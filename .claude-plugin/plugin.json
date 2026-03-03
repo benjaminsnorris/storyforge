@@ -1,0 +1,10 @@
+{
+  "name": "storyforge",
+  "description": "A novel-writing toolkit for Claude Code: interactive skills for creative development, autonomous scripts for execution, and deep craft knowledge throughout.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Ben Norris"
+  },
+  "license": "MIT",
+  "keywords": ["writing", "novel", "fiction", "creative-writing", "storytelling"]
+}
