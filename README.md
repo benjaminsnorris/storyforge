@@ -14,10 +14,10 @@ claude --plugin-dir ~/Developer/storyforge
 Skills are available as `/storyforge`, `/storyforge:develop`, `/storyforge:voice`,
 `/storyforge:scenes`, `/storyforge:plan-revision`, and `/storyforge:init`.
 
-To load Storyforge automatically in every session, add it to your Claude Code settings:
+To load Storyforge automatically, add a shell alias to your `~/.zshrc` (or `~/.bashrc`):
 
 ```bash
-claude settings add plugin_dirs ~/Developer/storyforge
+alias claude='claude --plugin-dir ~/Developer/storyforge'
 ```
 
 To update, pull the latest:
