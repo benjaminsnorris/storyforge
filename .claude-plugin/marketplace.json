@@ -1,0 +1,21 @@
+{
+  "name": "storyforge-marketplace",
+  "owner": {
+    "name": "Ben Norris"
+  },
+  "metadata": {
+    "description": "Novel-writing toolkit for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "storyforge",
+      "source": {
+        "source": "github",
+        "repo": "benjaminsnorris/storyforge"
+      },
+      "description": "A novel-writing toolkit for Claude Code: interactive skills for creative development, autonomous scripts for execution, and deep craft knowledge throughout.",
+      "keywords": ["writing", "novel", "fiction", "creative-writing", "storytelling"],
+      "category": "creative-writing"
+    }
+  ]
+}
