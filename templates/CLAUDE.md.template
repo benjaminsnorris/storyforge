@@ -10,9 +10,20 @@
 
 {SCENE_STATUS}
 
-## Available Commands
+## Storyforge
 
-{AVAILABLE_COMMANDS}
+This project uses [Storyforge](https://github.com/benjaminsnorris/storyforge). Available skills:
+
+- `/storyforge` — Hub: status, routing, "surprise me"
+- `/storyforge:develop` — World, character, story, timeline development
+- `/storyforge:voice` — Voice and style refinement
+- `/storyforge:scenes` — Scene index management
+- `/storyforge:plan-revision` — Plan revision passes from evaluation results
+
+Scripts (via project runner):
+- `./storyforge write` — Autonomous scene drafting
+- `./storyforge evaluate` — Multi-agent evaluation panel
+- `./storyforge revise` — Execute revision pipeline
 
 ## Suggested Next Steps
 
