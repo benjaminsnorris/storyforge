@@ -1,0 +1,777 @@
+#!/bin/bash
+set -euo pipefail
+
+# ============================================================================
+# storyforge-evaluate — Multi-agent evaluation panel for Storyforge projects
+#
+# Runs 6 core evaluator agents in parallel (plus any custom evaluators from
+# storyforge.yaml), each reading the manuscript and writing a report from
+# their professional perspective. After all evaluators complete, runs a
+# synthesis session that combines findings into prose + structured findings.yaml.
+#
+# Usage:
+#   ./storyforge-evaluate                      # Full manuscript
+#   ./storyforge-evaluate --act N              # Scenes in act N
+#   ./storyforge-evaluate --part N             # Scenes in part N
+#   ./storyforge-evaluate --scenes ID..ID      # Specific scene range
+#   ./storyforge-evaluate --scene ID           # Single scene
+# ============================================================================
+
+# --- Locate script directory and source libraries ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+
+if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
+    echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
+    exit 1
+fi
+
+# shellcheck source=lib/common.sh
+source "${LIB_DIR}/common.sh"
+
+# --- Detect project root ---
+detect_project_root
+log "Project root: ${PROJECT_DIR}"
+
+# --- Resolve plugin directory (where evaluator persona files live) ---
+PLUGIN_DIR=$(get_plugin_dir)
+PERSONA_DIR="${PLUGIN_DIR}/scripts/prompts/evaluators"
+
+# --- Configuration ---
+SCENE_INDEX="${PROJECT_DIR}/scene-index.yaml"
+SCENES_DIR="${PROJECT_DIR}/scenes"
+LOG_DIR="${PROJECT_DIR}/working/logs"
+LOG_FILE="${LOG_DIR}/evaluation-log.txt"
+export LOG_FILE
+
+EVAL_TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
+EVAL_DIR="${PROJECT_DIR}/working/evaluations/eval-${EVAL_TIMESTAMP}"
+
+# Optional budget flag — uncomment and set to cap per-evaluator spend
+# BUDGET_FLAG="--max-budget-usd 20"
+BUDGET_FLAG=""
+
+# Core evaluators (order matters for reporting, not execution)
+CORE_EVALUATORS=(
+    "literary-agent"
+    "developmental-editor"
+    "line-editor"
+    "genre-expert"
+    "first-reader"
+    "writing-coach"
+)
+
+# ============================================================================
+# Argument parsing
+# ============================================================================
+
+FILTER_MODE="all"       # all | act | part | range | single
+FILTER_VALUE=""
+RANGE_START=""
+RANGE_END=""
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Run a multi-agent evaluation panel on your manuscript.
+
+Options:
+  (no args)                     Evaluate full manuscript
+  --act N                       Evaluate scenes in act N
+  --part N                      Evaluate scenes in part N
+  --scenes ID..ID               Evaluate a range of scenes (inclusive)
+  --scene ID                    Evaluate a single scene
+  -h, --help                    Show this help
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") --act 2
+  $(basename "$0") --scenes act1-sc01..act1-sc10
+  $(basename "$0") --scene act2-sc05
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        --act)
+            FILTER_MODE="act"
+            FILTER_VALUE="${2:?ERROR: --act requires a value}"
+            shift 2
+            ;;
+        --part)
+            FILTER_MODE="part"
+            FILTER_VALUE="${2:?ERROR: --part requires a value}"
+            shift 2
+            ;;
+        --scenes)
+            FILTER_MODE="range"
+            local_range="${2:?ERROR: --scenes requires a range (e.g., act1-sc01..act1-sc10)}"
+            RANGE_START="${local_range%%\.\.*}"
+            RANGE_END="${local_range##*\.\.}"
+            if [[ -z "$RANGE_START" || -z "$RANGE_END" || "$RANGE_START" == "$RANGE_END" && "$local_range" != *".."* ]]; then
+                echo "ERROR: --scenes requires format ID..ID (e.g., act1-sc01..act1-sc10)" >&2
+                exit 1
+            fi
+            shift 2
+            ;;
+        --scene)
+            FILTER_MODE="single"
+            RANGE_START="${2:?ERROR: --scene requires a scene ID}"
+            shift 2
+            ;;
+        -*)
+            echo "ERROR: Unknown option: $1" >&2
+            usage
+            ;;
+        *)
+            echo "ERROR: Unexpected argument: $1" >&2
+            usage
+            ;;
+    esac
+done
+
+# ============================================================================
+# Prerequisites
+# ============================================================================
+
+check_file_exists "$SCENE_INDEX" "Scene index (scene-index.yaml)"
+
+# Read project metadata from storyforge.yaml
+PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
+PROJECT_GENRE=$(read_yaml_field "project.genre" 2>/dev/null || read_yaml_field "genre" 2>/dev/null || echo "")
+PROJECT_SUBGENRE=$(read_yaml_field "project.subgenre" 2>/dev/null || echo "")
+PROJECT_LOGLINE=$(read_yaml_field "project.logline" 2>/dev/null || read_yaml_field "logline" 2>/dev/null || echo "")
+
+# Resolve voice guide path
+VOICE_GUIDE_PATH=""
+VOICE_GUIDE_CONTENT=""
+
+# Check storyforge.yaml first
+CUSTOM_VG=$(read_yaml_field "artifacts.voice_guide.path" 2>/dev/null || true)
+if [[ -n "$CUSTOM_VG" && -f "${PROJECT_DIR}/${CUSTOM_VG}" ]]; then
+    VOICE_GUIDE_PATH="${PROJECT_DIR}/${CUSTOM_VG}"
+fi
+
+# Fall back to common locations
+if [[ -z "$VOICE_GUIDE_PATH" ]]; then
+    for vg in "references/voice-guide.md" "reference/voice-guide.md" "reference/persistent-prompt.md"; do
+        if [[ -f "${PROJECT_DIR}/${vg}" ]]; then
+            VOICE_GUIDE_PATH="${PROJECT_DIR}/${vg}"
+            break
+        fi
+    done
+fi
+
+if [[ -n "$VOICE_GUIDE_PATH" ]]; then
+    VOICE_GUIDE_CONTENT=$(cat "$VOICE_GUIDE_PATH")
+    log "Voice guide: ${VOICE_GUIDE_PATH}"
+else
+    log "WARNING: No voice guide found. Evaluators will proceed without voice reference."
+fi
+
+# Build genre string for display and injection
+GENRE_DISPLAY="$PROJECT_GENRE"
+if [[ -n "$PROJECT_SUBGENRE" ]]; then
+    GENRE_DISPLAY="${PROJECT_GENRE} (${PROJECT_SUBGENRE})"
+fi
+
+# ============================================================================
+# Build scene list from scene-index.yaml
+# ============================================================================
+
+ALL_SCENE_IDS=()
+while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    ALL_SCENE_IDS+=("$id")
+done < <(grep -E '^[[:space:]]*- id:[[:space:]]*' "$SCENE_INDEX" \
+    | sed 's/^[[:space:]]*- id:[[:space:]]*//' \
+    | sed 's/^["'"'"']//' \
+    | sed 's/["'"'"']$//' \
+    | sed 's/[[:space:]]*$//')
+
+if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
+    log "ERROR: No scenes found in ${SCENE_INDEX}"
+    exit 1
+fi
+
+log "Found ${#ALL_SCENE_IDS[@]} scenes in scene-index.yaml"
+
+# ============================================================================
+# Filter scenes based on scope arguments
+# ============================================================================
+
+FILTERED_IDS=()
+
+case "$FILTER_MODE" in
+    all)
+        FILTERED_IDS=("${ALL_SCENE_IDS[@]}")
+        ;;
+    single)
+        found=false
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            if [[ "$id" == "$RANGE_START" ]]; then
+                found=true
+                break
+            fi
+        done
+        if [[ "$found" == false ]]; then
+            log "ERROR: Scene '${RANGE_START}' not found in scene-index.yaml"
+            exit 1
+        fi
+        FILTERED_IDS=("$RANGE_START")
+        ;;
+    range)
+        in_range=false
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            if [[ "$id" == "$RANGE_START" ]]; then
+                in_range=true
+            fi
+            if [[ "$in_range" == true ]]; then
+                FILTERED_IDS+=("$id")
+            fi
+            if [[ "$id" == "$RANGE_END" ]]; then
+                break
+            fi
+        done
+        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+            log "ERROR: Could not find range ${RANGE_START}..${RANGE_END} in scene-index.yaml"
+            exit 1
+        fi
+        ;;
+    act)
+        local_pattern="act${FILTER_VALUE}"
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            if [[ "${id,,}" == "${local_pattern,,}"* ]]; then
+                FILTERED_IDS+=("$id")
+            fi
+        done
+        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+            log "ERROR: No scenes found matching act ${FILTER_VALUE}"
+            exit 1
+        fi
+        ;;
+    part)
+        local_pattern="p${FILTER_VALUE}"
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            if [[ "${id,,}" == "${local_pattern,,}"* || "${id,,}" == "part${FILTER_VALUE}"* ]]; then
+                FILTERED_IDS+=("$id")
+            fi
+        done
+        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+            log "ERROR: No scenes found matching part ${FILTER_VALUE}"
+            exit 1
+        fi
+        ;;
+esac
+
+# Build the scene file list (only scenes that have been drafted)
+SCENE_FILES=()
+MISSING_SCENES=()
+for id in "${FILTERED_IDS[@]}"; do
+    scene_file="${SCENES_DIR}/${id}.md"
+    if [[ -f "$scene_file" ]]; then
+        SCENE_FILES+=("scenes/${id}.md")
+    else
+        MISSING_SCENES+=("$id")
+    fi
+done
+
+if [[ ${#SCENE_FILES[@]} -eq 0 ]]; then
+    log "ERROR: No drafted scene files found for the selected scope."
+    log "Missing scenes: ${MISSING_SCENES[*]}"
+    exit 1
+fi
+
+if [[ ${#MISSING_SCENES[@]} -gt 0 ]]; then
+    log "WARNING: ${#MISSING_SCENES[@]} scenes not yet drafted (skipping): ${MISSING_SCENES[*]}"
+fi
+
+# Build scene list string for prompt injection
+SCENE_LIST_STR=""
+for sf in "${SCENE_FILES[@]}"; do
+    SCENE_LIST_STR="${SCENE_LIST_STR}   - ${sf}
+"
+done
+
+SCOPE_DESCRIPTION="full manuscript (${#SCENE_FILES[@]} scenes)"
+case "$FILTER_MODE" in
+    act)   SCOPE_DESCRIPTION="Act ${FILTER_VALUE} (${#SCENE_FILES[@]} scenes)" ;;
+    part)  SCOPE_DESCRIPTION="Part ${FILTER_VALUE} (${#SCENE_FILES[@]} scenes)" ;;
+    range) SCOPE_DESCRIPTION="scenes ${RANGE_START} through ${RANGE_END} (${#SCENE_FILES[@]} scenes)" ;;
+    single) SCOPE_DESCRIPTION="scene ${RANGE_START}" ;;
+esac
+
+# ============================================================================
+# Collect custom evaluators from storyforge.yaml
+# ============================================================================
+
+CUSTOM_EVALUATOR_NAMES=()
+CUSTOM_EVALUATOR_PATHS=()
+
+# Parse custom_evaluators list from storyforge.yaml
+# Format:   - name: my_evaluator
+#             persona_file: evaluation/my-evaluator.md
+while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    name=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+    if [[ -n "$name" ]]; then
+        CUSTOM_EVALUATOR_NAMES+=("$name")
+    fi
+done < <(sed -n '/^[[:space:]]*custom_evaluators:/,/^[[:space:]]*[^-[:space:]]/p' \
+    "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null \
+    | grep -E '^\s*- name:' \
+    | sed 's/^[[:space:]]*- name:[[:space:]]*//' \
+    | sed 's/^["'"'"']//' \
+    | sed 's/["'"'"']$//')
+
+# Resolve persona_file paths for each custom evaluator
+for cname in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
+    cpath=$(sed -n "/- name:[[:space:]]*${cname}/,/- name:/p" \
+        "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null \
+        | grep -E 'persona_file:' \
+        | head -1 \
+        | sed 's/^[[:space:]]*persona_file:[[:space:]]*//' \
+        | sed 's/^["'"'"']//' \
+        | sed 's/["'"'"']$//' \
+        | sed 's/[[:space:]]*$//')
+    if [[ -n "$cpath" ]]; then
+        CUSTOM_EVALUATOR_PATHS+=("${PROJECT_DIR}/${cpath}")
+    else
+        log "WARNING: No persona_file found for custom evaluator '${cname}', skipping"
+        # Remove this name from the list
+        CUSTOM_EVALUATOR_NAMES=("${CUSTOM_EVALUATOR_NAMES[@]/$cname}")
+    fi
+done
+
+ALL_EVALUATOR_COUNT=$(( ${#CORE_EVALUATORS[@]} + ${#CUSTOM_EVALUATOR_NAMES[@]} ))
+
+# ============================================================================
+# Build evaluation prompt
+# ============================================================================
+
+build_eval_prompt() {
+    local evaluator=$1
+    local is_custom=${2:-false}
+    local persona_file
+
+    if [[ "$is_custom" == true ]]; then
+        # Custom evaluator: path was resolved above
+        local idx=0
+        for cname in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
+            if [[ "$cname" == "$evaluator" ]]; then
+                persona_file="${CUSTOM_EVALUATOR_PATHS[$idx]}"
+                break
+            fi
+            idx=$((idx + 1))
+        done
+    else
+        persona_file="${PERSONA_DIR}/${evaluator}.md"
+    fi
+
+    if [[ ! -f "$persona_file" ]]; then
+        log "ERROR: Persona file not found: $persona_file"
+        return 1
+    fi
+
+    local persona
+    persona=$(cat "$persona_file")
+
+    # Replace {GENRE} placeholder in persona (used by genre-expert)
+    if [[ -n "$PROJECT_GENRE" ]]; then
+        persona="${persona//\{GENRE\}/$GENRE_DISPLAY}"
+    else
+        persona="${persona//\{GENRE\}/fiction}"
+    fi
+
+    # Build reference file list
+    local ref_files=""
+    for ref in "references/voice-guide.md" "reference/voice-guide.md" "references/story-architecture.md" \
+               "reference/story-architecture.md" "references/character-bible.md" "reference/character-bible.md"; do
+        if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
+            ref_files="${ref_files}   - ${ref}
+"
+        fi
+    done
+
+    cat <<EVAL_PROMPT
+You are evaluating the manuscript of "${PROJECT_TITLE}."
+
+===== PROJECT CONTEXT =====
+
+Title: ${PROJECT_TITLE}
+Genre: ${GENRE_DISPLAY:-Not specified}
+Logline: ${PROJECT_LOGLINE:-Not provided}
+Evaluation scope: ${SCOPE_DESCRIPTION}
+
+===== YOUR ROLE =====
+
+${persona}
+
+===== VOICE GUIDE =====
+
+$(if [[ -n "$VOICE_GUIDE_CONTENT" ]]; then
+    echo "The author's voice guide for this project:"
+    echo ""
+    echo "$VOICE_GUIDE_CONTENT"
+else
+    echo "No voice guide provided. Evaluate the prose on its own terms."
+fi)
+
+===== INSTRUCTIONS =====
+
+1. Read the scene files that comprise the evaluation scope. Read them in order:
+${SCENE_LIST_STR}
+2. Also read these reference files for context (if they exist):
+${ref_files}
+3. Write your evaluation report following the structure defined in your role description above.
+
+4. Save your report to: working/evaluations/eval-${EVAL_TIMESTAMP}/${evaluator}.md
+
+5. Be specific. Cite scene IDs, character names, and quote brief passages when making points. Vague praise or criticism is unhelpful. The author wants to know exactly what works, what does not, and why.
+
+6. Be honest. The author is looking for professional-grade feedback, not encouragement. If something is broken, say so clearly. If something is excellent, say that too — protecting strengths is as important as fixing weaknesses.
+
+===== OUTPUT =====
+
+Save your complete evaluation to: working/evaluations/eval-${EVAL_TIMESTAMP}/${evaluator}.md
+
+Do not commit to git — the calling script handles that.
+EVAL_PROMPT
+}
+
+# ============================================================================
+# Main execution
+# ============================================================================
+
+mkdir -p "$EVAL_DIR" "$LOG_DIR"
+
+SESSION_START=$(date +%s)
+
+log "============================================"
+log "Starting Storyforge evaluation panel"
+log "Project: ${PROJECT_TITLE}"
+log "Genre: ${GENRE_DISPLAY:-Not specified}"
+log "Scope: ${SCOPE_DESCRIPTION}"
+log "Core evaluators: ${CORE_EVALUATORS[*]}"
+if [[ ${#CUSTOM_EVALUATOR_NAMES[@]} -gt 0 ]]; then
+    log "Custom evaluators: ${CUSTOM_EVALUATOR_NAMES[*]}"
+fi
+log "Output directory: ${EVAL_DIR}"
+log "============================================"
+
+# --- Launch all evaluators in parallel ---
+PIDS=()
+EVAL_NAMES=()
+
+# Launch core evaluators
+for EVAL in "${CORE_EVALUATORS[@]}"; do
+    EVAL_LOG="${LOG_DIR}/eval-${EVAL}.log"
+
+    log "Launching evaluator: ${EVAL}"
+
+    PROMPT=$(build_eval_prompt "$EVAL" false)
+
+    claude -p "$PROMPT" \
+        --model claude-opus-4-6 \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        $BUDGET_FLAG \
+        > "$EVAL_LOG" 2>&1 &
+
+    PIDS+=($!)
+    EVAL_NAMES+=("$EVAL")
+done
+
+# Launch custom evaluators
+for EVAL in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
+    [[ -z "$EVAL" ]] && continue
+    EVAL_LOG="${LOG_DIR}/eval-${EVAL}.log"
+
+    log "Launching custom evaluator: ${EVAL}"
+
+    PROMPT=$(build_eval_prompt "$EVAL" true)
+
+    claude -p "$PROMPT" \
+        --model claude-opus-4-6 \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        $BUDGET_FLAG \
+        > "$EVAL_LOG" 2>&1 &
+
+    PIDS+=($!)
+    EVAL_NAMES+=("$EVAL")
+done
+
+log "All ${#PIDS[@]} evaluators launched. Waiting for completion..."
+
+# --- Wait for all evaluators, tracking results ---
+FAILED=()
+SUCCEEDED=()
+
+for i in "${!PIDS[@]}"; do
+    PID=${PIDS[$i]}
+    EVAL_NAME=${EVAL_NAMES[$i]}
+
+    set +e
+    wait "$PID"
+    EXIT_CODE=$?
+    set -e
+
+    if (( EXIT_CODE != 0 )); then
+        log "FAILED: ${EVAL_NAME} (exit code $EXIT_CODE)"
+        FAILED+=("$EVAL_NAME")
+    elif [[ ! -f "${EVAL_DIR}/${EVAL_NAME}.md" ]]; then
+        log "FAILED: ${EVAL_NAME} (no output file created)"
+        FAILED+=("$EVAL_NAME")
+    else
+        WORD_COUNT=$(wc -w < "${EVAL_DIR}/${EVAL_NAME}.md" | tr -d ' ')
+        log "SUCCESS: ${EVAL_NAME} (${WORD_COUNT} words)"
+        SUCCEEDED+=("$EVAL_NAME")
+    fi
+done
+
+log "Evaluator results: ${#SUCCEEDED[@]} succeeded, ${#FAILED[@]} failed"
+
+if (( ${#FAILED[@]} > 0 )); then
+    log "Failed evaluators: ${FAILED[*]}"
+fi
+
+# --- Run synthesis (needs at least 3 evaluators to be useful) ---
+if (( ${#SUCCEEDED[@]} < 3 )); then
+    log "ERROR: Too few evaluators succeeded (${#SUCCEEDED[@]}/${ALL_EVALUATOR_COUNT}). Skipping synthesis."
+    exit 1
+fi
+
+log "Running synthesis session..."
+SYNTHESIS_LOG="${LOG_DIR}/eval-synthesis.log"
+
+# Build list of available reports for the synthesis prompt
+REPORT_LIST=""
+for EVAL_NAME in "${SUCCEEDED[@]}"; do
+    REPORT_LIST="${REPORT_LIST}   - working/evaluations/eval-${EVAL_TIMESTAMP}/${EVAL_NAME}.md
+"
+done
+
+# Build reference file list for synthesis
+SYNTH_REF_FILES=""
+for ref in "references/voice-guide.md" "reference/voice-guide.md" "references/story-architecture.md" \
+           "reference/story-architecture.md"; do
+    if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
+        SYNTH_REF_FILES="${SYNTH_REF_FILES}   - ${ref}
+"
+    fi
+done
+
+read -r -d '' SYNTHESIS_PROMPT <<SYNTH_EOF || true
+You are synthesizing the evaluation reports from a multi-agent review panel for "${PROJECT_TITLE}."
+
+===== PROJECT CONTEXT =====
+
+Title: ${PROJECT_TITLE}
+Genre: ${GENRE_DISPLAY:-Not specified}
+Logline: ${PROJECT_LOGLINE:-Not provided}
+Evaluation scope: ${SCOPE_DESCRIPTION}
+
+===== INSTRUCTIONS =====
+
+1. Read ALL of the following evaluation reports:
+${REPORT_LIST}
+2. Also read the manuscript reference files for context:
+${SYNTH_REF_FILES}
+3. Produce TWO output files:
+
+--- FILE 1: synthesis.md ---
+
+Save to: working/evaluations/eval-${EVAL_TIMESTAMP}/synthesis.md
+
+A prose synthesis report with these sections:
+
+## Consensus Findings
+Issues or strengths identified by 3+ evaluators. These are high-confidence findings.
+
+## Contested Points
+Areas where evaluators disagree. Present both sides fairly and note why the disagreement exists.
+
+## Prioritized Action Items
+A numbered list of the most impactful changes, ordered by priority. For each:
+- What the issue is
+- Which evaluators flagged it
+- Suggested approach
+- Estimated effort (minor/moderate/major)
+
+## Strengths to Protect
+Elements that evaluators praised and that must be preserved in any further revision.
+
+## Overall Assessment
+A brief (2-3 paragraph) synthesis of where the manuscript stands. Be direct.
+
+--- FILE 2: findings.yaml ---
+
+Save to: working/evaluations/eval-${EVAL_TIMESTAMP}/findings.yaml
+
+A structured YAML file containing all findings categorized for machine consumption. Use this exact format:
+
+\`\`\`yaml
+# Evaluation Findings — ${PROJECT_TITLE}
+# Generated: ${EVAL_TIMESTAMP}
+# Scope: ${SCOPE_DESCRIPTION}
+
+metadata:
+  title: "${PROJECT_TITLE}"
+  genre: "${GENRE_DISPLAY:-Not specified}"
+  scope: "${SCOPE_DESCRIPTION}"
+  evaluators_succeeded:
+    - evaluator-name
+  evaluators_failed:
+    - evaluator-name
+  timestamp: "${EVAL_TIMESTAMP}"
+
+findings:
+  - id: F001
+    category: structure|character|pacing|prose|worldbuilding|theme|market|genre|continuity
+    severity: critical|major|minor|suggestion
+    summary: "One-line description of the finding"
+    detail: "Full explanation with context"
+    affected_scenes:
+      - scene-id
+    flagged_by:
+      - evaluator-name
+    recommendation: "Specific, actionable suggestion"
+
+  # ... more findings ...
+
+strengths:
+  - id: S001
+    category: structure|character|pacing|prose|worldbuilding|theme|voice|craft
+    summary: "One-line description of the strength"
+    detail: "Why this works and why it must be protected"
+    examples:
+      - scene-id
+    flagged_by:
+      - evaluator-name
+
+  # ... more strengths ...
+\`\`\`
+
+IMPORTANT: The findings.yaml must be valid YAML. Use quoted strings for values that contain colons, special characters, or newlines. Categorize every substantive point from every evaluator report. Severity levels:
+- critical: Structural or fundamental issue that must be addressed
+- major: Significant issue that weakens the manuscript
+- minor: Worth fixing but not urgent
+- suggestion: Nice-to-have improvement
+
+Do not commit to git — the calling script handles that.
+SYNTH_EOF
+
+SYNTH_START=$(date +%s)
+
+set +e
+claude -p "$SYNTHESIS_PROMPT" \
+    --model claude-opus-4-6 \
+    --dangerously-skip-permissions \
+    --output-format stream-json \
+    --verbose \
+    $BUDGET_FLAG \
+    > "$SYNTHESIS_LOG" 2>&1
+SYNTH_EXIT=$?
+set -e
+
+SYNTH_END=$(date +%s)
+SYNTH_DURATION=$(( SYNTH_END - SYNTH_START ))
+SYNTH_MINS=$(( SYNTH_DURATION / 60 ))
+SYNTH_SECS=$(( SYNTH_DURATION % 60 ))
+
+if (( SYNTH_EXIT != 0 )); then
+    log "ERROR: Synthesis session failed (exit code $SYNTH_EXIT) after ${SYNTH_MINS}m${SYNTH_SECS}s"
+    log "See: $SYNTHESIS_LOG"
+    exit 1
+fi
+
+# Verify synthesis outputs
+SYNTH_OK=true
+
+if [[ ! -f "${EVAL_DIR}/synthesis.md" ]]; then
+    log "ERROR: synthesis.md not created"
+    SYNTH_OK=false
+fi
+
+if [[ ! -f "${EVAL_DIR}/findings.yaml" ]]; then
+    log "WARNING: findings.yaml not created — synthesis may be incomplete"
+    # Not fatal: the prose synthesis is the primary output
+fi
+
+if [[ "$SYNTH_OK" == false ]]; then
+    log "See: $SYNTHESIS_LOG"
+    exit 1
+fi
+
+SYNTH_WORDS=$(wc -w < "${EVAL_DIR}/synthesis.md" | tr -d ' ')
+log "SUCCESS: Synthesis complete (${SYNTH_WORDS} words, ${SYNTH_MINS}m${SYNTH_SECS}s)"
+
+if [[ -f "${EVAL_DIR}/findings.yaml" ]]; then
+    FINDING_COUNT=$(grep -c '^\s*- id: F' "${EVAL_DIR}/findings.yaml" 2>/dev/null || echo "0")
+    STRENGTH_COUNT=$(grep -c '^\s*- id: S' "${EVAL_DIR}/findings.yaml" 2>/dev/null || echo "0")
+    log "Findings: ${FINDING_COUNT} issues, ${STRENGTH_COUNT} strengths cataloged"
+fi
+
+# ============================================================================
+# Git commit all evaluation files
+# ============================================================================
+
+log "Committing evaluation files..."
+
+HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+
+(
+    cd "$PROJECT_DIR"
+    git add "working/evaluations/eval-${EVAL_TIMESTAMP}/" 2>/dev/null || true
+    git commit -m "Evaluation: ${SCOPE_DESCRIPTION} (${#SUCCEEDED[@]}/${ALL_EVALUATOR_COUNT} evaluators)" 2>/dev/null || true
+)
+
+HEAD_AFTER=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+
+if [[ "$HEAD_BEFORE" != "$HEAD_AFTER" ]]; then
+    COMMIT_SHORT=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    log "Committed evaluation: ${COMMIT_SHORT}"
+else
+    log "WARNING: No git commit created (nothing to commit or git error)"
+fi
+
+# ============================================================================
+# Session complete
+# ============================================================================
+
+SESSION_END=$(date +%s)
+SESSION_DURATION=$(( SESSION_END - SESSION_START ))
+SESSION_MINS=$(( SESSION_DURATION / 60 ))
+SESSION_SECS=$(( SESSION_DURATION % 60 ))
+
+log "============================================"
+log "Evaluation panel complete!"
+log "  Project: ${PROJECT_TITLE}"
+log "  Scope: ${SCOPE_DESCRIPTION}"
+log "  Reports: ${EVAL_DIR}/"
+log "  Succeeded: ${#SUCCEEDED[@]}/${ALL_EVALUATOR_COUNT} evaluators + synthesis"
+if [[ ${#FAILED[@]} -gt 0 ]]; then
+    log "  Failed: ${FAILED[*]}"
+fi
+log "  Time: ${SESSION_MINS}m${SESSION_SECS}s"
+log "============================================"
+log ""
+log "Next steps:"
+log "  Read the synthesis:  cat ${EVAL_DIR}/synthesis.md"
+if [[ -f "${EVAL_DIR}/findings.yaml" ]]; then
+    log "  Browse findings:    cat ${EVAL_DIR}/findings.yaml"
+fi
+log "  Read individual:    ls ${EVAL_DIR}/"
+
+# Exit with failure if any evaluator failed
+if (( ${#FAILED[@]} > 0 )); then
+    exit 1
+fi

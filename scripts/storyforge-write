@@ -1,0 +1,446 @@
+#!/bin/bash
+set -euo pipefail
+
+# ============================================================================
+# storyforge-write — Autonomous scene drafting for Storyforge projects
+#
+# One claude -p invocation per scene. Each invocation reads all reference
+# material, drafts the scene, runs a quality review, updates continuity,
+# and commits to git.
+#
+# Usage:
+#   ./storyforge-write                        # Draft all remaining scenes
+#   ./storyforge-write act1-sc01              # Draft a single scene
+#   ./storyforge-write act1-sc01 act1-sc15    # Draft a range (by position in index)
+#   ./storyforge-write --act 2                # Draft all scenes in act 2
+#   ./storyforge-write --part 2               # Draft all scenes in part 2
+# ============================================================================
+
+# --- Locate script directory and source libraries ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+
+if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
+    echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${LIB_DIR}/prompt-builder.sh" ]]; then
+    echo "ERROR: Cannot find lib/prompt-builder.sh at ${LIB_DIR}" >&2
+    exit 1
+fi
+
+# shellcheck source=lib/common.sh
+source "${LIB_DIR}/common.sh"
+# shellcheck source=lib/prompt-builder.sh
+source "${LIB_DIR}/prompt-builder.sh"
+
+# --- Detect project root ---
+detect_project_root
+log "Project root: ${PROJECT_DIR}"
+
+# --- Configuration ---
+SCENE_INDEX="${PROJECT_DIR}/scene-index.yaml"
+SCENES_DIR="${PROJECT_DIR}/scenes"
+LOG_DIR="${PROJECT_DIR}/working/logs"
+LOG_FILE="${LOG_DIR}/drafting-log.txt"
+export LOG_FILE
+
+# Optional: uncomment and set a per-scene budget limit
+# BUDGET_FLAG="--max-budget-usd 20"
+BUDGET_FLAG=""
+
+# Ensure directories exist
+mkdir -p "$SCENES_DIR" "$LOG_DIR"
+
+# ============================================================================
+# Argument parsing
+# ============================================================================
+
+FILTER_MODE="all"       # all | single | range | act | part
+FILTER_VALUE=""
+RANGE_START=""
+RANGE_END=""
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Draft scenes autonomously using Claude.
+
+Options:
+  (no args)                   Draft all remaining (pending) scenes
+  SCENE_ID                    Draft a single scene
+  SCENE_ID SCENE_ID           Draft a range of scenes (inclusive, by index position)
+  --act N                     Draft all scenes in act N
+  --part N                    Draft all scenes in part N
+  -h, --help                  Show this help
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") act1-sc05
+  $(basename "$0") act1-sc01 act1-sc15
+  $(basename "$0") --act 2
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        --act)
+            FILTER_MODE="act"
+            FILTER_VALUE="${2:?ERROR: --act requires a value}"
+            shift 2
+            ;;
+        --part)
+            FILTER_MODE="part"
+            FILTER_VALUE="${2:?ERROR: --part requires a value}"
+            shift 2
+            ;;
+        -*)
+            echo "ERROR: Unknown option: $1" >&2
+            usage
+            ;;
+        *)
+            if [[ -z "$RANGE_START" ]]; then
+                RANGE_START="$1"
+                FILTER_MODE="single"
+            elif [[ "$FILTER_MODE" == "single" ]]; then
+                RANGE_END="$1"
+                FILTER_MODE="range"
+            else
+                echo "ERROR: Too many positional arguments" >&2
+                usage
+            fi
+            shift
+            ;;
+    esac
+done
+
+# ============================================================================
+# Prerequisites
+# ============================================================================
+
+check_file_exists "$SCENE_INDEX" "Scene index (scene-index.yaml)"
+
+# Voice guide — check common locations
+VOICE_GUIDE_FOUND=false
+for vg in "reference/voice-guide.md" "reference/persistent-prompt.md"; do
+    if [[ -f "${PROJECT_DIR}/${vg}" ]]; then
+        VOICE_GUIDE_FOUND=true
+        break
+    fi
+done
+
+# Also check storyforge.yaml for a custom voice guide path
+CUSTOM_VG=$(read_yaml_field "reference.voice_guide" 2>/dev/null || true)
+if [[ -z "$CUSTOM_VG" ]]; then
+    CUSTOM_VG=$(read_yaml_field "voice_guide" 2>/dev/null || true)
+fi
+if [[ -n "$CUSTOM_VG" && -f "${PROJECT_DIR}/${CUSTOM_VG}" ]]; then
+    VOICE_GUIDE_FOUND=true
+fi
+
+if [[ "$VOICE_GUIDE_FOUND" == false ]]; then
+    log "WARNING: No voice guide found. Drafting will proceed without voice constraints."
+    log "  Expected: reference/voice-guide.md or reference/persistent-prompt.md"
+fi
+
+# ============================================================================
+# Build scene list from scene-index.yaml
+# ============================================================================
+
+# Extract all scene IDs in order
+ALL_SCENE_IDS=()
+while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    ALL_SCENE_IDS+=("$id")
+done < <(grep -E '^[[:space:]]*- id:[[:space:]]*' "$SCENE_INDEX" \
+    | sed 's/^[[:space:]]*- id:[[:space:]]*//' \
+    | sed 's/[[:space:]]*$//')
+
+if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
+    log "ERROR: No scenes found in ${SCENE_INDEX}"
+    exit 1
+fi
+
+log "Found ${#ALL_SCENE_IDS[@]} scenes in scene-index.yaml"
+
+# ============================================================================
+# Filter scenes based on arguments
+# ============================================================================
+
+FILTERED_IDS=()
+
+case "$FILTER_MODE" in
+    all)
+        FILTERED_IDS=("${ALL_SCENE_IDS[@]}")
+        ;;
+
+    single)
+        # Verify the scene exists in the index
+        found=false
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            if [[ "$id" == "$RANGE_START" ]]; then
+                found=true
+                break
+            fi
+        done
+        if [[ "$found" == false ]]; then
+            log "ERROR: Scene '${RANGE_START}' not found in scene-index.yaml"
+            exit 1
+        fi
+        FILTERED_IDS=("$RANGE_START")
+        ;;
+
+    range)
+        # Collect all scenes between RANGE_START and RANGE_END (inclusive)
+        in_range=false
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            if [[ "$id" == "$RANGE_START" ]]; then
+                in_range=true
+            fi
+            if [[ "$in_range" == true ]]; then
+                FILTERED_IDS+=("$id")
+            fi
+            if [[ "$id" == "$RANGE_END" ]]; then
+                break
+            fi
+        done
+        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+            log "ERROR: Could not find range ${RANGE_START} to ${RANGE_END} in scene-index.yaml"
+            exit 1
+        fi
+        ;;
+
+    act)
+        # Match scenes whose ID starts with "act{N}" (case-insensitive)
+        local_pattern="act${FILTER_VALUE}"
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            if [[ "${id,,}" == "${local_pattern,,}"* ]]; then
+                FILTERED_IDS+=("$id")
+            fi
+        done
+        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+            log "ERROR: No scenes found matching act ${FILTER_VALUE}"
+            exit 1
+        fi
+        ;;
+
+    part)
+        # Match scenes whose ID starts with "part{N}" or whose metadata has part: N
+        local_pattern="part${FILTER_VALUE}"
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            if [[ "${id,,}" == "${local_pattern,,}"* ]]; then
+                FILTERED_IDS+=("$id")
+            else
+                # Check metadata for part field
+                local_part=$(read_scene_field "$id" "$PROJECT_DIR" "part" 2>/dev/null || true)
+                if [[ "$local_part" == "$FILTER_VALUE" ]]; then
+                    FILTERED_IDS+=("$id")
+                fi
+            fi
+        done
+        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+            log "ERROR: No scenes found matching part ${FILTER_VALUE}"
+            exit 1
+        fi
+        ;;
+esac
+
+# ============================================================================
+# Filter out already-drafted scenes (unless explicitly targeting a single scene)
+# ============================================================================
+
+PENDING_IDS=()
+SKIPPED=0
+
+for id in "${FILTERED_IDS[@]}"; do
+    status=$(get_scene_status "$id" "$PROJECT_DIR")
+    case "$status" in
+        drafted|revised|final)
+            if [[ "$FILTER_MODE" == "single" ]]; then
+                # User explicitly requested this scene — include it
+                PENDING_IDS+=("$id")
+                log "NOTE: Scene ${id} has status '${status}' but was explicitly requested"
+            else
+                SKIPPED=$((SKIPPED + 1))
+            fi
+            ;;
+        *)
+            PENDING_IDS+=("$id")
+            ;;
+    esac
+done
+
+if [[ ${#PENDING_IDS[@]} -eq 0 ]]; then
+    log "Nothing to draft — all ${#FILTERED_IDS[@]} matching scenes are already drafted (${SKIPPED} skipped)."
+    exit 0
+fi
+
+# ============================================================================
+# Session start
+# ============================================================================
+
+SESSION_START=$(date +%s)
+
+log "============================================"
+log "Starting Storyforge drafting session"
+log "Project: $(read_yaml_field 'project.title' 2>/dev/null || read_yaml_field 'title' 2>/dev/null || echo 'Unknown')"
+log "Scenes to draft: ${#PENDING_IDS[@]} (${SKIPPED} already-drafted skipped)"
+log "Scene list: ${PENDING_IDS[*]}"
+log "============================================"
+
+# ============================================================================
+# Main drafting loop
+# ============================================================================
+
+DRAFTED_COUNT=0
+TOTAL_WORDS=0
+
+for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
+    SCENE_ID="${PENDING_IDS[$i]}"
+    SCENE_FILE="${SCENES_DIR}/${SCENE_ID}.md"
+    SCENE_NUM=$((i + 1))
+
+    log "--- Scene ${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]}) ---"
+
+    # --- Check if scene file already has substantial content (defensive) ---
+    if [[ -f "$SCENE_FILE" && "$FILTER_MODE" != "single" ]]; then
+        existing_wc=$(wc -w < "$SCENE_FILE" 2>/dev/null | tr -d ' ')
+        if (( existing_wc > 200 )); then
+            log "Scene file already has ${existing_wc} words, skipping"
+            continue
+        fi
+    fi
+
+    # --- Build the prompt ---
+    PROMPT=$(build_scene_prompt "$SCENE_ID" "$PROJECT_DIR")
+
+    if [[ -z "$PROMPT" ]]; then
+        log "ERROR: Failed to build prompt for scene ${SCENE_ID}"
+        log "Stopping — prompt generation failed."
+        exit 1
+    fi
+
+    # --- Record git HEAD before invocation ---
+    HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+
+    # --- Per-scene log file ---
+    SCENE_LOG="${LOG_DIR}/drafting-${SCENE_ID}.log"
+
+    log "Invoking claude for scene ${SCENE_ID}..."
+    log "  Per-scene log: ${SCENE_LOG} (tail -f for live output)"
+    START_TIME=$(date +%s)
+
+    # --- Start background monitor ---
+    monitor_progress "$SCENE_ID" "$HEAD_BEFORE" "$START_TIME" &
+    MONITOR_PID=$!
+
+    # --- Invoke claude ---
+    set +e
+    claude -p "$PROMPT" \
+        --model claude-opus-4-6 \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        $BUDGET_FLAG \
+        > "$SCENE_LOG" 2>&1
+    EXIT_CODE=$?
+    set -e
+
+    # --- Stop the monitor ---
+    kill "$MONITOR_PID" 2>/dev/null || true
+    wait "$MONITOR_PID" 2>/dev/null || true
+
+    # --- Timing ---
+    END_TIME=$(date +%s)
+    DURATION=$(( END_TIME - START_TIME ))
+    MINUTES=$(( DURATION / 60 ))
+    SECS=$(( DURATION % 60 ))
+
+    if (( EXIT_CODE != 0 )); then
+        log "ERROR: claude exited with code ${EXIT_CODE} for scene ${SCENE_ID} after ${MINUTES}m${SECS}s"
+        log "See full output: ${SCENE_LOG}"
+        log "Stopping — continuity may be broken."
+        exit 1
+    fi
+
+    # --- Verification ---
+
+    # 1. Check scene file was created
+    if [[ ! -f "$SCENE_FILE" ]]; then
+        log "ERROR: Scene file not created: ${SCENE_FILE}"
+        log "Claude ran successfully but did not produce the file."
+        log "See full output: ${SCENE_LOG}"
+        log "Stopping — cannot continue without the scene."
+        exit 1
+    fi
+
+    # 2. Get word count and sanity-check
+    WORD_COUNT=$(wc -w < "$SCENE_FILE" | tr -d ' ')
+
+    if (( WORD_COUNT < 100 )); then
+        log "ERROR: Scene file suspiciously short (${WORD_COUNT} words): ${SCENE_FILE}"
+        log "See full output: ${SCENE_LOG}"
+        log "Stopping — likely incomplete draft."
+        exit 1
+    fi
+
+    # 3. Check/create git commit
+    HEAD_AFTER=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+
+    if [[ "$HEAD_BEFORE" == "$HEAD_AFTER" ]]; then
+        log "WARNING: No git commit detected. Attempting manual commit..."
+        (
+            cd "$PROJECT_DIR"
+            git add "scenes/${SCENE_ID}.md" 2>/dev/null || true
+            git add reference/ 2>/dev/null || true
+            git commit -m "Draft scene ${SCENE_ID}" 2>/dev/null || true
+        )
+        HEAD_AFTER=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+
+        if [[ "$HEAD_BEFORE" == "$HEAD_AFTER" ]]; then
+            log "ERROR: Could not create git commit for scene ${SCENE_ID}"
+            log "Stopping — next scene needs committed state."
+            exit 1
+        fi
+        log "Manual commit created."
+    fi
+
+    COMMIT_SHORT=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+    # 4. Push to remote (warn on failure, don't stop)
+    if ! git -C "$PROJECT_DIR" push 2>/dev/null; then
+        log "WARNING: git push failed for scene ${SCENE_ID} (commit ${COMMIT_SHORT}). Continuing."
+    fi
+
+    # --- Success ---
+    DRAFTED_COUNT=$((DRAFTED_COUNT + 1))
+    TOTAL_WORDS=$((TOTAL_WORDS + WORD_COUNT))
+    log "SUCCESS: Scene ${SCENE_ID} — ${WORD_COUNT} words, ${MINUTES}m${SECS}s, commit ${COMMIT_SHORT}"
+
+    # --- Pause between scenes ---
+    if (( i < ${#PENDING_IDS[@]} - 1 )); then
+        log "Pausing 10s before next scene..."
+        sleep 10
+    fi
+done
+
+# ============================================================================
+# Session complete
+# ============================================================================
+
+SESSION_END=$(date +%s)
+SESSION_DURATION=$(( SESSION_END - SESSION_START ))
+SESSION_MINS=$(( SESSION_DURATION / 60 ))
+SESSION_SECS=$(( SESSION_DURATION % 60 ))
+
+log "============================================"
+log "Drafting session complete!"
+log "Scenes drafted: ${DRAFTED_COUNT}/${#PENDING_IDS[@]}"
+log "Total words: ${TOTAL_WORDS}"
+log "Total time: ${SESSION_MINS}m${SESSION_SECS}s"
+log "============================================"
