@@ -4,25 +4,26 @@ A novel-writing toolkit for Claude Code. Interactive skills guide creative devel
 
 ## Installation
 
-### For development
-
-Load Storyforge directly from your local checkout:
+Clone the repo and load it as a Claude Code plugin:
 
 ```bash
+git clone https://github.com/benjaminsnorris/storyforge.git ~/Developer/storyforge
 claude --plugin-dir ~/Developer/storyforge
 ```
 
 Skills are available as `/storyforge`, `/storyforge:develop`, `/storyforge:voice`,
 `/storyforge:scenes`, `/storyforge:plan-revision`, and `/storyforge:init`.
-Edits take effect in your next Claude Code session.
 
-### For distribution (future)
-
-Storyforge can be distributed via a Claude Code marketplace:
+To load Storyforge automatically in every session, add it to your Claude Code settings:
 
 ```bash
-/plugin marketplace add benjaminsnorris/storyforge
-/plugin install storyforge
+claude settings add plugin_dirs ~/Developer/storyforge
+```
+
+To update, pull the latest:
+
+```bash
+cd ~/Developer/storyforge && git pull
 ```
 
 ## Quick Start
