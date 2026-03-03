@@ -10,7 +10,7 @@ You are helping an author set up a brand-new Storyforge novel project. This is t
 ## Locating the Storyforge Plugin
 
 The Storyforge plugin root is two levels up from this skill file's directory
-(this skill's directory → `skills/` → plugin root). Scripts live at `scripts/`
+(this skill's directory → `skills/` → plugin root). Templates live at `templates/`
 and reference materials live at `references/` relative to that plugin root.
 
 Store this resolved plugin path for use throughout the session.
@@ -55,15 +55,13 @@ Use the **Bash tool** to create the full directory tree:
 
 ```
 {project-dir}/
+├── storyforge          (project runner — delegates to installed plugin)
 ├── storyforge.yaml
 ├── CLAUDE.md
 ├── reference/
 ├── scenes/
 ├── draft/
 ├── manuscript/
-├── scripts/
-│   └── prompts/
-│       └── evaluators/
 └── working/
     ├── logs/
     ├── evaluations/
@@ -73,8 +71,16 @@ Use the **Bash tool** to create the full directory tree:
 Create all directories first with a single `mkdir -p` command:
 
 ```bash
-mkdir -p {project-dir}/{reference,scenes,draft,manuscript,scripts/prompts/evaluators,working/{logs,evaluations,plans}}
+mkdir -p {project-dir}/{reference,scenes,draft,manuscript,working/{logs,evaluations,plans}}
 ```
+
+Then copy the runner script from the plugin's `templates/storyforge-runner.sh` to the project root as `storyforge` and make it executable:
+
+```bash
+cp {plugin-root}/templates/storyforge-runner.sh {project-dir}/storyforge && chmod +x {project-dir}/storyforge
+```
+
+This single file is the only Storyforge executable in the project. It delegates to the installed plugin for `./storyforge write`, `./storyforge evaluate`, and `./storyforge revise`.
 
 ## Step 3: Generate storyforge.yaml
 
@@ -141,7 +147,7 @@ Read the `CLAUDE.md` template from the Storyforge plugin's `templates/` director
 - Target word count
 - Current phase: **development**
 - All artifacts marked as **not yet created**
-- Suggested next steps pointing to `storyforge-develop` for world-building, character development, and story concept work
+- Suggested next steps pointing to `/storyforge:develop` for world-building, character development, and story concept work
 
 If the template cannot be found, generate a project `CLAUDE.md` that includes:
 
@@ -167,8 +173,20 @@ If the template cannot be found, generate a project `CLAUDE.md` that includes:
 
 This project is in the **development** phase. The focus is on building the creative foundation before drafting begins.
 
+### Available Skills
+- `/storyforge` — Hub: status, routing, "surprise me"
+- `/storyforge:develop` — World, character, story, timeline development
+- `/storyforge:voice` — Voice and style refinement
+- `/storyforge:scenes` — Scene index management
+- `/storyforge:plan-revision` — Plan revision passes from evaluation results
+
+### Scripts (via project runner)
+- `./storyforge write` — Autonomous scene drafting
+- `./storyforge evaluate` — Multi-agent evaluation panel
+- `./storyforge revise` — Execute revision pipeline
+
 ### Suggested Next Steps
-Use `storyforge-develop` to begin working on:
+Use `/storyforge:develop` to begin working on:
 - **World-building** — establish the setting, rules, and texture of the world
 - **Character development** — create the cast and their inner lives
 - **Story concept** — shape the premise into a working structure
@@ -196,6 +214,6 @@ Example closing:
 
 > Your project is set up and ready to go. You've got a clean workspace, a scene index waiting to be filled, and a whole story ahead of you.
 >
-> Where would you like to start? Some authors like to build the world first, others want to meet their characters, and some jump straight into the story concept. There's no wrong door — pick the one that excites you most, and we'll dig in with `storyforge-develop`.
+> Where would you like to start? Some authors like to build the world first, others want to meet their characters, and some jump straight into the story concept. There's no wrong door — pick the one that excites you most, and we'll dig in with `/storyforge:develop`.
 
 Do not rush the author. Do not prescribe an order. Let them lead.
