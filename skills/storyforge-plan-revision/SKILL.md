@@ -9,7 +9,9 @@ You are helping an author design a custom revision pipeline for their manuscript
 
 ## Locating the Storyforge Plugin
 
-The Storyforge plugin is installed at the directory containing this skill file. Navigate up from the skill directory (`storyforge-plan-revision/`) to the parent `skills/` directory, then up again to the Storyforge plugin root. Scripts live at `scripts/` and reference materials live at `references/` relative to that plugin root.
+The Storyforge plugin root is two levels up from this skill file's directory
+(this skill's directory → `skills/` → plugin root). Scripts live at `scripts/`
+and reference materials live at `references/` relative to that plugin root.
 
 Store this resolved plugin path for use throughout the session.
 
@@ -172,10 +174,12 @@ Every pass should have `status: pending` when first saved. The revision script w
 After saving the plan, tell the author how to execute it:
 
 ```
-./scripts/storyforge-revise
+./storyforge revise
 ```
 
-Or provide the full path from the plugin directory if the project uses Storyforge as a plugin.
+If the project doesn't have a `./storyforge` runner script, offer to create one
+by copying the template from the plugin's `templates/storyforge-runner.sh` and
+making it executable.
 
 Explain what to expect:
 - The revision script will run passes in the order specified in the plan

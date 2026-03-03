@@ -9,7 +9,9 @@ You are the main entry point for all Storyforge novel-writing interaction. You a
 
 ## Locating the Storyforge Plugin
 
-The Storyforge plugin is installed at the directory containing this skill file. Navigate up from the skill directory (`storyforge/`) to the parent `skills/` directory, then up again to the Storyforge plugin root. Scripts live at `scripts/` and reference materials live at `references/` relative to that plugin root.
+The Storyforge plugin root is two levels up from this skill file's directory
+(this skill's directory → `skills/` → plugin root). Scripts live at `scripts/`
+and reference materials live at `references/` relative to that plugin root.
 
 Store this resolved plugin path for use throughout the session.
 
@@ -66,10 +68,12 @@ Check prerequisites before proceeding:
 If hard prerequisites are met, tell the author how to run the drafting script:
 
 ```
-./scripts/storyforge-write [options]
+./storyforge write [options]
 ```
 
-If the project is using Storyforge as a plugin, provide the full path from the plugin directory instead. Explain available options (scene selection, act scope, etc.).
+If the project doesn't have a `./storyforge` runner script, offer to create one
+by copying the template from the plugin's `templates/storyforge-runner.sh` and
+making it executable. Explain available options (scene selection, act scope, etc.).
 
 If a hard prerequisite is missing, explain what's needed and route to the skill that creates it — `storyforge-scenes` for the scene index, `storyforge-voice` for the voice guide.
 
@@ -83,10 +87,12 @@ Check prerequisites:
 If met, provide the evaluation command:
 
 ```
-./scripts/storyforge-evaluate [options]
+./storyforge evaluate [options]
 ```
 
-Or the full path from the plugin directory. Explain what the evaluation does and what output to expect.
+If the project doesn't have a `./storyforge` runner script, offer to create one
+by copying the template from the plugin's `templates/storyforge-runner.sh` and
+making it executable. Explain what the evaluation does and what output to expect.
 
 If no drafted scenes exist, explain what's needed and suggest drafting first.
 
@@ -101,10 +107,12 @@ Check prerequisites:
 If met, provide the revision command:
 
 ```
-./scripts/storyforge-revise [options]
+./storyforge revise [options]
 ```
 
-Or the full path from the plugin directory. Explain that it will run passes sequentially, pausing for interactive ones.
+If the project doesn't have a `./storyforge` runner script, offer to create one
+by copying the template from the plugin's `templates/storyforge-runner.sh` and
+making it executable. Explain that it will run passes sequentially, pausing for interactive ones.
 
 If the revision plan doesn't exist, explain that a revision plan is needed first and offer to invoke `storyforge-plan-revision`.
 
@@ -150,10 +158,10 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 
 | Command | Requires |
 |---|---|
-| `storyforge-write` | `scenes/scene-index.yaml` with at least one scene, `reference/voice-guide.md` |
-| `storyforge-evaluate` | At least some drafted scenes in `draft/` |
+| `storyforge write` | `scenes/scene-index.yaml` with at least one scene, `reference/voice-guide.md` |
+| `storyforge evaluate` | At least some drafted scenes in `draft/` |
 | `storyforge-plan-revision` | Evaluation results in `working/evaluations/` |
-| `storyforge-revise` | `working/plans/revision-plan.yaml` |
+| `storyforge revise` | `working/plans/revision-plan.yaml` |
 
 ### Soft Prerequisites (recommended — suggest but allow override)
 

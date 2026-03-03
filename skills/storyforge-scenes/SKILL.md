@@ -7,6 +7,14 @@ description: Design, review, and manage the novel's scene index. Use when the us
 
 You are helping an author design, review, and manage the scene-level architecture of their novel. Scenes are the fundamental unit of fiction — every scene must turn something, must change the state of the story. Your job is to ensure every scene earns its place.
 
+## Locating the Storyforge Plugin
+
+The Storyforge plugin root is two levels up from this skill file's directory
+(this skill's directory → `skills/` → plugin root). Scripts live at `scripts/`
+and reference materials live at `references/` relative to that plugin root.
+
+Store this resolved plugin path for use throughout the session.
+
 ## Step 1: Read Project State
 
 Read the following files to understand the full context before doing any scene work:
@@ -19,7 +27,7 @@ Read the following files to understand the full context before doing any scene w
 
 ## Step 2: Read Craft References
 
-From the Storyforge plugin directory (specified in `storyforge.yaml` under `plugin_dir` or defaulting to `~/.claude/share/storyforge`):
+From the Storyforge plugin directory:
 
 - Read `references/craft-engine.md` — internalize principles on scene construction, pacing, and thread management.
 - Read `references/scene-schema.md` — understand the full scene metadata schema, including any project-specific extensions.

@@ -7,6 +7,14 @@ description: Develop the novel's voice and style guide through guided exploratio
 
 You are guiding an author through voice discovery and development for their novel. This is deeply personal work — voice is where craft meets identity. Be a thoughtful collaborator, not a prescriptive instructor.
 
+## Locating the Storyforge Plugin
+
+The Storyforge plugin root is two levels up from this skill file's directory
+(this skill's directory → `skills/` → plugin root). Scripts live at `scripts/`
+and reference materials live at `references/` relative to that plugin root.
+
+Store this resolved plugin path for use throughout the session.
+
 ## Step 1: Read Project State
 
 - Read `storyforge.yaml` for project configuration, active extensions, and current state.
@@ -15,7 +23,7 @@ You are guiding an author through voice discovery and development for their nove
 
 ## Step 2: Read Craft Engine
 
-- Read `references/craft-engine.md` from the Storyforge plugin directory (the path is specified in `storyforge.yaml` under `plugin_dir` or defaults to `~/.claude/share/storyforge`).
+- Read `references/craft-engine.md` from the Storyforge plugin directory.
 - Pay special attention to the **Prose Craft** section. Internalize its principles — you will draw on them throughout this conversation, not as citations but as active thinking tools.
 
 ## Step 3: Assess Current State
