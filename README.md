@@ -4,41 +4,25 @@ A novel-writing toolkit for Claude Code. Interactive skills guide creative devel
 
 ## Installation
 
-### Install Skills (global — available in all projects)
+### For development
 
-Symlink each skill into your Claude Code skills directory:
+Load Storyforge directly from your local checkout:
 
 ```bash
-STORYFORGE=~/Developer/storyforge
-
-for skill in storyforge storyforge-init storyforge-develop storyforge-voice storyforge-scenes storyforge-plan-revision; do
-  ln -sf "$STORYFORGE/.claude/skills/$skill" ~/.claude/skills/"$skill"
-done
+claude --plugin-dir ~/Developer/storyforge
 ```
 
-To verify:
-```bash
-ls ~/.claude/skills/storyforge*/
-```
+Skills are available as `/storyforge`, `/storyforge:develop`, `/storyforge:voice`,
+`/storyforge:scenes`, `/storyforge:plan-revision`, and `/storyforge:init`.
+Edits take effect in your next Claude Code session.
 
-You should see six directories, each containing a SKILL.md.
+### For distribution (future)
 
-### Install Scripts (per-project)
-
-The autonomous scripts (drafting, evaluation, revision) run from within a Storyforge project. `storyforge-init` copies them into new projects automatically.
-
-To add scripts to an existing project:
-```bash
-cp -r ~/Developer/storyforge/scripts /path/to/your/project/
-chmod +x /path/to/your/project/scripts/storyforge-*
-```
-
-### Uninstall
+Storyforge can be distributed via a Claude Code marketplace:
 
 ```bash
-for skill in storyforge storyforge-init storyforge-develop storyforge-voice storyforge-scenes storyforge-plan-revision; do
-  rm -f ~/.claude/skills/"$skill"
-done
+/plugin marketplace add benjaminsnorris/storyforge
+/plugin install storyforge
 ```
 
 ## Quick Start
@@ -47,7 +31,7 @@ done
 
 In any directory, start a new Claude Code session and run:
 ```
-/storyforge-init
+/storyforge:init
 ```
 
 This creates the project scaffold, reference doc templates, and storyforge.yaml config.
@@ -66,19 +50,28 @@ The hub reads your project state and suggests what to work on, or you can direct
 | Skill | Purpose |
 |-------|---------|
 | `/storyforge` | Hub — orchestrator, status, "surprise me" mode |
-| `/storyforge-init` | Initialize a new novel project |
-| `/storyforge-develop` | World building, character development, story architecture, timeline |
-| `/storyforge-voice` | Voice and style guide development |
-| `/storyforge-scenes` | Scene index design, review, and editing |
-| `/storyforge-plan-revision` | Plan custom revision passes from evaluation results |
+| `/storyforge:init` | Initialize a new novel project |
+| `/storyforge:develop` | World building, character development, story architecture, timeline |
+| `/storyforge:voice` | Voice and style guide development |
+| `/storyforge:scenes` | Scene index design, review, and editing |
+| `/storyforge:plan-revision` | Plan custom revision passes from evaluation results |
 
-## Scripts
+## Project Setup
 
-| Script | Purpose |
-|--------|---------|
-| `scripts/storyforge-write` | Autonomous scene-by-scene drafting |
-| `scripts/storyforge-evaluate` | Multi-agent evaluation panel (6 evaluators + synthesis) |
-| `scripts/storyforge-revise` | Execute revision passes from revision-plan.yaml |
+Run `/storyforge:init` in a new project directory. This creates:
+- `storyforge.yaml` — project configuration
+- `storyforge` — runner script for autonomous commands
+- `reference/` — templates for world bible, character bible, etc.
+- Standard directory structure (`scenes/`, `draft/`, `manuscript/`, `working/`)
+
+Run autonomous scripts from your project root:
+
+```bash
+./storyforge write                    # Draft all remaining scenes
+./storyforge write act1-sc01          # Draft a single scene
+./storyforge evaluate                 # Run evaluation panel
+./storyforge revise                   # Execute revision pipeline
+```
 
 ## Project Structure
 
@@ -87,26 +80,25 @@ A Storyforge project looks like:
 ```
 my-novel/
 ├── storyforge.yaml          # Project config + state
+├── storyforge               # Runner script for autonomous commands
 ├── CLAUDE.md                # Auto-generated orchestration context
 ├── reference/               # World bible, character bible, voice guide, etc.
 ├── scenes/                  # Scene files with YAML frontmatter
 │   └── scene-index.yaml     # Master scene sequence
 ├── draft/                   # Assembled chapter drafts
 ├── manuscript/              # Post-revision manuscript
-├── scripts/                 # Autonomous execution scripts
-│   └── prompts/evaluators/  # Evaluator personas
 └── working/                 # Logs, evaluations, plans
 ```
 
 ## Workflow
 
-1. **`/storyforge-init`** — Create your project
-2. **`/storyforge-develop`** — Build world, characters, story (any order, as many sessions as you need)
-3. **`/storyforge-voice`** — Develop your voice and style guide
-4. **`/storyforge-scenes`** — Design your scene index
-5. **`scripts/storyforge-write`** — Draft scenes autonomously
-6. **`scripts/storyforge-evaluate`** — Run the evaluation panel
-7. **`/storyforge-plan-revision`** — Plan revision passes from evaluation findings
-8. **`scripts/storyforge-revise`** — Execute revision passes
+1. **`/storyforge:init`** — Create your project
+2. **`/storyforge:develop`** — Build world, characters, story (any order, as many sessions as you need)
+3. **`/storyforge:voice`** — Develop your voice and style guide
+4. **`/storyforge:scenes`** — Design your scene index
+5. **`./storyforge write`** — Draft scenes autonomously
+6. **`./storyforge evaluate`** — Run the evaluation panel
+7. **`/storyforge:plan-revision`** — Plan revision passes from evaluation findings
+8. **`./storyforge revise`** — Execute revision passes
 
 Or skip the sequence entirely and just run `/storyforge` — it knows where you are and what comes next.
