@@ -1,4 +1,4 @@
-# [Title] -- Chapter Log
+# [Title] -- Scene Log
 
 *Append-only archive. Per-scene summaries, character analysis, craft notes, and outline deviations.*
 *Read selectively -- typically only the last 2-3 entries needed when drafting.*

@@ -1,7 +1,7 @@
 # [Title] -- Continuity Tracker
 
 *Lean working reference for drafting. Current state only.*
-*Detailed per-scene analysis: see Chapter-Log.md. Resolved threads: see Resolved-Threads.md.*
+*Detailed per-scene analysis: see Scene-Log.md. Resolved threads: see Resolved-Threads.md.*
 
 **Last updated:** After Scene [X] draft
 **Scenes drafted:** [X] / [X]
