@@ -10,8 +10,9 @@ You are helping an author set up a brand-new Storyforge novel project. This is t
 ## Locating the Storyforge Plugin
 
 The Storyforge plugin root is two levels up from this skill file's directory
-(this skill's directory → `skills/` → plugin root). Templates live at `templates/`
-and reference materials live at `references/` relative to that plugin root.
+(this skill's directory → `skills/` → plugin root). Scripts live at `scripts/`,
+templates live at `templates/`, and reference materials live at `references/`
+relative to that plugin root.
 
 Store this resolved plugin path for use throughout the session.
 
