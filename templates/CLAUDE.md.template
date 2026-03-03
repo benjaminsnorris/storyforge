@@ -14,7 +14,7 @@
 
 This project uses [Storyforge](https://github.com/benjaminsnorris/storyforge). Available skills:
 
-- `/storyforge` — Hub: status, routing, "surprise me"
+- `/storyforge:forge` — Hub: status, routing, "surprise me"
 - `/storyforge:develop` — World, character, story, timeline development
 - `/storyforge:voice` — Voice and style refinement
 - `/storyforge:scenes` — Scene index management

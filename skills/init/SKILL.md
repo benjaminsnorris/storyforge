@@ -1,5 +1,5 @@
 ---
-name: storyforge-init
+name: init
 description: Initialize a new Storyforge novel project. Use when the user wants to start a new novel, create a new writing project, or set up Storyforge for a new book.
 ---
 
@@ -175,7 +175,7 @@ If the template cannot be found, generate a project `CLAUDE.md` that includes:
 This project is in the **development** phase. The focus is on building the creative foundation before drafting begins.
 
 ### Available Skills
-- `/storyforge` — Hub: status, routing, "surprise me"
+- `/storyforge:forge` — Hub: status, routing, "surprise me"
 - `/storyforge:develop` — World, character, story, timeline development
 - `/storyforge:voice` — Voice and style refinement
 - `/storyforge:scenes` — Scene index management

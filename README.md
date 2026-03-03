@@ -11,7 +11,7 @@ In any Claude Code session:
 /plugin install storyforge@storyforge-marketplace
 ```
 
-That's it. Skills are available as `/storyforge`, `/storyforge:develop`, `/storyforge:voice`,
+That's it. Skills are available as `/storyforge:forge`, `/storyforge:develop`, `/storyforge:voice`,
 `/storyforge:scenes`, `/storyforge:plan-revision`, and `/storyforge:init`. Updates are
 automatic.
 
@@ -39,7 +39,7 @@ This creates the project scaffold, reference doc templates, and storyforge.yaml 
 
 In a Storyforge project directory:
 ```
-/storyforge
+/storyforge:forge
 ```
 
 The hub reads your project state and suggests what to work on, or you can direct it.
@@ -48,7 +48,7 @@ The hub reads your project state and suggests what to work on, or you can direct
 
 | Skill | Purpose |
 |-------|---------|
-| `/storyforge` | Hub — orchestrator, status, "surprise me" mode |
+| `/storyforge:forge` | Hub — orchestrator, status, "surprise me" mode |
 | `/storyforge:init` | Initialize a new novel project |
 | `/storyforge:develop` | World building, character development, story architecture, timeline |
 | `/storyforge:voice` | Voice and style guide development |
@@ -100,4 +100,4 @@ my-novel/
 7. **`/storyforge:plan-revision`** — Plan revision passes from evaluation findings
 8. **`./storyforge revise`** — Execute revision passes
 
-Or skip the sequence entirely and just run `/storyforge` — it knows where you are and what comes next.
+Or skip the sequence entirely and just run `/storyforge:forge` — it knows where you are and what comes next.

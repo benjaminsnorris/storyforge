@@ -1,5 +1,5 @@
 ---
-name: storyforge-voice
+name: voice
 description: Develop the novel's voice and style guide through guided exploration. Use when the user wants to define their writing voice, discuss style, explore author influences, develop POV-specific voice rules, or refine their prose approach.
 ---
 

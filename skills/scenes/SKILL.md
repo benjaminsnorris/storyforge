@@ -1,5 +1,5 @@
 ---
-name: storyforge-scenes
+name: scenes
 description: Design, review, and manage the novel's scene index. Use when the user wants to plan scenes, review scene structure, check pacing, reorder scenes, add or remove scenes, split or merge scenes, or work with the scene index in any way.
 ---
 

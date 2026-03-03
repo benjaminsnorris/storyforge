@@ -1,6 +1,6 @@
 ---
-name: storyforge
-description: The main Storyforge hub for novel writing. Use when the user invokes /storyforge, asks what to work on next, says "surprise me", wants to check project status, or wants to do any novel-writing task. Routes to appropriate sub-skills or launches autonomous work.
+name: forge
+description: The main Storyforge hub for novel writing. Use when the user invokes /storyforge:forge, asks what to work on next, says "surprise me", wants to check project status, or wants to do any novel-writing task. Routes to appropriate sub-skills or launches autonomous work.
 ---
 
 # Storyforge Hub
@@ -46,13 +46,13 @@ Based on the author's message, operate in one of three modes:
 The author has a specific request. Parse what they want and route accordingly:
 
 **Character, world, story concept, or timeline work:**
-Invoke the `storyforge-develop` skill. This covers character bible creation and deepening, world-building, story architecture, synopsis development, and timeline construction.
+Invoke the `develop` skill. This covers character bible creation and deepening, world-building, story architecture, synopsis development, and timeline construction.
 
 **Voice and style work:**
-Invoke the `storyforge-voice` skill. This covers voice guide creation, voice sampling, voice refinement, and POV-specific voice rules.
+Invoke the `voice` skill. This covers voice guide creation, voice sampling, voice refinement, and POV-specific voice rules.
 
 **Scene planning, scene design, or scene review:**
-Invoke the `storyforge-scenes` skill. This covers scene index population, scene design, scene card creation, act-level planning, and scene auditing.
+Invoke the `scenes` skill. This covers scene index population, scene design, scene card creation, act-level planning, and scene auditing.
 
 **"Start drafting" / "Write scenes" / "Write the draft":**
 Check prerequisites before proceeding:
@@ -75,7 +75,7 @@ If the project doesn't have a `./storyforge` runner script, offer to create one
 by copying the template from the plugin's `templates/storyforge-runner.sh` and
 making it executable. Explain available options (scene selection, act scope, etc.).
 
-If a hard prerequisite is missing, explain what's needed and route to the skill that creates it — `storyforge-scenes` for the scene index, `storyforge-voice` for the voice guide.
+If a hard prerequisite is missing, explain what's needed and route to the skill that creates it — `scenes` for the scene index, `voice` for the voice guide.
 
 If soft prerequisites are missing, mention what's absent and ask the author whether they want to address it first or proceed anyway.
 
@@ -97,7 +97,7 @@ making it executable. Explain what the evaluation does and what output to expect
 If no drafted scenes exist, explain what's needed and suggest drafting first.
 
 **"Plan revision" / "What should I revise?":**
-Invoke the `storyforge-plan-revision` skill.
+Invoke the `plan-revision` skill.
 
 **"Run revision" / "Revise the draft":**
 Check prerequisites:
@@ -114,7 +114,7 @@ If the project doesn't have a `./storyforge` runner script, offer to create one
 by copying the template from the plugin's `templates/storyforge-runner.sh` and
 making it executable. Explain that it will run passes sequentially, pausing for interactive ones.
 
-If the revision plan doesn't exist, explain that a revision plan is needed first and offer to invoke `storyforge-plan-revision`.
+If the revision plan doesn't exist, explain that a revision plan is needed first and offer to invoke `plan-revision`.
 
 ---
 
@@ -160,7 +160,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 |---|---|
 | `storyforge write` | `scenes/scene-index.yaml` with at least one scene, `reference/voice-guide.md` |
 | `storyforge evaluate` | At least some drafted scenes in `draft/` |
-| `storyforge-plan-revision` | Evaluation results in `working/evaluations/` |
+| `plan-revision` | Evaluation results in `working/evaluations/` |
 | `storyforge revise` | `working/plans/revision-plan.yaml` |
 
 ### Soft Prerequisites (recommended — suggest but allow override)

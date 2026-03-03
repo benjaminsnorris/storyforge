@@ -1,5 +1,5 @@
 ---
-name: storyforge-develop
+name: develop
 description: Develop novel elements interactively — world building, character development, story architecture, timeline. Use when the user wants to flesh out characters, build their world, design story structure, develop a timeline, or work on any creative element of their novel. Also use when the user says "surprise me" or asks what to work on next during the development phase.
 ---
 

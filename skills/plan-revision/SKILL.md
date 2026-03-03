@@ -1,5 +1,5 @@
 ---
-name: storyforge-plan-revision
+name: plan-revision
 description: Plan a custom revision pipeline based on evaluation results. Use when the user has evaluation results and wants to plan their revision strategy, or when they want to configure which editing passes to run on their manuscript.
 ---
 
@@ -187,7 +187,7 @@ Explain what to expect:
 - Interactive passes will pause and engage the author for decisions
 - Progress is tracked in `revision-plan.yaml` — each pass is marked as `completed` when done
 - The author can stop and resume at any time; the script picks up where it left off
-- If a pass reveals new issues, they can re-run `storyforge-plan-revision` to update the plan
+- If a pass reveals new issues, they can re-run `plan-revision` to update the plan
 
 ## Coaching Posture
 
