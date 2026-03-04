@@ -15,7 +15,7 @@
 get_scene_metadata() {
     local scene_id="$1"
     local project_dir="$2"
-    local index_file="${project_dir}/scene-index.yaml"
+    local index_file="${project_dir}/scenes/scene-index.yaml"
 
     if [[ ! -f "$index_file" ]]; then
         echo ""
@@ -28,8 +28,11 @@ get_scene_metadata() {
     #     title: "The Descent"
     #     ...
     # We grab from the matching "- id:" line until the next "- id:" or EOF.
-    sed -n "/^[[:space:]]*- id:[[:space:]]*${scene_id}[[:space:]]*$/,/^[[:space:]]*- id:/p" "$index_file" \
-        | sed '${ /^[[:space:]]*- id:/d }'
+    awk -v id="$scene_id" '
+        $0 ~ "^[[:space:]]*- id:[[:space:]]*" id "[[:space:]]*$" { found=1 }
+        found && /^[[:space:]]*- id:/ && !($0 ~ "^[[:space:]]*- id:[[:space:]]*" id) { exit }
+        found { print }
+    ' "$index_file"
 }
 
 # ============================================================================
@@ -43,7 +46,7 @@ get_scene_metadata() {
 get_previous_scene() {
     local scene_id="$1"
     local project_dir="$2"
-    local index_file="${project_dir}/scene-index.yaml"
+    local index_file="${project_dir}/scenes/scene-index.yaml"
 
     if [[ ! -f "$index_file" ]]; then
         echo ""
@@ -130,6 +133,8 @@ get_scene_status() {
             | grep -E '^status:' \
             | head -1 \
             | sed 's/^status:[[:space:]]*//' \
+            | sed 's/^["'"'"']//' \
+            | sed 's/["'"'"']$//' \
             | sed 's/[[:space:]]*$//')
         if [[ -n "$file_status" ]]; then
             echo "$file_status"
