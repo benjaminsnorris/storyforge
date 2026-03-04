@@ -58,13 +58,20 @@ for (( i=0; i<${#SCENES[@]}; i++ )); do
         echo "[AUTOPILOT] ${SCENE} complete (exit: ${EXIT_CODE})"
     else
         echo ""
-        echo "╔══════════════════════════════════════════════════════════════╗"
-        echo "║  INTERACTIVE MODE — Scene ${NUM} of ${#SCENES[@]}                              ║"
-        echo "║                                                              ║"
-        echo "║  You can watch, give feedback, or redirect Claude.           ║"
-        echo "║  When this scene is done, type /exit to continue.            ║"
-        echo "║  Say \"finish without me\" to run the rest autonomously.       ║"
-        echo "╚══════════════════════════════════════════════════════════════╝"
+        BANNER_TITLE="INTERACTIVE MODE — Scene ${NUM} of ${#SCENES[@]}"
+        BANNER_WIDTH=60
+        BANNER_LINES=(
+            "$BANNER_TITLE"
+            ""
+            "You can watch, give feedback, or redirect Claude."
+            "When this scene is done, type /exit to continue."
+            "Say \"finish without me\" to run the rest autonomously."
+        )
+        printf '╔%*s╗\n' "$BANNER_WIDTH" '' | tr ' ' '═'
+        for line in "${BANNER_LINES[@]}"; do
+            printf '║  %-*s║\n' "$((BANNER_WIDTH - 2))" "$line"
+        done
+        printf '╚%*s╝\n' "$BANNER_WIDTH" '' | tr ' ' '═'
         echo ""
 
         if [[ "$USE_REAL_CLAUDE" == true ]]; then
