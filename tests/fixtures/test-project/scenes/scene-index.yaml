@@ -1,0 +1,33 @@
+# Scene Index — The Cartographer's Silence
+# Scenes are the atomic unit. Chapters are assembled from scenes later.
+
+scenes:
+  - id: act1-sc01
+    title: "The Finest Cartographer"
+    pov: "Dorren Hayle"
+    setting: "Pressure Cartography Office"
+    words: 2400
+    target_words: 2500
+    function: "Establishes Dorren as institutional gatekeeper; introduces the assignment"
+    status: "drafted"
+    action: null
+
+  - id: act1-sc02
+    title: "The Missing Village"
+    pov: "Dorren Hayle"
+    setting: "Dorren's private study"
+    words: null
+    target_words: 3000
+    function: "Dorren notices a village has vanished from the latest survey map"
+    status: "pending"
+    action: null
+
+  - id: act2-sc01
+    title: "Into the Blank"
+    pov: "Tessa Merrin"
+    setting: "The Uncharted Reaches"
+    words: null
+    target_words: 2800
+    function: "Tessa ventures into territory the maps refuse to record"
+    status: "pending"
+    action: null

@@ -1,0 +1,59 @@
+project:
+  title: "The Cartographer's Silence"
+  genre: "fantasy"
+  subgenre: "secondary world"
+  target_words: 90000
+  logline: "A cartographer discovers her maps are erasing people from existence."
+
+artifacts:
+  world_bible:
+    exists: true
+    path: reference/world-bible.md
+    updated: "2026-02-15"
+
+  character_bible:
+    exists: true
+    path: reference/character-bible.md
+    updated: "2026-02-20"
+
+  systems_bible:
+    exists: false
+    path: reference/systems-bible.md
+    updated:
+
+  story_architecture:
+    exists: false
+    path: reference/story-architecture.md
+    updated:
+
+  voice_guide:
+    exists: true
+    path: reference/voice-guide.md
+    updated: "2026-02-18"
+
+  timeline:
+    exists: false
+    path: reference/timeline.md
+    updated:
+
+  scene_index:
+    exists: true
+    path: scenes/scene-index.yaml
+    updated: "2026-02-25"
+
+  continuity_tracker:
+    exists: true
+    path: reference/continuity-tracker.md
+    updated: "2026-02-28"
+
+  key_decisions:
+    exists: true
+    path: reference/key-decisions.md
+    updated: "2026-02-22"
+
+scene_extensions: []
+
+evaluation:
+  custom_evaluators: []
+
+phase: drafting
