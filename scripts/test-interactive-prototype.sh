@@ -103,7 +103,7 @@ RULES:
 - When the user is done with this scene, they will type /exit to move on.
 
 AUTOPILOT:
-- If the user says 'autopilot the rest', 'go autonomous', 'finish without me', or similar:
+- If the user says 'autopilot the rest', 'go autonomous', 'finish without me', 'go auto', 'auto mode', or similar:
   1. Run: touch ${AUTOPILOT_FILE}
   2. Tell them: 'Autopilot enabled — the remaining scenes will run autonomously. Type /exit to continue.'
 - Do NOT exit on your own. The user types /exit when ready."
