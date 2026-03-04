@@ -339,6 +339,9 @@ if [[ -z "$PROJECT_TITLE" ]]; then
     PROJECT_TITLE="(untitled project)"
 fi
 
+# Clean up stale autopilot file from a previous crashed run
+rm -f "${PROJECT_DIR}/working/.autopilot"
+
 # ============================================================================
 # Main execution loop
 # ============================================================================

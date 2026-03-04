@@ -895,6 +895,9 @@ log "  Read individual:    ls ${EVAL_DIR}/"
 # --- Review phase ---
 run_review_phase "evaluation" "$PROJECT_DIR"
 
+# Clean up autopilot file
+rm -f "${PROJECT_DIR}/working/.autopilot"
+
 # Exit with failure if any evaluator failed
 if (( ${#FAILED[@]} > 0 )); then
     exit 1

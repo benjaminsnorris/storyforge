@@ -280,7 +280,7 @@ monitor_progress() {
 # ============================================================================
 
 # Default model for each task type. These are the smart defaults that balance
-# quality vs. cost. Override with STORYFORGE_MODEL env var or --model flag.
+# quality vs. cost. Override with STORYFORGE_MODEL env var.
 #
 # Task types:
 #   drafting     — scene writing (maximum creativity)

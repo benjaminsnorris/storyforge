@@ -293,6 +293,9 @@ if [[ ${#PENDING_IDS[@]} -eq 0 ]]; then
     exit 0
 fi
 
+# Clean up stale autopilot file from a previous crashed run
+rm -f "${PROJECT_DIR}/working/.autopilot"
+
 # ============================================================================
 # Session start
 # ============================================================================

@@ -74,6 +74,7 @@ Assemble scenes into chapters and generate book output.
 Options:
   --format FORMAT     Output format: epub, pdf, html, markdown, all (default: epub)
   --draft             Quick assembly — markdown only, no formatting
+  --interactive       Run the review phase interactively
   --dry-run           Show what would be done without doing it
   --skip-validation   Skip epubcheck validation
   -h, --help          Show this help
@@ -84,10 +85,6 @@ Formats:
   html       Generate single-file HTML (requires pandoc)
   markdown   Assemble manuscript markdown only (no external tools)
   all        Generate all available formats
-
-  --interactive               Run the review phase interactively
-  --dry-run                   Show what would be done without doing it
-  --skip-validation           Skip epubcheck validation
 
 Examples:
   $(basename "$0")

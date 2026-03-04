@@ -44,6 +44,8 @@ mkdir -p "$LOG_DIR"
 
 DRY_RUN=false
 export DRY_RUN
+INTERACTIVE=false
+export INTERACTIVE
 REVIEW_TYPE="manual"
 
 usage() {
@@ -54,8 +56,12 @@ Run a pipeline review for the current branch.
 
 Options:
   --type TYPE         Review type: drafting, evaluation, revision, assembly, manual (default: manual)
+  --interactive       Run the review interactively — discuss findings with Claude
   --dry-run           Show what would be done without doing it
   -h, --help          Show this help
+
+Environment:
+  STORYFORGE_MODEL    Override model selection (e.g., claude-opus-4-6)
 
 The review reads all changed files on the current branch, assesses quality,
 saves a review to working/reviews/, and (if a PR exists) posts the review
@@ -64,6 +70,7 @@ as a PR comment and updates labels.
 Examples:
   $(basename "$0")
   $(basename "$0") --type revision
+  $(basename "$0") --interactive
   $(basename "$0") --dry-run
 EOF
     exit 0
@@ -76,6 +83,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --interactive|-i)
+            INTERACTIVE=true
             shift
             ;;
         --type)
