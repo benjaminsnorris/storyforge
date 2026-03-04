@@ -81,7 +81,7 @@ Options:
   -h, --help                  Show this help
 
 Environment:
-  STORYFORGE_MODEL            Override model selection (e.g., claude-sonnet-4-6)
+  STORYFORGE_MODEL            Override model (default: opus for drafting)
   STORYFORGE_REJOIN_TIMEOUT   Seconds to wait for 'i' keypress in autopilot (default: 5)
 
 Examples:
@@ -409,7 +409,7 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
 
     if [[ "$USE_INTERACTIVE" == true ]]; then
         # --- Interactive mode ---
-        show_interactive_banner "Scene ${SCENE_NUM} of ${#PENDING_IDS[@]}"
+        show_interactive_banner "Scene ${SCENE_NUM} of ${#PENDING_IDS[@]}" "multi"
 
         INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$AUTOPILOT_FILE" "scene")
         SCENE_MODEL=$(select_model "drafting")

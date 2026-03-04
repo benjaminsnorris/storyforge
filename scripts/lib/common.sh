@@ -380,8 +380,11 @@ create_branch() {
     STORYFORGE_BRANCH="storyforge/${command_name}-$(date '+%Y%m%d-%H%M')"
     export STORYFORGE_BRANCH
 
+    set +e
     git -C "$project_dir" checkout -b "$STORYFORGE_BRANCH" 2>/dev/null
-    if [[ $? -ne 0 ]]; then
+    local branch_rc=$?
+    set -e
+    if [[ $branch_rc -ne 0 ]]; then
         log "ERROR: Failed to create branch ${STORYFORGE_BRANCH}"
         return 1
     fi
@@ -748,10 +751,15 @@ REVIEW_EOF
 # ============================================================================
 
 # Display the interactive mode banner before launching a claude session.
+# Pass "multi" as the second arg to show autopilot instructions (for loops).
+# Omit or pass "single" to hide autopilot instructions (for one-off steps).
 #
-# Usage: show_interactive_banner "Scene 3 of 12"
+# Usage:
+#   show_interactive_banner "Scene 3 of 12" "multi"   # shows autopilot
+#   show_interactive_banner "Evaluation Synthesis"      # no autopilot
 show_interactive_banner() {
     local subtitle="$1"
+    local mode="${2:-single}"
     local banner_width=60
 
     local lines=(
@@ -759,8 +767,10 @@ show_interactive_banner() {
         ""
         "You can watch, give feedback, or redirect Claude."
         "When done with this step, type /exit to continue."
-        'Say "finish without me" to run the rest autonomously.'
     )
+    if [[ "$mode" == "multi" ]]; then
+        lines+=('Say "finish without me" to run the rest autonomously.')
+    fi
 
     echo ""
     printf '╔%*s╗\n' "$banner_width" '' | tr ' ' '═'

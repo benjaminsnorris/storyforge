@@ -90,7 +90,7 @@ Options:
   -h, --help                    Show this help
 
 Environment:
-  STORYFORGE_MODEL              Override model selection (e.g., claude-opus-4-6)
+  STORYFORGE_MODEL              Override model (default: sonnet for evaluators, opus for synthesis)
 
 Examples:
   $(basename "$0")
@@ -777,11 +777,13 @@ if [[ "$INTERACTIVE" == true ]]; then
     # Interactive synthesis — user can guide how findings are interpreted
     show_interactive_banner "Evaluation Synthesis"
 
+    SYNTH_SYSTEM=$(build_interactive_system_prompt "${PROJECT_DIR}/working/.autopilot" "synthesis")
+
     set +e
     claude "$SYNTHESIS_PROMPT" \
         --model "$SYNTH_MODEL" \
         --dangerously-skip-permissions \
-        --append-system-prompt "You are in interactive mode for the evaluation synthesis. The user may give you feedback on how to interpret findings, ask you to emphasize certain areas, or adjust severity ratings. Complete the synthesis, then wait for the user to type /exit."
+        --append-system-prompt "$SYNTH_SYSTEM"
     SYNTH_EXIT=$?
     set -e
 else

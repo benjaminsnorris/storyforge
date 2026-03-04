@@ -258,10 +258,20 @@ assert_contains "$result" "THIS pass ONLY" "build_interactive_system_prompt: sco
 # show_interactive_banner (output format check)
 # ============================================================================
 
-result=$(show_interactive_banner "Scene 3 of 12")
-assert_contains "$result" "INTERACTIVE MODE" "show_interactive_banner: has title"
-assert_contains "$result" "Scene 3 of 12" "show_interactive_banner: has subtitle"
-assert_contains "$result" "/exit" "show_interactive_banner: mentions /exit"
-assert_contains "$result" "finish without me" "show_interactive_banner: mentions autopilot phrase"
-assert_contains "$result" "╔" "show_interactive_banner: has top border"
-assert_contains "$result" "╚" "show_interactive_banner: has bottom border"
+# Single-step banner (no autopilot line)
+result=$(show_interactive_banner "Evaluation Synthesis")
+assert_contains "$result" "INTERACTIVE MODE" "show_interactive_banner single: has title"
+assert_contains "$result" "Evaluation Synthesis" "show_interactive_banner single: has subtitle"
+assert_contains "$result" "/exit" "show_interactive_banner single: mentions /exit"
+assert_not_contains "$result" "finish without me" "show_interactive_banner single: no autopilot phrase"
+assert_contains "$result" "╔" "show_interactive_banner single: has top border"
+assert_contains "$result" "╚" "show_interactive_banner single: has bottom border"
+
+# Multi-step banner (with autopilot line)
+result=$(show_interactive_banner "Scene 3 of 12" "multi")
+assert_contains "$result" "INTERACTIVE MODE" "show_interactive_banner multi: has title"
+assert_contains "$result" "Scene 3 of 12" "show_interactive_banner multi: has subtitle"
+assert_contains "$result" "/exit" "show_interactive_banner multi: mentions /exit"
+assert_contains "$result" "finish without me" "show_interactive_banner multi: has autopilot phrase"
+assert_contains "$result" "╔" "show_interactive_banner multi: has top border"
+assert_contains "$result" "╚" "show_interactive_banner multi: has bottom border"
