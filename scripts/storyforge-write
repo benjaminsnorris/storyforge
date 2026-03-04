@@ -58,6 +58,7 @@ mkdir -p "$SCENES_DIR" "$LOG_DIR"
 # ============================================================================
 
 DRY_RUN=false
+INTERACTIVE=false
 FILTER_MODE="all"       # all | single | range | act | part
 FILTER_VALUE=""
 RANGE_START=""
@@ -75,12 +76,14 @@ Options:
   SCENE_ID SCENE_ID           Draft a range of scenes (inclusive, by index position)
   --act N                     Draft all scenes in act N
   --part N                    Draft all scenes in part N
+  --interactive               Draft with supervision — watch, give feedback, redirect
+  --dry-run                   Build prompts without invoking Claude
   -h, --help                  Show this help
 
 Examples:
   $(basename "$0")
   $(basename "$0") act1-sc05
-  $(basename "$0") act1-sc01 act1-sc15
+  $(basename "$0") --interactive
   $(basename "$0") --act 2
 EOF
     exit 0
@@ -93,6 +96,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --interactive|-i)
+            INTERACTIVE=true
             shift
             ;;
         --act)
@@ -370,35 +377,66 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         continue
     fi
 
+    # --- Check interactive/autopilot mode ---
+    AUTOPILOT_FILE="${PROJECT_DIR}/working/.autopilot"
+    USE_INTERACTIVE=false
+
+    if [[ "$INTERACTIVE" == true ]]; then
+        if [[ -f "$AUTOPILOT_FILE" ]]; then
+            # In autopilot — check if user wants to rejoin
+            if (( i > 0 )); then
+                check_rejoin_interactive "$PROJECT_DIR" "${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]})" && USE_INTERACTIVE=true
+            fi
+        else
+            USE_INTERACTIVE=true
+        fi
+    fi
+
     # --- Record git HEAD before invocation ---
     HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
 
     # --- Per-scene log file ---
     SCENE_LOG="${LOG_DIR}/drafting-${SCENE_ID}.log"
 
-    log "Invoking claude for scene ${SCENE_ID}..."
-    log "  Per-scene log: ${SCENE_LOG} (tail -f for live output)"
     START_TIME=$(date +%s)
 
-    # --- Start background monitor ---
-    monitor_progress "$SCENE_ID" "$HEAD_BEFORE" "$START_TIME" &
-    MONITOR_PID=$!
+    if [[ "$USE_INTERACTIVE" == true ]]; then
+        # --- Interactive mode ---
+        show_interactive_banner "Scene ${SCENE_NUM} of ${#PENDING_IDS[@]}"
 
-    # --- Invoke claude ---
-    set +e
-    claude -p "$PROMPT" \
-        --model claude-opus-4-6 \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --verbose \
-        $BUDGET_FLAG \
-        > "$SCENE_LOG" 2>&1
-    EXIT_CODE=$?
-    set -e
+        INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$AUTOPILOT_FILE" "scene")
 
-    # --- Stop the monitor ---
-    kill "$MONITOR_PID" 2>/dev/null || true
-    wait "$MONITOR_PID" 2>/dev/null || true
+        set +e
+        claude "$PROMPT" \
+            --model claude-opus-4-6 \
+            --dangerously-skip-permissions \
+            --append-system-prompt "$INTERACTIVE_SYSTEM"
+        EXIT_CODE=$?
+        set -e
+    else
+        # --- Headless mode ---
+        log "Invoking claude for scene ${SCENE_ID}..."
+        log "  Per-scene log: ${SCENE_LOG} (tail -f for live output)"
+
+        # Start background monitor
+        monitor_progress "$SCENE_ID" "$HEAD_BEFORE" "$START_TIME" &
+        MONITOR_PID=$!
+
+        set +e
+        claude -p "$PROMPT" \
+            --model claude-opus-4-6 \
+            --dangerously-skip-permissions \
+            --output-format stream-json \
+            --verbose \
+            $BUDGET_FLAG \
+            > "$SCENE_LOG" 2>&1
+        EXIT_CODE=$?
+        set -e
+
+        # Stop the monitor
+        kill "$MONITOR_PID" 2>/dev/null || true
+        wait "$MONITOR_PID" 2>/dev/null || true
+    fi
 
     # --- Timing ---
     END_TIME=$(date +%s)
@@ -468,12 +506,15 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
     log "SUCCESS: Scene ${SCENE_ID} — ${WORD_COUNT} words, ${MINUTES}m${SECS}s, commit ${COMMIT_SHORT}"
     update_pr_task "Draft scene ${SCENE_ID}" "$PROJECT_DIR"
 
-    # --- Pause between scenes ---
-    if (( i < ${#PENDING_IDS[@]} - 1 )); then
+    # --- Pause between scenes (headless only) ---
+    if (( i < ${#PENDING_IDS[@]} - 1 )) && [[ "$USE_INTERACTIVE" != true ]]; then
         log "Pausing 10s before next scene..."
         sleep 10
     fi
 done
+
+# Clean up autopilot file
+rm -f "${PROJECT_DIR}/working/.autopilot"
 
 # ============================================================================
 # Session complete
