@@ -83,7 +83,7 @@ Then copy the runner script from the plugin's `templates/storyforge-runner.sh` t
 cp {plugin-root}/templates/storyforge-runner.sh {project-dir}/storyforge && chmod +x {project-dir}/storyforge
 ```
 
-This single file is the only Storyforge executable in the project. It delegates to the installed plugin for `./storyforge write`, `./storyforge evaluate`, and `./storyforge revise`.
+This single file is the only Storyforge executable in the project. It delegates to the installed plugin for `./storyforge write`, `./storyforge evaluate`, `./storyforge revise`, and `./storyforge assemble`.
 
 ## Step 3: Generate storyforge.yaml
 

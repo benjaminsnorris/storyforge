@@ -20,11 +20,13 @@ This project uses [Storyforge](https://github.com/benjaminsnorris/storyforge). A
 - `/storyforge:scenes` — Scene index management
 - `/storyforge:plan-revision` — Plan revision passes from evaluation results
 - `/storyforge:review` — Review revision results, assess what landed, recommend next steps
+- `/storyforge:produce` — Book production: chapter mapping, epub/PDF generation, formatting
 
 Scripts (via project runner):
 - `./storyforge write` — Autonomous scene drafting
 - `./storyforge evaluate` — Multi-agent evaluation panel
 - `./storyforge revise` — Execute revision pipeline
+- `./storyforge assemble` — Assemble scenes into chapters, generate epub/PDF/HTML
 
 ## Suggested Next Steps
 
