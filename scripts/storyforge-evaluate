@@ -494,6 +494,38 @@ mkdir -p "$EVAL_DIR" "$LOG_DIR"
 
 SESSION_START=$(date +%s)
 
+# --- Branch + PR setup ---
+create_branch "evaluate" "$PROJECT_DIR"
+ensure_branch_pushed "$PROJECT_DIR"
+
+PR_BODY="## Evaluation Panel
+
+**Project:** ${PROJECT_TITLE}
+**Scope:** ${SCOPE_DESCRIPTION}
+**Evaluators:** ${ALL_EVALUATOR_COUNT}
+
+### Tasks
+"
+# Build task labels (track for consistent checkbox updates later)
+EVAL_TASK_LABELS=()
+for EVAL in "${CORE_EVALUATORS[@]}"; do
+    label="Evaluator: ${EVAL}"
+    EVAL_TASK_LABELS+=("$label")
+    PR_BODY="${PR_BODY}- [ ] ${label}
+"
+done
+for EVAL in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
+    [[ -z "$EVAL" ]] && continue
+    label="Evaluator: ${EVAL} (custom)"
+    EVAL_TASK_LABELS+=("$label")
+    PR_BODY="${PR_BODY}- [ ] ${label}
+"
+done
+PR_BODY="${PR_BODY}- [ ] Synthesis
+- [ ] Review"
+
+create_draft_pr "Evaluate: ${PROJECT_TITLE} (${SCOPE_DESCRIPTION})" "$PR_BODY" "$PROJECT_DIR"
+
 # Advance project phase to evaluation if needed
 CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
 if [[ "$CURRENT_PHASE" != "evaluation" && "$CURRENT_PHASE" != "revision" && "$CURRENT_PHASE" != "complete" ]]; then
@@ -583,6 +615,8 @@ for i in "${!PIDS[@]}"; do
         WORD_COUNT=$(wc -w < "${EVAL_DIR}/${EVAL_NAME}.md" | tr -d ' ')
         log "SUCCESS: ${EVAL_NAME} (${WORD_COUNT} words)"
         SUCCEEDED+=("$EVAL_NAME")
+        # Update PR task checkbox (use the pre-built label from EVAL_TASK_LABELS)
+        update_pr_task "${EVAL_TASK_LABELS[$i]}" "$PROJECT_DIR"
     fi
 done
 
@@ -768,6 +802,7 @@ fi
 
 SYNTH_WORDS=$(wc -w < "${EVAL_DIR}/synthesis.md" | tr -d ' ')
 log "SUCCESS: Synthesis complete (${SYNTH_WORDS} words, ${SYNTH_MINS}m${SYNTH_SECS}s)"
+update_pr_task "Synthesis" "$PROJECT_DIR"
 
 if [[ -f "${EVAL_DIR}/findings.yaml" ]]; then
     FINDING_COUNT=$(grep -c '^\s*- id: F' "${EVAL_DIR}/findings.yaml" 2>/dev/null || echo "0")
@@ -832,6 +867,9 @@ if [[ -f "${EVAL_DIR}/findings.yaml" ]]; then
     log "  Browse findings:    cat ${EVAL_DIR}/findings.yaml"
 fi
 log "  Read individual:    ls ${EVAL_DIR}/"
+
+# --- Review phase ---
+run_review_phase "evaluation" "$PROJECT_DIR"
 
 # Exit with failure if any evaluator failed
 if (( ${#FAILED[@]} > 0 )); then

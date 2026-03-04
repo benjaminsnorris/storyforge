@@ -195,6 +195,25 @@ SESSION_START=$(date +%s)
 TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
 GENRE=$(read_yaml_field "project.genre" 2>/dev/null || read_yaml_field "genre" 2>/dev/null || echo "")
 
+# --- Branch + PR setup ---
+if [[ "$DRY_RUN" != true ]]; then
+    create_branch "assemble" "$PROJECT_DIR"
+    ensure_branch_pushed "$PROJECT_DIR"
+
+    PR_BODY="## Assembly
+
+**Project:** ${TITLE}
+**Chapters:** ${TOTAL_CHAPTERS}
+**Format:** ${FORMAT}
+
+### Tasks
+- [ ] Assemble chapters
+- [ ] Generate formats
+- [ ] Review"
+
+    create_draft_pr "Assemble: ${TITLE}" "$PR_BODY" "$PROJECT_DIR"
+fi
+
 log "============================================"
 log "Starting Storyforge assembly"
 log "Project: ${TITLE}"
@@ -285,6 +304,7 @@ for (( ch=1; ch<=TOTAL_CHAPTERS; ch++ )); do
 done
 
 log "Chapter assembly complete: ${TOTAL_WORDS} words across ${TOTAL_CHAPTERS} chapters"
+update_pr_task "Assemble chapters" "$PROJECT_DIR"
 
 # ============================================================================
 # Phase 2: Assemble full manuscript
@@ -375,6 +395,8 @@ sed -i '' "/manuscript:/,/updated:/{
     s/updated:.*/updated: \"${TODAY}\"/
 }" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
 
+update_pr_task "Generate formats" "$PROJECT_DIR"
+
 # Advance phase to production if appropriate
 CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
 if [[ "$CURRENT_PHASE" == "complete" || "$CURRENT_PHASE" == "review" ]]; then
@@ -406,3 +428,16 @@ fi
 
 log "Time: ${SESSION_MINS}m${SESSION_SECS}s"
 log "============================================"
+
+# --- Git commit assembled output ---
+(
+    cd "$PROJECT_DIR"
+    git add manuscript/ storyforge.yaml 2>/dev/null || true
+    git commit -m "Assemble: ${TITLE} (${FORMAT})" 2>/dev/null || true
+    git push 2>/dev/null || true
+)
+
+# --- Review phase ---
+if [[ "$DRY_RUN" != true ]]; then
+    run_review_phase "assembly" "$PROJECT_DIR"
+fi

@@ -292,6 +292,28 @@ fi
 
 SESSION_START=$(date +%s)
 
+# --- Branch + PR setup ---
+if [[ "$DRY_RUN" != true ]]; then
+    create_branch "write" "$PROJECT_DIR"
+    ensure_branch_pushed "$PROJECT_DIR"
+
+    WRITE_TITLE=$(read_yaml_field 'project.title' 2>/dev/null || read_yaml_field 'title' 2>/dev/null || echo 'Unknown')
+    PR_BODY="## Drafting Session
+
+**Project:** ${WRITE_TITLE}
+**Scenes to draft:** ${#PENDING_IDS[@]}
+
+### Tasks
+"
+    for id in "${PENDING_IDS[@]}"; do
+        PR_BODY="${PR_BODY}- [ ] Draft scene ${id}
+"
+    done
+    PR_BODY="${PR_BODY}- [ ] Review"
+
+    create_draft_pr "Draft: ${WRITE_TITLE} (${#PENDING_IDS[@]} scenes)" "$PR_BODY" "$PROJECT_DIR"
+fi
+
 # Advance project phase to drafting if needed
 CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
 if [[ "$CURRENT_PHASE" != "drafting" && "$CURRENT_PHASE" != "evaluation" && "$CURRENT_PHASE" != "revision" && "$CURRENT_PHASE" != "complete" ]]; then
@@ -444,6 +466,7 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
     DRAFTED_COUNT=$((DRAFTED_COUNT + 1))
     TOTAL_WORDS=$((TOTAL_WORDS + WORD_COUNT))
     log "SUCCESS: Scene ${SCENE_ID} — ${WORD_COUNT} words, ${MINUTES}m${SECS}s, commit ${COMMIT_SHORT}"
+    update_pr_task "Draft scene ${SCENE_ID}" "$PROJECT_DIR"
 
     # --- Pause between scenes ---
     if (( i < ${#PENDING_IDS[@]} - 1 )); then
@@ -467,3 +490,8 @@ log "Scenes drafted: ${DRAFTED_COUNT}/${#PENDING_IDS[@]}"
 log "Total words: ${TOTAL_WORDS}"
 log "Total time: ${SESSION_MINS}m${SESSION_SECS}s"
 log "============================================"
+
+# --- Review phase ---
+if [[ "$DRY_RUN" != true && $DRAFTED_COUNT -gt 0 ]]; then
+    run_review_phase "drafting" "$PROJECT_DIR"
+fi

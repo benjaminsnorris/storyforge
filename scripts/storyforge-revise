@@ -337,6 +337,28 @@ fi
 # Main execution loop
 # ============================================================================
 
+# --- Branch + PR setup ---
+if [[ "$DRY_RUN" != true ]]; then
+    create_branch "revise" "$PROJECT_DIR"
+    ensure_branch_pushed "$PROJECT_DIR"
+
+    PR_BODY="## Revision
+
+**Project:** ${PROJECT_TITLE}
+**Passes:** ${TOTAL_PASSES}
+
+### Tasks
+"
+    for (( _i = 1; _i <= TOTAL_PASSES; _i++ )); do
+        _pname=$(read_pass_field "$_i" "name")
+        PR_BODY="${PR_BODY}- [ ] Pass: ${_pname}
+"
+    done
+    PR_BODY="${PR_BODY}- [ ] Review"
+
+    create_draft_pr "Revise: ${PROJECT_TITLE}" "$PR_BODY" "$PROJECT_DIR"
+fi
+
 log "============================================"
 log "Storyforge Revision — ${PROJECT_TITLE}"
 log "Plan: ${PLAN_FILE}"
@@ -468,6 +490,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     update_pass_field "$PASS_NUM" "status" "completed"
 
     log "SUCCESS: Pass ${PASS_NUM}/${TOTAL_PASSES} (${PASS_NAME}) — ${MINUTES}m${SECS}s, commit ${COMMIT_SHORT}"
+    update_pr_task "Pass: ${PASS_NAME}" "$PROJECT_DIR"
 
     # --- Pause between passes ---
     if (( PASS_NUM < TOTAL_PASSES )); then
@@ -515,5 +538,8 @@ if (( COMPLETED == TOTAL_PASSES )); then
     log ""
     log "Next step: run /storyforge:review to assess revision results"
     log "  or /storyforge:forge to get a recommendation"
+
+    # --- Review phase ---
+    run_review_phase "revision" "$PROJECT_DIR"
 fi
 log "============================================"
