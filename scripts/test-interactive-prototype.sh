@@ -57,10 +57,14 @@ for (( i=0; i<${#SCENES[@]}; i++ )); do
 
         echo "[AUTOPILOT] ${SCENE} complete (exit: ${EXIT_CODE})"
     else
-        echo "[INTERACTIVE] Opening interactive session for ${SCENE}..."
-        echo "[INTERACTIVE] You can interact with Claude."
-        echo "[INTERACTIVE] Say 'autopilot the rest' to switch remaining scenes to autonomous."
-        echo "[INTERACTIVE] Type /exit when done with this scene."
+        echo ""
+        echo "╔══════════════════════════════════════════════════════════════╗"
+        echo "║  INTERACTIVE MODE — Scene ${NUM} of ${#SCENES[@]}                              ║"
+        echo "║                                                              ║"
+        echo "║  You can watch, give feedback, or redirect Claude.           ║"
+        echo "║  When this scene is done, type /exit to continue.            ║"
+        echo "║  Say \"finish without me\" to run the rest autonomously.       ║"
+        echo "╚══════════════════════════════════════════════════════════════╝"
         echo ""
 
         if [[ "$USE_REAL_CLAUDE" == true ]]; then
