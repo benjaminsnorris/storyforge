@@ -104,20 +104,75 @@ resolve_scope() {
 # Prompt construction
 # ============================================================================
 
-# Build a prompt for an autonomous revision pass.
+# Read guidance entries for a specific pass from the revision plan.
+#
+# Guidance entries are YAML list items under the `guidance:` key within a pass
+# block. Each entry has `decision` and `rationale` fields.
+#
+# Usage:
+#   guidance=$(read_pass_guidance 2 "/path/to/project")
+#
+# Prints formatted guidance text, or empty string if no guidance exists.
+read_pass_guidance() {
+    local pass_num=$1
+    local project_dir="$2"
+    local plan_file="${project_dir}/working/plans/revision-plan.yaml"
+
+    # Extract the Nth pass block
+    local block
+    block=$(awk '
+        /^passes:/ { in_passes=1; next }
+        !in_passes { next }
+        /^[^ ]/ && !/^[[:space:]]/ { in_passes=0; next }
+        /^[[:space:]]*-[[:space:]]*name:/ { count++; if (count == target) found=1; else found=0 }
+        found { print }
+        found && count > target { exit }
+    ' target="$pass_num" "$plan_file")
+
+    # Check if the block contains a guidance section
+    if ! echo "$block" | grep -q 'guidance:'; then
+        return 0
+    fi
+
+    # Extract guidance entries (decision + rationale pairs)
+    echo "$block" | awk '
+        /^[[:space:]]+guidance:/ { in_guidance=1; next }
+        in_guidance && /^[[:space:]]+-[[:space:]]*decision:/ {
+            gsub(/^[[:space:]]+-[[:space:]]*decision:[[:space:]]*/, "")
+            gsub(/^["'"'"']/, ""); gsub(/["'"'"']$/, "")
+            decision = $0
+        }
+        in_guidance && /^[[:space:]]+rationale:/ {
+            gsub(/^[[:space:]]+rationale:[[:space:]]*/, "")
+            gsub(/^["'"'"']/, ""); gsub(/["'"'"']$/, "")
+            if (decision != "") {
+                print "- " decision
+                print "  Rationale: " $0
+                print ""
+                decision = ""
+            }
+        }
+        in_guidance && /^[[:space:]]*[a-z_]+:/ && !/rationale:/ && !/decision:/ { in_guidance=0 }
+        in_guidance && /^[[:space:]]*-[[:space:]]*name:/ { in_guidance=0 }
+    '
+}
+
+# Build a prompt for a revision pass.
 #
 # The resulting prompt instructs Claude to:
 #   1. Read the voice guide and continuity tracker for context
 #   2. Read every in-scope scene file
-#   3. Apply the stated revision purpose to each scene
-#   4. Preserve the established voice
-#   5. Maintain and update continuity
-#   6. NOT commit — the calling script handles git
+#   3. Follow the full pass configuration (targets, guidance, protection lists)
+#   4. Apply the stated revision purpose to each scene
+#   5. Preserve the established voice
+#   6. Maintain and update continuity
+#   7. NOT commit — the calling script handles git
+#   8. Produce a post-pass summary
 #
 # Usage:
 #   prompt=$(build_revision_prompt "prose-tightening" \
 #       "Cut filler, tighten sentences, reduce word count ~8%" \
-#       "full" "/path/to/project")
+#       "full" "/path/to/project" "$pass_block")
 #
 # Prints the assembled prompt to stdout.
 build_revision_prompt() {
@@ -125,6 +180,7 @@ build_revision_prompt() {
     local purpose="$2"
     local scope="$3"
     local project_dir="$4"
+    local pass_config="${5:-}"
 
     # Resolve which files are in scope
     local file_list
@@ -133,18 +189,30 @@ build_revision_prompt() {
     local file_count
     file_count=$(echo "$file_list" | wc -l | tr -d ' ')
 
-    # Locate reference files
-    local voice_guide="${project_dir}/reference/voice-guide.md"
-    local continuity_tracker="${project_dir}/reference/continuity-tracker.md"
-    local scene_index="${project_dir}/scenes/scene-index.yaml"
-
     # Build the file list as a readable block for the prompt
     local file_block=""
     while IFS= read -r fpath; do
-        # Show path relative to project root for clarity
         local rel="${fpath#${project_dir}/}"
         file_block+="- ${rel}"$'\n'
     done <<< "$file_list"
+
+    # Build the pass configuration section if provided
+    local config_section=""
+    if [[ -n "$pass_config" ]]; then
+        config_section="
+## Pass Configuration
+
+The full configuration for this revision pass from the author's revision plan.
+Follow all targets, guidance, and protection lists precisely:
+
+\`\`\`yaml
+${pass_config}
+\`\`\`
+
+**Protection list:** Any items marked \"do not touch\" must be preserved exactly as-is. Do not edit protected passages.
+
+**Targets:** If specific reduction percentages or instance counts are given, aim for those numbers. Track your progress."
+    fi
 
     # Assemble the prompt
     cat <<PROMPT_EOF
@@ -158,10 +226,11 @@ ${purpose}
 
 This pass covers ${file_count} scene file(s):
 
-${file_block}
+${file_block}${config_section}
+
 ## Instructions
 
-You are performing an autonomous revision pass on a novel manuscript. Follow these rules precisely:
+You are performing a revision pass on a novel manuscript. Follow these rules precisely:
 
 ### 1. Read Reference Context First
 
@@ -181,6 +250,8 @@ For each in-scope scene file, apply the revision purpose stated above:
 
 > ${purpose}
 
+If a pass configuration was provided above, follow its targets, guidance, and protection lists precisely. These represent the author's intent — execute on them, do not second-guess them.
+
 Work through each file methodically. Make edits directly to the scene files.
 
 ### 4. Preserve Voice
@@ -195,13 +266,16 @@ If your edits change any plot-relevant detail — character knowledge, physical 
 
 Do NOT run any git commands. Do NOT create commits. The calling script handles all git operations after this pass completes.
 
-### 7. Summary
+### 7. Post-Pass Summary
 
-After completing all edits, print a brief summary:
-- How many files were modified
-- What kinds of changes were made
-- Any continuity updates applied
-- Any issues discovered that may need a separate pass
+After completing all edits, print a structured summary:
+- **Files modified:** List each file that was changed
+- **Changes made:** Brief description of the kinds of edits applied
+- **Target progress:** For each target in the pass configuration, report how close you came (e.g., "architecture metaphor: reduced from ~85 to ~32 instances")
+- **Protected passages:** Confirm all protected passages were left untouched
+- **Continuity updates:** Any changes to the continuity tracker
+- **Net word count change:** Approximate words added or removed (e.g., "+1,200" or "-800")
+- **Issues discovered:** Anything that may need a separate pass
 PROMPT_EOF
 }
 
