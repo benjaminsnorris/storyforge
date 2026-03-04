@@ -476,6 +476,100 @@ EVAL_PROMPT
 }
 
 # ============================================================================
+# Progress monitors (background processes for user feedback)
+# ============================================================================
+
+evaluation_monitor() {
+    local eval_dir="$1"
+    local eval_names_str="$2"
+    local total_count="$3"
+    local start_time="$4"
+
+    # Split names into array
+    local names=()
+    read -ra names <<< "$eval_names_str"
+
+    # Track which evaluators we've already reported on
+    local -A reported_complete=()
+    local -A reported_active=()
+    local completed=0
+    local ticks=0
+
+    while true; do
+        sleep 30
+        ticks=$((ticks + 1))
+        local elapsed=$(( $(date +%s) - start_time ))
+        local mins=$(( elapsed / 60 ))
+
+        # Check for new report files
+        for name in "${names[@]}"; do
+            if [[ -z "${reported_complete[$name]+x}" && -f "${eval_dir}/${name}.md" ]]; then
+                local wc
+                wc=$(wc -w < "${eval_dir}/${name}.md" 2>/dev/null | tr -d ' ')
+                log "  [${name}] Report created (~${wc} words) [${mins}m]"
+                reported_complete[$name]=1
+                completed=$((completed + 1))
+            fi
+        done
+
+        # Check log file activity for in-progress evaluators (report once per evaluator)
+        for name in "${names[@]}"; do
+            if [[ -z "${reported_complete[$name]+x}" && -z "${reported_active[$name]+x}" ]]; then
+                local log_file="${LOG_DIR}/eval-${name}.log"
+                if [[ -f "$log_file" ]]; then
+                    local log_size
+                    log_size=$(wc -c < "$log_file" 2>/dev/null | tr -d ' ')
+                    if (( log_size > 1000 )); then
+                        log "  [${name}] Log active (growing) [${mins}m]"
+                        reported_active[$name]=1
+                    fi
+                fi
+            fi
+        done
+
+        # Heartbeat every 2 minutes (4 ticks x 30s)
+        if (( ticks % 4 == 0 )); then
+            log "  Evaluator progress: ${completed}/${total_count} complete, ${mins}m elapsed..."
+        fi
+    done
+}
+
+synthesis_monitor() {
+    local eval_dir="$1"
+    local start_time="$2"
+
+    local synthesis_detected=false
+    local findings_detected=false
+    local ticks=0
+
+    while true; do
+        sleep 30
+        ticks=$((ticks + 1))
+        local elapsed=$(( $(date +%s) - start_time ))
+        local mins=$(( elapsed / 60 ))
+
+        # Check for synthesis.md creation
+        if [[ "$synthesis_detected" == false && -f "${eval_dir}/synthesis.md" ]]; then
+            synthesis_detected=true
+            local wc
+            wc=$(wc -w < "${eval_dir}/synthesis.md" 2>/dev/null | tr -d ' ')
+            log "  [synthesis] synthesis.md created (~${wc} words) [${mins}m]"
+        fi
+
+        # Check for findings.yaml creation
+        if [[ "$findings_detected" == false && -f "${eval_dir}/findings.yaml" ]]; then
+            findings_detected=true
+            log "  [synthesis] findings.yaml created [${mins}m]"
+        fi
+
+        # Heartbeat every 2 minutes (4 ticks x 30s)
+        if (( ticks % 4 == 0 )); then
+            log "  Synthesis: ${mins}m elapsed..."
+        fi
+    done
+}
+
+# ============================================================================
 # Main execution
 # ============================================================================
 
@@ -609,6 +703,10 @@ done
 
 log "All ${#PIDS[@]} evaluators launched. Waiting for completion..."
 
+# Launch background progress monitor
+evaluation_monitor "$EVAL_DIR" "${EVAL_NAMES[*]}" "${#PIDS[@]}" "$(date +%s)" &
+EVAL_MONITOR_PID=$!
+
 # --- Wait for all evaluators, tracking results ---
 FAILED=()
 SUCCEEDED=()
@@ -636,6 +734,10 @@ for i in "${!PIDS[@]}"; do
         update_pr_task "${EVAL_TASK_LABELS[$i]}" "$PROJECT_DIR"
     fi
 done
+
+# Stop the evaluation progress monitor
+kill "$EVAL_MONITOR_PID" 2>/dev/null || true
+wait "$EVAL_MONITOR_PID" 2>/dev/null || true
 
 log "Evaluator results: ${#SUCCEEDED[@]} succeeded, ${#FAILED[@]} failed"
 
@@ -800,6 +902,11 @@ if [[ -f "$INTERACTIVE_FILE" ]]; then
     set -e
 else
     log "Running synthesis (model: ${SYNTH_MODEL})..."
+
+    # Launch synthesis progress monitor (headless only)
+    synthesis_monitor "$EVAL_DIR" "$(date +%s)" &
+    SYNTH_MONITOR_PID=$!
+
     set +e
     claude -p "$SYNTHESIS_PROMPT" \
         --model "$SYNTH_MODEL" \
@@ -810,6 +917,10 @@ else
         > "$SYNTHESIS_LOG" 2>&1
     SYNTH_EXIT=$?
     set -e
+
+    # Stop the synthesis progress monitor
+    kill "$SYNTH_MONITOR_PID" 2>/dev/null || true
+    wait "$SYNTH_MONITOR_PID" 2>/dev/null || true
 fi
 
 SYNTH_END=$(date +%s)

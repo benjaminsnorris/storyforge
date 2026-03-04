@@ -20,7 +20,7 @@ Store this resolved plugin path for use throughout the session.
 
 Before doing anything else, orient yourself:
 
-1. **Read `storyforge.yaml`** — title, genre, target word count, phase, artifact status.
+1. **Read `storyforge.yaml`** — title, genre, target word count, phase, artifact status. **Note the `project.coaching_level` field** — it controls how proactive you should be with chapter creation (see Coaching Level Behavior below).
 2. **Read `scenes/scene-index.yaml`** — how many scenes, their status (drafted/revised/pending), groupings (acts/parts).
 3. **Check for existing production artifacts:**
    - `reference/chapter-map.yaml` — does it exist? How many chapters?
@@ -36,11 +36,11 @@ Based on the author's message and project state, operate in one of these modes:
 
 ### First-Time Setup
 
-The chapter map doesn't exist yet. Guide the author through creating it.
+The chapter map doesn't exist yet. Guide the author through creating it. **How you guide depends on coaching level** — see Coaching Level Behavior below.
 
-**If given specific direction** (e.g., "make each act a part, with scenes grouped into chapters of 2-3 scenes each"), skip assessment and execute the direction immediately.
+**If given specific direction** (e.g., "make each act a part, with scenes grouped into chapters of 2-3 scenes each"), skip assessment and execute the direction immediately at any coaching level.
 
-**If no specific direction**, analyze the scene index and propose a chapter structure:
+**If no specific direction and coaching level is `full`**, analyze the scene index and propose a chapter structure:
 
 1. **Read all scene metadata** — IDs, titles, acts/parts, POV, settings, functions.
 2. **Propose a chapter mapping** based on natural scene groupings:
@@ -275,10 +275,33 @@ Every production decision (chapter structure, typography choices, front/back mat
 **Rationale:** Matches the secondary-world fantasy genre
 ```
 
+## Coaching Level Behavior
+
+Read `project.coaching_level` from storyforge.yaml. Chapter creation — deciding which scenes group into which chapters, setting pacing and flow — is a **creative endeavor**. Coaching levels apply to it.
+
+### `full` (default)
+Proactively propose a complete chapter structure. Analyze the scene index, group scenes into chapters based on narrative logic, and present the full proposal for approval. Create the chapter map on approval. Be opinionated about typography and formatting — you know what works for the genre.
+
+### `coach`
+Help the author think through chapter structure, but **do not generate a complete chapter proposal unprompted**. Instead:
+- Present analysis: scene count per act, word counts, natural break points, POV shifts
+- Ask guiding questions: "These three scenes share POV and setting — do they feel like one chapter to you?" "This act has 12 scenes — how many chapters feels right for the pacing you want?"
+- When the author gives direction (e.g., "chapters of 2-3 scenes"), help them refine it — flag potential issues ("Chapter 4 would be 8,000 words — split it?") but let them make the grouping decisions
+- Once the author has decided the structure, create the chapter map file for them
+
+Production settings (typography, scene breaks, front/back matter) are **not** creative decisions — ask and execute as normal at all coaching levels.
+
+### `strict`
+**Do not propose chapter structure, groupings, or pacing decisions.** The author provides their chapter breakdown; you handle the files.
+- Ask: "How do you want to group your scenes into chapters?" "What should each chapter be called?"
+- Do not analyze or suggest groupings. Do not propose titles.
+- Once the author provides their complete chapter structure, create the chapter map file and handle all file/metadata work
+- Production settings (typography, scene breaks, front/back matter) are structural/mechanical — ask and execute as normal
+
 ## Coaching Posture
 
 Production is exciting — the book is becoming a book. Be enthusiastic but practical. The author has done the hard creative work; this is about packaging it beautifully.
 
-Be opinionated about typography and formatting — you know what works for the genre. But respect the author's taste. If they want sans-serif headings in their literary novel, that's their choice.
+Be opinionated about typography and formatting — you know what works for the genre (in `full` and `coach` modes). But respect the author's taste. If they want sans-serif headings in their literary novel, that's their choice.
 
 Don't over-explain technical details about epub structure or pandoc flags. The author cares about what their book looks like, not how it's built. Surface the creative choices; hide the plumbing.
