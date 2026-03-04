@@ -65,19 +65,22 @@ for (( i=0; i<${#SCENES[@]}; i++ )); do
 
         if [[ "$USE_REAL_CLAUDE" == true ]]; then
             set +e
-            claude "You are drafting ${SCENE} (${NUM} of ${#SCENES[@]}) of a test novel.
-
-IMPORTANT RULES:
-- Draft THIS SCENE ONLY — one paragraph of placeholder prose.
-- Do NOT proceed to the next scene. The script manages the scene sequence.
-- When this scene is done, tell the user and WAIT for them to type /exit.
-
-If the user says 'autopilot the rest' or 'go autonomous' or 'finish without me':
-1. Run: touch ${AUTOPILOT_FILE}
-2. Tell them: 'Autopilot enabled. Type /exit to let the remaining scenes run autonomously.'
-Do NOT exit on your own — the user will type /exit when ready." \
+            claude "Draft ${SCENE} (${NUM} of ${#SCENES[@]}) — one paragraph of placeholder prose." \
                 --model claude-opus-4-6 \
-                --dangerously-skip-permissions
+                --dangerously-skip-permissions \
+                --append-system-prompt "You are in interactive drafting mode, managed by a script that loops over scenes one at a time.
+
+RULES:
+- Draft THIS SCENE ONLY. Do not proceed to the next scene — the script handles sequencing.
+- When this scene is done, tell the user the scene is complete and wait for them to respond.
+- The user may give you feedback, ask for changes, or say they are satisfied.
+- When the user is done with this scene, they will type /exit to move on.
+
+AUTOPILOT:
+- If the user says 'autopilot the rest', 'go autonomous', 'finish without me', or similar:
+  1. Run: touch ${AUTOPILOT_FILE}
+  2. Tell them: 'Autopilot enabled — the remaining scenes will run autonomously. Type /exit to continue.'
+- Do NOT exit on your own. The user types /exit when ready."
             EXIT_CODE=$?
             set -e
         else
