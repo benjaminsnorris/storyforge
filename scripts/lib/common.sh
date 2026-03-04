@@ -340,6 +340,43 @@ select_revision_model() {
 }
 
 # ============================================================================
+# Coaching level
+# ============================================================================
+
+# Get the coaching level for this session.
+#
+# Priority:
+#   1. STORYFORGE_COACHING env var (set by --coaching flag in scripts)
+#   2. project.coaching_level from storyforge.yaml
+#   3. Default: "full"
+#
+# Valid values: full, coach, strict
+#
+# Usage: level=$(get_coaching_level)
+get_coaching_level() {
+    # Flag/env override takes precedence
+    if [[ -n "${STORYFORGE_COACHING:-}" ]]; then
+        echo "$STORYFORGE_COACHING"
+        return 0
+    fi
+
+    # Read from project config
+    local level
+    level=$(read_yaml_field "project.coaching_level" 2>/dev/null || echo "")
+
+    if [[ -z "$level" ]]; then
+        echo "full"
+        return 0
+    fi
+
+    # Validate
+    case "$level" in
+        full|coach|strict) echo "$level" ;;
+        *) echo "full" ;;
+    esac
+}
+
+# ============================================================================
 # Git branch and PR workflow
 # ============================================================================
 

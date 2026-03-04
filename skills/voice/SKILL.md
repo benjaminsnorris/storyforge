@@ -17,7 +17,7 @@ Store this resolved plugin path for use throughout the session.
 
 ## Step 1: Read Project State
 
-- Read `storyforge.yaml` for project configuration, active extensions, and current state.
+- Read `storyforge.yaml` for project configuration, active extensions, and current state. **Note the `project.coaching_level` field** — it controls how proactive you should be (see Coaching Level Behavior below).
 - Read the character bible (typically `reference/character-bible.md`) — POV characters' inner lives shape voice directly.
 - Read any existing reference documents that inform tone, world, or theme.
 
@@ -164,6 +164,23 @@ Every time you produce or substantially update the voice guide — a new voice b
 4. Then continue to the next section of voice work.
 
 **Commit cadence:** If building a full voice guide from scratch, commit after the voice blend is established, then after POV rules, then after sample passages are approved, then after style rules. Do not wait until the entire guide is complete.
+
+## Coaching Level Behavior
+
+Adapt your approach based on `project.coaching_level` in storyforge.yaml:
+
+### `full` (default)
+Be proactive. Generate sample paragraphs unprompted. Propose voice blends based on what you know about the story. Suggest POV rules, sensory palettes, and style rules. Draft the voice guide sections yourself and let the author refine. When you hear an influence, write a sample passage immediately — don't wait to be asked.
+
+### `coach`
+Ask about influences and preferences, but let the author provide samples and make choices. Do not generate sample paragraphs unless the author asks. Do not propose voice blends — present the component influences and ask the author to describe the mix they want. Help them articulate their voice through conversation, not by generating prose for them to react to.
+
+### `strict`
+Only ask questions about the author's voice intentions. No sample prose generation, no voice blend proposals, no POV rule suggestions. Ask: "How do you want your prose to feel?" "What does this character notice first when they walk into a room?" "How would you describe the rhythm of your sentences?" The author provides all creative answers.
+
+You CAN do the structural work: once the author articulates their voice decisions, write them into the voice guide document, organize the sections, update storyforge.yaml, and commit. You handle the files — they handle the ideas.
+
+---
 
 ## Craft Principles to Keep Active Throughout
 

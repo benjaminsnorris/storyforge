@@ -41,6 +41,7 @@ mkdir -p "$LOG_DIR"
 # --- Arguments ---
 DRY_RUN=false
 INTERACTIVE=false
+COACHING_LEVEL=""
 START_PASS=0  # 0 means "find first pending"
 
 while [[ $# -gt 0 ]]; do
@@ -49,20 +50,30 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN=true
             shift
             ;;
+        --coaching)
+            COACHING_LEVEL="${2:?ERROR: --coaching requires a value (full, coach, or strict)}"
+            case "$COACHING_LEVEL" in
+                full|coach|strict) ;;
+                *) echo "ERROR: Invalid coaching level '${COACHING_LEVEL}'. Must be full, coach, or strict." >&2; exit 1 ;;
+            esac
+            shift 2
+            ;;
         --interactive|-i)
             INTERACTIVE=true
             shift
             ;;
         -h|--help)
-            echo "Usage: storyforge-revise [--dry-run] [--interactive] [PASS_NUM]"
+            echo "Usage: storyforge-revise [--dry-run] [--interactive] [--coaching LEVEL] [PASS_NUM]"
             echo ""
             echo "Options:"
             echo "  --dry-run       Build and print prompts without invoking Claude"
             echo "  --interactive   Supervise each pass — watch, give feedback, redirect"
+            echo "  --coaching LVL  Set coaching level: full, coach, or strict"
             echo "  PASS_NUM        Start from this pass number (1-indexed; default: first pending)"
             echo ""
             echo "Environment:"
             echo "  STORYFORGE_MODEL            Override model (default: opus for creative, sonnet for mechanical)"
+            echo "  STORYFORGE_COACHING         Override coaching level (default: from storyforge.yaml or full)"
             echo "  STORYFORGE_REJOIN_TIMEOUT   Seconds to wait for 'i' keypress in autopilot (default: 5)"
             exit 0
             ;;
@@ -76,6 +87,20 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# ============================================================================
+# Coaching level
+# ============================================================================
+
+if [[ -n "$COACHING_LEVEL" ]]; then
+    STORYFORGE_COACHING="$COACHING_LEVEL"
+    export STORYFORGE_COACHING
+fi
+
+EFFECTIVE_COACHING=$(get_coaching_level)
+
+# Ensure coaching directory exists
+mkdir -p "${PROJECT_DIR}/working/coaching"
 
 # ============================================================================
 # YAML helpers for revision-plan.yaml
@@ -379,6 +404,7 @@ fi
 log "============================================"
 log "Storyforge Revision — ${PROJECT_TITLE}"
 log "Plan: ${PLAN_FILE}"
+log "Coaching level: ${EFFECTIVE_COACHING}"
 log "Starting from pass: ${START_PASS} of ${TOTAL_PASSES}"
 log "============================================"
 
@@ -495,15 +521,30 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     fi
 
     # --- Verify changes ---
-    set +e
-    verify_revision_changes "$HEAD_BEFORE" "$PROJECT_DIR"
-    VERIFY_EXIT=$?
-    set -e
+    if [[ "$EFFECTIVE_COACHING" == "coach" || "$EFFECTIVE_COACHING" == "strict" ]]; then
+        # In coach/strict mode, check for coaching output files instead of scene changes
+        if [[ "$EFFECTIVE_COACHING" == "coach" ]]; then
+            COACHING_OUTPUT="${PROJECT_DIR}/working/coaching/${PASS_NAME}-notes.md"
+        else
+            COACHING_OUTPUT="${PROJECT_DIR}/working/coaching/${PASS_NAME}-checklist.md"
+        fi
 
-    if (( VERIFY_EXIT != 0 )); then
-        log "WARNING: Pass '${PASS_NAME}' produced no detectable changes."
-        log "This may be expected if the pass found nothing to fix."
-        log "Marking as completed and continuing."
+        if [[ ! -f "$COACHING_OUTPUT" ]]; then
+            log "WARNING: Coaching output not created: ${COACHING_OUTPUT}"
+        else
+            log "  Coaching output: ${COACHING_OUTPUT}"
+        fi
+    else
+        set +e
+        verify_revision_changes "$HEAD_BEFORE" "$PROJECT_DIR"
+        VERIFY_EXIT=$?
+        set -e
+
+        if (( VERIFY_EXIT != 0 )); then
+            log "WARNING: Pass '${PASS_NAME}' produced no detectable changes."
+            log "This may be expected if the pass found nothing to fix."
+            log "Marking as completed and continuing."
+        fi
     fi
 
     # --- Git commit (if claude didn't already) ---
@@ -511,8 +552,13 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     if [[ "$HEAD_BEFORE" == "$HEAD_AFTER" ]]; then
         log "  No commit from claude. Creating manual commit..."
         cd "$PROJECT_DIR"
-        git add -A
-        git commit -m "Revision: ${PASS_NAME}" 2>/dev/null || true
+        if [[ "$EFFECTIVE_COACHING" == "coach" || "$EFFECTIVE_COACHING" == "strict" ]]; then
+            git add working/coaching/ 2>/dev/null || true
+            git commit -m "${EFFECTIVE_COACHING^}: ${PASS_NAME}" 2>/dev/null || true
+        else
+            git add -A
+            git commit -m "Revision: ${PASS_NAME}" 2>/dev/null || true
+        fi
         HEAD_AFTER=$(git -C "$PROJECT_DIR" rev-parse HEAD)
         if [[ "$HEAD_BEFORE" == "$HEAD_AFTER" ]]; then
             log "  No changes to commit for pass '${PASS_NAME}'."

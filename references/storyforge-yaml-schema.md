@@ -27,8 +27,25 @@ Core metadata identifying the novel and its goals.
 | `subgenre` | string | optional | A more specific genre qualifier. Refines evaluation guidance when present. | `null` | `"hard sci-fi"` |
 | `target_words` | number | required | The target word count for the completed manuscript. Used to calibrate pacing feedback and act-length estimates. | — | `90000` |
 | `logline` | string | required | A one- or two-sentence pitch that captures the protagonist, conflict, and stakes. Referenced during story architecture and continuity checks to keep the narrative on course. | — | `"A disgraced xenolinguist must decode an alien signal before first contact becomes humanity's last."` |
+| `coaching_level` | enum | optional | Controls how much Claude takes the creative lead. Affects all skills and scripts. Override per-command with `--coaching LEVEL` or globally with `STORYFORGE_COACHING` env var. | `"full"` | `"coach"` |
 | `series_name` | string | optional | The name of the series this book belongs to. Used in epub metadata (`belongs-to-collection`). | `null` | `"The Mapmaker Trilogy"` |
 | `series_position` | number | optional | This book's position in the series. Used in epub metadata (`group-position`). | `null` | `2` |
+
+### `coaching_level` Values
+
+| Value | Description |
+|-------|-------------|
+| `full` | Claude proposes, generates, drafts, and revises. In development skills, Claude proactively fleshes out ideas, suggests details, and proposes content. In scripts, Claude writes scenes and makes edits. |
+| `coach` | Claude analyzes, plans, and critiques, but never writes prose or edits scene files. Scripts produce scene briefs and editorial notes in `working/coaching/` instead of drafting or editing scenes. Development skills ask questions and challenge ideas but don't generate content unprompted. |
+| `strict` | Claude does not write prose or propose creative content. Claude CAN create files, add metadata, organize documents, and do structural work. Scripts produce constraint lists and checklists in `working/coaching/` (and create scene files with frontmatter only). Development skills are Socratic — they ask questions and record the author's answers, but never propose creative content. |
+
+**Override precedence:** `--coaching` flag > `STORYFORGE_COACHING` env var > `project.coaching_level` in storyforge.yaml > `"full"` (default).
+
+**Output directory:** Coach and strict modes save output to `working/coaching/`:
+- `brief-{scene_id}.md` — scene briefs (coach mode, from `storyforge write`)
+- `constraints-{scene_id}.md` — constraint lists (strict mode, from `storyforge write`)
+- `{pass_name}-notes.md` — editorial notes (coach mode, from `storyforge revise`)
+- `{pass_name}-checklist.md` — checklists (strict mode, from `storyforge revise`)
 
 ---
 
@@ -126,6 +143,7 @@ project:
   subgenre: "hard sci-fi"
   target_words: 90000
   logline: "A disgraced xenolinguist must decode an alien signal before first contact becomes humanity's last."
+  coaching_level: full
 
 artifacts:
   world_bible:

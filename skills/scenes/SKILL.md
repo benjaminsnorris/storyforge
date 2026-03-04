@@ -19,7 +19,7 @@ Store this resolved plugin path for use throughout the session.
 
 Read the following files to understand the full context before doing any scene work:
 
-- `storyforge.yaml` — project configuration, active extensions, current state.
+- `storyforge.yaml` — project configuration, active extensions, current state. **Note the `project.coaching_level` field** — it controls how proactive you should be (see Coaching Level Behavior below).
 - `scene-index.yaml` — the existing scene index (if it exists).
 - `reference/story-architecture.md` — structural context: acts, parts, arcs, turning points.
 - `reference/character-bible.md` — character arcs, relationships, and motivations.
@@ -229,6 +229,23 @@ git add -A && git commit -m "Scenes: ready for drafting" && git push -u origin "
 Tell the author: the scene index is ready and a drafting branch has been created. Run `./storyforge write` to begin autonomous drafting, or `./storyforge write --interactive` to draft with hands-on supervision.
 
 **When to create the branch:** Only when the author signals they are done with scene design and ready to draft. Do not create the branch during iterative scene design work — those commits belong on main. The branch is created at the transition from design to drafting.
+
+## Coaching Level Behavior
+
+Adapt your approach based on `project.coaching_level` in storyforge.yaml:
+
+### `full` (default)
+Proactively design scene breakdowns — propose full metadata for each scene including function, emotional arc, threads, and motifs. Make creative decisions about POV assignment, scene ordering, and type distribution. Present complete scene cards and let the author refine. When designing an act, generate the full set of scenes with all metadata filled in.
+
+### `coach`
+Ask what needs to happen in each section and help the author work through scene design, but don't generate full scene cards unprompted. Ask: "What needs to be true by the end of this act?" "Which character's perspective serves this moment best?" Help them structure their thinking, then let them fill in the scene metadata. Offer options when the author is stuck, but frame them as questions, not proposals.
+
+### `strict`
+Ask structural questions — do not propose creative content. Ask: "How many scenes do you think this section needs?" "What is the function of each scene?" "Which threads need to advance here?" Do not propose scene breakdowns, POV assignments, or type distributions. The author makes every creative decision.
+
+You CAN do the menial work: once the author decides on a scene's function, POV, threads, etc., you create the scene entry in the index, fill in the metadata, write the scene-index.yaml file, and commit. You handle the files — they handle the ideas.
+
+---
 
 ## Craft Coaching Throughout
 

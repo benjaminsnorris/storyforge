@@ -73,7 +73,9 @@ If hard prerequisites are met, tell the author how to run the drafting script:
 
 If the project doesn't have a `./storyforge` runner script, offer to create one
 by copying the template from the plugin's `templates/storyforge-runner.sh` and
-making it executable. Explain available options (scene selection, act scope, `--interactive` for supervised drafting).
+making it executable. Explain available options (scene selection, act scope, `--interactive` for supervised drafting, `--coaching coach|strict` for coaching mode).
+
+If the project's coaching level is `coach` or `strict`, remind the author that drafting will produce briefs or constraint lists instead of scene prose. They can override with `--coaching full` for a specific run.
 
 If a hard prerequisite is missing, explain what's needed and route to the skill that creates it — `scenes` for the scene index, `voice` for the voice guide.
 
@@ -114,7 +116,9 @@ If met, provide the revision command:
 
 If the project doesn't have a `./storyforge` runner script, offer to create one
 by copying the template from the plugin's `templates/storyforge-runner.sh` and
-making it executable. Explain that it runs all passes autonomously in sequence — the author steers by editing guidance entries in the plan before execution. Mention `--interactive` for supervised revision where the author can watch and redirect each pass.
+making it executable. Explain that it runs all passes autonomously in sequence — the author steers by editing guidance entries in the plan before execution. Mention `--interactive` for supervised revision where the author can watch and redirect each pass. Mention `--coaching coach|strict` for editorial notes or checklists instead of direct edits.
+
+If the project's coaching level is `coach` or `strict`, remind the author that revision will produce editorial notes or checklists instead of editing scene files. They can override with `--coaching full` for a specific run.
 
 If the revision plan doesn't exist, explain that a revision plan is needed first and offer to invoke `plan-revision`.
 
@@ -181,6 +185,7 @@ The author said "surprise me," "what should I work on?", or gave no specific dir
 The author wants to see where things stand. Present a clean summary:
 
 - **Phase:** development / drafting / revision / polish
+- **Coaching level:** full / coach / strict — note if non-default
 - **Artifacts:** which exist, which are missing, which are incomplete
 - **Scene progress:** planned vs. drafted vs. revised (counts)
 - **Word count:** current vs. target (if drafting has begun)

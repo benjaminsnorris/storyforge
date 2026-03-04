@@ -46,6 +46,13 @@ Ask the author for the following details **one question at a time** using `AskUs
 
 5. **Logline** — "Give me a one-sentence logline that captures the premise of your story. Think of it as the sentence you'd use to make someone say, 'Oh, I want to read that.' No pressure to make it perfect — this is a living document."
 
+6. **Coaching level** — "How hands-on do you want Claude to be? This controls how much AI-generated content you'll see:
+   - **Full** (default) — Claude proposes, generates, drafts, and revises. Maximum creative partnership.
+   - **Coach** — Claude analyzes, plans, and critiques, but never writes prose. You write everything.
+   - **Strict** — Claude only asks questions and produces checklists. Purely Socratic — you drive every decision.
+
+   You can change this anytime in storyforge.yaml."
+
 Store all answers for use in subsequent steps.
 
 ## Step 2: Create the Project Directory Structure

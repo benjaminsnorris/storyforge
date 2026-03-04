@@ -210,6 +210,8 @@ build_revision_prompt() {
     local scope="$3"
     local project_dir="$4"
     local pass_config="${5:-}"
+    local coaching_level
+    coaching_level=$(get_coaching_level)
 
     # --- Select craft engine sections based on pass purpose ---
     local craft_section_nums=""
@@ -301,6 +303,91 @@ Before making any changes, read these reference files to understand the project'
 
 Read every scene file listed above in full before making changes. Understand the narrative arc across these scenes before editing any individual scene.
 
+PROMPT_EOF
+
+    # Coaching-level-specific instructions
+    if [[ "$coaching_level" == "coach" ]]; then
+        cat <<COACH_EOF
+### 3. Produce Editorial Notes
+
+You are in COACH mode. Do NOT edit scene files. Do NOT change any prose.
+
+For each in-scope scene file, produce editorial notes for the revision purpose:
+
+> ${purpose}
+
+If a pass configuration was provided above, analyze each scene against its targets, guidance, and protection lists. Document what you find — what needs to change, why, and how the author might approach it.
+
+Your notes should include:
+- Specific passages that need attention (quote them)
+- What is wrong or could be improved and why
+- Concrete suggestions for how to revise (but do not make the edits)
+- Voice preservation warnings — places where revision could damage the voice
+- Continuity implications of potential changes
+
+Save to: \`working/coaching/${pass_name}-notes.md\`
+
+### 4. Commit and Push
+
+\`\`\`
+mkdir -p working/coaching
+git add working/coaching/${pass_name}-notes.md
+git commit -m "Coach: editorial notes for ${pass_name}"
+git push
+\`\`\`
+
+### 5. Post-Pass Summary
+
+Print a structured summary:
+- **Scenes analyzed:** List each scene file reviewed
+- **Key findings:** Most important editorial observations
+- **Target assessment:** For each target in the pass configuration, report current state and what needs to change
+- **Priority edits:** Which changes would have the most impact, in order
+- **Voice risks:** Where the revision is most likely to damage voice if not careful
+- **Issues discovered:** Anything that may need a separate pass
+COACH_EOF
+
+    elif [[ "$coaching_level" == "strict" ]]; then
+        cat <<STRICT_EOF
+### 3. Produce Revision Checklist
+
+You are in STRICT mode. Do NOT edit scene files. Do NOT provide editorial suggestions or craft guidance.
+
+For each in-scope scene file, produce a checklist of which revision targets apply where:
+
+> ${purpose}
+
+If a pass configuration was provided above, check each scene against its targets. Report facts only — which targets apply to which scenes, with line references.
+
+Your checklist should include:
+- Which targets from the pass configuration apply to which scenes
+- Specific locations (with quotes) where targets are relevant
+- Current counts or measurements for quantitative targets
+- Protection list verification — confirm protected passages are identified
+
+Save to: \`working/coaching/${pass_name}-checklist.md\`
+
+### 4. Commit and Push
+
+\`\`\`
+mkdir -p working/coaching
+git add working/coaching/${pass_name}-checklist.md
+git commit -m "Strict: revision checklist for ${pass_name}"
+git push
+\`\`\`
+
+### 5. Post-Pass Summary
+
+Print a structured summary:
+- **Scenes analyzed:** List each scene file reviewed
+- **Target counts:** For each target, the current measurement per scene
+- **Applicable locations:** How many locations per scene per target
+- **Protected passages:** Confirmed locations of all protected passages
+STRICT_EOF
+
+    else
+        # full mode (default)
+        cat <<FULL_EOF
 ### 3. Apply the Revision
 
 For each in-scope scene file, apply the revision purpose stated above:
@@ -341,7 +428,8 @@ After completing all edits, print a structured summary:
 - **Continuity updates:** Any changes to the continuity tracker
 - **Net word count change:** Approximate words added or removed (e.g., "+1,200" or "-800")
 - **Issues discovered:** Anything that may need a separate pass
-PROMPT_EOF
+FULL_EOF
+    fi
 }
 
 # ============================================================================

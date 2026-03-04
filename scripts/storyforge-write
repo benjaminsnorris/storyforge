@@ -52,6 +52,7 @@ BUDGET_FLAG=""
 
 # Ensure directories exist
 mkdir -p "$SCENES_DIR" "$LOG_DIR"
+mkdir -p "${PROJECT_DIR}/working/coaching"
 
 # ============================================================================
 # Argument parsing
@@ -59,6 +60,7 @@ mkdir -p "$SCENES_DIR" "$LOG_DIR"
 
 DRY_RUN=false
 INTERACTIVE=false
+COACHING_LEVEL=""
 FILTER_MODE="all"       # all | single | range | act | part
 FILTER_VALUE=""
 RANGE_START=""
@@ -76,12 +78,14 @@ Options:
   SCENE_ID SCENE_ID           Draft a range of scenes (inclusive, by index position)
   --act N                     Draft all scenes in act N
   --part N                    Draft all scenes in part N
+  --coaching LEVEL            Set coaching level: full, coach, or strict
   --interactive               Draft with supervision — watch, give feedback, redirect
   --dry-run                   Build prompts without invoking Claude
   -h, --help                  Show this help
 
 Environment:
   STORYFORGE_MODEL            Override model (default: opus for drafting)
+  STORYFORGE_COACHING         Override coaching level (default: from storyforge.yaml or full)
   STORYFORGE_REJOIN_TIMEOUT   Seconds to wait for 'i' keypress in autopilot (default: 5)
 
 Examples:
@@ -101,6 +105,14 @@ while [[ $# -gt 0 ]]; do
         --dry-run)
             DRY_RUN=true
             shift
+            ;;
+        --coaching)
+            COACHING_LEVEL="${2:?ERROR: --coaching requires a value (full, coach, or strict)}"
+            case "$COACHING_LEVEL" in
+                full|coach|strict) ;;
+                *) echo "ERROR: Invalid coaching level '${COACHING_LEVEL}'. Must be full, coach, or strict." >&2; exit 1 ;;
+            esac
+            shift 2
             ;;
         --interactive|-i)
             INTERACTIVE=true
@@ -135,6 +147,18 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# ============================================================================
+# Coaching level
+# ============================================================================
+
+if [[ -n "$COACHING_LEVEL" ]]; then
+    STORYFORGE_COACHING="$COACHING_LEVEL"
+    export STORYFORGE_COACHING
+fi
+
+# Resolve effective coaching level for conditional logic in this script
+EFFECTIVE_COACHING=$(get_coaching_level)
 
 # ============================================================================
 # Prerequisites
@@ -342,6 +366,7 @@ fi
 log "============================================"
 log "Starting Storyforge drafting session"
 log "Project: $(read_yaml_field 'project.title' 2>/dev/null || read_yaml_field 'title' 2>/dev/null || echo 'Unknown')"
+log "Coaching level: ${EFFECTIVE_COACHING}"
 log "Scenes to draft: ${#PENDING_IDS[@]} (${SKIPPED} already-drafted skipped)"
 log "Scene list: ${PENDING_IDS[*]}"
 log "============================================"
@@ -457,23 +482,43 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
 
     # --- Verification ---
 
-    # 1. Check scene file was created
-    if [[ ! -f "$SCENE_FILE" ]]; then
-        log "ERROR: Scene file not created: ${SCENE_FILE}"
-        log "Claude ran successfully but did not produce the file."
-        log "See full output: ${SCENE_LOG}"
-        log "Stopping — cannot continue without the scene."
-        exit 1
-    fi
+    if [[ "$EFFECTIVE_COACHING" == "coach" || "$EFFECTIVE_COACHING" == "strict" ]]; then
+        # Coach/strict mode: check for coaching output instead of scene file
+        if [[ "$EFFECTIVE_COACHING" == "coach" ]]; then
+            COACHING_OUTPUT="${PROJECT_DIR}/working/coaching/brief-${SCENE_ID}.md"
+        else
+            COACHING_OUTPUT="${PROJECT_DIR}/working/coaching/constraints-${SCENE_ID}.md"
+        fi
 
-    # 2. Get word count and sanity-check
-    WORD_COUNT=$(wc -w < "$SCENE_FILE" | tr -d ' ')
+        if [[ ! -f "$COACHING_OUTPUT" ]]; then
+            log "WARNING: Coaching output not created: ${COACHING_OUTPUT}"
+            log "See full output: ${SCENE_LOG}"
+        fi
 
-    if (( WORD_COUNT < 100 )); then
-        log "ERROR: Scene file suspiciously short (${WORD_COUNT} words): ${SCENE_FILE}"
-        log "See full output: ${SCENE_LOG}"
-        log "Stopping — likely incomplete draft."
-        exit 1
+        WORD_COUNT=0
+        if [[ -f "$COACHING_OUTPUT" ]]; then
+            WORD_COUNT=$(wc -w < "$COACHING_OUTPUT" | tr -d ' ')
+        fi
+    else
+        # Full mode: check scene file was created
+        # 1. Check scene file was created
+        if [[ ! -f "$SCENE_FILE" ]]; then
+            log "ERROR: Scene file not created: ${SCENE_FILE}"
+            log "Claude ran successfully but did not produce the file."
+            log "See full output: ${SCENE_LOG}"
+            log "Stopping — cannot continue without the scene."
+            exit 1
+        fi
+
+        # 2. Get word count and sanity-check
+        WORD_COUNT=$(wc -w < "$SCENE_FILE" | tr -d ' ')
+
+        if (( WORD_COUNT < 100 )); then
+            log "ERROR: Scene file suspiciously short (${WORD_COUNT} words): ${SCENE_FILE}"
+            log "See full output: ${SCENE_LOG}"
+            log "Stopping — likely incomplete draft."
+            exit 1
+        fi
     fi
 
     # 3. Check/create git commit
@@ -483,9 +528,14 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         log "WARNING: No git commit detected. Attempting manual commit..."
         (
             cd "$PROJECT_DIR"
-            git add "scenes/${SCENE_ID}.md" 2>/dev/null || true
-            git add reference/ 2>/dev/null || true
-            git commit -m "Draft scene ${SCENE_ID}" 2>/dev/null || true
+            if [[ "$EFFECTIVE_COACHING" == "coach" || "$EFFECTIVE_COACHING" == "strict" ]]; then
+                git add working/coaching/ 2>/dev/null || true
+                git commit -m "${EFFECTIVE_COACHING^}: ${SCENE_ID}" 2>/dev/null || true
+            else
+                git add "scenes/${SCENE_ID}.md" 2>/dev/null || true
+                git add reference/ 2>/dev/null || true
+                git commit -m "Draft scene ${SCENE_ID}" 2>/dev/null || true
+            fi
         )
         HEAD_AFTER=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
 

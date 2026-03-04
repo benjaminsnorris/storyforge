@@ -171,9 +171,16 @@ get_scene_status() {
 # Prints the prompt to stdout.
 #
 # Usage: build_scene_prompt "act1-sc05" "/path/to/project"
+#
+# Respects coaching level:
+#   full   — drafts the scene (current behavior)
+#   coach  — produces a scene brief, no prose
+#   strict — produces a constraint list, no prose
 build_scene_prompt() {
     local scene_id="$1"
     local project_dir="$2"
+    local coaching_level
+    coaching_level=$(get_coaching_level)
 
     # --- Read project config ---
     local title
@@ -238,6 +245,7 @@ build_scene_prompt() {
     craft_sections=$(extract_craft_sections 2 3 4 5 2>/dev/null) || true
 
     # --- Assemble the prompt ---
+    # Header (shared across all coaching levels)
     cat <<PROMPT_EOF
 You are drafting scene ${scene_id}${scene_title:+ ("${scene_title}")} of "${title:-Untitled}"${genre:+, a ${genre}}. Follow these steps exactly and completely. Do not skip any step.
 
@@ -274,6 +282,85 @@ ${scene_metadata}
 ${target_words:+
 Target word count: ${target_words} words (stay within ~500 words of this target).}
 
+PROMPT_EOF
+
+    # Coaching-level-specific steps
+    if [[ "$coaching_level" == "coach" ]]; then
+        cat <<COACH_EOF
+===== STEP 4: PRODUCE SCENE BRIEF =====
+
+You are in COACH mode. Do NOT write prose. Do NOT create the scene file.
+
+Instead, produce a detailed scene brief covering:
+- Voice considerations: which voice rules apply, POV-specific patterns to deploy, emotional register
+- Continuity constraints: locked details that must be honored, character states entering the scene, active threads
+- Emotional arc targets: where the scene starts emotionally, where it must arrive, the turn
+- Craft guidance: pacing recommendations, dialogue density, sensory priorities, scene structure advice
+- Specific suggestions the author can use when writing this scene themselves
+
+Save to: working/coaching/brief-${scene_id}.md
+
+===== STEP 5: GIT COMMIT =====
+
+Stage and commit using the Bash tool:
+
+  mkdir -p working/coaching
+  git add "working/coaching/brief-${scene_id}.md"
+  git commit -m "Coach: scene brief for ${scene_id}${scene_title:+: ${scene_title}}"
+  git push
+
+===== IMPORTANT NOTES =====
+- Do NOT write the scene. Your job is to prepare the author to write it.
+- Be specific. "Use sensory detail" is not useful. "Ground the opening in the smell of wet stone and the sound of dripping water — Kael notices environmental details before people" is useful.
+- Reference the voice guide, continuity tracker, and craft principles concretely.
+COACH_EOF
+
+    elif [[ "$coaching_level" == "strict" ]]; then
+        cat <<STRICT_EOF
+===== STEP 4: CREATE SCENE FILE AND CONSTRAINT LIST =====
+
+You are in STRICT mode. Do NOT write prose. You may create files, add metadata, and do structural work.
+
+**4a. Create the scene file** with YAML frontmatter only — no prose content:
+
+Save to: scenes/${scene_id}.md
+
+---
+id: ${scene_id}
+title: "${scene_title:-}"
+status: pending
+target_words: ${target_words:-0}
+---
+
+(Leave the file empty after the frontmatter. The author writes the prose.)
+
+**4b. Produce a constraint list** covering:
+- Voice rules: which voice guide rules apply to this scene and POV character
+- Continuity requirements: locked details, character states, thread obligations
+- Structural obligations: what must turn in this scene, what the scene must set up for later scenes
+- Metadata: target word count, scene type, emotional arc endpoints
+
+Save to: working/coaching/constraints-${scene_id}.md
+
+===== STEP 5: GIT COMMIT =====
+
+Stage and commit using the Bash tool:
+
+  mkdir -p working/coaching
+  git add "scenes/${scene_id}.md"
+  git add "working/coaching/constraints-${scene_id}.md"
+  git commit -m "Strict: constraints for ${scene_id}${scene_title:+: ${scene_title}}"
+  git push
+
+===== IMPORTANT NOTES =====
+- Do NOT write prose. The scene file should contain only frontmatter.
+- Do NOT provide editorial suggestions or craft guidance. List facts and requirements only.
+- You CAN create files, add metadata, and do structural/organizational work.
+STRICT_EOF
+
+    else
+        # full mode (default)
+        cat <<FULL_EOF
 ===== STEP 4: DRAFT THE SCENE =====
 
 Write the complete scene following these rules:
@@ -342,5 +429,6 @@ Stage and commit using the Bash tool:
 - Complete ALL eight steps. The next scene's drafting depends on accurate continuity state.
 - If you encounter an issue with the draft, fix it before updating continuity files.
 - The continuity updates are as important as the scene itself — future scenes rely on them.
-PROMPT_EOF
+FULL_EOF
+    fi
 }
