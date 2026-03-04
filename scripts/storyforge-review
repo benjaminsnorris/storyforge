@@ -144,6 +144,12 @@ if has_gh; then
 fi
 export STORYFORGE_PR_NUMBER
 
+# Set up interactive mode file
+INTERACTIVE_FILE="${PROJECT_DIR}/working/.interactive"
+if [[ "$INTERACTIVE" == true ]]; then
+    touch "$INTERACTIVE_FILE"
+fi
+
 # ============================================================================
 # Run review
 # ============================================================================

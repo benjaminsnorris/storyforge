@@ -297,8 +297,12 @@ if [[ ${#PENDING_IDS[@]} -eq 0 ]]; then
     exit 0
 fi
 
-# Clean up stale autopilot file from a previous crashed run
-rm -f "${PROJECT_DIR}/working/.autopilot"
+# Set up interactive mode file
+INTERACTIVE_FILE="${PROJECT_DIR}/working/.interactive"
+rm -f "$INTERACTIVE_FILE"
+if [[ "$INTERACTIVE" == true ]]; then
+    touch "$INTERACTIVE_FILE"
+fi
 
 # ============================================================================
 # Session start
@@ -384,19 +388,10 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         continue
     fi
 
-    # --- Check interactive/autopilot mode ---
-    AUTOPILOT_FILE="${PROJECT_DIR}/working/.autopilot"
-    USE_INTERACTIVE=false
-
-    if [[ "$INTERACTIVE" == true ]]; then
-        if [[ -f "$AUTOPILOT_FILE" ]]; then
-            # In autopilot — check if user wants to rejoin
-            if (( i > 0 )); then
-                check_rejoin_interactive "$PROJECT_DIR" "${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]})" && USE_INTERACTIVE=true
-            fi
-        else
-            USE_INTERACTIVE=true
-        fi
+    # --- Check interactive mode ---
+    # Between steps (not first), offer mode switch if currently headless
+    if (( i > 0 )) && [[ ! -f "$INTERACTIVE_FILE" ]]; then
+        offer_interactive "$PROJECT_DIR" "${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]})" || true
     fi
 
     # --- Record git HEAD before invocation ---
@@ -407,11 +402,11 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
 
     START_TIME=$(date +%s)
 
-    if [[ "$USE_INTERACTIVE" == true ]]; then
+    if [[ -f "$INTERACTIVE_FILE" ]]; then
         # --- Interactive mode ---
         show_interactive_banner "Scene ${SCENE_NUM} of ${#PENDING_IDS[@]}" "multi"
 
-        INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$AUTOPILOT_FILE" "scene")
+        INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$PROJECT_DIR" "scene")
         SCENE_MODEL=$(select_model "drafting")
 
         set +e
@@ -516,14 +511,14 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
     update_pr_task "Draft scene ${SCENE_ID}" "$PROJECT_DIR"
 
     # --- Pause between scenes (headless only) ---
-    if (( i < ${#PENDING_IDS[@]} - 1 )) && [[ "$USE_INTERACTIVE" != true ]]; then
+    if (( i < ${#PENDING_IDS[@]} - 1 )) && [[ ! -f "$INTERACTIVE_FILE" ]]; then
         log "Pausing 10s before next scene..."
         sleep 10
     fi
 done
 
-# Clean up autopilot file
-rm -f "${PROJECT_DIR}/working/.autopilot"
+# Clean up interactive file
+rm -f "$INTERACTIVE_FILE"
 
 # ============================================================================
 # Session complete

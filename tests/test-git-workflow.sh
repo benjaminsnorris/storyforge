@@ -241,16 +241,16 @@ assert_equals "claude-sonnet-4-6" "$result" "select_revision_model: STORYFORGE_M
 # build_interactive_system_prompt
 # ============================================================================
 
-result=$(build_interactive_system_prompt "/tmp/.autopilot" "scene")
+result=$(build_interactive_system_prompt "/tmp" "scene")
 assert_contains "$result" "scene" "build_interactive_system_prompt: contains work unit (scene)"
 assert_contains "$result" "THIS scene ONLY" "build_interactive_system_prompt: scopes to single unit"
-assert_contains "$result" "/tmp/.autopilot" "build_interactive_system_prompt: contains autopilot file path"
-assert_contains "$result" "autopilot the rest" "build_interactive_system_prompt: has autopilot trigger phrase"
+assert_contains "$result" ".interactive" "build_interactive_system_prompt: references interactive file"
+assert_contains "$result" "rm -f" "build_interactive_system_prompt: removes interactive file for autopilot"
 assert_contains "$result" "go auto" "build_interactive_system_prompt: has go auto trigger"
 assert_contains "$result" "auto mode" "build_interactive_system_prompt: has auto mode trigger"
 assert_contains "$result" "/exit" "build_interactive_system_prompt: mentions /exit"
 
-result=$(build_interactive_system_prompt "/tmp/.autopilot" "pass")
+result=$(build_interactive_system_prompt "/tmp" "pass")
 assert_contains "$result" "pass" "build_interactive_system_prompt: pass work unit"
 assert_contains "$result" "THIS pass ONLY" "build_interactive_system_prompt: scopes to single pass"
 

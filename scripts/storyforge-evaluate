@@ -773,11 +773,16 @@ SYNTH_EOF
 SYNTH_START=$(date +%s)
 SYNTH_MODEL=$(select_model "synthesis")
 
+INTERACTIVE_FILE="${PROJECT_DIR}/working/.interactive"
 if [[ "$INTERACTIVE" == true ]]; then
+    touch "$INTERACTIVE_FILE"
+fi
+
+if [[ -f "$INTERACTIVE_FILE" ]]; then
     # Interactive synthesis — user can guide how findings are interpreted
     show_interactive_banner "Evaluation Synthesis"
 
-    SYNTH_SYSTEM=$(build_interactive_system_prompt "${PROJECT_DIR}/working/.autopilot" "synthesis")
+    SYNTH_SYSTEM=$(build_interactive_system_prompt "$PROJECT_DIR" "synthesis")
 
     set +e
     claude "$SYNTHESIS_PROMPT" \
@@ -900,8 +905,8 @@ log "  Read individual:    ls ${EVAL_DIR}/"
 # --- Review phase ---
 run_review_phase "evaluation" "$PROJECT_DIR"
 
-# Clean up autopilot file
-rm -f "${PROJECT_DIR}/working/.autopilot"
+# Clean up interactive file
+rm -f "${PROJECT_DIR}/working/.interactive"
 
 # Exit with failure if any evaluator failed
 if (( ${#FAILED[@]} > 0 )); then

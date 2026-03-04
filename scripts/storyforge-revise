@@ -343,8 +343,12 @@ if [[ -z "$PROJECT_TITLE" ]]; then
     PROJECT_TITLE="(untitled project)"
 fi
 
-# Clean up stale autopilot file from a previous crashed run
-rm -f "${PROJECT_DIR}/working/.autopilot"
+# Set up interactive mode file
+INTERACTIVE_FILE="${PROJECT_DIR}/working/.interactive"
+rm -f "$INTERACTIVE_FILE"
+if [[ "$INTERACTIVE" == true ]]; then
+    touch "$INTERACTIVE_FILE"
+fi
 
 # ============================================================================
 # Main execution loop
@@ -425,16 +429,10 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     # Mark as in_progress (only in live mode)
     update_pass_field "$PASS_NUM" "status" "in_progress"
 
-    # --- Check interactive/autopilot mode ---
-    AUTOPILOT_FILE="${PROJECT_DIR}/working/.autopilot"
-    USE_INTERACTIVE=false
-
-    if [[ "$INTERACTIVE" == true ]]; then
-        if [[ -f "$AUTOPILOT_FILE" ]]; then
-            check_rejoin_interactive "$PROJECT_DIR" "Pass: ${PASS_NAME} (${PASS_NUM}/${TOTAL_PASSES})" && USE_INTERACTIVE=true
-        else
-            USE_INTERACTIVE=true
-        fi
+    # --- Check interactive mode ---
+    # Between steps (not first pending), offer mode switch if currently headless
+    if (( PASS_NUM > START_PASS )) && [[ ! -f "$INTERACTIVE_FILE" ]]; then
+        offer_interactive "$PROJECT_DIR" "Pass: ${PASS_NAME} (${PASS_NUM}/${TOTAL_PASSES})" || true
     fi
 
     # Record git HEAD before invocation
@@ -447,11 +445,11 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     # Select model based on pass type (creative vs. mechanical)
     PASS_MODEL=$(select_revision_model "$PASS_NAME" "$PASS_PURPOSE")
 
-    if [[ "$USE_INTERACTIVE" == true ]]; then
+    if [[ -f "$INTERACTIVE_FILE" ]]; then
         # --- Interactive mode ---
         show_interactive_banner "Pass ${PASS_NUM} of ${TOTAL_PASSES}: ${PASS_NAME}" "multi"
 
-        INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$AUTOPILOT_FILE" "pass")
+        INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$PROJECT_DIR" "pass")
 
         set +e
         claude "$PROMPT" \
@@ -537,7 +535,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     update_pr_task "Pass: ${PASS_NAME}" "$PROJECT_DIR"
 
     # --- Pause between passes (headless only) ---
-    if (( PASS_NUM < TOTAL_PASSES )) && [[ "$USE_INTERACTIVE" != true ]]; then
+    if (( PASS_NUM < TOTAL_PASSES )) && [[ ! -f "$INTERACTIVE_FILE" ]]; then
         NEXT_STATUS=$(read_pass_field "$((PASS_NUM + 1))" "status")
         if [[ "$NEXT_STATUS" != "completed" ]]; then
             log "Pausing 10s before next pass..."
@@ -546,8 +544,8 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     fi
 done
 
-# Clean up autopilot file
-rm -f "${PROJECT_DIR}/working/.autopilot"
+# Clean up interactive file
+rm -f "$INTERACTIVE_FILE"
 
 # ============================================================================
 # Session summary

@@ -674,7 +674,8 @@ REVIEW_EOF
     local review_model
     review_model=$(select_model "review")
 
-    if [[ "${INTERACTIVE:-false}" == true ]]; then
+    local interactive_file="${project_dir}/working/.interactive"
+    if [[ -f "$interactive_file" ]]; then
         # Interactive review — user can discuss findings with Claude
         show_interactive_banner "Pipeline Review (${review_type})"
 
@@ -781,34 +782,30 @@ show_interactive_banner() {
     echo ""
 }
 
-# Check if the user wants to rejoin interactive mode between autopilot steps.
+# Between headless steps, offer the user a chance to go interactive.
 # Pauses for STORYFORGE_REJOIN_TIMEOUT seconds (default 5) and listens for 'i'.
-# If pressed, removes the autopilot file and returns 0 (switched to interactive).
-# Otherwise returns 1 (stay in autopilot).
+# If pressed, creates the interactive file and returns 0 (switched to interactive).
+# Otherwise returns 1 (stay in headless/autopilot).
 #
 # Usage:
-#   if check_rejoin_interactive "$PROJECT_DIR" "Scene 5 (5/12)"; then
+#   if offer_interactive "$PROJECT_DIR" "Scene 5 (5/12)"; then
 #       # switched to interactive
 #   fi
-check_rejoin_interactive() {
+offer_interactive() {
     local project_dir="$1"
     local step_label="$2"
-    local autopilot_file="${project_dir}/working/.autopilot"
+    local interactive_file="${project_dir}/working/.interactive"
     local timeout="${STORYFORGE_REJOIN_TIMEOUT:-5}"
 
-    if [[ ! -f "$autopilot_file" ]]; then
-        return 1
-    fi
-
     echo ""
-    echo -n "[AUTOPILOT] Next: ${step_label}. Press 'i' for interactive, or wait ${timeout}s... "
+    echo -n "  Next: ${step_label}. Press 'i' for interactive, or wait ${timeout}s... "
     local key=""
     read -t "$timeout" -n 1 key 2>/dev/null || true
     echo ""
 
     if [[ "$key" == "i" || "$key" == "I" ]]; then
-        rm -f "$autopilot_file"
-        echo "[AUTOPILOT] Switching to interactive mode."
+        touch "$interactive_file"
+        echo "  Switching to interactive mode."
         return 0
     fi
 
@@ -816,13 +813,14 @@ check_rejoin_interactive() {
 }
 
 # Build the system prompt appendix for interactive mode.
-# Contains the rules (single-step scope, autopilot trigger phrases)
+# Contains the rules (single-step scope, exit-to-continue behavior)
 # that the user should not see but Claude must follow.
 #
-# Usage: system_prompt=$(build_interactive_system_prompt "$AUTOPILOT_FILE" "scene")
+# Usage: system_prompt=$(build_interactive_system_prompt "$PROJECT_DIR" "scene")
 build_interactive_system_prompt() {
-    local autopilot_file="$1"
+    local project_dir="$1"
     local work_unit="${2:-step}"  # "scene", "pass", "evaluator", "step"
+    local interactive_file="${project_dir}/working/.interactive"
 
     cat <<SYSPROMPT_EOF
 You are in interactive mode, managed by a script that loops over ${work_unit}s one at a time.
@@ -835,8 +833,8 @@ RULES:
 
 AUTOPILOT:
 - If the user says 'autopilot the rest', 'go autonomous', 'finish without me', 'go auto', 'auto mode', or similar:
-  1. Run: touch ${autopilot_file}
-  2. Tell them: 'Autopilot enabled — the remaining ${work_unit}s will run autonomously. Type /exit to continue.'
+  1. Run: rm -f ${interactive_file}
+  2. Tell them: 'Switching to autopilot — the remaining ${work_unit}s will run autonomously. Type /exit to continue.'
 - Do NOT exit on your own. The user types /exit when ready.
 SYSPROMPT_EOF
 }
