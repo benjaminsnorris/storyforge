@@ -248,7 +248,11 @@ Commit and push the key decisions file after every new entry, along with whateve
 
 Autonomous scripts (`write`, `evaluate`, `revise`, `assemble`) work on feature branches, not main. The workflow:
 
-1. **Skills create branches** when saving plans or artifacts. For example, `plan-revision` creates `storyforge/revise-{timestamp}` before saving the revision plan. The `produce` skill creates `storyforge/assemble-{timestamp}` before saving the chapter map.
+1. **Skills create branches** when saving plans or artifacts:
+   - `scenes` creates `storyforge/write-{timestamp}` when scene design is complete
+   - `plan-revision` creates `storyforge/revise-{timestamp}` before saving the revision plan
+   - `produce` creates `storyforge/assemble-{timestamp}` before saving the chapter map
+   - `evaluate` has no preceding skill — the `storyforge-evaluate` script creates `storyforge/evaluate-{timestamp}` itself
 
 2. **Scripts create draft PRs** when they start. The PR includes a task list with one checkbox per phase (scene, evaluator, revision pass, etc.) plus a "Review" task. The PR is labeled `in-progress`.
 

@@ -206,6 +206,30 @@ Every time you add, modify, or remove scenes — an act designed, scenes reorder
 
 **Commit cadence:** If designing scenes for a full novel, commit after each act's scenes are designed. If doing a review, commit after each batch of edits. If splitting/merging, commit after each structural change. Do not wait until all scene work is complete.
 
+## Step 5: Create Drafting Branch When Scene Design Is Complete
+
+When scene design is finished and the author is ready to start drafting, create a feature branch so that all drafting work lives on a branch. Execute these steps **in this exact order**. Do not write any files before step 2 is complete.
+
+**1. Create the feature branch.** This must happen first, before any file is written or modified:
+```bash
+git checkout -b "storyforge/write-$(date '+%Y%m%d-%H%M')"
+```
+
+**2. Verify you are on the new branch** before proceeding:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+The output must start with `storyforge/write-`. If it does not, stop and fix the branch before writing any files.
+
+**3. Commit the scene index on the branch:**
+```bash
+git add -A && git commit -m "Scenes: ready for drafting" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
+```
+
+Tell the author: the scene index is ready and a drafting branch has been created. Run `./storyforge write` to begin autonomous drafting, or `./storyforge write --interactive` to draft with hands-on supervision.
+
+**When to create the branch:** Only when the author signals they are done with scene design and ready to draft. Do not create the branch during iterative scene design work — those commits belong on main. The branch is created at the transition from design to drafting.
+
 ## Craft Coaching Throughout
 
 Reference craft engine principles actively during scene work:
