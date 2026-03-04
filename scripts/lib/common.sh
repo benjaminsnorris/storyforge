@@ -660,3 +660,91 @@ REVIEW_EOF
         log "WARNING: Review file was not created"
     fi
 }
+
+# ============================================================================
+# Interactive mode helpers
+# ============================================================================
+
+# Display the interactive mode banner before launching a claude session.
+#
+# Usage: show_interactive_banner "Scene 3 of 12"
+show_interactive_banner() {
+    local subtitle="$1"
+    local banner_width=60
+
+    local lines=(
+        "INTERACTIVE MODE - ${subtitle}"
+        ""
+        "You can watch, give feedback, or redirect Claude."
+        "When done with this step, type /exit to continue."
+        'Say "finish without me" to run the rest autonomously.'
+    )
+
+    echo ""
+    printf '╔%*s╗\n' "$banner_width" '' | tr ' ' '═'
+    for line in "${lines[@]}"; do
+        printf '║  %-*s  ║\n' "$((banner_width - 4))" "$line"
+    done
+    printf '╚%*s╝\n' "$banner_width" '' | tr ' ' '═'
+    echo ""
+}
+
+# Check if the user wants to rejoin interactive mode between autopilot steps.
+# Pauses for STORYFORGE_REJOIN_TIMEOUT seconds (default 5) and listens for 'i'.
+# If pressed, removes the autopilot file and returns 0 (switched to interactive).
+# Otherwise returns 1 (stay in autopilot).
+#
+# Usage:
+#   if check_rejoin_interactive "$PROJECT_DIR" "Scene 5 (5/12)"; then
+#       # switched to interactive
+#   fi
+check_rejoin_interactive() {
+    local project_dir="$1"
+    local step_label="$2"
+    local autopilot_file="${project_dir}/working/.autopilot"
+    local timeout="${STORYFORGE_REJOIN_TIMEOUT:-5}"
+
+    if [[ ! -f "$autopilot_file" ]]; then
+        return 1
+    fi
+
+    echo ""
+    echo -n "[AUTOPILOT] Next: ${step_label}. Press 'i' for interactive, or wait ${timeout}s... "
+    local key=""
+    read -t "$timeout" -n 1 key 2>/dev/null || true
+    echo ""
+
+    if [[ "$key" == "i" || "$key" == "I" ]]; then
+        rm -f "$autopilot_file"
+        echo "[AUTOPILOT] Switching to interactive mode."
+        return 0
+    fi
+
+    return 1
+}
+
+# Build the system prompt appendix for interactive mode.
+# Contains the rules (single-step scope, autopilot trigger phrases)
+# that the user should not see but Claude must follow.
+#
+# Usage: system_prompt=$(build_interactive_system_prompt "$AUTOPILOT_FILE" "scene")
+build_interactive_system_prompt() {
+    local autopilot_file="$1"
+    local work_unit="${2:-step}"  # "scene", "pass", "evaluator", "step"
+
+    cat <<SYSPROMPT_EOF
+You are in interactive mode, managed by a script that loops over ${work_unit}s one at a time.
+
+RULES:
+- Complete THIS ${work_unit} ONLY. Do not proceed to the next ${work_unit} — the script handles sequencing.
+- When this ${work_unit} is done, tell the user it is complete and wait for them to respond.
+- The user may give you feedback, ask for changes, or say they are satisfied.
+- When the user is done with this ${work_unit}, they will type /exit to move on.
+
+AUTOPILOT:
+- If the user says 'autopilot the rest', 'go autonomous', 'finish without me', 'go auto', 'auto mode', or similar:
+  1. Run: touch ${autopilot_file}
+  2. Tell them: 'Autopilot enabled — the remaining ${work_unit}s will run autonomously. Type /exit to continue.'
+- Do NOT exit on your own. The user types /exit when ready.
+SYSPROMPT_EOF
+}
