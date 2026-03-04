@@ -122,5 +122,6 @@ evaluation:
 #   drafting      — writing prose against the scene index
 #   evaluation    — reviewing drafts with evaluators
 #   revision      — revising based on evaluation feedback
+#   review        — assessing revision results, deciding next cycle
 #   complete      — manuscript finished, artifacts locked
 phase: development

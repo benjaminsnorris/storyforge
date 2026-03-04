@@ -118,11 +118,16 @@ making it executable. Explain that it runs all passes autonomously in sequence â
 
 If the revision plan doesn't exist, explain that a revision plan is needed first and offer to invoke `plan-revision`.
 
+**"Review revision" / "How did the revision go?" / "What changed?":**
+Invoke the `review` skill. This is the natural next step after a revision cycle completes.
+
 ---
 
 ### Guided Mode
 
 The author said "surprise me," "what should I work on?", or gave no specific direction. This is your chance to be a thoughtful collaborator.
+
+**Check the project phase first.** If the phase is `review`, the revision cycle just completed and the highest-value action is always to run the review skill. Do not recommend other work â€” recommend `/storyforge:review` with a one-sentence rationale about what the revision covered. On approval, invoke the review skill immediately.
 
 **Assess the full project state** from what you read in Step 1.
 

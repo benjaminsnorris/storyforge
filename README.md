@@ -54,6 +54,7 @@ The hub reads your project state and suggests what to work on, or you can direct
 | `/storyforge:voice` | Voice and style guide development |
 | `/storyforge:scenes` | Scene index design, review, and editing |
 | `/storyforge:plan-revision` | Plan custom revision passes from evaluation results |
+| `/storyforge:review` | Review revision results, assess gaps, recommend next steps |
 
 ## Project Setup
 
@@ -97,5 +98,6 @@ my-novel/
 6. **`./storyforge evaluate`** — Run the evaluation panel
 7. **`/storyforge:plan-revision`** — Plan revision passes from evaluation findings
 8. **`./storyforge revise`** — Execute revision passes
+9. **`/storyforge:review`** — Assess revision results, decide next cycle
 
-Or skip the sequence entirely and just run `/storyforge:forge` — it knows where you are and what comes next.
+Steps 6-9 repeat until the manuscript is ready. Or skip the sequence entirely and just run `/storyforge:forge` — it knows where you are and what comes next.

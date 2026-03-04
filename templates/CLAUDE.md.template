@@ -19,6 +19,7 @@ This project uses [Storyforge](https://github.com/benjaminsnorris/storyforge). A
 - `/storyforge:voice` — Voice and style refinement
 - `/storyforge:scenes` — Scene index management
 - `/storyforge:plan-revision` — Plan revision passes from evaluation results
+- `/storyforge:review` — Review revision results, assess what landed, recommend next steps
 
 Scripts (via project runner):
 - `./storyforge write` — Autonomous scene drafting

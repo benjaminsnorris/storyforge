@@ -460,5 +460,24 @@ done
 log "Revision session complete. ${COMPLETED}/${TOTAL_PASSES} passes finished."
 if (( COMPLETED == TOTAL_PASSES )); then
     log "All revision passes are done!"
+
+    # Advance project phase to review
+    sed -i '' "s/^phase:.*/phase: review/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
+    log "Project phase advanced to: review"
+
+    # Ensure reviews directory exists
+    mkdir -p "${PROJECT_DIR}/working/reviews"
+
+    # Commit phase advancement
+    (
+        cd "$PROJECT_DIR"
+        git add storyforge.yaml 2>/dev/null || true
+        git commit -m "Revision complete: advance phase to review" 2>/dev/null || true
+        git push 2>/dev/null || true
+    )
+
+    log ""
+    log "Next step: run /storyforge:review to assess revision results"
+    log "  or /storyforge:forge to get a recommendation"
 fi
 log "============================================"

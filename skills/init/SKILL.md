@@ -181,6 +181,7 @@ This project is in the **development** phase. The focus is on building the creat
 - `/storyforge:voice` — Voice and style refinement
 - `/storyforge:scenes` — Scene index management
 - `/storyforge:plan-revision` — Plan revision passes from evaluation results
+- `/storyforge:review` — Review revision results and recommend next steps
 
 ### Scripts (via project runner)
 - `./storyforge write` — Autonomous scene drafting

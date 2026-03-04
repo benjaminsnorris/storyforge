@@ -107,6 +107,7 @@ If no custom evaluators are defined, this section can be omitted or set to an em
 | `drafting` | Active prose writing. Scene drafts are being produced against the scene index. |
 | `evaluation` | Drafts are being reviewed by built-in and custom evaluators. Feedback is collected for revision. |
 | `revision` | The author is revising drafts based on evaluation feedback. Continuity and voice checks run automatically. |
+| `review` | All revision passes complete. The author reviews what changed, what landed, and what gaps remain. Leads to another evaluation cycle, a follow-up revision, or completion. |
 | `complete` | The manuscript is considered finished. Artifact updates are locked unless the phase is rolled back. |
 
 ---
