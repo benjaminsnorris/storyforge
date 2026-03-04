@@ -276,6 +276,67 @@ monitor_progress() {
 }
 
 # ============================================================================
+# Model selection
+# ============================================================================
+
+# Default model for each task type. These are the smart defaults that balance
+# quality vs. cost. Override with STORYFORGE_MODEL env var or --model flag.
+#
+# Task types:
+#   drafting     — scene writing (maximum creativity)
+#   revision     — prose/voice/character revision (high creativity)
+#   mechanical   — continuity, fact-checking, thread tracking (low creativity)
+#   evaluation   — evaluator agents (analytical, structured output)
+#   synthesis    — cross-evaluator reconciliation (high reasoning)
+#   review       — pipeline QA (structured, bounded, mechanical)
+#
+# Usage: model=$(select_model "drafting")
+select_model() {
+    local task_type="$1"
+
+    # Environment override takes precedence
+    if [[ -n "${STORYFORGE_MODEL:-}" ]]; then
+        echo "$STORYFORGE_MODEL"
+        return 0
+    fi
+
+    case "$task_type" in
+        drafting)    echo "claude-opus-4-6" ;;
+        revision)    echo "claude-opus-4-6" ;;
+        mechanical)  echo "claude-sonnet-4-6" ;;
+        evaluation)  echo "claude-sonnet-4-6" ;;
+        synthesis)   echo "claude-opus-4-6" ;;
+        review)      echo "claude-sonnet-4-6" ;;
+        *)           echo "claude-opus-4-6" ;;
+    esac
+}
+
+# Select model for a revision pass based on pass name and purpose.
+# Creative passes (prose, voice, character) get Opus.
+# Mechanical passes (continuity, timeline) get Sonnet.
+#
+# Usage: model=$(select_revision_model "prose-tightening" "Cut filler, tighten sentences")
+select_revision_model() {
+    local pass_name="$1"
+    local purpose="$2"
+
+    # Environment override
+    if [[ -n "${STORYFORGE_MODEL:-}" ]]; then
+        echo "$STORYFORGE_MODEL"
+        return 0
+    fi
+
+    local pass_key
+    pass_key="$(echo "$pass_name $purpose" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ "$pass_key" =~ (continuity|timeline|consistency|fact.check|thread.track) ]]; then
+        echo "claude-sonnet-4-6"  # Mechanical — factual verification
+    else
+        echo "claude-opus-4-6"    # Creative — prose, voice, character, structure
+    fi
+}
+
+# ============================================================================
 # Git branch and PR workflow
 # ============================================================================
 
@@ -604,6 +665,9 @@ REVIEW_EOF
     local head_before
     head_before=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || echo "none")
 
+    local review_model
+    review_model=$(select_model "review")
+
     if [[ "${INTERACTIVE:-false}" == true ]]; then
         # Interactive review — user can discuss findings with Claude
         show_interactive_banner "Pipeline Review (${review_type})"
@@ -612,17 +676,17 @@ REVIEW_EOF
 
         set +e
         claude "$review_prompt" \
-            --model claude-opus-4-6 \
+            --model "$review_model" \
             --dangerously-skip-permissions \
             --append-system-prompt "You are in interactive mode for the pipeline review. Complete the review, then wait for the user. They may ask questions about findings or request adjustments. Type /exit when done."
         local review_exit=$?
         set -e
     else
-        log "Invoking claude for review..."
+        log "Invoking claude for review (model: ${review_model})..."
 
         set +e
         claude -p "$review_prompt" \
-            --model claude-opus-4-6 \
+            --model "$review_model" \
             --dangerously-skip-permissions \
             --output-format stream-json \
             --verbose \

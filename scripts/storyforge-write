@@ -405,17 +405,19 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         show_interactive_banner "Scene ${SCENE_NUM} of ${#PENDING_IDS[@]}"
 
         INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$AUTOPILOT_FILE" "scene")
+        SCENE_MODEL=$(select_model "drafting")
 
         set +e
         claude "$PROMPT" \
-            --model claude-opus-4-6 \
+            --model "$SCENE_MODEL" \
             --dangerously-skip-permissions \
             --append-system-prompt "$INTERACTIVE_SYSTEM"
         EXIT_CODE=$?
         set -e
     else
         # --- Headless mode ---
-        log "Invoking claude for scene ${SCENE_ID}..."
+        SCENE_MODEL=$(select_model "drafting")
+        log "Invoking claude for scene ${SCENE_ID} (model: ${SCENE_MODEL})..."
         log "  Per-scene log: ${SCENE_LOG} (tail -f for live output)"
 
         # Start background monitor
@@ -424,7 +426,7 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
 
         set +e
         claude -p "$PROMPT" \
-            --model claude-opus-4-6 \
+            --model "$SCENE_MODEL" \
             --dangerously-skip-permissions \
             --output-format stream-json \
             --verbose \
