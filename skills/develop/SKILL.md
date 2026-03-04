@@ -34,28 +34,33 @@ Do NOT skip this step. You need to know what already exists before you can help 
 
 ---
 
-## Step 2: Assess and Present
+## Step 2: Determine Execution Mode
 
-Give the author a clear, specific picture of where things stand. Do not be vague. Do not say "you've made great progress." Be concrete:
+**If invoked with specific direction** (e.g., "deepen Maren's wound/lie structure" or "build out the economic system in the world bible"):
+Skip assessment. Go directly to the relevant sub-workflow and execute. Make creative sub-decisions autonomously. Do not ask "what aspect?" or "which character?" — the direction tells you what to do. Do it.
 
-- "You have a world bible with solid geography and political structure, but no economic system and no religion or belief system. Your magic system is referenced but has no systems bible yet."
-- "Your character bible has three characters. Maren has a strong wound/lie/need structure. Rook has a name and a role but nothing underneath — no wound, no lie, no voice. Dex doesn't exist yet but is referenced in your story architecture as a major character."
-- "Your story architecture defines a three-act structure with clear turning points, but the climax only resolves the external conflict. The internal and thematic conflicts have no resolution mapped."
-- "You have no timeline document yet. Given the flashback structure you described in your architecture, this is a gap that will cause problems later."
-
-If nothing exists yet, say so plainly and help the author decide where to start.
-
-If the author says **"surprise me"** or **"what should I work on?"**, recommend the area with the most critical gaps. Prioritize in this order:
+**If invoked without direction** (e.g., via hub routing, "surprise me", or "what should I work on?"):
+Assess the project state, identify the single highest-impact gap, and execute on it. Prioritize:
 1. Characters without wound/lie/need (these are load-bearing — everything else depends on them)
 2. Story architecture gaps (especially missing climax resolution or unclear central conflict)
 3. World building gaps that will affect the story (not cosmetic gaps)
 4. Timeline issues (especially if the narrative is non-linear)
 
+Present a one-sentence assessment of what you're going to work on and why, then begin working immediately. Do not present a menu of options. Do not ask which area the author prefers. Pick the most impactful work and do it.
+
+**If the author asks for a status check** (e.g., "where do things stand?"):
+Give a concrete assessment — not vague praise, but specific gaps:
+
+- "Your character bible has three characters. Maren has a strong wound/lie/need structure. Rook has a name and a role but nothing underneath. Dex doesn't exist yet but is referenced in your story architecture."
+- "Your story architecture defines a three-act structure with clear turning points, but the climax only resolves the external conflict."
+
+Then recommend the highest-priority work and begin on approval.
+
 ---
 
 ## Step 3: Route to Sub-Workflow
 
-Based on what the author wants to work on, enter the appropriate sub-workflow below. If they want to work on something that spans multiple areas, pick the one that's most foundational and start there — you can always move to the next area in the same session.
+Based on the direction (given or self-determined), enter the appropriate sub-workflow below. If the work spans multiple areas, pick the one that's most foundational and start there — you can always move to the next area in the same session.
 
 ---
 

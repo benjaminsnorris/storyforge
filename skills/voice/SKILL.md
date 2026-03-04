@@ -26,15 +26,20 @@ Store this resolved plugin path for use throughout the session.
 - Read `references/craft-engine.md` from the Storyforge plugin directory.
 - Pay special attention to the **Prose Craft** section. Internalize its principles — you will draw on them throughout this conversation, not as citations but as active thinking tools.
 
-## Step 3: Assess Current State
+## Step 3: Assess Current State and Execute
 
-**If a voice guide already exists** (`reference/voice-guide.md`):
+**If invoked with specific direction** (e.g., "refine Kael's POV voice rules" or "develop the sensory palette"):
+Skip assessment. Go directly to the relevant subsection of voice discovery and execute. Produce work — draft voice rules, generate sample passages, update the voice guide. Do not ask what the author wants to focus on; they already told you.
+
+**If invoked without direction** (e.g., via hub routing or "surprise me"):
+Assess the voice guide state and execute the highest-impact work. If no voice guide exists, begin voice discovery from the top. If one exists, identify the weakest section and strengthen it — generate new samples, tighten rules, deepen POV-specific voice. Present a one-sentence rationale for what you're working on, then begin.
+
+**If a voice guide already exists** and the author wants to review it:
 - Read it thoroughly.
-- Summarize the current voice definition back to the author.
-- Ask: "What feels right about this? What feels off? What has changed since we wrote this?"
-- Proceed to whichever subsection the author wants to refine.
+- Identify what's strong, what's weak, and what's missing.
+- Begin refining the weakest area — don't ask which section to work on unless the author has already indicated a preference.
 
-**If starting fresh**, guide the author through voice discovery in the order below. Do not rush. Each step should be a genuine conversation, not a checklist.
+**If starting fresh**, guide the author through voice discovery in the order below. Voice discovery is inherently conversational — the author's input shapes the voice. Ask questions, but ask them one at a time and use the answers to drive forward, not to generate more questions.
 
 ## Step 4: Voice Discovery
 

@@ -68,12 +68,18 @@ Based on the analysis, design a custom set of revision passes. Each pass is a fo
 
 ```yaml
 - name: descriptive-kebab-case-name
-  type: autonomous | interactive
   scope: full | act-1 | act-2 | act-3 | [scene-id-list]
   purpose: "One sentence explaining what this pass fixes and why"
   estimated_effort: minor | moderate | major
   findings: [list of finding IDs or descriptions this pass addresses]
+  guidance:  # optional — for passes involving creative judgment
+    - decision: "What to do"
+      rationale: "Why this is the right call"
 ```
+
+All passes run autonomously. When a pass involves creative judgment — restructuring, character arc deepening, thematic reinterpretation — make the creative calls yourself and document them as `guidance` entries with rationale. The author reviews the plan before execution and can edit any guidance entry they disagree with.
+
+The `guidance` list is the author's control surface. Each entry is a specific creative decision with a rationale the author can evaluate. This replaces the old interactive/autonomous distinction: instead of pausing execution to ask the author what to do, you make the recommendation upfront and the author edits it before running the pipeline.
 
 ### Ordering Principles
 
@@ -87,22 +93,23 @@ Passes should be ordered to minimize wasted work:
 
 4. **Continuity audit last.** A clean sweep for anything the other passes introduced — timeline errors, dropped details, setting contradictions, knowledge violations. This pass exists precisely because the earlier passes may have created new continuity issues.
 
-### Type Guidance
+### Guidance Entries
 
-**Autonomous** passes are for mechanical, well-defined work where judgment calls are minimal:
-- Prose tightening against established voice rules
-- Continuity checking against timeline and world bible
-- Voice consistency enforcement on flagged scenes
-- Removing identified filler or redundancy
+When a pass involves creative judgment, you make the calls and document them. Do not leave creative decisions as open questions for the author to answer at runtime. Examples:
 
-**Interactive** passes are for work requiring the author's judgment:
-- Restructuring acts or scene sequences
-- Rethinking character arcs or motivations
-- Thematic deepening or reinterpretation
-- Adding new scenes or cutting existing ones
-- Resolving contradictions that could be fixed multiple ways
+**Mechanical passes** (prose tightening, continuity checking, voice consistency) typically need no guidance — the purpose and scope are sufficient direction.
 
-When in doubt, make it interactive. The author should be involved in any decision that changes the story's meaning.
+**Creative passes** (restructuring, character deepening, thematic work) need guidance entries:
+
+```yaml
+guidance:
+  - decision: "Fold difficult Calibrator encounter into Ch. 4 (Ashward Breach)"
+    rationale: "Crisis context makes prejudice feel earned, not convenient"
+  - decision: "Place first Aven appearance in Ch. 7 (the Protege scene)"
+    rationale: "ch07-sc04 already has a young Calibrator asking the right questions"
+```
+
+Be specific and opinionated. "Deepen character arcs" is not guidance — it's a restatement of the purpose. "Give Maren a moment in Ch. 12 where she almost reverts to her old lie, then catches herself" is guidance.
 
 ### Scope Guidance
 
@@ -116,14 +123,13 @@ When in doubt, make it interactive. The author should be involved in any decisio
 Walk the author through the proposed revision plan. For each pass:
 
 1. **Name and purpose** — what it does and why it matters
-2. **Type** — autonomous or interactive, with a brief rationale for the choice
-3. **Scope** — what parts of the manuscript it touches
+2. **Scope** — what parts of the manuscript it touches
+3. **Guidance** — the creative decisions you're recommending (if any), with rationale
 4. **Effort estimate** — how much work is involved
 5. **What it addresses** — which evaluation findings this pass resolves
 
 After presenting all passes, summarize:
 - Total number of passes
-- Estimated balance of autonomous vs. interactive work
 - Which evaluation findings are covered and which (if any) are deliberately deferred
 
 Then invite the author to adjust. They may:
@@ -131,7 +137,7 @@ Then invite the author to adjust. They may:
 - **Reorder passes** — move a pass earlier or later in the sequence
 - **Remove passes** — drop a pass they disagree with or want to defer
 - **Add passes** — request a pass the evaluation didn't flag but they want
-- **Change type** — switch a pass between autonomous and interactive
+- **Edit guidance** — change a creative decision they disagree with
 - **Adjust scope** — broaden or narrow what a pass covers
 - **Split or merge passes** — break a large pass into smaller ones, or combine related small passes
 
@@ -152,18 +158,19 @@ metadata:
   project: "{title}"
   generated: "{date}"
   total_passes: {count}
-  autonomous_passes: {count}
-  interactive_passes: {count}
 
 passes:
   - name: {name}
-    type: {autonomous|interactive}
     scope: {scope}
     purpose: "{purpose}"
     estimated_effort: {minor|moderate|major}
     status: pending
     findings:
       - "{finding description}"
+    guidance:  # include when pass involves creative judgment
+      - decision: "{specific creative decision}"
+        rationale: "{why this is the right call}"
+    summary: ""  # populated after pass completion
   # ... additional passes
 ```
 
@@ -182,12 +189,13 @@ by copying the template from the plugin's `templates/storyforge-runner.sh` and
 making it executable.
 
 Explain what to expect:
-- The revision script will run passes in the order specified in the plan
-- Autonomous passes will execute without interruption and report results when done
-- Interactive passes will pause and engage the author for decisions
+- The revision script runs all passes in order, autonomously
+- Each pass follows its guidance entries (if any) and produces a summary when done
 - Progress is tracked in `revision-plan.yaml` — each pass is marked as `completed` when done
 - The author can stop and resume at any time; the script picks up where it left off
+- After each pass, the author can review the summary and diff before the next pass runs
 - If a pass reveals new issues, they can re-run `plan-revision` to update the plan
+- To edit creative direction before execution, modify the `guidance` entries in the plan YAML directly
 
 ## Coaching Posture
 

@@ -112,7 +112,7 @@ If met, provide the revision command:
 
 If the project doesn't have a `./storyforge` runner script, offer to create one
 by copying the template from the plugin's `templates/storyforge-runner.sh` and
-making it executable. Explain that it will run passes sequentially, pausing for interactive ones.
+making it executable. Explain that it runs all passes autonomously in sequence — the author steers by editing guidance entries in the plan before execution.
 
 If the revision plan doesn't exist, explain that a revision plan is needed first and offer to invoke `plan-revision`.
 
@@ -131,9 +131,9 @@ The author said "surprise me," "what should I work on?", or gave no specific dir
 3. **Deepening existing material.** Characters without wounds or contradictions. Scenes without clear functions. A world bible that's all geography and no texture. Find where the existing work would benefit from another pass.
 4. **Creative exploration.** What-if exercises, thematic deepening, subplot development, alternate POV experiments. This is for projects where the foundation is solid and the author wants to discover something new.
 
-**Present ONE recommendation** with a one-sentence rationale. Do not present a menu of five options. Pick the best one and pitch it.
+**Present ONE recommendation** with a one-sentence rationale. Do not present a menu of five options. Pick the best one and pitch it. Include enough direction that the skill can execute immediately on approval — not just "work on characters" but "deepen Maren's wound/lie structure and trace how it drives her decisions in the Act 2 turning points."
 
-**On approval:** Execute immediately. This is the "approve and go" contract — when the author says yes, that's a green light to work, not to start another conversation about it. For interactive work, invoke the appropriate skill and begin. For autonomous scripts, launch them or provide the command.
+**On approval:** Execute immediately. Invoke the appropriate skill with the direction you recommended. The skill executes — no intermediate pitch, no "what aspect would you like to explore?", no sub-questions. The author approved the direction; Storyforge does the work.
 
 **On "no" or redirect:** Offer the next recommendation from the priority list, or take the author's new direction without resistance.
 
@@ -176,7 +176,12 @@ When a soft prerequisite is missing: mention it and ask if the author wants to a
 
 ## The "Approve and Go" Contract
 
-When the author approves a recommendation in guided mode, that is a green light to EXECUTE, not to start a dialogue about it. For interactive skills, invoke them and begin working immediately. For autonomous scripts, launch them or provide the command. The author wants to enjoy the output, not manage the process.
+When the author approves a recommendation in guided mode, that is a green light to EXECUTE, not to start a dialogue about it.
+
+**Current → Old (do not do this):** Author approves → skill asks "what aspect?" → author answers → skill works.
+**Current → New (do this):** Author approves → skill works.
+
+The hub provides the direction. The skill executes the direction. No intermediate questions. No breaking the task into sub-choices. Storyforge makes the creative sub-decisions, documents them in the output, and lets the author review the result. The author steers by redirecting after reviewing, not by answering questions before work begins.
 
 ## Coaching Posture
 

@@ -34,7 +34,11 @@ From the Storyforge plugin directory:
 
 ## Step 3: Determine Mode
 
-Based on the author's request, operate in one of three modes:
+**If invoked with specific direction** (e.g., "design scenes for Act 2" or "review pacing in Act 1"), go directly to the appropriate mode and execute. Do not ask clarifying sub-questions — make the creative calls and produce work.
+
+**If invoked without direction** (e.g., via hub routing or "surprise me"), assess the scene index state and execute the highest-impact work: if no scenes exist, enter Design mode for the opening act; if scenes exist but have gaps, enter Review mode and identify what needs attention; if the author has flagged specific changes, enter Edit mode.
+
+Based on the direction (given or self-determined), operate in one of three modes:
 
 ---
 
@@ -45,7 +49,7 @@ Use this when the author wants to plan new scenes for a section of the novel.
 ### Gather Context
 
 - Identify where in the story architecture these scenes fall (which act, which part, what structural purpose).
-- Ask: **"What needs to happen in this section? What has to be true by the end of it that isn't true at the beginning?"**
+- Determine what needs to happen in this section — what must be true by the end that isn't true at the beginning. Use the story architecture, character arcs, and thread requirements to answer this yourself.
 - Identify which threads need to advance, which characters need to appear, and what the emotional trajectory should be.
 
 ### Propose Scene Breakdowns
