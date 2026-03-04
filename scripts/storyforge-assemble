@@ -211,7 +211,7 @@ if [[ "$DRY_RUN" != true ]]; then
 - [ ] Generate formats
 - [ ] Review"
 
-    create_draft_pr "Assemble: ${TITLE}" "$PR_BODY" "$PROJECT_DIR"
+    create_draft_pr "Assemble: ${TITLE}" "$PR_BODY" "$PROJECT_DIR" "assembly"
 fi
 
 log "============================================"

@@ -348,25 +348,50 @@ ensure_branch_pushed() {
 }
 
 # Ensure a GitHub label exists (create silently if missing).
-# Usage: ensure_label "in-progress" "0075ca" "$PROJECT_DIR"
+# Usage: ensure_label "in-progress" "fef2c0" "Work is underway" "$PROJECT_DIR"
 ensure_label() {
     local label_name="$1"
     local color="$2"
-    local project_dir="$3"
+    local description="$3"
+    local project_dir="$4"
 
     has_gh || return 0
-    (cd "$project_dir" && gh label create "$label_name" --color "$color" 2>/dev/null) || true
+    (cd "$project_dir" && gh label create "$label_name" \
+        --color "$color" \
+        --description "$description" \
+        2>/dev/null) || true
+}
+
+# Ensure all storyforge labels exist in the repo.
+# Called once by create_draft_pr before creating a PR.
+# Usage: ensure_all_labels "$PROJECT_DIR"
+ensure_all_labels() {
+    local project_dir="$1"
+
+    has_gh || return 0
+
+    # Status labels
+    ensure_label "in-progress"    "fef2c0" "Autonomous work is underway"           "$project_dir"
+    ensure_label "reviewing"      "5319e7" "Pipeline review in progress"            "$project_dir"
+    ensure_label "ready-to-merge" "0e8a16" "Review complete — author may merge"     "$project_dir"
+
+    # Work type labels
+    ensure_label "drafting"       "1d76db" "Scene drafting session"                 "$project_dir"
+    ensure_label "evaluation"     "d93f0b" "Multi-agent evaluation panel"           "$project_dir"
+    ensure_label "revision"       "c5def5" "Revision pass execution"               "$project_dir"
+    ensure_label "assembly"       "bfdadc" "Manuscript assembly and production"     "$project_dir"
 }
 
 # Create a draft PR for the current branch.
 # If a PR already exists for this branch, fetches its number instead.
 # Sets and exports STORYFORGE_PR_NUMBER.
 #
-# Usage: create_draft_pr "Draft: My Novel scenes" "$PR_BODY" "$PROJECT_DIR"
+# Usage: create_draft_pr "Draft: My Novel scenes" "$PR_BODY" "$PROJECT_DIR" "drafting"
 create_draft_pr() {
     local title="$1"
     local body="$2"
     local project_dir="$3"
+    local work_type="${4:-}"
 
     if ! has_gh; then
         log "WARNING: gh CLI not available — skipping PR creation"
@@ -375,10 +400,8 @@ create_draft_pr() {
         return 0
     fi
 
-    # Ensure labels exist
-    ensure_label "in-progress" "0075ca" "$project_dir"
-    ensure_label "reviewing" "d876e3" "$project_dir"
-    ensure_label "ready-to-merge" "0e8a16" "$project_dir"
+    # Ensure all labels exist
+    ensure_all_labels "$project_dir"
 
     # Check if PR already exists for this branch
     local existing_pr
@@ -392,12 +415,17 @@ create_draft_pr() {
     fi
 
     # Create draft PR
+    local label_args="--label in-progress"
+    if [[ -n "$work_type" ]]; then
+        label_args="${label_args} --label ${work_type}"
+    fi
+
     local pr_url
     pr_url=$(cd "$project_dir" && gh pr create \
         --draft \
         --title "$title" \
         --body "$body" \
-        --label "in-progress" 2>/dev/null) || {
+        $label_args 2>/dev/null) || {
         log "WARNING: Failed to create draft PR"
         STORYFORGE_PR_NUMBER=""
         export STORYFORGE_PR_NUMBER

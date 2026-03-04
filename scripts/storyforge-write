@@ -311,7 +311,7 @@ if [[ "$DRY_RUN" != true ]]; then
     done
     PR_BODY="${PR_BODY}- [ ] Review"
 
-    create_draft_pr "Draft: ${WRITE_TITLE} (${#PENDING_IDS[@]} scenes)" "$PR_BODY" "$PROJECT_DIR"
+    create_draft_pr "Draft: ${WRITE_TITLE} (${#PENDING_IDS[@]} scenes)" "$PR_BODY" "$PROJECT_DIR" "drafting"
 fi
 
 # Advance project phase to drafting if needed

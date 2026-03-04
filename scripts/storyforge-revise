@@ -356,7 +356,7 @@ if [[ "$DRY_RUN" != true ]]; then
     done
     PR_BODY="${PR_BODY}- [ ] Review"
 
-    create_draft_pr "Revise: ${PROJECT_TITLE}" "$PR_BODY" "$PROJECT_DIR"
+    create_draft_pr "Revise: ${PROJECT_TITLE}" "$PR_BODY" "$PROJECT_DIR" "revision"
 fi
 
 log "============================================"

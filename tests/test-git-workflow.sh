@@ -159,7 +159,7 @@ assert_exit_code "0" "$rc" "update_pr_task: no-ops when PR number is empty"
 # ============================================================================
 
 # ensure_label should not crash even without gh
-(ensure_label "test-label" "ff0000" "/tmp" 2>/dev/null)
+(ensure_label "test-label" "ff0000" "Test label" "/tmp" 2>/dev/null)
 rc=$?
 assert_exit_code "0" "$rc" "ensure_label: does not crash"
 

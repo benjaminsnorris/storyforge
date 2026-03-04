@@ -524,7 +524,7 @@ done
 PR_BODY="${PR_BODY}- [ ] Synthesis
 - [ ] Review"
 
-create_draft_pr "Evaluate: ${PROJECT_TITLE} (${SCOPE_DESCRIPTION})" "$PR_BODY" "$PROJECT_DIR"
+create_draft_pr "Evaluate: ${PROJECT_TITLE} (${SCOPE_DESCRIPTION})" "$PR_BODY" "$PROJECT_DIR" "evaluation"
 
 # Advance project phase to evaluation if needed
 CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")

@@ -72,7 +72,7 @@ assert_equals "1" "$scene_count" "get_chapter_scenes: chapter 2 has exactly 1 sc
 # ============================================================================
 
 result=$(extract_scene_prose "${PROJECT_DIR}/scenes/act1-sc01.md")
-assert_contains "$result" "The ink was still wet" "extract_scene_prose: extracts prose from drafted scene"
+assert_contains "$result" "Dorren Hayle pressed" "extract_scene_prose: extracts prose from drafted scene"
 assert_not_contains "$result" "id:" "extract_scene_prose: strips YAML frontmatter id field"
 assert_not_contains "$result" "pov:" "extract_scene_prose: strips YAML frontmatter pov field"
 assert_not_contains "$result" "---" "extract_scene_prose: strips frontmatter delimiters"
@@ -87,7 +87,7 @@ assert_not_empty "$first_line" "extract_scene_prose: no leading blank lines"
 
 result=$(assemble_chapter 1 "$PROJECT_DIR" "blank")
 assert_contains "$result" "Chapter 1: The Finest Cartographer" "assemble_chapter: has chapter heading"
-assert_contains "$result" "The ink was still wet" "assemble_chapter: includes scene 1 prose"
+assert_contains "$result" "Dorren Hayle pressed" "assemble_chapter: includes scene 1 prose"
 
 # Chapter 1 with ornamental breaks
 result=$(assemble_chapter 1 "$PROJECT_DIR" "ornamental")
@@ -212,7 +212,7 @@ assert_contains "$manuscript_content" "Copyright" "assemble_manuscript: has copy
 assert_contains "$manuscript_content" "Contents" "assemble_manuscript: has table of contents"
 assert_contains "$manuscript_content" "Chapter 1:" "assemble_manuscript: has chapter 1 heading"
 assert_contains "$manuscript_content" "Chapter 2:" "assemble_manuscript: has chapter 2 heading"
-assert_contains "$manuscript_content" "The ink was still wet" "assemble_manuscript: has scene prose"
+assert_contains "$manuscript_content" "Dorren Hayle pressed" "assemble_manuscript: has scene prose"
 
 # Manuscript word count
 wc=$(manuscript_word_count "$TEMP_MANUSCRIPT")

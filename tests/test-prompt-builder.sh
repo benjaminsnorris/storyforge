@@ -40,9 +40,9 @@ assert_empty "$result" "get_previous_scene: first scene returns empty"
 result=$(get_previous_scene "act1-sc02" "$FIXTURE_DIR")
 assert_equals "act1-sc01" "$result" "get_previous_scene: act1-sc02 -> act1-sc01"
 
-# Third scene (cross-act) returns second
+# Cross-part scene returns preceding scene
 result=$(get_previous_scene "act2-sc01" "$FIXTURE_DIR")
-assert_equals "act1-sc02" "$result" "get_previous_scene: act2-sc01 -> act1-sc02"
+assert_equals "new-x1" "$result" "get_previous_scene: act2-sc01 -> new-x1"
 
 # Nonexistent scene returns empty
 result=$(get_previous_scene "act9-sc99" "$FIXTURE_DIR")
@@ -83,9 +83,9 @@ assert_equals "2500" "$result" "read_scene_field: target_words"
 result=$(get_scene_status "act1-sc01" "$FIXTURE_DIR")
 assert_equals "drafted" "$result" "get_scene_status: act1-sc01 from frontmatter"
 
-# act1-sc02 has status "pending" in frontmatter
+# act1-sc02 has status "drafted" in scene-index.yaml
 result=$(get_scene_status "act1-sc02" "$FIXTURE_DIR")
-assert_equals "pending" "$result" "get_scene_status: act1-sc02 from frontmatter"
+assert_equals "drafted" "$result" "get_scene_status: act1-sc02 from scene-index"
 
 # ============================================================================
 # build_scene_prompt
@@ -123,6 +123,6 @@ assert_contains "$prompt" "2500" "build_scene_prompt: contains target_words"
 prompt2=$(build_scene_prompt "act1-sc02" "$FIXTURE_DIR")
 assert_contains "$prompt2" "scenes/act1-sc01.md" "build_scene_prompt: sc02 references previous scene"
 
-# Cross-act scene references correct previous
+# Cross-part scene references correct previous
 prompt3=$(build_scene_prompt "act2-sc01" "$FIXTURE_DIR")
-assert_contains "$prompt3" "scenes/act1-sc02.md" "build_scene_prompt: act2-sc01 references act1-sc02"
+assert_contains "$prompt3" "scenes/new-x1.md" "build_scene_prompt: act2-sc01 references new-x1"
