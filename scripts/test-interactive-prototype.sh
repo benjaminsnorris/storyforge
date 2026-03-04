@@ -69,12 +69,7 @@ for (( i=0; i<${#SCENES[@]}; i++ )); do
         )
         printf '╔%*s╗\n' "$BANNER_WIDTH" '' | tr ' ' '═'
         for line in "${BANNER_LINES[@]}"; do
-            # Calculate byte vs display padding (multi-byte chars need extra space)
-            local byte_len=${#line}
-            local display_len
-            display_len=$(echo -n "$line" | LC_ALL=C wc -c | tr -d ' ')
-            local extra=$((display_len - byte_len))
-            printf '║  %-*s  ║\n' "$((BANNER_WIDTH - 4 + extra))" "$line"
+            printf '║  %-*s  ║\n' "$((BANNER_WIDTH - 4))" "$line"
         done
         printf '╚%*s╝\n' "$BANNER_WIDTH" '' | tr ' ' '═'
         echo ""
