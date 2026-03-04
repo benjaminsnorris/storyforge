@@ -39,6 +39,21 @@ for (( i=0; i<${#SCENES[@]}; i++ )); do
     echo "--- Scene ${NUM}/${#SCENES[@]}: ${SCENE} ---"
 
     if [[ -f "$AUTOPILOT_FILE" ]]; then
+        # Give the user a chance to jump back to interactive
+        if (( i > 0 )); then
+            echo ""
+            echo -n "[AUTOPILOT] Next: ${SCENE} (${NUM}/${#SCENES[@]}). Press 'i' for interactive, or wait 5s... "
+            SWITCH_KEY=""
+            read -t 5 -n 1 SWITCH_KEY 2>/dev/null || true
+            echo ""
+            if [[ "$SWITCH_KEY" == "i" || "$SWITCH_KEY" == "I" ]]; then
+                rm -f "$AUTOPILOT_FILE"
+                echo "[AUTOPILOT] Switching to interactive mode."
+            fi
+        fi
+    fi
+
+    if [[ -f "$AUTOPILOT_FILE" ]]; then
         echo "[AUTOPILOT] Running ${SCENE} autonomously (headless)..."
 
         if [[ "$USE_REAL_CLAUDE" == true ]]; then
