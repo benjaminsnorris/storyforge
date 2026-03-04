@@ -56,16 +56,17 @@ Use the **Bash tool** to create the full directory tree:
 
 ```
 {project-dir}/
-├── storyforge          (project runner — delegates to installed plugin)
+├── storyforge            (project runner — delegates to installed plugin)
 ├── storyforge.yaml
 ├── CLAUDE.md
 ├── reference/
 │   └── key-decisions.md
 ├── scenes/
-├── working/
-│   ├── logs/
-│   ├── evaluations/
-│   └── plans/
+│   └── scene-index.yaml
+└── working/
+    ├── logs/
+    ├── evaluations/
+    └── plans/
 ```
 
 Create all directories first with a single `mkdir -p` command:
@@ -73,6 +74,8 @@ Create all directories first with a single `mkdir -p` command:
 ```bash
 mkdir -p {project-dir}/{reference,scenes,working/{logs,evaluations,plans}}
 ```
+
+Do NOT create `draft/` or `manuscript/` directories. Storyforge works on scene files in `scenes/` throughout the entire pipeline — drafting, evaluation, and revision all operate on scenes. Manuscript assembly is a separate, late-stage step that happens when the author is ready.
 
 Then copy the runner script from the plugin's `templates/storyforge-runner.sh` to the project root as `storyforge` and make it executable:
 

@@ -33,47 +33,47 @@ project:
 artifacts:
   world_bible:
     exists: false
-    path: references/world-bible.md
+    path: reference/world-bible.md
     updated:
 
   character_bible:
     exists: false
-    path: references/character-bible.md
+    path: reference/character-bible.md
     updated:
 
   systems_bible:
     exists: false
-    path: references/systems-bible.md
+    path: reference/systems-bible.md
     updated:
 
   story_architecture:
     exists: false
-    path: references/story-architecture.md
+    path: reference/story-architecture.md
     updated:
 
   voice_guide:
     exists: false
-    path: references/voice-guide.md
+    path: reference/voice-guide.md
     updated:
 
   timeline:
     exists: false
-    path: references/timeline.md
+    path: reference/timeline.md
     updated:
 
   scene_index:
     exists: false
-    path: references/scene-index.md
+    path: scenes/scene-index.yaml
     updated:
 
   continuity_tracker:
     exists: false
-    path: references/continuity-tracker.md
+    path: reference/continuity-tracker.md
     updated:
 
   key_decisions:
     exists: false
-    path: references/key-decisions.md
+    path: reference/key-decisions.md
     updated:
 
 # ----------------------------------------------------------------------------

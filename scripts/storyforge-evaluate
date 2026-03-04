@@ -452,6 +452,13 @@ mkdir -p "$EVAL_DIR" "$LOG_DIR"
 
 SESSION_START=$(date +%s)
 
+# Advance project phase to evaluation if needed
+CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
+if [[ "$CURRENT_PHASE" != "evaluation" && "$CURRENT_PHASE" != "revision" && "$CURRENT_PHASE" != "complete" ]]; then
+    sed -i '' "s/^phase:.*/phase: evaluation/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
+    log "Project phase advanced to: evaluation"
+fi
+
 log "============================================"
 log "Starting Storyforge evaluation panel"
 log "Project: ${PROJECT_TITLE}"

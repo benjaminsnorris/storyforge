@@ -61,7 +61,7 @@ Run `/storyforge:init` in a new project directory. This creates:
 - `storyforge.yaml` — project configuration
 - `storyforge` — runner script for autonomous commands
 - `reference/` — templates for world bible, character bible, etc.
-- Standard directory structure (`scenes/`, `draft/`, `manuscript/`, `working/`)
+- Standard directory structure (`scenes/`, `working/`)
 
 Run autonomous scripts from your project root:
 
@@ -84,8 +84,6 @@ my-novel/
 ├── reference/               # World bible, character bible, voice guide, etc.
 ├── scenes/                  # Scene files with YAML frontmatter
 │   └── scene-index.yaml     # Master scene sequence
-├── draft/                   # Assembled chapter drafts
-├── manuscript/              # Post-revision manuscript
 └── working/                 # Logs, evaluations, plans
 ```
 

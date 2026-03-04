@@ -31,7 +31,7 @@ Before doing anything else, orient yourself:
    - `working/evaluations/findings.yaml`
    - `working/plans/revision-plan.yaml`
    - The `scenes/` directory (any `.md` files = drafted scenes)
-4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md` or `references/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
+4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
 
 Do not present this information unless the author asks for a status check. This is your internal orientation.
 

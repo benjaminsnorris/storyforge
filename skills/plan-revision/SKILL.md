@@ -35,7 +35,7 @@ Read the following files to understand the full project context:
 - **`scenes/scene-index.yaml`** — the scene inventory, structure, and any scene-level notes
 - **`reference/voice-guide.md`** — the established voice rules and style parameters
 - **`references/craft-engine.md`** from the plugin directory — the craft reference that informs revision strategy
-- **Key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md` or `references/key-decisions.md`). If it exists, read it in full. **Settled decisions must be respected in the plan — do not propose alternatives to decisions already made, and do not present them as open questions in guidance entries.**
+- **Key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. **Settled decisions must be respected in the plan — do not propose alternatives to decisions already made, and do not present them as open questions in guidance entries.**
 
 Also scan the `scenes/` directory to understand which scenes have been drafted and their approximate word counts.
 
@@ -158,7 +158,7 @@ This prevents future sessions from re-asking settled questions.
 
 ## Step 6: Save the Plan
 
-Once the author approves, write the finalized plan to `working/plans/revision-plan.yaml`. Then immediately commit and push all changes — the plan file, any updates to `storyforge.yaml`, and any updates to `CLAUDE.md`. Use a commit message like `"Plan revision: {N} passes for {title}"`. The repo should reflect the approved plan before execution begins.
+Once the author approves, write the finalized plan to `working/plans/revision-plan.yaml`. Update the project phase to `revision` in `storyforge.yaml`. Then immediately commit and push all changes — the plan file, `storyforge.yaml`, and `CLAUDE.md`. Use a commit message like `"Plan revision: {N} passes for {title}"`. The repo should reflect the approved plan before execution begins.
 
 The file should include:
 

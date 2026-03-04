@@ -194,7 +194,7 @@ Every time you add, modify, or remove scenes — an act designed, scenes reorder
 **After each deliverable:**
 
 1. Write the updated `scene-index.yaml`.
-2. Update `storyforge.yaml` with the current scene count, last-modified date, and any structural changes.
+2. Update `storyforge.yaml` with the current scene count, last-modified date, and any structural changes. If scenes were added and the project phase is still `development`, advance it to `scene-design`.
 3. Regenerate relevant sections of `CLAUDE.md` to reflect the current scene state (active scenes, next scenes to draft, thread status).
 4. **Commit and push immediately:**
    ```
