@@ -77,6 +77,35 @@ resolve_scope() {
             fi
         done <<< "$ids"
 
+    elif [[ "$scope" =~ ^part-[0-9]+$ ]]; then
+        # Part-level scope: "part-2" collects all scene IDs between
+        # the "# PART 2:" section header and the next "# PART" header
+        # in scene-index.yaml. Skips scenes whose files don't exist (cuts).
+        local part_num="${scope#part-}"
+        local part_label="PART ${part_num}"
+
+        local ids
+        ids=$(awk -v label="$part_label" '
+            $0 ~ "#[[:space:]]+" label ":" { in_part = 1; next }
+            in_part && /^[[:space:]]*#.*PART [0-9]+:/ { exit }
+            in_part && /^[[:space:]]*-[[:space:]]*id:/ {
+                sub(/^[[:space:]]*-[[:space:]]*id:[[:space:]]*/, "")
+                gsub(/["'"'"']/, "")
+                gsub(/[[:space:]]*$/, "")
+                print
+            }
+        ' "$index_file")
+
+        while IFS= read -r sid; do
+            [[ -z "$sid" ]] && continue
+            local f="${scene_dir}/${sid}.md"
+            if [[ -f "$f" ]]; then
+                matched_files+=("$f")
+            else
+                log "WARNING: Scene file missing for id '${sid}': ${f}"
+            fi
+        done <<< "$ids"
+
     else
         # Comma-separated scene IDs: "act1-sc03,act2-sc07,act3-sc12"
         IFS=',' read -ra id_list <<< "$scope"

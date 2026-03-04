@@ -2,6 +2,11 @@
 # Scenes are the atomic unit. Chapters are assembled from scenes later.
 
 scenes:
+
+  # ═══════════════════════════════════════════════════════════
+  # PART 1: THE MAP — Setup & Discovery
+  # ═══════════════════════════════════════════════════════════
+
   - id: act1-sc01
     title: "The Finest Cartographer"
     pov: "Dorren Hayle"
@@ -16,11 +21,25 @@ scenes:
     title: "The Missing Village"
     pov: "Dorren Hayle"
     setting: "Dorren's private study"
-    words: null
+    words: 95
     target_words: 3000
     function: "Dorren notices a village has vanished from the latest survey map"
-    status: "pending"
+    status: "drafted"
     action: null
+
+  - id: new-x1
+    title: "The Archivist's Warning"
+    pov: "Tessa Merrin"
+    setting: "City Archive"
+    words: 1200
+    target_words: 1500
+    function: "Tessa finds a discrepancy in the founding-era maps"
+    status: "drafted"
+    action: null
+
+  # ═══════════════════════════════════════════════════════════
+  # PART 2: THE BLANK — Investigation & Escalation
+  # ═══════════════════════════════════════════════════════════
 
   - id: act2-sc01
     title: "Into the Blank"

@@ -13,8 +13,9 @@ result=$(resolve_scope "full" "$FIXTURE_DIR" 2>/dev/null)
 assert_contains "$result" "act1-sc01.md" "resolve_scope full: contains act1-sc01"
 assert_contains "$result" "act1-sc02.md" "resolve_scope full: contains act1-sc02"
 assert_contains "$result" "act2-sc01.md" "resolve_scope full: contains act2-sc01"
+assert_contains "$result" "new-x1.md" "resolve_scope full: contains new-x1"
 count=$(echo "$result" | wc -l | tr -d ' ')
-assert_equals "3" "$count" "resolve_scope full: returns 3 files"
+assert_equals "4" "$count" "resolve_scope full: returns 4 files"
 
 # Act-level scope
 result=$(resolve_scope "act-1" "$FIXTURE_DIR" 2>/dev/null)
@@ -43,6 +44,28 @@ assert_equals "2" "$count" "resolve_scope comma: returns 2 files"
 result=$(resolve_scope "act-99" "$FIXTURE_DIR" 2>/dev/null)
 rc=$?
 assert_exit_code "1" "$rc" "resolve_scope: nonexistent act returns error"
+
+# Part-level scope: part-1 includes all scenes under PART 1 header
+result=$(resolve_scope "part-1" "$FIXTURE_DIR" 2>/dev/null)
+assert_contains "$result" "act1-sc01.md" "resolve_scope part-1: contains act1-sc01"
+assert_contains "$result" "act1-sc02.md" "resolve_scope part-1: contains act1-sc02"
+assert_contains "$result" "new-x1.md" "resolve_scope part-1: contains new-x1"
+assert_not_contains "$result" "act2-sc01.md" "resolve_scope part-1: excludes act2"
+count=$(echo "$result" | wc -l | tr -d ' ')
+assert_equals "3" "$count" "resolve_scope part-1: returns 3 files"
+
+# Part-level scope: part-2 includes only scenes under PART 2 header
+result=$(resolve_scope "part-2" "$FIXTURE_DIR" 2>/dev/null)
+assert_contains "$result" "act2-sc01.md" "resolve_scope part-2: contains act2-sc01"
+assert_not_contains "$result" "act1-sc01.md" "resolve_scope part-2: excludes act1"
+assert_not_contains "$result" "new-x1.md" "resolve_scope part-2: excludes new-x1"
+count=$(echo "$result" | wc -l | tr -d ' ')
+assert_equals "1" "$count" "resolve_scope part-2: returns 1 file"
+
+# Nonexistent part returns error
+result=$(resolve_scope "part-99" "$FIXTURE_DIR" 2>/dev/null)
+rc=$?
+assert_exit_code "1" "$rc" "resolve_scope: nonexistent part returns error"
 
 # ============================================================================
 # read_pass_guidance
@@ -112,7 +135,7 @@ assert_contains "$result" "Protection list" "build_revision_prompt: has protecti
 result=$(build_revision_prompt "prose-tightening" "Tighten prose" "full" "$FIXTURE_DIR" "" 2>/dev/null)
 
 # Has scope info
-assert_contains "$result" "3 scene file" "build_revision_prompt: shows file count"
+assert_contains "$result" "4 scene file" "build_revision_prompt: shows file count"
 
 # Has instruction sections
 assert_contains "$result" "Read Reference Context First" "build_revision_prompt: has instruction 1"
