@@ -30,8 +30,8 @@ Before doing anything else, orient yourself:
    - `scenes/scene-index.yaml`
    - `working/evaluations/findings.yaml`
    - `working/plans/revision-plan.yaml`
-   - The `draft/` directory (any `.md` files = drafted scenes)
-   - The `manuscript/` directory
+   - The `scenes/` directory (any `.md` files = drafted scenes)
+4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md` or `references/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
 
 Do not present this information unless the author asks for a status check. This is your internal orientation.
 
@@ -82,7 +82,7 @@ If soft prerequisites are missing, mention what's absent and ask the author whet
 **"Run evaluation" / "Evaluate the draft":**
 Check prerequisites:
 
-- *Hard prerequisite*: At least some drafted scenes must exist in `draft/`
+- *Hard prerequisite*: At least some scene files (`.md`) must exist in `scenes/`
 
 If met, provide the evaluation command:
 
@@ -94,7 +94,9 @@ If the project doesn't have a `./storyforge` runner script, offer to create one
 by copying the template from the plugin's `templates/storyforge-runner.sh` and
 making it executable. Explain what the evaluation does and what output to expect.
 
-If no drafted scenes exist, explain what's needed and suggest drafting first.
+Evaluation runs on scene files in `scenes/`, not assembled chapters. This is intentional — get the scenes right first, assemble into chapters later.
+
+If no scene files exist, explain what's needed and suggest drafting first.
 
 **"Plan revision" / "What should I revise?":**
 Invoke the `plan-revision` skill.
@@ -159,7 +161,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 | Command | Requires |
 |---|---|
 | `storyforge write` | `scenes/scene-index.yaml` with at least one scene, `reference/voice-guide.md` |
-| `storyforge evaluate` | At least some drafted scenes in `draft/` |
+| `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | `plan-revision` | Evaluation results in `working/evaluations/` |
 | `storyforge revise` | `working/plans/revision-plan.yaml` |
 
@@ -182,6 +184,34 @@ When the author approves a recommendation in guided mode, that is a green light 
 **Current → New (do this):** Author approves → skill works.
 
 The hub provides the direction. The skill executes the direction. No intermediate questions. No breaking the task into sub-choices. Storyforge makes the creative sub-decisions, documents them in the output, and lets the author review the result. The author steers by redirecting after reviewing, not by answering questions before work begins.
+
+## Decisions Are Recorded, Not Re-Asked
+
+**Every author decision gets written to the key decisions file immediately.**
+
+When the author makes a creative, structural, or editorial decision during a session — whether in response to a question you asked, as part of approving a plan, or as a standalone directive — record it in the key decisions file before moving on. The format:
+
+```markdown
+## [Category]: [Short Title]
+**Decision:** [What was decided — the actual choice, not the question]
+**Date:** [YYYY-MM-DD]
+**Context:** [Why this came up — what evaluation finding, what contested point, what planning question]
+**Rationale:** [Why this choice — the author's reasoning, or the reasoning they endorsed]
+```
+
+Categories: `Structure`, `Character`, `Voice`, `Revision`, `Scope`, `World`, `Theme`
+
+**Before asking any question**, check the key decisions file. If the decision is already recorded there, act on it — do not ask again. This applies across sessions: a decision made in a previous session is still a decision.
+
+**When proposing guidance entries** in a revision plan, check the key decisions file first. If the author has already decided something relevant, use that decision in the guidance — do not present it as an open question.
+
+Commit and push the key decisions file after every new entry, along with whatever deliverable prompted the decision.
+
+## Manuscript Assembly Is a Late-Stage Step
+
+Storyforge works on scenes, not assembled chapters. Evaluation, revision, and all craft work operate on scene files in `scenes/`. Manuscript assembly (combining scenes into chapters) is a separate, final step that happens when the author is satisfied with the scene-level content.
+
+Do not suggest assembling the manuscript until the author explicitly asks for it or signals they are done with scene-level revision. The scene is the unit of work.
 
 ## The Repo Is the Source of Truth
 

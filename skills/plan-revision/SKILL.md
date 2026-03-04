@@ -35,8 +35,9 @@ Read the following files to understand the full project context:
 - **`scenes/scene-index.yaml`** — the scene inventory, structure, and any scene-level notes
 - **`reference/voice-guide.md`** — the established voice rules and style parameters
 - **`references/craft-engine.md`** from the plugin directory — the craft reference that informs revision strategy
+- **Key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md` or `references/key-decisions.md`). If it exists, read it in full. **Settled decisions must be respected in the plan — do not propose alternatives to decisions already made, and do not present them as open questions in guidance entries.**
 
-Also scan the `draft/` directory to understand which scenes have been drafted and their approximate word counts.
+Also scan the `scenes/` directory to understand which scenes have been drafted and their approximate word counts.
 
 ## Step 3: Analyze Findings
 
@@ -142,6 +143,18 @@ Then invite the author to adjust. They may:
 - **Split or merge passes** — break a large pass into smaller ones, or combine related small passes
 
 Iterate until the author approves the plan. Do not rush this — the revision plan shapes weeks of work.
+
+**Record decisions as they happen.** When the author makes a decision during plan review — approving a pass, rejecting one, choosing between approaches, resolving a contested point — write it to the key decisions file immediately. Use the format:
+
+```markdown
+## [Category]: [Short Title]
+**Decision:** [What was decided]
+**Date:** [YYYY-MM-DD]
+**Context:** [What evaluation finding or planning question prompted this]
+**Rationale:** [Why — the author's reasoning or the reasoning they endorsed]
+```
+
+This prevents future sessions from re-asking settled questions.
 
 ## Step 6: Save the Plan
 

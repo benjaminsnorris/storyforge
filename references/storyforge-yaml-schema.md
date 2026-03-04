@@ -54,6 +54,7 @@ Every artifact entry shares the same three-field structure:
 | `timeline` | Chronological event log ensuring temporal consistency across scenes, subplots, and character arcs. | `references/timeline.md` |
 | `scene_index` | The master list of every scene with metadata (chapter, POV, location, status, word count, and any scene extensions). | `references/scene-index.md` |
 | `continuity_tracker` | A living ledger of continuity facts — promises made, details established, threads opened — used during evaluation and revision. | `references/continuity-tracker.md` |
+| `key_decisions` | A canonical log of author decisions — creative, structural, editorial. All skills consult this before asking questions and append new decisions immediately when the author makes them. If a decision is recorded here, it is settled and must not be re-asked. | `references/key-decisions.md` |
 
 ---
 

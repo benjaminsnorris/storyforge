@@ -71,6 +71,11 @@ artifacts:
     path: references/continuity-tracker.md
     updated:
 
+  key_decisions:
+    exists: false
+    path: references/key-decisions.md
+    updated:
+
 # ----------------------------------------------------------------------------
 # Scene Extensions
 # ----------------------------------------------------------------------------

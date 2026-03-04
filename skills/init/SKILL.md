@@ -60,19 +60,18 @@ Use the **Bash tool** to create the full directory tree:
 ├── storyforge.yaml
 ├── CLAUDE.md
 ├── reference/
+│   └── key-decisions.md
 ├── scenes/
-├── draft/
-├── manuscript/
-└── working/
-    ├── logs/
-    ├── evaluations/
-    └── plans/
+├── working/
+│   ├── logs/
+│   ├── evaluations/
+│   └── plans/
 ```
 
 Create all directories first with a single `mkdir -p` command:
 
 ```bash
-mkdir -p {project-dir}/{reference,scenes,draft,manuscript,working/{logs,evaluations,plans}}
+mkdir -p {project-dir}/{reference,scenes,working/{logs,evaluations,plans}}
 ```
 
 Then copy the runner script from the plugin's `templates/storyforge-runner.sh` to the project root as `storyforge` and make it executable:
@@ -166,9 +165,8 @@ If the template cannot be found, generate a project `CLAUDE.md` that includes:
 - [ ] World bible — not yet created
 - [ ] Character profiles — not yet created
 - [ ] Story concept / synopsis — not yet created
+- [ ] Key decisions — initialized (empty)
 - [ ] Scene index — initialized (empty)
-- [ ] First draft — not yet started
-- [ ] Manuscript — not yet assembled
 
 ## Current Phase: Development
 
