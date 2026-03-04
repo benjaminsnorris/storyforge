@@ -151,7 +151,13 @@ If the project doesn't have a `./storyforge` runner script, offer to create one 
 
 The author said "surprise me," "what should I work on?", or gave no specific direction. This is your chance to be a thoughtful collaborator.
 
-**Check the project phase first.** If the phase is `review`, the revision cycle just completed and the highest-value action is always to run the review skill. Do not recommend other work — recommend `/storyforge:review` with a one-sentence rationale about what the revision covered. On approval, invoke the review skill immediately.
+**Check the project phase first.**
+
+- If the phase is `review`, the revision cycle just completed and the highest-value action is always to run the review skill. Do not recommend other work — recommend `/storyforge:review` with a one-sentence rationale about what the revision covered. On approval, invoke the review skill immediately.
+
+- If the phase is `complete`, the manuscript is finished and the natural next step is book production. Recommend `/storyforge:produce` to set up the chapter map and production settings, then `./storyforge assemble` to generate the epub. If the chapter map already exists, recommend running `./storyforge assemble` directly.
+
+- If the phase is `production`, assembly is underway. Check whether output files exist in `manuscript/output/`. If not, recommend running `./storyforge assemble`. If they do, suggest reviewing the output or adjusting production settings via `/storyforge:produce`.
 
 **Assess the full project state** from what you read in Step 1.
 

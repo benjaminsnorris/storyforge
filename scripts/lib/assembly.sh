@@ -413,6 +413,17 @@ generate_epub_metadata() {
             echo "cover-image: \"${project_dir}/${cover_image}\""
         fi
     fi
+    # Series metadata (optional)
+    local series_name
+    series_name=$(read_yaml_field "project.series_name" 2>/dev/null || echo "")
+    local series_position
+    series_position=$(read_yaml_field "project.series_position" 2>/dev/null || echo "")
+    if [[ -n "$series_name" ]]; then
+        echo "belongs-to-collection: \"${series_name}\""
+        if [[ -n "$series_position" ]]; then
+            echo "group-position: \"${series_position}\""
+        fi
+    fi
     echo "rights: \"Copyright © ${copyright_year} ${author}\""
     echo "---"
 }

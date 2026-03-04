@@ -27,6 +27,8 @@ Core metadata identifying the novel and its goals.
 | `subgenre` | string | optional | A more specific genre qualifier. Refines evaluation guidance when present. | `null` | `"hard sci-fi"` |
 | `target_words` | number | required | The target word count for the completed manuscript. Used to calibrate pacing feedback and act-length estimates. | — | `90000` |
 | `logline` | string | required | A one- or two-sentence pitch that captures the protagonist, conflict, and stakes. Referenced during story architecture and continuity checks to keep the narrative on course. | — | `"A disgraced xenolinguist must decode an alien signal before first contact becomes humanity's last."` |
+| `series_name` | string | optional | The name of the series this book belongs to. Used in epub metadata (`belongs-to-collection`). | `null` | `"The Mapmaker Trilogy"` |
+| `series_position` | number | optional | This book's position in the series. Used in epub metadata (`group-position`). | `null` | `2` |
 
 ---
 

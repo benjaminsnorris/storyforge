@@ -1,7 +1,8 @@
 # Epub Preparation — Design
 
 **Date:** 2026-03-03
-**Status:** Draft
+**Status:** Implemented (Phases 1–3), Phase 4 partial
+**Version:** 0.5.1
 **Scope:** Adding book production capabilities to Storyforge — assembling scenes into chapters, generating front/back matter, formatting for epub/PDF, cover integration, and genre-appropriate layout.
 
 ## Why This Belongs in Storyforge
@@ -136,30 +137,38 @@ This is the first Storyforge feature that requires external tools:
 
 The skill should detect available tools and adjust capabilities accordingly. Core assembly (scenes → chapters → markdown manuscript) requires no external tools. Epub generation requires pandoc. PDF is optional.
 
-## Open Questions
+## Open Questions — Resolved
 
-1. **Chapter mapping: separate file or extension to scene-index?** A separate `chapter-map.yaml` is cleaner but adds another artifact. Extending scene-index with `chapter:` fields keeps everything in one place but makes the index more complex.
+1. **Chapter mapping: separate file or extension to scene-index?** ✅ **Decided: separate file.** `reference/chapter-map.yaml` keeps a clean separation between the atomic scene index (used by drafting/evaluation/revision) and the chapter structure (used only for production). Added as a tracked artifact in `storyforge.yaml`.
 
-2. **When does the `manuscript/` directory appear?** On first `./storyforge assemble` run? Or when the author enters the production phase? The init skill currently doesn't create it.
+2. **When does the `manuscript/` directory appear?** ✅ **Decided: on first `./storyforge assemble` run.** The init skill does not create it. It appears only when the author enters production.
 
-3. **Should assembly be idempotent?** If the author runs `./storyforge assemble` twice, should it overwrite or create a new timestamped output?
+3. **Should assembly be idempotent?** ✅ **Decided: yes, overwrite.** The output is deterministic from the inputs (chapter map + scene files + production settings). No timestamped copies.
 
-4. **How to handle illustrations/maps?** Some genres (fantasy, children's) include interior illustrations. This needs image handling beyond just the cover.
+4. **How to handle illustrations/maps?** ⏳ **Deferred.** The `manuscript/assets/` directory exists for images, but no illustration pipeline is implemented yet. Cover images are supported via pandoc's `--epub-cover-image`.
 
-5. **Print formatting?** Print-on-demand (KDP, IngramSpark) has specific requirements for trim size, bleed, margins, gutter. Is this in scope or a separate concern?
+5. **Print formatting?** ⏳ **Deferred.** PDF generation works via weasyprint or LaTeX, but print-on-demand trim/bleed/gutter settings are not yet implemented. A future phase.
 
-6. **Series metadata?** If this is book 2 of a trilogy, the epub needs series metadata. Where does this live in storyforge.yaml?
+6. **Series metadata?** ⏳ **Partially addressed.** Added optional `series` fields to `storyforge.yaml` project section (`series_name`, `series_position`). Epub metadata generation includes these when present. Full EPUB 3 series metadata (calibre:series) is a future refinement.
 
 ## Implementation Approach
 
 This is a larger feature that should be built incrementally:
 
-1. **Phase 1: Chapter assembly.** The chapter map, the assembly script, and basic markdown output. No formatting, no epub. Just scenes → chapters → manuscript files.
+1. **Phase 1: Chapter assembly.** ✅ The chapter map (`reference/chapter-map.yaml`), the assembly library (`scripts/lib/assembly.sh`), and the `storyforge-assemble` script. Scenes → chapters → manuscript markdown files.
 
-2. **Phase 2: Epub generation.** Pandoc integration, CSS styling, cover embedding, epubcheck validation. Genre presets.
+2. **Phase 2: Epub generation.** ✅ Pandoc integration, 6 genre CSS presets (default, literary-fiction, thriller, romance, fantasy, science-fiction), cover embedding, epubcheck validation, epub metadata with ISBN/series support.
 
-3. **Phase 3: The production skill.** Interactive skill that guides the author through all production decisions.
+3. **Phase 3: The production skill.** ✅ `/storyforge:produce` — interactive skill that guides the author through chapter mapping, typography choices, front/back matter, cover setup, and copyright. Integrated with forge hub routing.
 
-4. **Phase 4: PDF and additional formats.** LaTeX/weasyprint integration, print-ready output.
+4. **Phase 4: PDF and additional formats.** 🔶 Partial. PDF generation via weasyprint or LaTeX is implemented in the assembly library. Kindle (KFX/mobi) is not implemented. Print-on-demand formatting (trim, bleed, gutter) is deferred.
 
 Each phase is independently useful. Phase 1 alone solves the "I have scenes but no book" problem.
+
+## Implementation Notes
+
+- 252 tests across 6 suites (87 new for assembly/production)
+- All autonomous agents (write, evaluate, revise, assemble) commit and push after completing their work
+- Genre CSS presets live in `templates/production/css/` in the plugin
+- Chapter map template at `templates/production/chapter-map-template.yaml`
+- The `production` phase was added to the phase enum in storyforge.yaml
