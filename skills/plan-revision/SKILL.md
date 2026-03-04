@@ -158,7 +158,19 @@ This prevents future sessions from re-asking settled questions.
 
 ## Step 6: Save the Plan
 
-Once the author approves, write the finalized plan to `working/plans/revision-plan.yaml`. Update the project phase to `revision` in `storyforge.yaml`. Then immediately commit and push all changes — the plan file, `storyforge.yaml`, and `CLAUDE.md`. Use a commit message like `"Plan revision: {N} passes for {title}"`. The repo should reflect the approved plan before execution begins.
+Once the author approves, **create a feature branch before saving** so that the plan and all revision work live on a branch, not main:
+
+```bash
+git checkout -b "storyforge/revise-$(date '+%Y%m%d-%H%M')"
+```
+
+Then write the finalized plan to `working/plans/revision-plan.yaml`. Update the project phase to `revision` in `storyforge.yaml`. Commit and push all changes — the plan file, `storyforge.yaml`, and `CLAUDE.md` — to the new branch:
+
+```bash
+git add -A && git commit -m "Plan revision: {N} passes for {title}" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
+```
+
+When the author runs `./storyforge revise`, the script will detect this branch, create a draft PR with a task list, and track progress there. The repo should reflect the approved plan before execution begins.
 
 The file should include:
 

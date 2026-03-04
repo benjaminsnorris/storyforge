@@ -108,10 +108,18 @@ Then ask about production settings **one question at a time** using `AskUserQues
 Update `reference/chapter-map.yaml` with all production settings after each answer.
 
 **After all settings are configured:**
+- **Create a feature branch** before saving so the chapter map and assembly work live on a branch:
+  ```bash
+  git checkout -b "storyforge/assemble-$(date '+%Y%m%d-%H%M')"
+  ```
 - Update `storyforge.yaml`: set `chapter_map.exists: true` and `chapter_map.updated` to today's date
 - Record all production decisions in the key decisions file
-- Commit and push: `git add -A && git commit -m "Produce: create chapter map and production settings" && git push`
+- Commit and push to the new branch:
+  ```bash
+  git add -A && git commit -m "Produce: create chapter map and production settings" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
+  ```
 - Tell the author how to run the assembly: `./storyforge assemble`
+- When the author runs `./storyforge assemble`, the script will detect this branch, create a draft PR, and track progress there.
 
 ---
 

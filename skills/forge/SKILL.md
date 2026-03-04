@@ -200,6 +200,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 | `plan-revision` | Evaluation results in `working/evaluations/` |
 | `storyforge revise` | `working/plans/revision-plan.yaml` |
 | `storyforge assemble` | `reference/chapter-map.yaml` with at least one chapter, scene files for referenced scenes |
+| `storyforge review` | Must be on a feature branch (ideally with a PR) |
 
 ### Soft Prerequisites (recommended — suggest but allow override)
 
@@ -242,6 +243,24 @@ Categories: `Structure`, `Character`, `Voice`, `Revision`, `Scope`, `World`, `Th
 **When proposing guidance entries** in a revision plan, check the key decisions file first. If the author has already decided something relevant, use that decision in the guidance — do not present it as an open question.
 
 Commit and push the key decisions file after every new entry, along with whatever deliverable prompted the decision.
+
+## Branch + PR Workflow
+
+Autonomous scripts (`write`, `evaluate`, `revise`, `assemble`) work on feature branches, not main. The workflow:
+
+1. **Skills create branches** when saving plans or artifacts. For example, `plan-revision` creates `storyforge/revise-{timestamp}` before saving the revision plan. The `produce` skill creates `storyforge/assemble-{timestamp}` before saving the chapter map.
+
+2. **Scripts create draft PRs** when they start. The PR includes a task list with one checkbox per phase (scene, evaluator, revision pass, etc.) plus a "Review" task. The PR is labeled `in-progress`.
+
+3. **As work progresses**, tasks are checked off in the PR description. The author can follow along by watching the PR.
+
+4. **Review runs automatically** at the end. The review phase removes `in-progress`, adds `reviewing`, converts the draft PR to ready-for-review, runs a Claude-powered quality assessment, posts the review as a PR comment, then marks the PR `ready-to-merge`.
+
+5. **The author merges.** `ready-to-merge` is a recommendation. The author reviews the PR diff and comment, then merges or requests changes.
+
+If the author runs a script directly without going through a skill (no branch exists), the script creates the branch itself.
+
+The standalone `./storyforge review` command can also run the review phase on the current branch at any time.
 
 ## Manuscript Assembly Is a Late-Stage Step
 
