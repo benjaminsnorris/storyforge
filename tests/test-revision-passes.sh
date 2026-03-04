@@ -120,7 +120,7 @@ assert_contains "$result" "Read All In-Scope Scene Files" "build_revision_prompt
 assert_contains "$result" "Apply the Revision" "build_revision_prompt: has instruction 3"
 assert_contains "$result" "Preserve Voice" "build_revision_prompt: has instruction 4"
 assert_contains "$result" "Maintain Continuity" "build_revision_prompt: has instruction 5"
-assert_contains "$result" "Do Not Commit" "build_revision_prompt: has instruction 6"
+assert_contains "$result" "Commit and Push" "build_revision_prompt: has instruction 6"
 assert_contains "$result" "Post-Pass Summary" "build_revision_prompt: has instruction 7"
 
 # Has the purpose embedded

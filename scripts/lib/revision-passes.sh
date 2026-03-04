@@ -166,7 +166,7 @@ read_pass_guidance() {
 #   4. Apply the stated revision purpose to each scene
 #   5. Preserve the established voice
 #   6. Maintain and update continuity
-#   7. NOT commit — the calling script handles git
+#   7. Commit and push changes
 #   8. Produce a post-pass summary
 #
 # Usage:
@@ -290,9 +290,17 @@ Every edit must be consistent with the voice guide. Do not flatten distinctive c
 
 If your edits change any plot-relevant detail — character knowledge, physical state, timeline position, object presence, setting detail — update the continuity tracker to reflect the change. Do not create contradictions with other scenes (including those outside this pass's scope).
 
-### 6. Do Not Commit
+### 6. Commit and Push
 
-Do NOT run any git commands. Do NOT create commits. The calling script handles all git operations after this pass completes.
+After completing all edits for this pass, stage and commit your changes:
+
+\`\`\`
+git add scenes/ reference/ 2>/dev/null
+git commit -m "Revision: ${pass_name}"
+git push
+\`\`\`
+
+This is required — the author follows progress by pulling commits as you work.
 
 ### 7. Post-Pass Summary
 

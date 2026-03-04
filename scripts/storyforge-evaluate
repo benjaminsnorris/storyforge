@@ -448,7 +448,15 @@ ${ref_files}
 
 Save your complete evaluation to: working/evaluations/eval-${EVAL_TIMESTAMP}/${evaluator}.md
 
-Do not commit to git — the calling script handles that.
+===== COMMIT AND PUSH =====
+
+After saving your report, stage and commit:
+
+  git add "working/evaluations/eval-${EVAL_TIMESTAMP}/${evaluator}.md"
+  git commit -m "Evaluate: ${evaluator} report (${SCOPE_DESCRIPTION})"
+  git push
+
+This is required — the author follows progress by pulling commits as you work.
 EVAL_PROMPT
 }
 
@@ -707,7 +715,13 @@ IMPORTANT: The findings.yaml must be valid YAML. Use quoted strings for values t
 - minor: Worth fixing but not urgent
 - suggestion: Nice-to-have improvement
 
-Do not commit to git — the calling script handles that.
+After saving both files, stage and commit:
+
+  git add "working/evaluations/eval-${EVAL_TIMESTAMP}/synthesis.md" "working/evaluations/eval-${EVAL_TIMESTAMP}/findings.yaml"
+  git commit -m "Evaluate: synthesis (${SCOPE_DESCRIPTION})"
+  git push
+
+This is required — the author follows progress by pulling commits as you work.
 SYNTH_EOF
 
 SYNTH_START=$(date +%s)
