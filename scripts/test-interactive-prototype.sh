@@ -58,18 +58,23 @@ for (( i=0; i<${#SCENES[@]}; i++ )); do
         echo "[AUTOPILOT] ${SCENE} complete (exit: ${EXIT_CODE})"
     else
         echo ""
-        BANNER_TITLE="INTERACTIVE MODE — Scene ${NUM} of ${#SCENES[@]}"
+        BANNER_TITLE="INTERACTIVE MODE - Scene ${NUM} of ${#SCENES[@]}"
         BANNER_WIDTH=60
         BANNER_LINES=(
             "$BANNER_TITLE"
             ""
             "You can watch, give feedback, or redirect Claude."
             "When this scene is done, type /exit to continue."
-            "Say \"finish without me\" to run the rest autonomously."
+            'Say "finish without me" to run the rest autonomously.'
         )
         printf '╔%*s╗\n' "$BANNER_WIDTH" '' | tr ' ' '═'
         for line in "${BANNER_LINES[@]}"; do
-            printf '║  %-*s  ║\n' "$((BANNER_WIDTH - 4))" "$line"
+            # Calculate byte vs display padding (multi-byte chars need extra space)
+            local byte_len=${#line}
+            local display_len
+            display_len=$(echo -n "$line" | LC_ALL=C wc -c | tr -d ' ')
+            local extra=$((display_len - byte_len))
+            printf '║  %-*s  ║\n' "$((BANNER_WIDTH - 4 + extra))" "$line"
         done
         printf '╚%*s╝\n' "$BANNER_WIDTH" '' | tr ' ' '═'
         echo ""
