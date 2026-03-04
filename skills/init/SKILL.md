@@ -197,13 +197,21 @@ Start with whichever element pulls you in the strongest.
 
 Use the **Write tool** to save this to `{project-dir}/CLAUDE.md`.
 
-## Step 7: Initialize Git
+## Step 7: Initialize Git and Push
 
-Use the **Bash tool** to initialize a git repository and make the initial commit:
+Use the **Bash tool** to initialize a git repository, make the initial commit, and push to a remote:
 
 ```bash
 cd {project-dir} && git init && git add -A && git commit -m "Initialize Storyforge project: {title}"
 ```
+
+Then ask the author if they have a remote repository to push to. If they provide a URL (e.g., a GitHub repo), set it up and push:
+
+```bash
+git remote add origin {url} && git push -u origin main
+```
+
+If they don't have one yet, let them know they can add one later. The important thing is that the repo exists locally — every Storyforge skill commits and pushes after each significant change so the repo always reflects the project's current state.
 
 ## Step 8: Welcome the Author
 

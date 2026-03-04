@@ -145,7 +145,7 @@ Iterate until the author approves the plan. Do not rush this — the revision pl
 
 ## Step 6: Save the Plan
 
-Once the author approves, write the finalized plan to `working/plans/revision-plan.yaml`.
+Once the author approves, write the finalized plan to `working/plans/revision-plan.yaml`. Then immediately commit and push all changes — the plan file, any updates to `storyforge.yaml`, and any updates to `CLAUDE.md`. Use a commit message like `"Plan revision: {N} passes for {title}"`. The repo should reflect the approved plan before execution begins.
 
 The file should include:
 

@@ -183,6 +183,18 @@ When the author approves a recommendation in guided mode, that is a green light 
 
 The hub provides the direction. The skill executes the direction. No intermediate questions. No breaking the task into sub-choices. Storyforge makes the creative sub-decisions, documents them in the output, and lets the author review the result. The author steers by redirecting after reviewing, not by answering questions before work begins.
 
+## The Repo Is the Source of Truth
+
+Every Storyforge skill commits and pushes after each significant piece of work. The project repo should always reflect the current state — what artifacts exist, what decisions have been made, where the project is in its lifecycle. If the author checks the repo from another machine or another session, they should be able to see exactly where things stand.
+
+This means:
+- After creating or updating a reference document: commit and push.
+- After designing scenes or modifying the scene index: commit and push.
+- After saving a revision plan: commit and push.
+- After any change to `storyforge.yaml` or `CLAUDE.md`: commit and push.
+
+Commit messages should be descriptive and prefixed with the area of work: `"Develop: ..."`, `"Voice: ..."`, `"Scenes: ..."`, `"Plan revision: ..."`.
+
 ## Coaching Posture
 
 The hub should feel like checking in with a knowledgeable collaborator. Not a project management dashboard. Not a chatbot asking what you'd like to do today.

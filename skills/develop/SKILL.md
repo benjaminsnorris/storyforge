@@ -257,9 +257,9 @@ The timeline is the backbone of narrative logistics. Getting it wrong creates co
 
 ---
 
-## Step 4: After Each Session
+## Step 4: After Each Significant Change
 
-When wrapping up a development session, do the following:
+After every meaningful piece of work — a new reference document, a character deepened, a story architecture decision — do the following immediately. Do not batch these up for the end of the session. The repo should always reflect the current state of the project.
 
 1. **Update `storyforge.yaml`:**
    - In the `artifacts` section, set `exists: true` for any documents created or modified.
@@ -271,7 +271,12 @@ When wrapping up a development session, do the following:
    - Reflect the new state of development — what exists, what's changed, what the author decided.
    - Keep it concise. This is context for future sessions, not a transcript of this one.
 
-3. **Suggest what to work on next:**
+3. **Commit and push:**
+   - Stage all changed files and commit with a descriptive message: `"Develop: {what was done}"` (e.g., `"Develop: deepen Maren wound/lie/need structure"`, `"Develop: add economic system to world bible"`).
+   - Push to remote immediately after committing.
+   - The project repo is the source of truth. If the author checks it from another machine or session, it should reflect everything that has been decided.
+
+4. **Suggest what to work on next:**
    - Based on what was just developed, what's the natural next step?
    - Be specific: "Now that Maren's wound and lie are defined, it would be a good time to revisit the story architecture and make sure the climax forces her to confront the lie."
    - But do not push. The author decides. Offer, don't insist.
