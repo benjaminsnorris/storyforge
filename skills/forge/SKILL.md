@@ -185,15 +185,24 @@ The hub provides the direction. The skill executes the direction. No intermediat
 
 ## The Repo Is the Source of Truth
 
-Every Storyforge skill commits and pushes after each significant piece of work. The project repo should always reflect the current state — what artifacts exist, what decisions have been made, where the project is in its lifecycle. If the author checks the repo from another machine or another session, they should be able to see exactly where things stand.
+**Commit and push after every deliverable, not at the end of the session.**
 
-This means:
-- After creating or updating a reference document: commit and push.
-- After designing scenes or modifying the scene index: commit and push.
-- After saving a revision plan: commit and push.
-- After any change to `storyforge.yaml` or `CLAUDE.md`: commit and push.
+The project repo must always reflect the current state of the work. If the session crashes, if the author checks from another machine, if another Claude session opens the project — the repo must show everything that has been decided and produced. Uncommitted work is lost work.
 
-Commit messages should be descriptive and prefixed with the area of work: `"Develop: ..."`, `"Voice: ..."`, `"Scenes: ..."`, `"Plan revision: ..."`.
+This is especially important during long autonomous sessions where a skill is executing multiple pieces of work in sequence. Each deliverable gets its own commit and push before moving to the next:
+
+- Built a character? Commit and push. Then build the next character.
+- Designed an act's worth of scenes? Commit and push. Then design the next act.
+- Produced a voice guide section? Commit and push. Then produce the next section.
+- Updated a reference document? Commit and push.
+
+Every commit includes updated `storyforge.yaml` and `CLAUDE.md` so the project state files are always current.
+
+Commit messages are descriptive and prefixed: `"Develop: ..."`, `"Voice: ..."`, `"Scenes: ..."`, `"Plan revision: ..."`.
+
+```
+git add -A && git commit -m "Develop: {what was done}" && git push
+```
 
 ## Coaching Posture
 

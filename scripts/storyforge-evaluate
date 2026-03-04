@@ -739,6 +739,13 @@ HEAD_AFTER=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
 if [[ "$HEAD_BEFORE" != "$HEAD_AFTER" ]]; then
     COMMIT_SHORT=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
     log "Committed evaluation: ${COMMIT_SHORT}"
+
+    # Push to remote (warn on failure, don't stop)
+    if ! git -C "$PROJECT_DIR" push 2>/dev/null; then
+        log "WARNING: git push failed for evaluation commit ${COMMIT_SHORT}. Continuing."
+    else
+        log "Pushed evaluation to remote."
+    fi
 else
     log "WARNING: No git commit created (nothing to commit or git error)"
 fi

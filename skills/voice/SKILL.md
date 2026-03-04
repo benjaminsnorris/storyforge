@@ -145,13 +145,25 @@ Write or update `reference/voice-guide.md` with the full voice definition, organ
 6. **Style Rules** — the specific do/don't list
 7. **Sample Passages** — the approved sample paragraphs as reference benchmarks
 
-## Step 6: Update Project Files, Commit, and Push
+## Step 6: Commit After Every Deliverable
 
-After every meaningful change — a new voice guide created, POV rules added, sample passages approved, style rules refined — do the following immediately. Do not batch these up for the end of the session.
+**This step happens repeatedly throughout the session, not once at the end.**
 
-- Update `storyforge.yaml` to reflect that the voice guide exists and its last-modified date.
-- Update `CLAUDE.md` with any voice rules that should be active during all writing sessions (especially style rules and POV voice rules).
-- **Commit and push:** Stage all changed files and commit with a descriptive message: `"Voice: {what was done}"` (e.g., `"Voice: establish voice blend and sensory palette"`, `"Voice: add Kael POV-specific rules"`). Push to remote immediately. The project repo is the source of truth — it should always reflect the current state of the work.
+Every time you produce or substantially update the voice guide — a new voice blend, POV rules for a character, sample passages, style rules — you must commit and push before moving on to the next piece of work. The repo is the source of truth. If the session crashes or the author checks from another machine, the repo must reflect everything produced.
+
+**After each deliverable:**
+
+1. Update `storyforge.yaml` to reflect that the voice guide exists and its last-modified date.
+2. Update `CLAUDE.md` with any voice rules that should be active during all writing sessions (especially style rules and POV voice rules).
+3. **Commit and push immediately:**
+   ```
+   git add -A && git commit -m "Voice: {what was done}" && git push
+   ```
+   Examples: `"Voice: establish voice blend and sensory palette"`, `"Voice: add Kael POV-specific rules"`, `"Voice: refine dialogue philosophy and emotional register"`.
+
+4. Then continue to the next section of voice work.
+
+**Commit cadence:** If building a full voice guide from scratch, commit after the voice blend is established, then after POV rules, then after sample passages are approved, then after style rules. Do not wait until the entire guide is complete.
 
 ## Craft Principles to Keep Active Throughout
 

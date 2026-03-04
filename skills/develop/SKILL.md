@@ -257,29 +257,37 @@ The timeline is the backbone of narrative logistics. Getting it wrong creates co
 
 ---
 
-## Step 4: After Each Significant Change
+## Step 4: Commit After Every Deliverable
 
-After every meaningful piece of work — a new reference document, a character deepened, a story architecture decision — do the following immediately. Do not batch these up for the end of the session. The repo should always reflect the current state of the project.
+**This step happens repeatedly throughout the session, not once at the end.**
+
+Every time you produce or substantially update a document — a character bible entry, a world bible section, a story architecture decision — you must commit and push before moving on to the next piece of work. This is not optional. The repo is the source of truth. If the session crashes, if the author checks from another machine, if another Claude session opens the project — the repo must reflect everything that has been decided and produced.
+
+**After each deliverable:**
 
 1. **Update `storyforge.yaml`:**
    - In the `artifacts` section, set `exists: true` for any documents created or modified.
    - Update the `path` field to the correct file path.
    - Update the `last_modified` date to today's date.
-   - Do not modify other sections of `storyforge.yaml` unless the author specifically asks.
 
 2. **Update the project `CLAUDE.md`:**
    - Reflect the new state of development — what exists, what's changed, what the author decided.
    - Keep it concise. This is context for future sessions, not a transcript of this one.
 
-3. **Commit and push:**
-   - Stage all changed files and commit with a descriptive message: `"Develop: {what was done}"` (e.g., `"Develop: deepen Maren wound/lie/need structure"`, `"Develop: add economic system to world bible"`).
-   - Push to remote immediately after committing.
-   - The project repo is the source of truth. If the author checks it from another machine or session, it should reflect everything that has been decided.
+3. **Commit and push immediately:**
+   ```
+   git add -A && git commit -m "Develop: {what was done}" && git push
+   ```
+   Examples: `"Develop: deepen Maren wound/lie/need structure"`, `"Develop: add economic system to world bible"`, `"Develop: create story architecture with three-act structure"`.
 
-4. **Suggest what to work on next:**
-   - Based on what was just developed, what's the natural next step?
-   - Be specific: "Now that Maren's wound and lie are defined, it would be a good time to revisit the story architecture and make sure the climax forces her to confront the lie."
-   - But do not push. The author decides. Offer, don't insist.
+4. **Then continue** to the next piece of work, or suggest what to work on next.
+
+**Commit cadence examples:**
+- Building a character bible with 4 characters? Commit after each character, not after all four.
+- Creating a world bible? Commit after completing a major section (geography + politics), not after the entire document.
+- Working on story architecture? Commit when the structural framework is decided, then again after mapping turning points.
+
+The principle: if the session ended right now, would the repo reflect everything of value that was produced? If not, you haven't committed recently enough.
 
 ---
 

@@ -185,14 +185,26 @@ After any edit, run validation checks:
 
 ---
 
-## Step 4: Update Project Files, Commit, and Push
+## Step 4: Commit After Every Deliverable
 
-After any changes to the scene index — new scenes designed, scenes reordered, splits, merges, or cuts — do the following immediately. Do not batch these up for the end of the session.
+**This step happens repeatedly throughout the session, not once at the end.**
 
-- Write the updated `scene-index.yaml`.
-- Update `storyforge.yaml` with the current scene count, last-modified date, and any structural changes.
-- Regenerate relevant sections of `CLAUDE.md` to reflect the current scene state (active scenes, next scenes to draft, thread status).
-- **Commit and push:** Stage all changed files and commit with a descriptive message: `"Scenes: {what was done}"` (e.g., `"Scenes: design Act 1 scene breakdown (8 scenes)"`, `"Scenes: split act2-sc05 into two scenes"`). Push to remote immediately. The project repo is the source of truth — it should always reflect the current state of the work.
+Every time you add, modify, or remove scenes — an act designed, scenes reordered, a split or merge applied — you must commit and push before moving on to the next piece of work. The repo is the source of truth. If the session crashes or the author checks from another machine, the repo must reflect every scene decision that has been made.
+
+**After each deliverable:**
+
+1. Write the updated `scene-index.yaml`.
+2. Update `storyforge.yaml` with the current scene count, last-modified date, and any structural changes.
+3. Regenerate relevant sections of `CLAUDE.md` to reflect the current scene state (active scenes, next scenes to draft, thread status).
+4. **Commit and push immediately:**
+   ```
+   git add -A && git commit -m "Scenes: {what was done}" && git push
+   ```
+   Examples: `"Scenes: design Act 1 scene breakdown (8 scenes)"`, `"Scenes: split act2-sc05 into two scenes"`, `"Scenes: reorder Act 2 for better pacing"`.
+
+5. Then continue to the next piece of scene work.
+
+**Commit cadence:** If designing scenes for a full novel, commit after each act's scenes are designed. If doing a review, commit after each batch of edits. If splitting/merging, commit after each structural change. Do not wait until all scene work is complete.
 
 ## Craft Coaching Throughout
 
