@@ -1,0 +1,34 @@
+# Chapter Map — The Cartographer's Silence
+# Maps scenes to chapters for manuscript assembly.
+
+chapters:
+  - title: "The Finest Cartographer"
+    heading: numbered-titled
+    scenes:
+      - act1-sc01
+      - act1-sc02
+
+  - title: "Into the Blank"
+    heading: numbered-titled
+    scenes:
+      - act2-sc01
+
+production:
+  author: "Test Author"
+  language: en
+  scene_break: ornamental
+  default_heading: numbered-titled
+  include_toc: true
+  cover_image:
+  genre_preset: fantasy
+  copyright:
+    year: 2026
+    isbn: "978-0-000000-00-0"
+    license: "All rights reserved."
+  front_matter:
+    dedication:
+    epigraph:
+  back_matter:
+    acknowledgments:
+    about-the-author:
+    also-by:

@@ -167,8 +167,9 @@ if [[ $MISSING_SCENES -gt 0 ]]; then
     log "WARNING: ${MISSING_SCENES} scene file(s) missing. Assembly will proceed with available scenes."
 fi
 
-# Check tool availability for non-markdown formats
-if [[ "$FORMAT" != "markdown" ]]; then
+# Check tool availability for non-markdown formats (skip in dry-run mode)
+PANDOC_VERSION=""
+if [[ "$FORMAT" != "markdown" && "$DRY_RUN" != true ]]; then
     PANDOC_VERSION=$(check_pandoc 2>/dev/null || echo "")
     if [[ -z "$PANDOC_VERSION" ]]; then
         if [[ "$FORMAT" == "all" ]]; then

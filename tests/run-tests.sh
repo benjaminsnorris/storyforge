@@ -210,6 +210,7 @@ echo "Fixture: ${FIXTURE_DIR}"
 source "${PLUGIN_DIR}/scripts/lib/common.sh"
 source "${PLUGIN_DIR}/scripts/lib/prompt-builder.sh"
 source "${PLUGIN_DIR}/scripts/lib/revision-passes.sh"
+source "${PLUGIN_DIR}/scripts/lib/assembly.sh"
 
 # Set PROJECT_DIR to the fixture
 export PROJECT_DIR="$FIXTURE_DIR"

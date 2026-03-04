@@ -94,3 +94,29 @@ eval_dirs_before=$(ls -d "${FIXTURE_DIR}/working/evaluations/"*/ 2>/dev/null | w
 run_dry_run "storyforge-evaluate" >/dev/null
 eval_dirs_after=$(ls -d "${FIXTURE_DIR}/working/evaluations/"*/ 2>/dev/null | wc -l | tr -d ' ')
 assert_equals "$eval_dirs_before" "$eval_dirs_after" "evaluate dry-run: does not create new eval directory"
+
+# ============================================================================
+# storyforge-assemble --dry-run
+# ============================================================================
+
+result=$(run_dry_run "storyforge-assemble")
+rc=$?
+
+assert_exit_code "0" "$rc" "assemble dry-run: exits 0"
+assert_contains "$result" "DRY RUN: assemble" "assemble dry-run: has dry-run header"
+assert_contains "$result" "END DRY RUN: assemble" "assemble dry-run: has dry-run footer"
+assert_contains "$result" "The Cartographer's Silence" "assemble dry-run: shows project title"
+assert_contains "$result" "Chapters: 2" "assemble dry-run: shows chapter count"
+assert_contains "$result" "The Finest Cartographer" "assemble dry-run: shows chapter 1 title"
+assert_contains "$result" "Into the Blank" "assemble dry-run: shows chapter 2 title"
+assert_contains "$result" "act1-sc01" "assemble dry-run: lists scene IDs"
+assert_contains "$result" "act2-sc01" "assemble dry-run: lists scenes in chapter 2"
+
+# Dry-run should not create manuscript directory
+if [[ -d "${FIXTURE_DIR}/manuscript" ]]; then
+    FAIL=$((FAIL + 1))
+    echo "  FAIL: assemble dry-run: should not create manuscript directory"
+else
+    PASS=$((PASS + 1))
+    echo "  PASS: assemble dry-run: does not create manuscript directory"
+fi

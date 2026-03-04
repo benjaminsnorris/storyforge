@@ -51,6 +51,16 @@ artifacts:
     path: reference/key-decisions.md
     updated: "2026-02-22"
 
+  chapter_map:
+    exists: true
+    path: reference/chapter-map.yaml
+    updated: "2026-03-03"
+
+  manuscript:
+    exists: false
+    path: manuscript/
+    updated:
+
 scene_extensions: []
 
 evaluation:

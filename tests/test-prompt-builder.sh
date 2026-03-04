@@ -58,9 +58,9 @@ assert_contains "$result" "reference/voice-guide.md" "list_reference_files: voic
 assert_contains "$result" "reference/continuity-tracker.md" "list_reference_files: continuity-tracker"
 assert_contains "$result" "reference/key-decisions.md" "list_reference_files: key-decisions"
 
-# Should be sorted
+# Should be sorted (chapter-map.yaml sorts before character-bible.md)
 first_line=$(echo "$result" | head -1)
-assert_equals "reference/character-bible.md" "$first_line" "list_reference_files: sorted (character-bible first)"
+assert_equals "reference/chapter-map.yaml" "$first_line" "list_reference_files: sorted (chapter-map first)"
 
 # ============================================================================
 # read_scene_field

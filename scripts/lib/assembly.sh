@@ -53,10 +53,11 @@ read_chapter_field() {
         return 1
     fi
 
+    # Match field with optional leading "- " (YAML list item prefix)
     echo "$block" \
-        | grep -E "^[[:space:]]+${field}:" \
+        | grep -E "[[:space:]](-[[:space:]]+)?${field}:" \
         | head -1 \
-        | sed "s/^[[:space:]]*${field}:[[:space:]]*//" \
+        | sed "s/^.*${field}:[[:space:]]*//" \
         | sed 's/^["'"'"']//' \
         | sed 's/["'"'"']$//' \
         | sed 's/[[:space:]]*$//'
@@ -222,19 +223,21 @@ read_production_nested() {
         return 1
     fi
 
-    # Extract the production block first
-    local prod_block
-    prod_block=$(sed -n '/^production:/,/^[^ ]/p' "$chapter_map")
-
-    # Then extract the parent block within production
-    echo "$prod_block" \
-        | sed -n "/^[[:space:]]*${parent}:/,/^[[:space:]]*[^ ]/p" \
-        | grep -E "^[[:space:]]+${child}:" \
-        | head -1 \
-        | sed "s/^[[:space:]]*${child}:[[:space:]]*//" \
-        | sed 's/^["'"'"']//' \
-        | sed 's/["'"'"']$//' \
-        | sed 's/[[:space:]]*$//'
+    # Use awk to extract the nested value from production > parent > child
+    awk -v parent="$parent" -v child="$child" '
+        /^production:/ { in_prod=1; next }
+        in_prod && /^[^ ]/ { in_prod=0 }
+        in_prod && $0 ~ "^[[:space:]]+" parent ":" { in_parent=1; next }
+        in_parent && /^[[:space:]]+[^[:space:]]/ && !/^[[:space:]]+[[:space:]]/ { in_parent=0 }
+        in_parent && $0 ~ "^[[:space:]]+" child ":" {
+            val = $0
+            sub("^[[:space:]]*" child ":[[:space:]]*", "", val)
+            gsub(/^["'"'"'"]|["'"'"'"]$/, "", val)
+            gsub(/[[:space:]]*$/, "", val)
+            print val
+            exit
+        }
+    ' "$chapter_map"
 }
 
 # ============================================================================
