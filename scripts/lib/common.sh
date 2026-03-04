@@ -274,3 +274,361 @@ monitor_progress() {
         fi
     done
 }
+
+# ============================================================================
+# Git branch and PR workflow
+# ============================================================================
+
+# Check if the gh CLI is available.
+# Usage: has_gh && echo "yes" || echo "no"
+has_gh() {
+    command -v gh >/dev/null 2>&1
+}
+
+# Get the current git branch name.
+# Usage: branch=$(current_branch "$PROJECT_DIR")
+current_branch() {
+    local project_dir="$1"
+    git -C "$project_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo ""
+}
+
+# Create a feature branch for a storyforge command.
+# If already on a storyforge/* branch, treats it as a resume (no-op).
+# Sets and exports STORYFORGE_BRANCH.
+#
+# Usage: create_branch "write" "$PROJECT_DIR"
+create_branch() {
+    local command_name="$1"
+    local project_dir="$2"
+
+    local branch
+    branch=$(current_branch "$project_dir")
+
+    # Already on a storyforge feature branch — resume
+    if [[ "$branch" == storyforge/* ]]; then
+        STORYFORGE_BRANCH="$branch"
+        export STORYFORGE_BRANCH
+        log "Resuming on branch: ${STORYFORGE_BRANCH}"
+        return 0
+    fi
+
+    # Create new feature branch
+    STORYFORGE_BRANCH="storyforge/${command_name}-$(date '+%Y%m%d-%H%M')"
+    export STORYFORGE_BRANCH
+
+    git -C "$project_dir" checkout -b "$STORYFORGE_BRANCH" 2>/dev/null
+    if [[ $? -ne 0 ]]; then
+        log "ERROR: Failed to create branch ${STORYFORGE_BRANCH}"
+        return 1
+    fi
+
+    log "Created branch: ${STORYFORGE_BRANCH}"
+    return 0
+}
+
+# Push the current branch with -u to set up upstream tracking.
+# Idempotent — safe to call multiple times.
+#
+# Usage: ensure_branch_pushed "$PROJECT_DIR"
+ensure_branch_pushed() {
+    local project_dir="$1"
+    local branch="${STORYFORGE_BRANCH:-$(current_branch "$project_dir")}"
+
+    if [[ -z "$branch" ]]; then
+        log "WARNING: No branch to push"
+        return 1
+    fi
+
+    git -C "$project_dir" push -u origin "$branch" 2>/dev/null || {
+        log "WARNING: Could not push branch ${branch} to origin"
+        return 1
+    }
+
+    return 0
+}
+
+# Ensure a GitHub label exists (create silently if missing).
+# Usage: ensure_label "in-progress" "0075ca" "$PROJECT_DIR"
+ensure_label() {
+    local label_name="$1"
+    local color="$2"
+    local project_dir="$3"
+
+    has_gh || return 0
+    (cd "$project_dir" && gh label create "$label_name" --color "$color" 2>/dev/null) || true
+}
+
+# Create a draft PR for the current branch.
+# If a PR already exists for this branch, fetches its number instead.
+# Sets and exports STORYFORGE_PR_NUMBER.
+#
+# Usage: create_draft_pr "Draft: My Novel scenes" "$PR_BODY" "$PROJECT_DIR"
+create_draft_pr() {
+    local title="$1"
+    local body="$2"
+    local project_dir="$3"
+
+    if ! has_gh; then
+        log "WARNING: gh CLI not available — skipping PR creation"
+        STORYFORGE_PR_NUMBER=""
+        export STORYFORGE_PR_NUMBER
+        return 0
+    fi
+
+    # Ensure labels exist
+    ensure_label "in-progress" "0075ca" "$project_dir"
+    ensure_label "reviewing" "d876e3" "$project_dir"
+    ensure_label "ready-to-merge" "0e8a16" "$project_dir"
+
+    # Check if PR already exists for this branch
+    local existing_pr
+    existing_pr=$(cd "$project_dir" && gh pr view --json number --jq '.number' 2>/dev/null || echo "")
+
+    if [[ -n "$existing_pr" ]]; then
+        STORYFORGE_PR_NUMBER="$existing_pr"
+        export STORYFORGE_PR_NUMBER
+        log "Found existing PR #${STORYFORGE_PR_NUMBER}"
+        return 0
+    fi
+
+    # Create draft PR
+    local pr_url
+    pr_url=$(cd "$project_dir" && gh pr create \
+        --draft \
+        --title "$title" \
+        --body "$body" \
+        --label "in-progress" 2>/dev/null) || {
+        log "WARNING: Failed to create draft PR"
+        STORYFORGE_PR_NUMBER=""
+        export STORYFORGE_PR_NUMBER
+        return 1
+    }
+
+    # Extract PR number from URL (format: https://github.com/owner/repo/pull/123)
+    STORYFORGE_PR_NUMBER=$(echo "$pr_url" | grep -oE '[0-9]+$' || echo "")
+    export STORYFORGE_PR_NUMBER
+
+    if [[ -n "$STORYFORGE_PR_NUMBER" ]]; then
+        log "Created draft PR #${STORYFORGE_PR_NUMBER}: ${title}"
+    else
+        log "WARNING: PR created but could not parse number from: ${pr_url}"
+    fi
+
+    return 0
+}
+
+# Check off a task in the PR body.
+# Replaces "- [ ] {task_text}" with "- [x] {task_text}".
+#
+# Usage: update_pr_task "Draft scene act1-sc01" "$PROJECT_DIR"
+update_pr_task() {
+    local task_text="$1"
+    local project_dir="${2:-${PROJECT_DIR:-}}"
+    local pr_number="${STORYFORGE_PR_NUMBER:-}"
+
+    if ! has_gh || [[ -z "$pr_number" ]]; then
+        return 0
+    fi
+
+    # Fetch current body
+    local body
+    body=$(cd "$project_dir" && gh pr view "$pr_number" --json body --jq '.body' 2>/dev/null) || return 0
+
+    # Escape special sed characters in task text
+    local escaped
+    escaped=$(printf '%s' "$task_text" | sed 's/[\/&.*[\^$]/\\&/g')
+
+    # Replace unchecked with checked
+    local new_body
+    new_body=$(echo "$body" | sed "s/- \[ \] ${escaped}/- [x] ${escaped}/")
+
+    # Update PR body
+    (cd "$project_dir" && gh pr edit "$pr_number" --body "$new_body" 2>/dev/null) || {
+        log "WARNING: Failed to update PR task: ${task_text}"
+    }
+}
+
+# Run the review phase at the end of an autonomous process.
+#
+# Sequence:
+#   1. PR state change (start): remove in-progress, add reviewing, convert draft to ready
+#   2. Run Claude review: assess changed files, save review to working/reviews/
+#   3. Commit and push the review file
+#   4. PR state change (end): post review as comment, remove reviewing, add ready-to-merge
+#   5. Check off the "Review" task in the PR body
+#
+# Usage: run_review_phase "drafting" "$PROJECT_DIR"
+run_review_phase() {
+    local review_type="$1"
+    local project_dir="$2"
+    local pr_number="${STORYFORGE_PR_NUMBER:-}"
+
+    local review_timestamp
+    review_timestamp=$(date '+%Y%m%d-%H%M%S')
+    local review_file="${project_dir}/working/reviews/pipeline-review-${review_timestamp}.md"
+    local review_log="${project_dir}/working/logs/review-${review_timestamp}.log"
+
+    mkdir -p "${project_dir}/working/reviews" "${project_dir}/working/logs"
+
+    log "Starting review phase (${review_type})..."
+
+    # --- Step 1: PR state change (start of review) ---
+    if has_gh && [[ -n "$pr_number" ]]; then
+        log "Updating PR #${pr_number}: in-progress → reviewing"
+        (
+            cd "$project_dir"
+            gh pr edit "$pr_number" --remove-label "in-progress" --add-label "reviewing" 2>/dev/null || true
+            gh pr ready "$pr_number" 2>/dev/null || true
+        )
+    fi
+
+    # --- Step 2: Build and run the review prompt ---
+    local diff_stat
+    diff_stat=$(git -C "$project_dir" diff origin/main...HEAD --stat 2>/dev/null \
+             || git -C "$project_dir" diff --stat HEAD~1 HEAD 2>/dev/null \
+             || echo "(no diff available)")
+
+    local changed_files
+    changed_files=$(git -C "$project_dir" diff origin/main...HEAD --name-only 2>/dev/null \
+                 || git -C "$project_dir" diff --name-only HEAD~1 HEAD 2>/dev/null \
+                 || echo "(no changed files available)")
+
+    local title
+    title=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
+    local genre
+    genre=$(read_yaml_field "project.genre" 2>/dev/null || read_yaml_field "genre" 2>/dev/null || echo "")
+
+    local review_criteria=""
+    case "$review_type" in
+        drafting)
+            review_criteria="   - Voice consistency across drafted scenes
+   - Continuity with existing scenes and reference materials
+   - Scene function clarity — does each scene earn its place?
+   - Word count vs. targets"
+            ;;
+        evaluation)
+            review_criteria="   - Completeness — did all evaluators produce substantive reports?
+   - Coverage — are all key aspects of the manuscript addressed?
+   - Synthesis quality — does the synthesis accurately reflect individual reports?
+   - Actionability — are findings specific enough to act on?"
+            ;;
+        revision)
+            review_criteria="   - Were revision targets met (word count reductions, instance counts, etc.)?
+   - Was voice preserved during revision?
+   - Were continuity and reference materials updated?
+   - Are there new issues introduced by the revision?"
+            ;;
+        assembly)
+            review_criteria="   - Chapter structure — do chapters have logical boundaries?
+   - Scene breaks — are they consistent and appropriate?
+   - Front/back matter completeness
+   - Metadata accuracy (title, author, copyright)"
+            ;;
+        *)
+            review_criteria="   - Overall quality of the changes
+   - Consistency with project conventions
+   - Any issues or concerns"
+            ;;
+    esac
+
+    local review_prompt
+    read -r -d '' review_prompt <<REVIEW_EOF || true
+You are performing a pipeline review for "${title}"${genre:+ (${genre})}. This is a quality check at the end of a ${review_type} session.
+
+## Changed Files
+
+These files were modified in this session:
+
+${changed_files}
+
+## Diff Summary
+
+${diff_stat}
+
+## Instructions
+
+1. Read every changed file listed above.
+2. Based on the review type (${review_type}), assess:
+${review_criteria}
+
+3. Write a structured review with these sections:
+   - **Summary**: 2-3 sentences on what was done
+   - **Quality Signals**: What looks good
+   - **Concerns**: Any issues found (with specifics — cite files and details)
+   - **Recommendation**: Ready to merge, needs attention, or needs rework
+
+4. Save the review to: ${review_file}
+
+5. Commit and push:
+   git add working/reviews/
+   git commit -m "Review: pipeline review (${review_type})"
+   git push
+REVIEW_EOF
+
+    # --- Dry-run mode: print prompt and skip ---
+    if [[ "${DRY_RUN:-false}" == true ]]; then
+        echo "===== DRY RUN: review (${review_type}) ====="
+        echo "$review_prompt"
+        echo "===== END DRY RUN: review ====="
+        return 0
+    fi
+
+    log "Invoking claude for review..."
+
+    local head_before
+    head_before=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || echo "none")
+
+    set +e
+    claude -p "$review_prompt" \
+        --model claude-opus-4-6 \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        > "$review_log" 2>&1
+    local review_exit=$?
+    set -e
+
+    if (( review_exit != 0 )); then
+        log "WARNING: Review claude invocation failed (exit code ${review_exit})"
+        log "See: ${review_log}"
+    fi
+
+    # Fallback commit if Claude didn't
+    local head_after
+    head_after=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || echo "none")
+    if [[ "$head_before" == "$head_after" && -f "$review_file" ]]; then
+        (
+            cd "$project_dir"
+            git add working/reviews/ 2>/dev/null || true
+            git commit -m "Review: pipeline review (${review_type})" 2>/dev/null || true
+            git push 2>/dev/null || true
+        )
+    fi
+
+    # --- Step 4: PR state change (end of review) ---
+    if has_gh && [[ -n "$pr_number" ]]; then
+        # Post review as PR comment
+        if [[ -f "$review_file" ]]; then
+            log "Posting review to PR #${pr_number}..."
+            (cd "$project_dir" && gh pr comment "$pr_number" --body-file "$review_file" 2>/dev/null) || {
+                log "WARNING: Failed to post review comment"
+            }
+        fi
+
+        # Swap labels: reviewing → ready-to-merge
+        (
+            cd "$project_dir"
+            gh pr edit "$pr_number" --remove-label "reviewing" --add-label "ready-to-merge" 2>/dev/null || true
+        )
+        log "PR #${pr_number} marked ready-to-merge"
+    fi
+
+    # --- Step 5: Check off Review task ---
+    update_pr_task "Review" "$project_dir"
+
+    if [[ -f "$review_file" ]]; then
+        log "Review saved: ${review_file}"
+    else
+        log "WARNING: Review file was not created"
+    fi
+}
