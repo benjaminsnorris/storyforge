@@ -107,19 +107,29 @@ Then ask about production settings **one question at a time** using `AskUserQues
 
 Update `reference/chapter-map.yaml` with all production settings after each answer.
 
-**After all settings are configured:**
-- **Create a feature branch** before saving so the chapter map and assembly work live on a branch:
-  ```bash
-  git checkout -b "storyforge/assemble-$(date '+%Y%m%d-%H%M')"
-  ```
-- Update `storyforge.yaml`: set `chapter_map.exists: true` and `chapter_map.updated` to today's date
-- Record all production decisions in the key decisions file
-- Commit and push to the new branch:
-  ```bash
-  git add -A && git commit -m "Produce: create chapter map and production settings" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
-  ```
-- Tell the author how to run the assembly: `./storyforge assemble`
-- When the author runs `./storyforge assemble`, the script will detect this branch, create a draft PR, and track progress there.
+**After all settings are configured**, execute these steps **in this exact order**. Do not write any files before step 2 is complete.
+
+**1. Create the feature branch.** This must happen first, before any file is written or modified:
+```bash
+git checkout -b "storyforge/assemble-$(date '+%Y%m%d-%H%M')"
+```
+
+**2. Verify you are on the new branch** before proceeding:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+The output must start with `storyforge/assemble-`. If it does not, stop and fix the branch before writing any files.
+
+**3. Write the chapter map** to `reference/chapter-map.yaml` with all production settings.
+
+**4. Update project state:** set `chapter_map.exists: true` and `chapter_map.updated` to today's date in `storyforge.yaml`. Record all production decisions in the key decisions file.
+
+**5. Commit and push** all changes to the new branch:
+```bash
+git add -A && git commit -m "Produce: create chapter map and production settings" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
+```
+
+**6. Tell the author** how to run the assembly: `./storyforge assemble`. The script will detect this branch, create a draft PR, and track progress there.
 
 ---
 

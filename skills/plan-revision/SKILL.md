@@ -158,14 +158,24 @@ This prevents future sessions from re-asking settled questions.
 
 ## Step 6: Save the Plan
 
-Once the author approves, **create a feature branch before saving** so that the plan and all revision work live on a branch, not main:
+Once the author approves, execute these steps **in this exact order**. Do not write any files before step 2 is complete.
 
+**1. Create the feature branch.** This must happen first, before any file is written or modified:
 ```bash
 git checkout -b "storyforge/revise-$(date '+%Y%m%d-%H%M')"
 ```
 
-Then write the finalized plan to `working/plans/revision-plan.yaml`. Update the project phase to `revision` in `storyforge.yaml`. Commit and push all changes — the plan file, `storyforge.yaml`, and `CLAUDE.md` — to the new branch:
+**2. Verify you are on the new branch** before proceeding:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+The output must start with `storyforge/revise-`. If it does not, stop and fix the branch before writing any files.
 
+**3. Write the revision plan** to `working/plans/revision-plan.yaml`.
+
+**4. Update project state:** set `phase: revision` in `storyforge.yaml`. Update `CLAUDE.md` if needed.
+
+**5. Commit and push** all changes to the new branch:
 ```bash
 git add -A && git commit -m "Plan revision: {N} passes for {title}" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
 ```
