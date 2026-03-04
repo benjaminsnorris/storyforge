@@ -329,7 +329,10 @@ select_revision_model() {
     local pass_key
     pass_key="$(echo "$pass_name $purpose" | tr '[:upper:]' '[:lower:]')"
 
-    if [[ "$pass_key" =~ (continuity|timeline|consistency|fact.check|thread.track) ]]; then
+    # Mechanical passes: continuity, timeline, fact-checking — Sonnet is sufficient.
+    # But "voice-consistency" or "character-consistency" are creative, not mechanical.
+    # Only match when continuity/timeline/fact-check is the primary concern.
+    if [[ "$pass_key" =~ (continuity|timeline|fact.check|thread.track) ]]; then
         echo "claude-sonnet-4-6"  # Mechanical — factual verification
     else
         echo "claude-opus-4-6"    # Creative — prose, voice, character, structure

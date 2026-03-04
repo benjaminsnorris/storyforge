@@ -120,3 +120,16 @@ else
     PASS=$((PASS + 1))
     echo "  PASS: assemble dry-run: does not create manuscript directory"
 fi
+
+# ============================================================================
+# storyforge-review --dry-run
+# ============================================================================
+
+result=$(run_dry_run "storyforge-review" --type drafting)
+rc=$?
+
+assert_exit_code "0" "$rc" "review dry-run: exits 0"
+assert_contains "$result" "DRY RUN: review" "review dry-run: has dry-run header"
+assert_contains "$result" "END DRY RUN: review" "review dry-run: has dry-run footer"
+assert_contains "$result" "drafting" "review dry-run: shows review type"
+assert_contains "$result" "pipeline review" "review dry-run: prompt mentions pipeline review"

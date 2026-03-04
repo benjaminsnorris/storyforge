@@ -178,3 +178,90 @@ else
     PASS=$((PASS + 1))
     echo "  PASS: create_draft_pr: gh available (skipping no-gh test)"
 fi
+
+# ============================================================================
+# select_model
+# ============================================================================
+
+result=$(select_model "drafting")
+assert_equals "claude-opus-4-6" "$result" "select_model: drafting uses opus"
+
+result=$(select_model "revision")
+assert_equals "claude-opus-4-6" "$result" "select_model: revision uses opus"
+
+result=$(select_model "synthesis")
+assert_equals "claude-opus-4-6" "$result" "select_model: synthesis uses opus"
+
+result=$(select_model "evaluation")
+assert_equals "claude-sonnet-4-6" "$result" "select_model: evaluation uses sonnet"
+
+result=$(select_model "mechanical")
+assert_equals "claude-sonnet-4-6" "$result" "select_model: mechanical uses sonnet"
+
+result=$(select_model "review")
+assert_equals "claude-sonnet-4-6" "$result" "select_model: review uses sonnet"
+
+result=$(select_model "unknown-type")
+assert_equals "claude-opus-4-6" "$result" "select_model: unknown type defaults to opus"
+
+# STORYFORGE_MODEL override
+result=$(STORYFORGE_MODEL="claude-haiku-4-5" select_model "drafting")
+assert_equals "claude-haiku-4-5" "$result" "select_model: STORYFORGE_MODEL overrides drafting"
+
+result=$(STORYFORGE_MODEL="claude-haiku-4-5" select_model "review")
+assert_equals "claude-haiku-4-5" "$result" "select_model: STORYFORGE_MODEL overrides review"
+
+# ============================================================================
+# select_revision_model
+# ============================================================================
+
+result=$(select_revision_model "prose-tightening" "Cut filler, tighten sentences")
+assert_equals "claude-opus-4-6" "$result" "select_revision_model: prose pass uses opus"
+
+result=$(select_revision_model "character-arc-deepening" "Deepen character arcs")
+assert_equals "claude-opus-4-6" "$result" "select_revision_model: character pass uses opus"
+
+result=$(select_revision_model "voice-consistency" "Fix voice drift")
+assert_equals "claude-opus-4-6" "$result" "select_revision_model: voice pass uses opus"
+
+result=$(select_revision_model "continuity-audit" "Check timeline consistency")
+assert_equals "claude-sonnet-4-6" "$result" "select_revision_model: continuity pass uses sonnet"
+
+result=$(select_revision_model "timeline-fix" "Fix timeline contradictions")
+assert_equals "claude-sonnet-4-6" "$result" "select_revision_model: timeline pass uses sonnet"
+
+result=$(select_revision_model "fact-check" "Verify factual details")
+assert_equals "claude-sonnet-4-6" "$result" "select_revision_model: fact-check pass uses sonnet"
+
+# STORYFORGE_MODEL override
+result=$(STORYFORGE_MODEL="claude-sonnet-4-6" select_revision_model "prose-tightening" "Cut filler")
+assert_equals "claude-sonnet-4-6" "$result" "select_revision_model: STORYFORGE_MODEL overrides creative pass"
+
+# ============================================================================
+# build_interactive_system_prompt
+# ============================================================================
+
+result=$(build_interactive_system_prompt "/tmp/.autopilot" "scene")
+assert_contains "$result" "scene" "build_interactive_system_prompt: contains work unit (scene)"
+assert_contains "$result" "THIS scene ONLY" "build_interactive_system_prompt: scopes to single unit"
+assert_contains "$result" "/tmp/.autopilot" "build_interactive_system_prompt: contains autopilot file path"
+assert_contains "$result" "autopilot the rest" "build_interactive_system_prompt: has autopilot trigger phrase"
+assert_contains "$result" "go auto" "build_interactive_system_prompt: has go auto trigger"
+assert_contains "$result" "auto mode" "build_interactive_system_prompt: has auto mode trigger"
+assert_contains "$result" "/exit" "build_interactive_system_prompt: mentions /exit"
+
+result=$(build_interactive_system_prompt "/tmp/.autopilot" "pass")
+assert_contains "$result" "pass" "build_interactive_system_prompt: pass work unit"
+assert_contains "$result" "THIS pass ONLY" "build_interactive_system_prompt: scopes to single pass"
+
+# ============================================================================
+# show_interactive_banner (output format check)
+# ============================================================================
+
+result=$(show_interactive_banner "Scene 3 of 12")
+assert_contains "$result" "INTERACTIVE MODE" "show_interactive_banner: has title"
+assert_contains "$result" "Scene 3 of 12" "show_interactive_banner: has subtitle"
+assert_contains "$result" "/exit" "show_interactive_banner: mentions /exit"
+assert_contains "$result" "finish without me" "show_interactive_banner: mentions autopilot phrase"
+assert_contains "$result" "╔" "show_interactive_banner: has top border"
+assert_contains "$result" "╚" "show_interactive_banner: has bottom border"
