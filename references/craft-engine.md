@@ -53,7 +53,41 @@ Exposition, rising action, climax, falling action, denouement. Developed from an
 
 ---
 
-## 2. Prose Craft Principles
+## 2. Scene Craft
+
+Scenes are the fundamental unit of fiction. A novel is not a story — it is a sequence of scenes that, taken together, produce the experience of a story. Get the scenes right and most other problems solve themselves. Get them wrong and no amount of beautiful prose will save you.
+
+### Enter Late, Leave Early
+
+Every scene should begin as close to its essential action as possible. If a scene needs a paragraph of setup — the character arriving, settling in, ordering a drink — the scene is starting too early. The reader does not need to see the door open; the reader needs to be in the room when the argument starts. Endings work the same way: the moment the scene's turn is complete, get out. The impulse to show the character reflecting, to narrate the aftermath, to tie a bow on what just happened — resist it. What you leave out makes what you leave in more powerful. The reader's imagination will fill the space you leave, and it will fill it better than you can.
+
+### Every Scene Must Turn
+
+Something must be different at the end of the scene than at the beginning. A character learns something they cannot unlearn. A relationship shifts in a direction it cannot shift back from. A plan fails. A secret is revealed. A commitment deepens or breaks. If nothing changes, it is not a scene — it is an interlude, and interludes must be rare and deliberate. The test: state the scene's question ("Will she confront him about the letter?") and its answer ("She tries, but loses her nerve — and he notices"). If you cannot articulate both, the scene lacks a turn. A scene without a turn is a scene the reader will skim.
+
+### Scene Emotion vs. Character Emotion
+
+The scene has its own emotional work to do on the reader, which may differ from what the POV character feels. A calm character in a scene of mounting dread creates dramatic irony — the reader sees the danger the character does not, and the gap between their knowledge is the source of tension. An elated character in a scene that the reader knows will end in betrayal creates anticipatory grief. Controlling this gap between what the character feels and what the scene makes the reader feel is one of the most powerful techniques in fiction. When the gap is zero — when the reader feels exactly what the character feels — you are writing empathy. When the gap is wide, you are writing suspense, irony, or tragedy. Both are valid. Neither should happen by accident.
+
+### Psychic Distance at Scene Level
+
+Open with enough distance to establish the spatial and temporal frame — where are we, when is this, what is the physical reality of this place. Then narrow as the scene intensifies. The climactic moment of a scene should be at the closest psychic distance the narrative style permits: inside the character's body, feeling what they feel, seeing through their eyes. Pulling back too early — retreating to summary or observation just when the reader wants to be inside the moment — deflates the scene's emotional impact. Staying at maximum closeness throughout exhausts the reader. The scene's distance arc should mirror its emotional arc: wide establishing shot, steady approach, tight close-up at the turn, then a measured pull-back as the scene exits.
+
+### Show vs. Tell in Scenes
+
+The turning moment of a scene must be shown — the reader must experience it in real time, with sensory detail and emotional specificity. This is the moment the reader has been reading toward; summarizing it is a betrayal of the scene's contract. Setup and aftermath, however, can often be told. Brief summary within a scene is not a failure — it is pacing. "Three hours passed" is efficient and necessary. "They argued for three hours" is efficient when the argument's content matters less than its duration. The error is never telling. The error is telling when the reader needs to feel. If you find yourself summarizing a moment of high emotional intensity, you are either afraid of the scene or you have not yet found your way into it. Stop summarizing and write the moment.
+
+### Thread Management
+
+Threads should weave through scenes — appear, submerge, resurface. A thread that is always present becomes wallpaper; a thread that surfaces at the right moment becomes revelation. Every scene should advance at least one thread and touch no more than three. A scene that advances zero threads is disconnected from the narrative web. A scene that juggles five is overcrowded — the reader cannot track that many moving pieces in a single scene without losing the emotional through-line. When reintroducing a dormant thread, anchor it in a sensory detail or character memory that links to its last appearance. This creates the feeling of a novel that remembers itself — a web where pulling one strand vibrates the others.
+
+### Pacing Through Scene Variety
+
+The sequence of scene types, lengths, and emotional intensities creates the novel's tempo. Five rising-action scenes in a row produces adrenaline fatigue — the reader stops feeling urgency because urgency has become the baseline. Three introspective scenes back-to-back stalls momentum. An action scene immediately after another action scene yields diminishing returns. Plan the alternation of scene types as deliberately as a composer plans dynamics: loud and soft, fast and slow, internal and external, intimate and expansive. Scene length itself is a pacing tool — a short, sharp scene after a long one creates acceleration. A long, slow scene after several short ones creates gravity and weight. The rhythm of your scenes IS the pacing of your novel.
+
+---
+
+## 3. Prose Craft Principles
 
 ### Economy and Clarity
 
@@ -93,7 +127,7 @@ Give yourself permission to write badly in the first draft. Perfectionism is a f
 
 ---
 
-## 3. Character Craft
+## 4. Character Craft
 
 ### The Want/Need Framework
 
@@ -136,7 +170,7 @@ Ask these questions. If you cannot answer them, the character needs more work:
 
 ---
 
-## 4. The Rules and When to Break Them
+## 5. The Rules and When to Break Them
 
 ### "Show, Don't Tell"
 
@@ -168,7 +202,7 @@ Ask these questions. If you cannot answer them, the character needs more work:
 
 ---
 
-## 5. Tropes and Genre Conventions
+## 6. Tropes and Genre Conventions
 
 ### How to Think About Tropes
 
@@ -188,7 +222,7 @@ Every genre carries implicit promises. Romance promises an emotionally satisfyin
 
 ---
 
-## 6. The Coaching Posture
+## 7. The Coaching Posture
 
 ### How Storyforge Interacts with Authors
 

@@ -144,6 +144,55 @@ get_plugin_dir() {
 }
 
 # ============================================================================
+# Craft engine section extraction
+# ============================================================================
+
+# Extract one or more sections from the craft engine by section number.
+#
+# The craft engine uses "## N. Section Title" as section delimiters.
+# This function extracts full sections including subsections (### headings).
+#
+# Arguments:
+#   $1..N — One or more section numbers (e.g., 2 3 5)
+#
+# Globals:
+#   Uses get_plugin_dir() to locate the craft engine file.
+#
+# Output:
+#   Prints the extracted sections to stdout, separated by --- dividers.
+#   Returns 1 if the craft engine file is not found.
+#
+# Usage:
+#   extract_craft_sections 2 3 5       # Scene Craft + Prose Craft + Rules
+#   sections=$(extract_craft_sections 2 3 5)
+extract_craft_sections() {
+    local plugin_dir
+    plugin_dir=$(get_plugin_dir)
+    local craft_file="${plugin_dir}/references/craft-engine.md"
+
+    if [[ ! -f "$craft_file" ]]; then
+        log "WARNING: Craft engine not found at ${craft_file}"
+        return 1
+    fi
+
+    local first=true
+    for section_num in "$@"; do
+        if [[ "$first" == true ]]; then
+            first=false
+        else
+            echo ""
+            echo "---"
+            echo ""
+        fi
+        awk -v num="$section_num" '
+            $0 ~ "^## " num "\\. " { found=1 }
+            found && /^## [0-9]+\. / && !($0 ~ "^## " num "\\. ") { found=0 }
+            found { print }
+        ' "$craft_file"
+    done
+}
+
+# ============================================================================
 # Background progress monitor
 # ============================================================================
 

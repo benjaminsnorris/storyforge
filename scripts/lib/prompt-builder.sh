@@ -227,6 +227,11 @@ build_scene_prompt() {
 - ${rf}"
     done <<< "$ref_files"
 
+    # --- Extract relevant craft engine sections ---
+    # Scene Craft (2) + Prose Craft (3) + Character Craft (4) + Rules (5)
+    local craft_sections=""
+    craft_sections=$(extract_craft_sections 2 3 4 5 2>/dev/null) || true
+
     # --- Assemble the prompt ---
     cat <<PROMPT_EOF
 You are drafting scene ${scene_id}${scene_title:+ ("${scene_title}")} of "${title:-Untitled}"${genre:+, a ${genre}}. Follow these steps exactly and completely. Do not skip any step.
@@ -239,7 +244,14 @@ ${ref_list}
 These files contain the world bible, character bible, story architecture, timeline, and all other reference material for the project. Internalize them before writing.
 ${voice_guide:+
 Pay special attention to ${voice_guide} — this is the voice and style guide. Follow it exactly.}
+${craft_sections:+
 
+===== CRAFT PRINCIPLES =====
+
+The following craft principles govern how you write this scene. Internalize them — do not recite them, embody them in the prose.
+
+${craft_sections}
+}
 ===== STEP 2: READ THE PREVIOUS SCENE =====
 $(if [[ -n "$prev_scene" ]]; then
     echo ""

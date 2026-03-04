@@ -182,6 +182,27 @@ build_revision_prompt() {
     local project_dir="$4"
     local pass_config="${5:-}"
 
+    # --- Select craft engine sections based on pass purpose ---
+    local craft_section_nums=""
+    local pass_key="${pass_name,,} ${purpose,,}"  # lowercase for matching
+
+    if [[ "$pass_key" =~ (prose|voice|tighten|line.edit|sentence|rhythm|word.choice) ]]; then
+        craft_section_nums="3 5"  # Prose Craft + Rules
+    elif [[ "$pass_key" =~ (character|arc|deepen|motivation|relationship|dialogue) ]]; then
+        craft_section_nums="4 5"  # Character Craft + Rules
+    elif [[ "$pass_key" =~ (structure|pacing|reorder|scene.order|act.break|tempo) ]]; then
+        craft_section_nums="1 2"  # Narrative Structure + Scene Craft
+    elif [[ "$pass_key" =~ (continuity|timeline|consistency|fact.check) ]]; then
+        craft_section_nums=""      # No craft sections — continuity is factual
+    else
+        craft_section_nums="2 3 5"  # Default: Scene Craft + Prose Craft + Rules
+    fi
+
+    local craft_sections=""
+    if [[ -n "$craft_section_nums" ]]; then
+        craft_sections=$(extract_craft_sections $craft_section_nums 2>/dev/null) || true
+    fi
+
     # Resolve which files are in scope
     local file_list
     file_list=$(resolve_scope "$scope" "$project_dir") || return 1
@@ -227,7 +248,13 @@ ${purpose}
 This pass covers ${file_count} scene file(s):
 
 ${file_block}${config_section}
+${craft_sections:+
+## Craft Principles for This Pass
 
+The following craft principles are relevant to this revision pass. Let them guide your edits — do not reproduce them in the output, but let them inform every editorial decision.
+
+${craft_sections}
+}
 ## Instructions
 
 You are performing a revision pass on a novel manuscript. Follow these rules precisely:
