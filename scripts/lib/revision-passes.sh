@@ -184,7 +184,8 @@ build_revision_prompt() {
 
     # --- Select craft engine sections based on pass purpose ---
     local craft_section_nums=""
-    local pass_key="${pass_name,,} ${purpose,,}"  # lowercase for matching
+    local pass_key
+    pass_key="$(echo "$pass_name $purpose" | tr '[:upper:]' '[:lower:]')"
 
     if [[ "$pass_key" =~ (prose|voice|tighten|line.edit|sentence|rhythm|word.choice) ]]; then
         craft_section_nums="3 5"  # Prose Craft + Rules

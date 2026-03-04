@@ -39,22 +39,22 @@ Every artifact entry shares the same three-field structure:
 | Field | Type | Required | Description | Default | Example |
 |-------|------|----------|-------------|---------|---------|
 | `exists` | bool | required | Whether the artifact file has been created. Set to `true` by the skill that generates or updates the artifact. | `false` | `true` |
-| `path` | string | required | Relative path from the project root to the artifact file. Populated by `storyforge-init` with a conventional default; can be overridden by the user. | See per-artifact defaults below | `"references/world-bible.md"` |
+| `path` | string | required | Relative path from the project root to the artifact file. Populated by `storyforge-init` with a conventional default; can be overridden by the user. | See per-artifact defaults below | `"reference/world-bible.md"` |
 | `updated` | date | required | ISO 8601 date (`YYYY-MM-DD`) when the artifact was last written. Set automatically by the skill that modifies the file. | `null` | `2026-03-03` |
 
 ### Artifact Keys
 
 | Key | Description | Default `path` |
 |-----|-------------|-----------------|
-| `world_bible` | The world-building reference document covering setting, geography, history, culture, technology, and rules of the fictional world. | `references/world-bible.md` |
-| `character_bible` | Profiles for every named character including appearance, psychology, voice patterns, relationships, and arc trajectories. | `references/character-bible.md` |
-| `systems_bible` | Documentation of invented systems — magic, technology, politics, economics — with internal rules and constraints. | `references/systems-bible.md` |
-| `story_architecture` | The structural blueprint: act breaks, major turning points, subplot threading, and thematic throughlines. | `references/story-architecture.md` |
-| `voice_guide` | Prose style reference capturing POV strategy, sentence rhythm, diction registers, and per-character dialogue fingerprints. | `references/voice-guide.md` |
-| `timeline` | Chronological event log ensuring temporal consistency across scenes, subplots, and character arcs. | `references/timeline.md` |
-| `scene_index` | The master list of every scene with metadata (chapter, POV, location, status, word count, and any scene extensions). | `references/scene-index.md` |
-| `continuity_tracker` | A living ledger of continuity facts — promises made, details established, threads opened — used during evaluation and revision. | `references/continuity-tracker.md` |
-| `key_decisions` | A canonical log of author decisions — creative, structural, editorial. All skills consult this before asking questions and append new decisions immediately when the author makes them. If a decision is recorded here, it is settled and must not be re-asked. | `references/key-decisions.md` |
+| `world_bible` | The world-building reference document covering setting, geography, history, culture, technology, and rules of the fictional world. | `reference/world-bible.md` |
+| `character_bible` | Profiles for every named character including appearance, psychology, voice patterns, relationships, and arc trajectories. | `reference/character-bible.md` |
+| `systems_bible` | Documentation of invented systems — magic, technology, politics, economics — with internal rules and constraints. | `reference/systems-bible.md` |
+| `story_architecture` | The structural blueprint: act breaks, major turning points, subplot threading, and thematic throughlines. | `reference/story-architecture.md` |
+| `voice_guide` | Prose style reference capturing POV strategy, sentence rhythm, diction registers, and per-character dialogue fingerprints. | `reference/voice-guide.md` |
+| `timeline` | Chronological event log ensuring temporal consistency across scenes, subplots, and character arcs. | `reference/timeline.md` |
+| `scene_index` | The master list of every scene with metadata (chapter, POV, location, status, word count, and any scene extensions). | `scenes/scene-index.yaml` |
+| `continuity_tracker` | A living ledger of continuity facts — promises made, details established, threads opened — used during evaluation and revision. | `reference/continuity-tracker.md` |
+| `key_decisions` | A canonical log of author decisions — creative, structural, editorial. All skills consult this before asking questions and append new decisions immediately when the author makes them. If a decision is recorded here, it is settled and must not be re-asked. | `reference/key-decisions.md` |
 
 ---
 
@@ -125,35 +125,39 @@ project:
 artifacts:
   world_bible:
     exists: true
-    path: references/world-bible.md
+    path: reference/world-bible.md
     updated: 2026-02-15
   character_bible:
     exists: true
-    path: references/character-bible.md
+    path: reference/character-bible.md
     updated: 2026-02-20
   systems_bible:
     exists: true
-    path: references/systems-bible.md
+    path: reference/systems-bible.md
     updated: 2026-02-18
   story_architecture:
     exists: true
-    path: references/story-architecture.md
+    path: reference/story-architecture.md
     updated: 2026-02-25
   voice_guide:
     exists: true
-    path: references/voice-guide.md
+    path: reference/voice-guide.md
     updated: 2026-02-22
   timeline:
     exists: false
-    path: references/timeline.md
+    path: reference/timeline.md
     updated: null
   scene_index:
     exists: false
-    path: references/scene-index.md
+    path: scenes/scene-index.yaml
     updated: null
   continuity_tracker:
     exists: false
-    path: references/continuity-tracker.md
+    path: reference/continuity-tracker.md
+    updated: null
+  key_decisions:
+    exists: false
+    path: reference/key-decisions.md
     updated: null
 
 scene_extensions:

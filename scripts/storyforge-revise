@@ -462,7 +462,7 @@ if (( COMPLETED == TOTAL_PASSES )); then
     log "All revision passes are done!"
 
     # Advance project phase to review
-    sed -i '' "s/^phase:.*/phase: review/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
+    sed -i '' "s/^[[:space:]]*phase:.*/phase: review/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
     log "Project phase advanced to: review"
 
     # Ensure reviews directory exists
