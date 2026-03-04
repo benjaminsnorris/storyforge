@@ -334,6 +334,13 @@
   .pipe-step--draft { border-color: var(--rose-dim); }
   .pipe-step--eval .pipe-phase { color: var(--cranberry); }
   .pipe-step--eval { border-color: var(--cranberry-dim); }
+  .pipe-step--produce .pipe-phase { color: #7c3aed; }
+  .pipe-step--produce { border-color: rgba(124, 58, 237, 0.15); }
+
+  .pipe-type--produce {
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.07);
+  }
 
   .pipe-arrow {
     display: flex;
@@ -410,6 +417,8 @@
   .dive-card--artifacts::before { background: var(--sage); }
   .dive-card--craft::before { background: var(--gruvbox); }
   .dive-card--scenes::before { background: var(--nord); }
+  .dive-card--coaching::before { background: #7c3aed; }
+  .dive-card--produce::before { background: #0f766e; }
 
   .dive-card .dive-label {
     font-family: var(--font-mono);
@@ -429,6 +438,8 @@
   .dive-card--artifacts .dive-label { color: var(--sage); }
   .dive-card--craft .dive-label { color: var(--gruvbox); }
   .dive-card--scenes .dive-label { color: var(--nord); }
+  .dive-card--coaching .dive-label { color: #7c3aed; }
+  .dive-card--produce .dive-label { color: #0f766e; }
 
   .dive-card .dive-label .dot {
     width: 6px;
@@ -572,8 +583,8 @@
   <div class="pull-quote anim" style="--i:3">
     <strong>The philosophy:</strong> Rather than asking endless clarifying questions, Storyforge
     makes creative decisions, executes them, and produces work for you to review and refine.
-    It's a coach, not a co-author &mdash; it teaches craft, respects your vision, and pushes
-    you to go further when you're playing it safe.
+    Three coaching levels let you control how much creative authority Claude holds &mdash;
+    from full partnership to strict author control.
   </div>
 
   <!-- CAPABILITIES -->
@@ -620,6 +631,26 @@
       </p>
     </div>
 
+    <div class="cap-card anim" style="--i:9">
+      <div class="cap-num">05</div>
+      <h3>Book Production</h3>
+      <p>
+        Map scenes to chapters, configure typography with genre presets,
+        and assemble into epub, PDF, or HTML. Every autonomous step ends
+        with an automatic quality review.
+      </p>
+    </div>
+
+    <div class="cap-card anim" style="--i:10">
+      <div class="cap-num">06</div>
+      <h3>Coaching Levels</h3>
+      <p>
+        Three modes &mdash; <code>full</code>, <code>coach</code>, and
+        <code>strict</code> &mdash; let you control how much creative
+        authority Claude holds. From active partner to silent file clerk.
+      </p>
+    </div>
+
   </div>
 
   <!-- MINI PIPELINE -->
@@ -661,10 +692,16 @@
         <div class="pipe-name">Revise</div>
         <span class="pipe-type pipe-type--autonomous">autonomous</span>
       </div>
+      <div class="pipe-arrow">&rarr;</div>
+      <div class="pipe-step pipe-step--produce">
+        <div class="pipe-phase">Phase 7</div>
+        <div class="pipe-name">Produce</div>
+        <span class="pipe-type pipe-type--produce">interactive + auto</span>
+      </div>
     </div>
     <div class="iter-note anim" style="--i:11">
       <svg viewBox="0 0 16 16"><path d="M2 8a6 6 0 0 1 10.3-4.1M14 8a6 6 0 0 1-10.3 4.1"/><path d="M14 2v4h-4M2 14v-4h4"/></svg>
-      Scenes through Revise repeat until complete
+      Scenes through Revise repeat until complete &middot; Review runs after every autonomous step
     </div>
   </div>
 
@@ -677,8 +714,8 @@
         <div class="dive-label"><span class="dot"></span> Visualization</div>
         <h3>Workflow Pipeline</h3>
         <p>
-          The full 9-phase journey from project initialization through drafting,
-          evaluation, and revision. See how interactive skills and autonomous scripts
+          The full 10-phase journey from project initialization through drafting,
+          evaluation, revision, and production. See how interactive skills and autonomous scripts
           interleave, and where the iteration loop lives.
         </p>
         <div class="dive-cta">
@@ -757,11 +794,39 @@
         </div>
       </a>
 
+      <a href="coaching-levels.html" class="dive-card dive-card--coaching anim" style="--i:19">
+        <div class="dive-label"><span class="dot"></span> Visualization</div>
+        <h3>Coaching Levels</h3>
+        <p>
+          Three modes of creative collaboration &mdash; full partnership, guided coaching,
+          or strict author control. See how each level adapts Claude's behavior across
+          every phase of the writing process.
+        </p>
+        <div class="dive-cta">
+          View levels
+          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </div>
+      </a>
+
+      <a href="production-pipeline.html" class="dive-card dive-card--produce anim" style="--i:20">
+        <div class="dive-label"><span class="dot"></span> Visualization</div>
+        <h3>Production Pipeline</h3>
+        <p>
+          From manuscript to book &mdash; chapter mapping, typography presets,
+          front and back matter, and epub/PDF generation. See how the review
+          process integrates as a quality gate after every autonomous step.
+        </p>
+        <div class="dive-cta">
+          View production
+          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </div>
+      </a>
+
     </div>
   </div>
 
   <!-- INSTALL -->
-  <div class="install-section anim" style="--i:19">
+  <div class="install-section anim" style="--i:21">
     <div class="section-label"><span class="dot"></span> Get started</div>
     <div class="install-cmd"><span class="comment"># Install from the Claude Code marketplace</span>
 <span class="cmd">/plugin marketplace add</span> benjaminsnorris/storyforge
@@ -772,7 +837,7 @@
   </div>
 
   <!-- FOOTER -->
-  <div class="footer anim" style="--i:20">
+  <div class="footer anim" style="--i:22">
     Storyforge &mdash; a <a href="https://github.com/benjaminsnorris/storyforge">Claude Code plugin</a> for novel writers
   </div>
 

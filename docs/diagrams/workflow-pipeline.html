@@ -35,6 +35,10 @@
     --shadow-elevated: 0 2px 8px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06);
     --hub-bg: #fffdf7;
     --hub-border: #d4a73a;
+    --review: #0f766e;
+    --review-bg: rgba(15, 118, 110, 0.06);
+    --produce: #7c3aed;
+    --produce-bg: rgba(124, 58, 237, 0.06);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -63,6 +67,10 @@
       --shadow-elevated: 0 2px 8px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.2);
       --hub-bg: #1e2228;
       --hub-border: #d4a73a;
+      --review: #2dd4bf;
+      --review-bg: rgba(45, 212, 191, 0.08);
+      --produce: #a78bfa;
+      --produce-bg: rgba(167, 139, 250, 0.08);
     }
   }
 
@@ -354,6 +362,54 @@
     }
   }
 
+  /* Review phase */
+  .phase-card.review {
+    border-left: 3px solid var(--review);
+    background: var(--bg-card);
+  }
+
+  .review .phase-number {
+    background: var(--review-bg);
+    color: var(--review);
+    border: 1.5px solid var(--review);
+  }
+
+  .review .section-label::before { background: var(--review); }
+
+  .review .phase-mode {
+    color: var(--review);
+    background: var(--review-bg);
+  }
+
+  .review .phase-command {
+    color: var(--review);
+    background: var(--review-bg);
+  }
+
+  /* Produce phase */
+  .phase-card.produce {
+    border-left: 3px solid var(--produce);
+    background: var(--bg-card);
+  }
+
+  .produce .phase-number {
+    background: var(--produce-bg);
+    color: var(--produce);
+    border: 1.5px solid var(--produce);
+  }
+
+  .produce .section-label::before { background: var(--produce); }
+
+  .produce .phase-mode {
+    color: var(--produce);
+    background: var(--produce-bg);
+  }
+
+  .produce .phase-command {
+    color: var(--produce);
+    background: var(--produce-bg);
+  }
+
   /* --- Flow Arrow --- */
   .flow-arrow {
     display: flex;
@@ -588,7 +644,7 @@
   <!-- Hero -->
   <section class="hero animate" style="--i: 1">
     <h1>Story<span>forge</span> Pipeline</h1>
-    <p>A novel-writing toolkit for Claude Code. Guides authors from initial concept through drafting, evaluation, and revision across nine interconnected phases.</p>
+    <p>A novel-writing toolkit for Claude Code. Guides authors from initial concept through drafting, evaluation, revision, and production across ten interconnected phases.</p>
     <div class="legend">
       <div class="legend-item">
         <div class="legend-dot interactive"></div>
@@ -814,6 +870,54 @@
             <polyline points="4,2 6,3.5 4.5,5" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/>
           </svg>
           Scene Design &rarr; Draft &rarr; Evaluate &rarr; Plan Revision &rarr; Revise
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="--i: 20">
+      <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
+        <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
+        <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <!-- Phase 9: Review -->
+    <div class="phase-wrapper animate" style="--i: 21">
+      <div class="phase-card review">
+        <div class="phase-number">9</div>
+        <div class="phase-header">
+          <div class="phase-name">Review</div>
+          <code class="phase-command">/storyforge:review</code>
+        </div>
+        <div class="phase-body">
+          <div class="section-label">Quality Gate</div>
+          <p class="phase-desc">Automatic review runs at the end of every autonomous process &mdash; write, evaluate, revise, and assemble. Maps findings to changes, identifies gaps, and recommends next steps. Also available as a standalone skill.</p>
+          <div class="phase-mode">Automatic + Interactive</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="--i: 22">
+      <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
+        <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
+        <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <!-- Phase 10: Produce -->
+    <div class="phase-wrapper animate" style="--i: 23">
+      <div class="phase-card produce">
+        <div class="phase-number">10</div>
+        <div class="phase-header">
+          <div class="phase-name">Produce</div>
+          <code class="phase-command">/storyforge:produce</code>
+        </div>
+        <div class="phase-body">
+          <div class="section-label">Book Assembly</div>
+          <p class="phase-desc">Map scenes to chapters, configure typography and production settings, then assemble into epub, PDF, or HTML. Chapter mapping is a creative act &mdash; shaped by coaching level.</p>
+          <div class="phase-mode">Interactive + Autonomous</div>
         </div>
       </div>
     </div>
