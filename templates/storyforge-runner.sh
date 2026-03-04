@@ -13,7 +13,7 @@ find_plugin() {
   local cache_dir="$HOME/.claude/plugins/cache"
   if [[ -d "$cache_dir" ]]; then
     local found
-    found=$(find "$cache_dir" -maxdepth 3 -name "plugin.json" \
+    found=$(find "$cache_dir" -maxdepth 5 -name "plugin.json" \
       -path "*/storyforge/*" 2>/dev/null | sort -V | tail -1)
     if [[ -n "$found" ]]; then
       dirname "$(dirname "$found")"
