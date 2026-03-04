@@ -86,6 +86,9 @@ Formats:
   markdown   Assemble manuscript markdown only (no external tools)
   all        Generate all available formats
 
+Environment:
+  STORYFORGE_MODEL    Override model selection for the review phase
+
 Examples:
   $(basename "$0")
   $(basename "$0") --format markdown

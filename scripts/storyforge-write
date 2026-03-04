@@ -80,6 +80,10 @@ Options:
   --dry-run                   Build prompts without invoking Claude
   -h, --help                  Show this help
 
+Environment:
+  STORYFORGE_MODEL            Override model selection (e.g., claude-sonnet-4-6)
+  STORYFORGE_REJOIN_TIMEOUT   Seconds to wait for 'i' keypress in autopilot (default: 5)
+
 Examples:
   $(basename "$0")
   $(basename "$0") act1-sc05

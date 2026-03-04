@@ -89,6 +89,9 @@ Options:
   --dry-run                     Print prompts without invoking Claude
   -h, --help                    Show this help
 
+Environment:
+  STORYFORGE_MODEL              Override model selection (e.g., claude-opus-4-6)
+
 Examples:
   $(basename "$0")
   $(basename "$0") --act 2

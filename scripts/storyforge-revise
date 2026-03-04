@@ -60,6 +60,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --dry-run       Build and print prompts without invoking Claude"
             echo "  --interactive   Supervise each pass — watch, give feedback, redirect"
             echo "  PASS_NUM        Start from this pass number (1-indexed; default: first pending)"
+            echo ""
+            echo "Environment:"
+            echo "  STORYFORGE_MODEL            Override model selection"
+            echo "  STORYFORGE_REJOIN_TIMEOUT   Seconds to wait for 'i' keypress in autopilot (default: 5)"
             exit 0
             ;;
         [0-9]*)

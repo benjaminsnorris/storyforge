@@ -73,7 +73,7 @@ If hard prerequisites are met, tell the author how to run the drafting script:
 
 If the project doesn't have a `./storyforge` runner script, offer to create one
 by copying the template from the plugin's `templates/storyforge-runner.sh` and
-making it executable. Explain available options (scene selection, act scope, etc.).
+making it executable. Explain available options (scene selection, act scope, `--interactive` for supervised drafting).
 
 If a hard prerequisite is missing, explain what's needed and route to the skill that creates it — `scenes` for the scene index, `voice` for the voice guide.
 
@@ -92,7 +92,7 @@ If met, provide the evaluation command:
 
 If the project doesn't have a `./storyforge` runner script, offer to create one
 by copying the template from the plugin's `templates/storyforge-runner.sh` and
-making it executable. Explain what the evaluation does and what output to expect.
+making it executable. Explain what the evaluation does, available options (`--interactive` for supervised synthesis), and what output to expect.
 
 Evaluation runs on scene files in `scenes/`, not assembled chapters. This is intentional — get the scenes right first, assemble into chapters later.
 
@@ -114,7 +114,7 @@ If met, provide the revision command:
 
 If the project doesn't have a `./storyforge` runner script, offer to create one
 by copying the template from the plugin's `templates/storyforge-runner.sh` and
-making it executable. Explain that it runs all passes autonomously in sequence — the author steers by editing guidance entries in the plan before execution.
+making it executable. Explain that it runs all passes autonomously in sequence — the author steers by editing guidance entries in the plan before execution. Mention `--interactive` for supervised revision where the author can watch and redirect each pass.
 
 If the revision plan doesn't exist, explain that a revision plan is needed first and offer to invoke `plan-revision`.
 
