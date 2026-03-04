@@ -69,7 +69,7 @@ for (( i=0; i<${#SCENES[@]}; i++ )); do
         )
         printf '╔%*s╗\n' "$BANNER_WIDTH" '' | tr ' ' '═'
         for line in "${BANNER_LINES[@]}"; do
-            printf '║  %-*s║\n' "$((BANNER_WIDTH - 2))" "$line"
+            printf '║  %-*s  ║\n' "$((BANNER_WIDTH - 4))" "$line"
         done
         printf '╚%*s╝\n' "$BANNER_WIDTH" '' | tr ' ' '═'
         echo ""
