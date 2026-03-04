@@ -40,6 +40,7 @@ mkdir -p "$LOG_DIR"
 
 # --- Arguments ---
 DRY_RUN=false
+INTERACTIVE=false
 START_PASS=0  # 0 means "find first pending"
 
 while [[ $# -gt 0 ]]; do
@@ -48,12 +49,17 @@ while [[ $# -gt 0 ]]; do
             DRY_RUN=true
             shift
             ;;
+        --interactive|-i)
+            INTERACTIVE=true
+            shift
+            ;;
         -h|--help)
-            echo "Usage: storyforge-revise [--dry-run] [PASS_NUM]"
+            echo "Usage: storyforge-revise [--dry-run] [--interactive] [PASS_NUM]"
             echo ""
             echo "Options:"
-            echo "  --dry-run     Build and print prompts without invoking Claude"
-            echo "  PASS_NUM      Start from this pass number (1-indexed; default: first pending)"
+            echo "  --dry-run       Build and print prompts without invoking Claude"
+            echo "  --interactive   Supervise each pass — watch, give feedback, redirect"
+            echo "  PASS_NUM        Start from this pass number (1-indexed; default: first pending)"
             exit 0
             ;;
         [0-9]*)
@@ -412,33 +418,61 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     # Mark as in_progress (only in live mode)
     update_pass_field "$PASS_NUM" "status" "in_progress"
 
+    # --- Check interactive/autopilot mode ---
+    AUTOPILOT_FILE="${PROJECT_DIR}/working/.autopilot"
+    USE_INTERACTIVE=false
+
+    if [[ "$INTERACTIVE" == true ]]; then
+        if [[ -f "$AUTOPILOT_FILE" ]]; then
+            check_rejoin_interactive "$PROJECT_DIR" "Pass: ${PASS_NAME} (${PASS_NUM}/${TOTAL_PASSES})" && USE_INTERACTIVE=true
+        else
+            USE_INTERACTIVE=true
+        fi
+    fi
+
     # Record git HEAD before invocation
     HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD)
 
     STEP_LOG="${LOG_DIR}/revision-pass-${PASS_NUM}-${PASS_NAME}.log"
 
-    log "  Invoking claude for revision..."
-    log "  Pass log: $(basename "$STEP_LOG") (tail -f for live output)"
     START_TIME=$(date +%s)
 
-    # Start background monitor
-    revision_monitor "$PASS_NAME" "$HEAD_BEFORE" "$START_TIME" &
-    MONITOR_PID=$!
+    if [[ "$USE_INTERACTIVE" == true ]]; then
+        # --- Interactive mode ---
+        show_interactive_banner "Pass ${PASS_NUM} of ${TOTAL_PASSES}: ${PASS_NAME}"
 
-    # Invoke claude in headless mode
-    set +e
-    claude -p "$PROMPT" \
-        --model claude-opus-4-6 \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --verbose \
-        > "$STEP_LOG" 2>&1
-    EXIT_CODE=$?
-    set -e
+        INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$AUTOPILOT_FILE" "pass")
 
-    # Stop the monitor
-    kill $MONITOR_PID 2>/dev/null || true
-    wait $MONITOR_PID 2>/dev/null || true
+        set +e
+        claude "$PROMPT" \
+            --model claude-opus-4-6 \
+            --dangerously-skip-permissions \
+            --append-system-prompt "$INTERACTIVE_SYSTEM"
+        EXIT_CODE=$?
+        set -e
+    else
+        # --- Headless mode ---
+        log "  Invoking claude for revision..."
+        log "  Pass log: $(basename "$STEP_LOG") (tail -f for live output)"
+
+        # Start background monitor
+        revision_monitor "$PASS_NAME" "$HEAD_BEFORE" "$START_TIME" &
+        MONITOR_PID=$!
+
+        set +e
+        claude -p "$PROMPT" \
+            --model claude-opus-4-6 \
+            --dangerously-skip-permissions \
+            --output-format stream-json \
+            --verbose \
+            > "$STEP_LOG" 2>&1
+        EXIT_CODE=$?
+        set -e
+
+        # Stop the monitor
+        kill $MONITOR_PID 2>/dev/null || true
+        wait $MONITOR_PID 2>/dev/null || true
+    fi
 
     END_TIME=$(date +%s)
     DURATION=$(( END_TIME - START_TIME ))
@@ -492,8 +526,8 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     log "SUCCESS: Pass ${PASS_NUM}/${TOTAL_PASSES} (${PASS_NAME}) — ${MINUTES}m${SECS}s, commit ${COMMIT_SHORT}"
     update_pr_task "Pass: ${PASS_NAME}" "$PROJECT_DIR"
 
-    # --- Pause between passes ---
-    if (( PASS_NUM < TOTAL_PASSES )); then
+    # --- Pause between passes (headless only) ---
+    if (( PASS_NUM < TOTAL_PASSES )) && [[ "$USE_INTERACTIVE" != true ]]; then
         NEXT_STATUS=$(read_pass_field "$((PASS_NUM + 1))" "status")
         if [[ "$NEXT_STATUS" != "completed" ]]; then
             log "Pausing 10s before next pass..."
@@ -501,6 +535,9 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         fi
     fi
 done
+
+# Clean up autopilot file
+rm -f "${PROJECT_DIR}/working/.autopilot"
 
 # ============================================================================
 # Session summary

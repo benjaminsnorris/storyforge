@@ -67,6 +67,7 @@ CORE_EVALUATORS=(
 # ============================================================================
 
 DRY_RUN=false
+INTERACTIVE=false
 FILTER_MODE="all"       # all | act | part | range | single
 FILTER_VALUE=""
 RANGE_START=""
@@ -84,13 +85,15 @@ Options:
   --part N                      Evaluate scenes in part N
   --scenes ID..ID               Evaluate a range of scenes (inclusive)
   --scene ID                    Evaluate a single scene
+  --interactive                 Supervise the synthesis step interactively
+  --dry-run                     Print prompts without invoking Claude
   -h, --help                    Show this help
 
 Examples:
   $(basename "$0")
   $(basename "$0") --act 2
   $(basename "$0") --scenes act1-sc01..act1-sc10
-  $(basename "$0") --scene act2-sc05
+  $(basename "$0") --interactive
 EOF
     exit 0
 }
@@ -102,6 +105,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --interactive|-i)
+            INTERACTIVE=true
             shift
             ;;
         --act)
@@ -760,16 +767,29 @@ SYNTH_EOF
 
 SYNTH_START=$(date +%s)
 
-set +e
-claude -p "$SYNTHESIS_PROMPT" \
-    --model claude-opus-4-6 \
-    --dangerously-skip-permissions \
-    --output-format stream-json \
-    --verbose \
-    $BUDGET_FLAG \
-    > "$SYNTHESIS_LOG" 2>&1
-SYNTH_EXIT=$?
-set -e
+if [[ "$INTERACTIVE" == true ]]; then
+    # Interactive synthesis — user can guide how findings are interpreted
+    show_interactive_banner "Evaluation Synthesis"
+
+    set +e
+    claude "$SYNTHESIS_PROMPT" \
+        --model claude-opus-4-6 \
+        --dangerously-skip-permissions \
+        --append-system-prompt "You are in interactive mode for the evaluation synthesis. The user may give you feedback on how to interpret findings, ask you to emphasize certain areas, or adjust severity ratings. Complete the synthesis, then wait for the user to type /exit."
+    SYNTH_EXIT=$?
+    set -e
+else
+    set +e
+    claude -p "$SYNTHESIS_PROMPT" \
+        --model claude-opus-4-6 \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        $BUDGET_FLAG \
+        > "$SYNTHESIS_LOG" 2>&1
+    SYNTH_EXIT=$?
+    set -e
+fi
 
 SYNTH_END=$(date +%s)
 SYNTH_DURATION=$(( SYNTH_END - SYNTH_START ))

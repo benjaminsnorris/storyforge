@@ -63,6 +63,7 @@ DRY_RUN=false
 FORMAT="epub"           # epub | pdf | html | markdown | all
 DRAFT_MODE=false
 SKIP_VALIDATION=false
+INTERACTIVE=false
 
 usage() {
     cat <<EOF
@@ -83,6 +84,10 @@ Formats:
   html       Generate single-file HTML (requires pandoc)
   markdown   Assemble manuscript markdown only (no external tools)
   all        Generate all available formats
+
+  --interactive               Run the review phase interactively
+  --dry-run                   Show what would be done without doing it
+  --skip-validation           Skip epubcheck validation
 
 Examples:
   $(basename "$0")
@@ -113,6 +118,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-validation)
             SKIP_VALIDATION=true
+            shift
+            ;;
+        --interactive|-i)
+            INTERACTIVE=true
             shift
             ;;
         -*)

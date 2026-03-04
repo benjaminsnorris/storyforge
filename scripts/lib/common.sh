@@ -601,20 +601,35 @@ REVIEW_EOF
         return 0
     fi
 
-    log "Invoking claude for review..."
-
     local head_before
     head_before=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || echo "none")
 
-    set +e
-    claude -p "$review_prompt" \
-        --model claude-opus-4-6 \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --verbose \
-        > "$review_log" 2>&1
-    local review_exit=$?
-    set -e
+    if [[ "${INTERACTIVE:-false}" == true ]]; then
+        # Interactive review — user can discuss findings with Claude
+        show_interactive_banner "Pipeline Review (${review_type})"
+
+        log "Invoking interactive claude for review..."
+
+        set +e
+        claude "$review_prompt" \
+            --model claude-opus-4-6 \
+            --dangerously-skip-permissions \
+            --append-system-prompt "You are in interactive mode for the pipeline review. Complete the review, then wait for the user. They may ask questions about findings or request adjustments. Type /exit when done."
+        local review_exit=$?
+        set -e
+    else
+        log "Invoking claude for review..."
+
+        set +e
+        claude -p "$review_prompt" \
+            --model claude-opus-4-6 \
+            --dangerously-skip-permissions \
+            --output-format stream-json \
+            --verbose \
+            > "$review_log" 2>&1
+        local review_exit=$?
+        set -e
+    fi
 
     if (( review_exit != 0 )); then
         log "WARNING: Review claude invocation failed (exit code ${review_exit})"
