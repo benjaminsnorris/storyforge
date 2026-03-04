@@ -1,0 +1,118 @@
+/* Storyforge — Literary Fiction epub stylesheet
+ * Elegant, restrained typography with generous whitespace.
+ * Serif throughout, subtle chapter openings, clean scene breaks.
+ */
+
+body {
+  font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: 1em;
+  line-height: 1.7;
+  margin: 1.2em;
+  color: #1a1a1a;
+}
+
+/* Chapter headings — understated elegance */
+h1 {
+  font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: 1.5em;
+  font-weight: normal;
+  font-variant: small-caps;
+  letter-spacing: 0.1em;
+  text-align: center;
+  margin-top: 4em;
+  margin-bottom: 2em;
+  page-break-before: always;
+}
+
+h1:first-of-type {
+  margin-top: 2em;
+}
+
+h2 {
+  font-size: 1.2em;
+  font-weight: normal;
+  font-variant: small-caps;
+  letter-spacing: 0.05em;
+  margin-top: 2em;
+  margin-bottom: 1em;
+}
+
+h3 {
+  font-size: 1em;
+  font-weight: normal;
+  text-align: center;
+  margin-top: 1.5em;
+  margin-bottom: 0.8em;
+}
+
+/* Paragraphs */
+p {
+  text-indent: 1.5em;
+  margin-top: 0;
+  margin-bottom: 0;
+  text-align: justify;
+  hyphens: auto;
+}
+
+h1 + p,
+h2 + p,
+h3 + p,
+hr + p {
+  text-indent: 0;
+}
+
+/* Scene breaks — minimal */
+hr {
+  border: none;
+  text-align: center;
+  margin: 2em 0;
+}
+
+hr::after {
+  content: "\2022";
+  font-size: 0.8em;
+  color: #999;
+}
+
+/* Blockquotes — for epigraphs */
+blockquote {
+  font-style: italic;
+  margin: 2em 3em;
+  padding: 0;
+  border: none;
+  font-size: 0.95em;
+}
+
+blockquote p {
+  text-indent: 0;
+  text-align: center;
+}
+
+/* Drop cap — first letter of first paragraph after chapter heading */
+h1 + p::first-letter {
+  font-size: 3em;
+  float: left;
+  line-height: 0.8;
+  padding-right: 0.1em;
+  padding-top: 0.05em;
+  font-weight: normal;
+}
+
+em { font-style: italic; }
+strong { font-weight: bold; }
+
+nav#toc ol {
+  list-style: none;
+  padding-left: 0;
+}
+
+nav#toc li {
+  margin-bottom: 0.4em;
+  font-variant: small-caps;
+  letter-spacing: 0.05em;
+}
+
+nav#toc a {
+  text-decoration: none;
+  color: #1a1a1a;
+}

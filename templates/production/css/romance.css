@@ -1,0 +1,113 @@
+/* Storyforge — Romance epub stylesheet
+ * Warm, inviting typography following romance industry conventions.
+ * Readable serif body, decorative chapter headings.
+ */
+
+body {
+  font-family: Garamond, "EB Garamond", Georgia, serif;
+  font-size: 1em;
+  line-height: 1.65;
+  margin: 1em;
+  color: #2a2a2a;
+}
+
+/* Chapter headings — warm and inviting */
+h1 {
+  font-family: Garamond, "EB Garamond", Georgia, serif;
+  font-size: 1.8em;
+  font-weight: normal;
+  font-style: italic;
+  text-align: center;
+  margin-top: 3em;
+  margin-bottom: 1.5em;
+  page-break-before: always;
+}
+
+h1:first-of-type {
+  margin-top: 1em;
+}
+
+h2 {
+  font-size: 1.2em;
+  font-weight: normal;
+  font-style: italic;
+  margin-top: 1.5em;
+  margin-bottom: 0.8em;
+}
+
+h3 {
+  font-size: 1em;
+  font-weight: normal;
+  text-align: center;
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+}
+
+/* Paragraphs */
+p {
+  text-indent: 1.5em;
+  margin-top: 0;
+  margin-bottom: 0;
+  text-align: justify;
+}
+
+h1 + p,
+h2 + p,
+h3 + p,
+hr + p {
+  text-indent: 0;
+}
+
+/* Scene breaks — decorative */
+hr {
+  border: none;
+  text-align: center;
+  margin: 1.5em 0;
+}
+
+hr::after {
+  content: "\2766";
+  font-size: 1.2em;
+  color: #888;
+}
+
+/* Blockquotes */
+blockquote {
+  font-style: italic;
+  margin: 1.5em 2em;
+  padding: 0;
+  border: none;
+}
+
+blockquote p {
+  text-indent: 0;
+  text-align: center;
+}
+
+/* Drop cap for chapter openings */
+h1 + p::first-letter {
+  font-size: 2.5em;
+  float: left;
+  line-height: 0.85;
+  padding-right: 0.1em;
+  padding-top: 0.05em;
+  font-style: italic;
+}
+
+em { font-style: italic; }
+strong { font-weight: bold; }
+
+nav#toc ol {
+  list-style: none;
+  padding-left: 0;
+}
+
+nav#toc li {
+  margin-bottom: 0.4em;
+  font-style: italic;
+}
+
+nav#toc a {
+  text-decoration: none;
+  color: #2a2a2a;
+}

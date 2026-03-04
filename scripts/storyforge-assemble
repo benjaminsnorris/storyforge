@@ -1,0 +1,407 @@
+#!/bin/bash
+set -eo pipefail
+
+# ============================================================================
+# storyforge-assemble — Manuscript assembly and book production
+#
+# Reads chapter-map.yaml and scene files, assembles chapters, generates
+# epub, PDF, or HTML output. No external tools required for assembly;
+# pandoc required for epub/HTML; pandoc + LaTeX or weasyprint for PDF.
+#
+# Usage:
+#   ./storyforge assemble                    # Full assembly + epub
+#   ./storyforge assemble --format epub      # Epub only
+#   ./storyforge assemble --format pdf       # PDF only
+#   ./storyforge assemble --format html      # HTML only
+#   ./storyforge assemble --format markdown  # Assembled markdown only
+#   ./storyforge assemble --draft            # Quick assembly, no formatting
+#   ./storyforge assemble --dry-run          # Show what would be done
+# ============================================================================
+
+# --- Locate script directory and source libraries ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+
+if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
+    echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
+    exit 1
+fi
+if [[ ! -f "${LIB_DIR}/assembly.sh" ]]; then
+    echo "ERROR: Cannot find lib/assembly.sh at ${LIB_DIR}" >&2
+    exit 1
+fi
+
+# shellcheck source=lib/common.sh
+source "${LIB_DIR}/common.sh"
+# shellcheck source=lib/assembly.sh
+source "${LIB_DIR}/assembly.sh"
+
+# --- Detect project root ---
+detect_project_root
+log "Project root: ${PROJECT_DIR}"
+
+# --- Configuration ---
+CHAPTER_MAP="${PROJECT_DIR}/reference/chapter-map.yaml"
+MANUSCRIPT_DIR="${PROJECT_DIR}/manuscript"
+OUTPUT_DIR="${MANUSCRIPT_DIR}/output"
+CHAPTERS_DIR="${MANUSCRIPT_DIR}/chapters"
+LOG_DIR="${PROJECT_DIR}/working/logs"
+LOG_FILE="${LOG_DIR}/assembly-log.txt"
+export LOG_FILE
+
+# Get plugin directory for CSS and templates
+PLUGIN_DIR=$(get_plugin_dir)
+
+# Ensure log directory exists
+mkdir -p "$LOG_DIR"
+
+# ============================================================================
+# Argument parsing
+# ============================================================================
+
+DRY_RUN=false
+FORMAT="epub"           # epub | pdf | html | markdown | all
+DRAFT_MODE=false
+SKIP_VALIDATION=false
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Assemble scenes into chapters and generate book output.
+
+Options:
+  --format FORMAT     Output format: epub, pdf, html, markdown, all (default: epub)
+  --draft             Quick assembly — markdown only, no formatting
+  --dry-run           Show what would be done without doing it
+  --skip-validation   Skip epubcheck validation
+  -h, --help          Show this help
+
+Formats:
+  epub       Generate epub3 (requires pandoc)
+  pdf        Generate PDF (requires pandoc + LaTeX or weasyprint)
+  html       Generate single-file HTML (requires pandoc)
+  markdown   Assemble manuscript markdown only (no external tools)
+  all        Generate all available formats
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") --format markdown
+  $(basename "$0") --format all
+  $(basename "$0") --draft
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --draft)
+            DRAFT_MODE=true
+            FORMAT="markdown"
+            shift
+            ;;
+        --format)
+            FORMAT="${2:?ERROR: --format requires a value (epub, pdf, html, markdown, all)}"
+            shift 2
+            ;;
+        --skip-validation)
+            SKIP_VALIDATION=true
+            shift
+            ;;
+        -*)
+            echo "ERROR: Unknown option: $1" >&2
+            usage
+            ;;
+        *)
+            echo "ERROR: Unexpected argument: $1" >&2
+            usage
+            ;;
+    esac
+done
+
+# Validate format
+case "$FORMAT" in
+    epub|pdf|html|markdown|all) ;;
+    *)
+        echo "ERROR: Unknown format '${FORMAT}'. Use: epub, pdf, html, markdown, all" >&2
+        exit 1
+        ;;
+esac
+
+# ============================================================================
+# Prerequisites
+# ============================================================================
+
+check_file_exists "$CHAPTER_MAP" "Chapter map (reference/chapter-map.yaml)"
+
+# Verify chapter map has chapters
+TOTAL_CHAPTERS=$(count_chapters "$PROJECT_DIR")
+if [[ "$TOTAL_CHAPTERS" == "0" ]]; then
+    log "ERROR: No chapters found in ${CHAPTER_MAP}"
+    log "Add chapters with scene mappings to reference/chapter-map.yaml"
+    exit 1
+fi
+
+# Verify scene files exist for all referenced scenes
+MISSING_SCENES=0
+for (( ch=1; ch<=TOTAL_CHAPTERS; ch++ )); do
+    scene_ids=$(get_chapter_scenes "$ch" "$PROJECT_DIR")
+    while IFS= read -r scene_id; do
+        [[ -z "$scene_id" ]] && continue
+        scene_file="${PROJECT_DIR}/scenes/${scene_id}.md"
+        if [[ ! -f "$scene_file" ]]; then
+            log "WARNING: Scene file missing: scenes/${scene_id}.md (chapter ${ch})"
+            MISSING_SCENES=$((MISSING_SCENES + 1))
+        fi
+    done <<< "$scene_ids"
+done
+
+if [[ $MISSING_SCENES -gt 0 ]]; then
+    log "WARNING: ${MISSING_SCENES} scene file(s) missing. Assembly will proceed with available scenes."
+fi
+
+# Check tool availability for non-markdown formats
+if [[ "$FORMAT" != "markdown" ]]; then
+    PANDOC_VERSION=$(check_pandoc 2>/dev/null || echo "")
+    if [[ -z "$PANDOC_VERSION" ]]; then
+        if [[ "$FORMAT" == "all" ]]; then
+            log "WARNING: pandoc not found — will generate markdown only"
+            FORMAT="markdown"
+        else
+            log "ERROR: pandoc is required for ${FORMAT} output but not found"
+            log "Install: https://pandoc.org/installing.html"
+            exit 1
+        fi
+    else
+        log "Found pandoc ${PANDOC_VERSION}"
+    fi
+fi
+
+# ============================================================================
+# Session start
+# ============================================================================
+
+SESSION_START=$(date +%s)
+
+# Read project info
+TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
+GENRE=$(read_yaml_field "project.genre" 2>/dev/null || read_yaml_field "genre" 2>/dev/null || echo "")
+
+log "============================================"
+log "Starting Storyforge assembly"
+log "Project: ${TITLE}"
+log "Chapters: ${TOTAL_CHAPTERS}"
+log "Format: ${FORMAT}"
+if [[ "$DRAFT_MODE" == true ]]; then
+    log "Mode: draft (quick assembly)"
+fi
+log "============================================"
+
+# ============================================================================
+# Dry-run mode
+# ============================================================================
+
+if [[ "$DRY_RUN" == true ]]; then
+    echo "===== DRY RUN: assemble ====="
+    echo ""
+    echo "Project: ${TITLE}"
+    echo "Chapters: ${TOTAL_CHAPTERS}"
+    echo "Format: ${FORMAT}"
+    echo ""
+    echo "Chapter map:"
+    for (( ch=1; ch<=TOTAL_CHAPTERS; ch++ )); do
+        ch_title=$(read_chapter_field "$ch" "$PROJECT_DIR" "title")
+        echo "  Chapter ${ch}: ${ch_title}"
+        scene_ids=$(get_chapter_scenes "$ch" "$PROJECT_DIR")
+        while IFS= read -r scene_id; do
+            [[ -z "$scene_id" ]] && continue
+            scene_file="${PROJECT_DIR}/scenes/${scene_id}.md"
+            if [[ -f "$scene_file" ]]; then
+                wc=$(wc -w < "$scene_file" | tr -d ' ')
+                echo "    - ${scene_id} (${wc} words)"
+            else
+                echo "    - ${scene_id} (MISSING)"
+            fi
+        done <<< "$scene_ids"
+    done
+    echo ""
+    echo "Output directory: ${MANUSCRIPT_DIR}"
+    echo "Formats to generate:"
+    case "$FORMAT" in
+        epub) echo "  - epub3" ;;
+        pdf) echo "  - PDF" ;;
+        html) echo "  - HTML" ;;
+        markdown) echo "  - Markdown" ;;
+        all)
+            echo "  - Markdown"
+            [[ -n "$PANDOC_VERSION" ]] && echo "  - epub3"
+            [[ -n "$PANDOC_VERSION" ]] && echo "  - HTML"
+            if check_weasyprint 2>/dev/null || [[ -n "$PANDOC_VERSION" ]]; then
+                echo "  - PDF"
+            fi
+            ;;
+    esac
+    echo ""
+    echo "===== END DRY RUN: assemble ====="
+    exit 0
+fi
+
+# ============================================================================
+# Create output directories
+# ============================================================================
+
+mkdir -p "$MANUSCRIPT_DIR" "$OUTPUT_DIR" "$CHAPTERS_DIR"
+mkdir -p "${MANUSCRIPT_DIR}/front-matter"
+mkdir -p "${MANUSCRIPT_DIR}/back-matter"
+mkdir -p "${MANUSCRIPT_DIR}/assets"
+
+# ============================================================================
+# Phase 1: Assemble chapters
+# ============================================================================
+
+log "Assembling ${TOTAL_CHAPTERS} chapters..."
+
+BREAK_STYLE=$(read_production_field "$PROJECT_DIR" "scene_break" 2>/dev/null || echo "blank")
+
+TOTAL_WORDS=0
+for (( ch=1; ch<=TOTAL_CHAPTERS; ch++ )); do
+    ch_title=$(read_chapter_field "$ch" "$PROJECT_DIR" "title")
+    ch_file="${CHAPTERS_DIR}/chapter-$(printf '%02d' "$ch").md"
+
+    log "  Chapter ${ch}: ${ch_title}"
+    assemble_chapter "$ch" "$PROJECT_DIR" "$BREAK_STYLE" > "$ch_file"
+
+    ch_words=$(wc -w < "$ch_file" | tr -d ' ')
+    TOTAL_WORDS=$((TOTAL_WORDS + ch_words))
+    log "    ${ch_words} words → $(basename "$ch_file")"
+done
+
+log "Chapter assembly complete: ${TOTAL_WORDS} words across ${TOTAL_CHAPTERS} chapters"
+
+# ============================================================================
+# Phase 2: Assemble full manuscript
+# ============================================================================
+
+MANUSCRIPT_FILE="${MANUSCRIPT_DIR}/manuscript.md"
+
+log "Assembling full manuscript..."
+assemble_manuscript "$PROJECT_DIR" "$MANUSCRIPT_FILE"
+MANUSCRIPT_WORDS=$(manuscript_word_count "$MANUSCRIPT_FILE")
+log "Full manuscript assembled: ${MANUSCRIPT_WORDS} words → manuscript.md"
+
+# If draft mode, stop here
+if [[ "$DRAFT_MODE" == true ]]; then
+    log "Draft mode — skipping format generation"
+    log "Manuscript: ${MANUSCRIPT_FILE}"
+
+    SESSION_END=$(date +%s)
+    SESSION_DURATION=$(( SESSION_END - SESSION_START ))
+    log "Assembly complete in ${SESSION_DURATION}s"
+    exit 0
+fi
+
+# ============================================================================
+# Phase 3: Generate output formats
+# ============================================================================
+
+# Slug for output filenames
+TITLE_SLUG=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g')
+
+generate_format() {
+    local fmt="$1"
+
+    case "$fmt" in
+        epub)
+            local epub_file="${OUTPUT_DIR}/${TITLE_SLUG}.epub"
+            generate_epub "$PROJECT_DIR" "$MANUSCRIPT_FILE" "$epub_file" "$PLUGIN_DIR"
+            if [[ $? -eq 0 && "$SKIP_VALIDATION" != true ]]; then
+                validate_epub "$epub_file" || true
+            fi
+            ;;
+        html)
+            local html_file="${OUTPUT_DIR}/${TITLE_SLUG}.html"
+            generate_html "$PROJECT_DIR" "$MANUSCRIPT_FILE" "$html_file" "$PLUGIN_DIR"
+            ;;
+        pdf)
+            local pdf_file="${OUTPUT_DIR}/${TITLE_SLUG}.pdf"
+            generate_pdf "$PROJECT_DIR" "$MANUSCRIPT_FILE" "$pdf_file" "$PLUGIN_DIR"
+            ;;
+        markdown)
+            log "Markdown manuscript already at: ${MANUSCRIPT_FILE}"
+            ;;
+    esac
+}
+
+case "$FORMAT" in
+    all)
+        generate_format "markdown"
+        if [[ -n "${PANDOC_VERSION:-}" ]]; then
+            generate_format "epub"
+            generate_format "html"
+            # PDF is optional — try it, warn on failure
+            set +e
+            generate_format "pdf"
+            set -e
+        fi
+        ;;
+    *)
+        generate_format "$FORMAT"
+        ;;
+esac
+
+# ============================================================================
+# Update storyforge.yaml
+# ============================================================================
+
+TODAY=$(date +%Y-%m-%d)
+
+# Update chapter_map artifact if not already marked
+sed -i '' "/chapter_map:/,/updated:/{
+    s/exists: false/exists: true/
+    s/updated:.*/updated: \"${TODAY}\"/
+}" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
+
+# Update manuscript artifact
+sed -i '' "/manuscript:/,/updated:/{
+    s/exists: false/exists: true/
+    s/updated:.*/updated: \"${TODAY}\"/
+}" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
+
+# Advance phase to production if appropriate
+CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
+if [[ "$CURRENT_PHASE" == "complete" || "$CURRENT_PHASE" == "review" ]]; then
+    sed -i '' "s/^[[:space:]]*phase:.*/phase: production/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
+    log "Project phase advanced to: production"
+fi
+
+# ============================================================================
+# Session complete
+# ============================================================================
+
+SESSION_END=$(date +%s)
+SESSION_DURATION=$(( SESSION_END - SESSION_START ))
+SESSION_MINS=$(( SESSION_DURATION / 60 ))
+SESSION_SECS=$(( SESSION_DURATION % 60 ))
+
+log "============================================"
+log "Assembly complete!"
+log "Chapters: ${TOTAL_CHAPTERS}"
+log "Total words: ${MANUSCRIPT_WORDS}"
+log "Output: ${OUTPUT_DIR}/"
+
+# List generated files
+if [[ -d "$OUTPUT_DIR" ]]; then
+    for f in "${OUTPUT_DIR}"/*; do
+        [[ -f "$f" ]] && log "  $(basename "$f") ($(du -h "$f" | cut -f1 | tr -d ' '))"
+    done
+fi
+
+log "Time: ${SESSION_MINS}m${SESSION_SECS}s"
+log "============================================"

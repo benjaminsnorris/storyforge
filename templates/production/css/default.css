@@ -1,0 +1,113 @@
+/* Storyforge — Default epub stylesheet */
+
+/* Page and body */
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1em;
+  line-height: 1.6;
+  margin: 1em;
+  color: #1a1a1a;
+}
+
+/* Chapter headings */
+h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.8em;
+  font-weight: bold;
+  text-align: center;
+  margin-top: 3em;
+  margin-bottom: 1.5em;
+  page-break-before: always;
+}
+
+h1:first-of-type {
+  margin-top: 1em;
+}
+
+/* Section headings */
+h2 {
+  font-size: 1.3em;
+  font-weight: bold;
+  margin-top: 2em;
+  margin-bottom: 0.8em;
+}
+
+h3 {
+  font-size: 1.1em;
+  font-weight: bold;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  text-align: center;
+}
+
+/* Paragraphs — book-style indentation */
+p {
+  text-indent: 1.5em;
+  margin-top: 0;
+  margin-bottom: 0;
+  text-align: justify;
+}
+
+/* First paragraph after heading — no indent */
+h1 + p,
+h2 + p,
+h3 + p,
+hr + p {
+  text-indent: 0;
+}
+
+/* Scene breaks */
+hr {
+  border: none;
+  text-align: center;
+  margin: 1.5em 0;
+}
+
+hr::after {
+  content: "* * *";
+  font-size: 0.9em;
+  letter-spacing: 0.5em;
+  color: #666;
+}
+
+/* Blockquotes — for epigraphs and styled passages */
+blockquote {
+  font-style: italic;
+  margin: 1.5em 2em;
+  padding: 0;
+  border: none;
+}
+
+blockquote p {
+  text-indent: 0;
+}
+
+/* Emphasis */
+em {
+  font-style: italic;
+}
+
+strong {
+  font-weight: bold;
+}
+
+/* Title page */
+.title-page {
+  text-align: center;
+  margin-top: 30%;
+}
+
+/* Table of contents */
+nav#toc ol {
+  list-style: none;
+  padding-left: 0;
+}
+
+nav#toc li {
+  margin-bottom: 0.3em;
+}
+
+nav#toc a {
+  text-decoration: none;
+  color: #1a1a1a;
+}

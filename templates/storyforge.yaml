@@ -76,6 +76,16 @@ artifacts:
     path: reference/key-decisions.md
     updated:
 
+  chapter_map:
+    exists: false
+    path: reference/chapter-map.yaml
+    updated:
+
+  manuscript:
+    exists: false
+    path: manuscript/
+    updated:
+
 # ----------------------------------------------------------------------------
 # Scene Extensions
 # ----------------------------------------------------------------------------
@@ -124,4 +134,5 @@ evaluation:
 #   revision      — revising based on evaluation feedback
 #   review        — assessing revision results, deciding next cycle
 #   complete      — manuscript finished, artifacts locked
+#   production    — assembling scenes into chapters, generating epub/PDF
 phase: development

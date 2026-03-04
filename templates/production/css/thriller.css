@@ -1,0 +1,102 @@
+/* Storyforge — Thriller epub stylesheet
+ * Tight, punchy layout. Bold chapter headings. Short chapters feel fast.
+ */
+
+body {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 1em;
+  line-height: 1.5;
+  margin: 1em;
+  color: #111;
+}
+
+/* Chapter headings — bold and direct */
+h1 {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 2em;
+  font-weight: bold;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-top: 3em;
+  margin-bottom: 1em;
+  page-break-before: always;
+}
+
+h1:first-of-type {
+  margin-top: 1em;
+}
+
+h2 {
+  font-size: 1.3em;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+h3 {
+  font-size: 1em;
+  font-weight: bold;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+/* Paragraphs — tighter spacing */
+p {
+  text-indent: 1.2em;
+  margin-top: 0;
+  margin-bottom: 0;
+  text-align: left;
+}
+
+h1 + p,
+h2 + p,
+h3 + p,
+hr + p {
+  text-indent: 0;
+}
+
+/* Scene breaks — sharp line */
+hr {
+  border: none;
+  border-top: 2px solid #333;
+  width: 30%;
+  margin: 1.5em auto;
+}
+
+/* Blockquotes */
+blockquote {
+  font-style: italic;
+  margin: 1em 1.5em;
+  padding-left: 0.5em;
+  border-left: 3px solid #333;
+}
+
+blockquote p {
+  text-indent: 0;
+}
+
+em { font-style: italic; }
+strong { font-weight: bold; }
+
+nav#toc ol {
+  list-style: none;
+  padding-left: 0;
+}
+
+nav#toc li {
+  margin-bottom: 0.3em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.9em;
+}
+
+nav#toc a {
+  text-decoration: none;
+  color: #111;
+}

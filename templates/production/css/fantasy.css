@@ -1,0 +1,121 @@
+/* Storyforge — Fantasy epub stylesheet
+ * Rich, immersive typography. Ornamental scene breaks, decorative headings.
+ * Suited for epic fantasy, secondary world, and sword-and-sorcery.
+ */
+
+body {
+  font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: 1em;
+  line-height: 1.65;
+  margin: 1.1em;
+  color: #1a1a1a;
+}
+
+/* Chapter headings — bold and stately */
+h1 {
+  font-family: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: 2em;
+  font-weight: bold;
+  font-variant: small-caps;
+  letter-spacing: 0.08em;
+  text-align: center;
+  margin-top: 3em;
+  margin-bottom: 1.5em;
+  page-break-before: always;
+}
+
+h1:first-of-type {
+  margin-top: 1.5em;
+}
+
+h2 {
+  font-size: 1.3em;
+  font-weight: bold;
+  font-variant: small-caps;
+  letter-spacing: 0.05em;
+  margin-top: 2em;
+  margin-bottom: 0.8em;
+}
+
+h3 {
+  font-size: 1.1em;
+  font-weight: normal;
+  font-variant: small-caps;
+  text-align: center;
+  margin-top: 1.5em;
+  margin-bottom: 0.8em;
+}
+
+/* Paragraphs */
+p {
+  text-indent: 1.5em;
+  margin-top: 0;
+  margin-bottom: 0;
+  text-align: justify;
+  hyphens: auto;
+}
+
+h1 + p,
+h2 + p,
+h3 + p,
+hr + p {
+  text-indent: 0;
+}
+
+/* Scene breaks — ornamental */
+hr {
+  border: none;
+  text-align: center;
+  margin: 2em 0;
+}
+
+hr::after {
+  content: "\2726  \2726  \2726";
+  font-size: 0.8em;
+  letter-spacing: 0.3em;
+  color: #555;
+}
+
+/* Blockquotes — for epigraphs and prophecies */
+blockquote {
+  font-style: italic;
+  margin: 1.5em 2.5em;
+  padding: 0;
+  border: none;
+  font-size: 0.95em;
+}
+
+blockquote p {
+  text-indent: 0;
+  text-align: center;
+}
+
+/* Drop cap */
+h1 + p::first-letter {
+  font-size: 3.5em;
+  float: left;
+  line-height: 0.75;
+  padding-right: 0.1em;
+  padding-top: 0.05em;
+  font-weight: bold;
+  font-variant: normal;
+}
+
+em { font-style: italic; }
+strong { font-weight: bold; }
+
+nav#toc ol {
+  list-style: none;
+  padding-left: 0;
+}
+
+nav#toc li {
+  margin-bottom: 0.4em;
+  font-variant: small-caps;
+  letter-spacing: 0.05em;
+}
+
+nav#toc a {
+  text-decoration: none;
+  color: #1a1a1a;
+}

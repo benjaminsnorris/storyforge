@@ -1,0 +1,114 @@
+/* Storyforge — Science Fiction epub stylesheet
+ * Clean, modern typography. Geometric precision, minimal ornamentation.
+ */
+
+body {
+  font-family: "Avenir Next", Avenir, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 1em;
+  line-height: 1.6;
+  margin: 1em;
+  color: #1a1a1a;
+}
+
+/* Chapter headings — clean and modern */
+h1 {
+  font-family: "Avenir Next", Avenir, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 1.8em;
+  font-weight: 300;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  margin-top: 3em;
+  margin-bottom: 1.5em;
+  page-break-before: always;
+}
+
+h1:first-of-type {
+  margin-top: 1em;
+}
+
+h2 {
+  font-size: 1.2em;
+  font-weight: 300;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-top: 2em;
+  margin-bottom: 0.8em;
+}
+
+h3 {
+  font-size: 1em;
+  font-weight: 400;
+  text-align: center;
+  letter-spacing: 0.1em;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+/* Paragraphs */
+p {
+  text-indent: 1.2em;
+  margin-top: 0;
+  margin-bottom: 0;
+  text-align: justify;
+}
+
+h1 + p,
+h2 + p,
+h3 + p,
+hr + p {
+  text-indent: 0;
+}
+
+/* Scene breaks — geometric */
+hr {
+  border: none;
+  text-align: center;
+  margin: 1.5em 0;
+}
+
+hr::after {
+  content: "\25C6";
+  font-size: 0.7em;
+  color: #666;
+}
+
+/* Blockquotes */
+blockquote {
+  font-style: normal;
+  margin: 1.5em 2em;
+  padding-left: 0.8em;
+  border-left: 2px solid #ccc;
+  font-size: 0.95em;
+}
+
+blockquote p {
+  text-indent: 0;
+}
+
+em { font-style: italic; }
+strong { font-weight: bold; }
+
+/* Monospace for in-world technical text */
+code, pre {
+  font-family: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+nav#toc ol {
+  list-style: none;
+  padding-left: 0;
+}
+
+nav#toc li {
+  margin-bottom: 0.3em;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.85em;
+  font-weight: 300;
+}
+
+nav#toc a {
+  text-decoration: none;
+  color: #1a1a1a;
+}

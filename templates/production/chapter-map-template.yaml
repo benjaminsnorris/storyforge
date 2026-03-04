@@ -1,0 +1,57 @@
+# Chapter Map — {PROJECT_TITLE}
+#
+# Maps scenes to chapters for manuscript assembly.
+# Each chapter lists its scenes in reading order.
+# Run: ./storyforge assemble
+#
+# Chapter fields:
+#   title    — Chapter title (used in headings and TOC)
+#   heading  — Heading format: numbered, titled, numbered-titled, none
+#   scenes   — List of scene IDs from scene-index.yaml, in order
+#
+# Production fields (at bottom) control formatting and metadata.
+
+chapters:
+  - title: "Chapter Title"
+    heading: numbered-titled
+    scenes:
+      - scene-id-here
+
+# Production settings — controls formatting, metadata, and output
+production:
+  author: ""
+  language: en
+
+  # Scene break style: blank, ornamental, or custom:SYMBOL
+  scene_break: blank
+
+  # Chapter heading default: numbered, titled, numbered-titled, none
+  # (Individual chapters can override with their own heading: field)
+  default_heading: numbered-titled
+
+  # Include auto-generated table of contents
+  include_toc: true
+
+  # Cover image path (relative to project root)
+  cover_image:
+
+  # Genre preset for CSS styling (overridden by manuscript/assets/custom.css if present)
+  # Options: default, literary-fiction, thriller, romance, fantasy, science-fiction
+  genre_preset:
+
+  # Copyright information
+  copyright:
+    year:
+    isbn:
+    license: "All rights reserved."
+
+  # Front matter (paths relative to project root, or leave empty to skip)
+  front_matter:
+    dedication:
+    epigraph:
+
+  # Back matter (paths relative to project root, or leave empty to skip)
+  back_matter:
+    acknowledgments:
+    about-the-author:
+    also-by:
