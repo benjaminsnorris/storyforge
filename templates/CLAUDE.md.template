@@ -27,6 +27,7 @@ Scripts (via project runner):
 - `./storyforge evaluate` — Multi-agent evaluation panel
 - `./storyforge revise` — Execute revision pipeline
 - `./storyforge assemble` — Assemble scenes into chapters, generate epub/PDF/HTML
+- `./storyforge review` — Run pipeline review on current branch, post to PR
 
 ## Suggested Next Steps
 
