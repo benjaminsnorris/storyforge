@@ -246,12 +246,20 @@ This allows `./storyforge test` from any project directory.
 7. **test-craft-sections.sh** — tests for craft engine extraction.
 8. **Runner integration** — add `test` command to the runner script.
 
-## Open Questions
+## Resolved Questions
 
-1. **Should tests run against the real craft engine or a test copy?** Running against the real file means tests break if the craft engine changes (which is useful — it catches unintended changes). But it also means tests are fragile to content edits.
+1. **Tests run against the real craft engine.** This catches unintended changes and keeps tests truthful. The tradeoff (fragility to content edits) is acceptable — if the craft engine changes, tests should verify the new content still extracts correctly.
 
-2. **Git-dependent tests?** Some functions (`verify_revision_changes`, the commit/push in scripts) depend on git. Should we test these with a temp git repo, or skip them?
+2. **Git-dependent functions are not unit-tested.** `verify_revision_changes` and `monitor_progress` depend on live git state. These are tested implicitly via dry-run integration tests (which verify the scripts work end-to-end without Claude). Full git testing would require temp repos — deferred for now.
 
-3. **Should dry-run be the default in CI?** If Storyforge ever gets CI, the test suite + dry-run would be the natural pipeline.
+3. **Dry-run tests serve as integration tests.** The `test-dry-run.sh` suite runs each script with `--dry-run` and verifies prompt output. This is the natural CI pipeline.
 
-4. **Test coverage target?** Aim for all library functions covered. Scripts tested via dry-run mode. Interactive skills are not testable in this framework (they depend on Claude conversation).
+4. **Coverage:** All library functions in `common.sh`, `prompt-builder.sh`, and `revision-passes.sh` are covered. All three scripts are tested via dry-run mode. Interactive skills are not testable.
+
+## Implementation Notes
+
+- **Bash 3.2 compatibility:** macOS ships bash 3.2 which has a bug where empty arrays trigger "unbound variable" with `set -u`. Scripts use `set -eo pipefail` (without `-u`) to avoid this.
+- **Scene-index path bug fixed:** `prompt-builder.sh` was reading `${project_dir}/scene-index.yaml` instead of `${project_dir}/scenes/scene-index.yaml`. Fixed during test implementation. Same bug existed in `storyforge-write` and `storyforge-evaluate`.
+- **BSD sed compatibility:** `get_scene_metadata` used GNU sed syntax (`sed '${ /pattern/d }'`) which fails on macOS BSD sed. Rewritten to use awk.
+- **Quote stripping:** `get_scene_status` was not stripping quotes from YAML frontmatter values. Fixed.
+- **165 tests in ~1.4 seconds** on a standard MacBook.

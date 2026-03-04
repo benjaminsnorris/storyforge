@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -eo pipefail
 
 # ============================================================================
 # storyforge-evaluate — Multi-agent evaluation panel for Storyforge projects
@@ -15,6 +15,7 @@ set -euo pipefail
 #   ./storyforge-evaluate --part N             # Scenes in part N
 #   ./storyforge-evaluate --scenes ID..ID      # Specific scene range
 #   ./storyforge-evaluate --scene ID           # Single scene
+#   ./storyforge-evaluate --dry-run            # Print prompts without invoking Claude
 # ============================================================================
 
 # --- Locate script directory and source libraries ---
@@ -38,7 +39,7 @@ PLUGIN_DIR=$(get_plugin_dir)
 PERSONA_DIR="${PLUGIN_DIR}/scripts/prompts/evaluators"
 
 # --- Configuration ---
-SCENE_INDEX="${PROJECT_DIR}/scene-index.yaml"
+SCENE_INDEX="${PROJECT_DIR}/scenes/scene-index.yaml"
 SCENES_DIR="${PROJECT_DIR}/scenes"
 LOG_DIR="${PROJECT_DIR}/working/logs"
 LOG_FILE="${LOG_DIR}/evaluation-log.txt"
@@ -65,6 +66,7 @@ CORE_EVALUATORS=(
 # Argument parsing
 # ============================================================================
 
+DRY_RUN=false
 FILTER_MODE="all"       # all | act | part | range | single
 FILTER_VALUE=""
 RANGE_START=""
@@ -97,6 +99,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
             usage
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
             ;;
         --act)
             FILTER_MODE="act"
@@ -330,25 +336,27 @@ done < <(sed -n '/^[[:space:]]*custom_evaluators:/,/^[[:space:]]*[^-[:space:]]/p
     | sed 's/["'"'"']$//')
 
 # Resolve persona_file paths for each custom evaluator
-for cname in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
-    cpath=$(sed -n "/- name:[[:space:]]*${cname}/,/- name:/p" \
-        "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null \
-        | grep -E 'persona_file:' \
-        | head -1 \
-        | sed 's/^[[:space:]]*persona_file:[[:space:]]*//' \
-        | sed 's/^["'"'"']//' \
-        | sed 's/["'"'"']$//' \
-        | sed 's/[[:space:]]*$//')
-    if [[ -n "$cpath" ]]; then
-        CUSTOM_EVALUATOR_PATHS+=("${PROJECT_DIR}/${cpath}")
-    else
-        log "WARNING: No persona_file found for custom evaluator '${cname}', skipping"
-        # Remove this name from the list
-        CUSTOM_EVALUATOR_NAMES=("${CUSTOM_EVALUATOR_NAMES[@]/$cname}")
-    fi
-done
+CUSTOM_EVAL_COUNT=0
+if [[ ${#CUSTOM_EVALUATOR_NAMES[@]} -gt 0 ]]; then
+    for cname in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
+        cpath=$(sed -n "/- name:[[:space:]]*${cname}/,/- name:/p" \
+            "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null \
+            | grep -E 'persona_file:' \
+            | head -1 \
+            | sed 's/^[[:space:]]*persona_file:[[:space:]]*//' \
+            | sed 's/^["'"'"']//' \
+            | sed 's/["'"'"']$//' \
+            | sed 's/[[:space:]]*$//')
+        if [[ -n "$cpath" ]]; then
+            CUSTOM_EVALUATOR_PATHS+=("${PROJECT_DIR}/${cpath}")
+        else
+            log "WARNING: No persona_file found for custom evaluator '${cname}', skipping"
+        fi
+    done
+    CUSTOM_EVAL_COUNT=${#CUSTOM_EVALUATOR_NAMES[@]}
+fi
 
-ALL_EVALUATOR_COUNT=$(( ${#CORE_EVALUATORS[@]} + ${#CUSTOM_EVALUATOR_NAMES[@]} ))
+ALL_EVALUATOR_COUNT=$(( ${#CORE_EVALUATORS[@]} + CUSTOM_EVAL_COUNT ))
 
 # ============================================================================
 # Build evaluation prompt
@@ -447,6 +455,32 @@ EVAL_PROMPT
 # ============================================================================
 # Main execution
 # ============================================================================
+
+# --- Dry-run mode: print all prompts and exit ---
+if [[ "$DRY_RUN" == true ]]; then
+    for EVAL in "${CORE_EVALUATORS[@]}"; do
+        echo "===== DRY RUN: ${EVAL} ====="
+        build_eval_prompt "$EVAL" false
+        echo "===== END DRY RUN: ${EVAL} ====="
+        echo ""
+    done
+    if [[ ${#CUSTOM_EVALUATOR_NAMES[@]} -gt 0 ]]; then
+        for EVAL in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
+            [[ -z "$EVAL" ]] && continue
+            echo "===== DRY RUN: ${EVAL} (custom) ====="
+            build_eval_prompt "$EVAL" true
+            echo "===== END DRY RUN: ${EVAL} ====="
+            echo ""
+        done
+    fi
+
+    # Synthesis prompt (placeholder — full synthesis depends on evaluator output)
+    echo "===== DRY RUN: synthesis ====="
+    echo "# Synthesis prompt would read reports from: working/evaluations/eval-${EVAL_TIMESTAMP}/"
+    echo "# Evaluators: ${CORE_EVALUATORS[*]}"
+    echo "===== END DRY RUN: synthesis ====="
+    exit 0
+fi
 
 mkdir -p "$EVAL_DIR" "$LOG_DIR"
 

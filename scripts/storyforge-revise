@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -eo pipefail
 
 # ============================================================================
 # storyforge-revise — Execute revision passes from a revision plan
@@ -15,6 +15,7 @@ set -euo pipefail
 # Usage:
 #   storyforge-revise            # Start from first pending pass
 #   storyforge-revise 3          # Start from pass number 3 (1-indexed)
+#   storyforge-revise --dry-run  # Print prompts without invoking Claude
 # ============================================================================
 
 # --- Resolve script and library paths ---
@@ -38,7 +39,33 @@ export LOG_FILE
 mkdir -p "$LOG_DIR"
 
 # --- Arguments ---
-START_PASS="${1:-0}"  # 0 means "find first pending"
+DRY_RUN=false
+START_PASS=0  # 0 means "find first pending"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: storyforge-revise [--dry-run] [PASS_NUM]"
+            echo ""
+            echo "Options:"
+            echo "  --dry-run     Build and print prompts without invoking Claude"
+            echo "  PASS_NUM      Start from this pass number (1-indexed; default: first pending)"
+            exit 0
+            ;;
+        [0-9]*)
+            START_PASS="$1"
+            shift
+            ;;
+        *)
+            echo "Error: Unknown argument '$1'" >&2
+            exit 1
+            ;;
+    esac
+done
 
 # ============================================================================
 # YAML helpers for revision-plan.yaml
@@ -337,9 +364,6 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     # Execute pass — build prompt with guidance and invoke claude
     # =================================================================
 
-    # Mark as in_progress
-    update_pass_field "$PASS_NUM" "status" "in_progress"
-
     # Build the revision prompt (includes full pass config with guidance/targets)
     PASS_BLOCK=$(_get_pass_block "$PASS_NUM")
     log "  Building revision prompt..."
@@ -353,6 +377,18 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         log "Fix the issue and re-run: storyforge-revise ${PASS_NUM}"
         exit 1
     fi
+
+    # --- Dry-run mode: print prompt and continue (no status update, no Claude) ---
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "===== DRY RUN: ${PASS_NAME} (pass ${PASS_NUM}/${TOTAL_PASSES}) ====="
+        echo "$PROMPT"
+        echo "===== END DRY RUN: ${PASS_NAME} ====="
+        echo ""
+        continue
+    fi
+
+    # Mark as in_progress (only in live mode)
+    update_pass_field "$PASS_NUM" "status" "in_progress"
 
     # Record git HEAD before invocation
     HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD)

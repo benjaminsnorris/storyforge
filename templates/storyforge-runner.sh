@@ -32,13 +32,19 @@ find_plugin() {
 }
 
 PLUGIN_ROOT="$(find_plugin)"
-COMMAND="${1:?Usage: ./storyforge <write|evaluate|revise> [options]}"
+COMMAND="${1:?Usage: ./storyforge <write|evaluate|revise|test> [options]}"
 shift
 
-SCRIPT="$PLUGIN_ROOT/scripts/storyforge-$COMMAND"
-if [[ ! -x "$SCRIPT" ]]; then
-  echo "Error: Unknown command '$COMMAND'. Available: write, evaluate, revise" >&2
-  exit 1
-fi
-
-exec "$SCRIPT" "$@"
+case "$COMMAND" in
+  test)
+    exec bash "${PLUGIN_ROOT}/tests/run-tests.sh" "$@"
+    ;;
+  *)
+    SCRIPT="$PLUGIN_ROOT/scripts/storyforge-$COMMAND"
+    if [[ ! -x "$SCRIPT" ]]; then
+      echo "Error: Unknown command '$COMMAND'. Available: write, evaluate, revise, test" >&2
+      exit 1
+    fi
+    exec "$SCRIPT" "$@"
+    ;;
+esac

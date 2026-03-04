@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -eo pipefail
 
 # ============================================================================
 # storyforge-write — Autonomous scene drafting for Storyforge projects
@@ -14,6 +14,7 @@ set -euo pipefail
 #   ./storyforge-write act1-sc01 act1-sc15    # Draft a range (by position in index)
 #   ./storyforge-write --act 2                # Draft all scenes in act 2
 #   ./storyforge-write --part 2               # Draft all scenes in part 2
+#   ./storyforge-write --dry-run act1-sc01    # Build prompt without invoking Claude
 # ============================================================================
 
 # --- Locate script directory and source libraries ---
@@ -39,7 +40,7 @@ detect_project_root
 log "Project root: ${PROJECT_DIR}"
 
 # --- Configuration ---
-SCENE_INDEX="${PROJECT_DIR}/scene-index.yaml"
+SCENE_INDEX="${PROJECT_DIR}/scenes/scene-index.yaml"
 SCENES_DIR="${PROJECT_DIR}/scenes"
 LOG_DIR="${PROJECT_DIR}/working/logs"
 LOG_FILE="${LOG_DIR}/drafting-log.txt"
@@ -56,6 +57,7 @@ mkdir -p "$SCENES_DIR" "$LOG_DIR"
 # Argument parsing
 # ============================================================================
 
+DRY_RUN=false
 FILTER_MODE="all"       # all | single | range | act | part
 FILTER_VALUE=""
 RANGE_START=""
@@ -88,6 +90,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
             usage
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
             ;;
         --act)
             FILTER_MODE="act"
@@ -330,6 +336,16 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         log "ERROR: Failed to build prompt for scene ${SCENE_ID}"
         log "Stopping — prompt generation failed."
         exit 1
+    fi
+
+    # --- Dry-run mode: print prompt and continue ---
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "===== DRY RUN: ${SCENE_ID} ====="
+        echo "$PROMPT"
+        echo "===== END DRY RUN: ${SCENE_ID} ====="
+        echo ""
+        DRAFTED_COUNT=$((DRAFTED_COUNT + 1))
+        continue
     fi
 
     # --- Record git HEAD before invocation ---
