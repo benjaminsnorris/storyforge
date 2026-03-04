@@ -55,6 +55,8 @@ Every artifact entry shares the same three-field structure:
 | `scene_index` | The master list of every scene with metadata (chapter, POV, location, status, word count, and any scene extensions). | `scenes/scene-index.yaml` |
 | `continuity_tracker` | A living ledger of continuity facts — promises made, details established, threads opened — used during evaluation and revision. | `reference/continuity-tracker.md` |
 | `key_decisions` | A canonical log of author decisions — creative, structural, editorial. All skills consult this before asking questions and append new decisions immediately when the author makes them. If a decision is recorded here, it is settled and must not be re-asked. | `reference/key-decisions.md` |
+| `chapter_map` | Maps scenes to chapters for manuscript assembly. Includes chapter titles, scene ordering, and production settings (author, copyright, scene break style, genre preset). Created by the `produce` skill or manually. | `reference/chapter-map.yaml` |
+| `manuscript` | The assembled manuscript output directory. Contains individual chapter files, front/back matter, assets (CSS, cover), and generated output (epub, PDF, HTML). Created by `./storyforge assemble`. | `manuscript/` |
 
 ---
 
@@ -109,6 +111,7 @@ If no custom evaluators are defined, this section can be omitted or set to an em
 | `revision` | The author is revising drafts based on evaluation feedback. Continuity and voice checks run automatically. |
 | `review` | All revision passes complete. The author reviews what changed, what landed, and what gaps remain. Leads to another evaluation cycle, a follow-up revision, or completion. |
 | `complete` | The manuscript is considered finished. Artifact updates are locked unless the phase is rolled back. |
+| `production` | Assembling scenes into chapters, generating epub/PDF/HTML. The manuscript is being packaged for publication. |
 
 ---
 
@@ -158,6 +161,14 @@ artifacts:
   key_decisions:
     exists: false
     path: reference/key-decisions.md
+    updated: null
+  chapter_map:
+    exists: false
+    path: reference/chapter-map.yaml
+    updated: null
+  manuscript:
+    exists: false
+    path: manuscript/
     updated: null
 
 scene_extensions:

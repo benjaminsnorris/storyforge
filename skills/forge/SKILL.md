@@ -121,6 +121,30 @@ If the revision plan doesn't exist, explain that a revision plan is needed first
 **"Review revision" / "How did the revision go?" / "What changed?":**
 Invoke the `review` skill. This is the natural next step after a revision cycle completes.
 
+**"Assemble the book" / "Make an epub" / "Produce" / "Build the manuscript":**
+Invoke the `produce` skill. This is the interactive guide for manuscript assembly and book production.
+
+Check prerequisites before proceeding:
+
+- *Hard prerequisites* (will not proceed without):
+  - `reference/chapter-map.yaml` must exist with at least one chapter
+  - At least some scene files (`.md`) in `scenes/` for the referenced scenes
+- *Soft prerequisites* (recommend but allow override):
+  - All referenced scenes should have status `drafted` or `revised`
+  - A voice guide should exist (for consistency)
+
+If the chapter map exists, provide the assembly command:
+
+```
+./storyforge assemble [options]
+```
+
+Available options: `--format epub|pdf|html|markdown|all`, `--draft` (quick assembly), `--dry-run`, `--skip-validation`.
+
+If the chapter map doesn't exist, invoke the `produce` skill to guide the author through creating it.
+
+If the project doesn't have a `./storyforge` runner script, offer to create one by copying the template from the plugin's `templates/storyforge-runner.sh` and making it executable.
+
 ---
 
 ### Guided Mode
@@ -169,6 +193,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | `plan-revision` | Evaluation results in `working/evaluations/` |
 | `storyforge revise` | `working/plans/revision-plan.yaml` |
+| `storyforge assemble` | `reference/chapter-map.yaml` with at least one chapter, scene files for referenced scenes |
 
 ### Soft Prerequisites (recommended — suggest but allow override)
 
@@ -217,6 +242,8 @@ Commit and push the key decisions file after every new entry, along with whateve
 Storyforge works on scenes, not assembled chapters. Evaluation, revision, and all craft work operate on scene files in `scenes/`. Manuscript assembly (combining scenes into chapters) is a separate, final step that happens when the author is satisfied with the scene-level content.
 
 Do not suggest assembling the manuscript until the author explicitly asks for it or signals they are done with scene-level revision. The scene is the unit of work.
+
+When the author is ready, the `produce` skill guides them through creating `reference/chapter-map.yaml` (mapping scenes to chapters) and configuring production settings. Then `./storyforge assemble` runs the assembly pipeline to generate epub, PDF, or HTML output.
 
 ## The Repo Is the Source of Truth
 
