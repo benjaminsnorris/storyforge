@@ -76,9 +76,7 @@ for (( i=0; i<${#SCENES[@]}; i++ )); do
 
         if [[ "$USE_REAL_CLAUDE" == true ]]; then
             set +e
-            claude "Draft ${SCENE} (${NUM} of ${#SCENES[@]}) — one paragraph of placeholder prose.
-
-Interactive mode: you can give feedback or redirect as I work. When this scene is done, type /exit to move to the next scene. Say \"finish without me\" to run the rest autonomously." \
+            claude "Draft ${SCENE} (${NUM} of ${#SCENES[@]}) — one paragraph of placeholder prose." \
                 --model claude-opus-4-6 \
                 --dangerously-skip-permissions \
                 --append-system-prompt "You are in interactive drafting mode, managed by a script that loops over scenes one at a time.
