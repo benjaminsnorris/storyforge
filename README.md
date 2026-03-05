@@ -55,6 +55,7 @@ The hub reads your project state and suggests what to work on, or you can direct
 | `/storyforge:scenes` | Scene index design, review, and editing |
 | `/storyforge:plan-revision` | Plan custom revision passes from evaluation results |
 | `/storyforge:review` | Review revision results, assess gaps, recommend next steps |
+| `/storyforge:produce` | Chapter mapping, production settings, book assembly |
 
 ## Project Setup
 
@@ -71,7 +72,12 @@ Run autonomous scripts from your project root:
 ./storyforge write act1-sc01          # Draft a single scene
 ./storyforge evaluate                 # Run evaluation panel
 ./storyforge revise                   # Execute revision pipeline
+./storyforge assemble --format epub   # Generate epub
+./storyforge assemble --format web    # Generate hostable web book
+./storyforge cover --svg-only         # Preview generated cover
 ```
+
+All scripts support `--interactive` for supervised execution and `--dry-run` for preview.
 
 ## Project Structure
 
@@ -99,5 +105,17 @@ my-novel/
 7. **`/storyforge:plan-revision`** — Plan revision passes from evaluation findings
 8. **`./storyforge revise`** — Execute revision passes
 9. **`/storyforge:review`** — Assess revision results, decide next cycle
+10. **`/storyforge:produce`** — Map scenes to chapters, configure production settings
+11. **`./storyforge assemble`** — Generate epub, PDF, HTML, or web book
 
-Steps 6-9 repeat until the manuscript is ready. Or skip the sequence entirely and just run `/storyforge:forge` — it knows where you are and what comes next.
+Steps 5-9 repeat until the manuscript is ready. Or skip the sequence entirely and just run `/storyforge:forge` — it knows where you are and what comes next.
+
+## Coaching Levels
+
+Control how proactive Claude is with creative decisions via `project.coaching_level` in storyforge.yaml:
+
+- **`full`** (default) — Claude proposes, drafts, and revises. Maximum creative partnership.
+- **`coach`** — Claude analyzes and guides but never writes prose. You write everything.
+- **`strict`** — Claude only asks questions and produces checklists. Purely Socratic.
+
+Override per-session with `--coaching coach` on any script, or `STORYFORGE_COACHING=coach` env var.

@@ -22,11 +22,12 @@ This project uses [Storyforge](https://github.com/benjaminsnorris/storyforge). A
 - `/storyforge:review` — Review revision results, assess what landed, recommend next steps
 - `/storyforge:produce` — Book production: chapter mapping, epub/PDF generation, formatting
 
-Scripts (via project runner):
+Scripts (via project runner — all support `--interactive` and `--dry-run`):
 - `./storyforge write` — Autonomous scene drafting
 - `./storyforge evaluate` — Multi-agent evaluation panel
 - `./storyforge revise` — Execute revision pipeline
-- `./storyforge assemble` — Assemble scenes into chapters, generate epub/PDF/HTML
+- `./storyforge assemble` — Assemble scenes into chapters, generate epub/PDF/HTML/web
+- `./storyforge cover` — Generate typographic cover from title and genre
 - `./storyforge review` — Run pipeline review on current branch, post to PR
 
 ## Suggested Next Steps

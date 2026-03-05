@@ -155,6 +155,27 @@ Based on the author's decision:
 - **If planning follow-up revision:** Invoke `/storyforge:plan-revision`. The plan-revision skill will advance to `revision` when the plan is saved.
 - **If revision cycle is complete:** Update the phase to `evaluation` (ready for another cycle) or `complete` (done). The author decides.
 
+## Coaching Level Behavior
+
+Read `project.coaching_level` from storyforge.yaml. Review is primarily analytical — it maps findings to changes. Coaching level affects how directive the recommendation is.
+
+### `full` (default)
+Full analysis and recommendation. Produce the complete review report, assess all findings, surface new concerns, and make a strong recommendation (Path A/B/C) with specific rationale. Be opinionated about what should happen next.
+
+### `coach`
+Produce the full review report with findings mapping and analysis. But instead of making a single recommendation, **present all viable paths** and help the author reason through which is right:
+- "Here are the three options — here's what each means for your timeline and manuscript quality"
+- Ask which direction feels right to them
+- Help them think through implications of their choice
+
+### `strict`
+Produce the findings-to-changes mapping (the factual part of the review), but **do not recommend a path**. Present the data:
+- What was addressed, partially addressed, not addressed
+- What new concerns emerged
+- Finding resolution rate
+
+Then ask: "Based on this, what do you want to do next?" The author decides without a recommendation from you.
+
 ## Coaching Posture
 
 Be honest about what worked and what didn't. The author just invested significant time in revision — they deserve a clear-eyed assessment, not cheerleading. If a pass didn't land, say so plainly with specifics. If the revision was effective, say that too — revision is hard work and the author should know when it paid off.

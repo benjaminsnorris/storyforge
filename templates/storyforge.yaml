@@ -19,7 +19,12 @@ project:
   subgenre:                             # Optional: narrower classification (e.g., "urban fantasy", "techno-thriller")
   target_words: 80000                   # Target manuscript word count
   logline: "PROJECT_LOGLINE"            # 1-2 sentence pitch: protagonist + conflict + stakes
-  coaching_level: full                   # How much Claude takes the lead: full | coach | strict
+  # Coaching level — controls how proactive Claude is with creative decisions:
+  #   full   — Claude proposes, drafts, and revises. Maximum creative partnership.
+  #   coach  — Claude analyzes and guides but never writes prose. You write everything.
+  #   strict — Claude only asks questions and produces checklists. Purely Socratic.
+  # Override per-session: --coaching coach or STORYFORGE_COACHING=coach
+  coaching_level: full
   series_name:                          # Optional: series title (e.g., "The Mapmaker Trilogy")
   series_position:                      # Optional: position in the series (e.g., 1, 2, 3)
 

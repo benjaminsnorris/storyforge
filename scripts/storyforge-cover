@@ -48,18 +48,28 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Generate a typographic book cover from project title and genre.
+Creates a unique abstract pattern seeded from the title — the same title
+always produces the same cover. Genre determines the visual style.
 
 Options:
   --dry-run            Print config without generating
-  --svg-only           Output SVG without PNG conversion
+  --svg-only           Output SVG without PNG conversion (open in browser to preview)
   --output PATH        Override output path (default: manuscript/assets/cover.png)
   -h, --help           Show this help
 
-The cover is deterministic — the same title always produces the same pattern.
+Cover inputs (read automatically from project):
+  project.title, project.genre, project.series_name   from storyforge.yaml
+  production.author                                    from reference/chapter-map.yaml
+  production.cover.subtitle                            optional tagline
+  production.cover.palette                             warm, cool, dark, or light
 
-Environment:
-  Reads project.title, project.genre, project.series_name from storyforge.yaml
-  Reads production.author, production.cover.* from reference/chapter-map.yaml
+PNG conversion: rsvg-convert (best) > sips (macOS fallback) > SVG only
+
+Examples:
+  $(basename "$0")                     # Generate PNG cover
+  $(basename "$0") --svg-only          # Preview SVG in browser
+  $(basename "$0") --dry-run           # Show what would be generated
+  $(basename "$0") --output cover.png  # Custom output path
 EOF
     exit 0
 }

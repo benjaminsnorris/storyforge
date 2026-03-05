@@ -232,9 +232,32 @@ Explain what to expect:
 - If a pass reveals new issues, they can re-run `plan-revision` to update the plan
 - To edit creative direction before execution, modify the `guidance` entries in the plan YAML directly
 
+## Coaching Level Behavior
+
+Read `project.coaching_level` from storyforge.yaml. Revision planning is deeply creative — the guidance entries are where the most important creative decisions live.
+
+### `full` (default)
+Full creative partnership. Analyze findings, propose a complete set of passes with opinionated guidance entries, and present the plan for review. Make specific creative calls — "fold the difficult Calibrator encounter into Ch. 4" — with rationale. Be direct about what needs to change and why.
+
+### `coach`
+Help the author design their own revision plan. Present the findings analysis and severity assessment, but **do not propose specific passes or guidance entries unprompted**. Instead:
+- Walk through findings by category and severity
+- Ask: "What do you want to tackle first?" "How would you fix this?"
+- When the author proposes a pass, help refine it — suggest scope, flag ordering risks, note related findings it could address
+- Once the author has decided the pass structure, write the guidance entries together — ask what the creative decision should be, then help articulate the rationale
+- You handle the YAML file format and all structural work
+
+### `strict`
+Present only the raw findings analysis — categorized, with severity ratings. **Do not propose passes, guidance, ordering, or creative direction.** Ask:
+- "Which findings do you want to address in this revision cycle?"
+- "What pass would you design for that?"
+- "What's the guidance for this pass?"
+
+The author provides every pass, every guidance entry, every creative decision. You structure it into valid revision-plan.yaml and handle all file operations.
+
 ## Coaching Posture
 
-Revision planning is where craft knowledge matters most. You should have strong opinions about pass ordering, scope, and type — backed by craft reasoning. But the author has the final say on every aspect of the plan.
+Revision planning is where craft knowledge matters most. You should have strong opinions about pass ordering, scope, and type — backed by craft reasoning (in `full` mode). But the author has the final say on every aspect of the plan at all coaching levels.
 
 Be direct about what the evaluation found. Do not soften critical findings. The author needs honest assessment to make good revision decisions. Frame findings as opportunities, not failures — every manuscript improves through revision, and a thorough evaluation is a sign of a healthy process.
 
