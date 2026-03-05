@@ -616,14 +616,190 @@ update_pr_task() {
     }
 }
 
+# ============================================================================
+# Review phase helpers
+# ============================================================================
+
+# Run a single headless Claude session for review/cleanup/recommend.
+# Usage: _run_headless_session "$prompt" "$model" "$log_file"
+_run_headless_session() {
+    local prompt="$1"
+    local model="$2"
+    local log_file="$3"
+
+    set +e
+    claude -p "$prompt" \
+        --model "$model" \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        > "$log_file" 2>&1
+    local rc=$?
+    set -e
+    return $rc
+}
+
+# Run a cleanup pass — fix items identified in the review report.
+# Usage: run_cleanup_pass "$review_file" "$review_type" "$project_dir" "$iteration"
+run_cleanup_pass() {
+    local review_file="$1"
+    local review_type="$2"
+    local project_dir="$3"
+    local iteration="$4"
+
+    local cleanup_log="${project_dir}/working/logs/cleanup-${iteration}.log"
+    local cleanup_model
+    cleanup_model=$(select_model "review")
+
+    local cleanup_prompt
+    read -r -d '' cleanup_prompt <<CLEANUP_EOF || true
+You are performing cleanup pass ${iteration} on a Storyforge project after a ${review_type} review.
+
+Read the review report at: ${review_file}
+
+Focus ONLY on the "## Fixable Items" section. For each unchecked item (lines starting with "- [ ]"):
+1. Read the referenced file
+2. Make the specific fix described
+3. Stage the change
+
+After fixing all items, commit and push:
+  git add -A
+  git commit -m "Review: cleanup pass ${iteration} (${review_type})"
+  git push
+
+Rules:
+- Only fix items listed in "Fixable Items" — nothing else
+- Do not make subjective changes, creative edits, or prose improvements
+- Do not modify scene prose content
+- If an item is ambiguous or requires author judgment, skip it
+CLEANUP_EOF
+
+    log "  Cleanup pass ${iteration} (model: ${cleanup_model})..."
+    _run_headless_session "$cleanup_prompt" "$cleanup_model" "$cleanup_log"
+    local rc=$?
+
+    if (( rc != 0 )); then
+        log "WARNING: Cleanup pass ${iteration} failed (exit code ${rc})"
+    fi
+
+    return $rc
+}
+
+# Run the recommend step — write next-step recommendations.
+# Usage: run_recommend_step "$review_type" "$project_dir"
+run_recommend_step() {
+    local review_type="$1"
+    local project_dir="$2"
+
+    local title
+    title=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
+    local today
+    today=$(date '+%Y-%m-%d')
+
+    local recommend_log="${project_dir}/working/logs/recommend-$(date '+%Y%m%d-%H%M%S').log"
+    local recommend_model
+    recommend_model=$(select_model "review")
+
+    local recommend_prompt
+    read -r -d '' recommend_prompt <<RECOMMEND_EOF || true
+You are writing next-step recommendations for a Storyforge novel project after a ${review_type} pipeline run.
+
+Read the following files to understand the current state:
+- storyforge.yaml (project config, phase, artifact status)
+- The most recent review report in working/reviews/
+- The most recent evaluation findings in working/evaluations/ (if they exist)
+- working/plans/revision-plan.yaml (if it exists)
+- reference/key-decisions.md (if it exists)
+- CLAUDE.md
+
+Based on the project state and what just completed, write concrete recommendations.
+
+Save to: working/recommendations.md
+
+Use this exact format:
+
+# Next Steps — ${title}
+**After:** ${review_type} pipeline
+**Date:** ${today}
+
+## Recommended Next Step
+[One clear recommendation with rationale — e.g., "Run /storyforge:plan-revision to address the 3 critical findings from evaluation." Be specific about what command to run and why.]
+
+## Other Options
+- [Option with brief rationale]
+- [Option with brief rationale]
+
+## Project Health
+[One sentence assessment of where the manuscript stands]
+
+Then commit and push:
+  git add working/recommendations.md
+  git commit -m "Recommend: next steps after ${review_type}"
+  git push
+RECOMMEND_EOF
+
+    log "Running recommend step..."
+    _run_headless_session "$recommend_prompt" "$recommend_model" "$recommend_log"
+    local rc=$?
+
+    if (( rc != 0 )); then
+        log "WARNING: Recommend step failed (exit code ${rc})"
+    fi
+
+    # Fallback commit if Claude didn't
+    if [[ -f "${project_dir}/working/recommendations.md" ]]; then
+        local head_before head_after
+        head_before=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || echo "none")
+        (
+            cd "$project_dir"
+            git add working/recommendations.md working/logs/ 2>/dev/null || true
+            git commit -m "Recommend: next steps after ${review_type}" 2>/dev/null || true
+            git push 2>/dev/null || true
+        )
+        log "Recommendations saved: working/recommendations.md"
+    fi
+}
+
+# Build the PR comment for the review phase.
+# For evaluations, posts a synthesis summary instead of the review report.
+# Usage: build_pr_comment "$review_type" "$review_file" "$project_dir"
+build_pr_comment() {
+    local review_type="$1"
+    local review_file="$2"
+    local project_dir="$3"
+
+    if [[ "$review_type" == "evaluation" ]]; then
+        # Post synthesis summary instead of review meta-analysis
+        local synth_file
+        synth_file=$(ls -t "${project_dir}"/working/evaluations/*/synthesis.md 2>/dev/null | head -1)
+        if [[ -n "$synth_file" && -f "$synth_file" ]]; then
+            echo "## Evaluation Synthesis Summary"
+            echo ""
+            # Extract Overall Assessment and Prioritized Action Items
+            awk '/^## Overall Assessment$/,0' "$synth_file"
+            return 0
+        fi
+    fi
+
+    # Default: post the review report itself
+    if [[ -f "$review_file" ]]; then
+        cat "$review_file"
+    fi
+}
+
+# ============================================================================
+# Review phase (main entry point)
+# ============================================================================
+
 # Run the review phase at the end of an autonomous process.
 #
 # Sequence:
-#   1. PR state change (start): remove in-progress, add reviewing, convert draft to ready
-#   2. Run Claude review: assess changed files, save review to working/reviews/
-#   3. Commit and push the review file
-#   4. PR state change (end): post review as comment, remove reviewing, add ready-to-merge
-#   5. Check off the "Review" task in the PR body
+#   1. PR label: in-progress → reviewing
+#   2. Run Claude review (produces report with Fixable Items section)
+#   3. If coaching == "full": cleanup loop (fix items, re-review, max 3x)
+#   4. If coaching == "full": recommend step (write next-steps)
+#   5. PR label: reviewing → ready-to-merge, post comment
+#   6. Check off "Review" task
 #
 # Usage: run_review_phase "drafting" "$PROJECT_DIR"
 run_review_phase() {
@@ -725,10 +901,27 @@ ${review_criteria}
    - **Concerns**: Any issues found (with specifics — cite files and details)
    - **Recommendation**: Ready to merge, needs attention, or needs rework
 
-4. Save the review to: ${review_file}
+4. After your main review, add one final section:
 
-5. Commit and push:
-   git add working/reviews/
+## Fixable Items
+
+List specific items that can be fixed automatically without author input.
+Include ONLY items that are:
+- Concrete and unambiguous (not subjective quality judgments)
+- Small enough to fix in a single pass
+- Examples: unstaged files needing git add, stale YAML fields (phase, dates,
+  artifact exists flags), missing or incomplete reference file updates,
+  broken internal file references, scene frontmatter inconsistencies
+
+Format each as a checkbox:
+- [ ] {specific file}: {what needs to change}
+
+If nothing is auto-fixable, write: "None — all concerns require author judgment."
+
+5. Save the review to: ${review_file}
+
+6. Commit and push:
+   git add working/reviews/ working/logs/
    git commit -m "Review: pipeline review (${review_type})"
    git push
 REVIEW_EOF
@@ -763,16 +956,8 @@ REVIEW_EOF
         set -e
     else
         log "Invoking claude for review (model: ${review_model})..."
-
-        set +e
-        claude -p "$review_prompt" \
-            --model "$review_model" \
-            --dangerously-skip-permissions \
-            --output-format stream-json \
-            --verbose \
-            > "$review_log" 2>&1
+        _run_headless_session "$review_prompt" "$review_model" "$review_log"
         local review_exit=$?
-        set -e
     fi
 
     if (( review_exit != 0 )); then
@@ -786,18 +971,85 @@ REVIEW_EOF
     if [[ "$head_before" == "$head_after" && -f "$review_file" ]]; then
         (
             cd "$project_dir"
-            git add working/reviews/ 2>/dev/null || true
+            git add working/reviews/ working/logs/ 2>/dev/null || true
             git commit -m "Review: pipeline review (${review_type})" 2>/dev/null || true
             git push 2>/dev/null || true
         )
     fi
 
+    # --- Step 3: Cleanup loop + Recommend (full coaching only) ---
+    local coaching
+    coaching=$(get_coaching_level)
+
+    if [[ "$coaching" == "full" && -f "$review_file" ]]; then
+        # Cleanup loop: fix minor items, re-review, max 3 iterations
+        local max_cleanup=3
+        local cleanup_iter=0
+
+        while (( cleanup_iter < max_cleanup )); do
+            # Parse review report for fixable items
+            local fixable_section
+            fixable_section=$(sed -n '/^## Fixable Items/,/^## /p' "$review_file" 2>/dev/null \
+                           | tail -n +2 | sed '/^## /d')
+
+            # Exit if section is empty, says "None", or has no unchecked items
+            if [[ -z "$fixable_section" ]]; then
+                break
+            fi
+            if echo "$fixable_section" | grep -qi "^None"; then
+                break
+            fi
+            if ! echo "$fixable_section" | grep -q '^\- \[ \]'; then
+                break
+            fi
+
+            local item_count
+            item_count=$(echo "$fixable_section" | grep -c '^\- \[ \]' || echo "0")
+            log "Review found ${item_count} fixable item(s). Running cleanup pass $((cleanup_iter + 1))..."
+
+            run_cleanup_pass "$review_file" "$review_type" "$project_dir" "$((cleanup_iter + 1))"
+
+            # Re-run review to check if cleanup was successful
+            log "Re-running review after cleanup..."
+            review_timestamp=$(date '+%Y%m%d-%H%M%S')
+            review_file="${project_dir}/working/reviews/pipeline-review-${review_timestamp}.md"
+            review_log="${project_dir}/working/logs/review-${review_timestamp}.log"
+
+            # Update the review prompt with the new file path
+            review_prompt="${review_prompt/pipeline-review-*.md/pipeline-review-${review_timestamp}.md}"
+
+            _run_headless_session "$review_prompt" "$review_model" "$review_log"
+
+            # Fallback commit
+            head_before=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || echo "none")
+            if [[ -f "$review_file" ]]; then
+                (
+                    cd "$project_dir"
+                    git add working/reviews/ working/logs/ 2>/dev/null || true
+                    git commit -m "Review: re-review after cleanup $((cleanup_iter + 1)) (${review_type})" 2>/dev/null || true
+                    git push 2>/dev/null || true
+                )
+            fi
+
+            cleanup_iter=$((cleanup_iter + 1))
+        done
+
+        if (( cleanup_iter > 0 )); then
+            log "Cleanup complete after ${cleanup_iter} pass(es)."
+        fi
+
+        # Recommend step
+        run_recommend_step "$review_type" "$project_dir"
+    fi
+
     # --- Step 4: PR state change (end of review) ---
     if has_gh && [[ -n "$pr_number" ]]; then
-        # Post review as PR comment
-        if [[ -f "$review_file" ]]; then
+        # Build and post PR comment
+        local pr_comment
+        pr_comment=$(build_pr_comment "$review_type" "$review_file" "$project_dir")
+        if [[ -n "$pr_comment" ]]; then
             log "Posting review to PR #${pr_number}..."
-            (cd "$project_dir" && gh pr comment "$pr_number" --body-file "$review_file" 2>/dev/null) || {
+            (cd "$project_dir" && echo "$pr_comment" | gh pr comment "$pr_number" --body-file - 2>/dev/null) || {
                 log "WARNING: Failed to post review comment"
             }
         fi
