@@ -88,9 +88,10 @@ Then copy the runner script from the plugin's `templates/storyforge-runner.sh` t
 
 ```bash
 cp {plugin-root}/templates/storyforge-runner.sh {project-dir}/storyforge && chmod +x {project-dir}/storyforge
+cp {plugin-root}/templates/gitignore {project-dir}/.gitignore
 ```
 
-This single file is the only Storyforge executable in the project. It delegates to the installed plugin for `./storyforge write`, `./storyforge evaluate`, `./storyforge revise`, and `./storyforge assemble`.
+The runner script delegates to the installed plugin for `./storyforge write`, `./storyforge evaluate`, `./storyforge revise`, and `./storyforge assemble`. The `.gitignore` keeps logs, temp files, and generated output from cluttering git status.
 
 ## Step 3: Generate storyforge.yaml
 
