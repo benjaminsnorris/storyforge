@@ -12,8 +12,8 @@ In any Claude Code session:
 ```
 
 That's it. Skills are available as `/storyforge:forge`, `/storyforge:develop`, `/storyforge:voice`,
-`/storyforge:scenes`, `/storyforge:plan-revision`, and `/storyforge:init`. Updates are
-automatic.
+`/storyforge:scenes`, `/storyforge:plan-revision`, `/storyforge:recommend`, and `/storyforge:init`.
+Updates are automatic.
 
 ### For development
 
@@ -48,13 +48,14 @@ The hub reads your project state and suggests what to work on, or you can direct
 
 | Skill | Purpose |
 |-------|---------|
-| `/storyforge:forge` | Hub — orchestrator, status, "surprise me" mode |
+| `/storyforge:forge` | Hub — orchestrator, status, routes to other skills |
 | `/storyforge:init` | Initialize a new novel project |
 | `/storyforge:develop` | World building, character development, story architecture, timeline |
 | `/storyforge:voice` | Voice and style guide development |
 | `/storyforge:scenes` | Scene index design, review, and editing |
 | `/storyforge:plan-revision` | Plan custom revision passes from evaluation results |
-| `/storyforge:review` | Review revision results, assess gaps, recommend next steps |
+| `/storyforge:review` | Review revision results, map findings to changes, assess gaps |
+| `/storyforge:recommend` | Assess project state, recommend the highest-value next action |
 | `/storyforge:produce` | Chapter mapping, production settings, book assembly |
 
 ## Project Setup
@@ -91,7 +92,12 @@ my-novel/
 ├── reference/               # World bible, character bible, voice guide, etc.
 ├── scenes/                  # Scene files with YAML frontmatter
 │   └── scene-index.yaml     # Master scene sequence
-└── working/                 # Logs, evaluations, plans
+└── working/
+    ├── pipeline.yaml        # Pipeline manifest — tracks eval/revision cycles
+    ├── evaluations/         # Evaluation reports per cycle
+    ├── plans/               # Revision plans per cycle
+    ├── reviews/             # Pipeline review reports
+    └── logs/                # Execution logs
 ```
 
 ## Workflow
@@ -104,11 +110,14 @@ my-novel/
 6. **`./storyforge evaluate`** — Run the evaluation panel
 7. **`/storyforge:plan-revision`** — Plan revision passes from evaluation findings
 8. **`./storyforge revise`** — Execute revision passes
-9. **`/storyforge:review`** — Assess revision results, decide next cycle
-10. **`/storyforge:produce`** — Map scenes to chapters, configure production settings
-11. **`./storyforge assemble`** — Generate epub, PDF, HTML, or web book
+9. **`/storyforge:review`** — Assess revision results
+10. **`/storyforge:recommend`** — Get the recommended next action based on project state
+11. **`/storyforge:produce`** — Map scenes to chapters, configure production settings
+12. **`./storyforge assemble`** — Generate epub, PDF, HTML, or web book
 
-Steps 5-9 repeat until the manuscript is ready. Or skip the sequence entirely and just run `/storyforge:forge` — it knows where you are and what comes next.
+Steps 6-10 are a **pipeline cycle** — evaluate, plan, revise, review, recommend — tracked in `working/pipeline.yaml`. Each cycle links its evaluation, revision plan, and review report. Run as many cycles as the manuscript needs.
+
+Or skip the sequence entirely and just run `/storyforge:forge` — it reads your project state and routes to the right skill.
 
 ## Coaching Levels
 

@@ -431,7 +431,7 @@ flowchart TD
       </p>
       <ul class="mode-list">
         <li><strong>Directed</strong> — Author has a specific request; hub routes to the right skill.</li>
-        <li><strong>Guided</strong> — Author says "surprise me"; hub recommends the highest-value work from a priority list.</li>
+        <li><strong>Guided</strong> — Author says "surprise me"; hub delegates to the <code style="font-family:var(--font-mono);font-size:0.8rem">recommend</code> skill for the highest-value next action.</li>
         <li><strong>Status</strong> — Author wants a summary of project state.</li>
       </ul>
     </div>
@@ -457,6 +457,14 @@ flowchart TD
         <li>
           <span class="cmd">/storyforge:plan-revision</span>
           Plan revision passes from evaluation feedback.
+        </li>
+        <li>
+          <span class="cmd">/storyforge:recommend</span>
+          Assess project state, recommend the highest-value next action.
+        </li>
+        <li>
+          <span class="cmd">/storyforge:review</span>
+          Review revision results, map findings to changes.
         </li>
       </ul>
     </div>
@@ -490,6 +498,7 @@ flowchart TD
       <div class="state-items">
         <span class="state-tag">storyforge.yaml</span>
         <span class="state-tag">CLAUDE.md</span>
+        <span class="state-tag">working/pipeline.yaml</span>
         <span class="state-tag">reference/world-bible.md</span>
         <span class="state-tag">reference/character-bible.md</span>
         <span class="state-tag">reference/voice-guide.md</span>

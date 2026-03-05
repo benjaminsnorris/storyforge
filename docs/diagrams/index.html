@@ -693,15 +693,21 @@
         <span class="pipe-type pipe-type--autonomous">autonomous</span>
       </div>
       <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--produce">
+      <div class="pipe-step pipe-step--eval">
         <div class="pipe-phase">Phase 7</div>
+        <div class="pipe-name">Recommend</div>
+        <span class="pipe-type pipe-type--interactive">interactive</span>
+      </div>
+      <div class="pipe-arrow">&rarr;</div>
+      <div class="pipe-step pipe-step--produce">
+        <div class="pipe-phase">Phase 8</div>
         <div class="pipe-name">Produce</div>
         <span class="pipe-type pipe-type--produce">interactive + auto</span>
       </div>
     </div>
     <div class="iter-note anim" style="--i:11">
       <svg viewBox="0 0 16 16"><path d="M2 8a6 6 0 0 1 10.3-4.1M14 8a6 6 0 0 1-10.3 4.1"/><path d="M14 2v4h-4M2 14v-4h4"/></svg>
-      Scenes through Revise repeat until complete &middot; Review runs after every autonomous step
+      Evaluate through Recommend form a <strong>pipeline cycle</strong> tracked in pipeline.yaml &middot; Repeat until ready
     </div>
   </div>
 
@@ -729,7 +735,8 @@
         <h3>Two-Layer Architecture</h3>
         <p>
           How the routing hub reads project state and dispatches to the execution
-          layer. Three operating modes (directed, guided, status) and the
+          layer. Three operating modes (directed, guided, status), the
+          <code>recommend</code> skill for "what next" decisions, and the
           "approve and go" contract.
         </p>
         <div class="dive-cta">

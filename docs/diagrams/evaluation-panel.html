@@ -668,11 +668,13 @@
     <div class="callout animate" style="--i:19">
       <h3>What happens next</h3>
       <p>
-        After reviewing the evaluation findings, run
+        The evaluation starts a new <strong>pipeline cycle</strong> in <code>working/pipeline.yaml</code>,
+        linking the findings to whatever revision follows. Run
         <code>/storyforge:plan-revision</code>
-        to triage the results. The revision planner reads <code>findings.yaml</code>,
-        lets you decide which issues to address, and produces a structured revision plan
-        with concrete steps for each chapter.
+        to triage the results &mdash; it reads <code>findings.yaml</code> from the linked evaluation,
+        lets you decide which issues to address, and produces a numbered revision plan.
+        Or run <code>/storyforge:recommend</code> to let Storyforge assess the full project state
+        and suggest the highest-value next action.
       </p>
     </div>
   </div>

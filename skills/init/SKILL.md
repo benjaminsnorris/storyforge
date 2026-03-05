@@ -198,12 +198,13 @@ If the template cannot be found, generate a project `CLAUDE.md` that includes:
 This project is in the **development** phase. The focus is on building the creative foundation before drafting begins.
 
 ### Available Skills
-- `/storyforge:forge` — Hub: status, routing, "surprise me"
+- `/storyforge:forge` — Hub: status, routing, routes to other skills
 - `/storyforge:develop` — World, character, story, timeline development
 - `/storyforge:voice` — Voice and style refinement
 - `/storyforge:scenes` — Scene index management
 - `/storyforge:plan-revision` — Plan revision passes from evaluation results
-- `/storyforge:review` — Review revision results and recommend next steps
+- `/storyforge:review` — Review revision results, map findings to changes
+- `/storyforge:recommend` — Assess project state, recommend the highest-value next action
 
 ### Scripts (via project runner)
 - `./storyforge write` — Autonomous scene drafting
