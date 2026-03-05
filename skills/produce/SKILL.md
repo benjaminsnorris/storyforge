@@ -98,7 +98,12 @@ Then ask about production settings **one question at a time** using `AskUserQues
    - Also by (other books)
    For each selected item, ask the author to provide the text or a path to an existing file. Save to `manuscript/back-matter/{name}.md`.
 
-7. **Cover image** — "Do you have a cover image? If so, provide the file path. If not, the epub will be generated without a cover (you can add one later)."
+7. **Cover image** — "Do you have a cover image?"
+   - Provide file path (will be embedded in the epub)
+   - Generate one automatically (Storyforge creates a unique typographic cover from your title and genre — preview with `./storyforge cover --svg-only`)
+   - Skip for now (can be added later)
+
+   If generating: ask about an optional subtitle/tagline for the cover. Save to `production.cover.subtitle` in the chapter map.
 
 8. **Copyright** — "Copyright details:"
    - Year (default: current year)

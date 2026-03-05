@@ -1,0 +1,692 @@
+#!/bin/bash
+set -eo pipefail
+
+# ============================================================================
+# storyforge-cover — Generate a typographic book cover from title and genre
+#
+# Creates a beautiful SVG cover with generative patterns seeded from the
+# book's title, styled by genre. Converts to PNG for epub embedding.
+#
+# Usage:
+#   ./storyforge cover                  # Generate PNG cover
+#   ./storyforge cover --svg-only       # Generate SVG only (for preview)
+#   ./storyforge cover --output path    # Custom output path
+#   ./storyforge cover --dry-run        # Print config without generating
+# ============================================================================
+
+# --- Locate script directory and source libraries ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+
+if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
+    echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
+    exit 1
+fi
+
+# shellcheck source=lib/common.sh
+source "${LIB_DIR}/common.sh"
+
+# shellcheck source=lib/assembly.sh
+if [[ -f "${LIB_DIR}/assembly.sh" ]]; then
+    source "${LIB_DIR}/assembly.sh"
+fi
+
+# --- Detect project root ---
+detect_project_root
+log "Project root: ${PROJECT_DIR}"
+
+# ============================================================================
+# Argument parsing
+# ============================================================================
+
+DRY_RUN=false
+SVG_ONLY=false
+OUTPUT_PATH=""
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Generate a typographic book cover from project title and genre.
+
+Options:
+  --dry-run            Print config without generating
+  --svg-only           Output SVG without PNG conversion
+  --output PATH        Override output path (default: manuscript/assets/cover.png)
+  -h, --help           Show this help
+
+The cover is deterministic — the same title always produces the same pattern.
+
+Environment:
+  Reads project.title, project.genre, project.series_name from storyforge.yaml
+  Reads production.author, production.cover.* from reference/chapter-map.yaml
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)    usage ;;
+        --dry-run)    DRY_RUN=true; shift ;;
+        --svg-only)   SVG_ONLY=true; shift ;;
+        --output)     OUTPUT_PATH="${2:?ERROR: --output requires a path}"; shift 2 ;;
+        -*)           echo "ERROR: Unknown option: $1" >&2; usage ;;
+        *)            echo "ERROR: Unexpected argument: $1" >&2; usage ;;
+    esac
+done
+
+# ============================================================================
+# Read project metadata
+# ============================================================================
+
+TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Untitled")
+GENRE=$(read_yaml_field "project.genre" 2>/dev/null || read_yaml_field "genre" 2>/dev/null || echo "default")
+GENRE_LC=$(echo "$GENRE" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+SERIES_NAME=$(read_yaml_field "project.series_name" 2>/dev/null || echo "")
+SERIES_POS=$(read_yaml_field "project.series_position" 2>/dev/null || echo "")
+
+# Read from chapter-map.yaml if available
+AUTHOR=""
+SUBTITLE=""
+PALETTE=""
+if [[ -f "${PROJECT_DIR}/reference/chapter-map.yaml" ]]; then
+    AUTHOR=$(read_production_field "$PROJECT_DIR" "author" 2>/dev/null || echo "")
+    SUBTITLE=$(read_production_nested "$PROJECT_DIR" "cover" "subtitle" 2>/dev/null || echo "")
+    PALETTE=$(read_production_nested "$PROJECT_DIR" "cover" "palette" 2>/dev/null || echo "")
+fi
+
+# Fall back to storyforge.yaml author if not in chapter-map
+if [[ -z "$AUTHOR" ]]; then
+    AUTHOR=$(read_yaml_field "project.author" 2>/dev/null || echo "")
+fi
+
+# Set output paths
+ASSETS_DIR="${PROJECT_DIR}/manuscript/assets"
+if [[ -n "$OUTPUT_PATH" ]]; then
+    SVG_FILE="${OUTPUT_PATH%.png}.svg"
+    PNG_FILE="$OUTPUT_PATH"
+elif [[ "$SVG_ONLY" == true ]]; then
+    SVG_FILE="${ASSETS_DIR}/cover.svg"
+    PNG_FILE=""
+else
+    SVG_FILE="${ASSETS_DIR}/cover.svg"
+    PNG_FILE="${ASSETS_DIR}/cover.png"
+fi
+
+# ============================================================================
+# Dry run
+# ============================================================================
+
+if [[ "$DRY_RUN" == true ]]; then
+    log "=== Cover Generation (dry run) ==="
+    log "  Title:    ${TITLE}"
+    log "  Author:   ${AUTHOR:-[not set]}"
+    log "  Genre:    ${GENRE} (${GENRE_LC})"
+    log "  Subtitle: ${SUBTITLE:-[none]}"
+    log "  Palette:  ${PALETTE:-[genre default]}"
+    if [[ -n "$SERIES_NAME" ]]; then
+        log "  Series:   ${SERIES_NAME} #${SERIES_POS}"
+    fi
+    log "  SVG:      ${SVG_FILE}"
+    if [[ "$SVG_ONLY" != true ]]; then
+        log "  PNG:      ${PNG_FILE}"
+    fi
+    exit 0
+fi
+
+# ============================================================================
+# PRNG from title hash
+# ============================================================================
+
+# Generate a deterministic hash from the title
+TITLE_HASH=$(echo -n "$TITLE" | md5 2>/dev/null || echo -n "$TITLE" | md5sum 2>/dev/null | cut -d' ' -f1)
+
+# Extract seed values from different parts of the hash (each 0-255)
+seed_from_hash() {
+    local offset=$1
+    local hex="${TITLE_HASH:$offset:2}"
+    printf '%d' "0x${hex}"
+}
+
+# Pseudo-random number in range [min, max] from seed position
+prng() {
+    local offset=$1
+    local min=$2
+    local max=$3
+    local val
+    val=$(seed_from_hash "$offset")
+    echo $(( min + (val % (max - min + 1)) ))
+}
+
+# Pseudo-random float-ish (returns value * 100 for integer math)
+prng100() {
+    local offset=$1
+    local min=$2
+    local max=$3
+    local val
+    val=$(seed_from_hash "$offset")
+    echo $(( min + (val * (max - min) / 255) ))
+}
+
+# ============================================================================
+# Genre palettes
+# ============================================================================
+
+set_palette() {
+    case "$GENRE_LC" in
+        fantasy|epic-fantasy|urban-fantasy|dark-fantasy)
+            BG_COLOR="#1a1a2e"
+            BG_COLOR2="#16213e"
+            ACCENT="#d4a73a"
+            ACCENT2="#b8860b"
+            TEXT_COLOR="#f5f0e8"
+            TEXT_DIM="rgba(245,240,232,0.5)"
+            ;;
+        science-fiction|sci-fi|cyberpunk|space-opera)
+            BG_COLOR="#0d1117"
+            BG_COLOR2="#161b22"
+            ACCENT="#58a6ff"
+            ACCENT2="#1f6feb"
+            TEXT_COLOR="#e6edf3"
+            TEXT_DIM="rgba(230,237,243,0.5)"
+            ;;
+        thriller|suspense|mystery|crime)
+            BG_COLOR="#111111"
+            BG_COLOR2="#1a1a1a"
+            ACCENT="#dc2626"
+            ACCENT2="#991b1b"
+            TEXT_COLOR="#f5f5f5"
+            TEXT_DIM="rgba(245,245,245,0.5)"
+            ;;
+        romance|contemporary-romance|historical-romance)
+            BG_COLOR="#2d1b2e"
+            BG_COLOR2="#1f1520"
+            ACCENT="#e8a87c"
+            ACCENT2="#c4856c"
+            TEXT_COLOR="#fdf6ee"
+            TEXT_DIM="rgba(253,246,238,0.5)"
+            ;;
+        literary-fiction|literary|upmarket)
+            BG_COLOR="#f5f0e8"
+            BG_COLOR2="#ede5d8"
+            ACCENT="#374151"
+            ACCENT2="#6b7280"
+            TEXT_COLOR="#1a1a1a"
+            TEXT_DIM="rgba(26,26,26,0.4)"
+            ;;
+        *)
+            BG_COLOR="#1e293b"
+            BG_COLOR2="#0f172a"
+            ACCENT="#94a3b8"
+            ACCENT2="#64748b"
+            TEXT_COLOR="#f1f5f9"
+            TEXT_DIM="rgba(241,245,249,0.5)"
+            ;;
+    esac
+
+    # Custom palette override
+    if [[ -n "$PALETTE" ]]; then
+        case "$PALETTE" in
+            warm)
+                BG_COLOR="#2d1b12"
+                BG_COLOR2="#1a1008"
+                ACCENT="#d4a73a"
+                ACCENT2="#b8860b"
+                TEXT_COLOR="#fdf6ee"
+                TEXT_DIM="rgba(253,246,238,0.5)"
+                ;;
+            cool)
+                BG_COLOR="#0c1222"
+                BG_COLOR2="#060b16"
+                ACCENT="#60a5fa"
+                ACCENT2="#3b82f6"
+                TEXT_COLOR="#e2e8f0"
+                TEXT_DIM="rgba(226,232,240,0.5)"
+                ;;
+            dark)
+                BG_COLOR="#0a0a0a"
+                BG_COLOR2="#141414"
+                ACCENT="#a3a3a3"
+                ACCENT2="#737373"
+                TEXT_COLOR="#fafafa"
+                TEXT_DIM="rgba(250,250,250,0.4)"
+                ;;
+            light)
+                BG_COLOR="#fafaf9"
+                BG_COLOR2="#f5f5f4"
+                ACCENT="#57534e"
+                ACCENT2="#78716c"
+                TEXT_COLOR="#1c1917"
+                TEXT_DIM="rgba(28,25,23,0.4)"
+                ;;
+        esac
+    fi
+}
+
+# ============================================================================
+# Pattern generators (each emits SVG elements)
+# ============================================================================
+
+draw_fantasy_pattern() {
+    local cx=800
+    local cy=1200
+    local elements=""
+
+    # Concentric circles/arcs
+    local i
+    for i in 0 1 2 3 4 5; do
+        local r=$(( 200 + i * 120 + $(prng $((i * 2)) -40 40) ))
+        local sw=$(prng $((i * 2 + 10)) 1 3)
+        local opacity=$(prng100 $((i * 2 + 12)) 15 40)
+        local dash=$(prng $((i * 2 + 14)) 8 40)
+        local gap=$(prng $((i * 2 + 16)) 4 20)
+        elements="${elements}<circle cx=\"${cx}\" cy=\"${cy}\" r=\"${r}\" fill=\"none\" stroke=\"${ACCENT}\" stroke-width=\"${sw}\" opacity=\"0.${opacity}\" stroke-dasharray=\"${dash} ${gap}\"/>"
+    done
+
+    # Ornamental radial lines
+    local num_lines=$(prng 20 6 16)
+    for (( i=0; i<num_lines; i++ )); do
+        local angle=$(( i * 360 / num_lines + $(prng $((22 + i)) -8 8) ))
+        local r1=$(prng $((24 + i)) 100 300)
+        local r2=$(prng $((26 + i)) 500 900)
+        local rad_angle
+        rad_angle=$(echo "scale=4; ${angle} * 3.14159 / 180" | bc 2>/dev/null || echo "0")
+        if [[ "$rad_angle" != "0" ]]; then
+            local x1 y1 x2 y2
+            x1=$(echo "scale=0; ${cx} + ${r1} * c(${rad_angle})" | bc -l 2>/dev/null || echo "$cx")
+            y1=$(echo "scale=0; ${cy} + ${r1} * s(${rad_angle})" | bc -l 2>/dev/null || echo "$cy")
+            x2=$(echo "scale=0; ${cx} + ${r2} * c(${rad_angle})" | bc -l 2>/dev/null || echo "$cx")
+            y2=$(echo "scale=0; ${cy} + ${r2} * s(${rad_angle})" | bc -l 2>/dev/null || echo "$cy")
+            local opacity=$(prng100 $((28 + i)) 10 30)
+            elements="${elements}<line x1=\"${x1}\" y1=\"${y1}\" x2=\"${x2}\" y2=\"${y2}\" stroke=\"${ACCENT}\" stroke-width=\"1\" opacity=\"0.${opacity}\"/>"
+        fi
+    done
+
+    # Diamond shapes at corners
+    local d_size=$(prng 30 40 80)
+    local d_opacity=$(prng100 1 15 35)
+    elements="${elements}<polygon points=\"800,$(( 200 - d_size )) $(( 800 + d_size )),200 800,$(( 200 + d_size )) $(( 800 - d_size )),200\" fill=\"none\" stroke=\"${ACCENT}\" stroke-width=\"1.5\" opacity=\"0.${d_opacity}\"/>"
+
+    echo "$elements"
+}
+
+draw_scifi_pattern() {
+    local elements=""
+
+    # Grid of dots/nodes
+    local grid_size=$(prng 0 4 7)
+    local spacing=$(( 1600 / (grid_size + 1) ))
+    local i j
+    for (( i=1; i<=grid_size; i++ )); do
+        for (( j=1; j<=grid_size+3; j++ )); do
+            local x=$(( i * spacing + $(prng $(( (i*7+j) % 30 )) -20 20) ))
+            local y=$(( j * spacing + $(prng $(( (i*3+j*5) % 30 )) -20 20) ))
+            local r=$(prng $(( (i+j) % 30 )) 2 6)
+            local opacity=$(prng100 $(( (i*j) % 30 )) 10 35)
+            elements="${elements}<circle cx=\"${x}\" cy=\"${y}\" r=\"${r}\" fill=\"${ACCENT}\" opacity=\"0.${opacity}\"/>"
+        done
+    done
+
+    # Circuit-like horizontal/vertical lines connecting some nodes
+    local num_lines=$(prng 4 8 16)
+    for (( i=0; i<num_lines; i++ )); do
+        local x1=$(prng $(( i*2 )) 100 1500)
+        local y1=$(prng $(( i*2+1 )) 100 2300)
+        local length=$(prng $(( i*2+6 )) 100 600)
+        local vertical=$(( $(prng $(( i*2+8 )) 0 1) ))
+        local x2 y2
+        if (( vertical )); then
+            x2=$x1
+            y2=$(( y1 + length ))
+        else
+            x2=$(( x1 + length ))
+            y2=$y1
+        fi
+        local opacity=$(prng100 $(( i*2+10 )) 8 25)
+        elements="${elements}<line x1=\"${x1}\" y1=\"${y1}\" x2=\"${x2}\" y2=\"${y2}\" stroke=\"${ACCENT}\" stroke-width=\"1\" opacity=\"0.${opacity}\"/>"
+        # Node at endpoints
+        elements="${elements}<circle cx=\"${x1}\" cy=\"${y1}\" r=\"3\" fill=\"${ACCENT}\" opacity=\"0.${opacity}\"/>"
+        elements="${elements}<circle cx=\"${x2}\" cy=\"${y2}\" r=\"3\" fill=\"${ACCENT}\" opacity=\"0.${opacity}\"/>"
+    done
+
+    # Geometric tessellation — hexagonal hints
+    local hex_y
+    for hex_y in 400 800 1200 1600 2000; do
+        local hex_x=$(prng $(( hex_y % 28 )) 200 1400)
+        local hex_r=$(prng $(( (hex_y+2) % 28 )) 60 140)
+        local opacity=$(prng100 $(( (hex_y+4) % 28 )) 5 20)
+        elements="${elements}<polygon points=\"$(( hex_x + hex_r )),${hex_y} $(( hex_x + hex_r/2 )),$(( hex_y + hex_r*87/100 )) $(( hex_x - hex_r/2 )),$(( hex_y + hex_r*87/100 )) $(( hex_x - hex_r )),${hex_y} $(( hex_x - hex_r/2 )),$(( hex_y - hex_r*87/100 )) $(( hex_x + hex_r/2 )),$(( hex_y - hex_r*87/100 ))\" fill=\"none\" stroke=\"${ACCENT}\" stroke-width=\"1\" opacity=\"0.${opacity}\"/>"
+    done
+
+    echo "$elements"
+}
+
+draw_thriller_pattern() {
+    local elements=""
+
+    # Sharp diagonal lines
+    local num_lines=$(prng 0 10 20)
+    local i
+    for (( i=0; i<num_lines; i++ )); do
+        local x1=$(prng $(( i*2 )) 0 1600)
+        local y1=$(prng $(( i*2+1 )) 0 2400)
+        local len=$(prng $(( i*2+6 )) 200 800)
+        local angle=$(prng $(( i*2+8 )) 20 70)
+        local x2=$(( x1 + len ))
+        local y2=$(( y1 + len * angle / 45 ))
+        local sw=$(prng $(( i*2+10 )) 1 4)
+        local opacity=$(prng100 $(( i*2+12 )) 8 30)
+        elements="${elements}<line x1=\"${x1}\" y1=\"${y1}\" x2=\"${x2}\" y2=\"${y2}\" stroke=\"${ACCENT}\" stroke-width=\"${sw}\" opacity=\"0.${opacity}\"/>"
+    done
+
+    # Fragmented rectangles
+    local num_rects=$(prng 14 4 8)
+    for (( i=0; i<num_rects; i++ )); do
+        local x=$(prng $(( i*3 )) 50 1400)
+        local y=$(prng $(( i*3+1 )) 50 2200)
+        local w=$(prng $(( i*3+2 )) 40 200)
+        local h=$(prng $(( i*3+4 )) 40 200)
+        local opacity=$(prng100 $(( i*3+6 )) 5 20)
+        local rotation=$(prng $(( i*3+8 )) -15 15)
+        elements="${elements}<rect x=\"${x}\" y=\"${y}\" width=\"${w}\" height=\"${h}\" fill=\"none\" stroke=\"${ACCENT}\" stroke-width=\"1\" opacity=\"0.${opacity}\" transform=\"rotate(${rotation} $(( x + w/2 )) $(( y + h/2 )))\"/>"
+    done
+
+    echo "$elements"
+}
+
+draw_romance_pattern() {
+    local elements=""
+
+    # Flowing curves (cubic beziers)
+    local num_curves=$(prng 0 5 10)
+    local i
+    for (( i=0; i<num_curves; i++ )); do
+        local x1=$(prng $(( i*4 )) 0 1600)
+        local y1=$(prng $(( i*4+1 )) 0 2400)
+        local cx1=$(prng $(( i*4+2 )) 0 1600)
+        local cy1=$(prng $(( i*4+3 )) 0 2400)
+        local cx2=$(prng $(( i*4+4 % 30 )) 0 1600)
+        local cy2=$(prng $(( i*4+5 % 30 )) 0 2400)
+        local x2=$(prng $(( i*4+6 % 30 )) 0 1600)
+        local y2=$(prng $(( i*4+7 % 30 )) 0 2400)
+        local sw=$(prng $(( i*4+8 % 30 )) 1 3)
+        local opacity=$(prng100 $(( i*4+9 % 30 )) 10 30)
+        elements="${elements}<path d=\"M${x1},${y1} C${cx1},${cy1} ${cx2},${cy2} ${x2},${y2}\" fill=\"none\" stroke=\"${ACCENT}\" stroke-width=\"${sw}\" opacity=\"0.${opacity}\"/>"
+    done
+
+    # Soft overlapping circles
+    local num_circles=$(prng 10 6 12)
+    for (( i=0; i<num_circles; i++ )); do
+        local cx=$(prng $(( i*2+12 % 30 )) 200 1400)
+        local cy=$(prng $(( i*2+13 % 30 )) 300 2100)
+        local r=$(prng $(( i*2+14 % 30 )) 80 300)
+        local opacity=$(prng100 $(( i*2+16 % 30 )) 3 15)
+        elements="${elements}<circle cx=\"${cx}\" cy=\"${cy}\" r=\"${r}\" fill=\"none\" stroke=\"${ACCENT}\" stroke-width=\"1\" opacity=\"0.${opacity}\"/>"
+    done
+
+    echo "$elements"
+}
+
+draw_literary_pattern() {
+    local elements=""
+
+    # Minimal — just a few carefully placed lines
+    local num_lines=$(prng 0 3 6)
+    local i
+    for (( i=0; i<num_lines; i++ )); do
+        local x1=$(prng $(( i*3 )) 200 1400)
+        local y1=$(prng $(( i*3+1 )) 400 2000)
+        local x2=$(prng $(( i*3+2 )) 200 1400)
+        local y2=$(( y1 + $(prng $(( i*3+4 )) 100 400) ))
+        local opacity=$(prng100 $(( i*3+6 )) 8 20)
+        elements="${elements}<line x1=\"${x1}\" y1=\"${y1}\" x2=\"${x2}\" y2=\"${y2}\" stroke=\"${ACCENT}\" stroke-width=\"0.5\" opacity=\"0.${opacity}\"/>"
+    done
+
+    # Subtle texture — tiny dots scattered
+    local num_dots=$(prng 8 20 50)
+    for (( i=0; i<num_dots; i++ )); do
+        local x=$(prng $(( i % 30 )) 100 1500)
+        local y=$(prng $(( (i+15) % 30 )) 100 2300)
+        local r=$(prng $(( (i+7) % 30 )) 1 3)
+        local opacity=$(prng100 $(( (i+3) % 30 )) 5 15)
+        elements="${elements}<circle cx=\"${x}\" cy=\"${y}\" r=\"${r}\" fill=\"${ACCENT}\" opacity=\"0.${opacity}\"/>"
+    done
+
+    echo "$elements"
+}
+
+draw_default_pattern() {
+    local elements=""
+
+    # Balanced geometric — mix of shapes
+    local num_shapes=$(prng 0 8 14)
+    local i
+    for (( i=0; i<num_shapes; i++ )); do
+        local shape_type=$(prng $(( i*3 )) 0 2)
+        local x=$(prng $(( i*3+1 )) 100 1500)
+        local y=$(prng $(( i*3+2 )) 100 2300)
+        local size=$(prng $(( i*3+4 % 30 )) 40 200)
+        local opacity=$(prng100 $(( i*3+6 % 30 )) 8 25)
+
+        case $shape_type in
+            0) # Circle
+                elements="${elements}<circle cx=\"${x}\" cy=\"${y}\" r=\"${size}\" fill=\"none\" stroke=\"${ACCENT}\" stroke-width=\"1\" opacity=\"0.${opacity}\"/>"
+                ;;
+            1) # Rectangle
+                elements="${elements}<rect x=\"$(( x - size/2 ))\" y=\"$(( y - size/2 ))\" width=\"${size}\" height=\"${size}\" fill=\"none\" stroke=\"${ACCENT}\" stroke-width=\"1\" opacity=\"0.${opacity}\"/>"
+                ;;
+            2) # Line
+                local x2=$(( x + $(prng $(( i*3+8 % 30 )) -300 300) ))
+                local y2=$(( y + $(prng $(( i*3+10 % 30 )) -300 300) ))
+                elements="${elements}<line x1=\"${x}\" y1=\"${y}\" x2=\"${x2}\" y2=\"${y2}\" stroke=\"${ACCENT}\" stroke-width=\"1\" opacity=\"0.${opacity}\"/>"
+                ;;
+        esac
+    done
+
+    echo "$elements"
+}
+
+# ============================================================================
+# Text sizing
+# ============================================================================
+
+# Compute title font size based on character count
+compute_title_size() {
+    local len=${#TITLE}
+    if (( len <= 8 )); then
+        echo 140
+    elif (( len <= 15 )); then
+        echo 120
+    elif (( len <= 25 )); then
+        echo 96
+    elif (( len <= 40 )); then
+        echo 72
+    else
+        echo 56
+    fi
+}
+
+# Split long titles into lines (at word boundaries)
+split_title() {
+    local max_chars=$1
+    local words=($TITLE)
+    local lines=()
+    local current_line=""
+
+    for word in "${words[@]}"; do
+        if [[ -z "$current_line" ]]; then
+            current_line="$word"
+        elif (( ${#current_line} + 1 + ${#word} <= max_chars )); then
+            current_line="${current_line} ${word}"
+        else
+            lines+=("$current_line")
+            current_line="$word"
+        fi
+    done
+    [[ -n "$current_line" ]] && lines+=("$current_line")
+
+    printf '%s\n' "${lines[@]}"
+}
+
+# ============================================================================
+# SVG generation
+# ============================================================================
+
+generate_svg() {
+    local title_size
+    title_size=$(compute_title_size)
+
+    # Max chars per line based on font size
+    local max_chars
+    if (( title_size >= 120 )); then max_chars=12
+    elif (( title_size >= 96 )); then max_chars=16
+    elif (( title_size >= 72 )); then max_chars=22
+    else max_chars=30
+    fi
+
+    # Split title into lines
+    local title_lines=()
+    while IFS= read -r line; do
+        title_lines+=("$line")
+    done < <(split_title "$max_chars")
+
+    # Generate pattern based on genre
+    local pattern
+    case "$GENRE_LC" in
+        fantasy|epic-fantasy|urban-fantasy|dark-fantasy)
+            pattern=$(draw_fantasy_pattern) ;;
+        science-fiction|sci-fi|cyberpunk|space-opera)
+            pattern=$(draw_scifi_pattern) ;;
+        thriller|suspense|mystery|crime)
+            pattern=$(draw_thriller_pattern) ;;
+        romance|contemporary-romance|historical-romance)
+            pattern=$(draw_romance_pattern) ;;
+        literary-fiction|literary|upmarket)
+            pattern=$(draw_literary_pattern) ;;
+        *)
+            pattern=$(draw_default_pattern) ;;
+    esac
+
+    # Title Y position: centered in upper third
+    local title_block_height=$(( ${#title_lines[@]} * (title_size + 20) ))
+    local title_y=$(( 600 - title_block_height / 2 ))
+
+    # Build title text elements
+    local title_svg=""
+    local i
+    for (( i=0; i<${#title_lines[@]}; i++ )); do
+        local line_y=$(( title_y + i * (title_size + 20) ))
+        title_svg="${title_svg}  <text x=\"800\" y=\"${line_y}\" text-anchor=\"middle\" font-family=\"Georgia, 'Palatino Linotype', 'Book Antiqua', serif\" font-size=\"${title_size}\" font-weight=\"bold\" fill=\"${TEXT_COLOR}\" letter-spacing=\"2\">${title_lines[$i]}</text>
+"
+    done
+
+    # Subtitle
+    local subtitle_svg=""
+    if [[ -n "$SUBTITLE" ]]; then
+        local sub_y=$(( title_y + title_block_height + 40 ))
+        subtitle_svg="  <text x=\"800\" y=\"${sub_y}\" text-anchor=\"middle\" font-family=\"Georgia, 'Palatino Linotype', serif\" font-size=\"32\" font-weight=\"normal\" font-style=\"italic\" fill=\"${TEXT_DIM}\">${SUBTITLE}</text>"
+    fi
+
+    # Decorative rule between title and author
+    local rule_y=$(( title_y + title_block_height + 100 ))
+    local rule_svg="  <line x1=\"650\" y1=\"${rule_y}\" x2=\"950\" y2=\"${rule_y}\" stroke=\"${ACCENT}\" stroke-width=\"1\" opacity=\"0.4\"/>"
+
+    # Author
+    local author_svg=""
+    if [[ -n "$AUTHOR" ]]; then
+        author_svg="  <text x=\"800\" y=\"2100\" text-anchor=\"middle\" font-family=\"Georgia, 'Palatino Linotype', serif\" font-size=\"40\" font-weight=\"normal\" fill=\"${TEXT_COLOR}\" letter-spacing=\"6\">${AUTHOR}</text>"
+    fi
+
+    # Series badge
+    local series_svg=""
+    if [[ -n "$SERIES_NAME" ]]; then
+        local series_text="${SERIES_NAME}"
+        if [[ -n "$SERIES_POS" ]]; then
+            series_text="${SERIES_NAME} · Book ${SERIES_POS}"
+        fi
+        series_svg="  <text x=\"800\" y=\"2200\" text-anchor=\"middle\" font-family=\"'Courier New', monospace\" font-size=\"22\" font-weight=\"normal\" fill=\"${TEXT_DIM}\" letter-spacing=\"4\">${series_text}</text>"
+    fi
+
+    # Assemble SVG
+    cat <<SVG_EOF
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="2400" viewBox="0 0 1600 2400">
+  <!-- Background -->
+  <defs>
+    <linearGradient id="bg-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${BG_COLOR}"/>
+      <stop offset="100%" stop-color="${BG_COLOR2}"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="2400" fill="url(#bg-grad)"/>
+
+  <!-- Generated pattern -->
+  <g class="pattern">
+${pattern}
+  </g>
+
+  <!-- Title -->
+${title_svg}
+  <!-- Subtitle -->
+${subtitle_svg}
+
+  <!-- Rule -->
+${rule_svg}
+
+  <!-- Author -->
+${author_svg}
+
+  <!-- Series -->
+${series_svg}
+</svg>
+SVG_EOF
+}
+
+# ============================================================================
+# Main execution
+# ============================================================================
+
+set_palette
+
+# Create output directory
+mkdir -p "$(dirname "$SVG_FILE")"
+
+log "Generating cover..."
+log "  Title:  ${TITLE}"
+log "  Genre:  ${GENRE} → ${GENRE_LC} palette"
+if [[ -n "$AUTHOR" ]]; then
+    log "  Author: ${AUTHOR}"
+fi
+
+# Generate SVG
+generate_svg > "$SVG_FILE"
+log "SVG saved: ${SVG_FILE}"
+
+if [[ "$SVG_ONLY" == true ]]; then
+    log "Done (SVG only). Open in browser to preview."
+    exit 0
+fi
+
+# Convert to PNG
+PNG_CONVERTED=false
+
+if command -v rsvg-convert >/dev/null 2>&1; then
+    log "Converting to PNG via rsvg-convert..."
+    rsvg-convert -w 1600 -h 2400 -o "$PNG_FILE" "$SVG_FILE"
+    PNG_CONVERTED=true
+elif command -v sips >/dev/null 2>&1; then
+    log "Converting to PNG via sips..."
+    sips -s format png "$SVG_FILE" --out "$PNG_FILE" >/dev/null 2>&1
+    PNG_CONVERTED=true
+fi
+
+if [[ "$PNG_CONVERTED" == true && -f "$PNG_FILE" ]]; then
+    local_size=$(wc -c < "$PNG_FILE" | tr -d ' ')
+    log "PNG saved: ${PNG_FILE} ($(( local_size / 1024 ))KB)"
+else
+    log "WARNING: PNG conversion not available. Install librsvg (brew install librsvg) for best results."
+    log "SVG cover is at: ${SVG_FILE}"
+    # Use SVG as the cover (pandoc can sometimes handle it)
+    PNG_FILE="$SVG_FILE"
+fi
+
+log "Cover generation complete."

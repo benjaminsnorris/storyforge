@@ -33,7 +33,14 @@ production:
   include_toc: true
 
   # Cover image path (relative to project root)
+  # Leave empty to auto-generate a typographic cover from title + genre
   cover_image:
+
+  # Cover generation settings (used when no cover_image is provided)
+  # ./storyforge cover generates a unique pattern from your title
+  cover:
+    subtitle:
+    palette:
 
   # Genre preset for CSS styling (overridden by manuscript/assets/custom.css if present)
   # Options: default, literary-fiction, thriller, romance, fantasy, science-fiction

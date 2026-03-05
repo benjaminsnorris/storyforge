@@ -591,6 +591,61 @@ get_genre_css() {
 }
 
 # ============================================================================
+# Cover generation
+# ============================================================================
+
+# Generate a cover image if none is configured.
+# Usage: generate_cover_if_missing "/path/to/project" "/path/to/plugin"
+generate_cover_if_missing() {
+    local project_dir="$1"
+    local plugin_dir="$2"
+
+    # Check if cover_image is already set and file exists
+    local cover_image
+    cover_image=$(read_production_field "$project_dir" "cover_image" 2>/dev/null || echo "")
+    if [[ -n "$cover_image" && -f "${project_dir}/${cover_image}" ]]; then
+        log "Cover image found: ${cover_image}"
+        return 0
+    fi
+
+    # Check for cover generator script
+    local cover_script="${plugin_dir}/scripts/storyforge-cover"
+    if [[ ! -x "$cover_script" ]]; then
+        log "No cover image configured and cover generator not found. Proceeding without cover."
+        return 0
+    fi
+
+    log "No cover image — generating from title and genre..."
+
+    local cover_output="${project_dir}/manuscript/assets/cover.png"
+    if ! "$cover_script" --output "$cover_output"; then
+        log "WARNING: Cover generation failed. Proceeding without cover."
+        return 0
+    fi
+
+    # If PNG failed but SVG exists, use the SVG
+    if [[ ! -f "$cover_output" ]]; then
+        local svg_output="${cover_output%.png}.svg"
+        if [[ -f "$svg_output" ]]; then
+            cover_output="$svg_output"
+        else
+            log "WARNING: No cover file produced. Proceeding without cover."
+            return 0
+        fi
+    fi
+
+    # Update chapter-map.yaml with the generated cover path
+    local relative_path="${cover_output#${project_dir}/}"
+    local chapter_map="${project_dir}/reference/chapter-map.yaml"
+    if [[ -f "$chapter_map" ]]; then
+        sed -i '' "s|^[[:space:]]*cover_image:.*|  cover_image: \"${relative_path}\"|" "$chapter_map" 2>/dev/null || true
+        log "Updated chapter-map.yaml: cover_image: ${relative_path}"
+    fi
+
+    return 0
+}
+
+# ============================================================================
 # Epub generation
 # ============================================================================
 
