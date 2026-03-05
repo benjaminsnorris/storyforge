@@ -91,6 +91,7 @@ Required artifacts that don't exist yet:
 - **Character bible missing** → Recommend `/storyforge:develop` focused on character development. Be specific: "Build the character bible — start with your protagonist's wound/lie/need structure."
 - **World bible missing** → Recommend `/storyforge:develop` focused on world-building.
 - **Story architecture missing** → Recommend `/storyforge:develop` focused on story structure.
+- **Placeholder or generic title** → If the project has significant content (scenes drafted or revised) and the title looks like a placeholder ("Untitled," "My Novel," or something obviously temporary), recommend `/storyforge:title` to develop a strong title before production.
 
 Prioritize whichever gap would most improve the next phase of work. For a project about to draft, character bible matters most. For a complex fantasy, world bible matters most.
 
@@ -103,6 +104,7 @@ Artifacts exist but could be richer:
 - A story architecture that's plot-only without thematic throughlines
 - A scene index with scenes that lack clear functions or turning points
 - A voice guide that hasn't been tested against actual prose samples
+- **No press kit** → If the project is in late revision or production phase and no press kit exists (`manuscript/press-kit/` directory is absent), recommend `/storyforge:press-kit` to generate marketing materials while the manuscript is fresh.
 
 Recommend `/storyforge:develop` or `/storyforge:voice` or `/storyforge:scenes` with specific direction about what to deepen.
 

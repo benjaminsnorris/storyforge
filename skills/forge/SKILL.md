@@ -125,6 +125,12 @@ If the revision plan doesn't exist, explain that a revision plan is needed first
 **"Review revision" / "How did the revision go?" / "What changed?":**
 Invoke the `review` skill. This is the natural next step after a revision cycle completes.
 
+**"Develop the title" / "Refine my title" / "What should I call this book?":**
+Invoke the `title` skill.
+
+**"Create a press kit" / "Generate marketing copy" / "Write blurbs" / "Build promotional materials":**
+Invoke the `press-kit` skill. Check that scenes exist — the press kit needs story content to draw from.
+
 **"Assemble the book" / "Make an epub" / "Produce" / "Build the manuscript":**
 Invoke the `produce` skill. This is the interactive guide for manuscript assembly and book production.
 

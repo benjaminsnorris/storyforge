@@ -70,6 +70,8 @@ Use the **Bash tool** to create the full directory tree:
 │   └── key-decisions.md
 ├── scenes/
 │   └── scene-index.yaml
+├── manuscript/
+│   └── press-kit/        (marketing materials — blurbs, jacket copy, bios)
 └── working/
     ├── pipeline.yaml     (pipeline manifest — tracks eval/revision cycles)
     ├── logs/
@@ -80,7 +82,7 @@ Use the **Bash tool** to create the full directory tree:
 Create all directories first with a single `mkdir -p` command:
 
 ```bash
-mkdir -p {project-dir}/{reference,scenes,working/{logs,evaluations,plans}}
+mkdir -p {project-dir}/{reference,scenes,manuscript/press-kit,working/{logs,evaluations,plans}}
 ```
 
 Then create the initial pipeline manifest:
@@ -96,7 +98,7 @@ cycles: []
 EOF
 ```
 
-Do NOT create `draft/` or `manuscript/` directories. Storyforge works on scene files in `scenes/` throughout the entire pipeline — drafting, evaluation, and revision all operate on scenes. Manuscript assembly is a separate, late-stage step that happens when the author is ready.
+Do NOT create a `draft/` directory. Storyforge works on scene files in `scenes/` throughout the entire pipeline — drafting, evaluation, and revision all operate on scenes. Manuscript assembly is a separate, late-stage step. The `manuscript/press-kit/` directory is created as a placeholder for marketing materials; the rest of `manuscript/` is populated by the assembly pipeline later.
 
 Then copy the runner script from the plugin's `templates/storyforge-runner.sh` to the project root as `storyforge` and make it executable:
 
@@ -205,6 +207,8 @@ This project is in the **development** phase. The focus is on building the creat
 - `/storyforge:plan-revision` — Plan revision passes from evaluation results
 - `/storyforge:review` — Review revision results, map findings to changes
 - `/storyforge:recommend` — Assess project state, recommend the highest-value next action
+- `/storyforge:title` — Title and subtitle development, refinement, assessment
+- `/storyforge:press-kit` — Blurbs, jacket copy, author bio, social media, marketing materials
 
 ### Scripts (via project runner)
 - `./storyforge write` — Autonomous scene drafting

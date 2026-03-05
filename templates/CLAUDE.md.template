@@ -22,6 +22,8 @@ This project uses [Storyforge](https://github.com/benjaminsnorris/storyforge). A
 - `/storyforge:review` — Review revision results, map findings to changes, assess gaps
 - `/storyforge:recommend` — Assess project state, recommend the highest-value next action
 - `/storyforge:produce` — Book production: chapter mapping, epub/PDF generation, formatting
+- `/storyforge:title` — Title and subtitle development, refinement, assessment
+- `/storyforge:press-kit` — Blurbs, jacket copy, author bio, social media, marketing materials
 
 Scripts (via project runner — all support `--interactive` and `--dry-run`):
 - `./storyforge write` — Autonomous scene drafting

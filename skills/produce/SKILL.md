@@ -28,6 +28,15 @@ Before doing anything else, orient yourself:
 4. **Read the key decisions file** — check for any production-related decisions already made.
 5. **Count scene files** in `scenes/` — verify that referenced scenes have actual content.
 
+## Step 1.5: Title Check
+
+Before proceeding to chapter mapping or assembly, check whether the title is finalized:
+
+1. Read the key decisions file. If a title decision is recorded there, the title is settled — use it and move on.
+2. If no title decision exists, ask the author: "Your current title is '{title}'. Is this final, or would you like to explore alternatives before we assemble?"
+   - If final: record as a key decision and continue.
+   - If not sure: invoke the `title` skill. Return to produce when title is settled.
+
 ## Step 2: Determine Mode
 
 Based on the author's message and project state, operate in one of these modes:
