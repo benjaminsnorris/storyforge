@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="{{LANG}}" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{BOOK_TITLE}} by {{AUTHOR}}</title>
+<meta name="author" content="{{AUTHOR}}">
+<meta name="description" content="{{DESCRIPTION}}">
+{{CANONICAL}}
+<script>{{HEAD_SCRIPT}}</script>
+<style>
+{{CSS}}
+</style>
+</head>
+<body>
+
+<div class="book-landing">
+
+  {{COVER_IMG}}
+
+  <div class="book-meta">
+    <h1 class="book-title">{{BOOK_TITLE}}</h1>
+    <p class="book-author">{{AUTHOR}}</p>
+    {{LOGLINE}}
+    {{SERIES}}
+  </div>
+
+  <a href="chapters/chapter-01.html" class="start-reading">Start Reading</a>
+  <a href="contents.html" class="toc-link">Table of Contents</a>
+
+  {{COPYRIGHT}}
+</div>
+
+<script>
+{{JS}}
+</script>
+</body>
+</html>

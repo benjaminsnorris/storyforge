@@ -172,6 +172,7 @@ Explain the available options:
 - `--format epub` (default) — generate epub3
 - `--format pdf` — generate PDF (requires LaTeX or weasyprint)
 - `--format html` — generate single-file HTML
+- `--format web` — generate multi-page web book for hosting (beautiful reading experience with dark mode, reading position, chapter navigation)
 - `--format markdown` — assembled markdown only, no external tools needed
 - `--format all` — generate all available formats
 - `--draft` — quick assembly, markdown only, for proofing

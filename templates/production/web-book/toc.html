@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="{{LANG}}" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contents — {{BOOK_TITLE}}</title>
+<meta name="author" content="{{AUTHOR}}">
+{{CANONICAL}}
+<script>{{HEAD_SCRIPT}}</script>
+<style>
+{{CSS}}
+</style>
+</head>
+<body>
+
+<nav class="book-nav">
+  <a href="index.html" class="nav-title">{{BOOK_TITLE}}</a>
+  <div class="nav-controls">
+    <button class="theme-toggle" aria-label="Change theme">
+      <span class="icon-light">&#9788;</span>
+      <span class="icon-dark">&#9790;</span>
+      <span class="icon-sepia">&#9782;</span>
+    </button>
+  </div>
+</nav>
+
+<main class="reading-column" style="padding-top: 4em;">
+  <h1 style="text-align: center; margin-bottom: 1.5em;">Contents</h1>
+
+  <ol class="toc-list">
+{{TOC_ENTRIES}}
+  </ol>
+
+  {{BACK_MATTER_LINKS}}
+</main>
+
+<nav class="chapter-nav" style="justify-content: center;">
+  <a href="index.html" class="nav-link">&larr; Back to cover</a>
+</nav>
+
+<script>
+{{JS}}
+</script>
+</body>
+</html>

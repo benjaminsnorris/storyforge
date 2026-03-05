@@ -807,6 +807,240 @@ generate_html() {
 }
 
 # ============================================================================
+# Web book generation (multi-page static site)
+# ============================================================================
+
+# Generate a multi-page web book from assembled chapters.
+# Produces a folder of HTML files — one per chapter, plus index and TOC.
+# Usage: generate_web_book "/path/to/project" "/path/to/plugin"
+generate_web_book() {
+    local project_dir="$1"
+    local plugin_dir="$2"
+    local output_dir="${project_dir}/manuscript/output/web"
+    local template_dir="${plugin_dir}/templates/production/web-book"
+    local chapters_dir="${project_dir}/manuscript/chapters"
+
+    if ! check_pandoc >/dev/null 2>&1; then
+        log "ERROR: pandoc is required for web book generation but not found"
+        return 1
+    fi
+
+    # Verify templates exist
+    for tmpl in reading.css reading.js index.html toc.html chapter.html; do
+        if [[ ! -f "${template_dir}/${tmpl}" ]]; then
+            log "ERROR: Web book template missing: ${template_dir}/${tmpl}"
+            return 1
+        fi
+    done
+
+    # Read metadata
+    local title
+    title=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Untitled")
+    local author
+    author=$(read_production_field "$project_dir" "author" 2>/dev/null || echo "")
+    local language
+    language=$(read_production_field "$project_dir" "language" 2>/dev/null || echo "en")
+    local logline
+    logline=$(read_yaml_field "project.logline" 2>/dev/null || echo "")
+    local description
+    description=$(read_production_nested "$project_dir" "web" "description" 2>/dev/null || echo "$logline")
+    local base_url
+    base_url=$(read_production_nested "$project_dir" "web" "base_url" 2>/dev/null || echo "")
+    local series_name
+    series_name=$(read_yaml_field "project.series_name" 2>/dev/null || echo "")
+    local series_pos
+    series_pos=$(read_yaml_field "project.series_position" 2>/dev/null || echo "")
+    local copyright_year
+    copyright_year=$(read_production_nested "$project_dir" "copyright" "year" 2>/dev/null || date +%Y)
+    local cover_image
+    cover_image=$(read_production_field "$project_dir" "cover_image" 2>/dev/null || echo "")
+
+    local total_chapters
+    total_chapters=$(count_chapters)
+
+    # Read CSS and JS templates
+    local css_content
+    css_content=$(cat "${template_dir}/reading.css")
+    local js_content
+    js_content=$(cat "${template_dir}/reading.js")
+
+    # Head script (prevents flash of wrong theme) — extracted from JS comment
+    local head_script
+    head_script="(function(){var t=localStorage.getItem('storyforge-theme');if(t)document.documentElement.dataset.theme=t;else if(window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.dataset.theme='dark'})()"
+
+    # Create output directories
+    mkdir -p "${output_dir}/chapters"
+
+    log "Generating web book: ${total_chapters} chapters..."
+
+    # --- Build chapter list for TOC ---
+    local toc_entries=""
+    local ch_titles=()
+    local ch_slugs=()
+    for (( ch=1; ch<=total_chapters; ch++ )); do
+        local ch_title
+        ch_title=$(read_chapter_field "$ch" "$project_dir" "title")
+        local ch_slug
+        ch_slug=$(printf 'chapter-%02d' "$ch")
+        ch_titles+=("$ch_title")
+        ch_slugs+=("$ch_slug")
+        toc_entries="${toc_entries}    <li><a href=\"chapters/${ch_slug}.html\" data-chapter=\"${ch_slug}\">${ch_title}</a></li>
+"
+    done
+
+    # --- Helper: substitute template variables ---
+    _web_sub() {
+        local content="$1"
+        content="${content//\{\{BOOK_TITLE\}\}/$title}"
+        content="${content//\{\{AUTHOR\}\}/$author}"
+        content="${content//\{\{LANG\}\}/$language}"
+        content="${content//\{\{DESCRIPTION\}\}/$description}"
+        content="${content//\{\{TOTAL_CHAPTERS\}\}/$total_chapters}"
+        content="${content//\{\{CSS\}\}/$css_content}"
+        content="${content//\{\{JS\}\}/$js_content}"
+        content="${content//\{\{HEAD_SCRIPT\}\}/$head_script}"
+        content="${content//\{\{TOC_ENTRIES\}\}/$toc_entries}"
+
+        # Canonical link
+        if [[ -n "$base_url" ]]; then
+            content="${content//\{\{CANONICAL\}\}/<link rel=\"canonical\" href=\"${base_url}\">}"
+        else
+            content="${content//\{\{CANONICAL\}\}/}"
+        fi
+
+        echo "$content"
+    }
+
+    # --- Generate index.html ---
+    local index_tmpl
+    index_tmpl=$(cat "${template_dir}/index.html")
+
+    # Cover image
+    local cover_html=""
+    if [[ -n "$cover_image" && -f "${project_dir}/${cover_image}" ]]; then
+        cp "${project_dir}/${cover_image}" "${output_dir}/cover.png" 2>/dev/null || \
+        cp "${project_dir}/${cover_image}" "${output_dir}/cover.jpg" 2>/dev/null || true
+        local cover_ext="${cover_image##*.}"
+        cover_html="<img src=\"cover.${cover_ext}\" alt=\"${title}\" class=\"book-cover\">"
+    fi
+
+    # Logline
+    local logline_html=""
+    if [[ -n "$logline" ]]; then
+        logline_html="<p class=\"book-logline\">${logline}</p>"
+    fi
+
+    # Series
+    local series_html=""
+    if [[ -n "$series_name" ]]; then
+        series_html="<p class=\"book-series\">${series_name}"
+        if [[ -n "$series_pos" ]]; then
+            series_html="${series_html} &middot; Book ${series_pos}"
+        fi
+        series_html="${series_html}</p>"
+    fi
+
+    # Copyright
+    local copyright_html="<p class=\"book-copyright\">&copy; ${copyright_year} ${author}</p>"
+
+    local index_content
+    index_content=$(_web_sub "$index_tmpl")
+    index_content="${index_content//\{\{COVER_IMG\}\}/$cover_html}"
+    index_content="${index_content//\{\{LOGLINE\}\}/$logline_html}"
+    index_content="${index_content//\{\{SERIES\}\}/$series_html}"
+    index_content="${index_content//\{\{COPYRIGHT\}\}/$copyright_html}"
+    echo "$index_content" > "${output_dir}/index.html"
+
+    # --- Generate contents.html ---
+    local toc_tmpl
+    toc_tmpl=$(cat "${template_dir}/toc.html")
+
+    # Back matter links
+    local back_matter_html=""
+    for bm in "acknowledgments" "about-the-author" "also-by"; do
+        local bm_path
+        bm_path=$(read_production_nested "$project_dir" "back_matter" "$bm" 2>/dev/null || echo "")
+        if [[ -n "$bm_path" && -f "${project_dir}/${bm_path}" ]]; then
+            local bm_label
+            case "$bm" in
+                acknowledgments) bm_label="Acknowledgments" ;;
+                about-the-author) bm_label="About the Author" ;;
+                also-by) bm_label="Also By" ;;
+            esac
+            # Back matter pages not generated yet — link to last chapter as placeholder
+            back_matter_html="${back_matter_html}"
+        fi
+    done
+
+    local toc_content
+    toc_content=$(_web_sub "$toc_tmpl")
+    toc_content="${toc_content//\{\{BACK_MATTER_LINKS\}\}/$back_matter_html}"
+    echo "$toc_content" > "${output_dir}/contents.html"
+
+    # --- Generate chapter pages ---
+    local ch_tmpl
+    ch_tmpl=$(cat "${template_dir}/chapter.html")
+
+    for (( ch=1; ch<=total_chapters; ch++ )); do
+        local ch_idx=$(( ch - 1 ))
+        local ch_title="${ch_titles[$ch_idx]}"
+        local ch_slug="${ch_slugs[$ch_idx]}"
+        local ch_num_fmt
+        ch_num_fmt=$(printf '%02d' "$ch")
+        local ch_md="${chapters_dir}/chapter-${ch_num_fmt}.md"
+
+        if [[ ! -f "$ch_md" ]]; then
+            log "WARNING: Chapter file missing: ${ch_md}"
+            continue
+        fi
+
+        # Convert chapter markdown to HTML fragment
+        local ch_html_fragment
+        ch_html_fragment=$(pandoc --from markdown --to html5 "$ch_md" 2>/dev/null)
+
+        # Build prev/next links
+        local prev_link=""
+        local next_link=""
+        if (( ch > 1 )); then
+            local prev_slug
+            prev_slug=$(printf 'chapter-%02d' $(( ch - 1 )))
+            local prev_title="${ch_titles[$(( ch - 2 ))]}"
+            prev_link="<a href=\"${prev_slug}.html\" class=\"prev-chapter nav-link\"><span class=\"nav-label\">&larr; Previous Chapter</span><span class=\"nav-chapter-title\">${prev_title}</span></a>"
+        else
+            prev_link="<a href=\"../contents.html\" class=\"prev-chapter nav-link\"><span class=\"nav-label\">&larr; Contents</span></a>"
+        fi
+        if (( ch < total_chapters )); then
+            local next_slug
+            next_slug=$(printf 'chapter-%02d' $(( ch + 1 )))
+            local next_title="${ch_titles[$ch]}"
+            next_link="<a href=\"${next_slug}.html\" class=\"next-chapter nav-link\"><span class=\"nav-label\">Next Chapter &rarr;</span><span class=\"nav-chapter-title\">${next_title}</span></a>"
+        else
+            next_link="<a href=\"../index.html\" class=\"next-chapter nav-link\"><span class=\"nav-label\">Finished &rarr;</span><span class=\"nav-chapter-title\">Back to cover</span></a>"
+        fi
+
+        # Substitute into chapter template
+        local page_content
+        page_content=$(_web_sub "$ch_tmpl")
+        page_content="${page_content//\{\{CHAPTER_TITLE\}\}/$ch_title}"
+        page_content="${page_content//\{\{CHAPTER_SLUG\}\}/$ch_slug}"
+        page_content="${page_content//\{\{CHAPTER_NUM\}\}/$ch}"
+        page_content="${page_content//\{\{CHAPTER_CONTENT\}\}/$ch_html_fragment}"
+        page_content="${page_content//\{\{PREV_LINK\}\}/$prev_link}"
+        page_content="${page_content//\{\{NEXT_LINK\}\}/$next_link}"
+
+        echo "$page_content" > "${output_dir}/chapters/${ch_slug}.html"
+    done
+
+    # --- Summary ---
+    local total_files=$(( total_chapters + 2 ))  # chapters + index + contents
+    log "Web book generated: ${total_files} pages at ${output_dir}/"
+    log "  Landing: ${output_dir}/index.html"
+    log "  Contents: ${output_dir}/contents.html"
+    log "  Chapters: ${output_dir}/chapters/ (${total_chapters} files)"
+    return 0
+}
+
+# ============================================================================
 # PDF generation
 # ============================================================================
 

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="{{LANG}}" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{CHAPTER_TITLE}} — {{BOOK_TITLE}}</title>
+<meta name="author" content="{{AUTHOR}}">
+{{CANONICAL}}
+<script>{{HEAD_SCRIPT}}</script>
+<style>
+{{CSS}}
+</style>
+</head>
+<body data-chapter="{{CHAPTER_SLUG}}" data-chapter-num="{{CHAPTER_NUM}}" data-total-chapters="{{TOTAL_CHAPTERS}}">
+
+<div class="progress-bar"></div>
+
+<nav class="book-nav">
+  <a href="../contents.html" class="nav-title">{{BOOK_TITLE}}</a>
+  <div class="nav-controls">
+    <button class="toc-toggle" aria-label="Table of contents">&#9776;</button>
+    <button class="theme-toggle" aria-label="Change theme">
+      <span class="icon-light">&#9788;</span>
+      <span class="icon-dark">&#9790;</span>
+      <span class="icon-sepia">&#9782;</span>
+    </button>
+  </div>
+</nav>
+
+<main class="reading-column drop-cap">
+{{CHAPTER_CONTENT}}
+</main>
+
+<nav class="chapter-nav">
+  {{PREV_LINK}}
+  {{NEXT_LINK}}
+</nav>
+
+<!-- TOC Overlay -->
+<div class="toc-overlay">
+  <div class="toc-panel">
+    <h2>Contents</h2>
+    <ol class="toc-list">
+{{TOC_ENTRIES}}
+    </ol>
+  </div>
+</div>
+
+<script>
+{{JS}}
+</script>
+</body>
+</html>

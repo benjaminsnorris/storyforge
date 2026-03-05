@@ -62,3 +62,8 @@ production:
     acknowledgments:
     about-the-author:
     also-by:
+
+  # Web book settings (for --format web)
+  web:
+    base_url:           # Base URL for canonical links (e.g., https://mysite.com/my-novel)
+    description:        # Meta description for search engines

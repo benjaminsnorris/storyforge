@@ -60,7 +60,7 @@ mkdir -p "$LOG_DIR"
 # ============================================================================
 
 DRY_RUN=false
-FORMAT="epub"           # epub | pdf | html | markdown | all
+FORMAT="epub"           # epub | pdf | html | web | markdown | all
 DRAFT_MODE=false
 SKIP_VALIDATION=false
 INTERACTIVE=false
@@ -72,7 +72,7 @@ Usage: $(basename "$0") [OPTIONS]
 Assemble scenes into chapters and generate book output.
 
 Options:
-  --format FORMAT     Output format: epub, pdf, html, markdown, all (default: epub)
+  --format FORMAT     Output format: epub, pdf, html, web, markdown, all (default: epub)
   --draft             Quick assembly — markdown only, no formatting
   --interactive       Run the review phase interactively
   --dry-run           Show what would be done without doing it
@@ -83,6 +83,7 @@ Formats:
   epub       Generate epub3 (requires pandoc)
   pdf        Generate PDF (requires pandoc + LaTeX or weasyprint)
   html       Generate single-file HTML (requires pandoc)
+  web        Generate multi-page web book for hosting (requires pandoc)
   markdown   Assemble manuscript markdown only (no external tools)
   all        Generate all available formats
 
@@ -266,12 +267,14 @@ if [[ "$DRY_RUN" == true ]]; then
     case "$FORMAT" in
         epub) echo "  - epub3" ;;
         pdf) echo "  - PDF" ;;
-        html) echo "  - HTML" ;;
+        html) echo "  - HTML (single file)" ;;
+        web) echo "  - Web book (multi-page)" ;;
         markdown) echo "  - Markdown" ;;
         all)
             echo "  - Markdown"
             [[ -n "$PANDOC_VERSION" ]] && echo "  - epub3"
-            [[ -n "$PANDOC_VERSION" ]] && echo "  - HTML"
+            [[ -n "$PANDOC_VERSION" ]] && echo "  - HTML (single file)"
+            [[ -n "$PANDOC_VERSION" ]] && echo "  - Web book (multi-page)"
             if check_weasyprint 2>/dev/null || [[ -n "$PANDOC_VERSION" ]]; then
                 echo "  - PDF"
             fi
@@ -369,6 +372,9 @@ generate_format() {
             local pdf_file="${OUTPUT_DIR}/${TITLE_SLUG}.pdf"
             generate_pdf "$PROJECT_DIR" "$MANUSCRIPT_FILE" "$pdf_file" "$PLUGIN_DIR"
             ;;
+        web)
+            generate_web_book "$PROJECT_DIR" "$PLUGIN_DIR"
+            ;;
         markdown)
             log "Markdown manuscript already at: ${MANUSCRIPT_FILE}"
             ;;
@@ -381,6 +387,7 @@ case "$FORMAT" in
         if [[ -n "${PANDOC_VERSION:-}" ]]; then
             generate_format "epub"
             generate_format "html"
+            generate_format "web"
             # PDF is optional — try it, warn on failure
             set +e
             generate_format "pdf"
