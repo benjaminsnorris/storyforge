@@ -109,10 +109,12 @@ Then ask about production settings **one question at a time** using `AskUserQues
 
 7. **Cover image** — "Do you have a cover image?"
    - Provide file path (will be embedded in the epub)
-   - Generate one automatically (Storyforge creates a unique typographic cover from your title and genre — preview with `./storyforge cover --svg-only`)
+   - Design one interactively (invoke the `cover` skill for Claude-designed SVG artwork or AI-generated illustrations — return to produce when the cover is complete)
+   - Generate one automatically (basic typographic cover from title and genre — preview with `./storyforge cover --svg-only`)
    - Skip for now (can be added later)
 
-   If generating: ask about an optional subtitle/tagline for the cover. Save to `production.cover.subtitle` in the chapter map.
+   If the author chooses interactive design: invoke the `cover` skill. Return to produce when the cover is complete.
+   If generating automatically: ask about an optional subtitle/tagline for the cover. Save to `production.cover.subtitle` in the chapter map.
 
 8. **Copyright** — "Copyright details:"
    - Year (default: current year)

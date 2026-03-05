@@ -13,7 +13,7 @@ In any Claude Code session:
 
 That's it. Skills are available as `/storyforge:forge`, `/storyforge:develop`, `/storyforge:voice`,
 `/storyforge:scenes`, `/storyforge:plan-revision`, `/storyforge:recommend`, `/storyforge:title`,
-`/storyforge:press-kit`, and `/storyforge:init`. Updates are automatic.
+`/storyforge:press-kit`, `/storyforge:cover`, and `/storyforge:init`. Updates are automatic.
 
 ### For development
 
@@ -59,6 +59,7 @@ The hub reads your project state and suggests what to work on, or you can direct
 | `/storyforge:produce` | Chapter mapping, production settings, book assembly |
 | `/storyforge:title` | Title and subtitle development, refinement, assessment |
 | `/storyforge:press-kit` | Blurbs, jacket copy, author bio, social media, marketing materials |
+| `/storyforge:cover` | Cover design — Claude-designed SVG artwork or AI-generated illustrations |
 
 ## Project Setup
 
@@ -118,8 +119,9 @@ my-novel/
 10. **`/storyforge:recommend`** — Get the recommended next action based on project state
 11. **`/storyforge:title`** — Develop or finalize the book title
 12. **`/storyforge:produce`** — Map scenes to chapters, configure production settings
-13. **`/storyforge:press-kit`** — Generate blurbs, marketing copy, and press materials
-14. **`./storyforge assemble`** — Generate epub, PDF, HTML, or web book
+13. **`/storyforge:cover`** — Design a custom cover (SVG artwork or AI illustration)
+14. **`/storyforge:press-kit`** — Generate blurbs, marketing copy, and press materials
+15. **`./storyforge assemble`** — Generate epub, PDF, HTML, or web book
 
 Steps 6-10 are a **pipeline cycle** — evaluate, plan, revise, review, recommend — tracked in `working/pipeline.yaml`. Each cycle links its evaluation, revision plan, and review report. Run as many cycles as the manuscript needs.
 

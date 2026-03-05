@@ -209,6 +209,7 @@ This project is in the **development** phase. The focus is on building the creat
 - `/storyforge:recommend` — Assess project state, recommend the highest-value next action
 - `/storyforge:title` — Title and subtitle development, refinement, assessment
 - `/storyforge:press-kit` — Blurbs, jacket copy, author bio, social media, marketing materials
+- `/storyforge:cover` — Cover design: Claude-designed SVG artwork or AI-generated illustrations
 
 ### Scripts (via project runner)
 - `./storyforge write` — Autonomous scene drafting

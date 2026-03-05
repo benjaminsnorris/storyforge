@@ -615,7 +615,8 @@ generate_cover_if_missing() {
         return 0
     fi
 
-    log "No cover image — generating from title and genre..."
+    log "No cover image found. For a custom cover, run /storyforge:cover interactively."
+    log "Generating basic typographic cover from title and genre..."
 
     local cover_output="${project_dir}/manuscript/assets/cover.png"
     if ! "$cover_script" --output "$cover_output"; then

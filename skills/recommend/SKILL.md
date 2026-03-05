@@ -92,6 +92,7 @@ Required artifacts that don't exist yet:
 - **World bible missing** → Recommend `/storyforge:develop` focused on world-building.
 - **Story architecture missing** → Recommend `/storyforge:develop` focused on story structure.
 - **Placeholder or generic title** → If the project has significant content (scenes drafted or revised) and the title looks like a placeholder ("Untitled," "My Novel," or something obviously temporary), recommend `/storyforge:title` to develop a strong title before production.
+- **No cover image** → If the phase is `production` or `complete` and no cover exists (`production.cover_image` is empty or the file is missing), recommend `/storyforge:cover` to design a cover before final assembly.
 
 Prioritize whichever gap would most improve the next phase of work. For a project about to draft, character bible matters most. For a complex fantasy, world bible matters most.
 

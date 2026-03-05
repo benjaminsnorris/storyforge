@@ -131,6 +131,9 @@ Invoke the `title` skill.
 **"Create a press kit" / "Generate marketing copy" / "Write blurbs" / "Build promotional materials":**
 Invoke the `press-kit` skill. Check that scenes exist — the press kit needs story content to draw from.
 
+**"Design a cover" / "Create cover art" / "Make a book cover" / "Cover design":**
+Invoke the `cover` skill.
+
 **"Assemble the book" / "Make an epub" / "Produce" / "Build the manuscript":**
 Invoke the `produce` skill. This is the interactive guide for manuscript assembly and book production.
 
