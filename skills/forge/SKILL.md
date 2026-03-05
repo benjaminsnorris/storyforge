@@ -106,7 +106,7 @@ Invoke the `plan-revision` skill.
 **"Run revision" / "Revise the draft":**
 Check prerequisites:
 
-- *Hard prerequisite*: `working/plans/revision-plan.yaml` must exist
+- *Hard prerequisite*: A revision plan must exist for the current pipeline cycle (check `working/pipeline.yaml` for the plan field, or fall back to `working/plans/revision-plan.yaml`)
 
 If met, provide the revision command:
 
@@ -153,30 +153,11 @@ If the project doesn't have a `./storyforge` runner script, offer to create one 
 
 ### Guided Mode
 
-The author said "surprise me," "what should I work on?", or gave no specific direction. This is your chance to be a thoughtful collaborator.
+The author said "surprise me," "what should I work on?", or gave no specific direction.
 
-**Check the project phase first.**
+Invoke the `recommend` skill. It reads the full project state — phase, pipeline cycle, artifacts, evaluation findings, scene progress — and identifies the single highest-value next action using a structured decision framework. On approval, it executes immediately by invoking the appropriate skill with specific direction.
 
-- If the phase is `review`, the revision cycle just completed and the highest-value action is always to run the review skill. Do not recommend other work — recommend `/storyforge:review` with a one-sentence rationale about what the revision covered. On approval, invoke the review skill immediately.
-
-- If the phase is `complete`, the manuscript is finished and the natural next step is book production. Recommend `/storyforge:produce` to set up the chapter map and production settings, then `./storyforge assemble` to generate the epub. If the chapter map already exists, recommend running `./storyforge assemble` directly.
-
-- If the phase is `production`, assembly is underway. Check whether output files exist in `manuscript/output/`. If not, recommend running `./storyforge assemble`. If they do, suggest reviewing the output or adjusting production settings via `/storyforge:produce`.
-
-**Assess the full project state** from what you read in Step 1.
-
-**Identify the single highest-value action** using this priority order:
-
-1. **Work that blocks other work.** If the scene index is empty, nothing can be drafted. If no voice guide exists, drafting is blocked. Identify and recommend the blocker.
-2. **Gaps in required artifacts.** A missing character bible, world bible, or story architecture won't block drafting, but the draft will be weaker without them. Recommend filling the most impactful gap.
-3. **Deepening existing material.** Characters without wounds or contradictions. Scenes without clear functions. A world bible that's all geography and no texture. Find where the existing work would benefit from another pass.
-4. **Creative exploration.** What-if exercises, thematic deepening, subplot development, alternate POV experiments. This is for projects where the foundation is solid and the author wants to discover something new.
-
-**Present ONE recommendation** with a one-sentence rationale. Do not present a menu of five options. Pick the best one and pitch it. Include enough direction that the skill can execute immediately on approval — not just "work on characters" but "deepen Maren's wound/lie structure and trace how it drives her decisions in the Act 2 turning points."
-
-**On approval:** Execute immediately. Invoke the appropriate skill with the direction you recommended. The skill executes — no intermediate pitch, no "what aspect would you like to explore?", no sub-questions. The author approved the direction; Storyforge does the work.
-
-**On "no" or redirect:** Offer the next recommendation from the priority list, or take the author's new direction without resistance.
+Do not duplicate recommendation logic here. The `recommend` skill is the single authority on "what next."
 
 ---
 
@@ -203,7 +184,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 | `storyforge write` | `scenes/scene-index.yaml` with at least one scene, `reference/voice-guide.md` |
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | `plan-revision` | Evaluation results in `working/evaluations/` |
-| `storyforge revise` | `working/plans/revision-plan.yaml` |
+| `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.yaml`) |
 | `storyforge assemble` | `reference/chapter-map.yaml` with at least one chapter, scene files for referenced scenes |
 | `storyforge review` | Must be on a feature branch (ideally with a PR) |
 

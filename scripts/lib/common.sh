@@ -933,16 +933,38 @@ run_recommend_step() {
     read -r -d '' recommend_prompt <<RECOMMEND_EOF || true
 You are writing next-step recommendations for a Storyforge novel project after a ${review_type} pipeline run.
 
-Read the following files to understand the current state:
-- storyforge.yaml (project config, phase, artifact status)
-${pipeline_context}
-- The most recent review report in working/reviews/
-- The most recent evaluation findings in working/evaluations/ (if they exist)
-- The current cycle's revision plan in working/plans/ (if it exists)
-- reference/key-decisions.md (if it exists)
-- CLAUDE.md
+## Read Project State
 
-Based on the project state and what just completed, write concrete recommendations.
+Read ALL of the following files to understand the full picture:
+- storyforge.yaml (project config, phase, coaching level, artifact status)
+${pipeline_context}
+- CLAUDE.md (recent activity, standing instructions)
+- The most recent review report in working/reviews/
+- The most recent evaluation findings in working/evaluations/ — read findings.yaml or synthesis.md if they exist. Note severity counts (critical/major/minor).
+- The current cycle's revision plan in working/plans/ (if it exists) — check pass completion status
+- reference/key-decisions.md (if it exists) — do not recommend against settled decisions
+- Prior recommendations in working/recommendations*.md — avoid repeating the same recommendation
+
+## Decision Framework
+
+Apply these priorities in order. Stop at the first one that applies:
+
+1. **Pipeline cycle state** — if a cycle is in progress (evaluating/planning/revising/reviewing), recommend the next step in that cycle. Do not start something new mid-cycle.
+   - Status "planning" → recommend /storyforge:plan-revision
+   - Status "revising" → revision is running, note progress
+   - Status "reviewing" → recommend /storyforge:review
+
+2. **Unaddressed evaluation findings** — if critical/major findings exist without a revision plan, recommend /storyforge:plan-revision with specific finding counts and top issues.
+
+3. **Blockers** — empty scene index (recommend /storyforge:scenes), missing voice guide (recommend /storyforge:voice), no drafted scenes but ready to draft (recommend ./storyforge write).
+
+4. **Artifact gaps** — missing character bible, world bible, story architecture. Recommend /storyforge:develop with specific direction.
+
+5. **Deepening** — artifacts exist but are thin. Recommend the most impactful deepening.
+
+6. **Creative exploration** — foundation is solid, recommend what-if exercises, thematic work, or subplot development.
+
+## Write the Recommendation
 
 Save to: ${recommend_file}
 
@@ -953,11 +975,11 @@ Use this exact format:
 **Date:** ${today}
 
 ## Recommended Next Step
-[One clear recommendation with rationale — e.g., "Run /storyforge:plan-revision to address the 3 critical findings from evaluation." Be specific about what command to run and why.]
+[One clear recommendation with rationale. Be specific about what command or skill to run and why. Not "work on characters" but "Run /storyforge:plan-revision to address the 3 critical findings from evaluation — pacing issues in Act 2 and the unresolved continuity gap in chapters 8-10."]
 
 ## Other Options
-- [Option with brief rationale]
-- [Option with brief rationale]
+- [Next priority from the framework, with brief rationale]
+- [Another option, with brief rationale]
 
 ## Project Health
 [One sentence assessment of where the manuscript stands]

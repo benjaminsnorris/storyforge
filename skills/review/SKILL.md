@@ -68,38 +68,9 @@ Produce a high-level assessment:
 
 ## Step 5: Recommend Next Steps
 
-Based on the review, recommend ONE of these paths:
+After presenting the review findings to the author, invoke the `recommend` skill to determine the next step. The recommend skill will read the review you just produced, the pipeline manifest, and the full project state to make its recommendation.
 
-### Path A: Run Another Evaluation
-
-Recommend this when:
-- Many scenes were substantially rewritten
-- Pass summaries flagged uncertainty about whether changes landed
-- The revision touched structural elements (scene order, new scenes, cut scenes)
-- Enough changed that fresh evaluator eyes would be valuable
-
-Say: "The revision was substantial enough that a fresh evaluation would verify the changes landed. Run `./storyforge evaluate` to get new findings."
-
-### Path B: Plan a Follow-Up Revision
-
-Recommend this when:
-- A small number of specific gaps remain (partially addressed findings, new concerns from pass summaries)
-- The gaps are well-defined enough to plan targeted passes
-- A full re-evaluation would be overkill for the scope of remaining work
-
-Say: "There are N specific gaps remaining. Run `/storyforge:plan-revision` to design targeted follow-up passes."
-
-### Path C: Revision Cycle Complete
-
-Recommend this when:
-- All critical and major findings are addressed
-- Pass summaries don't flag significant new concerns
-- The remaining gaps are minor or stylistic
-- The manuscript is ready for the next major phase (or is done)
-
-Say: "The revision cycle addressed all critical findings and the manuscript is in strong shape. You can advance to the next phase or declare this draft complete."
-
-**Present only the recommended path with a clear rationale.** If the author disagrees, explain the other options.
+Do not duplicate recommendation logic here — the `recommend` skill is the single authority on "what next." It will determine whether to recommend another evaluation, a follow-up revision cycle, or declaring the cycle complete, based on the full project context including the review you just wrote.
 
 ## Step 6: Produce the Review Report
 
