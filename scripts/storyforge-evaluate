@@ -979,6 +979,7 @@ HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
 (
     cd "$PROJECT_DIR"
     git add "working/evaluations/eval-${EVAL_TIMESTAMP}/" 2>/dev/null || true
+    git add working/logs/ 2>/dev/null || true
     git commit -m "Evaluation: ${SCOPE_DESCRIPTION} (${#SUCCEEDED[@]}/${ALL_EVALUATOR_COUNT} evaluators)" 2>/dev/null || true
 )
 

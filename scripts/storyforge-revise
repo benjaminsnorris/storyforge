@@ -561,6 +561,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         cd "$PROJECT_DIR"
         if [[ "$EFFECTIVE_COACHING" == "coach" || "$EFFECTIVE_COACHING" == "strict" ]]; then
             git add working/coaching/ 2>/dev/null || true
+            git add working/logs/ 2>/dev/null || true
             git commit -m "${EFFECTIVE_COACHING^}: ${PASS_NAME}" 2>/dev/null || true
         else
             git add -A

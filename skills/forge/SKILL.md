@@ -229,9 +229,22 @@ The hub provides the direction. The skill executes the direction. No intermediat
 
 ## Decisions Are Recorded, Not Re-Asked
 
-**Every author decision gets written to the key decisions file immediately.**
+**Only record decisions the author explicitly makes.** The key decisions file is for the *author's* creative and structural choices — not for AI planning calls, routine approvals, or configuration preferences.
 
-When the author makes a creative, structural, or editorial decision during a session — whether in response to a question you asked, as part of approving a plan, or as a standalone directive — record it in the key decisions file before moving on. The format:
+**What IS a key decision:**
+- The author chooses a story direction: "The protagonist should betray the mentor in Act 3"
+- The author resolves a contested point: "Keep the dual timeline — it serves the theme"
+- The author overrides a suggestion: "No, I want the unreliable narrator even though the evaluation flagged it"
+- The author settles a structural question: "Three acts, not four"
+
+**What is NOT a key decision:**
+- The author approves a proposed revision pass (that's workflow, not a creative decision)
+- The author picks a typography preset or scene break style (that's configuration)
+- The author accepts a default or says "yes" to a suggestion without adding reasoning
+- Claude makes a planning call during autonomous execution (guidance entries are not key decisions)
+- The author says "looks good" or "go ahead" (that's approval, not a decision)
+
+When the author does make a genuine creative or structural decision, record it:
 
 ```markdown
 ## [Category]: [Short Title]

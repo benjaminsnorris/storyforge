@@ -4,9 +4,6 @@
 # macOS
 .DS_Store
 
-# Logs (debugging output, not meaningful to track)
-working/logs/
-
 # Temporary flag files (cleaned up by scripts)
 working/.autopilot
 working/.interactive

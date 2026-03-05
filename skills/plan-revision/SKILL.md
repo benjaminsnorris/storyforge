@@ -144,7 +144,7 @@ Then invite the author to adjust. They may:
 
 Iterate until the author approves the plan. Do not rush this — the revision plan shapes weeks of work.
 
-**Record decisions as they happen.** When the author makes a decision during plan review — approving a pass, rejecting one, choosing between approaches, resolving a contested point — write it to the key decisions file immediately. Use the format:
+**Record genuine creative decisions as they happen.** When the author makes a real creative or structural choice during plan review — resolving a contested point, choosing between fundamentally different approaches, overriding a recommendation with their own reasoning — write it to the key decisions file. Do NOT record routine approvals (saying "yes" to a pass), workflow choices (reordering passes), or configuration (adjusting scope). Use the format:
 
 ```markdown
 ## [Category]: [Short Title]

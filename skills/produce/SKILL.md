@@ -127,7 +127,7 @@ The output must start with `storyforge/assemble-`. If it does not, stop and fix 
 
 **3. Write the chapter map** to `reference/chapter-map.yaml` with all production settings.
 
-**4. Update project state:** set `chapter_map.exists: true` and `chapter_map.updated` to today's date in `storyforge.yaml`. Record all production decisions in the key decisions file.
+**4. Update project state:** set `chapter_map.exists: true` and `chapter_map.updated` to today's date in `storyforge.yaml`.
 
 **5. Commit and push** all changes to the new branch:
 ```bash
@@ -263,23 +263,12 @@ production:
     also-by:
 ```
 
-## Decisions Are Recorded
+## Decisions Are Recorded Selectively
 
-Every production decision (chapter structure, typography choices, front/back matter selections) gets written to the key decisions file:
+Only record genuine creative decisions in the key decisions file — not configuration or routine choices. Chapter structure (how scenes group into chapters, pacing, flow) is a creative decision worth recording. Typography presets, scene break style, and format choices are configuration saved in the chapter map — they do not belong in key decisions.
 
-```markdown
-## Production: Chapter Structure
-**Decision:** 15 chapters, 2-3 scenes per chapter, following act breaks
-**Date:** 2026-03-03
-**Context:** Initial manuscript assembly setup
-**Rationale:** Natural scene groupings match the act structure
-
-## Production: Typography
-**Decision:** Fantasy genre preset with ornamental scene breaks
-**Date:** 2026-03-03
-**Context:** Author chose during production setup
-**Rationale:** Matches the secondary-world fantasy genre
-```
+**Record:** "15 chapters following act breaks, with the midpoint cliffhanger isolated as its own short chapter" (creative/structural)
+**Don't record:** "Fantasy genre preset with ornamental scene breaks" (configuration — already in chapter-map.yaml)
 
 ## Coaching Level Behavior
 

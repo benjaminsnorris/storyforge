@@ -462,6 +462,7 @@ log "============================================"
 (
     cd "$PROJECT_DIR"
     git add manuscript/ storyforge.yaml 2>/dev/null || true
+    git add working/logs/ 2>/dev/null || true
     git commit -m "Assemble: ${TITLE} (${FORMAT})" 2>/dev/null || true
     git push 2>/dev/null || true
 )
