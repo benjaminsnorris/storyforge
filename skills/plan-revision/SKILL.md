@@ -17,13 +17,17 @@ Store this resolved plugin path for use throughout the session.
 
 ## Step 1: Read Evaluation Results
 
-Look for evaluation output in `working/evaluations/`:
+Look for evaluation output using the pipeline manifest:
 
-1. **Primary source:** Read `working/evaluations/findings.yaml` if it exists. This is the structured findings file produced by the evaluation pipeline, with categorized issues, severity ratings, and scene-level annotations.
+1. **Pipeline manifest:** Read `working/pipeline.yaml` if it exists. Find the current cycle and use its `evaluation` field to locate the evaluation directory (e.g., `working/evaluations/eval-20260305-091500/`). This is the authoritative link between the current cycle and its evaluation.
 
-2. **Fallback:** If `findings.yaml` does not exist, look for prose evaluation reports in `working/evaluations/` (any `.md` files). Read them all and extract findings manually — identify specific issues, affected scenes, severity, and category.
+2. **Fallback (no manifest):** If `working/pipeline.yaml` does not exist (older project), look for the most recent `eval-*` directory in `working/evaluations/`.
 
-3. **Synthesis report:** Also read `working/evaluations/synthesis.md` if it exists. This provides the evaluators' overall assessment and high-level recommendations.
+3. **Primary source:** Read `findings.yaml` in the evaluation directory if it exists. This is the structured findings file produced by the evaluation pipeline, with categorized issues, severity ratings, and scene-level annotations.
+
+4. **Fallback:** If `findings.yaml` does not exist, look for prose evaluation reports in the evaluation directory (any `.md` files). Read them all and extract findings manually — identify specific issues, affected scenes, severity, and category.
+
+5. **Synthesis report:** Also read `synthesis.md` in the evaluation directory if it exists. This provides the evaluators' overall assessment and high-level recommendations.
 
 If no evaluation results exist at all, tell the author that evaluation needs to run first and suggest they invoke the main `storyforge` hub to run an evaluation. Do not proceed without evaluation data.
 
@@ -173,7 +177,18 @@ git rev-parse --abbrev-ref HEAD
 ```
 The output must start with `storyforge/revise-`. If it does not, stop and fix the branch before writing any files.
 
-**3. Write the revision plan** to `working/plans/revision-plan.yaml`.
+**3. Determine the plan filename using the pipeline manifest.**
+
+Read `working/pipeline.yaml` to find the current cycle ID. Save the plan to a cycle-numbered file:
+- If the manifest exists and `current_cycle` > 0: save to `working/plans/revision-plan-{cycle_id}.yaml`
+- If the manifest doesn't exist (older project): save to `working/plans/revision-plan.yaml`
+
+After writing the plan file, update the manifest:
+```bash
+# Read current_cycle from working/pipeline.yaml (e.g., 2)
+# Then update the cycle's plan field:
+```
+In the manifest's current cycle entry, set `plan: revision-plan-{cycle_id}.yaml`.
 
 **4. Update project state:** set `phase: revision` in `storyforge.yaml`. Update `CLAUDE.md` if needed.
 

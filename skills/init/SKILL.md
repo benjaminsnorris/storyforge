@@ -71,6 +71,7 @@ Use the **Bash tool** to create the full directory tree:
 ├── scenes/
 │   └── scene-index.yaml
 └── working/
+    ├── pipeline.yaml     (pipeline manifest — tracks eval/revision cycles)
     ├── logs/
     ├── evaluations/
     └── plans/
@@ -80,6 +81,19 @@ Create all directories first with a single `mkdir -p` command:
 
 ```bash
 mkdir -p {project-dir}/{reference,scenes,working/{logs,evaluations,plans}}
+```
+
+Then create the initial pipeline manifest:
+
+```bash
+cat > {project-dir}/working/pipeline.yaml <<'EOF'
+# Pipeline Manifest — tracks evaluation/revision cycles
+# Auto-maintained by Storyforge scripts. Do not edit manually.
+
+current_cycle: 0
+
+cycles: []
+EOF
 ```
 
 Do NOT create `draft/` or `manuscript/` directories. Storyforge works on scene files in `scenes/` throughout the entire pipeline — drafting, evaluation, and revision all operate on scenes. Manuscript assembly is a separate, late-stage step that happens when the author is ready.

@@ -30,8 +30,16 @@ source "${LIB_DIR}/revision-passes.sh"
 detect_project_root
 # PROJECT_DIR is now set and exported
 
-# --- Paths ---
-PLAN_FILE="${PROJECT_DIR}/working/plans/revision-plan.yaml"
+# --- Pipeline manifest: resolve plan file for current cycle ---
+ensure_pipeline_manifest
+CYCLE_ID=$(get_current_cycle)
+PLAN_FILE=$(get_cycle_plan_file "$CYCLE_ID")
+
+# Fallback: if manifest has no plan and legacy file exists, use it
+if [[ ! -f "$PLAN_FILE" && -f "${PROJECT_DIR}/working/plans/revision-plan.yaml" ]]; then
+    PLAN_FILE="${PROJECT_DIR}/working/plans/revision-plan.yaml"
+fi
+
 LOG_DIR="${PROJECT_DIR}/working/logs"
 LOG_FILE="${LOG_DIR}/revision-log.txt"
 export LOG_FILE
@@ -408,9 +416,15 @@ if [[ "$DRY_RUN" != true ]]; then
     create_draft_pr "Revise: ${PROJECT_TITLE}" "$PR_BODY" "$PROJECT_DIR" "revision"
 fi
 
+# Update pipeline cycle status to revising
+if [[ "$DRY_RUN" != true && "$CYCLE_ID" != "0" ]]; then
+    update_cycle_field "$CYCLE_ID" "status" "revising"
+fi
+
 log "============================================"
 log "Storyforge Revision — ${PROJECT_TITLE}"
 log "Plan: ${PLAN_FILE}"
+log "Cycle: ${CYCLE_ID}"
 log "Coaching level: ${EFFECTIVE_COACHING}"
 log "Starting from pass: ${START_PASS} of ${TOTAL_PASSES}"
 log "============================================"
@@ -562,6 +576,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         if [[ "$EFFECTIVE_COACHING" == "coach" || "$EFFECTIVE_COACHING" == "strict" ]]; then
             git add working/coaching/ 2>/dev/null || true
             git add working/logs/ 2>/dev/null || true
+            git add working/pipeline.yaml 2>/dev/null || true
             git commit -m "${EFFECTIVE_COACHING^}: ${PASS_NAME}" 2>/dev/null || true
         else
             git add -A
@@ -626,10 +641,16 @@ if (( COMPLETED == TOTAL_PASSES )); then
     # Ensure reviews directory exists
     mkdir -p "${PROJECT_DIR}/working/reviews"
 
-    # Commit phase advancement
+    # Update pipeline cycle status to reviewing
+    if [[ "$CYCLE_ID" != "0" ]]; then
+        update_cycle_field "$CYCLE_ID" "status" "reviewing"
+    fi
+
+    # Commit phase advancement + manifest
     (
         cd "$PROJECT_DIR"
         git add storyforge.yaml 2>/dev/null || true
+        git add working/pipeline.yaml 2>/dev/null || true
         git commit -m "Revision complete: advance phase to review" 2>/dev/null || true
         git push 2>/dev/null || true
     )

@@ -377,6 +377,219 @@ get_coaching_level() {
 }
 
 # ============================================================================
+# Pipeline manifest (multi-cycle evaluation/revision tracking)
+# ============================================================================
+
+# Get the pipeline manifest path.
+# Usage: pipeline_file=$(get_pipeline_file)
+get_pipeline_file() {
+    echo "${PROJECT_DIR}/working/pipeline.yaml"
+}
+
+# Initialize the pipeline manifest if it doesn't exist.
+# Creates working/pipeline.yaml with current_cycle: 0 and empty cycles list.
+# Idempotent — no-op if file already exists.
+# Usage: ensure_pipeline_manifest
+ensure_pipeline_manifest() {
+    local pipeline_file
+    pipeline_file=$(get_pipeline_file)
+
+    if [[ -f "$pipeline_file" ]]; then
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$pipeline_file")"
+
+    cat > "$pipeline_file" <<'MANIFEST_EOF'
+# Pipeline Manifest — tracks evaluation/revision cycles
+# Auto-maintained by Storyforge scripts. Do not edit manually.
+
+current_cycle: 0
+
+cycles: []
+MANIFEST_EOF
+}
+
+# Get the current cycle number from the pipeline manifest.
+# Returns 0 if manifest doesn't exist or current_cycle is not set.
+# Usage: cycle=$(get_current_cycle)
+get_current_cycle() {
+    local pipeline_file
+    pipeline_file=$(get_pipeline_file)
+
+    if [[ ! -f "$pipeline_file" ]]; then
+        echo "0"
+        return 0
+    fi
+
+    local cycle
+    cycle=$(grep -E '^current_cycle:' "$pipeline_file" \
+        | head -1 \
+        | sed 's/^current_cycle:[[:space:]]*//' \
+        | sed 's/[[:space:]]*$//')
+
+    echo "${cycle:-0}"
+}
+
+# Read a field from a specific cycle in the pipeline manifest.
+# Usage: read_cycle_field 2 "evaluation" → "eval-20260305-091500"
+read_cycle_field() {
+    local cycle_id="$1"
+    local field="$2"
+    local pipeline_file
+    pipeline_file=$(get_pipeline_file)
+
+    if [[ ! -f "$pipeline_file" ]]; then
+        echo ""
+        return 1
+    fi
+
+    # Extract the value of the field from the matching cycle block
+    awk -v cid="$cycle_id" -v fld="$field" '
+        /^cycles:/ { in_cycles = 1; next }
+        !in_cycles { next }
+        /^[^ \t]/ && !/^[[:space:]]/ { exit }
+        /^[[:space:]]*- id:/ {
+            match($0, /id:[[:space:]]*/)
+            val = substr($0, RSTART + RLENGTH)
+            gsub(/[[:space:]]*$/, "", val)
+            gsub(/^["'"'"']|["'"'"']$/, "", val)
+            found = (val == cid) ? 1 : 0
+        }
+        found && $0 ~ "^[[:space:]]+" fld ":" {
+            sub("^[[:space:]]+" fld ":[[:space:]]*", "")
+            gsub(/^["'"'"']|["'"'"']$/, "")
+            gsub(/[[:space:]]*$/, "")
+            print
+            exit
+        }
+    ' "$pipeline_file"
+}
+
+# Start a new cycle in the pipeline manifest.
+# Increments current_cycle, appends a new cycle entry.
+# Returns the new cycle ID.
+# Usage: CYCLE_ID=$(start_new_cycle)
+start_new_cycle() {
+    ensure_pipeline_manifest
+
+    local pipeline_file
+    pipeline_file=$(get_pipeline_file)
+
+    local current
+    current=$(get_current_cycle)
+    local new_id=$((current + 1))
+    local today
+    today=$(date '+%Y-%m-%d')
+
+    # Update current_cycle
+    sed -i '' "s/^current_cycle:.*/current_cycle: ${new_id}/" "$pipeline_file"
+
+    # Append new cycle entry
+    # Handle the empty list case: replace "cycles: []" with "cycles:" + entry
+    if grep -q '^cycles: \[\]' "$pipeline_file"; then
+        sed -i '' "s/^cycles: \[\]/cycles:/" "$pipeline_file"
+    fi
+
+    cat >> "$pipeline_file" <<CYCLE_EOF
+  - id: ${new_id}
+    started: "${today}"
+    status: pending
+    evaluation:
+    plan:
+    review:
+    recommendations:
+    summary:
+CYCLE_EOF
+
+    echo "$new_id"
+}
+
+# Update a field on a specific cycle in the pipeline manifest.
+# Usage: update_cycle_field 2 "status" "revising"
+# Usage: update_cycle_field 2 "plan" "revision-plan-2.yaml"
+update_cycle_field() {
+    local cycle_id="$1"
+    local field="$2"
+    local value="$3"
+    local pipeline_file
+    pipeline_file=$(get_pipeline_file)
+
+    if [[ ! -f "$pipeline_file" ]]; then
+        return 1
+    fi
+
+    local tmp_file="${pipeline_file}.tmp"
+
+    awk -v cid="$cycle_id" -v fld="$field" -v newval="$value" '
+        /^cycles:/ { in_cycles = 1; print; next }
+        !in_cycles { print; next }
+        /^[^ \t]/ && !/^[[:space:]]/ { in_cycles = 0; print; next }
+        /^[[:space:]]*- id:/ {
+            match($0, /id:[[:space:]]*/)
+            val = substr($0, RSTART + RLENGTH)
+            gsub(/[[:space:]]*$/, "", val)
+            gsub(/^["'"'"']|["'"'"']$/, "", val)
+            in_target = (val == cid) ? 1 : 0
+            print; next
+        }
+        in_target && $0 ~ "^[[:space:]]+" fld ":" {
+            match($0, /^[[:space:]]+/)
+            indent = substr($0, RSTART, RLENGTH)
+            if (newval == "") {
+                print indent fld ":"
+            } else {
+                print indent fld ": " newval
+            }
+            next
+        }
+        { print }
+    ' "$pipeline_file" > "$tmp_file"
+
+    mv "$tmp_file" "$pipeline_file"
+}
+
+# Get the plan file path for the current or specified cycle.
+# Falls back to the legacy hardcoded path if no manifest or no plan set.
+# Usage: plan_file=$(get_cycle_plan_file)
+# Usage: plan_file=$(get_cycle_plan_file 2)
+get_cycle_plan_file() {
+    local cycle="${1:-}"
+    if [[ -z "$cycle" ]]; then
+        cycle=$(get_current_cycle)
+    fi
+
+    local plan_name
+    plan_name=$(read_cycle_field "$cycle" "plan")
+
+    if [[ -n "$plan_name" ]]; then
+        echo "${PROJECT_DIR}/working/plans/${plan_name}"
+    else
+        # Fallback to legacy path
+        echo "${PROJECT_DIR}/working/plans/revision-plan.yaml"
+    fi
+}
+
+# Get the evaluation directory for the current or specified cycle.
+# Usage: eval_dir=$(get_cycle_eval_dir)
+# Usage: eval_dir=$(get_cycle_eval_dir 2)
+get_cycle_eval_dir() {
+    local cycle="${1:-}"
+    if [[ -z "$cycle" ]]; then
+        cycle=$(get_current_cycle)
+    fi
+
+    local eval_name
+    eval_name=$(read_cycle_field "$cycle" "evaluation")
+
+    if [[ -n "$eval_name" ]]; then
+        echo "${PROJECT_DIR}/working/evaluations/${eval_name}"
+    else
+        echo ""
+    fi
+}
+
+# ============================================================================
 # Git branch and PR workflow
 # ============================================================================
 
@@ -696,9 +909,25 @@ run_recommend_step() {
     local today
     today=$(date '+%Y-%m-%d')
 
+    # Determine cycle-aware output file
+    local cycle_id
+    cycle_id=$(get_current_cycle)
+    local recommend_file="working/recommendations.md"
+    if [[ "$cycle_id" != "0" ]]; then
+        recommend_file="working/recommendations-${cycle_id}.md"
+    fi
+
     local recommend_log="${project_dir}/working/logs/recommend-$(date '+%Y%m%d-%H%M%S').log"
     local recommend_model
     recommend_model=$(select_model "review")
+
+    # Build pipeline context for the prompt
+    local pipeline_context=""
+    local pipeline_file
+    pipeline_file=$(get_pipeline_file)
+    if [[ -f "$pipeline_file" ]]; then
+        pipeline_context="- working/pipeline.yaml (pipeline manifest — shows cycle history)"
+    fi
 
     local recommend_prompt
     read -r -d '' recommend_prompt <<RECOMMEND_EOF || true
@@ -706,20 +935,21 @@ You are writing next-step recommendations for a Storyforge novel project after a
 
 Read the following files to understand the current state:
 - storyforge.yaml (project config, phase, artifact status)
+${pipeline_context}
 - The most recent review report in working/reviews/
 - The most recent evaluation findings in working/evaluations/ (if they exist)
-- working/plans/revision-plan.yaml (if it exists)
+- The current cycle's revision plan in working/plans/ (if it exists)
 - reference/key-decisions.md (if it exists)
 - CLAUDE.md
 
 Based on the project state and what just completed, write concrete recommendations.
 
-Save to: working/recommendations.md
+Save to: ${recommend_file}
 
 Use this exact format:
 
 # Next Steps — ${title}
-**After:** ${review_type} pipeline
+**After:** ${review_type} pipeline (cycle ${cycle_id})
 **Date:** ${today}
 
 ## Recommended Next Step
@@ -733,8 +963,8 @@ Use this exact format:
 [One sentence assessment of where the manuscript stands]
 
 Then commit and push:
-  git add working/recommendations.md
-  git commit -m "Recommend: next steps after ${review_type}"
+  git add ${recommend_file}
+  git commit -m "Recommend: next steps after ${review_type} (cycle ${cycle_id})"
   git push
 RECOMMEND_EOF
 
@@ -747,16 +977,24 @@ RECOMMEND_EOF
     fi
 
     # Fallback commit if Claude didn't
-    if [[ -f "${project_dir}/working/recommendations.md" ]]; then
+    if [[ -f "${project_dir}/${recommend_file}" ]]; then
         local head_before head_after
         head_before=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || echo "none")
         (
             cd "$project_dir"
-            git add working/recommendations.md working/logs/ 2>/dev/null || true
-            git commit -m "Recommend: next steps after ${review_type}" 2>/dev/null || true
+            git add "${recommend_file}" working/logs/ working/pipeline.yaml 2>/dev/null || true
+            git commit -m "Recommend: next steps after ${review_type} (cycle ${cycle_id})" 2>/dev/null || true
             git push 2>/dev/null || true
         )
-        log "Recommendations saved: working/recommendations.md"
+        log "Recommendations saved: ${recommend_file}"
+    fi
+
+    # Update pipeline manifest
+    if [[ "$cycle_id" != "0" ]]; then
+        local recommend_basename
+        recommend_basename=$(basename "$recommend_file")
+        update_cycle_field "$cycle_id" "recommendations" "$recommend_basename"
+        update_cycle_field "$cycle_id" "status" "complete"
     fi
 }
 
@@ -813,6 +1051,9 @@ run_review_phase() {
     local review_log="${project_dir}/working/logs/review-${review_timestamp}.log"
 
     mkdir -p "${project_dir}/working/reviews" "${project_dir}/working/logs"
+
+    local cycle_id
+    cycle_id=$(get_current_cycle)
 
     log "Starting review phase (${review_type})..."
 
@@ -971,10 +1212,17 @@ REVIEW_EOF
     if [[ "$head_before" == "$head_after" && -f "$review_file" ]]; then
         (
             cd "$project_dir"
-            git add working/reviews/ working/logs/ 2>/dev/null || true
+            git add working/reviews/ working/logs/ working/pipeline.yaml 2>/dev/null || true
             git commit -m "Review: pipeline review (${review_type})" 2>/dev/null || true
             git push 2>/dev/null || true
         )
+    fi
+
+    # Record review file in manifest (only after we know the file exists)
+    if [[ "$cycle_id" != "0" && -f "$review_file" ]]; then
+        local review_basename
+        review_basename=$(basename "$review_file")
+        update_cycle_field "$cycle_id" "review" "$review_basename"
     fi
 
     # --- Step 3: Cleanup loop + Recommend (full coaching only) ---
@@ -1025,7 +1273,7 @@ REVIEW_EOF
             if [[ -f "$review_file" ]]; then
                 (
                     cd "$project_dir"
-                    git add working/reviews/ working/logs/ 2>/dev/null || true
+                    git add working/reviews/ working/logs/ working/pipeline.yaml 2>/dev/null || true
                     git commit -m "Review: re-review after cleanup $((cleanup_iter + 1)) (${review_type})" 2>/dev/null || true
                     git push 2>/dev/null || true
                 )
@@ -1038,8 +1286,13 @@ REVIEW_EOF
             log "Cleanup complete after ${cleanup_iter} pass(es)."
         fi
 
-        # Recommend step
+        # Recommend step (also sets cycle status to complete)
         run_recommend_step "$review_type" "$project_dir"
+    else
+        # In coach/strict mode, no recommend step runs — mark cycle complete here
+        if [[ "$cycle_id" != "0" ]]; then
+            update_cycle_field "$cycle_id" "status" "complete"
+        fi
     fi
 
     # --- Step 4: PR state change (end of review) ---

@@ -18,11 +18,12 @@ Store this resolved plugin path for use throughout the session.
 ## Step 1: Read Project State
 
 1. **Read `storyforge.yaml`** — project config, current phase, artifacts.
-2. **Read the revision plan** — `working/plans/revision-plan.yaml`. Read every pass: name, purpose, scope, guidance entries, status, and summary fields.
-3. **Read evaluation findings** — find the most recent evaluation in `working/evaluations/`. Read `findings.yaml` (structured findings) and `synthesis.md` (prose synthesis). These are the findings the revision was meant to address.
-4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full.
-5. **Read the git log** for revision commits — use `git log --oneline` to identify commits made during the revision cycle. Look for commits with "Revision:" prefixes or commits between the revision plan commit and HEAD.
-6. **Read pass summaries** — if the revision plan has `summary` fields populated on passes, these are your primary source for what each pass did.
+2. **Read the pipeline manifest** — `working/pipeline.yaml` if it exists. Find the current cycle. Use its fields to locate the linked evaluation directory and revision plan file. This gives you the exact chain: which evaluation led to which plan led to which revision.
+3. **Read the revision plan** — use the `plan` field from the current cycle in the manifest (e.g., `working/plans/revision-plan-2.yaml`). If no manifest exists, fall back to `working/plans/revision-plan.yaml`. Read every pass: name, purpose, scope, guidance entries, status, and summary fields.
+4. **Read evaluation findings** — use the `evaluation` field from the current cycle in the manifest to locate the exact evaluation directory (e.g., `working/evaluations/eval-20260305-091500/`). If no manifest exists, find the most recent evaluation in `working/evaluations/`. Read `findings.yaml` (structured findings) and `synthesis.md` (prose synthesis). These are the findings the revision was meant to address.
+5. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full.
+6. **Read the git log** for revision commits — use `git log --oneline` to identify commits made during the revision cycle. Look for commits with "Revision:" prefixes or commits between the revision plan commit and HEAD.
+7. **Read pass summaries** — if the revision plan has `summary` fields populated on passes, these are your primary source for what each pass did.
 
 ## Step 2: Map Findings to Changes
 
@@ -107,8 +108,9 @@ Save the full review to `working/reviews/review-{date}.md` with this structure:
 ```markdown
 # Revision Review — {title}
 **Date:** {YYYY-MM-DD}
-**Revision plan:** working/plans/revision-plan.yaml
-**Based on evaluation:** working/evaluations/{eval-dir}/
+**Cycle:** {cycle_id from pipeline.yaml, or "N/A" if no manifest}
+**Revision plan:** {path from manifest's plan field, or working/plans/revision-plan.yaml}
+**Based on evaluation:** {path from manifest's evaluation field, or most recent eval-* dir}
 
 ## Summary
 [2-3 sentence overview: passes completed, scenes modified, net word change, finding resolution rate]
