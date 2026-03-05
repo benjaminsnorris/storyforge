@@ -68,6 +68,57 @@ rc=$?
 assert_exit_code "1" "$rc" "resolve_scope: nonexistent part returns error"
 
 # ============================================================================
+# resolve_scene_file — fallback for ID formatting mismatches
+# ============================================================================
+
+# Create temp project with numeric scene IDs
+NUMERIC_TMPDIR=$(mktemp -d)
+mkdir -p "${NUMERIC_TMPDIR}/scenes"
+echo "test" > "${NUMERIC_TMPDIR}/scenes/9.md"
+echo "test" > "${NUMERIC_TMPDIR}/scenes/13.md"
+echo "test" > "${NUMERIC_TMPDIR}/scenes/0.md"
+
+# Exact match works
+result=$(resolve_scene_file "${NUMERIC_TMPDIR}/scenes" "9" 2>/dev/null)
+assert_contains "$result" "9.md" "resolve_scene_file: exact match works"
+
+# scene-09 falls back to 9.md
+result=$(resolve_scene_file "${NUMERIC_TMPDIR}/scenes" "scene-09" 2>/dev/null)
+assert_contains "$result" "9.md" "resolve_scene_file: scene-09 resolves to 9.md"
+
+# scene-13 falls back to 13.md
+result=$(resolve_scene_file "${NUMERIC_TMPDIR}/scenes" "scene-13" 2>/dev/null)
+assert_contains "$result" "13.md" "resolve_scene_file: scene-13 resolves to 13.md"
+
+# 09 (leading zero) falls back to 9.md
+result=$(resolve_scene_file "${NUMERIC_TMPDIR}/scenes" "09" 2>/dev/null)
+assert_contains "$result" "9.md" "resolve_scene_file: 09 resolves to 9.md"
+
+# scene-0 falls back to 0.md
+result=$(resolve_scene_file "${NUMERIC_TMPDIR}/scenes" "scene-0" 2>/dev/null)
+assert_contains "$result" "0.md" "resolve_scene_file: scene-0 resolves to 0.md"
+
+# Nonexistent returns empty
+result=$(resolve_scene_file "${NUMERIC_TMPDIR}/scenes" "scene-999" 2>/dev/null)
+assert_empty "$result" "resolve_scene_file: nonexistent returns empty"
+
+# resolve_scope comma-separated with fallback
+cat > "${NUMERIC_TMPDIR}/scenes/scene-index.yaml" <<'YAML'
+scenes:
+  - id: 9
+    title: "Chapter Nine"
+  - id: 13
+    title: "Chapter Thirteen"
+YAML
+result=$(resolve_scope "scene-09,scene-13" "$NUMERIC_TMPDIR" 2>/dev/null)
+assert_contains "$result" "9.md" "resolve_scope comma fallback: scene-09 resolves to 9.md"
+assert_contains "$result" "13.md" "resolve_scope comma fallback: scene-13 resolves to 13.md"
+count=$(echo "$result" | wc -l | tr -d ' ')
+assert_equals "2" "$count" "resolve_scope comma fallback: returns 2 files"
+
+rm -rf "$NUMERIC_TMPDIR"
+
+# ============================================================================
 # read_pass_guidance
 # ============================================================================
 

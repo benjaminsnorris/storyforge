@@ -78,6 +78,8 @@ Based on the analysis, design a custom set of revision passes. Each pass is a fo
       rationale: "Why this is the right call"
 ```
 
+**CRITICAL: Scene IDs in scope lists must match scene-index.yaml exactly.** Read the `- id:` values from `scenes/scene-index.yaml` and use them verbatim. Scene IDs are arbitrary strings — they could be `1`, `30b`, `act2-sc07`, or anything else. Do NOT construct IDs by adding prefixes like `scene-` or padding numbers. If the scene index says `id: 9`, the scope must say `9`, not `scene-09`.
+
 All passes run autonomously. When a pass involves creative judgment — restructuring, character arc deepening, thematic reinterpretation — make the creative calls yourself and document them as `guidance` entries with rationale. The author reviews the plan before execution and can edit any guidance entry they disagree with.
 
 The `guidance` list is the author's control surface. Each entry is a specific creative decision with a rationale the author can evaluate. This replaces the old interactive/autonomous distinction: instead of pausing execution to ask the author what to do, you make the recommendation upfront and the author edits it before running the pipeline.
@@ -116,7 +118,7 @@ Be specific and opinionated. "Deepen character arcs" is not guidance — it's a 
 
 - Use `full` when an issue pervades the manuscript
 - Use act-level scope when issues are localized to a narrative section
-- Use scene-id lists when only specific scenes are affected
+- Use scene-id lists when only specific scenes are affected — **copy IDs exactly from scene-index.yaml**
 - Prefer narrower scopes — a targeted pass is faster and less risky than a full-manuscript pass
 
 ## Step 5: Present the Plan

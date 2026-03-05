@@ -9,6 +9,54 @@
 # Scope resolution
 # ============================================================================
 
+# Try to find a scene file, with fallback for common ID formatting mismatches.
+# If "scene-09.md" doesn't exist, tries "9.md" (strip prefix + leading zeros).
+# If "09.md" doesn't exist, tries "9.md" (strip leading zeros only).
+#
+# Usage: resolved_path=$(resolve_scene_file "/path/to/scenes" "scene-09")
+# Returns the path if found, empty string if not.
+resolve_scene_file() {
+    local scene_dir="$1"
+    local sid="$2"
+
+    # Try exact match first
+    if [[ -f "${scene_dir}/${sid}.md" ]]; then
+        echo "${scene_dir}/${sid}.md"
+        return 0
+    fi
+
+    # Try stripping "scene-" prefix and leading zeros: scene-09 -> 9
+    local stripped="$sid"
+    stripped="${stripped#scene-}"       # Remove "scene-" prefix
+    stripped="${stripped#Scene-}"       # Remove "Scene-" prefix
+    stripped=$(echo "$stripped" | sed 's/^0*//')  # Remove leading zeros
+    # Handle edge case: "0" becomes empty after stripping
+    if [[ -z "$stripped" ]]; then
+        stripped="0"
+    fi
+
+    if [[ "$stripped" != "$sid" && -f "${scene_dir}/${stripped}.md" ]]; then
+        log "NOTE: Resolved scope ID '${sid}' to scene file '${stripped}.md'" >&2
+        echo "${scene_dir}/${stripped}.md"
+        return 0
+    fi
+
+    # Try stripping just leading zeros (no prefix): 09 -> 9
+    local no_zeros
+    no_zeros=$(echo "$sid" | sed 's/^0*//')
+    if [[ -z "$no_zeros" ]]; then
+        no_zeros="0"
+    fi
+    if [[ "$no_zeros" != "$sid" && "$no_zeros" != "$stripped" && -f "${scene_dir}/${no_zeros}.md" ]]; then
+        log "NOTE: Resolved scope ID '${sid}' to scene file '${no_zeros}.md'" >&2
+        echo "${scene_dir}/${no_zeros}.md"
+        return 0
+    fi
+
+    # Nothing found
+    return 1
+}
+
 # Convert a scope specification to a list of scene file paths.
 #
 # Scope formats:
@@ -119,11 +167,12 @@ resolve_scope() {
         for sid in "${id_list[@]}"; do
             sid=$(echo "$sid" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
             [[ -z "$sid" ]] && continue
-            local f="${scene_dir}/${sid}.md"
-            if [[ -f "$f" ]]; then
+            local f
+            f=$(resolve_scene_file "$scene_dir" "$sid")
+            if [[ -n "$f" ]]; then
                 matched_files+=("$f")
             else
-                log "WARNING: Scene file missing for id '${sid}': ${f}"
+                log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md"
             fi
         done
     fi
