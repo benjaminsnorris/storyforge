@@ -414,8 +414,8 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
     fi
 
     # --- Check interactive mode ---
-    # Between steps (not first), offer mode switch if currently headless
-    if (( i > 0 )) && [[ ! -f "$INTERACTIVE_FILE" ]]; then
+    # Offer mode switch if currently headless (including before first step)
+    if [[ ! -f "$INTERACTIVE_FILE" ]]; then
         offer_interactive "$PROJECT_DIR" "${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]})" || true
     fi
 

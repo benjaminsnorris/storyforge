@@ -456,8 +456,8 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     update_pass_field "$PASS_NUM" "status" "in_progress"
 
     # --- Check interactive mode ---
-    # Between steps (not first pending), offer mode switch if currently headless
-    if (( PASS_NUM > START_PASS )) && [[ ! -f "$INTERACTIVE_FILE" ]]; then
+    # Offer mode switch if currently headless (including before first pass)
+    if [[ ! -f "$INTERACTIVE_FILE" ]]; then
         offer_interactive "$PROJECT_DIR" "Pass: ${PASS_NAME} (${PASS_NUM}/${TOTAL_PASSES})" || true
     fi
 

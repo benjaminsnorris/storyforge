@@ -654,6 +654,11 @@ fi
 log "Output directory: ${EVAL_DIR}"
 log "============================================"
 
+# --- Offer interactive mode before starting ---
+if [[ ! -f "$INTERACTIVE_FILE" ]]; then
+    offer_interactive "$PROJECT_DIR" "Evaluation panel (${ALL_EVALUATOR_COUNT} evaluators)" || true
+fi
+
 # --- Launch all evaluators in parallel ---
 PIDS=()
 EVAL_NAMES=()
