@@ -624,15 +624,9 @@ generate_cover_if_missing() {
         return 0
     fi
 
-    # If PNG failed but SVG exists, use the SVG
-    if [[ ! -f "$cover_output" ]]; then
-        local svg_output="${cover_output%.png}.svg"
-        if [[ -f "$svg_output" ]]; then
-            cover_output="$svg_output"
-        else
-            log "WARNING: No cover file produced. Proceeding without cover."
-            return 0
-        fi
+    if [[ ! -s "$cover_output" ]]; then
+        log "WARNING: No cover PNG produced. Proceeding without cover."
+        return 0
     fi
 
     # Update chapter-map.yaml with the generated cover path

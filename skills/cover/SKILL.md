@@ -34,11 +34,11 @@ Before doing anything else, orient yourself:
 Before determining mode, check what tools are available:
 
 1. **Image generation APIs** — check for `OPENAI_API_KEY` and `BFL_API_KEY` environment variables using the Bash tool.
-2. **PNG conversion** — check for `rsvg-convert` (best quality) and `sips` (macOS fallback) using the Bash tool.
+2. **PNG conversion** — check for `rsvg-convert` (best quality) and `sips` (macOS fallback) using the Bash tool. **At least one must be available.** If neither is found, tell the author: "Cover design requires a PNG converter. Install librsvg (`brew install librsvg`) and try again." Then stop — do not proceed without a way to produce the final PNG.
 3. **Store capability flags** for use in mode determination:
-   - **Tier 1 (SVG Design)**: Always available. Claude composes SVG directly.
+   - **Tier 1 (SVG Design)**: Available if `rsvg-convert` or `sips` is installed. Claude composes SVG, then converts to PNG.
    - **Tier 2 (AI Image Generation)**: Available if `OPENAI_API_KEY` or `BFL_API_KEY` is set.
-   - **Compositing**: Available if Tier 2 is available AND `rsvg-convert` is installed.
+   - **Compositing**: Available if Tier 2 is available AND `rsvg-convert` is installed (sips cannot render SVG with embedded raster images).
 
 ## Step 3: Determine Mode
 
@@ -158,21 +158,35 @@ Ask if they want adjustments. Iterate as needed — each iteration overwrites th
 
 ### Step T1.5: Convert to PNG
 
-Once the author approves, convert to PNG using the Bash tool:
+Once the author approves, convert the SVG to PNG. **The cover skill must produce a PNG** — downstream processes (epub generation, production pipeline) expect `cover.png` and should never need to convert formats themselves.
+
+Before attempting conversion, check that a converter is available. If neither tool exists, **stop and tell the author to install librsvg** — do not proceed without a PNG.
 
 ```bash
 mkdir -p manuscript/assets
 if command -v rsvg-convert >/dev/null 2>&1; then
     rsvg-convert -w 1600 -h 2400 -o manuscript/assets/cover.png manuscript/assets/cover.svg
 elif command -v sips >/dev/null 2>&1; then
-    sips -s format png manuscript/assets/cover.svg --out manuscript/assets/cover.png 2>/dev/null
+    sips -s format png -z 2400 1600 manuscript/assets/cover.svg --out manuscript/assets/cover.png 2>/dev/null
 else
-    echo "WARNING: No PNG conversion tool available. Install librsvg (brew install librsvg) for best results."
-    echo "The SVG cover will be used directly."
+    echo "ERROR: No PNG conversion tool available."
+    echo "Install librsvg for best results: brew install librsvg"
+    exit 1
 fi
 ```
 
-If conversion fails, the SVG can still be used — pandoc handles SVG covers in epub.
+**After conversion, verify the PNG was produced and is non-empty:**
+
+```bash
+if [[ ! -s manuscript/assets/cover.png ]]; then
+    echo "ERROR: PNG conversion produced an empty or missing file."
+    echo "Install librsvg for reliable conversion: brew install librsvg"
+    exit 1
+fi
+echo "Cover PNG verified: $(wc -c < manuscript/assets/cover.png) bytes"
+```
+
+Do not move to the next step until `cover.png` exists and is valid.
 
 ### Step T1.6: Update Configuration and Commit
 
@@ -253,15 +267,24 @@ Ask: "Would you like me to add title and author text as a crisp overlay (recomme
 ```
 
 3. Save to `manuscript/assets/cover-composite.svg`.
-4. Convert to PNG — this requires `rsvg-convert` specifically (sips cannot handle SVG with embedded raster images). If not available, warn the author:
+4. Convert to PNG — this requires `rsvg-convert` specifically (sips cannot handle SVG with embedded raster images):
 ```bash
 if command -v rsvg-convert >/dev/null 2>&1; then
     cd manuscript/assets && rsvg-convert -w 1600 -h 2400 -o cover.png cover-composite.svg
 else
-    echo "Text compositing requires librsvg. Install with: brew install librsvg"
-    echo "Using the illustration without text overlay for now."
-    cp manuscript/assets/cover-illustration.png manuscript/assets/cover.png
+    echo "ERROR: Text compositing requires librsvg. Install with: brew install librsvg"
+    echo "Cannot produce final cover PNG without it."
+    exit 1
 fi
+```
+
+**Verify the PNG after conversion:**
+```bash
+if [[ ! -s manuscript/assets/cover.png ]]; then
+    echo "ERROR: PNG conversion produced an empty or missing file."
+    exit 1
+fi
+echo "Cover PNG verified: $(wc -c < manuscript/assets/cover.png) bytes"
 ```
 
 **If as-is → use illustration directly:**
