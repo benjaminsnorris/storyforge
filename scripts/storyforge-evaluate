@@ -489,9 +489,9 @@ evaluation_monitor() {
     local names=()
     read -ra names <<< "$eval_names_str"
 
-    # Track which evaluators we've already reported on
-    local -A reported_complete=()
-    local -A reported_active=()
+    # Track which evaluators we've already reported on (space-delimited strings for bash 3.2 compat)
+    local reported_complete=" "
+    local reported_active=" "
     local completed=0
     local ticks=0
 
@@ -503,25 +503,25 @@ evaluation_monitor() {
 
         # Check for new report files
         for name in "${names[@]}"; do
-            if [[ -z "${reported_complete[$name]+x}" && -f "${eval_dir}/${name}.md" ]]; then
+            if [[ "$reported_complete" != *" ${name} "* && -f "${eval_dir}/${name}.md" ]]; then
                 local wc
                 wc=$(wc -w < "${eval_dir}/${name}.md" 2>/dev/null | tr -d ' ')
                 log "  [${name}] Report created (~${wc} words) [${mins}m]"
-                reported_complete[$name]=1
+                reported_complete="${reported_complete}${name} "
                 completed=$((completed + 1))
             fi
         done
 
         # Check log file activity for in-progress evaluators (report once per evaluator)
         for name in "${names[@]}"; do
-            if [[ -z "${reported_complete[$name]+x}" && -z "${reported_active[$name]+x}" ]]; then
+            if [[ "$reported_complete" != *" ${name} "* && "$reported_active" != *" ${name} "* ]]; then
                 local log_file="${LOG_DIR}/eval-${name}.log"
                 if [[ -f "$log_file" ]]; then
                     local log_size
                     log_size=$(wc -c < "$log_file" 2>/dev/null | tr -d ' ')
                     if (( log_size > 1000 )); then
                         log "  [${name}] Log active (growing) [${mins}m]"
-                        reported_active[$name]=1
+                        reported_active="${reported_active}${name} "
                     fi
                 fi
             fi

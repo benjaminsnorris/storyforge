@@ -33,6 +33,13 @@ resolve_scope() {
         return 1
     fi
 
+    # Normalize YAML inline list syntax: [30, 31] -> 30,31
+    if [[ "$scope" =~ ^\[.*\]$ ]]; then
+        scope="${scope#\[}"
+        scope="${scope%\]}"
+        scope=$(echo "$scope" | tr -d ' ')
+    fi
+
     local scene_dir="${project_dir}/scenes"
     local matched_files=()
 
