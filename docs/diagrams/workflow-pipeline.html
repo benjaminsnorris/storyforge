@@ -644,7 +644,7 @@
   <!-- Hero -->
   <section class="hero animate" style="--i: 1">
     <h1>Story<span>forge</span> Pipeline</h1>
-    <p>A novel-writing toolkit for Claude Code. Guides authors from initial concept through drafting, evaluation, revision, and production across ten interconnected phases.</p>
+    <p>A novel-writing toolkit for Claude Code. Guides authors from initial concept through drafting, evaluation, revision, and production across twelve interconnected phases.</p>
     <div class="legend">
       <div class="legend-item">
         <div class="legend-dot interactive"></div>
@@ -906,10 +906,34 @@
       </svg>
     </div>
 
-    <!-- Phase 10: Produce -->
+    <!-- Phase 10: Title -->
     <div class="phase-wrapper animate" style="--i: 23">
-      <div class="phase-card produce">
+      <div class="phase-card interactive">
         <div class="phase-number">10</div>
+        <div class="phase-header">
+          <div class="phase-name">Title</div>
+          <code class="phase-command">/storyforge:title</code>
+        </div>
+        <div class="phase-body">
+          <div class="section-label">Title Development</div>
+          <p class="phase-desc">Develop, refine, or finalize the book title and subtitle. Can be invoked at any phase, but naturally fits here &mdash; right before the book becomes a real artifact.</p>
+          <div class="phase-mode">Interactive</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="--i: 24">
+      <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
+        <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
+        <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <!-- Phase 11: Produce -->
+    <div class="phase-wrapper animate" style="--i: 25">
+      <div class="phase-card produce">
+        <div class="phase-number">11</div>
         <div class="phase-header">
           <div class="phase-name">Produce</div>
           <code class="phase-command">/storyforge:produce</code>
@@ -918,6 +942,30 @@
           <div class="section-label">Book Assembly</div>
           <p class="phase-desc">Map scenes to chapters, configure typography and production settings, then assemble into epub, PDF, or HTML. Chapter mapping is a creative act &mdash; shaped by coaching level.</p>
           <div class="phase-mode">Interactive + Autonomous</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="--i: 26">
+      <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
+        <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
+        <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <!-- Phase 12: Press Kit -->
+    <div class="phase-wrapper animate" style="--i: 27">
+      <div class="phase-card interactive">
+        <div class="phase-number">12</div>
+        <div class="phase-header">
+          <div class="phase-name">Press Kit</div>
+          <code class="phase-command">/storyforge:press-kit</code>
+        </div>
+        <div class="phase-body">
+          <div class="section-label">Marketing Materials</div>
+          <p class="phase-desc">Generate blurbs, jacket copy, author bio, social media teasers, selling points, comp titles, and query pitch. Everything an author needs to present their book to the world.</p>
+          <div class="phase-mode">Interactive</div>
         </div>
       </div>
     </div>

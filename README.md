@@ -12,8 +12,8 @@ In any Claude Code session:
 ```
 
 That's it. Skills are available as `/storyforge:forge`, `/storyforge:develop`, `/storyforge:voice`,
-`/storyforge:scenes`, `/storyforge:plan-revision`, `/storyforge:recommend`, and `/storyforge:init`.
-Updates are automatic.
+`/storyforge:scenes`, `/storyforge:plan-revision`, `/storyforge:recommend`, `/storyforge:title`,
+`/storyforge:press-kit`, and `/storyforge:init`. Updates are automatic.
 
 ### For development
 
@@ -57,6 +57,8 @@ The hub reads your project state and suggests what to work on, or you can direct
 | `/storyforge:review` | Review revision results, map findings to changes, assess gaps |
 | `/storyforge:recommend` | Assess project state, recommend the highest-value next action |
 | `/storyforge:produce` | Chapter mapping, production settings, book assembly |
+| `/storyforge:title` | Title and subtitle development, refinement, assessment |
+| `/storyforge:press-kit` | Blurbs, jacket copy, author bio, social media, marketing materials |
 
 ## Project Setup
 
@@ -92,6 +94,8 @@ my-novel/
 ├── reference/               # World bible, character bible, voice guide, etc.
 ├── scenes/                  # Scene files with YAML frontmatter
 │   └── scene-index.yaml     # Master scene sequence
+├── manuscript/
+│   └── press-kit/           # Marketing materials (blurbs, jacket copy, bios)
 └── working/
     ├── pipeline.yaml        # Pipeline manifest — tracks eval/revision cycles
     ├── evaluations/         # Evaluation reports per cycle
@@ -112,8 +116,10 @@ my-novel/
 8. **`./storyforge revise`** — Execute revision passes
 9. **`/storyforge:review`** — Assess revision results
 10. **`/storyforge:recommend`** — Get the recommended next action based on project state
-11. **`/storyforge:produce`** — Map scenes to chapters, configure production settings
-12. **`./storyforge assemble`** — Generate epub, PDF, HTML, or web book
+11. **`/storyforge:title`** — Develop or finalize the book title
+12. **`/storyforge:produce`** — Map scenes to chapters, configure production settings
+13. **`/storyforge:press-kit`** — Generate blurbs, marketing copy, and press materials
+14. **`./storyforge assemble`** — Generate epub, PDF, HTML, or web book
 
 Steps 6-10 are a **pipeline cycle** — evaluate, plan, revise, review, recommend — tracked in `working/pipeline.yaml`. Each cycle links its evaluation, revision plan, and review report. Run as many cycles as the manuscript needs.
 
