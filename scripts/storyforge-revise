@@ -382,6 +382,13 @@ fi
 # --- Branch + PR setup ---
 if [[ "$DRY_RUN" != true ]]; then
     create_branch "revise" "$PROJECT_DIR"
+
+    # Ensure phase is set to revision before pushing (gives the branch an initial commit)
+    CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
+    if [[ "$CURRENT_PHASE" != "revision" ]]; then
+        sed -i '' "s/^[[:space:]]*phase:.*/phase: revision/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
+    fi
+
     ensure_branch_pushed "$PROJECT_DIR"
 
     PR_BODY="## Revision

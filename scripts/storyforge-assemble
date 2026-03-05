@@ -208,6 +208,13 @@ GENRE=$(read_yaml_field "project.genre" 2>/dev/null || read_yaml_field "genre" 2
 # --- Branch + PR setup ---
 if [[ "$DRY_RUN" != true ]]; then
     create_branch "assemble" "$PROJECT_DIR"
+
+    # Advance phase to production before pushing (gives the branch an initial commit)
+    CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
+    if [[ "$CURRENT_PHASE" != "production" && "$CURRENT_PHASE" != "complete" ]]; then
+        sed -i '' "s/^[[:space:]]*phase:.*/phase: production/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
+    fi
+
     ensure_branch_pushed "$PROJECT_DIR"
 
     PR_BODY="## Assembly

@@ -88,6 +88,73 @@ assert_matches "$branch_after" "^storyforge/write-" "create_branch: resumes exis
 rm -rf "$BRANCH_TEST_DIR"
 
 # ============================================================================
+# ensure_branch_pushed — initial commit behavior (no remote needed)
+# ============================================================================
+
+# Create a fresh temp git repo for push tests
+PUSH_TEST_DIR=$(mktemp -d)
+(
+    cd "$PUSH_TEST_DIR"
+    git init -q
+    git commit --allow-empty -m "init" -q
+    # Create a storyforge.yaml so sed has something to modify
+    echo "phase: development" > storyforge.yaml
+    git add storyforge.yaml
+    git commit -m "add yaml" -q
+)
+
+# ensure_branch_pushed creates an initial commit when branch has no commits ahead
+push_commit_before=$(cd "$PUSH_TEST_DIR" && git rev-parse HEAD)
+(
+    cd "$PUSH_TEST_DIR"
+    export PROJECT_DIR="$PUSH_TEST_DIR"
+    export STORYFORGE_BRANCH="storyforge/test-branch"
+    git checkout -b "storyforge/test-branch" -q 2>/dev/null
+    # Modify storyforge.yaml to simulate phase advancement
+    sed -i '' "s/phase: development/phase: drafting/" storyforge.yaml
+    # ensure_branch_pushed should commit the change (push will fail without remote — that's OK)
+    ensure_branch_pushed "$PUSH_TEST_DIR" 2>/dev/null || true
+)
+push_commit_after=$(cd "$PUSH_TEST_DIR" && git rev-parse HEAD)
+if [[ "$push_commit_before" != "$push_commit_after" ]]; then
+    PASS=$((PASS + 1))
+    echo "  PASS: ensure_branch_pushed: creates initial commit when unstaged changes exist"
+else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL: ensure_branch_pushed: creates initial commit when unstaged changes exist"
+    echo "    Expected commit to be different, but HEAD unchanged"
+fi
+
+# ensure_branch_pushed creates empty commit when no changes exist
+(
+    cd "$PUSH_TEST_DIR"
+    git checkout -b "storyforge/empty-test" -q 2>/dev/null
+)
+empty_before=$(cd "$PUSH_TEST_DIR" && git rev-parse HEAD)
+(
+    cd "$PUSH_TEST_DIR"
+    export PROJECT_DIR="$PUSH_TEST_DIR"
+    export STORYFORGE_BRANCH="storyforge/empty-test"
+    ensure_branch_pushed "$PUSH_TEST_DIR" 2>/dev/null || true
+)
+empty_after=$(cd "$PUSH_TEST_DIR" && git rev-parse HEAD)
+if [[ "$empty_before" != "$empty_after" ]]; then
+    PASS=$((PASS + 1))
+    echo "  PASS: ensure_branch_pushed: creates empty commit when no changes exist"
+else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL: ensure_branch_pushed: creates empty commit when no changes exist"
+    echo "    Expected commit to be different, but HEAD unchanged"
+fi
+
+# The empty commit should have the branch name in its message
+empty_msg=$(cd "$PUSH_TEST_DIR" && git log -1 --format=%s)
+assert_contains "$empty_msg" "empty-test" "ensure_branch_pushed: empty commit message contains branch suffix"
+
+# Clean up
+rm -rf "$PUSH_TEST_DIR"
+
+# ============================================================================
 # update_pr_task — string replacement tests (no gh needed)
 # ============================================================================
 

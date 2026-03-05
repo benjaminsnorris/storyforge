@@ -337,6 +337,14 @@ SESSION_START=$(date +%s)
 # --- Branch + PR setup ---
 if [[ "$DRY_RUN" != true ]]; then
     create_branch "write" "$PROJECT_DIR"
+
+    # Advance project phase before pushing — gives the branch an initial commit
+    CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
+    if [[ "$CURRENT_PHASE" != "drafting" && "$CURRENT_PHASE" != "evaluation" && "$CURRENT_PHASE" != "revision" && "$CURRENT_PHASE" != "complete" ]]; then
+        sed -i '' "s/^[[:space:]]*phase:.*/phase: drafting/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
+        log "Project phase advanced to: drafting"
+    fi
+
     ensure_branch_pushed "$PROJECT_DIR"
 
     WRITE_TITLE=$(read_yaml_field 'project.title' 2>/dev/null || read_yaml_field 'title' 2>/dev/null || echo 'Unknown')
@@ -354,13 +362,6 @@ if [[ "$DRY_RUN" != true ]]; then
     PR_BODY="${PR_BODY}- [ ] Review"
 
     create_draft_pr "Draft: ${WRITE_TITLE} (${#PENDING_IDS[@]} scenes)" "$PR_BODY" "$PROJECT_DIR" "drafting"
-fi
-
-# Advance project phase to drafting if needed
-CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
-if [[ "$CURRENT_PHASE" != "drafting" && "$CURRENT_PHASE" != "evaluation" && "$CURRENT_PHASE" != "revision" && "$CURRENT_PHASE" != "complete" ]]; then
-    sed -i '' "s/^[[:space:]]*phase:.*/phase: drafting/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
-    log "Project phase advanced to: drafting"
 fi
 
 log "============================================"

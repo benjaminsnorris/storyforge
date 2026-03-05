@@ -431,6 +431,9 @@ create_branch() {
 }
 
 # Push the current branch with -u to set up upstream tracking.
+# If the branch has no commits ahead of its parent, creates an initial
+# commit (updates storyforge.yaml phase or empty commit) so the push
+# and subsequent PR creation succeed.
 # Idempotent — safe to call multiple times.
 #
 # Usage: ensure_branch_pushed "$PROJECT_DIR"
@@ -441,6 +444,39 @@ ensure_branch_pushed() {
     if [[ -z "$branch" ]]; then
         log "WARNING: No branch to push"
         return 1
+    fi
+
+    # Check if the branch has any commits ahead of its merge base.
+    # If not, we need an initial commit so gh pr create has a diff.
+    local base_branch
+    base_branch=$(git -C "$project_dir" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null \
+               || git -C "$project_dir" config init.defaultBranch 2>/dev/null \
+               || echo "main")
+    # Strip remote prefix (e.g., "origin/main" -> "main")
+    base_branch="${base_branch#origin/}"
+
+    local ahead
+    ahead=$(git -C "$project_dir" rev-list --count "${base_branch}..HEAD" 2>/dev/null || echo "0")
+
+    if [[ "$ahead" == "0" ]]; then
+        # Try to stage any pending state changes (phase update, yaml edits)
+        local committed=false
+        if ! git -C "$project_dir" diff --quiet 2>/dev/null; then
+            # There are unstaged changes — stage storyforge.yaml and CLAUDE.md
+            git -C "$project_dir" add storyforge.yaml 2>/dev/null || true
+            git -C "$project_dir" add CLAUDE.md 2>/dev/null || true
+            git -C "$project_dir" commit -m "Start ${branch##storyforge/}" 2>/dev/null && committed=true
+        fi
+
+        if [[ "$committed" != true ]]; then
+            # No changes to commit, or commit failed — create an empty commit
+            git -C "$project_dir" commit --allow-empty \
+                -m "Start ${branch##storyforge/}" 2>/dev/null && committed=true
+        fi
+
+        if [[ "$committed" == true ]]; then
+            log "Initial commit on ${branch}"
+        fi
     fi
 
     git -C "$project_dir" push -u origin "$branch" 2>/dev/null || {
