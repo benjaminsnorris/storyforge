@@ -35,7 +35,35 @@ Before determining mode, check what tools are available:
 
 1. **Image generation APIs** — check for `OPENAI_API_KEY` and `BFL_API_KEY` environment variables using the Bash tool.
 2. **PNG conversion** — check for `rsvg-convert` (best quality) and `sips` (macOS fallback) using the Bash tool. **At least one must be available.** If neither is found, tell the author: "Cover design requires a PNG converter. Install librsvg (`brew install librsvg`) and try again." Then stop — do not proceed without a way to produce the final PNG.
-3. **Store capability flags** for use in mode determination:
+3. **Cover fonts** — check that the recommended cover fonts are installed. These are free Google Fonts that `rsvg-convert` needs at render time. Without them, SVG text falls back to generic serif/sans-serif and the cover will look wrong.
+
+   Run this check using the Bash tool:
+   ```bash
+   missing_fonts=()
+   for font in "Playfair Display" "Cormorant Garamond" "EB Garamond" "Oswald" "Bebas Neue"; do
+       if ! fc-list : family 2>/dev/null | grep -qi "$font"; then
+           missing_fonts+=("$font")
+       fi
+   done
+   if [[ ${#missing_fonts[@]} -gt 0 ]]; then
+       echo "MISSING FONTS: ${missing_fonts[*]}"
+   else
+       echo "All cover fonts installed."
+   fi
+   ```
+
+   If `fc-list` is not available, tell the author: "Install fontconfig to check fonts: `brew install fontconfig`"
+
+   If fonts are missing, tell the author which ones and how to install them:
+   > "Your system is missing these cover fonts: **{list}**. Install them to get the best results. All are free Google Fonts — download from [fonts.google.com](https://fonts.google.com) and install via Font Book, or use Homebrew:
+   > ```
+   > brew install --cask font-playfair-display font-cormorant-garamond font-eb-garamond font-oswald font-bebas-neue
+   > ```
+   > I can proceed with fallback fonts, but the cover may not match the intended design."
+
+   Let the author decide whether to install now or proceed with fallbacks. Do not block — missing fonts degrade quality but don't prevent cover generation.
+
+4. **Store capability flags** for use in mode determination:
    - **Tier 1 (SVG Design)**: Available if `rsvg-convert` or `sips` is installed. Claude composes SVG, then converts to PNG.
    - **Tier 2 (AI Image Generation)**: Available if `OPENAI_API_KEY` or `BFL_API_KEY` is set.
    - **Compositing**: Available if Tier 2 is available AND `rsvg-convert` is installed (sips cannot render SVG with embedded raster images).
