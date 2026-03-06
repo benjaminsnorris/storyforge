@@ -12,7 +12,3 @@ working/.interactive
 manuscript/output/
 manuscript/chapters/
 manuscript/metadata.yaml
-
-# Generated cover (reproducible via ./storyforge cover)
-manuscript/assets/cover.svg
-manuscript/assets/cover.png
