@@ -693,19 +693,41 @@ body {
   margin-bottom: 0.3em;
 }
 
+/* --- CONTENTS PAGE TITLE ------------------------------------------------ */
+
+.contents-title {
+  font-family: var(--title-font);
+  font-size: 1.8em;
+  font-weight: normal;
+  letter-spacing: 0.06em;
+  text-align: center;
+  color: var(--text);
+  margin-bottom: 1.5em;
+  padding-top: 1em;
+}
+
 /* --- 15. RESPONSIVE ----------------------------------------------------- */
 
 @media (max-width: 639px) {
   .chapter-content,
+  .reading-column,
   .book-landing { padding-left: 20px; padding-right: 20px; }
 
   .book-nav { padding: 0.5rem 1rem; }
+
+  .book-nav .nav-title { font-size: 0.72em; max-width: 40%; }
+  .book-nav .chapter-info { font-size: 0.68em; }
 
   .chapter-content h1 {
     font-size: 1.25em;
     margin-top: 2.5em;
     margin-bottom: 1.5em;
   }
+
+  .part-label { font-size: 0.65em; margin-top: 2em; }
+
+  .part-interstitial { min-height: 50vh; }
+  .part-title { font-size: 1.5em; }
 
   .chapter-nav {
     padding-left: 20px;
@@ -723,18 +745,23 @@ body {
 
   .book-landing { padding-top: 3em; }
   .book-meta .book-title { font-size: 1.6em; }
+  .book-cover { max-width: 240px; width: 70%; }
+  .contents-title { font-size: 1.4em; }
   .toc-panel { padding: 2em 1.5em; width: 95%; }
+  .toc-book-title { font-size: 0.95em; }
 }
 
 @media (min-width: 640px) and (max-width: 1024px) {
   .chapter-content,
+  .reading-column,
   .book-landing { max-width: 38em; padding-left: 2rem; padding-right: 2rem; }
 }
 
 @media (pointer: coarse) {
   .book-nav .nav-controls button,
   .chapter-nav a,
-  .toc-panel a { min-height: 44px; display: flex; align-items: center; }
+  .toc-panel a,
+  .toc-contents a { min-height: 44px; display: flex; align-items: center; }
 }
 
 /* --- 16. SELECTION ------------------------------------------------------ */
