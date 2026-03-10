@@ -267,3 +267,46 @@ else
     PASS=$((PASS + 1))
     echo "  PASS: check_pandoc: function runs (pandoc not available, returns 1)"
 fi
+
+# ============================================================================
+# count_parts
+# ============================================================================
+
+result=$(count_parts "$PROJECT_DIR")
+assert_equals "2" "$result" "count_parts: finds 2 parts in fixture"
+
+result=$(count_parts "/nonexistent/path")
+assert_equals "0" "$result" "count_parts: returns 0 for missing project"
+
+# ============================================================================
+# read_part_field
+# ============================================================================
+
+result=$(read_part_field 1 "$PROJECT_DIR" "title")
+assert_equals "The Expedition" "$result" "read_part_field: reads title from part 1"
+
+result=$(read_part_field 2 "$PROJECT_DIR" "title")
+assert_equals "The Blank" "$result" "read_part_field: reads title from part 2"
+
+result=$(read_part_field 1 "$PROJECT_DIR" "number")
+assert_equals "1" "$result" "read_part_field: reads number from part 1"
+
+# ============================================================================
+# get_chapter_part_title
+# ============================================================================
+
+result=$(get_chapter_part_title 1 "$PROJECT_DIR")
+assert_equals "The Expedition" "$result" "get_chapter_part_title: chapter 1 belongs to part 'The Expedition'"
+
+result=$(get_chapter_part_title 2 "$PROJECT_DIR")
+assert_equals "The Blank" "$result" "get_chapter_part_title: chapter 2 belongs to part 'The Blank'"
+
+# ============================================================================
+# read_chapter_field: part field
+# ============================================================================
+
+result=$(read_chapter_field 1 "$PROJECT_DIR" "part")
+assert_equals "1" "$result" "read_chapter_field: reads part number from chapter 1"
+
+result=$(read_chapter_field 2 "$PROJECT_DIR" "part")
+assert_equals "2" "$result" "read_chapter_field: reads part number from chapter 2"
