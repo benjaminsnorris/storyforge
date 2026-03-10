@@ -560,11 +560,13 @@ body {
 }
 
 .start-reading {
-  display: inline-block;
+  display: block;
+  max-width: 16em;
+  margin: 0 auto;
   padding: 0.85em 2.5em;
   background: var(--accent);
   color: var(--bg);
-  font-family: var(--title-font);
+  font-family: 'Literata', Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
   font-size: 1em;
   letter-spacing: 0.08em;
   text-decoration: none;
@@ -681,6 +683,7 @@ body {
 .resume-link {
   display: block;
   margin-bottom: 1.5em;
+  font-family: var(--title-font);
   font-size: 0.9em;
   color: var(--accent);
   text-decoration: none;
