@@ -13,13 +13,16 @@
   --accent: #8b4513; --surface: #f0ebe3; --border: rgba(0,0,0,0.08);
 }
 [data-theme="dark"] {
-  --bg: #1a1816; --text: #d4cec6; --text-dim: #8a8078;
-  --accent: #c4956a; --surface: #252220; --border: rgba(255,255,255,0.06);
+  --bg: #0f0e0d; --text: #d4cec6; --text-dim: #8a8078;
+  --accent: #c4956a; --surface: #1a1816; --border: rgba(255,255,255,0.06);
 }
 [data-theme="sepia"] {
   --bg: #f4ecd8; --text: #3b2e1e; --text-dim: #6b5a42;
   --accent: #8b5e3c; --surface: #e8dfc8; --border: rgba(59,46,30,0.1);
 }
+
+[data-theme="dark"] .reading-column,
+[data-theme="dark"] .chapter-content { line-height: 1.65; }
 
 /* Default to light; honor OS dark preference when no theme is stored */
 :root {
@@ -31,6 +34,30 @@
     --bg: #1a1816; --text: #d4cec6; --text-dim: #8a8078;
     --accent: #c4956a; --surface: #252220; --border: rgba(255,255,255,0.06);
   }
+}
+
+/* --- FONT LOADING ------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Literata';
+  src: url('{{FONT_PATH}}/literata-regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Literata';
+  src: url('{{FONT_PATH}}/literata-italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Literata';
+  src: url('{{FONT_PATH}}/literata-bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
 }
 
 /* --- 2. RESET & BASE ---------------------------------------------------- */
@@ -46,7 +73,7 @@ html {
 body {
   background-color: var(--bg);
   color: var(--text);
-  font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
+  font-family: 'Literata', Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
   font-size: clamp(18px, 1.15rem + 0.25vw, 21px);
   line-height: 1.58;
   transition: background-color 0.4s ease, color 0.4s ease;
@@ -242,6 +269,17 @@ body {
 .book-nav.hidden {
   transform: translateY(-100%);
   pointer-events: none;
+}
+
+[data-theme="dark"] .book-nav::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent) 30%, var(--accent) 70%, transparent);
+  opacity: 0.3;
 }
 
 .book-nav .book-title {
@@ -484,7 +522,7 @@ body {
   padding: 0.85em 2.5em;
   background: var(--accent);
   color: var(--bg);
-  font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
+  font-family: 'Literata', Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
   font-size: 1em;
   letter-spacing: 0.08em;
   text-decoration: none;
@@ -496,6 +534,111 @@ body {
 
 .start-reading:hover { filter: brightness(1.1); transform: translateY(-1px); }
 .start-reading:active { transform: translateY(0); }
+
+/* --- PART LABEL (above chapter heading) --------------------------------- */
+
+.part-label {
+  text-align: center;
+  font-size: 0.72em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-top: 3em;
+  margin-bottom: 0.5em;
+  transition: color 0.4s ease;
+}
+
+.part-label + h1 {
+  margin-top: 0.5em;
+}
+
+/* --- PART INTERSTITIAL PAGE --------------------------------------------- */
+
+.part-interstitial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+  text-align: center;
+  padding: 2em 1.5rem;
+}
+
+.part-number {
+  font-size: 0.75em;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 1em;
+}
+
+.part-title {
+  font-size: 2em;
+  font-weight: normal;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  line-height: 1.3;
+  margin: 0;
+}
+
+.part-ornament {
+  width: 3em;
+  height: 1px;
+  background: var(--border);
+  margin-top: 2em;
+}
+
+[data-theme="dark"] .part-number { color: var(--accent); }
+[data-theme="dark"] .part-ornament {
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.4;
+}
+
+/* --- TOC PART HEADINGS -------------------------------------------------- */
+
+.toc-part {
+  font-size: 0.72em;
+  font-weight: normal;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 1.5em 0 0.5em;
+  padding: 0 0.25em;
+}
+
+.toc-part:first-child { margin-top: 0; }
+
+.toc-panel li.toc-current a,
+.toc-list li.toc-current a {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.toc-panel li.toc-current a::before {
+  color: var(--accent);
+}
+
+/* --- RESUME LINK -------------------------------------------------------- */
+
+.resume-link {
+  display: block;
+  margin-bottom: 1.5em;
+  font-size: 0.9em;
+  color: var(--accent);
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.resume-link:hover { filter: brightness(1.2); }
+
+.resume-label {
+  display: block;
+  font-size: 0.75em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 0.3em;
+}
 
 /* --- 15. RESPONSIVE ----------------------------------------------------- */
 
