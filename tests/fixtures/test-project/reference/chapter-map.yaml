@@ -1,15 +1,23 @@
 # Chapter Map — The Cartographer's Silence
 # Maps scenes to chapters for manuscript assembly.
 
+parts:
+  - number: 1
+    title: "The Expedition"
+  - number: 2
+    title: "The Blank"
+
 chapters:
   - title: "The Finest Cartographer"
     heading: numbered-titled
+    part: 1
     scenes:
       - act1-sc01
       - act1-sc02
 
   - title: "Into the Blank"
     heading: numbered-titled
+    part: 2
     scenes:
       - act2-sc01
 
