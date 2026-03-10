@@ -507,7 +507,7 @@ body {
 
 .book-meta { margin-bottom: 3em; }
 
-.book-meta .book-main-title {
+.book-meta .book-title {
   font-family: var(--title-font);
   font-size: 2em;
   font-weight: normal;
@@ -698,7 +698,7 @@ body {
   }
 
   .book-landing { padding-top: 3em; }
-  .book-meta .book-main-title { font-size: 1.6em; }
+  .book-meta .book-title { font-size: 1.6em; }
   .toc-panel { padding: 2em 1.5em; width: 95%; }
 }
 
