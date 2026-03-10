@@ -25,7 +25,8 @@
     {{SERIES}}
   </div>
 
-  <a href="chapters/chapter-01.html" class="start-reading">Start Reading</a>
+  <div id="resume-link"></div>
+  <a href="chapters/{{FIRST_PAGE}}" class="start-reading">Start Reading</a>
   <a href="contents.html" class="toc-link">Table of Contents</a>
 
   {{COPYRIGHT}}
@@ -33,6 +34,21 @@
 
 <script>
 {{JS}}
+</script>
+<script>
+// Resume-aware landing page
+(function() {
+  var CHAPTER_MAP = {{CHAPTER_MAP_JSON}};
+  var lastChapter = localStorage.getItem('storyforge-last-chapter');
+  if (lastChapter && CHAPTER_MAP[lastChapter]) {
+    var el = document.getElementById('resume-link');
+    if (el) {
+      el.innerHTML = '<a href="chapters/' + lastChapter + '.html" class="resume-link">' +
+        '<span class="resume-label">Continue Reading</span>' +
+        CHAPTER_MAP[lastChapter] + '</a>';
+    }
+  }
+})();
 </script>
 </body>
 </html>
