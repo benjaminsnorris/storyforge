@@ -1008,15 +1008,18 @@ generate_web_book() {
     local ch_part part_slug part_idx
 
     for (( ch=1; ch<=total_chapters; ch++ )); do
-        ch_part=$(read_chapter_field "$ch" "$project_dir" "part" 2>/dev/null || echo "")
+        # Only insert part interstitials when a parts: array exists
+        if (( total_parts > 0 )); then
+            ch_part=$(read_chapter_field "$ch" "$project_dir" "part" 2>/dev/null || echo "")
 
-        if [[ -n "$ch_part" && "$ch_part" != "$current_part" ]]; then
-            current_part="$ch_part"
-            part_slug=$(printf 'part-%02d' "$ch_part")
-            part_idx=$(( ch_part - 1 ))
-            nav_types+=("part")
-            nav_slugs+=("$part_slug")
-            nav_titles+=("${part_titles[$part_idx]:-Part $ch_part}")
+            if [[ -n "$ch_part" && "$ch_part" != "$current_part" ]]; then
+                current_part="$ch_part"
+                part_slug=$(printf 'part-%02d' "$ch_part")
+                part_idx=$(( ch_part - 1 ))
+                nav_types+=("part")
+                nav_slugs+=("$part_slug")
+                nav_titles+=("${part_titles[$part_idx]:-Part $ch_part}")
+            fi
         fi
 
         nav_types+=("chapter")
@@ -1033,26 +1036,29 @@ generate_web_book() {
     local toc_ch_part toc_ch_title toc_ch_slug toc_part_idx toc_pt
 
     for (( ch=1; ch<=total_chapters; ch++ )); do
-        toc_ch_part=$(read_chapter_field "$ch" "$project_dir" "part" 2>/dev/null || echo "")
         toc_ch_title="${ch_titles[$((ch-1))]}"
         toc_ch_slug="${ch_slugs[$((ch-1))]}"
 
-        if [[ -n "$toc_ch_part" && "$toc_ch_part" != "$toc_current_part" ]]; then
-            if [[ -n "$toc_current_part" ]]; then
-                toc_entries="${toc_entries}  </ol>
+        if (( total_parts > 0 )); then
+            toc_ch_part=$(read_chapter_field "$ch" "$project_dir" "part" 2>/dev/null || echo "")
+
+            if [[ -n "$toc_ch_part" && "$toc_ch_part" != "$toc_current_part" ]]; then
+                if [[ -n "$toc_current_part" ]]; then
+                    toc_entries="${toc_entries}  </ol>
 "
-                toc_entries_ch="${toc_entries_ch}  </ol>
+                    toc_entries_ch="${toc_entries_ch}  </ol>
 "
-            fi
-            toc_current_part="$toc_ch_part"
-            toc_part_idx=$(( toc_ch_part - 1 ))
-            toc_pt="${part_titles[$toc_part_idx]:-Part $toc_ch_part}"
-            local part_heading="  <h3 class=\"toc-part\">Part ${toc_ch_part}: ${toc_pt}</h3>
+                fi
+                toc_current_part="$toc_ch_part"
+                toc_part_idx=$(( toc_ch_part - 1 ))
+                toc_pt="${part_titles[$toc_part_idx]:-Part $toc_ch_part}"
+                local part_heading="  <h3 class=\"toc-part\">Part ${toc_ch_part}: ${toc_pt}</h3>
   <ol class=\"toc-list\" start=\"${ch}\">
 "
-            toc_entries="${toc_entries}${part_heading}"
-            toc_entries_ch="${toc_entries_ch}${part_heading}"
-        elif [[ -z "$toc_current_part" && "$ch" -eq 1 ]]; then
+                toc_entries="${toc_entries}${part_heading}"
+                toc_entries_ch="${toc_entries_ch}${part_heading}"
+            fi
+        elif [[ "$ch" -eq 1 ]]; then
             toc_entries="${toc_entries}  <ol class=\"toc-list\">
 "
             toc_entries_ch="${toc_entries_ch}  <ol class=\"toc-list\">
@@ -1273,8 +1279,10 @@ generate_web_book() {
             pandoc --from markdown --to html5 "$ch_md" > "$ch_html_file" 2>/dev/null
 
             local part_label_html=""
-            local ch_part_title
-            ch_part_title=$(get_chapter_part_title "$ch_num" "$project_dir")
+            local ch_part_title=""
+            if (( total_parts > 0 )); then
+                ch_part_title=$(get_chapter_part_title "$ch_num" "$project_dir")
+            fi
             if [[ -n "$ch_part_title" ]]; then
                 local ch_part_num
                 ch_part_num=$(read_chapter_field "$ch_num" "$project_dir" "part" 2>/dev/null || echo "")
