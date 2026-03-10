@@ -138,9 +138,9 @@ done
 
 # Validate format
 case "$FORMAT" in
-    epub|pdf|html|markdown|all) ;;
+    epub|pdf|html|web|markdown|all) ;;
     *)
-        echo "ERROR: Unknown format '${FORMAT}'. Use: epub, pdf, html, markdown, all" >&2
+        echo "ERROR: Unknown format '${FORMAT}'. Use: epub, pdf, html, web, markdown, all" >&2
         exit 1
         ;;
 esac
