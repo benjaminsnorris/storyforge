@@ -938,6 +938,17 @@ generate_web_book() {
     local cover_image
     cover_image=$(read_production_field "$project_dir" "cover_image" 2>/dev/null || echo "")
 
+    # Title font (for headings — loaded from Google Fonts)
+    local title_font
+    title_font=$(read_production_field "$project_dir" "title_font" 2>/dev/null || echo "")
+    local title_font_link=""
+    local title_font_stack="'Literata', Georgia, serif"
+    if [[ -n "$title_font" ]]; then
+        local font_param="${title_font// /+}"
+        title_font_link="<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin><link href=\"https://fonts.googleapis.com/css2?family=${font_param}:wght@400;700&display=swap\" rel=\"stylesheet\">"
+        title_font_stack="'${title_font}', 'Literata', Georgia, serif"
+    fi
+
     local total_chapters
     total_chapters=$(count_chapters "$project_dir")
 
@@ -1059,8 +1070,9 @@ generate_web_book() {
 
     # --- Helper: substitute template variables ---
     # Pre-build CSS with font paths for both depth levels
-    local css_toplevel="${css_content//\{\{FONT_PATH\}\}/fonts}"
-    local css_chapters="${css_content//\{\{FONT_PATH\}\}/..\/fonts}"
+    local css_resolved="${css_content//\{\{TITLE_FONT_STACK\}\}/$title_font_stack}"
+    local css_toplevel="${css_resolved//\{\{FONT_PATH\}\}/fonts}"
+    local css_chapters="${css_resolved//\{\{FONT_PATH\}\}/..\/fonts}"
 
     # Pre-build resolved TOC entries as a temp file (avoids sed delimiter issues)
     local toc_file
@@ -1120,6 +1132,7 @@ generate_web_book() {
                 line="${line//\{\{TOTAL_CHAPTERS\}\}/$total_chapters}"
                 line="${line//\{\{HEAD_SCRIPT\}\}/$head_script}"
                 line="${line//\{\{CANONICAL\}\}/$canonical_html}"
+                line="${line//\{\{TITLE_FONT_LINK\}\}/$title_font_link}"
                 echo "$line"
             fi
         done < "$tmpl_file"
