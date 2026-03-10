@@ -900,6 +900,9 @@ generate_web_book() {
     local template_dir="${plugin_dir}/templates/production/web-book"
     local chapters_dir="${project_dir}/manuscript/chapters"
 
+    # Ensure PROJECT_DIR is set for read_yaml_field
+    PROJECT_DIR="$project_dir"
+
     if ! check_pandoc >/dev/null 2>&1; then
         log "ERROR: pandoc is required for web book generation but not found"
         return 1
