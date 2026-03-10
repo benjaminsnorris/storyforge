@@ -161,19 +161,15 @@ Write the SVG file to `manuscript/assets/cover.svg` using the Write tool.
 - **Unexpected spatial composition.** Asymmetric title placement. Text overlapping the imagery. Generous negative space OR controlled density. Not everything centered in the safe zone.
 - **Atmosphere and depth.** Gradient meshes, noise textures, geometric patterns, layered transparencies, dramatic shadows. A flat cover is a dead cover.
 
-**Title sizing** — follow this logic for readability:
+**Title and author sizing — covers must be readable as thumbnails:**
 
-| Title length | Font size | Max chars per line |
-|---|---|---|
-| ≤8 chars | 140px | 12 |
-| 9-15 chars | 120px | 12 |
-| 16-25 chars | 96px | 16 |
-| 26-40 chars | 72px | 22 |
-| >40 chars | 56px | 30 |
+The title must span **80-90% of the cover width**. The author name must span **at least 50-60% of the cover width**. These are minimum requirements — covers that look fine at full size are consistently unreadable at thumbnail scale. Size text to fill the available width, then pick a font size that achieves it.
+
+For a 1600px-wide cover, the title text block should be 1280-1440px wide, and the author name should be 800-960px wide. Use `textLength` and `lengthAdjust="spacingAndGlyphs"` on `<text>` elements if needed to hit these widths precisely.
 
 Break titles at word boundaries. Center each line. Space lines at font-size + 20px.
 
-**Author name:** Position in the lower portion of the cover. Typically 36-48px, with generous letter-spacing (6-10px). All caps or small-caps often works well.
+**Author name:** Position in the lower portion of the cover. All caps or small-caps often works well. Size it to fill at least 50-60% of the cover width — do not use a small font size with wide letter-spacing as a substitute.
 
 ### Step T1.4: Preview and Iterate
 
