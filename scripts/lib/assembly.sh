@@ -978,10 +978,10 @@ generate_web_book() {
     total_parts=$(count_parts "$project_dir")
 
     local -a part_titles=()
+    local _pt_title
     for (( p=1; p<=total_parts; p++ )); do
-        local pt
-        pt=$(read_part_field "$p" "$project_dir" "title")
-        part_titles+=("$pt")
+        _pt_title=$(read_part_field "$p" "$project_dir" "title")
+        part_titles+=("$_pt_title")
     done
 
     # Build navigation chain: interleave part interstitials with chapters
@@ -989,16 +989,15 @@ generate_web_book() {
     local -a nav_slugs=()
     local -a nav_titles=()
     local current_part=0
+    local ch_part part_slug part_idx
 
     for (( ch=1; ch<=total_chapters; ch++ )); do
-        local ch_part
         ch_part=$(read_chapter_field "$ch" "$project_dir" "part" 2>/dev/null || echo "")
 
         if [[ -n "$ch_part" && "$ch_part" != "$current_part" ]]; then
             current_part="$ch_part"
-            local part_slug
             part_slug=$(printf 'part-%02d' "$ch_part")
-            local part_idx=$(( ch_part - 1 ))
+            part_idx=$(( ch_part - 1 ))
             nav_types+=("part")
             nav_slugs+=("$part_slug")
             nav_titles+=("${part_titles[$part_idx]:-Part $ch_part}")
@@ -1014,22 +1013,22 @@ generate_web_book() {
     # --- Build part-grouped TOC entries ---
     local toc_entries=""
     local toc_current_part=""
+    local toc_ch_part toc_ch_title toc_ch_slug toc_part_idx toc_pt
 
     for (( ch=1; ch<=total_chapters; ch++ )); do
-        local ch_part
-        ch_part=$(read_chapter_field "$ch" "$project_dir" "part" 2>/dev/null || echo "")
-        local ch_title="${ch_titles[$((ch-1))]}"
-        local ch_slug="${ch_slugs[$((ch-1))]}"
+        toc_ch_part=$(read_chapter_field "$ch" "$project_dir" "part" 2>/dev/null || echo "")
+        toc_ch_title="${ch_titles[$((ch-1))]}"
+        toc_ch_slug="${ch_slugs[$((ch-1))]}"
 
-        if [[ -n "$ch_part" && "$ch_part" != "$toc_current_part" ]]; then
+        if [[ -n "$toc_ch_part" && "$toc_ch_part" != "$toc_current_part" ]]; then
             if [[ -n "$toc_current_part" ]]; then
                 toc_entries="${toc_entries}  </ol>
 "
             fi
-            toc_current_part="$ch_part"
-            local part_idx=$(( ch_part - 1 ))
-            local pt="${part_titles[$part_idx]:-Part $ch_part}"
-            toc_entries="${toc_entries}  <h3 class=\"toc-part\">Part ${ch_part}: ${pt}</h3>
+            toc_current_part="$toc_ch_part"
+            toc_part_idx=$(( toc_ch_part - 1 ))
+            toc_pt="${part_titles[$toc_part_idx]:-Part $toc_ch_part}"
+            toc_entries="${toc_entries}  <h3 class=\"toc-part\">Part ${toc_ch_part}: ${toc_pt}</h3>
   <ol class=\"toc-list\" start=\"${ch}\">
 "
         elif [[ -z "$toc_current_part" && "$ch" -eq 1 ]]; then
@@ -1037,7 +1036,7 @@ generate_web_book() {
 "
         fi
 
-        toc_entries="${toc_entries}    <li><a href=\"chapters/${ch_slug}.html\" data-chapter=\"${ch_slug}\">${ch_title}</a></li>
+        toc_entries="${toc_entries}    <li><a href=\"chapters/${toc_ch_slug}.html\" data-chapter=\"${toc_ch_slug}\">${toc_ch_title}</a></li>
 "
     done
     toc_entries="${toc_entries}  </ol>
@@ -1056,37 +1055,82 @@ generate_web_book() {
     chapter_map_json="${chapter_map_json}}"
 
     # --- Helper: substitute template variables ---
-    _web_sub() {
-        local content="$1"
-        local font_path="${2:-fonts}"
-        content="${content//\{\{BOOK_TITLE\}\}/$title}"
-        content="${content//\{\{AUTHOR\}\}/$author}"
-        content="${content//\{\{LANG\}\}/$language}"
-        content="${content//\{\{DESCRIPTION\}\}/$description}"
-        content="${content//\{\{TOTAL_CHAPTERS\}\}/$total_chapters}"
-        content="${content//\{\{CSS\}\}/${css_content//\{\{FONT_PATH\}\}/$font_path}}"
-        content="${content//\{\{JS\}\}/$js_content}"
-        content="${content//\{\{HEAD_SCRIPT\}\}/$head_script}"
-        content="${content//\{\{TOC_ENTRIES\}\}/$toc_entries}"
-        content="${content//\{\{FONT_PATH\}\}/$font_path}"
-        content="${content//\{\{CHAPTER_MAP_JSON\}\}/$chapter_map_json}"
+    # Pre-build CSS with font paths for both depth levels
+    local css_toplevel="${css_content//\{\{FONT_PATH\}\}/fonts}"
+    local css_chapters="${css_content//\{\{FONT_PATH\}\}/..\/fonts}"
 
-        if [[ -n "$base_url" ]]; then
-            content="${content//\{\{CANONICAL\}\}/<link rel=\"canonical\" href=\"${base_url}\">}"
-        else
-            content="${content//\{\{CANONICAL\}\}/}"
-        fi
+    # Pre-build resolved TOC entries as a temp file (avoids sed delimiter issues)
+    local toc_file
+    toc_file=$(mktemp "${TMPDIR:-/tmp}/sf-toc.XXXXXX")
+    echo "$toc_entries" > "$toc_file"
 
-        echo "$content"
+    # Pre-build resolved CSS as temp files
+    local css_top_file css_ch_file js_file map_file
+    css_top_file=$(mktemp "${TMPDIR:-/tmp}/sf-css-top.XXXXXX")
+    css_ch_file=$(mktemp "${TMPDIR:-/tmp}/sf-css-ch.XXXXXX")
+    js_file=$(mktemp "${TMPDIR:-/tmp}/sf-js.XXXXXX")
+    map_file=$(mktemp "${TMPDIR:-/tmp}/sf-map.XXXXXX")
+    echo "$css_toplevel" > "$css_top_file"
+    echo "$css_chapters" > "$css_ch_file"
+    echo "$js_content" > "$js_file"
+    echo "$chapter_map_json" > "$map_file"
+
+    local canonical_html=""
+    if [[ -n "$base_url" ]]; then
+        canonical_html="<link rel=\"canonical\" href=\"${base_url}\">"
+    fi
+
+    # Stamp a template file with common variables, writing result to stdout.
+    # For large multi-line content (CSS, JS, TOC), replaces the entire line
+    # containing the placeholder with the file contents. For simple variables,
+    # uses sed-safe replacement.
+    # Usage: _web_stamp <template_file> <font_depth>
+    #   font_depth: "top" for index/contents, "ch" for chapters/parts
+    _web_stamp() {
+        local tmpl_file="$1"
+        local depth="${2:-top}"
+        local css_src="$css_top_file"
+        [[ "$depth" == "ch" ]] && css_src="$css_ch_file"
+
+        # Process template line by line
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            # Check for file-inclusion placeholders (replace entire line with file)
+            if [[ "$line" == *'{{CSS}}'* ]]; then
+                cat "$css_src"
+            elif [[ "$line" == *'{{JS}}'* ]]; then
+                cat "$js_file"
+            elif [[ "$line" == *'{{TOC_ENTRIES}}'* ]]; then
+                cat "$toc_file"
+            elif [[ "$line" == *'{{CHAPTER_MAP_JSON}}'* ]]; then
+                # Preserve the surrounding JS context
+                local before="${line%%\{\{CHAPTER_MAP_JSON\}\}*}"
+                local after="${line#*\{\{CHAPTER_MAP_JSON\}\}}"
+                printf '%s' "$before"
+                cat "$map_file"
+                echo "$after"
+            else
+                # Simple variable substitution on single lines
+                line="${line//\{\{BOOK_TITLE\}\}/$title}"
+                line="${line//\{\{AUTHOR\}\}/$author}"
+                line="${line//\{\{LANG\}\}/$language}"
+                line="${line//\{\{DESCRIPTION\}\}/$description}"
+                line="${line//\{\{TOTAL_CHAPTERS\}\}/$total_chapters}"
+                line="${line//\{\{HEAD_SCRIPT\}\}/$head_script}"
+                line="${line//\{\{CANONICAL\}\}/$canonical_html}"
+                echo "$line"
+            fi
+        done < "$tmpl_file"
+    }
+
+    # Clean up temp files on exit
+    _web_cleanup() {
+        rm -f "$toc_file" "$css_top_file" "$css_ch_file" "$js_file" "$map_file"
     }
 
     # --- Determine first page ---
     local first_page="${nav_slugs[0]}.html"
 
     # --- Generate index.html ---
-    local index_tmpl
-    index_tmpl=$(cat "${template_dir}/index.html")
-
     local cover_html=""
     if [[ -n "$cover_image" && -f "${project_dir}/${cover_image}" ]]; then
         cp "${project_dir}/${cover_image}" "${output_dir}/cover.png" 2>/dev/null || \
@@ -1111,48 +1155,22 @@ generate_web_book() {
 
     local copyright_html="<p class=\"book-copyright\">&copy; ${copyright_year} ${author}</p>"
 
-    local index_content
-    index_content=$(_web_sub "$index_tmpl" "fonts")
-    index_content="${index_content//\{\{COVER_IMG\}\}/$cover_html}"
-    index_content="${index_content//\{\{LOGLINE\}\}/$logline_html}"
-    index_content="${index_content//\{\{SERIES\}\}/$series_html}"
-    index_content="${index_content//\{\{COPYRIGHT\}\}/$copyright_html}"
-    index_content="${index_content//\{\{FIRST_PAGE\}\}/$first_page}"
-    echo "$index_content" > "${output_dir}/index.html"
+    _web_stamp "${template_dir}/index.html" "top" \
+        | while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line//\{\{COVER_IMG\}\}/$cover_html}"
+            line="${line//\{\{LOGLINE\}\}/$logline_html}"
+            line="${line//\{\{SERIES\}\}/$series_html}"
+            line="${line//\{\{COPYRIGHT\}\}/$copyright_html}"
+            line="${line//\{\{FIRST_PAGE\}\}/$first_page}"
+            echo "$line"
+        done > "${output_dir}/index.html"
 
     # --- Generate contents.html ---
-    local toc_tmpl
-    toc_tmpl=$(cat "${template_dir}/toc.html")
-
-    # Back matter links
-    local back_matter_html=""
-    for bm in "acknowledgments" "about-the-author" "also-by"; do
-        local bm_path
-        bm_path=$(read_production_nested "$project_dir" "back_matter" "$bm" 2>/dev/null || echo "")
-        if [[ -n "$bm_path" && -f "${project_dir}/${bm_path}" ]]; then
-            local bm_label
-            case "$bm" in
-                acknowledgments) bm_label="Acknowledgments" ;;
-                about-the-author) bm_label="About the Author" ;;
-                also-by) bm_label="Also By" ;;
-            esac
-            # Back matter pages not generated yet — link to last chapter as placeholder
-            back_matter_html="${back_matter_html}"
-        fi
-    done
-
-    local toc_content
-    toc_content=$(_web_sub "$toc_tmpl" "fonts")
-    toc_content="${toc_content//\{\{BACK_MATTER_LINKS\}\}/$back_matter_html}"
-    echo "$toc_content" > "${output_dir}/contents.html"
-
-    # --- Read part template ---
-    local part_tmpl
-    part_tmpl=$(cat "${template_dir}/part.html")
-
-    # --- Generate chapter template ---
-    local ch_tmpl
-    ch_tmpl=$(cat "${template_dir}/chapter.html")
+    _web_stamp "${template_dir}/toc.html" "top" \
+        | while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line//\{\{BACK_MATTER_LINKS\}\}/}"
+            echo "$line"
+        done > "${output_dir}/contents.html"
 
     # --- Generate all pages using navigation chain ---
     for (( i=0; i<nav_total; i++ )); do
@@ -1192,14 +1210,14 @@ generate_web_book() {
             local part_num="${page_slug#part-}"
             part_num=$((10#$part_num))
 
-            local page_content
-            page_content=$(_web_sub "$part_tmpl" "../fonts")
-            page_content="${page_content//\{\{PART_NUMBER\}\}/$part_num}"
-            page_content="${page_content//\{\{PART_TITLE\}\}/$page_title}"
-            page_content="${page_content//\{\{PREV_LINK\}\}/$prev_link}"
-            page_content="${page_content//\{\{NEXT_LINK\}\}/$next_link}"
-
-            echo "$page_content" > "${output_dir}/chapters/${page_slug}.html"
+            _web_stamp "${template_dir}/part.html" "ch" \
+                | while IFS= read -r _line || [[ -n "$_line" ]]; do
+                    _line="${_line//\{\{PART_NUMBER\}\}/$part_num}"
+                    _line="${_line//\{\{PART_TITLE\}\}/$page_title}"
+                    _line="${_line//\{\{PREV_LINK\}\}/$prev_link}"
+                    _line="${_line//\{\{NEXT_LINK\}\}/$next_link}"
+                    echo "$_line"
+                done > "${output_dir}/chapters/${page_slug}.html"
 
         elif [[ "$page_type" == "chapter" ]]; then
             local ch_num="${page_slug#chapter-}"
@@ -1213,8 +1231,10 @@ generate_web_book() {
                 continue
             fi
 
-            local ch_html_fragment
-            ch_html_fragment=$(pandoc --from markdown --to html5 "$ch_md" 2>/dev/null)
+            # Convert chapter markdown to HTML fragment, write to temp file
+            local ch_html_file
+            ch_html_file=$(mktemp "${TMPDIR:-/tmp}/sf-ch.XXXXXX")
+            pandoc --from markdown --to html5 "$ch_md" > "$ch_html_file" 2>/dev/null
 
             local part_label_html=""
             local ch_part_title
@@ -1225,19 +1245,28 @@ generate_web_book() {
                 part_label_html="<div class=\"part-label\">Part ${ch_part_num}: ${ch_part_title}</div>"
             fi
 
-            local page_content
-            page_content=$(_web_sub "$ch_tmpl" "../fonts")
-            page_content="${page_content//\{\{CHAPTER_TITLE\}\}/$page_title}"
-            page_content="${page_content//\{\{CHAPTER_SLUG\}\}/$page_slug}"
-            page_content="${page_content//\{\{CHAPTER_NUM\}\}/$ch_num}"
-            page_content="${page_content//\{\{CHAPTER_CONTENT\}\}/$ch_html_fragment}"
-            page_content="${page_content//\{\{PREV_LINK\}\}/$prev_link}"
-            page_content="${page_content//\{\{NEXT_LINK\}\}/$next_link}"
-            page_content="${page_content//\{\{PART_LABEL\}\}/$part_label_html}"
+            # Stamp the template, then substitute per-chapter variables
+            # Use awk for CHAPTER_CONTENT to handle multi-line HTML
+            _web_stamp "${template_dir}/chapter.html" "ch" \
+                | while IFS= read -r _line || [[ -n "$_line" ]]; do
+                    if [[ "$_line" == *'{{CHAPTER_CONTENT}}'* ]]; then
+                        cat "$ch_html_file"
+                    else
+                        _line="${_line//\{\{CHAPTER_TITLE\}\}/$page_title}"
+                        _line="${_line//\{\{CHAPTER_SLUG\}\}/$page_slug}"
+                        _line="${_line//\{\{CHAPTER_NUM\}\}/$ch_num}"
+                        _line="${_line//\{\{PREV_LINK\}\}/$prev_link}"
+                        _line="${_line//\{\{NEXT_LINK\}\}/$next_link}"
+                        _line="${_line//\{\{PART_LABEL\}\}/$part_label_html}"
+                        echo "$_line"
+                    fi
+                done > "${output_dir}/chapters/${page_slug}.html"
 
-            echo "$page_content" > "${output_dir}/chapters/${page_slug}.html"
+            rm -f "$ch_html_file"
         fi
     done
+
+    _web_cleanup
 
     # --- Summary ---
     local total_files=$(( nav_total + 2 ))
