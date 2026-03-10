@@ -941,6 +941,8 @@ generate_web_book() {
     # Title font (for headings — loaded from Google Fonts)
     local title_font
     title_font=$(read_production_field "$project_dir" "title_font" 2>/dev/null || echo "")
+    local title_font_weight
+    title_font_weight=$(read_production_field "$project_dir" "title_font_weight" 2>/dev/null || echo "700")
     local title_font_link=""
     local title_font_stack="'Literata', Georgia, serif"
     if [[ -n "$title_font" ]]; then
@@ -1082,6 +1084,7 @@ generate_web_book() {
     # --- Helper: substitute template variables ---
     # Pre-build CSS with font paths for both depth levels
     local css_resolved="${css_content//\{\{TITLE_FONT_STACK\}\}/$title_font_stack}"
+    css_resolved="${css_resolved//\{\{TITLE_FONT_WEIGHT\}\}/$title_font_weight}"
     local css_toplevel="${css_resolved//\{\{FONT_PATH\}\}/fonts}"
     local css_chapters="${css_resolved//\{\{FONT_PATH\}\}/..\/fonts}"
 

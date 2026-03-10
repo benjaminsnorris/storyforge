@@ -63,7 +63,7 @@
 
 /* Title font — applied to book title, chapter headings, part titles.
    Loaded via Google Fonts <link> in <head>; fallback to body font. */
-:root { --title-font: {{TITLE_FONT_STACK}}; }
+:root { --title-font: {{TITLE_FONT_STACK}}; --title-weight: {{TITLE_FONT_WEIGHT}}; }
 
 /* --- 2. RESET & BASE ---------------------------------------------------- */
 
@@ -124,7 +124,7 @@ body {
 .chapter-content h1 {
   font-family: var(--title-font);
   font-size: 1.5em;
-  font-weight: normal;
+  font-weight: var(--title-weight);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   text-align: center;
@@ -533,7 +533,7 @@ body {
 .book-meta .book-title {
   font-family: var(--title-font);
   font-size: 2em;
-  font-weight: normal;
+  font-weight: var(--title-weight);
   letter-spacing: 0.06em;
   color: var(--text);
   margin-bottom: 0.3em;
@@ -542,9 +542,10 @@ body {
 }
 
 .book-meta .book-author {
+  font-family: var(--title-font);
   font-size: 1.05em;
   color: var(--text-dim);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   margin-bottom: 1.2em;
   transition: color 0.4s ease;
 }
@@ -563,7 +564,7 @@ body {
   padding: 0.85em 2.5em;
   background: var(--accent);
   color: var(--bg);
-  font-family: 'Literata', Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
+  font-family: var(--title-font);
   font-size: 1em;
   letter-spacing: 0.08em;
   text-decoration: none;
@@ -577,14 +578,18 @@ body {
 .start-reading:active { transform: translateY(0); }
 
 .toc-link {
-  display: block;
-  margin-top: 1em;
-  font-size: 0.88em;
-  color: var(--text-dim);
-  letter-spacing: 0.04em;
-  transition: color 0.3s ease;
+  display: inline-block;
+  margin-top: 2em;
+  margin-bottom: 2em;
+  font-family: var(--title-font);
+  font-size: 0.9em;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.15em;
+  transition: color 0.3s ease, border-color 0.3s ease;
 }
-.toc-link:hover { color: var(--accent); }
+.toc-link:hover { color: var(--text); border-bottom-color: var(--accent); }
 
 /* --- PART LABEL (above chapter heading) --------------------------------- */
 
@@ -626,7 +631,7 @@ body {
 .part-title {
   font-family: var(--title-font);
   font-size: 2em;
-  font-weight: normal;
+  font-weight: var(--title-weight);
   letter-spacing: 0.08em;
   color: var(--text);
   line-height: 1.3;
@@ -698,7 +703,7 @@ body {
 .contents-title {
   font-family: var(--title-font);
   font-size: 1.8em;
-  font-weight: normal;
+  font-weight: var(--title-weight);
   letter-spacing: 0.06em;
   text-align: center;
   color: var(--text);
