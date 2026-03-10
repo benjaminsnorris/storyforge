@@ -10,7 +10,9 @@ set -eo pipefail
 # synthesis session that combines findings into prose + structured findings.yaml.
 #
 # Usage:
-#   ./storyforge-evaluate                      # Full manuscript
+#   ./storyforge-evaluate                      # Full manuscript (scene files)
+#   ./storyforge-evaluate --manuscript         # Full manuscript (assembled chapters)
+#   ./storyforge-evaluate --chapter N          # Single assembled chapter
 #   ./storyforge-evaluate --act N              # Scenes in act N
 #   ./storyforge-evaluate --part N             # Scenes in part N
 #   ./storyforge-evaluate --scenes ID..ID      # Specific scene range
@@ -68,7 +70,7 @@ CORE_EVALUATORS=(
 
 DRY_RUN=false
 INTERACTIVE=false
-FILTER_MODE="all"       # all | act | part | range | single
+FILTER_MODE="all"       # all | act | part | range | single | manuscript | chapter
 FILTER_VALUE=""
 RANGE_START=""
 RANGE_END=""
@@ -80,7 +82,9 @@ Usage: $(basename "$0") [OPTIONS]
 Run a multi-agent evaluation panel on your manuscript.
 
 Options:
-  (no args)                     Evaluate full manuscript
+  (no args)                     Evaluate full manuscript (scene files)
+  --manuscript                  Evaluate assembled chapters (from manuscript/chapters/)
+  --chapter N                   Evaluate a single assembled chapter
   --act N                       Evaluate scenes in act N
   --part N                      Evaluate scenes in part N
   --scenes ID..ID               Evaluate a range of scenes (inclusive)
@@ -94,6 +98,8 @@ Environment:
 
 Examples:
   $(basename "$0")
+  $(basename "$0") --manuscript
+  $(basename "$0") --chapter 5
   $(basename "$0") --act 2
   $(basename "$0") --scenes act1-sc01..act1-sc10
   $(basename "$0") --interactive
@@ -113,6 +119,15 @@ while [[ $# -gt 0 ]]; do
         --interactive|-i)
             INTERACTIVE=true
             shift
+            ;;
+        --manuscript)
+            FILTER_MODE="manuscript"
+            shift
+            ;;
+        --chapter)
+            FILTER_MODE="chapter"
+            FILTER_VALUE="${2:?ERROR: --chapter requires a chapter number}"
+            shift 2
             ;;
         --act)
             FILTER_MODE="act"
@@ -155,7 +170,20 @@ done
 # Prerequisites
 # ============================================================================
 
-check_file_exists "$SCENE_INDEX" "Scene index (scene-index.yaml)"
+# Manuscript mode reads from manuscript/chapters/ instead of scenes/
+MANUSCRIPT_MODE=false
+CHAPTERS_DIR="${PROJECT_DIR}/manuscript/chapters"
+
+if [[ "$FILTER_MODE" == "manuscript" || "$FILTER_MODE" == "chapter" ]]; then
+    MANUSCRIPT_MODE=true
+    if [[ ! -d "$CHAPTERS_DIR" ]]; then
+        echo "ERROR: No assembled chapters found at manuscript/chapters/" >&2
+        echo "Run 'storyforge assemble' first to generate chapter files." >&2
+        exit 1
+    fi
+else
+    check_file_exists "$SCENE_INDEX" "Scene index (scene-index.yaml)"
+fi
 
 # Read project metadata from storyforge.yaml
 PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
@@ -197,130 +225,181 @@ if [[ -n "$PROJECT_SUBGENRE" ]]; then
 fi
 
 # ============================================================================
-# Build scene list from scene-index.yaml
+# Build file list — manuscript chapters or individual scenes
 # ============================================================================
 
-ALL_SCENE_IDS=()
-while IFS= read -r id; do
-    [[ -z "$id" ]] && continue
-    ALL_SCENE_IDS+=("$id")
-done < <(grep -E '^[[:space:]]*- id:[[:space:]]*' "$SCENE_INDEX" \
-    | sed 's/^[[:space:]]*- id:[[:space:]]*//' \
-    | sed 's/^["'"'"']//' \
-    | sed 's/["'"'"']$//' \
-    | sed 's/[[:space:]]*$//')
+# These variables are populated by either manuscript or scene mode:
+SCENE_FILES=()         # Relative paths for prompt injection
+SCENE_LIST_STR=""      # Formatted list string for prompt
+SCOPE_DESCRIPTION=""   # Human-readable scope label
+INPUT_TYPE="scenes"    # "scenes" or "chapters" — affects prompt language
 
-if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
-    log "ERROR: No scenes found in ${SCENE_INDEX}"
-    exit 1
-fi
+if [[ "$MANUSCRIPT_MODE" == true ]]; then
+    # --- Manuscript mode: read assembled chapter files ---
+    INPUT_TYPE="chapters"
 
-log "Found ${#ALL_SCENE_IDS[@]} scenes in scene-index.yaml"
+    CHAPTER_FILES=()
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        CHAPTER_FILES+=("$f")
+    done < <(ls "${CHAPTERS_DIR}"/chapter-*.md 2>/dev/null | sort)
 
-# ============================================================================
-# Filter scenes based on scope arguments
-# ============================================================================
-
-FILTERED_IDS=()
-
-case "$FILTER_MODE" in
-    all)
-        FILTERED_IDS=("${ALL_SCENE_IDS[@]}")
-        ;;
-    single)
-        found=false
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            if [[ "$id" == "$RANGE_START" ]]; then
-                found=true
-                break
-            fi
-        done
-        if [[ "$found" == false ]]; then
-            log "ERROR: Scene '${RANGE_START}' not found in scene-index.yaml"
-            exit 1
-        fi
-        FILTERED_IDS=("$RANGE_START")
-        ;;
-    range)
-        in_range=false
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            if [[ "$id" == "$RANGE_START" ]]; then
-                in_range=true
-            fi
-            if [[ "$in_range" == true ]]; then
-                FILTERED_IDS+=("$id")
-            fi
-            if [[ "$id" == "$RANGE_END" ]]; then
-                break
-            fi
-        done
-        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: Could not find range ${RANGE_START}..${RANGE_END} in scene-index.yaml"
-            exit 1
-        fi
-        ;;
-    act)
-        local_pattern="act${FILTER_VALUE}"
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            if [[ "${id,,}" == "${local_pattern,,}"* ]]; then
-                FILTERED_IDS+=("$id")
-            fi
-        done
-        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: No scenes found matching act ${FILTER_VALUE}"
-            exit 1
-        fi
-        ;;
-    part)
-        local_pattern="p${FILTER_VALUE}"
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            if [[ "${id,,}" == "${local_pattern,,}"* || "${id,,}" == "part${FILTER_VALUE}"* ]]; then
-                FILTERED_IDS+=("$id")
-            fi
-        done
-        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: No scenes found matching part ${FILTER_VALUE}"
-            exit 1
-        fi
-        ;;
-esac
-
-# Build the scene file list (only scenes that have been drafted)
-SCENE_FILES=()
-MISSING_SCENES=()
-for id in "${FILTERED_IDS[@]}"; do
-    scene_file="${SCENES_DIR}/${id}.md"
-    if [[ -f "$scene_file" ]]; then
-        SCENE_FILES+=("scenes/${id}.md")
-    else
-        MISSING_SCENES+=("$id")
+    if [[ ${#CHAPTER_FILES[@]} -eq 0 ]]; then
+        log "ERROR: No chapter files found in ${CHAPTERS_DIR}"
+        log "Run 'storyforge assemble' first to generate chapter files."
+        exit 1
     fi
-done
 
-if [[ ${#SCENE_FILES[@]} -eq 0 ]]; then
-    log "ERROR: No drafted scene files found for the selected scope."
-    log "Missing scenes: ${MISSING_SCENES[*]}"
-    exit 1
-fi
+    case "$FILTER_MODE" in
+        manuscript)
+            # All chapters
+            for f in "${CHAPTER_FILES[@]}"; do
+                rel_path="manuscript/chapters/$(basename "$f")"
+                SCENE_FILES+=("$rel_path")
+            done
+            SCOPE_DESCRIPTION="full manuscript (${#CHAPTER_FILES[@]} assembled chapters)"
+            ;;
+        chapter)
+            # Single chapter
+            ch_file="${CHAPTERS_DIR}/chapter-$(printf '%02d' "$FILTER_VALUE").md"
+            if [[ ! -f "$ch_file" ]]; then
+                log "ERROR: Chapter file not found: manuscript/chapters/chapter-$(printf '%02d' "$FILTER_VALUE").md"
+                exit 1
+            fi
+            SCENE_FILES+=("manuscript/chapters/$(basename "$ch_file")")
+            SCOPE_DESCRIPTION="chapter ${FILTER_VALUE}"
+            ;;
+    esac
 
-if [[ ${#MISSING_SCENES[@]} -gt 0 ]]; then
-    log "WARNING: ${#MISSING_SCENES[@]} scenes not yet drafted (skipping): ${MISSING_SCENES[*]}"
-fi
+    log "Manuscript mode: ${#SCENE_FILES[@]} chapter file(s)"
 
-# Build scene list string for prompt injection
-SCENE_LIST_STR=""
-for sf in "${SCENE_FILES[@]}"; do
-    SCENE_LIST_STR="${SCENE_LIST_STR}   - ${sf}
+    # Build file list string for prompt injection
+    for sf in "${SCENE_FILES[@]}"; do
+        SCENE_LIST_STR="${SCENE_LIST_STR}   - ${sf}
 "
-done
+    done
+else
+    # --- Scene mode: read from scene-index.yaml ---
+    ALL_SCENE_IDS=()
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+        ALL_SCENE_IDS+=("$id")
+    done < <(grep -E '^[[:space:]]*- id:[[:space:]]*' "$SCENE_INDEX" \
+        | sed 's/^[[:space:]]*- id:[[:space:]]*//' \
+        | sed 's/^["'"'"']//' \
+        | sed 's/["'"'"']$//' \
+        | sed 's/[[:space:]]*$//')
 
-SCOPE_DESCRIPTION="full manuscript (${#SCENE_FILES[@]} scenes)"
-case "$FILTER_MODE" in
-    act)   SCOPE_DESCRIPTION="Act ${FILTER_VALUE} (${#SCENE_FILES[@]} scenes)" ;;
-    part)  SCOPE_DESCRIPTION="Part ${FILTER_VALUE} (${#SCENE_FILES[@]} scenes)" ;;
-    range) SCOPE_DESCRIPTION="scenes ${RANGE_START} through ${RANGE_END} (${#SCENE_FILES[@]} scenes)" ;;
-    single) SCOPE_DESCRIPTION="scene ${RANGE_START}" ;;
-esac
+    if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
+        log "ERROR: No scenes found in ${SCENE_INDEX}"
+        exit 1
+    fi
+
+    log "Found ${#ALL_SCENE_IDS[@]} scenes in scene-index.yaml"
+
+    # ============================================================================
+    # Filter scenes based on scope arguments
+    # ============================================================================
+
+    FILTERED_IDS=()
+
+    case "$FILTER_MODE" in
+        all)
+            FILTERED_IDS=("${ALL_SCENE_IDS[@]}")
+            ;;
+        single)
+            found=false
+            for id in "${ALL_SCENE_IDS[@]}"; do
+                if [[ "$id" == "$RANGE_START" ]]; then
+                    found=true
+                    break
+                fi
+            done
+            if [[ "$found" == false ]]; then
+                log "ERROR: Scene '${RANGE_START}' not found in scene-index.yaml"
+                exit 1
+            fi
+            FILTERED_IDS=("$RANGE_START")
+            ;;
+        range)
+            in_range=false
+            for id in "${ALL_SCENE_IDS[@]}"; do
+                if [[ "$id" == "$RANGE_START" ]]; then
+                    in_range=true
+                fi
+                if [[ "$in_range" == true ]]; then
+                    FILTERED_IDS+=("$id")
+                fi
+                if [[ "$id" == "$RANGE_END" ]]; then
+                    break
+                fi
+            done
+            if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+                log "ERROR: Could not find range ${RANGE_START}..${RANGE_END} in scene-index.yaml"
+                exit 1
+            fi
+            ;;
+        act)
+            local_pattern="act${FILTER_VALUE}"
+            for id in "${ALL_SCENE_IDS[@]}"; do
+                if [[ "${id,,}" == "${local_pattern,,}"* ]]; then
+                    FILTERED_IDS+=("$id")
+                fi
+            done
+            if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+                log "ERROR: No scenes found matching act ${FILTER_VALUE}"
+                exit 1
+            fi
+            ;;
+        part)
+            local_pattern="p${FILTER_VALUE}"
+            for id in "${ALL_SCENE_IDS[@]}"; do
+                if [[ "${id,,}" == "${local_pattern,,}"* || "${id,,}" == "part${FILTER_VALUE}"* ]]; then
+                    FILTERED_IDS+=("$id")
+                fi
+            done
+            if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+                log "ERROR: No scenes found matching part ${FILTER_VALUE}"
+                exit 1
+            fi
+            ;;
+    esac
+
+    # Build the scene file list (only scenes that have been drafted)
+    MISSING_SCENES=()
+    for id in "${FILTERED_IDS[@]}"; do
+        scene_file="${SCENES_DIR}/${id}.md"
+        if [[ -f "$scene_file" ]]; then
+            SCENE_FILES+=("scenes/${id}.md")
+        else
+            MISSING_SCENES+=("$id")
+        fi
+    done
+
+    if [[ ${#SCENE_FILES[@]} -eq 0 ]]; then
+        log "ERROR: No drafted scene files found for the selected scope."
+        log "Missing scenes: ${MISSING_SCENES[*]}"
+        exit 1
+    fi
+
+    if [[ ${#MISSING_SCENES[@]} -gt 0 ]]; then
+        log "WARNING: ${#MISSING_SCENES[@]} scenes not yet drafted (skipping): ${MISSING_SCENES[*]}"
+    fi
+
+    # Build scene list string for prompt injection
+    for sf in "${SCENE_FILES[@]}"; do
+        SCENE_LIST_STR="${SCENE_LIST_STR}   - ${sf}
+"
+    done
+
+    SCOPE_DESCRIPTION="full manuscript (${#SCENE_FILES[@]} scenes)"
+    case "$FILTER_MODE" in
+        act)   SCOPE_DESCRIPTION="Act ${FILTER_VALUE} (${#SCENE_FILES[@]} scenes)" ;;
+        part)  SCOPE_DESCRIPTION="Part ${FILTER_VALUE} (${#SCENE_FILES[@]} scenes)" ;;
+        range) SCOPE_DESCRIPTION="scenes ${RANGE_START} through ${RANGE_END} (${#SCENE_FILES[@]} scenes)" ;;
+        single) SCOPE_DESCRIPTION="scene ${RANGE_START}" ;;
+    esac
+fi
 
 # ============================================================================
 # Collect custom evaluators from storyforge.yaml
@@ -444,7 +523,15 @@ fi)
 
 ===== INSTRUCTIONS =====
 
+$(if [[ "$INPUT_TYPE" == "chapters" ]]; then
+    cat <<'CHAPTER_INST'
+1. Read the assembled chapter files that comprise the evaluation scope. These are the final manuscript chapters with scenes already combined, scene breaks in place, and chapter headings applied. Read them in order:
+CHAPTER_INST
+else
+    cat <<'SCENE_INST'
 1. Read the scene files that comprise the evaluation scope. Read them in order:
+SCENE_INST
+fi)
 ${SCENE_LIST_STR}
 2. Also read these reference files for context (if they exist):
 ${ref_files}
@@ -455,7 +542,20 @@ IMPORTANT: If \`reference/key-decisions.md\` exists, it is the authoritative rec
 
 4. Save your report to: working/evaluations/eval-${EVAL_TIMESTAMP}/${evaluator}.md
 
+$(if [[ "$INPUT_TYPE" == "chapters" ]]; then
+    cat <<'CHAPTER_CITE'
+5. Be specific. Cite chapter numbers, character names, and quote brief passages when making points. Pay particular attention to:
+   - Chapter-level pacing: Does each chapter have a satisfying arc? Does it open with momentum and close with a reason to turn the page?
+   - Chapter transitions: How does the end of one chapter flow into the beginning of the next? Are cliffhangers, hooks, and tonal shifts effective?
+   - Chapter length variation: Are chapters appropriately varied in length, or do they feel monotonous? Do short chapters create urgency where needed?
+   - Scene breaks within chapters: Do the scene breaks within each chapter feel natural? Does the ordering of scenes within a chapter create the right rhythm?
+   - Overall reading momentum: Evaluate pacing as a reader would experience it — chapter by chapter, not scene by scene.
+CHAPTER_CITE
+else
+    cat <<'SCENE_CITE'
 5. Be specific. Cite scene IDs, character names, and quote brief passages when making points. Vague praise or criticism is unhelpful. The author wants to know exactly what works, what does not, and why.
+SCENE_CITE
+fi)
 
 6. Be honest. The author is looking for professional-grade feedback, not encouragement. If something is broken, say so clearly. If something is excellent, say that too — protecting strengths is as important as fixing weaknesses.
 
@@ -855,8 +955,8 @@ findings:
     severity: critical|major|minor|suggestion
     summary: "One-line description of the finding"
     detail: "Full explanation with context"
-    affected_scenes:
-      - scene-id
+    affected_locations:
+      - $(if [[ "$INPUT_TYPE" == "chapters" ]]; then echo "chapter-number-or-range"; else echo "scene-id"; fi)
     flagged_by:
       - evaluator-name
     recommendation: "Specific, actionable suggestion"
@@ -869,7 +969,7 @@ strengths:
     summary: "One-line description of the strength"
     detail: "Why this works and why it must be protected"
     examples:
-      - scene-id
+      - $(if [[ "$INPUT_TYPE" == "chapters" ]]; then echo "chapter-number-or-range"; else echo "scene-id"; fi)
     flagged_by:
       - evaluator-name
 
