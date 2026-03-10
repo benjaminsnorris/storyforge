@@ -46,8 +46,8 @@ Work through these priorities in order. Stop at the first one that applies — t
 Some phases have a single obvious next step:
 
 - **Phase is `review`** → The revision cycle just finished. Recommend `/storyforge:review` to assess what changed and determine if the revision landed. Do not recommend other work until the review is done.
-- **Phase is `complete`** → The manuscript is done. Recommend `/storyforge:produce` to set up production (chapter map, epub settings), or `./storyforge assemble` if the chapter map already exists.
-- **Phase is `production`** → Assembly is underway. Check if output exists in `manuscript/output/`. If not, recommend `./storyforge assemble`. If it does, suggest reviewing the output or adjusting production settings via `/storyforge:produce`.
+- **Phase is `complete`** → The manuscript is done. Recommend `/storyforge:produce` to set up production (chapter map, epub settings), or prompt the author to run `./storyforge assemble` if the chapter map already exists.
+- **Phase is `production`** → Assembly is underway. Check if output exists in `manuscript/output/`. If not, prompt the author to run `./storyforge assemble`. If it does, suggest reviewing the output or adjusting production settings via `/storyforge:produce`.
 
 ### Priority 2: Pipeline Cycle State
 
@@ -70,7 +70,7 @@ Work that prevents other work from happening:
 
 - **Scene index is empty** → Nothing can be drafted. Recommend `/storyforge:scenes` to design the scene structure.
 - **Voice guide is missing** → Drafting is blocked. Recommend `/storyforge:voice` to establish the voice.
-- **No scenes drafted** but scene index exists and voice guide exists → Ready to draft. Recommend `./storyforge write` to begin drafting.
+- **No scenes drafted** but scene index exists and voice guide exists → Ready to draft. Prompt the author to run `./storyforge write` to begin drafting.
 
 ### Priority 4: Unaddressed Evaluation Findings
 
@@ -82,7 +82,7 @@ If an evaluation has been completed but no revision plan exists:
 
 If a revision cycle completed but critical findings remain unaddressed (check the most recent review report):
 
-- Recommend running `./storyforge evaluate` for a fresh assessment, or `/storyforge:plan-revision` for a targeted follow-up cycle
+- Prompt the author to run `./storyforge evaluate` for a fresh assessment, or recommend `/storyforge:plan-revision` for a targeted follow-up cycle
 
 ### Priority 5: Artifact Gaps
 
@@ -188,6 +188,7 @@ git push
 
 ## Important
 
+- **Never run pipeline scripts directly.** The `./storyforge write`, `./storyforge evaluate`, `./storyforge revise`, and `./storyforge assemble` commands launch long-running Claude sub-sessions. Running them from inside an existing Claude session almost always fails. Always prompt the author to run these commands themselves in their terminal.
 - **Do not re-ask settled decisions.** Check the key decisions file before recommending anything that touches a previously decided topic.
 - **Do not recommend against the current cycle.** If evaluation just finished and the cycle is in `planning` state, recommend plan-revision — don't suggest starting a new evaluation or drafting new scenes.
 - **Be specific.** "Work on your characters" is not a recommendation. "Deepen Maren's wound/lie structure — her Act 2 choices don't yet connect to the childhood betrayal established in her backstory" is a recommendation.

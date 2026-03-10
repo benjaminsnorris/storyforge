@@ -466,8 +466,3 @@ log "============================================"
     git commit -m "Assemble: ${TITLE} (${FORMAT})" 2>/dev/null || true
     git push 2>/dev/null || true
 )
-
-# --- Review phase ---
-if [[ "$DRY_RUN" != true ]]; then
-    run_review_phase "assembly" "$PROJECT_DIR"
-fi

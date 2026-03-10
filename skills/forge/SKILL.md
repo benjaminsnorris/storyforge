@@ -43,7 +43,9 @@ Based on the author's message, operate in one of three modes:
 
 ### Directed Mode
 
-The author has a specific request. Parse what they want and route accordingly:
+The author has a specific request. Parse what they want and route accordingly.
+
+**CRITICAL: Never run pipeline scripts directly.** The `./storyforge write`, `./storyforge evaluate`, `./storyforge revise`, and `./storyforge assemble` commands launch long-running Claude sub-sessions. Running them from inside an existing Claude session almost always fails. Instead, **always prompt the author to run the command themselves** in their terminal. This also lets the author choose `--interactive` mode to participate in the process. Present the command, explain the options, and let the author execute it.
 
 **Character, world, story concept, or timeline work:**
 Invoke the `develop` skill. This covers character bible creation and deepening, world-building, story architecture, synopsis development, and timeline construction.

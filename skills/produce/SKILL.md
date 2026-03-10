@@ -173,7 +173,7 @@ The chapter map exists and the author wants to assemble the book. This is a shor
 
 Check that the `./storyforge` runner script exists in the project. If not, create it from the plugin template.
 
-Then provide the command:
+Then tell the author the command to run:
 
 ```
 ./storyforge assemble [options]
@@ -190,11 +190,7 @@ Explain the available options:
 - `--dry-run` — show what would be done without doing it
 - `--skip-validation` — skip epubcheck validation
 
-If the author says "just do it" or similar, run the assembly command directly using the Bash tool:
-
-```bash
-cd {project-dir} && ./storyforge assemble --format epub
-```
+**Do NOT run the assembly script directly.** Always prompt the author to run it themselves. This lets them choose interactive mode, watch progress, and intervene if needed.
 
 ---
 
@@ -202,13 +198,13 @@ cd {project-dir} && ./storyforge assemble --format epub
 
 The author wants to see what the assembled book looks like before generating final output.
 
-Run a draft assembly:
+Tell the author to run:
 
-```bash
-cd {project-dir} && ./storyforge assemble --draft
+```
+./storyforge assemble --draft
 ```
 
-Then read and present a summary of the assembled manuscript:
+After they run it, read and present a summary of the assembled manuscript:
 - Total chapters and word count
 - Chapter list with word counts
 - Front/back matter included
