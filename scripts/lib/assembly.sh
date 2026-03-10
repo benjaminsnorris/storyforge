@@ -1024,8 +1024,9 @@ generate_web_book() {
 
     local nav_total=${#nav_types[@]}
 
-    # --- Build part-grouped TOC entries ---
+    # --- Build part-grouped TOC entries (two versions: top-level and chapter-level) ---
     local toc_entries=""
+    local toc_entries_ch=""
     local toc_current_part=""
     local toc_ch_part toc_ch_title toc_ch_slug toc_part_idx toc_pt
 
@@ -1038,22 +1039,32 @@ generate_web_book() {
             if [[ -n "$toc_current_part" ]]; then
                 toc_entries="${toc_entries}  </ol>
 "
+                toc_entries_ch="${toc_entries_ch}  </ol>
+"
             fi
             toc_current_part="$toc_ch_part"
             toc_part_idx=$(( toc_ch_part - 1 ))
             toc_pt="${part_titles[$toc_part_idx]:-Part $toc_ch_part}"
-            toc_entries="${toc_entries}  <h3 class=\"toc-part\">Part ${toc_ch_part}: ${toc_pt}</h3>
+            local part_heading="  <h3 class=\"toc-part\">Part ${toc_ch_part}: ${toc_pt}</h3>
   <ol class=\"toc-list\" start=\"${ch}\">
 "
+            toc_entries="${toc_entries}${part_heading}"
+            toc_entries_ch="${toc_entries_ch}${part_heading}"
         elif [[ -z "$toc_current_part" && "$ch" -eq 1 ]]; then
             toc_entries="${toc_entries}  <ol class=\"toc-list\">
+"
+            toc_entries_ch="${toc_entries_ch}  <ol class=\"toc-list\">
 "
         fi
 
         toc_entries="${toc_entries}    <li><a href=\"chapters/${toc_ch_slug}.html\" data-chapter=\"${toc_ch_slug}\">${toc_ch_title}</a></li>
 "
+        toc_entries_ch="${toc_entries_ch}    <li><a href=\"${toc_ch_slug}.html\" data-chapter=\"${toc_ch_slug}\">${toc_ch_title}</a></li>
+"
     done
     toc_entries="${toc_entries}  </ol>
+"
+    toc_entries_ch="${toc_entries_ch}  </ol>
 "
 
     # --- Build chapter map JSON for resume feature ---
@@ -1074,10 +1085,12 @@ generate_web_book() {
     local css_toplevel="${css_resolved//\{\{FONT_PATH\}\}/fonts}"
     local css_chapters="${css_resolved//\{\{FONT_PATH\}\}/..\/fonts}"
 
-    # Pre-build resolved TOC entries as a temp file (avoids sed delimiter issues)
-    local toc_file
+    # Pre-build resolved TOC entries as temp files (top-level and chapter-level paths)
+    local toc_file toc_ch_file_toc
     toc_file=$(mktemp "${TMPDIR:-/tmp}/sf-toc.XXXXXX")
+    toc_ch_file_toc=$(mktemp "${TMPDIR:-/tmp}/sf-toc-ch.XXXXXX")
     echo "$toc_entries" > "$toc_file"
+    echo "$toc_entries_ch" > "$toc_ch_file_toc"
 
     # Pre-build resolved CSS as temp files
     local css_top_file css_ch_file js_file map_file
@@ -1105,7 +1118,11 @@ generate_web_book() {
         local tmpl_file="$1"
         local depth="${2:-top}"
         local css_src="$css_top_file"
-        [[ "$depth" == "ch" ]] && css_src="$css_ch_file"
+        local toc_src="$toc_file"
+        if [[ "$depth" == "ch" ]]; then
+            css_src="$css_ch_file"
+            toc_src="$toc_ch_file_toc"
+        fi
 
         # Process template line by line
         while IFS= read -r line || [[ -n "$line" ]]; do
@@ -1115,7 +1132,7 @@ generate_web_book() {
             elif [[ "$line" == *'{{JS}}'* ]]; then
                 cat "$js_file"
             elif [[ "$line" == *'{{TOC_ENTRIES}}'* ]]; then
-                cat "$toc_file"
+                cat "$toc_src"
             elif [[ "$line" == *'{{CHAPTER_MAP_JSON}}'* ]]; then
                 # Preserve the surrounding JS context
                 local before="${line%%\{\{CHAPTER_MAP_JSON\}\}*}"
@@ -1140,7 +1157,7 @@ generate_web_book() {
 
     # Clean up temp files on exit
     _web_cleanup() {
-        rm -f "$toc_file" "$css_top_file" "$css_ch_file" "$js_file" "$map_file"
+        rm -f "$toc_file" "$toc_ch_file_toc" "$css_top_file" "$css_ch_file" "$js_file" "$map_file"
     }
 
     # --- Determine first page ---
