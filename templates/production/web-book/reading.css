@@ -292,7 +292,8 @@ body {
   opacity: 0.3;
 }
 
-.book-nav .book-title {
+.book-nav .nav-title {
+  font-family: var(--title-font);
   font-size: 0.82em;
   color: var(--text-dim);
   letter-spacing: 0.06em;
@@ -300,6 +301,15 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 50%;
+  transition: color 0.4s ease;
+}
+
+.book-nav .chapter-info {
+  font-family: var(--title-font);
+  font-size: 0.78em;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
   transition: color 0.4s ease;
 }
 
@@ -400,6 +410,7 @@ body {
 
 .toc-panel a,
 .toc-contents a {
+  font-family: var(--title-font);
   display: flex;
   align-items: baseline;
   gap: 0.75em;
@@ -626,6 +637,7 @@ body {
 /* --- TOC PART HEADINGS -------------------------------------------------- */
 
 .toc-part {
+  font-family: var(--title-font);
   font-size: 0.72em;
   font-weight: normal;
   letter-spacing: 0.2em;
