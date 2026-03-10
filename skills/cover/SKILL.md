@@ -15,6 +15,8 @@ and reference materials live at `references/` relative to that plugin root.
 
 Store this resolved plugin path for use throughout the session.
 
+**Do not open image files.** Never run `open`, `xdg-open`, or any command to display or preview cover images. The author may be working via SSH or already has the project open in an editor. Just tell them the file path and let them view it however they prefer.
+
 ## Step 1: Read Project State
 
 Before doing anything else, orient yourself:
