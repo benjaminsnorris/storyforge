@@ -906,7 +906,7 @@ generate_web_book() {
     fi
 
     # Verify templates exist
-    for tmpl in reading.css reading.js index.html toc.html chapter.html; do
+    for tmpl in reading.css reading.js index.html toc.html chapter.html part.html; do
         if [[ ! -f "${template_dir}/${tmpl}" ]]; then
             log "ERROR: Web book template missing: ${template_dir}/${tmpl}"
             return 1
@@ -936,7 +936,7 @@ generate_web_book() {
     cover_image=$(read_production_field "$project_dir" "cover_image" 2>/dev/null || echo "")
 
     local total_chapters
-    total_chapters=$(count_chapters)
+    total_chapters=$(count_chapters "$project_dir")
 
     # Read CSS and JS templates
     local css_content
@@ -951,10 +951,17 @@ generate_web_book() {
     # Create output directories
     mkdir -p "${output_dir}/chapters"
 
+    # Copy font files
+    local font_src="${template_dir}/fonts"
+    if [[ -d "$font_src" ]]; then
+        mkdir -p "${output_dir}/fonts"
+        cp "${font_src}"/*.woff2 "${output_dir}/fonts/" 2>/dev/null || true
+        log "  Fonts copied to ${output_dir}/fonts/"
+    fi
+
     log "Generating web book: ${total_chapters} chapters..."
 
-    # --- Build chapter list for TOC ---
-    local toc_entries=""
+    # --- Build chapter arrays ---
     local ch_titles=()
     local ch_slugs=()
     for (( ch=1; ch<=total_chapters; ch++ )); do
@@ -964,24 +971,106 @@ generate_web_book() {
         ch_slug=$(printf 'chapter-%02d' "$ch")
         ch_titles+=("$ch_title")
         ch_slugs+=("$ch_slug")
+    done
+
+    # --- Read parts data ---
+    local total_parts
+    total_parts=$(count_parts "$project_dir")
+
+    local -a part_titles=()
+    for (( p=1; p<=total_parts; p++ )); do
+        local pt
+        pt=$(read_part_field "$p" "$project_dir" "title")
+        part_titles+=("$pt")
+    done
+
+    # Build navigation chain: interleave part interstitials with chapters
+    local -a nav_types=()
+    local -a nav_slugs=()
+    local -a nav_titles=()
+    local current_part=0
+
+    for (( ch=1; ch<=total_chapters; ch++ )); do
+        local ch_part
+        ch_part=$(read_chapter_field "$ch" "$project_dir" "part" 2>/dev/null || echo "")
+
+        if [[ -n "$ch_part" && "$ch_part" != "$current_part" ]]; then
+            current_part="$ch_part"
+            local part_slug
+            part_slug=$(printf 'part-%02d' "$ch_part")
+            local part_idx=$(( ch_part - 1 ))
+            nav_types+=("part")
+            nav_slugs+=("$part_slug")
+            nav_titles+=("${part_titles[$part_idx]:-Part $ch_part}")
+        fi
+
+        nav_types+=("chapter")
+        nav_slugs+=("${ch_slugs[$((ch-1))]}")
+        nav_titles+=("${ch_titles[$((ch-1))]}")
+    done
+
+    local nav_total=${#nav_types[@]}
+
+    # --- Build part-grouped TOC entries ---
+    local toc_entries=""
+    local toc_current_part=""
+
+    for (( ch=1; ch<=total_chapters; ch++ )); do
+        local ch_part
+        ch_part=$(read_chapter_field "$ch" "$project_dir" "part" 2>/dev/null || echo "")
+        local ch_title="${ch_titles[$((ch-1))]}"
+        local ch_slug="${ch_slugs[$((ch-1))]}"
+
+        if [[ -n "$ch_part" && "$ch_part" != "$toc_current_part" ]]; then
+            if [[ -n "$toc_current_part" ]]; then
+                toc_entries="${toc_entries}  </ol>
+"
+            fi
+            toc_current_part="$ch_part"
+            local part_idx=$(( ch_part - 1 ))
+            local pt="${part_titles[$part_idx]:-Part $ch_part}"
+            toc_entries="${toc_entries}  <h3 class=\"toc-part\">Part ${ch_part}: ${pt}</h3>
+  <ol class=\"toc-list\" start=\"${ch}\">
+"
+        elif [[ -z "$toc_current_part" && "$ch" -eq 1 ]]; then
+            toc_entries="${toc_entries}  <ol class=\"toc-list\">
+"
+        fi
+
         toc_entries="${toc_entries}    <li><a href=\"chapters/${ch_slug}.html\" data-chapter=\"${ch_slug}\">${ch_title}</a></li>
 "
     done
+    toc_entries="${toc_entries}  </ol>
+"
+
+    # --- Build chapter map JSON for resume feature ---
+    local chapter_map_json="{"
+    for (( ch=1; ch<=total_chapters; ch++ )); do
+        local ch_title="${ch_titles[$((ch-1))]}"
+        local ch_slug="${ch_slugs[$((ch-1))]}"
+        if (( ch > 1 )); then
+            chapter_map_json="${chapter_map_json},"
+        fi
+        chapter_map_json="${chapter_map_json}\"${ch_slug}\":\"Chapter ${ch}: ${ch_title}\""
+    done
+    chapter_map_json="${chapter_map_json}}"
 
     # --- Helper: substitute template variables ---
     _web_sub() {
         local content="$1"
+        local font_path="${2:-fonts}"
         content="${content//\{\{BOOK_TITLE\}\}/$title}"
         content="${content//\{\{AUTHOR\}\}/$author}"
         content="${content//\{\{LANG\}\}/$language}"
         content="${content//\{\{DESCRIPTION\}\}/$description}"
         content="${content//\{\{TOTAL_CHAPTERS\}\}/$total_chapters}"
-        content="${content//\{\{CSS\}\}/$css_content}"
+        content="${content//\{\{CSS\}\}/${css_content//\{\{FONT_PATH\}\}/$font_path}}"
         content="${content//\{\{JS\}\}/$js_content}"
         content="${content//\{\{HEAD_SCRIPT\}\}/$head_script}"
         content="${content//\{\{TOC_ENTRIES\}\}/$toc_entries}"
+        content="${content//\{\{FONT_PATH\}\}/$font_path}"
+        content="${content//\{\{CHAPTER_MAP_JSON\}\}/$chapter_map_json}"
 
-        # Canonical link
         if [[ -n "$base_url" ]]; then
             content="${content//\{\{CANONICAL\}\}/<link rel=\"canonical\" href=\"${base_url}\">}"
         else
@@ -991,11 +1080,13 @@ generate_web_book() {
         echo "$content"
     }
 
+    # --- Determine first page ---
+    local first_page="${nav_slugs[0]}.html"
+
     # --- Generate index.html ---
     local index_tmpl
     index_tmpl=$(cat "${template_dir}/index.html")
 
-    # Cover image
     local cover_html=""
     if [[ -n "$cover_image" && -f "${project_dir}/${cover_image}" ]]; then
         cp "${project_dir}/${cover_image}" "${output_dir}/cover.png" 2>/dev/null || \
@@ -1004,13 +1095,11 @@ generate_web_book() {
         cover_html="<img src=\"cover.${cover_ext}\" alt=\"${title}\" class=\"book-cover\">"
     fi
 
-    # Logline
     local logline_html=""
     if [[ -n "$logline" ]]; then
         logline_html="<p class=\"book-logline\">${logline}</p>"
     fi
 
-    # Series
     local series_html=""
     if [[ -n "$series_name" ]]; then
         series_html="<p class=\"book-series\">${series_name}"
@@ -1020,15 +1109,15 @@ generate_web_book() {
         series_html="${series_html}</p>"
     fi
 
-    # Copyright
     local copyright_html="<p class=\"book-copyright\">&copy; ${copyright_year} ${author}</p>"
 
     local index_content
-    index_content=$(_web_sub "$index_tmpl")
+    index_content=$(_web_sub "$index_tmpl" "fonts")
     index_content="${index_content//\{\{COVER_IMG\}\}/$cover_html}"
     index_content="${index_content//\{\{LOGLINE\}\}/$logline_html}"
     index_content="${index_content//\{\{SERIES\}\}/$series_html}"
     index_content="${index_content//\{\{COPYRIGHT\}\}/$copyright_html}"
+    index_content="${index_content//\{\{FIRST_PAGE\}\}/$first_page}"
     echo "$index_content" > "${output_dir}/index.html"
 
     # --- Generate contents.html ---
@@ -1053,70 +1142,109 @@ generate_web_book() {
     done
 
     local toc_content
-    toc_content=$(_web_sub "$toc_tmpl")
+    toc_content=$(_web_sub "$toc_tmpl" "fonts")
     toc_content="${toc_content//\{\{BACK_MATTER_LINKS\}\}/$back_matter_html}"
     echo "$toc_content" > "${output_dir}/contents.html"
 
-    # --- Generate chapter pages ---
+    # --- Read part template ---
+    local part_tmpl
+    part_tmpl=$(cat "${template_dir}/part.html")
+
+    # --- Generate chapter template ---
     local ch_tmpl
     ch_tmpl=$(cat "${template_dir}/chapter.html")
 
-    for (( ch=1; ch<=total_chapters; ch++ )); do
-        local ch_idx=$(( ch - 1 ))
-        local ch_title="${ch_titles[$ch_idx]}"
-        local ch_slug="${ch_slugs[$ch_idx]}"
-        local ch_num_fmt
-        ch_num_fmt=$(printf '%02d' "$ch")
-        local ch_md="${chapters_dir}/chapter-${ch_num_fmt}.md"
-
-        if [[ ! -f "$ch_md" ]]; then
-            log "WARNING: Chapter file missing: ${ch_md}"
-            continue
-        fi
-
-        # Convert chapter markdown to HTML fragment
-        local ch_html_fragment
-        ch_html_fragment=$(pandoc --from markdown --to html5 "$ch_md" 2>/dev/null)
+    # --- Generate all pages using navigation chain ---
+    for (( i=0; i<nav_total; i++ )); do
+        local page_type="${nav_types[$i]}"
+        local page_slug="${nav_slugs[$i]}"
+        local page_title="${nav_titles[$i]}"
 
         # Build prev/next links
         local prev_link=""
         local next_link=""
-        if (( ch > 1 )); then
-            local prev_slug
-            prev_slug=$(printf 'chapter-%02d' $(( ch - 1 )))
-            local prev_title="${ch_titles[$(( ch - 2 ))]}"
-            prev_link="<a href=\"${prev_slug}.html\" class=\"prev-chapter nav-link\"><span class=\"nav-label\">&larr; Previous Chapter</span><span class=\"nav-chapter-title\">${prev_title}</span></a>"
+
+        if (( i > 0 )); then
+            local prev_slug="${nav_slugs[$((i-1))]}"
+            local prev_title="${nav_titles[$((i-1))]}"
+            local prev_label="&larr; Previous"
+            if [[ "${nav_types[$((i-1))]}" == "part" ]]; then
+                prev_label="&larr; ${prev_title}"
+            fi
+            prev_link="<a href=\"${prev_slug}.html\" class=\"prev-chapter nav-link\"><span class=\"nav-label\">${prev_label}</span><span class=\"nav-chapter-title\">${prev_title}</span></a>"
         else
             prev_link="<a href=\"../contents.html\" class=\"prev-chapter nav-link\"><span class=\"nav-label\">&larr; Contents</span></a>"
         fi
-        if (( ch < total_chapters )); then
-            local next_slug
-            next_slug=$(printf 'chapter-%02d' $(( ch + 1 )))
-            local next_title="${ch_titles[$ch]}"
-            next_link="<a href=\"${next_slug}.html\" class=\"next-chapter nav-link\"><span class=\"nav-label\">Next Chapter &rarr;</span><span class=\"nav-chapter-title\">${next_title}</span></a>"
+
+        if (( i < nav_total - 1 )); then
+            local next_slug="${nav_slugs[$((i+1))]}"
+            local next_title="${nav_titles[$((i+1))]}"
+            local next_label="Next &rarr;"
+            if [[ "${nav_types[$((i+1))]}" == "part" ]]; then
+                next_label="${next_title} &rarr;"
+            fi
+            next_link="<a href=\"${next_slug}.html\" class=\"next-chapter nav-link\"><span class=\"nav-label\">${next_label}</span><span class=\"nav-chapter-title\">${next_title}</span></a>"
         else
             next_link="<a href=\"../index.html\" class=\"next-chapter nav-link\"><span class=\"nav-label\">Finished &rarr;</span><span class=\"nav-chapter-title\">Back to cover</span></a>"
         fi
 
-        # Substitute into chapter template
-        local page_content
-        page_content=$(_web_sub "$ch_tmpl")
-        page_content="${page_content//\{\{CHAPTER_TITLE\}\}/$ch_title}"
-        page_content="${page_content//\{\{CHAPTER_SLUG\}\}/$ch_slug}"
-        page_content="${page_content//\{\{CHAPTER_NUM\}\}/$ch}"
-        page_content="${page_content//\{\{CHAPTER_CONTENT\}\}/$ch_html_fragment}"
-        page_content="${page_content//\{\{PREV_LINK\}\}/$prev_link}"
-        page_content="${page_content//\{\{NEXT_LINK\}\}/$next_link}"
+        if [[ "$page_type" == "part" ]]; then
+            local part_num="${page_slug#part-}"
+            part_num=$((10#$part_num))
 
-        echo "$page_content" > "${output_dir}/chapters/${ch_slug}.html"
+            local page_content
+            page_content=$(_web_sub "$part_tmpl" "../fonts")
+            page_content="${page_content//\{\{PART_NUMBER\}\}/$part_num}"
+            page_content="${page_content//\{\{PART_TITLE\}\}/$page_title}"
+            page_content="${page_content//\{\{PREV_LINK\}\}/$prev_link}"
+            page_content="${page_content//\{\{NEXT_LINK\}\}/$next_link}"
+
+            echo "$page_content" > "${output_dir}/chapters/${page_slug}.html"
+
+        elif [[ "$page_type" == "chapter" ]]; then
+            local ch_num="${page_slug#chapter-}"
+            ch_num=$((10#$ch_num))
+            local ch_num_fmt
+            ch_num_fmt=$(printf '%02d' "$ch_num")
+            local ch_md="${chapters_dir}/chapter-${ch_num_fmt}.md"
+
+            if [[ ! -f "$ch_md" ]]; then
+                log "WARNING: Chapter file missing: ${ch_md}"
+                continue
+            fi
+
+            local ch_html_fragment
+            ch_html_fragment=$(pandoc --from markdown --to html5 "$ch_md" 2>/dev/null)
+
+            local part_label_html=""
+            local ch_part_title
+            ch_part_title=$(get_chapter_part_title "$ch_num" "$project_dir")
+            if [[ -n "$ch_part_title" ]]; then
+                local ch_part_num
+                ch_part_num=$(read_chapter_field "$ch_num" "$project_dir" "part" 2>/dev/null || echo "")
+                part_label_html="<div class=\"part-label\">Part ${ch_part_num}: ${ch_part_title}</div>"
+            fi
+
+            local page_content
+            page_content=$(_web_sub "$ch_tmpl" "../fonts")
+            page_content="${page_content//\{\{CHAPTER_TITLE\}\}/$page_title}"
+            page_content="${page_content//\{\{CHAPTER_SLUG\}\}/$page_slug}"
+            page_content="${page_content//\{\{CHAPTER_NUM\}\}/$ch_num}"
+            page_content="${page_content//\{\{CHAPTER_CONTENT\}\}/$ch_html_fragment}"
+            page_content="${page_content//\{\{PREV_LINK\}\}/$prev_link}"
+            page_content="${page_content//\{\{NEXT_LINK\}\}/$next_link}"
+            page_content="${page_content//\{\{PART_LABEL\}\}/$part_label_html}"
+
+            echo "$page_content" > "${output_dir}/chapters/${page_slug}.html"
+        fi
     done
 
     # --- Summary ---
-    local total_files=$(( total_chapters + 2 ))  # chapters + index + contents
+    local total_files=$(( nav_total + 2 ))
     log "Web book generated: ${total_files} pages at ${output_dir}/"
     log "  Landing: ${output_dir}/index.html"
     log "  Contents: ${output_dir}/contents.html"
-    log "  Chapters: ${output_dir}/chapters/ (${total_chapters} files)"
+    log "  Chapters: ${output_dir}/chapters/ (${total_chapters} chapters, ${total_parts} parts)"
     return 0
 }
 
