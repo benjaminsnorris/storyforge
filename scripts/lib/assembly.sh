@@ -63,6 +63,83 @@ read_chapter_field() {
         | sed 's/[[:space:]]*$//'
 }
 
+# Count the number of parts defined in chapter-map.yaml
+# Usage: count_parts "/path/to/project"
+count_parts() {
+    local project_dir="$1"
+    local chapter_map="${project_dir}/reference/chapter-map.yaml"
+
+    if [[ ! -f "$chapter_map" ]]; then
+        echo "0"
+        return 0
+    fi
+
+    awk '
+        /^parts:/ { in_parts=1; next }
+        in_parts && /^[^ ]/ { exit }
+        in_parts && /^[[:space:]]*- number:/ { count++ }
+        END { print count+0 }
+    ' "$chapter_map"
+}
+
+# Get the Nth part block (1-indexed) from chapter-map.yaml
+# Usage: get_part_block 1 "/path/to/project"
+get_part_block() {
+    local part_num="$1"
+    local project_dir="$2"
+    local chapter_map="${project_dir}/reference/chapter-map.yaml"
+
+    if [[ ! -f "$chapter_map" ]]; then
+        return 1
+    fi
+
+    awk -v num="$part_num" '
+        /^parts:/ { in_parts=1; next }
+        in_parts && /^[^ ]/ { exit }
+        in_parts && /^[[:space:]]*- number:/ { count++ }
+        in_parts && count == num { print }
+        in_parts && count > num { exit }
+    ' "$chapter_map"
+}
+
+# Read a field from a part block
+# Usage: read_part_field 1 "/path/to/project" "title"
+read_part_field() {
+    local part_num="$1"
+    local project_dir="$2"
+    local field="$3"
+
+    local block
+    block=$(get_part_block "$part_num" "$project_dir")
+    if [[ -z "$block" ]]; then
+        return 1
+    fi
+
+    echo "$block" \
+        | grep -E "[[:space:]](-[[:space:]]+)?${field}:" \
+        | head -1 \
+        | sed "s/^.*${field}:[[:space:]]*//" \
+        | sed 's/^["'"'"']//' \
+        | sed 's/["'"'"']$//' \
+        | sed 's/[[:space:]]*$//'
+}
+
+# Get the part title for a given chapter number
+# Usage: get_chapter_part_title 1 "/path/to/project"
+get_chapter_part_title() {
+    local chapter_num="$1"
+    local project_dir="$2"
+
+    local part_num
+    part_num=$(read_chapter_field "$chapter_num" "$project_dir" "part")
+    if [[ -z "$part_num" ]]; then
+        echo ""
+        return 0
+    fi
+
+    read_part_field "$part_num" "$project_dir" "title"
+}
+
 # Get the scene IDs for a chapter (from the scenes list in the chapter block)
 # Usage: get_chapter_scenes 1 "/path/to/project"
 get_chapter_scenes() {
