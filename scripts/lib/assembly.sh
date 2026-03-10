@@ -784,13 +784,26 @@ generate_html() {
         --toc-depth=1
     )
 
+    # Inline CSS into the HTML so the file is fully self-contained
+    local css_header=""
     if [[ -f "$css_file" ]]; then
-        pandoc_args+=(--css "$css_file")
+        css_header=$(mktemp "${TMPDIR:-/tmp}/storyforge-css.XXXXXX")
+        {
+            echo '<style>'
+            cat "$css_file"
+            # Browser-friendly defaults for readable HTML
+            echo 'body { max-width: 42em; margin: 2em auto; padding: 0 1em; }'
+            echo '</style>'
+        } > "$css_header"
+        pandoc_args+=(--include-in-header "$css_header")
     fi
 
     log "Running pandoc: HTML generation..."
     pandoc "${pandoc_args[@]}" "$manuscript"
     local rc=$?
+
+    # Clean up temp CSS header file
+    [[ -n "$css_header" && -f "$css_header" ]] && rm -f "$css_header"
 
     if [[ $rc -ne 0 ]]; then
         log "ERROR: pandoc failed with exit code ${rc}"
