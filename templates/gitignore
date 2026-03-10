@@ -8,7 +8,3 @@
 working/.autopilot
 working/.interactive
 
-# Generated manuscript output (reproducible from scenes + chapter map)
-manuscript/output/
-manuscript/chapters/
-manuscript/metadata.yaml
