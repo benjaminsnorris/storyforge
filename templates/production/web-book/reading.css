@@ -8,6 +8,19 @@
 
 /* --- 1. COLOR THEMES ---------------------------------------------------- */
 
+/* Base defaults (light theme) — overridden by [data-theme] selectors below */
+:root {
+  --bg: #faf8f4; --text: #2c2420; --text-dim: #6b5f54;
+  --accent: #8b4513; --surface: #f0ebe3; --border: rgba(0,0,0,0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #0f0e0d; --text: #d4cec6; --text-dim: #8a8078;
+    --accent: #c4956a; --surface: #1a1816; --border: rgba(255,255,255,0.06);
+  }
+}
+
+/* Explicit theme overrides — must come after :root to win on specificity */
 [data-theme="light"] {
   --bg: #faf8f4; --text: #2c2420; --text-dim: #6b5f54;
   --accent: #8b4513; --surface: #f0ebe3; --border: rgba(0,0,0,0.08);
@@ -23,18 +36,6 @@
 
 [data-theme="dark"] .reading-column,
 [data-theme="dark"] .chapter-content { line-height: 1.65; }
-
-/* Default to light; honor OS dark preference when no theme is stored */
-:root {
-  --bg: #faf8f4; --text: #2c2420; --text-dim: #6b5f54;
-  --accent: #8b4513; --surface: #f0ebe3; --border: rgba(0,0,0,0.08);
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    --bg: #1a1816; --text: #d4cec6; --text-dim: #8a8078;
-    --accent: #c4956a; --surface: #252220; --border: rgba(255,255,255,0.06);
-  }
-}
 
 /* --- FONT LOADING ------------------------------------------------------- */
 
@@ -63,6 +64,9 @@
 /* --- 2. RESET & BASE ---------------------------------------------------- */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+a { color: var(--text); text-decoration: none; }
+a:hover { color: var(--accent); }
 
 html {
   -webkit-text-size-adjust: 100%;
@@ -376,16 +380,20 @@ body {
   text-align: center;
 }
 
-.toc-panel ol { list-style: none; counter-reset: toc-chapter; }
+.toc-panel ol,
+.toc-contents ol { list-style: none; counter-reset: toc-chapter; }
 
-.toc-panel li {
+.toc-panel li,
+.toc-contents li {
   counter-increment: toc-chapter;
   border-bottom: 1px solid var(--border);
 }
 
-.toc-panel li:last-child { border-bottom: none; }
+.toc-panel li:last-child,
+.toc-contents li:last-child { border-bottom: none; }
 
-.toc-panel a {
+.toc-panel a,
+.toc-contents a {
   display: flex;
   align-items: baseline;
   gap: 0.75em;
@@ -396,9 +404,11 @@ body {
   transition: color 0.3s ease;
 }
 
-.toc-panel a:hover { color: var(--accent); }
+.toc-panel a:hover,
+.toc-contents a:hover { color: var(--accent); }
 
-.toc-panel a::before {
+.toc-panel a::before,
+.toc-contents a::before {
   content: counter(toc-chapter);
   font-size: 0.78em;
   color: var(--text-dim);
@@ -407,7 +417,8 @@ body {
 }
 
 /* Completed chapters */
-.toc-panel li.chapter-read a { color: var(--text-dim); }
+.toc-panel li.chapter-read a,
+.toc-contents li.chapter-read a { color: var(--text-dim); }
 
 .toc-panel li.chapter-read a::after {
   content: "\2713";
@@ -534,6 +545,16 @@ body {
 
 .start-reading:hover { filter: brightness(1.1); transform: translateY(-1px); }
 .start-reading:active { transform: translateY(0); }
+
+.toc-link {
+  display: block;
+  margin-top: 1em;
+  font-size: 0.88em;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  transition: color 0.3s ease;
+}
+.toc-link:hover { color: var(--accent); }
 
 /* --- PART LABEL (above chapter heading) --------------------------------- */
 
