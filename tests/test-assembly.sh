@@ -85,14 +85,23 @@ assert_not_empty "$first_line" "extract_scene_prose: no leading blank lines"
 # assemble_chapter
 # ============================================================================
 
-result=$(assemble_chapter 1 "$PROJECT_DIR" "blank")
+result=$(assemble_chapter 1 "$PROJECT_DIR" "space")
 assert_contains "$result" "Chapter 1: The Finest Cartographer" "assemble_chapter: has chapter heading"
 assert_contains "$result" "Dorren Hayle pressed" "assemble_chapter: includes scene 1 prose"
+assert_contains "$result" "---" "assemble_chapter space: has thematic break between scenes"
+
+# "blank" is a legacy alias for "space" — should also produce a thematic break
+result=$(assemble_chapter 1 "$PROJECT_DIR" "blank")
+assert_contains "$result" "---" "assemble_chapter blank (legacy): has thematic break between scenes"
 
 # Chapter 1 with ornamental breaks
 result=$(assemble_chapter 1 "$PROJECT_DIR" "ornamental")
 assert_contains "$result" "Chapter 1: The Finest Cartographer" "assemble_chapter ornamental: has heading"
-assert_contains "$result" "* * *" "assemble_chapter ornamental: has ornamental break between scenes"
+assert_contains "$result" "***" "assemble_chapter ornamental: has ornamental break between scenes"
+
+# Chapter 1 with line breaks
+result=$(assemble_chapter 1 "$PROJECT_DIR" "line")
+assert_contains "$result" "---" "assemble_chapter line: has line break between scenes"
 
 # Chapter 1 with custom break
 result=$(assemble_chapter 1 "$PROJECT_DIR" "custom:~~~")
@@ -105,11 +114,11 @@ assert_contains "$result" "~~~" "assemble_chapter custom: has custom break symbo
 # Test with different heading formats (we need to temporarily modify the chapter map)
 # Instead, we test the heading logic directly through assemble_chapter
 # The fixture uses numbered-titled, so we verify that format
-result=$(assemble_chapter 1 "$PROJECT_DIR" "blank")
+result=$(assemble_chapter 1 "$PROJECT_DIR" "space")
 assert_matches "$result" "Chapter 1:" "assemble_chapter: numbered-titled format includes number"
 assert_contains "$result" "The Finest Cartographer" "assemble_chapter: numbered-titled format includes title"
 
-result=$(assemble_chapter 2 "$PROJECT_DIR" "blank")
+result=$(assemble_chapter 2 "$PROJECT_DIR" "space")
 assert_matches "$result" "Chapter 2:" "assemble_chapter: chapter 2 has correct number"
 assert_contains "$result" "Into the Blank" "assemble_chapter: chapter 2 heading has title"
 

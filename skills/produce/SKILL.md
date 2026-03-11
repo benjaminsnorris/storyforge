@@ -76,10 +76,13 @@ Then ask about production settings **one question at a time** using `AskUserQues
 
 1. **Author name** — "What name should appear on the title page and copyright?"
 
-2. **Scene break style** — "How should scene breaks within a chapter look?"
-   - Blank line (subtle, common in literary fiction)
-   - Ornamental (`* * *` — common in fantasy and genre fiction)
-   - Custom symbol (author provides)
+2. **Scene break style** — "How should scene breaks within a chapter look?" Present the genre-appropriate default first:
+   - **Space** — extra whitespace, no visible marker (literary fiction default)
+   - **Ornamental** — genre-appropriate symbol rendered by CSS: asterism for fantasy, decorative glyph for romance, bullet for literary fiction (fantasy/romance default)
+   - **Line** — short horizontal rule (thriller/science-fiction default)
+   - **Custom** — author provides a symbol (e.g., `~`, `⁂`, `§`)
+
+   Genre defaults: literary-fiction → space, thriller → line, romance → ornamental, fantasy → ornamental, science-fiction → line. Present the default for the project's genre and let the author confirm or change.
 
 3. **Chapter heading format** — "How should chapter headings appear?"
    - Numbered + titled (e.g., "Chapter 1: The Finest Cartographer")

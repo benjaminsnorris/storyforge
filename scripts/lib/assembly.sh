@@ -188,7 +188,8 @@ extract_scene_prose() {
 
 # Assemble a single chapter from its scenes
 # Usage: assemble_chapter 1 "/path/to/project" "scene_break_style"
-# scene_break_style: "blank" (default), "ornamental", "custom:SYMBOL"
+# scene_break_style: "space" (default), "ornamental", "line", "custom:SYMBOL"
+#                    "blank" is a legacy alias for "space"
 assemble_chapter() {
     local chapter_num="$1"
     local project_dir="$2"
@@ -221,17 +222,32 @@ assemble_chapter() {
         echo ""
     fi
 
-    # Build scene break marker
+    # Build scene break marker — always a markdown thematic break so pandoc
+    # generates <hr> and genre CSS can style it.  The "blank" option was
+    # broken (single empty line = invisible), so all styles now emit a
+    # thematic break.  Genre CSS controls the visual rendering.
+    #
+    # Styles:
+    #   space         — "---"  → <hr> styled as extra whitespace (no visible marker)
+    #   ornamental    — "***"  → <hr> styled per genre CSS (asterism, fleuron, bullet, etc.)
+    #   line          — "---"  → <hr> styled as a visible line
+    #   blank         — legacy alias for "space" (backward compat)
+    #   custom:SYMBOL — literal symbol text centered between blank lines
     local break_marker=""
+    local break_is_custom=false
     case "$break_style" in
-        blank)
-            break_marker=""
+        blank|space)
+            break_marker="---"
             ;;
         ornamental)
-            break_marker="* * *"
+            break_marker="***"
+            ;;
+        line)
+            break_marker="---"
             ;;
         custom:*)
             break_marker="${break_style#custom:}"
+            break_is_custom=true
             ;;
     esac
 
@@ -254,10 +270,8 @@ assemble_chapter() {
         else
             # Scene break between scenes
             echo ""
-            if [[ -n "$break_marker" ]]; then
-                echo "$break_marker"
-                echo ""
-            fi
+            echo "$break_marker"
+            echo ""
         fi
 
         extract_scene_prose "$scene_file"

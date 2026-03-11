@@ -22,8 +22,13 @@ production:
   author: ""
   language: en
 
-  # Scene break style: blank, ornamental, or custom:SYMBOL
-  scene_break: blank
+  # Scene break style — controls how scene transitions appear within chapters.
+  # All styles produce a markdown thematic break (---/***) that genre CSS renders.
+  #   space        — extra whitespace only, no visible marker (literary fiction default)
+  #   ornamental   — genre-appropriate symbol: asterism, fleuron, bullet, etc. (fantasy/romance)
+  #   line         — short horizontal line (thriller/science-fiction)
+  #   custom:X     — your own symbol, e.g. custom:~ or custom:⁂
+  scene_break: ornamental
 
   # Chapter heading default: numbered, titled, numbered-titled, none
   # (Individual chapters can override with their own heading: field)
