@@ -788,6 +788,7 @@ for EVAL in "${CORE_EVALUATORS[@]}"; do
         > "$EVAL_LOG" 2>&1 &
 
     PIDS+=($!)
+    register_child_pid $!
     EVAL_NAMES+=("$EVAL")
 done
 
@@ -810,6 +811,7 @@ for EVAL in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
         > "$EVAL_LOG" 2>&1 &
 
     PIDS+=($!)
+    register_child_pid $!
     EVAL_NAMES+=("$EVAL")
 done
 
@@ -818,6 +820,7 @@ log "All ${#PIDS[@]} evaluators launched. Waiting for completion..."
 # Launch background progress monitor
 evaluation_monitor "$EVAL_DIR" "${EVAL_NAMES[*]}" "${#PIDS[@]}" "$(date +%s)" &
 EVAL_MONITOR_PID=$!
+register_child_pid $EVAL_MONITOR_PID
 
 # --- Wait for all evaluators, tracking results ---
 FAILED=()
@@ -1018,6 +1021,7 @@ else
     # Launch synthesis progress monitor (headless only)
     synthesis_monitor "$EVAL_DIR" "$(date +%s)" &
     SYNTH_MONITOR_PID=$!
+    register_child_pid $SYNTH_MONITOR_PID
 
     set +e
     claude -p "$SYNTHESIS_PROMPT" \

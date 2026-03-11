@@ -451,6 +451,7 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         # Start background monitor
         monitor_progress "$SCENE_ID" "$HEAD_BEFORE" "$START_TIME" &
         MONITOR_PID=$!
+        register_child_pid $MONITOR_PID
 
         set +e
         claude -p "$PROMPT" \

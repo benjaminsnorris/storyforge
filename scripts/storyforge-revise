@@ -513,6 +513,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         # Start background monitor
         revision_monitor "$PASS_NAME" "$HEAD_BEFORE" "$START_TIME" &
         MONITOR_PID=$!
+        register_child_pid $MONITOR_PID
 
         set +e
         claude -p "$PROMPT" \

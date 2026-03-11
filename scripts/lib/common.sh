@@ -5,6 +5,105 @@
 # The calling script should set its own `set -euo pipefail`.
 
 # ============================================================================
+# Signal handling — graceful shutdown of long-running scripts
+# ============================================================================
+
+# Tracked child PIDs — scripts register background processes here so they
+# can be cleaned up on interrupt.  Use register_child_pid / unregister_child_pid.
+_SF_CHILD_PIDS=()
+_SF_SHUTTING_DOWN=false
+
+# Register a background PID for cleanup on interrupt.
+# Usage: register_child_pid $!
+register_child_pid() {
+    _SF_CHILD_PIDS+=("$1")
+}
+
+# Remove a PID from the tracked list (call after wait succeeds).
+# Usage: unregister_child_pid $PID
+unregister_child_pid() {
+    local target="$1"
+    local new_pids=()
+    for p in "${_SF_CHILD_PIDS[@]}"; do
+        [[ "$p" != "$target" ]] && new_pids+=("$p")
+    done
+    _SF_CHILD_PIDS=("${new_pids[@]+"${new_pids[@]}"}")
+}
+
+# Signal handler — kills all tracked children, logs, and exits.
+_sf_handle_interrupt() {
+    # Guard against re-entry (multiple signals in quick succession)
+    if [[ "$_SF_SHUTTING_DOWN" == true ]]; then
+        return
+    fi
+    _SF_SHUTTING_DOWN=true
+
+    echo ""
+    log "INTERRUPTED — shutting down gracefully..."
+
+    # Kill all tracked child processes
+    local killed=0
+    for pid in "${_SF_CHILD_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            killed=$((killed + 1))
+        fi
+    done
+
+    if (( killed > 0 )); then
+        log "Sent SIGTERM to ${killed} background process(es). Waiting up to 10s..."
+
+        # Give children a moment to exit cleanly
+        local waited=0
+        while (( waited < 10 )); do
+            local still_running=0
+            for pid in "${_SF_CHILD_PIDS[@]}"; do
+                kill -0 "$pid" 2>/dev/null && still_running=$((still_running + 1))
+            done
+            (( still_running == 0 )) && break
+            sleep 1
+            waited=$((waited + 1))
+        done
+
+        # Force-kill any stragglers
+        for pid in "${_SF_CHILD_PIDS[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -9 "$pid" 2>/dev/null || true
+                log "Force-killed process ${pid}"
+            fi
+        done
+    fi
+
+    # Commit any partial work that's been staged
+    if [[ -n "${PROJECT_DIR:-}" && -d "${PROJECT_DIR}/.git" ]]; then
+        local has_staged
+        has_staged=$(git -C "$PROJECT_DIR" diff --cached --quiet 2>/dev/null; echo $?)
+        local has_unstaged_eval
+        has_unstaged_eval=$(git -C "$PROJECT_DIR" status --porcelain working/evaluations/ 2>/dev/null || true)
+        local has_unstaged_scenes
+        has_unstaged_scenes=$(git -C "$PROJECT_DIR" status --porcelain scenes/ 2>/dev/null || true)
+
+        if [[ "$has_staged" != "0" || -n "$has_unstaged_eval" || -n "$has_unstaged_scenes" ]]; then
+            log "Committing partial work before exit..."
+            (
+                cd "$PROJECT_DIR"
+                git add working/evaluations/ working/logs/ scenes/ 2>/dev/null || true
+                git commit -m "Interrupted: partial work saved" 2>/dev/null || true
+                git push 2>/dev/null || true
+            )
+            log "Partial work committed."
+        fi
+    fi
+
+    log "Shutdown complete."
+    exit 130  # Standard exit code for SIGINT
+}
+
+# Install the signal handler.  Scripts that source common.sh get this
+# automatically.  The handler fires on Ctrl+C (INT) and TERM.
+trap _sf_handle_interrupt INT TERM
+
+# ============================================================================
 # Project root detection
 # ============================================================================
 
