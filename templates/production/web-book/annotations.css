@@ -188,6 +188,7 @@
 .sf-margin-indicator {
   position: absolute;
   left: -28px;
+  top: 0;
   width: 18px;
   height: 18px;
   background: var(--accent);
