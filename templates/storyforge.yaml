@@ -73,6 +73,24 @@ artifacts:
     exists: false
     path: scenes/scene-index.yaml
     updated:
+    # Example scene-index.yaml entries (use descriptive slugs for IDs):
+    #   scenes:
+    #     - id: "geometry-of-dying"
+    #       title: "The Geometry of Dying"
+    #       pov: character-name
+    #       location: location-name
+    #       timeline_position: 1
+    #       status: outline
+    #       summary: >
+    #         Brief description of what happens in this scene.
+    #     - id: "sheriffs-ledger"
+    #       title: "The Sheriff's Ledger"
+    #       pov: character-name
+    #       location: location-name
+    #       timeline_position: 2
+    #       status: outline
+    #       summary: >
+    #         Brief description of what happens in this scene.
 
   continuity_tracker:
     exists: false

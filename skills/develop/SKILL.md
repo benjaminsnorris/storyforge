@@ -215,6 +215,8 @@ Structure is not formula. Structure is the answer to the question: "In what orde
 
 **Produce or update `reference/story-architecture.md`** with: premise, theme, central conflict (all three levels), structural framework being used, acts/parts with turning points, midpoint, climax, and resolution. Mark any elements that are still undeveloped.
 
+When naming scenes or structural beats in any document, use descriptive slugs (e.g., `geometry-of-dying`, `the-last-calibrator`), never numeric or positional IDs. A scene is a single continuous pass of experience — one camera angle — designed to be reshuffled freely; order lives in the scene index, not the filename.
+
 ---
 
 ### Sub-Workflow: Timeline

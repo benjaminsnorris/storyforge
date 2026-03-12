@@ -5,6 +5,8 @@ description: Design, review, and manage the novel's scene index. Use when the us
 
 # Storyforge Scenes Skill
 
+**Scene philosophy:** A scene is a single continuous pass of experience — one camera angle. Not a mini-chapter. Scenes can be a single paragraph or many pages. They are designed to be reshuffled freely; order lives in the index, not the filename.
+
 You are helping an author design, review, and manage the scene-level architecture of their novel. Scenes are the fundamental unit of fiction — every scene must turn something, must change the state of the story. Your job is to ensure every scene earns its place.
 
 ## Locating the Storyforge Plugin
@@ -57,7 +59,7 @@ Use this when the author wants to plan new scenes for a section of the novel.
 For each proposed scene, provide the full core metadata:
 
 ```yaml
-- id: "act1-sc01"
+- id: "geometry-of-dying"
   title: "..."
   pov: "..."
   setting: "..."
@@ -72,6 +74,8 @@ For each proposed scene, provide the full core metadata:
   target_words: ...
   status: pending
 ```
+
+**Scene ID naming:** Generate slugs from the scene title — e.g., "The Geometry of Dying" → `geometry-of-dying`. Never use numeric or positional IDs like `act1-sc01` or `scene-07`. Keep slugs to 2–5 hyphenated words. Slugs are permanent identifiers; order lives in the index, not the filename.
 
 Include any project-specific extensions defined in `storyforge.yaml`.
 
@@ -181,7 +185,7 @@ After any edit, run validation checks:
 - No POV gaps (a POV character who disappears from the rotation unexpectedly).
 - Reasonable pacing (no new monotonous stretches created by the edit).
 - Timeline consistency (especially after reordering).
-- Scene IDs remain unique and follow the project's naming convention.
+- Scene IDs remain unique and use descriptive slugs (e.g., `geometry-of-dying`), never numeric or positional IDs.
 
 ---
 
@@ -200,7 +204,7 @@ Every time you add, modify, or remove scenes — an act designed, scenes reorder
    ```
    git add -A && git commit -m "Scenes: {what was done}" && git push
    ```
-   Examples: `"Scenes: design Act 1 scene breakdown (8 scenes)"`, `"Scenes: split act2-sc05 into two scenes"`, `"Scenes: reorder Act 2 for better pacing"`.
+   Examples: `"Scenes: design Act 1 scene breakdown (8 scenes)"`, `"Scenes: split geometry-of-dying into two scenes"`, `"Scenes: reorder Act 2 for better pacing"`.
 
 5. Then continue to the next piece of scene work.
 
