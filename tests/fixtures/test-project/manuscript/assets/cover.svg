@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="2400" viewBox="0 0 1600 2400">
+  <!-- Background -->
+  <defs>
+    <linearGradient id="bg-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="2400" fill="url(#bg-grad)"/>
+
+  <!-- Generated pattern -->
+  <g class="pattern">
+<circle cx="800" cy="1200" r="173" fill="none" stroke="#d4a73a" stroke-width="1" opacity="0.35" stroke-dasharray="31 18"/><circle cx="800" cy="1200" r="303" fill="none" stroke="#d4a73a" stroke-width="1" opacity="0.17" stroke-dasharray="12 14"/><circle cx="800" cy="1200" r="449" fill="none" stroke="#d4a73a" stroke-width="3" opacity="0.38" stroke-dasharray="36 8"/><circle cx="800" cy="1200" r="597" fill="none" stroke="#d4a73a" stroke-width="2" opacity="0.20" stroke-dasharray="29 4"/><circle cx="800" cy="1200" r="718" fill="none" stroke="#d4a73a" stroke-width="2" opacity="0.17" stroke-dasharray="9 4"/><circle cx="800" cy="1200" r="835" fill="none" stroke="#d4a73a" stroke-width="1" opacity="0.18" stroke-dasharray="30 11"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.23"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.28"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.21"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="1074" y1="1474" x2="1451" y2="1851" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><line x1="800" y1="1200" x2="800" y2="1200" stroke="#d4a73a" stroke-width="1" opacity="0.10"/><polygon points="800,132 868,200 800,268 732,200" fill="none" stroke="#d4a73a" stroke-width="1.5" opacity="0.34"/>
+  </g>
+
+  <!-- Title -->
+  <text x="800" y="508" text-anchor="middle" font-family="Georgia, 'Palatino Linotype', 'Book Antiqua', serif" font-size="72" font-weight="bold" fill="#f5f0e8" letter-spacing="2">The Cartographer's</text>
+  <text x="800" y="600" text-anchor="middle" font-family="Georgia, 'Palatino Linotype', 'Book Antiqua', serif" font-size="72" font-weight="bold" fill="#f5f0e8" letter-spacing="2">Silence</text>
+
+  <!-- Subtitle -->
+
+
+  <!-- Rule -->
+  <line x1="650" y1="792" x2="950" y2="792" stroke="#d4a73a" stroke-width="1" opacity="0.4"/>
+
+  <!-- Author -->
+  <text x="800" y="2100" text-anchor="middle" font-family="Georgia, 'Palatino Linotype', serif" font-size="40" font-weight="normal" fill="#f5f0e8" letter-spacing="6">Test Author</text>
+
+  <!-- Series -->
+
+</svg>
