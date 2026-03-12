@@ -790,9 +790,9 @@
 
     var annotations = loadAnnotations();
     if (annotations.length === 0) {
-      btn.textContent = '\u2913';
+      btn.textContent = '\uD83D\uDCAC';
     } else {
-      btn.textContent = '\u2913 ' + annotations.length;
+      btn.textContent = '\uD83D\uDCAC ' + annotations.length;
     }
   }
 
@@ -1074,14 +1074,25 @@
     menu.style.borderRadius = '6px';
     menu.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
     menu.style.padding = '4px 0';
-    menu.style.minWidth = '200px';
+    menu.style.minWidth = '220px';
     menu.style.fontSize = '0.875rem';
+
+    var heading = document.createElement('div');
+    heading.textContent = 'Export Annotations';
+    heading.style.padding = '8px 16px 4px';
+    heading.style.fontSize = '0.75rem';
+    heading.style.letterSpacing = '0.08em';
+    heading.style.textTransform = 'uppercase';
+    heading.style.color = 'var(--text-dim, #666)';
+    heading.style.borderBottom = '1px solid var(--border, #ccc)';
+    heading.style.marginBottom = '4px';
+    menu.appendChild(heading);
 
     var options = [
       { label: 'This chapter (JSON)', format: 'chapter-json' },
-      { label: 'This chapter (MD)',   format: 'chapter' },
+      { label: 'This chapter (Markdown)',   format: 'chapter' },
       { label: 'All chapters (JSON)', format: 'json' },
-      { label: 'All chapters (MD)',   format: 'md' }
+      { label: 'All chapters (Markdown)',   format: 'md' }
     ];
 
     options.forEach(function(opt) {
@@ -1134,8 +1145,8 @@
 
     var btn = document.createElement('button');
     btn.className = 'sf-export-btn';
-    btn.textContent = '\u2913';
-    btn.title = 'Export annotations';
+    btn.textContent = '\uD83D\uDCAC';
+    btn.title = 'Annotations';
     btn.setAttribute('aria-label', 'Export annotations');
 
     btn.addEventListener('click', function(e) {
