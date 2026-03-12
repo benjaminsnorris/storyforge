@@ -1521,7 +1521,20 @@
   }
 
   // =========================================================================
-  // 12. INIT
+  // 12. KEYBOARD SHORTCUTS
+  // =========================================================================
+
+  document.addEventListener('keydown', function(e) {
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+
+    if (e.key === 'a' || e.key === 'A') {
+      toggleSidebar();
+    }
+  });
+
+  // =========================================================================
+  // 13. INIT
   // =========================================================================
 
   function init() {
