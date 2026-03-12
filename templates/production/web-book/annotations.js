@@ -911,7 +911,246 @@
   }
 
   // =========================================================================
-  // 11. INIT
+  // 11. EXPORT
+  // =========================================================================
+
+  function getAllAnnotations() {
+    var all = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (key && key.indexOf(STORAGE_PREFIX) === 0) {
+          var chSlug = key.slice(STORAGE_PREFIX.length);
+          var raw = localStorage.getItem(key);
+          if (!raw) continue;
+          var parsed = JSON.parse(raw);
+          parsed.forEach(function(a) {
+            if (!a.chapter) a.chapter = chSlug;
+          });
+          all = all.concat(parsed);
+        }
+      }
+    } catch (e) {
+      console.warn('[Storyforge Annotations] getAllAnnotations error:', e);
+    }
+
+    all.sort(function(a, b) {
+      if (a.chapter < b.chapter) return -1;
+      if (a.chapter > b.chapter) return 1;
+      if (a.scene < b.scene) return -1;
+      if (a.scene > b.scene) return 1;
+      return (a.anchor.paragraphIndex || 0) - (b.anchor.paragraphIndex || 0);
+    });
+
+    return all;
+  }
+
+  function exportJSON(annotations) {
+    var titleEl = document.querySelector('.nav-title');
+    var bookTitle = titleEl ? titleEl.textContent.trim() : bookSlug;
+    return JSON.stringify({
+      book: bookTitle,
+      exportedAt: new Date().toISOString(),
+      annotator: 'author',
+      annotations: annotations
+    }, null, 2);
+  }
+
+  function exportMarkdown(annotations) {
+    // Build chapter title lookup from TOC links
+    var chapterTitles = {};
+    var tocLinks = document.querySelectorAll('.toc-contents a');
+    tocLinks.forEach(function(link) {
+      var href = link.getAttribute('href') || '';
+      var match = href.match(/chapters\/(chapter-\d+)\.html/);
+      if (match) {
+        chapterTitles[match[1]] = link.textContent.trim();
+      }
+    });
+
+    var titleEl = document.querySelector('.nav-title');
+    var bookTitle = titleEl ? titleEl.textContent.trim() : bookSlug;
+    var dateStr = new Date().toISOString().slice(0, 10);
+
+    var lines = [];
+    lines.push('# Annotations: ' + bookTitle);
+    lines.push('Exported: ' + dateStr);
+    lines.push('');
+
+    var currentChapter = null;
+    var currentScene = null;
+
+    annotations.forEach(function(a) {
+      if (a.chapter !== currentChapter) {
+        currentChapter = a.chapter;
+        currentScene = null;
+        var chNum = (currentChapter.match(/chapter-(\d+)/) || [])[1] || '';
+        var chTitle = chapterTitles[currentChapter] ||
+          (chNum ? 'Chapter ' + chNum : currentChapter);
+        lines.push('## ' + chTitle);
+        lines.push('');
+      }
+
+      if (a.scene !== currentScene) {
+        currentScene = a.scene;
+        lines.push('### Scene: ' + currentScene);
+        lines.push('');
+      }
+
+      if (a.type === 'margin-note') {
+        lines.push('*(margin note)*');
+      }
+
+      if (a.selectedText) {
+        lines.push('> \u201c' + a.selectedText + '\u201d');
+      }
+
+      if (a.comment) {
+        lines.push(a.comment);
+      }
+
+      lines.push('');
+    });
+
+    return lines.join('\n');
+  }
+
+  function downloadFile(content, filename, mimeType) {
+    var blob = new Blob([content], { type: mimeType });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function doExport(format) {
+    var annotations, content, filename;
+
+    if (format === 'chapter-json') {
+      annotations = loadAnnotations();
+      content = exportJSON(annotations);
+      filename = bookSlug + '-' + chapterSlug + '-annotations.json';
+      downloadFile(content, filename, 'application/json');
+    } else if (format === 'chapter') {
+      annotations = loadAnnotations();
+      content = exportMarkdown(annotations);
+      filename = bookSlug + '-' + chapterSlug + '-annotations.md';
+      downloadFile(content, filename, 'text/markdown');
+    } else if (format === 'json') {
+      annotations = getAllAnnotations();
+      content = exportJSON(annotations);
+      filename = bookSlug + '-annotations.json';
+      downloadFile(content, filename, 'application/json');
+    } else if (format === 'md') {
+      annotations = getAllAnnotations();
+      content = exportMarkdown(annotations);
+      filename = bookSlug + '-annotations.md';
+      downloadFile(content, filename, 'text/markdown');
+    }
+  }
+
+  var activeExportMenu = null;
+
+  function showExportMenu(anchorEl) {
+    if (activeExportMenu && activeExportMenu.parentNode) {
+      activeExportMenu.parentNode.removeChild(activeExportMenu);
+      activeExportMenu = null;
+      return;
+    }
+
+    var menu = document.createElement('div');
+    menu.className = 'sf-export-menu';
+
+    var rect = anchorEl.getBoundingClientRect();
+    menu.style.position = 'absolute';
+    menu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+    menu.style.left = rect.left + 'px';
+    menu.style.zIndex = '10001';
+    menu.style.background = 'var(--bg, #fff)';
+    menu.style.border = '1px solid var(--border, #ccc)';
+    menu.style.borderRadius = '6px';
+    menu.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    menu.style.padding = '4px 0';
+    menu.style.minWidth = '200px';
+    menu.style.fontSize = '0.875rem';
+
+    var options = [
+      { label: 'This chapter (JSON)', format: 'chapter-json' },
+      { label: 'This chapter (MD)',   format: 'chapter' },
+      { label: 'All chapters (JSON)', format: 'json' },
+      { label: 'All chapters (MD)',   format: 'md' }
+    ];
+
+    options.forEach(function(opt) {
+      var btn = document.createElement('button');
+      btn.textContent = opt.label;
+      btn.style.display = 'block';
+      btn.style.width = '100%';
+      btn.style.padding = '8px 16px';
+      btn.style.textAlign = 'left';
+      btn.style.background = 'none';
+      btn.style.border = 'none';
+      btn.style.cursor = 'pointer';
+      btn.style.color = 'var(--text, #000)';
+      btn.addEventListener('mouseenter', function() {
+        btn.style.background = 'var(--highlight-bg, rgba(0,0,0,0.06))';
+      });
+      btn.addEventListener('mouseleave', function() {
+        btn.style.background = 'none';
+      });
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        doExport(opt.format);
+        if (activeExportMenu && activeExportMenu.parentNode) {
+          activeExportMenu.parentNode.removeChild(activeExportMenu);
+        }
+        activeExportMenu = null;
+      });
+      menu.appendChild(btn);
+    });
+
+    document.body.appendChild(menu);
+    activeExportMenu = menu;
+
+    function onOutsideClick(e) {
+      if (activeExportMenu && !activeExportMenu.contains(e.target) && e.target !== anchorEl) {
+        if (activeExportMenu.parentNode) activeExportMenu.parentNode.removeChild(activeExportMenu);
+        activeExportMenu = null;
+        document.removeEventListener('click', onOutsideClick);
+      }
+    }
+    // Defer to avoid immediately closing from the button click
+    setTimeout(function() {
+      document.addEventListener('click', onOutsideClick);
+    }, 0);
+  }
+
+  function addExportButton() {
+    var navControls = document.querySelector('.nav-controls');
+    if (!navControls) return;
+
+    var btn = document.createElement('button');
+    btn.className = 'sf-export-btn';
+    btn.textContent = '\u2913';
+    btn.title = 'Export annotations';
+    btn.setAttribute('aria-label', 'Export annotations');
+    btn.style.cursor = 'pointer';
+
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      showExportMenu(btn);
+    });
+
+    navControls.prepend(btn);
+  }
+
+  // =========================================================================
+  // 12. INIT
   // =========================================================================
 
   function init() {
@@ -922,6 +1161,7 @@
     setupMarginTriggers();
     createToolbar();
     updateBadge();
+    addExportButton();
   }
 
   if (document.readyState === 'loading') {
