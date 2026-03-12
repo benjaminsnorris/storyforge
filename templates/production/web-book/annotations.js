@@ -1254,12 +1254,12 @@
 
     sidebarEl.appendChild(header);
 
-    // Color filters
+    // Color legend / filters
     var filters = document.createElement('div');
     filters.className = 'sf-sidebar-filters';
 
     var allBtn = document.createElement('button');
-    allBtn.className = 'sf-filter-all selected';
+    allBtn.className = 'sf-filter-row sf-filter-all selected';
     allBtn.textContent = 'All';
     allBtn.addEventListener('click', function() {
       sidebarFilter = null;
@@ -1269,17 +1269,26 @@
     filters.appendChild(allBtn);
 
     HIGHLIGHT_COLORS.forEach(function(c) {
-      var swatch = document.createElement('button');
-      swatch.className = 'sf-color-swatch sf-filter-swatch';
-      swatch.style.backgroundColor = c.color;
-      swatch.title = c.label;
-      swatch.dataset.color = c.id;
-      swatch.addEventListener('click', function() {
+      var row = document.createElement('button');
+      row.className = 'sf-filter-row sf-filter-swatch';
+      row.dataset.color = c.id;
+      row.addEventListener('click', function() {
         sidebarFilter = (sidebarFilter === c.id) ? null : c.id;
         updateFilterUI();
         renderSidebarList();
       });
-      filters.appendChild(swatch);
+
+      var dot = document.createElement('span');
+      dot.className = 'sf-filter-dot';
+      dot.style.backgroundColor = c.color;
+      row.appendChild(dot);
+
+      var label = document.createElement('span');
+      label.className = 'sf-filter-label';
+      label.textContent = c.label;
+      row.appendChild(label);
+
+      filters.appendChild(row);
     });
 
     sidebarEl.appendChild(filters);

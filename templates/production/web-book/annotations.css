@@ -536,31 +536,47 @@
 
 .sf-sidebar-filters {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 18px;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 10px 18px;
   border-bottom: 1px solid var(--border);
 }
 
-.sf-filter-all {
+.sf-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   background: none;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: 1px solid transparent;
+  border-radius: 14px;
   color: var(--text-dim);
-  font-size: 0.75em;
+  font-size: 0.72em;
+  font-family: var(--title-font, inherit);
+  letter-spacing: 0.03em;
   padding: 4px 10px;
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
+  transition: color 0.2s, border-color 0.2s, background-color 0.2s;
 }
 
-.sf-filter-all.selected {
+.sf-filter-row:hover {
+  background: var(--surface);
+}
+
+.sf-filter-row.selected {
   color: var(--text);
-  border-color: var(--text);
+  border-color: var(--border);
+  background: var(--surface);
 }
 
-.sf-filter-swatch {
-  width: 22px;
-  height: 22px;
+.sf-filter-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sf-filter-label {
+  white-space: nowrap;
 }
 
 .sf-sidebar-list {
