@@ -279,9 +279,8 @@
     info.setAttribute('aria-label', 'Table of contents');
     info.addEventListener('click', toggleToc);
     var navControls = bookNav.querySelector('.nav-controls');
-    var themeToggle = navControls ? navControls.querySelector('.theme-toggle') : null;
-    if (navControls && themeToggle) {
-      navControls.insertBefore(info, themeToggle);
+    if (navControls) {
+      bookNav.insertBefore(info, navControls);
     } else {
       bookNav.appendChild(info);
     }
