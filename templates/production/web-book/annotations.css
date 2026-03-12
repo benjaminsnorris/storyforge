@@ -91,6 +91,11 @@
   color: var(--text);
   resize: vertical;
   min-height: 60px;
+  outline: none;
+}
+
+.sf-comment-input textarea:focus {
+  border-color: var(--accent);
 }
 
 .sf-comment-input .sf-actions {
@@ -217,6 +222,35 @@
   resize: vertical;
   min-height: 60px;
   box-sizing: border-box;
+  outline: none;
+}
+
+.sf-note-panel textarea:focus {
+  border-color: var(--accent);
+}
+
+.sf-note-panel .sf-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.sf-note-panel button {
+  background: var(--surface);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.sf-note-panel button:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+  background: var(--bg);
 }
 
 /* Export button — match .theme-toggle / .toc-toggle styling */
