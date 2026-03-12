@@ -54,16 +54,16 @@ artifacts:
   chapter_map:
     exists: true
     path: reference/chapter-map.yaml
-    updated: "2026-03-03"
+    updated: "2026-03-11"
 
   manuscript:
-    exists: false
+    exists: true
     path: manuscript/
-    updated:
+    updated: "2026-03-11"
 
 scene_extensions: []
 
 evaluation:
   custom_evaluators: []
 
-phase: drafting
+phase: production
