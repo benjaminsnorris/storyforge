@@ -8,7 +8,7 @@ Every project uses these fields. They are not optional.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Unique scene identifier (e.g., `act1-sc01`, `p2-sc15`). Must be unique across the project. |
+| `id` | string | Unique scene identifier — a descriptive slug (e.g., `geometry-of-dying`, `sheriffs-ledger`). Must be unique across the project. |
 | `title` | string | Scene title — evocative but not spoilery. Used for reference, not necessarily reader-facing. |
 | `pov` | string | POV character's full name. Must match a character in the character bible. |
 | `setting` | string | Where the scene takes place. Specific enough to visualize. |
@@ -49,14 +49,14 @@ The master scene sequence lives in `scenes/scene-index.yaml`:
 # Scenes are the atomic unit. Chapters are assembled from scenes later.
 
 scenes:
-  - id: "act1-sc01"
+  - id: "geometry-of-dying"
     pov: "Character Name"
     words: 2500          # Actual word count (filled after drafting)
     function: "Specific function description"
     status: "drafted"
     action: null          # Revision action if applicable
 
-  - id: "act1-sc02"
+  - id: "sheriffs-ledger"
     pov: "Other Character"
     words: null
     function: "Another specific function"
@@ -72,7 +72,7 @@ Individual scene files live in `scenes/` as Markdown with YAML frontmatter:
 
 ```markdown
 ---
-id: "act1-sc01"
+id: "geometry-of-dying"
 title: "The Finest Cartographer"
 pov: "Dorren Hayle"
 setting: "Pressure Cartography Office"
@@ -98,11 +98,24 @@ status: "drafted"
 Scene prose goes here...
 ```
 
-## Naming Conventions
+## Scene ID Convention
 
-Scene IDs should follow the pattern `{grouping}-sc{number}`:
-- `act1-sc01` — grouped by act
-- `p1-sc01` — grouped by part
-- `ch01-sc01` — grouped by chapter (if chapter structure is known early)
+Scene IDs are descriptive slugs that identify the scene by its content, not its position:
 
-The grouping prefix should match the structural unit defined in the story architecture. Numbering is sequential within the group.
+- **Format:** lowercase, hyphen-separated words (e.g., `geometry-of-dying`, `sheriffs-ledger`, `hidden-canyon`)
+- **Length:** 2-5 words — specific enough to identify, short enough to type
+- **Content-based:** Name describes what happens or the key image, not sequence
+- **No numbers:** Avoid numeric IDs or positional prefixes — ordering lives in `scene-index.yaml` and `chapter-map.yaml`
+
+Good: `geometry-of-dying`, `first-meridian`, `woman-in-cellars-light`
+Bad: `1`, `scene-01`, `ch3-sc2`, `act1-opening`
+
+For new scenes without clear content yet, use a working slug: `opening-chase`, `bridge-confrontation`, `quiet-morning`. Rename later if the scene evolves.
+
+## What Is a Scene?
+
+A scene is a single continuous pass of experience — one camera angle before the lens shifts. The moment the POV changes, or time jumps, or location shifts, that's a new scene.
+
+Scenes are **not mini-chapters**. They may be extremely short (a single paragraph) or long (several pages). Length is dictated by the experience, not by structural convention.
+
+Scenes are designed to be **reshuffled**. The ordering in `scene-index.yaml` is a working sequence, not a permanent assignment. If the story is better served by moving a scene, move it — that's what the index is for.
