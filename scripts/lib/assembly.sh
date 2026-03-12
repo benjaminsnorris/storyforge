@@ -998,6 +998,24 @@ generate_web_book() {
     local js_content
     js_content=$(cat "${template_dir}/reading.js")
 
+    # Load annotation assets (only when --annotate is active)
+    local ann_css_content=""
+    local ann_js_content=""
+    if [[ "$annotate" == "true" ]]; then
+        local ann_css_file="${template_dir}/annotations.css"
+        local ann_js_file="${template_dir}/annotations.js"
+        if [[ -f "$ann_css_file" ]]; then
+            ann_css_content=$(<"$ann_css_file")
+        fi
+        if [[ -f "$ann_js_file" ]]; then
+            ann_js_content=$(<"$ann_js_file")
+        fi
+    fi
+
+    # Derive book slug for data-book attribute (used when --annotate is active)
+    local book_slug
+    book_slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
+
     # Head script (prevents flash of wrong theme) — extracted from JS comment
     local head_script
     head_script="(function(){var t=localStorage.getItem('storyforge-theme');if(t)document.documentElement.dataset.theme=t;else if(window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.dataset.theme='dark'})()"
@@ -1344,9 +1362,34 @@ generate_web_book() {
                         _line="${_line//\{\{PREV_LINK\}\}/$prev_link}"
                         _line="${_line//\{\{NEXT_LINK\}\}/$next_link}"
                         _line="${_line//\{\{PART_LABEL\}\}/$part_label_html}"
+                        if [[ "$annotate" == "true" ]]; then
+                            _line="${_line//data-chapter=/data-book=\"${book_slug}\" data-chapter=}"
+                        fi
                         echo "$_line"
                     fi
                 done > "${output_dir}/chapters/${page_slug}.html"
+
+            if [[ "$annotate" == "true" && -n "$ann_css_content" ]]; then
+                local ann_css_tmp ann_js_tmp
+                ann_css_tmp=$(mktemp "${TMPDIR:-/tmp}/sf-ann-css.XXXXXX")
+                ann_js_tmp=$(mktemp "${TMPDIR:-/tmp}/sf-ann-js.XXXXXX")
+                printf '%s\n' "$ann_css_content" > "$ann_css_tmp"
+                printf '%s\n' "$ann_js_content" > "$ann_js_tmp"
+
+                local ch_out="${output_dir}/chapters/${page_slug}.html"
+                # Inject annotation CSS BEFORE </style>
+                awk -v file="$ann_css_tmp" '
+                    /<\/style>/ { while ((getline line < file) > 0) print line; close(file) }
+                    { print }
+                ' "$ch_out" > "${ch_out}.tmp" && mv "${ch_out}.tmp" "$ch_out"
+                # Inject annotation JS BEFORE </script>
+                awk -v file="$ann_js_tmp" '
+                    /<\/script>/ && !done { while ((getline line < file) > 0) print line; close(file); done=1 }
+                    { print }
+                ' "$ch_out" > "${ch_out}.tmp" && mv "${ch_out}.tmp" "$ch_out"
+
+                rm -f "$ann_css_tmp" "$ann_js_tmp"
+            fi
 
             rm -f "$ch_html_file"
         fi
