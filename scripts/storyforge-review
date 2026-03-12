@@ -164,4 +164,6 @@ if [[ -n "$STORYFORGE_PR_NUMBER" ]]; then
 fi
 log "============================================"
 
+begin_healing_zone "running ${REVIEW_TYPE} review"
 run_review_phase "$REVIEW_TYPE" "$PROJECT_DIR"
+end_healing_zone
