@@ -1064,9 +1064,7 @@
     var menu = document.createElement('div');
     menu.className = 'sf-export-menu';
 
-    var chapterInfo = document.querySelector('.chapter-info');
-    var anchor = chapterInfo || anchorEl;
-    var rect = anchor.getBoundingClientRect();
+    var rect = anchorEl.getBoundingClientRect();
     menu.style.position = 'absolute';
     menu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
     menu.style.right = (document.documentElement.clientWidth - rect.right) + 'px';
