@@ -33,6 +33,16 @@
   </div>
 
   {{BACK_MATTER_LINKS}}
+
+  <div id="sf-toc-export" style="display:none; text-align:center; margin-top:3em; padding-top:2em; border-top:1px solid var(--border);">
+    <p style="font-size:0.85em; color:var(--text-dim); margin-bottom:1em;">
+      <span id="sf-toc-count"></span> annotations across all chapters
+    </p>
+    <div style="display:flex; gap:0.5em; justify-content:center; flex-wrap:wrap;">
+      <button class="sf-toc-dl" data-format="json" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-dim);cursor:pointer;font-size:0.85em;padding:0.4em 1em;transition:color 0.3s,border-color 0.3s,background-color 0.3s;">Download JSON</button>
+      <button class="sf-toc-dl" data-format="md" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-dim);cursor:pointer;font-size:0.85em;padding:0.4em 1em;transition:color 0.3s,border-color 0.3s,background-color 0.3s;">Download Markdown</button>
+    </div>
+  </div>
 </main>
 
 <nav class="chapter-nav" style="justify-content: center;">
@@ -41,6 +51,74 @@
 
 <script>
 {{JS}}
+</script>
+<script>
+(function(){
+  var bookSlug = '{{BOOK_SLUG}}';
+  var prefix = 'storyforge-annotations-' + bookSlug + '-';
+
+  function getAllAnnotations() {
+    var all = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var key = localStorage.key(i);
+      if (key && key.indexOf(prefix) === 0) {
+        try {
+          var parsed = JSON.parse(localStorage.getItem(key));
+          var chSlug = key.slice(prefix.length);
+          parsed.forEach(function(a) { if (!a.chapter) a.chapter = chSlug; });
+          all = all.concat(parsed);
+        } catch(e) {}
+      }
+    }
+    all.sort(function(a,b) {
+      if (a.chapter < b.chapter) return -1;
+      if (a.chapter > b.chapter) return 1;
+      return (a.anchor.paragraphIndex||0) - (b.anchor.paragraphIndex||0);
+    });
+    return all;
+  }
+
+  var annotations = getAllAnnotations();
+  if (annotations.length > 0) {
+    var panel = document.getElementById('sf-toc-export');
+    var count = document.getElementById('sf-toc-count');
+    panel.style.display = '';
+    count.textContent = annotations.length;
+
+    function download(content, filename, mime) {
+      var blob = new Blob([content], {type: mime});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = filename; a.style.display = 'none';
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+
+    var buttons = document.querySelectorAll('.sf-toc-dl');
+    buttons.forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var fmt = btn.dataset.format;
+        var titleEl = document.querySelector('.nav-title');
+        var bookTitle = titleEl ? titleEl.textContent.trim() : bookSlug;
+        if (fmt === 'json') {
+          download(JSON.stringify({book:bookTitle,exportedAt:new Date().toISOString(),annotator:'author',annotations:annotations},null,2),
+            bookSlug+'-annotations.json','application/json');
+        } else {
+          var lines = ['# Annotations: '+bookTitle,'Exported: '+new Date().toISOString().slice(0,10),''];
+          var curCh = null;
+          annotations.forEach(function(a) {
+            if (a.chapter !== curCh) { curCh = a.chapter; var n=(curCh.match(/chapter-(\d+)/)||[])[1]||curCh; lines.push('## Chapter '+n,''); }
+            if (a.type==='margin-note') lines.push('*(margin note)*');
+            if (a.selectedText) lines.push('> \u201c'+a.selectedText+'\u201d');
+            if (a.comment) lines.push(a.comment);
+            lines.push('');
+          });
+          download(lines.join('\n'), bookSlug+'-annotations.md','text/markdown');
+        }
+      });
+    });
+  }
+})();
 </script>
 </body>
 </html>

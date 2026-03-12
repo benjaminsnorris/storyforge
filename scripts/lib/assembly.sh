@@ -1212,6 +1212,7 @@ generate_web_book() {
                 line="${line//\{\{LANG\}\}/$language}"
                 line="${line//\{\{DESCRIPTION\}\}/$description}"
                 line="${line//\{\{TOTAL_CHAPTERS\}\}/$total_chapters}"
+                line="${line//\{\{BOOK_SLUG\}\}/$book_slug}"
                 line="${line//\{\{HEAD_SCRIPT\}\}/$head_script}"
                 line="${line//\{\{CANONICAL\}\}/$canonical_html}"
                 line="${line//\{\{TITLE_FONT_LINK\}\}/$title_font_link}"
