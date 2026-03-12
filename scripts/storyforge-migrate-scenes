@@ -1,0 +1,294 @@
+#!/bin/bash
+set -eo pipefail
+
+# ============================================================================
+# storyforge-migrate-scenes — Rename numeric scene IDs to descriptive slugs
+#
+# Usage:
+#   ./storyforge-migrate-scenes                  # Migrate scenes in current project
+#   ./storyforge-migrate-scenes --dry-run        # Preview only, no changes
+#   ./storyforge-migrate-scenes --project DIR    # Specify project directory
+# ============================================================================
+
+# --- Locate script directory and source libraries ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+
+if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
+    echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
+    exit 1
+fi
+
+# shellcheck source=lib/common.sh
+source "${LIB_DIR}/common.sh"
+
+# ============================================================================
+# Argument parsing
+# ============================================================================
+
+DRY_RUN=false
+PROJECT_ARG=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --project)
+            PROJECT_ARG="$2"
+            shift 2
+            ;;
+        --project=*)
+            PROJECT_ARG="${1#--project=}"
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: storyforge-migrate-scenes [--dry-run] [--project DIR]"
+            echo ""
+            echo "Renames numeric scene IDs (1, 2, 3) to descriptive slugs"
+            echo "derived from scene titles (geometry-of-dying, bridge-at-midnight, ...)."
+            echo ""
+            echo "Options:"
+            echo "  --dry-run       Preview changes without modifying any files"
+            echo "  --project DIR   Use DIR as project root instead of auto-detecting"
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# --- Detect or set project root ---
+if [[ -n "$PROJECT_ARG" ]]; then
+    if [[ ! -d "$PROJECT_ARG" ]]; then
+        echo "ERROR: Project directory not found: ${PROJECT_ARG}" >&2
+        exit 1
+    fi
+    PROJECT_DIR="$(cd "$PROJECT_ARG" && pwd)"
+    export PROJECT_DIR
+else
+    detect_project_root
+fi
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+SCENE_INDEX="${PROJECT_DIR}/scenes/scene-index.yaml"
+SCENES_DIR="${PROJECT_DIR}/scenes"
+CHAPTER_MAP="${PROJECT_DIR}/reference/chapter-map.yaml"
+
+if [[ ! -f "$SCENE_INDEX" ]]; then
+    echo "ERROR: scene-index.yaml not found at ${SCENE_INDEX}" >&2
+    exit 1
+fi
+
+# ============================================================================
+# slugify() — convert a title to a URL-friendly slug
+#
+# Rules:
+#   1. Lowercase everything
+#   2. Strip parenthetical suffix from the parentheses (kept separately for
+#      collision disambiguation)
+#   3. Remove non-alphanumeric characters (except spaces and hyphens)
+#   4. Replace spaces with hyphens
+#   5. Strip leading "the-"
+#   6. Collapse multiple hyphens, strip leading/trailing hyphens
+# ============================================================================
+
+slugify() {
+    local title="$1"
+    local include_paren="${2:-false}"  # if true, include parenthetical in slug
+
+    local base paren slug
+
+    # Extract parenthetical suffix if present, e.g. "(Reprise)"
+    if echo "$title" | grep -qE '\([^)]+\)'; then
+        paren=$(echo "$title" | sed 's/.*(\([^)]*\)).*/\1/')
+        base=$(echo "$title" | sed 's/[[:space:]]*([^)]*)[[:space:]]*//')
+    else
+        paren=""
+        base="$title"
+    fi
+
+    # Slugify the base
+    slug=$(echo "$base" \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed "s/[^a-z0-9 -]//g" \
+        | sed 's/[[:space:]][[:space:]]*/\-/g' \
+        | sed 's/^-*//' \
+        | sed 's/-*$//' \
+        | sed 's/^the-//')
+
+    # If requested (collision case) or if we want the full slug, append paren
+    if [[ "$include_paren" == "true" && -n "$paren" ]]; then
+        local paren_slug
+        paren_slug=$(echo "$paren" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed "s/[^a-z0-9 -]//g" \
+            | sed 's/[[:space:]][[:space:]]*/\-/g' \
+            | sed 's/^-*//' \
+            | sed 's/-*$//')
+        slug="${slug}-${paren_slug}"
+    fi
+
+    echo "$slug"
+}
+
+# ============================================================================
+# Read scene IDs and titles from scene-index.yaml
+#
+# Outputs lines of: ID<TAB>TITLE
+# Only reads lines of the form:  - id: VALUE  followed by title: VALUE
+# ============================================================================
+
+read_scene_id_title_pairs() {
+    local yaml_file="$1"
+    local current_id=""
+    local in_scene=false
+
+    while IFS= read -r line; do
+        # Detect "  - id: VALUE" (start of a scene block)
+        if echo "$line" | grep -qE '^[[:space:]]*-[[:space:]]+id:'; then
+            current_id=$(echo "$line" | sed 's/.*id:[[:space:]]*//' | sed 's/^["'"'"']//' | sed 's/["'"'"']$//' | sed 's/[[:space:]]*$//')
+            in_scene=true
+        elif [[ "$in_scene" == true ]] && echo "$line" | grep -qE '^[[:space:]]+title:'; then
+            local title
+            title=$(echo "$line" | sed 's/.*title:[[:space:]]*//' | sed 's/^["'"'"']//' | sed 's/["'"'"']$//' | sed 's/[[:space:]]*$//')
+            echo "${current_id}	${title}"
+            in_scene=false
+            current_id=""
+        elif [[ "$in_scene" == true ]] && echo "$line" | grep -qE '^[[:space:]]*-[[:space:]]+id:'; then
+            # Another scene block started before we got the title — reset
+            current_id=$(echo "$line" | sed 's/.*id:[[:space:]]*//' | sed 's/^["'"'"']//' | sed 's/["'"'"']$//' | sed 's/[[:space:]]*$//')
+        fi
+    done < "$yaml_file"
+}
+
+# ============================================================================
+# is_slug() — return 0 if the ID is already a slug (not purely numeric)
+# ============================================================================
+
+is_slug() {
+    local id="$1"
+    # If the ID contains only digits, it's numeric (not a slug)
+    if echo "$id" | grep -qE '^[0-9]+$'; then
+        return 1  # numeric, not a slug
+    fi
+    return 0  # already a slug
+}
+
+# ============================================================================
+# Build the ID -> slug mapping, handling collisions
+# ============================================================================
+
+# We'll collect pairs into arrays
+declare -a SCENE_IDS=()
+declare -a SCENE_TITLES=()
+declare -a SCENE_SLUGS=()
+
+while IFS='	' read -r id title; do
+    SCENE_IDS+=("$id")
+    SCENE_TITLES+=("$title")
+done < <(read_scene_id_title_pairs "$SCENE_INDEX")
+
+# First pass: compute base slugs (without parentheticals)
+declare -a BASE_SLUGS=()
+for i in "${!SCENE_IDS[@]}"; do
+    BASE_SLUGS+=("$(slugify "${SCENE_TITLES[$i]}" false)")
+done
+
+# Second pass: detect collisions using a sorted duplicate check (bash 3 compat)
+# Build a newline-separated list of base slugs, find duplicates with sort|uniq -d
+_slug_list=""
+for slug in "${BASE_SLUGS[@]}"; do
+    _slug_list="${_slug_list}${slug}"$'\n'
+done
+_duplicate_slugs=$(echo "$_slug_list" | sort | uniq -d)
+
+# Third pass: assign final slugs, expanding colliders to full slug with parenthetical
+for i in "${!SCENE_IDS[@]}"; do
+    local_base="${BASE_SLUGS[$i]}"
+    if echo "$_duplicate_slugs" | grep -qxF "$local_base"; then
+        # Use full slug with parenthetical to disambiguate
+        SCENE_SLUGS+=("$(slugify "${SCENE_TITLES[$i]}" true)")
+    else
+        SCENE_SLUGS+=("$local_base")
+    fi
+done
+
+# ============================================================================
+# Report and execute
+# ============================================================================
+
+if [[ "$DRY_RUN" == true ]]; then
+    echo "DRY RUN: storyforge-migrate-scenes"
+    echo "Project: ${PROJECT_DIR}"
+    echo ""
+fi
+
+changed=0
+skipped=0
+
+for i in "${!SCENE_IDS[@]}"; do
+    id="${SCENE_IDS[$i]}"
+    title="${SCENE_TITLES[$i]}"
+    slug="${SCENE_SLUGS[$i]}"
+
+    if is_slug "$id"; then
+        echo "  SKIP: ${id} (already a slug)"
+        skipped=$((skipped + 1))
+        continue
+    fi
+
+    echo "  RENAME: ${id} -> ${slug}  (\"${title}\")"
+    changed=$((changed + 1))
+
+    if [[ "$DRY_RUN" == true ]]; then
+        continue
+    fi
+
+    # --- Rename scene file ---
+    old_file="${SCENES_DIR}/${id}.md"
+    new_file="${SCENES_DIR}/${slug}.md"
+
+    if [[ -f "$old_file" ]]; then
+        # Prefer git mv, fall back to mv
+        if git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1 && \
+           git -C "$PROJECT_DIR" ls-files --error-unmatch "$old_file" >/dev/null 2>&1; then
+            git -C "$PROJECT_DIR" mv "$old_file" "$new_file"
+        else
+            mv "$old_file" "$new_file"
+        fi
+    else
+        echo "  WARNING: Scene file not found: ${old_file}" >&2
+    fi
+
+    # --- Update frontmatter id: in the scene file ---
+    if [[ -f "$new_file" ]]; then
+        # Replace: id: "OLD" or id: OLD  (in frontmatter, within the --- block)
+        # BSD sed compatible: sed -i ''
+        sed -i '' "s|^id: *[\"']*${id}[\"']*$|id: \"${slug}\"|" "$new_file"
+    fi
+
+    # --- Update scene-index.yaml ---
+    # Replace lines that are exactly "  - id: ID" or "    id: ID" etc.
+    sed -i '' "s|\\([-[:space:]]*id:[[:space:]]*[\"']*\\)${id}\\([\"']*\\)|\\1${slug}\\2|g" "$SCENE_INDEX"
+
+    # --- Update chapter-map.yaml ---
+    if [[ -f "$CHAPTER_MAP" ]]; then
+        # Scene references in chapter-map appear as "      - ID" (list items)
+        sed -i '' "s|\\([[:space:]]*-[[:space:]]*\\)${id}$|\\1${slug}|g" "$CHAPTER_MAP"
+    fi
+done
+
+echo ""
+if [[ "$DRY_RUN" == true ]]; then
+    echo "DRY RUN complete: ${changed} scene(s) would be renamed, ${skipped} skipped."
+    echo "END DRY RUN: storyforge-migrate-scenes"
+else
+    echo "Migration complete: ${changed} scene(s) renamed, ${skipped} skipped."
+fi
