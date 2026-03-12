@@ -158,6 +158,7 @@
 .sf-margin-trigger {
   position: absolute;
   left: -32px;
+  top: 0;
   width: 24px;
   height: 24px;
   background: var(--surface);
