@@ -1064,10 +1064,12 @@
     var menu = document.createElement('div');
     menu.className = 'sf-export-menu';
 
-    var rect = anchorEl.getBoundingClientRect();
+    var chapterInfo = document.querySelector('.chapter-info');
+    var anchor = chapterInfo || anchorEl;
+    var rect = anchor.getBoundingClientRect();
     menu.style.position = 'absolute';
     menu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
-    menu.style.left = rect.left + 'px';
+    menu.style.right = (document.documentElement.clientWidth - rect.right) + 'px';
     menu.style.zIndex = '10001';
     menu.style.background = 'var(--bg, #fff)';
     menu.style.border = '1px solid var(--border, #ccc)';

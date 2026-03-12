@@ -331,24 +331,21 @@ body {
   gap: 0.5rem;
 }
 
-/* --- 11. THEME TOGGLE & TOC BUTTON -------------------------------------- */
+/* --- 11. THEME TOGGLE --------------------------------------------------- */
 
-.theme-toggle,
-.toc-toggle {
+.theme-toggle {
   background: none;
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-dim);
   cursor: pointer;
   line-height: 1;
+  font-size: 0.9em;
+  padding: 0.3em 0.55em;
   transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
 }
 
-.theme-toggle { font-size: 0.9em; padding: 0.3em 0.55em; }
-.toc-toggle { font-size: 0.82em; padding: 0.3em 0.6em; letter-spacing: 0.04em; }
-
-.theme-toggle:hover,
-.toc-toggle:hover {
+.theme-toggle:hover {
   color: var(--text);
   border-color: var(--text-dim);
   background: var(--surface);
