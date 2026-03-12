@@ -34,13 +34,12 @@
 
   {{BACK_MATTER_LINKS}}
 
-  <div id="sf-toc-export" style="display:none; text-align:center; margin-top:3em; padding-top:2em; border-top:1px solid var(--border);">
-    <p style="font-size:0.85em; color:var(--text-dim); margin-bottom:1em;">
-      <span id="sf-toc-count"></span> annotations across all chapters
-    </p>
-    <div style="display:flex; gap:0.5em; justify-content:center; flex-wrap:wrap;">
-      <button class="sf-toc-dl" data-format="json" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-dim);cursor:pointer;font-size:0.85em;padding:0.4em 1em;transition:color 0.3s,border-color 0.3s,background-color 0.3s;">Download JSON</button>
-      <button class="sf-toc-dl" data-format="md" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-dim);cursor:pointer;font-size:0.85em;padding:0.4em 1em;transition:color 0.3s,border-color 0.3s,background-color 0.3s;">Download Markdown</button>
+  <div id="sf-toc-export" style="display:none; text-align:center; margin-top:3em;">
+    <p id="sf-toc-label" style="font-family:var(--title-font); font-size:0.78em; font-style:italic; color:var(--text-dim); letter-spacing:0.04em; margin-bottom:1.2em;"></p>
+    <div style="display:flex; gap:0.75em; justify-content:center; flex-wrap:wrap;">
+      <a class="sf-toc-dl" data-format="json" href="#" style="font-family:var(--title-font); font-size:0.88em; color:var(--accent); letter-spacing:0.04em; cursor:pointer; border-bottom:1px solid var(--border); padding-bottom:0.15em; transition:color 0.3s, border-color 0.3s; text-decoration:none;">Download JSON</a>
+      <span style="color:var(--text-dim); font-size:0.78em; line-height:1.8;">&middot;</span>
+      <a class="sf-toc-dl" data-format="md" href="#" style="font-family:var(--title-font); font-size:0.88em; color:var(--accent); letter-spacing:0.04em; cursor:pointer; border-bottom:1px solid var(--border); padding-bottom:0.15em; transition:color 0.3s, border-color 0.3s; text-decoration:none;">Download Markdown</a>
     </div>
   </div>
 </main>
@@ -81,9 +80,10 @@
   var annotations = getAllAnnotations();
   if (annotations.length > 0) {
     var panel = document.getElementById('sf-toc-export');
-    var count = document.getElementById('sf-toc-count');
+    var label = document.getElementById('sf-toc-label');
     panel.style.display = '';
-    count.textContent = annotations.length;
+    var n = annotations.length;
+    label.textContent = n + (n === 1 ? ' annotation' : ' annotations') + ' across all chapters';
 
     function download(content, filename, mime) {
       var blob = new Blob([content], {type: mime});
@@ -96,7 +96,8 @@
 
     var buttons = document.querySelectorAll('.sf-toc-dl');
     buttons.forEach(function(btn) {
-      btn.addEventListener('click', function() {
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
         var fmt = btn.dataset.format;
         var titleEl = document.querySelector('.nav-title');
         var bookTitle = titleEl ? titleEl.textContent.trim() : bookSlug;
