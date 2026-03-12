@@ -82,7 +82,7 @@ Based on the analysis, design a custom set of revision passes. Each pass is a fo
       rationale: "Why this is the right call"
 ```
 
-**CRITICAL: Scene IDs in scope lists must match scene-index.yaml exactly.** Read the `- id:` values from `scenes/scene-index.yaml` and use them verbatim. Scene IDs are arbitrary strings — they could be `1`, `30b`, `act2-sc07`, or anything else. Do NOT construct IDs by adding prefixes like `scene-` or padding numbers. If the scene index says `id: 9`, the scope must say `9`, not `scene-09`.
+**CRITICAL: Scene IDs in scope lists must match scene-index.yaml exactly.** Read the `- id:` values from `scenes/scene-index.yaml` and use them verbatim. Scene IDs are descriptive slugs (e.g., `geometry-of-dying`, `the-last-calibrator`) — do NOT construct IDs by adding prefixes, padding numbers, or guessing formats. Copy them character-for-character from the index. If the scene index says `id: geometry-of-dying`, the scope must say `geometry-of-dying`.
 
 All passes run autonomously. When a pass involves creative judgment — restructuring, character arc deepening, thematic reinterpretation — make the creative calls yourself and document them as `guidance` entries with rationale. The author reviews the plan before execution and can edit any guidance entry they disagree with.
 
@@ -113,7 +113,7 @@ guidance:
   - decision: "Fold difficult Calibrator encounter into Ch. 4 (Ashward Breach)"
     rationale: "Crisis context makes prejudice feel earned, not convenient"
   - decision: "Place first Aven appearance in Ch. 7 (the Protege scene)"
-    rationale: "ch07-sc04 already has a young Calibrator asking the right questions"
+    rationale: "ashward-protege already has a young Calibrator asking the right questions"
 ```
 
 Be specific and opinionated. "Deepen character arcs" is not guidance — it's a restatement of the purpose. "Give Maren a moment in Ch. 12 where she almost reverts to her old lie, then catches herself" is guidance.

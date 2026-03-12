@@ -54,7 +54,7 @@ Invoke the `develop` skill. This covers character bible creation and deepening, 
 Invoke the `voice` skill. This covers voice guide creation, voice sampling, voice refinement, and POV-specific voice rules.
 
 **Scene planning, scene design, or scene review:**
-Invoke the `scenes` skill. This covers scene index population, scene design, scene card creation, act-level planning, and scene auditing.
+Invoke the `scenes` skill. This covers scene index population, scene design, scene card creation, act-level planning, and scene auditing. When scenes are created or proposed, all scene IDs must use descriptive slugs (e.g., `geometry-of-dying`), never numeric or positional IDs. A scene is a single continuous pass of experience — one camera angle — designed to be reshuffled freely; order lives in the index, not the filename.
 
 **"Start drafting" / "Write scenes" / "Write the draft":**
 Check prerequisites before proceeding:
