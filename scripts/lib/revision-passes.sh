@@ -37,6 +37,16 @@ resolve_scene_file() {
         return 0
     fi
 
+    # Zero-padded numeric fallback: bare "25" -> "025" (3-digit zero-padded)
+    if [[ "$sid" =~ ^[0-9]+$ ]]; then
+        local padded
+        padded=$(printf '%03d' "$sid")
+        if [[ "$padded" != "$sid" && -f "${scene_dir}/${padded}.md" ]]; then
+            echo "${scene_dir}/${padded}.md"
+            return 0
+        fi
+    fi
+
     return 1
 }
 
@@ -84,11 +94,12 @@ resolve_scope() {
 
         while IFS= read -r sid; do
             [[ -z "$sid" ]] && continue
-            local f="${scene_dir}/${sid}.md"
-            if [[ -f "$f" ]]; then
+            local f
+            f=$(resolve_scene_file "$scene_dir" "$sid")
+            if [[ -n "$f" ]]; then
                 matched_files+=("$f")
             else
-                log "WARNING: Scene file missing for id '${sid}': ${f}"
+                log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md"
             fi
         done <<< "$ids"
 
@@ -106,11 +117,12 @@ resolve_scope() {
         while IFS= read -r sid; do
             [[ -z "$sid" ]] && continue
             if [[ "$sid" == ${prefix}* ]]; then
-                local f="${scene_dir}/${sid}.md"
-                if [[ -f "$f" ]]; then
+                local f
+                f=$(resolve_scene_file "$scene_dir" "$sid")
+                if [[ -n "$f" ]]; then
                     matched_files+=("$f")
                 else
-                    log "WARNING: Scene file missing for id '${sid}': ${f}"
+                    log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md"
                 fi
             fi
         done <<< "$ids"
@@ -136,11 +148,12 @@ resolve_scope() {
 
         while IFS= read -r sid; do
             [[ -z "$sid" ]] && continue
-            local f="${scene_dir}/${sid}.md"
-            if [[ -f "$f" ]]; then
+            local f
+            f=$(resolve_scene_file "$scene_dir" "$sid")
+            if [[ -n "$f" ]]; then
                 matched_files+=("$f")
             else
-                log "WARNING: Scene file missing for id '${sid}': ${f}"
+                log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md"
             fi
         done <<< "$ids"
 
