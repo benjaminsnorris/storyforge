@@ -305,12 +305,24 @@ body {
 }
 
 .book-nav .chapter-info {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
   font-family: var(--title-font);
   font-size: 0.78em;
   color: var(--text-dim);
   letter-spacing: 0.04em;
   white-space: nowrap;
-  transition: color 0.4s ease;
+  padding: 0.3em 0.6em;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.book-nav .chapter-info:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+  background: var(--surface);
 }
 
 .book-nav .nav-controls {

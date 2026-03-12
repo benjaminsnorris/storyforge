@@ -278,9 +278,11 @@
   var totalChapters = document.body.getAttribute('data-total-chapters');
 
   if (chapterNum && totalChapters && bookNav) {
-    var info = document.createElement('span');
+    var info = document.createElement('button');
     info.className = 'chapter-info';
     info.textContent = 'Chapter ' + chapterNum + ' of ' + totalChapters;
+    info.setAttribute('aria-label', 'Table of contents');
+    info.addEventListener('click', toggleToc);
     bookNav.appendChild(info);
   }
 
