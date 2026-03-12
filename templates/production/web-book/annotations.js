@@ -761,6 +761,33 @@
       viewer.appendChild(timeEl);
     }
 
+    // Color picker for highlights/comments (not margin notes)
+    if (annotation.type !== 'margin-note') {
+      var colorRow = document.createElement('div');
+      colorRow.className = 'sf-color-picker';
+      colorRow.style.marginBottom = '8px';
+      HIGHLIGHT_COLORS.forEach(function(c) {
+        var swatch = document.createElement('button');
+        swatch.className = 'sf-color-swatch';
+        if ((annotation.color || 'yellow') === c.id) swatch.classList.add('selected');
+        swatch.style.backgroundColor = c.color;
+        swatch.title = c.label;
+        swatch.addEventListener('click', function(e) {
+          e.stopPropagation();
+          annotation.color = c.id;
+          updateAnnotation(annotation.id, { color: c.id });
+          var hlSpan = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
+          if (hlSpan) hlSpan.dataset.color = c.id;
+          // Update selected state
+          colorRow.querySelectorAll('.sf-color-swatch').forEach(function(s) { s.classList.remove('selected'); });
+          swatch.classList.add('selected');
+          updateBadge();
+        });
+        colorRow.appendChild(swatch);
+      });
+      viewer.appendChild(colorRow);
+    }
+
     var actions = document.createElement('div');
     actions.className = 'sf-actions';
 

@@ -484,10 +484,11 @@
 
 .sf-sidebar {
   position: fixed;
-  top: 42px;
+  top: 0;
   right: 0;
   width: 320px;
-  height: calc(100vh - 42px);
+  height: 100vh;
+  padding-top: 44px;
   background: var(--bg);
   border-left: 1px solid var(--border);
   z-index: 850;
