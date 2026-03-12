@@ -1,0 +1,2711 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Into the Blank — The Cartographer's Silence</title>
+<meta name="author" content="Test Author">
+
+<script>(function(){var t=localStorage.getItem('storyforge-theme');if(t)document.documentElement.dataset.theme=t;else if(window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.dataset.theme='dark'})()</script>
+
+<style>
+/* ==========================================================================
+   reading.css — Web Book Reading Experience
+   StoryForge production stylesheet
+
+   A reading environment that disappears. Inspired by Butterick's Practical
+   Typography, Tufte CSS, and the tradition of fine bookmaking.
+   ========================================================================== */
+
+/* --- 1. COLOR THEMES ---------------------------------------------------- */
+
+/* Base defaults (light theme) — overridden by [data-theme] selectors below */
+:root {
+  --bg: #faf8f4; --text: #2c2420; --text-dim: #6b5f54;
+  --accent: #8b4513; --surface: #f0ebe3; --border: rgba(0,0,0,0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #0f0e0d; --text: #d4cec6; --text-dim: #8a8078;
+    --accent: #c4956a; --surface: #1a1816; --border: rgba(255,255,255,0.06);
+  }
+}
+
+/* Explicit theme overrides — must come after :root to win on specificity */
+[data-theme="light"] {
+  --bg: #faf8f4; --text: #2c2420; --text-dim: #6b5f54;
+  --accent: #8b4513; --surface: #f0ebe3; --border: rgba(0,0,0,0.08);
+}
+[data-theme="dark"] {
+  --bg: #0f0e0d; --text: #d4cec6; --text-dim: #8a8078;
+  --accent: #c4956a; --surface: #1a1816; --border: rgba(255,255,255,0.06);
+}
+[data-theme="sepia"] {
+  --bg: #f4ecd8; --text: #3b2e1e; --text-dim: #6b5a42;
+  --accent: #8b5e3c; --surface: #e8dfc8; --border: rgba(59,46,30,0.1);
+}
+
+[data-theme="dark"] .reading-column,
+[data-theme="dark"] .chapter-content { line-height: 1.65; }
+
+/* --- FONT LOADING ------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Literata';
+  src: url('..\/fonts/literata-regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Literata';
+  src: url('..\/fonts/literata-italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Literata';
+  src: url('..\/fonts/literata-bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Title font — applied to book title, chapter headings, part titles.
+   Loaded via Google Fonts <link> in <head>; fallback to body font. */
+:root { --title-font: 'Literata', Georgia, serif; --title-weight: 700; }
+
+/* --- 2. RESET & BASE ---------------------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+a { color: var(--text); text-decoration: none; }
+a:hover { color: var(--accent); }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: 'Literata', Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
+  font-size: clamp(18px, 1.15rem + 0.25vw, 21px);
+  line-height: 1.58;
+  transition: background-color 0.4s ease, color 0.4s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* --- 3. TYPOGRAPHY — THE TEXT COLUMN ------------------------------------
+   The measure: 36em keeps us at 65-75 characters per line.
+   ----------------------------------------------------------------------- */
+
+.chapter-content,
+.reading-column,
+.book-landing {
+  max-width: 36em;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* Book-style paragraphs: indented, no vertical gap */
+.chapter-content p {
+  text-indent: 1.5em;
+  margin: 0;
+  transition: color 0.4s ease;
+}
+
+/* First paragraph after structural elements — no indent */
+.chapter-content h1 + p,
+.chapter-content h2 + p,
+.chapter-content h3 + p,
+.chapter-content hr + p,
+.chapter-content blockquote + p {
+  text-indent: 0;
+}
+
+/* --- 4. HEADINGS --------------------------------------------------------
+   Chapter titles (h1): graceful, quiet — a breath before the prose.
+   ----------------------------------------------------------------------- */
+
+.chapter-content h1 {
+  font-family: var(--title-font);
+  font-size: 1.5em;
+  font-weight: var(--title-weight);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--text);
+  margin-top: 3.5em;
+  margin-bottom: 2em;
+  line-height: 1.3;
+  transition: color 0.4s ease;
+}
+
+/* Subtle rule beneath chapter title */
+.chapter-content h1::after {
+  content: "";
+  display: block;
+  width: 3em;
+  height: 1px;
+  background: var(--border);
+  margin: 0.8em auto 0;
+}
+
+.chapter-content h2 {
+  font-size: 1.15em;
+  font-weight: normal;
+  font-style: italic;
+  color: var(--text);
+  margin: 2em 0 0.75em;
+  line-height: 1.4;
+  transition: color 0.4s ease;
+}
+
+.chapter-content h3 {
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin: 1.5em 0 0.5em;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  transition: color 0.4s ease;
+}
+
+/* --- 5. SCENE BREAKS ----------------------------------------------------
+   No visible rule. A quiet asterism marks the shift.
+   ----------------------------------------------------------------------- */
+
+.chapter-content hr {
+  border: none;
+  text-align: center;
+  margin: 2.5em 0;
+  overflow: visible;
+}
+
+.chapter-content hr::after {
+  content: "\2042"; /* asterism */
+  display: inline-block;
+  font-size: 1.2em;
+  color: var(--text-dim);
+  letter-spacing: 0.3em;
+  position: relative;
+  top: -0.1em;
+  transition: color 0.4s ease;
+}
+
+/* --- 6. DROP CAP --------------------------------------------------------
+   Optional. Apply .drop-cap to the chapter-content wrapper.
+   ----------------------------------------------------------------------- */
+
+.drop-cap p:first-of-type::first-letter {
+  float: left;
+  font-size: 3.5em;
+  line-height: 0.8;
+  padding-right: 0.08em;
+  margin-top: 0.05em;
+  color: var(--accent);
+  font-weight: normal;
+  transition: color 0.4s ease;
+}
+
+/* --- 7. BLOCKQUOTES (EPIGRAPHS) ----------------------------------------- */
+
+.chapter-content blockquote {
+  max-width: 28em;
+  margin: 2em auto;
+  padding: 0 1.5em;
+  border-left: 2px solid var(--border);
+  font-style: italic;
+  color: var(--text-dim);
+  transition: color 0.4s ease, border-color 0.4s ease;
+}
+
+.chapter-content blockquote p {
+  text-indent: 0;
+  margin-bottom: 0.5em;
+}
+
+.chapter-content blockquote p:last-child { margin-bottom: 0; }
+
+.chapter-content blockquote cite {
+  display: block;
+  margin-top: 0.75em;
+  font-style: normal;
+  font-size: 0.88em;
+  text-align: right;
+  color: var(--text-dim);
+}
+
+/* --- 8. INLINE ELEMENTS ------------------------------------------------- */
+
+.chapter-content strong { font-weight: 700; }
+.chapter-content em { font-style: italic; }
+
+.chapter-content a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+  transition: color 0.3s ease, border-color 0.3s ease;
+}
+
+.chapter-content a:hover { border-bottom-color: var(--accent); }
+
+/* --- 9. PROGRESS BAR ---------------------------------------------------- */
+
+.progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
+  z-index: 1000;
+  transition: width 0.15s linear, background-color 0.4s ease;
+  pointer-events: none;
+}
+
+/* --- 10. TOP NAVIGATION BAR ---------------------------------------------
+   Translucent strip. Always available, never intrudes.
+   ----------------------------------------------------------------------- */
+
+.book-nav {
+  position: sticky;
+  top: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1.5rem;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  transition: transform 0.3s ease, background-color 0.4s ease, border-color 0.4s ease;
+}
+
+.book-nav.hidden {
+  transform: translateY(-100%);
+  pointer-events: none;
+}
+
+[data-theme="dark"] .book-nav::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent) 30%, var(--accent) 70%, transparent);
+  opacity: 0.3;
+}
+
+.book-nav .nav-title {
+  font-family: var(--title-font);
+  font-size: 0.82em;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50%;
+  transition: color 0.4s ease;
+}
+
+.book-nav .chapter-info {
+  font-family: var(--title-font);
+  font-size: 0.78em;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transition: color 0.4s ease;
+}
+
+.book-nav .nav-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* --- 11. THEME TOGGLE & TOC BUTTON -------------------------------------- */
+
+.theme-toggle,
+.toc-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.theme-toggle { font-size: 0.9em; padding: 0.3em 0.55em; }
+.toc-toggle { font-size: 0.82em; padding: 0.3em 0.6em; letter-spacing: 0.04em; }
+
+.theme-toggle:hover,
+.toc-toggle:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+  background: var(--surface);
+}
+
+/* Icon visibility per theme */
+.theme-toggle .icon-light,
+.theme-toggle .icon-dark,
+.theme-toggle .icon-sepia { display: none; }
+
+[data-theme="light"] .theme-toggle .icon-light,
+:root:not([data-theme]) .theme-toggle .icon-light { display: inline; }
+[data-theme="dark"] .theme-toggle .icon-dark { display: inline; }
+[data-theme="sepia"] .theme-toggle .icon-sepia { display: inline; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .theme-toggle .icon-light { display: none; }
+  :root:not([data-theme]) .theme-toggle .icon-dark { display: inline; }
+}
+
+/* --- 12. TABLE OF CONTENTS OVERLAY -------------------------------------- */
+
+.toc-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.toc-overlay.active { opacity: 1; visibility: visible; }
+
+.toc-panel {
+  background: var(--bg);
+  border-radius: 8px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 2.5em 2em;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  transition: background-color 0.4s ease;
+}
+
+.toc-book-title {
+  font-family: var(--title-font);
+  font-size: 1.1em;
+  font-weight: normal;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  text-align: center;
+  margin-bottom: 0.3em;
+  transition: color 0.4s ease;
+}
+
+.toc-panel h2 {
+  font-family: var(--title-font);
+  font-size: 0.85em;
+  font-weight: normal;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 1.5em;
+  text-align: center;
+}
+
+.toc-panel ol,
+.toc-contents ol { list-style: none; counter-reset: toc-chapter; }
+
+.toc-panel li,
+.toc-contents li {
+  counter-increment: toc-chapter;
+  border-bottom: 1px solid var(--border);
+}
+
+.toc-panel li:last-child,
+.toc-contents li:last-child { border-bottom: none; }
+
+.toc-panel a,
+.toc-contents a {
+  font-family: var(--title-font);
+  display: flex;
+  align-items: baseline;
+  gap: 0.75em;
+  padding: 0.65em 0.25em;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.95em;
+  transition: color 0.3s ease;
+}
+
+.toc-panel a:hover,
+.toc-contents a:hover { color: var(--accent); }
+
+.toc-panel a::before,
+.toc-contents a::before {
+  content: counter(toc-chapter);
+  font-size: 0.78em;
+  color: var(--text-dim);
+  min-width: 1.5em;
+  text-align: right;
+}
+
+/* Completed chapters */
+.toc-panel li.chapter-read a,
+.toc-contents li.chapter-read a { color: var(--text-dim); }
+
+.toc-panel li.chapter-read a::after {
+  content: "\2713";
+  font-size: 0.78em;
+  margin-left: auto;
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
+.toc-close {
+  display: block;
+  margin: 1.5em auto 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.85em;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  transition: color 0.3s ease;
+}
+
+.toc-close:hover { color: var(--text); }
+
+/* --- 13. CHAPTER NAVIGATION (BOTTOM) ------------------------------------
+   The invitation to turn the page.
+   ----------------------------------------------------------------------- */
+
+.chapter-nav {
+  max-width: 36em;
+  margin: 0 auto;
+  padding: 3em 1.5rem 4em;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  gap: 2em;
+  transition: border-color 0.4s ease;
+}
+
+.chapter-nav a {
+  display: block;
+  text-decoration: none;
+  color: var(--text);
+  padding: 0.75em 0;
+  min-height: 44px;
+  transition: color 0.3s ease;
+}
+
+.chapter-nav a:hover { color: var(--accent); }
+
+.chapter-nav .nav-label {
+  display: block;
+  font-size: 0.72em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 0.3em;
+}
+
+.chapter-nav .nav-chapter-title { font-style: italic; }
+.chapter-nav .nav-prev { text-align: left; }
+.chapter-nav .nav-next { text-align: right; margin-left: auto; }
+
+/* --- 14. INDEX / LANDING PAGE ------------------------------------------- */
+
+.book-landing {
+  text-align: center;
+  padding-top: 6em;
+  padding-bottom: 4em;
+}
+
+.book-cover {
+  max-width: 300px;
+  width: 60%;
+  height: auto;
+  margin: 0 auto 2.5em;
+  display: block;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12), 0 8px 24px rgba(0,0,0,0.08);
+}
+
+.book-meta { margin-bottom: 3em; }
+
+.book-meta .book-title {
+  font-family: var(--title-font);
+  font-size: 2em;
+  font-weight: var(--title-weight);
+  letter-spacing: 0.06em;
+  color: var(--text);
+  margin-bottom: 0.3em;
+  line-height: 1.2;
+  transition: color 0.4s ease;
+}
+
+.book-meta .book-author {
+  font-family: var(--title-font);
+  font-size: 1.05em;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  margin-bottom: 1.2em;
+  transition: color 0.4s ease;
+}
+
+.book-meta .book-logline {
+  font-style: italic;
+  color: var(--text-dim);
+  max-width: 28em;
+  margin: 0 auto;
+  line-height: 1.5;
+  transition: color 0.4s ease;
+}
+
+.start-reading {
+  display: block;
+  max-width: 16em;
+  margin: 0 auto;
+  padding: 0.85em 2.5em;
+  background: var(--accent);
+  color: var(--bg);
+  font-family: 'Literata', Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
+  font-size: 1em;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.3s ease, color 0.3s ease, transform 0.2s ease;
+}
+
+.start-reading:hover { color: var(--bg); filter: brightness(1.1); transform: translateY(-1px); }
+.start-reading:active { transform: translateY(0); }
+
+.toc-link {
+  display: inline-block;
+  margin-top: 2em;
+  margin-bottom: 2em;
+  font-family: var(--title-font);
+  font-size: 0.9em;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.15em;
+  transition: color 0.3s ease, border-color 0.3s ease;
+}
+.toc-link:hover { color: var(--text); border-bottom-color: var(--accent); }
+
+/* --- PART LABEL (above chapter heading) --------------------------------- */
+
+.part-label {
+  text-align: center;
+  font-size: 0.72em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-top: 3em;
+  margin-bottom: 0.5em;
+  transition: color 0.4s ease;
+}
+
+.part-label + h1 {
+  margin-top: 0.5em;
+}
+
+/* --- PART INTERSTITIAL PAGE --------------------------------------------- */
+
+.part-interstitial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+  text-align: center;
+  padding: 2em 1.5rem;
+}
+
+.part-number {
+  font-size: 0.75em;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 1em;
+}
+
+.part-title {
+  font-family: var(--title-font);
+  font-size: 2em;
+  font-weight: var(--title-weight);
+  letter-spacing: 0.08em;
+  color: var(--text);
+  line-height: 1.3;
+  margin: 0;
+}
+
+.part-ornament {
+  width: 3em;
+  height: 1px;
+  background: var(--border);
+  margin-top: 2em;
+}
+
+[data-theme="dark"] .part-number { color: var(--accent); }
+[data-theme="dark"] .part-ornament {
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.4;
+}
+
+/* --- TOC PART HEADINGS -------------------------------------------------- */
+
+.toc-part {
+  font-family: var(--title-font);
+  font-size: 0.72em;
+  font-weight: normal;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 1.5em 0 0.5em;
+  padding: 0 0.25em;
+}
+
+.toc-part:first-child { margin-top: 0; }
+
+.toc-panel li.toc-current a,
+.toc-list li.toc-current a {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.toc-panel li.toc-current a::before {
+  color: var(--accent);
+}
+
+/* --- RESUME LINK -------------------------------------------------------- */
+
+.resume-link {
+  display: block;
+  margin-bottom: 1.5em;
+  font-family: var(--title-font);
+  font-size: 0.9em;
+  color: var(--accent);
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.resume-link:hover { filter: brightness(1.2); }
+
+.resume-label {
+  display: block;
+  font-size: 0.75em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 0.3em;
+}
+
+/* --- CONTENTS PAGE TITLE ------------------------------------------------ */
+
+.contents-title {
+  font-family: var(--title-font);
+  font-size: 1.8em;
+  font-weight: var(--title-weight);
+  letter-spacing: 0.06em;
+  text-align: center;
+  color: var(--text);
+  margin-bottom: 1.5em;
+  padding-top: 1em;
+}
+
+/* --- 15. RESPONSIVE ----------------------------------------------------- */
+
+@media (max-width: 639px) {
+  .chapter-content,
+  .reading-column,
+  .book-landing { padding-left: 20px; padding-right: 20px; }
+
+  .book-nav { padding: 0.5rem 1rem; }
+
+  .book-nav .nav-title { font-size: 0.72em; max-width: 40%; }
+  .book-nav .chapter-info { font-size: 0.68em; }
+
+  .chapter-content h1 {
+    font-size: 1.25em;
+    margin-top: 2.5em;
+    margin-bottom: 1.5em;
+  }
+
+  .part-label { font-size: 0.65em; margin-top: 2em; }
+
+  .part-interstitial { min-height: 50vh; }
+  .part-title { font-size: 1.5em; }
+
+  .chapter-nav {
+    padding-left: 20px;
+    padding-right: 20px;
+    flex-direction: column;
+    gap: 1em;
+  }
+
+  .chapter-nav .nav-next {
+    text-align: left;
+    margin-left: 0;
+    padding-top: 1em;
+    border-top: 1px solid var(--border);
+  }
+
+  .book-landing { padding-top: 3em; }
+  .book-meta .book-title { font-size: 1.6em; }
+  .book-cover { max-width: 240px; width: 70%; }
+  .contents-title { font-size: 1.4em; }
+  .toc-panel { padding: 2em 1.5em; width: 95%; }
+  .toc-book-title { font-size: 0.95em; }
+}
+
+@media (min-width: 640px) and (max-width: 1024px) {
+  .chapter-content,
+  .reading-column,
+  .book-landing { max-width: 38em; padding-left: 2rem; padding-right: 2rem; }
+}
+
+@media (pointer: coarse) {
+  .book-nav .nav-controls button,
+  .chapter-nav a,
+  .toc-panel a,
+  .toc-contents a { min-height: 44px; display: flex; align-items: center; }
+}
+
+/* --- 16. SELECTION ------------------------------------------------------ */
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--text);
+}
+
+/* --- 17. PRINT ---------------------------------------------------------- */
+
+@media print {
+  .book-nav, .progress-bar, .chapter-nav,
+  .toc-overlay, .theme-toggle, .toc-toggle { display: none !important; }
+
+  body { background: white; color: black; font-size: 11pt; }
+  .chapter-content { max-width: none; padding: 0; }
+  .chapter-content h1 { page-break-before: always; color: black; }
+  .chapter-content h1:first-of-type { page-break-before: avoid; }
+  .chapter-content hr { page-break-after: avoid; }
+  .chapter-content blockquote { color: #333; border-left-color: #ccc; }
+  a { color: black; border-bottom: none; }
+}
+
+/* --- 18. REDUCED MOTION ------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* ==========================================================================
+   annotations.css — Annotation Overlay Styles
+   StoryForge production stylesheet — loaded when --annotate is active
+
+   Theme variables from reading.css:
+     --bg, --text, --text-dim, --accent, --surface, --border
+   Breakpoints: 639px mobile, 640px+ desktop
+   ========================================================================== */
+
+/* --- 1. HIGHLIGHTS ------------------------------------------------------- */
+
+.sf-highlight {
+  background-color: rgba(255, 220, 80, 0.35);
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s;
+}
+
+.sf-highlight:hover {
+  background-color: rgba(255, 220, 80, 0.55);
+}
+
+/* Dot indicator for highlights that have an attached comment */
+.sf-highlight.has-comment::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  margin-left: 2px;
+  vertical-align: super;
+}
+
+/* Dark theme variants */
+[data-theme="dark"] .sf-highlight { background-color: rgba(255, 200, 60, 0.2); }
+[data-theme="dark"] .sf-highlight:hover { background-color: rgba(255, 200, 60, 0.35); }
+
+/* Sepia theme variants */
+[data-theme="sepia"] .sf-highlight { background-color: rgba(200, 160, 60, 0.25); }
+[data-theme="sepia"] .sf-highlight:hover { background-color: rgba(200, 160, 60, 0.4); }
+
+
+/* --- 2. DESKTOP POPOVER -------------------------------------------------- */
+
+.sf-popover {
+  position: absolute;
+  z-index: 100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  animation: sf-fade-in 0.15s ease;
+}
+
+.sf-popover button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sf-popover button:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* Comment input within popover */
+.sf-comment-input {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 240px;
+}
+
+.sf-comment-input textarea {
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+  min-height: 60px;
+}
+
+.sf-comment-input .sf-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+@keyframes sf-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+
+/* --- 3. MOBILE BOTTOM TOOLBAR -------------------------------------------- */
+
+/* Hidden by default; shown only on mobile via media query below */
+.sf-toolbar { display: none; }
+
+@media (max-width: 639px) {
+  /* Suppress desktop popover entirely on mobile */
+  .sf-popover { display: none !important; }
+
+  .sf-toolbar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 8px 12px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sf-toolbar button {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    min-height: 44px;
+  }
+
+  .sf-toolbar button:active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  .sf-toolbar button.sf-hidden { display: none; }
+
+  /* Ensure content isn't hidden behind the fixed toolbar */
+  .reading-column { padding-bottom: 70px; }
+}
+
+
+/* --- 4. MARGIN NOTES ----------------------------------------------------- */
+
+.sf-margin-trigger {
+  position: absolute;
+  left: -32px;
+  width: 24px;
+  height: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+/* Reveal trigger button on paragraph hover (desktop only) */
+@media (min-width: 640px) {
+  [data-scene] > *:hover > .sf-margin-trigger,
+  .sf-margin-trigger:hover { opacity: 1; }
+}
+
+.sf-margin-indicator {
+  position: absolute;
+  left: -28px;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  color: var(--bg);
+}
+
+.sf-note-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  margin: 8px 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  animation: sf-fade-in 0.15s ease;
+}
+
+.sf-note-panel textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+  min-height: 60px;
+  box-sizing: border-box;
+}
+
+/* Badge used to show annotation counts in nav/headings */
+.sf-badge {
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 6px;
+}
+
+
+/* --- 5. COMMENT VIEWER --------------------------------------------------- */
+
+.sf-comment-viewer {
+  position: absolute;
+  z-index: 101;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  max-width: 300px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  animation: sf-fade-in 0.15s ease;
+}
+
+.sf-comment-viewer p {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.sf-comment-viewer .sf-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.sf-comment-viewer button {
+  background: var(--surface);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.sf-comment-viewer button.sf-delete {
+  color: #c0392b;
+  border-color: #c0392b;
+}
+
+
+/* --- 6. STALE ANNOTATIONS PANEL ----------------------------------------- */
+
+.sf-stale-panel {
+  margin-top: 3rem;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  border-left: 3px solid #e67e22;
+}
+
+.sf-stale-panel h3 {
+  margin: 0 0 12px;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.sf-stale-panel details { margin-bottom: 8px; }
+
+.sf-stale-panel summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.sf-stale-panel blockquote {
+  margin: 4px 0 4px 12px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  font-style: italic;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.sf-stale-panel button {
+  background: var(--surface);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+
+/* --- 7. PRINT AND REDUCED MOTION ---------------------------------------- */
+
+@media print {
+  /* Remove highlight tinting in print — text should read cleanly */
+  .sf-highlight { background: none !important; }
+  .sf-highlight.has-comment::after { display: none; }
+
+  /* Hide all annotation UI chrome from print output */
+  .sf-popover,
+  .sf-toolbar,
+  .sf-margin-trigger,
+  .sf-margin-indicator,
+  .sf-note-panel,
+  .sf-comment-viewer,
+  .sf-badge,
+  .sf-stale-panel { display: none !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-popover,
+  .sf-note-panel,
+  .sf-comment-viewer { animation: none; }
+}
+</style>
+</head>
+<body data-book="the-cartographer-s-silence" data-chapter="chapter-02" data-chapter-num="2" data-total-chapters="2">
+
+<div class="progress-bar"></div>
+
+<nav class="book-nav">
+  <a href="../contents.html" class="nav-title">The Cartographer's Silence</a>
+  <div class="nav-controls">
+    <button class="toc-toggle" aria-label="Table of contents">&#9776;</button>
+    <button class="theme-toggle" aria-label="Change theme">
+      <span class="icon-light">&#9788;</span>
+      <span class="icon-dark">&#9790;</span>
+      <span class="icon-sepia">&#9782;</span>
+    </button>
+  </div>
+</nav>
+
+<main class="reading-column chapter-content drop-cap">
+<div class="part-label">Part 2: The Blank</div>
+<h1 id="chapter-2-into-the-blank">Chapter 2: Into the Blank</h1>
+<section data-scene="act2-sc01">
+<p>The edge of the mapped world was not a line on the ground. Tessa had
+expected — what? A wall of fog, a change in the light, some visible
+boundary between the known and the unknown.</p>
+<p>Instead, the road simply became less certain. The packed dirt
+softened. The trees stopped being species she recognized and became
+species she almost recognized. Close enough to name, wrong enough to
+doubt.</p>
+<p>She checked her compass. The needle was steady, which was more than
+she could say for her hands.</p>
+</section>
+</main>
+
+<nav class="chapter-nav">
+  <a href="part-02.html" class="prev-chapter nav-link"><span class="nav-label">&larr; The Blank</span><span class="nav-chapter-title">The Blank</span></a>
+  <a href="../index.html" class="next-chapter nav-link"><span class="nav-label">Finished &rarr;</span><span class="nav-chapter-title">Back to cover</span></a>
+</nav>
+
+<!-- TOC Overlay -->
+<div class="toc-overlay">
+  <div class="toc-panel">
+    <div class="toc-book-title">The Cartographer's Silence</div>
+    <h2>Contents</h2>
+    <div class="toc-contents">
+  <h3 class="toc-part">Part 1: The Expedition</h3>
+  <ol class="toc-list" start="1">
+    <li><a href="chapter-01.html" data-book="the-cartographer-s-silence" data-chapter="chapter-01">The Finest Cartographer</a></li>
+  </ol>
+  <h3 class="toc-part">Part 2: The Blank</h3>
+  <ol class="toc-list" start="2">
+    <li><a href="chapter-02.html" data-book="the-cartographer-s-silence" data-chapter="chapter-02">Into the Blank</a></li>
+  </ol>
+
+    </div>
+  </div>
+</div>
+
+<script>
+/*
+ * Storyforge Web Book — Progressive Enhancement
+ *
+ * The book is fully readable with JavaScript disabled.
+ * Everything in this file is optional enhancement.
+ *
+ * ---------------------------------------------------------------------------
+ * INLINE IN <head> — prevents flash of wrong theme.
+ * Paste this inside a <script> tag before any stylesheets:
+ *
+ * (function(){var t=localStorage.getItem('storyforge-theme');if(t)document.documentElement.dataset.theme=t;else if(window.matchMedia('(prefers-color-scheme:dark)').matches)document.documentElement.dataset.theme='dark'})();
+ *
+ * ---------------------------------------------------------------------------
+ */
+
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------------------
+  // Utilities
+  // ---------------------------------------------------------------------------
+
+  /** Return a debounced version of fn that waits ms before firing. */
+  function debounce(fn, ms) {
+    var timer;
+    return function () {
+      var ctx = this, args = arguments;
+      clearTimeout(timer);
+      timer = setTimeout(function () { fn.apply(ctx, args); }, ms);
+    };
+  }
+
+  /** Derive a slug for the current chapter from the URL or body attribute. */
+  function getChapterSlug() {
+    var slug = document.body.getAttribute('data-chapter');
+    if (slug) return slug;
+    // Fall back to the last segment of the pathname, minus extension
+    var path = window.location.pathname.replace(/\/+$/, '');
+    var parts = path.split('/');
+    return (parts[parts.length - 1] || 'index').replace(/\.html?$/, '');
+  }
+
+  // ---------------------------------------------------------------------------
+  // 1. Theme switching
+  // ---------------------------------------------------------------------------
+
+  var themes = ['light', 'dark', 'sepia'];
+
+  function currentTheme() {
+    return document.documentElement.dataset.theme || 'light';
+  }
+
+  function setTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('storyforge-theme', theme);
+  }
+
+  function cycleTheme() {
+    var idx = themes.indexOf(currentTheme());
+    setTheme(themes[(idx + 1) % themes.length]);
+  }
+
+  var themeBtn = document.querySelector('.theme-toggle');
+  if (themeBtn) {
+    themeBtn.addEventListener('click', cycleTheme);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2. Reading position persistence
+  // ---------------------------------------------------------------------------
+
+  var posKey = 'pos-' + getChapterSlug();
+
+  // Restore saved position after layout settles.
+  var savedPos = localStorage.getItem(posKey);
+  if (savedPos !== null) {
+    setTimeout(function () {
+      window.scrollTo(0, parseInt(savedPos, 10));
+    }, 100);
+  }
+
+  // Save position on scroll (debounced).
+  window.addEventListener('scroll', debounce(function () {
+    localStorage.setItem(posKey, String(window.scrollY));
+  }, 500));
+
+  // ---------------------------------------------------------------------------
+  // 3. Chapter completion tracking
+  // ---------------------------------------------------------------------------
+
+  function getChaptersRead() {
+    try { return JSON.parse(localStorage.getItem('chapters-read')) || []; }
+    catch (_) { return []; }
+  }
+
+  function markChapterRead(slug) {
+    var read = getChaptersRead();
+    if (read.indexOf(slug) === -1) {
+      read.push(slug);
+      localStorage.setItem('chapters-read', JSON.stringify(read));
+    }
+  }
+
+  /** Apply .chapter-read to TOC links whose chapters have been completed. */
+  function applyReadClasses() {
+    var read = getChaptersRead();
+    if (!read.length) return;
+    var links = document.querySelectorAll('.toc-overlay a, .toc a');
+    for (var i = 0; i < links.length; i++) {
+      var href = links[i].getAttribute('href') || '';
+      var slug = href.replace(/^.*\//, '').replace(/\.html?$/, '');
+      if (read.indexOf(slug) !== -1) {
+        links[i].classList.add('chapter-read');
+      }
+    }
+  }
+
+  applyReadClasses();
+
+  // Mark current chapter as read when user scrolls past 90%.
+  var chapterMarked = false;
+  function checkCompletion() {
+    if (chapterMarked) return;
+    var scrollTop = window.scrollY;
+    var docHeight = document.documentElement.scrollHeight;
+    var winHeight = window.innerHeight;
+    if (docHeight <= winHeight) return; // page fits in viewport
+    if (scrollTop / (docHeight - winHeight) >= 0.9) {
+      chapterMarked = true;
+      markChapterRead(getChapterSlug());
+      applyReadClasses();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4. Progress bar
+  // ---------------------------------------------------------------------------
+
+  var progressBar = document.querySelector('.progress-bar');
+
+  function updateProgress() {
+    if (!progressBar) return;
+    var scrollTop = window.scrollY;
+    var docHeight = document.documentElement.scrollHeight;
+    var winHeight = window.innerHeight;
+    var pct = docHeight <= winHeight ? 100 : (scrollTop / (docHeight - winHeight)) * 100;
+    progressBar.style.width = Math.min(pct, 100) + '%';
+  }
+
+  // ---------------------------------------------------------------------------
+  // 5. Auto-hiding navigation
+  // ---------------------------------------------------------------------------
+
+  var bookNav = document.querySelector('.book-nav');
+  var lastScrollY = window.scrollY;
+  var hideTimer = null;
+
+  function handleNavVisibility() {
+    var scrollY = window.scrollY;
+    if (!bookNav) return;
+
+    // Always visible near the top of the page.
+    if (scrollY < 100) {
+      bookNav.classList.remove('hidden');
+      clearTimeout(hideTimer);
+      lastScrollY = scrollY;
+      return;
+    }
+
+    if (scrollY > lastScrollY) {
+      // Scrolling down — hide after 3 seconds.
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(function () {
+        bookNav.classList.add('hidden');
+      }, 3000);
+    } else {
+      // Scrolling up — show immediately.
+      clearTimeout(hideTimer);
+      bookNav.classList.remove('hidden');
+    }
+
+    lastScrollY = scrollY;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Unified scroll handler (uses rAF for smooth progress bar updates)
+  // ---------------------------------------------------------------------------
+
+  var scrollTicking = false;
+  window.addEventListener('scroll', function () {
+    if (!scrollTicking) {
+      requestAnimationFrame(function () {
+        updateProgress();
+        checkCompletion();
+        handleNavVisibility();
+        scrollTicking = false;
+      });
+      scrollTicking = true;
+    }
+  });
+
+  // Initial call so progress bar is correct on load.
+  updateProgress();
+
+  // ---------------------------------------------------------------------------
+  // 6. Keyboard navigation
+  // ---------------------------------------------------------------------------
+
+  document.addEventListener('keydown', function (e) {
+    // Don't capture when the user is typing in a form field.
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) {
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowLeft': {
+        var prev = document.querySelector('.prev-chapter');
+        if (prev && prev.href) window.location.href = prev.href;
+        break;
+      }
+      case 'ArrowRight': {
+        var next = document.querySelector('.next-chapter');
+        if (next && next.href) window.location.href = next.href;
+        break;
+      }
+      case 't':
+      case 'T':
+        toggleToc();
+        break;
+      case 'Escape':
+        closeToc();
+        break;
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 7. TOC overlay toggle
+  // ---------------------------------------------------------------------------
+
+  var tocOverlay = document.querySelector('.toc-overlay');
+  var tocToggle = document.querySelector('.toc-toggle');
+
+  function toggleToc() {
+    if (!tocOverlay) return;
+    tocOverlay.classList.toggle('active');
+    if (tocOverlay.classList.contains('active')) {
+      var current = tocOverlay.querySelector('.toc-current');
+      if (current) {
+        setTimeout(function () {
+          current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }, 100);
+      }
+    }
+  }
+
+  function closeToc() {
+    if (!tocOverlay) return;
+    tocOverlay.classList.remove('active');
+  }
+
+  if (tocToggle) {
+    tocToggle.addEventListener('click', toggleToc);
+  }
+
+  // Close on backdrop click (click on the overlay itself, not its children).
+  if (tocOverlay) {
+    tocOverlay.addEventListener('click', function (e) {
+      if (e.target === tocOverlay) closeToc();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 8. Chapter info in navigation
+  // ---------------------------------------------------------------------------
+
+  var chapterNum = document.body.getAttribute('data-chapter-num');
+  var totalChapters = document.body.getAttribute('data-total-chapters');
+
+  if (chapterNum && totalChapters && bookNav) {
+    var info = document.createElement('span');
+    info.className = 'chapter-info';
+    info.textContent = 'Chapter ' + chapterNum + ' of ' + totalChapters;
+    bookNav.appendChild(info);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 9. Resume tracking — store last-visited chapter
+  // ---------------------------------------------------------------------------
+
+  var currentSlug = getChapterSlug();
+  if (currentSlug && currentSlug !== 'index' && currentSlug !== 'contents') {
+    localStorage.setItem('storyforge-last-chapter', currentSlug);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 10. TOC current chapter highlight
+  // ---------------------------------------------------------------------------
+
+  function highlightCurrentChapter() {
+    var slug = getChapterSlug();
+    if (!slug) return;
+    var links = document.querySelectorAll('.toc-overlay a, .toc-list a');
+    for (var i = 0; i < links.length; i++) {
+      var href = links[i].getAttribute('href') || '';
+      var linkSlug = href.replace(/^.*\//, '').replace(/\.html?$/, '');
+      if (linkSlug === slug) {
+        var li = links[i].closest('li');
+        if (li) {
+          li.classList.add('toc-current');
+        }
+      }
+    }
+  }
+
+  highlightCurrentChapter();
+
+})();
+// Storyforge Annotation Overlay — loaded when --annotate is active
+(function() {
+  'use strict';
+
+  var bookSlug = document.body.dataset.book || 'unknown';
+  var chapterSlug = document.body.dataset.chapter || 'unknown';
+  var STORAGE_PREFIX = 'storyforge-annotations-' + bookSlug + '-';
+
+  // =========================================================================
+  // 1. UUID GENERATOR
+  // =========================================================================
+
+  function uuid() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+
+  // =========================================================================
+  // 2. STORAGE FUNCTIONS
+  // =========================================================================
+
+  function storageKey() {
+    return STORAGE_PREFIX + chapterSlug;
+  }
+
+  function loadAnnotations() {
+    try {
+      var raw = localStorage.getItem(storageKey());
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveAnnotations(annotations) {
+    try {
+      localStorage.setItem(storageKey(), JSON.stringify(annotations));
+    } catch (e) {
+      console.warn('[Storyforge Annotations] localStorage full — could not save annotations.', e);
+    }
+  }
+
+  function addAnnotation(annotation) {
+    var annotations = loadAnnotations();
+    annotations.push(annotation);
+    saveAnnotations(annotations);
+    return annotation;
+  }
+
+  function updateAnnotation(id, updates) {
+    var annotations = loadAnnotations();
+    for (var i = 0; i < annotations.length; i++) {
+      if (annotations[i].id === id) {
+        for (var key in updates) {
+          if (Object.prototype.hasOwnProperty.call(updates, key)) {
+            annotations[i][key] = updates[key];
+          }
+        }
+        break;
+      }
+    }
+    saveAnnotations(annotations);
+  }
+
+  function deleteAnnotation(id) {
+    var annotations = loadAnnotations();
+    saveAnnotations(annotations.filter(function(a) { return a.id !== id; }));
+  }
+
+  // =========================================================================
+  // 3. DOM HELPERS
+  // =========================================================================
+
+  var BLOCK_SELECTOR = 'p, blockquote, ul, ol, h1, h2, h3, h4, h5, h6';
+
+  function getSceneForNode(node) {
+    var el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    while (el && el !== document.body) {
+      if (el.dataset && el.dataset.scene !== undefined) {
+        return el.dataset.scene;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function getParagraphIndex(node, scene) {
+    var section = document.querySelector('[data-scene="' + scene + '"]');
+    if (!section) return -1;
+
+    var blocks = section.querySelectorAll(BLOCK_SELECTOR);
+    var el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+
+    // Walk up to find a direct block child of the section
+    while (el && el.parentElement !== section) {
+      el = el.parentElement;
+    }
+    if (!el) return -1;
+
+    for (var i = 0; i < blocks.length; i++) {
+      if (blocks[i] === el) return i;
+    }
+    return -1;
+  }
+
+  function getBlockByIndex(scene, index) {
+    var section = document.querySelector('[data-scene="' + scene + '"]');
+    if (!section) return null;
+    var blocks = section.querySelectorAll(BLOCK_SELECTOR);
+    return blocks[index] || null;
+  }
+
+  // =========================================================================
+  // 4. HIGHLIGHT RENDERING
+  // =========================================================================
+
+  function renderHighlight(annotation) {
+    if (annotation.type === 'margin-note') return;
+
+    var anchor = annotation.anchor;
+    if (!anchor) return;
+
+    var block = getBlockByIndex(annotation.scene, anchor.paragraphIndex);
+    if (!block) return;
+
+    try {
+      // Use TreeWalker to find the text nodes covering the start/end offsets
+      // offsets are relative to the block's full text content
+      var walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, null, false);
+      var startNode = null, endNode = null;
+      var startOffset = 0, endOffset = 0;
+      var charCount = 0;
+      var node;
+
+      while ((node = walker.nextNode())) {
+        var nodeLen = node.nodeValue.length;
+        if (startNode === null && charCount + nodeLen > anchor.startOffset) {
+          startNode = node;
+          startOffset = anchor.startOffset - charCount;
+        }
+        if (endNode === null && charCount + nodeLen >= anchor.endOffset) {
+          endNode = node;
+          endOffset = anchor.endOffset - charCount;
+          break;
+        }
+        charCount += nodeLen;
+      }
+
+      if (!startNode || !endNode) return;
+
+      var range = document.createRange();
+      range.setStart(startNode, startOffset);
+      range.setEnd(endNode, endOffset);
+
+      var span = document.createElement('span');
+      span.className = 'sf-highlight';
+      if (annotation.comment) span.classList.add('has-comment');
+      span.dataset.annotationId = annotation.id;
+      range.surroundContents(span);
+    } catch (e) {
+      // Cross-element or other range errors — skip silently
+    }
+  }
+
+  function renderAllHighlights() {
+    var annotations = loadAnnotations();
+    annotations.forEach(function(a) {
+      if (a.type !== 'margin-note') renderHighlight(a);
+    });
+  }
+
+  // =========================================================================
+  // 5. DESKTOP POPOVER
+  // =========================================================================
+
+  var activePopover = null;
+
+  function removePopover() {
+    if (activePopover && activePopover.parentNode) {
+      activePopover.parentNode.removeChild(activePopover);
+    }
+    activePopover = null;
+  }
+
+  function showPopover(x, y, range) {
+    removePopover();
+
+    var popover = document.createElement('div');
+    popover.className = 'sf-popover';
+    popover.style.top = (y + window.scrollY) + 'px';
+    popover.style.left = (x + window.scrollX) + 'px';
+
+    var hlBtn = document.createElement('button');
+    hlBtn.textContent = 'Highlight';
+    hlBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      createHighlightFromRange(range, '');
+      removePopover();
+    });
+
+    var cmBtn = document.createElement('button');
+    cmBtn.textContent = 'Comment';
+    cmBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      showCommentInput(popover, range);
+    });
+
+    popover.appendChild(hlBtn);
+    popover.appendChild(cmBtn);
+    document.body.appendChild(popover);
+    activePopover = popover;
+  }
+
+  function showCommentInput(popover, range) {
+    while (popover.firstChild) popover.removeChild(popover.firstChild);
+
+    var wrap = document.createElement('div');
+    wrap.className = 'sf-comment-input';
+
+    var textarea = document.createElement('textarea');
+    textarea.placeholder = 'Add a comment…';
+    textarea.rows = 3;
+
+    var actions = document.createElement('div');
+    actions.className = 'sf-actions';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      removePopover();
+      window.getSelection().removeAllRanges();
+    });
+
+    var saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      createHighlightFromRange(range, textarea.value.trim());
+      removePopover();
+    });
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(saveBtn);
+    wrap.appendChild(textarea);
+    wrap.appendChild(actions);
+    popover.appendChild(wrap);
+    textarea.focus();
+  }
+
+  function getTextOffsets(block, range) {
+    // Walk text nodes in block to compute character offsets for start/end
+    var walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, null, false);
+    var startOffset = 0, endOffset = 0;
+    var charCount = 0;
+    var node;
+
+    while ((node = walker.nextNode())) {
+      var nodeLen = node.nodeValue.length;
+      if (node === range.startContainer) {
+        startOffset = charCount + range.startOffset;
+      }
+      if (node === range.endContainer) {
+        endOffset = charCount + range.endOffset;
+        break;
+      }
+      charCount += nodeLen;
+    }
+    return { startOffset: startOffset, endOffset: endOffset };
+  }
+
+  function createHighlightFromRange(range, comment) {
+    try {
+      var startNode = range.startContainer;
+      var scene = getSceneForNode(startNode);
+      if (!scene) return;
+
+      var paragraphIndex = getParagraphIndex(startNode, scene);
+      if (paragraphIndex < 0) return;
+
+      var block = getBlockByIndex(scene, paragraphIndex);
+      if (!block) return;
+
+      var offsets = getTextOffsets(block, range);
+      var selectedText = range.toString();
+
+      var annotation = {
+        id: uuid(),
+        type: comment ? 'comment' : 'highlight',
+        chapter: chapterSlug,
+        scene: scene,
+        anchor: {
+          paragraphIndex: paragraphIndex,
+          startOffset: offsets.startOffset,
+          endOffset: offsets.endOffset
+        },
+        selectedText: selectedText,
+        comment: comment,
+        createdAt: new Date().toISOString()
+      };
+
+      addAnnotation(annotation);
+      renderHighlight(annotation);
+      updateBadge();
+      window.getSelection().removeAllRanges();
+    } catch (e) {
+      console.warn('[Storyforge Annotations] createHighlightFromRange error:', e);
+    }
+  }
+
+  // Desktop mouseup listener
+  document.addEventListener('mouseup', function(e) {
+    if (window.innerWidth < 640) return;
+
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
+
+    var range = selection.getRangeAt(0);
+    var container = range.commonAncestorContainer;
+    var el = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+    if (!el.closest('.chapter-content')) return;
+
+    var rect = range.getBoundingClientRect();
+    showPopover(rect.left, rect.top - 50, range.cloneRange());
+  });
+
+  // Desktop mousedown listener — close popover when clicking outside
+  document.addEventListener('mousedown', function(e) {
+    if (window.innerWidth < 640) return;
+    if (activePopover && !activePopover.contains(e.target)) {
+      removePopover();
+    }
+  });
+
+  // =========================================================================
+  // 6. MOBILE TOOLBAR
+  // =========================================================================
+
+  var toolbar = null;
+  var pendingRange = null;
+
+  function createToolbar() {
+    if (window.innerWidth >= 640) return;
+    if (toolbar) return;
+
+    toolbar = document.createElement('div');
+    toolbar.className = 'sf-toolbar';
+
+    var hlBtn = document.createElement('button');
+    hlBtn.className = 'sf-hidden';
+    hlBtn.dataset.action = 'highlight';
+    hlBtn.textContent = 'Highlight';
+    hlBtn.addEventListener('click', function() {
+      if (pendingRange) {
+        createHighlightFromRange(pendingRange, '');
+        clearMobileSelection();
+      }
+    });
+
+    var cmBtn = document.createElement('button');
+    cmBtn.className = 'sf-hidden';
+    cmBtn.dataset.action = 'comment';
+    cmBtn.textContent = 'Comment';
+    cmBtn.addEventListener('click', function() {
+      if (pendingRange) {
+        showMobileCommentInput(pendingRange);
+      }
+    });
+
+    var noteBtn = document.createElement('button');
+    noteBtn.dataset.action = 'note';
+    noteBtn.textContent = '+ Note';
+    noteBtn.addEventListener('click', function() {
+      showMobileMarginInput();
+    });
+
+    toolbar.appendChild(hlBtn);
+    toolbar.appendChild(cmBtn);
+    toolbar.appendChild(noteBtn);
+    document.body.appendChild(toolbar);
+  }
+
+  document.addEventListener('selectionchange', function() {
+    if (window.innerWidth >= 640) return;
+    if (!toolbar) return;
+
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+      // Delay hide to allow tap registration
+      setTimeout(function() {
+        var sel = window.getSelection();
+        if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+          var hlBtn = toolbar.querySelector('[data-action="highlight"]');
+          var cmBtn = toolbar.querySelector('[data-action="comment"]');
+          if (hlBtn) hlBtn.classList.add('sf-hidden');
+          if (cmBtn) cmBtn.classList.add('sf-hidden');
+        }
+      }, 200);
+      return;
+    }
+
+    var range = selection.getRangeAt(0);
+    var container = range.commonAncestorContainer;
+    var el = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+    if (!el.closest('.chapter-content')) return;
+
+    pendingRange = range.cloneRange();
+    var hlBtn = toolbar.querySelector('[data-action="highlight"]');
+    var cmBtn = toolbar.querySelector('[data-action="comment"]');
+    if (hlBtn) hlBtn.classList.remove('sf-hidden');
+    if (cmBtn) cmBtn.classList.remove('sf-hidden');
+  });
+
+  function clearMobileSelection() {
+    window.getSelection().removeAllRanges();
+    pendingRange = null;
+    if (!toolbar) return;
+    var hlBtn = toolbar.querySelector('[data-action="highlight"]');
+    var cmBtn = toolbar.querySelector('[data-action="comment"]');
+    if (hlBtn) hlBtn.classList.add('sf-hidden');
+    if (cmBtn) cmBtn.classList.add('sf-hidden');
+  }
+
+  function showMobileCommentInput(range) {
+    if (!toolbar) return;
+    while (toolbar.firstChild) toolbar.removeChild(toolbar.firstChild);
+
+    var wrap = document.createElement('div');
+    wrap.className = 'sf-comment-input';
+    wrap.style.width = '100%';
+
+    var textarea = document.createElement('textarea');
+    textarea.placeholder = 'Add a comment…';
+    textarea.rows = 2;
+
+    var actions = document.createElement('div');
+    actions.className = 'sf-actions';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function() {
+      clearMobileSelection();
+      rebuildToolbar();
+    });
+
+    var saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', function() {
+      createHighlightFromRange(range, textarea.value.trim());
+      rebuildToolbar();
+    });
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(saveBtn);
+    wrap.appendChild(textarea);
+    wrap.appendChild(actions);
+    toolbar.appendChild(wrap);
+    textarea.focus();
+  }
+
+  function rebuildToolbar() {
+    if (toolbar && toolbar.parentNode) {
+      toolbar.parentNode.removeChild(toolbar);
+    }
+    toolbar = null;
+    pendingRange = null;
+    createToolbar();
+  }
+
+  // =========================================================================
+  // 7. MARGIN NOTES
+  // =========================================================================
+
+  function setupMarginTriggers() {
+    if (window.innerWidth < 640) return; // Desktop only
+
+    var sections = document.querySelectorAll('[data-scene]');
+    sections.forEach(function(section) {
+      var blocks = section.querySelectorAll(BLOCK_SELECTOR);
+      blocks.forEach(function(block, index) {
+        block.style.position = 'relative';
+
+        var trigger = document.createElement('button');
+        trigger.className = 'sf-margin-trigger';
+        trigger.textContent = '+';
+        trigger.title = 'Add margin note';
+        trigger.setAttribute('aria-label', 'Add margin note');
+
+        var scene = section.dataset.scene;
+        trigger.addEventListener('click', function(e) {
+          e.stopPropagation();
+          showMarginNoteInput(scene, index, block);
+        });
+
+        block.appendChild(trigger);
+      });
+    });
+  }
+
+  function showMarginNoteInput(scene, paragraphIndex, block) {
+    // Remove any existing note panel
+    var existing = document.querySelector('.sf-note-panel');
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+
+    var panel = document.createElement('div');
+    panel.className = 'sf-note-panel';
+
+    var textarea = document.createElement('textarea');
+    textarea.placeholder = 'Add a margin note…';
+    textarea.rows = 3;
+
+    var actions = document.createElement('div');
+    actions.className = 'sf-actions';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function() {
+      if (panel.parentNode) panel.parentNode.removeChild(panel);
+    });
+
+    var saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', function() {
+      var text = textarea.value.trim();
+      if (!text) return;
+
+      var annotation = {
+        id: uuid(),
+        type: 'margin-note',
+        chapter: chapterSlug,
+        scene: scene,
+        anchor: { paragraphIndex: paragraphIndex },
+        comment: text,
+        createdAt: new Date().toISOString()
+      };
+
+      addAnnotation(annotation);
+      if (panel.parentNode) panel.parentNode.removeChild(panel);
+      renderMarginIndicator(annotation, block);
+      updateBadge();
+    });
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(saveBtn);
+    panel.appendChild(textarea);
+    panel.appendChild(actions);
+
+    block.insertAdjacentElement('afterend', panel);
+    textarea.focus();
+  }
+
+  function showMobileMarginInput() {
+    var viewportCenter = window.innerHeight / 2;
+    var sections = document.querySelectorAll('[data-scene]');
+    var closestBlock = null;
+    var closestScene = null;
+    var closestIndex = -1;
+    var closestDist = Infinity;
+
+    sections.forEach(function(section) {
+      var blocks = section.querySelectorAll(BLOCK_SELECTOR);
+      blocks.forEach(function(block, index) {
+        var rect = block.getBoundingClientRect();
+        var blockCenter = (rect.top + rect.bottom) / 2;
+        var dist = Math.abs(blockCenter - viewportCenter);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestBlock = block;
+          closestScene = section.dataset.scene;
+          closestIndex = index;
+        }
+      });
+    });
+
+    if (closestBlock) {
+      showMarginNoteInput(closestScene, closestIndex, closestBlock);
+    }
+  }
+
+  function renderMarginIndicator(annotation, block) {
+    var indicator = document.createElement('span');
+    indicator.className = 'sf-margin-indicator';
+    indicator.textContent = '✎';
+    indicator.dataset.annotationId = annotation.id;
+    indicator.title = annotation.comment;
+    indicator.setAttribute('role', 'button');
+    indicator.setAttribute('tabindex', '0');
+    indicator.addEventListener('click', function(e) {
+      e.stopPropagation();
+      showCommentViewer(annotation, indicator);
+    });
+    block.style.position = 'relative';
+    block.appendChild(indicator);
+  }
+
+  function renderAllMarginNotes() {
+    var annotations = loadAnnotations();
+    annotations.forEach(function(a) {
+      if (a.type !== 'margin-note') return;
+      var block = getBlockByIndex(a.scene, a.anchor.paragraphIndex);
+      if (block) renderMarginIndicator(a, block);
+    });
+  }
+
+  // =========================================================================
+  // 8. COMMENT VIEWER
+  // =========================================================================
+
+  var activeViewer = null;
+
+  function removeViewer() {
+    if (activeViewer && activeViewer.parentNode) {
+      activeViewer.parentNode.removeChild(activeViewer);
+    }
+    activeViewer = null;
+  }
+
+  function showCommentViewer(annotation, targetEl) {
+    removeViewer();
+
+    var viewer = document.createElement('div');
+    viewer.className = 'sf-comment-viewer';
+
+    var rect = targetEl.getBoundingClientRect();
+    viewer.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+    viewer.style.left = (rect.left + window.scrollX) + 'px';
+
+    if (annotation.comment) {
+      var commentP = document.createElement('p');
+      commentP.textContent = annotation.comment;
+      viewer.appendChild(commentP);
+    }
+
+    if (annotation.selectedText) {
+      var quoteP = document.createElement('p');
+      quoteP.style.fontStyle = 'italic';
+      quoteP.style.color = 'var(--text-dim)';
+      var text = annotation.selectedText;
+      if (text.length > 100) text = text.slice(0, 100) + '…';
+      quoteP.textContent = '\u201c' + text + '\u201d';
+      viewer.appendChild(quoteP);
+    }
+
+    var actions = document.createElement('div');
+    actions.className = 'sf-actions';
+
+    var editBtn = document.createElement('button');
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      showEditInput(annotation, targetEl);
+    });
+
+    var deleteBtn = document.createElement('button');
+    deleteBtn.className = 'sf-delete';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      deleteAnnotation(annotation.id);
+
+      // Unwrap highlight span or remove margin indicator
+      var hlSpan = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
+      if (hlSpan) {
+        while (hlSpan.firstChild) hlSpan.parentNode.insertBefore(hlSpan.firstChild, hlSpan);
+        hlSpan.parentNode.removeChild(hlSpan);
+      }
+      var indicator = document.querySelector('.sf-margin-indicator[data-annotation-id="' + annotation.id + '"]');
+      if (indicator && indicator.parentNode) indicator.parentNode.removeChild(indicator);
+
+      removeViewer();
+      updateBadge();
+    });
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      removeViewer();
+    });
+
+    actions.appendChild(editBtn);
+    actions.appendChild(deleteBtn);
+    actions.appendChild(closeBtn);
+    viewer.appendChild(actions);
+
+    document.body.appendChild(viewer);
+    activeViewer = viewer;
+  }
+
+  function showEditInput(annotation, targetEl) {
+    removeViewer();
+
+    var viewer = document.createElement('div');
+    viewer.className = 'sf-comment-viewer';
+
+    var rect = targetEl.getBoundingClientRect();
+    viewer.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+    viewer.style.left = (rect.left + window.scrollX) + 'px';
+
+    var textarea = document.createElement('textarea');
+    textarea.value = annotation.comment || '';
+    textarea.rows = 3;
+    textarea.style.width = '100%';
+    textarea.style.fontFamily = 'inherit';
+    textarea.style.fontSize = '0.85rem';
+    textarea.style.padding = '6px 8px';
+    textarea.style.boxSizing = 'border-box';
+    textarea.style.border = '1px solid var(--border)';
+    textarea.style.borderRadius = '4px';
+    textarea.style.background = 'var(--bg)';
+    textarea.style.color = 'var(--text)';
+
+    var actions = document.createElement('div');
+    actions.className = 'sf-actions';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      removeViewer();
+    });
+
+    var saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var newComment = textarea.value.trim();
+      updateAnnotation(annotation.id, { comment: newComment });
+      annotation.comment = newComment;
+
+      // Update has-comment class on highlight span
+      var hlSpan = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
+      if (hlSpan) {
+        if (newComment) {
+          hlSpan.classList.add('has-comment');
+        } else {
+          hlSpan.classList.remove('has-comment');
+        }
+      }
+
+      removeViewer();
+    });
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(saveBtn);
+    viewer.appendChild(textarea);
+    viewer.appendChild(actions);
+
+    document.body.appendChild(viewer);
+    activeViewer = viewer;
+    textarea.focus();
+  }
+
+  // Click listener: open viewer on highlight/indicator, close when clicking outside
+  document.addEventListener('click', function(e) {
+    var hlSpan = e.target.closest('.sf-highlight');
+    var indicator = e.target.closest('.sf-margin-indicator');
+
+    if (hlSpan) {
+      var annotationId = hlSpan.dataset.annotationId;
+      var annotations = loadAnnotations();
+      var annotation = null;
+      for (var i = 0; i < annotations.length; i++) {
+        if (annotations[i].id === annotationId) { annotation = annotations[i]; break; }
+      }
+      if (annotation) showCommentViewer(annotation, hlSpan);
+      return;
+    }
+
+    if (indicator) {
+      // Already handled by indicator's own click listener
+      return;
+    }
+
+    if (activeViewer && !activeViewer.contains(e.target)) {
+      removeViewer();
+    }
+  });
+
+  // =========================================================================
+  // 9. BADGE
+  // =========================================================================
+
+  function updateBadge() {
+    var existing = document.querySelector('.sf-badge');
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+
+    var annotations = loadAnnotations();
+    if (annotations.length === 0) return;
+
+    var badge = document.createElement('span');
+    badge.className = 'sf-badge';
+    badge.textContent = annotations.length;
+
+    var navControls = document.querySelector('.nav-controls');
+    if (navControls) navControls.prepend(badge);
+  }
+
+  // =========================================================================
+  // 10. ANCHOR RE-VALIDATION
+  // =========================================================================
+
+  function revalidateAnchors() {
+    var annotations = loadAnnotations();
+    var stale = [];
+    var valid = [];
+
+    annotations.forEach(function(annotation) {
+      if (annotation.type === 'margin-note') {
+        var block = getBlockByIndex(annotation.scene, annotation.anchor.paragraphIndex);
+        if (!block) {
+          stale.push(annotation);
+        } else {
+          valid.push(annotation);
+        }
+        return;
+      }
+
+      // highlight or comment
+      var block = getBlockByIndex(annotation.scene, annotation.anchor.paragraphIndex);
+      if (block && block.textContent.indexOf(annotation.selectedText) !== -1) {
+        // Still valid at stored location
+        valid.push(annotation);
+        return;
+      }
+
+      // Try scanning +/- 3 paragraphs
+      var found = false;
+      for (var delta = -3; delta <= 3; delta++) {
+        if (delta === 0) continue;
+        var altIndex = annotation.anchor.paragraphIndex + delta;
+        if (altIndex < 0) continue;
+        var altBlock = getBlockByIndex(annotation.scene, altIndex);
+        if (altBlock && altBlock.textContent.indexOf(annotation.selectedText) !== -1) {
+          // Re-anchor: update paragraphIndex
+          var textIdx = altBlock.textContent.indexOf(annotation.selectedText);
+          annotation.anchor.paragraphIndex = altIndex;
+          annotation.anchor.startOffset = textIdx;
+          annotation.anchor.endOffset = textIdx + annotation.selectedText.length;
+          valid.push(annotation);
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        stale.push(annotation);
+      }
+    });
+
+    saveAnnotations(valid);
+    return stale;
+  }
+
+  function renderStalePanel(staleAnnotations) {
+    if (!staleAnnotations || staleAnnotations.length === 0) return;
+
+    var chapterContent = document.querySelector('.chapter-content');
+    if (!chapterContent) return;
+
+    var panel = document.createElement('div');
+    panel.className = 'sf-stale-panel';
+
+    var heading = document.createElement('h3');
+    heading.textContent = staleAnnotations.length + ' annotation' +
+      (staleAnnotations.length !== 1 ? 's' : '') +
+      ' could not be placed (text may have changed)';
+    panel.appendChild(heading);
+
+    staleAnnotations.forEach(function(annotation) {
+      var details = document.createElement('details');
+
+      var summary = document.createElement('summary');
+      summary.textContent = annotation.type.charAt(0).toUpperCase() +
+        annotation.type.slice(1).replace('-', ' ');
+      details.appendChild(summary);
+
+      if (annotation.selectedText) {
+        var quote = document.createElement('blockquote');
+        quote.textContent = annotation.selectedText;
+        details.appendChild(quote);
+      }
+
+      if (annotation.comment) {
+        var commentP = document.createElement('p');
+        commentP.textContent = annotation.comment;
+        commentP.style.fontSize = '0.8rem';
+        commentP.style.margin = '4px 0';
+        details.appendChild(commentP);
+      }
+
+      var deleteBtn = document.createElement('button');
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', function() {
+        deleteAnnotation(annotation.id);
+        if (details.parentNode) details.parentNode.removeChild(details);
+        var remaining = panel.querySelectorAll('details');
+        if (remaining.length === 0 && panel.parentNode) {
+          panel.parentNode.removeChild(panel);
+        }
+        updateBadge();
+      });
+      details.appendChild(deleteBtn);
+
+      panel.appendChild(details);
+    });
+
+    chapterContent.appendChild(panel);
+  }
+
+  // =========================================================================
+  // 11. EXPORT
+  // =========================================================================
+
+  function getAllAnnotations() {
+    var all = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (key && key.indexOf(STORAGE_PREFIX) === 0) {
+          var chSlug = key.slice(STORAGE_PREFIX.length);
+          var raw = localStorage.getItem(key);
+          if (!raw) continue;
+          var parsed = JSON.parse(raw);
+          parsed.forEach(function(a) {
+            if (!a.chapter) a.chapter = chSlug;
+          });
+          all = all.concat(parsed);
+        }
+      }
+    } catch (e) {
+      console.warn('[Storyforge Annotations] getAllAnnotations error:', e);
+    }
+
+    all.sort(function(a, b) {
+      if (a.chapter < b.chapter) return -1;
+      if (a.chapter > b.chapter) return 1;
+      if (a.scene < b.scene) return -1;
+      if (a.scene > b.scene) return 1;
+      return (a.anchor.paragraphIndex || 0) - (b.anchor.paragraphIndex || 0);
+    });
+
+    return all;
+  }
+
+  function exportJSON(annotations) {
+    var titleEl = document.querySelector('.nav-title');
+    var bookTitle = titleEl ? titleEl.textContent.trim() : bookSlug;
+    return JSON.stringify({
+      book: bookTitle,
+      exportedAt: new Date().toISOString(),
+      annotator: 'author',
+      annotations: annotations
+    }, null, 2);
+  }
+
+  function exportMarkdown(annotations) {
+    // Build chapter title lookup from TOC links
+    var chapterTitles = {};
+    var tocLinks = document.querySelectorAll('.toc-contents a');
+    tocLinks.forEach(function(link) {
+      var href = link.getAttribute('href') || '';
+      var match = href.match(/chapters\/(chapter-\d+)\.html/);
+      if (match) {
+        chapterTitles[match[1]] = link.textContent.trim();
+      }
+    });
+
+    var titleEl = document.querySelector('.nav-title');
+    var bookTitle = titleEl ? titleEl.textContent.trim() : bookSlug;
+    var dateStr = new Date().toISOString().slice(0, 10);
+
+    var lines = [];
+    lines.push('# Annotations: ' + bookTitle);
+    lines.push('Exported: ' + dateStr);
+    lines.push('');
+
+    var currentChapter = null;
+    var currentScene = null;
+
+    annotations.forEach(function(a) {
+      if (a.chapter !== currentChapter) {
+        currentChapter = a.chapter;
+        currentScene = null;
+        var chNum = (currentChapter.match(/chapter-(\d+)/) || [])[1] || '';
+        var chTitle = chapterTitles[currentChapter] ||
+          (chNum ? 'Chapter ' + chNum : currentChapter);
+        lines.push('## ' + chTitle);
+        lines.push('');
+      }
+
+      if (a.scene !== currentScene) {
+        currentScene = a.scene;
+        lines.push('### Scene: ' + currentScene);
+        lines.push('');
+      }
+
+      if (a.type === 'margin-note') {
+        lines.push('*(margin note)*');
+      }
+
+      if (a.selectedText) {
+        lines.push('> \u201c' + a.selectedText + '\u201d');
+      }
+
+      if (a.comment) {
+        lines.push(a.comment);
+      }
+
+      lines.push('');
+    });
+
+    return lines.join('\n');
+  }
+
+  function downloadFile(content, filename, mimeType) {
+    var blob = new Blob([content], { type: mimeType });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function doExport(format) {
+    var annotations, content, filename;
+
+    if (format === 'chapter-json') {
+      annotations = loadAnnotations();
+      content = exportJSON(annotations);
+      filename = bookSlug + '-' + chapterSlug + '-annotations.json';
+      downloadFile(content, filename, 'application/json');
+    } else if (format === 'chapter') {
+      annotations = loadAnnotations();
+      content = exportMarkdown(annotations);
+      filename = bookSlug + '-' + chapterSlug + '-annotations.md';
+      downloadFile(content, filename, 'text/markdown');
+    } else if (format === 'json') {
+      annotations = getAllAnnotations();
+      content = exportJSON(annotations);
+      filename = bookSlug + '-annotations.json';
+      downloadFile(content, filename, 'application/json');
+    } else if (format === 'md') {
+      annotations = getAllAnnotations();
+      content = exportMarkdown(annotations);
+      filename = bookSlug + '-annotations.md';
+      downloadFile(content, filename, 'text/markdown');
+    }
+  }
+
+  var activeExportMenu = null;
+
+  function showExportMenu(anchorEl) {
+    if (activeExportMenu && activeExportMenu.parentNode) {
+      activeExportMenu.parentNode.removeChild(activeExportMenu);
+      activeExportMenu = null;
+      return;
+    }
+
+    var menu = document.createElement('div');
+    menu.className = 'sf-export-menu';
+
+    var rect = anchorEl.getBoundingClientRect();
+    menu.style.position = 'absolute';
+    menu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+    menu.style.left = rect.left + 'px';
+    menu.style.zIndex = '10001';
+    menu.style.background = 'var(--bg, #fff)';
+    menu.style.border = '1px solid var(--border, #ccc)';
+    menu.style.borderRadius = '6px';
+    menu.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    menu.style.padding = '4px 0';
+    menu.style.minWidth = '200px';
+    menu.style.fontSize = '0.875rem';
+
+    var options = [
+      { label: 'This chapter (JSON)', format: 'chapter-json' },
+      { label: 'This chapter (MD)',   format: 'chapter' },
+      { label: 'All chapters (JSON)', format: 'json' },
+      { label: 'All chapters (MD)',   format: 'md' }
+    ];
+
+    options.forEach(function(opt) {
+      var btn = document.createElement('button');
+      btn.textContent = opt.label;
+      btn.style.display = 'block';
+      btn.style.width = '100%';
+      btn.style.padding = '8px 16px';
+      btn.style.textAlign = 'left';
+      btn.style.background = 'none';
+      btn.style.border = 'none';
+      btn.style.cursor = 'pointer';
+      btn.style.color = 'var(--text, #000)';
+      btn.addEventListener('mouseenter', function() {
+        btn.style.background = 'var(--highlight-bg, rgba(0,0,0,0.06))';
+      });
+      btn.addEventListener('mouseleave', function() {
+        btn.style.background = 'none';
+      });
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        doExport(opt.format);
+        if (activeExportMenu && activeExportMenu.parentNode) {
+          activeExportMenu.parentNode.removeChild(activeExportMenu);
+        }
+        activeExportMenu = null;
+      });
+      menu.appendChild(btn);
+    });
+
+    document.body.appendChild(menu);
+    activeExportMenu = menu;
+
+    function onOutsideClick(e) {
+      if (activeExportMenu && !activeExportMenu.contains(e.target) && e.target !== anchorEl) {
+        if (activeExportMenu.parentNode) activeExportMenu.parentNode.removeChild(activeExportMenu);
+        activeExportMenu = null;
+        document.removeEventListener('click', onOutsideClick);
+      }
+    }
+    // Defer to avoid immediately closing from the button click
+    setTimeout(function() {
+      document.addEventListener('click', onOutsideClick);
+    }, 0);
+  }
+
+  function addExportButton() {
+    var navControls = document.querySelector('.nav-controls');
+    if (!navControls) return;
+
+    var btn = document.createElement('button');
+    btn.className = 'sf-export-btn';
+    btn.textContent = '\u2913';
+    btn.title = 'Export annotations';
+    btn.setAttribute('aria-label', 'Export annotations');
+    btn.style.cursor = 'pointer';
+
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      showExportMenu(btn);
+    });
+
+    navControls.prepend(btn);
+  }
+
+  // =========================================================================
+  // 12. INIT
+  // =========================================================================
+
+  function init() {
+    var stale = revalidateAnchors();
+    renderAllHighlights();
+    renderAllMarginNotes();
+    renderStalePanel(stale);
+    setupMarginTriggers();
+    createToolbar();
+    updateBadge();
+    addExportButton();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+})();
+</script>
+</body>
+</html>
