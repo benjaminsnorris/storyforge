@@ -123,6 +123,17 @@ assert_matches "$result" "Chapter 2:" "assemble_chapter: chapter 2 has correct n
 assert_contains "$result" "Into the Blank" "assemble_chapter: chapter 2 heading has title"
 
 # ============================================================================
+# assemble_chapter — scene markers
+# ============================================================================
+
+result=$(assemble_chapter 1 "$PROJECT_DIR" "ornamental")
+assert_contains "$result" "<!-- scene:act1-sc01 -->" "assemble_chapter: includes scene marker for first scene"
+assert_contains "$result" "<!-- scene:act1-sc02 -->" "assemble_chapter: includes scene marker for second scene"
+
+result=$(assemble_chapter 2 "$PROJECT_DIR" "ornamental")
+assert_contains "$result" "<!-- scene:act2-sc01 -->" "assemble_chapter: includes scene marker for single scene"
+
+# ============================================================================
 # read_production_field
 # ============================================================================
 
@@ -319,3 +330,18 @@ assert_equals "1" "$result" "read_chapter_field: reads part number from chapter 
 
 result=$(read_chapter_field 2 "$PROJECT_DIR" "part")
 assert_equals "2" "$result" "read_chapter_field: reads part number from chapter 2"
+
+# ============================================================================
+# _wrap_scene_sections
+# ============================================================================
+
+input='<!-- scene:act1-sc01 -->
+<p>First scene prose.</p>
+<!-- scene:act1-sc02 -->
+<p>Second scene prose.</p>'
+
+result=$(echo "$input" | _wrap_scene_sections)
+assert_contains "$result" '<section data-scene="act1-sc01">' "_wrap_scene_sections: wraps first scene"
+assert_contains "$result" '<section data-scene="act1-sc02">' "_wrap_scene_sections: wraps second scene"
+assert_contains "$result" '</section>' "_wrap_scene_sections: closes sections"
+assert_not_contains "$result" '<!-- scene:' "_wrap_scene_sections: removes comment markers"

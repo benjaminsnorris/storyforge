@@ -122,6 +122,13 @@ else
 fi
 
 # ============================================================================
+# --annotate flag
+# ============================================================================
+
+result=$(cd "$PROJECT_DIR" && "${PLUGIN_DIR}/scripts/storyforge-assemble" --dry-run --annotate --format web 2>&1)
+assert_contains "$result" "annotate" "storyforge-assemble: --annotate flag recognized in dry-run"
+
+# ============================================================================
 # storyforge-review --dry-run
 # ============================================================================
 

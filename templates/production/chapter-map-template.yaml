@@ -72,3 +72,8 @@ production:
   web:
     base_url:           # Base URL for canonical links (e.g., https://mysite.com/my-novel)
     description:        # Meta description for search engines
+
+  # Annotations (for web book --annotate mode)
+  # annotations:
+  #   enabled: false
+  #   mode: author  # or "beta"

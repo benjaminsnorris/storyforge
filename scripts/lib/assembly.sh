@@ -274,6 +274,9 @@ assemble_chapter() {
             echo ""
         fi
 
+        # Scene boundary marker (preserved through pandoc as HTML comment)
+        echo "<!-- scene:${scene_id} -->"
+        echo ""
         extract_scene_prose "$scene_file"
     done <<< "$scene_ids"
 }
@@ -904,12 +907,33 @@ generate_html() {
 # Web book generation (multi-page static site)
 # ============================================================================
 
+# _wrap_scene_sections — convert scene HTML comments into <section> wrappers
+# Input: HTML on stdin containing <!-- scene:ID --> comments
+# Output: HTML with scene comments replaced by <section data-scene="ID"> wrappers
+_wrap_scene_sections() {
+    awk '
+    BEGIN { open = 0 }
+    /^<!-- scene:/ {
+        if (open) print "</section>"
+        # Extract scene ID from <!-- scene:SCENE_ID -->
+        gsub(/<!-- scene:/, "")
+        gsub(/ -->/, "")
+        printf "<section data-scene=\"%s\">\n", $0
+        open = 1
+        next
+    }
+    { print }
+    END { if (open) print "</section>" }
+    '
+}
+
 # Generate a multi-page web book from assembled chapters.
 # Produces a folder of HTML files — one per chapter, plus index and TOC.
-# Usage: generate_web_book "/path/to/project" "/path/to/plugin"
+# Usage: generate_web_book "/path/to/project" "/path/to/plugin" [annotate]
 generate_web_book() {
     local project_dir="$1"
     local plugin_dir="$2"
+    local annotate="${3:-false}"
     local output_dir="${project_dir}/manuscript/output/web"
     local template_dir="${plugin_dir}/templates/production/web-book"
     local chapters_dir="${project_dir}/manuscript/chapters"
@@ -973,6 +997,24 @@ generate_web_book() {
     css_content=$(cat "${template_dir}/reading.css")
     local js_content
     js_content=$(cat "${template_dir}/reading.js")
+
+    # Load annotation assets (only when --annotate is active)
+    local ann_css_content=""
+    local ann_js_content=""
+    if [[ "$annotate" == "true" ]]; then
+        local ann_css_file="${template_dir}/annotations.css"
+        local ann_js_file="${template_dir}/annotations.js"
+        if [[ -f "$ann_css_file" ]]; then
+            ann_css_content=$(<"$ann_css_file")
+        fi
+        if [[ -f "$ann_js_file" ]]; then
+            ann_js_content=$(<"$ann_js_file")
+        fi
+    fi
+
+    # Derive book slug for data-book attribute (used when --annotate is active)
+    local book_slug
+    book_slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
 
     # Head script (prevents flash of wrong theme) — extracted from JS comment
     local head_script
@@ -1290,7 +1332,11 @@ generate_web_book() {
             # Convert chapter markdown to HTML fragment, write to temp file
             local ch_html_file
             ch_html_file=$(mktemp "${TMPDIR:-/tmp}/sf-ch.XXXXXX")
-            pandoc --from markdown --to html5 "$ch_md" > "$ch_html_file" 2>/dev/null
+            if [[ "$annotate" == "true" ]]; then
+                pandoc --from markdown --to html5 "$ch_md" 2>/dev/null | _wrap_scene_sections > "$ch_html_file"
+            else
+                pandoc --from markdown --to html5 "$ch_md" > "$ch_html_file" 2>/dev/null
+            fi
 
             local part_label_html=""
             local ch_part_title=""
@@ -1316,9 +1362,38 @@ generate_web_book() {
                         _line="${_line//\{\{PREV_LINK\}\}/$prev_link}"
                         _line="${_line//\{\{NEXT_LINK\}\}/$next_link}"
                         _line="${_line//\{\{PART_LABEL\}\}/$part_label_html}"
+                        if [[ "$annotate" == "true" ]]; then
+                            _line="${_line//data-chapter=/data-book=\"${book_slug}\" data-chapter=}"
+                        fi
                         echo "$_line"
                     fi
                 done > "${output_dir}/chapters/${page_slug}.html"
+
+            if [[ "$annotate" == "true" && -n "$ann_css_content" ]]; then
+                local ann_css_tmp ann_js_tmp
+                ann_css_tmp=$(mktemp "${TMPDIR:-/tmp}/sf-ann-css.XXXXXX")
+                ann_js_tmp=$(mktemp "${TMPDIR:-/tmp}/sf-ann-js.XXXXXX")
+                printf '%s\n' "$ann_css_content" > "$ann_css_tmp"
+                printf '%s\n' "$ann_js_content" > "$ann_js_tmp"
+
+                local ch_out="${output_dir}/chapters/${page_slug}.html"
+                # Inject annotation CSS BEFORE </style>
+                awk -v file="$ann_css_tmp" '
+                    /<\/style>/ { while ((getline line < file) > 0) print line; close(file) }
+                    { print }
+                ' "$ch_out" > "${ch_out}.tmp" && mv "${ch_out}.tmp" "$ch_out"
+                # Inject annotation JS BEFORE the last </script>
+                local _sc_count
+                _sc_count=$(grep -c '</script>' "$ch_out")
+                awk -v file="$ann_js_tmp" -v target="$_sc_count" '
+                    BEGIN { n = 0 }
+                    /<\/script>/ { n++ }
+                    /<\/script>/ && n == target { while ((getline line < file) > 0) print line; close(file) }
+                    { print }
+                ' "$ch_out" > "${ch_out}.tmp" && mv "${ch_out}.tmp" "$ch_out"
+
+                rm -f "$ann_css_tmp" "$ann_js_tmp"
+            fi
 
             rm -f "$ch_html_file"
         fi
