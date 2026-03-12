@@ -1382,9 +1382,13 @@ generate_web_book() {
                     /<\/style>/ { while ((getline line < file) > 0) print line; close(file) }
                     { print }
                 ' "$ch_out" > "${ch_out}.tmp" && mv "${ch_out}.tmp" "$ch_out"
-                # Inject annotation JS BEFORE </script>
-                awk -v file="$ann_js_tmp" '
-                    /<\/script>/ && !done { while ((getline line < file) > 0) print line; close(file); done=1 }
+                # Inject annotation JS BEFORE the last </script>
+                local _sc_count
+                _sc_count=$(grep -c '</script>' "$ch_out")
+                awk -v file="$ann_js_tmp" -v target="$_sc_count" '
+                    BEGIN { n = 0 }
+                    /<\/script>/ { n++ }
+                    /<\/script>/ && n == target { while ((getline line < file) > 0) print line; close(file) }
                     { print }
                 ' "$ch_out" > "${ch_out}.tmp" && mv "${ch_out}.tmp" "$ch_out"
 

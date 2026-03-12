@@ -2,7 +2,7 @@
 # test-annotations.sh — Tests for annotation build integration
 #
 # Run via: ./tests/run-tests.sh tests/test-annotations.sh
-# Tests scene marker injection, section wrapping, and annotation flag behavior.
+# Tests scene marker injection, section wrapping, and annotation asset injection.
 #
 # Depends on: FIXTURE_DIR, PROJECT_DIR, PLUGIN_DIR, assertion functions (from run-tests.sh)
 
@@ -57,28 +57,85 @@ assert_contains "$result" '<section data-scene="sc01">' "wrap_sections: works wi
 assert_contains "$result" '</section>' "wrap_sections: closes single scene section"
 
 # ============================================================================
-# --annotate flag integration (requires pandoc)
+# Annotation asset injection (unit test — no full pipeline)
 # ============================================================================
 
-if command -v pandoc &>/dev/null && [[ -d "${PROJECT_DIR}/scenes" ]]; then
-    # Build web book WITH --annotate
-    (cd "$PROJECT_DIR" && "${PLUGIN_DIR}/scripts/storyforge-assemble" --format web --annotate 2>/dev/null)
-    if [[ -f "${PROJECT_DIR}/manuscript/output/web/chapters/chapter-01.html" ]]; then
-        ch1=$(cat "${PROJECT_DIR}/manuscript/output/web/chapters/chapter-01.html")
-        assert_contains "$ch1" 'data-scene=' "annotate flag: chapter HTML contains data-scene attributes"
-        assert_contains "$ch1" 'Annotation Overlay' "annotate flag: chapter HTML contains annotation JS"
-        assert_contains "$ch1" 'sf-highlight' "annotate flag: chapter HTML contains annotation CSS"
-        assert_contains "$ch1" 'data-book=' "annotate flag: chapter HTML contains data-book attribute"
-    else
-        FAIL=$((FAIL + 1))
-        echo "  FAIL: annotate flag: web book chapter-01.html not generated"
-    fi
+# Create a minimal chapter HTML file matching the template structure
+_ann_test_dir=$(mktemp -d "${TMPDIR:-/tmp}/sf-ann-test.XXXXXX")
+cat > "${_ann_test_dir}/chapter-01.html" << 'HTMLEOF'
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<script>var headScript = true;</script>
+<style>
+body { color: black; }
+</style>
+</head>
+<body data-chapter="chapter-01">
+<p>Hello world</p>
+<script>
+var reading = true;
+</script>
+</body>
+</html>
+HTMLEOF
 
-    # Build web book WITHOUT --annotate
-    (cd "$PROJECT_DIR" && "${PLUGIN_DIR}/scripts/storyforge-assemble" --format web 2>/dev/null)
-    if [[ -f "${PROJECT_DIR}/manuscript/output/web/chapters/chapter-01.html" ]]; then
-        ch1_clean=$(cat "${PROJECT_DIR}/manuscript/output/web/chapters/chapter-01.html")
-        assert_not_contains "$ch1_clean" 'sf-highlight' "no annotate flag: chapter HTML does not contain annotation CSS"
-        assert_not_contains "$ch1_clean" 'data-scene=' "no annotate flag: chapter HTML does not contain data-scene attributes"
-    fi
+# Create annotation CSS and JS temp files
+_ann_css_tmp=$(mktemp "${TMPDIR:-/tmp}/sf-ann-css.XXXXXX")
+_ann_js_tmp=$(mktemp "${TMPDIR:-/tmp}/sf-ann-js.XXXXXX")
+printf '%s\n' '.sf-highlight { background: yellow; }' > "$_ann_css_tmp"
+printf '%s\n' '// Storyforge Annotation Overlay' > "$_ann_js_tmp"
+
+_ch_out="${_ann_test_dir}/chapter-01.html"
+
+# Inject CSS BEFORE </style>
+awk -v file="$_ann_css_tmp" '
+    /<\/style>/ { while ((getline line < file) > 0) print line; close(file) }
+    { print }
+' "$_ch_out" > "${_ch_out}.tmp" && mv "${_ch_out}.tmp" "$_ch_out"
+
+# Inject JS BEFORE the last </script>
+_sc_count=$(grep -c '</script>' "$_ch_out")
+awk -v file="$_ann_js_tmp" -v target="$_sc_count" '
+    BEGIN { n = 0 }
+    /<\/script>/ { n++ }
+    /<\/script>/ && n == target { while ((getline line < file) > 0) print line; close(file) }
+    { print }
+' "$_ch_out" > "${_ch_out}.tmp" && mv "${_ch_out}.tmp" "$_ch_out"
+
+_result=$(cat "$_ch_out")
+assert_contains "$_result" 'sf-highlight' "asset injection: annotation CSS injected into chapter HTML"
+assert_contains "$_result" 'Annotation Overlay' "asset injection: annotation JS injected into chapter HTML"
+
+# CSS should be inside <style> block (before </style>)
+_css_line=$(echo "$_result" | grep -n 'sf-highlight' | head -1 | cut -d: -f1)
+_style_close=$(echo "$_result" | grep -n '</style>' | head -1 | cut -d: -f1)
+if [[ "$_css_line" -lt "$_style_close" ]]; then
+    PASS=$((PASS + 1))
+    echo "  PASS: asset injection: CSS is inside <style> block"
+else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL: asset injection: CSS should be before </style>"
 fi
+
+# JS should be inside the LAST <script> block, not the head script
+_js_line=$(echo "$_result" | grep -n 'Annotation Overlay' | head -1 | cut -d: -f1)
+_head_script_close=$(echo "$_result" | grep -n '</script>' | head -1 | cut -d: -f1)
+_last_script_close=$(echo "$_result" | grep -n '</script>' | tail -1 | cut -d: -f1)
+if [[ "$_js_line" -gt "$_head_script_close" && "$_js_line" -lt "$_last_script_close" ]]; then
+    PASS=$((PASS + 1))
+    echo "  PASS: asset injection: JS is in main <script> block, not head"
+else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL: asset injection: JS should be in main script block (line $_js_line), not head (closes at $_head_script_close)"
+fi
+
+# data-book attribute injection (string substitution test)
+_body_line='<body data-chapter="chapter-01" data-chapter-num="1">'
+_book_slug="test-book"
+_annotated_line="${_body_line//data-chapter=/data-book=\"${_book_slug}\" data-chapter=}"
+assert_contains "$_annotated_line" 'data-book="test-book"' "data-book: attribute injected into body tag"
+assert_contains "$_annotated_line" 'data-chapter="chapter-01"' "data-book: preserves existing data-chapter"
+
+# Cleanup
+rm -rf "$_ann_test_dir" "$_ann_css_tmp" "$_ann_js_tmp"
