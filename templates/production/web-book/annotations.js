@@ -797,6 +797,7 @@
     if (annotations.length > 0) {
       var count = document.createElement('span');
       count.className = 'sf-count';
+      count.style.fontSize = '0.75em';
       count.textContent = ' ' + annotations.length;
       btn.appendChild(count);
     }
@@ -1160,11 +1161,16 @@
       showExportMenu(btn);
     });
 
-    var themeToggle = navControls.querySelector('.theme-toggle');
-    if (themeToggle) {
-      navControls.insertBefore(btn, themeToggle);
+    var chapterInfo = navControls.querySelector('.chapter-info');
+    if (chapterInfo) {
+      navControls.insertBefore(btn, chapterInfo);
     } else {
-      navControls.appendChild(btn);
+      var themeToggle = navControls.querySelector('.theme-toggle');
+      if (themeToggle) {
+        navControls.insertBefore(btn, themeToggle);
+      } else {
+        navControls.appendChild(btn);
+      }
     }
   }
 
