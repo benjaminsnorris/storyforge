@@ -919,6 +919,11 @@
       count.textContent = ' ' + annotations.length;
       btn.appendChild(count);
     }
+
+    // Refresh sidebar list if open
+    if (sidebarEl && sidebarEl.classList.contains('active')) {
+      renderSidebarList();
+    }
   }
 
   // =========================================================================
@@ -1177,92 +1182,248 @@
     }
   }
 
-  var activeExportMenu = null;
+  // =========================================================================
+  // 11b. ANNOTATION SIDEBAR
+  // =========================================================================
 
-  function showExportMenu(anchorEl) {
-    if (activeExportMenu && activeExportMenu.parentNode) {
-      activeExportMenu.parentNode.removeChild(activeExportMenu);
-      activeExportMenu = null;
+  var sidebarEl = null;
+  var sidebarFilter = null;
+
+  function toggleSidebar() {
+    if (sidebarEl && sidebarEl.classList.contains('active')) {
+      closeSidebar();
+    } else {
+      openSidebar();
+    }
+  }
+
+  function openSidebar() {
+    if (!sidebarEl) buildSidebar();
+    renderSidebarList();
+    sidebarEl.classList.add('active');
+  }
+
+  function closeSidebar() {
+    if (sidebarEl) sidebarEl.classList.remove('active');
+  }
+
+  function buildSidebar() {
+    sidebarEl = document.createElement('div');
+    sidebarEl.className = 'sf-sidebar';
+
+    // Header
+    var header = document.createElement('div');
+    header.className = 'sf-sidebar-header';
+
+    var title = document.createElement('h3');
+    title.textContent = 'Annotations';
+    header.appendChild(title);
+
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'sf-sidebar-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.addEventListener('click', closeSidebar);
+    header.appendChild(closeBtn);
+
+    sidebarEl.appendChild(header);
+
+    // Color filters
+    var filters = document.createElement('div');
+    filters.className = 'sf-sidebar-filters';
+
+    var allBtn = document.createElement('button');
+    allBtn.className = 'sf-filter-all selected';
+    allBtn.textContent = 'All';
+    allBtn.addEventListener('click', function() {
+      sidebarFilter = null;
+      updateFilterUI();
+      renderSidebarList();
+    });
+    filters.appendChild(allBtn);
+
+    HIGHLIGHT_COLORS.forEach(function(c) {
+      var swatch = document.createElement('button');
+      swatch.className = 'sf-color-swatch sf-filter-swatch';
+      swatch.style.backgroundColor = c.color;
+      swatch.title = c.label;
+      swatch.dataset.color = c.id;
+      swatch.addEventListener('click', function() {
+        sidebarFilter = (sidebarFilter === c.id) ? null : c.id;
+        updateFilterUI();
+        renderSidebarList();
+      });
+      filters.appendChild(swatch);
+    });
+
+    sidebarEl.appendChild(filters);
+
+    // List container
+    var list = document.createElement('div');
+    list.className = 'sf-sidebar-list';
+    sidebarEl.appendChild(list);
+
+    // Footer with export links
+    var footer = document.createElement('div');
+    footer.className = 'sf-sidebar-footer';
+
+    var exportLabel = document.createElement('span');
+    exportLabel.textContent = 'Export: ';
+    exportLabel.style.color = 'var(--text-dim)';
+    exportLabel.style.fontSize = '0.78em';
+    footer.appendChild(exportLabel);
+
+    ['chapter-json', 'chapter', 'json', 'md'].forEach(function(fmt, i) {
+      var labels = { 'chapter-json': 'Chapter JSON', 'chapter': 'Chapter MD', 'json': 'All JSON', 'md': 'All MD' };
+      if (i > 0) {
+        var sep = document.createElement('span');
+        sep.textContent = ' \u00b7 ';
+        sep.style.color = 'var(--text-dim)';
+        sep.style.fontSize = '0.78em';
+        footer.appendChild(sep);
+      }
+      var link = document.createElement('a');
+      link.href = '#';
+      link.textContent = labels[fmt];
+      link.style.color = 'var(--accent)';
+      link.style.fontSize = '0.78em';
+      link.style.textDecoration = 'none';
+      link.addEventListener('click', function(e) {
+        e.preventDefault();
+        doExport(fmt);
+      });
+      footer.appendChild(link);
+    });
+
+    sidebarEl.appendChild(footer);
+    document.body.appendChild(sidebarEl);
+  }
+
+  function updateFilterUI() {
+    if (!sidebarEl) return;
+    var allBtn = sidebarEl.querySelector('.sf-filter-all');
+    var swatches = sidebarEl.querySelectorAll('.sf-filter-swatch');
+    if (allBtn) {
+      if (sidebarFilter === null) allBtn.classList.add('selected');
+      else allBtn.classList.remove('selected');
+    }
+    swatches.forEach(function(s) {
+      if (s.dataset.color === sidebarFilter) s.classList.add('selected');
+      else s.classList.remove('selected');
+    });
+  }
+
+  function renderSidebarList() {
+    if (!sidebarEl) return;
+    var list = sidebarEl.querySelector('.sf-sidebar-list');
+    if (!list) return;
+    while (list.firstChild) list.removeChild(list.firstChild);
+
+    var annotations = loadAnnotations();
+
+    if (sidebarFilter) {
+      annotations = annotations.filter(function(a) {
+        return (a.color || 'yellow') === sidebarFilter;
+      });
+    }
+
+    if (annotations.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'sf-sidebar-empty';
+      empty.textContent = sidebarFilter ? 'No ' + sidebarFilter + ' annotations' : 'No annotations yet';
+      list.appendChild(empty);
       return;
     }
 
-    var menu = document.createElement('div');
-    menu.className = 'sf-export-menu';
-
-    var rect = anchorEl.getBoundingClientRect();
-    menu.style.position = 'absolute';
-    menu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
-    menu.style.right = (document.documentElement.clientWidth - rect.right) + 'px';
-    menu.style.zIndex = '10001';
-    menu.style.background = 'var(--bg, #fff)';
-    menu.style.border = '1px solid var(--border, #ccc)';
-    menu.style.borderRadius = '6px';
-    menu.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-    menu.style.padding = '4px 0';
-    menu.style.minWidth = '220px';
-    menu.style.fontSize = '0.875rem';
-
-    var heading = document.createElement('div');
-    heading.textContent = 'Export Annotations';
-    heading.style.padding = '8px 16px 4px';
-    heading.style.fontSize = '0.75rem';
-    heading.style.letterSpacing = '0.08em';
-    heading.style.textTransform = 'uppercase';
-    heading.style.color = 'var(--text-dim, #666)';
-    heading.style.borderBottom = '1px solid var(--border, #ccc)';
-    heading.style.marginBottom = '4px';
-    menu.appendChild(heading);
-
-    var options = [
-      { label: 'This chapter (JSON)', format: 'chapter-json' },
-      { label: 'This chapter (Markdown)',   format: 'chapter' },
-      { label: 'All chapters (JSON)', format: 'json' },
-      { label: 'All chapters (Markdown)',   format: 'md' }
-    ];
-
-    options.forEach(function(opt) {
-      var btn = document.createElement('button');
-      btn.textContent = opt.label;
-      btn.style.display = 'block';
-      btn.style.width = '100%';
-      btn.style.padding = '8px 16px';
-      btn.style.textAlign = 'left';
-      btn.style.background = 'none';
-      btn.style.border = 'none';
-      btn.style.cursor = 'pointer';
-      btn.style.color = 'var(--text, #000)';
-      btn.addEventListener('mouseenter', function() {
-        btn.style.background = 'var(--highlight-bg, rgba(0,0,0,0.06))';
+    annotations.forEach(function(annotation) {
+      var card = document.createElement('div');
+      card.className = 'sf-sidebar-card';
+      card.addEventListener('click', function() {
+        scrollToAnnotation(annotation);
+        if (window.innerWidth < 640) closeSidebar();
       });
-      btn.addEventListener('mouseleave', function() {
-        btn.style.background = 'none';
-      });
-      btn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        doExport(opt.format);
-        if (activeExportMenu && activeExportMenu.parentNode) {
-          activeExportMenu.parentNode.removeChild(activeExportMenu);
-        }
-        activeExportMenu = null;
-      });
-      menu.appendChild(btn);
-    });
 
-    document.body.appendChild(menu);
-    activeExportMenu = menu;
+      // Color dot
+      var dot = document.createElement('span');
+      dot.className = 'sf-sidebar-dot';
+      var colorObj = HIGHLIGHT_COLORS.find(function(c) { return c.id === (annotation.color || 'yellow'); });
+      dot.style.backgroundColor = colorObj ? colorObj.color : '#fcd44f';
+      card.appendChild(dot);
 
-    function onOutsideClick(e) {
-      if (activeExportMenu && !activeExportMenu.contains(e.target) && e.target !== anchorEl) {
-        if (activeExportMenu.parentNode) activeExportMenu.parentNode.removeChild(activeExportMenu);
-        activeExportMenu = null;
-        document.removeEventListener('click', onOutsideClick);
+      var content = document.createElement('div');
+      content.className = 'sf-sidebar-card-content';
+
+      // Selected text
+      if (annotation.selectedText) {
+        var textEl = document.createElement('p');
+        textEl.className = 'sf-sidebar-text';
+        var t = annotation.selectedText;
+        if (t.length > 60) t = t.slice(0, 60) + '\u2026';
+        textEl.textContent = '\u201c' + t + '\u201d';
+        content.appendChild(textEl);
       }
-    }
-    // Defer to avoid immediately closing from the button click
-    setTimeout(function() {
-      document.addEventListener('click', onOutsideClick);
-    }, 0);
+
+      // Comment
+      if (annotation.comment) {
+        var commentEl = document.createElement('p');
+        commentEl.className = 'sf-sidebar-comment';
+        var c = annotation.comment;
+        if (c.length > 80) c = c.slice(0, 80) + '\u2026';
+        commentEl.textContent = c;
+        content.appendChild(commentEl);
+      }
+
+      // Type label for margin notes
+      if (annotation.type === 'margin-note') {
+        var typeEl = document.createElement('span');
+        typeEl.className = 'sf-sidebar-type';
+        typeEl.textContent = 'Margin note';
+        content.appendChild(typeEl);
+      }
+
+      // Timestamp
+      if (annotation.createdAt) {
+        var timeEl = document.createElement('time');
+        timeEl.className = 'sf-sidebar-time';
+        var date = new Date(annotation.createdAt);
+        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        timeEl.textContent = months[date.getMonth()] + ' ' + date.getDate();
+        content.appendChild(timeEl);
+      }
+
+      card.appendChild(content);
+      list.appendChild(card);
+    });
   }
+
+  function scrollToAnnotation(annotation) {
+    var el = null;
+    if (annotation.type === 'margin-note') {
+      el = document.querySelector('.sf-margin-indicator[data-annotation-id="' + annotation.id + '"]');
+    } else {
+      el = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
+    }
+    if (!el) return;
+
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('sf-flash');
+    setTimeout(function() { el.classList.remove('sf-flash'); }, 1200);
+  }
+
+  // Close sidebar on outside click
+  document.addEventListener('click', function(e) {
+    if (!sidebarEl || !sidebarEl.classList.contains('active')) return;
+    if (sidebarEl.contains(e.target)) return;
+    var toggleBtn = document.querySelector('.sf-export-btn');
+    if (toggleBtn && (toggleBtn === e.target || toggleBtn.contains(e.target))) return;
+    closeSidebar();
+  });
+
+  // Close sidebar on Escape
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && sidebarEl && sidebarEl.classList.contains('active')) {
+      closeSidebar();
+    }
+  });
 
   function addExportButton() {
     var navControls = document.querySelector('.nav-controls');
@@ -1276,7 +1437,7 @@
 
     btn.addEventListener('click', function(e) {
       e.stopPropagation();
-      showExportMenu(btn);
+      toggleSidebar();
     });
 
     var chapterInfo = navControls.querySelector('.chapter-info');
