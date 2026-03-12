@@ -239,7 +239,6 @@
   // ---------------------------------------------------------------------------
 
   var tocOverlay = document.querySelector('.toc-overlay');
-  var tocToggle = document.querySelector('.toc-toggle');
 
   function toggleToc() {
     if (!tocOverlay) return;
@@ -257,10 +256,6 @@
   function closeToc() {
     if (!tocOverlay) return;
     tocOverlay.classList.remove('active');
-  }
-
-  if (tocToggle) {
-    tocToggle.addEventListener('click', toggleToc);
   }
 
   // Close on backdrop click (click on the overlay itself, not its children).
