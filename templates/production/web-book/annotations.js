@@ -213,6 +213,18 @@
     activePopover = popover;
   }
 
+  function addTextareaShortcuts(textarea, onSave, onCancel) {
+    textarea.addEventListener('keydown', function(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        onSave();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        onCancel();
+      }
+    });
+  }
+
   function showCommentInput(popover, range) {
     while (popover.firstChild) popover.removeChild(popover.firstChild);
 
@@ -240,6 +252,14 @@
       e.stopPropagation();
       createHighlightFromRange(range, textarea.value.trim());
       removePopover();
+    });
+
+    addTextareaShortcuts(textarea, function() {
+      createHighlightFromRange(range, textarea.value.trim());
+      removePopover();
+    }, function() {
+      removePopover();
+      window.getSelection().removeAllRanges();
     });
 
     actions.appendChild(cancelBtn);
@@ -515,15 +535,7 @@
     var actions = document.createElement('div');
     actions.className = 'sf-actions';
 
-    var cancelBtn = document.createElement('button');
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.addEventListener('click', function() {
-      if (panel.parentNode) panel.parentNode.removeChild(panel);
-    });
-
-    var saveBtn = document.createElement('button');
-    saveBtn.textContent = 'Save';
-    saveBtn.addEventListener('click', function() {
+    function saveMarginNote() {
       var text = textarea.value.trim();
       if (!text) return;
 
@@ -541,7 +553,21 @@
       if (panel.parentNode) panel.parentNode.removeChild(panel);
       renderMarginIndicator(annotation, block);
       updateBadge();
-    });
+    }
+
+    function cancelMarginNote() {
+      if (panel.parentNode) panel.parentNode.removeChild(panel);
+    }
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', cancelMarginNote);
+
+    var saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', saveMarginNote);
+
+    addTextareaShortcuts(textarea, saveMarginNote, cancelMarginNote);
 
     actions.appendChild(cancelBtn);
     actions.appendChild(saveBtn);
@@ -700,18 +726,30 @@
     viewer.style.top = (rect.bottom + window.scrollY + 6) + 'px';
     viewer.style.left = (rect.left + window.scrollX) + 'px';
 
+    var wrap = document.createElement('div');
+    wrap.className = 'sf-comment-input';
+
     var textarea = document.createElement('textarea');
     textarea.value = annotation.comment || '';
+    textarea.placeholder = 'Add a comment…';
     textarea.rows = 3;
-    textarea.style.width = '100%';
-    textarea.style.fontFamily = 'inherit';
-    textarea.style.fontSize = '0.85rem';
-    textarea.style.padding = '6px 8px';
-    textarea.style.boxSizing = 'border-box';
-    textarea.style.border = '1px solid var(--border)';
-    textarea.style.borderRadius = '4px';
-    textarea.style.background = 'var(--bg)';
-    textarea.style.color = 'var(--text)';
+
+    function saveEdit() {
+      var newComment = textarea.value.trim();
+      updateAnnotation(annotation.id, { comment: newComment });
+      annotation.comment = newComment;
+
+      var hlSpan = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
+      if (hlSpan) {
+        if (newComment) {
+          hlSpan.classList.add('has-comment');
+        } else {
+          hlSpan.classList.remove('has-comment');
+        }
+      }
+
+      removeViewer();
+    }
 
     var actions = document.createElement('div');
     actions.className = 'sf-actions';
@@ -727,27 +765,16 @@
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', function(e) {
       e.stopPropagation();
-      var newComment = textarea.value.trim();
-      updateAnnotation(annotation.id, { comment: newComment });
-      annotation.comment = newComment;
-
-      // Update has-comment class on highlight span
-      var hlSpan = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
-      if (hlSpan) {
-        if (newComment) {
-          hlSpan.classList.add('has-comment');
-        } else {
-          hlSpan.classList.remove('has-comment');
-        }
-      }
-
-      removeViewer();
+      saveEdit();
     });
+
+    addTextareaShortcuts(textarea, saveEdit, removeViewer);
 
     actions.appendChild(cancelBtn);
     actions.appendChild(saveBtn);
-    viewer.appendChild(textarea);
-    viewer.appendChild(actions);
+    wrap.appendChild(textarea);
+    wrap.appendChild(actions);
+    viewer.appendChild(wrap);
 
     document.body.appendChild(viewer);
     activeViewer = viewer;
