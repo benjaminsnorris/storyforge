@@ -785,18 +785,15 @@
   // =========================================================================
 
   function updateBadge() {
-    var existing = document.querySelector('.sf-badge');
-    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    var btn = document.querySelector('.sf-export-btn');
+    if (!btn) return;
 
     var annotations = loadAnnotations();
-    if (annotations.length === 0) return;
-
-    var badge = document.createElement('span');
-    badge.className = 'sf-badge';
-    badge.textContent = annotations.length;
-
-    var navControls = document.querySelector('.nav-controls');
-    if (navControls) navControls.prepend(badge);
+    if (annotations.length === 0) {
+      btn.textContent = '\u2913';
+    } else {
+      btn.textContent = '\u2913 ' + annotations.length;
+    }
   }
 
   // =========================================================================
