@@ -35,7 +35,7 @@
   display: inline-block;
   width: 6px;
   height: 6px;
-  background: var(--accent);
+  background: var(--sf-hl-color, var(--accent));
   border-radius: 50%;
   margin-left: 2px;
   vertical-align: super;

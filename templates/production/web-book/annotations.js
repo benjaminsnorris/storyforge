@@ -167,6 +167,8 @@
       if (annotation.comment) span.classList.add('has-comment');
       span.dataset.annotationId = annotation.id;
       span.dataset.color = annotation.color || 'yellow';
+      var hlColorObj = HIGHLIGHT_COLORS.find(function(c) { return c.id === (annotation.color || 'yellow'); });
+      if (hlColorObj) span.style.setProperty('--sf-hl-color', hlColorObj.color);
       range.surroundContents(span);
     } catch (e) {
       // Cross-element or other range errors — skip silently
@@ -801,7 +803,10 @@
           annotation.color = c.id;
           updateAnnotation(annotation.id, { color: c.id });
           var hlSpan = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
-          if (hlSpan) hlSpan.dataset.color = c.id;
+          if (hlSpan) {
+            hlSpan.dataset.color = c.id;
+            hlSpan.style.setProperty('--sf-hl-color', c.color);
+          }
           var indEl = document.querySelector('.sf-margin-indicator[data-annotation-id="' + annotation.id + '"]');
           if (indEl) indEl.style.backgroundColor = c.color;
           // Update selected state
