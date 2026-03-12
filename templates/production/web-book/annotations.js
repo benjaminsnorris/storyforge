@@ -670,6 +670,16 @@
       viewer.appendChild(quoteP);
     }
 
+    if (annotation.createdAt) {
+      var timeEl = document.createElement('time');
+      timeEl.className = 'sf-timestamp';
+      var date = new Date(annotation.createdAt);
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      timeEl.textContent = months[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear();
+      timeEl.setAttribute('datetime', annotation.createdAt);
+      viewer.appendChild(timeEl);
+    }
+
     var actions = document.createElement('div');
     actions.className = 'sf-actions';
 

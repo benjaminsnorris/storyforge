@@ -308,6 +308,15 @@
   animation: sf-fade-in 0.15s ease;
 }
 
+.sf-comment-viewer .sf-timestamp {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  opacity: 0.7;
+}
+
 .sf-comment-viewer p {
   margin: 0 0 10px;
   font-size: 0.85rem;
