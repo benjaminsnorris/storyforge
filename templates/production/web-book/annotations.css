@@ -339,13 +339,14 @@
 }
 
 .sf-comment-viewer button.sf-delete {
-  color: var(--text-dim);
-  border-color: var(--border);
+  color: #c0392b;
+  border-color: #c0392b;
 }
 
 .sf-comment-viewer button.sf-delete:hover {
   color: #e74c3c;
   border-color: #e74c3c;
+  background: rgba(231, 76, 60, 0.08);
 }
 
 
