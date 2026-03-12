@@ -64,6 +64,7 @@ FORMAT="epub"           # epub | pdf | html | web | markdown | all
 DRAFT_MODE=false
 SKIP_VALIDATION=false
 INTERACTIVE=false
+ANNOTATE=false
 
 usage() {
     cat <<EOF
@@ -119,6 +120,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-validation)
             SKIP_VALIDATION=true
+            shift
+            ;;
+        --annotate)
+            ANNOTATE=true
             shift
             ;;
         --interactive|-i)
@@ -270,6 +275,7 @@ if [[ "$DRY_RUN" == true ]]; then
     done
     echo ""
     echo "Output directory: ${MANUSCRIPT_DIR}"
+    echo "annotate: ${ANNOTATE}"
     echo "Formats to generate:"
     case "$FORMAT" in
         epub) echo "  - epub3" ;;
