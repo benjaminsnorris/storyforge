@@ -604,6 +604,27 @@
     var panel = document.createElement('div');
     panel.className = 'sf-note-panel';
 
+    // Color picker
+    var selectedColor = 'yellow';
+    var colorPicker = document.createElement('div');
+    colorPicker.className = 'sf-color-picker';
+    colorPicker.style.marginBottom = '8px';
+    HIGHLIGHT_COLORS.forEach(function(c) {
+      var swatch = document.createElement('button');
+      swatch.className = 'sf-color-swatch';
+      if (c.id === selectedColor) swatch.classList.add('selected');
+      swatch.style.backgroundColor = c.color;
+      swatch.title = c.label;
+      swatch.addEventListener('click', function(e) {
+        e.preventDefault();
+        selectedColor = c.id;
+        colorPicker.querySelectorAll('.sf-color-swatch').forEach(function(s) { s.classList.remove('selected'); });
+        swatch.classList.add('selected');
+      });
+      colorPicker.appendChild(swatch);
+    });
+    panel.appendChild(colorPicker);
+
     var textarea = document.createElement('textarea');
     textarea.placeholder = 'Add a margin note…';
     textarea.rows = 3;
@@ -622,6 +643,7 @@
         scene: scene,
         anchor: { paragraphIndex: paragraphIndex },
         comment: text,
+        color: selectedColor,
         createdAt: new Date().toISOString()
       };
 
@@ -761,8 +783,8 @@
       viewer.appendChild(timeEl);
     }
 
-    // Color picker for highlights/comments (not margin notes)
-    if (annotation.type !== 'margin-note') {
+    // Color picker
+    {
       var colorRow = document.createElement('div');
       colorRow.className = 'sf-color-picker';
       colorRow.style.marginBottom = '8px';
