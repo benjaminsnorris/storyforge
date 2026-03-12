@@ -675,7 +675,12 @@
       timeEl.className = 'sf-timestamp';
       var date = new Date(annotation.createdAt);
       var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      timeEl.textContent = months[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear();
+      var hours = date.getHours();
+      var minutes = date.getMinutes();
+      var ampm = hours >= 12 ? 'pm' : 'am';
+      hours = hours % 12 || 12;
+      var minStr = minutes < 10 ? '0' + minutes : minutes;
+      timeEl.textContent = months[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear() + ' at ' + hours + ':' + minStr + ' ' + ampm;
       timeEl.setAttribute('datetime', annotation.createdAt);
       viewer.appendChild(timeEl);
     }
