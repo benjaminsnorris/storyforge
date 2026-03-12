@@ -2,3 +2,4 @@
 *.log
 working/
 .superpowers/
+.worktrees/
