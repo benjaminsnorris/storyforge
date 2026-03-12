@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storyforge — Interactive Mode</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ── Reset ── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ── Custom Properties ── */
+  :root {
+    --bg:           #faf8f8;
+    --bg-elevated:  #ffffff;
+    --bg-recessed:  #f3eff0;
+    --surface:      #fff;
+    --fg:           #1a1518;
+    --fg-muted:     #6b5a60;
+    --fg-faint:     #a09098;
+    --text:         #1a1518;
+    --text-dim:     #6b5a60;
+    --border:       #e4dade;
+    --border-bright:#d0c4ca;
+    --shadow-sm:    0 1px 3px rgba(26,15,20,0.04);
+    --shadow-md:    0 4px 16px rgba(26,15,20,0.07);
+    --shadow-lg:    0 8px 32px rgba(26,15,20,0.10);
+
+    /* Primary cranberry/rose */
+    --primary:        #881337;
+    --primary-light:  #a91d4e;
+    --primary-soft:   #881337cc;
+    --primary-bg:     #8813370a;
+    --primary-border: #88133725;
+
+    /* Mode accents */
+    --interactive-color:  #881337;
+    --interactive-bg:     #8813370a;
+    --interactive-border: #88133730;
+    --autopilot-color:    #6d28d9;
+    --autopilot-bg:       #6d28d90a;
+    --autopilot-border:   #6d28d930;
+
+    /* Functional accents */
+    --state-color:    #b45309;
+    --rejoin-color:   #0d7c66;
+    --banner-color:   #881337;
+    --prompt-color:   #6d28d9;
+
+    --font-body: 'IBM Plex Sans', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+    --max-w: 1100px;
+    --radius: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:           #161214;
+      --bg-elevated:  #211c1e;
+      --bg-recessed:  #110e10;
+      --surface:      #211c1e;
+      --fg:           #e8e2e4;
+      --fg-muted:     #a09098;
+      --fg-faint:     #706068;
+      --text:         #e8e2e4;
+      --text-dim:     #a09098;
+      --border:       #332a2e;
+      --border-bright:#4a3e44;
+      --shadow-sm:    0 1px 3px rgba(0,0,0,0.2);
+      --shadow-md:    0 4px 16px rgba(0,0,0,0.3);
+      --shadow-lg:    0 8px 32px rgba(0,0,0,0.35);
+
+      --primary:        #e8849e;
+      --primary-light:  #f0a0b6;
+      --primary-soft:   #e8849ecc;
+      --primary-bg:     #e8849e10;
+      --primary-border: #e8849e30;
+
+      --interactive-color:  #e8849e;
+      --interactive-bg:     #e8849e10;
+      --interactive-border: #e8849e40;
+      --autopilot-color:    #a78bfa;
+      --autopilot-bg:       #a78bfa10;
+      --autopilot-border:   #a78bfa40;
+
+      --state-color:    #f59e0b;
+      --rejoin-color:   #34d399;
+      --banner-color:   #e8849e;
+      --prompt-color:   #a78bfa;
+    }
+  }
+
+  /* ── Base ── */
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--font-body);
+    color: var(--fg);
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse at 15% 0%, rgba(136,19,55,0.04) 0%, transparent 55%),
+      radial-gradient(ellipse at 85% 0%, rgba(109,40,217,0.03) 0%, transparent 55%),
+      radial-gradient(ellipse at 50% 100%, rgba(180,83,9,0.02) 0%, transparent 50%);
+    min-height: 100vh;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body {
+      background-image:
+        radial-gradient(ellipse at 15% 0%, rgba(232,132,158,0.04) 0%, transparent 55%),
+        radial-gradient(ellipse at 85% 0%, rgba(167,139,250,0.03) 0%, transparent 55%),
+        radial-gradient(ellipse at 50% 100%, rgba(245,158,11,0.02) 0%, transparent 50%);
+    }
+  }
+
+  /* ── Utilities ── */
+  .container { max-width: var(--max-w); margin: 0 auto; padding: 0 1.5rem; }
+  .mono-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+  .dot-label::before {
+    content: '';
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+
+  /* ── Animations ── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate {
+    opacity: 0;
+    animation: fadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation-delay: calc(var(--i, 0) * 0.08s);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate { animation: none; opacity: 1; }
+  }
+
+  /* ── Back Nav ── */
+  .back-nav { position: fixed; top: 16px; left: 16px; z-index: 300; }
+  .back-nav a { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--text-dim); text-decoration: none; background: var(--surface, #fff); border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px 7px 10px; transition: color 0.2s, border-color 0.2s, box-shadow 0.2s; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .back-nav a:hover { color: var(--text); border-color: var(--border-bright); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .back-nav svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ── Hero ── */
+  .hero {
+    padding: 5rem 0 3rem;
+    text-align: center;
+    position: relative;
+  }
+  .hero::after {
+    content: '';
+    display: block;
+    width: 80px;
+    height: 3px;
+    background: linear-gradient(90deg, var(--interactive-color), var(--autopilot-color));
+    margin: 2rem auto 0;
+    border-radius: 2px;
+  }
+  .hero h1 {
+    font-family: var(--font-body);
+    font-size: clamp(2rem, 5vw, 3.2rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--fg);
+    margin-bottom: 0.3rem;
+  }
+  .hero .subtitle {
+    font-size: 1.1rem;
+    color: var(--fg-muted);
+    max-width: 580px;
+    margin: 0.75rem auto 0;
+    line-height: 1.7;
+  }
+  .hero .cmd {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--fg-muted);
+    background: var(--bg-recessed);
+    border: 1px solid var(--border);
+    display: inline-block;
+    padding: 0.35rem 1rem;
+    border-radius: var(--radius);
+    margin-top: 1.25rem;
+  }
+  .hero .cmd code {
+    color: var(--primary);
+  }
+
+  /* ── Section scaffolding ── */
+  section { padding: 3rem 0; }
+  .section-header {
+    margin-bottom: 2rem;
+  }
+  .section-header h2 {
+    font-family: var(--font-body);
+    font-size: 1.6rem;
+    font-weight: 600;
+    color: var(--fg);
+    margin-top: 0.4rem;
+  }
+
+  /* ── State Machine Diagram ── */
+  .state-diagram {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2.5rem 2rem;
+    box-shadow: var(--shadow-md);
+    position: relative;
+    overflow: hidden;
+  }
+  .state-diagram::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--interactive-color), var(--autopilot-color));
+  }
+
+  .state-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    flex-wrap: wrap;
+  }
+
+  .state-node {
+    background: var(--bg-elevated);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    padding: 1.2rem 1.6rem;
+    text-align: center;
+    min-width: 160px;
+    transition: box-shadow 0.2s, transform 0.2s;
+  }
+  .state-node:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .state-node:hover { transform: none; }
+  }
+  .state-node .state-label {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 0.3rem;
+  }
+  .state-node .state-name {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--fg);
+  }
+  .state-node .state-desc {
+    font-size: 0.78rem;
+    color: var(--fg-muted);
+    margin-top: 0.3rem;
+    line-height: 1.4;
+  }
+
+  .state-start {
+    border-color: var(--fg-faint);
+    background: var(--bg-recessed);
+  }
+  .state-start .state-label { color: var(--fg-faint); }
+
+  .state-interactive {
+    border-color: var(--interactive-color);
+    background: var(--interactive-bg);
+  }
+  .state-interactive .state-label { color: var(--interactive-color); }
+
+  .state-autopilot {
+    border-color: var(--autopilot-color);
+    background: var(--autopilot-bg);
+  }
+  .state-autopilot .state-label { color: var(--autopilot-color); }
+
+  .state-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0 0.6rem;
+    color: var(--fg-faint);
+    min-width: 80px;
+  }
+  .state-arrow svg {
+    width: 40px;
+    height: 16px;
+  }
+  .state-arrow .arrow-label {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.3;
+    margin-bottom: 0.25rem;
+    color: var(--fg-faint);
+    max-width: 100px;
+  }
+  .state-arrow-reverse {
+    flex-direction: column-reverse;
+  }
+  .state-arrow-reverse .arrow-label {
+    margin-bottom: 0;
+    margin-top: 0.25rem;
+  }
+
+  .state-bidirectional {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0 0.4rem;
+    min-width: 120px;
+  }
+  .state-bidirectional .arrow-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--fg-faint);
+  }
+  .state-bidirectional .arrow-row svg {
+    width: 36px;
+    height: 14px;
+  }
+  .state-bidirectional .arrow-row .arrow-label {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--fg-faint);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 768px) {
+    .state-flow { flex-direction: column; gap: 0.5rem; }
+    .state-node { min-width: 220px; }
+    .state-arrow, .state-bidirectional { padding: 0.4rem 0; }
+    .state-arrow svg { transform: rotate(90deg); }
+    .state-bidirectional .arrow-row svg { transform: rotate(90deg); }
+  }
+
+  /* ── Terminal Mock ── */
+  .terminal-section {
+    background: var(--bg-recessed);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 3.5rem 0;
+  }
+
+  .terminal {
+    background: #1a1118;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+    max-width: 640px;
+    margin: 0 auto;
+    font-family: var(--font-mono);
+  }
+  .terminal-bar {
+    background: #2a2228;
+    padding: 0.6rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+  .terminal-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+  }
+  .terminal-dot:nth-child(1) { background: #ff5f57; }
+  .terminal-dot:nth-child(2) { background: #ffbd2e; }
+  .terminal-dot:nth-child(3) { background: #28c840; }
+  .terminal-body {
+    padding: 1.25rem 1.5rem;
+    font-size: 0.78rem;
+    line-height: 1.8;
+    color: #c8b8c0;
+  }
+  .terminal-body .t-border {
+    color: #584858;
+  }
+  .terminal-body .t-title {
+    color: #e8849e;
+    font-weight: 600;
+  }
+  .terminal-body .t-accent {
+    color: #a78bfa;
+  }
+  .terminal-body .t-dim {
+    color: #786878;
+  }
+  .terminal-body .t-bright {
+    color: #f0e0e8;
+  }
+  .terminal-body .t-green {
+    color: #34d399;
+  }
+
+  /* ── Component Cards ── */
+  .component-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+  @media (max-width: 768px) {
+    .component-grid { grid-template-columns: 1fr; gap: 1.25rem; }
+  }
+
+  .component-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.75rem;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.25s ease, transform 0.25s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .component-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--card-accent);
+  }
+  .component-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-3px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .component-card:hover { transform: none; }
+  }
+
+  .component-card .card-icon {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.9rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--card-accent);
+    background: var(--card-accent-bg, var(--bg-recessed));
+    border: 1px solid var(--card-accent-border, var(--border));
+  }
+
+  .component-card .card-tag {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--card-accent);
+    margin-bottom: 0.4rem;
+  }
+  .component-card h3 {
+    font-family: var(--font-body);
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 0.5rem;
+  }
+  .component-card p {
+    font-size: 0.88rem;
+    color: var(--fg-muted);
+    line-height: 1.6;
+    margin-bottom: 0.75rem;
+  }
+  .component-card .code-block {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--fg-faint);
+    background: var(--bg-recessed);
+    border: 1px solid var(--border);
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    line-height: 1.6;
+  }
+  .component-card .code-block span {
+    color: var(--card-accent);
+  }
+  .component-card ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .component-card ul li {
+    font-size: 0.85rem;
+    color: var(--fg-muted);
+    padding: 0.35rem 0;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    line-height: 1.5;
+  }
+  .component-card ul li::before {
+    content: '';
+    display: inline-block;
+    flex-shrink: 0;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--card-accent);
+    margin-top: 0.45em;
+  }
+
+  /* ── Scripts Table ── */
+  .scripts-section {
+    background: var(--bg-recessed);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 3.5rem 0;
+  }
+
+  .scripts-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+  .scripts-table thead {
+    background: var(--bg-recessed);
+  }
+  .scripts-table th {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+    padding: 0.85rem 1.25rem;
+    text-align: left;
+    border-bottom: 2px solid var(--border);
+  }
+  .scripts-table td {
+    padding: 0.85rem 1.25rem;
+    font-size: 0.88rem;
+    color: var(--fg-muted);
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    line-height: 1.5;
+  }
+  .scripts-table tr:last-child td {
+    border-bottom: none;
+  }
+  .scripts-table tr:hover td {
+    background: var(--primary-bg);
+  }
+  .scripts-table .script-name {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 0.82rem;
+    color: var(--primary);
+  }
+  .scripts-table .work-unit {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    background: var(--bg-recessed);
+    border: 1px solid var(--border);
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    display: inline-block;
+    color: var(--fg);
+  }
+
+  @media (max-width: 480px) {
+    .scripts-table { font-size: 0.82rem; }
+    .scripts-table th, .scripts-table td { padding: 0.65rem 0.85rem; }
+  }
+
+  /* ── Trigger Phrases ── */
+  .triggers-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  @media (max-width: 480px) {
+    .triggers-grid { grid-template-columns: 1fr; }
+  }
+
+  .trigger-item {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem 1.15rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    transition: box-shadow 0.2s, transform 0.2s;
+  }
+  .trigger-item:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .trigger-item:hover { transform: none; }
+  }
+  .trigger-item .trigger-icon {
+    flex-shrink: 0;
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-family: var(--font-mono);
+  }
+  .trigger-to-auto .trigger-icon {
+    background: var(--autopilot-bg);
+    color: var(--autopilot-color);
+    border: 1px solid var(--autopilot-border);
+  }
+  .trigger-to-interactive .trigger-icon {
+    background: var(--interactive-bg);
+    color: var(--interactive-color);
+    border: 1px solid var(--interactive-border);
+  }
+  .trigger-item .trigger-text {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .trigger-item .trigger-desc {
+    font-size: 0.72rem;
+    color: var(--fg-faint);
+    font-family: var(--font-body);
+  }
+
+  /* ── Mode Cards (hero-adjacent) ── */
+  .modes-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+    margin-top: 0.5rem;
+  }
+  @media (max-width: 768px) {
+    .modes-grid { grid-template-columns: 1fr; gap: 1.25rem; }
+  }
+
+  .mode-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow 0.25s ease, transform 0.25s ease;
+  }
+  .mode-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mode-card:hover { transform: none; }
+  }
+  .mode-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--mode-accent);
+  }
+  .mode-card .mode-tag {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--mode-accent);
+    margin-bottom: 0.5rem;
+  }
+  .mode-card h3 {
+    font-family: var(--font-body);
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--fg);
+    margin-bottom: 0.4rem;
+  }
+  .mode-card p {
+    font-size: 0.88rem;
+    color: var(--fg-muted);
+    line-height: 1.6;
+  }
+  .mode-card ul {
+    list-style: none;
+    padding: 0;
+    margin: 0.75rem 0 0 0;
+  }
+  .mode-card ul li {
+    font-size: 0.85rem;
+    color: var(--fg-muted);
+    padding: 0.3rem 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    line-height: 1.5;
+  }
+  .mode-card ul li::before {
+    content: '';
+    display: inline-block;
+    flex-shrink: 0;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--mode-accent);
+    margin-top: 0.45em;
+  }
+
+  /* ── Callout ── */
+  .callout-section { padding: 2rem 0 5rem; }
+  .callout {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius);
+    padding: 1.5rem 2rem;
+    box-shadow: var(--shadow-sm);
+    max-width: 720px;
+    margin: 0 auto;
+    position: relative;
+  }
+  .callout .callout-icon {
+    position: absolute;
+    top: -14px;
+    left: 24px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--primary);
+  }
+  .callout p {
+    font-size: 0.95rem;
+    color: var(--fg-muted);
+    line-height: 1.75;
+  }
+  .callout strong {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .callout code {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    background: var(--bg-recessed);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    color: var(--primary);
+  }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center;
+    padding: 2rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--fg-faint);
+    letter-spacing: 0.05em;
+  }
+</style>
+</head>
+<body>
+
+<nav class="back-nav"><a href="../index.html"><svg viewBox="0 0 16 16"><path d="M10 12L6 8l4-4"/></svg>Storyforge</a></nav>
+
+<!-- ════ Hero ════ -->
+<header class="hero">
+  <div class="container">
+    <p class="mono-label dot-label animate" style="--i:0">v0.7.0</p>
+    <h1 class="animate" style="--i:1">Interactive Mode</h1>
+    <p class="subtitle animate" style="--i:2">
+      Watch Claude work and intervene at any point &mdash; switching between supervised collaboration and autonomous autopilot mid-task
+    </p>
+    <div class="cmd animate" style="--i:3"><code>./storyforge write --interactive</code></div>
+  </div>
+</header>
+
+<!-- ════ Two Execution Modes ════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <p class="mono-label dot-label animate" style="--i:4">Execution Modes</p>
+      <h2 class="animate" style="--i:5">Two ways to work</h2>
+    </div>
+
+    <div class="modes-grid">
+
+      <div class="mode-card animate" style="--mode-accent: var(--interactive-color); --i:6">
+        <div class="mode-tag">Supervised</div>
+        <h3>Interactive</h3>
+        <p>Author collaborates with Claude step-by-step, giving feedback and redirecting as needed.</p>
+        <ul>
+          <li>Banner displayed with instructions</li>
+          <li>System prompt rules appended</li>
+          <li>Claude completes one work unit, then waits</li>
+          <li>Author can redirect mid-task</li>
+        </ul>
+      </div>
+
+      <div class="mode-card animate" style="--mode-accent: var(--autopilot-color); --i:7">
+        <div class="mode-tag">Autonomous</div>
+        <h3>Autopilot</h3>
+        <p>Claude works autonomously through remaining tasks. Output streams to log files.</p>
+        <ul>
+          <li>Progress monitor shows current status</li>
+          <li>Output streamed to log files</li>
+          <li>Brief pause between steps to allow rejoin</li>
+          <li>Activated via trigger phrases</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ════ State Machine ════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <p class="mono-label dot-label animate" style="--i:8">State Transitions</p>
+      <h2 class="animate" style="--i:9">Mode switching at runtime</h2>
+    </div>
+
+    <div class="state-diagram animate" style="--i:10">
+      <div class="state-flow">
+
+        <div class="state-node state-start">
+          <span class="state-label">Entry</span>
+          <span class="state-name">--interactive</span>
+          <span class="state-desc">Flag passed to script</span>
+        </div>
+
+        <div class="state-arrow">
+          <span class="arrow-label">creates<br>.interactive</span>
+          <svg viewBox="0 0 40 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h30m-6-4l6 4-6 4"/></svg>
+        </div>
+
+        <div class="state-node state-interactive">
+          <span class="state-label">Active</span>
+          <span class="state-name">Interactive</span>
+          <span class="state-desc">Step-by-step collaboration</span>
+        </div>
+
+        <div class="state-bidirectional">
+          <div class="arrow-row">
+            <span class="arrow-label">"go auto"</span>
+            <svg viewBox="0 0 36 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h26m-5-3.5l5 3.5-5 3.5"/></svg>
+          </div>
+          <div class="arrow-row">
+            <svg viewBox="0 0 36 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M32 7H6m5-3.5L6 7l5 3.5"/></svg>
+            <span class="arrow-label">press 'i'</span>
+          </div>
+        </div>
+
+        <div class="state-node state-autopilot">
+          <span class="state-label">Autonomous</span>
+          <span class="state-name">Autopilot</span>
+          <span class="state-desc">Claude works independently</span>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════ Terminal Banner ════ -->
+<section class="terminal-section">
+  <div class="container">
+    <div class="section-header" style="text-align: center;">
+      <p class="mono-label dot-label animate" style="--i:11; justify-content: center;">Banner Pattern</p>
+      <h2 class="animate" style="--i:12">What the author sees</h2>
+    </div>
+
+    <div class="terminal animate" style="--i:13">
+      <div class="terminal-bar">
+        <div class="terminal-dot"></div>
+        <div class="terminal-dot"></div>
+        <div class="terminal-dot"></div>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-border">╔══════════════════════════════════════════════════════════╗</span></div>
+        <div><span class="t-border">║</span>  <span class="t-title">STORYFORGE &mdash; INTERACTIVE MODE</span>                        <span class="t-border">║</span></div>
+        <div><span class="t-border">║</span>  <span class="t-accent">Scene Drafting</span>                                       <span class="t-border">║</span></div>
+        <div><span class="t-border">║</span>                                                          <span class="t-border">║</span></div>
+        <div><span class="t-border">║</span>  <span class="t-bright">Watch, give feedback, or redirect Claude.</span>              <span class="t-border">║</span></div>
+        <div><span class="t-border">║</span>                                                          <span class="t-border">║</span></div>
+        <div><span class="t-border">║</span>  <span class="t-dim">Say</span> <span class="t-green">"finish without me"</span> <span class="t-dim">to switch to autopilot.</span>      <span class="t-border">║</span></div>
+        <div><span class="t-border">╚══════════════════════════════════════════════════════════╝</span></div>
+        <div>&nbsp;</div>
+        <div><span class="t-green">▶</span> <span class="t-bright">Drafting scene 3 of 12:</span> <span class="t-accent">The Harbor at Dawn</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════ Components ════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <p class="mono-label dot-label animate" style="--i:14">Architecture</p>
+      <h2 class="animate" style="--i:15">Core components</h2>
+    </div>
+
+    <div class="component-grid">
+
+      <!-- State File -->
+      <div class="component-card animate" style="--card-accent: var(--state-color); --card-accent-bg: #b453090a; --card-accent-border: #b4530925; --i:16">
+        <div class="card-icon">.</div>
+        <div class="card-tag">State Management</div>
+        <h3>State File</h3>
+        <p>A single file controls the current mode. Its presence means interactive mode is active.</p>
+        <div class="code-block">
+          <span>working/</span>.interactive
+        </div>
+        <ul>
+          <li>Created when <code style="font-family: var(--font-mono); font-size: 0.78rem;">--interactive</code> flag is passed</li>
+          <li>Deleted on trigger phrase or script end</li>
+          <li>Cleaned up at script start and exit</li>
+        </ul>
+      </div>
+
+      <!-- Rejoin Mechanism -->
+      <div class="component-card animate" style="--card-accent: var(--rejoin-color); --card-accent-bg: #0d7c660a; --card-accent-border: #0d7c6625; --i:17">
+        <div class="card-icon">i</div>
+        <div class="card-tag">Rejoin</div>
+        <h3>Rejoin Mechanism</h3>
+        <p>Between autopilot steps, a brief window lets the author jump back into interactive mode.</p>
+        <div class="code-block">
+          <span>offer_interactive</span>(): "Press 'i' for interactive, or wait 5s..."
+        </div>
+        <ul>
+          <li>Uses <code style="font-family: var(--font-mono); font-size: 0.78rem;">read -t $timeout -n 1</code> for keypress</li>
+          <li>Configurable via STORYFORGE_REJOIN_TIMEOUT</li>
+          <li>Default timeout: 5 seconds</li>
+        </ul>
+      </div>
+
+      <!-- Banner -->
+      <div class="component-card animate" style="--card-accent: var(--banner-color); --card-accent-bg: #8813370a; --card-accent-border: #88133725; --i:18">
+        <div class="card-icon">B</div>
+        <div class="card-tag">Display</div>
+        <h3>Interactive Banner</h3>
+        <p>A boxed banner (60 chars wide) displayed at the start of each interactive step.</p>
+        <div class="code-block">
+          <span>show_interactive_banner</span>(subtitle, mode)
+        </div>
+        <ul>
+          <li>"multi" mode: shows autopilot escape option</li>
+          <li>"single" mode: no autopilot option shown</li>
+          <li>Instructions: watch, give feedback, redirect</li>
+        </ul>
+      </div>
+
+      <!-- System Prompt -->
+      <div class="component-card animate" style="--card-accent: var(--prompt-color); --card-accent-bg: #6d28d90a; --card-accent-border: #6d28d925; --i:19">
+        <div class="card-icon">$</div>
+        <div class="card-tag">Prompt Injection</div>
+        <h3>System Prompt</h3>
+        <p>Invisible rules appended via <code style="font-family: var(--font-mono); font-size: 0.82rem;">--append-system-prompt</code> to constrain Claude's behavior.</p>
+        <div class="code-block">
+          <span>build_interactive_system_prompt</span>(dir, work_unit)
+        </div>
+        <ul>
+          <li>Complete THIS work unit only</li>
+          <li>Don't proceed to next step</li>
+          <li>Wait for user before continuing</li>
+          <li>Listen for trigger phrases</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ════ Scripts Support ════ -->
+<section class="scripts-section">
+  <div class="container">
+    <div class="section-header">
+      <p class="mono-label dot-label animate" style="--i:20">Compatibility</p>
+      <h2 class="animate" style="--i:21">Scripts supporting interactive mode</h2>
+    </div>
+
+    <table class="scripts-table animate" style="--i:22">
+      <thead>
+        <tr>
+          <th>Script</th>
+          <th>Work Unit</th>
+          <th>Interactive Scope</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="script-name">storyforge-write</span></td>
+          <td><span class="work-unit">scene</span></td>
+          <td>Scene-by-scene drafting with per-scene interaction</td>
+        </tr>
+        <tr>
+          <td><span class="script-name">storyforge-revise</span></td>
+          <td><span class="work-unit">pass</span></td>
+          <td>Pass-by-pass revision with per-pass interaction</td>
+        </tr>
+        <tr>
+          <td><span class="script-name">storyforge-evaluate</span></td>
+          <td><span class="work-unit">synthesis</span></td>
+          <td>Synthesis step only (evaluators run in parallel)</td>
+        </tr>
+        <tr>
+          <td><span class="script-name">storyforge-assemble</span></td>
+          <td><span class="work-unit">review</span></td>
+          <td>Review phase only</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ════ Trigger Phrases ════ -->
+<section>
+  <div class="container">
+    <div class="section-header" style="text-align: center;">
+      <p class="mono-label dot-label animate" style="--i:23; justify-content: center;">Voice Commands</p>
+      <h2 class="animate" style="--i:24">Trigger phrases</h2>
+    </div>
+
+    <div class="triggers-grid">
+
+      <div class="trigger-item trigger-to-auto animate" style="--i:25">
+        <div class="trigger-icon">A</div>
+        <div>
+          <div class="trigger-text">"finish without me"</div>
+          <div class="trigger-desc">Switch to autopilot</div>
+        </div>
+      </div>
+
+      <div class="trigger-item trigger-to-auto animate" style="--i:26">
+        <div class="trigger-icon">A</div>
+        <div>
+          <div class="trigger-text">"go auto"</div>
+          <div class="trigger-desc">Switch to autopilot</div>
+        </div>
+      </div>
+
+      <div class="trigger-item trigger-to-auto animate" style="--i:27">
+        <div class="trigger-icon">A</div>
+        <div>
+          <div class="trigger-text">"auto mode"</div>
+          <div class="trigger-desc">Switch to autopilot</div>
+        </div>
+      </div>
+
+      <div class="trigger-item trigger-to-auto animate" style="--i:28">
+        <div class="trigger-icon">A</div>
+        <div>
+          <div class="trigger-text">"autopilot the rest"</div>
+          <div class="trigger-desc">Switch to autopilot</div>
+        </div>
+      </div>
+
+      <div class="trigger-item trigger-to-interactive animate" style="--i:29">
+        <div class="trigger-icon">i</div>
+        <div>
+          <div class="trigger-text">Press 'i' key</div>
+          <div class="trigger-desc">Rejoin from autopilot</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ════ Callout ════ -->
+<section class="callout-section">
+  <div class="container">
+    <div class="callout animate" style="--i:30">
+      <div class="callout-icon">*</div>
+      <p>
+        Interactive mode is <strong>opt-in per invocation</strong>. Without the <code>--interactive</code> flag,
+        all scripts run in fully autonomous headless mode. The <code>working/.interactive</code> state file is
+        always cleaned up at script start and exit to prevent stale state.
+      </p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">Storyforge &middot; Interactive Mode &middot; v0.7.0</div>
+</footer>
+
+</body>
+</html>
