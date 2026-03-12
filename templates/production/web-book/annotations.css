@@ -168,6 +168,8 @@
 
 .sf-color-swatch.selected {
   border-color: var(--text);
+  transform: scale(1.2);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-dim);
 }
 
 /* Note button in popover */
