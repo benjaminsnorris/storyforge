@@ -634,7 +634,7 @@
       viewer.appendChild(commentP);
     }
 
-    if (annotation.selectedText) {
+    if (annotation.selectedText && annotation.type === 'margin-note') {
       var quoteP = document.createElement('p');
       quoteP.style.fontStyle = 'italic';
       quoteP.style.color = 'var(--text-dim)';

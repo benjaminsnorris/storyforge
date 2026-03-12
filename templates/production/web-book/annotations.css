@@ -294,38 +294,51 @@
   z-index: 101;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px;
+  border-radius: 8px;
+  padding: 12px 14px;
   max-width: 300px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
   animation: sf-fade-in 0.15s ease;
 }
 
 .sf-comment-viewer p {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 0.85rem;
   color: var(--text);
+  line-height: 1.4;
 }
 
 .sf-comment-viewer .sf-actions {
   display: flex;
-  gap: 4px;
-  justify-content: flex-end;
+  gap: 6px;
 }
 
 .sf-comment-viewer button {
   background: var(--surface);
   color: var(--text-dim);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 8px;
-  font-size: 0.8rem;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
   cursor: pointer;
+  min-height: 36px;
+  transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.sf-comment-viewer button:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+  background: var(--bg);
 }
 
 .sf-comment-viewer button.sf-delete {
-  color: #c0392b;
-  border-color: #c0392b;
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+
+.sf-comment-viewer button.sf-delete:hover {
+  color: #e74c3c;
+  border-color: #e74c3c;
 }
 
 
