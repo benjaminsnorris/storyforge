@@ -313,6 +313,7 @@
   // Desktop mouseup listener
   document.addEventListener('mouseup', function(e) {
     if (window.innerWidth < 640) return;
+    if (activePopover && activePopover.contains(e.target)) return;
 
     var selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
