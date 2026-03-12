@@ -1173,8 +1173,8 @@
     renderStalePanel(stale);
     setupMarginTriggers();
     createToolbar();
-    updateBadge();
     addExportButton();
+    updateBadge();
   }
 
   if (document.readyState === 'loading') {
