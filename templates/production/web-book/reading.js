@@ -278,7 +278,13 @@
     info.textContent = 'Chapter ' + chapterNum + ' of ' + totalChapters;
     info.setAttribute('aria-label', 'Table of contents');
     info.addEventListener('click', toggleToc);
-    bookNav.appendChild(info);
+    var navControls = bookNav.querySelector('.nav-controls');
+    var themeToggle = navControls ? navControls.querySelector('.theme-toggle') : null;
+    if (navControls && themeToggle) {
+      navControls.insertBefore(info, themeToggle);
+    } else {
+      bookNav.appendChild(info);
+    }
   }
 
   // ---------------------------------------------------------------------------

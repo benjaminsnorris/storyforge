@@ -1145,7 +1145,12 @@
       showExportMenu(btn);
     });
 
-    navControls.prepend(btn);
+    var themeToggle = navControls.querySelector('.theme-toggle');
+    if (themeToggle) {
+      navControls.insertBefore(btn, themeToggle);
+    } else {
+      navControls.appendChild(btn);
+    }
   }
 
   // =========================================================================
