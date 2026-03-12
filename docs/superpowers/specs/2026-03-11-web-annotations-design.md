@@ -99,10 +99,6 @@ The pacing in this whole section drags after the reveal.
 
 Grouped by chapter, then scene, in reading order. Export available per-chapter and "export all" from the TOC page.
 
-## Prerequisites
-
-- Fix: `--format web` is missing from the format validation case in `storyforge-assemble` (line 141). The `web` format must be accepted alongside `epub|pdf|html|markdown|all` before annotation work can begin.
-
 ## Build Integration
 
 ### New Template Files
