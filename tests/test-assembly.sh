@@ -123,6 +123,17 @@ assert_matches "$result" "Chapter 2:" "assemble_chapter: chapter 2 has correct n
 assert_contains "$result" "Into the Blank" "assemble_chapter: chapter 2 heading has title"
 
 # ============================================================================
+# assemble_chapter — scene markers
+# ============================================================================
+
+result=$(assemble_chapter 1 "$PROJECT_DIR" "ornamental")
+assert_contains "$result" "<!-- scene:act1-sc01 -->" "assemble_chapter: includes scene marker for first scene"
+assert_contains "$result" "<!-- scene:act1-sc02 -->" "assemble_chapter: includes scene marker for second scene"
+
+result=$(assemble_chapter 2 "$PROJECT_DIR" "ornamental")
+assert_contains "$result" "<!-- scene:act2-sc01 -->" "assemble_chapter: includes scene marker for single scene"
+
+# ============================================================================
 # read_production_field
 # ============================================================================
 

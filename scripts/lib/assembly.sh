@@ -274,6 +274,9 @@ assemble_chapter() {
             echo ""
         fi
 
+        # Scene boundary marker (preserved through pandoc as HTML comment)
+        echo "<!-- scene:${scene_id} -->"
+        echo ""
         extract_scene_prose "$scene_file"
     done <<< "$scene_ids"
 }
