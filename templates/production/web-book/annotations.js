@@ -6,6 +6,14 @@
   var chapterSlug = document.body.dataset.chapter || 'unknown';
   var STORAGE_PREFIX = 'storyforge-annotations-' + bookSlug + '-';
 
+  var HIGHLIGHT_COLORS = [
+    { id: 'yellow', label: 'Important', color: '#fcd44f' },
+    { id: 'pink', label: 'Needs Revision', color: '#e8819a' },
+    { id: 'green', label: 'Strong Passage', color: '#6dca6d' },
+    { id: 'blue', label: 'Research Needed', color: '#78b4ff' },
+    { id: 'orange', label: 'Cut / Reconsider', color: '#f0a840' }
+  ];
+
   // =========================================================================
   // 1. UUID GENERATOR
   // =========================================================================
@@ -158,6 +166,7 @@
       span.className = 'sf-highlight';
       if (annotation.comment) span.classList.add('has-comment');
       span.dataset.annotationId = annotation.id;
+      span.dataset.color = annotation.color || 'yellow';
       range.surroundContents(span);
     } catch (e) {
       // Cross-element or other range errors — skip silently
@@ -184,31 +193,47 @@
     activePopover = null;
   }
 
+  function buildColorPicker(onColorClick) {
+    var picker = document.createElement('div');
+    picker.className = 'sf-color-picker';
+    HIGHLIGHT_COLORS.forEach(function(c) {
+      var swatch = document.createElement('button');
+      swatch.className = 'sf-color-swatch';
+      swatch.style.backgroundColor = c.color;
+      swatch.title = c.label;
+      swatch.dataset.color = c.id;
+      swatch.addEventListener('click', function(e) {
+        e.stopPropagation();
+        onColorClick(c.id);
+      });
+      picker.appendChild(swatch);
+    });
+    return picker;
+  }
+
   function showPopover(x, y, range) {
     removePopover();
 
     var popover = document.createElement('div');
-    popover.className = 'sf-popover';
+    popover.className = 'sf-popover sf-popover-colors';
     popover.style.top = (y + window.scrollY) + 'px';
     popover.style.left = (x + window.scrollX) + 'px';
 
-    var hlBtn = document.createElement('button');
-    hlBtn.textContent = 'Highlight';
-    hlBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      createHighlightFromRange(range, '');
+    var picker = buildColorPicker(function(colorId) {
+      createHighlightFromRange(range, '', colorId);
       removePopover();
     });
+    popover.appendChild(picker);
 
-    var cmBtn = document.createElement('button');
-    cmBtn.textContent = 'Comment';
-    cmBtn.addEventListener('click', function(e) {
+    var noteBtn = document.createElement('button');
+    noteBtn.className = 'sf-popover-note';
+    noteBtn.textContent = 'Note';
+    noteBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       showCommentInput(popover, range);
     });
+    popover.appendChild(noteBtn);
 
-    popover.appendChild(hlBtn);
-    popover.appendChild(cmBtn);
     document.body.appendChild(popover);
     activePopover = popover;
   }
@@ -227,9 +252,25 @@
 
   function showCommentInput(popover, range) {
     while (popover.firstChild) popover.removeChild(popover.firstChild);
+    popover.className = 'sf-popover';
+
+    var selectedColor = 'yellow';
 
     var wrap = document.createElement('div');
     wrap.className = 'sf-comment-input';
+
+    var picker = buildColorPicker(function(colorId) {
+      selectedColor = colorId;
+      var swatches = picker.querySelectorAll('.sf-color-swatch');
+      swatches.forEach(function(s) {
+        if (s.dataset.color === colorId) s.classList.add('selected');
+        else s.classList.remove('selected');
+      });
+    });
+    // Default select yellow
+    var defaultSwatch = picker.querySelector('[data-color="yellow"]');
+    if (defaultSwatch) defaultSwatch.classList.add('selected');
+    wrap.appendChild(picker);
 
     var textarea = document.createElement('textarea');
     textarea.placeholder = 'Add a comment…';
@@ -250,12 +291,12 @@
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', function(e) {
       e.stopPropagation();
-      createHighlightFromRange(range, textarea.value.trim());
+      createHighlightFromRange(range, textarea.value.trim(), selectedColor);
       removePopover();
     });
 
     addTextareaShortcuts(textarea, function() {
-      createHighlightFromRange(range, textarea.value.trim());
+      createHighlightFromRange(range, textarea.value.trim(), selectedColor);
       removePopover();
     }, function() {
       removePopover();
@@ -291,7 +332,7 @@
     return { startOffset: startOffset, endOffset: endOffset };
   }
 
-  function createHighlightFromRange(range, comment) {
+  function createHighlightFromRange(range, comment, color) {
     try {
       var startNode = range.startContainer;
       var scene = getSceneForNode(startNode);
@@ -318,6 +359,7 @@
         },
         selectedText: selectedText,
         comment: comment,
+        color: color || 'yellow',
         createdAt: new Date().toISOString()
       };
 
@@ -375,8 +417,7 @@
     hlBtn.textContent = 'Highlight';
     hlBtn.addEventListener('click', function() {
       if (pendingRange) {
-        createHighlightFromRange(pendingRange, '');
-        clearMobileSelection();
+        showMobileColorPicker(pendingRange);
       }
     });
 
@@ -444,13 +485,48 @@
     if (cmBtn) cmBtn.classList.add('sf-hidden');
   }
 
+  function showMobileColorPicker(range) {
+    if (!toolbar) return;
+    while (toolbar.firstChild) toolbar.removeChild(toolbar.firstChild);
+
+    var picker = buildColorPicker(function(colorId) {
+      createHighlightFromRange(range, '', colorId);
+      clearMobileSelection();
+      rebuildToolbar();
+    });
+    toolbar.appendChild(picker);
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.fontSize = '0.78em';
+    cancelBtn.addEventListener('click', function() {
+      clearMobileSelection();
+      rebuildToolbar();
+    });
+    toolbar.appendChild(cancelBtn);
+  }
+
   function showMobileCommentInput(range) {
     if (!toolbar) return;
     while (toolbar.firstChild) toolbar.removeChild(toolbar.firstChild);
 
+    var selectedColor = 'yellow';
+
     var wrap = document.createElement('div');
     wrap.className = 'sf-comment-input';
     wrap.style.width = '100%';
+
+    var picker = buildColorPicker(function(colorId) {
+      selectedColor = colorId;
+      var swatches = picker.querySelectorAll('.sf-color-swatch');
+      swatches.forEach(function(s) {
+        if (s.dataset.color === colorId) s.classList.add('selected');
+        else s.classList.remove('selected');
+      });
+    });
+    var defaultSwatch = picker.querySelector('[data-color="yellow"]');
+    if (defaultSwatch) defaultSwatch.classList.add('selected');
+    wrap.appendChild(picker);
 
     var textarea = document.createElement('textarea');
     textarea.placeholder = 'Add a comment…';
@@ -469,7 +545,7 @@
     var saveBtn = document.createElement('button');
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', function() {
-      createHighlightFromRange(range, textarea.value.trim());
+      createHighlightFromRange(range, textarea.value.trim(), selectedColor);
       rebuildToolbar();
     });
 
