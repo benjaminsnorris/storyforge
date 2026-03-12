@@ -6,6 +6,14 @@
   var chapterSlug = document.body.dataset.chapter || 'unknown';
   var STORAGE_PREFIX = 'storyforge-annotations-' + bookSlug + '-';
 
+  var HIGHLIGHT_COLORS = [
+    { id: 'yellow', label: 'Important', color: '#fcd44f' },
+    { id: 'pink', label: 'Needs Revision', color: '#e8819a' },
+    { id: 'green', label: 'Strong Passage', color: '#6dca6d' },
+    { id: 'blue', label: 'Research Needed', color: '#78b4ff' },
+    { id: 'orange', label: 'Cut / Reconsider', color: '#f0a840' }
+  ];
+
   // =========================================================================
   // 1. UUID GENERATOR
   // =========================================================================
@@ -158,6 +166,9 @@
       span.className = 'sf-highlight';
       if (annotation.comment) span.classList.add('has-comment');
       span.dataset.annotationId = annotation.id;
+      span.dataset.color = annotation.color || 'yellow';
+      var hlColorObj = HIGHLIGHT_COLORS.find(function(c) { return c.id === (annotation.color || 'yellow'); });
+      if (hlColorObj) span.style.setProperty('--sf-hl-color', hlColorObj.color);
       range.surroundContents(span);
     } catch (e) {
       // Cross-element or other range errors — skip silently
@@ -184,40 +195,84 @@
     activePopover = null;
   }
 
+  function buildColorPicker(onColorClick) {
+    var picker = document.createElement('div');
+    picker.className = 'sf-color-picker';
+    HIGHLIGHT_COLORS.forEach(function(c) {
+      var swatch = document.createElement('button');
+      swatch.className = 'sf-color-swatch';
+      swatch.style.backgroundColor = c.color;
+      swatch.title = c.label;
+      swatch.dataset.color = c.id;
+      swatch.addEventListener('click', function(e) {
+        e.stopPropagation();
+        onColorClick(c.id);
+      });
+      picker.appendChild(swatch);
+    });
+    return picker;
+  }
+
   function showPopover(x, y, range) {
     removePopover();
 
     var popover = document.createElement('div');
-    popover.className = 'sf-popover';
+    popover.className = 'sf-popover sf-popover-colors';
     popover.style.top = (y + window.scrollY) + 'px';
     popover.style.left = (x + window.scrollX) + 'px';
 
-    var hlBtn = document.createElement('button');
-    hlBtn.textContent = 'Highlight';
-    hlBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      createHighlightFromRange(range, '');
+    var picker = buildColorPicker(function(colorId) {
+      createHighlightFromRange(range, '', colorId);
       removePopover();
     });
+    popover.appendChild(picker);
 
-    var cmBtn = document.createElement('button');
-    cmBtn.textContent = 'Comment';
-    cmBtn.addEventListener('click', function(e) {
+    var noteBtn = document.createElement('button');
+    noteBtn.className = 'sf-popover-note';
+    noteBtn.textContent = 'Note';
+    noteBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       showCommentInput(popover, range);
     });
+    popover.appendChild(noteBtn);
 
-    popover.appendChild(hlBtn);
-    popover.appendChild(cmBtn);
     document.body.appendChild(popover);
     activePopover = popover;
   }
 
+  function addTextareaShortcuts(textarea, onSave, onCancel) {
+    textarea.addEventListener('keydown', function(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        onSave();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        onCancel();
+      }
+    });
+  }
+
   function showCommentInput(popover, range) {
     while (popover.firstChild) popover.removeChild(popover.firstChild);
+    popover.className = 'sf-popover';
+
+    var selectedColor = 'yellow';
 
     var wrap = document.createElement('div');
     wrap.className = 'sf-comment-input';
+
+    var picker = buildColorPicker(function(colorId) {
+      selectedColor = colorId;
+      var swatches = picker.querySelectorAll('.sf-color-swatch');
+      swatches.forEach(function(s) {
+        if (s.dataset.color === colorId) s.classList.add('selected');
+        else s.classList.remove('selected');
+      });
+    });
+    // Default select yellow
+    var defaultSwatch = picker.querySelector('[data-color="yellow"]');
+    if (defaultSwatch) defaultSwatch.classList.add('selected');
+    wrap.appendChild(picker);
 
     var textarea = document.createElement('textarea');
     textarea.placeholder = 'Add a comment…';
@@ -238,8 +293,16 @@
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', function(e) {
       e.stopPropagation();
-      createHighlightFromRange(range, textarea.value.trim());
+      createHighlightFromRange(range, textarea.value.trim(), selectedColor);
       removePopover();
+    });
+
+    addTextareaShortcuts(textarea, function() {
+      createHighlightFromRange(range, textarea.value.trim(), selectedColor);
+      removePopover();
+    }, function() {
+      removePopover();
+      window.getSelection().removeAllRanges();
     });
 
     actions.appendChild(cancelBtn);
@@ -271,7 +334,7 @@
     return { startOffset: startOffset, endOffset: endOffset };
   }
 
-  function createHighlightFromRange(range, comment) {
+  function createHighlightFromRange(range, comment, color) {
     try {
       var startNode = range.startContainer;
       var scene = getSceneForNode(startNode);
@@ -298,6 +361,7 @@
         },
         selectedText: selectedText,
         comment: comment,
+        color: color || 'yellow',
         createdAt: new Date().toISOString()
       };
 
@@ -313,6 +377,7 @@
   // Desktop mouseup listener
   document.addEventListener('mouseup', function(e) {
     if (window.innerWidth < 640) return;
+    if (activePopover && activePopover.contains(e.target)) return;
 
     var selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
@@ -354,8 +419,7 @@
     hlBtn.textContent = 'Highlight';
     hlBtn.addEventListener('click', function() {
       if (pendingRange) {
-        createHighlightFromRange(pendingRange, '');
-        clearMobileSelection();
+        showMobileColorPicker(pendingRange);
       }
     });
 
@@ -423,13 +487,48 @@
     if (cmBtn) cmBtn.classList.add('sf-hidden');
   }
 
+  function showMobileColorPicker(range) {
+    if (!toolbar) return;
+    while (toolbar.firstChild) toolbar.removeChild(toolbar.firstChild);
+
+    var picker = buildColorPicker(function(colorId) {
+      createHighlightFromRange(range, '', colorId);
+      clearMobileSelection();
+      rebuildToolbar();
+    });
+    toolbar.appendChild(picker);
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.fontSize = '0.78em';
+    cancelBtn.addEventListener('click', function() {
+      clearMobileSelection();
+      rebuildToolbar();
+    });
+    toolbar.appendChild(cancelBtn);
+  }
+
   function showMobileCommentInput(range) {
     if (!toolbar) return;
     while (toolbar.firstChild) toolbar.removeChild(toolbar.firstChild);
 
+    var selectedColor = 'yellow';
+
     var wrap = document.createElement('div');
     wrap.className = 'sf-comment-input';
     wrap.style.width = '100%';
+
+    var picker = buildColorPicker(function(colorId) {
+      selectedColor = colorId;
+      var swatches = picker.querySelectorAll('.sf-color-swatch');
+      swatches.forEach(function(s) {
+        if (s.dataset.color === colorId) s.classList.add('selected');
+        else s.classList.remove('selected');
+      });
+    });
+    var defaultSwatch = picker.querySelector('[data-color="yellow"]');
+    if (defaultSwatch) defaultSwatch.classList.add('selected');
+    wrap.appendChild(picker);
 
     var textarea = document.createElement('textarea');
     textarea.placeholder = 'Add a comment…';
@@ -448,7 +547,7 @@
     var saveBtn = document.createElement('button');
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', function() {
-      createHighlightFromRange(range, textarea.value.trim());
+      createHighlightFromRange(range, textarea.value.trim(), selectedColor);
       rebuildToolbar();
     });
 
@@ -507,6 +606,27 @@
     var panel = document.createElement('div');
     panel.className = 'sf-note-panel';
 
+    // Color picker
+    var selectedColor = 'yellow';
+    var colorPicker = document.createElement('div');
+    colorPicker.className = 'sf-color-picker';
+    colorPicker.style.marginBottom = '8px';
+    HIGHLIGHT_COLORS.forEach(function(c) {
+      var swatch = document.createElement('button');
+      swatch.className = 'sf-color-swatch';
+      if (c.id === selectedColor) swatch.classList.add('selected');
+      swatch.style.backgroundColor = c.color;
+      swatch.title = c.label;
+      swatch.addEventListener('click', function(e) {
+        e.preventDefault();
+        selectedColor = c.id;
+        colorPicker.querySelectorAll('.sf-color-swatch').forEach(function(s) { s.classList.remove('selected'); });
+        swatch.classList.add('selected');
+      });
+      colorPicker.appendChild(swatch);
+    });
+    panel.appendChild(colorPicker);
+
     var textarea = document.createElement('textarea');
     textarea.placeholder = 'Add a margin note…';
     textarea.rows = 3;
@@ -514,15 +634,7 @@
     var actions = document.createElement('div');
     actions.className = 'sf-actions';
 
-    var cancelBtn = document.createElement('button');
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.addEventListener('click', function() {
-      if (panel.parentNode) panel.parentNode.removeChild(panel);
-    });
-
-    var saveBtn = document.createElement('button');
-    saveBtn.textContent = 'Save';
-    saveBtn.addEventListener('click', function() {
+    function saveMarginNote() {
       var text = textarea.value.trim();
       if (!text) return;
 
@@ -533,6 +645,7 @@
         scene: scene,
         anchor: { paragraphIndex: paragraphIndex },
         comment: text,
+        color: selectedColor,
         createdAt: new Date().toISOString()
       };
 
@@ -540,7 +653,21 @@
       if (panel.parentNode) panel.parentNode.removeChild(panel);
       renderMarginIndicator(annotation, block);
       updateBadge();
-    });
+    }
+
+    function cancelMarginNote() {
+      if (panel.parentNode) panel.parentNode.removeChild(panel);
+    }
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', cancelMarginNote);
+
+    var saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', saveMarginNote);
+
+    addTextareaShortcuts(textarea, saveMarginNote, cancelMarginNote);
 
     actions.appendChild(cancelBtn);
     actions.appendChild(saveBtn);
@@ -585,6 +712,8 @@
     indicator.textContent = '✎';
     indicator.dataset.annotationId = annotation.id;
     indicator.title = annotation.comment;
+    var colorObj = HIGHLIGHT_COLORS.find(function(c) { return c.id === (annotation.color || 'yellow'); });
+    if (colorObj) indicator.style.backgroundColor = colorObj.color;
     indicator.setAttribute('role', 'button');
     indicator.setAttribute('tabindex', '0');
     indicator.addEventListener('click', function(e) {
@@ -633,7 +762,7 @@
       viewer.appendChild(commentP);
     }
 
-    if (annotation.selectedText) {
+    if (annotation.selectedText && (annotation.comment || annotation.type === 'margin-note')) {
       var quoteP = document.createElement('p');
       quoteP.style.fontStyle = 'italic';
       quoteP.style.color = 'var(--text-dim)';
@@ -641,6 +770,53 @@
       if (text.length > 100) text = text.slice(0, 100) + '…';
       quoteP.textContent = '\u201c' + text + '\u201d';
       viewer.appendChild(quoteP);
+    }
+
+    if (annotation.createdAt) {
+      var timeEl = document.createElement('time');
+      timeEl.className = 'sf-timestamp';
+      var date = new Date(annotation.createdAt);
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      var hours = date.getHours();
+      var minutes = date.getMinutes();
+      var ampm = hours >= 12 ? 'pm' : 'am';
+      hours = hours % 12 || 12;
+      var minStr = minutes < 10 ? '0' + minutes : minutes;
+      timeEl.textContent = months[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear() + ' at ' + hours + ':' + minStr + ' ' + ampm;
+      timeEl.setAttribute('datetime', annotation.createdAt);
+      viewer.appendChild(timeEl);
+    }
+
+    // Color picker
+    {
+      var colorRow = document.createElement('div');
+      colorRow.className = 'sf-color-picker';
+      colorRow.style.marginBottom = '8px';
+      HIGHLIGHT_COLORS.forEach(function(c) {
+        var swatch = document.createElement('button');
+        swatch.className = 'sf-color-swatch';
+        if ((annotation.color || 'yellow') === c.id) swatch.classList.add('selected');
+        swatch.style.backgroundColor = c.color;
+        swatch.title = c.label;
+        swatch.addEventListener('click', function(e) {
+          e.stopPropagation();
+          annotation.color = c.id;
+          updateAnnotation(annotation.id, { color: c.id });
+          var hlSpan = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
+          if (hlSpan) {
+            hlSpan.dataset.color = c.id;
+            hlSpan.style.setProperty('--sf-hl-color', c.color);
+          }
+          var indEl = document.querySelector('.sf-margin-indicator[data-annotation-id="' + annotation.id + '"]');
+          if (indEl) indEl.style.backgroundColor = c.color;
+          // Update selected state
+          colorRow.querySelectorAll('.sf-color-swatch').forEach(function(s) { s.classList.remove('selected'); });
+          swatch.classList.add('selected');
+          updateBadge();
+        });
+        colorRow.appendChild(swatch);
+      });
+      viewer.appendChild(colorRow);
     }
 
     var actions = document.createElement('div');
@@ -699,18 +875,30 @@
     viewer.style.top = (rect.bottom + window.scrollY + 6) + 'px';
     viewer.style.left = (rect.left + window.scrollX) + 'px';
 
+    var wrap = document.createElement('div');
+    wrap.className = 'sf-comment-input';
+
     var textarea = document.createElement('textarea');
     textarea.value = annotation.comment || '';
+    textarea.placeholder = 'Add a comment…';
     textarea.rows = 3;
-    textarea.style.width = '100%';
-    textarea.style.fontFamily = 'inherit';
-    textarea.style.fontSize = '0.85rem';
-    textarea.style.padding = '6px 8px';
-    textarea.style.boxSizing = 'border-box';
-    textarea.style.border = '1px solid var(--border)';
-    textarea.style.borderRadius = '4px';
-    textarea.style.background = 'var(--bg)';
-    textarea.style.color = 'var(--text)';
+
+    function saveEdit() {
+      var newComment = textarea.value.trim();
+      updateAnnotation(annotation.id, { comment: newComment });
+      annotation.comment = newComment;
+
+      var hlSpan = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
+      if (hlSpan) {
+        if (newComment) {
+          hlSpan.classList.add('has-comment');
+        } else {
+          hlSpan.classList.remove('has-comment');
+        }
+      }
+
+      removeViewer();
+    }
 
     var actions = document.createElement('div');
     actions.className = 'sf-actions';
@@ -726,27 +914,16 @@
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', function(e) {
       e.stopPropagation();
-      var newComment = textarea.value.trim();
-      updateAnnotation(annotation.id, { comment: newComment });
-      annotation.comment = newComment;
-
-      // Update has-comment class on highlight span
-      var hlSpan = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
-      if (hlSpan) {
-        if (newComment) {
-          hlSpan.classList.add('has-comment');
-        } else {
-          hlSpan.classList.remove('has-comment');
-        }
-      }
-
-      removeViewer();
+      saveEdit();
     });
+
+    addTextareaShortcuts(textarea, saveEdit, removeViewer);
 
     actions.appendChild(cancelBtn);
     actions.appendChild(saveBtn);
-    viewer.appendChild(textarea);
-    viewer.appendChild(actions);
+    wrap.appendChild(textarea);
+    wrap.appendChild(actions);
+    viewer.appendChild(wrap);
 
     document.body.appendChild(viewer);
     activeViewer = viewer;
@@ -784,18 +961,27 @@
   // =========================================================================
 
   function updateBadge() {
-    var existing = document.querySelector('.sf-badge');
-    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    var btn = document.querySelector('.sf-export-btn');
+    if (!btn) return;
+
+    var svg = btn.querySelector('svg');
+    // Remove any existing count span
+    var existing = btn.querySelector('.sf-count');
+    if (existing) existing.parentNode.removeChild(existing);
 
     var annotations = loadAnnotations();
-    if (annotations.length === 0) return;
+    if (annotations.length > 0) {
+      var count = document.createElement('span');
+      count.className = 'sf-count';
+      count.style.fontSize = '0.75em';
+      count.textContent = ' ' + annotations.length;
+      btn.appendChild(count);
+    }
 
-    var badge = document.createElement('span');
-    badge.className = 'sf-badge';
-    badge.textContent = annotations.length;
-
-    var navControls = document.querySelector('.nav-controls');
-    if (navControls) navControls.prepend(badge);
+    // Refresh sidebar list if open
+    if (sidebarEl && sidebarEl.classList.contains('active')) {
+      renderSidebarList();
+    }
   }
 
   // =========================================================================
@@ -1054,81 +1240,257 @@
     }
   }
 
-  var activeExportMenu = null;
+  // =========================================================================
+  // 11b. ANNOTATION SIDEBAR
+  // =========================================================================
 
-  function showExportMenu(anchorEl) {
-    if (activeExportMenu && activeExportMenu.parentNode) {
-      activeExportMenu.parentNode.removeChild(activeExportMenu);
-      activeExportMenu = null;
+  var sidebarEl = null;
+  var sidebarFilter = null;
+
+  function toggleSidebar() {
+    if (sidebarEl && sidebarEl.classList.contains('active')) {
+      closeSidebar();
+    } else {
+      openSidebar();
+    }
+  }
+
+  function openSidebar() {
+    if (!sidebarEl) buildSidebar();
+    renderSidebarList();
+    sidebarEl.classList.add('active');
+  }
+
+  function closeSidebar() {
+    if (sidebarEl) sidebarEl.classList.remove('active');
+  }
+
+  function buildSidebar() {
+    sidebarEl = document.createElement('div');
+    sidebarEl.className = 'sf-sidebar';
+
+    // Header
+    var header = document.createElement('div');
+    header.className = 'sf-sidebar-header';
+
+    var title = document.createElement('h3');
+    title.textContent = 'Annotations';
+    header.appendChild(title);
+
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'sf-sidebar-close';
+    closeBtn.innerHTML = '&times;';
+    closeBtn.addEventListener('click', closeSidebar);
+    header.appendChild(closeBtn);
+
+    sidebarEl.appendChild(header);
+
+    // Color legend / filters
+    var filters = document.createElement('div');
+    filters.className = 'sf-sidebar-filters';
+
+    var allBtn = document.createElement('button');
+    allBtn.className = 'sf-filter-row sf-filter-all selected';
+    allBtn.textContent = 'All';
+    allBtn.addEventListener('click', function() {
+      sidebarFilter = null;
+      updateFilterUI();
+      renderSidebarList();
+    });
+    filters.appendChild(allBtn);
+
+    HIGHLIGHT_COLORS.forEach(function(c) {
+      var row = document.createElement('button');
+      row.className = 'sf-filter-row sf-filter-swatch';
+      row.dataset.color = c.id;
+      row.addEventListener('click', function() {
+        sidebarFilter = (sidebarFilter === c.id) ? null : c.id;
+        updateFilterUI();
+        renderSidebarList();
+      });
+
+      var dot = document.createElement('span');
+      dot.className = 'sf-filter-dot';
+      dot.style.backgroundColor = c.color;
+      row.appendChild(dot);
+
+      var label = document.createElement('span');
+      label.className = 'sf-filter-label';
+      label.textContent = c.label;
+      row.appendChild(label);
+
+      filters.appendChild(row);
+    });
+
+    sidebarEl.appendChild(filters);
+
+    // List container
+    var list = document.createElement('div');
+    list.className = 'sf-sidebar-list';
+    sidebarEl.appendChild(list);
+
+    // Footer with export links
+    var footer = document.createElement('div');
+    footer.className = 'sf-sidebar-footer';
+
+    var exportLabel = document.createElement('span');
+    exportLabel.textContent = 'Export: ';
+    exportLabel.style.color = 'var(--text-dim)';
+    exportLabel.style.fontSize = '0.78em';
+    footer.appendChild(exportLabel);
+
+    ['chapter-json', 'chapter', 'json', 'md'].forEach(function(fmt, i) {
+      var labels = { 'chapter-json': 'Chapter JSON', 'chapter': 'Chapter MD', 'json': 'All JSON', 'md': 'All MD' };
+      if (i > 0) {
+        var sep = document.createElement('span');
+        sep.textContent = ' \u00b7 ';
+        sep.style.color = 'var(--text-dim)';
+        sep.style.fontSize = '0.78em';
+        footer.appendChild(sep);
+      }
+      var link = document.createElement('a');
+      link.href = '#';
+      link.textContent = labels[fmt];
+      link.style.color = 'var(--accent)';
+      link.style.fontSize = '0.78em';
+      link.style.textDecoration = 'none';
+      link.addEventListener('click', function(e) {
+        e.preventDefault();
+        doExport(fmt);
+      });
+      footer.appendChild(link);
+    });
+
+    sidebarEl.appendChild(footer);
+    document.body.appendChild(sidebarEl);
+  }
+
+  function updateFilterUI() {
+    if (!sidebarEl) return;
+    var allBtn = sidebarEl.querySelector('.sf-filter-all');
+    var swatches = sidebarEl.querySelectorAll('.sf-filter-swatch');
+    if (allBtn) {
+      if (sidebarFilter === null) allBtn.classList.add('selected');
+      else allBtn.classList.remove('selected');
+    }
+    swatches.forEach(function(s) {
+      if (s.dataset.color === sidebarFilter) s.classList.add('selected');
+      else s.classList.remove('selected');
+    });
+  }
+
+  function renderSidebarList() {
+    if (!sidebarEl) return;
+    var list = sidebarEl.querySelector('.sf-sidebar-list');
+    if (!list) return;
+    while (list.firstChild) list.removeChild(list.firstChild);
+
+    var annotations = loadAnnotations();
+
+    if (sidebarFilter) {
+      annotations = annotations.filter(function(a) {
+        return (a.color || 'yellow') === sidebarFilter;
+      });
+    }
+
+    if (annotations.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'sf-sidebar-empty';
+      empty.textContent = sidebarFilter ? 'No ' + sidebarFilter + ' annotations' : 'No annotations yet';
+      list.appendChild(empty);
       return;
     }
 
-    var menu = document.createElement('div');
-    menu.className = 'sf-export-menu';
-
-    var rect = anchorEl.getBoundingClientRect();
-    menu.style.position = 'absolute';
-    menu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
-    menu.style.left = rect.left + 'px';
-    menu.style.zIndex = '10001';
-    menu.style.background = 'var(--bg, #fff)';
-    menu.style.border = '1px solid var(--border, #ccc)';
-    menu.style.borderRadius = '6px';
-    menu.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-    menu.style.padding = '4px 0';
-    menu.style.minWidth = '200px';
-    menu.style.fontSize = '0.875rem';
-
-    var options = [
-      { label: 'This chapter (JSON)', format: 'chapter-json' },
-      { label: 'This chapter (MD)',   format: 'chapter' },
-      { label: 'All chapters (JSON)', format: 'json' },
-      { label: 'All chapters (MD)',   format: 'md' }
-    ];
-
-    options.forEach(function(opt) {
-      var btn = document.createElement('button');
-      btn.textContent = opt.label;
-      btn.style.display = 'block';
-      btn.style.width = '100%';
-      btn.style.padding = '8px 16px';
-      btn.style.textAlign = 'left';
-      btn.style.background = 'none';
-      btn.style.border = 'none';
-      btn.style.cursor = 'pointer';
-      btn.style.color = 'var(--text, #000)';
-      btn.addEventListener('mouseenter', function() {
-        btn.style.background = 'var(--highlight-bg, rgba(0,0,0,0.06))';
+    annotations.forEach(function(annotation) {
+      var card = document.createElement('div');
+      card.className = 'sf-sidebar-card';
+      card.addEventListener('click', function() {
+        scrollToAnnotation(annotation);
+        if (window.innerWidth < 640) closeSidebar();
       });
-      btn.addEventListener('mouseleave', function() {
-        btn.style.background = 'none';
-      });
-      btn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        doExport(opt.format);
-        if (activeExportMenu && activeExportMenu.parentNode) {
-          activeExportMenu.parentNode.removeChild(activeExportMenu);
-        }
-        activeExportMenu = null;
-      });
-      menu.appendChild(btn);
-    });
 
-    document.body.appendChild(menu);
-    activeExportMenu = menu;
+      // Color dot
+      var dot = document.createElement('span');
+      dot.className = 'sf-sidebar-dot';
+      var colorObj = HIGHLIGHT_COLORS.find(function(c) { return c.id === (annotation.color || 'yellow'); });
+      dot.style.backgroundColor = colorObj ? colorObj.color : '#fcd44f';
+      card.appendChild(dot);
 
-    function onOutsideClick(e) {
-      if (activeExportMenu && !activeExportMenu.contains(e.target) && e.target !== anchorEl) {
-        if (activeExportMenu.parentNode) activeExportMenu.parentNode.removeChild(activeExportMenu);
-        activeExportMenu = null;
-        document.removeEventListener('click', onOutsideClick);
+      var content = document.createElement('div');
+      content.className = 'sf-sidebar-card-content';
+
+      // Selected text
+      if (annotation.selectedText) {
+        var textEl = document.createElement('p');
+        textEl.className = 'sf-sidebar-text';
+        var t = annotation.selectedText;
+        if (t.length > 60) t = t.slice(0, 60) + '\u2026';
+        textEl.textContent = '\u201c' + t + '\u201d';
+        content.appendChild(textEl);
       }
-    }
-    // Defer to avoid immediately closing from the button click
-    setTimeout(function() {
-      document.addEventListener('click', onOutsideClick);
-    }, 0);
+
+      // Comment
+      if (annotation.comment) {
+        var commentEl = document.createElement('p');
+        commentEl.className = 'sf-sidebar-comment';
+        var c = annotation.comment;
+        if (c.length > 80) c = c.slice(0, 80) + '\u2026';
+        commentEl.textContent = c;
+        content.appendChild(commentEl);
+      }
+
+      // Type label for margin notes
+      if (annotation.type === 'margin-note') {
+        var typeEl = document.createElement('span');
+        typeEl.className = 'sf-sidebar-type';
+        typeEl.textContent = 'Margin note';
+        content.appendChild(typeEl);
+      }
+
+      // Timestamp
+      if (annotation.createdAt) {
+        var timeEl = document.createElement('time');
+        timeEl.className = 'sf-sidebar-time';
+        var date = new Date(annotation.createdAt);
+        var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        timeEl.textContent = months[date.getMonth()] + ' ' + date.getDate();
+        content.appendChild(timeEl);
+      }
+
+      card.appendChild(content);
+      list.appendChild(card);
+    });
   }
+
+  function scrollToAnnotation(annotation) {
+    var el = null;
+    if (annotation.type === 'margin-note') {
+      el = document.querySelector('.sf-margin-indicator[data-annotation-id="' + annotation.id + '"]');
+    } else {
+      el = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
+    }
+    if (!el) return;
+
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('sf-flash');
+    setTimeout(function() { el.classList.remove('sf-flash'); }, 1200);
+  }
+
+  // Close sidebar on outside click
+  document.addEventListener('click', function(e) {
+    if (!sidebarEl || !sidebarEl.classList.contains('active')) return;
+    if (sidebarEl.contains(e.target)) return;
+    var toggleBtn = document.querySelector('.sf-export-btn');
+    if (toggleBtn && (toggleBtn === e.target || toggleBtn.contains(e.target))) return;
+    closeSidebar();
+  });
+
+  // Close sidebar on Escape
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && sidebarEl && sidebarEl.classList.contains('active')) {
+      closeSidebar();
+    }
+  });
 
   function addExportButton() {
     var navControls = document.querySelector('.nav-controls');
@@ -1136,21 +1498,43 @@
 
     var btn = document.createElement('button');
     btn.className = 'sf-export-btn';
-    btn.textContent = '\u2913';
-    btn.title = 'Export annotations';
-    btn.setAttribute('aria-label', 'Export annotations');
-    btn.style.cursor = 'pointer';
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    btn.title = 'Annotations';
+    btn.setAttribute('aria-label', 'Annotations');
 
     btn.addEventListener('click', function(e) {
       e.stopPropagation();
-      showExportMenu(btn);
+      toggleSidebar();
     });
 
-    navControls.prepend(btn);
+    var chapterInfo = navControls.querySelector('.chapter-info');
+    if (chapterInfo) {
+      navControls.insertBefore(btn, chapterInfo);
+    } else {
+      var themeToggle = navControls.querySelector('.theme-toggle');
+      if (themeToggle) {
+        navControls.insertBefore(btn, themeToggle);
+      } else {
+        navControls.appendChild(btn);
+      }
+    }
   }
 
   // =========================================================================
-  // 12. INIT
+  // 12. KEYBOARD SHORTCUTS
+  // =========================================================================
+
+  document.addEventListener('keydown', function(e) {
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+
+    if (e.key === 'a' || e.key === 'A') {
+      toggleSidebar();
+    }
+  });
+
+  // =========================================================================
+  // 13. INIT
   // =========================================================================
 
   function init() {
@@ -1160,8 +1544,8 @@
     renderStalePanel(stale);
     setupMarginTriggers();
     createToolbar();
-    updateBadge();
     addExportButton();
+    updateBadge();
   }
 
   if (document.readyState === 'loading') {

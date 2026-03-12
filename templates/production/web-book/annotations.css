@@ -10,16 +10,24 @@
 /* --- 1. HIGHLIGHTS ------------------------------------------------------- */
 
 .sf-highlight {
-  background-color: rgba(255, 220, 80, 0.35);
-  border-radius: 2px;
   cursor: pointer;
   position: relative;
   transition: background-color 0.2s;
+  border-radius: 2px;
+  background-color: rgba(255, 220, 80, 0.35); /* fallback for uncolored */
 }
 
-.sf-highlight:hover {
-  background-color: rgba(255, 220, 80, 0.55);
-}
+/* Per-color highlights */
+.sf-highlight[data-color="yellow"] { background-color: rgba(255, 220, 80, 0.35); }
+.sf-highlight[data-color="yellow"]:hover { background-color: rgba(255, 220, 80, 0.55); }
+.sf-highlight[data-color="pink"] { background-color: rgba(255, 130, 150, 0.3); }
+.sf-highlight[data-color="pink"]:hover { background-color: rgba(255, 130, 150, 0.5); }
+.sf-highlight[data-color="green"] { background-color: rgba(120, 220, 120, 0.3); }
+.sf-highlight[data-color="green"]:hover { background-color: rgba(120, 220, 120, 0.5); }
+.sf-highlight[data-color="blue"] { background-color: rgba(120, 180, 255, 0.3); }
+.sf-highlight[data-color="blue"]:hover { background-color: rgba(120, 180, 255, 0.5); }
+.sf-highlight[data-color="orange"] { background-color: rgba(255, 180, 80, 0.3); }
+.sf-highlight[data-color="orange"]:hover { background-color: rgba(255, 180, 80, 0.5); }
 
 /* Dot indicator for highlights that have an attached comment */
 .sf-highlight.has-comment::after {
@@ -27,19 +35,37 @@
   display: inline-block;
   width: 6px;
   height: 6px;
-  background: var(--accent);
+  background: var(--sf-hl-color, var(--accent));
   border-radius: 50%;
   margin-left: 2px;
   vertical-align: super;
 }
 
-/* Dark theme variants */
+/* Dark theme — per-color variants (reduced opacity) */
 [data-theme="dark"] .sf-highlight { background-color: rgba(255, 200, 60, 0.2); }
-[data-theme="dark"] .sf-highlight:hover { background-color: rgba(255, 200, 60, 0.35); }
+[data-theme="dark"] .sf-highlight[data-color="yellow"] { background-color: rgba(255, 220, 80, 0.2); }
+[data-theme="dark"] .sf-highlight[data-color="yellow"]:hover { background-color: rgba(255, 220, 80, 0.35); }
+[data-theme="dark"] .sf-highlight[data-color="pink"] { background-color: rgba(255, 130, 150, 0.2); }
+[data-theme="dark"] .sf-highlight[data-color="pink"]:hover { background-color: rgba(255, 130, 150, 0.35); }
+[data-theme="dark"] .sf-highlight[data-color="green"] { background-color: rgba(120, 220, 120, 0.2); }
+[data-theme="dark"] .sf-highlight[data-color="green"]:hover { background-color: rgba(120, 220, 120, 0.35); }
+[data-theme="dark"] .sf-highlight[data-color="blue"] { background-color: rgba(120, 180, 255, 0.2); }
+[data-theme="dark"] .sf-highlight[data-color="blue"]:hover { background-color: rgba(120, 180, 255, 0.35); }
+[data-theme="dark"] .sf-highlight[data-color="orange"] { background-color: rgba(255, 180, 80, 0.2); }
+[data-theme="dark"] .sf-highlight[data-color="orange"]:hover { background-color: rgba(255, 180, 80, 0.35); }
 
-/* Sepia theme variants */
+/* Sepia theme — per-color variants (warmed tones) */
 [data-theme="sepia"] .sf-highlight { background-color: rgba(200, 160, 60, 0.25); }
-[data-theme="sepia"] .sf-highlight:hover { background-color: rgba(200, 160, 60, 0.4); }
+[data-theme="sepia"] .sf-highlight[data-color="yellow"] { background-color: rgba(200, 170, 60, 0.25); }
+[data-theme="sepia"] .sf-highlight[data-color="yellow"]:hover { background-color: rgba(200, 170, 60, 0.4); }
+[data-theme="sepia"] .sf-highlight[data-color="pink"] { background-color: rgba(200, 120, 130, 0.25); }
+[data-theme="sepia"] .sf-highlight[data-color="pink"]:hover { background-color: rgba(200, 120, 130, 0.4); }
+[data-theme="sepia"] .sf-highlight[data-color="green"] { background-color: rgba(110, 180, 100, 0.25); }
+[data-theme="sepia"] .sf-highlight[data-color="green"]:hover { background-color: rgba(110, 180, 100, 0.4); }
+[data-theme="sepia"] .sf-highlight[data-color="blue"] { background-color: rgba(110, 160, 210, 0.25); }
+[data-theme="sepia"] .sf-highlight[data-color="blue"]:hover { background-color: rgba(110, 160, 210, 0.4); }
+[data-theme="sepia"] .sf-highlight[data-color="orange"] { background-color: rgba(200, 150, 70, 0.25); }
+[data-theme="sepia"] .sf-highlight[data-color="orange"]:hover { background-color: rgba(200, 150, 70, 0.4); }
 
 
 /* --- 2. DESKTOP POPOVER -------------------------------------------------- */
@@ -49,55 +75,116 @@
   z-index: 100;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px;
+  border-radius: 8px;
+  padding: 8px;
   display: flex;
-  gap: 4px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  gap: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
   animation: sf-fade-in 0.15s ease;
 }
 
 .sf-popover button {
   background: var(--surface);
-  color: var(--text);
+  color: var(--text-dim);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 4px 10px;
+  border-radius: 6px;
+  padding: 8px 16px;
   font-size: 0.85rem;
+  font-family: system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.03em;
   cursor: pointer;
   white-space: nowrap;
+  min-height: 36px;
+  transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
 }
 
 .sf-popover button:hover {
-  background: var(--accent);
-  color: var(--bg);
+  color: var(--text);
+  border-color: var(--accent);
 }
 
 /* Comment input within popover */
 .sf-comment-input {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  min-width: 240px;
+  gap: 8px;
+  min-width: 260px;
 }
 
 .sf-comment-input textarea {
   font-family: inherit;
   font-size: 0.85rem;
-  padding: 6px 8px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--bg);
   color: var(--text);
   resize: vertical;
-  min-height: 60px;
+  min-height: 70px;
+  outline: none;
+  line-height: 1.5;
+}
+
+.sf-comment-input textarea:focus {
+  border-color: var(--accent);
 }
 
 .sf-comment-input .sf-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   justify-content: flex-end;
 }
+
+/* Color picker popover layout */
+.sf-popover.sf-popover-colors {
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+}
+
+/* Color picker row */
+.sf-color-picker {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 4px 6px;
+}
+
+.sf-color-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.2s, transform 0.15s;
+  padding: 0;
+  background: none;
+}
+
+.sf-color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.sf-color-swatch.selected {
+  border-color: var(--text);
+  transform: scale(1.2);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text-dim);
+}
+
+/* Note button in popover */
+.sf-popover-note {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.78em;
+  font-family: system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: color 0.2s;
+}
+.sf-popover-note:hover { color: var(--text); }
 
 @keyframes sf-fade-in {
   from { opacity: 0; transform: translateY(4px); }
@@ -158,6 +245,7 @@
 .sf-margin-trigger {
   position: absolute;
   left: -32px;
+  top: 0;
   width: 24px;
   height: 24px;
   background: var(--surface);
@@ -182,6 +270,8 @@
 .sf-margin-indicator {
   position: absolute;
   left: -28px;
+  top: 0;
+  z-index: 1;
   width: 18px;
   height: 18px;
   background: var(--accent);
@@ -197,10 +287,10 @@
 .sf-note-panel {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px;
-  margin: 8px 0;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  border-radius: 8px;
+  padding: 14px;
+  margin: 12px 0;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
   animation: sf-fade-in 0.15s ease;
 }
 
@@ -208,24 +298,76 @@
   width: 100%;
   font-family: inherit;
   font-size: 0.85rem;
-  padding: 6px 8px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--bg);
   color: var(--text);
   resize: vertical;
-  min-height: 60px;
+  min-height: 70px;
   box-sizing: border-box;
+  outline: none;
+  line-height: 1.5;
 }
 
-/* Badge used to show annotation counts in nav/headings */
+.sf-note-panel textarea:focus {
+  border-color: var(--accent);
+}
+
+.sf-note-panel .sf-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.sf-note-panel button {
+  background: var(--surface);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  min-height: 36px;
+  transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.sf-note-panel button:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+  background: var(--bg);
+}
+
+/* Export button — match .theme-toggle / .toc-toggle styling */
+.sf-export-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.9em;
+  padding: 0.3em 0.55em;
+  line-height: 1;
+  transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.sf-export-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+  background: var(--surface);
+}
+
+/* Badge used to show annotation counts in nav */
 .sf-badge {
-  background: var(--accent);
-  color: var(--bg);
-  font-size: 0.65rem;
-  padding: 1px 5px;
-  border-radius: 8px;
-  margin-left: 6px;
+  background: none;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.82em;
+  padding: 0.3em 0.6em;
+  line-height: 1;
+  transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
 }
 
 
@@ -236,38 +378,61 @@
   z-index: 101;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 10px;
+  border-radius: 8px;
+  padding: 12px 14px;
   max-width: 300px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
   animation: sf-fade-in 0.15s ease;
 }
 
+.sf-comment-viewer .sf-timestamp {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+  opacity: 0.7;
+}
+
 .sf-comment-viewer p {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 0.85rem;
   color: var(--text);
+  line-height: 1.4;
 }
 
 .sf-comment-viewer .sf-actions {
   display: flex;
-  gap: 4px;
-  justify-content: flex-end;
+  gap: 6px;
 }
 
-.sf-comment-viewer button {
+.sf-comment-viewer button:not(.sf-color-swatch) {
   background: var(--surface);
   color: var(--text-dim);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 3px 8px;
-  font-size: 0.8rem;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
   cursor: pointer;
+  min-height: 36px;
+  transition: color 0.3s ease, border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.sf-comment-viewer button:not(.sf-color-swatch):hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+  background: var(--bg);
 }
 
 .sf-comment-viewer button.sf-delete {
   color: #c0392b;
   border-color: #c0392b;
+}
+
+.sf-comment-viewer button.sf-delete:hover {
+  color: #e74c3c;
+  border-color: #e74c3c;
+  background: rgba(231, 76, 60, 0.08);
 }
 
 
@@ -317,7 +482,227 @@
 }
 
 
-/* --- 7. PRINT AND REDUCED MOTION ---------------------------------------- */
+/* --- 7. ANNOTATION SIDEBAR ----------------------------------------------- */
+
+.sf-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100vh;
+  padding-top: 44px;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  z-index: 850;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.1);
+}
+
+.sf-sidebar.active {
+  transform: translateX(0);
+}
+
+.sf-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sf-sidebar-header h3 {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 0.95em;
+  font-weight: normal;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  margin: 0;
+}
+
+.sf-sidebar-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.4em;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.sf-sidebar-close:hover {
+  color: var(--text);
+}
+
+.sf-sidebar-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sf-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.78em;
+  font-family: system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.03em;
+  padding: 10px 18px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.sf-filter-row:last-child {
+  border-bottom: none;
+}
+
+.sf-filter-row:hover {
+  background: var(--surface);
+}
+
+.sf-filter-row.selected {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.sf-filter-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sf-filter-label {
+  white-space: nowrap;
+}
+
+.sf-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.sf-sidebar-empty {
+  text-align: center;
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 0.85em;
+  padding: 2em 1em;
+}
+
+.sf-sidebar-card {
+  display: flex;
+  gap: 10px;
+  padding: 12px 18px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background-color 0.2s;
+}
+
+.sf-sidebar-card:hover {
+  background: var(--surface);
+}
+
+.sf-sidebar-card:last-child {
+  border-bottom: none;
+}
+
+.sf-sidebar-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.sf-sidebar-card-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.sf-sidebar-text {
+  font-size: 0.82em;
+  font-style: italic;
+  color: var(--text-dim);
+  margin: 0 0 4px;
+  line-height: 1.4;
+}
+
+.sf-sidebar-comment {
+  font-size: 0.85em;
+  color: var(--text);
+  margin: 0 0 4px;
+  line-height: 1.4;
+}
+
+.sf-sidebar-type {
+  display: inline-block;
+  font-size: 0.7em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.sf-sidebar-time {
+  font-size: 0.7em;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+.sf-sidebar-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+/* Flash animation for scroll-to */
+@keyframes sf-flash {
+  0%, 100% { opacity: 1; }
+  25% { opacity: 0.3; }
+  50% { opacity: 1; }
+  75% { opacity: 0.3; }
+}
+
+.sf-highlight.sf-flash,
+.sf-margin-indicator.sf-flash {
+  animation: sf-flash 1.2s ease;
+}
+
+/* Mobile: bottom sheet instead of sidebar */
+@media (max-width: 639px) {
+  .sf-sidebar {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: auto;
+    max-height: 60vh;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    border-radius: 12px 12px 0 0;
+    transform: translateY(100%);
+    box-shadow: 0 -4px 16px rgba(0,0,0,0.15);
+  }
+
+  .sf-sidebar.active {
+    transform: translateY(0);
+  }
+}
+
+
+/* --- 8. PRINT AND REDUCED MOTION ---------------------------------------- */
 
 @media print {
   /* Remove highlight tinting in print — text should read cleanly */
@@ -332,11 +717,15 @@
   .sf-note-panel,
   .sf-comment-viewer,
   .sf-badge,
+  .sf-sidebar,
   .sf-stale-panel { display: none !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sf-popover,
   .sf-note-panel,
+  .sf-sidebar,
   .sf-comment-viewer { animation: none; }
+
+  .sf-sidebar { transition: none; }
 }

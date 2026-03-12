@@ -239,7 +239,6 @@
   // ---------------------------------------------------------------------------
 
   var tocOverlay = document.querySelector('.toc-overlay');
-  var tocToggle = document.querySelector('.toc-toggle');
 
   function toggleToc() {
     if (!tocOverlay) return;
@@ -259,10 +258,6 @@
     tocOverlay.classList.remove('active');
   }
 
-  if (tocToggle) {
-    tocToggle.addEventListener('click', toggleToc);
-  }
-
   // Close on backdrop click (click on the overlay itself, not its children).
   if (tocOverlay) {
     tocOverlay.addEventListener('click', function (e) {
@@ -278,10 +273,17 @@
   var totalChapters = document.body.getAttribute('data-total-chapters');
 
   if (chapterNum && totalChapters && bookNav) {
-    var info = document.createElement('span');
+    var info = document.createElement('button');
     info.className = 'chapter-info';
     info.textContent = 'Chapter ' + chapterNum + ' of ' + totalChapters;
-    bookNav.appendChild(info);
+    info.setAttribute('aria-label', 'Table of contents');
+    info.addEventListener('click', toggleToc);
+    var navControls = bookNav.querySelector('.nav-controls');
+    if (navControls) {
+      bookNav.insertBefore(info, navControls);
+    } else {
+      bookNav.appendChild(info);
+    }
   }
 
   // ---------------------------------------------------------------------------
