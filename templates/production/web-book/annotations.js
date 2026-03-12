@@ -710,6 +710,8 @@
     indicator.textContent = '✎';
     indicator.dataset.annotationId = annotation.id;
     indicator.title = annotation.comment;
+    var colorObj = HIGHLIGHT_COLORS.find(function(c) { return c.id === (annotation.color || 'yellow'); });
+    if (colorObj) indicator.style.backgroundColor = colorObj.color;
     indicator.setAttribute('role', 'button');
     indicator.setAttribute('tabindex', '0');
     indicator.addEventListener('click', function(e) {
@@ -800,6 +802,8 @@
           updateAnnotation(annotation.id, { color: c.id });
           var hlSpan = document.querySelector('.sf-highlight[data-annotation-id="' + annotation.id + '"]');
           if (hlSpan) hlSpan.dataset.color = c.id;
+          var indEl = document.querySelector('.sf-margin-indicator[data-annotation-id="' + annotation.id + '"]');
+          if (indEl) indEl.style.backgroundColor = c.color;
           // Update selected state
           colorRow.querySelectorAll('.sf-color-swatch').forEach(function(s) { s.classList.remove('selected'); });
           swatch.classList.add('selected');
