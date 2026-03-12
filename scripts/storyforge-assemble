@@ -65,6 +65,7 @@ DRAFT_MODE=false
 SKIP_VALIDATION=false
 INTERACTIVE=false
 ANNOTATE=false
+NO_PR=false
 
 usage() {
     cat <<EOF
@@ -124,6 +125,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --annotate)
             ANNOTATE=true
+            shift
+            ;;
+        --no-pr)
+            NO_PR=true
             shift
             ;;
         --interactive|-i)
@@ -233,7 +238,9 @@ if [[ "$DRY_RUN" != true ]]; then
 - [ ] Generate formats
 - [ ] Review"
 
-    create_draft_pr "Assemble: ${TITLE}" "$PR_BODY" "$PROJECT_DIR" "assembly"
+    if [[ "$NO_PR" != true ]]; then
+        create_draft_pr "Assemble: ${TITLE}" "$PR_BODY" "$PROJECT_DIR" "assembly"
+    fi
 fi
 
 log "============================================"
