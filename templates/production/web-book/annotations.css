@@ -1,1 +1,342 @@
-/* Storyforge Annotation Overlay — styles loaded when --annotate is active */
+/* ==========================================================================
+   annotations.css — Annotation Overlay Styles
+   StoryForge production stylesheet — loaded when --annotate is active
+
+   Theme variables from reading.css:
+     --bg, --text, --text-dim, --accent, --surface, --border
+   Breakpoints: 639px mobile, 640px+ desktop
+   ========================================================================== */
+
+/* --- 1. HIGHLIGHTS ------------------------------------------------------- */
+
+.sf-highlight {
+  background-color: rgba(255, 220, 80, 0.35);
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.2s;
+}
+
+.sf-highlight:hover {
+  background-color: rgba(255, 220, 80, 0.55);
+}
+
+/* Dot indicator for highlights that have an attached comment */
+.sf-highlight.has-comment::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  margin-left: 2px;
+  vertical-align: super;
+}
+
+/* Dark theme variants */
+[data-theme="dark"] .sf-highlight { background-color: rgba(255, 200, 60, 0.2); }
+[data-theme="dark"] .sf-highlight:hover { background-color: rgba(255, 200, 60, 0.35); }
+
+/* Sepia theme variants */
+[data-theme="sepia"] .sf-highlight { background-color: rgba(200, 160, 60, 0.25); }
+[data-theme="sepia"] .sf-highlight:hover { background-color: rgba(200, 160, 60, 0.4); }
+
+
+/* --- 2. DESKTOP POPOVER -------------------------------------------------- */
+
+.sf-popover {
+  position: absolute;
+  z-index: 100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  display: flex;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  animation: sf-fade-in 0.15s ease;
+}
+
+.sf-popover button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sf-popover button:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* Comment input within popover */
+.sf-comment-input {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 240px;
+}
+
+.sf-comment-input textarea {
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+  min-height: 60px;
+}
+
+.sf-comment-input .sf-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+@keyframes sf-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+
+/* --- 3. MOBILE BOTTOM TOOLBAR -------------------------------------------- */
+
+/* Hidden by default; shown only on mobile via media query below */
+.sf-toolbar { display: none; }
+
+@media (max-width: 639px) {
+  /* Suppress desktop popover entirely on mobile */
+  .sf-popover { display: none !important; }
+
+  .sf-toolbar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 8px 12px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sf-toolbar button {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    min-height: 44px;
+  }
+
+  .sf-toolbar button:active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  .sf-toolbar button.sf-hidden { display: none; }
+
+  /* Ensure content isn't hidden behind the fixed toolbar */
+  .reading-column { padding-bottom: 70px; }
+}
+
+
+/* --- 4. MARGIN NOTES ----------------------------------------------------- */
+
+.sf-margin-trigger {
+  position: absolute;
+  left: -32px;
+  width: 24px;
+  height: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+/* Reveal trigger button on paragraph hover (desktop only) */
+@media (min-width: 640px) {
+  [data-scene] > *:hover > .sf-margin-trigger,
+  .sf-margin-trigger:hover { opacity: 1; }
+}
+
+.sf-margin-indicator {
+  position: absolute;
+  left: -28px;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  color: var(--bg);
+}
+
+.sf-note-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  margin: 8px 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  animation: sf-fade-in 0.15s ease;
+}
+
+.sf-note-panel textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+  min-height: 60px;
+  box-sizing: border-box;
+}
+
+/* Badge used to show annotation counts in nav/headings */
+.sf-badge {
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 6px;
+}
+
+
+/* --- 5. COMMENT VIEWER --------------------------------------------------- */
+
+.sf-comment-viewer {
+  position: absolute;
+  z-index: 101;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  max-width: 300px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  animation: sf-fade-in 0.15s ease;
+}
+
+.sf-comment-viewer p {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.sf-comment-viewer .sf-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.sf-comment-viewer button {
+  background: var(--surface);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.sf-comment-viewer button.sf-delete {
+  color: #c0392b;
+  border-color: #c0392b;
+}
+
+
+/* --- 6. STALE ANNOTATIONS PANEL ----------------------------------------- */
+
+.sf-stale-panel {
+  margin-top: 3rem;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  border-left: 3px solid #e67e22;
+}
+
+.sf-stale-panel h3 {
+  margin: 0 0 12px;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.sf-stale-panel details { margin-bottom: 8px; }
+
+.sf-stale-panel summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.sf-stale-panel blockquote {
+  margin: 4px 0 4px 12px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  font-style: italic;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.sf-stale-panel button {
+  background: var(--surface);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+
+/* --- 7. PRINT AND REDUCED MOTION ---------------------------------------- */
+
+@media print {
+  /* Remove highlight tinting in print — text should read cleanly */
+  .sf-highlight { background: none !important; }
+  .sf-highlight.has-comment::after { display: none; }
+
+  /* Hide all annotation UI chrome from print output */
+  .sf-popover,
+  .sf-toolbar,
+  .sf-margin-trigger,
+  .sf-margin-indicator,
+  .sf-note-panel,
+  .sf-comment-viewer,
+  .sf-badge,
+  .sf-stale-panel { display: none !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-popover,
+  .sf-note-panel,
+  .sf-comment-viewer { animation: none; }
+}
