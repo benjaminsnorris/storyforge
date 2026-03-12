@@ -395,7 +395,7 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         fi
     fi
 
-    # --- Build the prompt ---
+    # --- Build the prompt (outside zone — needed for dry-run check) ---
     PROMPT=$(build_scene_prompt "$SCENE_ID" "$PROJECT_DIR")
 
     if [[ -z "$PROMPT" ]]; then
@@ -404,7 +404,7 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         exit 1
     fi
 
-    # --- Dry-run mode: print prompt and continue ---
+    # --- Dry-run mode: print prompt and continue (outside zone) ---
     if [[ "$DRY_RUN" == true ]]; then
         echo "===== DRY RUN: ${SCENE_ID} ====="
         echo "$PROMPT"
@@ -414,11 +414,14 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         continue
     fi
 
-    # --- Check interactive mode ---
+    # --- Check interactive mode (outside zone) ---
     # Offer mode switch if currently headless (including before first step)
     if [[ ! -f "$INTERACTIVE_FILE" ]]; then
         offer_interactive "$PROJECT_DIR" "${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]})" || true
     fi
+
+    # --- Healing zone: invoke → verify → commit ---
+    begin_healing_zone "drafting scene ${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]})"
 
     # --- Record git HEAD before invocation ---
     HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
@@ -479,7 +482,7 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         log "ERROR: claude exited with code ${EXIT_CODE} for scene ${SCENE_ID} after ${MINUTES}m${SECS}s"
         log "See full output: ${SCENE_LOG}"
         log "Stopping — continuity may be broken."
-        exit 1
+        false  # Trigger healing
     fi
 
     # --- Verification ---
@@ -509,7 +512,7 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
             log "Claude ran successfully but did not produce the file."
             log "See full output: ${SCENE_LOG}"
             log "Stopping — cannot continue without the scene."
-            exit 1
+            false  # Trigger healing
         fi
 
         # 2. Get word count and sanity-check
@@ -519,7 +522,7 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
             log "ERROR: Scene file suspiciously short (${WORD_COUNT} words): ${SCENE_FILE}"
             log "See full output: ${SCENE_LOG}"
             log "Stopping — likely incomplete draft."
-            exit 1
+            false  # Trigger healing
         fi
     fi
 
@@ -546,10 +549,12 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         if [[ "$HEAD_BEFORE" == "$HEAD_AFTER" ]]; then
             log "ERROR: Could not create git commit for scene ${SCENE_ID}"
             log "Stopping — next scene needs committed state."
-            exit 1
+            false  # Trigger healing
         fi
         log "Manual commit created."
     fi
+
+    end_healing_zone
 
     COMMIT_SHORT=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 

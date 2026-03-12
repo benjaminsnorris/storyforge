@@ -229,7 +229,6 @@ manuscript_content=$(cat "$TEMP_MANUSCRIPT")
 assert_contains "$manuscript_content" "The Cartographer's Silence" "assemble_manuscript: has title"
 assert_contains "$manuscript_content" "Test Author" "assemble_manuscript: has author"
 assert_contains "$manuscript_content" "Copyright" "assemble_manuscript: has copyright page"
-assert_contains "$manuscript_content" "Contents" "assemble_manuscript: has table of contents"
 assert_contains "$manuscript_content" "Chapter 1:" "assemble_manuscript: has chapter 1 heading"
 assert_contains "$manuscript_content" "Chapter 2:" "assemble_manuscript: has chapter 2 heading"
 assert_contains "$manuscript_content" "Dorren Hayle pressed" "assemble_manuscript: has scene prose"

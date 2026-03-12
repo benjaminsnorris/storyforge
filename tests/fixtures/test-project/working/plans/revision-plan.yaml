@@ -1,0 +1,21 @@
+status: "pending"
+created: "2026-03-12"
+
+passes:
+  - name: prose-tightening
+    status: "pending"
+    purpose: "Cut filler, tighten sentences, strengthen verb choices"
+    scope: full
+    guidance:
+      - decision: "Preserve cartographic metaphor throughout"
+        rationale: "The cartographic metaphor ties character identity to the magic system"
+      - decision: "Keep the opening paragraph intact"
+        rationale: "Establishes tone effectively"
+
+  - name: character-arc-deepening
+    status: "pending"
+    purpose: "Deepen emotional arcs and character interiority"
+    scope: full
+    guidance:
+      - decision: "Make emotional reveals subtle rather than explicit"
+        rationale: "The prose style favors restraint; readers should feel the shift"

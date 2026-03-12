@@ -482,6 +482,8 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         offer_interactive "$PROJECT_DIR" "Pass: ${PASS_NAME} (${PASS_NUM}/${TOTAL_PASSES})" || true
     fi
 
+    begin_healing_zone "revision pass ${PASS_NUM}: ${PASS_NAME}"
+
     # Record git HEAD before invocation
     HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD)
 
@@ -498,13 +500,11 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
 
         INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$PROJECT_DIR" "pass")
 
-        set +e
         claude "$PROMPT" \
             --model "$PASS_MODEL" \
             --dangerously-skip-permissions \
             --append-system-prompt "$INTERACTIVE_SYSTEM"
         EXIT_CODE=$?
-        set -e
     else
         # --- Headless mode ---
         log "  Invoking claude for revision (model: ${PASS_MODEL})..."
@@ -515,7 +515,6 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         MONITOR_PID=$!
         register_child_pid $MONITOR_PID
 
-        set +e
         claude -p "$PROMPT" \
             --model "$PASS_MODEL" \
             --dangerously-skip-permissions \
@@ -523,7 +522,6 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
             --verbose \
             > "$STEP_LOG" 2>&1
         EXIT_CODE=$?
-        set -e
 
         # Stop the monitor
         kill $MONITOR_PID 2>/dev/null || true
@@ -539,7 +537,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         log "ERROR: claude exited with code ${EXIT_CODE} for pass '${PASS_NAME}' after ${MINUTES}m${SECS}s"
         log "See full output: ${STEP_LOG}"
         log "Fix the issue and re-run: storyforge-revise ${PASS_NUM}"
-        exit 1
+        false
     fi
 
     # --- Verify changes ---
@@ -557,16 +555,11 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
             log "  Coaching output: ${COACHING_OUTPUT}"
         fi
     else
-        set +e
-        verify_revision_changes "$HEAD_BEFORE" "$PROJECT_DIR"
-        VERIFY_EXIT=$?
-        set -e
-
-        if (( VERIFY_EXIT != 0 )); then
+        verify_revision_changes "$HEAD_BEFORE" "$PROJECT_DIR" || {
             log "WARNING: Pass '${PASS_NAME}' produced no detectable changes."
             log "This may be expected if the pass found nothing to fix."
             log "Marking as completed and continuing."
-        fi
+        }
     fi
 
     # --- Git commit (if claude didn't already) ---
@@ -597,6 +590,8 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     if ! git -C "$PROJECT_DIR" push 2>/dev/null; then
         log "WARNING: git push failed for pass '${PASS_NAME}' (commit ${COMMIT_SHORT}). Continuing."
     fi
+
+    end_healing_zone
 
     # --- Update plan status ---
     update_pass_field "$PASS_NUM" "status" "completed"

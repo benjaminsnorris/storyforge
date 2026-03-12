@@ -323,17 +323,19 @@ log "Assembling ${TOTAL_CHAPTERS} chapters..."
 BREAK_STYLE=$(read_production_field "$PROJECT_DIR" "scene_break" 2>/dev/null || echo "blank")
 
 TOTAL_WORDS=0
+begin_healing_zone "assembling chapters"
 for (( ch=1; ch<=TOTAL_CHAPTERS; ch++ )); do
     ch_title=$(read_chapter_field "$ch" "$PROJECT_DIR" "title")
     ch_file="${CHAPTERS_DIR}/chapter-$(printf '%02d' "$ch").md"
 
     log "  Chapter ${ch}: ${ch_title}"
-    assemble_chapter "$ch" "$PROJECT_DIR" "$BREAK_STYLE" > "$ch_file"
+    assemble_chapter "$ch" "$PROJECT_DIR" "$BREAK_STYLE" > "$ch_file" || false
 
     ch_words=$(wc -w < "$ch_file" | tr -d ' ')
     TOTAL_WORDS=$((TOTAL_WORDS + ch_words))
     log "    ${ch_words} words → $(basename "$ch_file")"
 done
+end_healing_zone
 
 log "Chapter assembly complete: ${TOTAL_WORDS} words across ${TOTAL_CHAPTERS} chapters"
 update_pr_task "Assemble chapters" "$PROJECT_DIR"
@@ -401,6 +403,7 @@ generate_format() {
     esac
 }
 
+begin_healing_zone "generating ${FORMAT} output"
 case "$FORMAT" in
     all)
         generate_format "markdown"
@@ -418,6 +421,7 @@ case "$FORMAT" in
         generate_format "$FORMAT"
         ;;
 esac
+end_healing_zone
 
 # ============================================================================
 # Update storyforge.yaml

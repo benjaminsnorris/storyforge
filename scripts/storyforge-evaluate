@@ -869,6 +869,16 @@ fi
 log "Running synthesis session..."
 SYNTHESIS_LOG="${LOG_DIR}/eval-synthesis.log"
 
+SYNTH_START=$(date +%s)
+SYNTH_MODEL=$(select_model "synthesis")
+
+INTERACTIVE_FILE="${PROJECT_DIR}/working/.interactive"
+if [[ "$INTERACTIVE" == true ]]; then
+    touch "$INTERACTIVE_FILE"
+fi
+
+begin_healing_zone "evaluation synthesis"
+
 # Build list of available reports for the synthesis prompt
 REPORT_LIST=""
 for EVAL_NAME in "${SUCCEEDED[@]}"; do
@@ -994,27 +1004,16 @@ After saving both files, stage and commit:
 This is required — the author follows progress by pulling commits as you work.
 SYNTH_EOF
 
-SYNTH_START=$(date +%s)
-SYNTH_MODEL=$(select_model "synthesis")
-
-INTERACTIVE_FILE="${PROJECT_DIR}/working/.interactive"
-if [[ "$INTERACTIVE" == true ]]; then
-    touch "$INTERACTIVE_FILE"
-fi
-
 if [[ -f "$INTERACTIVE_FILE" ]]; then
     # Interactive synthesis — user can guide how findings are interpreted
     show_interactive_banner "Evaluation Synthesis"
 
     SYNTH_SYSTEM=$(build_interactive_system_prompt "$PROJECT_DIR" "synthesis")
 
-    set +e
     claude "$SYNTHESIS_PROMPT" \
         --model "$SYNTH_MODEL" \
         --dangerously-skip-permissions \
-        --append-system-prompt "$SYNTH_SYSTEM"
-    SYNTH_EXIT=$?
-    set -e
+        --append-system-prompt "$SYNTH_SYSTEM" || false
 else
     log "Running synthesis (model: ${SYNTH_MODEL})..."
 
@@ -1023,16 +1022,13 @@ else
     SYNTH_MONITOR_PID=$!
     register_child_pid $SYNTH_MONITOR_PID
 
-    set +e
     claude -p "$SYNTHESIS_PROMPT" \
         --model "$SYNTH_MODEL" \
         --dangerously-skip-permissions \
         --output-format stream-json \
         --verbose \
         $BUDGET_FLAG \
-        > "$SYNTHESIS_LOG" 2>&1
-    SYNTH_EXIT=$?
-    set -e
+        > "$SYNTHESIS_LOG" 2>&1 || false
 
     # Stop the synthesis progress monitor
     kill "$SYNTH_MONITOR_PID" 2>/dev/null || true
@@ -1044,18 +1040,11 @@ SYNTH_DURATION=$(( SYNTH_END - SYNTH_START ))
 SYNTH_MINS=$(( SYNTH_DURATION / 60 ))
 SYNTH_SECS=$(( SYNTH_DURATION % 60 ))
 
-if (( SYNTH_EXIT != 0 )); then
-    log "ERROR: Synthesis session failed (exit code $SYNTH_EXIT) after ${SYNTH_MINS}m${SYNTH_SECS}s"
-    log "See: $SYNTHESIS_LOG"
-    exit 1
-fi
-
 # Verify synthesis outputs
-SYNTH_OK=true
-
 if [[ ! -f "${EVAL_DIR}/synthesis.md" ]]; then
     log "ERROR: synthesis.md not created"
-    SYNTH_OK=false
+    log "See: $SYNTHESIS_LOG"
+    false
 fi
 
 if [[ ! -f "${EVAL_DIR}/findings.yaml" ]]; then
@@ -1063,10 +1052,7 @@ if [[ ! -f "${EVAL_DIR}/findings.yaml" ]]; then
     # Not fatal: the prose synthesis is the primary output
 fi
 
-if [[ "$SYNTH_OK" == false ]]; then
-    log "See: $SYNTHESIS_LOG"
-    exit 1
-fi
+end_healing_zone
 
 SYNTH_WORDS=$(wc -w < "${EVAL_DIR}/synthesis.md" | tr -d ' ')
 log "SUCCESS: Synthesis complete (${SYNTH_WORDS} words, ${SYNTH_MINS}m${SYNTH_SECS}s)"

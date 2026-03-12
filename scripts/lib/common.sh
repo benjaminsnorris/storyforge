@@ -104,6 +104,298 @@ _sf_handle_interrupt() {
 trap _sf_handle_interrupt INT TERM
 
 # ============================================================================
+# Self-healing zones — automatic error recovery for autonomous scripts
+# ============================================================================
+#
+# Usage:
+#   begin_healing_zone "description of what we're doing"
+#     command1 ...
+#     command2 ...
+#   end_healing_zone
+#
+# If any command fails inside the zone, the system:
+#   1. Captures the error (command, exit code, stderr)
+#   2. Invokes Claude to diagnose and fix the issue
+#   3. Retries the zone from the top
+#   4. After 3 failed attempts, exits with the original error
+
+_SF_HEALING_ZONE=""           # Current zone description (empty = not in a zone)
+_SF_HEALING_ATTEMPT=0         # Current attempt number (0 = not healing)
+_SF_HEALING_MAX_ATTEMPTS=3    # Max retries before giving up
+_SF_HEALING_ERR_FILE=""       # Temp file capturing stderr during zone
+_SF_HEALING_LOG=""            # Dedicated healing log file
+
+# Begin a healing zone. Disables set -e and redirects stderr to capture errors.
+# Usage: begin_healing_zone "drafting scene geometry-of-dying"
+begin_healing_zone() {
+    local description="$1"
+    _SF_HEALING_ZONE="$description"
+
+    if [[ "$_SF_HEALING_ATTEMPT" -eq 0 ]]; then
+        _SF_HEALING_ATTEMPT=1
+    fi
+
+    # Create stderr capture file
+    _SF_HEALING_ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/sf-heal-err.XXXXXX")
+
+    # Set up healing log
+    if [[ -n "${PROJECT_DIR:-}" ]]; then
+        _SF_HEALING_LOG="${PROJECT_DIR}/working/logs/healing-$(date '+%Y%m%d-%H%M%S').log"
+        mkdir -p "$(dirname "$_SF_HEALING_LOG")"
+    fi
+
+    # Install error trap (replaces set -e behavior inside the zone)
+    set +e
+    trap '_sf_zone_error_handler "$BASH_COMMAND" $?' ERR
+    set -o errtrace  # Ensure ERR trap fires in functions too
+}
+
+# End a healing zone. Restores set -e and clears state.
+end_healing_zone() {
+    # Remove zone error trap, restore set -e
+    trap - ERR
+    set +o errtrace 2>/dev/null || true
+    set -e
+
+    # Clean up
+    rm -f "$_SF_HEALING_ERR_FILE"
+    _SF_HEALING_ZONE=""
+    _SF_HEALING_ATTEMPT=0
+    _SF_HEALING_ERR_FILE=""
+}
+
+# Error handler — fired by ERR trap inside a healing zone.
+_sf_zone_error_handler() {
+    local failed_command="$1"
+    local exit_code="$2"
+
+    # Don't heal if we're shutting down
+    if [[ "$_SF_SHUTTING_DOWN" == true ]]; then
+        exit "$exit_code"
+    fi
+
+    log "HEALING: Command failed in zone '${_SF_HEALING_ZONE}'"
+    log "  Command: ${failed_command}"
+    log "  Exit code: ${exit_code}"
+    log "  Attempt: ${_SF_HEALING_ATTEMPT} of ${_SF_HEALING_MAX_ATTEMPTS}"
+
+    # Log to healing file too
+    if [[ -n "$_SF_HEALING_LOG" ]]; then
+        {
+            echo "============================================"
+            echo "Healing attempt ${_SF_HEALING_ATTEMPT}"
+            echo "Zone: ${_SF_HEALING_ZONE}"
+            echo "Failed command: ${failed_command}"
+            echo "Exit code: ${exit_code}"
+            echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "============================================"
+        } >> "$_SF_HEALING_LOG"
+    fi
+
+    # Check if we've exhausted attempts
+    if [[ "$_SF_HEALING_ATTEMPT" -ge "$_SF_HEALING_MAX_ATTEMPTS" ]]; then
+        log "HEALING FAILED: Exhausted ${_SF_HEALING_MAX_ATTEMPTS} attempts for zone '${_SF_HEALING_ZONE}'"
+        log "  Last error: ${failed_command} (exit ${exit_code})"
+
+        # Clean up and restore normal error handling
+        trap - ERR
+        set +o errtrace 2>/dev/null || true
+        set -e
+        rm -f "$_SF_HEALING_ERR_FILE"
+        _SF_HEALING_ZONE=""
+        _SF_HEALING_ATTEMPT=0
+
+        # Exit with the original error
+        exit "$exit_code"
+    fi
+
+    # Capture recent stderr/log context
+    local error_context=""
+    if [[ -f "$_SF_HEALING_ERR_FILE" && -s "$_SF_HEALING_ERR_FILE" ]]; then
+        error_context=$(tail -50 "$_SF_HEALING_ERR_FILE")
+    fi
+
+    # Also grab recent log output
+    local recent_log=""
+    if [[ -n "${LOG_FILE:-}" && -f "$LOG_FILE" ]]; then
+        recent_log=$(tail -30 "$LOG_FILE")
+    fi
+
+    # Build diagnosis prompt
+    _run_healing_attempt "$failed_command" "$exit_code" "$error_context" "$recent_log"
+}
+
+# Run a Claude-powered healing attempt.
+_run_healing_attempt() {
+    local failed_command="$1"
+    local exit_code="$2"
+    local error_context="$3"
+    local recent_log="$4"
+
+    log "HEALING: Invoking Claude to diagnose and fix (attempt ${_SF_HEALING_ATTEMPT})..."
+
+    local heal_model
+    heal_model=$(select_model "review")  # Use review-tier model for diagnosis
+
+    local heal_log="${PROJECT_DIR}/working/logs/healing-attempt-${_SF_HEALING_ATTEMPT}.log"
+
+    local heal_prompt
+    read -r -d '' heal_prompt <<HEAL_EOF || true
+You are a diagnostic assistant for the Storyforge novel-writing toolkit.
+
+An autonomous script encountered an error and needs your help to fix it.
+
+## What the script was doing
+${_SF_HEALING_ZONE}
+
+## What failed
+Command: ${failed_command}
+Exit code: ${exit_code}
+
+## Error output (last 50 lines)
+${error_context}
+
+## Recent log output (last 30 lines)
+${recent_log}
+
+## Project location
+${PROJECT_DIR}
+
+## Your job
+1. Diagnose why the command failed
+2. Fix the root cause (edit files, fix YAML syntax, create missing files, etc.)
+3. Commit your fix: git add -A && git commit -m "Heal: fix for ${_SF_HEALING_ZONE}"
+4. Do NOT re-run the original command — the script will retry automatically
+
+## Rules
+- Only fix the immediate problem — do not make unrelated changes
+- If the error is in a YAML file, read it and fix the syntax
+- If a required file is missing, check if it should exist and create it if appropriate
+- If the error is a code bug in a Storyforge script, fix it
+- If you cannot determine the cause, create a file at working/logs/healing-diagnosis.md explaining what you found
+HEAL_EOF
+
+    # Log the prompt to the healing log
+    if [[ -n "$_SF_HEALING_LOG" ]]; then
+        {
+            echo ""
+            echo "--- Healing prompt ---"
+            echo "$heal_prompt"
+            echo "--- End prompt ---"
+            echo ""
+        } >> "$_SF_HEALING_LOG"
+    fi
+
+    # Invoke Claude to fix the issue
+    set +e
+    claude -p "$heal_prompt" \
+        --model "$heal_model" \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        > "$heal_log" 2>&1
+    local heal_rc=$?
+    set -e
+
+    # Append Claude's output to healing log
+    if [[ -n "$_SF_HEALING_LOG" && -f "$heal_log" ]]; then
+        {
+            echo "--- Claude healing output ---"
+            tail -50 "$heal_log"
+            echo "--- End output ---"
+        } >> "$_SF_HEALING_LOG"
+    fi
+
+    if (( heal_rc != 0 )); then
+        log "HEALING: Claude healing session itself failed (exit ${heal_rc})"
+    else
+        log "HEALING: Claude completed diagnosis. Retrying zone..."
+    fi
+
+    # Increment attempt counter for the retry
+    _SF_HEALING_ATTEMPT=$((_SF_HEALING_ATTEMPT + 1))
+
+    # NOTE: After this function returns, the ERR trap that called us
+    # will have already interrupted the zone's execution. The calling
+    # script needs to re-enter the zone. This is handled by wrapping
+    # zones in a retry loop — see the integration pattern below.
+}
+
+# High-level wrapper that handles the retry loop.
+# Usage: run_healing_zone "description" zone_function_name [args...]
+#
+# The zone function should contain the commands to execute.
+# It will be called repeatedly until it succeeds or max attempts exhausted.
+run_healing_zone() {
+    local description="$1"
+    shift
+    local zone_fn="$1"
+    shift
+
+    _SF_HEALING_ATTEMPT=0
+    local max=$_SF_HEALING_MAX_ATTEMPTS
+
+    while true; do
+        _SF_HEALING_ATTEMPT=$((_SF_HEALING_ATTEMPT + 1))
+
+        if (( _SF_HEALING_ATTEMPT > 1 )); then
+            log "HEALING: Retry ${_SF_HEALING_ATTEMPT} of ${max} for '${description}'"
+        fi
+
+        # Set up zone state
+        _SF_HEALING_ZONE="$description"
+        _SF_HEALING_ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/sf-heal-err.XXXXXX")
+        if [[ -n "${PROJECT_DIR:-}" && -z "${_SF_HEALING_LOG:-}" ]]; then
+            _SF_HEALING_LOG="${PROJECT_DIR}/working/logs/healing-$(date '+%Y%m%d-%H%M%S').log"
+            mkdir -p "$(dirname "$_SF_HEALING_LOG")"
+        fi
+
+        # Run the zone function
+        set +e
+        (
+            set -e
+            "$zone_fn" "$@"
+        )
+        local zone_rc=$?
+        set -e
+
+        rm -f "$_SF_HEALING_ERR_FILE"
+
+        # Success — exit the loop
+        if (( zone_rc == 0 )); then
+            _SF_HEALING_ZONE=""
+            _SF_HEALING_ATTEMPT=0
+            _SF_HEALING_LOG=""
+            return 0
+        fi
+
+        # Zone failed
+        log "HEALING: Zone '${description}' failed (exit ${zone_rc}), attempt ${_SF_HEALING_ATTEMPT} of ${max}"
+
+        if (( _SF_HEALING_ATTEMPT >= max )); then
+            log "HEALING FAILED: Exhausted ${max} attempts for '${description}'"
+            _SF_HEALING_ZONE=""
+            _SF_HEALING_ATTEMPT=0
+            _SF_HEALING_LOG=""
+            exit "$zone_rc"
+        fi
+
+        # Capture context for healing
+        local error_context=""
+        if [[ -f "$_SF_HEALING_ERR_FILE" && -s "$_SF_HEALING_ERR_FILE" ]]; then
+            error_context=$(tail -50 "$_SF_HEALING_ERR_FILE")
+        fi
+        local recent_log=""
+        if [[ -n "${LOG_FILE:-}" && -f "$LOG_FILE" ]]; then
+            recent_log=$(tail -30 "$LOG_FILE")
+        fi
+
+        # Run healing attempt
+        _run_healing_attempt "zone: ${description}" "$zone_rc" "$error_context" "$recent_log"
+    done
+}
+
+# ============================================================================
 # Project root detection
 # ============================================================================
 
