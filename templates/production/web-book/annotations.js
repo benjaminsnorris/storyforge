@@ -788,11 +788,17 @@
     var btn = document.querySelector('.sf-export-btn');
     if (!btn) return;
 
+    var svg = btn.querySelector('svg');
+    // Remove any existing count span
+    var existing = btn.querySelector('.sf-count');
+    if (existing) existing.parentNode.removeChild(existing);
+
     var annotations = loadAnnotations();
-    if (annotations.length === 0) {
-      btn.textContent = '\uD83D\uDCAC';
-    } else {
-      btn.textContent = '\uD83D\uDCAC ' + annotations.length;
+    if (annotations.length > 0) {
+      var count = document.createElement('span');
+      count.className = 'sf-count';
+      count.textContent = ' ' + annotations.length;
+      btn.appendChild(count);
     }
   }
 
@@ -1145,9 +1151,9 @@
 
     var btn = document.createElement('button');
     btn.className = 'sf-export-btn';
-    btn.textContent = '\uD83D\uDCAC';
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     btn.title = 'Annotations';
-    btn.setAttribute('aria-label', 'Export annotations');
+    btn.setAttribute('aria-label', 'Annotations');
 
     btn.addEventListener('click', function(e) {
       e.stopPropagation();
