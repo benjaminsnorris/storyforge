@@ -386,7 +386,7 @@ generate_format() {
             generate_pdf "$PROJECT_DIR" "$MANUSCRIPT_FILE" "$pdf_file" "$PLUGIN_DIR"
             ;;
         web)
-            generate_web_book "$PROJECT_DIR" "$PLUGIN_DIR"
+            generate_web_book "$PROJECT_DIR" "$PLUGIN_DIR" "$ANNOTATE"
             ;;
         markdown)
             log "Markdown manuscript already at: ${MANUSCRIPT_FILE}"

@@ -907,12 +907,33 @@ generate_html() {
 # Web book generation (multi-page static site)
 # ============================================================================
 
+# _wrap_scene_sections — convert scene HTML comments into <section> wrappers
+# Input: HTML on stdin containing <!-- scene:ID --> comments
+# Output: HTML with scene comments replaced by <section data-scene="ID"> wrappers
+_wrap_scene_sections() {
+    awk '
+    BEGIN { open = 0 }
+    /^<!-- scene:/ {
+        if (open) print "</section>"
+        # Extract scene ID from <!-- scene:SCENE_ID -->
+        gsub(/<!-- scene:/, "")
+        gsub(/ -->/, "")
+        printf "<section data-scene=\"%s\">\n", $0
+        open = 1
+        next
+    }
+    { print }
+    END { if (open) print "</section>" }
+    '
+}
+
 # Generate a multi-page web book from assembled chapters.
 # Produces a folder of HTML files — one per chapter, plus index and TOC.
-# Usage: generate_web_book "/path/to/project" "/path/to/plugin"
+# Usage: generate_web_book "/path/to/project" "/path/to/plugin" [annotate]
 generate_web_book() {
     local project_dir="$1"
     local plugin_dir="$2"
+    local annotate="${3:-false}"
     local output_dir="${project_dir}/manuscript/output/web"
     local template_dir="${plugin_dir}/templates/production/web-book"
     local chapters_dir="${project_dir}/manuscript/chapters"
@@ -1293,7 +1314,11 @@ generate_web_book() {
             # Convert chapter markdown to HTML fragment, write to temp file
             local ch_html_file
             ch_html_file=$(mktemp "${TMPDIR:-/tmp}/sf-ch.XXXXXX")
-            pandoc --from markdown --to html5 "$ch_md" > "$ch_html_file" 2>/dev/null
+            if [[ "$annotate" == "true" ]]; then
+                pandoc --from markdown --to html5 "$ch_md" 2>/dev/null | _wrap_scene_sections > "$ch_html_file"
+            else
+                pandoc --from markdown --to html5 "$ch_md" > "$ch_html_file" 2>/dev/null
+            fi
 
             local part_label_html=""
             local ch_part_title=""

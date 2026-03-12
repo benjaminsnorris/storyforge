@@ -330,3 +330,18 @@ assert_equals "1" "$result" "read_chapter_field: reads part number from chapter 
 
 result=$(read_chapter_field 2 "$PROJECT_DIR" "part")
 assert_equals "2" "$result" "read_chapter_field: reads part number from chapter 2"
+
+# ============================================================================
+# _wrap_scene_sections
+# ============================================================================
+
+input='<!-- scene:act1-sc01 -->
+<p>First scene prose.</p>
+<!-- scene:act1-sc02 -->
+<p>Second scene prose.</p>'
+
+result=$(echo "$input" | _wrap_scene_sections)
+assert_contains "$result" '<section data-scene="act1-sc01">' "_wrap_scene_sections: wraps first scene"
+assert_contains "$result" '<section data-scene="act1-sc02">' "_wrap_scene_sections: wraps second scene"
+assert_contains "$result" '</section>' "_wrap_scene_sections: closes sections"
+assert_not_contains "$result" '<!-- scene:' "_wrap_scene_sections: removes comment markers"
