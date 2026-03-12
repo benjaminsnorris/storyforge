@@ -790,10 +790,9 @@
 
     var annotations = loadAnnotations();
     if (annotations.length === 0) {
-      btn.style.display = 'none';
+      btn.textContent = '\u2913';
     } else {
-      btn.style.display = '';
-      btn.textContent = annotations.length;
+      btn.textContent = '\u2913 ' + annotations.length;
     }
   }
 
@@ -1137,9 +1136,9 @@
 
     var btn = document.createElement('button');
     btn.className = 'sf-export-btn';
+    btn.textContent = '\u2913';
     btn.title = 'Export annotations';
     btn.setAttribute('aria-label', 'Export annotations');
-    btn.style.display = 'none';
 
     btn.addEventListener('click', function(e) {
       e.stopPropagation();
