@@ -116,10 +116,13 @@ done
 detect_project_root
 log "Project root: ${PROJECT_DIR}"
 
-# --- Create scoring branch ---
+# --- Project info ---
+PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
+
+# --- Create scoring branch + draft PR ---
 if [[ "$DRY_RUN" != true ]]; then
-    SCORE_BRANCH="storyforge/score-$(date '+%Y%m%d-%H%M%S')"
-    create_branch "score" "$PROJECT_DIR" 2>/dev/null || true
+    create_branch "score" "$PROJECT_DIR"
+    ensure_branch_pushed "$PROJECT_DIR"
 fi
 
 # --- Resolve plugin directory ---
@@ -332,6 +335,26 @@ log "Cost forecast: ~\$${SCENE_COST} (${TOTAL_INVOCATIONS} invocations, avg ${AV
 
 if [[ "$DRY_RUN" == false ]]; then
     check_cost_threshold "$SCENE_COST" || { log "Cost threshold check declined. Aborting."; exit 1; }
+fi
+
+# --- Draft PR ---
+if [[ "$DRY_RUN" != true ]]; then
+    PR_BODY="## Principled Scoring
+
+**Project:** ${PROJECT_TITLE}
+**Mode:** ${SCORE_MODE}
+**Scenes:** ${SCENE_COUNT}
+**Estimated cost:** ~\$${SCENE_COST}
+
+### Tasks
+- [ ] Scene-level scoring (${SCENE_COUNT} scenes)
+- [ ] Act-level scoring
+- [ ] Novel-level scoring
+- [ ] Diagnosis and proposals
+- [ ] Improvement cycle
+- [ ] Review"
+
+    create_draft_pr "Score: ${PROJECT_TITLE} (${SCORE_MODE}, ${SCENE_COUNT} scenes)" "$PR_BODY" "$PROJECT_DIR" "scoring" 2>/dev/null || true
 fi
 
 # ============================================================================
@@ -692,6 +715,7 @@ esac
 
 log ""
 log "Scene scoring complete: ${SCORED} scenes scored, ${FAILED} failures"
+update_pr_task "Scene-level scoring (${SCENE_COUNT} scenes)" "$PROJECT_DIR" 2>/dev/null || true
 
 # ============================================================================
 # Act-level scoring
@@ -778,6 +802,7 @@ $(cat "$scene_file")
 else
     log "WARNING: Act-level template not found, skipping"
 fi
+update_pr_task "Act-level scoring" "$PROJECT_DIR" 2>/dev/null || true
 
 # ============================================================================
 # Novel-level scoring
@@ -885,6 +910,7 @@ $(echo "$character_list" | sed 's/^/- /')"
 else
     log "WARNING: Novel-level template not found, skipping"
 fi
+update_pr_task "Novel-level scoring" "$PROJECT_DIR" 2>/dev/null || true
 
 # ============================================================================
 # Update latest symlink
@@ -1034,6 +1060,8 @@ if [[ -f "$PROPOSALS_FILE" ]]; then
 else
     log "No proposals generated"
 fi
+update_pr_task "Diagnosis and proposals" "$PROJECT_DIR" 2>/dev/null || true
+update_pr_task "Improvement cycle" "$PROJECT_DIR" 2>/dev/null || true
 
 # Collect exemplars from high-scoring scenes
 collect_exemplars "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE"
