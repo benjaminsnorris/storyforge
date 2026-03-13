@@ -481,54 +481,34 @@ SCENE_COUNT=${#SCENE_IDS[@]}
 log "${SCENE_COUNT} scenes need enrichment"
 
 # ============================================================================
-# Step 3: Cost forecast
-# ============================================================================
-
-AVG_WORDS=0
-TOTAL_WC=0
-WC_COUNT=0
-for id in "${SCENE_IDS[@]}"; do
-    sf="${SCENES_DIR}/${id}.md"
-    if [[ -f "$sf" ]]; then
-        wc_val=$(wc -w < "$sf" | tr -d ' ')
-        TOTAL_WC=$((TOTAL_WC + wc_val))
-        WC_COUNT=$((WC_COUNT + 1))
-    fi
-done
-
-if (( WC_COUNT > 0 )); then
-    AVG_WORDS=$((TOTAL_WC / WC_COUNT))
-else
-    AVG_WORDS=800
-fi
-
-# One invocation per scene, relatively small output (~200 tokens)
-ENRICH_COST=$(estimate_cost "evaluate" "$SCENE_COUNT" "$AVG_WORDS" "$MODEL")
-log "Cost forecast: ~\$${ENRICH_COST} (${SCENE_COUNT} scenes, avg ${AVG_WORDS} words/scene)"
-
-if [[ "$DRY_RUN" == false ]]; then
-    check_cost_threshold "$ENRICH_COST" || { log "Cost threshold check declined. Aborting."; exit 1; }
-fi
-
-# ============================================================================
-# Dry-run summary
+# Step 3: Dry-run (exit early before any changes)
 # ============================================================================
 
 if [[ "$DRY_RUN" == true ]]; then
+    AVG_WORDS=800
+    for id in "${SCENE_IDS[@]}"; do
+        sf="${SCENES_DIR}/${id}.md"
+        [[ -f "$sf" ]] && { wc_val=$(wc -w < "$sf" | tr -d ' '); AVG_WORDS=$((AVG_WORDS + wc_val)); }
+    done
+    (( SCENE_COUNT > 0 )) && AVG_WORDS=$((AVG_WORDS / SCENE_COUNT))
+    ENRICH_COST=$(estimate_cost "evaluate" "$SCENE_COUNT" "$AVG_WORDS" "$MODEL")
+
     log "============================================"
     log "DRY RUN — Enrichment Plan"
     log "============================================"
-    log "Scenes:   ${SCENE_COUNT}"
+    log "Scenes needing enrichment: ${SCENE_COUNT}"
     log "Fields:   ${ENRICH_FIELDS}"
     log "Parallel: ${PARALLEL}"
     log "Force:    ${FORCE}"
     log "Model:    ${MODEL}"
-    log "Estimate: ~\$${ENRICH_COST}"
+    log "Max cost: ~\$${ENRICH_COST} (actual will be lower — free heuristics run first)"
+    log ""
+    log "Phase 1 (free): word_count updates, time_of_day inference from keywords"
+    log "Phase 2 (Claude): only fields that can't be inferred — type, characters, emotional_arc, threads, motifs, timeline_day"
     log ""
     log "Scenes to enrich:"
     for id in "${SCENE_IDS[@]}"; do
         local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-        # List which fields are missing
         missing_fields=""
         for field in "${FIELDS_ARRAY[@]}"; do
             current_val=""
@@ -538,11 +518,7 @@ if [[ "$DRY_RUN" == true ]]; then
                 current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
             fi
             if [[ -z "$current_val" ]] || [[ "$FORCE" == true ]]; then
-                if [[ -z "$missing_fields" ]]; then
-                    missing_fields="$field"
-                else
-                    missing_fields="${missing_fields}, ${field}"
-                fi
+                [[ -z "$missing_fields" ]] && missing_fields="$field" || missing_fields="${missing_fields}, ${field}"
             fi
         done
         log "  - ${id} (${local_title:-untitled}) — missing: ${missing_fields}"
@@ -559,34 +535,154 @@ fi
 create_branch "enrich" "$PROJECT_DIR"
 ensure_branch_pushed "$PROJECT_DIR"
 
-PR_BODY="## Metadata Enrichment
-
-**Project:** ${PROJECT_TITLE}
-**Scenes:** ${SCENE_COUNT}
-**Fields:** ${ENRICH_FIELDS}
-**Estimated cost:** ~\$${ENRICH_COST}
-
-### Tasks
-- [ ] Recover threads from scene-index.yaml
-- [ ] Enrich metadata (${SCENE_COUNT} scenes)
-- [ ] Commit and push results
-- [ ] Review"
-
-create_draft_pr "Enrich: ${PROJECT_TITLE} (${SCENE_COUNT} scenes)" "$PR_BODY" "$PROJECT_DIR" "enrichment" 2>/dev/null || true
-
 # ============================================================================
-# Step 5: Enrich scenes in parallel batches
+# Step 5: Free enrichment (no Claude needed)
 # ============================================================================
 
 log "============================================"
-log "Starting metadata enrichment"
+log "Phase 1: Free enrichment (no API calls)"
 log "============================================"
-log "Parallel workers: ${PARALLEL}"
+
+FREE_ENRICHED=0
+
+# --- Update word_count from actual files ---
+for id in "${SCENE_IDS[@]}"; do
+    scene_file="${SCENES_DIR}/${id}.md"
+    [[ -f "$scene_file" ]] || continue
+    current_wc=$(get_csv_field "$METADATA_CSV" "$id" "word_count")
+    actual_wc=$(wc -w < "$scene_file" | tr -d ' ')
+    if [[ -z "$current_wc" ]] || [[ "$current_wc" == "0" ]]; then
+        update_csv_field "$METADATA_CSV" "$id" "word_count" "$actual_wc"
+    fi
+done
+
+# --- Infer time_of_day from keywords in prose and setting ---
+infer_time_of_day() {
+    local text="$1"
+    local lower
+    lower=$(echo "$text" | tr '[:upper:]' '[:lower:]')
+    # Check for explicit time references
+    if echo "$lower" | grep -qiE 'dawn|sunrise|first light'; then echo "dawn"; return; fi
+    if echo "$lower" | grep -qiE 'morning|breakfast|coffee.*woke|alarm clock|a\.m\b'; then echo "morning"; return; fi
+    if echo "$lower" | grep -qiE 'afternoon|lunch|midday|noon'; then echo "afternoon"; return; fi
+    if echo "$lower" | grep -qiE 'dusk|sunset|twilight|golden hour'; then echo "dusk"; return; fi
+    if echo "$lower" | grep -qiE 'evening|dinner|supper|sundown'; then echo "evening"; return; fi
+    if echo "$lower" | grep -qiE 'night|midnight|dark.*outside|moonlight|2:[0-9][0-9]\s*a|3:[0-9][0-9]\s*a|lamp.*lit|streetlight'; then echo "night"; return; fi
+    echo ""
+}
+
+for id in "${SCENE_IDS[@]}"; do
+    current_tod=$(get_csv_field "$METADATA_CSV" "$id" "time_of_day")
+    if [[ -z "$current_tod" ]] || [[ "$FORCE" == true ]]; then
+        # Check setting field first
+        setting_val=$(get_csv_field "$METADATA_CSV" "$id" "setting")
+        inferred=$(infer_time_of_day "$setting_val")
+        # If not found in setting, check first 500 chars of scene prose
+        if [[ -z "$inferred" ]]; then
+            scene_file="${SCENES_DIR}/${id}.md"
+            if [[ -f "$scene_file" ]]; then
+                head_text=$(head -c 1000 "$scene_file")
+                inferred=$(infer_time_of_day "$head_text")
+            fi
+        fi
+        if [[ -n "$inferred" ]]; then
+            update_csv_field "$METADATA_CSV" "$id" "time_of_day" "$inferred"
+            FREE_ENRICHED=$((FREE_ENRICHED + 1))
+        fi
+    fi
+done
+
+log "Free enrichment: ${FREE_ENRICHED} fields updated (word count + time_of_day)"
+
+# ============================================================================
+# Step 6: Re-check which scenes still need Claude enrichment
+# ============================================================================
+
+CLAUDE_IDS=()
+for id in "${SCENE_IDS[@]}"; do
+    still_needs=false
+    for field in "${FIELDS_ARRAY[@]}"; do
+        # Skip fields that aren't Claude-dependent
+        case "$field" in
+            time_of_day)
+                # Already handled by heuristic — only ask Claude if still empty
+                current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
+                [[ -z "$current_val" ]] && still_needs=true
+                ;;
+            type|timeline_day)
+                current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
+                [[ -z "$current_val" || "$FORCE" == true ]] && still_needs=true
+                ;;
+            emotional_arc|characters|threads|motifs)
+                current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
+                [[ -z "$current_val" || "$FORCE" == true ]] && still_needs=true
+                ;;
+        esac
+        [[ "$still_needs" == true ]] && break
+    done
+    [[ "$still_needs" == true ]] && CLAUDE_IDS+=("$id")
+done
+
+CLAUDE_COUNT=${#CLAUDE_IDS[@]}
+if (( CLAUDE_COUNT == 0 )); then
+    log "All remaining fields populated by free enrichment. No Claude calls needed."
+    # Skip to commit
+else
+    log "${CLAUDE_COUNT} scenes still need Claude enrichment (reduced from ${SCENE_COUNT})"
+fi
+
+# ============================================================================
+# Step 7: Claude enrichment for remaining gaps
+# ============================================================================
 
 ENRICHED=0
 FAILED=0
 
-# Helper: build the enrichment prompt for a scene
+if (( CLAUDE_COUNT > 0 )); then
+
+# Cost forecast (now accurate — only counts scenes that still need Claude)
+AVG_WORDS=0
+TOTAL_WC=0
+WC_COUNT=0
+for id in "${CLAUDE_IDS[@]}"; do
+    sf="${SCENES_DIR}/${id}.md"
+    if [[ -f "$sf" ]]; then
+        wc_val=$(wc -w < "$sf" | tr -d ' ')
+        TOTAL_WC=$((TOTAL_WC + wc_val))
+        WC_COUNT=$((WC_COUNT + 1))
+    fi
+done
+(( WC_COUNT > 0 )) && AVG_WORDS=$((TOTAL_WC / WC_COUNT)) || AVG_WORDS=800
+
+ENRICH_COST=$(estimate_cost "evaluate" "$CLAUDE_COUNT" "$AVG_WORDS" "$MODEL")
+log "Cost forecast: ~\$${ENRICH_COST} (${CLAUDE_COUNT} scenes needing Claude, avg ${AVG_WORDS} words/scene)"
+
+check_cost_threshold "$ENRICH_COST" || { log "Cost threshold check declined. Aborting."; exit 1; }
+
+# Create draft PR
+PR_BODY="## Metadata Enrichment
+
+**Project:** ${PROJECT_TITLE}
+**Phase 1 (free):** ${FREE_ENRICHED} fields updated (word count, time_of_day)
+**Phase 2 (Claude):** ${CLAUDE_COUNT} scenes (of ${SCENE_COUNT} total)
+**Fields:** ${ENRICH_FIELDS}
+**Estimated cost:** ~\$${ENRICH_COST}
+
+### Tasks
+- [x] Free enrichment (word count, time_of_day keywords)
+- [x] Thread recovery from scene-index.yaml
+- [ ] Claude enrichment (${CLAUDE_COUNT} scenes)
+- [ ] Commit and push results
+- [ ] Review"
+
+create_draft_pr "Enrich: ${PROJECT_TITLE} (${CLAUDE_COUNT} scenes)" "$PR_BODY" "$PROJECT_DIR" "enrichment" 2>/dev/null || true
+
+log "============================================"
+log "Phase 2: Claude enrichment (${CLAUDE_COUNT} scenes)"
+log "============================================"
+log "Parallel workers: ${PARALLEL}"
+
+# Helper: build a TARGETED enrichment prompt (only asks for missing fields)
 build_enrich_prompt() {
     local scene_id="$1"
     local scene_file="${SCENES_DIR}/${scene_id}.md"
@@ -601,34 +697,42 @@ build_enrich_prompt() {
     function_val=""
     [[ -f "$INTENT_CSV" ]] && function_val=$(get_csv_field "$INTENT_CSV" "$scene_id" "function")
 
-    cat <<PROMPT_EOF
-You are analyzing a scene from a novel to extract structured metadata.
+    # Build field instructions only for fields that are actually missing
+    local field_instructions=""
+    for field in "${FIELDS_ARRAY[@]}"; do
+        current_val=""
+        if is_metadata_field "$field"; then
+            current_val=$(get_csv_field "$METADATA_CSV" "$scene_id" "$field")
+        elif is_intent_field "$field"; then
+            current_val=$(get_csv_field "$INTENT_CSV" "$scene_id" "$field")
+        fi
+        [[ -n "$current_val" && "$FORCE" != true ]] && continue
 
-## Scene Text
+        case "$field" in
+            type) field_instructions="${field_instructions}
+TYPE: <one of: character, plot, world, action, transition, confrontation>" ;;
+            timeline_day) field_instructions="${field_instructions}
+TIMELINE_DAY: <integer day number in the story's internal timeline, starting from 1>" ;;
+            time_of_day) field_instructions="${field_instructions}
+TIME_OF_DAY: <one of: morning, afternoon, evening, night, dawn, dusk>" ;;
+            characters) field_instructions="${field_instructions}
+CHARACTERS: <semicolon-separated list of ALL character names who appear or are mentioned by name>" ;;
+            emotional_arc) field_instructions="${field_instructions}
+EMOTIONAL_ARC: <one sentence: \"[starting emotion] giving way to [ending emotion]\">" ;;
+            threads) field_instructions="${field_instructions}
+THREADS: <semicolon-separated list of story threads, e.g. \"investigation;family_secret\">" ;;
+            motifs) field_instructions="${field_instructions}
+MOTIFS: <semicolon-separated list of recurring images/symbols, e.g. \"hands;darkness;water\">" ;;
+        esac
+    done
+
+    cat <<PROMPT_EOF
+Analyze this scene and extract the requested metadata. Respond with ONLY the labeled lines below, nothing else.
+
+Title: ${title:-Unknown} | POV: ${pov:-Unknown} | Setting: ${setting:-Unknown}
 
 ${scene_text}
-
-## Existing Metadata
-
-Title: ${title:-Unknown}
-POV: ${pov:-Unknown}
-Setting: ${setting:-Unknown}
-Part: ${part:-Unknown}
-Function: ${function_val:-Unknown}
-
-## Extract the following fields
-
-For each field, provide your answer on a single line in the exact format shown.
-
-TYPE: <one of: character, plot, world, action, transition, confrontation>
-TIMELINE_DAY: <integer day number in the story's internal timeline, starting from 1. Use your best judgment based on time references in the text and surrounding scenes.>
-TIME_OF_DAY: <one of: morning, afternoon, evening, night, dawn, dusk>
-CHARACTERS: <semicolon-separated list of ALL character names who appear, are mentioned by name, or speak in this scene>
-EMOTIONAL_ARC: <one sentence describing the emotional shift within the scene, format: "[starting emotion] to/giving way to [ending emotion]">
-THREADS: <semicolon-separated list of story threads this scene touches, using short descriptive names like "investigation", "romantic_tension", "family_secret">
-MOTIFS: <semicolon-separated list of recurring images, symbols, or sensory patterns present in this scene, like "hands", "darkness", "water", "silence">
-
-Respond with ONLY the field lines above, nothing else.
+${field_instructions}
 PROMPT_EOF
 }
 
@@ -658,18 +762,18 @@ validate_timeline_day() {
 }
 
 batch_start=0
-while (( batch_start < SCENE_COUNT )); do
+while (( batch_start < CLAUDE_COUNT )); do
     batch_pids=()
     batch_ids=()
     batch_end=$(( batch_start + PARALLEL ))
-    (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
+    (( batch_end > CLAUDE_COUNT )) && batch_end=$CLAUDE_COUNT
 
     # Launch batch
     for (( i=batch_start; i<batch_end; i++ )); do
-        id="${SCENE_IDS[$i]}"
+        id="${CLAUDE_IDS[$i]}"
         batch_ids+=("$id")
         local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-        log "  Launching enrichment for ${local_title:-$id} ($((i+1))/${SCENE_COUNT})..."
+        log "  Launching enrichment for ${local_title:-$id} ($((i+1))/${CLAUDE_COUNT})..."
 
         (
             # Worker subshell
@@ -818,6 +922,8 @@ done
 
 log ""
 log "Enrichment complete: ${ENRICHED} scenes enriched, ${FAILED} failures"
+
+fi  # end if CLAUDE_COUNT > 0
 
 # ============================================================================
 # Update PR tasks
