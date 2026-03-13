@@ -149,7 +149,7 @@ frontmatter_field() {
     echo "$fm" | yaml_field "$field"
 }
 
-# Read a YAML array field from frontmatter, join items with ||
+# Read a YAML array field from frontmatter, join items with ;
 # Usage: frontmatter_array <file> <field>
 frontmatter_array() {
     local file="$1" field="$2"
@@ -165,7 +165,7 @@ frontmatter_array() {
                 local val
                 val=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/^["'\'']//' | sed 's/["'\'']*$//')
                 if [[ -n "$result" ]]; then
-                    result="${result}||${val}"
+                    result="${result};${val}"
                 else
                     result="$val"
                 fi
@@ -563,7 +563,7 @@ migrate_chapter_map() {
             if [[ -z "$scenes" ]]; then
                 scenes="$scene_id"
             else
-                scenes="${scenes}||${scene_id}"
+                scenes="${scenes};${scene_id}"
             fi
             continue
         fi
@@ -689,7 +689,7 @@ migrate_findings() {
                     scene_val=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*$//')
                     scene_val=$(strip_quotes "$scene_val")
                     if [[ -n "$current_scenes" ]]; then
-                        current_scenes="${current_scenes}||${scene_val}"
+                        current_scenes="${current_scenes};${scene_val}"
                     else
                         current_scenes="$scene_val"
                     fi
@@ -706,7 +706,7 @@ migrate_findings() {
                     flagged_val=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*$//')
                     flagged_val=$(strip_quotes "$flagged_val")
                     if [[ -n "$current_flagged" ]]; then
-                        current_flagged="${current_flagged}||${flagged_val}"
+                        current_flagged="${current_flagged};${flagged_val}"
                     else
                         current_flagged="$flagged_val"
                     fi
@@ -886,7 +886,7 @@ migrate_revision_plans() {
                 if [[ -z "$guidance_items" ]]; then
                     guidance_items="$decision"
                 else
-                    guidance_items="${guidance_items}||${decision}"
+                    guidance_items="${guidance_items};${decision}"
                 fi
                 continue
             fi

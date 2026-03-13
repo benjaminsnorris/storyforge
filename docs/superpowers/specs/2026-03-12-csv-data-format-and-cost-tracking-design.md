@@ -33,20 +33,20 @@ All structured data files use **pipe-delimited CSV**:
 
 - **Extension:** `.csv`
 - **Field delimiter:** single pipe `|`
-- **Array delimiter within fields:** double pipe `||`
+- **Array delimiter within fields:** semicolon `;`
 - **First row:** header with field names
 - **No quoting** — pipes and double-pipes do not appear in natural prose
 - **No trailing delimiters**
 - **Encoding:** UTF-8
 - **Newlines:** LF (Unix-style)
 - **Empty fields:** zero characters between delimiters (e.g., `value1||value3` means field 1 has value, field 2 is empty, field 3 has value)
-- **Schema-aware parsing:** which columns contain arrays is determined by the header row and the table schema. Only columns declared as arrays interpret `||` as an array separator; in all other columns, `||` between field delimiters means two adjacent empty fields. Parsers must know the schema to disambiguate.
+- **Semicolons in content:** If a semicolon appears in content text, use a comma instead or escape as `\;`
 
 Example:
 
 ```
 id|title|pov|characters|threads
-the-finest-cartographer|The Finest Cartographer|Dorren Hayle|Dorren Hayle||Tessa Merrin||Pell|institutional failure||chosen blindness||the anomaly
+the-finest-cartographer|The Finest Cartographer|Dorren Hayle|Dorren Hayle;Tessa Merrin;Pell|institutional failure;chosen blindness;the anomaly
 ```
 
 ### Scene Files
@@ -103,16 +103,16 @@ Read during drafting, revision, scene design, and revision planning.
 | `id` | string | Scene ID (matches filename) |
 | `function` | string | Why this scene exists — specific and testable |
 | `emotional_arc` | string | How emotion shifts within the scene |
-| `characters` | array | All characters present or referenced (`||`-separated) |
-| `threads` | array | Story threads touched (`||`-separated) |
-| `motifs` | array | Recurring imagery/language patterns (`||`-separated) |
+| `characters` | array | All characters present or referenced (`;`-separated) |
+| `threads` | array | Story threads touched (`;`-separated) |
+| `motifs` | array | Recurring imagery/language patterns (`;`-separated) |
 | `notes` | string | Directorial or craft notes |
 
 Example:
 
 ```
 id|function|emotional_arc|characters|threads|motifs|notes
-the-finest-cartographer|Establishes Dorren as institutional gatekeeper; introduces Junction 14 assignment|Controlled competence giving way to buried unease|Dorren Hayle||Tessa Merrin||Pell||Calla||Nessa Vyre|institutional failure||chosen blindness||the anomaly||maps and territory|maps/cartography||governance-as-weight||hands||blindness/seeing|
+the-finest-cartographer|Establishes Dorren as institutional gatekeeper, introduces Junction 14 assignment|Controlled competence giving way to buried unease|Dorren Hayle;Tessa Merrin;Pell;Calla;Nessa Vyre|institutional failure;chosen blindness;the anomaly;maps and territory|maps/cartography;governance-as-weight;hands;blindness/seeing|
 ```
 
 #### Future: `scenes/scores.csv` — Principle Scores
@@ -131,7 +131,7 @@ Maps scenes to chapters for production assembly.
 | `title` | string | Chapter title |
 | `heading` | string | Heading style (e.g., "Chapter 1", "Part One", custom) |
 | `part` | integer | Part number |
-| `scenes` | array | Scene IDs in order (`||`-separated) |
+| `scenes` | array | Scene IDs in order (`;`-separated) |
 
 #### `reference/timeline.csv`
 
@@ -142,7 +142,7 @@ Chronological events for continuity.
 | `day` | integer/string | Timeline position (day number or date) |
 | `time` | string | Time of day or specific time |
 | `event` | string | What happens |
-| `scenes` | array | Related scene IDs (`||`-separated) |
+| `scenes` | array | Related scene IDs (`;`-separated) |
 | `notes` | string | Continuity notes |
 
 #### `reference/key-decisions.csv`
@@ -154,7 +154,7 @@ Decisions affecting the story, recorded by the system.
 | `id` | string | Decision ID (e.g., `kd001`) |
 | `date` | string | ISO date |
 | `decision` | string | What was decided (one sentence) |
-| `affects` | array | Scene IDs affected (`||`-separated) |
+| `affects` | array | Scene IDs affected (`;`-separated) |
 | `rationale` | string | Why (one sentence) |
 | `active` | boolean | Whether the decision is still in effect |
 
@@ -200,7 +200,7 @@ Evaluation findings from the panel.
 | `evaluator` | string | Which evaluator raised it |
 | `severity` | string | critical, major, minor, suggestion |
 | `category` | string | Finding category (pacing, dialogue, continuity, etc.) |
-| `scenes` | array | Affected scene IDs (`||`-separated) |
+| `scenes` | array | Affected scene IDs (`;`-separated) |
 | `summary` | string | One-line description |
 | `recommendation` | string | Suggested fix (one sentence) |
 | `status` | string | open, addressed, dismissed |
@@ -214,7 +214,7 @@ Same structure without severity:
 | `id` | string | Strength ID |
 | `evaluator` | string | Which evaluator flagged it |
 | `category` | string | Category |
-| `scenes` | array | Example scene IDs (`||`-separated) |
+| `scenes` | array | Example scene IDs (`;`-separated) |
 | `summary` | string | One-line description |
 
 #### `working/evaluations/{eval-dir}/false-positives.csv`
@@ -235,10 +235,10 @@ Same structure without severity:
 | `name` | string | Pass name (e.g., "strengthen-dialogue") |
 | `purpose` | string | What this pass aims to fix |
 | `scope` | string | full, act, or scenes |
-| `targets` | array | Target scene IDs if scope is scenes (`||`-separated) |
+| `targets` | array | Target scene IDs if scope is scenes (`;`-separated) |
 | `guidance` | string | Concise revision guidance |
-| `protection` | array | What NOT to change (`||`-separated) |
-| `findings` | array | Finding IDs this pass addresses (`||`-separated) |
+| `protection` | array | What NOT to change (`;`-separated) |
+| `findings` | array | Finding IDs this pass addresses (`;`-separated) |
 | `status` | string | pending, in-progress, complete |
 | `model_tier` | string | opus or sonnet |
 

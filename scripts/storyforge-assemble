@@ -162,7 +162,7 @@ esac
 # ============================================================================
 
 # CSV format: seq|title|heading|part|scenes
-# scenes column uses || as separator for multiple scene IDs
+# scenes column uses ; as separator for multiple scene IDs
 if [[ -f "$CHAPTER_MAP_CSV" ]]; then
     USE_CSV_CHAPTER_MAP=true
     log "Using CSV chapter map: ${CHAPTER_MAP_CSV}"
@@ -189,7 +189,7 @@ if [[ -f "$CHAPTER_MAP_CSV" ]]; then
         local project_dir="$2"
         local csv="${project_dir}/reference/chapter-map.csv"
         [[ -f "$csv" ]] || return 1
-        # scenes is the last column and uses || as sub-separator within
+        # scenes is the last column and uses ; as sub-separator within
         # the |-delimited CSV. Extract everything after the 4th | delimiter.
         local scenes_str
         scenes_str=$(awk -F'|' -v id="$chapter_num" '
@@ -203,8 +203,8 @@ if [[ -f "$CHAPTER_MAP_CSV" ]]; then
                 print s
             }
         ' "$csv")
-        # Convert || separator to newlines, filtering empty entries
-        echo "$scenes_str" | sed 's/||/\n/g' | sed '/^$/d'
+        # Convert ; separator to newlines, filtering empty entries
+        echo "$scenes_str" | sed 's/;/\n/g' | sed '/^$/d'
     }
 elif [[ -f "$CHAPTER_MAP" ]]; then
     log "DEPRECATION: Using YAML chapter map. Migrate to reference/chapter-map.csv."

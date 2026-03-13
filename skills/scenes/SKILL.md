@@ -23,7 +23,7 @@ Read the following files to understand the full context before doing any scene w
 
 - `storyforge.yaml` — project configuration, active extensions, current state. **Note the `project.coaching_level` field** — it controls how proactive you should be (see Coaching Level Behavior below).
 - `scenes/metadata.csv` — the existing scene metadata (pipe-delimited CSV: `id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words`). If this does not exist, fall back to `scene-index.yaml` for legacy projects.
-- `scenes/intent.csv` — scene intent data (pipe-delimited CSV: `id|function|emotional_arc|characters|threads|motifs|notes`). Array fields use `||` (double-pipe) as the internal separator.
+- `scenes/intent.csv` — scene intent data (pipe-delimited CSV: `id|function|emotional_arc|characters|threads|motifs|notes`). Array fields use `;` (semicolon) as the internal separator.
 - `reference/story-architecture.md` — structural context: acts, parts, arcs, turning points.
 - `reference/character-bible.md` — character arcs, relationships, and motivations.
 - `reference/voice-guide.md` — voice and POV rules (if it exists), especially POV-specific voice rules that affect scene assignment.
@@ -65,10 +65,10 @@ id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|ta
 geometry-of-dying|1|The Geometry of Dying|Character Name|Location|1|character|1|morning|pending|0|2500
 ```
 
-**`scenes/intent.csv`** — one row per scene (pipe-delimited, arrays use `||`):
+**`scenes/intent.csv`** — one row per scene (pipe-delimited, arrays use `;`):
 ```
 id|function|emotional_arc|characters|threads|motifs|notes
-geometry-of-dying|Specific function description|Emotional start to end|Char A||Char B|thread-1||thread-2|motif-1||motif-2|
+geometry-of-dying|Specific function description|Emotional start to end|Char A;Char B|thread-1;thread-2|motif-1;motif-2|
 ```
 
 **Scene files are pure prose** — no YAML frontmatter. The filename is the scene ID (e.g., `scenes/geometry-of-dying.md`). All metadata lives in the CSV files, not in the scene files.

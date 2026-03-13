@@ -9,7 +9,7 @@ Scene data is split across two pipe-delimited CSV files:
 - **`scenes/metadata.csv`** — structural and tracking metadata (POV, setting, part, status, word counts)
 - **`scenes/intent.csv`** — creative intent data (function, emotional arc, characters, threads, motifs)
 
-Both files use pipe (`|`) as the field delimiter. Array values within a single column use double-pipe (`||`) as the separator. The first row is always the header. The `id` column appears first in both files and is the join key.
+Both files use pipe (`|`) as the field delimiter. Array values within a single column use semicolon (`;`) as the separator. The first row is always the header. The `id` column appears first in both files and is the join key.
 
 ### Legacy Format
 
@@ -41,15 +41,15 @@ If a project has `scenes/scene-index.yaml` but no `metadata.csv`, it is using th
 | `id` | string | Scene ID — must match the `id` in metadata.csv. |
 | `function` | string | Why this scene exists for the story. Must be specific — not "advance the plot" but "she discovers he kept the letter." A scene without a clear function should be cut or merged. |
 | `emotional_arc` | string | The emotional journey within the scene. Where does the reader start and end emotionally? |
-| `characters` | array | All characters present or referenced in the scene. Double-pipe separated (e.g., `Dorren Hayle||Tessa Merrin||Pell`). |
-| `threads` | array | Story threads this scene touches. Double-pipe separated. Must match threads tracked in the continuity tracker. |
-| `motifs` | array | Motifs or recurring elements that appear in this scene. Double-pipe separated. |
+| `characters` | array | All characters present or referenced in the scene. Semicolon separated (e.g., `Dorren Hayle;Tessa Merrin;Pell`). |
+| `threads` | array | Story threads this scene touches. Semicolon separated. Must match threads tracked in the continuity tracker. |
+| `motifs` | array | Motifs or recurring elements that appear in this scene. Semicolon separated. |
 | `notes` | string | Free-form notes about the scene. |
 
 ## CSV Format Conventions
 
 - **Delimiter:** `|` (pipe character)
-- **Array separator:** `||` (double-pipe) within a single column — e.g., `thread-a||thread-b||thread-c`
+- **Array separator:** `;` (semicolon) within a single column — e.g., `thread-a;thread-b;thread-c`
 - **Header row:** Always present, always the first line
 - **No quoting:** Values should not contain pipe characters; if unavoidable, rephrase the value
 - **Empty values:** Leave the field empty between delimiters (e.g., `id||title` means the second field is empty)
@@ -67,8 +67,8 @@ sheriffs-ledger|2|The Sheriff's Ledger|Kael Maren|The Deep Archive|1|plot|2|afte
 
 ```
 id|function|emotional_arc|characters|threads|motifs|notes
-geometry-of-dying|Establishes Dorren as institutional gatekeeper|Controlled competence to buried unease|Dorren Hayle||Tessa Merrin||Pell|institutional failure||chosen blindness|maps/cartography||governance-as-weight|
-sheriffs-ledger|Kael discovers archive inconsistencies|Scholarly calm to urgent alarm|Kael Maren||Dorren Hayle|the anomaly||archive corruption|blindness/seeing|
+geometry-of-dying|Establishes Dorren as institutional gatekeeper|Controlled competence to buried unease|Dorren Hayle;Tessa Merrin;Pell|institutional failure;chosen blindness|maps/cartography;governance-as-weight|
+sheriffs-ledger|Kael discovers archive inconsistencies|Scholarly calm to urgent alarm|Kael Maren;Dorren Hayle|the anomaly;archive corruption|blindness/seeing|
 ```
 
 ## Project Extensions

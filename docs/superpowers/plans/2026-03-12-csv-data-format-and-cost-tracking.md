@@ -6,7 +6,7 @@
 
 **Architecture:** New CSV read/write library in `scripts/lib/csv.sh`, new cost tracking library in `scripts/lib/costs.sh`, new migration script `scripts/storyforge-migrate`. Existing scripts (`storyforge-write`, `storyforge-evaluate`, `storyforge-revise`, `storyforge-assemble`) updated to use CSV functions and log costs. Backward compatibility: CSV-first with YAML fallback during transition.
 
-**Tech Stack:** Pure bash/awk/sed (no external dependencies). Pipe-delimited CSV files with `||` array delimiters. Stream-json parsing for token usage extraction.
+**Tech Stack:** Pure bash/awk/sed (no external dependencies). Pipe-delimited CSV files with `;` array delimiters. Stream-json parsing for token usage extraction.
 
 **Spec:** `docs/superpowers/specs/2026-03-12-csv-data-format-and-cost-tracking-design.md`
 
@@ -58,9 +58,9 @@ Create `scripts/lib/csv.sh`:
 #!/bin/bash
 # csv.sh — Pipe-delimited CSV reading and writing utilities
 #
-# File format: pipe-delimited (|), double-pipe (||) for arrays within fields.
+# File format: pipe-delimited (|), semicolon (;) for arrays within fields.
 # First row is always the header. Schema-aware: only declared array columns
-# interpret || as array separator.
+# interpret ; as array separator.
 
 # get_csv_field(file, id, field) — print a single field value for a given ID
 # Uses awk to match the id column and extract the named column.
@@ -134,10 +134,10 @@ Create `tests/fixtures/test-project/scenes/intent.csv`:
 
 ```
 id|function|emotional_arc|characters|threads|motifs|notes
-act1-sc01|Establishes Dorren as institutional gatekeeper|Controlled competence to buried unease|Dorren Hayle||Tessa Merrin||Pell|institutional failure||chosen blindness|maps/cartography||governance-as-weight|
-act1-sc02|Dorren notices a village has vanished from the pressure maps|Routine giving way to dread|Dorren Hayle|the anomaly||maps and territory|depth/descent|
-new-x1|Kael warns about archive inconsistencies|Scholarly calm to urgent alarm|Kael Maren||Dorren Hayle|the anomaly||archive corruption|blindness/seeing|
-act2-sc01|First exploration of the eastern damage|Professional detachment to visceral shock|Tessa Merrin||Pell|infrastructure failure||the subsidence|depth/descent||acceptable variance|
+act1-sc01|Establishes Dorren as institutional gatekeeper|Controlled competence to buried unease|Dorren Hayle;Tessa Merrin;Pell|institutional failure;chosen blindness|maps/cartography;governance-as-weight|
+act1-sc02|Dorren notices a village has vanished from the pressure maps|Routine giving way to dread|Dorren Hayle|the anomaly;maps and territory|depth/descent|
+new-x1|Kael warns about archive inconsistencies|Scholarly calm to urgent alarm|Kael Maren;Dorren Hayle|the anomaly;archive corruption|blindness/seeing|
+act2-sc01|First exploration of the eastern damage|Professional detachment to visceral shock|Tessa Merrin;Pell|infrastructure failure;the subsidence|depth/descent;acceptable variance|
 ```
 
 - [ ] **Step 8: Run all CSV tests**
@@ -889,7 +889,7 @@ assert_contains "$CH_HEADER" "seq|title" "migrate: chapter-map.csv has correct h
 
 - [ ] **Step 2: Implement chapter-map.yaml to chapter-map.csv migration**
 
-Add `migrate_chapter_map()` function to `storyforge-migrate`. Parse the YAML list of chapters, extract title/heading/part/scenes fields, write to `reference/chapter-map.csv`. Scene lists use `||` as the array delimiter.
+Add `migrate_chapter_map()` function to `storyforge-migrate`. Parse the YAML list of chapters, extract title/heading/part/scenes fields, write to `reference/chapter-map.csv`. Scene lists use `;` as the array delimiter.
 
 - [ ] **Step 3: Write failing tests for findings migration**
 

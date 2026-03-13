@@ -23,7 +23,7 @@ Look for evaluation output using the pipeline manifest:
 
 2. **Fallback (no manifest):** If `working/pipeline.yaml` does not exist (older project), look for the most recent `eval-*` directory in `working/evaluations/`.
 
-3. **Primary source (CSV):** Read `findings.csv` in the evaluation directory if it exists. This is a pipe-delimited CSV with columns: `id|severity|category|location|finding|suggestion`. Array values (like multiple scene IDs in `location`) use `||` (double-pipe) as separator. Also check for `strengths.csv` and `false-positives.csv` in the same directory.
+3. **Primary source (CSV):** Read `findings.csv` in the evaluation directory if it exists. This is a pipe-delimited CSV with columns: `id|severity|category|location|finding|suggestion`. Array values (like multiple scene IDs in `location`) use `;` (semicolon) as separator. Also check for `strengths.csv` and `false-positives.csv` in the same directory.
 
 4. **Fallback (YAML):** If `findings.csv` does not exist, read `findings.yaml` in the evaluation directory. This is the legacy structured findings file with categorized issues, severity ratings, and scene-level annotations.
 
@@ -199,20 +199,20 @@ The file is a pipe-delimited CSV with this header and format:
 
 ```
 pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier
-1|structural-reorder|Reorder Act 2 scenes for better pacing|act-2|scene-a||scene-b|Move confrontation earlier|strength-x||voice-quality|f001||f003|pending|opus
-2|prose-tightening|Tighten dialogue across full manuscript|full||Cut filler words|voice-quality||imagery|f005|pending|sonnet
+1|structural-reorder|Reorder Act 2 scenes for better pacing|act-2|scene-a;scene-b|Move confrontation earlier|strength-x;voice-quality|f001;f003|pending|opus
+2|prose-tightening|Tighten dialogue across full manuscript|full||Cut filler words|voice-quality;imagery|f005|pending|sonnet
 ```
 
 **CSV conventions:**
 - Delimiter: `|` (pipe)
-- Array values within a column: `||` (double-pipe) — e.g., `scene-a||scene-b` in the targets column
+- Array values within a column: `;` (semicolon) — e.g., `scene-a;scene-b` in the targets column
 - First row is always the header
 - One row per pass, in execution order
 - `pass` column is the pass number (1-based)
 - `targets` column lists scene IDs when scope is scene-level (empty for `full` or act-level scope)
 - `guidance` column contains concise revision guidance text
-- `protection` column lists things NOT to change (double-pipe separated)
-- `findings` column lists finding IDs this pass addresses (double-pipe separated)
+- `protection` column lists things NOT to change (semicolon separated)
+- `findings` column lists finding IDs this pass addresses (semicolon separated)
 - `model_tier` is `opus` for creative passes, `sonnet` for mechanical passes
 
 Every pass should have `status: pending` when first saved. The revision script will update status as passes are executed.
