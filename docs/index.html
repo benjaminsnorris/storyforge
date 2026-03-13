@@ -344,6 +344,8 @@
   .pipe-step--scenes { border-color: var(--amber-dim); }
   .pipe-step--draft .pipe-phase { color: var(--rose); }
   .pipe-step--draft { border-color: var(--rose-dim); }
+  .pipe-step--score .pipe-phase { color: var(--teal); }
+  .pipe-step--score { border-color: var(--teal-dim); }
   .pipe-step--eval .pipe-phase { color: var(--cranberry); }
   .pipe-step--eval { border-color: var(--cranberry-dim); }
   .pipe-step--produce .pipe-phase { color: #7c3aed; }
@@ -432,6 +434,7 @@
   .dive-card--coaching::before { background: var(--violet); }
   .dive-card--produce::before { background: var(--teal); }
   .dive-card--healing::before { background: var(--indigo); }
+  .dive-card--scoring::before { background: var(--teal); }
   .dive-card--interactive::before { background: var(--cranberry); }
 
   .dive-card .dive-label {
@@ -455,6 +458,7 @@
   .dive-card--coaching .dive-label { color: var(--violet); }
   .dive-card--produce .dive-label { color: var(--teal); }
   .dive-card--healing .dive-label { color: var(--indigo); }
+  .dive-card--scoring .dive-label { color: var(--teal); }
   .dive-card--interactive .dive-label { color: var(--cranberry); }
 
   .dive-card .dive-label .dot {
@@ -697,44 +701,50 @@
         <span class="pipe-type pipe-type--autonomous">autonomous</span>
       </div>
       <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--eval">
+      <div class="pipe-step pipe-step--score">
         <div class="pipe-phase">Phase 5</div>
+        <div class="pipe-name">Score</div>
+        <span class="pipe-type pipe-type--autonomous">autonomous</span>
+      </div>
+      <div class="pipe-arrow">&rarr;</div>
+      <div class="pipe-step pipe-step--eval">
+        <div class="pipe-phase">Phase 6</div>
         <div class="pipe-name">Evaluate</div>
         <span class="pipe-type pipe-type--autonomous">autonomous</span>
       </div>
       <div class="pipe-arrow">&rarr;</div>
       <div class="pipe-step pipe-step--draft">
-        <div class="pipe-phase">Phase 6</div>
+        <div class="pipe-phase">Phase 7</div>
         <div class="pipe-name">Revise</div>
         <span class="pipe-type pipe-type--autonomous">autonomous</span>
       </div>
       <div class="pipe-arrow">&rarr;</div>
       <div class="pipe-step pipe-step--eval">
-        <div class="pipe-phase">Phase 7</div>
+        <div class="pipe-phase">Phase 8</div>
         <div class="pipe-name">Recommend</div>
         <span class="pipe-type pipe-type--interactive">interactive</span>
       </div>
       <div class="pipe-arrow">&rarr;</div>
       <div class="pipe-step pipe-step--produce">
-        <div class="pipe-phase">Phase 8</div>
+        <div class="pipe-phase">Phase 9</div>
         <div class="pipe-name">Title</div>
         <span class="pipe-type pipe-type--interactive">interactive</span>
       </div>
       <div class="pipe-arrow">&rarr;</div>
       <div class="pipe-step pipe-step--produce">
-        <div class="pipe-phase">Phase 9</div>
+        <div class="pipe-phase">Phase 10</div>
         <div class="pipe-name">Cover</div>
         <span class="pipe-type pipe-type--interactive">interactive</span>
       </div>
       <div class="pipe-arrow">&rarr;</div>
       <div class="pipe-step pipe-step--produce">
-        <div class="pipe-phase">Phase 10</div>
+        <div class="pipe-phase">Phase 11</div>
         <div class="pipe-name">Produce</div>
         <span class="pipe-type pipe-type--produce">interactive + auto</span>
       </div>
       <div class="pipe-arrow">&rarr;</div>
       <div class="pipe-step pipe-step--produce">
-        <div class="pipe-phase">Phase 11</div>
+        <div class="pipe-phase">Phase 12</div>
         <div class="pipe-name">Press Kit</div>
         <span class="pipe-type pipe-type--interactive">interactive</span>
       </div>
@@ -863,7 +873,21 @@
         </div>
       </a>
 
-      <a href="diagrams/self-healing.html" class="dive-card dive-card--healing anim" style="--i:21">
+      <a href="diagrams/scoring-system.html" class="dive-card dive-card--scoring anim" style="--i:21">
+        <div class="dive-label"><span class="dot"></span> Visualization</div>
+        <h3>Principled Scoring</h3>
+        <p>
+          Score every scene against 25 craft principles. A self-improving system that
+          diagnoses weaknesses, tunes prompts, and feeds validated improvements back
+          to the plugin itself.
+        </p>
+        <div class="dive-cta">
+          View scoring system
+          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </div>
+      </a>
+
+      <a href="diagrams/self-healing.html" class="dive-card dive-card--healing anim" style="--i:22">
         <div class="dive-label"><span class="dot"></span> Visualization</div>
         <h3>Self-Healing Scripts</h3>
         <p>
@@ -877,7 +901,7 @@
         </div>
       </a>
 
-      <a href="diagrams/interactive-mode.html" class="dive-card dive-card--interactive anim" style="--i:22">
+      <a href="diagrams/interactive-mode.html" class="dive-card dive-card--interactive anim" style="--i:23">
         <div class="dive-label"><span class="dot"></span> Visualization</div>
         <h3>Interactive Mode</h3>
         <p>
@@ -895,7 +919,7 @@
   </div>
 
   <!-- INSTALL -->
-  <div class="install-section anim" style="--i:23">
+  <div class="install-section anim" style="--i:24">
     <div class="section-label"><span class="dot"></span> Get started</div>
     <div class="install-cmd"><span class="comment"># Install from the Claude Code marketplace</span>
 <span class="cmd">/plugin marketplace add</span> benjaminsnorris/storyforge
@@ -906,7 +930,7 @@
   </div>
 
   <!-- FOOTER -->
-  <div class="footer anim" style="--i:24">
+  <div class="footer anim" style="--i:25">
     Storyforge &mdash; a <a href="https://github.com/benjaminsnorris/storyforge">Claude Code plugin</a> for novel writers
   </div>
 

@@ -389,26 +389,31 @@ flowchart TD
     hub["Hub — /storyforge:forge\n(Routing Layer)"]
     skills["Interactive Skills\n(Author Collaborates)"]
     scripts["Autonomous Scripts\n(Claude Executes)"]
+    scoring["Scoring Engine\n./storyforge score · /storyforge:score"]
     state["State Layer\nYAML + Artifacts"]
     output["Manuscript Output"]
 
     author -->|"request / approve"| hub
     hub -->|"route"| skills
     hub -->|"dispatch"| scripts
+    hub -->|"dispatch"| scoring
     hub <-->|"read / write"| state
     skills -->|"artifacts"| state
     scripts -->|"artifacts"| state
+    scoring -->|"scores + diagnostics"| state
     skills --> output
     scripts --> output
 
     classDef hubNode fill:#2563eb22,stroke:#2563eb,stroke-width:2px
     classDef execNode fill:#0f766e22,stroke:#0f766e,stroke-width:2px
+    classDef scoringNode fill:#0f766e22,stroke:#0f766e,stroke-width:2px
     classDef stateNode fill:#94a3b822,stroke:#94a3b8,stroke-width:2px
     classDef authorNode fill:#2563eb11,stroke:#2563eb,stroke-width:2px,stroke-dasharray:5 5
     classDef outputNode fill:#0f766e11,stroke:#0f766e,stroke-width:2px,stroke-dasharray:5 5
 
     class hub hubNode
     class skills,scripts execNode
+    class scoring scoringNode
     class state stateNode
     class author authorNode
     class output outputNode
@@ -459,6 +464,10 @@ flowchart TD
           Plan revision passes from evaluation feedback.
         </li>
         <li>
+          <span class="cmd">/storyforge:score</span>
+          Review and interpret scoring results; drill into principle breakdowns.
+        </li>
+        <li>
           <span class="cmd">/storyforge:recommend</span>
           Assess project state, recommend the highest-value next action.
         </li>
@@ -490,6 +499,10 @@ flowchart TD
         <li>
           <span class="cmd">./storyforge write</span>
           Draft scenes using reference documents and the voice guide.
+        </li>
+        <li>
+          <span class="cmd">./storyforge score</span>
+          Score every scene against 25 craft principles; diagnose and self-improve.
         </li>
         <li>
           <span class="cmd">./storyforge evaluate</span>
