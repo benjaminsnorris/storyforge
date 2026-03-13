@@ -31,11 +31,13 @@ The evaluation loop is expensive and infrequent. The revision model is "fix this
 
 #### Three Scoring Modes
 
-**Grouped (default):** One Claude invocation per craft engine section. ~4-5 calls for scene-level principles, plus 1-2 for act/novel-level. Best balance of accuracy and cost.
+**Grouped (default):** One Claude invocation per craft engine section **per scene**. For each scene, ~4 calls (scene craft, prose craft, character craft, rules). For a 100-scene manuscript, this is ~400 scene-level calls plus 2-3 for act/novel-level. Best balance of accuracy and cost per principle, but scales with scene count.
 
-**Quick (`--quick`):** Single invocation scores all principles at once. Cheapest, less precise. Good for directional checks between rewrites.
+**Quick (`--quick`):** Single invocation per scene scores all principles at once. For 100 scenes, ~100 calls. Cheapest per-scene option, less precise. Good for directional checks between rewrites.
 
-**Deep (`--deep`):** One invocation per individual principle. Most expensive, highest accuracy. Used to investigate a specific weakness.
+**Deep (`--deep`):** One invocation per individual principle per scene. ~23 calls per scene. Most expensive, highest accuracy. Used to investigate a specific weakness — typically combined with `--scenes` to target specific scenes rather than the full manuscript.
+
+**Scope and mode are orthogonal:** Modes (`--quick`, `--deep`) and scope filters (`--scenes`, `--act`) can be combined. `--quick --scenes act1-sc01,act1-sc02` scores two scenes in quick mode. `--deep --act 2` deeply scores all scenes in act 2.
 
 #### Scoring Tiers by Scale
 
@@ -62,6 +64,10 @@ Principles are scored at their natural scale:
 |---------|-----------|
 | Character Craft (per character) | Want/Need, Wound/Lie, Flaws as Strengths, Voice as Character |
 | Tropes & Genre | Trope awareness, Archetype vs Cliche, Genre contract fulfillment, Subversion/Deconstruction awareness |
+
+#### Overlapping Principles
+
+Two principles share territory: `psychic_distance_scene` (Scene Craft) and `fictive_dream` (Prose Craft). They measure different things: `psychic_distance_scene` assesses the scene-level arc of distance (establishing shot → close-up at turn → pull-back), while `fictive_dream` assesses sentence-level distance control and whether the reader stays immersed. A scene can score high on the distance arc but low on prose-level immersion, or vice versa.
 
 #### Rules to Break Scoring
 
@@ -142,13 +148,23 @@ part|campbells_monomyth|three_act|save_the_cat|truby_22|harmon_circle|kishotenke
 1|6|7|5|6|7|3|7|8|7
 ```
 
-#### `novel-scores.csv`
+#### `character-scores.csv`
+
+Per-character arc scores:
 
 ```
-subject|want_need|wound_lie|flaws_as_strengths|voice_as_character|trope_awareness|archetype_vs_cliche|genre_contract|subversion_awareness
-Dorren Hayle|8|9|7|8||||
-Tessa Merrin|7|6|8|7||||
-novel_overall|||||7|8|9|6
+character|want_need|wound_lie|flaws_as_strengths|voice_as_character
+Dorren Hayle|8|9|7|8
+Tessa Merrin|7|6|8|7
+```
+
+#### `genre-scores.csv`
+
+Novel-level trope and genre convention scores:
+
+```
+trope_awareness|archetype_vs_cliche|genre_contract|subversion_awareness
+7|8|9|6
 ```
 
 #### `diagnosis.csv`
@@ -162,7 +178,9 @@ thread_management|scene|5.1|the-hollow-district;the-archivists-warning|+0.4|medi
 campbells_monomyth|act|3.8|part-2||high
 ```
 
-Priority computed from: absolute score (lower = higher priority), regression (negative delta = higher priority), and craft weight (higher-weighted principles get higher priority).
+- `worst_items` is a `;`-separated array of scene IDs, act numbers, or character names depending on scale
+- When previous cycle data is missing, corrupt, or has different columns, `delta_from_last` is left empty (not an error)
+- Priority computed from: absolute score (lower = higher priority), regression (negative delta = higher priority), and craft weight (higher-weighted principles get higher priority)
 
 #### `proposals.csv`
 
@@ -225,15 +243,35 @@ Author (or system in full coaching) runs `storyforge write` or `storyforge revis
 After rewrite and re-score:
 
 - Compare before/after scores for each applied proposal
-- Record results in `working/tuning.csv`:
-
-```
-cycle|proposal_id|principle|lever|change|score_before|score_after|kept
-3|p001|economy_clarity|craft_weight|5→8|4.2|6.8|true
-3|p002|thread_management|scene_intent|add thread limit|5.1|7.3|true
-```
-
+- Record results in `working/tuning.csv`
 - If a proposal didn't improve scores (or caused regression), mark as `kept: false` and revert the change
+
+#### `working/tuning.csv`
+
+The system's memory of what works and what doesn't. Append-only.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `cycle` | integer | Pipeline cycle number |
+| `proposal_id` | string | ID from proposals.csv |
+| `principle` | string | Principle slug |
+| `lever` | string | Which lever was adjusted (craft_weight, voice_guide, scene_intent, override) |
+| `change` | string | What was changed (e.g., "weight 5→8") |
+| `score_before` | decimal | Average score for this principle before the change |
+| `score_after` | decimal | Average score after rewrite |
+| `kept` | boolean | true if change was kept, false if reverted |
+
+#### `working/scores/cycle-N/overrides.csv`
+
+Temporary per-scene instructions that expire after one cycle.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `scene_id` | string | Scene ID |
+| `principle` | string | Principle slug |
+| `instruction` | string | Specific directive for this scene |
+| `source_proposal` | string | Proposal ID that generated this override |
+| `expires_after_cycle` | integer | Cycle number after which this override is removed |
 - Check for validated patterns (3+ successful applications of same principle+lever) and trigger plugin insight submission
 
 ### Craft Weights
@@ -295,6 +333,8 @@ Same format, lives in the storyforge plugin. New projects copy this to `working/
 
 Effective weight = `author_weight` if set, otherwise `weight`.
 
+**Scale-specific behavior:** Scene-level weights (scene_craft, prose_craft, rules) are injected into every scene drafting prompt. Act/novel-level weights (narrative_frameworks, character_craft) are injected only when drafting prompts for the first or last scene of an act (structural moments), or when the scene's `type` is `plot` or `character` — not into every scene. This prevents arc-level concerns from overwhelming scene-level execution.
+
 This replaces injecting 2,000+ tokens of craft engine text with a ~200-token weighted summary — a significant token savings that compounds across every invocation.
 
 Per-scene overrides are appended after the weighted directive for the specific scene being drafted.
@@ -351,6 +391,7 @@ sound_rhythm_pov|the-weight-of-the-rim|9|The lamp guttered. The map curled. And 
 - These exemplars are injected into scoring prompts alongside the standard rubric: "Here is what a 9 on economy looks like in YOUR voice"
 - This makes scoring increasingly calibrated to the author's style over time
 - Author exemplars never replace standard rubric exemplars — they supplement them
+- Any literal `|` in excerpt text is replaced with an em-dash before storage to avoid breaking the CSV format
 
 **This is how the system becomes personalized without losing objectivity.** The rubric defines the principle. The standard exemplars show what it looks like in great literature. The author exemplars show what it looks like when this author does it well.
 
@@ -367,7 +408,7 @@ At the end of Step 7 (Record), the system checks the tuning ledger for validated
 
 #### GitHub Issue Submission
 
-When a validated pattern is detected, the system creates a GitHub issue on `benjaminsnorris/storyforge` using `gh issue create`. This happens **automatically regardless of coaching level** — plugin improvement is separate from author involvement preferences.
+When a validated pattern is detected, the system creates a GitHub issue on `benjaminsnorris/storyforge` using `gh issue create`. This happens **automatically regardless of coaching level** — plugin improvement is separate from author involvement preferences. Authors who want to disable this can set `STORYFORGE_AUTO_ISSUES=false` in their environment or `storyforge.yaml`.
 
 **Issue structure:**
 
@@ -457,7 +498,7 @@ Scoring must be cheap enough to run frequently:
 
 **Deep mode:** ~23 invocations for scene-level alone. Estimated ~$5-8. Use sparingly.
 
-All scoring invocations logged via `log_usage()` to the cost ledger.
+All scoring invocations logged via `log_usage()` to the cost ledger with operation type `score`. The `estimate_cost` function in `costs.sh` needs a `score` case added (output estimate ~500 tokens per invocation — scoring returns structured data, not prose).
 
 ### Backward Compatibility
 
