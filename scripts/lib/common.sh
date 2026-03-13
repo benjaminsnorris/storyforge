@@ -41,11 +41,14 @@ _sf_handle_interrupt() {
     echo ""
     log "INTERRUPTED — shutting down gracefully..."
 
-    # Kill all tracked child processes
+    # Kill all tracked child processes and their children.
+    # Use negative PID to kill the entire process group when possible,
+    # ensuring claude processes spawned inside worker subshells also die.
     local killed=0
     for pid in "${_SF_CHILD_PIDS[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
+            # Try process group kill first (kills subshell + its children)
+            kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
             killed=$((killed + 1))
         fi
     done
@@ -65,10 +68,10 @@ _sf_handle_interrupt() {
             waited=$((waited + 1))
         done
 
-        # Force-kill any stragglers
+        # Force-kill any stragglers (process group + individual)
         for pid in "${_SF_CHILD_PIDS[@]}"; do
             if kill -0 "$pid" 2>/dev/null; then
-                kill -9 "$pid" 2>/dev/null || true
+                kill -9 -- -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
                 log "Force-killed process ${pid}"
             fi
         done
@@ -83,11 +86,14 @@ _sf_handle_interrupt() {
         local has_unstaged_scenes
         has_unstaged_scenes=$(git -C "$PROJECT_DIR" status --porcelain scenes/ 2>/dev/null || true)
 
-        if [[ "$has_staged" != "0" || -n "$has_unstaged_eval" || -n "$has_unstaged_scenes" ]]; then
+        local has_unstaged_scores
+        has_unstaged_scores=$(git -C "$PROJECT_DIR" status --porcelain working/scores/ 2>/dev/null || true)
+
+        if [[ "$has_staged" != "0" || -n "$has_unstaged_eval" || -n "$has_unstaged_scenes" || -n "$has_unstaged_scores" ]]; then
             log "Committing partial work before exit..."
             (
                 cd "$PROJECT_DIR"
-                git add working/evaluations/ working/logs/ scenes/ 2>/dev/null || true
+                git add working/evaluations/ working/logs/ working/scores/ working/costs/ scenes/ 2>/dev/null || true
                 git commit -m "Interrupted: partial work saved" 2>/dev/null || true
                 git push 2>/dev/null || true
             )
