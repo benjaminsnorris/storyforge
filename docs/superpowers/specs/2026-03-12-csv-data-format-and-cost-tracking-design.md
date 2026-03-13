@@ -39,7 +39,8 @@ All structured data files use **pipe-delimited CSV**:
 - **No trailing delimiters**
 - **Encoding:** UTF-8
 - **Newlines:** LF (Unix-style)
-- **Empty fields:** zero characters between delimiters (e.g., `value1||value3`)
+- **Empty fields:** zero characters between delimiters (e.g., `value1||value3` means field 1 has value, field 2 is empty, field 3 has value)
+- **Schema-aware parsing:** which columns contain arrays is determined by the header row and the table schema. Only columns declared as arrays interpret `||` as an array separator; in all other columns, `||` between field delimiters means two adjacent empty fields. Parsers must know the schema to disambiguate.
 
 Example:
 
@@ -173,8 +174,8 @@ Append-only log of every Claude invocation. One row per invocation.
 | `output_tokens` | integer | Output tokens generated |
 | `cache_read` | integer | Tokens read from cache |
 | `cache_create` | integer | Tokens written to cache |
-| `cost_usd` | decimal | Calculated cost in USD |
-| `duration_s` | integer | Wall-clock seconds |
+| `cost_usd` | string | Calculated cost in USD (formatted as decimal string, computed via `awk`) |
+| `duration_s` | integer | Wall-clock seconds (scripts record `$(date +%s)` before each invocation and compute delta after; for parallel invocations like evaluators, each process tracks its own start time) |
 
 #### `working/costs/summary.csv`
 
@@ -187,7 +188,7 @@ Regenerated from ledger on demand or at end of each operation.
 | `total_input` | integer | Total input tokens |
 | `total_output` | integer | Total output tokens |
 | `total_cache_read` | integer | Total cache reads |
-| `total_cost_usd` | decimal | Total cost in USD |
+| `total_cost_usd` | string | Total cost in USD (decimal string) |
 
 #### `working/evaluations/{eval-dir}/findings.csv`
 
@@ -294,6 +295,8 @@ PRICING_SONNET_CACHE_CREATE=3.75
 
 Override via environment variables: `STORYFORGE_PRICING_OPUS_INPUT`, etc.
 
+All cost calculations use `awk` for floating-point arithmetic, consistent with the project's "pure grep/sed/awk, no external dependencies" approach.
+
 ### Cost Forecasting
 
 Before each autonomous operation, scripts estimate cost:
@@ -335,7 +338,7 @@ Evaluation complete. 8 invocations.
 
 ### `storyforge-migrate` Script
 
-A new script at `scripts/storyforge-migrate` that converts existing projects to the CSV format.
+A new script at `scripts/storyforge-migrate` that converts existing projects to the CSV format. This supersedes the existing `storyforge-migrate-scenes` script (which only handled file renaming). The old script can be removed after all projects are migrated.
 
 #### Behavior
 
@@ -391,14 +394,21 @@ The script also converts (when present):
 
 ### New Functions in `common.sh`
 
-**CSV Reading:**
-- `read_csv(file)` — reads a pipe-delimited CSV, returns rows as associative arrays or field-indexed values
-- `get_csv_field(file, id, field)` — look up a single field for a given ID
-- `get_csv_row(file, id)` — return all fields for a given ID
-- `get_csv_column(file, field)` — return all values for a given field
+**CSV Reading** (all functions print results to stdout for capture via `$(...)` or piping):
+- `get_csv_field(file, id, field)` — prints a single field value for a given ID. Uses awk to match the id column and extract the named column.
+- `get_csv_row(file, id)` — prints all field values for a given ID as a pipe-delimited string. Caller splits on `|` to access fields.
+- `get_csv_column(file, field)` — prints all values for a given column, one per line.
+- `list_csv_ids(file)` — prints all IDs, one per line, in file order.
+
+**CSV Writing:**
+- `update_csv_field(file, id, field, value)` — reads the file, updates the matching row's field, rewrites atomically (write to temp file, then `mv`). Sequential access only — no concurrent writers.
+- `append_csv_row(file, row)` — appends a pipe-delimited row to the file. Used for append-only files like `ledger.csv`.
+
+**Scene List Building:**
+- Scripts build the scene list by reading `id` and `seq` columns from `metadata.csv`, sorting by `seq`, and filtering by `status` (e.g., exclude `cut` scenes). This replaces the current `scene-index.yaml` parsing in `storyforge-write` (lines 193-254) and similar blocks in other scripts.
 
 **Cost Tracking:**
-- `log_usage(log_file, operation, target, model)` — parse stream-json log file for usage data, calculate cost, append to ledger.csv
+- `log_usage(log_file, operation, target, model)` — parse stream-json log file for the final usage event, calculate cost via `awk`, append to ledger.csv. If usage data is not found in the log (e.g., invocation failed or format changed), logs a warning and writes a row with zero tokens and $0.00 cost so the ledger remains append-only and complete.
 - `estimate_cost(operation, scope_count, avg_words, model)` — forecast cost for an operation
 - `check_cost_threshold(estimated_cost)` — prompt for confirmation if over threshold, return 0 to proceed or 1 to abort
 - `print_cost_summary(operation)` — print end-of-operation cost report from ledger entries
@@ -412,6 +422,9 @@ The script also converts (when present):
 - `get_scene_metadata()` reads from `metadata.csv` instead of scene-index.yaml
 - `get_scene_intent()` reads from `intent.csv` when creative context is needed
 - `build_scene_prompt()` updated to use CSV readers
+- `build_scene_prompt()` no longer instructs Claude to write YAML frontmatter into scene files. Instead, Claude writes pure prose; the script updates `metadata.csv` (status, word_count) after writing.
+- Strict coaching mode: placeholder scene files become empty `.md` files. Metadata that was previously written as frontmatter-only is written to `metadata.csv` instead.
+- `list_reference_files()` updated to include `*.csv` in the file discovery glob alongside `*.md`, `*.yaml`, `*.yml`, and `*.txt`
 
 **`scripts/storyforge-write`:**
 - Add cost forecast before starting
