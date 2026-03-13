@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storyforge — Metadata Enrichment</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ── Reset ─────────────────────────────────────────────── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ── Light palette ─────────────────────────────────────── */
+  :root {
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+    --bg: #faf8f5;
+    --bg-card: #ffffff;
+    --bg-recessed: #f2efe9;
+    --bg-code: #f7f5f0;
+    --text: #1a1610;
+    --text-secondary: #5c5548;
+    --text-muted: #9a9285;
+    --text-dim: #7a7265;
+    --border: #e2ddd4;
+    --border-light: #ebe7df;
+    --border-bright: #cec7bb;
+
+    --primary: #b45309;
+    --primary-light: #d97706;
+    --primary-bg: rgba(180, 83, 9, 0.06);
+    --primary-border: rgba(180, 83, 9, 0.2);
+
+    --free: #059669;
+    --free-bg: rgba(5, 150, 105, 0.06);
+    --free-border: rgba(5, 150, 105, 0.2);
+
+    --claude: #7c3aed;
+    --claude-bg: rgba(124, 58, 237, 0.06);
+    --claude-border: rgba(124, 58, 237, 0.2);
+
+    --field: #0369a1;
+    --field-bg: rgba(3, 105, 161, 0.06);
+    --field-border: rgba(3, 105, 161, 0.2);
+
+    --arrow-color: #cec7bb;
+    --surface: #ffffff;
+    --shadow: 0 1px 3px rgba(26,22,16,0.05), 0 4px 12px rgba(26,22,16,0.03);
+    --shadow-elevated: 0 2px 8px rgba(26,22,16,0.07), 0 8px 24px rgba(26,22,16,0.05);
+
+    --max-w: 920px;
+    --radius: 10px;
+  }
+
+  /* ── Dark palette ──────────────────────────────────────── */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #100e0b;
+      --bg-card: #1c1915;
+      --bg-recessed: #0c0b08;
+      --bg-code: #161410;
+      --text: #ede9e0;
+      --text-secondary: #ada598;
+      --text-muted: #706a5e;
+      --text-dim: #8a8274;
+      --border: #2e2a24;
+      --border-light: #252119;
+      --border-bright: #403a30;
+
+      --primary: #f59e0b;
+      --primary-light: #fbbf24;
+      --primary-bg: rgba(245, 158, 11, 0.08);
+      --primary-border: rgba(245, 158, 11, 0.22);
+
+      --free: #34d399;
+      --free-bg: rgba(52, 211, 153, 0.07);
+      --free-border: rgba(52, 211, 153, 0.2);
+
+      --claude: #a78bfa;
+      --claude-bg: rgba(167, 139, 250, 0.08);
+      --claude-border: rgba(167, 139, 250, 0.2);
+
+      --field: #38bdf8;
+      --field-bg: rgba(56, 189, 248, 0.07);
+      --field-border: rgba(56, 189, 248, 0.2);
+
+      --arrow-color: #403a30;
+      --surface: #1c1915;
+      --shadow: 0 1px 3px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.15);
+      --shadow-elevated: 0 2px 8px rgba(0,0,0,0.25), 0 8px 24px rgba(0,0,0,0.2);
+    }
+  }
+
+  /* ── Base ───────────────────────────────────────────────── */
+  html {
+    font-size: 16px;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.7;
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(180, 83, 9, 0.04) 0%, transparent 55%),
+      radial-gradient(ellipse at 80% 0%, rgba(124, 58, 237, 0.03) 0%, transparent 55%),
+      radial-gradient(ellipse at 50% 100%, rgba(5, 150, 105, 0.02) 0%, transparent 50%);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body {
+      background-image:
+        radial-gradient(ellipse at 20% 0%, rgba(245, 158, 11, 0.05) 0%, transparent 55%),
+        radial-gradient(ellipse at 80% 0%, rgba(167, 139, 250, 0.04) 0%, transparent 55%),
+        radial-gradient(ellipse at 50% 100%, rgba(52, 211, 153, 0.02) 0%, transparent 50%);
+    }
+  }
+
+  /* ── Animations ────────────────────────────────────────── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(18px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-delay: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  .animate {
+    animation: fadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 0.08s);
+  }
+
+  /* ── Layout ────────────────────────────────────────────── */
+  .container {
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 3rem 1.5rem 5rem;
+  }
+
+  /* ── Back nav ──────────────────────────────────────────── */
+  .back-nav { position: fixed; top: 16px; left: 16px; z-index: 300; }
+  .back-nav a { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--text-dim); text-decoration: none; background: var(--surface, #fff); border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px 7px 10px; transition: color 0.2s, border-color 0.2s, box-shadow 0.2s; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .back-nav a:hover { color: var(--text); border-color: var(--border-bright); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .back-nav svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ── Hero ───────────────────────────────────────────────── */
+  .hero {
+    text-align: center;
+    margin-bottom: 3.5rem;
+    padding: 2.5rem 2rem 2rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 14px;
+    box-shadow: var(--shadow-elevated);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--free), var(--primary), var(--claude));
+  }
+
+  .hero h1 {
+    font-family: var(--font-body);
+    font-size: clamp(2rem, 5vw, 2.6rem);
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+  }
+
+  .hero .subtitle {
+    font-size: 0.88rem;
+    line-height: 1.7;
+    color: var(--text-secondary);
+    max-width: 540px;
+    margin: 0 auto 1.25rem;
+    font-weight: 400;
+  }
+
+  .hero .version-badge {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--primary);
+    background: var(--primary-bg);
+    border: 1px solid var(--primary-border);
+    padding: 0.3rem 0.85rem;
+    border-radius: 6px;
+    display: inline-block;
+  }
+
+  /* ── Section scaffolding ───────────────────────────────── */
+  section { margin-bottom: 3.5rem; }
+
+  .section-tag {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .section-tag::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+    flex-shrink: 0;
+  }
+
+  .section-heading {
+    font-family: var(--font-body);
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.3rem;
+    letter-spacing: -0.02em;
+  }
+
+  .section-subheading {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-bottom: 2rem;
+    line-height: 1.6;
+  }
+
+  /* ── Flow Diagram ──────────────────────────────────────── */
+  .flow-diagram {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  .flow-node {
+    width: 100%;
+    max-width: 620px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    padding: 1rem 1.5rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    box-shadow: var(--shadow);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    position: relative;
+  }
+
+  .flow-node:hover {
+    border-color: var(--border-bright);
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .flow-node-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+  }
+
+  .flow-node-icon svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .flow-node-icon.free { background: var(--free-bg); border: 1px solid var(--free-border); }
+  .flow-node-icon.free svg { stroke: var(--free); }
+  .flow-node-icon.claude { background: var(--claude-bg); border: 1px solid var(--claude-border); }
+  .flow-node-icon.claude svg { stroke: var(--claude); }
+  .flow-node-icon.input { background: var(--primary-bg); border: 1px solid var(--primary-border); }
+  .flow-node-icon.input svg { stroke: var(--primary); }
+  .flow-node-icon.output { background: var(--field-bg); border: 1px solid var(--field-border); }
+  .flow-node-icon.output svg { stroke: var(--field); }
+
+  .flow-node-content { flex: 1; min-width: 0; }
+
+  .flow-node-title {
+    font-family: var(--font-body);
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 0.15rem;
+  }
+
+  .flow-node-desc {
+    font-size: 0.76rem;
+    color: var(--text-secondary);
+    line-height: 1.55;
+  }
+
+  .flow-node-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+  }
+
+  .field-tag {
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    font-weight: 500;
+    padding: 0.15rem 0.55rem;
+    border-radius: 4px;
+    display: inline-block;
+  }
+
+  .field-tag.free { color: var(--free); background: var(--free-bg); border: 1px solid var(--free-border); }
+  .field-tag.claude { color: var(--claude); background: var(--claude-bg); border: 1px solid var(--claude-border); }
+  .field-tag.both { color: var(--primary); background: var(--primary-bg); border: 1px solid var(--primary-border); }
+
+  .flow-arrow {
+    display: flex;
+    justify-content: center;
+    padding: 0.15rem 0;
+    flex-shrink: 0;
+  }
+
+  /* ── Reduction Banner ──────────────────────────────────── */
+  .reduction-banner {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 14px;
+    padding: 1.75rem 2rem;
+    box-shadow: var(--shadow);
+    text-align: center;
+    max-width: 620px;
+    margin: 0 auto;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .reduction-banner::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--free), var(--primary));
+  }
+
+  .reduction-flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+  }
+
+  .reduction-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0 0.75rem;
+  }
+
+  .reduction-number {
+    font-family: var(--font-mono);
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .reduction-number.amber { color: var(--primary); }
+  .reduction-number.green { color: var(--free); }
+  .reduction-number.purple { color: var(--claude); }
+
+  .reduction-label {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .reduction-chevron {
+    color: var(--arrow-color);
+    display: flex;
+    align-items: center;
+    padding: 0 0.25rem;
+  }
+
+  .reduction-chevron svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .reduction-note {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  /* ── Two-column tables ─────────────────────────────────── */
+  .table-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+  }
+
+  .table-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.25s ease, transform 0.25s ease;
+    position: relative;
+  }
+
+  .table-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--card-accent);
+  }
+
+  .table-card:hover {
+    box-shadow: var(--shadow-elevated);
+    transform: translateY(-2px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .table-card:hover { transform: none; }
+  }
+
+  .table-card-header {
+    padding: 1rem 1.25rem 0.75rem;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .table-card-header h3 {
+    font-family: var(--font-body);
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+
+  .table-card-header .table-file {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+  }
+
+  .field-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .field-table th {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    text-align: left;
+    padding: 0.6rem 1rem;
+    background: var(--bg-recessed);
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .field-table td {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--border-light);
+    line-height: 1.5;
+  }
+
+  .field-table tr:last-child td {
+    border-bottom: none;
+  }
+
+  .field-table td:first-child {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .field-table .source-free { color: var(--free); font-weight: 500; }
+  .field-table .source-claude { color: var(--claude); font-weight: 500; }
+  .field-table .source-both { color: var(--primary); font-weight: 500; }
+
+  /* ── Component Cards ───────────────────────────────────── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+
+  .component-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.25s ease, transform 0.25s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .component-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--card-accent);
+  }
+
+  .component-card:hover {
+    box-shadow: var(--shadow-elevated);
+    transform: translateY(-2px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .component-card:hover { transform: none; }
+  }
+
+  .component-card .card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.85rem;
+  }
+
+  .component-card .card-icon svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke-width: 1.5;
+  }
+
+  .component-card h3 {
+    font-family: var(--font-body);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.35rem;
+    letter-spacing: -0.01em;
+  }
+
+  .component-card .card-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  /* ── Code Block ────────────────────────────────────────── */
+  .code-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+
+  .code-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.7rem 1.25rem;
+    background: var(--bg-recessed);
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .code-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    opacity: 0.4;
+  }
+
+  .code-title {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-left: 0.25rem;
+  }
+
+  .code-body {
+    padding: 1.25rem 1.5rem;
+  }
+
+  .code-body pre {
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    line-height: 2;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  .code-body .cmd { color: var(--primary); font-weight: 600; }
+  .code-body .flag { color: var(--claude); }
+  .code-body .comment { color: var(--text-muted); }
+
+  /* ── Callout ───────────────────────────────────────────── */
+  .callout {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.5rem;
+    box-shadow: var(--shadow);
+    max-width: 680px;
+    margin: 0 auto;
+  }
+
+  .callout p {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.75;
+  }
+
+  .callout strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .callout code {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--primary);
+    background: var(--primary-bg);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+  }
+
+  /* ── Footer ────────────────────────────────────────────── */
+  footer {
+    text-align: center;
+    padding: 2rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+  }
+
+  /* ── Responsive ────────────────────────────────────────── */
+  @media (max-width: 768px) {
+    .container { padding: 2rem 1rem 3rem; }
+    .hero { padding: 1.75rem 1.25rem 1.5rem; }
+    .hero h1 { font-size: 1.8rem; }
+    .card-grid { grid-template-columns: 1fr; }
+    .table-pair { grid-template-columns: 1fr; }
+    .reduction-flow { gap: 0.25rem; }
+    .reduction-step { padding: 0 0.4rem; }
+    .reduction-number { font-size: 1.3rem; }
+  }
+
+  @media (max-width: 480px) {
+    .hero h1 { font-size: 1.5rem; }
+    .flow-node { padding: 0.85rem 1rem; gap: 0.75rem; }
+    .flow-node-icon { width: 34px; height: 34px; }
+    .flow-node-icon svg { width: 16px; height: 16px; }
+    .section-heading { font-size: 1.25rem; }
+    .reduction-flow { flex-direction: column; gap: 0; }
+    .reduction-chevron { transform: rotate(90deg); padding: 0.2rem 0; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="back-nav"><a href="../index.html"><svg viewBox="0 0 16 16"><path d="M10 12L6 8l4-4"/></svg>Storyforge</a></nav>
+
+<div class="container">
+
+  <!-- ── Hero ──────────────────────────────────────────── -->
+  <section class="hero animate" style="--i: 0">
+    <h1>Metadata Enrichment</h1>
+    <p class="subtitle">From manuscript to structured data &mdash; free heuristics first, Claude for the rest</p>
+    <span class="version-badge">storyforge enrich</span>
+  </section>
+
+  <!-- ── Section 1: Two-Phase Architecture ────────────── -->
+  <section>
+    <div class="animate" style="--i: 1">
+      <div class="section-tag">Architecture</div>
+      <h2 class="section-heading">Two-Phase Enrichment</h2>
+      <p class="section-subheading">Extract what you can for free, then call Claude only for the gaps.</p>
+    </div>
+
+    <div class="flow-diagram">
+
+      <!-- Input -->
+      <div class="flow-node animate" style="--i: 2">
+        <div class="flow-node-icon input">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+            <polyline points="14,2 14,8 20,8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+        </div>
+        <div class="flow-node-content">
+          <div class="flow-node-title">Manuscript Scenes</div>
+          <div class="flow-node-desc">Raw scene files from <code>scenes/</code> and the scene index YAML. Each scene may be missing some or all enrichment fields.</div>
+        </div>
+      </div>
+
+      <div class="flow-arrow animate" style="--i: 3">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <line x1="12" y1="2" x2="12" y2="18" stroke="var(--arrow-color)" stroke-width="1.5"/>
+          <polyline points="8,15 12,20 16,15" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <!-- Phase 1 -->
+      <div class="flow-node animate" style="--i: 4; border-left: 3px solid var(--free);">
+        <div class="flow-node-icon free">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <div class="flow-node-content">
+          <div class="flow-node-title">Phase 1: Free (No API Cost)</div>
+          <div class="flow-node-desc">
+            Pure shell heuristics that run instantly with zero API calls.
+            Word count via <code>wc -w</code>.
+            Time of day inferred by grepping for keywords like "morning", "2:47 AM", "midnight".
+            Threads recovered from scene-index.yaml (<code>threads_planted</code> / <code>threads_advanced</code> / <code>threads_resolved</code> merged into a single threads field).
+          </div>
+          <div class="flow-node-fields">
+            <span class="field-tag free">word_count</span>
+            <span class="field-tag free">time_of_day</span>
+            <span class="field-tag free">threads</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-arrow animate" style="--i: 5">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <line x1="12" y1="2" x2="12" y2="18" stroke="var(--arrow-color)" stroke-width="1.5"/>
+          <polyline points="8,15 12,20 16,15" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <!-- Phase 2 -->
+      <div class="flow-node animate" style="--i: 6; border-left: 3px solid var(--claude);">
+        <div class="flow-node-icon claude">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+          </svg>
+        </div>
+        <div class="flow-node-content">
+          <div class="flow-node-title">Phase 2: Claude (Targeted)</div>
+          <div class="flow-node-desc">
+            Only runs for scenes still missing data after Phase 1.
+            Builds a per-scene prompt asking only for the missing fields &mdash; not all seven.
+            Runs parallel workers (default 6) for speed.
+          </div>
+          <div class="flow-node-fields">
+            <span class="field-tag claude">type</span>
+            <span class="field-tag claude">characters</span>
+            <span class="field-tag claude">emotional_arc</span>
+            <span class="field-tag claude">motifs</span>
+            <span class="field-tag claude">timeline_day</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-arrow animate" style="--i: 7">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <line x1="12" y1="2" x2="12" y2="18" stroke="var(--arrow-color)" stroke-width="1.5"/>
+          <polyline points="8,15 12,20 16,15" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <!-- Output -->
+      <div class="flow-node animate" style="--i: 8">
+        <div class="flow-node-icon output">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+            <polyline points="22,4 12,14.01 9,11.01"/>
+          </svg>
+        </div>
+        <div class="flow-node-content">
+          <div class="flow-node-title">Enriched Data</div>
+          <div class="flow-node-desc">Structured metadata written to <code>metadata.csv</code> and <code>intent.csv</code>, ready for evaluation, assembly, and visualization.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Section 2: Reduction Banner ─────────────────── -->
+  <section>
+    <div class="reduction-banner animate" style="--i: 9">
+      <div class="reduction-flow">
+        <div class="reduction-step">
+          <span class="reduction-number amber">102</span>
+          <span class="reduction-label">Scenes</span>
+        </div>
+        <div class="reduction-chevron">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>
+        </div>
+        <div class="reduction-step">
+          <span class="reduction-number green">40</span>
+          <span class="reduction-label">Fields free</span>
+        </div>
+        <div class="reduction-chevron">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>
+        </div>
+        <div class="reduction-step">
+          <span class="reduction-number purple">62</span>
+          <span class="reduction-label">Need Claude</span>
+        </div>
+      </div>
+      <p class="reduction-note">Phase 1 fills what it can at zero cost. Phase 2 only sends scenes that still have gaps &mdash; and only asks for the missing fields.</p>
+    </div>
+  </section>
+
+  <!-- ── Section 3: What Gets Enriched ───────────────── -->
+  <section>
+    <div class="animate" style="--i: 10">
+      <div class="section-tag">Fields</div>
+      <h2 class="section-heading">What Gets Enriched</h2>
+      <p class="section-subheading">Eight fields across two CSV files, each sourced by the cheapest method available.</p>
+    </div>
+
+    <div class="table-pair">
+
+      <div class="table-card animate" style="--card-accent: var(--primary); --i: 11">
+        <div class="table-card-header">
+          <h3>Metadata Fields</h3>
+          <div class="table-file">metadata.csv</div>
+        </div>
+        <table class="field-table">
+          <thead>
+            <tr><th>Field</th><th>Source</th><th>Method</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>word_count</td>
+              <td class="source-free">File</td>
+              <td><code>wc -w</code></td>
+            </tr>
+            <tr>
+              <td>time_of_day</td>
+              <td class="source-both">Keywords / Claude</td>
+              <td>Grep first, Claude fallback</td>
+            </tr>
+            <tr>
+              <td>type</td>
+              <td class="source-claude">Claude</td>
+              <td>Scene purpose analysis</td>
+            </tr>
+            <tr>
+              <td>timeline_day</td>
+              <td class="source-claude">Claude</td>
+              <td>Temporal context analysis</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-card animate" style="--card-accent: var(--claude); --i: 12">
+        <div class="table-card-header">
+          <h3>Intent Fields</h3>
+          <div class="table-file">intent.csv</div>
+        </div>
+        <table class="field-table">
+          <thead>
+            <tr><th>Field</th><th>Source</th><th>Method</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>threads</td>
+              <td class="source-both">YAML / Claude</td>
+              <td>Recover from scene-index.yaml first</td>
+            </tr>
+            <tr>
+              <td>characters</td>
+              <td class="source-claude">Claude</td>
+              <td>Name extraction from prose</td>
+            </tr>
+            <tr>
+              <td>emotional_arc</td>
+              <td class="source-claude">Claude</td>
+              <td>Emotional shift analysis</td>
+            </tr>
+            <tr>
+              <td>motifs</td>
+              <td class="source-claude">Claude</td>
+              <td>Symbol/image identification</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Section 4: Cost Efficiency ──────────────────── -->
+  <section>
+    <div class="animate" style="--i: 13">
+      <div class="section-tag">Efficiency</div>
+      <h2 class="section-heading">Cost Efficiency</h2>
+      <p class="section-subheading">Every design choice minimizes API spend without sacrificing completeness.</p>
+    </div>
+
+    <div class="card-grid">
+
+      <div class="component-card animate" style="--card-accent: var(--free); --i: 14">
+        <div class="card-icon" style="background: var(--free-bg); border: 1px solid var(--free-border);">
+          <svg viewBox="0 0 24 24" stroke="var(--free)" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="1" x2="12" y2="23"/>
+            <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
+          </svg>
+        </div>
+        <h3>Phase 1 Is Free</h3>
+        <p class="card-desc">Word counts, time-of-day keywords, and thread recovery all use shell commands with zero API calls. For many fields this is all you need.</p>
+      </div>
+
+      <div class="component-card animate" style="--card-accent: var(--claude); --i: 15">
+        <div class="card-icon" style="background: var(--claude-bg); border: 1px solid var(--claude-border);">
+          <svg viewBox="0 0 24 24" stroke="var(--claude)" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/>
+          </svg>
+        </div>
+        <h3>Targeted Prompts</h3>
+        <p class="card-desc">Phase 2 only sends scenes that still have gaps. Each prompt asks only for the missing fields, not all seven &mdash; smaller prompts, lower cost.</p>
+      </div>
+
+      <div class="component-card animate" style="--card-accent: var(--primary); --i: 16">
+        <div class="card-icon" style="background: var(--primary-bg); border: 1px solid var(--primary-border);">
+          <svg viewBox="0 0 24 24" stroke="var(--primary)" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+            <path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/>
+          </svg>
+        </div>
+        <h3>Parallel Workers</h3>
+        <p class="card-desc">Default 6 parallel workers process scenes concurrently. Same total cost, but finishes much faster for large manuscripts.</p>
+      </div>
+
+      <div class="component-card animate" style="--card-accent: var(--field); --i: 17">
+        <div class="card-icon" style="background: var(--field-bg); border: 1px solid var(--field-border);">
+          <svg viewBox="0 0 24 24" stroke="var(--field)" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+            <polyline points="14,2 14,8 20,8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+        </div>
+        <h3>Cost Ledger</h3>
+        <p class="card-desc">Every API call is tracked in <code style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--field); background: var(--field-bg); padding: 0.1rem 0.35rem; border-radius: 3px;">working/costs/ledger.csv</code> so you always know what enrichment costs.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Section 5: Usage ────────────────────────────── -->
+  <section>
+    <div class="animate" style="--i: 18">
+      <div class="section-tag">Usage</div>
+      <h2 class="section-heading">Commands</h2>
+      <p class="section-subheading">Run enrichment from the project root with flexible targeting.</p>
+    </div>
+
+    <div class="code-section animate" style="--i: 19">
+      <div class="code-header">
+        <div class="code-dot"></div>
+        <div class="code-dot"></div>
+        <div class="code-dot"></div>
+        <span class="code-title">terminal</span>
+      </div>
+      <div class="code-body">
+        <pre><span class="cmd">./storyforge enrich</span>                    <span class="comment"># All scenes, all fields</span>
+<span class="cmd">./storyforge enrich</span> <span class="flag">--fields</span> type,characters  <span class="comment"># Specific fields only</span>
+<span class="cmd">./storyforge enrich</span> <span class="flag">--act</span> 2            <span class="comment"># One act only</span>
+<span class="cmd">./storyforge enrich</span> <span class="flag">--dry-run</span>          <span class="comment"># Preview what would happen</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Callout ─────────────────────────────────────── -->
+  <section>
+    <div class="callout animate" style="--i: 20">
+      <p>
+        Enrichment is <strong>idempotent</strong> &mdash; running it again skips fields that already have data.
+        Use <code>--fields</code> to target specific columns, or <code>--act</code> to limit scope.
+        Phase 1 always runs first so you never pay for data you could get for free.
+      </p>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div>Storyforge &middot; Metadata Enrichment</div>
+</footer>
+
+<script>
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('animate');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -30px 0px' });
+
+  document.querySelectorAll('.animate').forEach(el => {
+    el.style.opacity = '0';
+    el.classList.remove('animate');
+    observer.observe(el);
+  });
+</script>
+
+</body>
+</html>
