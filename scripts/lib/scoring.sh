@@ -479,3 +479,196 @@ check_validated_patterns() {
         }
     ' "$tuning_file"
 }
+
+# submit_plugin_insight(principle, lever, change, avg_improvement, project_title, evidence_lines)
+# Creates a GitHub issue on benjaminsnorris/storyforge with structured insight data
+submit_plugin_insight() {
+    local principle="$1" lever="$2" change="$3" avg_improvement="$4"
+    local project_title="$5" evidence="$6"
+
+    # Check STORYFORGE_AUTO_ISSUES (default: true)
+    local auto_issues
+    auto_issues=$(read_yaml_field "auto_issues" 2>/dev/null || echo "true")
+    [[ "${STORYFORGE_AUTO_ISSUES:-$auto_issues}" == "false" ]] && return 0
+
+    # Check gh CLI available
+    has_gh || { log "WARNING: gh not available, skipping plugin insight"; return 0; }
+
+    local section
+    section=$(get_csv_field "$WEIGHTS_FILE" "$principle" "section" "principle" 2>/dev/null || echo "unknown")
+
+    local body="## Plugin Insight: ${section} — ${principle}
+
+**Source project:** ${project_title}
+**Average improvement:** ${avg_improvement}
+
+### Change
+${change}
+
+### Evidence
+${evidence}
+
+### Recommendation
+Update \`references/default-craft-weights.csv\` based on this validated pattern."
+
+    gh issue create \
+        --repo benjaminsnorris/storyforge \
+        --title "Plugin Insight: ${principle} — ${lever}" \
+        --body "$body" \
+        --label "plugin-insight" \
+        2>/dev/null || log "WARNING: Failed to create plugin insight issue"
+}
+
+# record_author_score(project_dir, scene_id, principle, score)
+# Write to scenes/author-scores.csv
+record_author_score() {
+    local project_dir="$1" scene_id="$2" principle="$3" score="$4"
+    local author_file="${project_dir}/scenes/author-scores.csv"
+
+    # Create file with header if missing
+    if [[ ! -f "$author_file" ]]; then
+        # Copy header from scene-scores.csv if available
+        local scores_dir="${project_dir}/working/scores/latest"
+        if [[ -f "${scores_dir}/scene-scores.csv" ]]; then
+            head -1 "${scores_dir}/scene-scores.csv" > "$author_file"
+        else
+            echo "id|${principle}" > "$author_file"
+        fi
+    fi
+
+    # Check if principle column exists in header
+    local header
+    header=$(head -1 "$author_file")
+    if ! echo "$header" | grep -q "|${principle}\(|\|$\)"; then
+        # Add column to header
+        sed -i '' "1s/$/$|${principle}/" "$author_file"
+    fi
+
+    # Update or add row for this scene+principle
+    if grep -q "^${scene_id}|" "$author_file"; then
+        # Row exists — update the specific column
+        update_csv_field "$author_file" "$scene_id" "$principle" "$score"
+    else
+        # New row — build with empty columns, then set the value
+        local col_count
+        col_count=$(head -1 "$author_file" | awk -F'|' '{ print NF }')
+        local new_row="${scene_id}"
+        local i=2
+        while (( i <= col_count )); do
+            new_row="${new_row}|"
+            i=$((i + 1))
+        done
+        echo "$new_row" >> "$author_file"
+        update_csv_field "$author_file" "$scene_id" "$principle" "$score"
+    fi
+}
+
+# compute_author_deltas(project_dir, scores_dir)
+# Compare system scores to author scores, return systematic biases
+compute_author_deltas() {
+    local project_dir="$1" scores_dir="$2"
+    local author_file="${project_dir}/scenes/author-scores.csv"
+    local system_file="${scores_dir}/scene-scores.csv"
+    [[ -f "$author_file" && -f "$system_file" ]] || return 0
+
+    # For each cell where both system and author have a value,
+    # compute delta (system - author), output principle|avg_delta
+    awk -F'|' '
+        # Read author file (first file)
+        FNR == NR && FNR == 1 {
+            for (i = 2; i <= NF; i++) author_cols[i] = $i
+            author_ncols = NF
+            next
+        }
+        FNR == NR {
+            for (i = 2; i <= NF; i++) {
+                if ($i != "") author_data[$1, author_cols[i]] = $i + 0
+            }
+            next
+        }
+        # Read system file (second file)
+        FNR == 1 {
+            for (i = 2; i <= NF; i++) system_cols[i] = $i
+            system_ncols = NF
+            next
+        }
+        {
+            for (i = 2; i <= NF; i++) {
+                if ($i != "") system_data[$1, system_cols[i]] = $i + 0
+            }
+        }
+        END {
+            # Find matching cells and compute deltas
+            for (key in author_data) {
+                if (key in system_data) {
+                    split(key, parts, SUBSEP)
+                    principle = parts[2]
+                    delta = system_data[key] - author_data[key]
+                    delta_sum[principle] += delta
+                    delta_count[principle]++
+                }
+            }
+            for (p in delta_count) {
+                if (delta_count[p] > 0) {
+                    avg = delta_sum[p] / delta_count[p]
+                    printf "%s|%.1f\n", p, avg
+                }
+            }
+        }
+    ' "$author_file" "$system_file"
+}
+
+# collect_exemplars(scores_dir, project_dir, cycle)
+# For scenes scoring 9+ on any principle, extract a passage for the exemplar bank
+collect_exemplars() {
+    local scores_dir="$1" project_dir="$2" cycle="$3"
+    local exemplars_file="${project_dir}/working/exemplars.csv"
+    local scores_file="${scores_dir}/scene-scores.csv"
+    [[ -f "$scores_file" ]] || return 0
+
+    if [[ ! -f "$exemplars_file" ]]; then
+        mkdir -p "$(dirname "$exemplars_file")"
+        echo "principle|scene_id|score|excerpt|cycle" > "$exemplars_file"
+    fi
+
+    local rationale_file="${scores_dir}/scene-rationale.csv"
+
+    # Find cells with score >= 9
+    local header
+    header=$(head -1 "$scores_file")
+    local col_count
+    col_count=$(echo "$header" | awk -F'|' '{ print NF }')
+
+    local col=2
+    while (( col <= col_count )); do
+        local principle
+        principle=$(echo "$header" | awk -F'|' -v c="$col" '{ print $c }')
+        [[ -z "$principle" ]] && { col=$((col + 1)); continue; }
+
+        # Find rows with score >= 9 in this column
+        awk -F'|' -v c="$col" -v p="$principle" '
+            NR == 1 { next }
+            $c + 0 >= 9 { print $1 "|" p "|" $c }
+        ' "$scores_file" | while IFS='|' read -r scene_id prin score_val; do
+            [[ -z "$scene_id" ]] && continue
+
+            # Check if already present for this scene+principle
+            if grep -q "^${prin}|${scene_id}|" "$exemplars_file" 2>/dev/null; then
+                continue
+            fi
+
+            # Get rationale as excerpt
+            local excerpt=""
+            if [[ -f "$rationale_file" ]]; then
+                excerpt=$(get_csv_field "$rationale_file" "$scene_id" "$prin" 2>/dev/null || true)
+            fi
+            excerpt="${excerpt:-high-scoring passage}"
+            # Escape pipes in excerpt
+            excerpt=$(echo "$excerpt" | tr '|' '-')
+
+            echo "${prin}|${scene_id}|${score_val}|${excerpt}|${cycle}" >> "$exemplars_file"
+        done
+
+        col=$((col + 1))
+    done
+}

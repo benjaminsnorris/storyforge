@@ -1028,12 +1028,28 @@ else
     log "No proposals generated"
 fi
 
+# Collect exemplars from high-scoring scenes
+collect_exemplars "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE"
+
 # Check for validated patterns from tuning history
 validated=$(check_validated_patterns "$PROJECT_DIR")
 if [[ -n "$validated" ]]; then
     log "Validated tuning patterns found:"
+    project_title=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
     echo "$validated" | while IFS='|' read -r vp vl vi; do
         log "  ${vp} (${vl}): avg improvement ${vi}"
+        # Build evidence from tuning ledger
+        evidence=""
+        if [[ -f "${PROJECT_DIR}/working/tuning.csv" ]]; then
+            evidence=$(awk -F'|' -v p="$vp" -v l="$vl" '
+                NR == 1 { next }
+                $3 == p && $4 == l && $8 == "true" {
+                    printf "- Cycle %s: %s (before: %s, after: %s)\n", $1, $5, $6, $7
+                }
+            ' "${PROJECT_DIR}/working/tuning.csv")
+        fi
+        # Submit plugin insight
+        submit_plugin_insight "$vp" "$vl" "Validated pattern across 3+ cycles" "$vi" "$project_title" "$evidence"
     done
 fi
 
@@ -1051,6 +1067,7 @@ log "Committing scoring results..."
     git add "working/logs/" 2>/dev/null || true
     git add "working/tuning.csv" 2>/dev/null || true
     git add "working/overrides.csv" 2>/dev/null || true
+    git add "working/exemplars.csv" 2>/dev/null || true
     git commit -m "Score: cycle ${CYCLE}, ${SCENE_COUNT} scenes (${SCORE_MODE} mode)" 2>/dev/null || true
     git push 2>/dev/null || true
 )
