@@ -41,6 +41,7 @@ SCORE_MODE="grouped"   # grouped | quick | deep
 FILTER_MODE="all"
 FILTER_SCENES=""        # Comma-separated scene IDs
 FILTER_ACT=""
+PARALLEL=${STORYFORGE_SCORE_PARALLEL:-6}
 
 # --- Argument parsing ---
 usage() {
@@ -59,6 +60,7 @@ Scope:
   --act N           Score scenes in act N only
 
 Options:
+  --parallel N      Score N scenes concurrently (default: 6, env: STORYFORGE_SCORE_PARALLEL)
   --interactive, -i Enable interactive mode
   --dry-run         Show what would be scored without invoking Claude
   -h, --help        Show this help
@@ -99,6 +101,10 @@ while [[ $# -gt 0 ]]; do
         --act)
             FILTER_MODE="act"
             FILTER_ACT="${2:?ERROR: --act requires an act number}"
+            shift 2
+            ;;
+        --parallel)
+            PARALLEL="${2:?ERROR: --parallel requires a number}"
             shift 2
             ;;
         -*)
@@ -495,6 +501,7 @@ if [[ "$DRY_RUN" == true ]]; then
     log "============================================"
     log "Mode:     ${SCORE_MODE}"
     log "Scenes:   ${SCENE_COUNT}"
+    log "Parallel: ${PARALLEL}"
     log "Cycle:    ${CYCLE}"
     log "Model:    ${MODEL}"
     log "Estimate: ~\$${SCENE_COST}"
@@ -544,38 +551,93 @@ case "$SCORE_MODE" in
 
 # --- GROUPED MODE ---
 grouped)
-    for id in "${SCENE_IDS[@]}"; do
-        SCORED=$((SCORED + 1))
-        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+    log "Parallel workers: ${PARALLEL}"
 
-        for group in "${SCORING_GROUPS[@]}"; do
-    template_file="${PROMPTS_DIR}/${group}.md"
-            if [[ ! -f "$template_file" ]]; then
-                log "WARNING: Template not found: ${template_file}, skipping group ${group}"
-                continue
-            fi
+    batch_start=0
+    while (( batch_start < SCENE_COUNT )); do
+        batch_pids=()
+        batch_ids=()
+        batch_end=$(( batch_start + PARALLEL ))
+        (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
 
-            template=$(cat "$template_file")
+        # Launch batch — each worker scores all 4 groups for one scene
+        for (( i=batch_start; i<batch_end; i++ )); do
+            id="${SCENE_IDS[$i]}"
+            batch_ids+=("$id")
+            local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            log "  Launching grouped score for ${local_title:-$id} ($((i+1))/${SCENE_COUNT})..."
 
-            prompt=$(substitute_prompt "$template" "$id")
+            (
+                # Worker subshell — runs all scoring groups for one scene
+                group_failed=0
+                for group in "${SCORING_GROUPS[@]}"; do
+                    template_file="${PROMPTS_DIR}/${group}.md"
+                    [[ ! -f "$template_file" ]] && continue
 
-    log_file="${LOG_DIR}/score-${id}-${group}.log"
-    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${group}.csv"
-    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${group}.csv"
+                    template=$(cat "$template_file")
+                    prompt=$(substitute_prompt "$template" "$id")
+                    log_file="${LOG_DIR}/score-${id}-${group}.log"
+                    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${group}.csv"
+                    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${group}.csv"
 
-            log "Scoring ${group} for ${id} (${SCORED}/${SCENE_COUNT})..."
+                    if ! invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
+                        group_failed=$((group_failed + 1))
+                    fi
+                done
 
-            if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
-                # Merge into cumulative scene CSVs
-                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
-                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
-                rm -f "$tmp_scores" "$tmp_rationale"
-                log "  Scored ${group} for ${local_title:-$id} (${SCORED}/${SCENE_COUNT})"
+                # Merge all groups for this scene into per-scene combined files
+                combined_scores="${CYCLE_DIR}/.combined-scores-${id}.csv"
+                combined_rationale="${CYCLE_DIR}/.combined-rationale-${id}.csv"
+                for group in "${SCORING_GROUPS[@]}"; do
+                    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${group}.csv"
+                    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${group}.csv"
+                    if [[ -f "$tmp_scores" ]]; then
+                        merge_score_files "$combined_scores" "$tmp_scores"
+                        rm -f "$tmp_scores"
+                    fi
+                    if [[ -f "$tmp_rationale" ]]; then
+                        merge_score_files "$combined_rationale" "$tmp_rationale"
+                        rm -f "$tmp_rationale"
+                    fi
+                done
+
+                # Write status
+                if (( group_failed == 0 )); then
+                    echo "ok" > "${CYCLE_DIR}/.status-${id}"
+                else
+                    echo "fail" > "${CYCLE_DIR}/.status-${id}"
+                fi
+            ) &
+            batch_pids+=($!)
+            register_child_pid $!
+        done
+
+        # Wait for batch
+        for pid in "${batch_pids[@]}"; do
+            wait "$pid" 2>/dev/null || true
+            unregister_child_pid "$pid" 2>/dev/null || true
+        done
+
+        # Merge batch results into cumulative files
+        for id in "${batch_ids[@]}"; do
+            SCORED=$((SCORED + 1))
+            local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            status_file="${CYCLE_DIR}/.status-${id}"
+            combined_scores="${CYCLE_DIR}/.combined-scores-${id}.csv"
+            combined_rationale="${CYCLE_DIR}/.combined-rationale-${id}.csv"
+
+            if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]]; then
+                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$combined_scores"
+                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$combined_rationale"
+                log "  Scored ${local_title:-$id} (${SCORED}/${SCENE_COUNT})"
             else
                 FAILED=$((FAILED + 1))
-                log "  WARNING: Failed to parse ${group} scores for ${id}"
+                log "  WARNING: Failed to score ${id}"
             fi
+            rm -f "$combined_scores" "$combined_rationale" "$status_file"
         done
+
+        batch_start=$batch_end
     done
     ;;
 
@@ -588,27 +650,67 @@ quick)
     fi
     template=$(cat "$template_file")
 
-    for id in "${SCENE_IDS[@]}"; do
-        SCORED=$((SCORED + 1))
-        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+    log "Parallel workers: ${PARALLEL}"
 
-        prompt=$(substitute_prompt "$template" "$id")
+    # Process scenes in batches of $PARALLEL
+    batch_start=0
+    while (( batch_start < SCENE_COUNT )); do
+        batch_pids=()
+        batch_ids=()
+        batch_end=$(( batch_start + PARALLEL ))
+        (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
 
-    log_file="${LOG_DIR}/score-${id}-quick.log"
-    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-quick.csv"
-    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-quick.csv"
+        # Launch batch
+        for (( i=batch_start; i<batch_end; i++ )); do
+            id="${SCENE_IDS[$i]}"
+            batch_ids+=("$id")
+            local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            log "  Launching score for ${local_title:-$id} ($((i+1))/${SCENE_COUNT})..."
 
-        log "Scoring all principles for ${id} (${SCORED}/${SCENE_COUNT})..."
+            (
+                # Worker subshell — scores one scene, writes status file
+                prompt=$(substitute_prompt "$template" "$id")
+                log_file="${LOG_DIR}/score-${id}-quick.log"
+                tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-quick.csv"
+                tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-quick.csv"
+                status_file="${CYCLE_DIR}/.status-${id}"
 
-        if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
-            merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
-            merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
-            rm -f "$tmp_scores" "$tmp_rationale"
-            log "  Scored ${local_title:-$id} (${SCORED}/${SCENE_COUNT})"
-        else
-            FAILED=$((FAILED + 1))
-            log "  WARNING: Failed to parse scores for ${id}"
-        fi
+                if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
+                    echo "ok" > "$status_file"
+                else
+                    echo "fail" > "$status_file"
+                fi
+            ) &
+            batch_pids+=($!)
+            register_child_pid $!
+        done
+
+        # Wait for batch to complete
+        for pid in "${batch_pids[@]}"; do
+            wait "$pid" 2>/dev/null || true
+            unregister_child_pid "$pid" 2>/dev/null || true
+        done
+
+        # Merge results from batch
+        for id in "${batch_ids[@]}"; do
+            SCORED=$((SCORED + 1))
+            local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            status_file="${CYCLE_DIR}/.status-${id}"
+            tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-quick.csv"
+            tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-quick.csv"
+
+            if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]]; then
+                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
+                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
+                log "  Scored ${local_title:-$id} (${SCORED}/${SCENE_COUNT})"
+            else
+                FAILED=$((FAILED + 1))
+                log "  WARNING: Failed to parse scores for ${id}"
+            fi
+            rm -f "$tmp_scores" "$tmp_rationale" "$status_file"
+        done
+
+        batch_start=$batch_end
     done
     ;;
 
@@ -628,45 +730,53 @@ deep)
 
     PRINCIPLE_COUNT=${#DEEP_PRINCIPLES[@]}
     log "Deep mode: ${PRINCIPLE_COUNT} principles x ${SCENE_COUNT} scenes"
+    log "Parallel workers: ${PARALLEL}"
 
-    for id in "${SCENE_IDS[@]}"; do
-        SCORED=$((SCORED + 1))
-        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+    batch_start=0
+    while (( batch_start < SCENE_COUNT )); do
+        batch_pids=()
+        batch_ids=()
+        batch_end=$(( batch_start + PARALLEL ))
+        (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
 
-    p_idx=0
-        for principle in "${DEEP_PRINCIPLES[@]}"; do
-            p_idx=$((p_idx + 1))
+        for (( i=batch_start; i<batch_end; i++ )); do
+            id="${SCENE_IDS[$i]}"
+            batch_ids+=("$id")
+            local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            log "  Launching deep score for ${local_title:-$id} ($((i+1))/${SCENE_COUNT})..."
 
-            # Build a minimal prompt for a single principle
-            rubric_content=$(extract_rubric_section "Scene Craft")  # Get all rubrics
-            # Try to extract just the relevant principle's rubric section
-            principle_rubric=$(echo "$rubric_content" | awk -v p="$principle" '
-                BEGIN { gsub(/_/, " ", p); }
-                tolower($0) ~ tolower(p) { found=1 }
-                found && /^---/ { found=0 }
-                found && /^### / && !(tolower($0) ~ tolower(p)) { found=0 }
-                found { print }
-            ')
+            (
+                # Worker subshell — scores all principles for one scene
+                scene_file="${SCENES_DIR}/${id}.md"
+                scene_text=""
+                [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
+                scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+                scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
+                scene_function=""
+                scene_emotional_arc=""
+                [[ -f "$INTENT_CSV" ]] && scene_function=$(get_csv_field "$INTENT_CSV" "$id" "function")
+                [[ -f "$INTENT_CSV" ]] && scene_emotional_arc=$(get_csv_field "$INTENT_CSV" "$id" "emotional_arc")
 
-            # If we could not isolate it, use the full rubric set
-            if [[ -z "$principle_rubric" ]]; then
-                rubric_content=$(for section in "Scene Craft" "Prose Craft" "Character Craft" "Rules to Break"; do
-                    extract_rubric_section "$section"
-                done)
-                principle_rubric="$rubric_content"
-            fi
+                combined_scores="${CYCLE_DIR}/.combined-scores-${id}.csv"
+                combined_rationale="${CYCLE_DIR}/.combined-rationale-${id}.csv"
+                p_failed=0
 
-    scene_file="${SCENES_DIR}/${id}.md"
-    scene_text=""
-            [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
+                for principle in "${DEEP_PRINCIPLES[@]}"; do
+                    rubric_content=$(extract_rubric_section "Scene Craft")
+                    principle_rubric=$(echo "$rubric_content" | awk -v p="$principle" '
+                        BEGIN { gsub(/_/, " ", p); }
+                        tolower($0) ~ tolower(p) { found=1 }
+                        found && /^---/ { found=0 }
+                        found && /^### / && !(tolower($0) ~ tolower(p)) { found=0 }
+                        found { print }
+                    ')
+                    if [[ -z "$principle_rubric" ]]; then
+                        principle_rubric=$(for section in "Scene Craft" "Prose Craft" "Character Craft" "Rules to Break"; do
+                            extract_rubric_section "$section"
+                        done)
+                    fi
 
-    scene_title scene_pov scene_function scene_emotional_arc
-            scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-            scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
-            [[ -f "$INTENT_CSV" ]] && scene_function=$(get_csv_field "$INTENT_CSV" "$id" "function")
-            [[ -f "$INTENT_CSV" ]] && scene_emotional_arc=$(get_csv_field "$INTENT_CSV" "$id" "emotional_arc")
-
-            prompt="You are scoring a single craft principle for a scene. Score it 1-10.
+                    prompt="You are scoring a single craft principle for a scene. Score it 1-10.
 
 ## Rubric
 
@@ -694,21 +804,53 @@ RATIONALE:
 id|${principle}
 ${id}|<one sentence>"
 
-    log_file="${LOG_DIR}/score-${id}-${principle}.log"
-    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${principle}.csv"
-    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${principle}.csv"
+                    log_file="${LOG_DIR}/score-${id}-${principle}.log"
+                    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${principle}.csv"
+                    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${principle}.csv"
 
-            log "  Scoring ${principle} for ${id} (${p_idx}/${PRINCIPLE_COUNT}, scene ${SCORED}/${SCENE_COUNT})..."
+                    if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
+                        merge_score_files "$combined_scores" "$tmp_scores"
+                        merge_score_files "$combined_rationale" "$tmp_rationale"
+                        rm -f "$tmp_scores" "$tmp_rationale"
+                    else
+                        p_failed=$((p_failed + 1))
+                    fi
+                done
 
-            if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
-                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
-                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
-                rm -f "$tmp_scores" "$tmp_rationale"
+                if (( p_failed == 0 )); then
+                    echo "ok" > "${CYCLE_DIR}/.status-${id}"
+                else
+                    echo "fail" > "${CYCLE_DIR}/.status-${id}"
+                fi
+            ) &
+            batch_pids+=($!)
+            register_child_pid $!
+        done
+
+        for pid in "${batch_pids[@]}"; do
+            wait "$pid" 2>/dev/null || true
+            unregister_child_pid "$pid" 2>/dev/null || true
+        done
+
+        for id in "${batch_ids[@]}"; do
+            SCORED=$((SCORED + 1))
+            local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            status_file="${CYCLE_DIR}/.status-${id}"
+            combined_scores="${CYCLE_DIR}/.combined-scores-${id}.csv"
+            combined_rationale="${CYCLE_DIR}/.combined-rationale-${id}.csv"
+
+            if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]]; then
+                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$combined_scores"
+                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$combined_rationale"
+                log "  Scored ${local_title:-$id} (${SCORED}/${SCENE_COUNT})"
             else
                 FAILED=$((FAILED + 1))
-                log "  WARNING: Failed to parse ${principle} score for ${id}"
+                log "  WARNING: Failed to score ${id}"
             fi
+            rm -f "$combined_scores" "$combined_rationale" "$status_file"
         done
+
+        batch_start=$batch_end
     done
     ;;
 esac
