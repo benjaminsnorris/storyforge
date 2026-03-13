@@ -549,7 +549,10 @@ migrate_chapter_map() {
 }
 
 # ============================================================================
-# migrate_findings — findings.yaml → findings.csv, strengths.csv, false-positives.csv
+# migrate_findings — findings.yaml → findings.csv
+# Handles two YAML formats:
+#   Format A (test fixture): findings with severity/category/location/finding/suggestion
+#   Format B (real projects): findings with id/category/severity/summary/detail/affected_scenes/flagged_by/recommendation
 # ============================================================================
 
 migrate_findings() {
@@ -561,7 +564,7 @@ migrate_findings() {
 
     echo "Migrating evaluation findings..."
 
-    local findings_header="id|severity|category|location|finding|suggestion"
+    local findings_header="id|evaluator|severity|category|scenes|summary|recommendation|status"
     local count=0
 
     for eval_dir in "${evals_dir}"/*/; do
@@ -575,78 +578,137 @@ migrate_findings() {
 
         echo "  Processing ${eval_name}..."
 
-        # Parse findings
+        # Parse findings section
         local rows=()
-        local finding_id=0
-        local severity="" category="" location="" finding="" suggestion=""
-        local in_findings=false
+        local current_id="" current_severity="" current_category="" current_summary=""
+        local current_scenes="" current_flagged="" current_recommendation=""
+        local in_findings=false in_scenes=false in_flagged=false
+        local auto_id=0
 
         while IFS= read -r line; do
+            # Detect section starts
             if echo "$line" | grep -qE '^findings:'; then
                 in_findings=true
+                in_scenes=false
+                in_flagged=false
                 continue
             fi
 
-            # Another top-level key ends findings
+            # Another top-level key ends findings section
             if [[ "$in_findings" == true ]] && echo "$line" | grep -qE '^[a-z]'; then
-                # Save last finding
-                if [[ -n "$finding" ]]; then
-                    finding_id=$((finding_id + 1))
-                    rows+=("${eval_name}-${finding_id}|${severity}|${category}|${location}|${finding}|${suggestion}")
+                if [[ -n "$current_summary" || -n "$current_id" ]]; then
+                    _emit_finding_row
                 fi
                 in_findings=false
+                in_scenes=false
+                in_flagged=false
                 continue
             fi
 
             [[ "$in_findings" != true ]] && continue
 
-            # New finding entry
-            if echo "$line" | grep -qE '^[[:space:]]*-[[:space:]]+severity:'; then
+            # New finding entry (starts with "  - id:" or "  - severity:" or "  - category:")
+            if echo "$line" | grep -qE '^[[:space:]]*-[[:space:]]+(id|severity|category):'; then
                 # Save previous finding
-                if [[ -n "$finding" ]]; then
-                    finding_id=$((finding_id + 1))
-                    rows+=("${eval_name}-${finding_id}|${severity}|${category}|${location}|${finding}|${suggestion}")
+                if [[ -n "$current_summary" || -n "$current_id" ]]; then
+                    _emit_finding_row
                 fi
-                severity=$(echo "$line" | sed 's/.*severity:[[:space:]]*//' | sed 's/[[:space:]]*$//')
-                severity=$(strip_quotes "$severity")
-                category=""
-                location=""
-                finding=""
-                suggestion=""
+                in_scenes=false
+                in_flagged=false
+                current_id="" current_severity="" current_category="" current_summary=""
+                current_scenes="" current_flagged="" current_recommendation=""
+
+                # Extract the first field from the entry line
+                local field_name field_value
+                field_name=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/:.*//')
+                field_value=$(echo "$line" | sed 's/^[^:]*:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                field_value=$(strip_quotes "$field_value")
+                case "$field_name" in
+                    id) current_id="$field_value" ;;
+                    severity) current_severity="$field_value" ;;
+                    category) current_category="$field_value" ;;
+                esac
                 continue
             fi
 
-            if echo "$line" | grep -qE '^[[:space:]]+category:'; then
-                category=$(echo "$line" | sed 's/.*category:[[:space:]]*//' | sed 's/[[:space:]]*$//')
-                category=$(strip_quotes "$category")
-                continue
+            # Sub-list items for affected_scenes
+            if [[ "$in_scenes" == true ]]; then
+                if echo "$line" | grep -qE '^[[:space:]]*-[[:space:]]'; then
+                    local scene_val
+                    scene_val=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                    scene_val=$(strip_quotes "$scene_val")
+                    if [[ -n "$current_scenes" ]]; then
+                        current_scenes="${current_scenes}||${scene_val}"
+                    else
+                        current_scenes="$scene_val"
+                    fi
+                    continue
+                else
+                    in_scenes=false
+                fi
             fi
 
-            if echo "$line" | grep -qE '^[[:space:]]+location:'; then
-                location=$(echo "$line" | sed 's/.*location:[[:space:]]*//' | sed 's/[[:space:]]*$//')
-                location=$(strip_quotes "$location")
-                continue
+            # Sub-list items for flagged_by
+            if [[ "$in_flagged" == true ]]; then
+                if echo "$line" | grep -qE '^[[:space:]]*-[[:space:]]'; then
+                    local flagged_val
+                    flagged_val=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                    flagged_val=$(strip_quotes "$flagged_val")
+                    if [[ -n "$current_flagged" ]]; then
+                        current_flagged="${current_flagged}||${flagged_val}"
+                    else
+                        current_flagged="$flagged_val"
+                    fi
+                    continue
+                else
+                    in_flagged=false
+                fi
             fi
 
-            if echo "$line" | grep -qE '^[[:space:]]+finding:'; then
-                finding=$(echo "$line" | sed 's/.*finding:[[:space:]]*//' | sed 's/[[:space:]]*$//')
-                finding=$(strip_quotes "$finding")
-                finding=$(escape_pipe "$finding")
-                continue
-            fi
-
-            if echo "$line" | grep -qE '^[[:space:]]+suggestion:'; then
-                suggestion=$(echo "$line" | sed 's/.*suggestion:[[:space:]]*//' | sed 's/[[:space:]]*$//')
-                suggestion=$(strip_quotes "$suggestion")
-                suggestion=$(escape_pipe "$suggestion")
-                continue
+            # Field extraction
+            if echo "$line" | grep -qE '^[[:space:]]+id:'; then
+                current_id=$(echo "$line" | sed 's/.*id:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                current_id=$(strip_quotes "$current_id")
+            elif echo "$line" | grep -qE '^[[:space:]]+severity:'; then
+                current_severity=$(echo "$line" | sed 's/.*severity:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                current_severity=$(strip_quotes "$current_severity")
+            elif echo "$line" | grep -qE '^[[:space:]]+category:'; then
+                current_category=$(echo "$line" | sed 's/.*category:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                current_category=$(strip_quotes "$current_category")
+            elif echo "$line" | grep -qE '^[[:space:]]+summary:'; then
+                current_summary=$(echo "$line" | sed 's/.*summary:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                current_summary=$(strip_quotes "$current_summary")
+                current_summary=$(escape_pipe "$current_summary")
+            elif echo "$line" | grep -qE '^[[:space:]]+finding:'; then
+                # Format A: "finding" field maps to summary
+                current_summary=$(echo "$line" | sed 's/.*finding:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                current_summary=$(strip_quotes "$current_summary")
+                current_summary=$(escape_pipe "$current_summary")
+            elif echo "$line" | grep -qE '^[[:space:]]+recommendation:'; then
+                current_recommendation=$(echo "$line" | sed 's/.*recommendation:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                current_recommendation=$(strip_quotes "$current_recommendation")
+                current_recommendation=$(escape_pipe "$current_recommendation")
+            elif echo "$line" | grep -qE '^[[:space:]]+suggestion:'; then
+                # Format A: "suggestion" maps to recommendation
+                current_recommendation=$(echo "$line" | sed 's/.*suggestion:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                current_recommendation=$(strip_quotes "$current_recommendation")
+                current_recommendation=$(escape_pipe "$current_recommendation")
+            elif echo "$line" | grep -qE '^[[:space:]]+location:'; then
+                # Format A: "location" maps to scenes
+                local loc
+                loc=$(echo "$line" | sed 's/.*location:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                loc=$(strip_quotes "$loc")
+                current_scenes="$loc"
+            elif echo "$line" | grep -qE '^[[:space:]]+affected_scenes:'; then
+                in_scenes=true
+            elif echo "$line" | grep -qE '^[[:space:]]+flagged_by:'; then
+                in_flagged=true
             fi
         done < "$findings_yaml"
 
         # Save last finding
-        if [[ -n "$finding" ]]; then
-            finding_id=$((finding_id + 1))
-            rows+=("${eval_name}-${finding_id}|${severity}|${category}|${location}|${finding}|${suggestion}")
+        if [[ -n "$current_summary" || -n "$current_id" ]]; then
+            _emit_finding_row
         fi
 
         local findings_csv="${eval_dir}findings.csv"
@@ -664,6 +726,12 @@ migrate_findings() {
     done
 
     echo "  Processed ${count} evaluation(s)"
+}
+
+_emit_finding_row() {
+    auto_id=$((auto_id + 1))
+    local fid="${current_id:-F${auto_id}}"
+    rows+=("${fid}|${current_flagged}|${current_severity}|${current_category}|${current_scenes}|${current_summary}|${current_recommendation}|open")
 }
 
 # ============================================================================

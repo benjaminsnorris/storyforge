@@ -187,7 +187,7 @@ if [[ -d "$TMPDIR_EXEC/working/evaluations/eval-test" ]]; then
     assert_file_exists "$TMPDIR_EXEC/working/evaluations/eval-test/findings.csv" "execute: findings.csv created"
 
     f_header=$(head -1 "$TMPDIR_EXEC/working/evaluations/eval-test/findings.csv")
-    assert_equals "id|severity|category|location|finding|suggestion" "$f_header" "execute: findings.csv header correct"
+    assert_equals "id|evaluator|severity|category|scenes|summary|recommendation|status" "$f_header" "execute: findings.csv header correct"
 
     f_content=$(cat "$TMPDIR_EXEC/working/evaluations/eval-test/findings.csv")
     assert_contains "$f_content" "high" "execute: findings.csv contains severity"
