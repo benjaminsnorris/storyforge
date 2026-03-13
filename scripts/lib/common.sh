@@ -110,6 +110,50 @@ _sf_handle_interrupt() {
 trap _sf_handle_interrupt INT TERM
 
 # ============================================================================
+# Stream-JSON text extraction — shared by all scripts that invoke Claude
+# ============================================================================
+
+# extract_claude_response(log_file)
+# Extract the text response from a Claude stream-json log file.
+# Tries multiple strategies for different output formats.
+# Prints the extracted text to stdout. Returns 1 if nothing found.
+extract_claude_response() {
+    local log_file="$1"
+    [[ -f "$log_file" ]] || return 1
+
+    local text=""
+
+    # Strategy 1: Extract from "result" field (claude -p with stream-json)
+    text=$(grep '"type":"result"' "$log_file" 2>/dev/null \
+        | sed 's/.*"result":"//' | sed 's/","stop_reason.*//' \
+        | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
+
+    # Strategy 2: Extract from assistant message content
+    if [[ -z "$text" ]]; then
+        text=$(grep '"type":"assistant"' "$log_file" 2>/dev/null \
+            | sed 's/.*"text":"//' | sed 's/"}],"stop_reason.*//' \
+            | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
+    fi
+
+    # Strategy 3: Extract from content_block_delta (streaming format)
+    if [[ -z "$text" ]]; then
+        text=$(sed -n 's/.*"type":"content_block_delta".*"text":"\([^"]*\)".*/\1/p' "$log_file" \
+            | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
+    fi
+
+    # Strategy 4: Fallback to plain text lines
+    if [[ -z "$text" ]]; then
+        text=$(grep -v '^\s*{' "$log_file" 2>/dev/null || true)
+    fi
+
+    if [[ -z "$text" ]]; then
+        return 1
+    fi
+
+    echo "$text"
+}
+
+# ============================================================================
 # Self-healing zones — automatic error recovery for autonomous scripts
 # ============================================================================
 #

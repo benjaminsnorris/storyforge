@@ -44,39 +44,12 @@ parse_score_output() {
         return 1
     fi
 
-    # Extract text content from stream-json log
-    # Try multiple extraction strategies for different output formats
-    local text_content=""
-
-    # Strategy 1: Extract from "result" field (claude -p with stream-json)
-    if [[ -z "$text_content" ]]; then
-        text_content=$(grep '"type":"result"' "$log_file" 2>/dev/null \
-            | sed 's/.*"result":"//' | sed 's/","stop_reason.*//' \
-            | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
-    fi
-
-    # Strategy 2: Extract from assistant message content
-    if [[ -z "$text_content" ]]; then
-        text_content=$(grep '"type":"assistant"' "$log_file" 2>/dev/null \
-            | sed 's/.*"text":"//' | sed 's/"}],"stop_reason.*//' \
-            | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
-    fi
-
-    # Strategy 3: Extract from content_block_delta (streaming format)
-    if [[ -z "$text_content" ]]; then
-        text_content=$(sed -n 's/.*"type":"content_block_delta".*"text":"\([^"]*\)".*/\1/p' "$log_file" \
-            | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
-    fi
-
-    # Strategy 4: Fallback to plain text lines
-    if [[ -z "$text_content" ]]; then
-        text_content=$(grep -v '^\s*{' "$log_file" 2>/dev/null || true)
-    fi
-
-    if [[ -z "$text_content" ]]; then
+    # Extract text content using shared extraction function
+    local text_content
+    text_content=$(extract_claude_response "$log_file") || {
         log "WARNING: No text content found in $log_file"
         return 1
-    fi
+    }
 
     # Extract SCORES block: lines between marker and next blank line or next marker
     local scores_block
