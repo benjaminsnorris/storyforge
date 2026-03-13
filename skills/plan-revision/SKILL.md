@@ -23,11 +23,13 @@ Look for evaluation output using the pipeline manifest:
 
 2. **Fallback (no manifest):** If `working/pipeline.yaml` does not exist (older project), look for the most recent `eval-*` directory in `working/evaluations/`.
 
-3. **Primary source:** Read `findings.yaml` in the evaluation directory if it exists. This is the structured findings file produced by the evaluation pipeline, with categorized issues, severity ratings, and scene-level annotations.
+3. **Primary source (CSV):** Read `findings.csv` in the evaluation directory if it exists. This is a pipe-delimited CSV with columns: `id|severity|category|location|finding|suggestion`. Array values (like multiple scene IDs in `location`) use `||` (double-pipe) as separator. Also check for `strengths.csv` and `false-positives.csv` in the same directory.
 
-4. **Fallback:** If `findings.yaml` does not exist, look for prose evaluation reports in the evaluation directory (any `.md` files). Read them all and extract findings manually — identify specific issues, affected scenes, severity, and category.
+4. **Fallback (YAML):** If `findings.csv` does not exist, read `findings.yaml` in the evaluation directory. This is the legacy structured findings file with categorized issues, severity ratings, and scene-level annotations.
 
-5. **Synthesis report:** Also read `synthesis.md` in the evaluation directory if it exists. This provides the evaluators' overall assessment and high-level recommendations.
+5. **Fallback (prose):** If neither CSV nor YAML findings exist, look for prose evaluation reports in the evaluation directory (any `.md` files). Read them all and extract findings manually — identify specific issues, affected scenes, severity, and category.
+
+6. **Synthesis report:** Also read `synthesis.md` in the evaluation directory if it exists. This provides the evaluators' overall assessment and high-level recommendations.
 
 If no evaluation results exist at all, tell the author that evaluation needs to run first and suggest they invoke the main `storyforge` hub to run an evaluation. Do not proceed without evaluation data.
 
@@ -36,7 +38,7 @@ If no evaluation results exist at all, tell the author that evaluation needs to 
 Read the following files to understand the full project context:
 
 - **`storyforge.yaml`** — project configuration, phase, genre, target word count
-- **`scenes/scene-index.yaml`** — the scene inventory, structure, and any scene-level notes
+- **`scenes/metadata.csv`** and **`scenes/intent.csv`** — the scene inventory and intent data (pipe-delimited CSV). If these do not exist, fall back to `scenes/scene-index.yaml` for legacy projects.
 - **`reference/voice-guide.md`** — the established voice rules and style parameters
 - **`references/craft-engine.md`** from the plugin directory — the craft reference that informs revision strategy
 - **Key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. **Settled decisions must be respected in the plan — do not propose alternatives to decisions already made, and do not present them as open questions in guidance entries.**
@@ -82,7 +84,7 @@ Based on the analysis, design a custom set of revision passes. Each pass is a fo
       rationale: "Why this is the right call"
 ```
 
-**CRITICAL: Scene IDs in scope lists must match scene-index.yaml exactly.** Read the `- id:` values from `scenes/scene-index.yaml` and use them verbatim. Scene IDs are descriptive slugs (e.g., `geometry-of-dying`, `the-last-calibrator`) — do NOT construct IDs by adding prefixes, padding numbers, or guessing formats. Copy them character-for-character from the index. If the scene index says `id: geometry-of-dying`, the scope must say `geometry-of-dying`.
+**CRITICAL: Scene IDs in scope lists must match `scenes/metadata.csv` exactly.** Read the `id` column from `scenes/metadata.csv` and use the values verbatim. Scene IDs are descriptive slugs (e.g., `geometry-of-dying`, `the-last-calibrator`) — do NOT construct IDs by adding prefixes, padding numbers, or guessing formats. Copy them character-for-character from the CSV. If metadata.csv has `geometry-of-dying` in the id column, the scope must say `geometry-of-dying`.
 
 All passes run autonomously. When a pass involves creative judgment — restructuring, character arc deepening, thematic reinterpretation — make the creative calls yourself and document them as `guidance` entries with rationale. The author reviews the plan before execution and can edit any guidance entry they disagree with.
 
@@ -122,7 +124,7 @@ Be specific and opinionated. "Deepen character arcs" is not guidance — it's a 
 
 - Use `full` when an issue pervades the manuscript
 - Use act-level scope when issues are localized to a narrative section
-- Use scene-id lists when only specific scenes are affected — **copy IDs exactly from scene-index.yaml**
+- Use scene-id lists when only specific scenes are affected — **copy IDs exactly from `scenes/metadata.csv`**
 - Prefer narrower scopes — a targeted pass is faster and less risky than a full-manuscript pass
 
 ## Step 5: Present the Plan
@@ -179,16 +181,10 @@ The output must start with `storyforge/revise-`. If it does not, stop and fix th
 
 **3. Determine the plan filename using the pipeline manifest.**
 
-Read `working/pipeline.yaml` to find the current cycle ID. Save the plan to a cycle-numbered file:
-- If the manifest exists and `current_cycle` > 0: save to `working/plans/revision-plan-{cycle_id}.yaml`
-- If the manifest doesn't exist (older project): save to `working/plans/revision-plan.yaml`
+Read `working/pipeline.yaml` (or `working/pipeline.csv` if the project has migrated to CSV) to find the current cycle ID. Save the plan as a pipe-delimited CSV:
+- Save to `working/plans/revision-plan.csv`
 
-After writing the plan file, update the manifest:
-```bash
-# Read current_cycle from working/pipeline.yaml (e.g., 2)
-# Then update the cycle's plan field:
-```
-In the manifest's current cycle entry, set `plan: revision-plan-{cycle_id}.yaml`.
+After writing the plan file, update the manifest's current cycle entry to set the `plan` field to `revision-plan.csv`.
 
 **4. Update project state:** set `phase: revision` in `storyforge.yaml`. Update `CLAUDE.md` if needed.
 
@@ -199,32 +195,25 @@ git add -A && git commit -m "Plan revision: {N} passes for {title}" && git push 
 
 When the author runs `./storyforge revise`, the script will detect this branch, create a draft PR with a task list, and track progress there. The repo should reflect the approved plan before execution begins.
 
-The file should include:
+The file is a pipe-delimited CSV with this header and format:
 
-```yaml
-# Revision Plan — {title}
-# Generated: {current date}
-# Based on evaluation results in working/evaluations/
-
-metadata:
-  project: "{title}"
-  generated: "{date}"
-  total_passes: {count}
-
-passes:
-  - name: {name}
-    scope: {scope}
-    purpose: "{purpose}"
-    estimated_effort: {minor|moderate|major}
-    status: pending
-    findings:
-      - "{finding description}"
-    guidance:  # include when pass involves creative judgment
-      - decision: "{specific creative decision}"
-        rationale: "{why this is the right call}"
-    summary: ""  # populated after pass completion
-  # ... additional passes
 ```
+pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier
+1|structural-reorder|Reorder Act 2 scenes for better pacing|act-2|scene-a||scene-b|Move confrontation earlier|strength-x||voice-quality|f001||f003|pending|opus
+2|prose-tightening|Tighten dialogue across full manuscript|full||Cut filler words|voice-quality||imagery|f005|pending|sonnet
+```
+
+**CSV conventions:**
+- Delimiter: `|` (pipe)
+- Array values within a column: `||` (double-pipe) — e.g., `scene-a||scene-b` in the targets column
+- First row is always the header
+- One row per pass, in execution order
+- `pass` column is the pass number (1-based)
+- `targets` column lists scene IDs when scope is scene-level (empty for `full` or act-level scope)
+- `guidance` column contains concise revision guidance text
+- `protection` column lists things NOT to change (double-pipe separated)
+- `findings` column lists finding IDs this pass addresses (double-pipe separated)
+- `model_tier` is `opus` for creative passes, `sonnet` for mechanical passes
 
 Every pass should have `status: pending` when first saved. The revision script will update status as passes are executed.
 
@@ -243,11 +232,11 @@ making it executable.
 Explain what to expect:
 - The revision script runs all passes in order, autonomously
 - Each pass follows its guidance entries (if any) and produces a summary when done
-- Progress is tracked in `revision-plan.yaml` — each pass is marked as `completed` when done
+- Progress is tracked in `revision-plan.csv` — each pass's status column is updated as it progresses
 - The author can stop and resume at any time; the script picks up where it left off
 - After each pass, the author can review the summary and diff before the next pass runs
 - If a pass reveals new issues, they can re-run `plan-revision` to update the plan
-- To edit creative direction before execution, modify the `guidance` entries in the plan YAML directly
+- To edit creative direction before execution, modify the `guidance` column in the plan CSV directly
 
 ## Coaching Level Behavior
 
@@ -270,7 +259,7 @@ Present only the raw findings analysis — categorized, with severity ratings. *
 - "What pass would you design for that?"
 - "What's the guidance for this pass?"
 
-The author provides every pass, every guidance entry, every creative decision. You structure it into valid revision-plan.yaml and handle all file operations.
+The author provides every pass, every guidance entry, every creative decision. You structure it into valid revision-plan.csv and handle all file operations.
 
 ## Coaching Posture
 

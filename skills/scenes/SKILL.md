@@ -22,7 +22,8 @@ Store this resolved plugin path for use throughout the session.
 Read the following files to understand the full context before doing any scene work:
 
 - `storyforge.yaml` — project configuration, active extensions, current state. **Note the `project.coaching_level` field** — it controls how proactive you should be (see Coaching Level Behavior below).
-- `scene-index.yaml` — the existing scene index (if it exists).
+- `scenes/metadata.csv` — the existing scene metadata (pipe-delimited CSV: `id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words`). If this does not exist, fall back to `scene-index.yaml` for legacy projects.
+- `scenes/intent.csv` — scene intent data (pipe-delimited CSV: `id|function|emotional_arc|characters|threads|motifs|notes`). Array fields use `||` (double-pipe) as the internal separator.
 - `reference/story-architecture.md` — structural context: acts, parts, arcs, turning points.
 - `reference/character-bible.md` — character arcs, relationships, and motivations.
 - `reference/voice-guide.md` — voice and POV rules (if it exists), especially POV-specific voice rules that affect scene assignment.
@@ -56,28 +57,25 @@ Use this when the author wants to plan new scenes for a section of the novel.
 
 ### Propose Scene Breakdowns
 
-For each proposed scene, provide the full core metadata:
+For each proposed scene, present the full core metadata. Scene data is stored in two CSV files:
 
-```yaml
-- id: "geometry-of-dying"
-  title: "..."
-  pov: "..."
-  setting: "..."
-  characters: [...]
-  function: "..."
-  emotional_arc: "..."
-  threads: [...]
-  motifs: [...]
-  timeline_position: ...
-  part: ...
-  type: "..."  # character | plot | world | action | transition
-  target_words: ...
-  status: pending
+**`scenes/metadata.csv`** — one row per scene (pipe-delimited):
+```
+id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words
+geometry-of-dying|1|The Geometry of Dying|Character Name|Location|1|character|1|morning|pending|0|2500
 ```
 
-**Scene ID naming:** Generate slugs from the scene title — e.g., "The Geometry of Dying" → `geometry-of-dying`. Never use numeric or positional IDs like `act1-sc01` or `scene-07`. Keep slugs to 2–5 hyphenated words. Slugs are permanent identifiers; order lives in the index, not the filename.
+**`scenes/intent.csv`** — one row per scene (pipe-delimited, arrays use `||`):
+```
+id|function|emotional_arc|characters|threads|motifs|notes
+geometry-of-dying|Specific function description|Emotional start to end|Char A||Char B|thread-1||thread-2|motif-1||motif-2|
+```
 
-Include any project-specific extensions defined in `storyforge.yaml`.
+**Scene files are pure prose** — no YAML frontmatter. The filename is the scene ID (e.g., `scenes/geometry-of-dying.md`). All metadata lives in the CSV files, not in the scene files.
+
+**Scene ID naming:** Generate slugs from the scene title — e.g., "The Geometry of Dying" → `geometry-of-dying`. Never use numeric or positional IDs like `act1-sc01` or `scene-07`. Keep slugs to 2–5 hyphenated words. Slugs are permanent identifiers; order lives in `metadata.csv` (the `seq` column), not the filename.
+
+Include any project-specific extensions defined in `storyforge.yaml` as additional columns in `metadata.csv`.
 
 ### Challenge Rigorously
 
@@ -186,6 +184,7 @@ After any edit, run validation checks:
 - Reasonable pacing (no new monotonous stretches created by the edit).
 - Timeline consistency (especially after reordering).
 - Scene IDs remain unique and use descriptive slugs (e.g., `geometry-of-dying`), never numeric or positional IDs.
+- The `seq` column in `metadata.csv` is consistent with the intended scene order.
 
 ---
 
@@ -197,7 +196,7 @@ Every time you add, modify, or remove scenes — an act designed, scenes reorder
 
 **After each deliverable:**
 
-1. Write the updated `scene-index.yaml`.
+1. Write the updated `scenes/metadata.csv` and `scenes/intent.csv`. If the project still has a legacy `scene-index.yaml`, you may update it for backward compatibility, but the CSV files are the canonical source.
 2. Update `storyforge.yaml` with the current scene count, last-modified date, and any structural changes. If scenes were added and the project phase is still `development`, advance it to `scene-design`.
 3. Regenerate relevant sections of `CLAUDE.md` to reflect the current scene state (active scenes, next scenes to draft, thread status).
 4. **Commit and push immediately:**
@@ -247,7 +246,7 @@ Ask what needs to happen in each section and help the author work through scene 
 ### `strict`
 Ask structural questions — do not propose creative content. Ask: "How many scenes do you think this section needs?" "What is the function of each scene?" "Which threads need to advance here?" Do not propose scene breakdowns, POV assignments, or type distributions. The author makes every creative decision.
 
-You CAN do the menial work: once the author decides on a scene's function, POV, threads, etc., you create the scene entry in the index, fill in the metadata, write the scene-index.yaml file, and commit. You handle the files — they handle the ideas.
+You CAN do the menial work: once the author decides on a scene's function, POV, threads, etc., you create the scene entry in `metadata.csv` and `intent.csv`, fill in the metadata, and commit. You handle the files — they handle the ideas.
 
 ---
 
