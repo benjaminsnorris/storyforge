@@ -216,3 +216,266 @@ build_weighted_text() {
         echo "All principles are weighted equally. No high-priority overrides."
     fi
 }
+
+# ============================================================================
+# Improvement cycle functions
+# ============================================================================
+
+# generate_diagnosis(scores_dir, prev_scores_dir, weights_file)
+# Analyse score CSVs, compute per-principle averages, identify worst scenes,
+# compare to previous cycle if available, write diagnosis.csv.
+generate_diagnosis() {
+    local scores_dir="$1"
+    local prev_scores_dir="${2:-}"
+    local weights_file="$3"
+
+    local diagnosis_file="${scores_dir}/diagnosis.csv"
+    echo "principle|scale|avg_score|worst_items|delta_from_last|priority" > "$diagnosis_file"
+
+    # Process each score file (scene, act, character, genre)
+    for score_entry in \
+        "scene-scores.csv|scene" \
+        "act-scores.csv|act" \
+        "character-scores.csv|character" \
+        "genre-scores.csv|genre"; do
+
+        local csv_name="${score_entry%%|*}"
+        local scale="${score_entry##*|}"
+        local score_file="${scores_dir}/${csv_name}"
+        [[ -f "$score_file" ]] || continue
+
+        local prev_file=""
+        if [[ -n "$prev_scores_dir" && -f "${prev_scores_dir}/${csv_name}" ]]; then
+            prev_file="${prev_scores_dir}/${csv_name}"
+        fi
+
+        # Get header columns (skip first column which is id)
+        local header
+        header=$(head -1 "$score_file")
+        local col_count
+        col_count=$(echo "$header" | awk -F'|' '{ print NF }')
+
+        # For each principle column (columns 2..N)
+        local col=2
+        while (( col <= col_count )); do
+            local principle
+            principle=$(echo "$header" | awk -F'|' -v c="$col" '{ print $c }')
+            [[ -z "$principle" ]] && { col=$((col + 1)); continue; }
+
+            # Compute average and find worst items
+            local avg_and_worst
+            avg_and_worst=$(awk -F'|' -v c="$col" '
+                NR == 1 { next }
+                {
+                    val = $c + 0
+                    sum += val; n++
+                    ids[NR] = $1
+                    scores[NR] = val
+                }
+                END {
+                    if (n == 0) { print "0||"; exit }
+                    avg = sum / n
+                    # printf avg with one decimal
+                    printf "%.1f|", avg
+                    # Collect items below average, sort by score ascending, take worst 5
+                    worst_count = 0
+                    # Simple selection: gather below-average items
+                    for (i in scores) {
+                        if (scores[i] < avg && worst_count < 5) {
+                            if (worst_count > 0) printf ";"
+                            printf "%s", ids[i]
+                            worst_count++
+                        }
+                    }
+                    printf "|"
+                }
+            ' "$score_file")
+
+            local avg_score="${avg_and_worst%%|*}"
+            local rest="${avg_and_worst#*|}"
+            local worst_items="${rest%%|*}"
+
+            # Compute delta from previous cycle
+            local delta=""
+            if [[ -n "$prev_file" ]]; then
+                local prev_avg
+                prev_avg=$(awk -F'|' -v c="$col" -v p="$principle" '
+                    NR == 1 {
+                        for (i = 1; i <= NF; i++) {
+                            if ($i == p) { tc = i; break }
+                        }
+                        next
+                    }
+                    tc {
+                        val = $tc + 0; sum += val; n++
+                    }
+                    END {
+                        if (n > 0) printf "%.1f", sum / n
+                        else print ""
+                    }
+                ' "$prev_file")
+                if [[ -n "$prev_avg" && -n "$avg_score" ]]; then
+                    delta=$(awk -v cur="$avg_score" -v prev="$prev_avg" 'BEGIN {
+                        d = cur - prev
+                        if (d >= 0) printf "+%.1f", d
+                        else printf "%.1f", d
+                    }')
+                fi
+            fi
+
+            # Determine priority
+            local priority="low"
+            local eff_weight=""
+            if [[ -f "$weights_file" ]]; then
+                eff_weight=$(get_effective_weight "$weights_file" "$principle" 2>/dev/null || true)
+            fi
+
+            # Check if avg < 4 -> high, avg < 6 -> medium
+            local is_high=false is_medium=false
+            if [[ -n "$avg_score" ]]; then
+                is_high=$(awk -v a="$avg_score" 'BEGIN { print (a < 4) ? "true" : "false" }')
+                is_medium=$(awk -v a="$avg_score" 'BEGIN { print (a < 6) ? "true" : "false" }')
+            fi
+
+            # Check if regressing > 0.5
+            local is_regressing=false
+            if [[ -n "$delta" ]]; then
+                is_regressing=$(awk -v d="$delta" 'BEGIN {
+                    # delta is negative when regressing (score went down)
+                    print (d + 0 < -0.5) ? "true" : "false"
+                }')
+            fi
+
+            if [[ "$is_high" == "true" || "$is_regressing" == "true" ]]; then
+                priority="high"
+            elif [[ "$is_medium" == "true" ]]; then
+                priority="medium"
+            fi
+
+            # Boost to high if weight >= 7
+            if [[ -n "$eff_weight" ]] && (( eff_weight >= 7 )); then
+                if [[ "$priority" == "medium" || "$is_medium" == "true" ]]; then
+                    priority="high"
+                fi
+            fi
+
+            echo "${principle}|${scale}|${avg_score}|${worst_items}|${delta}|${priority}" >> "$diagnosis_file"
+            col=$((col + 1))
+        done
+    done
+}
+
+# generate_proposals(scores_dir, weights_file)
+# Read diagnosis.csv, generate proposals for high and medium priority items.
+# Writes proposals.csv.
+generate_proposals() {
+    local scores_dir="$1"
+    local weights_file="$2"
+
+    local diagnosis_file="${scores_dir}/diagnosis.csv"
+    local proposals_file="${scores_dir}/proposals.csv"
+
+    if [[ ! -f "$diagnosis_file" ]]; then
+        return 1
+    fi
+
+    echo "id|principle|lever|target|change|rationale|status" > "$proposals_file"
+
+    local proposal_num=0
+    while IFS='|' read -r principle scale avg_score worst_items delta priority; do
+        [[ "$principle" == "principle" ]] && continue  # skip header
+        [[ "$priority" != "high" && "$priority" != "medium" ]] && continue
+
+        local current_weight=""
+        if [[ -f "$weights_file" ]]; then
+            current_weight=$(get_csv_field "$weights_file" "$principle" "weight" "principle")
+        fi
+        current_weight="${current_weight:-5}"
+
+        # Determine weight increase
+        local increase=1
+        [[ "$priority" == "high" ]] && increase=2
+
+        local new_weight=$((current_weight + increase))
+        (( new_weight > 10 )) && new_weight=10
+
+        proposal_num=$((proposal_num + 1))
+        local pid
+        pid=$(printf "p%03d" "$proposal_num")
+
+        # If weight already >= 8 and still scoring low: propose voice_guide instead
+        if (( current_weight >= 8 )); then
+            echo "${pid}|${principle}|voice_guide|global|add voice guidance for ${principle}|avg_score ${avg_score}, weight already ${current_weight}|pending" >> "$proposals_file"
+        else
+            echo "${pid}|${principle}|craft_weight|global|weight ${current_weight} → ${new_weight}|avg_score ${avg_score}, priority ${priority}|pending" >> "$proposals_file"
+        fi
+
+        # If specific scenes score < 3 on this principle, propose scene-level overrides
+        if [[ -n "$worst_items" ]]; then
+            local scene_score_file="${scores_dir}/scene-scores.csv"
+            if [[ -f "$scene_score_file" ]]; then
+                IFS=';' read -ra worst_scenes <<< "$worst_items"
+                for scene_id in "${worst_scenes[@]}"; do
+                    [[ -z "$scene_id" ]] && continue
+                    local scene_val
+                    scene_val=$(get_csv_field "$scene_score_file" "$scene_id" "$principle")
+                    if [[ -n "$scene_val" ]] && (( scene_val < 3 )); then
+                        proposal_num=$((proposal_num + 1))
+                        pid=$(printf "p%03d" "$proposal_num")
+                        echo "${pid}|${principle}|scene_intent|${scene_id}|strengthen ${principle} intent|scene scores ${scene_val}, needs targeted fix|pending" >> "$proposals_file"
+                    fi
+                done
+            fi
+        fi
+    done < "$diagnosis_file"
+}
+
+# record_tuning(project_dir, cycle, proposal_id, principle, lever, change, score_before, score_after, kept)
+# Append a row to working/tuning.csv. Create header on first use.
+record_tuning() {
+    local project_dir="$1"
+    local cycle="$2"
+    local proposal_id="$3"
+    local principle="$4"
+    local lever="$5"
+    local change="$6"
+    local score_before="$7"
+    local score_after="$8"
+    local kept="$9"
+
+    local tuning_file="${project_dir}/working/tuning.csv"
+    if [[ ! -f "$tuning_file" ]]; then
+        mkdir -p "$(dirname "$tuning_file")"
+        echo "cycle|proposal_id|principle|lever|change|score_before|score_after|kept" > "$tuning_file"
+    fi
+    echo "${cycle}|${proposal_id}|${principle}|${lever}|${change}|${score_before}|${score_after}|${kept}" >> "$tuning_file"
+}
+
+# check_validated_patterns(project_dir)
+# Read tuning.csv, find principle+lever combos with 3+ rows where kept=true.
+# Returns validated patterns as lines: principle|lever|avg_improvement
+check_validated_patterns() {
+    local project_dir="$1"
+    local tuning_file="${project_dir}/working/tuning.csv"
+
+    if [[ ! -f "$tuning_file" ]]; then
+        return 0
+    fi
+
+    awk -F'|' '
+        NR == 1 { next }
+        $8 == "true" {
+            key = $3 "|" $4
+            count[key]++
+            improvement[key] += ($7 - $6)
+        }
+        END {
+            for (k in count) {
+                if (count[k] >= 3) {
+                    avg_imp = improvement[k] / count[k]
+                    printf "%s|%.1f\n", k, avg_imp
+                }
+            }
+        }
+    ' "$tuning_file"
+}

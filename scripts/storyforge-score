@@ -893,6 +893,151 @@ echo ""
 print_cost_summary "score"
 
 # ============================================================================
+# Improvement cycle: diagnosis and proposals
+# ============================================================================
+
+log "Running improvement cycle..."
+
+# Determine previous cycle directory
+PREV_DIR=""
+if (( CYCLE > 1 )); then
+    PREV_DIR="${PROJECT_DIR}/working/scores/cycle-$((CYCLE - 1))"
+    if [[ ! -d "$PREV_DIR" ]]; then
+        PREV_DIR=""
+    fi
+fi
+
+# Generate diagnosis and proposals
+generate_diagnosis "$CYCLE_DIR" "$PREV_DIR" "$WEIGHTS_FILE"
+generate_proposals "$CYCLE_DIR" "$WEIGHTS_FILE"
+
+PROPOSALS_FILE="${CYCLE_DIR}/proposals.csv"
+DIAGNOSIS_FILE="${CYCLE_DIR}/diagnosis.csv"
+
+if [[ -f "$PROPOSALS_FILE" ]]; then
+    PROPOSAL_COUNT=$(awk -F'|' 'NR > 1 { count++ } END { print count+0 }' "$PROPOSALS_FILE")
+    log "Generated ${PROPOSAL_COUNT} improvement proposals"
+
+    if (( PROPOSAL_COUNT > 0 )); then
+        # Approval step based on coaching level
+        COACHING=$(get_coaching_level 2>/dev/null || echo "full")
+        APPLIED=0
+
+        case "$COACHING" in
+            full)
+                # Auto-approve all proposals
+                log "Coaching level: full — auto-approving all proposals"
+                local tmp_proposals="${PROPOSALS_FILE}.tmp.$$"
+                awk -F'|' -v OFS='|' '
+                    NR == 1 { print; next }
+                    { $7 = "approved"; print }
+                ' "$PROPOSALS_FILE" > "$tmp_proposals" && mv "$tmp_proposals" "$PROPOSALS_FILE"
+                ;;
+            coach)
+                # Interactive approval
+                log "Coaching level: coach — review proposals below"
+                while IFS='|' read -r pid principle lever target change rationale status; do
+                    [[ "$pid" == "id" ]] && continue
+                    [[ "$status" != "pending" ]] && continue
+                    echo ""
+                    echo "  Proposal ${pid}: ${principle}"
+                    echo "    Lever: ${lever}, Target: ${target}"
+                    echo "    Change: ${change}"
+                    echo "    Rationale: ${rationale}"
+                    read -r -p "  Approve? (y/n) " answer < /dev/tty 2>/dev/null || answer="n"
+                    if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                        update_csv_field "$PROPOSALS_FILE" "$pid" "status" "approved"
+                    else
+                        update_csv_field "$PROPOSALS_FILE" "$pid" "status" "rejected"
+                    fi
+                done < "$PROPOSALS_FILE"
+                ;;
+            strict)
+                # Report only — do not approve
+                log "Coaching level: strict — diagnosis and proposals generated as report only"
+                echo ""
+                echo "=== Diagnosis Summary ==="
+                if [[ -f "$DIAGNOSIS_FILE" ]]; then
+                    awk -F'|' 'NR > 1 && ($6 == "high" || $6 == "medium") {
+                        printf "  %s (%s): avg %.1f, priority %s\n", $1, $2, $3, $6
+                    }' "$DIAGNOSIS_FILE"
+                fi
+                echo ""
+                echo "=== Proposals (not applied in strict mode) ==="
+                awk -F'|' 'NR > 1 {
+                    printf "  %s: %s — %s (%s)\n", $1, $2, $5, $6
+                }' "$PROPOSALS_FILE"
+                echo ""
+                ;;
+        esac
+
+        # Apply step for approved proposals
+        if [[ "$COACHING" != "strict" ]]; then
+            while IFS='|' read -r pid principle lever target change rationale status; do
+                [[ "$pid" == "id" ]] && continue
+                [[ "$status" != "approved" ]] && continue
+
+                case "$lever" in
+                    craft_weight)
+                        # Extract new weight from change string "weight X → Y"
+                        local new_val
+                        new_val=$(echo "$change" | sed -n 's/.*→ *\([0-9]*\).*/\1/p')
+                        if [[ -n "$new_val" ]]; then
+                            update_csv_field "$WEIGHTS_FILE" "$principle" "weight" "$new_val" "principle"
+                            APPLIED=$((APPLIED + 1))
+                            update_csv_field "$PROPOSALS_FILE" "$pid" "status" "applied"
+                        fi
+                        ;;
+                    scene_intent)
+                        if [[ -f "$INTENT_CSV" ]]; then
+                            # Record as override — scene_intent changes need human/Claude writing
+                            local overrides_file="${PROJECT_DIR}/working/overrides.csv"
+                            if [[ ! -f "$overrides_file" ]]; then
+                                echo "id|principle|directive|source" > "$overrides_file"
+                            fi
+                            echo "${target}|${principle}|${change}|${pid}" >> "$overrides_file"
+                            APPLIED=$((APPLIED + 1))
+                            update_csv_field "$PROPOSALS_FILE" "$pid" "status" "applied"
+                        fi
+                        ;;
+                    voice_guide)
+                        local overrides_file="${PROJECT_DIR}/working/overrides.csv"
+                        if [[ ! -f "$overrides_file" ]]; then
+                            echo "id|principle|directive|source" > "$overrides_file"
+                        fi
+                        echo "global|${principle}|${change}|${pid}" >> "$overrides_file"
+                        APPLIED=$((APPLIED + 1))
+                        update_csv_field "$PROPOSALS_FILE" "$pid" "status" "applied"
+                        ;;
+                    override)
+                        local overrides_file="${PROJECT_DIR}/working/overrides.csv"
+                        if [[ ! -f "$overrides_file" ]]; then
+                            echo "id|principle|directive|source" > "$overrides_file"
+                        fi
+                        echo "${target}|${principle}|${change}|${pid}" >> "$overrides_file"
+                        APPLIED=$((APPLIED + 1))
+                        update_csv_field "$PROPOSALS_FILE" "$pid" "status" "applied"
+                        ;;
+                esac
+            done < "$PROPOSALS_FILE"
+
+            log "${APPLIED} proposals applied. Run storyforge write to rewrite with updated guidance."
+        fi
+    fi
+else
+    log "No proposals generated"
+fi
+
+# Check for validated patterns from tuning history
+validated=$(check_validated_patterns "$PROJECT_DIR")
+if [[ -n "$validated" ]]; then
+    log "Validated tuning patterns found:"
+    echo "$validated" | while IFS='|' read -r vp vl vi; do
+        log "  ${vp} (${vl}): avg improvement ${vi}"
+    done
+fi
+
+# ============================================================================
 # Git commit and push
 # ============================================================================
 
@@ -904,6 +1049,8 @@ log "Committing scoring results..."
     git add "working/craft-weights.csv" 2>/dev/null || true
     git add "working/costs/" 2>/dev/null || true
     git add "working/logs/" 2>/dev/null || true
+    git add "working/tuning.csv" 2>/dev/null || true
+    git add "working/overrides.csv" 2>/dev/null || true
     git commit -m "Score: cycle ${CYCLE}, ${SCENE_COUNT} scenes (${SCORE_MODE} mode)" 2>/dev/null || true
     git push 2>/dev/null || true
 )
