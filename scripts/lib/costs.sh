@@ -167,6 +167,7 @@ estimate_cost() {
         draft|write)    output_per_item=1500 ;;
         evaluate)       output_per_item=2000 ;;
         revise)         output_per_item=1000 ;;
+        score)          output_per_item=800 ;;
         *)              output_per_item=1500 ;;
     esac
 
