@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storyforge — Principled Scoring</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ── Reset ─────────────────────────────────────────────── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ── Light palette ─────────────────────────────────────── */
+  :root {
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+    --bg: #f6fafa;
+    --bg-card: #ffffff;
+    --bg-recessed: #ecf5f4;
+    --bg-code: #f0f7f6;
+    --text: #112525;
+    --text-secondary: #4a6363;
+    --text-muted: #7a9494;
+    --text-dim: #6a8a8a;
+    --border: #d0e2e0;
+    --border-light: #dcecea;
+    --border-bright: #b0ceca;
+
+    --primary: #0f766e;
+    --primary-light: #0d9488;
+    --primary-bg: rgba(15, 118, 110, 0.06);
+    --primary-border: rgba(15, 118, 110, 0.2);
+
+    --secondary: #0891b2;
+    --secondary-bg: rgba(8, 145, 178, 0.06);
+    --secondary-border: rgba(8, 145, 178, 0.2);
+
+    --accent: #7c3aed;
+    --accent-bg: rgba(124, 58, 237, 0.06);
+    --accent-border: rgba(124, 58, 237, 0.2);
+
+    --success: #059669;
+    --success-bg: rgba(5, 150, 105, 0.06);
+    --success-border: rgba(5, 150, 105, 0.2);
+
+    --warn: #d97706;
+    --warn-bg: rgba(217, 119, 6, 0.06);
+    --warn-border: rgba(217, 119, 6, 0.2);
+
+    --error: #dc2626;
+    --error-bg: rgba(220, 38, 38, 0.06);
+    --error-border: rgba(220, 38, 38, 0.2);
+
+    --arrow-color: #b0ceca;
+    --surface: #ffffff;
+    --shadow: 0 1px 3px rgba(17,37,37,0.05), 0 4px 12px rgba(17,37,37,0.03);
+    --shadow-elevated: 0 2px 8px rgba(17,37,37,0.07), 0 8px 24px rgba(17,37,37,0.05);
+
+    --max-w: 900px;
+    --radius: 10px;
+  }
+
+  /* ── Dark palette ──────────────────────────────────────── */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1414;
+      --bg-card: #142222;
+      --bg-recessed: #0a1010;
+      --bg-code: #112020;
+      --text: #e0efef;
+      --text-secondary: #9ab8b8;
+      --text-muted: #607a7a;
+      --text-dim: #6a8a8a;
+      --border: #243838;
+      --border-light: #1e3030;
+      --border-bright: #385050;
+
+      --primary: #2dd4bf;
+      --primary-light: #5eead4;
+      --primary-bg: rgba(45, 212, 191, 0.08);
+      --primary-border: rgba(45, 212, 191, 0.2);
+
+      --secondary: #22d3ee;
+      --secondary-bg: rgba(34, 211, 238, 0.06);
+      --secondary-border: rgba(34, 211, 238, 0.2);
+
+      --accent: #a78bfa;
+      --accent-bg: rgba(167, 139, 250, 0.08);
+      --accent-border: rgba(167, 139, 250, 0.2);
+
+      --success: #34d399;
+      --success-bg: rgba(52, 211, 153, 0.06);
+      --success-border: rgba(52, 211, 153, 0.2);
+
+      --warn: #fbbf24;
+      --warn-bg: rgba(251, 191, 36, 0.06);
+      --warn-border: rgba(251, 191, 36, 0.2);
+
+      --error: #f87171;
+      --error-bg: rgba(248, 113, 113, 0.06);
+      --error-border: rgba(248, 113, 113, 0.2);
+
+      --arrow-color: #385050;
+      --surface: #142222;
+      --shadow: 0 1px 3px rgba(0,0,0,0.2), 0 4px 12px rgba(0,0,0,0.15);
+      --shadow-elevated: 0 2px 8px rgba(0,0,0,0.25), 0 8px 24px rgba(0,0,0,0.2);
+    }
+  }
+
+  /* ── Base ───────────────────────────────────────────────── */
+  html {
+    font-size: 16px;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.7;
+    background-image:
+      radial-gradient(ellipse at 20% 0%, rgba(15, 118, 110, 0.05) 0%, transparent 55%),
+      radial-gradient(ellipse at 80% 0%, rgba(8, 145, 178, 0.04) 0%, transparent 55%),
+      radial-gradient(ellipse at 50% 100%, rgba(124, 58, 237, 0.02) 0%, transparent 50%);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body {
+      background-image:
+        radial-gradient(ellipse at 20% 0%, rgba(45, 212, 191, 0.06) 0%, transparent 55%),
+        radial-gradient(ellipse at 80% 0%, rgba(34, 211, 238, 0.04) 0%, transparent 55%),
+        radial-gradient(ellipse at 50% 100%, rgba(167, 139, 250, 0.02) 0%, transparent 50%);
+    }
+  }
+
+  /* ── Animations ────────────────────────────────────────── */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(18px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-delay: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  .animate {
+    animation: fadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--i, 0) * 0.08s);
+  }
+
+  /* ── Layout ────────────────────────────────────────────── */
+  .container {
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 3rem 1.5rem 5rem;
+  }
+
+  /* ── Back nav ──────────────────────────────────────────── */
+  .back-nav { position: fixed; top: 16px; left: 16px; z-index: 300; }
+  .back-nav a { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--text-dim); text-decoration: none; background: var(--surface, #fff); border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px 7px 10px; transition: color 0.2s, border-color 0.2s, box-shadow 0.2s; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .back-nav a:hover { color: var(--text); border-color: var(--border-bright); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .back-nav svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ── Hero ───────────────────────────────────────────────── */
+  .hero {
+    text-align: center;
+    margin-bottom: 3.5rem;
+    padding: 2.5rem 2rem 2rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 14px;
+    box-shadow: var(--shadow-elevated);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--primary), var(--secondary), var(--accent));
+  }
+
+  .hero h1 {
+    font-family: var(--font-body);
+    font-size: clamp(2rem, 5vw, 2.6rem);
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.03em;
+    line-height: 1.15;
+  }
+
+  .hero .subtitle {
+    font-size: 0.88rem;
+    line-height: 1.7;
+    color: var(--text-secondary);
+    max-width: 560px;
+    margin: 0 auto;
+    font-weight: 400;
+  }
+
+  /* ── Section scaffolding ───────────────────────────────── */
+  section { margin-bottom: 3.5rem; }
+
+  .section-tag {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .section-tag::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+    flex-shrink: 0;
+  }
+
+  .section-heading {
+    font-family: var(--font-body);
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.3rem;
+    letter-spacing: -0.02em;
+  }
+
+  .section-subheading {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-bottom: 2rem;
+    line-height: 1.6;
+  }
+
+  /* ── Cycle Diagram ──────────────────────────────────────── */
+  .cycle-ring {
+    position: relative;
+    width: 100%;
+    max-width: 620px;
+    margin: 0 auto;
+    aspect-ratio: 1;
+  }
+
+  .cycle-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 10;
+  }
+
+  .cycle-center-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--primary-bg);
+    border: 2px solid var(--primary-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 0.5rem;
+  }
+
+  .cycle-center-icon svg {
+    width: 24px;
+    height: 24px;
+    stroke: var(--primary);
+    fill: none;
+    stroke-width: 1.5;
+  }
+
+  .cycle-center-label {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--primary);
+  }
+
+  .cycle-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+  }
+
+  .cycle-step {
+    position: absolute;
+    width: 150px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    padding: 0.75rem 0.9rem;
+    box-shadow: var(--shadow);
+    transition: border-color 0.2s, box-shadow 0.2s;
+    z-index: 5;
+    text-align: center;
+  }
+
+  .cycle-step:hover {
+    border-color: var(--border-bright);
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .cycle-step-num {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 600;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.15rem;
+  }
+
+  .cycle-step-title {
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 0.15rem;
+  }
+
+  .cycle-step-desc {
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    line-height: 1.45;
+  }
+
+  /* ── Cycle: linear fallback for mobile ──────────────────── */
+  .cycle-linear {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  .cycle-linear-node {
+    width: 100%;
+    max-width: 500px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    box-shadow: var(--shadow);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .cycle-linear-node:hover {
+    border-color: var(--border-bright);
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .cycle-linear-num {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--primary-bg);
+    border: 1px solid var(--primary-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--primary);
+  }
+
+  .cycle-linear-content { flex: 1; min-width: 0; }
+
+  .cycle-linear-title {
+    font-family: var(--font-body);
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 0.1rem;
+  }
+
+  .cycle-linear-desc {
+    font-size: 0.74rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  .cycle-linear-arrow {
+    display: flex;
+    justify-content: center;
+    padding: 0.15rem 0;
+  }
+
+  .cycle-linear-loop {
+    display: flex;
+    justify-content: center;
+    margin-top: 0.25rem;
+  }
+
+  .cycle-linear-loop-label {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: var(--primary-bg);
+    border: 1px solid var(--primary-border);
+    border-radius: 20px;
+    padding: 0.3rem 1rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .cycle-linear-loop-label svg {
+    width: 14px;
+    height: 14px;
+    stroke: var(--primary);
+    fill: none;
+    stroke-width: 1.5;
+  }
+
+  /* ── Card Grid ──────────────────────────────────────────── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+  }
+
+  .card-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+
+  .component-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.25s ease, transform 0.25s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .component-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--card-accent, var(--primary));
+  }
+
+  .component-card:hover {
+    box-shadow: var(--shadow-elevated);
+    transform: translateY(-2px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .component-card:hover { transform: none; }
+  }
+
+  .component-card .card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.85rem;
+  }
+
+  .component-card .card-icon svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke-width: 1.5;
+  }
+
+  .component-card h3 {
+    font-family: var(--font-body);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.35rem;
+    letter-spacing: -0.01em;
+  }
+
+  .component-card .card-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 0.75rem;
+  }
+
+  .component-card .card-detail {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    line-height: 1.8;
+  }
+
+  .component-card .card-detail code {
+    color: var(--card-accent, var(--primary));
+    background: var(--bg-recessed);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.66rem;
+  }
+
+  /* ── Tier Table ─────────────────────────────────────────── */
+  .tier-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+
+  .tier-table thead th {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    background: var(--bg-recessed);
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tier-table tbody td {
+    font-size: 0.82rem;
+    padding: 0.85rem 1rem;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-light);
+    vertical-align: top;
+  }
+
+  .tier-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .tier-table tbody td:first-child {
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .tier-table .tier-badge {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    display: inline-block;
+  }
+
+  .tier-badge.scene { background: var(--primary-bg); color: var(--primary); border: 1px solid var(--primary-border); }
+  .tier-badge.act { background: var(--secondary-bg); color: var(--secondary); border: 1px solid var(--secondary-border); }
+  .tier-badge.novel { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border); }
+
+  .tier-principles {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    line-height: 1.7;
+  }
+
+  /* ── Lever Cards ────────────────────────────────────────── */
+  .lever-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .lever-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    padding: 1.1rem 1.5rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    box-shadow: var(--shadow);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .lever-card:hover {
+    border-color: var(--border-bright);
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .lever-num {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--primary-bg);
+    border: 1px solid var(--primary-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--primary);
+  }
+
+  .lever-content { flex: 1; min-width: 0; }
+
+  .lever-title {
+    font-family: var(--font-body);
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 0.1rem;
+  }
+
+  .lever-desc {
+    font-size: 0.76rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  /* ── Flow path (plugin learning) ────────────────────────── */
+  .flow-path {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .flow-path-step {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    padding: 0.75rem 1.1rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text);
+    text-align: center;
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.2s;
+    min-width: 0;
+  }
+
+  .flow-path-step:hover {
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .flow-path-step small {
+    display: block;
+    font-size: 0.66rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+  }
+
+  .flow-path-arrow {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--arrow-color);
+    padding: 0 0.35rem;
+    flex-shrink: 0;
+  }
+
+  /* ── Callout ───────────────────────────────────────────── */
+  .callout {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.5rem;
+    box-shadow: var(--shadow);
+    max-width: 720px;
+    margin: 0 auto;
+  }
+
+  .callout p {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.75;
+  }
+
+  .callout strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .callout code {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--primary);
+    background: var(--primary-bg);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+  }
+
+  /* ── Compact cards (calibration, rubrics) ────────────────── */
+  .compact-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+
+  .compact-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.5rem;
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.2s;
+  }
+
+  .compact-card:hover {
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .compact-card h3 {
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.4rem;
+    letter-spacing: -0.01em;
+  }
+
+  .compact-card p {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  .compact-card .card-detail {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+    line-height: 1.8;
+  }
+
+  /* ── Footer ────────────────────────────────────────────── */
+  footer {
+    text-align: center;
+    padding: 2rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+  }
+
+  /* ── Responsive ────────────────────────────────────────── */
+  @media (max-width: 768px) {
+    .container { padding: 2rem 1rem 3rem; }
+    .hero { padding: 1.75rem 1.25rem 1.5rem; }
+    .hero h1 { font-size: 1.8rem; }
+    .card-grid { grid-template-columns: 1fr; }
+    .card-grid-2 { grid-template-columns: 1fr; }
+    .compact-grid { grid-template-columns: 1fr; }
+    .cycle-ring { display: none; }
+    .cycle-linear { display: flex; }
+    .flow-path { flex-direction: column; gap: 0.5rem; }
+    .flow-path-arrow { transform: rotate(90deg); padding: 0; }
+    .tier-table { font-size: 0.78rem; }
+    .tier-table thead th { padding: 0.6rem 0.75rem; }
+    .tier-table tbody td { padding: 0.7rem 0.75rem; }
+  }
+
+  @media (max-width: 480px) {
+    .hero h1 { font-size: 1.5rem; }
+    .section-heading { font-size: 1.25rem; }
+    .lever-card { padding: 0.85rem 1rem; gap: 0.75rem; }
+    .cycle-step { width: 120px; padding: 0.5rem 0.6rem; }
+    .cycle-step-title { font-size: 0.72rem; }
+    .cycle-step-desc { font-size: 0.6rem; }
+  }
+
+  @media (min-width: 769px) {
+    .cycle-linear { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="back-nav"><a href="../index.html"><svg viewBox="0 0 16 16"><path d="M10 12L6 8l4-4"/></svg>Storyforge</a></nav>
+
+<div class="container">
+
+  <!-- ── Hero ──────────────────────────────────────────── -->
+  <section class="hero animate" style="--i: 0">
+    <h1>Principled Scoring</h1>
+    <p class="subtitle">A self-improving system that measures craft, diagnoses weaknesses, and tunes itself</p>
+  </section>
+
+  <!-- ── Section 1: The Improvement Cycle ────────────── -->
+  <section>
+    <div class="animate" style="--i: 1">
+      <div class="section-tag">The Loop</div>
+      <h2 class="section-heading">The Improvement Cycle</h2>
+      <p class="section-subheading">Seven steps that repeat until the novel meets its own standards.</p>
+    </div>
+
+    <!-- Circular diagram for desktop -->
+    <div class="cycle-ring animate" style="--i: 2">
+      <!-- Center label -->
+      <div class="cycle-center">
+        <div class="cycle-center-icon">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23,4 23,10 17,10"/>
+            <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>
+          </svg>
+        </div>
+        <div class="cycle-center-label">Repeat</div>
+      </div>
+
+      <!-- SVG arrows forming a circle -->
+      <svg class="cycle-svg" viewBox="0 0 620 620" fill="none">
+        <!-- Circular arrow path -->
+        <circle cx="310" cy="310" r="195" stroke="var(--border)" stroke-width="1.5" stroke-dasharray="8 6" fill="none" opacity="0.6"/>
+        <!-- Arrow heads at intervals around the circle -->
+        <g stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round" stroke-linecap="round">
+          <!-- Top to top-right -->
+          <polyline points="395,118 405,112 400,124"/>
+          <!-- Top-right to right -->
+          <polyline points="498,225 505,218 502,232"/>
+          <!-- Right to bottom-right -->
+          <polyline points="502,392 505,382 498,395"/>
+          <!-- Bottom-right to bottom -->
+          <polyline points="400,496 405,508 395,502"/>
+          <!-- Bottom to bottom-left -->
+          <polyline points="225,502 218,505 225,498"/>
+          <!-- Bottom-left to left -->
+          <polyline points="118,395 112,395 120,388"/>
+          <!-- Left to top-left -->
+          <polyline points="120,232 112,225 122,225"/>
+        </g>
+      </svg>
+
+      <!-- 7 steps positioned around the circle -->
+      <!-- Step 1: Score (top center) -->
+      <div class="cycle-step" style="top: 2%; left: 50%; transform: translateX(-50%);">
+        <div class="cycle-step-num">01</div>
+        <div class="cycle-step-title">Score</div>
+        <div class="cycle-step-desc">Run craft principle scoring against scenes</div>
+      </div>
+
+      <!-- Step 2: Diagnose (top right) -->
+      <div class="cycle-step" style="top: 14%; right: 1%;">
+        <div class="cycle-step-num">02</div>
+        <div class="cycle-step-title">Diagnose</div>
+        <div class="cycle-step-desc">Identify weakest principles and worst scenes</div>
+      </div>
+
+      <!-- Step 3: Hypothesize (right) -->
+      <div class="cycle-step" style="top: 42%; right: -3%;">
+        <div class="cycle-step-num">03</div>
+        <div class="cycle-step-title">Hypothesize</div>
+        <div class="cycle-step-desc">Propose changes to weights, voice, intent</div>
+      </div>
+
+      <!-- Step 4: Approve (bottom right) -->
+      <div class="cycle-step" style="bottom: 12%; right: 2%;">
+        <div class="cycle-step-num">04</div>
+        <div class="cycle-step-title">Approve</div>
+        <div class="cycle-step-desc">Author reviews per coaching level</div>
+      </div>
+
+      <!-- Step 5: Apply (bottom center) -->
+      <div class="cycle-step" style="bottom: 0%; left: 50%; transform: translateX(-50%);">
+        <div class="cycle-step-num">05</div>
+        <div class="cycle-step-title">Apply</div>
+        <div class="cycle-step-desc">Update weights, voice guide, overrides</div>
+      </div>
+
+      <!-- Step 6: Rewrite (bottom left) -->
+      <div class="cycle-step" style="bottom: 12%; left: 2%;">
+        <div class="cycle-step-num">06</div>
+        <div class="cycle-step-title">Rewrite</div>
+        <div class="cycle-step-desc">Redraft with tuned weighted directives</div>
+      </div>
+
+      <!-- Step 7: Re-score (top left) -->
+      <div class="cycle-step" style="top: 14%; left: 1%;">
+        <div class="cycle-step-num">07</div>
+        <div class="cycle-step-title">Re-score</div>
+        <div class="cycle-step-desc">Measure improvement, log to tuning ledger</div>
+      </div>
+    </div>
+
+    <!-- Linear fallback for mobile -->
+    <div class="cycle-linear">
+      <div class="cycle-linear-node animate" style="--i: 2">
+        <div class="cycle-linear-num">1</div>
+        <div class="cycle-linear-content">
+          <div class="cycle-linear-title">Score</div>
+          <div class="cycle-linear-desc">Run craft principle scoring against scenes (25 scene-level, 9 act-level, 8 novel-level principles)</div>
+        </div>
+      </div>
+      <div class="cycle-linear-arrow"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><line x1="12" y1="2" x2="12" y2="18" stroke="var(--arrow-color)" stroke-width="1.5"/><polyline points="8,15 12,20 16,15" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg></div>
+
+      <div class="cycle-linear-node animate" style="--i: 3">
+        <div class="cycle-linear-num">2</div>
+        <div class="cycle-linear-content">
+          <div class="cycle-linear-title">Diagnose</div>
+          <div class="cycle-linear-desc">Identify weakest principles and worst-scoring scenes</div>
+        </div>
+      </div>
+      <div class="cycle-linear-arrow"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><line x1="12" y1="2" x2="12" y2="18" stroke="var(--arrow-color)" stroke-width="1.5"/><polyline points="8,15 12,20 16,15" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg></div>
+
+      <div class="cycle-linear-node animate" style="--i: 4">
+        <div class="cycle-linear-num">3</div>
+        <div class="cycle-linear-content">
+          <div class="cycle-linear-title">Hypothesize</div>
+          <div class="cycle-linear-desc">Propose specific changes to craft weights, voice guide, scene intent</div>
+        </div>
+      </div>
+      <div class="cycle-linear-arrow"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><line x1="12" y1="2" x2="12" y2="18" stroke="var(--arrow-color)" stroke-width="1.5"/><polyline points="8,15 12,20 16,15" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg></div>
+
+      <div class="cycle-linear-node animate" style="--i: 5">
+        <div class="cycle-linear-num">4</div>
+        <div class="cycle-linear-content">
+          <div class="cycle-linear-title">Approve</div>
+          <div class="cycle-linear-desc">Author reviews (full=auto, coach=interactive, strict=report only)</div>
+        </div>
+      </div>
+      <div class="cycle-linear-arrow"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><line x1="12" y1="2" x2="12" y2="18" stroke="var(--arrow-color)" stroke-width="1.5"/><polyline points="8,15 12,20 16,15" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg></div>
+
+      <div class="cycle-linear-node animate" style="--i: 6">
+        <div class="cycle-linear-num">5</div>
+        <div class="cycle-linear-content">
+          <div class="cycle-linear-title">Apply</div>
+          <div class="cycle-linear-desc">Update craft weights, voice guide, scene intent, per-scene overrides</div>
+        </div>
+      </div>
+      <div class="cycle-linear-arrow"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><line x1="12" y1="2" x2="12" y2="18" stroke="var(--arrow-color)" stroke-width="1.5"/><polyline points="8,15 12,20 16,15" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg></div>
+
+      <div class="cycle-linear-node animate" style="--i: 7">
+        <div class="cycle-linear-num">6</div>
+        <div class="cycle-linear-content">
+          <div class="cycle-linear-title">Rewrite</div>
+          <div class="cycle-linear-desc">Redraft scenes with tuned guidance (weighted directives, not raw craft engine)</div>
+        </div>
+      </div>
+      <div class="cycle-linear-arrow"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><line x1="12" y1="2" x2="12" y2="18" stroke="var(--arrow-color)" stroke-width="1.5"/><polyline points="8,15 12,20 16,15" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg></div>
+
+      <div class="cycle-linear-node animate" style="--i: 8">
+        <div class="cycle-linear-num">7</div>
+        <div class="cycle-linear-content">
+          <div class="cycle-linear-title">Re-score</div>
+          <div class="cycle-linear-desc">Measure improvement, record in tuning ledger</div>
+        </div>
+      </div>
+
+      <div class="cycle-linear-loop animate" style="--i: 9">
+        <div class="cycle-linear-loop-label">
+          <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+          Repeat cycle
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Section 2: Scoring Modes ────────────────────── -->
+  <section>
+    <div class="animate" style="--i: 10">
+      <div class="section-tag">Modes</div>
+      <h2 class="section-heading">Three Scoring Modes</h2>
+      <p class="section-subheading">Choose the depth that fits the moment.</p>
+    </div>
+
+    <div class="card-grid">
+
+      <div class="component-card animate" style="--card-accent: var(--primary); --i: 11">
+        <div class="card-icon" style="background: var(--primary-bg); border: 1px solid var(--primary-border);">
+          <svg viewBox="0 0 24 24" stroke="var(--primary)" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+          </svg>
+        </div>
+        <h3>Grouped</h3>
+        <p class="card-desc">4 calls per scene, one per craft section. The default mode &mdash; most accurate for systematic improvement.</p>
+        <div class="card-detail">
+          Cost: <code>~$8-12</code> for 100 scenes
+        </div>
+      </div>
+
+      <div class="component-card animate" style="--card-accent: var(--secondary); --i: 12">
+        <div class="card-icon" style="background: var(--secondary-bg); border: 1px solid var(--secondary-border);">
+          <svg viewBox="0 0 24 24" stroke="var(--secondary)" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+        </div>
+        <h3>Quick</h3>
+        <p class="card-desc">1 call per scene. Fast directional check &mdash; good for a pulse read after a round of revisions.</p>
+        <div class="card-detail">
+          Cost: <code>~$2-3</code> for 100 scenes
+        </div>
+      </div>
+
+      <div class="component-card animate" style="--card-accent: var(--accent); --i: 13">
+        <div class="card-icon" style="background: var(--accent-bg); border: 1px solid var(--accent-border);">
+          <svg viewBox="0 0 24 24" stroke="var(--accent)" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            <line x1="8" y1="11" x2="14" y2="11"/><line x1="11" y1="8" x2="11" y2="14"/>
+          </svg>
+        </div>
+        <h3>Deep</h3>
+        <p class="card-desc">23 calls per scene. Investigative mode &mdash; best combined with <code>--scenes</code> for targeted analysis.</p>
+        <div class="card-detail">
+          Best for: <code>targeted diagnosis</code>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Section 3: Scoring Tiers ────────────────────── -->
+  <section>
+    <div class="animate" style="--i: 14">
+      <div class="section-tag">Scale</div>
+      <h2 class="section-heading">Scoring Tiers</h2>
+      <p class="section-subheading">What gets measured at each scale.</p>
+    </div>
+
+    <div class="animate" style="--i: 15; overflow-x: auto;">
+      <table class="tier-table">
+        <thead>
+          <tr>
+            <th>Tier</th>
+            <th>Count</th>
+            <th>Principles Scored</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tier-badge scene">Per-Scene</span></td>
+            <td style="font-family: var(--font-mono); font-weight: 600; color: var(--primary);">25</td>
+            <td class="tier-principles">
+              Scene Craft (7) &middot; Prose Craft (9) &middot; Character Craft scene-level (2) &middot; Rules to Break (7)
+            </td>
+          </tr>
+          <tr>
+            <td><span class="tier-badge act">Per-Act</span></td>
+            <td style="font-family: var(--font-mono); font-weight: 600; color: var(--secondary);">9</td>
+            <td class="tier-principles">
+              Narrative Frameworks (7) &middot; Character Web &middot; Character as Theme
+            </td>
+          </tr>
+          <tr>
+            <td><span class="tier-badge novel">Per-Novel</span></td>
+            <td style="font-family: var(--font-mono); font-weight: 600; color: var(--accent);">8+</td>
+            <td class="tier-principles">
+              Character arcs per character (4 each) &middot; Genre conventions (4)
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Section 4: The Five Tuning Levers ───────────── -->
+  <section>
+    <div class="animate" style="--i: 16">
+      <div class="section-tag">Tuning</div>
+      <h2 class="section-heading">The Five Tuning Levers</h2>
+      <p class="section-subheading">How the system translates scores into concrete improvements.</p>
+    </div>
+
+    <div class="lever-list">
+
+      <div class="lever-card animate" style="--i: 17">
+        <div class="lever-num">1</div>
+        <div class="lever-content">
+          <div class="lever-title">Craft Weights</div>
+          <div class="lever-desc">Primary dials: 1-10 per principle. Injected into the writing prompt as a weighted directive &mdash; not the raw craft engine text.</div>
+        </div>
+      </div>
+
+      <div class="lever-card animate" style="--i: 18">
+        <div class="lever-num">2</div>
+        <div class="lever-content">
+          <div class="lever-title">Voice Guide</div>
+          <div class="lever-desc">Concrete prose directives for when weight changes alone are not enough. "Shorten sentences in action beats" rather than "improve pacing."</div>
+        </div>
+      </div>
+
+      <div class="lever-card animate" style="--i: 19">
+        <div class="lever-num">3</div>
+        <div class="lever-content">
+          <div class="lever-title">Scene Intent</div>
+          <div class="lever-desc">Sharpen the function and emotional_arc for specific scenes so the scorer and the writer are aligned on what each scene must do.</div>
+        </div>
+      </div>
+
+      <div class="lever-card animate" style="--i: 20">
+        <div class="lever-num">4</div>
+        <div class="lever-content">
+          <div class="lever-title">Per-Scene Overrides</div>
+          <div class="lever-desc">Temporary instructions for specific scenes. Expire after the current cycle &mdash; designed for surgical, one-time fixes.</div>
+        </div>
+      </div>
+
+      <div class="lever-card animate" style="--i: 21">
+        <div class="lever-num">5</div>
+        <div class="lever-content">
+          <div class="lever-title">Tuning Ledger</div>
+          <div class="lever-desc">Memory of what works and what doesn't. Each entry records the change made, the before/after scores, and whether it helped.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Section 5: Plugin-Level Learning ────────────── -->
+  <section>
+    <div class="animate" style="--i: 22">
+      <div class="section-tag">Learning</div>
+      <h2 class="section-heading">Plugin-Level Learning</h2>
+      <p class="section-subheading">How individual project discoveries improve the plugin for everyone.</p>
+    </div>
+
+    <div class="flow-path animate" style="--i: 23">
+      <div class="flow-path-step">
+        Project Tuning Ledger
+        <small>per-project memory</small>
+      </div>
+      <div class="flow-path-arrow">&rarr;</div>
+      <div class="flow-path-step">
+        Validated Pattern
+        <small>3+ successes</small>
+      </div>
+      <div class="flow-path-arrow">&rarr;</div>
+      <div class="flow-path-step">
+        GitHub Issue
+        <small>on storyforge repo</small>
+      </div>
+      <div class="flow-path-arrow">&rarr;</div>
+      <div class="flow-path-step">
+        Maintainer Review
+        <small>human gate</small>
+      </div>
+      <div class="flow-path-arrow">&rarr;</div>
+      <div class="flow-path-step" style="border-top: 2px solid var(--primary);">
+        Default Craft Weights
+        <small>all future projects</small>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Section 6: Author Calibration ───────────────── -->
+  <section>
+    <div class="animate" style="--i: 24">
+      <div class="section-tag">Calibration</div>
+      <h2 class="section-heading">Author Calibration</h2>
+      <p class="section-subheading">Teaching the system your taste.</p>
+    </div>
+
+    <div class="compact-grid">
+
+      <div class="compact-card animate" style="--i: 25">
+        <h3>Author Scoring</h3>
+        <p>Authors can optionally provide their own scores for any scene. The delta between system and author scores teaches the system the author's personal taste &mdash; what they value that the generic rubric misses.</p>
+      </div>
+
+      <div class="compact-card animate" style="--i: 26">
+        <h3>Exemplar Bank</h3>
+        <p>Passages scoring 9+ are automatically collected as exemplars &mdash; concrete examples of "what excellence looks like in your voice." These exemplars are fed back into future writing prompts.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Section 7: Scoring Rubrics ──────────────────── -->
+  <section>
+    <div class="callout animate" style="--i: 27">
+      <p>
+        <strong>Scoring Rubrics</strong> &mdash; Every principle has defined score bands: <code>1-3</code> (fundamental problems), <code>4-6</code> (competent but unremarkable), <code>7-8</code> (skilled craft), <code>9-10</code> (exceptional). Each band includes literary exemplars from published works so the scorer has concrete reference points, not abstract ideals.
+      </p>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div>Storyforge &middot; Principled Scoring &middot; Self-Improving Craft Measurement</div>
+</footer>
+
+<script>
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('animate');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -30px 0px' });
+
+  document.querySelectorAll('.animate').forEach(el => {
+    el.style.opacity = '0';
+    el.classList.remove('animate');
+    observer.observe(el);
+  });
+</script>
+
+</body>
+</html>
