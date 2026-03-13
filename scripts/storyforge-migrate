@@ -149,6 +149,38 @@ frontmatter_field() {
     echo "$fm" | yaml_field "$field"
 }
 
+# Read a YAML array field from frontmatter, join items with ||
+# Usage: frontmatter_array <file> <field>
+frontmatter_array() {
+    local file="$1" field="$2"
+    [[ -f "$file" ]] || return 0
+    local fm
+    fm=$(sed -n '/^---$/,/^---$/p' "$file" 2>/dev/null) || true
+    [[ -z "$fm" ]] && return 0
+    # Find the field, then collect list items (lines starting with "  - ")
+    local in_field=false result=""
+    while IFS= read -r line; do
+        if [[ "$in_field" == true ]]; then
+            if echo "$line" | grep -qE '^[[:space:]]*-[[:space:]]'; then
+                local val
+                val=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/^["'\'']//' | sed 's/["'\'']*$//')
+                if [[ -n "$result" ]]; then
+                    result="${result}||${val}"
+                else
+                    result="$val"
+                fi
+            else
+                # Not a list item — end of array
+                break
+            fi
+        fi
+        if echo "$line" | grep -qE "^${field}:"; then
+            in_field=true
+        fi
+    done <<< "$fm"
+    echo "$result"
+}
+
 # Escape pipe characters in a value (should not appear, but safety)
 escape_pipe() {
     echo "$1" | tr '|' ':'
@@ -316,19 +348,38 @@ migrate_scene_metadata() {
         notes=$(echo "$block" | yaml_field "notes")
         [[ -z "$notes" ]] && notes=$(echo "$block" | yaml_field "summary")
 
-        # Check scene file frontmatter for fields not in the index
+        # Check scene file frontmatter for ALL fields not yet populated from the index
         local scene_file="${SCENES_DIR}/${id}.md"
         if [[ -f "$scene_file" ]]; then
-            [[ -z "$word_count" || "$word_count" == "null" ]] && {
-                local fm_wc
-                fm_wc=$(frontmatter_field "$scene_file" "word_count")
-                [[ -n "$fm_wc" && "$fm_wc" != "null" ]] && word_count="$fm_wc"
-            }
-            [[ -z "$status" || "$status" == "null" ]] && {
-                local fm_status
-                fm_status=$(frontmatter_field "$scene_file" "status")
-                [[ -n "$fm_status" && "$fm_status" != "null" ]] && status="$fm_status"
-            }
+            local fm_val
+            # Metadata fields
+            [[ -z "$title" || "$title" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "title"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && title="$fm_val"; }
+            [[ -z "$pov" || "$pov" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "pov"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && pov="$fm_val"; }
+            [[ -z "$setting" || "$setting" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "setting"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && setting="$fm_val"; }
+            [[ -z "$part" || "$part" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "part"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && part="$fm_val"; }
+            [[ -z "$scene_type" || "$scene_type" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "type"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && scene_type="$fm_val"; }
+            [[ -z "$timeline_day" || "$timeline_day" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "timeline_day"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && timeline_day="$fm_val"; }
+            [[ -z "$time_of_day" || "$time_of_day" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "time_of_day"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && time_of_day="$fm_val"; }
+            [[ -z "$word_count" || "$word_count" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "word_count"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && word_count="$fm_val"; }
+            [[ -z "$status" || "$status" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "status"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && status="$fm_val"; }
+            [[ -z "$target_words" || "$target_words" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "target_words"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && target_words="$fm_val"; }
+            # Intent fields
+            [[ -z "$func" || "$func" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "function"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && func="$fm_val"; }
+            [[ -z "$emotional_arc" || "$emotional_arc" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "emotional_arc"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && emotional_arc="$fm_val"; }
+            [[ -z "$notes" || "$notes" == "null" ]] && { fm_val=$(frontmatter_field "$scene_file" "notes"); [[ -n "$fm_val" && "$fm_val" != "null" ]] && notes="$fm_val"; }
+            # Array fields from frontmatter (characters, threads, motifs)
+            if [[ -z "$characters" || "$characters" == "null" ]]; then
+                fm_val=$(frontmatter_array "$scene_file" "characters")
+                [[ -n "$fm_val" ]] && characters="$fm_val"
+            fi
+            if [[ -z "$threads" || "$threads" == "null" ]]; then
+                fm_val=$(frontmatter_array "$scene_file" "threads")
+                [[ -n "$fm_val" ]] && threads="$fm_val"
+            fi
+            if [[ -z "$motifs" || "$motifs" == "null" ]]; then
+                fm_val=$(frontmatter_array "$scene_file" "motifs")
+                [[ -n "$fm_val" ]] && motifs="$fm_val"
+            fi
         fi
 
         # Clean up null values
