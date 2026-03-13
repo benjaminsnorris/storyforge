@@ -39,6 +39,8 @@
     --review-bg: rgba(15, 118, 110, 0.06);
     --produce: #7c3aed;
     --produce-bg: rgba(124, 58, 237, 0.06);
+    --score: #0d9488;
+    --score-bg: rgba(13, 148, 136, 0.06);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -71,6 +73,8 @@
       --review-bg: rgba(45, 212, 191, 0.08);
       --produce: #a78bfa;
       --produce-bg: rgba(167, 139, 250, 0.08);
+      --score: #2dd4bf;
+      --score-bg: rgba(45, 212, 191, 0.08);
     }
   }
 
@@ -410,6 +414,110 @@
     background: var(--produce-bg);
   }
 
+  /* Score phase */
+  .phase-card.score {
+    border-left: 3px solid var(--score);
+    background: var(--bg-card-auto);
+  }
+
+  .score .phase-number {
+    background: var(--score-bg);
+    color: var(--score);
+    border: 1.5px solid var(--score);
+  }
+
+  .score .section-label::before { background: var(--score); }
+
+  .score .phase-mode {
+    color: var(--score);
+    background: var(--score-bg);
+  }
+
+  .score .phase-command {
+    color: var(--score);
+    background: var(--score-bg);
+  }
+
+  /* --- Inner Loop Callout --- */
+  .inner-loop-callout {
+    margin-top: 0.5rem;
+    padding: 1rem 1.25rem;
+    background: var(--bg-recessed);
+    border: 1px dashed var(--score);
+    border-radius: 10px;
+    text-align: center;
+  }
+
+  .inner-loop-callout .section-label {
+    justify-content: center;
+    margin-bottom: 0.4rem;
+  }
+
+  .inner-loop-callout .section-label::before {
+    background: var(--score);
+  }
+
+  .inner-loop-callout p {
+    font-size: 0.78rem;
+    line-height: 1.65;
+    color: var(--text-secondary);
+  }
+
+  .inner-loop-callout strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .inner-loop-range {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--score);
+  }
+
+  .inner-loop-range svg {
+    flex-shrink: 0;
+  }
+
+  /* Inner loop bracket */
+  .inner-bracket-group {
+    position: relative;
+    padding-left: 1.5rem;
+    margin-left: 1rem;
+  }
+
+  .inner-bracket-group::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.5rem;
+    bottom: 0.5rem;
+    width: 3px;
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--score) 0, var(--score) 6px,
+      transparent 6px, transparent 12px
+    );
+    border-radius: 2px;
+    opacity: 0.5;
+  }
+
+  .inner-bracket-label {
+    position: absolute;
+    left: -3.2rem;
+    top: 50%;
+    transform: translateY(-50%) rotate(-90deg);
+    font-size: 0.55rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--score);
+    white-space: nowrap;
+  }
+
   /* --- Flow Arrow --- */
   .flow-arrow {
     display: flex;
@@ -644,7 +752,7 @@
   <!-- Hero -->
   <section class="hero animate" style="--i: 1">
     <h1>Story<span>forge</span> Pipeline</h1>
-    <p>A novel-writing toolkit for Claude Code. Guides authors from initial concept through drafting, evaluation, revision, and production across thirteen interconnected phases.</p>
+    <p>A novel-writing toolkit for Claude Code. Guides authors from initial concept through drafting, evaluation, revision, and production across fourteen interconnected phases.</p>
     <div class="legend">
       <div class="legend-item">
         <div class="legend-dot interactive"></div>
@@ -784,34 +892,88 @@
       </svg>
     </div>
 
-    <!-- Phase 6: Evaluate -->
+    <!-- Inner Score/Rewrite loop bracket -->
+    <div class="inner-bracket-group">
+      <div class="inner-bracket-label">Score Loop</div>
+
+    <!-- Phase 6: Score -->
     <div class="phase-wrapper animate" style="--i: 13">
-      <div class="phase-card autonomous">
+      <div class="phase-card score">
         <div class="phase-number">6</div>
         <div class="phase-header">
-          <div class="phase-name">Evaluate</div>
-          <code class="phase-command">./storyforge evaluate</code>
+          <div class="phase-name">Score</div>
+          <code class="phase-command">./storyforge score</code>
         </div>
         <div class="phase-body">
-          <div class="section-label">Manuscript Analysis</div>
-          <p class="phase-desc">A six-persona evaluation panel analyzes the manuscript. Each persona assesses different dimensions — prose quality, pacing, character consistency, plot coherence, and more.</p>
+          <div class="section-label">Principled Scoring</div>
+          <p class="phase-desc">Score scenes against 25 craft principles. Diagnose weaknesses, propose prompt adjustments, and rewrite with tuned guidance. Repeat until scores plateau. Fast and cheap (~$2&ndash;3 per cycle) compared to full evaluation.</p>
           <div class="phase-mode">Autonomous</div>
         </div>
       </div>
     </div>
 
-    <!-- Arrow -->
+    </div><!-- end inner-bracket-group -->
+
+    <!-- Inner Loop Arrow (loops back) -->
     <div class="flow-arrow animate" style="--i: 14">
+      <svg width="60" height="36" viewBox="0 0 60 36" fill="none">
+        <path d="M30 2 L30 16 Q30 22 24 22 L12 22 Q6 22 6 28 L6 32" stroke="var(--score)" stroke-width="1.5" fill="none" stroke-dasharray="5 3"/>
+        <polyline points="2,28 6,34 10,28" stroke="var(--score)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+        <text x="38" y="22" fill="var(--text-muted)" font-size="8" font-family="JetBrains Mono, monospace" font-weight="500">REWRITE</text>
+      </svg>
+    </div>
+
+    <!-- Inner Loop Callout -->
+    <div class="animate" style="--i: 15">
+      <div class="inner-loop-callout">
+        <div class="section-label">Score &rarr; Rewrite Loop</div>
+        <p>A <strong>tight inner loop</strong> between drafting and evaluation. Score produces per-scene scores against 25 craft principles, act-level framework scores, and novel-level character/genre scores. Diagnosis drives prompt tuning and targeted rewrites. Validated improvements feed back into the plugin itself.</p>
+        <div class="inner-loop-range">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M11 7A4 4 0 1 1 5.5 3.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+            <polyline points="4,2 6,3.5 4.5,5" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/>
+          </svg>
+          Draft &rarr; Score &rarr; Diagnose &rarr; Tune &rarr; Rewrite &rarr; Re-score
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="--i: 16">
       <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
         <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
         <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
       </svg>
     </div>
 
-    <!-- Phase 7: Plan Revision -->
-    <div class="phase-wrapper animate" style="--i: 15">
-      <div class="phase-card interactive">
+    <!-- Phase 7: Evaluate -->
+    <div class="phase-wrapper animate" style="--i: 17">
+      <div class="phase-card autonomous">
         <div class="phase-number">7</div>
+        <div class="phase-header">
+          <div class="phase-name">Evaluate</div>
+          <code class="phase-command">./storyforge evaluate</code>
+        </div>
+        <div class="phase-body">
+          <div class="section-label">Deep Manuscript Analysis</div>
+          <p class="phase-desc">An occasional deep review (1&ndash;2 times per project). A six-persona evaluation panel analyzes the manuscript across prose quality, pacing, character consistency, plot coherence, and more. Runs after scoring has plateaued.</p>
+          <div class="phase-mode">Autonomous</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="--i: 18">
+      <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
+        <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
+        <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <!-- Phase 8: Plan Revision -->
+    <div class="phase-wrapper animate" style="--i: 19">
+      <div class="phase-card interactive">
+        <div class="phase-number">8</div>
         <div class="phase-header">
           <div class="phase-name">Plan Revision</div>
           <code class="phase-command">/storyforge:plan-revision</code>
@@ -825,17 +987,17 @@
     </div>
 
     <!-- Arrow -->
-    <div class="flow-arrow animate" style="--i: 16">
+    <div class="flow-arrow animate" style="--i: 20">
       <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
         <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
         <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
       </svg>
     </div>
 
-    <!-- Phase 8: Revise -->
-    <div class="phase-wrapper animate" style="--i: 17">
+    <!-- Phase 9: Revise -->
+    <div class="phase-wrapper animate" style="--i: 21">
       <div class="phase-card autonomous">
-        <div class="phase-number">8</div>
+        <div class="phase-number">9</div>
         <div class="phase-header">
           <div class="phase-name">Revise</div>
           <code class="phase-command">./storyforge revise</code>
@@ -851,7 +1013,7 @@
     </div><!-- end bracket-group -->
 
     <!-- Iteration Arrow (loops back) -->
-    <div class="flow-arrow animate" style="--i: 18">
+    <div class="flow-arrow animate" style="--i: 22">
       <svg width="60" height="36" viewBox="0 0 60 36" fill="none">
         <path d="M30 2 L30 16 Q30 22 24 22 L12 22 Q6 22 6 28 L6 32" stroke="var(--gold-dim)" stroke-width="1.5" fill="none" stroke-dasharray="5 3"/>
         <polyline points="2,28 6,34 10,28" stroke="var(--gold-dim)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
@@ -860,32 +1022,32 @@
     </div>
 
     <!-- Iteration Callout -->
-    <div class="animate" style="--i: 19">
+    <div class="animate" style="--i: 23">
       <div class="iteration-callout">
         <div class="section-label">Iterative Refinement</div>
-        <p>Steps 4 through 8 form a <strong>refinement loop</strong>. After revision, return to Scene Design to restructure, then draft, evaluate, and revise again. Each cycle sharpens the manuscript toward its final form.</p>
+        <p>Steps 4 through 9 form a <strong>refinement loop</strong>. After revision, return to Scene Design to restructure, then draft, score, evaluate, and revise again. The inner Score &rarr; Rewrite loop runs within each cycle, tightening prose before the expensive full evaluation. Each cycle sharpens the manuscript toward its final form.</p>
         <div class="iteration-range">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <path d="M11 7A4 4 0 1 1 5.5 3.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
             <polyline points="4,2 6,3.5 4.5,5" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/>
           </svg>
-          Scene Design &rarr; Draft &rarr; Evaluate &rarr; Plan Revision &rarr; Revise
+          Scene Design &rarr; Draft &rarr; Score &rarr; Evaluate &rarr; Plan Revision &rarr; Revise
         </div>
       </div>
     </div>
 
     <!-- Arrow -->
-    <div class="flow-arrow animate" style="--i: 20">
+    <div class="flow-arrow animate" style="--i: 24">
       <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
         <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
         <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
       </svg>
     </div>
 
-    <!-- Phase 9: Review -->
-    <div class="phase-wrapper animate" style="--i: 21">
+    <!-- Phase 10: Review -->
+    <div class="phase-wrapper animate" style="--i: 25">
       <div class="phase-card review">
-        <div class="phase-number">9</div>
+        <div class="phase-number">10</div>
         <div class="phase-header">
           <div class="phase-name">Review</div>
           <code class="phase-command">/storyforge:review</code>
@@ -899,17 +1061,17 @@
     </div>
 
     <!-- Arrow -->
-    <div class="flow-arrow animate" style="--i: 22">
+    <div class="flow-arrow animate" style="--i: 26">
       <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
         <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
         <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
       </svg>
     </div>
 
-    <!-- Phase 10: Title -->
-    <div class="phase-wrapper animate" style="--i: 23">
+    <!-- Phase 11: Title -->
+    <div class="phase-wrapper animate" style="--i: 27">
       <div class="phase-card interactive">
-        <div class="phase-number">10</div>
+        <div class="phase-number">11</div>
         <div class="phase-header">
           <div class="phase-name">Title</div>
           <code class="phase-command">/storyforge:title</code>
@@ -923,17 +1085,17 @@
     </div>
 
     <!-- Arrow -->
-    <div class="flow-arrow animate" style="--i: 24">
+    <div class="flow-arrow animate" style="--i: 28">
       <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
         <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
         <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
       </svg>
     </div>
 
-    <!-- Phase 11: Cover -->
-    <div class="phase-wrapper animate" style="--i: 25">
+    <!-- Phase 12: Cover -->
+    <div class="phase-wrapper animate" style="--i: 29">
       <div class="phase-card interactive">
-        <div class="phase-number">11</div>
+        <div class="phase-number">12</div>
         <div class="phase-header">
           <div class="phase-name">Cover</div>
           <code class="phase-command">/storyforge:cover</code>
@@ -947,17 +1109,17 @@
     </div>
 
     <!-- Arrow -->
-    <div class="flow-arrow animate" style="--i: 26">
+    <div class="flow-arrow animate" style="--i: 30">
       <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
         <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
         <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
       </svg>
     </div>
 
-    <!-- Phase 12: Produce -->
-    <div class="phase-wrapper animate" style="--i: 27">
+    <!-- Phase 13: Produce -->
+    <div class="phase-wrapper animate" style="--i: 31">
       <div class="phase-card produce">
-        <div class="phase-number">12</div>
+        <div class="phase-number">13</div>
         <div class="phase-header">
           <div class="phase-name">Produce</div>
           <code class="phase-command">/storyforge:produce</code>
@@ -971,17 +1133,17 @@
     </div>
 
     <!-- Arrow -->
-    <div class="flow-arrow animate" style="--i: 28">
+    <div class="flow-arrow animate" style="--i: 32">
       <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
         <line x1="12" y1="2" x2="12" y2="22" stroke="var(--arrow-color)" stroke-width="1.5"/>
         <polyline points="7,18 12,24 17,18" stroke="var(--arrow-color)" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
       </svg>
     </div>
 
-    <!-- Phase 13: Press Kit -->
-    <div class="phase-wrapper animate" style="--i: 29">
+    <!-- Phase 14: Press Kit -->
+    <div class="phase-wrapper animate" style="--i: 33">
       <div class="phase-card interactive">
-        <div class="phase-number">13</div>
+        <div class="phase-number">14</div>
         <div class="phase-header">
           <div class="phase-name">Press Kit</div>
           <code class="phase-command">/storyforge:press-kit</code>
