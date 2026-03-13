@@ -699,3 +699,340 @@ collect_exemplars() {
         col=$((col + 1))
     done
 }
+
+# ============================================================================
+# generate_score_report(cycle_dir, project_dir, cycle, mode, scene_count, cost)
+# Generate a self-contained HTML report at cycle_dir/report.html
+# ============================================================================
+
+generate_score_report() {
+    local cycle_dir="$1" project_dir="$2" cycle="$3" mode="$4" scene_count="$5" cost="$6"
+    local report_file="${cycle_dir}/report.html"
+    local project_title
+    project_title=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
+
+    # Build character table rows
+    local char_rows=""
+    if [[ -f "${cycle_dir}/character-scores.csv" ]]; then
+        while IFS='|' read -r char wn wl fas vac; do
+            [[ "$char" == "character" ]] && continue
+            local avg
+            avg=$(awk "BEGIN { printf \"%.1f\", ($wn + $wl + $fas + $vac) / 4 }")
+            char_rows="${char_rows}<tr><td>${char}</td><td class=\"sc-${wn}\">${wn}</td><td class=\"sc-${wl}\">${wl}</td><td class=\"sc-${fas}\">${fas}</td><td class=\"sc-${vac}\">${vac}</td><td><strong>${avg}</strong></td></tr>"
+        done < "${cycle_dir}/character-scores.csv"
+    fi
+
+    # Build act table rows
+    local act_rows=""
+    if [[ -f "${cycle_dir}/act-scores.csv" ]]; then
+        while IFS='|' read -r id cm ta stc t22 hc ki fr cw ct; do
+            [[ "$id" == "id" ]] && continue
+            local label
+            label=$(echo "$id" | sed 's/act-/Part /')
+            act_rows="${act_rows}<tr><td>${label}</td><td class=\"sc-${cm}\">${cm}</td><td class=\"sc-${ta}\">${ta}</td><td class=\"sc-${stc}\">${stc}</td><td class=\"sc-${t22}\">${t22}</td><td class=\"sc-${hc}\">${hc}</td><td class=\"sc-${ki}\">${ki}</td><td class=\"sc-${fr}\">${fr}</td><td class=\"sc-${cw}\">${cw}</td><td class=\"sc-${ct}\">${ct}</td></tr>"
+        done < "${cycle_dir}/act-scores.csv"
+    fi
+
+    # Build genre row
+    local genre_row=""
+    if [[ -f "${cycle_dir}/genre-scores.csv" ]]; then
+        genre_row=$(awk -F'|' 'NR==2 { printf "<td class=\"sc-%s\">%s</td><td class=\"sc-%s\">%s</td><td class=\"sc-%s\">%s</td><td class=\"sc-%s\">%s</td>", $1,$1,$2,$2,$3,$3,$4,$4 }' "${cycle_dir}/genre-scores.csv")
+    fi
+
+    # Build top strengths / weaknesses from diagnosis
+    local strengths="" weaknesses=""
+    if [[ -f "${cycle_dir}/diagnosis.csv" ]]; then
+        strengths=$(awk -F'|' 'NR>1 && $3+0 > 0 { print $3+0, $1, $4 }' "${cycle_dir}/diagnosis.csv" \
+            | sort -t' ' -k1 -rn | head -5 \
+            | while read -r score prin scenes; do
+                echo "<tr><td>${prin//_/ }</td><td>${score}</td><td>${scenes}</td></tr>"
+            done)
+        weaknesses=$(awk -F'|' 'NR>1 && $3+0 > 0 { print $3+0, $1, $4 }' "${cycle_dir}/diagnosis.csv" \
+            | sort -t' ' -k1 -n | head -5 \
+            | while read -r score prin scenes; do
+                echo "<tr><td>${prin//_/ }</td><td>${score}</td><td>${scenes}</td></tr>"
+            done)
+    fi
+
+    # Build proposals rows
+    local proposal_rows=""
+    if [[ -f "${cycle_dir}/proposals.csv" ]]; then
+        while IFS='|' read -r pid prin lever target change rationale status; do
+            [[ "$pid" == "id" ]] && continue
+            local status_badge
+            case "$status" in
+                applied) status_badge="<span class='badge badge-applied'>applied</span>" ;;
+                approved) status_badge="<span class='badge badge-approved'>approved</span>" ;;
+                rejected) status_badge="<span class='badge badge-rejected'>rejected</span>" ;;
+                *) status_badge="<span class='badge badge-pending'>pending</span>" ;;
+            esac
+            proposal_rows="${proposal_rows}<tr><td>${prin//_/ }</td><td>${lever//_/ }</td><td>${change}</td><td>${rationale}</td><td>${status_badge}</td></tr>"
+        done < "${cycle_dir}/proposals.csv"
+    fi
+
+    # Build scene heatmap rows (average per scene across principle groups)
+    local scene_heatmap=""
+    if [[ -f "${cycle_dir}/scene-scores.csv" ]]; then
+        local header
+        header=$(head -1 "${cycle_dir}/scene-scores.csv")
+        local ncols
+        ncols=$(echo "$header" | tr '|' '\n' | wc -l | tr -d ' ')
+        scene_heatmap=$(awk -F'|' -v nc="$ncols" '
+            NR==1 { next }
+            {
+                sum=0; count=0
+                for(i=2; i<=nc; i++) { if($i+0 > 0) { sum += $i; count++ } }
+                avg = (count > 0) ? sum/count : 0
+                printf "<tr><td>%s</td><td class=\"sc-%d\">%.1f</td></tr>\n", $1, int(avg+0.5), avg
+            }
+        ' "${cycle_dir}/scene-scores.csv")
+    fi
+
+    cat > "$report_file" << 'HTMLEOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scoring Report</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+    --bg: #faf8f6; --surface: #fff; --border: #e5e1db; --text: #2c2420;
+    --text-dim: #8a7d73; --teal: #0f766e; --teal-dim: rgba(15,118,110,0.07);
+    --red: #dc2626; --amber: #d97706; --green: #16a34a;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #1a1614; --surface: #262019; --border: rgba(255,255,255,0.08);
+        --text: #ede5dd; --text-dim: #a69889; --teal: #2dd4bf; --teal-dim: rgba(45,212,191,0.08);
+        --red: #f87171; --amber: #fbbf24; --green: #4ade80;
+    }
+}
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+.page { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+h1 { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+h2 { font-size: 18px; font-weight: 600; margin: 32px 0 12px; color: var(--teal); border-bottom: 2px solid var(--teal-dim); padding-bottom: 6px; }
+.meta { font-size: 13px; color: var(--text-dim); margin-bottom: 24px; }
+.meta span { margin-right: 16px; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; }
+th { text-align: left; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
+td { padding: 6px 10px; border: 1px solid var(--border); }
+.sc-1,.sc-2,.sc-3 { background: rgba(220,38,38,0.12); color: var(--red); font-weight: 600; }
+.sc-4,.sc-5 { background: rgba(217,119,6,0.10); color: var(--amber); }
+.sc-6 { background: rgba(217,119,6,0.06); }
+.sc-7,.sc-8 { background: rgba(22,163,74,0.06); }
+.sc-9,.sc-10 { background: rgba(22,163,74,0.12); color: var(--green); font-weight: 600; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+.badge-applied { background: rgba(22,163,74,0.12); color: var(--green); }
+.badge-approved { background: rgba(22,163,74,0.06); color: var(--green); }
+.badge-rejected { background: rgba(220,38,38,0.08); color: var(--red); }
+.badge-pending { background: rgba(217,119,6,0.08); color: var(--amber); }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 640px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="page">
+HTMLEOF
+
+    # Inject dynamic content
+    cat >> "$report_file" << EOF
+<h1>${project_title} — Scoring Report</h1>
+<div class="meta">
+    <span>Cycle ${cycle}</span>
+    <span>Mode: ${mode}</span>
+    <span>Scenes: ${scene_count}</span>
+    <span>Cost: \$${cost}</span>
+    <span>$(date '+%Y-%m-%d %H:%M')</span>
+</div>
+
+<h2>Character Arcs</h2>
+<table>
+<tr><th>Character</th><th>Want/Need</th><th>Wound/Lie</th><th>Flaws</th><th>Voice</th><th>Avg</th></tr>
+${char_rows}
+</table>
+
+<h2>Act Structure</h2>
+<table>
+<tr><th>Act</th><th>Campbell</th><th>3-Act</th><th>Save Cat</th><th>Truby</th><th>Harmon</th><th>Kishoten.</th><th>Freytag</th><th>Char Web</th><th>Char Theme</th></tr>
+${act_rows}
+</table>
+
+<h2>Genre Contract</h2>
+<table>
+<tr><th>Trope Awareness</th><th>Archetype vs Cliche</th><th>Genre Contract</th><th>Subversion</th></tr>
+<tr>${genre_row}</tr>
+</table>
+
+<div class="two-col">
+<div>
+<h2>Top Strengths</h2>
+<table>
+<tr><th>Principle</th><th>Avg</th><th>Best Scenes</th></tr>
+${strengths}
+</table>
+</div>
+<div>
+<h2>Areas for Improvement</h2>
+<table>
+<tr><th>Principle</th><th>Avg</th><th>Weakest Scenes</th></tr>
+${weaknesses}
+</table>
+</div>
+</div>
+
+<h2>Improvement Proposals</h2>
+<table>
+<tr><th>Principle</th><th>Lever</th><th>Change</th><th>Rationale</th><th>Status</th></tr>
+${proposal_rows}
+</table>
+
+<h2>Scene Averages</h2>
+<table>
+<tr><th>Scene</th><th>Avg Score</th></tr>
+${scene_heatmap}
+</table>
+
+</div>
+</body>
+</html>
+EOF
+
+    log "Generated scoring report: ${report_file}"
+}
+
+# ============================================================================
+# build_score_pr_comment(cycle_dir, project_dir, cycle, mode, scene_count, cost)
+# Build a markdown PR comment with scoring summary
+# ============================================================================
+
+build_score_pr_comment() {
+    local cycle_dir="$1" project_dir="$2" cycle="$3" mode="$4" scene_count="$5" cost="$6"
+    local project_title
+    project_title=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
+
+    local comment="## Scoring Report — Cycle ${cycle}
+
+**${project_title}** | ${mode} mode | ${scene_count} scenes | \$${cost}
+
+"
+
+    # Character arcs
+    if [[ -f "${cycle_dir}/character-scores.csv" ]]; then
+        comment="${comment}### Character Arcs
+| Character | Want/Need | Wound/Lie | Flaws | Voice | Avg |
+|-----------|-----------|-----------|-------|-------|-----|
+"
+        while IFS='|' read -r char wn wl fas vac; do
+            [[ "$char" == "character" ]] && continue
+            local avg
+            avg=$(awk "BEGIN { printf \"%.1f\", ($wn + $wl + $fas + $vac) / 4 }")
+            local wn_icon wl_icon fas_icon vac_icon
+            wn_icon=$(_score_icon "$wn"); wl_icon=$(_score_icon "$wl")
+            fas_icon=$(_score_icon "$fas"); vac_icon=$(_score_icon "$vac")
+            comment="${comment}| ${char} | ${wn_icon} ${wn} | ${wl_icon} ${wl} | ${fas_icon} ${fas} | ${vac_icon} ${vac} | **${avg}** |
+"
+        done < "${cycle_dir}/character-scores.csv"
+        comment="${comment}
+"
+    fi
+
+    # Act structure
+    if [[ -f "${cycle_dir}/act-scores.csv" ]]; then
+        comment="${comment}### Act Structure
+| Act | Campbell | 3-Act | Save Cat | Truby | Harmon | Kishoten. | Freytag | Char Web | Theme |
+|-----|----------|-------|----------|-------|--------|-----------|---------|----------|-------|
+"
+        while IFS='|' read -r id cm ta stc t22 hc ki fr cw ct; do
+            [[ "$id" == "id" ]] && continue
+            local label
+            label=$(echo "$id" | sed 's/act-/Part /')
+            comment="${comment}| ${label} | ${cm} | ${ta} | ${stc} | ${t22} | ${hc} | ${ki} | ${fr} | ${cw} | ${ct} |
+"
+        done < "${cycle_dir}/act-scores.csv"
+        comment="${comment}
+"
+    fi
+
+    # Genre
+    if [[ -f "${cycle_dir}/genre-scores.csv" ]]; then
+        local genre_vals
+        genre_vals=$(awk -F'|' 'NR==2' "${cycle_dir}/genre-scores.csv")
+        comment="${comment}### Genre Contract
+| Trope Awareness | Archetype vs Cliche | Genre Contract | Subversion |
+|-----------------|---------------------|----------------|------------|
+| $(echo "$genre_vals" | awk -F'|' '{ printf "%s | %s | %s | %s", $1, $2, $3, $4 }') |
+
+"
+    fi
+
+    # Top strengths and weaknesses
+    if [[ -f "${cycle_dir}/diagnosis.csv" ]]; then
+        local top5_strong top5_weak
+        top5_strong=$(awk -F'|' 'NR>1 && $3+0 > 0' "${cycle_dir}/diagnosis.csv" | sort -t'|' -k3 -rn | head -5)
+        top5_weak=$(awk -F'|' 'NR>1 && $3+0 > 0' "${cycle_dir}/diagnosis.csv" | sort -t'|' -k3 -n | head -5)
+
+        comment="${comment}### Top Strengths
+| Principle | Avg | Best Scenes |
+|-----------|-----|-------------|
+"
+        echo "$top5_strong" | while IFS='|' read -r prin scale avg scenes delta priority; do
+            comment_line="| ${prin//_/ } | ${avg} | ${scenes} |"
+            echo "$comment_line"
+        done | while read -r line; do
+            comment="${comment}${line}
+"
+        done
+        # Use a simpler approach - pipe to a temp var
+        local strong_rows weak_rows
+        strong_rows=$(echo "$top5_strong" | while IFS='|' read -r prin scale avg scenes delta priority; do
+            echo "| ${prin//_/ } | ${avg} | ${scenes} |"
+        done)
+        weak_rows=$(echo "$top5_weak" | while IFS='|' read -r prin scale avg scenes delta priority; do
+            echo "| ${prin//_/ } | ${avg} | ${scenes} |"
+        done)
+
+        comment="${comment}${strong_rows}
+
+### Areas for Improvement
+| Principle | Avg | Weakest Scenes |
+|-----------|-----|----------------|
+${weak_rows}
+
+"
+    fi
+
+    # Proposals
+    if [[ -f "${cycle_dir}/proposals.csv" ]]; then
+        local prop_count
+        prop_count=$(awk -F'|' 'NR>1' "${cycle_dir}/proposals.csv" | wc -l | tr -d ' ')
+        if (( prop_count > 0 )); then
+            comment="${comment}### Improvement Proposals (${prop_count})
+| Principle | Lever | Change | Status |
+|-----------|-------|--------|--------|
+"
+            while IFS='|' read -r pid prin lever target change rationale status; do
+                [[ "$pid" == "id" ]] && continue
+                comment="${comment}| ${prin//_/ } | ${lever//_/ } | ${change} | ${status} |
+"
+            done < "${cycle_dir}/proposals.csv"
+            comment="${comment}
+"
+        fi
+    fi
+
+    comment="${comment}---
+*Report: \`working/scores/cycle-${cycle}/report.html\`*"
+
+    echo "$comment"
+}
+
+# Helper: score icon for PR comment
+_score_icon() {
+    local score="$1"
+    if (( score >= 8 )); then echo "🟢"
+    elif (( score >= 5 )); then echo "🟡"
+    else echo "🔴"
+    fi
+}

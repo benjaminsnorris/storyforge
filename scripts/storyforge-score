@@ -1234,6 +1234,33 @@ fi
 # Git commit and push
 # ============================================================================
 
+# ============================================================================
+# Generate report and PR comment
+# ============================================================================
+
+TOTAL_COST=$(awk -F'|' '
+    NR==1 { next }
+    $2 == "score" { sum += $9 }
+    END { printf "%.2f", sum }
+' "${PROJECT_DIR}/working/costs/ledger.csv" 2>/dev/null || echo "0.00")
+
+generate_score_report "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE" "$SCORE_MODE" "$SCENE_COUNT" "$TOTAL_COST"
+
+# Post PR comment with scoring summary
+if has_gh 2>/dev/null; then
+    PR_COMMENT=$(build_score_pr_comment "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE" "$SCORE_MODE" "$SCENE_COUNT" "$TOTAL_COST")
+    if [[ -n "$PR_COMMENT" ]]; then
+        # Find the PR for the current branch
+        CURRENT_PR=$(gh pr view --json number -q '.number' 2>/dev/null || true)
+        if [[ -n "$CURRENT_PR" ]]; then
+            echo "$PR_COMMENT" | gh pr comment "$CURRENT_PR" --body-file - 2>/dev/null || log "WARNING: Failed to post PR comment"
+            log "Posted scoring summary to PR #${CURRENT_PR}"
+        fi
+    fi
+fi
+
+update_pr_task "Review" "$PROJECT_DIR" 2>/dev/null || true
+
 log "Committing scoring results..."
 
 (
