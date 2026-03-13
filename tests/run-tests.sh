@@ -213,6 +213,7 @@ source "${PLUGIN_DIR}/scripts/lib/revision-passes.sh"
 source "${PLUGIN_DIR}/scripts/lib/assembly.sh"
 source "${PLUGIN_DIR}/scripts/lib/cover-api.sh"
 source "${PLUGIN_DIR}/scripts/lib/csv.sh"
+source "${PLUGIN_DIR}/scripts/lib/costs.sh"
 
 # Set PROJECT_DIR to the fixture
 export PROJECT_DIR="$FIXTURE_DIR"

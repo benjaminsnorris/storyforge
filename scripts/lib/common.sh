@@ -537,6 +537,7 @@ get_plugin_dir() {
 # Source companion libraries that live alongside common.sh
 _sf_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "${_sf_lib_dir}/csv.sh" ]] && source "${_sf_lib_dir}/csv.sh"
+[[ -f "${_sf_lib_dir}/costs.sh" ]] && source "${_sf_lib_dir}/costs.sh"
 unset _sf_lib_dir
 
 # ============================================================================
