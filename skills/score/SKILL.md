@@ -142,29 +142,49 @@ When the author says "run scoring" or "score my scenes":
 1. Confirm the mode and scope:
    - **Mode:** `--grouped` (default, most accurate), `--quick` (faster, cheaper), or `--deep` (per-principle, most expensive)
    - **Scope:** all scenes (default), `--scenes ID,ID` for specific scenes, `--act N` for a specific act
-2. Show the dry-run first so the author sees the cost estimate:
+
+2. Present the author with two options:
+
+   > **Option A: Run it here**
+   > I'll launch the scoring script in this conversation. This invokes Claude sessions, so I need to unset the CLAUDECODE variable. It will take approximately N minutes and cost ~$X.
+   >
+   > **Option B: Run it yourself**
+   > Copy this command and run it in a separate terminal:
+   > ```bash
+   > cd [project_dir] && [plugin_path]/scripts/storyforge-score --quick
+   > ```
+   > Add `--dry-run` to preview the cost first. Add `--scenes ID,ID` or `--act N` to limit scope.
+
+3. Wait for the author's choice.
+
+### If Option A:
+
+   Show the dry-run first:
    ```bash
-   ./storyforge score --quick --dry-run
+   unset CLAUDECODE && [plugin_path]/scripts/storyforge-score --quick --dry-run
    ```
-3. If the author approves, run the scoring script. **You must unset CLAUDECODE first** since the script invokes `claude -p`:
+   If the author approves, run:
    ```bash
-   unset CLAUDECODE && ./storyforge score --quick
+   unset CLAUDECODE && [plugin_path]/scripts/storyforge-score --quick
    ```
-   Or with scope:
-   ```bash
-   unset CLAUDECODE && ./storyforge score --quick --scenes 001,002,003
-   ```
-4. The script will:
-   - Create a `storyforge/score-*` branch
-   - Run cost forecasting and check the threshold
-   - Score all scenes in scope
-   - Run act-level and novel-level scoring
-   - Generate diagnosis and improvement proposals
-   - Apply proposals per coaching level (full=auto, coach=interactive, strict=report)
-   - Collect exemplars from 9+ scores
-   - Check for validated tuning patterns (for plugin insights)
-   - Commit and push results
-5. After scoring completes, switch to Review mode to present results
+
+### If Option B:
+
+   Provide the full command with appropriate flags. End the conversation so they can run it.
+
+### What the script does:
+
+- Creates a `storyforge/score-*` branch and draft PR
+- Runs cost forecasting and checks the threshold
+- Scores all scenes in scope (parallel batches of 6)
+- Runs act-level and novel-level scoring
+- Generates diagnosis and improvement proposals
+- Applies proposals per coaching level (full=auto, coach=interactive, strict=report)
+- Posts a scoring summary as a PR comment
+- Generates an HTML report at `working/scores/cycle-N/report.html`
+- Commits and pushes results
+
+After scoring completes, switch to Review mode to present results.
 
 **Cost estimates:**
 - Quick mode: ~$0.03 per scene + ~$1 for act/novel scoring

@@ -1589,6 +1589,16 @@ HTMLEOF
 
 log "Dashboard generated: ${DASHBOARD_FILE}"
 
+# --- Commit and push ---
+if [[ "$DRY_RUN" != true ]]; then
+    (
+        cd "$PROJECT_DIR"
+        git add working/dashboard.html 2>/dev/null || true
+        git commit -m "Visualize: generate manuscript dashboard" 2>/dev/null || true
+        git push 2>/dev/null || true
+    )
+fi
+
 # --- Open in browser ---
 if [[ "$OPEN_BROWSER" == true ]]; then
     if command -v open &>/dev/null; then
