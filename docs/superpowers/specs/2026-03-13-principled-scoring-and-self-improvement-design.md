@@ -43,12 +43,13 @@ The evaluation loop is expensive and infrequent. The revision model is "fix this
 
 Principles are scored at their natural scale:
 
-**Per-scene (23 principles):**
+**Per-scene (25 principles):**
 
 | Section | Principles | Score range |
 |---------|-----------|-------------|
 | Scene Craft | Enter Late/Leave Early, Every Scene Must Turn, Scene Emotion vs Character Emotion, Psychic Distance at Scene Level, Show vs Tell in Scenes, Thread Management, Pacing Through Scene Variety | 1-10 each |
 | Prose Craft | Economy and Clarity, Sentence as Unit of Thought, Writer's Toolbox, Precision in Language, Persuasive Structure, Fictive Dream and Psychic Distance, Scene vs Summary, Sound/Rhythm/POV, Permission and Emotional Honesty | 1-10 each |
+| Character Craft (scene-level) | Egri's Premise (does POV character's trait drive this scene's conflict?), Testing Characters (can the testing questions be answered for the POV character from this scene alone?) | 1-10 each |
 | Rules to Break | Show Don't Tell, Avoid Adverbs, Avoid Passive Voice, Write What You Know, Never Open with Weather/Dreams, Avoid Said-Bookisms, Kill Your Darlings | 1-10 each |
 
 **Per-act/part (~9 principles):**
@@ -333,7 +334,9 @@ Same format, lives in the storyforge plugin. New projects copy this to `working/
 
 Effective weight = `author_weight` if set, otherwise `weight`.
 
-**Scale-specific behavior:** Scene-level weights (scene_craft, prose_craft, rules) are injected into every scene drafting prompt. Act/novel-level weights (narrative_frameworks, character_craft) are injected only when drafting prompts for the first or last scene of an act (structural moments), or when the scene's `type` is `plot` or `character` — not into every scene. This prevents arc-level concerns from overwhelming scene-level execution.
+**Scale-specific behavior:** Scene-level weights (scene_craft, prose_craft, rules) are injected into every scene drafting prompt. Act/novel-level weights (narrative_frameworks, character_craft relational) are injected only when drafting prompts for the first or last scene of an act (structural moments), or when the scene's `type` is `plot` or `character` — not into every scene.
+
+**Character-level weight-to-score mapping:** `craft-weights.csv` has one weight per character_craft principle (e.g., one `want_need` weight), but `character-scores.csv` has per-character rows. For diagnosis: `avg_score` is the average across all characters for that principle. If one character scores 9 and another scores 3, the average is 6 — but the diagnosis `worst_items` column names the specific character. Proposals target the character, not the principle globally: "Strengthen Tessa's want/need arc" rather than "increase want_need weight." Character-level proposals use the `scene_intent` lever to sharpen intent for scenes where that character is POV. This prevents arc-level concerns from overwhelming scene-level execution.
 
 This replaces injecting 2,000+ tokens of craft engine text with a ~200-token weighted summary — a significant token savings that compounds across every invocation.
 
@@ -492,11 +495,11 @@ the-footnote|3||||...
 
 Scoring must be cheap enough to run frequently:
 
-**Grouped mode (default):** ~5 invocations for scene-level + 2 for act/novel. Using Sonnet (analytical task). For a 100-scene manuscript: estimated ~$1-2 per full scoring run.
+**Grouped mode (default):** ~4 invocations per scene (one per craft engine section) + 2-3 for act/novel-level. Using Sonnet (analytical task). For a 100-scene manuscript: ~400 scene-level calls + 2-3 act/novel = estimated ~$8-12 per full scoring run. For a targeted `--act 2` run with 20 scenes: ~$1.50-2.50.
 
-**Quick mode:** 1 invocation. Estimated ~$0.30-0.50.
+**Quick mode:** 1 invocation per scene. For 100 scenes: ~100 calls. Estimated ~$2-3 for full manuscript.
 
-**Deep mode:** ~23 invocations for scene-level alone. Estimated ~$5-8. Use sparingly.
+**Deep mode:** ~23 invocations per scene. For 100 scenes: ~2,300 calls. Estimated ~$40-60. Use with `--scenes` to target specific scenes — `--deep --scenes problematic-scene` costs ~$0.50.
 
 All scoring invocations logged via `log_usage()` to the cost ledger with operation type `score`. The `estimate_cost` function in `costs.sh` needs a `score` case added (output estimate ~500 tokens per invocation — scoring returns structured data, not prose).
 
