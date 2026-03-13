@@ -334,19 +334,26 @@ fi
 
 SCORING_GROUPS=("scene-craft" "prose-craft" "character-craft-scene" "rules")
 
-# Map group names to rubric section names in scoring-rubrics.md
-declare -A GROUP_RUBRIC_SECTION
-GROUP_RUBRIC_SECTION[scene-craft]="Scene Craft"
-GROUP_RUBRIC_SECTION[prose-craft]="Prose Craft"
-GROUP_RUBRIC_SECTION[character-craft-scene]="Character Craft"
-GROUP_RUBRIC_SECTION[rules]="Rules to Break"
+# Map group names to rubric section names (bash 3 compatible — no associative arrays)
+get_rubric_section() {
+    case "$1" in
+        scene-craft) echo "Scene Craft" ;;
+        prose-craft) echo "Prose Craft" ;;
+        character-craft-scene) echo "Character Craft" ;;
+        rules) echo "Rules to Break" ;;
+        *) echo "" ;;
+    esac
+}
 
-# Map group names to prompt placeholder names
-declare -A GROUP_RUBRIC_PLACEHOLDER
-GROUP_RUBRIC_PLACEHOLDER[scene-craft]="SCENE_CRAFT_RUBRIC"
-GROUP_RUBRIC_PLACEHOLDER[prose-craft]="PROSE_CRAFT_RUBRIC"
-GROUP_RUBRIC_PLACEHOLDER[character-craft-scene]="CHARACTER_CRAFT_SCENE_RUBRIC"
-GROUP_RUBRIC_PLACEHOLDER[rules]="RULES_RUBRIC"
+get_rubric_placeholder() {
+    case "$1" in
+        scene-craft) echo "SCENE_CRAFT_RUBRIC" ;;
+        prose-craft) echo "PROSE_CRAFT_RUBRIC" ;;
+        character-craft-scene) echo "CHARACTER_CRAFT_SCENE_RUBRIC" ;;
+        rules) echo "RULES_RUBRIC" ;;
+        *) echo "" ;;
+    esac
+}
 
 # ============================================================================
 # Helper: substitute placeholders in a prompt template
@@ -390,10 +397,12 @@ substitute_prompt() {
 
     # Rubric substitutions (all sections, for quick mode)
     for group in "${SCORING_GROUPS[@]}"; do
-        local placeholder="${GROUP_RUBRIC_PLACEHOLDER[$group]}"
-        if [[ "$result" == *"{{${placeholder}}}"* ]]; then
-            local rubric_content
-            rubric_content=$(extract_rubric_section "${GROUP_RUBRIC_SECTION[$group]}")
+        local placeholder
+        placeholder=$(get_rubric_placeholder "$group")
+        if [[ -n "$placeholder" ]] && [[ "$result" == *"{{${placeholder}}}"* ]]; then
+            local rubric_content rubric_section
+            rubric_section=$(get_rubric_section "$group")
+            rubric_content=$(extract_rubric_section "$rubric_section")
             result="${result//\{\{${placeholder}\}\}/$rubric_content}"
         fi
     done
@@ -511,21 +520,19 @@ grouped)
         local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
 
         for group in "${SCORING_GROUPS[@]}"; do
-            local template_file="${PROMPTS_DIR}/${group}.md"
+    template_file="${PROMPTS_DIR}/${group}.md"
             if [[ ! -f "$template_file" ]]; then
                 log "WARNING: Template not found: ${template_file}, skipping group ${group}"
                 continue
             fi
 
-            local template
             template=$(cat "$template_file")
 
-            local prompt
             prompt=$(substitute_prompt "$template" "$id")
 
-            local log_file="${LOG_DIR}/score-${id}-${group}.log"
-            local tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${group}.csv"
-            local tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${group}.csv"
+    log_file="${LOG_DIR}/score-${id}-${group}.log"
+    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${group}.csv"
+    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${group}.csv"
 
             log "Scoring ${group} for ${id} (${SCORED}/${SCENE_COUNT})..."
 
@@ -545,24 +552,22 @@ grouped)
 
 # --- QUICK MODE ---
 quick)
-    local template_file="${PROMPTS_DIR}/quick.md"
+    template_file="${PROMPTS_DIR}/quick.md"
     if [[ ! -f "$template_file" ]]; then
         log "ERROR: Quick mode template not found: ${template_file}"
         exit 1
     fi
-    local template
     template=$(cat "$template_file")
 
     for id in "${SCENE_IDS[@]}"; do
         SCORED=$((SCORED + 1))
         local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
 
-        local prompt
         prompt=$(substitute_prompt "$template" "$id")
 
-        local log_file="${LOG_DIR}/score-${id}-quick.log"
-        local tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-quick.csv"
-        local tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-quick.csv"
+    log_file="${LOG_DIR}/score-${id}-quick.log"
+    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-quick.csv"
+    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-quick.csv"
 
         log "Scoring all principles for ${id} (${SCORED}/${SCENE_COUNT})..."
 
@@ -599,15 +604,13 @@ deep)
         SCORED=$((SCORED + 1))
         local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
 
-        local p_idx=0
+    p_idx=0
         for principle in "${DEEP_PRINCIPLES[@]}"; do
             p_idx=$((p_idx + 1))
 
             # Build a minimal prompt for a single principle
-            local rubric_content
             rubric_content=$(extract_rubric_section "Scene Craft")  # Get all rubrics
             # Try to extract just the relevant principle's rubric section
-            local principle_rubric
             principle_rubric=$(echo "$rubric_content" | awk -v p="$principle" '
                 BEGIN { gsub(/_/, " ", p); }
                 tolower($0) ~ tolower(p) { found=1 }
@@ -624,17 +627,16 @@ deep)
                 principle_rubric="$rubric_content"
             fi
 
-            local scene_file="${SCENES_DIR}/${id}.md"
-            local scene_text=""
+    scene_file="${SCENES_DIR}/${id}.md"
+    scene_text=""
             [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
 
-            local scene_title scene_pov scene_function scene_emotional_arc
+    scene_title scene_pov scene_function scene_emotional_arc
             scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
             scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
             [[ -f "$INTENT_CSV" ]] && scene_function=$(get_csv_field "$INTENT_CSV" "$id" "function")
             [[ -f "$INTENT_CSV" ]] && scene_emotional_arc=$(get_csv_field "$INTENT_CSV" "$id" "emotional_arc")
 
-            local prompt
             prompt="You are scoring a single craft principle for a scene. Score it 1-10.
 
 ## Rubric
@@ -663,9 +665,9 @@ RATIONALE:
 id|${principle}
 ${id}|<one sentence>"
 
-            local log_file="${LOG_DIR}/score-${id}-${principle}.log"
-            local tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${principle}.csv"
-            local tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${principle}.csv"
+    log_file="${LOG_DIR}/score-${id}-${principle}.log"
+    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${principle}.csv"
+    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${principle}.csv"
 
             log "  Scoring ${principle} for ${id} (${p_idx}/${PRINCIPLE_COUNT}, scene ${SCORED}/${SCENE_COUNT})..."
 
@@ -700,7 +702,7 @@ if [[ -f "$ACT_TEMPLATE_FILE" ]]; then
     while IFS= read -r act_val; do
         [[ -z "$act_val" ]] && continue
         # Deduplicate
-        local dup=false
+    dup=false
         for existing in "${ACTS[@]+"${ACTS[@]}"}"; do
             [[ "$existing" == "$act_val" ]] && dup=true && break
         done
@@ -743,7 +745,7 @@ $(cat "$scene_file")
         weighted_text=$(build_weighted_text "$WEIGHTS_FILE")
 
         # Substitute into template
-        local prompt="$ACT_TEMPLATE"
+    prompt="$ACT_TEMPLATE"
         prompt="${prompt//\{\{NARRATIVE_FRAMEWORKS_RUBRIC\}\}/$narrative_rubric}"
         prompt="${prompt//\{\{CHARACTER_CRAFT_ACT_RUBRIC\}\}/$character_act_rubric}"
         prompt="${prompt//\{\{ACT_LABEL\}\}/$act_label}"
@@ -752,9 +754,9 @@ $(cat "$scene_file")
         prompt="${prompt//\{\{WEIGHTED_PRINCIPLES\}\}/$weighted_text}"
         prompt="${prompt//\{\{ACT_ID\}\}/$act_id}"
 
-        local log_file="${LOG_DIR}/score-${act_id}.log"
-        local tmp_scores="${CYCLE_DIR}/.tmp-act-scores-${act_label}.csv"
-        local tmp_rationale="${CYCLE_DIR}/.tmp-act-rationale-${act_label}.csv"
+    log_file="${LOG_DIR}/score-${act_id}.log"
+    tmp_scores="${CYCLE_DIR}/.tmp-act-scores-${act_label}.csv"
+    tmp_rationale="${CYCLE_DIR}/.tmp-act-rationale-${act_label}.csv"
 
         log "  Scoring act ${act_label} (${act_scene_count} scenes)..."
 
@@ -818,7 +820,7 @@ $(echo "$character_list" | sed 's/^/- /')"
     weighted_text=$(build_weighted_text "$WEIGHTS_FILE")
 
     # Substitute into template
-    local prompt="$NOVEL_TEMPLATE"
+    prompt="$NOVEL_TEMPLATE"
     prompt="${prompt//\{\{CHARACTER_CRAFT_NOVEL_RUBRIC\}\}/$character_novel_rubric}"
     prompt="${prompt//\{\{GENRE_RUBRIC\}\}/$genre_rubric}"
     prompt="${prompt//\{\{MANUSCRIPT_SUMMARY\}\}/$manuscript_summary}"
@@ -826,7 +828,7 @@ $(echo "$character_list" | sed 's/^/- /')"
     prompt="${prompt//\{\{STORY_ARCHITECTURE\}\}/${story_architecture:-No story architecture found.}}"
     prompt="${prompt//\{\{WEIGHTED_PRINCIPLES\}\}/$weighted_text}"
 
-    local log_file="${LOG_DIR}/score-novel-level.log"
+    log_file="${LOG_DIR}/score-novel-level.log"
 
     log "  Scoring novel-level character + genre..."
 
@@ -846,8 +848,8 @@ $(echo "$character_list" | sed 's/^/- /')"
         end_healing_zone
 
         # Parse character scores
-        local char_scores="${CYCLE_DIR}/.tmp-char-scores.csv"
-        local char_rationale="${CYCLE_DIR}/.tmp-char-rationale.csv"
+    char_scores="${CYCLE_DIR}/.tmp-char-scores.csv"
+    char_rationale="${CYCLE_DIR}/.tmp-char-rationale.csv"
         parse_score_output "$log_file" "$char_scores" "$char_rationale" "CHARACTER_SCORES" "CHARACTER_RATIONALE"
         if [[ -f "$char_scores" ]]; then
             cp "$char_scores" "${CYCLE_DIR}/character-scores.csv"
@@ -859,8 +861,8 @@ $(echo "$character_list" | sed 's/^/- /')"
         fi
 
         # Parse genre scores
-        local genre_scores="${CYCLE_DIR}/.tmp-genre-scores.csv"
-        local genre_rationale="${CYCLE_DIR}/.tmp-genre-rationale.csv"
+    genre_scores="${CYCLE_DIR}/.tmp-genre-scores.csv"
+    genre_rationale="${CYCLE_DIR}/.tmp-genre-rationale.csv"
         parse_score_output "$log_file" "$genre_scores" "$genre_rationale" "GENRE_SCORES" "GENRE_RATIONALE"
         if [[ -f "$genre_scores" ]]; then
             cp "$genre_scores" "${CYCLE_DIR}/genre-scores.csv"
@@ -927,7 +929,7 @@ if [[ -f "$PROPOSALS_FILE" ]]; then
             full)
                 # Auto-approve all proposals
                 log "Coaching level: full — auto-approving all proposals"
-                local tmp_proposals="${PROPOSALS_FILE}.tmp.$$"
+    tmp_proposals="${PROPOSALS_FILE}.tmp.$$"
                 awk -F'|' -v OFS='|' '
                     NR == 1 { print; next }
                     { $7 = "approved"; print }
@@ -980,7 +982,6 @@ if [[ -f "$PROPOSALS_FILE" ]]; then
                 case "$lever" in
                     craft_weight)
                         # Extract new weight from change string "weight X → Y"
-                        local new_val
                         new_val=$(echo "$change" | sed -n 's/.*→ *\([0-9]*\).*/\1/p')
                         if [[ -n "$new_val" ]]; then
                             update_csv_field "$WEIGHTS_FILE" "$principle" "weight" "$new_val" "principle"
@@ -991,7 +992,7 @@ if [[ -f "$PROPOSALS_FILE" ]]; then
                     scene_intent)
                         if [[ -f "$INTENT_CSV" ]]; then
                             # Record as override — scene_intent changes need human/Claude writing
-                            local overrides_file="${PROJECT_DIR}/working/overrides.csv"
+    overrides_file="${PROJECT_DIR}/working/overrides.csv"
                             if [[ ! -f "$overrides_file" ]]; then
                                 echo "id|principle|directive|source" > "$overrides_file"
                             fi
@@ -1001,7 +1002,7 @@ if [[ -f "$PROPOSALS_FILE" ]]; then
                         fi
                         ;;
                     voice_guide)
-                        local overrides_file="${PROJECT_DIR}/working/overrides.csv"
+    overrides_file="${PROJECT_DIR}/working/overrides.csv"
                         if [[ ! -f "$overrides_file" ]]; then
                             echo "id|principle|directive|source" > "$overrides_file"
                         fi
@@ -1010,7 +1011,7 @@ if [[ -f "$PROPOSALS_FILE" ]]; then
                         update_csv_field "$PROPOSALS_FILE" "$pid" "status" "applied"
                         ;;
                     override)
-                        local overrides_file="${PROJECT_DIR}/working/overrides.csv"
+    overrides_file="${PROJECT_DIR}/working/overrides.csv"
                         if [[ ! -f "$overrides_file" ]]; then
                             echo "id|principle|directive|source" > "$overrides_file"
                         fi
