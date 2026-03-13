@@ -11,28 +11,35 @@
 # ============================================================================
 
 # Print a single field value for a given ID.
-# Usage: get_csv_field <file> <id> <field>
+# Usage: get_csv_field <file> <id> <field> [key_column]
 get_csv_field() {
-    local file="$1" id="$2" field="$3"
+    local file="$1" id="$2" field="$3" key_col="${4:-id}"
     [[ -f "$file" ]] || return 0
-    awk -F'|' -v id="$id" -v field="$field" '
+    awk -F'|' -v id="$id" -v field="$field" -v key_col="$key_col" '
         NR == 1 {
             for (i = 1; i <= NF; i++) {
-                if ($i == field) { col = i; break }
+                if ($i == field) { fcol = i }
+                if ($i == key_col) { kcol = i }
             }
             next
         }
-        col && $1 == id { print $col }
+        fcol && kcol && $kcol == id { print $fcol }
     ' "$file"
 }
 
 # Print all field values for a given ID as a pipe-delimited string.
-# Usage: get_csv_row <file> <id>
+# Usage: get_csv_row <file> <id> [key_column]
 get_csv_row() {
-    local file="$1" id="$2"
+    local file="$1" id="$2" key_col="${3:-id}"
     [[ -f "$file" ]] || return 0
-    awk -F'|' -v id="$id" '
-        NR > 1 && $1 == id { print; exit }
+    awk -F'|' -v id="$id" -v key_col="$key_col" '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) {
+                if ($i == key_col) { kcol = i; break }
+            }
+            next
+        }
+        kcol && $kcol == id { print; exit }
     ' "$file"
 }
 
@@ -66,20 +73,21 @@ list_csv_ids() {
 
 # Update a single field for a given ID.  Rewrites the file atomically
 # (write to temp, then mv).
-# Usage: update_csv_field <file> <id> <field> <value>
+# Usage: update_csv_field <file> <id> <field> <value> [key_column]
 update_csv_field() {
-    local file="$1" id="$2" field="$3" value="$4"
+    local file="$1" id="$2" field="$3" value="$4" key_col="${5:-id}"
     [[ -f "$file" ]] || return 0
     local tmp="${file}.tmp.$$"
-    awk -F'|' -v OFS='|' -v id="$id" -v field="$field" -v val="$value" '
+    awk -F'|' -v OFS='|' -v id="$id" -v field="$field" -v val="$value" -v key_col="$key_col" '
         NR == 1 {
             for (i = 1; i <= NF; i++) {
-                if ($i == field) { col = i; break }
+                if ($i == field) { fcol = i }
+                if ($i == key_col) { kcol = i }
             }
             print
             next
         }
-        col && $1 == id { $col = val }
+        fcol && kcol && $kcol == id { $fcol = val }
         { print }
     ' "$file" > "$tmp" && mv "$tmp" "$file"
 }

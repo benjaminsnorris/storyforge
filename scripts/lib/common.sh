@@ -538,6 +538,7 @@ get_plugin_dir() {
 _sf_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "${_sf_lib_dir}/csv.sh" ]] && source "${_sf_lib_dir}/csv.sh"
 [[ -f "${_sf_lib_dir}/costs.sh" ]] && source "${_sf_lib_dir}/costs.sh"
+[[ -f "${_sf_lib_dir}/scoring.sh" ]] && source "${_sf_lib_dir}/scoring.sh"
 unset _sf_lib_dir
 
 # ============================================================================
