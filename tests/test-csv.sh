@@ -18,7 +18,7 @@ result=$(get_csv_field "$META_CSV" "act1-sc01" "word_count")
 assert_equals "2400" "$result" "get_csv_field: word_count of act1-sc01"
 
 result=$(get_csv_field "$META_CSV" "act2-sc01" "status")
-assert_equals "planned" "$result" "get_csv_field: status of act2-sc01"
+assert_equals "pending" "$result" "get_csv_field: status of act2-sc01"
 
 result=$(get_csv_field "$META_CSV" "act1-sc02" "pov")
 assert_equals "Dorren Hayle" "$result" "get_csv_field: pov of act1-sc02"
@@ -68,7 +68,7 @@ assert_contains "$result" "act2-sc01" "get_csv_column: id column contains act2-s
 
 result=$(get_csv_column "$META_CSV" "status")
 assert_contains "$result" "drafted" "get_csv_column: status column contains drafted"
-assert_contains "$result" "planned" "get_csv_column: status column contains planned"
+assert_contains "$result" "pending" "get_csv_column: status column contains pending"
 
 line_count=$(get_csv_column "$META_CSV" "title" | wc -l | tr -d ' ')
 assert_equals "4" "$line_count" "get_csv_column: title column has 4 rows"

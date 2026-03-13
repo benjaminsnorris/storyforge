@@ -2,25 +2,51 @@
 # prompt-builder.sh — Generate drafting prompts from project config
 #
 # Source this file from your script; do not execute it directly.
-# Requires common.sh to be sourced first (for read_yaml_field, log, etc.).
+# Requires common.sh to be sourced first (for read_yaml_field, log, csv.sh, etc.).
 
 # ============================================================================
 # Scene metadata extraction
 # ============================================================================
 
-# Extract the YAML block for a given scene ID from scene-index.yaml.
-# Prints the raw YAML lines (indented block under the scene entry).
+# Extract metadata for a given scene ID.
+# CSV-first: checks scenes/metadata.csv, formats as "key: value" pairs.
+# Falls back to YAML scene-index.yaml block if CSV not found.
 #
 # Usage: get_scene_metadata "act1-sc05" "/path/to/project"
 get_scene_metadata() {
     local scene_id="$1"
     local project_dir="$2"
+    local csv_file="${project_dir}/scenes/metadata.csv"
+
+    # CSV-first path
+    if [[ -f "$csv_file" ]]; then
+        local row
+        row=$(get_csv_row "$csv_file" "$scene_id")
+        if [[ -n "$row" ]]; then
+            # Read header to get field names
+            local header
+            header=$(head -1 "$csv_file")
+            # Format as key: value pairs
+            local IFS='|'
+            local -a fields=($header)
+            local -a values=($row)
+            local i
+            for (( i=0; i<${#fields[@]}; i++ )); do
+                echo "${fields[$i]}: ${values[$i]:-}"
+            done
+            return 0
+        fi
+    fi
+
+    # YAML fallback
     local index_file="${project_dir}/scenes/scene-index.yaml"
 
     if [[ ! -f "$index_file" ]]; then
         echo ""
         return 1
     fi
+
+    log "DEPRECATION: Reading scene metadata from YAML. Migrate to scenes/metadata.csv." >&2
 
     # Find the line with this scene ID and extract its block.
     # Scene entries look like:
@@ -33,6 +59,43 @@ get_scene_metadata() {
         found && /^[[:space:]]*- id:/ && !($0 ~ "^[[:space:]]*- id:[[:space:]]*" id) { exit }
         found { print }
     ' "$index_file"
+}
+
+# ============================================================================
+# Scene intent extraction
+# ============================================================================
+
+# Read intent data for a given scene from scenes/intent.csv.
+# Returns key-value pairs, or empty if file/row doesn't exist.
+#
+# Usage: get_scene_intent "act1-sc05" "/path/to/project"
+get_scene_intent() {
+    local scene_id="$1"
+    local project_dir="$2"
+    local csv_file="${project_dir}/scenes/intent.csv"
+
+    if [[ ! -f "$csv_file" ]]; then
+        return 0
+    fi
+
+    local row
+    row=$(get_csv_row "$csv_file" "$scene_id")
+    if [[ -z "$row" ]]; then
+        return 0
+    fi
+
+    local header
+    header=$(head -1 "$csv_file")
+    local IFS='|'
+    local -a fields=($header)
+    local -a values=($row)
+    local i
+    for (( i=0; i<${#fields[@]}; i++ )); do
+        # Skip id column and empty values
+        [[ "${fields[$i]}" == "id" ]] && continue
+        [[ -z "${values[$i]:-}" ]] && continue
+        echo "${fields[$i]}: ${values[$i]}"
+    done
 }
 
 # ============================================================================
@@ -91,7 +154,7 @@ list_reference_files() {
 
     # Find all files in reference/, sorted for deterministic ordering.
     # Return paths relative to project root for use in prompts.
-    find "$ref_dir" -type f -name '*.md' -o -name '*.yaml' -o -name '*.yml' -o -name '*.txt' \
+    find "$ref_dir" -type f -name '*.md' -o -name '*.yaml' -o -name '*.yml' -o -name '*.txt' -o -name '*.csv' \
         | sort \
         | while IFS= read -r f; do
             echo "${f#${project_dir}/}"
@@ -102,13 +165,23 @@ list_reference_files() {
 # Scene status helpers
 # ============================================================================
 
-# Read a field from a scene's YAML metadata block.
+# Read a field from a scene's metadata.
+# CSV-first: uses get_csv_field if metadata.csv exists.
+# Falls back to parsing the YAML metadata block.
 # Usage: read_scene_field "act1-sc05" "/path/to/project" "title"
 read_scene_field() {
     local scene_id="$1"
     local project_dir="$2"
     local field="$3"
+    local csv_file="${project_dir}/scenes/metadata.csv"
 
+    # CSV-first path
+    if [[ -f "$csv_file" ]]; then
+        get_csv_field "$csv_file" "$scene_id" "$field"
+        return 0
+    fi
+
+    # YAML fallback
     get_scene_metadata "$scene_id" "$project_dir" \
         | grep -E "^[[:space:]]+${field}:" \
         | head -1 \
@@ -118,12 +191,25 @@ read_scene_field() {
         | sed 's/[[:space:]]*$//'
 }
 
-# Get the status of a scene (from scene-index.yaml or scene file frontmatter).
+# Get the status of a scene.
+# CSV-first: reads from metadata.csv if available.
+# Falls back to scene file frontmatter, then scene-index.yaml.
 # Returns: "pending", "drafted", "revised", or "outlined"
 # Usage: get_scene_status "act1-sc05" "/path/to/project"
 get_scene_status() {
     local scene_id="$1"
     local project_dir="$2"
+
+    # CSV-first path
+    local csv_file="${project_dir}/scenes/metadata.csv"
+    if [[ -f "$csv_file" ]]; then
+        local csv_status
+        csv_status=$(get_csv_field "$csv_file" "$scene_id" "status")
+        if [[ -n "$csv_status" ]]; then
+            echo "$csv_status"
+            return 0
+        fi
+    fi
 
     # First check if the scene file exists and has frontmatter status
     local scene_file="${project_dir}/scenes/${scene_id}.md"
@@ -195,18 +281,35 @@ build_scene_prompt() {
         genre=$(read_yaml_field "genre")
     fi
 
+    # --- Detect CSV mode ---
+    local csv_mode=false
+    local csv_file="${project_dir}/scenes/metadata.csv"
+    if [[ -f "$csv_file" ]]; then
+        csv_mode=true
+    fi
+
     # --- Scene metadata ---
     local scene_metadata
     scene_metadata=$(get_scene_metadata "$scene_id" "$project_dir")
 
-    local scene_title
-    scene_title=$(read_scene_field "$scene_id" "$project_dir" "title")
-
-    local target_words
-    target_words=$(read_scene_field "$scene_id" "$project_dir" "target_words")
-    if [[ -z "$target_words" ]]; then
-        target_words=$(read_scene_field "$scene_id" "$project_dir" "word_count")
+    local scene_title target_words
+    if [[ "$csv_mode" == true ]]; then
+        scene_title=$(get_csv_field "$csv_file" "$scene_id" "title")
+        target_words=$(get_csv_field "$csv_file" "$scene_id" "target_words")
+        if [[ -z "$target_words" ]]; then
+            target_words=$(get_csv_field "$csv_file" "$scene_id" "word_count")
+        fi
+    else
+        scene_title=$(read_scene_field "$scene_id" "$project_dir" "title")
+        target_words=$(read_scene_field "$scene_id" "$project_dir" "target_words")
+        if [[ -z "$target_words" ]]; then
+            target_words=$(read_scene_field "$scene_id" "$project_dir" "word_count")
+        fi
     fi
+
+    # --- Scene intent (CSV only) ---
+    local scene_intent=""
+    scene_intent=$(get_scene_intent "$scene_id" "$project_dir")
 
     # --- Previous scene ---
     local prev_scene
@@ -279,7 +382,10 @@ fi)
 Here is the metadata for the scene you are drafting:
 
 ${scene_metadata}
-${target_words:+
+${scene_intent:+
+Scene intent:
+${scene_intent}
+}${target_words:+
 Target word count: ${target_words} words (stay within ~500 words of this target).}
 
 PROMPT_EOF
@@ -316,7 +422,21 @@ Stage and commit using the Bash tool:
 COACH_EOF
 
     elif [[ "$coaching_level" == "strict" ]]; then
-        cat <<STRICT_EOF
+        if [[ "$csv_mode" == true ]]; then
+            cat <<STRICT_CSV_EOF
+===== STEP 4: CREATE SCENE FILE AND CONSTRAINT LIST =====
+
+You are in STRICT mode. Do NOT write prose. You may create files, add metadata, and do structural work.
+
+**4a. Create the scene file** — an empty file (metadata is tracked in CSV, not frontmatter):
+
+Save to: scenes/${scene_id}.md
+
+(Create the file empty. The author writes the prose. Do not include any YAML frontmatter or metadata.)
+
+STRICT_CSV_EOF
+        else
+            cat <<STRICT_YAML_EOF
 ===== STEP 4: CREATE SCENE FILE AND CONSTRAINT LIST =====
 
 You are in STRICT mode. Do NOT write prose. You may create files, add metadata, and do structural work.
@@ -333,6 +453,10 @@ target_words: ${target_words:-0}
 ---
 
 (Leave the file empty after the frontmatter. The author writes the prose.)
+
+STRICT_YAML_EOF
+        fi
+        cat <<STRICT_COMMON_EOF
 
 **4b. Produce a constraint list** covering:
 - Voice rules: which voice guide rules apply to this scene and POV character
@@ -353,10 +477,10 @@ Stage and commit using the Bash tool:
   git push
 
 ===== IMPORTANT NOTES =====
-- Do NOT write prose. The scene file should contain only frontmatter.
+- Do NOT write prose. The scene file should be empty (or frontmatter-only if not using CSV).
 - Do NOT provide editorial suggestions or craft guidance. List facts and requirements only.
 - You CAN create files, add metadata, and do structural/organizational work.
-STRICT_EOF
+STRICT_COMMON_EOF
 
     else
         # full mode (default)
@@ -378,6 +502,14 @@ CONTINUITY:
 
 Save the scene to: scenes/${scene_id}.md
 
+FULL_EOF
+        if [[ "$csv_mode" == true ]]; then
+            cat <<FULL_CSV_EOF
+Write ONLY the scene prose. Do not include any YAML frontmatter or metadata.
+
+FULL_CSV_EOF
+        else
+            cat <<FULL_YAML_EOF
 The file should begin with YAML frontmatter:
 ---
 id: ${scene_id}
@@ -388,6 +520,10 @@ drafted_at: "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 ---
 
 Then the scene content.
+
+FULL_YAML_EOF
+        fi
+        cat <<FULL_REST_EOF
 
 ===== STEP 5: QUALITY REVIEW =====
 
@@ -429,6 +565,6 @@ Stage and commit using the Bash tool:
 - Complete ALL eight steps. The next scene's drafting depends on accurate continuity state.
 - If you encounter an issue with the draft, fix it before updating continuity files.
 - The continuity updates are as important as the scene itself — future scenes rely on them.
-FULL_EOF
+FULL_REST_EOF
     fi
 }
