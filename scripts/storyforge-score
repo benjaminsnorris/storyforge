@@ -116,6 +116,12 @@ done
 detect_project_root
 log "Project root: ${PROJECT_DIR}"
 
+# --- Create scoring branch ---
+if [[ "$DRY_RUN" != true ]]; then
+    SCORE_BRANCH="storyforge/score-$(date '+%Y%m%d-%H%M%S')"
+    create_branch "score" "$PROJECT_DIR" 2>/dev/null || true
+fi
+
 # --- Resolve plugin directory ---
 PLUGIN_DIR=$(get_plugin_dir)
 PROMPTS_DIR="${SCRIPT_DIR}/prompts/scoring"

@@ -138,9 +138,38 @@ If the author has provided scores:
 ## Run Mode: Triggering a Scoring Cycle
 
 When the author says "run scoring" or "score my scenes":
-1. Confirm the mode (grouped/quick/deep) and scope (all scenes, specific act, specific scenes)
-2. Delegate to `./storyforge score` with the appropriate flags
-3. After scoring completes, switch to Review mode to present results
+
+1. Confirm the mode and scope:
+   - **Mode:** `--grouped` (default, most accurate), `--quick` (faster, cheaper), or `--deep` (per-principle, most expensive)
+   - **Scope:** all scenes (default), `--scenes ID,ID` for specific scenes, `--act N` for a specific act
+2. Show the dry-run first so the author sees the cost estimate:
+   ```bash
+   ./storyforge score --quick --dry-run
+   ```
+3. If the author approves, run the scoring script. **You must unset CLAUDECODE first** since the script invokes `claude -p`:
+   ```bash
+   unset CLAUDECODE && ./storyforge score --quick
+   ```
+   Or with scope:
+   ```bash
+   unset CLAUDECODE && ./storyforge score --quick --scenes 001,002,003
+   ```
+4. The script will:
+   - Create a `storyforge/score-*` branch
+   - Run cost forecasting and check the threshold
+   - Score all scenes in scope
+   - Run act-level and novel-level scoring
+   - Generate diagnosis and improvement proposals
+   - Apply proposals per coaching level (full=auto, coach=interactive, strict=report)
+   - Collect exemplars from 9+ scores
+   - Check for validated tuning patterns (for plugin insights)
+   - Commit and push results
+5. After scoring completes, switch to Review mode to present results
+
+**Cost estimates:**
+- Quick mode: ~$0.03 per scene + ~$1 for act/novel scoring
+- Grouped mode: ~$0.12 per scene + ~$1 for act/novel scoring
+- Deep mode: ~$0.50 per scene + ~$1 for act/novel scoring
 
 ---
 
