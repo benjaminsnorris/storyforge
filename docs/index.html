@@ -279,22 +279,19 @@
     display: flex;
     align-items: stretch;
     gap: 0;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    justify-content: center;
     padding-bottom: 8px;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
+    row-gap: 8px;
   }
 
-  .mini-pipeline::-webkit-scrollbar { height: 4px; }
-  .mini-pipeline::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
   .pipe-step {
-    flex: 1;
-    min-width: 100px;
+    flex: 0 1 auto;
+    min-width: 76px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 14px 12px;
+    padding: 10px 8px;
     text-align: center;
     transition: border-color 0.2s;
   }
@@ -303,26 +300,26 @@
 
   .pipe-step .pipe-phase {
     font-family: var(--font-mono);
-    font-size: 9px;
+    font-size: 8px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
   }
 
   .pipe-step .pipe-name {
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 600;
     margin-bottom: 2px;
   }
 
   .pipe-step .pipe-type {
     font-family: var(--font-mono);
-    font-size: 9px;
+    font-size: 8px;
     border-radius: 3px;
-    padding: 1px 6px;
+    padding: 1px 5px;
     display: inline-block;
-    margin-top: 4px;
+    margin-top: 3px;
   }
 
   .pipe-type--interactive {
@@ -359,9 +356,9 @@
   .pipe-arrow {
     display: flex;
     align-items: center;
-    padding: 0 3px;
+    padding: 0 2px;
     color: var(--text-light);
-    font-size: 14px;
+    font-size: 10px;
     flex-shrink: 0;
   }
 
@@ -570,9 +567,8 @@
     .page { padding: 32px 20px 48px; }
     .caps-grid { grid-template-columns: 1fr; }
     .dives-grid { grid-template-columns: 1fr 1fr; }
-    .mini-pipeline { flex-wrap: wrap; gap: 8px; }
     .pipe-arrow { display: none; }
-    .pipe-step { min-width: unset; }
+    .pipe-step { min-width: 64px; }
     .pull-quote { padding: 20px 20px; }
   }
 
@@ -751,7 +747,7 @@
     </div>
     <div class="iter-note anim" style="--i:11">
       <svg viewBox="0 0 16 16"><path d="M2 8a6 6 0 0 1 10.3-4.1M14 8a6 6 0 0 1-10.3 4.1"/><path d="M14 2v4h-4M2 14v-4h4"/></svg>
-      Evaluate through Recommend form a <strong>pipeline cycle</strong> tracked in pipeline.yaml &middot; Repeat until ready
+      Draft &rarr; Score forms a <strong>tight inner loop</strong> (rewrite until scores plateau) &middot; Evaluate through Recommend forms a <strong>pipeline cycle</strong> &middot; Repeat until ready
     </div>
   </div>
 
