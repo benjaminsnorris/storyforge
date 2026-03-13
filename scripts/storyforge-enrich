@@ -533,6 +533,15 @@ fi
 # ============================================================================
 
 create_branch "enrich" "$PROJECT_DIR"
+
+# Commit any files already changed by discovery and thread recovery
+(
+    cd "$PROJECT_DIR"
+    git add scenes/metadata.csv scenes/intent.csv 2>/dev/null || true
+    git add -A 2>/dev/null || true
+    git commit -m "Enrich: discover scenes and recover threads" 2>/dev/null || true
+)
+
 ensure_branch_pushed "$PROJECT_DIR"
 
 # ============================================================================
@@ -796,19 +805,26 @@ while (( batch_start < CLAUDE_COUNT )); do
             end_healing_zone
 
             # Extract the text content from stream-json output
+            # Uses multiple strategies matching the pattern from scoring.sh
             response=""
             if [[ -f "$log_file" ]]; then
-                response=$(grep '"type":"content_block_delta"' "$log_file" 2>/dev/null \
-                    | sed 's/.*"text":"\([^"]*\)".*/\1/' \
-                    | tr -d '\n' || true)
-                # Also try the result line
+                # Strategy 1: Extract from "result" field (claude -p with stream-json)
+                response=$(grep '"type":"result"' "$log_file" 2>/dev/null \
+                    | sed 's/.*"result":"//' | sed 's/","stop_reason.*//' \
+                    | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
+
+                # Strategy 2: Extract from assistant message content
                 if [[ -z "$response" ]]; then
-                    response=$(grep '"type":"result"' "$log_file" 2>/dev/null \
-                        | sed -n 's/.*"text":"\(.*\)".*/\1/p' \
-                        | head -1 || true)
+                    response=$(grep '"type":"assistant"' "$log_file" 2>/dev/null \
+                        | sed 's/.*"text":"//' | sed 's/"}],"stop_reason.*//' \
+                        | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
                 fi
-                # Unescape newlines
-                response=$(echo "$response" | sed 's/\\n/\n/g')
+
+                # Strategy 3: Extract from content_block_delta (streaming format)
+                if [[ -z "$response" ]]; then
+                    response=$(sed -n 's/.*"type":"content_block_delta".*"text":"\([^"]*\)".*/\1/p' "$log_file" \
+                        | tr -d '\n' | sed 's/\\n/\n/g' || true)
+                fi
             fi
 
             # Log usage
