@@ -1,0 +1,5 @@
+id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words
+act1-sc01|1|The Finest Cartographer|Dorren Hayle|Pressure Cartography Office|1|character|1|morning|drafted|2400|2500
+act1-sc02|2|The Missing Village|Dorren Hayle|Dorren's private study|1|character|1|evening|drafted|95|3000
+new-x1|3|The Archivist's Warning|Kael Maren|The Deep Archive|1|plot|2|afternoon|drafted|1200|1500
+act2-sc01|4|Into the Blank|Tessa Merrin|The Uncharted Reaches|2|world|3|morning|pending|0|2800

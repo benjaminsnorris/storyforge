@@ -190,24 +190,47 @@ if [[ "$VOICE_GUIDE_FOUND" == false ]]; then
 fi
 
 # ============================================================================
-# Build scene list from scene-index.yaml
+# Build scene list — CSV-first with YAML fallback
 # ============================================================================
 
-# Extract all scene IDs in order
-ALL_SCENE_IDS=()
-while IFS= read -r id; do
-    [[ -z "$id" ]] && continue
-    ALL_SCENE_IDS+=("$id")
-done < <(grep -E '^[[:space:]]*- id:[[:space:]]*' "$SCENE_INDEX" \
-    | sed 's/^[[:space:]]*- id:[[:space:]]*//' \
-    | sed 's/[[:space:]]*$//')
+METADATA_CSV="${SCENES_DIR}/metadata.csv"
+CSV_MODE=false
 
-if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
-    log "ERROR: No scenes found in ${SCENE_INDEX}"
-    exit 1
+ALL_SCENE_IDS=()
+if [[ -f "$METADATA_CSV" ]]; then
+    CSV_MODE=true
+    # Read scene IDs from metadata.csv, sorted by seq column, filtering out cut status
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+        local_status=$(get_csv_field "$METADATA_CSV" "$id" "status")
+        if [[ "$local_status" != "cut" ]]; then
+            ALL_SCENE_IDS+=("$id")
+        fi
+    done < <(awk -F'|' '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "seq") seq_col = i
+            }
+            next
+        }
+        seq_col { print $1 "|" $seq_col }
+    ' "$METADATA_CSV" | sort -t'|' -k2 -n | cut -d'|' -f1)
+    log "Found ${#ALL_SCENE_IDS[@]} scenes in metadata.csv (CSV mode)"
+else
+    # YAML fallback
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+        ALL_SCENE_IDS+=("$id")
+    done < <(grep -E '^[[:space:]]*- id:[[:space:]]*' "$SCENE_INDEX" \
+        | sed 's/^[[:space:]]*- id:[[:space:]]*//' \
+        | sed 's/[[:space:]]*$//')
+    log "Found ${#ALL_SCENE_IDS[@]} scenes in scene-index.yaml (YAML mode)"
 fi
 
-log "Found ${#ALL_SCENE_IDS[@]} scenes in scene-index.yaml"
+if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
+    log "ERROR: No scenes found in ${METADATA_CSV:-$SCENE_INDEX}"
+    exit 1
+fi
 
 # ============================================================================
 # Filter scenes based on arguments
@@ -319,6 +342,31 @@ done
 if [[ ${#PENDING_IDS[@]} -eq 0 ]]; then
     log "Nothing to draft — all ${#FILTERED_IDS[@]} matching scenes are already drafted (${SKIPPED} skipped)."
     exit 0
+fi
+
+# ============================================================================
+# Cost forecasting
+# ============================================================================
+
+if [[ "$DRY_RUN" != true && "$CSV_MODE" == true ]]; then
+    # Calculate average word count from metadata.csv
+    AVG_WORDS=$(awk -F'|' '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "target_words") col = i
+            }
+            next
+        }
+        col && $col+0 > 0 { sum += $col; count++ }
+        END { if (count > 0) printf "%d", sum / count; else print 2000 }
+    ' "$METADATA_CSV")
+    FORECAST_MODEL=$(select_model "drafting")
+    ESTIMATED_COST=$(estimate_cost "draft" "${#PENDING_IDS[@]}" "$AVG_WORDS" "$FORECAST_MODEL")
+    log "Cost forecast: ~\$${ESTIMATED_COST} for ${#PENDING_IDS[@]} scenes (avg ${AVG_WORDS} words, model ${FORECAST_MODEL})"
+    if ! check_cost_threshold "$ESTIMATED_COST"; then
+        log "Aborting — cost threshold exceeded."
+        exit 0
+    fi
 fi
 
 # Set up interactive mode file
@@ -456,6 +504,7 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         MONITOR_PID=$!
         register_child_pid $MONITOR_PID
 
+        _SF_INVOCATION_START=$(date +%s)
         set +e
         claude -p "$PROMPT" \
             --model "$SCENE_MODEL" \
@@ -470,6 +519,9 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         # Stop the monitor
         kill "$MONITOR_PID" 2>/dev/null || true
         wait "$MONITOR_PID" 2>/dev/null || true
+
+        # Log usage/cost data
+        log_usage "$SCENE_LOG" "draft" "$SCENE_ID" "$SCENE_MODEL"
     fi
 
     # --- Timing ---
@@ -523,6 +575,13 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
             log "See full output: ${SCENE_LOG}"
             log "Stopping — likely incomplete draft."
             false  # Trigger healing
+        fi
+
+        # Update metadata.csv with word count and status
+        if [[ "$CSV_MODE" == true ]]; then
+            update_csv_field "$METADATA_CSV" "$SCENE_ID" "word_count" "$WORD_COUNT"
+            update_csv_field "$METADATA_CSV" "$SCENE_ID" "status" "drafted"
+            log "Updated metadata.csv: ${SCENE_ID} word_count=${WORD_COUNT} status=drafted"
         fi
     fi
 
@@ -594,6 +653,11 @@ log "Scenes drafted: ${DRAFTED_COUNT}/${#PENDING_IDS[@]}"
 log "Total words: ${TOTAL_WORDS}"
 log "Total time: ${SESSION_MINS}m${SESSION_SECS}s"
 log "============================================"
+
+# --- Cost summary ---
+if [[ "$DRY_RUN" != true && $DRAFTED_COUNT -gt 0 ]]; then
+    print_cost_summary "draft"
+fi
 
 # --- Review phase ---
 if [[ "$DRY_RUN" != true && $DRAFTED_COUNT -gt 0 ]]; then

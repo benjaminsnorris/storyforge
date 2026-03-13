@@ -1,0 +1,1079 @@
+#!/bin/bash
+set -eo pipefail
+
+# ============================================================================
+# storyforge-score — Principled craft scoring for Storyforge projects
+#
+# Evaluates manuscript scenes against the craft engine's scoring rubrics,
+# producing per-scene, per-act, and novel-level scores in CSV format.
+#
+# Three scoring modes:
+#   --grouped (default)  One Claude call per scoring group per scene
+#   --quick              All 25 scene-level principles in one call per scene
+#   --deep               One Claude call per principle per scene
+#
+# Usage:
+#   ./storyforge-score                        # All scenes, grouped mode
+#   ./storyforge-score --quick                # All scenes, quick mode
+#   ./storyforge-score --deep                 # All scenes, deep mode
+#   ./storyforge-score --scenes ID,ID         # Specific scenes only
+#   ./storyforge-score --act 2                # Scenes in act 2 only
+#   ./storyforge-score --interactive          # Enable interactive mode
+#   ./storyforge-score --dry-run              # Show what would be scored
+# ============================================================================
+
+# --- Locate script directory and source libraries ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+
+if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
+    echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
+    exit 1
+fi
+
+# shellcheck source=lib/common.sh
+source "${LIB_DIR}/common.sh"
+
+# --- Default options ---
+DRY_RUN=false
+INTERACTIVE=false
+SCORE_MODE="grouped"   # grouped | quick | deep
+FILTER_MODE="all"
+FILTER_SCENES=""        # Comma-separated scene IDs
+FILTER_ACT=""
+
+# --- Argument parsing ---
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Score manuscript scenes against craft engine principles.
+
+Modes:
+  --grouped         One call per scoring group per scene (default)
+  --quick           All principles in one call per scene
+  --deep            One call per principle per scene
+
+Scope:
+  --scenes ID,ID    Score specific scenes only (comma-separated)
+  --act N           Score scenes in act N only
+
+Options:
+  --interactive, -i Enable interactive mode
+  --dry-run         Show what would be scored without invoking Claude
+  -h, --help        Show this help
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --interactive|-i)
+            INTERACTIVE=true
+            shift
+            ;;
+        --grouped)
+            SCORE_MODE="grouped"
+            shift
+            ;;
+        --quick)
+            SCORE_MODE="quick"
+            shift
+            ;;
+        --deep)
+            SCORE_MODE="deep"
+            shift
+            ;;
+        --scenes)
+            FILTER_MODE="scenes"
+            FILTER_SCENES="${2:?ERROR: --scenes requires comma-separated scene IDs}"
+            shift 2
+            ;;
+        --act)
+            FILTER_MODE="act"
+            FILTER_ACT="${2:?ERROR: --act requires an act number}"
+            shift 2
+            ;;
+        -*)
+            echo "ERROR: Unknown option: $1" >&2
+            usage
+            ;;
+        *)
+            echo "ERROR: Unexpected argument: $1" >&2
+            usage
+            ;;
+    esac
+done
+
+# --- Detect project root ---
+detect_project_root
+log "Project root: ${PROJECT_DIR}"
+
+# --- Resolve plugin directory ---
+PLUGIN_DIR=$(get_plugin_dir)
+PROMPTS_DIR="${SCRIPT_DIR}/prompts/scoring"
+
+# --- Select model ---
+MODEL=$(select_model "evaluation")
+log "Scoring model: ${MODEL}"
+
+# --- Initialize craft weights ---
+init_craft_weights "$PROJECT_DIR" "$PLUGIN_DIR"
+WEIGHTS_FILE="${PROJECT_DIR}/working/craft-weights.csv"
+
+# ============================================================================
+# Build scene list from metadata.csv
+# ============================================================================
+
+METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
+SCENES_DIR="${PROJECT_DIR}/scenes"
+
+if [[ ! -f "$METADATA_CSV" ]]; then
+    log "ERROR: scenes/metadata.csv not found. Run 'storyforge scenes' to create scene metadata."
+    exit 1
+fi
+
+# Read all scene IDs sorted by seq, excluding cut scenes
+ALL_SCENE_IDS=()
+while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    local_status=$(get_csv_field "$METADATA_CSV" "$id" "status")
+    if [[ "$local_status" != "cut" ]]; then
+        ALL_SCENE_IDS+=("$id")
+    fi
+done < <(awk -F'|' '
+    NR == 1 {
+        for (i = 1; i <= NF; i++) {
+            if ($i == "seq") seq_col = i
+        }
+        next
+    }
+    seq_col { print $1 "|" $seq_col }
+' "$METADATA_CSV" | sort -t'|' -k2 -n | cut -d'|' -f1)
+
+if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
+    log "ERROR: No scenes found in metadata.csv"
+    exit 1
+fi
+
+log "Found ${#ALL_SCENE_IDS[@]} scenes in metadata.csv"
+
+# ============================================================================
+# Filter scenes based on scope flags
+# ============================================================================
+
+FILTERED_IDS=()
+
+case "$FILTER_MODE" in
+    all)
+        FILTERED_IDS=("${ALL_SCENE_IDS[@]}")
+        ;;
+    scenes)
+        # Comma-separated list
+        IFS=',' read -ra REQUESTED <<< "$FILTER_SCENES"
+        for req in "${REQUESTED[@]}"; do
+            req=$(echo "$req" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            found=false
+            for id in "${ALL_SCENE_IDS[@]}"; do
+                if [[ "$id" == "$req" ]]; then
+                    FILTERED_IDS+=("$req")
+                    found=true
+                    break
+                fi
+            done
+            if [[ "$found" == false ]]; then
+                log "WARNING: Scene '$req' not found in metadata.csv, skipping"
+            fi
+        done
+        ;;
+    act)
+        local_pattern="act${FILTER_ACT}"
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            if [[ "${id,,}" == "${local_pattern,,}"* ]]; then
+                FILTERED_IDS+=("$id")
+            fi
+        done
+        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+            log "ERROR: No scenes found matching act ${FILTER_ACT}"
+            exit 1
+        fi
+        ;;
+esac
+
+# Filter to only scenes that have been drafted
+SCENE_IDS=()
+MISSING_SCENES=()
+for id in "${FILTERED_IDS[@]}"; do
+    if [[ -f "${SCENES_DIR}/${id}.md" ]]; then
+        SCENE_IDS+=("$id")
+    else
+        MISSING_SCENES+=("$id")
+    fi
+done
+
+if [[ ${#SCENE_IDS[@]} -eq 0 ]]; then
+    log "ERROR: No drafted scene files found for the selected scope."
+    if [[ ${#MISSING_SCENES[@]} -gt 0 ]]; then
+        log "Missing scenes: ${MISSING_SCENES[*]}"
+    fi
+    exit 1
+fi
+
+if [[ ${#MISSING_SCENES[@]} -gt 0 ]]; then
+    log "WARNING: ${#MISSING_SCENES[@]} scenes not yet drafted (skipping): ${MISSING_SCENES[*]}"
+fi
+
+SCENE_COUNT=${#SCENE_IDS[@]}
+log "Scoring ${SCENE_COUNT} scenes in ${SCORE_MODE} mode"
+
+# ============================================================================
+# Determine cycle number
+# ============================================================================
+
+PIPELINE_YAML="${PROJECT_DIR}/working/pipeline.yaml"
+CYCLE=1
+
+# Check pipeline.yaml for active cycle
+if [[ -f "$PIPELINE_YAML" ]]; then
+    active_cycle=$(grep -E '^\s*cycle:' "$PIPELINE_YAML" 2>/dev/null \
+        | head -1 \
+        | sed 's/^[[:space:]]*cycle:[[:space:]]*//' \
+        | sed 's/[[:space:]]*$//' || true)
+    if [[ -n "$active_cycle" && "$active_cycle" =~ ^[0-9]+$ ]]; then
+        CYCLE="$active_cycle"
+    fi
+fi
+
+# If no active cycle, find highest existing cycle-N and increment
+if [[ "$CYCLE" -eq 1 && -d "${PROJECT_DIR}/working/scores" ]]; then
+    highest=0
+    for d in "${PROJECT_DIR}/working/scores"/cycle-*; do
+        [[ -d "$d" ]] || continue
+        n=$(basename "$d" | sed 's/^cycle-//')
+        if [[ "$n" =~ ^[0-9]+$ ]] && (( n > highest )); then
+            highest="$n"
+        fi
+    done
+    if (( highest > 0 )); then
+        CYCLE=$((highest + 1))
+    fi
+fi
+
+CYCLE_DIR="${PROJECT_DIR}/working/scores/cycle-${CYCLE}"
+mkdir -p "$CYCLE_DIR"
+LOG_DIR="${PROJECT_DIR}/working/logs"
+mkdir -p "$LOG_DIR"
+
+log "Cycle: ${CYCLE} -> ${CYCLE_DIR}"
+
+# ============================================================================
+# Cost forecast
+# ============================================================================
+
+# Estimate average word count
+AVG_WORDS=0
+TOTAL_WC=0
+WC_COUNT=0
+while IFS= read -r wc; do
+    [[ -z "$wc" || "$wc" == "0" ]] && continue
+    TOTAL_WC=$((TOTAL_WC + wc))
+    WC_COUNT=$((WC_COUNT + 1))
+done < <(get_csv_column "$METADATA_CSV" "word_count")
+
+if (( WC_COUNT > 0 )); then
+    AVG_WORDS=$((TOTAL_WC / WC_COUNT))
+fi
+
+if (( AVG_WORDS == 0 )); then
+    # Estimate from scene files
+    for id in "${SCENE_IDS[@]}"; do
+        sf="${SCENES_DIR}/${id}.md"
+        if [[ -f "$sf" ]]; then
+            wc_val=$(wc -w < "$sf" | tr -d ' ')
+            TOTAL_WC=$((TOTAL_WC + wc_val))
+            WC_COUNT=$((WC_COUNT + 1))
+        fi
+    done
+    if (( WC_COUNT > 0 )); then
+        AVG_WORDS=$((TOTAL_WC / WC_COUNT))
+    else
+        AVG_WORDS=3000
+    fi
+fi
+
+# Multiplier depends on mode
+case "$SCORE_MODE" in
+    grouped) INVOCATIONS_PER_SCENE=4 ;;
+    quick)   INVOCATIONS_PER_SCENE=1 ;;
+    deep)    INVOCATIONS_PER_SCENE=25 ;;
+esac
+
+# Add act-level + novel-level invocations
+ACT_INVOCATIONS=3   # Rough estimate
+NOVEL_INVOCATIONS=1
+TOTAL_INVOCATIONS=$(( SCENE_COUNT * INVOCATIONS_PER_SCENE + ACT_INVOCATIONS + NOVEL_INVOCATIONS ))
+
+SCENE_COST=$(estimate_cost "score" "$TOTAL_INVOCATIONS" "$AVG_WORDS" "$MODEL")
+log "Cost forecast: ~\$${SCENE_COST} (${TOTAL_INVOCATIONS} invocations, avg ${AVG_WORDS} words/scene)"
+
+if [[ "$DRY_RUN" == false ]]; then
+    check_cost_threshold "$SCENE_COST" || { log "Cost threshold check declined. Aborting."; exit 1; }
+fi
+
+# ============================================================================
+# Scoring groups for grouped mode
+# ============================================================================
+
+SCORING_GROUPS=("scene-craft" "prose-craft" "character-craft-scene" "rules")
+
+# Map group names to rubric section names (bash 3 compatible — no associative arrays)
+get_rubric_section() {
+    case "$1" in
+        scene-craft) echo "Scene Craft" ;;
+        prose-craft) echo "Prose Craft" ;;
+        character-craft-scene) echo "Character Craft" ;;
+        rules) echo "Rules to Break" ;;
+        *) echo "" ;;
+    esac
+}
+
+get_rubric_placeholder() {
+    case "$1" in
+        scene-craft) echo "SCENE_CRAFT_RUBRIC" ;;
+        prose-craft) echo "PROSE_CRAFT_RUBRIC" ;;
+        character-craft-scene) echo "CHARACTER_CRAFT_SCENE_RUBRIC" ;;
+        rules) echo "RULES_RUBRIC" ;;
+        *) echo "" ;;
+    esac
+}
+
+# ============================================================================
+# Helper: substitute placeholders in a prompt template
+# ============================================================================
+
+substitute_prompt() {
+    local template="$1"
+    local scene_id="$2"
+
+    # Read scene metadata
+    local scene_title scene_pov scene_function scene_emotional_arc scene_text
+    scene_title=$(get_csv_field "$METADATA_CSV" "$scene_id" "title")
+    scene_pov=$(get_csv_field "$METADATA_CSV" "$scene_id" "pov")
+
+    # Intent fields
+    if [[ -f "$INTENT_CSV" ]]; then
+        scene_function=$(get_csv_field "$INTENT_CSV" "$scene_id" "function")
+        scene_emotional_arc=$(get_csv_field "$INTENT_CSV" "$scene_id" "emotional_arc")
+    fi
+
+    # Scene text
+    local scene_file="${SCENES_DIR}/${scene_id}.md"
+    if [[ -f "$scene_file" ]]; then
+        scene_text=$(cat "$scene_file")
+    else
+        scene_text="[Scene file not found: ${scene_id}.md]"
+    fi
+
+    # Build weighted principles text
+    local weighted_text
+    weighted_text=$(build_weighted_text "$WEIGHTS_FILE")
+
+    # Perform substitutions
+    local result="$template"
+    result="${result//\{\{SCENE_ID\}\}/$scene_id}"
+    result="${result//\{\{SCENE_TITLE\}\}/${scene_title:-Unknown}}"
+    result="${result//\{\{SCENE_POV\}\}/${scene_pov:-Unknown}}"
+    result="${result//\{\{SCENE_FUNCTION\}\}/${scene_function:-Not specified}}"
+    result="${result//\{\{SCENE_EMOTIONAL_ARC\}\}/${scene_emotional_arc:-Not specified}}"
+    result="${result//\{\{WEIGHTED_PRINCIPLES\}\}/$weighted_text}"
+
+    # Rubric substitutions (all sections, for quick mode)
+    for group in "${SCORING_GROUPS[@]}"; do
+        local placeholder
+        placeholder=$(get_rubric_placeholder "$group")
+        if [[ -n "$placeholder" ]] && [[ "$result" == *"{{${placeholder}}}"* ]]; then
+            local rubric_content rubric_section
+            rubric_section=$(get_rubric_section "$group")
+            rubric_content=$(extract_rubric_section "$rubric_section")
+            result="${result//\{\{${placeholder}\}\}/$rubric_content}"
+        fi
+    done
+
+    # Scene text last (it's large)
+    result="${result//\{\{SCENE_TEXT\}\}/$scene_text}"
+
+    echo "$result"
+}
+
+# ============================================================================
+# Helper: invoke Claude and parse results
+# ============================================================================
+
+invoke_and_parse() {
+    local prompt="$1"
+    local log_file="$2"
+    local score_file="$3"
+    local rationale_file="$4"
+    local score_marker="${5:-SCORES}"
+    local rationale_marker="${6:-RATIONALE}"
+
+    if [[ "$DRY_RUN" == true ]]; then
+        log "[DRY RUN] Would invoke Claude (${#prompt} chars prompt)"
+        log "[DRY RUN] Would write scores to: $score_file"
+        log "[DRY RUN] Would write rationale to: $rationale_file"
+        return 0
+    fi
+
+    _SF_INVOCATION_START=$(date +%s)
+    export _SF_INVOCATION_START
+
+    begin_healing_zone "scoring invocation"
+
+    claude -p "$prompt" \
+        --model "$MODEL" \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        > "$log_file" 2>&1 || true
+
+    end_healing_zone
+
+    # Parse scores from output
+    parse_score_output "$log_file" "$score_file" "$rationale_file" "$score_marker" "$rationale_marker"
+    local parse_rc=$?
+
+    # Log usage
+    log_usage "$log_file" "score" "$(basename "$score_file" .csv)" "$MODEL"
+
+    return $parse_rc
+}
+
+# ============================================================================
+# Dry-run summary
+# ============================================================================
+
+if [[ "$DRY_RUN" == true ]]; then
+    log "============================================"
+    log "DRY RUN — Scoring Plan"
+    log "============================================"
+    log "Mode:     ${SCORE_MODE}"
+    log "Scenes:   ${SCENE_COUNT}"
+    log "Cycle:    ${CYCLE}"
+    log "Model:    ${MODEL}"
+    log "Estimate: ~\$${SCENE_COST}"
+    log ""
+    log "Scenes to score:"
+    for id in "${SCENE_IDS[@]}"; do
+        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+        log "  - ${id} (${local_title:-untitled})"
+    done
+    log ""
+    case "$SCORE_MODE" in
+        grouped)
+            log "Groups per scene: ${SCORING_GROUPS[*]}"
+            log "Total invocations: ${TOTAL_INVOCATIONS}"
+            ;;
+        quick)
+            log "Quick mode: 1 invocation per scene (all 25 principles)"
+            log "Total invocations: ${TOTAL_INVOCATIONS}"
+            ;;
+        deep)
+            log "Deep mode: 1 invocation per principle per scene"
+            log "Total invocations: ${TOTAL_INVOCATIONS}"
+            ;;
+    esac
+    log ""
+    log "After scene scoring:"
+    log "  - Act-level scoring (~${ACT_INVOCATIONS} invocations)"
+    log "  - Novel-level scoring (1 invocation)"
+    log ""
+    log "Output directory: ${CYCLE_DIR}"
+    log "============================================"
+    exit 0
+fi
+
+# ============================================================================
+# Main scoring loop
+# ============================================================================
+
+log "============================================"
+log "Starting scoring cycle ${CYCLE}"
+log "============================================"
+
+SCORED=0
+FAILED=0
+
+case "$SCORE_MODE" in
+
+# --- GROUPED MODE ---
+grouped)
+    for id in "${SCENE_IDS[@]}"; do
+        SCORED=$((SCORED + 1))
+        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+
+        for group in "${SCORING_GROUPS[@]}"; do
+    template_file="${PROMPTS_DIR}/${group}.md"
+            if [[ ! -f "$template_file" ]]; then
+                log "WARNING: Template not found: ${template_file}, skipping group ${group}"
+                continue
+            fi
+
+            template=$(cat "$template_file")
+
+            prompt=$(substitute_prompt "$template" "$id")
+
+    log_file="${LOG_DIR}/score-${id}-${group}.log"
+    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${group}.csv"
+    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${group}.csv"
+
+            log "Scoring ${group} for ${id} (${SCORED}/${SCENE_COUNT})..."
+
+            if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
+                # Merge into cumulative scene CSVs
+                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
+                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
+                rm -f "$tmp_scores" "$tmp_rationale"
+                log "  Scored ${group} for ${local_title:-$id} (${SCORED}/${SCENE_COUNT})"
+            else
+                FAILED=$((FAILED + 1))
+                log "  WARNING: Failed to parse ${group} scores for ${id}"
+            fi
+        done
+    done
+    ;;
+
+# --- QUICK MODE ---
+quick)
+    template_file="${PROMPTS_DIR}/quick.md"
+    if [[ ! -f "$template_file" ]]; then
+        log "ERROR: Quick mode template not found: ${template_file}"
+        exit 1
+    fi
+    template=$(cat "$template_file")
+
+    for id in "${SCENE_IDS[@]}"; do
+        SCORED=$((SCORED + 1))
+        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+
+        prompt=$(substitute_prompt "$template" "$id")
+
+    log_file="${LOG_DIR}/score-${id}-quick.log"
+    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-quick.csv"
+    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-quick.csv"
+
+        log "Scoring all principles for ${id} (${SCORED}/${SCENE_COUNT})..."
+
+        if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
+            merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
+            merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
+            rm -f "$tmp_scores" "$tmp_rationale"
+            log "  Scored ${local_title:-$id} (${SCORED}/${SCENE_COUNT})"
+        else
+            FAILED=$((FAILED + 1))
+            log "  WARNING: Failed to parse scores for ${id}"
+        fi
+    done
+    ;;
+
+# --- DEEP MODE ---
+deep)
+    # Read all scene-level principles from weights file
+    DEEP_PRINCIPLES=()
+    while IFS='|' read -r section principle weight author_weight notes; do
+        [[ "$section" == "section" ]] && continue  # skip header
+        # Only scene-level sections
+        case "$section" in
+            scene_craft|prose_craft|character_craft|rules)
+                DEEP_PRINCIPLES+=("$principle")
+                ;;
+        esac
+    done < "$WEIGHTS_FILE"
+
+    PRINCIPLE_COUNT=${#DEEP_PRINCIPLES[@]}
+    log "Deep mode: ${PRINCIPLE_COUNT} principles x ${SCENE_COUNT} scenes"
+
+    for id in "${SCENE_IDS[@]}"; do
+        SCORED=$((SCORED + 1))
+        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+
+    p_idx=0
+        for principle in "${DEEP_PRINCIPLES[@]}"; do
+            p_idx=$((p_idx + 1))
+
+            # Build a minimal prompt for a single principle
+            rubric_content=$(extract_rubric_section "Scene Craft")  # Get all rubrics
+            # Try to extract just the relevant principle's rubric section
+            principle_rubric=$(echo "$rubric_content" | awk -v p="$principle" '
+                BEGIN { gsub(/_/, " ", p); }
+                tolower($0) ~ tolower(p) { found=1 }
+                found && /^---/ { found=0 }
+                found && /^### / && !(tolower($0) ~ tolower(p)) { found=0 }
+                found { print }
+            ')
+
+            # If we could not isolate it, use the full rubric set
+            if [[ -z "$principle_rubric" ]]; then
+                rubric_content=$(for section in "Scene Craft" "Prose Craft" "Character Craft" "Rules to Break"; do
+                    extract_rubric_section "$section"
+                done)
+                principle_rubric="$rubric_content"
+            fi
+
+    scene_file="${SCENES_DIR}/${id}.md"
+    scene_text=""
+            [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
+
+    scene_title scene_pov scene_function scene_emotional_arc
+            scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
+            [[ -f "$INTENT_CSV" ]] && scene_function=$(get_csv_field "$INTENT_CSV" "$id" "function")
+            [[ -f "$INTENT_CSV" ]] && scene_emotional_arc=$(get_csv_field "$INTENT_CSV" "$id" "emotional_arc")
+
+            prompt="You are scoring a single craft principle for a scene. Score it 1-10.
+
+## Rubric
+
+${principle_rubric}
+
+## Scene
+
+**Title:** ${scene_title:-Unknown}
+**POV:** ${scene_pov:-Unknown}
+**Function:** ${scene_function:-Not specified}
+**Emotional Arc:** ${scene_emotional_arc:-Not specified}
+
+${scene_text}
+
+## Instructions
+
+Score the principle '${principle}' as an integer from 1 to 10. Anchor in textual evidence.
+Output ONLY the two CSV blocks below.
+
+SCORES:
+id|${principle}
+${id}|<score>
+
+RATIONALE:
+id|${principle}
+${id}|<one sentence>"
+
+    log_file="${LOG_DIR}/score-${id}-${principle}.log"
+    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${principle}.csv"
+    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${principle}.csv"
+
+            log "  Scoring ${principle} for ${id} (${p_idx}/${PRINCIPLE_COUNT}, scene ${SCORED}/${SCENE_COUNT})..."
+
+            if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
+                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
+                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
+                rm -f "$tmp_scores" "$tmp_rationale"
+            else
+                FAILED=$((FAILED + 1))
+                log "  WARNING: Failed to parse ${principle} score for ${id}"
+            fi
+        done
+    done
+    ;;
+esac
+
+log ""
+log "Scene scoring complete: ${SCORED} scenes scored, ${FAILED} failures"
+
+# ============================================================================
+# Act-level scoring
+# ============================================================================
+
+log "Running act-level scoring..."
+
+ACT_TEMPLATE_FILE="${PROMPTS_DIR}/act-level.md"
+if [[ -f "$ACT_TEMPLATE_FILE" ]]; then
+    ACT_TEMPLATE=$(cat "$ACT_TEMPLATE_FILE")
+
+    # Discover unique acts from metadata
+    ACTS=()
+    while IFS= read -r act_val; do
+        [[ -z "$act_val" ]] && continue
+        # Deduplicate
+    dup=false
+        for existing in "${ACTS[@]+"${ACTS[@]}"}"; do
+            [[ "$existing" == "$act_val" ]] && dup=true && break
+        done
+        [[ "$dup" == false ]] && ACTS+=("$act_val")
+    done < <(get_csv_column "$METADATA_CSV" "part")
+
+    for act_label in "${ACTS[@]+"${ACTS[@]}"}"; do
+        [[ -z "$act_label" ]] && continue
+
+        # Collect scene texts for this act
+        act_scenes_text=""
+        act_scene_count=0
+        act_id="act-${act_label}"
+
+        for id in "${SCENE_IDS[@]}"; do
+            scene_part=$(get_csv_field "$METADATA_CSV" "$id" "part")
+            if [[ "$scene_part" == "$act_label" ]]; then
+                scene_file="${SCENES_DIR}/${id}.md"
+                if [[ -f "$scene_file" ]]; then
+                    local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+                    act_scenes_text="${act_scenes_text}
+
+--- Scene: ${local_title:-$id} (${id}) ---
+
+$(cat "$scene_file")
+"
+                    act_scene_count=$((act_scene_count + 1))
+                fi
+            fi
+        done
+
+        if (( act_scene_count == 0 )); then
+            log "  Skipping act ${act_label}: no scored scenes"
+            continue
+        fi
+
+        # Build rubric content
+        narrative_rubric=$(extract_rubric_section "Narrative Frameworks")
+        character_act_rubric=$(extract_rubric_section "Character Craft")
+        weighted_text=$(build_weighted_text "$WEIGHTS_FILE")
+
+        # Substitute into template
+    prompt="$ACT_TEMPLATE"
+        prompt="${prompt//\{\{NARRATIVE_FRAMEWORKS_RUBRIC\}\}/$narrative_rubric}"
+        prompt="${prompt//\{\{CHARACTER_CRAFT_ACT_RUBRIC\}\}/$character_act_rubric}"
+        prompt="${prompt//\{\{ACT_LABEL\}\}/$act_label}"
+        prompt="${prompt//\{\{SCENE_COUNT\}\}/$act_scene_count}"
+        prompt="${prompt//\{\{ACT_SCENES_TEXT\}\}/$act_scenes_text}"
+        prompt="${prompt//\{\{WEIGHTED_PRINCIPLES\}\}/$weighted_text}"
+        prompt="${prompt//\{\{ACT_ID\}\}/$act_id}"
+
+    log_file="${LOG_DIR}/score-${act_id}.log"
+    tmp_scores="${CYCLE_DIR}/.tmp-act-scores-${act_label}.csv"
+    tmp_rationale="${CYCLE_DIR}/.tmp-act-rationale-${act_label}.csv"
+
+        log "  Scoring act ${act_label} (${act_scene_count} scenes)..."
+
+        if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
+            merge_score_files "${CYCLE_DIR}/act-scores.csv" "$tmp_scores"
+            merge_score_files "${CYCLE_DIR}/act-rationale.csv" "$tmp_rationale"
+            rm -f "$tmp_scores" "$tmp_rationale"
+            log "  Act ${act_label} scored"
+        else
+            log "  WARNING: Failed to parse act-level scores for ${act_label}"
+        fi
+    done
+else
+    log "WARNING: Act-level template not found, skipping"
+fi
+
+# ============================================================================
+# Novel-level scoring
+# ============================================================================
+
+log "Running novel-level scoring..."
+
+NOVEL_TEMPLATE_FILE="${PROMPTS_DIR}/novel-level.md"
+if [[ -f "$NOVEL_TEMPLATE_FILE" ]]; then
+    NOVEL_TEMPLATE=$(cat "$NOVEL_TEMPLATE_FILE")
+
+    # Build manuscript summary
+    manuscript_summary="Scene count: ${SCENE_COUNT}"
+
+    # Collect character list from intent.csv if available
+    character_list=""
+    if [[ -f "$INTENT_CSV" ]]; then
+        character_list=$(get_csv_column "$INTENT_CSV" "characters" | tr ';' '\n' | sort -u | grep -v '^$' | head -20 || true)
+        if [[ -n "$character_list" ]]; then
+            manuscript_summary="${manuscript_summary}
+
+Characters mentioned across scenes:
+$(echo "$character_list" | sed 's/^/- /')"
+        fi
+    fi
+
+    # Read character bible and story architecture if available
+    character_bible=""
+    story_architecture=""
+    for ref in "reference/character-bible.md" "references/character-bible.md"; do
+        if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
+            character_bible=$(cat "${PROJECT_DIR}/${ref}")
+            break
+        fi
+    done
+    for ref in "reference/story-architecture.md" "references/story-architecture.md"; do
+        if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
+            story_architecture=$(cat "${PROJECT_DIR}/${ref}")
+            break
+        fi
+    done
+
+    # Build rubrics
+    character_novel_rubric=$(extract_rubric_section "Character Craft")
+    genre_rubric=$(extract_rubric_section "Tropes and Genre")
+    weighted_text=$(build_weighted_text "$WEIGHTS_FILE")
+
+    # Substitute into template
+    prompt="$NOVEL_TEMPLATE"
+    prompt="${prompt//\{\{CHARACTER_CRAFT_NOVEL_RUBRIC\}\}/$character_novel_rubric}"
+    prompt="${prompt//\{\{GENRE_RUBRIC\}\}/$genre_rubric}"
+    prompt="${prompt//\{\{MANUSCRIPT_SUMMARY\}\}/$manuscript_summary}"
+    prompt="${prompt//\{\{CHARACTER_BIBLE\}\}/${character_bible:-No character bible found.}}"
+    prompt="${prompt//\{\{STORY_ARCHITECTURE\}\}/${story_architecture:-No story architecture found.}}"
+    prompt="${prompt//\{\{WEIGHTED_PRINCIPLES\}\}/$weighted_text}"
+
+    log_file="${LOG_DIR}/score-novel-level.log"
+
+    log "  Scoring novel-level character + genre..."
+
+    if [[ "$DRY_RUN" == false ]]; then
+        _SF_INVOCATION_START=$(date +%s)
+        export _SF_INVOCATION_START
+
+        begin_healing_zone "novel-level scoring"
+
+        claude -p "$prompt" \
+            --model "$MODEL" \
+            --dangerously-skip-permissions \
+            --output-format stream-json \
+            --verbose \
+            > "$log_file" 2>&1 || true
+
+        end_healing_zone
+
+        # Parse character scores
+    char_scores="${CYCLE_DIR}/.tmp-char-scores.csv"
+    char_rationale="${CYCLE_DIR}/.tmp-char-rationale.csv"
+        parse_score_output "$log_file" "$char_scores" "$char_rationale" "CHARACTER_SCORES" "CHARACTER_RATIONALE"
+        if [[ -f "$char_scores" ]]; then
+            cp "$char_scores" "${CYCLE_DIR}/character-scores.csv"
+            rm -f "$char_scores"
+        fi
+        if [[ -f "$char_rationale" ]]; then
+            cp "$char_rationale" "${CYCLE_DIR}/character-rationale.csv"
+            rm -f "$char_rationale"
+        fi
+
+        # Parse genre scores
+    genre_scores="${CYCLE_DIR}/.tmp-genre-scores.csv"
+    genre_rationale="${CYCLE_DIR}/.tmp-genre-rationale.csv"
+        parse_score_output "$log_file" "$genre_scores" "$genre_rationale" "GENRE_SCORES" "GENRE_RATIONALE"
+        if [[ -f "$genre_scores" ]]; then
+            cp "$genre_scores" "${CYCLE_DIR}/genre-scores.csv"
+            rm -f "$genre_scores"
+        fi
+        if [[ -f "$genre_rationale" ]]; then
+            cp "$genre_rationale" "${CYCLE_DIR}/genre-rationale.csv"
+            rm -f "$genre_rationale"
+        fi
+
+        log_usage "$log_file" "score" "novel-level" "$MODEL"
+        log "  Novel-level scoring complete"
+    fi
+else
+    log "WARNING: Novel-level template not found, skipping"
+fi
+
+# ============================================================================
+# Update latest symlink
+# ============================================================================
+
+ln -sfn "cycle-${CYCLE}" "${PROJECT_DIR}/working/scores/latest"
+log "Updated latest symlink -> cycle-${CYCLE}"
+
+# ============================================================================
+# Cost summary
+# ============================================================================
+
+echo ""
+print_cost_summary "score"
+
+# ============================================================================
+# Improvement cycle: diagnosis and proposals
+# ============================================================================
+
+log "Running improvement cycle..."
+
+# Determine previous cycle directory
+PREV_DIR=""
+if (( CYCLE > 1 )); then
+    PREV_DIR="${PROJECT_DIR}/working/scores/cycle-$((CYCLE - 1))"
+    if [[ ! -d "$PREV_DIR" ]]; then
+        PREV_DIR=""
+    fi
+fi
+
+# Generate diagnosis and proposals
+generate_diagnosis "$CYCLE_DIR" "$PREV_DIR" "$WEIGHTS_FILE"
+generate_proposals "$CYCLE_DIR" "$WEIGHTS_FILE"
+
+PROPOSALS_FILE="${CYCLE_DIR}/proposals.csv"
+DIAGNOSIS_FILE="${CYCLE_DIR}/diagnosis.csv"
+
+if [[ -f "$PROPOSALS_FILE" ]]; then
+    PROPOSAL_COUNT=$(awk -F'|' 'NR > 1 { count++ } END { print count+0 }' "$PROPOSALS_FILE")
+    log "Generated ${PROPOSAL_COUNT} improvement proposals"
+
+    if (( PROPOSAL_COUNT > 0 )); then
+        # Approval step based on coaching level
+        COACHING=$(get_coaching_level 2>/dev/null || echo "full")
+        APPLIED=0
+
+        case "$COACHING" in
+            full)
+                # Auto-approve all proposals
+                log "Coaching level: full — auto-approving all proposals"
+    tmp_proposals="${PROPOSALS_FILE}.tmp.$$"
+                awk -F'|' -v OFS='|' '
+                    NR == 1 { print; next }
+                    { $7 = "approved"; print }
+                ' "$PROPOSALS_FILE" > "$tmp_proposals" && mv "$tmp_proposals" "$PROPOSALS_FILE"
+                ;;
+            coach)
+                # Interactive approval
+                log "Coaching level: coach — review proposals below"
+                while IFS='|' read -r pid principle lever target change rationale status; do
+                    [[ "$pid" == "id" ]] && continue
+                    [[ "$status" != "pending" ]] && continue
+                    echo ""
+                    echo "  Proposal ${pid}: ${principle}"
+                    echo "    Lever: ${lever}, Target: ${target}"
+                    echo "    Change: ${change}"
+                    echo "    Rationale: ${rationale}"
+                    read -r -p "  Approve? (y/n) " answer < /dev/tty 2>/dev/null || answer="n"
+                    if [[ "$answer" == "y" || "$answer" == "Y" ]]; then
+                        update_csv_field "$PROPOSALS_FILE" "$pid" "status" "approved"
+                    else
+                        update_csv_field "$PROPOSALS_FILE" "$pid" "status" "rejected"
+                    fi
+                done < "$PROPOSALS_FILE"
+                ;;
+            strict)
+                # Report only — do not approve
+                log "Coaching level: strict — diagnosis and proposals generated as report only"
+                echo ""
+                echo "=== Diagnosis Summary ==="
+                if [[ -f "$DIAGNOSIS_FILE" ]]; then
+                    awk -F'|' 'NR > 1 && ($6 == "high" || $6 == "medium") {
+                        printf "  %s (%s): avg %.1f, priority %s\n", $1, $2, $3, $6
+                    }' "$DIAGNOSIS_FILE"
+                fi
+                echo ""
+                echo "=== Proposals (not applied in strict mode) ==="
+                awk -F'|' 'NR > 1 {
+                    printf "  %s: %s — %s (%s)\n", $1, $2, $5, $6
+                }' "$PROPOSALS_FILE"
+                echo ""
+                ;;
+        esac
+
+        # Apply step for approved proposals
+        if [[ "$COACHING" != "strict" ]]; then
+            while IFS='|' read -r pid principle lever target change rationale status; do
+                [[ "$pid" == "id" ]] && continue
+                [[ "$status" != "approved" ]] && continue
+
+                case "$lever" in
+                    craft_weight)
+                        # Extract new weight from change string "weight X → Y"
+                        new_val=$(echo "$change" | sed -n 's/.*→ *\([0-9]*\).*/\1/p')
+                        if [[ -n "$new_val" ]]; then
+                            update_csv_field "$WEIGHTS_FILE" "$principle" "weight" "$new_val" "principle"
+                            APPLIED=$((APPLIED + 1))
+                            update_csv_field "$PROPOSALS_FILE" "$pid" "status" "applied"
+                        fi
+                        ;;
+                    scene_intent)
+                        if [[ -f "$INTENT_CSV" ]]; then
+                            # Record as override — scene_intent changes need human/Claude writing
+    overrides_file="${PROJECT_DIR}/working/overrides.csv"
+                            if [[ ! -f "$overrides_file" ]]; then
+                                echo "id|principle|directive|source" > "$overrides_file"
+                            fi
+                            echo "${target}|${principle}|${change}|${pid}" >> "$overrides_file"
+                            APPLIED=$((APPLIED + 1))
+                            update_csv_field "$PROPOSALS_FILE" "$pid" "status" "applied"
+                        fi
+                        ;;
+                    voice_guide)
+    overrides_file="${PROJECT_DIR}/working/overrides.csv"
+                        if [[ ! -f "$overrides_file" ]]; then
+                            echo "id|principle|directive|source" > "$overrides_file"
+                        fi
+                        echo "global|${principle}|${change}|${pid}" >> "$overrides_file"
+                        APPLIED=$((APPLIED + 1))
+                        update_csv_field "$PROPOSALS_FILE" "$pid" "status" "applied"
+                        ;;
+                    override)
+    overrides_file="${PROJECT_DIR}/working/overrides.csv"
+                        if [[ ! -f "$overrides_file" ]]; then
+                            echo "id|principle|directive|source" > "$overrides_file"
+                        fi
+                        echo "${target}|${principle}|${change}|${pid}" >> "$overrides_file"
+                        APPLIED=$((APPLIED + 1))
+                        update_csv_field "$PROPOSALS_FILE" "$pid" "status" "applied"
+                        ;;
+                esac
+            done < "$PROPOSALS_FILE"
+
+            log "${APPLIED} proposals applied. Run storyforge write to rewrite with updated guidance."
+        fi
+    fi
+else
+    log "No proposals generated"
+fi
+
+# Collect exemplars from high-scoring scenes
+collect_exemplars "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE"
+
+# Check for validated patterns from tuning history
+validated=$(check_validated_patterns "$PROJECT_DIR")
+if [[ -n "$validated" ]]; then
+    log "Validated tuning patterns found:"
+    project_title=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
+    echo "$validated" | while IFS='|' read -r vp vl vi; do
+        log "  ${vp} (${vl}): avg improvement ${vi}"
+        # Build evidence from tuning ledger
+        evidence=""
+        if [[ -f "${PROJECT_DIR}/working/tuning.csv" ]]; then
+            evidence=$(awk -F'|' -v p="$vp" -v l="$vl" '
+                NR == 1 { next }
+                $3 == p && $4 == l && $8 == "true" {
+                    printf "- Cycle %s: %s (before: %s, after: %s)\n", $1, $5, $6, $7
+                }
+            ' "${PROJECT_DIR}/working/tuning.csv")
+        fi
+        # Submit plugin insight
+        submit_plugin_insight "$vp" "$vl" "Validated pattern across 3+ cycles" "$vi" "$project_title" "$evidence"
+    done
+fi
+
+# ============================================================================
+# Git commit and push
+# ============================================================================
+
+log "Committing scoring results..."
+
+(
+    cd "$PROJECT_DIR"
+    git add "working/scores/" 2>/dev/null || true
+    git add "working/craft-weights.csv" 2>/dev/null || true
+    git add "working/costs/" 2>/dev/null || true
+    git add "working/logs/" 2>/dev/null || true
+    git add "working/tuning.csv" 2>/dev/null || true
+    git add "working/overrides.csv" 2>/dev/null || true
+    git add "working/exemplars.csv" 2>/dev/null || true
+    git commit -m "Score: cycle ${CYCLE}, ${SCENE_COUNT} scenes (${SCORE_MODE} mode)" 2>/dev/null || true
+    git push 2>/dev/null || true
+)
+
+log "============================================"
+log "Scoring cycle ${CYCLE} complete"
+log "Results: ${CYCLE_DIR}"
+log "============================================"

@@ -761,6 +761,52 @@ fi
 log "Output directory: ${EVAL_DIR}"
 log "============================================"
 
+# --- Cost forecast ---
+EVAL_MODEL_FORECAST=$(select_model "evaluation")
+SYNTH_MODEL_FORECAST=$(select_model "synthesis")
+
+# Estimate average word count from metadata.csv or scene files
+METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+AVG_WORDS=0
+if [[ -f "$METADATA_CSV" ]]; then
+    TOTAL_WC=0
+    WC_COUNT=0
+    while IFS= read -r wc; do
+        [[ -z "$wc" || "$wc" == "0" ]] && continue
+        TOTAL_WC=$((TOTAL_WC + wc))
+        WC_COUNT=$((WC_COUNT + 1))
+    done < <(get_csv_column "$METADATA_CSV" "word_count")
+    if (( WC_COUNT > 0 )); then
+        AVG_WORDS=$((TOTAL_WC / WC_COUNT))
+    fi
+fi
+if (( AVG_WORDS == 0 )); then
+    # Estimate from scene files
+    TOTAL_WC=0
+    WC_COUNT=0
+    for sf in "${SCENE_FILES[@]}"; do
+        sf_path="${PROJECT_DIR}/${sf}"
+        if [[ -f "$sf_path" ]]; then
+            wc_val=$(wc -w < "$sf_path" | tr -d ' ')
+            TOTAL_WC=$((TOTAL_WC + wc_val))
+            WC_COUNT=$((WC_COUNT + 1))
+        fi
+    done
+    if (( WC_COUNT > 0 )); then
+        AVG_WORDS=$((TOTAL_WC / WC_COUNT))
+    else
+        AVG_WORDS=3000
+    fi
+fi
+
+# Each evaluator reads all scenes; synthesis reads reports
+EVALUATOR_COST=$(estimate_cost "evaluate" "${#SCENE_FILES[@]}" "$AVG_WORDS" "$EVAL_MODEL_FORECAST")
+SYNTH_COST=$(estimate_cost "evaluate" "1" "$((AVG_WORDS * ${#SCENE_FILES[@]}))" "$SYNTH_MODEL_FORECAST")
+TOTAL_FORECAST=$(awk "BEGIN { printf \"%.2f\", ${EVALUATOR_COST} * ${ALL_EVALUATOR_COUNT} + ${SYNTH_COST} }")
+
+log "Cost forecast: ~\$${TOTAL_FORECAST} (${ALL_EVALUATOR_COUNT} evaluators @ ~\$${EVALUATOR_COST} + synthesis ~\$${SYNTH_COST})"
+check_cost_threshold "$TOTAL_FORECAST" || { log "Cost threshold check declined. Aborting."; exit 1; }
+
 # --- Offer interactive mode before starting ---
 if [[ ! -f "$INTERACTIVE_FILE" ]]; then
     offer_interactive "$PROJECT_DIR" "Evaluation panel (${ALL_EVALUATOR_COUNT} evaluators)" || true
@@ -769,6 +815,9 @@ fi
 # --- Launch all evaluators in parallel ---
 PIDS=()
 EVAL_NAMES=()
+EVAL_MODELS=()
+_SF_INVOCATION_START=$(date +%s)
+export _SF_INVOCATION_START
 
 # Launch core evaluators
 for EVAL in "${CORE_EVALUATORS[@]}"; do
@@ -778,6 +827,7 @@ for EVAL in "${CORE_EVALUATORS[@]}"; do
     log "Launching evaluator: ${EVAL} (model: ${EVAL_MODEL})"
 
     PROMPT=$(build_eval_prompt "$EVAL" false)
+    EVAL_MODELS+=("$EVAL_MODEL")
 
     claude -p "$PROMPT" \
         --model "$EVAL_MODEL" \
@@ -801,6 +851,7 @@ for EVAL in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
     log "Launching custom evaluator: ${EVAL} (model: ${EVAL_MODEL})"
 
     PROMPT=$(build_eval_prompt "$EVAL" true)
+    EVAL_MODELS+=("$EVAL_MODEL")
 
     claude -p "$PROMPT" \
         --model "$EVAL_MODEL" \
@@ -834,6 +885,11 @@ for i in "${!PIDS[@]}"; do
     wait "$PID"
     EXIT_CODE=$?
     set -e
+
+    # Log usage for cost tracking
+    EVAL_LOG_FILE="${LOG_DIR}/eval-${EVAL_NAME}.log"
+    EVAL_MODEL_USED="${EVAL_MODELS[$i]:-unknown}"
+    log_usage "$EVAL_LOG_FILE" "evaluate" "$EVAL_NAME" "$EVAL_MODEL_USED"
 
     if (( EXIT_CODE != 0 )); then
         log "FAILED: ${EVAL_NAME} (exit code $EXIT_CODE)"
@@ -876,6 +932,9 @@ INTERACTIVE_FILE="${PROJECT_DIR}/working/.interactive"
 if [[ "$INTERACTIVE" == true ]]; then
     touch "$INTERACTIVE_FILE"
 fi
+
+_SF_INVOCATION_START=$(date +%s)
+export _SF_INVOCATION_START
 
 begin_healing_zone "evaluation synthesis"
 
@@ -1054,6 +1113,9 @@ fi
 
 end_healing_zone
 
+# Log synthesis usage
+log_usage "$SYNTHESIS_LOG" "synthesize" "synthesis" "$SYNTH_MODEL"
+
 SYNTH_WORDS=$(wc -w < "${EVAL_DIR}/synthesis.md" | tr -d ' ')
 log "SUCCESS: Synthesis complete (${SYNTH_WORDS} words, ${SYNTH_MINS}m${SYNTH_SECS}s)"
 
@@ -1079,6 +1141,7 @@ HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
     cd "$PROJECT_DIR"
     git add "working/evaluations/eval-${EVAL_TIMESTAMP}/" 2>/dev/null || true
     git add working/logs/ 2>/dev/null || true
+    git add working/costs/ 2>/dev/null || true
     git add working/pipeline.yaml 2>/dev/null || true
     git commit -m "Evaluation: ${SCOPE_DESCRIPTION} (${#SUCCEEDED[@]}/${ALL_EVALUATOR_COUNT} evaluators)" 2>/dev/null || true
 )
@@ -1126,6 +1189,10 @@ if [[ -f "${EVAL_DIR}/findings.yaml" ]]; then
     log "  Browse findings:    cat ${EVAL_DIR}/findings.yaml"
 fi
 log "  Read individual:    ls ${EVAL_DIR}/"
+
+# --- Cost summary ---
+print_cost_summary "evaluate"
+print_cost_summary "synthesize"
 
 # --- Review phase ---
 run_review_phase "evaluation" "$PROJECT_DIR"

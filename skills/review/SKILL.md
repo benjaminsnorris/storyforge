@@ -19,15 +19,15 @@ Store this resolved plugin path for use throughout the session.
 
 1. **Read `storyforge.yaml`** — project config, current phase, artifacts.
 2. **Read the pipeline manifest** — `working/pipeline.yaml` if it exists. Find the current cycle. Use its fields to locate the linked evaluation directory and revision plan file. This gives you the exact chain: which evaluation led to which plan led to which revision.
-3. **Read the revision plan** — use the `plan` field from the current cycle in the manifest (e.g., `working/plans/revision-plan-2.yaml`). If no manifest exists, fall back to `working/plans/revision-plan.yaml`. Read every pass: name, purpose, scope, guidance entries, status, and summary fields.
-4. **Read evaluation findings** — use the `evaluation` field from the current cycle in the manifest to locate the exact evaluation directory (e.g., `working/evaluations/eval-20260305-091500/`). If no manifest exists, find the most recent evaluation in `working/evaluations/`. Read `findings.yaml` (structured findings) and `synthesis.md` (prose synthesis). These are the findings the revision was meant to address.
+3. **Read the revision plan** — check for `working/plans/revision-plan.csv` first (pipe-delimited CSV with columns: `pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier`). If CSV does not exist, use the `plan` field from the current cycle in the manifest (e.g., `working/plans/revision-plan-2.yaml`). If no manifest exists, fall back to `working/plans/revision-plan.yaml`. Read every pass: name, purpose, scope, guidance, status, and summary fields.
+4. **Read evaluation findings** — use the `evaluation` field from the current cycle in the manifest to locate the exact evaluation directory (e.g., `working/evaluations/eval-20260305-091500/`). If no manifest exists, find the most recent evaluation in `working/evaluations/`. Read `findings.csv` first (pipe-delimited: `id|severity|category|location|finding|suggestion`). If CSV does not exist, fall back to `findings.yaml`. Also read `synthesis.md` (prose synthesis). These are the findings the revision was meant to address.
 5. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full.
 6. **Read the git log** for revision commits — use `git log --oneline` to identify commits made during the revision cycle. Look for commits with "Revision:" prefixes or commits between the revision plan commit and HEAD.
 7. **Read pass summaries** — if the revision plan has `summary` fields populated on passes, these are your primary source for what each pass did.
 
 ## Step 2: Map Findings to Changes
 
-For each finding in the evaluation (from `findings.yaml`), determine its resolution status:
+For each finding in the evaluation (from `findings.csv` or `findings.yaml`), determine its resolution status:
 
 ### Resolution Categories
 
@@ -38,7 +38,7 @@ For each finding in the evaluation (from `findings.yaml`), determine its resolut
 
 ### For Each Finding, Report:
 
-- Finding ID and summary (from findings.yaml)
+- Finding ID and summary (from findings.csv or findings.yaml)
 - Severity (critical / major / minor / suggestion)
 - Resolution status (addressed / partially / not addressed / indirectly improved)
 - What was done (from pass summaries and guidance entries)

@@ -71,7 +71,7 @@ Every artifact entry shares the same three-field structure:
 | `story_architecture` | The structural blueprint: act breaks, major turning points, subplot threading, and thematic throughlines. | `reference/story-architecture.md` |
 | `voice_guide` | Prose style reference capturing POV strategy, sentence rhythm, diction registers, and per-character dialogue fingerprints. | `reference/voice-guide.md` |
 | `timeline` | Chronological event log ensuring temporal consistency across scenes, subplots, and character arcs. | `reference/timeline.md` |
-| `scene_index` | The master list of every scene with metadata (chapter, POV, location, status, word count, and any scene extensions). | `scenes/scene-index.yaml` |
+| `scene_index` | The master list of every scene with metadata (POV, location, status, word count, and any scene extensions). Stored as two pipe-delimited CSV files: `scenes/metadata.csv` (structural data) and `scenes/intent.csv` (creative intent). Legacy projects may still reference `scenes/scene-index.yaml`. | `scenes/metadata.csv` |
 | `continuity_tracker` | A living ledger of continuity facts — promises made, details established, threads opened — used during evaluation and revision. | `reference/continuity-tracker.md` |
 | `key_decisions` | A canonical log of author decisions — creative, structural, editorial. All skills consult this before asking questions and append new decisions immediately when the author makes them. If a decision is recorded here, it is settled and must not be re-asked. | `reference/key-decisions.md` |
 | `chapter_map` | Maps scenes to chapters for manuscript assembly. Includes chapter titles, scene ordering, production settings (author, copyright, scene break style, genre preset), cover generation settings (`cover.subtitle`, `cover.palette`), and web book settings (`web.base_url`, `web.description`). Created by the `produce` skill or manually. | `reference/chapter-map.yaml` |
@@ -92,6 +92,8 @@ Each item in the list has the following fields:
 | `description` | string | required | A human-readable explanation of what this field tracks and how it should be populated. For `enum` types, list the allowed values here. | — | `"Narrative tension on a 1-5 scale: 1=reflective, 3=rising, 5=climactic"` |
 
 If no custom extensions are needed, this section can be an empty list (`[]`).
+
+> **Note on structured data formats:** As of v0.16.0, Storyforge uses pipe-delimited CSV (not YAML) for structured data files that scripts read and write programmatically. This includes scene metadata (`scenes/metadata.csv`, `scenes/intent.csv`), evaluation findings (`working/evaluations/*/findings.csv`), and revision plans (`working/plans/revision-plan.csv`). The `storyforge.yaml` project config remains YAML. See `references/scene-schema.md` for CSV format conventions.
 
 ---
 
@@ -172,7 +174,7 @@ artifacts:
     updated: null
   scene_index:
     exists: false
-    path: scenes/scene-index.yaml
+    path: scenes/metadata.csv
     updated: null
   continuity_tracker:
     exists: false

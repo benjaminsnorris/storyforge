@@ -126,3 +126,83 @@ assert_contains "$prompt2" "scenes/act1-sc01.md" "build_scene_prompt: sc02 refer
 # Cross-part scene references correct previous
 prompt3=$(build_scene_prompt "act2-sc01" "$FIXTURE_DIR")
 assert_contains "$prompt3" "scenes/new-x1.md" "build_scene_prompt: act2-sc01 references new-x1"
+
+# ============================================================================
+# build_weighted_directive
+# ============================================================================
+
+# Returns error (1) when no weights file exists
+_bwd_result=$(build_weighted_directive "$FIXTURE_DIR" 2>/dev/null; echo "EXIT:$?")
+_bwd_exit=$(echo "$_bwd_result" | tail -1 | sed 's/EXIT://')
+assert_equals "1" "$_bwd_exit" "build_weighted_directive: returns 1 when no weights file"
+
+# Setup: create a weights file in the fixture
+mkdir -p "${FIXTURE_DIR}/working"
+cat > "${FIXTURE_DIR}/working/craft-weights.csv" <<'WCSV'
+section|principle|weight|author_weight|notes
+scene_craft|every_scene_must_turn|7||
+scene_craft|enter_late_leave_early|5||
+prose_craft|economy_clarity|5||
+character_craft|want_need|6||
+rules|write_what_you_know|3||
+narrative|kishotenketsu|3||
+scene_craft|pacing_variety|8|9|author boosted
+WCSV
+
+# Returns output when weights file exists
+_bwd_output=$(build_weighted_directive "$FIXTURE_DIR")
+_bwd_rc=$?
+assert_equals "0" "$_bwd_rc" "build_weighted_directive: returns 0 when weights file exists"
+assert_not_empty "$_bwd_output" "build_weighted_directive: produces output"
+
+# High-weight principles appear
+assert_contains "$_bwd_output" "every scene must turn" "build_weighted_directive: high-weight principle listed"
+assert_contains "$_bwd_output" "pacing variety" "build_weighted_directive: author-boosted principle listed"
+assert_contains "$_bwd_output" "priority: 9/10" "build_weighted_directive: author_weight overrides weight"
+
+# Medium-weight principles appear in awareness list
+assert_contains "$_bwd_output" "enter late leave early" "build_weighted_directive: medium principle in awareness"
+assert_contains "$_bwd_output" "want need" "build_weighted_directive: medium principle (6) in awareness"
+
+# Low-weight principles (<=3) do NOT appear
+assert_not_contains "$_bwd_output" "write what you know" "build_weighted_directive: low-weight excluded"
+assert_not_contains "$_bwd_output" "kishotenketsu" "build_weighted_directive: low-weight excluded (3)"
+
+# ============================================================================
+# get_scene_overrides
+# ============================================================================
+
+# Returns empty when no overrides file
+_ov_result=$(get_scene_overrides "act1-sc01" "$FIXTURE_DIR")
+assert_empty "$_ov_result" "get_scene_overrides: empty when no overrides file"
+
+# Setup: create overrides file
+mkdir -p "${FIXTURE_DIR}/working/scores/latest"
+cat > "${FIXTURE_DIR}/working/scores/latest/overrides.csv" <<'OCSV'
+id|pass|instruction
+act1-sc01|voice|Tighten Dorren's internal monologue
+act1-sc01|pacing|Reduce exposition in opening paragraph
+act1-sc02|voice|More sensory detail needed
+OCSV
+
+_ov_result=$(get_scene_overrides "act1-sc01" "$FIXTURE_DIR")
+assert_contains "$_ov_result" "Tighten Dorren" "get_scene_overrides: returns matching override"
+assert_contains "$_ov_result" "Reduce exposition" "get_scene_overrides: returns second override"
+assert_not_contains "$_ov_result" "sensory detail" "get_scene_overrides: excludes other scenes"
+
+# ============================================================================
+# build_scene_prompt with weighted directives
+# ============================================================================
+
+# With craft-weights.csv present, build_scene_prompt should use weighted directive
+_wp=$(build_scene_prompt "act1-sc01" "$FIXTURE_DIR")
+assert_contains "$_wp" "Craft Priorities" "build_scene_prompt: uses weighted directive when weights exist"
+assert_contains "$_wp" "every scene must turn" "build_scene_prompt: weighted principle in prompt"
+
+# Scene-specific overrides should be included
+assert_contains "$_wp" "Scene-Specific Notes" "build_scene_prompt: includes scene overrides section"
+assert_contains "$_wp" "Tighten Dorren" "build_scene_prompt: includes override instruction"
+
+# Cleanup fixture additions
+rm -f "${FIXTURE_DIR}/working/craft-weights.csv"
+rm -rf "${FIXTURE_DIR}/working/scores"
