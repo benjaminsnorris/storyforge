@@ -1,0 +1,861 @@
+#!/bin/bash
+set -eo pipefail
+
+# ============================================================================
+# storyforge-enrich — Metadata enrichment for Storyforge projects
+#
+# Reads scene prose files and uses Claude to extract missing metadata,
+# populating the CSV files that power the manuscript dashboard.
+#
+# Enriches metadata.csv fields: type, timeline_day, time_of_day
+# Enriches intent.csv fields: emotional_arc, characters, threads, motifs
+#
+# Usage:
+#   ./storyforge-enrich                        # All scenes, all fields
+#   ./storyforge-enrich --scenes 001,002       # Specific scenes only
+#   ./storyforge-enrich --act 2                # Scenes in act 2 only
+#   ./storyforge-enrich --fields type,threads  # Enrich specific fields only
+#   ./storyforge-enrich --force                # Re-enrich even populated fields
+#   ./storyforge-enrich --dry-run              # Show what would be enriched
+# ============================================================================
+
+# --- Locate script directory and source libraries ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+
+if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
+    echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
+    exit 1
+fi
+
+# shellcheck source=lib/common.sh
+source "${LIB_DIR}/common.sh"
+
+# --- Default options ---
+DRY_RUN=false
+FORCE=false
+FILTER_MODE="all"
+FILTER_SCENES=""
+FILTER_ACT=""
+PARALLEL=${STORYFORGE_ENRICH_PARALLEL:-6}
+ENRICH_FIELDS="type,timeline_day,time_of_day,characters,emotional_arc,threads,motifs"
+
+# All valid enrichment fields
+VALID_FIELDS="type,timeline_day,time_of_day,characters,emotional_arc,threads,motifs"
+
+# Minimum word count for enrichment
+MIN_WORDS=50
+
+# --- Argument parsing ---
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Enrich scene metadata by analyzing prose with Claude.
+
+Scope:
+  --scenes ID,ID    Enrich specific scenes only (comma-separated)
+  --act N           Enrich scenes in act N only
+
+Options:
+  --parallel N      Concurrent workers (default: 6, env: STORYFORGE_ENRICH_PARALLEL)
+  --fields FIELDS   Comma-separated fields to enrich (default: all)
+                    Valid: type,timeline_day,time_of_day,characters,emotional_arc,threads,motifs
+  --force           Re-enrich scenes that already have data (overwrite)
+  --dry-run         Show what would be enriched without invoking Claude
+  -h, --help        Show this help
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
+        --scenes)
+            FILTER_MODE="scenes"
+            FILTER_SCENES="${2:?ERROR: --scenes requires comma-separated scene IDs}"
+            shift 2
+            ;;
+        --act)
+            FILTER_MODE="act"
+            FILTER_ACT="${2:?ERROR: --act requires an act number}"
+            shift 2
+            ;;
+        --parallel)
+            PARALLEL="${2:?ERROR: --parallel requires a number}"
+            shift 2
+            ;;
+        --fields)
+            ENRICH_FIELDS="${2:?ERROR: --fields requires comma-separated field names}"
+            # Validate fields
+            IFS=',' read -ra _check_fields <<< "$ENRICH_FIELDS"
+            for _f in "${_check_fields[@]}"; do
+                case "$_f" in
+                    type|timeline_day|time_of_day|characters|emotional_arc|threads|motifs) ;;
+                    *)
+                        echo "ERROR: Invalid field '$_f'. Valid fields: ${VALID_FIELDS}" >&2
+                        exit 1
+                        ;;
+                esac
+            done
+            shift 2
+            ;;
+        -*)
+            echo "ERROR: Unknown option: $1" >&2
+            usage
+            ;;
+        *)
+            echo "ERROR: Unexpected argument: $1" >&2
+            usage
+            ;;
+    esac
+done
+
+# --- Detect project root ---
+detect_project_root
+log "Project root: ${PROJECT_DIR}"
+
+# --- Project info ---
+PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
+
+# --- Resolve paths ---
+METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
+SCENES_DIR="${PROJECT_DIR}/scenes"
+SCENE_INDEX="${PROJECT_DIR}/scenes/scene-index.yaml"
+LOG_DIR="${PROJECT_DIR}/working/logs"
+ENRICH_DIR="${PROJECT_DIR}/working/enrich"
+
+mkdir -p "$LOG_DIR"
+mkdir -p "$ENRICH_DIR"
+
+if [[ ! -f "$METADATA_CSV" ]]; then
+    log "ERROR: scenes/metadata.csv not found. Run 'storyforge scenes' to create scene metadata."
+    exit 1
+fi
+
+if [[ ! -f "$INTENT_CSV" ]]; then
+    log "ERROR: scenes/intent.csv not found. Run 'storyforge scenes' to create scene metadata."
+    exit 1
+fi
+
+# --- Select model (analytical task -> Sonnet) ---
+MODEL=$(select_model "evaluation")
+log "Enrichment model: ${MODEL}"
+
+# ============================================================================
+# Step 1: Discover scenes — ensure all scene files have metadata rows
+# ============================================================================
+
+log "Discovering scenes..."
+
+# Get existing IDs from metadata.csv
+EXISTING_META_IDS=()
+while IFS= read -r eid; do
+    [[ -z "$eid" ]] && continue
+    EXISTING_META_IDS+=("$eid")
+done < <(list_csv_ids "$METADATA_CSV")
+
+EXISTING_INTENT_IDS=()
+while IFS= read -r eid; do
+    [[ -z "$eid" ]] && continue
+    EXISTING_INTENT_IDS+=("$eid")
+done < <(list_csv_ids "$INTENT_CSV")
+
+# Find the next available seq number
+MAX_SEQ=0
+while IFS= read -r seq_val; do
+    [[ -z "$seq_val" ]] && continue
+    if [[ "$seq_val" =~ ^[0-9]+$ ]] && (( seq_val > MAX_SEQ )); then
+        MAX_SEQ="$seq_val"
+    fi
+done < <(get_csv_column "$METADATA_CSV" "seq")
+
+# Scan for scene files not yet in CSVs
+ADDED_ROWS=0
+for scene_file in "${SCENES_DIR}"/*.md; do
+    [[ -f "$scene_file" ]] || continue
+    fname=$(basename "$scene_file" .md)
+    # Skip non-scene files (like README, etc.)
+    [[ "$fname" =~ ^[0-9] ]] || continue
+
+    # Check if already in metadata.csv
+    in_meta=false
+    for eid in "${EXISTING_META_IDS[@]+"${EXISTING_META_IDS[@]}"}"; do
+        if [[ "$eid" == "$fname" ]]; then
+            in_meta=true
+            break
+        fi
+    done
+
+    if [[ "$in_meta" == false ]]; then
+        MAX_SEQ=$((MAX_SEQ + 1))
+        # Extract title from first heading or use filename
+        title=$(grep -m1 '^#' "$scene_file" 2>/dev/null | sed 's/^#\+[[:space:]]*//' || echo "$fname")
+        [[ -z "$title" ]] && title="$fname"
+        # metadata.csv header: id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words
+        append_csv_row "$METADATA_CSV" "${fname}|${MAX_SEQ}|${title}||||||||"
+        ADDED_ROWS=$((ADDED_ROWS + 1))
+        log "  Added metadata row for ${fname}"
+    fi
+
+    # Check if already in intent.csv
+    in_intent=false
+    for eid in "${EXISTING_INTENT_IDS[@]+"${EXISTING_INTENT_IDS[@]}"}"; do
+        if [[ "$eid" == "$fname" ]]; then
+            in_intent=true
+            break
+        fi
+    done
+
+    if [[ "$in_intent" == false ]]; then
+        # intent.csv header: id|function|emotional_arc|characters|threads|motifs|notes
+        append_csv_row "$INTENT_CSV" "${fname}||||||"
+        log "  Added intent row for ${fname}"
+    fi
+done
+
+if (( ADDED_ROWS > 0 )); then
+    log "Added ${ADDED_ROWS} new rows to CSVs"
+fi
+
+# ============================================================================
+# Step 1.5: Recover threads from scene-index.yaml (if present)
+# ============================================================================
+
+if [[ -f "$SCENE_INDEX" ]]; then
+    log "Found scene-index.yaml — recovering thread data..."
+    THREADS_RECOVERED=0
+
+    # Parse scene-index.yaml for threads_planted, threads_advanced, threads_resolved
+    # Format in YAML:
+    #   - id: 1
+    #     threads_planted: ["dream_mechanic", "victim_perspective"]
+    #     threads_advanced: ["dream_mechanic"]
+    #     threads_resolved: []
+
+    current_id=""
+    current_threads_planted=""
+    current_threads_advanced=""
+    current_threads_resolved=""
+
+    while IFS= read -r line; do
+        # Detect scene id
+        if echo "$line" | grep -qE '^\s*-\s*id:'; then
+            # Process previous scene if we had one
+            if [[ -n "$current_id" ]]; then
+                # Merge all threads into a single semicolon-separated list
+                all_threads=""
+                for t in $current_threads_planted $current_threads_advanced $current_threads_resolved; do
+                    t=$(echo "$t" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    [[ -z "$t" ]] && continue
+                    if [[ -z "$all_threads" ]]; then
+                        all_threads="$t"
+                    else
+                        # Avoid duplicates
+                        if ! echo ";${all_threads};" | grep -q ";${t};"; then
+                            all_threads="${all_threads};${t}"
+                        fi
+                    fi
+                done
+
+                if [[ -n "$all_threads" ]]; then
+                    # Zero-pad the id to match CSV format (e.g., 1 -> 001)
+                    padded_id=$(printf "%03d" "$current_id" 2>/dev/null || echo "$current_id")
+                    existing_threads=$(get_csv_field "$INTENT_CSV" "$padded_id" "threads")
+                    if [[ -z "$existing_threads" ]] || [[ "$FORCE" == true ]]; then
+                        update_csv_field "$INTENT_CSV" "$padded_id" "threads" "$all_threads"
+                        THREADS_RECOVERED=$((THREADS_RECOVERED + 1))
+                    fi
+                fi
+            fi
+
+            current_id=$(echo "$line" | sed 's/.*id:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+            current_threads_planted=""
+            current_threads_advanced=""
+            current_threads_resolved=""
+        fi
+
+        # Extract thread arrays — format: threads_planted: ["a", "b"]
+        if echo "$line" | grep -qE 'threads_planted:'; then
+            raw=$(echo "$line" | sed 's/.*threads_planted:[[:space:]]*//')
+            # Parse ["a", "b"] -> a b
+            current_threads_planted=$(echo "$raw" | sed 's/\[//g;s/\]//g;s/"//g;s/,/ /g' | tr -s ' ')
+        fi
+        if echo "$line" | grep -qE 'threads_advanced:'; then
+            raw=$(echo "$line" | sed 's/.*threads_advanced:[[:space:]]*//')
+            current_threads_advanced=$(echo "$raw" | sed 's/\[//g;s/\]//g;s/"//g;s/,/ /g' | tr -s ' ')
+        fi
+        if echo "$line" | grep -qE 'threads_resolved:'; then
+            raw=$(echo "$line" | sed 's/.*threads_resolved:[[:space:]]*//')
+            current_threads_resolved=$(echo "$raw" | sed 's/\[//g;s/\]//g;s/"//g;s/,/ /g' | tr -s ' ')
+        fi
+    done < "$SCENE_INDEX"
+
+    # Process the last scene
+    if [[ -n "$current_id" ]]; then
+        all_threads=""
+        for t in $current_threads_planted $current_threads_advanced $current_threads_resolved; do
+            t=$(echo "$t" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [[ -z "$t" ]] && continue
+            if [[ -z "$all_threads" ]]; then
+                all_threads="$t"
+            else
+                if ! echo ";${all_threads};" | grep -q ";${t};"; then
+                    all_threads="${all_threads};${t}"
+                fi
+            fi
+        done
+        if [[ -n "$all_threads" ]]; then
+            padded_id=$(printf "%03d" "$current_id" 2>/dev/null || echo "$current_id")
+            existing_threads=$(get_csv_field "$INTENT_CSV" "$padded_id" "threads")
+            if [[ -z "$existing_threads" ]] || [[ "$FORCE" == true ]]; then
+                update_csv_field "$INTENT_CSV" "$padded_id" "threads" "$all_threads"
+                THREADS_RECOVERED=$((THREADS_RECOVERED + 1))
+            fi
+        fi
+    fi
+
+    log "Recovered threads for ${THREADS_RECOVERED} scenes from scene-index.yaml"
+fi
+
+# ============================================================================
+# Step 2: Build scene list and identify gaps
+# ============================================================================
+
+# Read all scene IDs sorted by seq, excluding cut scenes
+ALL_SCENE_IDS=()
+while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    local_status=$(get_csv_field "$METADATA_CSV" "$id" "status")
+    if [[ "$local_status" != "cut" ]]; then
+        ALL_SCENE_IDS+=("$id")
+    fi
+done < <(awk -F'|' '
+    NR == 1 {
+        for (i = 1; i <= NF; i++) {
+            if ($i == "seq") seq_col = i
+        }
+        next
+    }
+    seq_col { print $1 "|" $seq_col }
+' "$METADATA_CSV" | sort -t'|' -k2 -n | cut -d'|' -f1)
+
+if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
+    log "ERROR: No scenes found in metadata.csv"
+    exit 1
+fi
+
+log "Found ${#ALL_SCENE_IDS[@]} scenes in metadata.csv"
+
+# ============================================================================
+# Filter scenes based on scope flags
+# ============================================================================
+
+FILTERED_IDS=()
+
+case "$FILTER_MODE" in
+    all)
+        FILTERED_IDS=("${ALL_SCENE_IDS[@]}")
+        ;;
+    scenes)
+        IFS=',' read -ra REQUESTED <<< "$FILTER_SCENES"
+        for req in "${REQUESTED[@]}"; do
+            req=$(echo "$req" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            found=false
+            for id in "${ALL_SCENE_IDS[@]}"; do
+                if [[ "$id" == "$req" ]]; then
+                    FILTERED_IDS+=("$req")
+                    found=true
+                    break
+                fi
+            done
+            if [[ "$found" == false ]]; then
+                log "WARNING: Scene '$req' not found in metadata.csv, skipping"
+            fi
+        done
+        ;;
+    act)
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            scene_part=$(get_csv_field "$METADATA_CSV" "$id" "part")
+            if [[ "$scene_part" == "$FILTER_ACT" ]]; then
+                FILTERED_IDS+=("$id")
+            fi
+        done
+        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+            log "ERROR: No scenes found in act ${FILTER_ACT}"
+            exit 1
+        fi
+        ;;
+esac
+
+# ============================================================================
+# Identify which scenes need enrichment
+# ============================================================================
+
+# Parse requested fields into an array
+IFS=',' read -ra FIELDS_ARRAY <<< "$ENRICH_FIELDS"
+
+# Metadata fields vs intent fields
+is_metadata_field() {
+    case "$1" in
+        type|timeline_day|time_of_day) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+is_intent_field() {
+    case "$1" in
+        emotional_arc|characters|threads|motifs) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Build list of scenes that need enrichment, tracking which fields are needed
+SCENE_IDS=()
+MISSING_SCENES=()
+SKIPPED_SHORT=()
+
+for id in "${FILTERED_IDS[@]}"; do
+    scene_file="${SCENES_DIR}/${id}.md"
+
+    # Check scene file exists
+    if [[ ! -f "$scene_file" ]]; then
+        MISSING_SCENES+=("$id")
+        continue
+    fi
+
+    # Check word count
+    wc_val=$(wc -w < "$scene_file" | tr -d ' ')
+    if (( wc_val < MIN_WORDS )); then
+        SKIPPED_SHORT+=("$id")
+        continue
+    fi
+
+    # Check if any requested fields are empty
+    needs_enrichment=false
+    for field in "${FIELDS_ARRAY[@]}"; do
+        current_val=""
+        if is_metadata_field "$field"; then
+            current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
+        elif is_intent_field "$field"; then
+            current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
+        fi
+
+        if [[ -z "$current_val" ]] || [[ "$FORCE" == true ]]; then
+            needs_enrichment=true
+            break
+        fi
+    done
+
+    if [[ "$needs_enrichment" == true ]]; then
+        SCENE_IDS+=("$id")
+    fi
+done
+
+if [[ ${#MISSING_SCENES[@]} -gt 0 ]]; then
+    log "WARNING: ${#MISSING_SCENES[@]} scenes have metadata rows but no prose file (skipping): ${MISSING_SCENES[*]}"
+fi
+
+if [[ ${#SKIPPED_SHORT[@]} -gt 0 ]]; then
+    log "WARNING: ${#SKIPPED_SHORT[@]} scenes are too short (<${MIN_WORDS} words) for enrichment: ${SKIPPED_SHORT[*]}"
+fi
+
+if [[ ${#SCENE_IDS[@]} -eq 0 ]]; then
+    log "No scenes need enrichment. All requested fields are already populated."
+    log "Use --force to re-enrich existing data."
+    exit 0
+fi
+
+SCENE_COUNT=${#SCENE_IDS[@]}
+log "${SCENE_COUNT} scenes need enrichment"
+
+# ============================================================================
+# Step 3: Cost forecast
+# ============================================================================
+
+AVG_WORDS=0
+TOTAL_WC=0
+WC_COUNT=0
+for id in "${SCENE_IDS[@]}"; do
+    sf="${SCENES_DIR}/${id}.md"
+    if [[ -f "$sf" ]]; then
+        wc_val=$(wc -w < "$sf" | tr -d ' ')
+        TOTAL_WC=$((TOTAL_WC + wc_val))
+        WC_COUNT=$((WC_COUNT + 1))
+    fi
+done
+
+if (( WC_COUNT > 0 )); then
+    AVG_WORDS=$((TOTAL_WC / WC_COUNT))
+else
+    AVG_WORDS=800
+fi
+
+# One invocation per scene, relatively small output (~200 tokens)
+ENRICH_COST=$(estimate_cost "evaluate" "$SCENE_COUNT" "$AVG_WORDS" "$MODEL")
+log "Cost forecast: ~\$${ENRICH_COST} (${SCENE_COUNT} scenes, avg ${AVG_WORDS} words/scene)"
+
+if [[ "$DRY_RUN" == false ]]; then
+    check_cost_threshold "$ENRICH_COST" || { log "Cost threshold check declined. Aborting."; exit 1; }
+fi
+
+# ============================================================================
+# Dry-run summary
+# ============================================================================
+
+if [[ "$DRY_RUN" == true ]]; then
+    log "============================================"
+    log "DRY RUN — Enrichment Plan"
+    log "============================================"
+    log "Scenes:   ${SCENE_COUNT}"
+    log "Fields:   ${ENRICH_FIELDS}"
+    log "Parallel: ${PARALLEL}"
+    log "Force:    ${FORCE}"
+    log "Model:    ${MODEL}"
+    log "Estimate: ~\$${ENRICH_COST}"
+    log ""
+    log "Scenes to enrich:"
+    for id in "${SCENE_IDS[@]}"; do
+        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+        # List which fields are missing
+        missing_fields=""
+        for field in "${FIELDS_ARRAY[@]}"; do
+            current_val=""
+            if is_metadata_field "$field"; then
+                current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
+            elif is_intent_field "$field"; then
+                current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
+            fi
+            if [[ -z "$current_val" ]] || [[ "$FORCE" == true ]]; then
+                if [[ -z "$missing_fields" ]]; then
+                    missing_fields="$field"
+                else
+                    missing_fields="${missing_fields}, ${field}"
+                fi
+            fi
+        done
+        log "  - ${id} (${local_title:-untitled}) — missing: ${missing_fields}"
+    done
+    log ""
+    log "============================================"
+    exit 0
+fi
+
+# ============================================================================
+# Step 4: Create branch and PR
+# ============================================================================
+
+create_branch "enrich" "$PROJECT_DIR"
+ensure_branch_pushed "$PROJECT_DIR"
+
+PR_BODY="## Metadata Enrichment
+
+**Project:** ${PROJECT_TITLE}
+**Scenes:** ${SCENE_COUNT}
+**Fields:** ${ENRICH_FIELDS}
+**Estimated cost:** ~\$${ENRICH_COST}
+
+### Tasks
+- [ ] Recover threads from scene-index.yaml
+- [ ] Enrich metadata (${SCENE_COUNT} scenes)
+- [ ] Commit and push results
+- [ ] Review"
+
+create_draft_pr "Enrich: ${PROJECT_TITLE} (${SCENE_COUNT} scenes)" "$PR_BODY" "$PROJECT_DIR" "enrichment" 2>/dev/null || true
+
+# ============================================================================
+# Step 5: Enrich scenes in parallel batches
+# ============================================================================
+
+log "============================================"
+log "Starting metadata enrichment"
+log "============================================"
+log "Parallel workers: ${PARALLEL}"
+
+ENRICHED=0
+FAILED=0
+
+# Helper: build the enrichment prompt for a scene
+build_enrich_prompt() {
+    local scene_id="$1"
+    local scene_file="${SCENES_DIR}/${scene_id}.md"
+    local scene_text=""
+    [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
+
+    local title pov setting part function_val
+    title=$(get_csv_field "$METADATA_CSV" "$scene_id" "title")
+    pov=$(get_csv_field "$METADATA_CSV" "$scene_id" "pov")
+    setting=$(get_csv_field "$METADATA_CSV" "$scene_id" "setting")
+    part=$(get_csv_field "$METADATA_CSV" "$scene_id" "part")
+    function_val=""
+    [[ -f "$INTENT_CSV" ]] && function_val=$(get_csv_field "$INTENT_CSV" "$scene_id" "function")
+
+    cat <<PROMPT_EOF
+You are analyzing a scene from a novel to extract structured metadata.
+
+## Scene Text
+
+${scene_text}
+
+## Existing Metadata
+
+Title: ${title:-Unknown}
+POV: ${pov:-Unknown}
+Setting: ${setting:-Unknown}
+Part: ${part:-Unknown}
+Function: ${function_val:-Unknown}
+
+## Extract the following fields
+
+For each field, provide your answer on a single line in the exact format shown.
+
+TYPE: <one of: character, plot, world, action, transition, confrontation>
+TIMELINE_DAY: <integer day number in the story's internal timeline, starting from 1. Use your best judgment based on time references in the text and surrounding scenes.>
+TIME_OF_DAY: <one of: morning, afternoon, evening, night, dawn, dusk>
+CHARACTERS: <semicolon-separated list of ALL character names who appear, are mentioned by name, or speak in this scene>
+EMOTIONAL_ARC: <one sentence describing the emotional shift within the scene, format: "[starting emotion] to/giving way to [ending emotion]">
+THREADS: <semicolon-separated list of story threads this scene touches, using short descriptive names like "investigation", "romantic_tension", "family_secret">
+MOTIFS: <semicolon-separated list of recurring images, symbols, or sensory patterns present in this scene, like "hands", "darkness", "water", "silence">
+
+Respond with ONLY the field lines above, nothing else.
+PROMPT_EOF
+}
+
+# Helper: validate a type value
+validate_type() {
+    case "$1" in
+        character|plot|world|action|transition|confrontation) echo "$1" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Helper: validate a time_of_day value
+validate_time_of_day() {
+    case "$1" in
+        morning|afternoon|evening|night|dawn|dusk) echo "$1" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Helper: validate timeline_day (positive integer)
+validate_timeline_day() {
+    if [[ "$1" =~ ^[0-9]+$ ]] && (( $1 > 0 )); then
+        echo "$1"
+    else
+        echo ""
+    fi
+}
+
+batch_start=0
+while (( batch_start < SCENE_COUNT )); do
+    batch_pids=()
+    batch_ids=()
+    batch_end=$(( batch_start + PARALLEL ))
+    (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
+
+    # Launch batch
+    for (( i=batch_start; i<batch_end; i++ )); do
+        id="${SCENE_IDS[$i]}"
+        batch_ids+=("$id")
+        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+        log "  Launching enrichment for ${local_title:-$id} ($((i+1))/${SCENE_COUNT})..."
+
+        (
+            # Worker subshell
+            prompt=$(build_enrich_prompt "$id")
+            log_file="${LOG_DIR}/enrich-${id}.log"
+            result_file="${ENRICH_DIR}/.enrich-${id}.txt"
+
+            _SF_INVOCATION_START=$(date +%s)
+            export _SF_INVOCATION_START
+
+            begin_healing_zone "enrich invocation"
+
+            claude -p "$prompt" \
+                --model "$MODEL" \
+                --dangerously-skip-permissions \
+                --output-format stream-json \
+                --verbose \
+                > "$log_file" 2>&1 || true
+
+            end_healing_zone
+
+            # Extract the text content from stream-json output
+            response=""
+            if [[ -f "$log_file" ]]; then
+                response=$(grep '"type":"content_block_delta"' "$log_file" 2>/dev/null \
+                    | sed 's/.*"text":"\([^"]*\)".*/\1/' \
+                    | tr -d '\n' || true)
+                # Also try the result line
+                if [[ -z "$response" ]]; then
+                    response=$(grep '"type":"result"' "$log_file" 2>/dev/null \
+                        | sed -n 's/.*"text":"\(.*\)".*/\1/p' \
+                        | head -1 || true)
+                fi
+                # Unescape newlines
+                response=$(echo "$response" | sed 's/\\n/\n/g')
+            fi
+
+            # Log usage
+            log_usage "$log_file" "enrich" "$id" "$MODEL"
+
+            # Parse response into result file
+            if [[ -n "$response" ]]; then
+                type_val=$(echo "$response" | grep "^TYPE:" | sed 's/^TYPE:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
+                timeline_day_val=$(echo "$response" | grep "^TIMELINE_DAY:" | sed 's/^TIMELINE_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
+                time_of_day_val=$(echo "$response" | grep "^TIME_OF_DAY:" | sed 's/^TIME_OF_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
+                characters_val=$(echo "$response" | grep "^CHARACTERS:" | sed 's/^CHARACTERS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
+                emotional_arc_val=$(echo "$response" | grep "^EMOTIONAL_ARC:" | sed 's/^EMOTIONAL_ARC:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
+                threads_val=$(echo "$response" | grep "^THREADS:" | sed 's/^THREADS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
+                motifs_val=$(echo "$response" | grep "^MOTIFS:" | sed 's/^MOTIFS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
+
+                # Validate
+                type_val=$(validate_type "$type_val")
+                timeline_day_val=$(validate_timeline_day "$timeline_day_val")
+                time_of_day_val=$(validate_time_of_day "$time_of_day_val")
+
+                # Write results to temp file (pipe-delimited key|value pairs)
+                {
+                    echo "TYPE|${type_val}"
+                    echo "TIMELINE_DAY|${timeline_day_val}"
+                    echo "TIME_OF_DAY|${time_of_day_val}"
+                    echo "CHARACTERS|${characters_val}"
+                    echo "EMOTIONAL_ARC|${emotional_arc_val}"
+                    echo "THREADS|${threads_val}"
+                    echo "MOTIFS|${motifs_val}"
+                    echo "STATUS|ok"
+                } > "$result_file"
+            else
+                echo "STATUS|fail" > "$result_file"
+            fi
+        ) &
+        batch_pids+=($!)
+        register_child_pid $!
+    done
+
+    # Wait for batch to complete
+    for pid in "${batch_pids[@]}"; do
+        wait "$pid" 2>/dev/null || true
+        unregister_child_pid "$pid" 2>/dev/null || true
+    done
+
+    # Apply results from temp files to CSVs
+    for id in "${batch_ids[@]}"; do
+        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+        result_file="${ENRICH_DIR}/.enrich-${id}.txt"
+
+        if [[ ! -f "$result_file" ]]; then
+            FAILED=$((FAILED + 1))
+            log "  WARNING: No results for ${id}"
+            continue
+        fi
+
+        status_val=$(grep "^STATUS|" "$result_file" | cut -d'|' -f2)
+        if [[ "$status_val" != "ok" ]]; then
+            FAILED=$((FAILED + 1))
+            log "  WARNING: Failed to enrich ${id}"
+            rm -f "$result_file"
+            continue
+        fi
+
+        # Apply each field if it was requested and is currently empty (or force)
+        for field in "${FIELDS_ARRAY[@]}"; do
+            # Map field name to result file key
+            result_key=""
+            case "$field" in
+                type)           result_key="TYPE" ;;
+                timeline_day)   result_key="TIMELINE_DAY" ;;
+                time_of_day)    result_key="TIME_OF_DAY" ;;
+                characters)     result_key="CHARACTERS" ;;
+                emotional_arc)  result_key="EMOTIONAL_ARC" ;;
+                threads)        result_key="THREADS" ;;
+                motifs)         result_key="MOTIFS" ;;
+            esac
+
+            [[ -z "$result_key" ]] && continue
+
+            new_val=$(grep "^${result_key}|" "$result_file" | cut -d'|' -f2-)
+            [[ -z "$new_val" ]] && continue
+
+            # Check if field already has data (skip unless force)
+            current_val=""
+            if is_metadata_field "$field"; then
+                current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
+            elif is_intent_field "$field"; then
+                current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
+            fi
+
+            if [[ -n "$current_val" ]] && [[ "$FORCE" != true ]]; then
+                continue
+            fi
+
+            # Update the appropriate CSV
+            if is_metadata_field "$field"; then
+                update_csv_field "$METADATA_CSV" "$id" "$field" "$new_val"
+            elif is_intent_field "$field"; then
+                update_csv_field "$INTENT_CSV" "$id" "$field" "$new_val"
+            fi
+        done
+
+        ENRICHED=$((ENRICHED + 1))
+        log "  Enriched ${local_title:-$id} (${ENRICHED}/${SCENE_COUNT})"
+        rm -f "$result_file"
+    done
+
+    batch_start=$batch_end
+done
+
+log ""
+log "Enrichment complete: ${ENRICHED} scenes enriched, ${FAILED} failures"
+
+# ============================================================================
+# Update PR tasks
+# ============================================================================
+
+update_pr_task "Recover threads from scene-index.yaml" "$PROJECT_DIR" 2>/dev/null || true
+update_pr_task "Enrich metadata (${SCENE_COUNT} scenes)" "$PROJECT_DIR" 2>/dev/null || true
+
+# ============================================================================
+# Cost summary
+# ============================================================================
+
+echo ""
+print_cost_summary "enrich"
+
+# ============================================================================
+# Commit and push
+# ============================================================================
+
+log "Committing enrichment results..."
+
+(
+    cd "$PROJECT_DIR"
+    git add "scenes/metadata.csv" 2>/dev/null || true
+    git add "scenes/intent.csv" 2>/dev/null || true
+    git add "working/costs/" 2>/dev/null || true
+    git add "working/logs/" 2>/dev/null || true
+    git add "working/enrich/" 2>/dev/null || true
+    git commit -m "Enrich: metadata for ${ENRICHED} scenes (${ENRICH_FIELDS})" 2>/dev/null || true
+    git push 2>/dev/null || true
+)
+
+update_pr_task "Commit and push results" "$PROJECT_DIR" 2>/dev/null || true
+update_pr_task "Review" "$PROJECT_DIR" 2>/dev/null || true
+
+log "============================================"
+log "Enrichment complete"
+log "  Scenes enriched: ${ENRICHED}"
+log "  Failures: ${FAILED}"
+log "  Fields: ${ENRICH_FIELDS}"
+log "============================================"
