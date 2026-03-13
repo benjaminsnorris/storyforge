@@ -44,13 +44,32 @@ parse_score_output() {
         return 1
     fi
 
-    # Extract text content from stream-json log (content blocks)
-    local text_content
-    text_content=$(sed -n 's/.*"type":"content_block_delta".*"text":"\([^"]*\)".*/\1/p' "$log_file" \
-        | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
+    # Extract text content from stream-json log
+    # Try multiple extraction strategies for different output formats
+    local text_content=""
 
+    # Strategy 1: Extract from "result" field (claude -p with stream-json)
     if [[ -z "$text_content" ]]; then
-        # Fallback: try plain text extraction
+        text_content=$(grep '"type":"result"' "$log_file" 2>/dev/null \
+            | sed 's/.*"result":"//' | sed 's/","stop_reason.*//' \
+            | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
+    fi
+
+    # Strategy 2: Extract from assistant message content
+    if [[ -z "$text_content" ]]; then
+        text_content=$(grep '"type":"assistant"' "$log_file" 2>/dev/null \
+            | sed 's/.*"text":"//' | sed 's/"}],"stop_reason.*//' \
+            | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
+    fi
+
+    # Strategy 3: Extract from content_block_delta (streaming format)
+    if [[ -z "$text_content" ]]; then
+        text_content=$(sed -n 's/.*"type":"content_block_delta".*"text":"\([^"]*\)".*/\1/p' "$log_file" \
+            | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g' || true)
+    fi
+
+    # Strategy 4: Fallback to plain text lines
+    if [[ -z "$text_content" ]]; then
         text_content=$(grep -v '^\s*{' "$log_file" 2>/dev/null || true)
     fi
 
@@ -80,7 +99,6 @@ parse_score_output() {
     # Write scores
     if [[ -n "$scores_block" ]]; then
         echo "$scores_block" > "$score_target"
-        return 0
     else
         log "WARNING: No ${score_marker} block found in $log_file"
         return 1
@@ -93,7 +111,7 @@ parse_score_output() {
 }
 
 # merge_score_files(target, source)
-# Merge columns from source into target, joining on id column.
+# Smart merge: if headers match, append rows. If headers differ, join columns on id.
 # If target doesn't exist, just copy source.
 merge_score_files() {
     local target="$1" source="$2"
@@ -105,6 +123,15 @@ merge_score_files() {
 
     if [[ ! -f "$target" ]]; then
         cp "$source" "$target"
+        return 0
+    fi
+
+    # Check if headers match — if so, just append data rows
+    local target_header source_header
+    target_header=$(head -1 "$target")
+    source_header=$(head -1 "$source")
+    if [[ "$target_header" == "$source_header" ]]; then
+        tail -n +2 "$source" >> "$target"
         return 0
     fi
 
