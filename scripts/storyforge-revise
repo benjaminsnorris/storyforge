@@ -40,6 +40,16 @@ if [[ ! -f "$PLAN_FILE" && -f "${PROJECT_DIR}/working/plans/revision-plan.yaml" 
     PLAN_FILE="${PROJECT_DIR}/working/plans/revision-plan.yaml"
 fi
 
+# --- Check for CSV revision plan (CSV-first, YAML fallback) ---
+CSV_PLAN_FILE="${PROJECT_DIR}/working/plans/revision-plan.csv"
+USE_CSV_PLAN=false
+if [[ -f "$CSV_PLAN_FILE" ]]; then
+    USE_CSV_PLAN=true
+    log "Using CSV revision plan: ${CSV_PLAN_FILE}"
+elif [[ -f "$PLAN_FILE" ]]; then
+    log "DEPRECATION: Using YAML revision plan. Migrate to working/plans/revision-plan.csv."
+fi
+
 LOG_DIR="${PROJECT_DIR}/working/logs"
 LOG_FILE="${LOG_DIR}/revision-log.txt"
 export LOG_FILE
@@ -109,6 +119,78 @@ EFFECTIVE_COACHING=$(get_coaching_level)
 
 # Ensure coaching directory exists
 mkdir -p "${PROJECT_DIR}/working/coaching"
+
+# ============================================================================
+# CSV helpers for revision-plan.csv
+#
+# CSV format: id|name|purpose|scope|targets|guidance|protection|findings|status|model_tier
+# The id column is the pass number (1, 2, 3, ...).
+# ============================================================================
+
+# Count passes in the CSV plan file.
+count_csv_passes() {
+    [[ -f "$CSV_PLAN_FILE" ]] || { echo "0"; return; }
+    awk -F'|' 'NR > 1 { count++ } END { print count+0 }' "$CSV_PLAN_FILE"
+}
+
+# Read a field from a CSV pass by pass number.
+# Usage: read_csv_pass_field 1 "name"
+read_csv_pass_field() {
+    local pass_num="$1"
+    local field="$2"
+    get_csv_field "$CSV_PLAN_FILE" "$pass_num" "$field"
+}
+
+# Update a field in the CSV plan for a given pass number.
+# Usage: update_csv_pass_field 1 "status" "completed"
+update_csv_pass_field() {
+    local pass_num="$1"
+    local field="$2"
+    local value="$3"
+    update_csv_field "$CSV_PLAN_FILE" "$pass_num" "$field" "$value"
+}
+
+# ============================================================================
+# Unified accessors — dispatch to CSV or YAML depending on USE_CSV_PLAN
+# ============================================================================
+
+unified_count_passes() {
+    if [[ "$USE_CSV_PLAN" == true ]]; then
+        count_csv_passes
+    else
+        count_passes
+    fi
+}
+
+unified_read_pass_field() {
+    local pass_num="$1"
+    local field="$2"
+    if [[ "$USE_CSV_PLAN" == true ]]; then
+        read_csv_pass_field "$pass_num" "$field"
+    else
+        read_pass_field "$pass_num" "$field"
+    fi
+}
+
+unified_read_pass_scope() {
+    local pass_num="$1"
+    if [[ "$USE_CSV_PLAN" == true ]]; then
+        read_csv_pass_field "$pass_num" "scope"
+    else
+        read_pass_scope "$pass_num"
+    fi
+}
+
+unified_update_pass_field() {
+    local pass_num="$1"
+    local field="$2"
+    local value="$3"
+    if [[ "$USE_CSV_PLAN" == true ]]; then
+        update_csv_pass_field "$pass_num" "$field" "$value"
+    else
+        update_pass_field "$pass_num" "$field" "$value"
+    fi
+}
 
 # ============================================================================
 # YAML helpers for revision-plan.yaml
@@ -329,13 +411,13 @@ revision_monitor() {
 # Prerequisite checks
 # ============================================================================
 
-if [[ ! -f "$PLAN_FILE" ]]; then
+if [[ "$USE_CSV_PLAN" != true && ! -f "$PLAN_FILE" ]]; then
     log "ERROR: Revision plan not found at ${PLAN_FILE}"
     log "Run the storyforge-plan-revision skill first to create a revision plan."
     exit 1
 fi
 
-TOTAL_PASSES=$(count_passes)
+TOTAL_PASSES=$(unified_count_passes)
 
 if (( TOTAL_PASSES == 0 )); then
     log "ERROR: No passes found in ${PLAN_FILE}"
@@ -349,7 +431,7 @@ fi
 if (( START_PASS == 0 )); then
     # Find the first pending or in_progress pass
     for (( i = 1; i <= TOTAL_PASSES; i++ )); do
-        local_status=$(read_pass_field "$i" "status")
+        local_status=$(unified_read_pass_field "$i" "status")
         if [[ "$local_status" == "pending" || "$local_status" == "in_progress" ]]; then
             START_PASS=$i
             break
@@ -407,7 +489,7 @@ if [[ "$DRY_RUN" != true ]]; then
 ### Tasks
 "
     for (( _i = 1; _i <= TOTAL_PASSES; _i++ )); do
-        _pname=$(read_pass_field "$_i" "name")
+        _pname=$(unified_read_pass_field "$_i" "name")
         PR_BODY="${PR_BODY}- [ ] Pass: ${_pname}
 "
     done
@@ -429,12 +511,63 @@ log "Coaching level: ${EFFECTIVE_COACHING}"
 log "Starting from pass: ${START_PASS} of ${TOTAL_PASSES}"
 log "============================================"
 
+# --- Cost forecast ---
+if [[ "$DRY_RUN" != true ]]; then
+    PENDING_PASSES=0
+    for (( _fc = START_PASS; _fc <= TOTAL_PASSES; _fc++ )); do
+        _fc_status=$(unified_read_pass_field "$_fc" "status")
+        [[ "$_fc_status" != "completed" ]] && PENDING_PASSES=$((PENDING_PASSES + 1))
+    done
+
+    # Estimate average word count from metadata.csv or scene files
+    METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+    AVG_WORDS=0
+    if [[ -f "$METADATA_CSV" ]]; then
+        TOTAL_WC=0
+        WC_COUNT=0
+        while IFS= read -r wc; do
+            [[ -z "$wc" || "$wc" == "0" ]] && continue
+            TOTAL_WC=$((TOTAL_WC + wc))
+            WC_COUNT=$((WC_COUNT + 1))
+        done < <(get_csv_column "$METADATA_CSV" "word_count")
+        if (( WC_COUNT > 0 )); then
+            AVG_WORDS=$((TOTAL_WC / WC_COUNT))
+        fi
+    fi
+    if (( AVG_WORDS == 0 )); then
+        # Estimate from scene files in scenes directory
+        TOTAL_WC=0
+        WC_COUNT=0
+        for sf in "${PROJECT_DIR}"/scenes/*.md; do
+            [[ -f "$sf" ]] || continue
+            wc_val=$(wc -w < "$sf" | tr -d ' ')
+            TOTAL_WC=$((TOTAL_WC + wc_val))
+            WC_COUNT=$((WC_COUNT + 1))
+        done
+        if (( WC_COUNT > 0 )); then
+            AVG_WORDS=$((TOTAL_WC / WC_COUNT))
+        else
+            AVG_WORDS=3000
+        fi
+        [[ $WC_COUNT -eq 0 ]] && WC_COUNT=1
+    fi
+
+    # Each pass reads all scenes in scope
+    SCENE_COUNT="${WC_COUNT:-1}"
+    REVISE_MODEL_FORECAST=$(select_revision_model "prose" "prose revision" 2>/dev/null || select_model "revision" 2>/dev/null || echo "sonnet")
+    PER_PASS_COST=$(estimate_cost "revise" "$SCENE_COUNT" "$AVG_WORDS" "$REVISE_MODEL_FORECAST")
+    TOTAL_FORECAST=$(awk "BEGIN { printf \"%.2f\", ${PER_PASS_COST} * ${PENDING_PASSES} }")
+
+    log "Cost forecast: ~\$${TOTAL_FORECAST} (${PENDING_PASSES} passes @ ~\$${PER_PASS_COST})"
+    check_cost_threshold "$TOTAL_FORECAST" || { log "Cost threshold check declined. Aborting."; exit 1; }
+fi
+
 for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     # --- Read pass configuration ---
-    PASS_NAME=$(read_pass_field "$PASS_NUM" "name")
-    PASS_SCOPE=$(read_pass_scope "$PASS_NUM")
-    PASS_PURPOSE=$(read_pass_field "$PASS_NUM" "purpose")
-    PASS_STATUS=$(read_pass_field "$PASS_NUM" "status")
+    PASS_NAME=$(unified_read_pass_field "$PASS_NUM" "name")
+    PASS_SCOPE=$(unified_read_pass_scope "$PASS_NUM")
+    PASS_PURPOSE=$(unified_read_pass_field "$PASS_NUM" "purpose")
+    PASS_STATUS=$(unified_read_pass_field "$PASS_NUM" "status")
 
     # --- Skip completed passes ---
     if [[ "$PASS_STATUS" == "completed" ]]; then
@@ -451,7 +584,26 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     # =================================================================
 
     # Build the revision prompt (includes full pass config with guidance/targets)
-    PASS_BLOCK=$(_get_pass_block "$PASS_NUM")
+    if [[ "$USE_CSV_PLAN" == true ]]; then
+        # Build a YAML-like config block from CSV fields for prompt injection
+        _csv_targets=$(read_csv_pass_field "$PASS_NUM" "targets")
+        _csv_guidance=$(read_csv_pass_field "$PASS_NUM" "guidance")
+        _csv_protection=$(read_csv_pass_field "$PASS_NUM" "protection")
+        _csv_findings=$(read_csv_pass_field "$PASS_NUM" "findings")
+        PASS_BLOCK="- name: ${PASS_NAME}
+    purpose: ${PASS_PURPOSE}
+    scope: ${PASS_SCOPE}"
+        [[ -n "$_csv_targets" ]] && PASS_BLOCK="${PASS_BLOCK}
+    targets: ${_csv_targets}"
+        [[ -n "$_csv_guidance" ]] && PASS_BLOCK="${PASS_BLOCK}
+    guidance: ${_csv_guidance}"
+        [[ -n "$_csv_protection" ]] && PASS_BLOCK="${PASS_BLOCK}
+    protection: ${_csv_protection}"
+        [[ -n "$_csv_findings" ]] && PASS_BLOCK="${PASS_BLOCK}
+    findings: ${_csv_findings}"
+    else
+        PASS_BLOCK=$(_get_pass_block "$PASS_NUM")
+    fi
     log "  Building revision prompt..."
     set +e
     PROMPT=$(build_revision_prompt "$PASS_NAME" "$PASS_PURPOSE" "$PASS_SCOPE" "$PROJECT_DIR" "$PASS_BLOCK")
@@ -474,7 +626,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     fi
 
     # Mark as in_progress (only in live mode)
-    update_pass_field "$PASS_NUM" "status" "in_progress"
+    unified_update_pass_field "$PASS_NUM" "status" "in_progress"
 
     # --- Check interactive mode ---
     # Offer mode switch if currently headless (including before first pass)
@@ -490,6 +642,8 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     STEP_LOG="${LOG_DIR}/revision-pass-${PASS_NUM}-${PASS_NAME}.log"
 
     START_TIME=$(date +%s)
+    _SF_INVOCATION_START=$START_TIME
+    export _SF_INVOCATION_START
 
     # Select model based on pass type (creative vs. mechanical)
     PASS_MODEL=$(select_revision_model "$PASS_NAME" "$PASS_PURPOSE")
@@ -533,6 +687,9 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     MINUTES=$(( DURATION / 60 ))
     SECS=$(( DURATION % 60 ))
 
+    # Log usage for cost tracking
+    log_usage "$STEP_LOG" "revise" "$PASS_NAME" "$PASS_MODEL"
+
     if (( EXIT_CODE != 0 )); then
         log "ERROR: claude exited with code ${EXIT_CODE} for pass '${PASS_NAME}' after ${MINUTES}m${SECS}s"
         log "See full output: ${STEP_LOG}"
@@ -562,6 +719,19 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         }
     fi
 
+    # --- Update word counts in metadata.csv after revision ---
+    METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+    if [[ -f "$METADATA_CSV" && "$EFFECTIVE_COACHING" == "full" ]]; then
+        while IFS= read -r scene_id; do
+            [[ -z "$scene_id" ]] && continue
+            scene_file="${PROJECT_DIR}/scenes/${scene_id}.md"
+            if [[ -f "$scene_file" ]]; then
+                new_wc=$(wc -w < "$scene_file" | tr -d ' ')
+                update_csv_field "$METADATA_CSV" "$scene_id" "word_count" "$new_wc"
+            fi
+        done < <(list_csv_ids "$METADATA_CSV")
+    fi
+
     # --- Git commit (if claude didn't already) ---
     HEAD_AFTER=$(git -C "$PROJECT_DIR" rev-parse HEAD)
     if [[ "$HEAD_BEFORE" == "$HEAD_AFTER" ]]; then
@@ -570,6 +740,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         if [[ "$EFFECTIVE_COACHING" == "coach" || "$EFFECTIVE_COACHING" == "strict" ]]; then
             git add working/coaching/ 2>/dev/null || true
             git add working/logs/ 2>/dev/null || true
+            git add working/costs/ 2>/dev/null || true
             git add working/pipeline.yaml 2>/dev/null || true
             git commit -m "${EFFECTIVE_COACHING^}: ${PASS_NAME}" 2>/dev/null || true
         else
@@ -594,14 +765,14 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     end_healing_zone
 
     # --- Update plan status ---
-    update_pass_field "$PASS_NUM" "status" "completed"
+    unified_update_pass_field "$PASS_NUM" "status" "completed"
 
     log "SUCCESS: Pass ${PASS_NUM}/${TOTAL_PASSES} (${PASS_NAME}) — ${MINUTES}m${SECS}s, commit ${COMMIT_SHORT}"
     update_pr_task "Pass: ${PASS_NAME}" "$PROJECT_DIR"
 
     # --- Pause between passes (headless only) ---
     if (( PASS_NUM < TOTAL_PASSES )) && [[ ! -f "$INTERACTIVE_FILE" ]]; then
-        NEXT_STATUS=$(read_pass_field "$((PASS_NUM + 1))" "status")
+        NEXT_STATUS=$(unified_read_pass_field "$((PASS_NUM + 1))" "status")
         if [[ "$NEXT_STATUS" != "completed" ]]; then
             log "Pausing 10s before next pass..."
             sleep 10
@@ -621,12 +792,18 @@ log "============================================"
 # Count completed passes
 COMPLETED=0
 for (( i = 1; i <= TOTAL_PASSES; i++ )); do
-    s=$(read_pass_field "$i" "status")
+    s=$(unified_read_pass_field "$i" "status")
     if [[ "$s" == "completed" ]]; then
         COMPLETED=$((COMPLETED + 1))
     fi
 done
 log "Revision session complete. ${COMPLETED}/${TOTAL_PASSES} passes finished."
+
+# --- Cost summary ---
+if [[ "$DRY_RUN" != true ]]; then
+    print_cost_summary "revise"
+fi
+
 if (( COMPLETED == TOTAL_PASSES )); then
     log "All revision passes are done!"
 

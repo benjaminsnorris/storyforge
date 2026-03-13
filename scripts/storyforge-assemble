@@ -41,7 +41,9 @@ detect_project_root
 log "Project root: ${PROJECT_DIR}"
 
 # --- Configuration ---
+CHAPTER_MAP_CSV="${PROJECT_DIR}/reference/chapter-map.csv"
 CHAPTER_MAP="${PROJECT_DIR}/reference/chapter-map.yaml"
+USE_CSV_CHAPTER_MAP=false
 MANUSCRIPT_DIR="${PROJECT_DIR}/manuscript"
 OUTPUT_DIR="${MANUSCRIPT_DIR}/output"
 CHAPTERS_DIR="${MANUSCRIPT_DIR}/chapters"
@@ -156,10 +158,68 @@ case "$FORMAT" in
 esac
 
 # ============================================================================
+# CSV chapter map support (CSV-first, YAML fallback)
+# ============================================================================
+
+# CSV format: seq|title|heading|part|scenes
+# scenes column uses || as separator for multiple scene IDs
+if [[ -f "$CHAPTER_MAP_CSV" ]]; then
+    USE_CSV_CHAPTER_MAP=true
+    log "Using CSV chapter map: ${CHAPTER_MAP_CSV}"
+
+    # Override assembly functions to read from CSV
+    count_chapters() {
+        local project_dir="$1"
+        local csv="${project_dir}/reference/chapter-map.csv"
+        [[ -f "$csv" ]] || { echo "0"; return; }
+        awk -F'|' 'NR > 1 { count++ } END { print count+0 }' "$csv"
+    }
+
+    read_chapter_field() {
+        local chapter_num="$1"
+        local project_dir="$2"
+        local field="$3"
+        local csv="${project_dir}/reference/chapter-map.csv"
+        [[ -f "$csv" ]] || return 1
+        get_csv_field "$csv" "$chapter_num" "$field"
+    }
+
+    get_chapter_scenes() {
+        local chapter_num="$1"
+        local project_dir="$2"
+        local csv="${project_dir}/reference/chapter-map.csv"
+        [[ -f "$csv" ]] || return 1
+        # scenes is the last column and uses || as sub-separator within
+        # the |-delimited CSV. Extract everything after the 4th | delimiter.
+        local scenes_str
+        scenes_str=$(awk -F'|' -v id="$chapter_num" '
+            NR > 1 && $1 == id {
+                # Rebuild everything from field 5 onward
+                s = ""
+                for (i = 5; i <= NF; i++) {
+                    if (i > 5) s = s "|"
+                    s = s $i
+                }
+                print s
+            }
+        ' "$csv")
+        # Convert || separator to newlines, filtering empty entries
+        echo "$scenes_str" | sed 's/||/\n/g' | sed '/^$/d'
+    }
+elif [[ -f "$CHAPTER_MAP" ]]; then
+    log "DEPRECATION: Using YAML chapter map. Migrate to reference/chapter-map.csv."
+fi
+
+# ============================================================================
 # Prerequisites
 # ============================================================================
 
-check_file_exists "$CHAPTER_MAP" "Chapter map (reference/chapter-map.yaml)"
+if [[ "$USE_CSV_CHAPTER_MAP" == true ]]; then
+    # CSV exists, no need to check YAML
+    :
+else
+    check_file_exists "$CHAPTER_MAP" "Chapter map (reference/chapter-map.yaml)"
+fi
 
 # Verify chapter map has chapters
 TOTAL_CHAPTERS=$(count_chapters "$PROJECT_DIR")
@@ -480,6 +540,7 @@ log "============================================"
     cd "$PROJECT_DIR"
     git add manuscript/ storyforge.yaml 2>/dev/null || true
     git add working/logs/ 2>/dev/null || true
+    git add working/costs/ 2>/dev/null || true
     git commit -m "Assemble: ${TITLE} (${FORMAT})" 2>/dev/null || true
     git push 2>/dev/null || true
 )
