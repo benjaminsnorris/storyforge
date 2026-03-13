@@ -250,6 +250,75 @@ get_scene_status() {
 }
 
 # ============================================================================
+# Weighted craft directives
+# ============================================================================
+
+# Build a token-efficient weighted summary of craft principles for injection
+# into drafting/revision prompts. Uses working/craft-weights.csv.
+# Returns 0 with output if weights file exists, 1 otherwise.
+#
+# Usage: craft_text=$(build_weighted_directive "$project_dir")
+build_weighted_directive() {
+    local project_dir="$1"
+    local weights_file="${project_dir}/working/craft-weights.csv"
+
+    # If no weights file, fall back to nothing (caller uses extract_craft_sections)
+    [[ -f "$weights_file" ]] || return 1
+
+    echo "## Craft Priorities"
+    echo ""
+
+    # High priority (weight >= 7): explicit emphasis
+    local has_high=false
+    while IFS='|' read -r section principle weight author_weight notes; do
+        [[ "$section" == "section" ]] && continue
+        local eff_w="$weight"
+        [[ -n "$author_weight" ]] && eff_w="$author_weight"
+        if (( eff_w >= 7 )); then
+            if [[ "$has_high" == false ]]; then
+                echo "Pay particular attention to these principles:"
+                echo ""
+                has_high=true
+            fi
+            echo "- **${principle//_/ }** (priority: ${eff_w}/10)"
+        fi
+    done < "$weights_file"
+
+    if [[ "$has_high" == true ]]; then
+        echo ""
+    fi
+
+    # Medium priority (4-6): mentioned
+    echo "Also maintain awareness of: "
+    local medium_list=""
+    while IFS='|' read -r section principle weight author_weight notes; do
+        [[ "$section" == "section" ]] && continue
+        local eff_w="$weight"
+        [[ -n "$author_weight" ]] && eff_w="$author_weight"
+        if (( eff_w >= 4 && eff_w < 7 )); then
+            [[ -n "$medium_list" ]] && medium_list="${medium_list}, "
+            medium_list="${medium_list}${principle//_/ }"
+        fi
+    done < "$weights_file"
+    echo "$medium_list"
+    echo ""
+    echo "Follow all craft principles, but weight your attention toward the priorities listed above."
+
+    return 0
+}
+
+# Get scene-specific overrides from the current evaluation cycle.
+# Prints override instructions for the given scene, or nothing if no overrides.
+#
+# Usage: overrides=$(get_scene_overrides "act1-sc05" "/path/to/project")
+get_scene_overrides() {
+    local scene_id="$1" project_dir="$2"
+    local latest="${project_dir}/working/scores/latest/overrides.csv"
+    [[ -f "$latest" ]] || return 0
+    awk -F'|' -v id="$scene_id" 'NR>1 && $1 == id { print "- " $3 }' "$latest"
+}
+
+# ============================================================================
 # Prompt builder
 # ============================================================================
 
@@ -343,9 +412,27 @@ build_scene_prompt() {
     done <<< "$ref_files"
 
     # --- Extract relevant craft engine sections ---
-    # Scene Craft (2) + Prose Craft (3) + Character Craft (4) + Rules (5)
+    # Try weighted directives first (from craft-weights.csv) — much more token-efficient
+    # Fall back to raw craft engine sections if no weights file
     local craft_sections=""
-    craft_sections=$(extract_craft_sections 2 3 4 5 2>/dev/null) || true
+    if craft_sections=$(build_weighted_directive "$project_dir"); then
+        # Weighted directive available
+        :
+    else
+        # Fall back to raw craft engine sections
+        # Scene Craft (2) + Prose Craft (3) + Character Craft (4) + Rules (5)
+        craft_sections=$(extract_craft_sections 2 3 4 5 2>/dev/null) || true
+    fi
+
+    # Add scene-specific overrides if available
+    local overrides
+    overrides=$(get_scene_overrides "$scene_id" "$project_dir")
+    if [[ -n "$overrides" ]]; then
+        craft_sections="${craft_sections}
+
+## Scene-Specific Notes
+${overrides}"
+    fi
 
     # --- Assemble the prompt ---
     # Header (shared across all coaching levels)
