@@ -433,6 +433,8 @@
   .dive-card--healing::before { background: var(--indigo); }
   .dive-card--scoring::before { background: var(--teal); }
   .dive-card--interactive::before { background: var(--cranberry); }
+  .dive-card--enrich::before { background: var(--amber); }
+  .dive-card--dashboard::before { background: var(--rose); }
 
   .dive-card .dive-label {
     font-family: var(--font-mono);
@@ -457,6 +459,8 @@
   .dive-card--healing .dive-label { color: var(--indigo); }
   .dive-card--scoring .dive-label { color: var(--teal); }
   .dive-card--interactive .dive-label { color: var(--cranberry); }
+  .dive-card--enrich .dive-label { color: var(--amber); }
+  .dive-card--dashboard .dive-label { color: var(--rose); }
 
   .dive-card .dive-label .dot {
     width: 6px;
@@ -911,11 +915,39 @@
         </div>
       </a>
 
+      <a href="diagrams/enrichment.html" class="dive-card dive-card--enrich anim" style="--i:24">
+        <div class="dive-label"><span class="dot"></span> Visualization</div>
+        <h3>Metadata Enrichment</h3>
+        <p>
+          Populate missing scene metadata automatically. Free heuristics extract
+          what they can &mdash; word counts, time of day, thread recovery. Claude
+          fills in the rest: characters, emotional arcs, threads, motifs, scene types.
+        </p>
+        <div class="dive-cta">
+          View enrichment
+          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </div>
+      </a>
+
+      <a href="diagrams/dashboard-preview.html" class="dive-card dive-card--dashboard anim" style="--i:25">
+        <div class="dive-label"><span class="dot"></span> Visualization</div>
+        <h3>Manuscript Dashboard</h3>
+        <p>
+          Ten interconnected visualizations that let you see your entire book at
+          a glance. POV rivers, character presence, thread weaving, emotional
+          terrain, craft score heatmaps &mdash; all linked by scene selection.
+        </p>
+        <div class="dive-cta">
+          View dashboard
+          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </div>
+      </a>
+
     </div>
   </div>
 
   <!-- INSTALL -->
-  <div class="install-section anim" style="--i:24">
+  <div class="install-section anim" style="--i:26">
     <div class="section-label"><span class="dot"></span> Get started</div>
     <div class="install-cmd"><span class="comment"># Install from the Claude Code marketplace</span>
 <span class="cmd">/plugin marketplace add</span> benjaminsnorris/storyforge
@@ -926,7 +958,7 @@
   </div>
 
   <!-- FOOTER -->
-  <div class="footer anim" style="--i:25">
+  <div class="footer anim" style="--i:27">
     Storyforge &mdash; a <a href="https://github.com/benjaminsnorris/storyforge">Claude Code plugin</a> for novel writers
   </div>
 
