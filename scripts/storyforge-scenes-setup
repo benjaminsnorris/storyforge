@@ -34,6 +34,7 @@ DRY_RUN=false
 AUTO_YES=false
 SOURCE_PATH=""
 PARALLEL=${STORYFORGE_SCENES_PARALLEL:-6}
+SETUP_MODE="${STORYFORGE_SETUP_MODE:-batch}"
 
 # --- Argument parsing ---
 usage() {
@@ -49,6 +50,7 @@ Modes (exactly one required):
 
 Options:
   --source PATH       Source directory (for chapters) or file (for manuscript)
+  --direct            Use direct API calls instead of batch (default: batch)
   --dry-run           Show what would happen without making changes
   --yes               Skip interactive confirmation of splits
   --parallel N        Workers for Claude calls (default: 6)
@@ -77,6 +79,10 @@ while [[ $# -gt 0 ]]; do
         --source)
             SOURCE_PATH="${2:?ERROR: --source requires a path}"
             shift 2
+            ;;
+        --direct)
+            SETUP_MODE="direct"
+            shift
             ;;
         --dry-run)
             DRY_RUN=true
@@ -109,6 +115,12 @@ fi
 # --- Detect project root ---
 detect_project_root
 log "Project root: ${PROJECT_DIR}"
+
+# --- API key check (required for both batch and direct modes) ---
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    log "ERROR: ANTHROPIC_API_KEY is required. Set it with: export ANTHROPIC_API_KEY=your-key"
+    exit 1
+fi
 
 # --- Project info ---
 PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
@@ -439,13 +451,12 @@ find_content_start() {
     echo "$after_line"
 }
 
-# Use Claude to detect scene boundaries when no explicit markers
-claude_detect_scenes() {
+# Build the scene detection prompt for a chapter
+build_scene_prompt() {
     local chapter_text="$1"
-    local chapter_id="$2"
-    local log_file="${LOG_DIR}/scenes-setup-detect-${chapter_id}.log"
 
-    prompt="You are identifying scene boundaries in a chapter of a novel.
+    cat <<PROMPTEOF
+You are identifying scene boundaries in a chapter of a novel.
 
 A scene is a continuous unit of action in one time and place. A new scene begins when there is a significant shift in:
 - Time (hours or days pass)
@@ -468,29 +479,56 @@ SCENE: <line_number> | <suggested_title> | <brief_reason>
 Where line_number is the line in the chapter text where this scene begins (1-indexed).
 The first scene always starts at line 1.
 
-Output ONLY SCENE: lines, nothing else."
+Output ONLY SCENE: lines, nothing else.
+PROMPTEOF
+}
+
+# Use direct API to detect scene boundaries (single chapter)
+claude_detect_scenes() {
+    local chapter_text="$1"
+    local chapter_id="$2"
+    local log_file="${LOG_DIR}/scenes-setup-detect-${chapter_id}.json"
+
+    prompt=$(build_scene_prompt "$chapter_text")
 
     _SF_INVOCATION_START=$(date +%s)
     export _SF_INVOCATION_START
 
     begin_healing_zone "scene boundary detection"
 
-    claude -p "$prompt" \
-        --model "$MODEL" \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --verbose \
-        > "$log_file" 2>&1 || true
+    invoke_anthropic_api "$prompt" "$MODEL" "$log_file" 4096 || true
 
     end_healing_zone
 
     # Parse response
-    response=$(extract_claude_response "$log_file" 2>/dev/null || true)
+    response=$(extract_api_response "$log_file" 2>/dev/null || true)
 
     # Log usage
-    log_usage "$log_file" "scene-detect" "$chapter_id" "$MODEL"
+    log_api_usage "$log_file" "scene-detect" "$chapter_id" "$MODEL"
 
     echo "$response"
+}
+
+# Build a JSONL batch file with all chapter prompts
+# Arguments: array of chapter files (via CLAUDE_CHAPTERS global)
+# Writes batch file to WORK_DIR/.batch-input.jsonl
+build_scene_batch() {
+    local batch_file="${WORK_DIR}/.batch-input.jsonl"
+    rm -f "$batch_file"
+
+    for cf in "${CLAUDE_CHAPTERS[@]}"; do
+        ch_name=$(basename "$cf" .md)
+        chapter_text=$(cat "$cf")
+        prompt=$(build_scene_prompt "$chapter_text")
+
+        # Build JSON request line
+        json_prompt=$(jq -Rs '.' <<< "$prompt")
+        cat <<BATCHEOF >> "$batch_file"
+{"custom_id": "${ch_name}", "params": {"model": "${MODEL}", "max_tokens": 4096, "messages": [{"role": "user", "content": ${json_prompt}}]}}
+BATCHEOF
+    done
+
+    echo "$batch_file"
 }
 
 # Parse SCENE: lines into arrays
@@ -809,40 +847,95 @@ do_split_chapters() {
         log "${#MARKER_CHAPTERS[@]} chapters have explicit markers, ${#CLAUDE_CHAPTERS[@]} need Claude detection"
     fi
 
-    # Process chapters that need Claude detection in parallel batches
+    # Process chapters that need Claude detection
     if [[ "$DRY_RUN" == false ]] && [[ ${#CLAUDE_CHAPTERS[@]} -gt 0 ]]; then
         CLAUDE_TOTAL=${#CLAUDE_CHAPTERS[@]}
-        batch_start=0
 
-        while (( batch_start < CLAUDE_TOTAL )); do
-            batch_pids=()
-            batch_ids=()
-            batch_end=$(( batch_start + PARALLEL ))
-            (( batch_end > CLAUDE_TOTAL )) && batch_end=$CLAUDE_TOTAL
+        if [[ "$SETUP_MODE" == "batch" ]]; then
+            # --- Batch mode: submit all chapters as a single batch ---
+            log "Submitting ${CLAUDE_TOTAL} chapters to Batch API..."
 
-            for (( i=batch_start; i<batch_end; i++ )); do
-                cf="${CLAUDE_CHAPTERS[$i]}"
-                ch_name=$(basename "$cf" .md)
-                batch_ids+=("$ch_name")
-                log "  Launching scene detection for ${ch_name}..."
+            _SF_INVOCATION_START=$(date +%s)
+            export _SF_INVOCATION_START
 
-                (
-                    chapter_text=$(cat "$cf")
-                    response=$(claude_detect_scenes "$chapter_text" "$ch_name")
-                    # Write response to temp file
-                    echo "$response" > "${WORK_DIR}/.detect-${ch_name}.txt"
-                ) &
-                batch_pids+=($!)
-                register_child_pid $!
+            batch_file=$(build_scene_batch)
+            batch_id=$(submit_batch "$batch_file")
+
+            if [[ -z "$batch_id" ]]; then
+                log "ERROR: Batch submission failed. Falling back to direct mode."
+                SETUP_MODE="direct"
+            else
+                log "  Batch submitted: ${batch_id}"
+                log "  Polling for results..."
+
+                poll_batch "$batch_id"
+
+                log "  Downloading results..."
+                download_batch_results "$batch_id" "$WORK_DIR" "$LOG_DIR"
+
+                # Move results into detect files and log usage
+                for cf in "${CLAUDE_CHAPTERS[@]}"; do
+                    ch_name=$(basename "$cf" .md)
+                    txt_file="${LOG_DIR}/${ch_name}.txt"
+                    json_file="${LOG_DIR}/${ch_name}.json"
+                    status_file="${WORK_DIR}/.status-${ch_name}"
+
+                    if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]]; then
+                        # Copy text response for later parsing
+                        if [[ -f "$txt_file" ]]; then
+                            cp "$txt_file" "${WORK_DIR}/.detect-${ch_name}.txt"
+                        fi
+                        # Log usage from the JSON response
+                        if [[ -f "$json_file" ]]; then
+                            log_api_usage "$json_file" "scene-detect" "$ch_name" "$MODEL"
+                        fi
+                    else
+                        log "  WARNING: Batch item failed for ${ch_name}"
+                    fi
+
+                    rm -f "$status_file" "$txt_file" "$json_file"
+                done
+
+                rm -f "$batch_file"
+                log "  Batch processing complete"
+            fi
+        fi
+
+        if [[ "$SETUP_MODE" == "direct" ]]; then
+            # --- Direct mode: parallel API calls ---
+            log "Processing ${CLAUDE_TOTAL} chapters via direct API (parallel=${PARALLEL})..."
+            batch_start=0
+
+            while (( batch_start < CLAUDE_TOTAL )); do
+                batch_pids=()
+                batch_ids=()
+                batch_end=$(( batch_start + PARALLEL ))
+                (( batch_end > CLAUDE_TOTAL )) && batch_end=$CLAUDE_TOTAL
+
+                for (( i=batch_start; i<batch_end; i++ )); do
+                    cf="${CLAUDE_CHAPTERS[$i]}"
+                    ch_name=$(basename "$cf" .md)
+                    batch_ids+=("$ch_name")
+                    log "  Launching scene detection for ${ch_name}..."
+
+                    (
+                        chapter_text=$(cat "$cf")
+                        response=$(claude_detect_scenes "$chapter_text" "$ch_name")
+                        # Write response to temp file
+                        echo "$response" > "${WORK_DIR}/.detect-${ch_name}.txt"
+                    ) &
+                    batch_pids+=($!)
+                    register_child_pid $!
+                done
+
+                for pid in "${batch_pids[@]}"; do
+                    wait "$pid" 2>/dev/null || true
+                    unregister_child_pid "$pid" 2>/dev/null || true
+                done
+
+                batch_start=$batch_end
             done
-
-            for pid in "${batch_pids[@]}"; do
-                wait "$pid" 2>/dev/null || true
-                unregister_child_pid "$pid" 2>/dev/null || true
-            done
-
-            batch_start=$batch_end
-        done
+        fi
     fi
 
     # Now process all chapters sequentially (for confirmation and writing)
