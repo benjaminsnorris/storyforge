@@ -185,11 +185,13 @@ extract_rubric_section() {
     ' "$rubric_file"
 }
 
-# build_weighted_text(weights_file)
+# build_weighted_text(weights_file, [exclude_section])
 # Build the {{WEIGHTED_PRINCIPLES}} substitution text.
 # Lists principles with effective weight >= 7 as high-priority.
+# Optional exclude_section filters out an entire section (e.g. "narrative").
 build_weighted_text() {
     local weights_file="$1"
+    local exclude_section="${2:-}"
 
     if [[ ! -f "$weights_file" ]]; then
         echo "No craft weights available."
@@ -201,6 +203,10 @@ build_weighted_text() {
 
     while IFS='|' read -r section principle weight author_weight notes; do
         [[ "$section" == "section" ]] && continue  # skip header
+        # Skip excluded section (e.g. narrative principles for scene-level scoring)
+        if [[ -n "$exclude_section" && "$section" == "$exclude_section" ]]; then
+            continue
+        fi
         local eff_w="$weight"
         if [[ -n "$author_weight" ]]; then
             eff_w="$author_weight"
@@ -233,6 +239,9 @@ generate_diagnosis() {
     local diagnosis_file="${scores_dir}/diagnosis.csv"
     echo "principle|scale|avg_score|worst_items|delta_from_last|priority" > "$diagnosis_file"
 
+    # Narrative principles are scored at novel level, not per scene
+    local NARRATIVE_PRINCIPLES="campbells_monomyth three_act save_the_cat truby_22 harmon_circle kishotenketsu freytag"
+
     # Process each score file (scene, act, character, genre)
     for score_entry in \
         "scene-scores.csv|scene" \
@@ -262,6 +271,18 @@ generate_diagnosis() {
             local principle
             principle=$(echo "$header" | awk -F'|' -v c="$col" '{ print $c }')
             [[ -z "$principle" ]] && { col=$((col + 1)); continue; }
+
+            # Skip narrative principles in scene-level scores (scored at novel level)
+            if [[ "$scale" == "scene" ]]; then
+                local is_narrative=false
+                for np in $NARRATIVE_PRINCIPLES; do
+                    [[ "$principle" == "$np" ]] && is_narrative=true && break
+                done
+                if [[ "$is_narrative" == "true" ]]; then
+                    col=$((col + 1))
+                    continue
+                fi
+            fi
 
             # Compute average and find worst items
             local avg_and_worst
