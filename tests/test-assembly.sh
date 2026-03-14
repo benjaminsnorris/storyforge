@@ -18,20 +18,21 @@ result=$(count_chapters "/nonexistent/path")
 assert_equals "0" "$result" "count_chapters: returns 0 for missing project"
 
 # ============================================================================
-# get_chapter_block
+# chapter CSV row reading
 # ============================================================================
 
-result=$(get_chapter_block 1 "$PROJECT_DIR")
-assert_contains "$result" "The Finest Cartographer" "get_chapter_block: chapter 1 has correct title"
-assert_contains "$result" "act1-sc01" "get_chapter_block: chapter 1 includes first scene"
-assert_contains "$result" "act1-sc02" "get_chapter_block: chapter 1 includes second scene"
+CHAPTER_MAP="${PROJECT_DIR}/reference/chapter-map.csv"
+result=$(get_csv_row "$CHAPTER_MAP" "1" "chapter")
+assert_contains "$result" "The Finest Cartographer" "chapter CSV: chapter 1 has correct title"
+assert_contains "$result" "act1-sc01" "chapter CSV: chapter 1 includes first scene"
+assert_contains "$result" "act1-sc02" "chapter CSV: chapter 1 includes second scene"
 
-result=$(get_chapter_block 2 "$PROJECT_DIR")
-assert_contains "$result" "Into the Blank" "get_chapter_block: chapter 2 has correct title"
-assert_contains "$result" "act2-sc01" "get_chapter_block: chapter 2 includes scene"
+result=$(get_csv_row "$CHAPTER_MAP" "2" "chapter")
+assert_contains "$result" "Into the Blank" "chapter CSV: chapter 2 has correct title"
+assert_contains "$result" "act2-sc01" "chapter CSV: chapter 2 includes scene"
 
-result=$(get_chapter_block 3 "$PROJECT_DIR")
-assert_empty "$result" "get_chapter_block: returns empty for nonexistent chapter"
+result=$(get_csv_row "$CHAPTER_MAP" "3" "chapter")
+assert_empty "$result" "chapter CSV: returns empty for nonexistent chapter"
 
 # ============================================================================
 # read_chapter_field

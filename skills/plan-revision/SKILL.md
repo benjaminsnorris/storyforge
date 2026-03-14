@@ -38,7 +38,7 @@ If no evaluation results exist at all, tell the author that evaluation needs to 
 Read the following files to understand the full project context:
 
 - **`storyforge.yaml`** — project configuration, phase, genre, target word count
-- **`reference/scene-metadata.csv`** and **`reference/scene-intent.csv`** — the scene inventory and intent data (pipe-delimited CSV). If these do not exist, fall back to `scenes/scene-index.yaml` for legacy projects.
+- **`reference/scene-metadata.csv`** and **`reference/scene-intent.csv`** — the scene inventory and intent data (pipe-delimited CSV).
 - **`reference/voice-guide.md`** — the established voice rules and style parameters
 - **`references/craft-engine.md`** from the plugin directory — the craft reference that informs revision strategy
 - **Key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. **Settled decisions must be respected in the plan — do not propose alternatives to decisions already made, and do not present them as open questions in guidance entries.**

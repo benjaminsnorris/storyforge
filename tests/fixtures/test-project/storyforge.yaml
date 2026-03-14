@@ -38,7 +38,7 @@ artifacts:
 
   scene_index:
     exists: true
-    path: scenes/scene-index.yaml
+    path: reference/scene-metadata.csv
     updated: "2026-02-25"
 
   continuity_tracker:
@@ -53,7 +53,7 @@ artifacts:
 
   chapter_map:
     exists: true
-    path: reference/chapter-map.yaml
+    path: reference/chapter-map.csv
     updated: "2026-03-03"
 
   manuscript:
@@ -67,3 +67,29 @@ evaluation:
   custom_evaluators: []
 
 phase: drafting
+
+parts:
+  - number: 1
+    title: "The Expedition"
+  - number: 2
+    title: "The Blank"
+
+production:
+  author: "Test Author"
+  language: en
+  scene_break: ornamental
+  default_heading: numbered-titled
+  include_toc: true
+  cover_image:
+  genre_preset: fantasy
+  copyright:
+    year: 2026
+    isbn: "978-0-000000-00-0"
+    license: "All rights reserved."
+  front_matter:
+    dedication:
+    epigraph:
+  back_matter:
+    acknowledgments:
+    about-the-author:
+    also-by:

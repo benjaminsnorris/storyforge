@@ -17,13 +17,14 @@ assert_contains "$result" "new-x1.md" "resolve_scope full: contains new-x1"
 count=$(echo "$result" | wc -l | tr -d ' ')
 assert_equals "4" "$count" "resolve_scope full: returns 4 files"
 
-# Act-level scope
+# Act-level scope (now uses CSV part column, not ID prefix)
 result=$(resolve_scope "act-1" "$FIXTURE_DIR" 2>/dev/null)
 assert_contains "$result" "act1-sc01.md" "resolve_scope act-1: contains act1-sc01"
 assert_contains "$result" "act1-sc02.md" "resolve_scope act-1: contains act1-sc02"
+assert_contains "$result" "new-x1.md" "resolve_scope act-1: contains new-x1 (part=1)"
 assert_not_contains "$result" "act2-sc01.md" "resolve_scope act-1: excludes act2"
 count=$(echo "$result" | wc -l | tr -d ' ')
-assert_equals "2" "$count" "resolve_scope act-1: returns 2 files"
+assert_equals "3" "$count" "resolve_scope act-1: returns 3 files"
 
 # Act 2
 result=$(resolve_scope "act-2" "$FIXTURE_DIR" 2>/dev/null)
@@ -103,13 +104,12 @@ result=$(resolve_scene_file "${NUMERIC_TMPDIR}/scenes" "scene-999" 2>/dev/null)
 assert_empty "$result" "resolve_scene_file: nonexistent returns empty"
 
 # resolve_scope comma-separated with fallback
-cat > "${NUMERIC_TMPDIR}/scenes/scene-index.yaml" <<'YAML'
-scenes:
-  - id: 9
-    title: "Chapter Nine"
-  - id: 13
-    title: "Chapter Thirteen"
-YAML
+mkdir -p "${NUMERIC_TMPDIR}/reference"
+cat > "${NUMERIC_TMPDIR}/reference/scene-metadata.csv" <<'CSV'
+id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words
+9|1|Chapter Nine||||||||||
+13|2|Chapter Thirteen||||||||||
+CSV
 result=$(resolve_scope "scene-09,scene-13" "$NUMERIC_TMPDIR" 2>/dev/null)
 assert_contains "$result" "9.md" "resolve_scope comma fallback: scene-09 resolves to 9.md"
 assert_contains "$result" "13.md" "resolve_scope comma fallback: scene-13 resolves to 13.md"

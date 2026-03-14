@@ -163,7 +163,6 @@ INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
 [[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
 [[ ! -f "$INTENT_CSV" ]] && INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
 SCENES_DIR="${PROJECT_DIR}/scenes"
-SCENE_INDEX="${PROJECT_DIR}/scenes/scene-index.yaml"
 LOG_DIR="${PROJECT_DIR}/working/logs"
 ENRICH_DIR="${PROJECT_DIR}/working/enrich"
 
@@ -258,106 +257,6 @@ done
 
 if (( ADDED_ROWS > 0 )); then
     log "Added ${ADDED_ROWS} new rows to CSVs"
-fi
-
-# ============================================================================
-# Step 1.5: Recover threads from scene-index.yaml (if present)
-# ============================================================================
-
-if [[ -f "$SCENE_INDEX" ]]; then
-    log "Found scene-index.yaml — recovering thread data..."
-    THREADS_RECOVERED=0
-
-    # Parse scene-index.yaml for threads_planted, threads_advanced, threads_resolved
-    # Format in YAML:
-    #   - id: 1
-    #     threads_planted: ["dream_mechanic", "victim_perspective"]
-    #     threads_advanced: ["dream_mechanic"]
-    #     threads_resolved: []
-
-    current_id=""
-    current_threads_planted=""
-    current_threads_advanced=""
-    current_threads_resolved=""
-
-    while IFS= read -r line; do
-        # Detect scene id
-        if echo "$line" | grep -qE '^\s*-\s*id:'; then
-            # Process previous scene if we had one
-            if [[ -n "$current_id" ]]; then
-                # Merge all threads into a single semicolon-separated list
-                all_threads=""
-                for t in $current_threads_planted $current_threads_advanced $current_threads_resolved; do
-                    t=$(echo "$t" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-                    [[ -z "$t" ]] && continue
-                    if [[ -z "$all_threads" ]]; then
-                        all_threads="$t"
-                    else
-                        # Avoid duplicates
-                        if ! echo ";${all_threads};" | grep -q ";${t};"; then
-                            all_threads="${all_threads};${t}"
-                        fi
-                    fi
-                done
-
-                if [[ -n "$all_threads" ]]; then
-                    # Zero-pad the id to match CSV format (e.g., 1 -> 001)
-                    padded_id=$(printf "%03d" "$current_id" 2>/dev/null || echo "$current_id")
-                    existing_threads=$(get_csv_field "$INTENT_CSV" "$padded_id" "threads")
-                    if [[ -z "$existing_threads" ]] || [[ "$FORCE" == true ]]; then
-                        update_csv_field "$INTENT_CSV" "$padded_id" "threads" "$all_threads"
-                        THREADS_RECOVERED=$((THREADS_RECOVERED + 1))
-                    fi
-                fi
-            fi
-
-            current_id=$(echo "$line" | sed 's/.*id:[[:space:]]*//' | sed 's/[[:space:]]*$//')
-            current_threads_planted=""
-            current_threads_advanced=""
-            current_threads_resolved=""
-        fi
-
-        # Extract thread arrays — format: threads_planted: ["a", "b"]
-        if echo "$line" | grep -qE 'threads_planted:'; then
-            raw=$(echo "$line" | sed 's/.*threads_planted:[[:space:]]*//')
-            # Parse ["a", "b"] -> a b
-            current_threads_planted=$(echo "$raw" | sed 's/\[//g;s/\]//g;s/"//g;s/,/ /g' | tr -s ' ')
-        fi
-        if echo "$line" | grep -qE 'threads_advanced:'; then
-            raw=$(echo "$line" | sed 's/.*threads_advanced:[[:space:]]*//')
-            current_threads_advanced=$(echo "$raw" | sed 's/\[//g;s/\]//g;s/"//g;s/,/ /g' | tr -s ' ')
-        fi
-        if echo "$line" | grep -qE 'threads_resolved:'; then
-            raw=$(echo "$line" | sed 's/.*threads_resolved:[[:space:]]*//')
-            current_threads_resolved=$(echo "$raw" | sed 's/\[//g;s/\]//g;s/"//g;s/,/ /g' | tr -s ' ')
-        fi
-    done < "$SCENE_INDEX"
-
-    # Process the last scene
-    if [[ -n "$current_id" ]]; then
-        all_threads=""
-        for t in $current_threads_planted $current_threads_advanced $current_threads_resolved; do
-            t=$(echo "$t" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            [[ -z "$t" ]] && continue
-            if [[ -z "$all_threads" ]]; then
-                all_threads="$t"
-            else
-                if ! echo ";${all_threads};" | grep -q ";${t};"; then
-                    all_threads="${all_threads};${t}"
-                fi
-            fi
-        done
-        if [[ -n "$all_threads" ]]; then
-            padded_id=$(printf "%03d" "$current_id" 2>/dev/null || echo "$current_id")
-            existing_threads=$(get_csv_field "$INTENT_CSV" "$padded_id" "threads")
-            if [[ -z "$existing_threads" ]] || [[ "$FORCE" == true ]]; then
-                update_csv_field "$INTENT_CSV" "$padded_id" "threads" "$all_threads"
-                THREADS_RECOVERED=$((THREADS_RECOVERED + 1))
-            fi
-        fi
-    fi
-
-    log "Recovered threads for ${THREADS_RECOVERED} scenes from scene-index.yaml"
 fi
 
 # ============================================================================
@@ -508,12 +407,12 @@ fi
 
 create_branch "enrich" "$PROJECT_DIR"
 
-# Commit any files already changed by discovery and thread recovery
+# Commit any files already changed by discovery
 (
     cd "$PROJECT_DIR"
     git add reference/scene-metadata.csv reference/scene-intent.csv 2>/dev/null || true
     git add -A 2>/dev/null || true
-    git commit -m "Enrich: discover scenes and recover threads" 2>/dev/null || true
+    git commit -m "Enrich: discover new scenes" 2>/dev/null || true
 )
 
 ensure_branch_pushed "$PROJECT_DIR"
@@ -683,7 +582,6 @@ PR_BODY="## Metadata Enrichment
 
 ### Tasks
 - [x] Free enrichment (word count, time_of_day keywords)
-- [x] Thread recovery from scene-index.yaml
 - [ ] Claude enrichment (${CLAUDE_COUNT} scenes)
 - [ ] Commit and push results
 - [ ] Review"
@@ -966,7 +864,6 @@ fi
 # Update PR tasks
 # ============================================================================
 
-update_pr_task "Recover threads from scene-index.yaml" "$PROJECT_DIR" 2>/dev/null || true
 update_pr_task "Enrich metadata (${SCENE_COUNT} scenes)" "$PROJECT_DIR" 2>/dev/null || true
 
 # ============================================================================

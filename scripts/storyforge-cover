@@ -59,7 +59,7 @@ Options:
 
 Cover inputs (read automatically from project):
   project.title, project.genre, project.series_name   from storyforge.yaml
-  production.author                                    from reference/chapter-map.yaml
+  production.author                                    from storyforge.yaml
   production.cover.subtitle                            optional tagline
   production.cover.palette                             warm, cool, dark, or light
 
@@ -95,17 +95,12 @@ GENRE_LC=$(echo "$GENRE" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
 SERIES_NAME=$(read_yaml_field "project.series_name" 2>/dev/null || echo "")
 SERIES_POS=$(read_yaml_field "project.series_position" 2>/dev/null || echo "")
 
-# Read from chapter-map.yaml if available
-AUTHOR=""
-SUBTITLE=""
-PALETTE=""
-if [[ -f "${PROJECT_DIR}/reference/chapter-map.yaml" ]]; then
-    AUTHOR=$(read_production_field "$PROJECT_DIR" "author" 2>/dev/null || echo "")
-    SUBTITLE=$(read_production_nested "$PROJECT_DIR" "cover" "subtitle" 2>/dev/null || echo "")
-    PALETTE=$(read_production_nested "$PROJECT_DIR" "cover" "palette" 2>/dev/null || echo "")
-fi
+# Read production settings from storyforge.yaml
+AUTHOR=$(read_production_field "$PROJECT_DIR" "author" 2>/dev/null || echo "")
+SUBTITLE=$(read_production_nested "$PROJECT_DIR" "cover" "subtitle" 2>/dev/null || echo "")
+PALETTE=$(read_production_nested "$PROJECT_DIR" "cover" "palette" 2>/dev/null || echo "")
 
-# Fall back to storyforge.yaml author if not in chapter-map
+# Fall back to storyforge.yaml project.author if production.author not set
 if [[ -z "$AUTHOR" ]]; then
     AUTHOR=$(read_yaml_field "project.author" 2>/dev/null || echo "")
 fi

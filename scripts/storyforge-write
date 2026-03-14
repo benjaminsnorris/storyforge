@@ -40,7 +40,6 @@ detect_project_root
 log "Project root: ${PROJECT_DIR}"
 
 # --- Configuration ---
-SCENE_INDEX="${PROJECT_DIR}/scenes/scene-index.yaml"
 SCENES_DIR="${PROJECT_DIR}/scenes"
 LOG_DIR="${PROJECT_DIR}/working/logs"
 LOG_FILE="${LOG_DIR}/drafting-log.txt"
@@ -178,10 +177,6 @@ EFFECTIVE_COACHING=$(get_coaching_level)
 # Prerequisites
 # ============================================================================
 
-# scene-index.yaml is still needed by prompt-builder for scene context
-if [[ ! -f "$SCENE_INDEX" ]]; then
-    log "WARNING: scene-index.yaml not found — prompt builder may have limited context"
-fi
 
 # Voice guide — check common locations
 VOICE_GUIDE_FOUND=false

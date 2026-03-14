@@ -99,7 +99,7 @@ The author wants a straight assessment — is this title working?
 The author picks a title, iterates further, or keeps their current one. When the author makes a decision:
 
 1. **Update `project.title`** in `storyforge.yaml`.
-2. **Update `production.cover.subtitle`** in `reference/chapter-map.yaml` if a subtitle was chosen and the chapter map exists.
+2. **Update `production.cover.subtitle`** in `storyforge.yaml` if a subtitle was chosen.
 3. **Save the process** to `reference/title-development.md`:
    - Final title and subtitle (if any)
    - Rationale for the choice

@@ -71,26 +71,8 @@ artifacts:
 
   scene_index:
     exists: false
-    path: scenes/scene-index.yaml
+    path: reference/scene-metadata.csv
     updated:
-    # Example scene-index.yaml entries (use descriptive slugs for IDs):
-    #   scenes:
-    #     - id: "geometry-of-dying"
-    #       title: "The Geometry of Dying"
-    #       pov: character-name
-    #       location: location-name
-    #       timeline_position: 1
-    #       status: outline
-    #       summary: >
-    #         Brief description of what happens in this scene.
-    #     - id: "sheriffs-ledger"
-    #       title: "The Sheriff's Ledger"
-    #       pov: character-name
-    #       location: location-name
-    #       timeline_position: 2
-    #       status: outline
-    #       summary: >
-    #         Brief description of what happens in this scene.
 
   continuity_tracker:
     exists: false
@@ -104,7 +86,7 @@ artifacts:
 
   chapter_map:
     exists: false
-    path: reference/chapter-map.yaml
+    path: reference/chapter-map.csv
     updated:
 
   manuscript:
@@ -162,3 +144,47 @@ evaluation:
 #   complete      — manuscript finished, artifacts locked
 #   production    — assembling scenes into chapters, generating epub/PDF
 phase: development
+
+# ----------------------------------------------------------------------------
+# Parts (optional)
+# ----------------------------------------------------------------------------
+# If your novel is divided into parts/acts, list them here with titles.
+# Part numbers are referenced in reference/chapter-map.csv's part column.
+#
+# parts:
+#   - number: 1
+#     title: "Part One"
+#   - number: 2
+#     title: "Part Two"
+
+# ----------------------------------------------------------------------------
+# Production
+# ----------------------------------------------------------------------------
+# Controls formatting, metadata, and output for manuscript assembly.
+# These settings are used by storyforge-assemble and the produce skill.
+#
+# production:
+#   author: ""
+#   language: en
+#   scene_break: ornamental    # space, ornamental, line, custom:SYMBOL
+#   default_heading: numbered-titled  # numbered, titled, numbered-titled, none
+#   include_toc: true
+#   cover_image:               # path relative to project root, or empty for auto-generation
+#   genre_preset:              # default, literary-fiction, thriller, romance, fantasy, science-fiction
+#   cover:
+#     subtitle:
+#     palette:
+#   copyright:
+#     year:
+#     isbn:
+#     license: "All rights reserved."
+#   front_matter:
+#     dedication:
+#     epigraph:
+#   back_matter:
+#     acknowledgments:
+#     about-the-author:
+#     also-by:
+#   web:
+#     base_url:
+#     description:

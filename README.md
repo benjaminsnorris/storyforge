@@ -93,8 +93,7 @@ my-novel/
 ├── storyforge               # Runner script for autonomous commands
 ├── CLAUDE.md                # Auto-generated orchestration context
 ├── reference/               # World bible, character bible, voice guide, etc.
-├── scenes/                  # Scene files with YAML frontmatter
-│   └── scene-index.yaml     # Master scene sequence
+├── scenes/                  # Scene prose files (pure markdown, no frontmatter)
 ├── manuscript/
 │   └── press-kit/           # Marketing materials (blurbs, jacket copy, bios)
 └── working/

@@ -23,7 +23,7 @@ cp -R "${FIXTURE_DIR}/" "${COVER_TEST_DIR}/"
 # Create a fake cover PNG and set it in the chapter map
 mkdir -p "${COVER_TEST_DIR}/manuscript/assets"
 echo "fake-png-data" > "${COVER_TEST_DIR}/manuscript/assets/cover.png"
-sed -i '' 's|^  cover_image:.*|  cover_image: "manuscript/assets/cover.png"|' "${COVER_TEST_DIR}/reference/chapter-map.yaml"
+sed -i '' 's|^  cover_image:.*|  cover_image: "manuscript/assets/cover.png"|' "${COVER_TEST_DIR}/storyforge.yaml"
 
 result=$(generate_cover_if_missing "$COVER_TEST_DIR" "$PLUGIN_DIR" 2>&1)
 rc=$?
@@ -36,7 +36,7 @@ assert_contains "$result" "Cover image found" "generate_cover_if_missing: report
 
 # Reset: remove cover and clear the config
 rm -f "${COVER_TEST_DIR}/manuscript/assets/cover.png"
-sed -i '' 's|^  cover_image:.*|  cover_image:|' "${COVER_TEST_DIR}/reference/chapter-map.yaml"
+sed -i '' 's|^  cover_image:.*|  cover_image:|' "${COVER_TEST_DIR}/storyforge.yaml"
 
 # Point to a non-existent cover script
 result=$(generate_cover_if_missing "$COVER_TEST_DIR" "/nonexistent/plugin" 2>&1)
@@ -49,7 +49,7 @@ assert_contains "$result" "not found" "generate_cover_if_missing: reports genera
 # ============================================================================
 
 # Set a cover path that doesn't exist on disk
-sed -i '' 's|^  cover_image:.*|  cover_image: "manuscript/assets/missing-cover.png"|' "${COVER_TEST_DIR}/reference/chapter-map.yaml"
+sed -i '' 's|^  cover_image:.*|  cover_image: "manuscript/assets/missing-cover.png"|' "${COVER_TEST_DIR}/storyforge.yaml"
 
 result=$(generate_cover_if_missing "$COVER_TEST_DIR" "/nonexistent/plugin" 2>&1)
 rc=$?
@@ -72,7 +72,7 @@ SCRIPT
 chmod +x "${FAKE_PLUGIN_DIR}/scripts/storyforge-cover"
 
 # Reset cover_image to empty
-sed -i '' 's|^  cover_image:.*|  cover_image:|' "${COVER_TEST_DIR}/reference/chapter-map.yaml"
+sed -i '' 's|^  cover_image:.*|  cover_image:|' "${COVER_TEST_DIR}/storyforge.yaml"
 
 result=$(generate_cover_if_missing "$COVER_TEST_DIR" "$FAKE_PLUGIN_DIR" 2>&1)
 rc=$?
@@ -123,7 +123,7 @@ SCRIPT
 chmod +x "${FAKE_PLUGIN_DIR}/scripts/storyforge-cover"
 
 # Reset cover_image to empty
-sed -i '' 's|^  cover_image:.*|  cover_image:|' "${COVER_TEST_DIR}/reference/chapter-map.yaml"
+sed -i '' 's|^  cover_image:.*|  cover_image:|' "${COVER_TEST_DIR}/storyforge.yaml"
 rm -f "${COVER_TEST_DIR}/manuscript/assets/cover.png"
 
 result=$(generate_cover_if_missing "$COVER_TEST_DIR" "$FAKE_PLUGIN_DIR" 2>&1)
@@ -133,9 +133,9 @@ assert_exit_code "0" "$rc" "generate_cover_if_missing: exits 0 when generator su
 # Verify the cover file was created
 assert_file_exists "${COVER_TEST_DIR}/manuscript/assets/cover.png" "generate_cover_if_missing: PNG file created"
 
-# Verify chapter-map.yaml was updated
-cover_field=$(grep 'cover_image:' "${COVER_TEST_DIR}/reference/chapter-map.yaml" | head -1)
-assert_contains "$cover_field" "manuscript/assets/cover.png" "generate_cover_if_missing: chapter-map.yaml updated with cover path"
+# Verify storyforge.yaml was updated
+cover_field=$(grep 'cover_image:' "${COVER_TEST_DIR}/storyforge.yaml" | head -1)
+assert_contains "$cover_field" "manuscript/assets/cover.png" "generate_cover_if_missing: storyforge.yaml updated with cover path"
 
 # ============================================================================
 # Cleanup
