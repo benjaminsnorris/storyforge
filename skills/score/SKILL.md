@@ -71,7 +71,7 @@ Present a high-level overview:
 When the author asks about a specific scene:
 - Show all principle scores for that scene
 - Show rationale for each score from scene-rationale.csv
-- Highlight scores below 4 (critical) and above 8 (excellent)
+- Highlight scores of 1-2 (critical) and 5 (masterful)
 - Compare to the scene's intent from intent.csv -- are low scores aligned with the scene's purpose?
 
 ### Diagnosis and Proposals
@@ -85,7 +85,7 @@ Present the improvement cycle results:
 ### Exemplar Bank
 
 If `working/exemplars.csv` exists, show high-scoring passages:
-- List scenes that scored 9+ on any principle
+- List scenes that scored 5 on any principle
 - Group by principle to show what excellence looks like
 - These exemplars can guide revision work
 
@@ -105,7 +105,7 @@ Display `working/craft-weights.csv` showing:
 ### Set Author Weights
 
 When the author says a principle matters more or less to them:
-1. Confirm the principle name and desired weight (1-10 scale)
+1. Confirm the principle name and desired weight (1-10 scale, this is importance not score)
 2. Update the `author_weight` column in `working/craft-weights.csv`
 3. Explain how this affects scoring: higher weights make this principle count more in diagnosis priority
 
@@ -122,7 +122,7 @@ Use this when the author wants to rate their own scenes.
 ### Record Author Scores
 
 When the author provides a score for a scene+principle:
-1. Confirm the scene ID, principle, and score (1-10)
+1. Confirm the scene ID, principle, and score (1-5: Absent, Developing, Competent, Strong, Masterful)
 2. Save to `scenes/author-scores.csv` using the same CSV format as scene-scores.csv
 3. Show how the author's score compares to the system score
 
@@ -140,7 +140,7 @@ If the author has provided scores:
 When the author says "run scoring" or "score my scenes":
 
 1. Confirm the mode and scope:
-   - **Mode:** `--grouped` (default, most accurate), `--quick` (faster, cheaper), or `--deep` (per-principle, most expensive)
+   - **Mode:** default (Haiku screen + Sonnet deep dive for deficits), `--quick` (Haiku screen only, fast), or `--deep` (Haiku screen + Sonnet deep dive for all principles)
    - **Scope:** all scenes (default), `--scenes ID,ID` for specific scenes, `--act N` for a specific act
 
 2. Present the author with two options:
@@ -176,8 +176,10 @@ When the author says "run scoring" or "score my scenes":
 
 - Creates a `storyforge/score-*` branch and draft PR
 - Runs cost forecasting and checks the threshold
-- Scores all scenes in scope (parallel batches of 6)
-- Runs act-level and novel-level scoring
+- **Pass 1:** Haiku binary diagnostic screen (99 markers per scene, parallel batches of 6)
+- **Pass 2:** Sonnet deep dive for scene-principle pairs scoring ≤ 3 (skipped in quick mode, all principles in deep mode)
+- Aggregates diagnostic results into 1-5 scores using power mean
+- Runs act-level and novel-level scoring (Sonnet, 1-5 scale)
 - Generates diagnosis and improvement proposals
 - Applies proposals per coaching level (full=auto, coach=interactive, strict=report)
 - Posts a scoring summary as a PR comment
@@ -187,9 +189,9 @@ When the author says "run scoring" or "score my scenes":
 After scoring completes, switch to Review mode to present results.
 
 **Cost estimates:**
-- Quick mode: ~$0.03 per scene + ~$1 for act/novel scoring
-- Grouped mode: ~$0.12 per scene + ~$1 for act/novel scoring
-- Deep mode: ~$0.50 per scene + ~$1 for act/novel scoring
+- Quick mode: ~$0.01 per scene (Haiku only) + ~$1 for act/novel scoring
+- Default mode: ~$0.05 per scene (Haiku + targeted Sonnet) + ~$1 for act/novel scoring
+- Deep mode: ~$0.15 per scene (Haiku + full Sonnet) + ~$1 for act/novel scoring
 
 ---
 
@@ -233,5 +235,5 @@ Reference these scoring concepts as needed:
 - **Diagnosis priority** = based on average score, regression from previous cycle, and effective weight. High priority means the principle needs attention.
 - **Proposals** = suggested changes (weight adjustments, voice guide additions, scene-level overrides) based on diagnosis.
 - **Tuning ledger** = history of all weight changes and their effects, used to detect validated patterns.
-- **Exemplars** = passages scoring 9+ that demonstrate craft excellence, useful as reference during revision.
+- **Exemplars** = passages scoring 5 (masterful) that demonstrate craft excellence, useful as reference during revision.
 - **Author deltas** = systematic differences between system and author scores, revealing calibration gaps.

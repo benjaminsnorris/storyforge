@@ -125,10 +125,10 @@ mkdir -p "$diag_dir"
 # Create mock scene-scores.csv
 cat > "${diag_dir}/scene-scores.csv" <<'CSV'
 id|economy_clarity|thread_management|every_scene_must_turn
-the-footnote|3|6|7
-the-weight-of-the-rim|4|5|8
-the-hollow-district|5|4|6
-the-bridge|7|7|9
+the-footnote|1|3|4
+the-weight-of-the-rim|2|2|4
+the-hollow-district|2|2|3
+the-bridge|3|4|5
 CSV
 
 # Create mock weights file
@@ -167,10 +167,10 @@ prev_dir="${SCORING_TMP}/prev-scores"
 mkdir -p "$prev_dir"
 cat > "${prev_dir}/scene-scores.csv" <<'CSV'
 id|economy_clarity|thread_management|every_scene_must_turn
-the-footnote|5|6|7
-the-weight-of-the-rim|6|5|8
-the-hollow-district|6|4|6
-the-bridge|7|7|9
+the-footnote|3|3|4
+the-weight-of-the-rim|3|3|4
+the-hollow-district|3|3|3
+the-bridge|4|4|5
 CSV
 
 diag_dir2="${SCORING_TMP}/diag-scores2"
@@ -179,7 +179,7 @@ cp "${diag_dir}/scene-scores.csv" "${diag_dir2}/scene-scores.csv"
 
 generate_diagnosis "$diag_dir2" "$prev_dir" "$diag_weights"
 diag2_content=$(cat "${diag_dir2}/diagnosis.csv")
-# economy_clarity went from avg 6.0 to 4.75 -> delta should be negative
+# economy_clarity went from avg ~3.2 to ~2.0 -> delta should be negative
 assert_matches "$diag2_content" "economy_clarity.*-" \
     "generate_diagnosis computes negative delta for regressing principle"
 

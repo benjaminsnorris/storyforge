@@ -867,7 +867,7 @@ function updateDetailPanel(sceneId) {
             if (k === 'id') continue;
             const num = parseInt(v);
             if (isNaN(num)) continue;
-            const color = num >= 8 ? 'var(--score-high)' : num >= 6 ? 'var(--score-mid-high)' : num >= 4 ? 'var(--score-mid-low)' : 'var(--score-low)';
+            const color = num >= 4 ? 'var(--score-high)' : num >= 3 ? 'var(--score-mid-high)' : num >= 2 ? 'var(--score-mid-low)' : 'var(--score-low)';
             html += `<span class="sg-label">${k.replace(/_/g, ' ')}</span><span class="sg-value" style="color:${color}">${num}</span>`;
         }
         html += '</div></div>';

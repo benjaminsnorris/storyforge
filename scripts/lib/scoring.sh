@@ -274,7 +274,10 @@ generate_diagnosis() {
                 }
                 END {
                     if (n == 0) { print "0||"; exit }
-                    avg = sum / n
+                    # Power mean with p=0.5 (penalizes low scores harder)
+                    pow_sum = 0
+                    for (i in scores) pow_sum += scores[i] ^ 0.5
+                    avg = (pow_sum / n) ^ (1 / 0.5)
                     # printf avg with one decimal
                     printf "%.1f|", avg
                     # Collect items below average, sort by score ascending, take worst 5
@@ -330,19 +333,21 @@ generate_diagnosis() {
                 eff_weight=$(get_effective_weight "$weights_file" "$principle" 2>/dev/null || true)
             fi
 
-            # Check if avg < 4 -> high, avg < 6 -> medium
+            # Priority thresholds (1-5 scale):
+            #   high: avg < 2 (absent/developing) or regressing > 0.25
+            #   medium: avg < 3 (below competent)
             local is_high=false is_medium=false
             if [[ -n "$avg_score" ]]; then
-                is_high=$(awk -v a="$avg_score" 'BEGIN { print (a < 4) ? "true" : "false" }')
-                is_medium=$(awk -v a="$avg_score" 'BEGIN { print (a < 6) ? "true" : "false" }')
+                is_high=$(awk -v a="$avg_score" 'BEGIN { print (a < 2) ? "true" : "false" }')
+                is_medium=$(awk -v a="$avg_score" 'BEGIN { print (a < 3) ? "true" : "false" }')
             fi
 
-            # Check if regressing > 0.5
+            # Check if regressing > 0.25 (scaled from 0.5 on 1-10)
             local is_regressing=false
             if [[ -n "$delta" ]]; then
                 is_regressing=$(awk -v d="$delta" 'BEGIN {
                     # delta is negative when regressing (score went down)
-                    print (d + 0 < -0.5) ? "true" : "false"
+                    print (d + 0 < -0.25) ? "true" : "false"
                 }')
             fi
 
@@ -633,7 +638,7 @@ collect_exemplars() {
 
     local rationale_file="${scores_dir}/scene-rationale.csv"
 
-    # Find cells with score >= 9
+    # Find cells with score >= 5 (masterful on 1-5 scale)
     local header
     header=$(head -1 "$scores_file")
     local col_count
@@ -645,10 +650,10 @@ collect_exemplars() {
         principle=$(echo "$header" | awk -F'|' -v c="$col" '{ print $c }')
         [[ -z "$principle" ]] && { col=$((col + 1)); continue; }
 
-        # Find rows with score >= 9 in this column
+        # Find rows with score >= 5 in this column
         awk -F'|' -v c="$col" -v p="$principle" '
             NR == 1 { next }
-            $c + 0 >= 9 { print $1 "|" p "|" $c }
+            $c + 0 >= 5 { print $1 "|" p "|" $c }
         ' "$scores_file" | while IFS='|' read -r scene_id prin score_val; do
             [[ -z "$scene_id" ]] && continue
 
@@ -753,9 +758,9 @@ generate_score_report() {
         scene_heatmap=$(awk -F'|' -v nc="$ncols" '
             NR==1 { next }
             {
-                sum=0; count=0
-                for(i=2; i<=nc; i++) { if($i+0 > 0) { sum += $i; count++ } }
-                avg = (count > 0) ? sum/count : 0
+                pow_sum=0; count=0
+                for(i=2; i<=nc; i++) { if($i+0 > 0) { pow_sum += ($i+0) ^ 0.5; count++ } }
+                avg = (count > 0) ? (pow_sum/count) ^ (1/0.5) : 0
                 printf "<tr><td>%s</td><td class=\"sc-%d\">%.1f</td></tr>\n", $1, int(avg+0.5), avg
             }
         ' "${cycle_dir}/scene-scores.csv")
@@ -791,11 +796,11 @@ h2 { font-size: 18px; font-weight: 600; margin: 32px 0 12px; color: var(--teal);
 table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; }
 th { text-align: left; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
 td { padding: 6px 10px; border: 1px solid var(--border); }
-.sc-1,.sc-2,.sc-3 { background: rgba(220,38,38,0.12); color: var(--red); font-weight: 600; }
-.sc-4,.sc-5 { background: rgba(217,119,6,0.10); color: var(--amber); }
-.sc-6 { background: rgba(217,119,6,0.06); }
-.sc-7,.sc-8 { background: rgba(22,163,74,0.06); }
-.sc-9,.sc-10 { background: rgba(22,163,74,0.12); color: var(--green); font-weight: 600; }
+.sc-1 { background: rgba(220,38,38,0.15); color: var(--red); font-weight: 600; }
+.sc-2 { background: rgba(217,119,6,0.12); color: var(--amber); font-weight: 600; }
+.sc-3 { background: rgba(217,119,6,0.06); }
+.sc-4 { background: rgba(22,163,74,0.08); }
+.sc-5 { background: rgba(22,163,74,0.15); color: var(--green); font-weight: 600; }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
 .badge-applied { background: rgba(22,163,74,0.12); color: var(--green); }
 .badge-approved { background: rgba(22,163,74,0.06); color: var(--green); }
@@ -1004,8 +1009,325 @@ ${weak_rows}
 # Helper: score icon for PR comment
 _score_icon() {
     local score="$1"
-    if (( score >= 8 )); then echo "🟢"
-    elif (( score >= 5 )); then echo "🟡"
+    if (( score >= 4 )); then echo "🟢"
+    elif (( score >= 3 )); then echo "🟡"
     else echo "🔴"
     fi
+}
+
+# ============================================================================
+# Diagnostic scoring functions
+# ============================================================================
+
+# build_diagnostic_markers(diagnostics_csv)
+# Reads the diagnostics CSV and formats markers into a readable text block
+# for the Haiku diagnostic prompt. Groups by principle with headers.
+build_diagnostic_markers() {
+    local diagnostics_csv="$1"
+
+    if [[ ! -f "$diagnostics_csv" ]]; then
+        log "WARNING: Diagnostics CSV not found: $diagnostics_csv"
+        return 1
+    fi
+
+    local current_principle=""
+    local output=""
+
+    while IFS='|' read -r principle marker_id question deficit_if weight evidence_required; do
+        # Skip header
+        [[ "$principle" == "principle" ]] && continue
+
+        # Print principle header when it changes
+        if [[ "$principle" != "$current_principle" ]]; then
+            current_principle="$principle"
+            output="${output}
+=== ${principle} ===
+"
+        fi
+
+        output="${output}[${marker_id}] ${question}
+"
+    done < "$diagnostics_csv"
+
+    echo "$output"
+}
+
+# parse_diagnostic_output(log_file, output_dir, scene_id)
+# Extracts Claude's response from a stream-json log file using extract_claude_response.
+# Parses the DIAGNOSTICS: CSV block.
+# Writes marker results to ${output_dir}/.diag-${scene_id}.csv
+# Format: marker_id|answer|evidence
+# Returns 0 on success, 1 on failure.
+parse_diagnostic_output() {
+    local log_file="$1"
+    local output_dir="$2"
+    local scene_id="$3"
+
+    if [[ ! -f "$log_file" ]]; then
+        log "WARNING: Log file not found for diagnostic parsing: $log_file"
+        return 1
+    fi
+
+    local text_content
+    text_content=$(extract_claude_response "$log_file") || {
+        log "WARNING: No text content found in $log_file"
+        return 1
+    }
+
+    # Extract DIAGNOSTICS: block — lines between marker and next blank line or next marker
+    local diag_block
+    diag_block=$(echo "$text_content" | awk '
+        /^DIAGNOSTICS:/ { found=1; next }
+        found && /^[[:space:]]*$/ { found=0 }
+        found && /^[A-Z_]+:/ { found=0 }
+        found { print }
+    ')
+
+    if [[ -z "$diag_block" ]]; then
+        log "WARNING: No DIAGNOSTICS block found in $log_file"
+        return 1
+    fi
+
+    local diag_file="${output_dir}/.diag-${scene_id}.csv"
+    # If block starts with the header line, use it directly; otherwise add header
+    if echo "$diag_block" | head -1 | grep -q "^marker_id"; then
+        echo "$diag_block" > "$diag_file"
+    else
+        echo "marker_id|answer|evidence" > "$diag_file"
+        echo "$diag_block" >> "$diag_file"
+    fi
+
+    return 0
+}
+
+# aggregate_diagnostic_scores(diag_file, diagnostics_csv, output_scores, output_rationale, scene_id)
+# Reads per-scene diagnostic results and the master diagnostics.csv.
+# For each principle, computes deficit ratio and maps to 1-5 scale.
+# Writes output_scores and output_rationale as pipe-delimited CSV.
+aggregate_diagnostic_scores() {
+    local diag_file="$1"
+    local diagnostics_csv="$2"
+    local output_scores="$3"
+    local output_rationale="$4"
+    local scene_id="$5"
+
+    if [[ ! -f "$diag_file" || ! -f "$diagnostics_csv" ]]; then
+        log "WARNING: Missing input files for diagnostic aggregation"
+        return 1
+    fi
+
+    # Collect all principles in order (unique, preserving first-seen order)
+    local principles_ordered=""
+    local seen_principles=""
+    while IFS='|' read -r principle marker_id question deficit_if weight evidence_required; do
+        [[ "$principle" == "principle" ]] && continue
+        # Check if already seen using grep on the tracker string
+        if ! echo "$seen_principles" | grep -q "|${principle}|"; then
+            seen_principles="${seen_principles}|${principle}|"
+            if [[ -z "$principles_ordered" ]]; then
+                principles_ordered="$principle"
+            else
+                principles_ordered="${principles_ordered} ${principle}"
+            fi
+        fi
+    done < "$diagnostics_csv"
+
+    # For each principle, compute deficit ratio using awk across both files
+    # We'll build the score and rationale rows in a temp file via awk
+    local tmp_results="${output_scores}.tmp.$$"
+
+    awk -F'|' '
+        # First file: diagnostics_csv — read marker definitions
+        FNR == NR && FNR == 1 { next }
+        FNR == NR {
+            principle = $1
+            marker = $2
+            deficit_if_val = $4
+            weight_val = $5 + 0
+
+            marker_principle[marker] = principle
+            marker_deficit_if[marker] = deficit_if_val
+            marker_weight[marker] = weight_val
+            max_points[principle] += weight_val
+
+            # Track principle order
+            if (!(principle in seen)) {
+                seen[principle] = 1
+                prin_order[++prin_count] = principle
+            }
+            next
+        }
+        # Second file: diag_file — read diagnostic results
+        FNR == 1 { next }
+        {
+            marker = $1
+            answer = $2
+            evidence = $3
+
+            if (marker in marker_principle) {
+                p = marker_principle[marker]
+                # YES = deficit found, NO/CLEAN = no deficit
+                ans_lower = tolower(answer)
+                if (ans_lower == "yes") {
+                    deficit_points[p] += marker_weight[marker]
+                    # Collect evidence
+                    if (evidence != "" && evidence != "CLEAN") {
+                        if (rationale[p] != "") rationale[p] = rationale[p] "; "
+                        rationale[p] = rationale[p] marker ": " evidence
+                    }
+                }
+            }
+        }
+        END {
+            # Map deficit ratio to 1-5 scale
+            # ratio = 0.00 -> 5, <= 0.20 -> 4, <= 0.50 -> 3, <= 0.80 -> 2, > 0.80 -> 1
+
+            # Print header line
+            header = "id"
+            for (i = 1; i <= prin_count; i++) header = header "|" prin_order[i]
+            print "H|" header
+
+            # Print score row
+            score_row = ""
+            for (i = 1; i <= prin_count; i++) {
+                p = prin_order[i]
+                if (max_points[p] > 0) {
+                    ratio = deficit_points[p] / max_points[p]
+                } else {
+                    ratio = 0
+                }
+                if (ratio == 0) score = 5
+                else if (ratio <= 0.20) score = 4
+                else if (ratio <= 0.50) score = 3
+                else if (ratio <= 0.80) score = 2
+                else score = 1
+                if (score_row != "") score_row = score_row "|"
+                score_row = score_row score
+            }
+            print "S|" score_row
+
+            # Print rationale row
+            rat_row = ""
+            for (i = 1; i <= prin_count; i++) {
+                p = prin_order[i]
+                r = rationale[p]
+                if (r == "") r = "No deficits"
+                # Replace pipes in rationale with dashes
+                gsub(/\|/, "-", r)
+                if (rat_row != "") rat_row = rat_row "|"
+                rat_row = rat_row r
+            }
+            print "R|" rat_row
+        }
+    ' "$diagnostics_csv" "$diag_file" > "$tmp_results"
+
+    # Parse the temp results into scores and rationale files
+    # Use sed to strip the prefix (H|, S|, R|) — avoids awk OFS issues
+    local header_line score_line rationale_line
+    header_line=$(grep '^H|' "$tmp_results" | sed 's/^H|//')
+    score_line=$(grep '^S|' "$tmp_results" | sed 's/^S|//')
+    rationale_line=$(grep '^R|' "$tmp_results" | sed 's/^R|//')
+
+    echo "$header_line" > "$output_scores"
+    echo "${scene_id}|${score_line}" >> "$output_scores"
+
+    echo "$header_line" > "$output_rationale"
+    echo "${scene_id}|${rationale_line}" >> "$output_rationale"
+
+    rm -f "$tmp_results"
+    return 0
+}
+
+# identify_deep_dive_targets(diag_file, diagnostics_csv, threshold)
+# Identifies scene-principle pairs needing Sonnet deep dive.
+# A principle needs deep dive if its diagnostic score is at or below threshold (default 3).
+# Outputs pipe-delimited lines: principle|score|deficit_markers
+identify_deep_dive_targets() {
+    local diag_file="$1"
+    local diagnostics_csv="$2"
+    local threshold="${3:-3}"
+
+    if [[ ! -f "$diag_file" || ! -f "$diagnostics_csv" ]]; then
+        return 1
+    fi
+
+    awk -F'|' -v threshold="$threshold" '
+        # First file: diagnostics_csv
+        FNR == NR && FNR == 1 { next }
+        FNR == NR {
+            marker = $2
+            principle = $1
+            deficit_if_val = $4
+            weight_val = $5 + 0
+
+            marker_principle[marker] = principle
+            marker_deficit_if[marker] = deficit_if_val
+            marker_weight[marker] = weight_val
+            max_points[principle] += weight_val
+
+            if (!(principle in seen)) {
+                seen[principle] = 1
+                prin_order[++prin_count] = principle
+            }
+            next
+        }
+        # Second file: diag_file
+        FNR == 1 { next }
+        {
+            marker = $1
+            answer = $2
+
+            if (marker in marker_principle) {
+                p = marker_principle[marker]
+                ans_lower = tolower(answer)
+                if (ans_lower == "yes") {
+                    deficit_points[p] += marker_weight[marker]
+                    if (deficit_markers[p] != "") deficit_markers[p] = deficit_markers[p] ";"
+                    deficit_markers[p] = deficit_markers[p] marker
+                }
+            }
+        }
+        END {
+            for (i = 1; i <= prin_count; i++) {
+                p = prin_order[i]
+                if (max_points[p] > 0) {
+                    ratio = deficit_points[p] / max_points[p]
+                } else {
+                    ratio = 0
+                }
+                if (ratio == 0) score = 5
+                else if (ratio <= 0.20) score = 4
+                else if (ratio <= 0.50) score = 3
+                else if (ratio <= 0.80) score = 2
+                else score = 1
+
+                if (score <= threshold) {
+                    dm = deficit_markers[p]
+                    if (dm == "") dm = "none"
+                    print p "|" score "|" dm
+                }
+            }
+        }
+    ' "$diagnostics_csv" "$diag_file"
+}
+
+# build_principle_guide(principle_name, guide_file)
+# Extracts the "what it looks like / doesn't look like" section for a specific
+# principle from the principle-guide.md file.
+# The guide uses ### principle_name headers. Extracts everything between
+# the matching header and the next ### or ## header.
+build_principle_guide() {
+    local principle_name="$1"
+    local guide_file="$2"
+
+    if [[ ! -f "$guide_file" ]]; then
+        log "WARNING: Principle guide not found: $guide_file"
+        return 1
+    fi
+
+    awk -v principle="$principle_name" '
+        $0 ~ "^### " principle "$" { found=1; next }
+        found && /^###? / { found=0 }
+        found { print }
+    ' "$guide_file"
 }
