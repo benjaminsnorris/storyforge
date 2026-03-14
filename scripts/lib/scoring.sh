@@ -333,19 +333,21 @@ generate_diagnosis() {
                 eff_weight=$(get_effective_weight "$weights_file" "$principle" 2>/dev/null || true)
             fi
 
-            # Check if avg < 4 -> high, avg < 6 -> medium
+            # Priority thresholds (1-5 scale):
+            #   high: avg < 2 (absent/developing) or regressing > 0.25
+            #   medium: avg < 3 (below competent)
             local is_high=false is_medium=false
             if [[ -n "$avg_score" ]]; then
-                is_high=$(awk -v a="$avg_score" 'BEGIN { print (a < 4) ? "true" : "false" }')
-                is_medium=$(awk -v a="$avg_score" 'BEGIN { print (a < 6) ? "true" : "false" }')
+                is_high=$(awk -v a="$avg_score" 'BEGIN { print (a < 2) ? "true" : "false" }')
+                is_medium=$(awk -v a="$avg_score" 'BEGIN { print (a < 3) ? "true" : "false" }')
             fi
 
-            # Check if regressing > 0.5
+            # Check if regressing > 0.25 (scaled from 0.5 on 1-10)
             local is_regressing=false
             if [[ -n "$delta" ]]; then
                 is_regressing=$(awk -v d="$delta" 'BEGIN {
                     # delta is negative when regressing (score went down)
-                    print (d + 0 < -0.5) ? "true" : "false"
+                    print (d + 0 < -0.25) ? "true" : "false"
                 }')
             fi
 
@@ -794,11 +796,11 @@ h2 { font-size: 18px; font-weight: 600; margin: 32px 0 12px; color: var(--teal);
 table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; }
 th { text-align: left; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }
 td { padding: 6px 10px; border: 1px solid var(--border); }
-.sc-1,.sc-2,.sc-3 { background: rgba(220,38,38,0.12); color: var(--red); font-weight: 600; }
-.sc-4,.sc-5 { background: rgba(217,119,6,0.10); color: var(--amber); }
-.sc-6 { background: rgba(217,119,6,0.06); }
-.sc-7,.sc-8 { background: rgba(22,163,74,0.06); }
-.sc-9,.sc-10 { background: rgba(22,163,74,0.12); color: var(--green); font-weight: 600; }
+.sc-1 { background: rgba(220,38,38,0.15); color: var(--red); font-weight: 600; }
+.sc-2 { background: rgba(217,119,6,0.12); color: var(--amber); font-weight: 600; }
+.sc-3 { background: rgba(217,119,6,0.06); }
+.sc-4 { background: rgba(22,163,74,0.08); }
+.sc-5 { background: rgba(22,163,74,0.15); color: var(--green); font-weight: 600; }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
 .badge-applied { background: rgba(22,163,74,0.12); color: var(--green); }
 .badge-approved { background: rgba(22,163,74,0.06); color: var(--green); }
@@ -1007,8 +1009,8 @@ ${weak_rows}
 # Helper: score icon for PR comment
 _score_icon() {
     local score="$1"
-    if (( score >= 8 )); then echo "🟢"
-    elif (( score >= 5 )); then echo "🟡"
+    if (( score >= 4 )); then echo "🟢"
+    elif (( score >= 3 )); then echo "🟡"
     else echo "🔴"
     fi
 }

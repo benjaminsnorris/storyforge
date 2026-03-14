@@ -24,7 +24,7 @@ You are scoring a novel against novel-level Character Craft principles and Genre
 
 ## Instructions
 
-- Score each principle as an integer from 1 to 10 using the rubric's score bands.
+- Score each principle as an integer from 1 to 5 (1=Absent, 2=Developing, 3=Competent, 4=Strong, 5=Masterful).
 - For character scores: produce one row per major character. Assess each character's want/need tension, wound/lie depth, flaw-strength unity, and voice distinctiveness independently.
 - For genre scores: produce a single row. Assess the novel's overall engagement with its genre traditions.
 - Anchor every score in observable textual evidence from the summary, character bible, and architecture -- not subjective impression.
