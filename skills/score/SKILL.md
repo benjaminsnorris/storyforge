@@ -29,6 +29,8 @@ Read the following files to understand the full context:
   - `act-scores.csv` -- act-level scores (if available)
   - `character-scores.csv` -- novel-level character scores (if available)
   - `genre-scores.csv` -- novel-level genre scores (if available)
+  - `narrative-scores.csv` -- novel-level narrative framework alignment (if exists)
+  - `narrative-rationale.csv` -- rationale for narrative scores (if exists)
 - `working/tuning.csv` -- history of weight tuning decisions (if exists)
 - `working/exemplars.csv` -- bank of high-scoring passages (if exists)
 - `scenes/author-scores.csv` -- author's own scores (if exists)
@@ -88,6 +90,29 @@ If `working/exemplars.csv` exists, show high-scoring passages:
 - List scenes that scored 5 on any principle
 - Group by principle to show what excellence looks like
 - These exemplars can guide revision work
+
+### Narrative Profile
+
+If `narrative-scores.csv` exists, display the narrative framework profile:
+
+> **Narrative Profile**
+> Your manuscript's structural DNA:
+>
+> | Framework | Score | Alignment |
+> |-----------|-------|-----------|
+> | Three Act | 5 | Strong |
+> | Campbell's Monomyth | 4 | Mostly aligned |
+> | Harmon Circle | 4 | Mostly aligned |
+> | Save the Cat | 3 | Partial |
+> | Freytag | 3 | Partial |
+> | Truby 22 | 2 | Loose |
+> | Kishotenketsu | 1 | Not present |
+>
+> This shows which narrative structures your manuscript naturally follows. Low scores aren't deficits — they reflect creative choices about story structure.
+
+Score-to-alignment mapping: 5=Strong, 4=Mostly aligned, 3=Partial, 2=Loose, 1=Not present. Use the score color coding: 5=blue, 4=green, 3=yellow, 2=red, 1=near-black.
+
+If `narrative-rationale.csv` exists, offer to show the detailed rationale for any framework the author is curious about.
 
 ---
 

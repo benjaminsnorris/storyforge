@@ -274,6 +274,43 @@ ${pass_config}
 **Targets:** If specific reduction percentages or instance counts are given, aim for those numbers. Track your progress."
     fi
 
+    # Inject relevant overrides from scoring proposals
+    local overrides_file="${project_dir}/working/scores/latest/overrides.csv"
+    local overrides_section=""
+    if [[ -f "$overrides_file" ]]; then
+        # Filter overrides relevant to this pass's targets
+        local relevant_overrides=""
+        # Extract targets from pass config (CSV targets column uses semicolons)
+        local _csv_targets=""
+        if [[ -n "$pass_config" ]]; then
+            _csv_targets=$(echo "$pass_config" | grep -o 'targets:[[:space:]]*[^|]*' | sed 's/^targets:[[:space:]]*//' | tr -d '"' || true)
+        fi
+
+        if [[ -n "$_csv_targets" ]]; then
+            # Match overrides by scene ID
+            IFS=';' read -ra target_ids <<< "$_csv_targets"
+            for tid in "${target_ids[@]}"; do
+                local tid_trimmed
+                tid_trimmed=$(echo "$tid" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                local scene_overrides
+                scene_overrides=$(awk -F'|' -v id="$tid_trimmed" 'NR>1 && $1 == id { print "- [" $1 "] " $2 ": " $3 }' "$overrides_file")
+                [[ -n "$scene_overrides" ]] && relevant_overrides="${relevant_overrides}${scene_overrides}"$'\n'
+            done
+        else
+            # Full-scope pass — include all overrides
+            relevant_overrides=$(awk -F'|' 'NR>1 { print "- [" $1 "] " $2 ": " $3 }' "$overrides_file")
+        fi
+
+        if [[ -n "$relevant_overrides" ]]; then
+            overrides_section="
+## Scoring Overrides
+
+The following craft directives were approved during scoring. Apply them during this revision:
+
+${relevant_overrides}"
+        fi
+    fi
+
     # Assemble the prompt
     cat <<PROMPT_EOF
 # Revision Pass: ${pass_name}
@@ -286,7 +323,7 @@ ${purpose}
 
 This pass covers ${file_count} scene file(s):
 
-${file_block}${config_section}
+${file_block}${config_section}${overrides_section}
 ${craft_sections:+
 ## Craft Principles for This Pass
 

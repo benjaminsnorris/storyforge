@@ -33,6 +33,18 @@ Look for evaluation output using the pipeline manifest:
 
 If no evaluation results exist at all, tell the author that evaluation needs to run first and suggest they invoke the main `storyforge` hub to run an evaluation. Do not proceed without evaluation data.
 
+### Scoring Data (if available)
+
+If a scoring cycle has run, also read:
+- `working/scores/latest/diagnosis.csv` — principle-level strength/weakness analysis with priorities
+- `working/scores/latest/proposals.csv` — recommended improvements from scoring
+- `working/scores/latest/narrative-scores.csv` — novel-level narrative framework alignment
+
+Use scoring data to supplement evaluation findings:
+- High-priority craft deficits from `diagnosis.csv` should inform pass design (e.g., if `economy_clarity` scores low across many scenes, include a prose-tightening pass)
+- Proposals from `proposals.csv` with `voice_guide` or `scene_intent` levers provide specific guidance for passes
+- Narrative scores provide context about the manuscript's structural approach (informational, not deficit-driven)
+
 ## Step 2: Read Project Context
 
 Read the following files to understand the full project context:
@@ -126,6 +138,14 @@ Be specific and opinionated. "Deepen character arcs" is not guidance — it's a 
 - Use act-level scope when issues are localized to a narrative section
 - Use scene-id lists when only specific scenes are affected — **copy IDs exactly from `reference/scene-metadata.csv`**
 - Prefer narrower scopes — a targeted pass is faster and less risky than a full-manuscript pass
+
+### Integrating Scoring Data
+
+When scoring data is available alongside evaluation findings:
+1. **Cross-reference**: If both evaluation findings and scoring diagnosis flag the same principle, increase that pass's priority
+2. **Add scoring-informed passes**: If scoring diagnosis identifies high-priority deficits not covered by evaluation findings, add targeted passes for those
+3. **Include proposals as guidance**: When creating a pass that addresses a scored principle, incorporate relevant proposals from `proposals.csv` into the pass's guidance field
+4. **Narrative context**: Mention the manuscript's narrative profile (from `narrative-scores.csv`) in passes that affect structure, but don't treat low narrative scores as deficits
 
 ## Step 5: Present the Plan
 
