@@ -611,7 +611,23 @@ fi
 
 # --- Offer interactive rejoin between phases (autonomous mode) ---
 if [[ ! -f "$INTERACTIVE_FILE" && "$EMBEDDED" != true ]]; then
-    offer_interactive "$PROJECT_DIR" "Phase 2: Sonnet timeline assignment" || true
+    if offer_interactive "$PROJECT_DIR" "Phase 2: Sonnet timeline assignment"; then
+        # User just rejoined — show Phase 1 results before proceeding
+        indicator_display=""
+        for id in "${SCENE_IDS[@]}"; do
+            seq_val=$(get_csv_field "$METADATA_CSV" "$id" "seq")
+            title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            indicator_file="${TIMELINE_DIR}/.indicators-${id}"
+            indicators="(not extracted)"
+            [[ -f "$indicator_file" ]] && indicators=$(cat "$indicator_file")
+            indicator_display="${indicator_display}
+SEQ ${seq_val}: ${title} (${id})
+  Indicators: ${indicators}
+"
+        done
+
+        run_interactive_checkpoint "Phase 1: Temporal Indicators" "$indicator_display" "review"
+    fi
 fi
 
 # Update PR task (standalone mode)
