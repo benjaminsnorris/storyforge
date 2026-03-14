@@ -565,6 +565,7 @@ fi
 CHAR_MAP=""
 MOTIF_MAP=""
 LOCATION_MAP=""
+THREAD_MAP=""
 
 CHARACTERS_CSV="${PROJECT_DIR}/reference/characters.csv"
 if [[ -f "$CHARACTERS_CSV" ]]; then
@@ -582,6 +583,12 @@ LOCATIONS_CSV="${PROJECT_DIR}/reference/locations.csv"
 if [[ -f "$LOCATIONS_CSV" ]]; then
     LOCATION_MAP=$(load_alias_map "$LOCATIONS_CSV")
     log "Loaded location aliases from locations.csv"
+fi
+
+THREADS_CSV="${PROJECT_DIR}/reference/threads.csv"
+if [[ -f "$THREADS_CSV" ]]; then
+    THREAD_MAP=$(load_alias_map "$THREADS_CSV")
+    log "Loaded thread aliases from threads.csv"
 fi
 
 # ============================================================================
@@ -734,6 +741,9 @@ parse_enrich_response() {
         fi
         if [[ -n "$LOCATION_MAP" && -n "$location_val" ]]; then
             location_val=$(normalize_aliases "$LOCATION_MAP" "$location_val")
+        fi
+        if [[ -n "$THREAD_MAP" && -n "$threads_val" ]]; then
+            threads_val=$(normalize_aliases "$THREAD_MAP" "$threads_val")
         fi
 
         # Validate

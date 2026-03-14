@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-aliases.sh — Tests for aliases.sh shared library (characters, motifs, locations)
+# test-aliases.sh — Tests for aliases.sh shared library (characters, motifs, locations, threads)
 
 # Tests use $FIXTURE_DIR, $PROJECT_DIR, $PLUGIN_DIR, $TMPDIR
 # Libraries are already sourced by run-tests.sh
@@ -7,6 +7,7 @@
 CHARACTERS_CSV="${FIXTURE_DIR}/reference/characters.csv"
 MOTIF_CSV="${FIXTURE_DIR}/reference/motif-taxonomy.csv"
 LOCATIONS_CSV="${FIXTURE_DIR}/reference/locations.csv"
+THREADS_CSV="${FIXTURE_DIR}/reference/threads.csv"
 
 # ============================================================================
 # load_alias_map — characters
@@ -113,6 +114,30 @@ assert_equals "Dorren's study" "$RESULT" "normalize locations: variant resolves"
 
 RESULT=$(normalize_aliases "$LOC_MAP" "Unknown Place")
 assert_equals "Unknown Place" "$RESULT" "normalize locations: unknown passthrough"
+
+# ============================================================================
+# load_alias_map + normalize_aliases — threads
+# ============================================================================
+
+echo "--- load_alias_map: threads ---"
+
+THREAD_MAP=$(load_alias_map "$THREADS_CSV")
+assert_not_empty "$THREAD_MAP" "load threads: returns a file path"
+assert_file_exists "$THREAD_MAP" "load threads: file exists"
+
+echo "--- normalize_aliases: threads ---"
+
+RESULT=$(normalize_aliases "$THREAD_MAP" "succession;map trust;being erased")
+assert_equals "Succession crisis;Trust in cartography;Erasure" "$RESULT" "normalize threads: aliases resolve"
+
+RESULT=$(normalize_aliases "$THREAD_MAP" "the succession;Succession crisis;who rules next")
+assert_equals "Succession crisis" "$RESULT" "normalize threads: deduplicates variants"
+
+RESULT=$(normalize_aliases "$THREAD_MAP" "succession;unknown thread;erasure")
+assert_equals "Succession crisis;unknown thread;Erasure" "$RESULT" "normalize threads: unknown passthrough"
+
+RESULT=$(normalize_aliases "$THREAD_MAP" "SUCCESSION;Trusting Maps")
+assert_equals "Succession crisis;Trust in cartography" "$RESULT" "normalize threads: case-insensitive"
 
 # ============================================================================
 # normalize_aliases — edge cases
