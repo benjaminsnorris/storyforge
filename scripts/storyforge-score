@@ -8,9 +8,9 @@ set -eo pipefail
 # producing per-scene, per-act, and novel-level scores in CSV format.
 #
 # Three scoring modes:
-#   (default)   One Sonnet call per scene — all 25 principles (recommended)
-#   --quick     One Haiku call per scene — faster, cheaper, less critical
-#   --deep      One Sonnet call per scene — same as default (reserved for future use)
+#   (default)     Batch API, Opus — best value and judgment (~$12/100 scenes, few minutes)
+#   --direct      Direct API, Sonnet — real-time results for interactive use
+#   --direct --deep  Direct API, Opus — real-time Opus when you need results now
 #
 # Usage:
 #   ./storyforge-score                        # All scenes, default two-pass
@@ -37,7 +37,8 @@ source "${LIB_DIR}/common.sh"
 # --- Default options ---
 DRY_RUN=false
 INTERACTIVE=false
-SCORE_MODE="default"   # default | quick | deep
+SCORE_MODE="batch"     # batch | direct | direct-deep
+DIRECT_MODE=false
 FILTER_MODE="all"
 FILTER_SCENES=""        # Comma-separated scene IDs
 FILTER_ACT=""
@@ -55,9 +56,9 @@ framework scores and novel-level character/genre scores. Produces
 diagnosis, improvement proposals, and an HTML report.
 
 Modes:
-  (default)         One Sonnet call per scene, all 25 principles (recommended)
-  --quick           One Haiku call per scene (faster, cheaper, less critical)
-  --deep            Same as default (reserved for future per-principle deep dive)
+  (default)         Batch API with Opus — submit all scenes, results in minutes (recommended)
+  --direct          Direct API with Sonnet — real-time results for interactive use
+  --direct --deep   Direct API with Opus — real-time Opus for immediate results
 
 Scope:
   --scenes ID,ID    Score specific scenes only (comma-separated slug IDs)
@@ -72,12 +73,11 @@ Options:
   -h, --help        Show this help
 
 Examples:
-  $(basename "$0")                          # All scenes, default two-pass
-  $(basename "$0") --quick                  # Haiku screen only (fast)
-  $(basename "$0") --deep --scenes my-scene # Deep evaluation of one scene
-  $(basename "$0") --quick --from-seq 32    # Quick screen from scene 32 on
-  $(basename "$0") --act 3                  # Score part 3 only
-  $(basename "$0") --dry-run               # Preview cost estimate
+  $(basename "$0")                          # Batch Opus — all scenes (recommended)
+  $(basename "$0") --direct --scenes my-scene  # Sonnet, one scene, real-time
+  $(basename "$0") --direct --deep --act 2     # Opus, act 2, real-time
+  $(basename "$0") --from-seq 10-20            # Batch Opus, scenes 10-20
+  $(basename "$0") --dry-run                   # Preview cost estimate
 EOF
     exit 0
 }
@@ -95,12 +95,13 @@ while [[ $# -gt 0 ]]; do
             INTERACTIVE=true
             shift
             ;;
-        --quick)
-            SCORE_MODE="quick"
+        --direct)
+            DIRECT_MODE=true
+            SCORE_MODE="direct"
             shift
             ;;
         --deep)
-            SCORE_MODE="deep"
+            SCORE_MODE="direct-deep"
             shift
             ;;
         --scenes)
@@ -151,10 +152,16 @@ PLUGIN_DIR=$(get_plugin_dir)
 PROMPTS_DIR="${SCRIPT_DIR}/prompts/scoring"
 
 # --- Select models ---
-# Haiku for Pass 1 (diagnostic screen), Sonnet for Pass 2 (deep dive) and act/novel scoring
-HAIKU_MODEL=$(select_model "extraction")
 SONNET_MODEL=$(select_model "evaluation")
-log "Models: ${HAIKU_MODEL} (quick) / ${SONNET_MODEL} (default/deep)"
+OPUS_MODEL="claude-opus-4-6"
+
+case "$SCORE_MODE" in
+    batch)       EVAL_MODEL="$OPUS_MODEL" ;;
+    direct)      EVAL_MODEL="$SONNET_MODEL" ;;
+    direct-deep) EVAL_MODEL="$OPUS_MODEL" ;;
+esac
+
+log "Mode: ${SCORE_MODE}, Model: ${EVAL_MODEL}"
 
 # --- Initialize craft weights ---
 init_craft_weights "$PROJECT_DIR" "$PLUGIN_DIR"
@@ -289,16 +296,14 @@ fi
 ACT_INVOCATIONS=3
 NOVEL_INVOCATIONS=1
 
-case "$SCORE_MODE" in
-    quick)
-        SCENE_COST=$(estimate_cost "score" "$SCENE_COUNT" "$AVG_WORDS" "$HAIKU_MODEL")
-        log "Cost forecast: ~\$${SCENE_COST} (${SCENE_COUNT} Haiku calls)"
-        ;;
-    *)
-        SCENE_COST=$(estimate_cost "score" "$SCENE_COUNT" "$AVG_WORDS" "$SONNET_MODEL")
-        log "Cost forecast: ~\$${SCENE_COST} (${SCENE_COUNT} Sonnet calls)"
-        ;;
-esac
+SCENE_COST=$(estimate_cost "score" "$SCENE_COUNT" "$AVG_WORDS" "$EVAL_MODEL")
+# Batch API is 50% off
+if [[ "$SCORE_MODE" == "batch" ]]; then
+    SCENE_COST=$(awk "BEGIN { printf \"%.2f\", $SCENE_COST * 0.5 }")
+    log "Cost forecast: ~\$${SCENE_COST} (${SCENE_COUNT} Opus calls via Batch API, 50% off)"
+else
+    log "Cost forecast: ~\$${SCENE_COST} (${SCENE_COUNT} ${EVAL_MODEL} calls via Direct API)"
+fi
 
 if [[ "$DRY_RUN" == false ]]; then
     check_cost_threshold "$SCENE_COST" || { log "Cost threshold check declined. Aborting."; exit 1; }
@@ -380,11 +385,7 @@ if [[ "$DRY_RUN" == true ]]; then
     log "Scenes:   ${SCENE_COUNT}"
     log "Parallel: ${PARALLEL}"
     log "Cycle:    ${CYCLE}"
-    if [[ "$SCORE_MODE" == "quick" ]]; then
-        log "Model:    ${HAIKU_MODEL}"
-    else
-        log "Model:    ${SONNET_MODEL}"
-    fi
+    log "Model:    ${EVAL_MODEL}"
     log "Estimate: ~\$${SCENE_COST}"
     log ""
     log "Scenes to score:"
@@ -394,14 +395,15 @@ if [[ "$DRY_RUN" == true ]]; then
     done
     log ""
     case "$SCORE_MODE" in
-        quick)
-            log "Quick mode: 1 Haiku call per scene (${SCENE_COUNT} calls)"
+        batch)
+            log "Batch mode: ${SCENE_COUNT} Opus calls via Batch API (50% off)"
+            log "  Results typically arrive in 2-10 minutes"
             ;;
-        default)
-            log "Default mode: 1 Sonnet call per scene (${SCENE_COUNT} calls)"
+        direct)
+            log "Direct mode: ${SCENE_COUNT} Sonnet calls, real-time, ${PARALLEL} parallel"
             ;;
-        deep)
-            log "Deep mode: 1 Sonnet call per scene (${SCENE_COUNT} calls)"
+        direct-deep)
+            log "Direct+deep mode: ${SCENE_COUNT} Opus calls, real-time, ${PARALLEL} parallel"
             ;;
     esac
     log ""
@@ -454,13 +456,6 @@ EVAL_TEMPLATE=$(cat "$EVAL_TEMPLATE_FILE")
 EVALUATION_CRITERIA=$(build_evaluation_criteria "$DIAGNOSTICS_CSV" "$GUIDE_FILE")
 WEIGHTED_TEXT=$(build_weighted_text "$WEIGHTS_FILE")
 
-# Select model based on mode
-case "$SCORE_MODE" in
-    quick)   EVAL_MODEL="$HAIKU_MODEL" ;;
-    *)       EVAL_MODEL="$SONNET_MODEL" ;;
-esac
-
-log "Parallel workers: ${PARALLEL}"
 log "Evaluation model: ${EVAL_MODEL} (mode: ${SCORE_MODE})"
 log ""
 
@@ -470,105 +465,292 @@ log "============================================"
 
 SCORE_START_TIME=$(date +%s)
 
-batch_start=0
-while (( batch_start < SCENE_COUNT )); do
-    batch_pids=()
-    batch_ids=()
-    batch_end=$(( batch_start + PARALLEL ))
-    (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
-    batch_start_time=$(date +%s)
+# --- Helper: build prompt for a scene ---
+build_scene_prompt() {
+    local id="$1"
+    local scene_file="${SCENES_DIR}/${id}.md"
+    local scene_text=""
+    [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
+    local scene_title
+    scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+    local scene_pov
+    scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
+    local scene_function="" scene_emotional_arc=""
+    [[ -f "$INTENT_CSV" ]] && scene_function=$(get_csv_field "$INTENT_CSV" "$id" "function")
+    [[ -f "$INTENT_CSV" ]] && scene_emotional_arc=$(get_csv_field "$INTENT_CSV" "$id" "emotional_arc")
 
+    local scene_text_numbered
+    scene_text_numbered=$(echo "$scene_text" | awk '{ printf "%d: %s\n", NR, $0 }')
+
+    local prompt="$EVAL_TEMPLATE"
+    prompt="${prompt//\{\{SCENE_TITLE\}\}/${scene_title:-Unknown}}"
+    prompt="${prompt//\{\{SCENE_POV\}\}/${scene_pov:-Unknown}}"
+    prompt="${prompt//\{\{SCENE_FUNCTION\}\}/${scene_function:-Not specified}}"
+    prompt="${prompt//\{\{SCENE_EMOTIONAL_ARC\}\}/${scene_emotional_arc:-Not specified}}"
+    prompt="${prompt//\{\{EVALUATION_CRITERIA\}\}/$EVALUATION_CRITERIA}"
+    prompt="${prompt//\{\{WEIGHTED_PRINCIPLES\}\}/$WEIGHTED_TEXT}"
+    prompt="${prompt//\{\{SCENE_TEXT\}\}/$scene_text_numbered}"
+    echo "$prompt"
+}
+
+case "$SCORE_MODE" in
+
+# ================================================================
+# BATCH MODE (default): Submit all scenes via Batch API
+# ================================================================
+batch)
     log ""
-    log "Batch $((batch_start / PARALLEL + 1)): scenes $((batch_start + 1))-${batch_end} of ${SCENE_COUNT}"
+    log "Building batch request for ${SCENE_COUNT} scenes..."
 
-    for (( i=batch_start; i<batch_end; i++ )); do
-        id="${SCENE_IDS[$i]}"
-        batch_ids+=("$id")
-        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-        log "  Scoring ${local_title:-$id} ($((i+1))/${SCENE_COUNT})..."
+    BATCH_FILE="${CYCLE_DIR}/.batch-requests.jsonl"
+    rm -f "$BATCH_FILE"
 
-        (
-            # Worker subshell — one call per scene, all 25 principles
-            scene_file="${SCENES_DIR}/${id}.md"
-            scene_text=""
-            [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
-            scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-            scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
-            scene_function=""
-            scene_emotional_arc=""
-            [[ -f "$INTENT_CSV" ]] && scene_function=$(get_csv_field "$INTENT_CSV" "$id" "function")
-            [[ -f "$INTENT_CSV" ]] && scene_emotional_arc=$(get_csv_field "$INTENT_CSV" "$id" "emotional_arc")
-
-            # Add line numbers to scene text for evidence references
-            scene_text_numbered=$(echo "$scene_text" | awk '{ printf "%d: %s\n", NR, $0 }')
-
-            prompt="$EVAL_TEMPLATE"
-            prompt="${prompt//\{\{SCENE_TITLE\}\}/${scene_title:-Unknown}}"
-            prompt="${prompt//\{\{SCENE_POV\}\}/${scene_pov:-Unknown}}"
-            prompt="${prompt//\{\{SCENE_FUNCTION\}\}/${scene_function:-Not specified}}"
-            prompt="${prompt//\{\{SCENE_EMOTIONAL_ARC\}\}/${scene_emotional_arc:-Not specified}}"
-            prompt="${prompt//\{\{EVALUATION_CRITERIA\}\}/$EVALUATION_CRITERIA}"
-            prompt="${prompt//\{\{WEIGHTED_PRINCIPLES\}\}/$WEIGHTED_TEXT}"
-            prompt="${prompt//\{\{SCENE_TEXT\}\}/$scene_text_numbered}"
-
-            log_file="${LOG_DIR}/score-${id}.json"
-
-            _SF_INVOCATION_START=$(date +%s)
-            export _SF_INVOCATION_START
-
-            if invoke_anthropic_api "$prompt" "$EVAL_MODEL" "$log_file" 4096; then
-                log_api_usage "$log_file" "score" "$id" "$EVAL_MODEL"
-
-                tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}.csv"
-                tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
-
-                if parse_scene_evaluation "$log_file" "$tmp_scores" "$tmp_rationale" "$id"; then
-                    log "    [${id}] scored"
-                    echo "ok" > "${CYCLE_DIR}/.status-${id}"
-                else
-                    log "    [${id}] FAILED (parse error)"
-                    echo "fail" > "${CYCLE_DIR}/.status-${id}"
-                fi
-            else
-                log "    [${id}] FAILED (API error)"
-                echo "fail" > "${CYCLE_DIR}/.status-${id}"
-            fi
-        ) &
-        batch_pids+=($!)
-        register_child_pid $!
+    for id in "${SCENE_IDS[@]}"; do
+        prompt=$(build_scene_prompt "$id")
+        jq -nc --arg id "$id" --arg model "$EVAL_MODEL" --arg prompt "$prompt" '{
+            custom_id: $id,
+            params: {
+                model: $model,
+                max_tokens: 4096,
+                messages: [{role: "user", content: $prompt}]
+            }
+        }' >> "$BATCH_FILE"
     done
 
-    # Wait for batch
-    for pid in "${batch_pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
-        unregister_child_pid "$pid" 2>/dev/null || true
+    log "Submitting batch ($(wc -c < "$BATCH_FILE" | tr -d ' ') bytes)..."
+
+    BATCH_RESPONSE=$(curl -s "https://api.anthropic.com/v1/messages/batches" \
+        -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "content-type: application/json" \
+        -d "{\"requests\": $(jq -s '.' "$BATCH_FILE")}") || {
+        log "ERROR: Failed to submit batch"
+        exit 1
+    }
+
+    BATCH_ID=$(echo "$BATCH_RESPONSE" | jq -r '.id // empty')
+    if [[ -z "$BATCH_ID" ]]; then
+        log "ERROR: No batch ID returned"
+        log "  Response: $(echo "$BATCH_RESPONSE" | head -3)"
+        exit 1
+    fi
+
+    log "Batch submitted: ${BATCH_ID}"
+    log "Polling for results..."
+
+    # Poll until done
+    POLL_INTERVAL=15
+    while true; do
+        sleep "$POLL_INTERVAL"
+        BATCH_STATUS=$(curl -s "https://api.anthropic.com/v1/messages/batches/${BATCH_ID}" \
+            -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+            -H "anthropic-version: 2023-06-01")
+
+        pstatus=$(echo "$BATCH_STATUS" | jq -r '.processing_status')
+        succeeded=$(echo "$BATCH_STATUS" | jq -r '.request_counts.succeeded')
+        errored=$(echo "$BATCH_STATUS" | jq -r '.request_counts.errored')
+        elapsed=$(( $(date +%s) - SCORE_START_TIME ))
+
+        log "  ${elapsed}s: ${pstatus} (${succeeded} succeeded, ${errored} errored)"
+
+        if [[ "$pstatus" == "ended" ]]; then
+            break
+        fi
+
+        # Increase poll interval over time
+        (( POLL_INTERVAL < 30 )) && POLL_INTERVAL=$((POLL_INTERVAL + 5))
     done
 
-    # Merge results for this batch
-    for id in "${batch_ids[@]}"; do
+    # Download results
+    RESULTS_URL=$(echo "$BATCH_STATUS" | jq -r '.results_url // empty')
+    if [[ -z "$RESULTS_URL" ]]; then
+        log "ERROR: No results URL in batch response"
+        exit 1
+    fi
+
+    RESULTS_FILE="${CYCLE_DIR}/.batch-results.jsonl"
+    curl -s "$RESULTS_URL" \
+        -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+        -H "anthropic-version: 2023-06-01" \
+        > "$RESULTS_FILE"
+
+    log "Results downloaded. Parsing..."
+
+    # Parse each result — use python for robust JSON handling (control chars in text)
+    python3 -c "
+import json, sys, os
+
+results_file = '${RESULTS_FILE}'
+cycle_dir = '${CYCLE_DIR}'
+log_dir = '${LOG_DIR}'
+
+with open(results_file) as f:
+    for line in f:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        cid = obj.get('custom_id', '')
+        result = obj.get('result', {})
+        rtype = result.get('type', '')
+
+        if rtype != 'succeeded':
+            # Write fail status
+            with open(os.path.join(cycle_dir, f'.status-{cid}'), 'w') as sf:
+                sf.write('fail')
+            continue
+
+        msg = result.get('message', {})
+        usage = msg.get('usage', {})
+
+        # Extract text
+        text = ''
+        for block in msg.get('content', []):
+            if block.get('type') == 'text':
+                text = block.get('text', '')
+
+        # Write the API response as JSON for log_api_usage
+        response_file = os.path.join(log_dir, f'score-{cid}.json')
+        with open(response_file, 'w') as rf:
+            json.dump({'usage': usage, 'content': msg.get('content', [])}, rf)
+
+        # Write the text content for parse_scene_evaluation
+        text_file = os.path.join(log_dir, f'score-{cid}.txt')
+        with open(text_file, 'w') as tf:
+            tf.write(text)
+
+        # Write ok status
+        with open(os.path.join(cycle_dir, f'.status-{cid}'), 'w') as sf:
+            sf.write('ok')
+
+print('done')
+" || {
+        log "ERROR: Failed to parse batch results"
+        exit 1
+    }
+
+    # Process parsed results
+    for id in "${SCENE_IDS[@]}"; do
         local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
         status_file="${CYCLE_DIR}/.status-${id}"
-        tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}.csv"
-        tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
+        text_file="${LOG_DIR}/score-${id}.txt"
+        json_file="${LOG_DIR}/score-${id}.json"
 
-        if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]]; then
-            merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
-            merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
-            SCORED=$((SCORED + 1))
-            log "  ${local_title:-$id} scored (${SCORED}/${SCENE_COUNT})"
+        if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]] && [[ -f "$text_file" ]]; then
+            # Log usage from the JSON response
+            log_api_usage "$json_file" "score" "$id" "$EVAL_MODEL"
+
+            # Parse the text output into scores
+            tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}.csv"
+            tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
+
+            if parse_scene_evaluation "$text_file" "$tmp_scores" "$tmp_rationale" "$id"; then
+                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
+                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
+                SCORED=$((SCORED + 1))
+                log "  ${local_title:-$id} scored (${SCORED}/${SCENE_COUNT})"
+            else
+                FAILED=$((FAILED + 1))
+                log "  WARNING: Failed to parse ${id}"
+            fi
+            rm -f "$tmp_scores" "$tmp_rationale"
         else
             FAILED=$((FAILED + 1))
-            log "  WARNING: Failed to score ${id}"
+            log "  WARNING: Failed ${id}"
         fi
-        rm -f "$tmp_scores" "$tmp_rationale" "$status_file"
+        rm -f "$status_file"
     done
 
-    batch_elapsed=$(( $(date +%s) - batch_start_time ))
-    total_elapsed=$(( $(date +%s) - SCORE_START_TIME ))
-    log "  Batch done in ${batch_elapsed}s (${SCORED}/${SCENE_COUNT} scored, ${total_elapsed}s elapsed)"
+    # Clean up batch temp files
+    rm -f "$BATCH_FILE" "$RESULTS_FILE"
+    ;;
 
-    batch_start=$batch_end
-done
+# ================================================================
+# DIRECT MODE: Parallel real-time calls
+# ================================================================
+direct|direct-deep)
+    log "Parallel workers: ${PARALLEL}"
+    log ""
+
+    batch_start=0
+    while (( batch_start < SCENE_COUNT )); do
+        batch_pids=()
+        batch_ids=()
+        batch_end=$(( batch_start + PARALLEL ))
+        (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
+        batch_start_time=$(date +%s)
+
+        log ""
+        log "Batch $((batch_start / PARALLEL + 1)): scenes $((batch_start + 1))-${batch_end} of ${SCENE_COUNT}"
+
+        for (( i=batch_start; i<batch_end; i++ )); do
+            id="${SCENE_IDS[$i]}"
+            batch_ids+=("$id")
+            local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            log "  Scoring ${local_title:-$id} ($((i+1))/${SCENE_COUNT})..."
+
+            (
+                prompt=$(build_scene_prompt "$id")
+                log_file="${LOG_DIR}/score-${id}.json"
+
+                _SF_INVOCATION_START=$(date +%s)
+                export _SF_INVOCATION_START
+
+                if invoke_anthropic_api "$prompt" "$EVAL_MODEL" "$log_file" 4096; then
+                    log_api_usage "$log_file" "score" "$id" "$EVAL_MODEL"
+
+                    tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}.csv"
+                    tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
+
+                    if parse_scene_evaluation "$log_file" "$tmp_scores" "$tmp_rationale" "$id"; then
+                        log "    [${id}] scored"
+                        echo "ok" > "${CYCLE_DIR}/.status-${id}"
+                    else
+                        log "    [${id}] FAILED (parse error)"
+                        echo "fail" > "${CYCLE_DIR}/.status-${id}"
+                    fi
+                else
+                    log "    [${id}] FAILED (API error)"
+                    echo "fail" > "${CYCLE_DIR}/.status-${id}"
+                fi
+            ) &
+            batch_pids+=($!)
+            register_child_pid $!
+        done
+
+        for pid in "${batch_pids[@]}"; do
+            wait "$pid" 2>/dev/null || true
+            unregister_child_pid "$pid" 2>/dev/null || true
+        done
+
+        for id in "${batch_ids[@]}"; do
+            local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            status_file="${CYCLE_DIR}/.status-${id}"
+            tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}.csv"
+            tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
+
+            if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]]; then
+                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
+                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
+                SCORED=$((SCORED + 1))
+                log "  ${local_title:-$id} scored (${SCORED}/${SCENE_COUNT})"
+            else
+                FAILED=$((FAILED + 1))
+                log "  WARNING: Failed to score ${id}"
+            fi
+            rm -f "$tmp_scores" "$tmp_rationale" "$status_file"
+        done
+
+        batch_elapsed=$(( $(date +%s) - batch_start_time ))
+        total_elapsed=$(( $(date +%s) - SCORE_START_TIME ))
+        log "  Batch done in ${batch_elapsed}s (${SCORED}/${SCENE_COUNT} scored, ${total_elapsed}s elapsed)"
+
+        batch_start=$batch_end
+    done
+    ;;
+
+esac
 
 log ""
 log "Scene scoring complete: ${SCORED} scenes scored, ${FAILED} failures"

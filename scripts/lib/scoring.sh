@@ -1511,9 +1511,16 @@ parse_scene_evaluation() {
         return 1
     fi
 
-    # Try direct API response format first, then claude -p format
+    # Try multiple extraction strategies:
+    # 1. Plain text file (batch mode writes .txt)
+    # 2. API JSON response (direct mode writes .json)
+    # 3. Claude -p stream-json (legacy)
     local text_content
-    text_content=$(extract_api_response "$log_file" 2>/dev/null) || true
+    if [[ "$log_file" == *.txt ]]; then
+        text_content=$(cat "$log_file")
+    else
+        text_content=$(extract_api_response "$log_file" 2>/dev/null) || true
+    fi
     if [[ -z "$text_content" ]]; then
         text_content=$(extract_claude_response "$log_file") || {
             log "WARNING: No text content found in $log_file"
