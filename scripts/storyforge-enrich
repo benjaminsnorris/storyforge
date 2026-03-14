@@ -1104,6 +1104,54 @@ echo ""
 print_cost_summary "enrich"
 
 # ============================================================================
+# Seed alias CSVs from enriched data (if still header-only)
+# ============================================================================
+
+seed_alias_csv() {
+    local csv_file="$1"
+    local source_csv="$2"
+    local source_field="$3"
+    local header="$4"
+
+    # Only seed if file exists and has exactly 1 line (header only)
+    [[ -f "$csv_file" ]] || return 0
+    local line_count
+    line_count=$(wc -l < "$csv_file" | tr -d ' ')
+    (( line_count > 1 )) && return 0
+
+    # Extract unique values from the source CSV field
+    local values
+    values=$(get_csv_column "$source_csv" "$source_field" 2>/dev/null || true)
+    [[ -z "$values" ]] && return 0
+
+    # Split semicolon-separated values, deduplicate, sort
+    local unique
+    unique=$(echo "$values" | tr ';' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | sort -uf)
+    [[ -z "$unique" ]] && return 0
+
+    local count=0
+    while IFS= read -r name; do
+        # Generate id from name: lowercase, spaces to hyphens, strip non-alphanum
+        local id
+        id=$(echo "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]/-/g; s/[^a-z0-9-]//g; s/--*/-/g; s/^-//; s/-$//')
+        echo "${id}|${name}|" >> "$csv_file"
+        count=$((count + 1))
+    done <<< "$unique"
+
+    if (( count > 0 )); then
+        log "Seeded ${csv_file##*/} with ${count} entries from enriched data"
+    fi
+}
+
+INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+
+seed_alias_csv "${PROJECT_DIR}/reference/characters.csv" "$INTENT_CSV" "characters" "id|name|aliases|role"
+seed_alias_csv "${PROJECT_DIR}/reference/threads.csv" "$INTENT_CSV" "threads" "id|name|aliases"
+seed_alias_csv "${PROJECT_DIR}/reference/motif-taxonomy.csv" "$INTENT_CSV" "motifs" "id|name|aliases|tier"
+seed_alias_csv "${PROJECT_DIR}/reference/locations.csv" "$METADATA_CSV" "location" "id|name|aliases"
+
+# ============================================================================
 # Commit and push
 # ============================================================================
 
@@ -1113,6 +1161,10 @@ log "Committing enrichment results..."
     cd "$PROJECT_DIR"
     git add "reference/scene-metadata.csv" 2>/dev/null || true
     git add "reference/scene-intent.csv" 2>/dev/null || true
+    git add "reference/characters.csv" 2>/dev/null || true
+    git add "reference/threads.csv" 2>/dev/null || true
+    git add "reference/motif-taxonomy.csv" 2>/dev/null || true
+    git add "reference/locations.csv" 2>/dev/null || true
     git add "working/costs/" 2>/dev/null || true
     git add "working/logs/" 2>/dev/null || true
     git add "working/enrich/" 2>/dev/null || true
