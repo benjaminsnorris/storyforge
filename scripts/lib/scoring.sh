@@ -1041,7 +1041,6 @@ build_diagnostic_markers() {
         fi
 
         output="${output}[${marker_id}] ${question}
-  -> Answer YES or NO. If deficit: quote evidence. If clean: write CLEAN.
 "
     done < "$diagnostics_csv"
 
@@ -1162,10 +1161,9 @@ aggregate_diagnostic_scores() {
 
             if (marker in marker_principle) {
                 p = marker_principle[marker]
-                # Check if this is a deficit
+                # YES = deficit found, NO/CLEAN = no deficit
                 ans_lower = tolower(answer)
-                def_lower = tolower(marker_deficit_if[marker])
-                if (ans_lower == def_lower) {
+                if (ans_lower == "yes") {
                     deficit_points[p] += marker_weight[marker]
                     # Collect evidence
                     if (evidence != "" && evidence != "CLEAN") {
@@ -1277,8 +1275,7 @@ identify_deep_dive_targets() {
             if (marker in marker_principle) {
                 p = marker_principle[marker]
                 ans_lower = tolower(answer)
-                def_lower = tolower(marker_deficit_if[marker])
-                if (ans_lower == def_lower) {
+                if (ans_lower == "yes") {
                     deficit_points[p] += marker_weight[marker]
                     if (deficit_markers[p] != "") deficit_markers[p] = deficit_markers[p] ";"
                     deficit_markers[p] = deficit_markers[p] marker

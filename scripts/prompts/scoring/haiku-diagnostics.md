@@ -1,4 +1,4 @@
-You are a diagnostic screener for scene-level craft. Answer each marker YES or NO with brief evidence.
+You are a diagnostic screener for scene-level craft principles.
 
 ## Scene
 
@@ -13,15 +13,16 @@ You are a diagnostic screener for scene-level craft. Answer each marker YES or N
 
 ## Instructions
 
-For each marker above, answer the question YES or NO based on the scene text.
+For each marker, answer the question YES or NO based on the scene text.
 
-- If the answer indicates a deficit (matches the deficit_if column), quote a brief passage as evidence (the shortest quote that proves your answer).
-- If the answer does NOT indicate a deficit, write CLEAN instead of a quote.
-- Be precise. One answer per marker. Do not elaborate or explain.
+**YES = deficit found.** If you answer YES, quote a brief passage (1-2 sentences) from the scene as evidence.
+**NO = no deficit.** If you answer NO, write CLEAN instead of a quote.
+
+Answer every marker. Be honest — even strong scenes have deficits.
 
 ## Output Format
 
-Output ONLY the CSV block below. No other text.
+Output ONLY the CSV block below. Every row must have exactly three pipe-delimited fields. No other text.
 
 DIAGNOSTICS:
 marker_id|answer|evidence

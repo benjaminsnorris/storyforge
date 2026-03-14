@@ -21,7 +21,7 @@ assert_contains "$result" "enter_late_leave_early" "markers include enter_late_l
 assert_contains "$result" "economy_clarity" "markers include economy_clarity"
 assert_contains "$result" "kill_darlings" "markers include kill_darlings"
 assert_contains "$result" "[elle-1]" "markers include marker IDs"
-assert_contains "$result" "YES or NO" "markers include answer instructions"
+assert_contains "$result" "[elle-1]" "markers include formatted marker entries"
 
 # Count principles — should have headers for all 25
 principle_count=$(echo "$result" | grep -c "^=== " || true)
@@ -64,22 +64,22 @@ cat > "$TEST_DIAG_CSV" <<'EOF'
 principle|marker_id|question|deficit_if|weight|evidence_required
 alpha|a-1|Is there a problem?|yes|2|Quote it
 alpha|a-2|Is there another problem?|yes|1|Quote it
-alpha|a-3|Is there a good thing?|no|1|Quote it
-beta|b-1|First check|yes|2|Quote
-beta|b-2|Second check|no|2|Quote
+alpha|a-3|Is the good thing missing?|yes|1|Quote it
+beta|b-1|First problem check|yes|2|Quote
+beta|b-2|Second problem check|yes|2|Quote
 EOF
 
-# Create diagnostic results: alpha has 1 deficit (a-1=YES, a-2=NO, a-3=YES(no deficit))
+# Create diagnostic results: alpha has 1 deficit (a-1=YES), 2 clean (a-2=NO, a-3=NO)
 # alpha deficit_points=2, max=4, ratio=0.50 -> score 3
-# beta has no deficits (b-1=NO, b-2=YES) -> score 5
+# beta has no deficits (b-1=NO, b-2=NO) -> score 5
 TEST_DIAG_RESULTS="${DIAG_TMPDIR}/.diag-test-agg.csv"
 cat > "$TEST_DIAG_RESULTS" <<'EOF'
 marker_id|answer|evidence
 a-1|YES|"Found a problem here"
 a-2|NO|CLEAN
-a-3|YES|CLEAN
+a-3|NO|CLEAN
 b-1|NO|CLEAN
-b-2|YES|"Good thing found"
+b-2|NO|CLEAN
 EOF
 
 SCORES_OUT="${DIAG_TMPDIR}/agg-scores.csv"
@@ -115,9 +115,9 @@ cat > "$ALL_DEF" <<'EOF'
 marker_id|answer|evidence
 a-1|YES|"problem 1"
 a-2|YES|"problem 2"
-a-3|NO|"missing good thing"
+a-3|YES|"missing good thing"
 b-1|YES|"b problem"
-b-2|NO|"b missing"
+b-2|YES|"b problem 2"
 EOF
 
 SCORES_OUT2="${DIAG_TMPDIR}/agg-scores-2.csv"
@@ -141,9 +141,9 @@ cat > "$NO_DEF" <<'EOF'
 marker_id|answer|evidence
 a-1|NO|CLEAN
 a-2|NO|CLEAN
-a-3|YES|CLEAN
+a-3|NO|CLEAN
 b-1|NO|CLEAN
-b-2|YES|CLEAN
+b-2|NO|CLEAN
 EOF
 
 SCORES_OUT3="${DIAG_TMPDIR}/agg-scores-3.csv"
