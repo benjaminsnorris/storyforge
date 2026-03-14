@@ -339,15 +339,20 @@ HEAL_EOF
     fi
 
     # Invoke Claude to fix the issue
-    set +e
-    claude -p "$heal_prompt" \
-        --model "$heal_model" \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --verbose \
-        > "$heal_log" 2>&1
-    local heal_rc=$?
-    set -e
+    local heal_rc=0
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+        invoke_anthropic_api "$heal_prompt" "$heal_model" "$heal_log" 8192 || heal_rc=$?
+    else
+        set +e
+        claude -p "$heal_prompt" \
+            --model "$heal_model" \
+            --dangerously-skip-permissions \
+            --output-format stream-json \
+            --verbose \
+            > "$heal_log" 2>&1
+        heal_rc=$?
+        set -e
+    fi
 
     # Append Claude's output to healing log
     if [[ -n "$_SF_HEALING_LOG" && -f "$heal_log" ]]; then
@@ -590,6 +595,7 @@ get_plugin_dir() {
 _sf_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "${_sf_lib_dir}/csv.sh" ]] && source "${_sf_lib_dir}/csv.sh"
 [[ -f "${_sf_lib_dir}/costs.sh" ]] && source "${_sf_lib_dir}/costs.sh"
+[[ -f "${_sf_lib_dir}/api.sh" ]] && source "${_sf_lib_dir}/api.sh"
 [[ -f "${_sf_lib_dir}/scoring.sh" ]] && source "${_sf_lib_dir}/scoring.sh"
 [[ -f "${_sf_lib_dir}/scene-filter.sh" ]] && source "${_sf_lib_dir}/scene-filter.sh"
 [[ -f "${_sf_lib_dir}/aliases.sh" ]] && source "${_sf_lib_dir}/aliases.sh"
@@ -1296,6 +1302,13 @@ _run_headless_session() {
     local model="$2"
     local log_file="$3"
 
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+        # Direct API (preferred for autonomous mode)
+        invoke_anthropic_api "$prompt" "$model" "$log_file" 8192
+        return $?
+    fi
+
+    # Fallback to claude -p if no API key
     set +e
     claude -p "$prompt" \
         --model "$model" \
@@ -1306,6 +1319,24 @@ _run_headless_session() {
     local rc=$?
     set -e
     return $rc
+}
+
+# Extract text from a headless session log file.
+# Handles both API JSON format and stream-json format.
+_extract_headless_response() {
+    local log_file="$1"
+    [[ -f "$log_file" ]] || return 1
+
+    # Try API JSON format first (has .content array)
+    local api_text
+    api_text=$(extract_api_response "$log_file" 2>/dev/null)
+    if [[ -n "$api_text" ]]; then
+        echo "$api_text"
+        return 0
+    fi
+
+    # Fall back to stream-json format
+    extract_claude_response "$log_file" 2>/dev/null
 }
 
 # Run a cleanup pass — fix items identified in the review report.
