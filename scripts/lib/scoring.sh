@@ -274,7 +274,10 @@ generate_diagnosis() {
                 }
                 END {
                     if (n == 0) { print "0||"; exit }
-                    avg = sum / n
+                    # Power mean with p=0.5 (penalizes low scores harder)
+                    pow_sum = 0
+                    for (i in scores) pow_sum += scores[i] ^ 0.5
+                    avg = (pow_sum / n) ^ (1 / 0.5)
                     # printf avg with one decimal
                     printf "%.1f|", avg
                     # Collect items below average, sort by score ascending, take worst 5
@@ -753,9 +756,9 @@ generate_score_report() {
         scene_heatmap=$(awk -F'|' -v nc="$ncols" '
             NR==1 { next }
             {
-                sum=0; count=0
-                for(i=2; i<=nc; i++) { if($i+0 > 0) { sum += $i; count++ } }
-                avg = (count > 0) ? sum/count : 0
+                pow_sum=0; count=0
+                for(i=2; i<=nc; i++) { if($i+0 > 0) { pow_sum += ($i+0) ^ 0.5; count++ } }
+                avg = (count > 0) ? (pow_sum/count) ^ (1/0.5) : 0
                 printf "<tr><td>%s</td><td class=\"sc-%d\">%.1f</td></tr>\n", $1, int(avg+0.5), avg
             }
         ' "${cycle_dir}/scene-scores.csv")
