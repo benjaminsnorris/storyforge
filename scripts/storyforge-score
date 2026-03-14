@@ -41,6 +41,7 @@ SCORE_MODE="grouped"   # grouped | quick | deep
 FILTER_MODE="all"
 FILTER_SCENES=""        # Comma-separated scene IDs
 FILTER_ACT=""
+FILTER_FROM_SEQ=""
 PARALLEL=${STORYFORGE_SCORE_PARALLEL:-6}
 
 # --- Argument parsing ---
@@ -48,22 +49,34 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Score manuscript scenes against craft engine principles.
+Score manuscript scenes against 25 craft principles (scene craft,
+prose craft, character craft, rules to break), plus act-level
+framework scores and novel-level character/genre scores. Produces
+diagnosis, improvement proposals, and an HTML report.
 
 Modes:
-  --grouped         One call per scoring group per scene (default)
-  --quick           All principles in one call per scene
-  --deep            One call per principle per scene
+  --grouped         One call per scoring group per scene (default, most accurate)
+  --quick           All principles in one call per scene (faster, cheaper)
+  --deep            One call per principle per scene (most detailed)
 
 Scope:
-  --scenes ID,ID    Score specific scenes only (comma-separated)
-  --act N           Score scenes in act N only
+  --scenes ID,ID    Score specific scenes only (comma-separated slug IDs)
+  --act N           Score scenes in act/part N only
+  --from-seq N      Score scenes from sequence number N onward
 
 Options:
   --parallel N      Score N scenes concurrently (default: 6, env: STORYFORGE_SCORE_PARALLEL)
   --interactive, -i Enable interactive mode
   --dry-run         Show what would be scored without invoking Claude
   -h, --help        Show this help
+
+Examples:
+  $(basename "$0")                          # Score all scenes (grouped mode)
+  $(basename "$0") --quick                  # Fast scoring, all scenes
+  $(basename "$0") --quick --from-seq 32    # Quick score from scene 32 onward
+  $(basename "$0") --deep --scenes claires-cold   # Deep score one scene
+  $(basename "$0") --act 3                  # Score part 3 only
+  $(basename "$0") --dry-run               # Preview cost estimate
 EOF
     exit 0
 }
@@ -101,6 +114,11 @@ while [[ $# -gt 0 ]]; do
         --act)
             FILTER_MODE="act"
             FILTER_ACT="${2:?ERROR: --act requires an act number}"
+            shift 2
+            ;;
+        --from-seq)
+            FILTER_MODE="from_seq"
+            FILTER_FROM_SEQ="${2:?ERROR: --from-seq requires a sequence number}"
             shift 2
             ;;
         --parallel)
@@ -213,16 +231,29 @@ case "$FILTER_MODE" in
         done
         ;;
     act)
-        local_pattern="act${FILTER_ACT}"
         for id in "${ALL_SCENE_IDS[@]}"; do
-            if [[ "${id,,}" == "${local_pattern,,}"* ]]; then
+            scene_part=$(get_csv_field "$METADATA_CSV" "$id" "part")
+            if [[ "$scene_part" == "$FILTER_ACT" ]]; then
                 FILTERED_IDS+=("$id")
             fi
         done
         if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: No scenes found matching act ${FILTER_ACT}"
+            log "ERROR: No scenes found in act ${FILTER_ACT}"
             exit 1
         fi
+        ;;
+    from_seq)
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            scene_seq=$(get_csv_field "$METADATA_CSV" "$id" "seq")
+            if [[ -n "$scene_seq" ]] && (( scene_seq >= FILTER_FROM_SEQ )); then
+                FILTERED_IDS+=("$id")
+            fi
+        done
+        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+            log "ERROR: No scenes found with seq >= ${FILTER_FROM_SEQ}"
+            exit 1
+        fi
+        log "Filtered to ${#FILTERED_IDS[@]} scenes with seq >= ${FILTER_FROM_SEQ}"
         ;;
 esac
 

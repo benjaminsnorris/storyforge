@@ -37,6 +37,7 @@ FORCE=false
 FILTER_MODE="all"
 FILTER_SCENES=""
 FILTER_ACT=""
+FILTER_FROM_SEQ=""
 PARALLEL=${STORYFORGE_ENRICH_PARALLEL:-6}
 ENRICH_FIELDS="type,timeline_day,time_of_day,characters,emotional_arc,threads,motifs"
 
@@ -51,11 +52,15 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Enrich scene metadata by analyzing prose with Claude.
+Enrich scene metadata by analyzing prose with Claude. Runs in two
+phases: free heuristics first (word count, time of day, thread
+recovery), then Claude for remaining gaps (type, characters,
+emotional arc, threads, motifs, timeline day).
 
 Scope:
-  --scenes ID,ID    Enrich specific scenes only (comma-separated)
-  --act N           Enrich scenes in act N only
+  --scenes ID,ID    Enrich specific scenes only (comma-separated slug IDs)
+  --act N           Enrich scenes in act/part N only
+  --from-seq N      Enrich scenes from sequence number N onward
 
 Options:
   --parallel N      Concurrent workers (default: 6, env: STORYFORGE_ENRICH_PARALLEL)
@@ -64,6 +69,14 @@ Options:
   --force           Re-enrich scenes that already have data (overwrite)
   --dry-run         Show what would be enriched without invoking Claude
   -h, --help        Show this help
+
+Examples:
+  $(basename "$0")                          # Enrich all scenes
+  $(basename "$0") --from-seq 32            # Enrich from scene 32 onward
+  $(basename "$0") --act 3                  # Enrich part 3 only
+  $(basename "$0") --fields type,characters # Only extract type and characters
+  $(basename "$0") --scenes claires-cold,pewter-town  # Specific scenes
+  $(basename "$0") --dry-run               # Preview without invoking Claude
 EOF
     exit 0
 }
@@ -89,6 +102,11 @@ while [[ $# -gt 0 ]]; do
         --act)
             FILTER_MODE="act"
             FILTER_ACT="${2:?ERROR: --act requires an act number}"
+            shift 2
+            ;;
+        --from-seq)
+            FILTER_MODE="from_seq"
+            FILTER_FROM_SEQ="${2:?ERROR: --from-seq requires a sequence number}"
             shift 2
             ;;
         --parallel)
@@ -399,6 +417,19 @@ case "$FILTER_MODE" in
             log "ERROR: No scenes found in act ${FILTER_ACT}"
             exit 1
         fi
+        ;;
+    from_seq)
+        for id in "${ALL_SCENE_IDS[@]}"; do
+            scene_seq=$(get_csv_field "$METADATA_CSV" "$id" "seq")
+            if [[ -n "$scene_seq" ]] && (( scene_seq >= FILTER_FROM_SEQ )); then
+                FILTERED_IDS+=("$id")
+            fi
+        done
+        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
+            log "ERROR: No scenes found with seq >= ${FILTER_FROM_SEQ}"
+            exit 1
+        fi
+        log "Filtered to ${#FILTERED_IDS[@]} scenes with seq >= ${FILTER_FROM_SEQ}"
         ;;
 esac
 
