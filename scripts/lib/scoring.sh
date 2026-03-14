@@ -1,8 +1,143 @@
 #!/bin/bash
 # scoring.sh — Scoring library for principled evaluation
 #
-# Provides weight management functions for the craft-weights system.
+# Provides weight management, direct API invocation, and score parsing
+# for the craft-weights system.
 # Source this file from your script; do not execute it directly.
+
+# ============================================================================
+# Direct Anthropic API invocation (bypasses claude -p overhead)
+# ============================================================================
+
+# invoke_anthropic_api(prompt, model, log_file, [max_tokens])
+# Calls the Anthropic Messages API directly via curl.
+# Requires ANTHROPIC_API_KEY environment variable.
+# Writes the full API response to log_file.
+# Extracts and prints the text response to stdout.
+# Returns 0 on success, 1 on failure.
+invoke_anthropic_api() {
+    local prompt="$1"
+    local model="$2"
+    local log_file="$3"
+    local max_tokens="${4:-4096}"
+
+    if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+        log "ERROR: ANTHROPIC_API_KEY not set. Required for direct API scoring."
+        log "  Set it with: export ANTHROPIC_API_KEY=your-key"
+        return 1
+    fi
+
+    # Build the JSON request — escape the prompt for JSON embedding
+    local json_prompt
+    json_prompt=$(jq -Rs '.' <<< "$prompt")
+
+    local request_body
+    request_body=$(cat <<JSONEOF
+{
+    "model": "${model}",
+    "max_tokens": ${max_tokens},
+    "messages": [
+        {"role": "user", "content": ${json_prompt}}
+    ]
+}
+JSONEOF
+)
+
+    # Make the API call
+    local http_code
+    http_code=$(curl -s -w "%{http_code}" -o "$log_file" \
+        "https://api.anthropic.com/v1/messages" \
+        -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "content-type: application/json" \
+        -d "$request_body" 2>/dev/null) || {
+        log "WARNING: curl failed for API call"
+        return 1
+    }
+
+    if [[ "$http_code" != "200" ]]; then
+        log "WARNING: API returned HTTP ${http_code}"
+        [[ -f "$log_file" ]] && log "  Response: $(head -1 "$log_file")"
+        return 1
+    fi
+
+    return 0
+}
+
+# extract_api_response(log_file)
+# Extracts the text content from an Anthropic Messages API JSON response.
+# Prints the text to stdout.
+extract_api_response() {
+    local log_file="$1"
+    [[ -f "$log_file" ]] || return 1
+    jq -r '.content[] | select(.type == "text") | .text' "$log_file" 2>/dev/null
+}
+
+# extract_api_usage(log_file)
+# Extracts usage data from an Anthropic Messages API response.
+# Prints: input_tokens|output_tokens|cache_read|cache_create
+extract_api_usage() {
+    local log_file="$1"
+    [[ -f "$log_file" ]] || return 1
+    jq -r '[
+        (.usage.input_tokens // 0),
+        (.usage.output_tokens // 0),
+        (.usage.cache_read_input_tokens // 0),
+        (.usage.cache_creation_input_tokens // 0)
+    ] | join("|")' "$log_file" 2>/dev/null
+}
+
+# log_api_usage(log_file, operation, target, model, [ledger_file])
+# Parses an Anthropic API response and appends a cost row to the ledger.
+log_api_usage() {
+    local log_file="$1"
+    local operation="$2"
+    local target="$3"
+    local model="$4"
+    local ledger_file="${5:-${PROJECT_DIR}/working/costs/ledger.csv}"
+    local ledger_header="timestamp|operation|target|model|input_tokens|output_tokens|cache_read|cache_create|cost_usd|duration_s"
+
+    local ledger_dir
+    ledger_dir="$(dirname "$ledger_file")"
+    mkdir -p "$ledger_dir"
+    if [[ ! -f "$ledger_file" ]]; then
+        echo "$ledger_header" > "$ledger_file"
+    fi
+
+    local duration_s="0"
+    if [[ -n "${_SF_INVOCATION_START:-}" ]]; then
+        duration_s="$(( $(date +%s) - _SF_INVOCATION_START ))"
+    fi
+
+    local timestamp
+    timestamp="$(date '+%Y-%m-%dT%H:%M:%S')"
+
+    local usage_data
+    usage_data=$(extract_api_usage "$log_file")
+    if [[ -z "$usage_data" ]]; then
+        echo "${timestamp}|${operation}|${target}|${model}|0|0|0|0|0.000000|${duration_s}" >> "$ledger_file"
+        return
+    fi
+
+    IFS='|' read -r input_tokens output_tokens cache_read cache_create <<< "$usage_data"
+
+    local price_input price_output price_cache_read price_cache_create
+    price_input="$(get_model_pricing "$model" input)"
+    price_output="$(get_model_pricing "$model" output)"
+    price_cache_read="$(get_model_pricing "$model" cache_read)"
+    price_cache_create="$(get_model_pricing "$model" cache_create)"
+
+    local cost_usd
+    cost_usd="$(awk "BEGIN {
+        cost = ($input_tokens * $price_input / 1000000) + \
+               ($output_tokens * $price_output / 1000000) + \
+               ($cache_read * $price_cache_read / 1000000) + \
+               ($cache_create * $price_cache_create / 1000000)
+        printf \"%.6f\", cost
+    }")"
+
+    echo "${timestamp}|${operation}|${target}|${model}|${input_tokens}|${output_tokens}|${cache_read}|${cache_create}|${cost_usd}|${duration_s}" >> "$ledger_file"
+}
 
 # init_craft_weights(project_dir, plugin_dir)
 # Copy default weights to project if craft-weights.csv doesn't exist
@@ -1359,4 +1494,186 @@ build_principle_guide() {
         found && /^###? / { found=0 }
         found { print }
     ' "$guide_file"
+}
+
+# parse_scene_evaluation(log_file, output_scores, output_rationale, scene_id)
+# Parses the SCORES: block from a single-pass scene evaluation.
+# Input format: principle|score|deficits|evidence_lines (one row per principle)
+# Outputs: pivoted CSVs with principles as columns (matching existing format).
+parse_scene_evaluation() {
+    local log_file="$1"
+    local output_scores="$2"
+    local output_rationale="$3"
+    local scene_id="$4"
+
+    if [[ ! -f "$log_file" ]]; then
+        log "WARNING: Log file not found: $log_file"
+        return 1
+    fi
+
+    # Try multiple extraction strategies:
+    # 1. Plain text file (batch mode writes .txt)
+    # 2. API JSON response (direct mode writes .json)
+    # 3. Claude -p stream-json (legacy)
+    local text_content
+    if [[ "$log_file" == *.txt ]]; then
+        text_content=$(cat "$log_file")
+    else
+        text_content=$(extract_api_response "$log_file" 2>/dev/null) || true
+    fi
+    if [[ -z "$text_content" ]]; then
+        text_content=$(extract_claude_response "$log_file") || {
+            log "WARNING: No text content found in $log_file"
+            return 1
+        }
+    fi
+
+    # Extract SCORES: block
+    local scores_block
+    scores_block=$(echo "$text_content" | awk '
+        /^SCORES:/ { found=1; next }
+        found && /^[[:space:]]*$/ { found=0 }
+        found && /^[A-Z_]+:/ { found=0 }
+        found { print }
+    ')
+
+    # Fallback: look for principle|score|deficits header directly
+    if [[ -z "$scores_block" ]]; then
+        scores_block=$(echo "$text_content" | awk '
+            /^principle\|/ { found=1 }
+            found && /^[[:space:]]*$/ { found=0 }
+            found { print }
+        ')
+    fi
+
+    if [[ -z "$scores_block" ]]; then
+        log "WARNING: No SCORES block found in $log_file"
+        return 1
+    fi
+
+    # Pivot rows into columns using canonical principle order from diagnostics.csv
+    # This ensures all scenes produce identical headers regardless of model output order
+    local plugin_dir
+    plugin_dir=$(get_plugin_dir)
+    local diagnostics_csv="${plugin_dir}/references/diagnostics.csv"
+
+    # Build canonical principle list
+    local canonical_principles=""
+    if [[ -f "$diagnostics_csv" ]]; then
+        canonical_principles=$(awk -F'|' 'NR > 1 && !seen[$2]++ { print $2 }' "$diagnostics_csv")
+    fi
+
+    # Parse model output into a lookup (principle -> score, principle -> rationale)
+    # Use temp files for bash 3 compat (no associative arrays)
+    local tmp_lookup="${output_scores}.lookup.$$"
+    while IFS='|' read -r principle score deficits evidence_lines; do
+        [[ "$principle" == "principle" ]] && continue
+        [[ -z "$principle" ]] && continue
+        local rationale
+        if [[ "$deficits" == "none" || -z "$deficits" ]]; then
+            rationale="No deficits"
+        else
+            deficits_clean="${deficits//|/-}"
+            evidence_clean="${evidence_lines//|/-}"
+            rationale="${deficits_clean} (${evidence_clean})"
+        fi
+        echo "${principle}|${score}|${rationale}" >> "$tmp_lookup"
+    done <<< "$scores_block"
+
+    # Build header and rows in canonical order
+    local header="id"
+    local score_row="${scene_id}"
+    local rationale_row="${scene_id}"
+
+    if [[ -n "$canonical_principles" ]]; then
+        while IFS= read -r principle; do
+            header="${header}|${principle}"
+            # Look up this principle's score and rationale
+            local entry
+            entry=$(grep "^${principle}|" "$tmp_lookup" 2>/dev/null | head -1)
+            if [[ -n "$entry" ]]; then
+                score_row="${score_row}|$(echo "$entry" | cut -d'|' -f2)"
+                rationale_row="${rationale_row}|$(echo "$entry" | cut -d'|' -f3-)"
+            else
+                score_row="${score_row}|"
+                rationale_row="${rationale_row}|"
+            fi
+        done <<< "$canonical_principles"
+    else
+        # Fallback: use model output order (no diagnostics.csv available)
+        while IFS='|' read -r principle score rationale; do
+            [[ -z "$principle" ]] && continue
+            header="${header}|${principle}"
+            score_row="${score_row}|${score}"
+            rationale_row="${rationale_row}|${rationale}"
+        done < "$tmp_lookup"
+    fi
+
+    rm -f "$tmp_lookup"
+
+    echo "$header" > "$output_scores"
+    echo "$score_row" >> "$output_scores"
+
+    echo "$header" > "$output_rationale"
+    echo "$rationale_row" >> "$output_rationale"
+
+    return 0
+}
+
+# build_evaluation_criteria(diagnostics_csv, guide_file)
+# Builds the combined evaluation criteria block for the single-pass Sonnet prompt.
+# For each principle: the diagnostic checklist + the principle guide description.
+build_evaluation_criteria() {
+    local diagnostics_csv="$1"
+    local guide_file="$2"
+
+    if [[ ! -f "$diagnostics_csv" || ! -f "$guide_file" ]]; then
+        log "WARNING: Missing diagnostics or guide file"
+        return 1
+    fi
+
+    local current_principle=""
+    local output=""
+
+    # Collect markers per principle
+    while IFS='|' read -r section principle marker_id question deficit_if weight evidence_required; do
+        [[ "$section" == "section" ]] && continue
+
+        if [[ "$principle" != "$current_principle" ]]; then
+            # Close previous principle and start new one
+            if [[ -n "$current_principle" ]]; then
+                # Append the principle guide
+                guide=$(build_principle_guide "$current_principle" "$guide_file")
+                if [[ -n "$guide" ]]; then
+                    output="${output}
+${guide}
+"
+                fi
+            fi
+
+            current_principle="$principle"
+            output="${output}
+---
+
+### ${principle}
+
+**Diagnostic checklist:**
+"
+        fi
+
+        output="${output}- ${question}
+"
+    done < "$diagnostics_csv"
+
+    # Close the last principle
+    if [[ -n "$current_principle" ]]; then
+        guide=$(build_principle_guide "$current_principle" "$guide_file")
+        if [[ -n "$guide" ]]; then
+            output="${output}
+${guide}
+"
+        fi
+    fi
+
+    echo "$output"
 }
