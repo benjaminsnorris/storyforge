@@ -121,26 +121,48 @@ while (( batch_start < TOTAL )); do
 done
 ```
 
-### Claude Invocation Pattern
+### Claude Invocation — Autonomous (Direct API)
 ```bash
 _SF_INVOCATION_START=$(date +%s)
 export _SF_INVOCATION_START
 
 begin_healing_zone "description"
 
+invoke_anthropic_api "$prompt" "$MODEL" "$log_file" 4096
+
+end_healing_zone
+
+response=$(extract_api_response "$log_file")
+log_api_usage "$log_file" "operation" "$target" "$MODEL"
+```
+
+### Claude Invocation — Autonomous (Batch API)
+```bash
+# Build JSONL — one request per line
+for id in "${IDS[@]}"; do
+    prompt=$(build_prompt "$id")
+    jq -nc --arg id "$id" --arg model "$MODEL" --arg prompt "$prompt" '{
+        custom_id: $id,
+        params: { model: $model, max_tokens: 4096, messages: [{role: "user", content: $prompt}] }
+    }' >> "$BATCH_FILE"
+done
+
+BATCH_ID=$(submit_batch "$BATCH_FILE")
+poll_batch "$BATCH_ID"
+download_batch_results "$BATCH_ID" "$OUTPUT_DIR" "$LOG_DIR"
+
+# Process results: ${id}.txt (text), ${id}.json (usage), .status-${id} (ok/fail)
+```
+
+### Claude Invocation — Interactive (Claude Code)
+```bash
 claude -p "$prompt" \
     --model "$MODEL" \
     --dangerously-skip-permissions \
     --output-format stream-json \
     --verbose \
-    > "$log_file" 2>&1 || true
-
-end_healing_zone
-
-# Parse response — ALWAYS use the shared function
-response=$(extract_claude_response "$log_file" || true)
-
-# Log usage
+    > "$log_file" 2>&1
+response=$(extract_claude_response "$log_file")
 log_usage "$log_file" "operation" "$target" "$MODEL"
 ```
 
