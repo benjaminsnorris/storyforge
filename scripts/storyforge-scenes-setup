@@ -173,8 +173,11 @@ slugify() {
 # Shared utility: resolve slug collisions
 # ============================================================================
 
-# Track used slugs to detect collisions
-USED_SLUGS=""
+# Track used slugs to detect collisions (uses a temp file because
+# unique_slug is called via $() which runs in a subshell — variables
+# don't persist across subshell boundaries)
+USED_SLUGS_FILE=$(mktemp "${TMPDIR:-/tmp}/sf-slugs.XXXXXX")
+trap 'rm -f "$USED_SLUGS_FILE"' EXIT
 
 # Returns a unique slug, appending -2, -3, etc. if needed
 unique_slug() {
@@ -182,13 +185,12 @@ unique_slug() {
     local candidate="$base_slug"
     local counter=2
 
-    while echo "$USED_SLUGS" | grep -q "^${candidate}$"; do
+    while grep -q "^${candidate}$" "$USED_SLUGS_FILE" 2>/dev/null; do
         candidate="${base_slug}-${counter}"
         counter=$((counter + 1))
     done
 
-    USED_SLUGS="${USED_SLUGS}
-${candidate}"
+    echo "$candidate" >> "$USED_SLUGS_FILE"
     echo "$candidate"
 }
 
@@ -432,7 +434,6 @@ find_content_start() {
         esac
         echo "$line_num"
         return
-        ;;
     done <<< "$text"
 
     echo "$after_line"
