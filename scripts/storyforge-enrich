@@ -61,6 +61,7 @@ Scope:
   --scenes ID,ID    Enrich specific scenes only (comma-separated slug IDs)
   --act N           Enrich scenes in act/part N only
   --from-seq N      Enrich scenes from sequence number N onward
+  --from-seq N-M    Enrich scenes in sequence range N through M
 
 Options:
   --parallel N      Concurrent workers (default: 6, env: STORYFORGE_ENRICH_PARALLEL)
@@ -73,6 +74,7 @@ Options:
 Examples:
   $(basename "$0")                          # Enrich all scenes
   $(basename "$0") --from-seq 32            # Enrich from scene 32 onward
+  $(basename "$0") --from-seq 5-10          # Enrich scenes 5 through 10
   $(basename "$0") --act 3                  # Enrich part 3 only
   $(basename "$0") --fields type,characters # Only extract type and characters
   $(basename "$0") --scenes claires-cold,pewter-town  # Specific scenes
@@ -351,86 +353,16 @@ if [[ -f "$SCENE_INDEX" ]]; then
 fi
 
 # ============================================================================
-# Step 2: Build scene list and identify gaps
+# Step 2: Build scene list and apply filters
 # ============================================================================
 
-# Read all scene IDs sorted by seq, excluding cut scenes
-ALL_SCENE_IDS=()
-while IFS= read -r id; do
-    [[ -z "$id" ]] && continue
-    local_status=$(get_csv_field "$METADATA_CSV" "$id" "status")
-    if [[ "$local_status" != "cut" ]]; then
-        ALL_SCENE_IDS+=("$id")
-    fi
-done < <(awk -F'|' '
-    NR == 1 {
-        for (i = 1; i <= NF; i++) {
-            if ($i == "seq") seq_col = i
-        }
-        next
-    }
-    seq_col { print $1 "|" $seq_col }
-' "$METADATA_CSV" | sort -t'|' -k2 -n | cut -d'|' -f1)
-
-if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
-    log "ERROR: No scenes found in metadata.csv"
-    exit 1
-fi
-
-log "Found ${#ALL_SCENE_IDS[@]} scenes in metadata.csv"
-
-# ============================================================================
-# Filter scenes based on scope flags
-# ============================================================================
-
-FILTERED_IDS=()
+build_scene_list "$METADATA_CSV"
 
 case "$FILTER_MODE" in
-    all)
-        FILTERED_IDS=("${ALL_SCENE_IDS[@]}")
-        ;;
-    scenes)
-        IFS=',' read -ra REQUESTED <<< "$FILTER_SCENES"
-        for req in "${REQUESTED[@]}"; do
-            req=$(echo "$req" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            found=false
-            for id in "${ALL_SCENE_IDS[@]}"; do
-                if [[ "$id" == "$req" ]]; then
-                    FILTERED_IDS+=("$req")
-                    found=true
-                    break
-                fi
-            done
-            if [[ "$found" == false ]]; then
-                log "WARNING: Scene '$req' not found in metadata.csv, skipping"
-            fi
-        done
-        ;;
-    act)
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            scene_part=$(get_csv_field "$METADATA_CSV" "$id" "part")
-            if [[ "$scene_part" == "$FILTER_ACT" ]]; then
-                FILTERED_IDS+=("$id")
-            fi
-        done
-        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: No scenes found in act ${FILTER_ACT}"
-            exit 1
-        fi
-        ;;
-    from_seq)
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            scene_seq=$(get_csv_field "$METADATA_CSV" "$id" "seq")
-            if [[ -n "$scene_seq" ]] && (( scene_seq >= FILTER_FROM_SEQ )); then
-                FILTERED_IDS+=("$id")
-            fi
-        done
-        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: No scenes found with seq >= ${FILTER_FROM_SEQ}"
-            exit 1
-        fi
-        log "Filtered to ${#FILTERED_IDS[@]} scenes with seq >= ${FILTER_FROM_SEQ}"
-        ;;
+    all)       apply_scene_filter "$METADATA_CSV" "all" ;;
+    scenes)    apply_scene_filter "$METADATA_CSV" "scenes" "$FILTER_SCENES" ;;
+    act)       apply_scene_filter "$METADATA_CSV" "act" "$FILTER_ACT" ;;
+    from_seq)  apply_scene_filter "$METADATA_CSV" "from_seq" "$FILTER_FROM_SEQ" ;;
 esac
 
 # ============================================================================

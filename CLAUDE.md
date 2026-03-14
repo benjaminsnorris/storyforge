@@ -48,6 +48,11 @@ Before writing new code, check if a shared function already exists. Duplicating 
 - `update_csv_field(file, id, field, value, [key_column])` — update one cell (atomic write)
 - `append_csv_row(file, row)` — append a row
 
+**scene-filter.sh:**
+- `build_scene_list(metadata_csv)` — populate ALL_SCENE_IDS sorted by seq, excluding cut
+- `apply_scene_filter(metadata_csv, mode, [value], [value2])` — filter into FILTERED_IDS
+  - Modes: `all`, `scenes` (comma-separated), `single`, `act` (CSV part column), `from_seq` (N or N-M range), `range` (start_id, end_id)
+
 **costs.sh:**
 - `log_usage(log_file, operation, target, model, [ledger])` — parse stream-json for usage, calculate cost, append to ledger
 - `estimate_cost(operation, count, avg_words, model)` — forecast cost

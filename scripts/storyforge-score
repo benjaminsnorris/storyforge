@@ -63,6 +63,7 @@ Scope:
   --scenes ID,ID    Score specific scenes only (comma-separated slug IDs)
   --act N           Score scenes in act/part N only
   --from-seq N      Score scenes from sequence number N onward
+  --from-seq N-M    Score scenes in sequence range N through M
 
 Options:
   --parallel N      Score N scenes concurrently (default: 6, env: STORYFORGE_SCORE_PARALLEL)
@@ -74,6 +75,7 @@ Examples:
   $(basename "$0")                          # Score all scenes (grouped mode)
   $(basename "$0") --quick                  # Fast scoring, all scenes
   $(basename "$0") --quick --from-seq 32    # Quick score from scene 32 onward
+  $(basename "$0") --from-seq 5-10          # Score scenes 5 through 10
   $(basename "$0") --deep --scenes claires-cold   # Deep score one scene
   $(basename "$0") --act 3                  # Score part 3 only
   $(basename "$0") --dry-run               # Preview cost estimate
@@ -172,89 +174,17 @@ INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
 [[ ! -f "$INTENT_CSV" ]] && INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
 SCENES_DIR="${PROJECT_DIR}/scenes"
 
-if [[ ! -f "$METADATA_CSV" ]]; then
-    log "ERROR: reference/scene-metadata.csv not found. Run 'storyforge scenes' to create scene metadata."
-    exit 1
-fi
-
-# Read all scene IDs sorted by seq, excluding cut scenes
-ALL_SCENE_IDS=()
-while IFS= read -r id; do
-    [[ -z "$id" ]] && continue
-    local_status=$(get_csv_field "$METADATA_CSV" "$id" "status")
-    if [[ "$local_status" != "cut" ]]; then
-        ALL_SCENE_IDS+=("$id")
-    fi
-done < <(awk -F'|' '
-    NR == 1 {
-        for (i = 1; i <= NF; i++) {
-            if ($i == "seq") seq_col = i
-        }
-        next
-    }
-    seq_col { print $1 "|" $seq_col }
-' "$METADATA_CSV" | sort -t'|' -k2 -n | cut -d'|' -f1)
-
-if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
-    log "ERROR: No scenes found in metadata.csv"
-    exit 1
-fi
-
-log "Found ${#ALL_SCENE_IDS[@]} scenes in metadata.csv"
+build_scene_list "$METADATA_CSV"
 
 # ============================================================================
 # Filter scenes based on scope flags
 # ============================================================================
 
-FILTERED_IDS=()
-
 case "$FILTER_MODE" in
-    all)
-        FILTERED_IDS=("${ALL_SCENE_IDS[@]}")
-        ;;
-    scenes)
-        # Comma-separated list
-        IFS=',' read -ra REQUESTED <<< "$FILTER_SCENES"
-        for req in "${REQUESTED[@]}"; do
-            req=$(echo "$req" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            found=false
-            for id in "${ALL_SCENE_IDS[@]}"; do
-                if [[ "$id" == "$req" ]]; then
-                    FILTERED_IDS+=("$req")
-                    found=true
-                    break
-                fi
-            done
-            if [[ "$found" == false ]]; then
-                log "WARNING: Scene '$req' not found in metadata.csv, skipping"
-            fi
-        done
-        ;;
-    act)
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            scene_part=$(get_csv_field "$METADATA_CSV" "$id" "part")
-            if [[ "$scene_part" == "$FILTER_ACT" ]]; then
-                FILTERED_IDS+=("$id")
-            fi
-        done
-        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: No scenes found in act ${FILTER_ACT}"
-            exit 1
-        fi
-        ;;
-    from_seq)
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            scene_seq=$(get_csv_field "$METADATA_CSV" "$id" "seq")
-            if [[ -n "$scene_seq" ]] && (( scene_seq >= FILTER_FROM_SEQ )); then
-                FILTERED_IDS+=("$id")
-            fi
-        done
-        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: No scenes found with seq >= ${FILTER_FROM_SEQ}"
-            exit 1
-        fi
-        log "Filtered to ${#FILTERED_IDS[@]} scenes with seq >= ${FILTER_FROM_SEQ}"
-        ;;
+    all)       apply_scene_filter "$METADATA_CSV" "all" ;;
+    scenes)    apply_scene_filter "$METADATA_CSV" "scenes" "$FILTER_SCENES" ;;
+    act)       apply_scene_filter "$METADATA_CSV" "act" "$FILTER_ACT" ;;
+    from_seq)  apply_scene_filter "$METADATA_CSV" "from_seq" "$FILTER_FROM_SEQ" ;;
 esac
 
 # Filter to only scenes that have been drafted

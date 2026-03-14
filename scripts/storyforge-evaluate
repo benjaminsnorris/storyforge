@@ -70,8 +70,10 @@ CORE_EVALUATORS=(
 
 DRY_RUN=false
 INTERACTIVE=false
-FILTER_MODE="all"       # all | act | part | range | single | manuscript | chapter
+FILTER_MODE="all"       # all | act | range | single | scenes | from_seq | manuscript | chapter
 FILTER_VALUE=""
+FILTER_SCENES=""
+FILTER_FROM_SEQ=""
 RANGE_START=""
 RANGE_END=""
 
@@ -81,14 +83,18 @@ Usage: $(basename "$0") [OPTIONS]
 
 Run a multi-agent evaluation panel on your manuscript.
 
-Options:
+Scope:
   (no args)                     Evaluate full manuscript (scene files)
   --manuscript                  Evaluate assembled chapters (from manuscript/chapters/)
   --chapter N                   Evaluate a single assembled chapter
-  --act N                       Evaluate scenes in act N
-  --part N                      Evaluate scenes in part N
-  --scenes ID..ID               Evaluate a range of scenes (inclusive)
+  --act N                       Evaluate scenes in act/part N
+  --scenes ID,ID                Evaluate specific scenes (comma-separated slug IDs)
+  --scenes ID..ID               Evaluate a range of scenes (inclusive, by position)
   --scene ID                    Evaluate a single scene
+  --from-seq N                  Evaluate scenes from sequence number N onward
+  --from-seq N-M                Evaluate scenes in sequence range N through M
+
+Options:
   --interactive                 Supervise the synthesis step interactively
   --dry-run                     Print prompts without invoking Claude
   -h, --help                    Show this help
@@ -101,7 +107,9 @@ Examples:
   $(basename "$0") --manuscript
   $(basename "$0") --chapter 5
   $(basename "$0") --act 2
-  $(basename "$0") --scenes act1-sc01..act1-sc10
+  $(basename "$0") --from-seq 32
+  $(basename "$0") --from-seq 5-10
+  $(basename "$0") --scenes claires-cold,pewter-town
   $(basename "$0") --interactive
 EOF
     exit 0
@@ -129,25 +137,28 @@ while [[ $# -gt 0 ]]; do
             FILTER_VALUE="${2:?ERROR: --chapter requires a chapter number}"
             shift 2
             ;;
-        --act)
+        --act|--part)
             FILTER_MODE="act"
-            FILTER_VALUE="${2:?ERROR: --act requires a value}"
-            shift 2
-            ;;
-        --part)
-            FILTER_MODE="part"
-            FILTER_VALUE="${2:?ERROR: --part requires a value}"
+            FILTER_VALUE="${2:?ERROR: $1 requires a value}"
             shift 2
             ;;
         --scenes)
-            FILTER_MODE="range"
-            local_range="${2:?ERROR: --scenes requires a range (e.g., act1-sc01..act1-sc10)}"
-            RANGE_START="${local_range%%\.\.*}"
-            RANGE_END="${local_range##*\.\.}"
-            if [[ -z "$RANGE_START" || -z "$RANGE_END" || "$RANGE_START" == "$RANGE_END" && "$local_range" != *".."* ]]; then
-                echo "ERROR: --scenes requires format ID..ID (e.g., act1-sc01..act1-sc10)" >&2
-                exit 1
+            local_arg="${2:?ERROR: --scenes requires scene IDs}"
+            if [[ "$local_arg" == *".."* ]]; then
+                # Range format: ID..ID (legacy support)
+                FILTER_MODE="range"
+                RANGE_START="${local_arg%%\.\.*}"
+                RANGE_END="${local_arg##*\.\.}"
+            else
+                # Comma-separated list
+                FILTER_MODE="scenes"
+                FILTER_SCENES="$local_arg"
             fi
+            shift 2
+            ;;
+        --from-seq)
+            FILTER_MODE="from_seq"
+            FILTER_FROM_SEQ="${2:?ERROR: --from-seq requires a sequence number}"
             shift 2
             ;;
         --scene)
@@ -181,8 +192,6 @@ if [[ "$FILTER_MODE" == "manuscript" || "$FILTER_MODE" == "chapter" ]]; then
         echo "Run 'storyforge assemble' first to generate chapter files." >&2
         exit 1
     fi
-else
-    check_file_exists "$SCENE_INDEX" "Scene index (scene-index.yaml)"
 fi
 
 # Read project metadata from storyforge.yaml
@@ -279,90 +288,19 @@ if [[ "$MANUSCRIPT_MODE" == true ]]; then
 "
     done
 else
-    # --- Scene mode: read from scene-index.yaml ---
-    ALL_SCENE_IDS=()
-    while IFS= read -r id; do
-        [[ -z "$id" ]] && continue
-        ALL_SCENE_IDS+=("$id")
-    done < <(grep -E '^[[:space:]]*- id:[[:space:]]*' "$SCENE_INDEX" \
-        | sed 's/^[[:space:]]*- id:[[:space:]]*//' \
-        | sed 's/^["'"'"']//' \
-        | sed 's/["'"'"']$//' \
-        | sed 's/[[:space:]]*$//')
+    # --- Scene mode: read from metadata.csv ---
+    METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+    [[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
 
-    if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
-        log "ERROR: No scenes found in ${SCENE_INDEX}"
-        exit 1
-    fi
-
-    log "Found ${#ALL_SCENE_IDS[@]} scenes in scene-index.yaml"
-
-    # ============================================================================
-    # Filter scenes based on scope arguments
-    # ============================================================================
-
-    FILTERED_IDS=()
+    build_scene_list "$METADATA_CSV"
 
     case "$FILTER_MODE" in
-        all)
-            FILTERED_IDS=("${ALL_SCENE_IDS[@]}")
-            ;;
-        single)
-            found=false
-            for id in "${ALL_SCENE_IDS[@]}"; do
-                if [[ "$id" == "$RANGE_START" ]]; then
-                    found=true
-                    break
-                fi
-            done
-            if [[ "$found" == false ]]; then
-                log "ERROR: Scene '${RANGE_START}' not found in scene-index.yaml"
-                exit 1
-            fi
-            FILTERED_IDS=("$RANGE_START")
-            ;;
-        range)
-            in_range=false
-            for id in "${ALL_SCENE_IDS[@]}"; do
-                if [[ "$id" == "$RANGE_START" ]]; then
-                    in_range=true
-                fi
-                if [[ "$in_range" == true ]]; then
-                    FILTERED_IDS+=("$id")
-                fi
-                if [[ "$id" == "$RANGE_END" ]]; then
-                    break
-                fi
-            done
-            if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-                log "ERROR: Could not find range ${RANGE_START}..${RANGE_END} in scene-index.yaml"
-                exit 1
-            fi
-            ;;
-        act)
-            local_pattern="act${FILTER_VALUE}"
-            for id in "${ALL_SCENE_IDS[@]}"; do
-                if [[ "${id,,}" == "${local_pattern,,}"* ]]; then
-                    FILTERED_IDS+=("$id")
-                fi
-            done
-            if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-                log "ERROR: No scenes found matching act ${FILTER_VALUE}"
-                exit 1
-            fi
-            ;;
-        part)
-            local_pattern="p${FILTER_VALUE}"
-            for id in "${ALL_SCENE_IDS[@]}"; do
-                if [[ "${id,,}" == "${local_pattern,,}"* || "${id,,}" == "part${FILTER_VALUE}"* ]]; then
-                    FILTERED_IDS+=("$id")
-                fi
-            done
-            if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-                log "ERROR: No scenes found matching part ${FILTER_VALUE}"
-                exit 1
-            fi
-            ;;
+        all)       apply_scene_filter "$METADATA_CSV" "all" ;;
+        single)    apply_scene_filter "$METADATA_CSV" "single" "$RANGE_START" ;;
+        range)     apply_scene_filter "$METADATA_CSV" "range" "$RANGE_START" "$RANGE_END" ;;
+        scenes)    apply_scene_filter "$METADATA_CSV" "scenes" "$FILTER_SCENES" ;;
+        act)       apply_scene_filter "$METADATA_CSV" "act" "$FILTER_VALUE" ;;
+        from_seq)  apply_scene_filter "$METADATA_CSV" "from_seq" "$FILTER_FROM_SEQ" ;;
     esac
 
     # Build the scene file list (only scenes that have been drafted)
@@ -394,10 +332,11 @@ else
 
     SCOPE_DESCRIPTION="full manuscript (${#SCENE_FILES[@]} scenes)"
     case "$FILTER_MODE" in
-        act)   SCOPE_DESCRIPTION="Act ${FILTER_VALUE} (${#SCENE_FILES[@]} scenes)" ;;
-        part)  SCOPE_DESCRIPTION="Part ${FILTER_VALUE} (${#SCENE_FILES[@]} scenes)" ;;
-        range) SCOPE_DESCRIPTION="scenes ${RANGE_START} through ${RANGE_END} (${#SCENE_FILES[@]} scenes)" ;;
-        single) SCOPE_DESCRIPTION="scene ${RANGE_START}" ;;
+        act)      SCOPE_DESCRIPTION="Act ${FILTER_VALUE} (${#SCENE_FILES[@]} scenes)" ;;
+        range)    SCOPE_DESCRIPTION="scenes ${RANGE_START} through ${RANGE_END} (${#SCENE_FILES[@]} scenes)" ;;
+        single)   SCOPE_DESCRIPTION="scene ${RANGE_START}" ;;
+        from_seq) SCOPE_DESCRIPTION="seq ${FILTER_FROM_SEQ} (${#SCENE_FILES[@]} scenes)" ;;
+        scenes)   SCOPE_DESCRIPTION="${#SCENE_FILES[@]} selected scenes" ;;
     esac
 fi
 

@@ -61,8 +61,10 @@ mkdir -p "${PROJECT_DIR}/working/coaching"
 DRY_RUN=false
 INTERACTIVE=false
 COACHING_LEVEL=""
-FILTER_MODE="all"       # all | single | range | act | part
+FILTER_MODE="all"       # all | single | range | act | from_seq | scenes
 FILTER_VALUE=""
+FILTER_SCENES=""
+FILTER_FROM_SEQ=""
 RANGE_START=""
 RANGE_END=""
 
@@ -72,12 +74,16 @@ Usage: $(basename "$0") [OPTIONS]
 
 Draft scenes autonomously using Claude.
 
-Options:
+Scope:
   (no args)                   Draft all remaining (pending) scenes
   SCENE_ID                    Draft a single scene
   SCENE_ID SCENE_ID           Draft a range of scenes (inclusive, by index position)
-  --act N                     Draft all scenes in act N
-  --part N                    Draft all scenes in part N
+  --scenes ID,ID              Draft specific scenes (comma-separated slug IDs)
+  --act N                     Draft all scenes in act/part N
+  --from-seq N                Draft scenes from sequence number N onward
+  --from-seq N-M              Draft scenes in sequence range N through M
+
+Options:
   --coaching LEVEL            Set coaching level: full, coach, or strict
   --interactive               Draft with supervision — watch, give feedback, redirect
   --dry-run                   Build prompts without invoking Claude
@@ -93,6 +99,9 @@ Examples:
   $(basename "$0") act1-sc05
   $(basename "$0") --interactive
   $(basename "$0") --act 2
+  $(basename "$0") --from-seq 32
+  $(basename "$0") --from-seq 5-10
+  $(basename "$0") --scenes claires-cold,pewter-town
 EOF
     exit 0
 }
@@ -118,14 +127,19 @@ while [[ $# -gt 0 ]]; do
             INTERACTIVE=true
             shift
             ;;
-        --act)
+        --act|--part)
             FILTER_MODE="act"
-            FILTER_VALUE="${2:?ERROR: --act requires a value}"
+            FILTER_VALUE="${2:?ERROR: $1 requires a value}"
             shift 2
             ;;
-        --part)
-            FILTER_MODE="part"
-            FILTER_VALUE="${2:?ERROR: --part requires a value}"
+        --scenes)
+            FILTER_MODE="scenes"
+            FILTER_SCENES="${2:?ERROR: --scenes requires comma-separated scene IDs}"
+            shift 2
+            ;;
+        --from-seq)
+            FILTER_MODE="from_seq"
+            FILTER_FROM_SEQ="${2:?ERROR: --from-seq requires a sequence number}"
             shift 2
             ;;
         -*)
@@ -164,7 +178,10 @@ EFFECTIVE_COACHING=$(get_coaching_level)
 # Prerequisites
 # ============================================================================
 
-check_file_exists "$SCENE_INDEX" "Scene index (scene-index.yaml)"
+# scene-index.yaml is still needed by prompt-builder for scene context
+if [[ ! -f "$SCENE_INDEX" ]]; then
+    log "WARNING: scene-index.yaml not found — prompt builder may have limited context"
+fi
 
 # Voice guide — check common locations
 VOICE_GUIDE_FOUND=false
@@ -190,130 +207,26 @@ if [[ "$VOICE_GUIDE_FOUND" == false ]]; then
 fi
 
 # ============================================================================
-# Build scene list — CSV-first with YAML fallback
+# Build scene list from metadata.csv
 # ============================================================================
 
 METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
 # Fallback to old location
 [[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${SCENES_DIR}/metadata.csv"
-CSV_MODE=false
 
-ALL_SCENE_IDS=()
-if [[ -f "$METADATA_CSV" ]]; then
-    CSV_MODE=true
-    # Read scene IDs from metadata.csv, sorted by seq column, filtering out cut status
-    while IFS= read -r id; do
-        [[ -z "$id" ]] && continue
-        local_status=$(get_csv_field "$METADATA_CSV" "$id" "status")
-        if [[ "$local_status" != "cut" ]]; then
-            ALL_SCENE_IDS+=("$id")
-        fi
-    done < <(awk -F'|' '
-        NR == 1 {
-            for (i = 1; i <= NF; i++) {
-                if ($i == "seq") seq_col = i
-            }
-            next
-        }
-        seq_col { print $1 "|" $seq_col }
-    ' "$METADATA_CSV" | sort -t'|' -k2 -n | cut -d'|' -f1)
-    log "Found ${#ALL_SCENE_IDS[@]} scenes in metadata.csv (CSV mode)"
-else
-    # YAML fallback
-    while IFS= read -r id; do
-        [[ -z "$id" ]] && continue
-        ALL_SCENE_IDS+=("$id")
-    done < <(grep -E '^[[:space:]]*- id:[[:space:]]*' "$SCENE_INDEX" \
-        | sed 's/^[[:space:]]*- id:[[:space:]]*//' \
-        | sed 's/[[:space:]]*$//')
-    log "Found ${#ALL_SCENE_IDS[@]} scenes in scene-index.yaml (YAML mode)"
-fi
-
-if [[ ${#ALL_SCENE_IDS[@]} -eq 0 ]]; then
-    log "ERROR: No scenes found in ${METADATA_CSV:-$SCENE_INDEX}"
-    exit 1
-fi
+build_scene_list "$METADATA_CSV"
 
 # ============================================================================
 # Filter scenes based on arguments
 # ============================================================================
 
-FILTERED_IDS=()
-
 case "$FILTER_MODE" in
-    all)
-        FILTERED_IDS=("${ALL_SCENE_IDS[@]}")
-        ;;
-
-    single)
-        # Verify the scene exists in the index
-        found=false
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            if [[ "$id" == "$RANGE_START" ]]; then
-                found=true
-                break
-            fi
-        done
-        if [[ "$found" == false ]]; then
-            log "ERROR: Scene '${RANGE_START}' not found in scene-index.yaml"
-            exit 1
-        fi
-        FILTERED_IDS=("$RANGE_START")
-        ;;
-
-    range)
-        # Collect all scenes between RANGE_START and RANGE_END (inclusive)
-        in_range=false
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            if [[ "$id" == "$RANGE_START" ]]; then
-                in_range=true
-            fi
-            if [[ "$in_range" == true ]]; then
-                FILTERED_IDS+=("$id")
-            fi
-            if [[ "$id" == "$RANGE_END" ]]; then
-                break
-            fi
-        done
-        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: Could not find range ${RANGE_START} to ${RANGE_END} in scene-index.yaml"
-            exit 1
-        fi
-        ;;
-
-    act)
-        # Match scenes whose ID starts with "act{N}" (case-insensitive)
-        local_pattern="act${FILTER_VALUE}"
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            if [[ "${id,,}" == "${local_pattern,,}"* ]]; then
-                FILTERED_IDS+=("$id")
-            fi
-        done
-        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: No scenes found matching act ${FILTER_VALUE}"
-            exit 1
-        fi
-        ;;
-
-    part)
-        # Match scenes whose ID starts with "part{N}" or whose metadata has part: N
-        local_pattern="part${FILTER_VALUE}"
-        for id in "${ALL_SCENE_IDS[@]}"; do
-            if [[ "${id,,}" == "${local_pattern,,}"* ]]; then
-                FILTERED_IDS+=("$id")
-            else
-                # Check metadata for part field
-                local_part=$(read_scene_field "$id" "$PROJECT_DIR" "part" 2>/dev/null || true)
-                if [[ "$local_part" == "$FILTER_VALUE" ]]; then
-                    FILTERED_IDS+=("$id")
-                fi
-            fi
-        done
-        if [[ ${#FILTERED_IDS[@]} -eq 0 ]]; then
-            log "ERROR: No scenes found matching part ${FILTER_VALUE}"
-            exit 1
-        fi
-        ;;
+    all)       apply_scene_filter "$METADATA_CSV" "all" ;;
+    single)    apply_scene_filter "$METADATA_CSV" "single" "$RANGE_START" ;;
+    range)     apply_scene_filter "$METADATA_CSV" "range" "$RANGE_START" "$RANGE_END" ;;
+    scenes)    apply_scene_filter "$METADATA_CSV" "scenes" "$FILTER_SCENES" ;;
+    act)       apply_scene_filter "$METADATA_CSV" "act" "$FILTER_VALUE" ;;
+    from_seq)  apply_scene_filter "$METADATA_CSV" "from_seq" "$FILTER_FROM_SEQ" ;;
 esac
 
 # ============================================================================
@@ -350,7 +263,7 @@ fi
 # Cost forecasting
 # ============================================================================
 
-if [[ "$DRY_RUN" != true && "$CSV_MODE" == true ]]; then
+if [[ "$DRY_RUN" != true ]]; then
     # Calculate average word count from metadata.csv
     AVG_WORDS=$(awk -F'|' '
         NR == 1 {
@@ -580,11 +493,9 @@ for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
         fi
 
         # Update metadata.csv with word count and status
-        if [[ "$CSV_MODE" == true ]]; then
-            update_csv_field "$METADATA_CSV" "$SCENE_ID" "word_count" "$WORD_COUNT"
-            update_csv_field "$METADATA_CSV" "$SCENE_ID" "status" "drafted"
-            log "Updated metadata.csv: ${SCENE_ID} word_count=${WORD_COUNT} status=drafted"
-        fi
+        update_csv_field "$METADATA_CSV" "$SCENE_ID" "word_count" "$WORD_COUNT"
+        update_csv_field "$METADATA_CSV" "$SCENE_ID" "status" "drafted"
+        log "Updated metadata.csv: ${SCENE_ID} word_count=${WORD_COUNT} status=drafted"
     fi
 
     # 3. Check/create git commit
