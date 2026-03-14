@@ -61,12 +61,12 @@ echo "  -- aggregate_diagnostic_scores --"
 # Create a simplified diagnostics CSV for testing
 TEST_DIAG_CSV="${DIAG_TMPDIR}/test-diagnostics.csv"
 cat > "$TEST_DIAG_CSV" <<'EOF'
-principle|marker_id|question|deficit_if|weight|evidence_required
-alpha|a-1|Is there a problem?|yes|2|Quote it
-alpha|a-2|Is there another problem?|yes|1|Quote it
-alpha|a-3|Is the good thing missing?|yes|1|Quote it
-beta|b-1|First problem check|yes|2|Quote
-beta|b-2|Second problem check|yes|2|Quote
+section|principle|marker_id|question|deficit_if|weight|evidence_required
+test_a|alpha|a-1|Is there a problem?|yes|2|Quote it
+test_a|alpha|a-2|Is there another problem?|yes|1|Quote it
+test_a|alpha|a-3|Is the good thing missing?|yes|1|Quote it
+test_b|beta|b-1|First problem check|yes|2|Quote
+test_b|beta|b-2|Second problem check|yes|2|Quote
 EOF
 
 # Create diagnostic results: alpha has 1 deficit (a-1=YES), 2 clean (a-2=NO, a-3=NO)

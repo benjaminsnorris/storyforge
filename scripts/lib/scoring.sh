@@ -1024,6 +1024,7 @@ _score_icon() {
 # for the Haiku diagnostic prompt. Groups by principle with headers.
 build_diagnostic_markers() {
     local diagnostics_csv="$1"
+    local filter_section="${2:-}"  # Optional: only markers for this section
 
     if [[ ! -f "$diagnostics_csv" ]]; then
         log "WARNING: Diagnostics CSV not found: $diagnostics_csv"
@@ -1033,9 +1034,14 @@ build_diagnostic_markers() {
     local current_principle=""
     local output=""
 
-    while IFS='|' read -r principle marker_id question deficit_if weight evidence_required; do
+    while IFS='|' read -r section principle marker_id question deficit_if weight evidence_required; do
         # Skip header
-        [[ "$principle" == "principle" ]] && continue
+        [[ "$section" == "section" ]] && continue
+
+        # Filter by section if specified
+        if [[ -n "$filter_section" && "$section" != "$filter_section" ]]; then
+            continue
+        fi
 
         # Print principle header when it changes
         if [[ "$principle" != "$current_principle" ]]; then
@@ -1050,6 +1056,21 @@ build_diagnostic_markers() {
     done < "$diagnostics_csv"
 
     echo "$output"
+}
+
+# list_diagnostic_sections(diagnostics_csv)
+# Returns unique section names from the diagnostics CSV, one per line.
+list_diagnostic_sections() {
+    local diagnostics_csv="$1"
+    awk -F'|' 'NR > 1 { if (!seen[$1]++) print $1 }' "$diagnostics_csv"
+}
+
+# count_diagnostic_markers(diagnostics_csv, section)
+# Returns number of markers in a section.
+count_diagnostic_markers() {
+    local diagnostics_csv="$1"
+    local section="$2"
+    awk -F'|' -v s="$section" 'NR > 1 && $1 == s { count++ } END { print count+0 }' "$diagnostics_csv"
 }
 
 # parse_diagnostic_output(log_file, output_dir, scene_id)
@@ -1119,8 +1140,8 @@ aggregate_diagnostic_scores() {
     # Collect all principles in order (unique, preserving first-seen order)
     local principles_ordered=""
     local seen_principles=""
-    while IFS='|' read -r principle marker_id question deficit_if weight evidence_required; do
-        [[ "$principle" == "principle" ]] && continue
+    while IFS='|' read -r section principle marker_id question deficit_if weight evidence_required; do
+        [[ "$section" == "section" ]] && continue
         # Check if already seen using grep on the tracker string
         if ! echo "$seen_principles" | grep -q "|${principle}|"; then
             seen_principles="${seen_principles}|${principle}|"
@@ -1138,15 +1159,14 @@ aggregate_diagnostic_scores() {
 
     awk -F'|' '
         # First file: diagnostics_csv — read marker definitions
+        # Fields: section|principle|marker_id|question|deficit_if|weight|evidence_required
         FNR == NR && FNR == 1 { next }
         FNR == NR {
-            principle = $1
-            marker = $2
-            deficit_if_val = $4
-            weight_val = $5 + 0
+            principle = $2
+            marker = $3
+            weight_val = $6 + 0
 
             marker_principle[marker] = principle
-            marker_deficit_if[marker] = deficit_if_val
             marker_weight[marker] = weight_val
             max_points[principle] += weight_val
 
@@ -1158,6 +1178,7 @@ aggregate_diagnostic_scores() {
             next
         }
         # Second file: diag_file — read diagnostic results
+        # Fields: marker_id|answer|evidence
         FNR == 1 { next }
         {
             marker = $1
@@ -1166,7 +1187,7 @@ aggregate_diagnostic_scores() {
 
             if (marker in marker_principle) {
                 p = marker_principle[marker]
-                # YES = deficit found, NO/CLEAN = no deficit
+                # YES = deficit found, NO = no deficit
                 ans_lower = tolower(answer)
                 if (ans_lower == "yes") {
                     deficit_points[p] += marker_weight[marker]
@@ -1253,15 +1274,14 @@ identify_deep_dive_targets() {
 
     awk -F'|' -v threshold="$threshold" '
         # First file: diagnostics_csv
+        # Fields: section|principle|marker_id|question|deficit_if|weight|evidence_required
         FNR == NR && FNR == 1 { next }
         FNR == NR {
-            marker = $2
-            principle = $1
-            deficit_if_val = $4
-            weight_val = $5 + 0
+            marker = $3
+            principle = $2
+            weight_val = $6 + 0
 
             marker_principle[marker] = principle
-            marker_deficit_if[marker] = deficit_if_val
             marker_weight[marker] = weight_val
             max_points[principle] += weight_val
 
