@@ -12,7 +12,9 @@ set -eo pipefail
 # Enriches intent.csv fields: emotional_arc, characters, threads, motifs
 #
 # Usage:
-#   ./storyforge-enrich                        # All scenes, all fields
+#   ./storyforge-enrich                        # All scenes, batch mode (50% off)
+#   ./storyforge-enrich --direct               # All scenes, real-time parallel
+#   ./storyforge-enrich --interactive          # All scenes, claude -p mode
 #   ./storyforge-enrich --scenes 001,002       # Specific scenes only
 #   ./storyforge-enrich --act 2                # Scenes in act 2 only
 #   ./storyforge-enrich --fields type,threads  # Enrich specific fields only
@@ -37,6 +39,8 @@ DRY_RUN=false
 FORCE=false
 SKIP_TIMELINE=false
 SKIP_DASHBOARD=false
+INTERACTIVE=false
+ENRICH_MODE="batch"    # batch | direct | interactive
 FILTER_MODE="all"
 FILTER_SCENES=""
 FILTER_ACT=""
@@ -60,6 +64,11 @@ phases: free heuristics first (word count, time of day, thread
 recovery), then Claude for remaining gaps (type, location, characters,
 emotional arc, threads, motifs).
 
+Modes (default: batch):
+  (default)         Batch API — 50% cost savings, results in 2-10 minutes
+  --direct          Direct API — real-time parallel calls
+  --interactive, -i Interactive mode — uses claude -p with live feedback
+
 Scope:
   --scenes ID,ID    Enrich specific scenes only (comma-separated slug IDs)
   --act N           Enrich scenes in act/part N only
@@ -77,7 +86,9 @@ Options:
   -h, --help        Show this help
 
 Examples:
-  $(basename "$0")                          # Enrich all scenes (includes timeline)
+  $(basename "$0")                          # Enrich all scenes via Batch API (50% off)
+  $(basename "$0") --direct                 # Enrich all scenes via Direct API
+  $(basename "$0") --interactive            # Enrich with interactive feedback
   $(basename "$0") --skip-timeline          # Enrich without timeline pass
   $(basename "$0") --from-seq 32            # Enrich from scene 32 onward
   $(basename "$0") --from-seq 5-10          # Enrich scenes 5 through 10
@@ -96,6 +107,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --direct)
+            ENRICH_MODE="direct"
+            shift
+            ;;
+        --interactive|-i)
+            INTERACTIVE=true
+            ENRICH_MODE="interactive"
             shift
             ;;
         --skip-dashboard)
@@ -159,6 +179,15 @@ done
 detect_project_root
 log "Project root: ${PROJECT_DIR}"
 
+# --- Require API key for batch/direct modes ---
+if [[ "$ENRICH_MODE" != "interactive" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    log "ERROR: ANTHROPIC_API_KEY not set."
+    log "  Enrichment uses the Anthropic API directly (batch mode by default)."
+    log "  Set it with: export ANTHROPIC_API_KEY=your-key"
+    log "  Or use --interactive for claude -p mode."
+    exit 1
+fi
+
 # --- Project info ---
 PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
 
@@ -187,7 +216,7 @@ fi
 
 # --- Select model (structured extraction -> Haiku) ---
 MODEL=$(select_model "extraction")
-log "Enrichment model: ${MODEL}"
+log "Enrichment model: ${MODEL} (mode: ${ENRICH_MODE})"
 
 # ============================================================================
 # Step 1: Discover scenes — ensure all scene files have metadata rows
@@ -372,9 +401,15 @@ if [[ "$DRY_RUN" == true ]]; then
     (( SCENE_COUNT > 0 )) && AVG_WORDS=$((AVG_WORDS / SCENE_COUNT))
     ENRICH_COST=$(estimate_cost "evaluate" "$SCENE_COUNT" "$AVG_WORDS" "$MODEL")
 
+    # Apply batch discount to dry-run estimate
+    if [[ "$ENRICH_MODE" == "batch" ]]; then
+        ENRICH_COST=$(awk "BEGIN { printf \"%.2f\", $ENRICH_COST * 0.5 }")
+    fi
+
     log "============================================"
     log "DRY RUN — Enrichment Plan"
     log "============================================"
+    log "Mode:     ${ENRICH_MODE}"
     log "Scenes needing enrichment: ${SCENE_COUNT}"
     log "Fields:   ${ENRICH_FIELDS}"
     log "Parallel: ${PARALLEL}"
@@ -573,7 +608,13 @@ done
 (( WC_COUNT > 0 )) && AVG_WORDS=$((TOTAL_WC / WC_COUNT)) || AVG_WORDS=800
 
 ENRICH_COST=$(estimate_cost "evaluate" "$CLAUDE_COUNT" "$AVG_WORDS" "$MODEL")
-log "Cost forecast: ~\$${ENRICH_COST} (${CLAUDE_COUNT} scenes needing Claude, avg ${AVG_WORDS} words/scene)"
+# Batch API is 50% off
+if [[ "$ENRICH_MODE" == "batch" ]]; then
+    ENRICH_COST=$(awk "BEGIN { printf \"%.2f\", $ENRICH_COST * 0.5 }")
+    log "Cost forecast: ~\$${ENRICH_COST} (${CLAUDE_COUNT} calls via Batch API, 50% off, avg ${AVG_WORDS} words/scene)"
+else
+    log "Cost forecast: ~\$${ENRICH_COST} (${CLAUDE_COUNT} ${MODEL} calls via ${ENRICH_MODE^} API, avg ${AVG_WORDS} words/scene)"
+fi
 
 check_cost_threshold "$ENRICH_COST" || { log "Cost threshold check declined. Aborting."; exit 1; }
 
@@ -581,6 +622,7 @@ check_cost_threshold "$ENRICH_COST" || { log "Cost threshold check declined. Abo
 PR_BODY="## Metadata Enrichment
 
 **Project:** ${PROJECT_TITLE}
+**Mode:** ${ENRICH_MODE}
 **Phase 1 (free):** ${FREE_ENRICHED} fields updated (word count, time_of_day)
 **Phase 2 (Claude):** ${CLAUDE_COUNT} scenes (of ${SCENE_COUNT} total)
 **Fields:** ${ENRICH_FIELDS}
@@ -595,9 +637,8 @@ PR_BODY="## Metadata Enrichment
 create_draft_pr "Enrich: ${PROJECT_TITLE} (${CLAUDE_COUNT} scenes)" "$PR_BODY" "$PROJECT_DIR" "enrichment" 2>/dev/null || true
 
 log "============================================"
-log "Phase 2: Claude enrichment (${CLAUDE_COUNT} scenes)"
+log "Phase 2: Claude enrichment (${CLAUDE_COUNT} scenes, mode: ${ENRICH_MODE})"
 log "============================================"
-log "Parallel workers: ${PARALLEL}"
 
 # Helper: build a TARGETED enrichment prompt (only asks for missing fields)
 build_enrich_prompt() {
@@ -669,161 +710,313 @@ validate_time_of_day() {
     esac
 }
 
-batch_start=0
-while (( batch_start < CLAUDE_COUNT )); do
-    batch_pids=()
-    batch_ids=()
-    batch_end=$(( batch_start + PARALLEL ))
-    (( batch_end > CLAUDE_COUNT )) && batch_end=$CLAUDE_COUNT
+# Helper: parse a response text into a result file (pipe-delimited key|value pairs)
+# Used by all three modes to process the extracted text identically.
+parse_enrich_response() {
+    local response="$1"
+    local result_file="$2"
 
-    # Launch batch
-    for (( i=batch_start; i<batch_end; i++ )); do
-        id="${CLAUDE_IDS[$i]}"
-        batch_ids+=("$id")
-        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-        log "  Launching enrichment for ${local_title:-$id} ($((i+1))/${CLAUDE_COUNT})..."
+    if [[ -n "$response" ]]; then
+        type_val=$(echo "$response" | grep "^TYPE:" | sed 's/^TYPE:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+        location_val=$(echo "$response" | grep "^LOCATION:" | sed 's/^LOCATION:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+        time_of_day_val=$(echo "$response" | grep "^TIME_OF_DAY:" | sed 's/^TIME_OF_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+        characters_val=$(echo "$response" | grep "^CHARACTERS:" | sed 's/^CHARACTERS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+        emotional_arc_val=$(echo "$response" | grep "^EMOTIONAL_ARC:" | sed 's/^EMOTIONAL_ARC:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+        threads_val=$(echo "$response" | grep "^THREADS:" | sed 's/^THREADS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+        motifs_val=$(echo "$response" | grep "^MOTIFS:" | sed 's/^MOTIFS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
 
-        (
-            # Worker subshell
-            prompt=$(build_enrich_prompt "$id")
-            log_file="${LOG_DIR}/enrich-${id}.log"
-            result_file="${ENRICH_DIR}/.enrich-${id}.txt"
+        # Normalize against alias maps
+        if [[ -n "$CHAR_MAP" ]]; then
+            characters_val=$(normalize_aliases "$CHAR_MAP" "$characters_val")
+        fi
+        if [[ -n "$MOTIF_MAP" ]]; then
+            motifs_val=$(normalize_aliases "$MOTIF_MAP" "$motifs_val")
+        fi
+        if [[ -n "$LOCATION_MAP" && -n "$location_val" ]]; then
+            location_val=$(normalize_aliases "$LOCATION_MAP" "$location_val")
+        fi
 
-            _SF_INVOCATION_START=$(date +%s)
-            export _SF_INVOCATION_START
+        # Validate
+        type_val=$(validate_type "$type_val")
+        time_of_day_val=$(validate_time_of_day "$time_of_day_val")
 
-            begin_healing_zone "enrich invocation"
+        # Write results to temp file
+        {
+            echo "TYPE|${type_val}"
+            echo "LOCATION|${location_val}"
+            echo "TIME_OF_DAY|${time_of_day_val}"
+            echo "CHARACTERS|${characters_val}"
+            echo "EMOTIONAL_ARC|${emotional_arc_val}"
+            echo "THREADS|${threads_val}"
+            echo "MOTIFS|${motifs_val}"
+            echo "STATUS|ok"
+        } > "$result_file"
+    else
+        echo "STATUS|fail" > "$result_file"
+    fi
+}
 
-            claude -p "$prompt" \
-                --model "$MODEL" \
-                --dangerously-skip-permissions \
-                --output-format stream-json \
-                --verbose \
-                > "$log_file" 2>&1 || true
+# Helper: apply a result file to CSVs for one scene
+apply_enrich_result() {
+    local id="$1"
+    local result_file="$2"
+    local local_title
+    local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
 
-            end_healing_zone
+    if [[ ! -f "$result_file" ]]; then
+        FAILED=$((FAILED + 1))
+        log "  WARNING: No results for ${id}"
+        return
+    fi
 
-            # Extract text content using shared extraction function
-            response=$(extract_claude_response "$log_file" 2>/dev/null || true)
+    status_val=$(grep "^STATUS|" "$result_file" | cut -d'|' -f2)
+    if [[ "$status_val" != "ok" ]]; then
+        FAILED=$((FAILED + 1))
+        log "  WARNING: Failed to enrich ${id}"
+        rm -f "$result_file"
+        return
+    fi
 
-            # Log usage
-            log_usage "$log_file" "enrich" "$id" "$MODEL"
+    # Apply each field if it was requested and is currently empty (or force)
+    for field in "${FIELDS_ARRAY[@]}"; do
+        # Map field name to result file key
+        result_key=""
+        case "$field" in
+            type)           result_key="TYPE" ;;
+            location)       result_key="LOCATION" ;;
+            time_of_day)    result_key="TIME_OF_DAY" ;;
+            characters)     result_key="CHARACTERS" ;;
+            emotional_arc)  result_key="EMOTIONAL_ARC" ;;
+            threads)        result_key="THREADS" ;;
+            motifs)         result_key="MOTIFS" ;;
+        esac
 
-            # Parse response into result file
-            if [[ -n "$response" ]]; then
-                type_val=$(echo "$response" | grep "^TYPE:" | sed 's/^TYPE:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-                location_val=$(echo "$response" | grep "^LOCATION:" | sed 's/^LOCATION:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-                time_of_day_val=$(echo "$response" | grep "^TIME_OF_DAY:" | sed 's/^TIME_OF_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-                characters_val=$(echo "$response" | grep "^CHARACTERS:" | sed 's/^CHARACTERS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-                emotional_arc_val=$(echo "$response" | grep "^EMOTIONAL_ARC:" | sed 's/^EMOTIONAL_ARC:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-                threads_val=$(echo "$response" | grep "^THREADS:" | sed 's/^THREADS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-                motifs_val=$(echo "$response" | grep "^MOTIFS:" | sed 's/^MOTIFS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+        [[ -z "$result_key" ]] && continue
 
-                # Normalize against alias maps
-                if [[ -n "$CHAR_MAP" ]]; then
-                    characters_val=$(normalize_aliases "$CHAR_MAP" "$characters_val")
-                fi
-                if [[ -n "$MOTIF_MAP" ]]; then
-                    motifs_val=$(normalize_aliases "$MOTIF_MAP" "$motifs_val")
-                fi
-                if [[ -n "$LOCATION_MAP" && -n "$location_val" ]]; then
-                    location_val=$(normalize_aliases "$LOCATION_MAP" "$location_val")
-                fi
+        new_val=$(grep "^${result_key}|" "$result_file" | cut -d'|' -f2-)
+        [[ -z "$new_val" ]] && continue
 
-                # Validate
-                type_val=$(validate_type "$type_val")
-                time_of_day_val=$(validate_time_of_day "$time_of_day_val")
+        # Check if field already has data (skip unless force)
+        current_val=""
+        if is_metadata_field "$field"; then
+            current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
+        elif is_intent_field "$field"; then
+            current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
+        fi
 
-                # Write results to temp file (pipe-delimited key|value pairs)
-                {
-                    echo "TYPE|${type_val}"
-                    echo "LOCATION|${location_val}"
-                    echo "TIME_OF_DAY|${time_of_day_val}"
-                    echo "CHARACTERS|${characters_val}"
-                    echo "EMOTIONAL_ARC|${emotional_arc_val}"
-                    echo "THREADS|${threads_val}"
-                    echo "MOTIFS|${motifs_val}"
-                    echo "STATUS|ok"
-                } > "$result_file"
-            else
-                echo "STATUS|fail" > "$result_file"
-            fi
-        ) &
-        batch_pids+=($!)
-        register_child_pid $!
+        if [[ -n "$current_val" ]] && [[ "$FORCE" != true ]]; then
+            continue
+        fi
+
+        # Update the appropriate CSV
+        if is_metadata_field "$field"; then
+            update_csv_field "$METADATA_CSV" "$id" "$field" "$new_val"
+        elif is_intent_field "$field"; then
+            update_csv_field "$INTENT_CSV" "$id" "$field" "$new_val"
+        fi
     done
 
-    # Wait for batch to complete
-    for pid in "${batch_pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
-        unregister_child_pid "$pid" 2>/dev/null || true
+    ENRICHED=$((ENRICHED + 1))
+    log "  Enriched ${local_title:-$id} (${ENRICHED}/${CLAUDE_COUNT})"
+    rm -f "$result_file"
+}
+
+case "$ENRICH_MODE" in
+
+# ================================================================
+# BATCH MODE (default): Submit all scenes via Batch API
+# ================================================================
+batch)
+    log ""
+    log "Building batch request for ${CLAUDE_COUNT} scenes..."
+
+    BATCH_FILE="${ENRICH_DIR}/.batch-requests.jsonl"
+    rm -f "$BATCH_FILE"
+
+    for id in "${CLAUDE_IDS[@]}"; do
+        prompt=$(build_enrich_prompt "$id")
+        jq -nc --arg id "$id" --arg model "$MODEL" --arg prompt "$prompt" '{
+            custom_id: $id,
+            params: {
+                model: $model,
+                max_tokens: 4096,
+                messages: [{role: "user", content: $prompt}]
+            }
+        }' >> "$BATCH_FILE"
     done
 
-    # Apply results from temp files to CSVs
-    for id in "${batch_ids[@]}"; do
-        local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+    log "Submitting batch ($(wc -c < "$BATCH_FILE" | tr -d ' ') bytes)..."
+
+    BATCH_ID=$(submit_batch "$BATCH_FILE") || { log "ERROR: Batch submission failed"; exit 1; }
+    log "Batch submitted: ${BATCH_ID}"
+    log "Polling for results..."
+    poll_batch "$BATCH_ID"
+    log "Batch complete. Downloading results..."
+    download_batch_results "$BATCH_ID" "$ENRICH_DIR" "$LOG_DIR"
+
+    # Process parsed results
+    for id in "${CLAUDE_IDS[@]}"; do
+        status_file="${ENRICH_DIR}/.status-${id}"
+        text_file="${LOG_DIR}/${id}.txt"
+        json_file="${LOG_DIR}/${id}.json"
         result_file="${ENRICH_DIR}/.enrich-${id}.txt"
 
-        if [[ ! -f "$result_file" ]]; then
+        if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]] && [[ -f "$text_file" ]]; then
+            # Log usage from the JSON response
+            log_api_usage "$json_file" "enrich" "$id" "$MODEL"
+
+            # Parse the text output into result file
+            response=$(cat "$text_file")
+            parse_enrich_response "$response" "$result_file"
+
+            # Apply result to CSVs
+            apply_enrich_result "$id" "$result_file"
+        else
             FAILED=$((FAILED + 1))
-            log "  WARNING: No results for ${id}"
-            continue
+            log "  WARNING: Failed ${id}"
         fi
-
-        status_val=$(grep "^STATUS|" "$result_file" | cut -d'|' -f2)
-        if [[ "$status_val" != "ok" ]]; then
-            FAILED=$((FAILED + 1))
-            log "  WARNING: Failed to enrich ${id}"
-            rm -f "$result_file"
-            continue
-        fi
-
-        # Apply each field if it was requested and is currently empty (or force)
-        for field in "${FIELDS_ARRAY[@]}"; do
-            # Map field name to result file key
-            result_key=""
-            case "$field" in
-                type)           result_key="TYPE" ;;
-                location)       result_key="LOCATION" ;;
-                time_of_day)    result_key="TIME_OF_DAY" ;;
-                characters)     result_key="CHARACTERS" ;;
-                emotional_arc)  result_key="EMOTIONAL_ARC" ;;
-                threads)        result_key="THREADS" ;;
-                motifs)         result_key="MOTIFS" ;;
-            esac
-
-            [[ -z "$result_key" ]] && continue
-
-            new_val=$(grep "^${result_key}|" "$result_file" | cut -d'|' -f2-)
-            [[ -z "$new_val" ]] && continue
-
-            # Check if field already has data (skip unless force)
-            current_val=""
-            if is_metadata_field "$field"; then
-                current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
-            elif is_intent_field "$field"; then
-                current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
-            fi
-
-            if [[ -n "$current_val" ]] && [[ "$FORCE" != true ]]; then
-                continue
-            fi
-
-            # Update the appropriate CSV
-            if is_metadata_field "$field"; then
-                update_csv_field "$METADATA_CSV" "$id" "$field" "$new_val"
-            elif is_intent_field "$field"; then
-                update_csv_field "$INTENT_CSV" "$id" "$field" "$new_val"
-            fi
-        done
-
-        ENRICHED=$((ENRICHED + 1))
-        log "  Enriched ${local_title:-$id} (${ENRICHED}/${SCENE_COUNT})"
-        rm -f "$result_file"
+        rm -f "$status_file" "$text_file" "$json_file"
     done
 
-    batch_start=$batch_end
-done
+    # Clean up batch temp files
+    rm -f "$BATCH_FILE"
+    ;;
+
+# ================================================================
+# DIRECT MODE: Parallel real-time API calls
+# ================================================================
+direct)
+    log "Parallel workers: ${PARALLEL}"
+    log ""
+
+    batch_start=0
+    while (( batch_start < CLAUDE_COUNT )); do
+        batch_pids=()
+        batch_ids=()
+        batch_end=$(( batch_start + PARALLEL ))
+        (( batch_end > CLAUDE_COUNT )) && batch_end=$CLAUDE_COUNT
+
+        # Launch batch
+        for (( i=batch_start; i<batch_end; i++ )); do
+            id="${CLAUDE_IDS[$i]}"
+            batch_ids+=("$id")
+            local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            log "  Launching enrichment for ${local_title:-$id} ($((i+1))/${CLAUDE_COUNT})..."
+
+            (
+                # Worker subshell
+                prompt=$(build_enrich_prompt "$id")
+                log_file="${LOG_DIR}/enrich-${id}.json"
+                result_file="${ENRICH_DIR}/.enrich-${id}.txt"
+
+                _SF_INVOCATION_START=$(date +%s)
+                export _SF_INVOCATION_START
+
+                begin_healing_zone "enrich invocation"
+
+                if invoke_anthropic_api "$prompt" "$MODEL" "$log_file" 4096; then
+                    log_api_usage "$log_file" "enrich" "$id" "$MODEL"
+
+                    response=$(extract_api_response "$log_file" 2>/dev/null || true)
+                    parse_enrich_response "$response" "$result_file"
+                else
+                    log_api_usage "$log_file" "enrich" "$id" "$MODEL"
+                    echo "STATUS|fail" > "$result_file"
+                fi
+
+                end_healing_zone
+            ) &
+            batch_pids+=($!)
+            register_child_pid $!
+        done
+
+        # Wait for batch to complete
+        for pid in "${batch_pids[@]}"; do
+            wait "$pid" 2>/dev/null || true
+            unregister_child_pid "$pid" 2>/dev/null || true
+        done
+
+        # Apply results from temp files to CSVs
+        for id in "${batch_ids[@]}"; do
+            result_file="${ENRICH_DIR}/.enrich-${id}.txt"
+            apply_enrich_result "$id" "$result_file"
+        done
+
+        batch_start=$batch_end
+    done
+    ;;
+
+# ================================================================
+# INTERACTIVE MODE: claude -p with live feedback
+# ================================================================
+interactive)
+    log "Parallel workers: ${PARALLEL}"
+    log ""
+
+    batch_start=0
+    while (( batch_start < CLAUDE_COUNT )); do
+        batch_pids=()
+        batch_ids=()
+        batch_end=$(( batch_start + PARALLEL ))
+        (( batch_end > CLAUDE_COUNT )) && batch_end=$CLAUDE_COUNT
+
+        # Launch batch
+        for (( i=batch_start; i<batch_end; i++ )); do
+            id="${CLAUDE_IDS[$i]}"
+            batch_ids+=("$id")
+            local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+            log "  Launching enrichment for ${local_title:-$id} ($((i+1))/${CLAUDE_COUNT})..."
+
+            (
+                # Worker subshell
+                prompt=$(build_enrich_prompt "$id")
+                log_file="${LOG_DIR}/enrich-${id}.log"
+                result_file="${ENRICH_DIR}/.enrich-${id}.txt"
+
+                _SF_INVOCATION_START=$(date +%s)
+                export _SF_INVOCATION_START
+
+                begin_healing_zone "enrich invocation"
+
+                claude -p "$prompt" \
+                    --model "$MODEL" \
+                    --dangerously-skip-permissions \
+                    --output-format stream-json \
+                    --verbose \
+                    > "$log_file" 2>&1 || true
+
+                end_healing_zone
+
+                # Extract text content using shared extraction function
+                response=$(extract_claude_response "$log_file" 2>/dev/null || true)
+
+                # Log usage
+                log_usage "$log_file" "enrich" "$id" "$MODEL"
+
+                # Parse response into result file
+                parse_enrich_response "$response" "$result_file"
+            ) &
+            batch_pids+=($!)
+            register_child_pid $!
+        done
+
+        # Wait for batch to complete
+        for pid in "${batch_pids[@]}"; do
+            wait "$pid" 2>/dev/null || true
+            unregister_child_pid "$pid" 2>/dev/null || true
+        done
+
+        # Apply results from temp files to CSVs
+        for id in "${batch_ids[@]}"; do
+            result_file="${ENRICH_DIR}/.enrich-${id}.txt"
+            apply_enrich_result "$id" "$result_file"
+        done
+
+        batch_start=$batch_end
+    done
+    ;;
+
+esac
 
 log ""
 log "Enrichment complete: ${ENRICHED} scenes enriched, ${FAILED} failures"
@@ -913,7 +1106,7 @@ log "Committing enrichment results..."
     git add "working/costs/" 2>/dev/null || true
     git add "working/logs/" 2>/dev/null || true
     git add "working/enrich/" 2>/dev/null || true
-    git commit -m "Enrich: metadata for ${ENRICHED} scenes (${ENRICH_FIELDS})" 2>/dev/null || true
+    git commit -m "Enrich: metadata for ${ENRICHED} scenes (${ENRICH_MODE} mode, ${ENRICH_FIELDS})" 2>/dev/null || true
     git push 2>/dev/null || true
 )
 
