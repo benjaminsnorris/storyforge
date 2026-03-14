@@ -215,7 +215,7 @@ git commit -m "Score: add novel-level narrative framework scoring pass"
 **Files:**
 - Modify: `scripts/storyforge-visualize` (add HTML panel + JS render function + data injection)
 
-- [ ] **Step 1: Add data injection for narrative scores**
+- [x] **Step 1: Add data injection for narrative scores**
 
 In the data injection section (around line 659-668 where CSV data is converted to JSON), add:
 
@@ -237,7 +237,7 @@ Inject into the HTML template:
 const NARRATIVE_SCORES = ${NARRATIVE_JSON};
 ```
 
-- [ ] **Step 2: Add HTML panel after the heatmap section**
+- [x] **Step 2: Add HTML panel after the heatmap section**
 
 After the heatmap `</div>` (around line 628), insert:
 
@@ -253,7 +253,7 @@ After the heatmap `</div>` (around line 628), insert:
 </div>
 ```
 
-- [ ] **Step 3: Add radar chart render function**
+- [x] **Step 3: Add radar chart render function**
 
 After the heatmap render function, add the narrative radar renderer:
 
@@ -356,12 +356,12 @@ After the heatmap render function, add the narrative radar renderer:
 })();
 ```
 
-- [ ] **Step 4: Test dashboard generation**
+- [x] **Step 4: Test dashboard generation**
 
 Run `./storyforge visualize` from a novel project with scores.
 Expected: Dashboard generates without errors. If narrative scores exist, radar chart appears.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/storyforge-visualize
