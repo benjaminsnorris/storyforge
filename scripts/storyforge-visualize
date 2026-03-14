@@ -176,11 +176,11 @@ cat > "$DASHBOARD_FILE" << 'HTMLEOF'
     --type-transition: #8b5cf6;
     --type-confrontation: #ec4899;
 
-    --score-low: #dc2626;
-    --score-mid-low: #d97706;
-    --score-mid: #a3a3a3;
+    --score-low: #18181b;
+    --score-mid-low: #dc2626;
+    --score-mid: #d97706;
     --score-mid-high: #16a34a;
-    --score-high: #059669;
+    --score-high: #2563eb;
 
     --shadow: 0 1px 3px rgba(44,36,32,0.06);
     --shadow-elevated: 0 4px 16px rgba(44,36,32,0.1);
@@ -210,11 +210,11 @@ cat > "$DASHBOARD_FILE" << 'HTMLEOF'
         --type-transition: #a78bfa;
         --type-confrontation: #f472b6;
 
-        --score-low: #f87171;
-        --score-mid-low: #fbbf24;
-        --score-mid: #737373;
+        --score-low: #3f3f46;
+        --score-mid-low: #f87171;
+        --score-mid: #fbbf24;
         --score-mid-high: #4ade80;
-        --score-high: #34d399;
+        --score-high: #60a5fa;
 
         --shadow: 0 1px 3px rgba(0,0,0,0.3);
         --shadow-elevated: 0 4px 16px rgba(0,0,0,0.4);
@@ -867,7 +867,7 @@ function updateDetailPanel(sceneId) {
             if (k === 'id') continue;
             const num = parseInt(v);
             if (isNaN(num)) continue;
-            const color = num >= 4 ? 'var(--score-high)' : num >= 3 ? 'var(--score-mid-high)' : num >= 2 ? 'var(--score-mid-low)' : 'var(--score-low)';
+            const color = num >= 5 ? 'var(--score-high)' : num >= 4 ? 'var(--score-mid-high)' : num >= 3 ? 'var(--score-mid)' : num >= 2 ? 'var(--score-mid-low)' : 'var(--score-low)';
             html += `<span class="sg-label">${k.replace(/_/g, ' ')}</span><span class="sg-value" style="color:${color}">${num}</span>`;
         }
         html += '</div></div>';
