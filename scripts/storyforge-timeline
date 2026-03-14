@@ -480,12 +480,18 @@ ${id}|<day>"
 
     begin_healing_zone "timeline phase 2 assignment"
 
+    # Run claude in background so we can track its PID for interrupt handling
     claude -p "$timeline_prompt" \
         --model "$SONNET_MODEL" \
         --dangerously-skip-permissions \
         --output-format stream-json \
         --verbose \
-        > "$tl_log" 2>&1 || true
+        > "$tl_log" 2>&1 &
+    local claude_pid=$!
+    register_child_pid $claude_pid
+
+    wait "$claude_pid" 2>/dev/null || true
+    unregister_child_pid "$claude_pid" 2>/dev/null || true
 
     end_healing_zone
 
