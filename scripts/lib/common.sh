@@ -738,6 +738,7 @@ monitor_progress() {
 #   mechanical   — continuity, fact-checking, thread tracking (low creativity)
 #   evaluation   — evaluator agents (analytical, structured output)
 #   synthesis    — cross-evaluator reconciliation (high reasoning)
+#   extraction   — lightweight signal extraction (low cost, high speed)
 #   review       — pipeline QA (structured, bounded, mechanical)
 #
 # Usage: model=$(select_model "drafting")
@@ -755,6 +756,7 @@ select_model() {
         revision)    echo "claude-opus-4-6" ;;
         mechanical)  echo "claude-sonnet-4-6" ;;
         evaluation)  echo "claude-sonnet-4-6" ;;
+        extraction)  echo "claude-haiku-4-5-20251001" ;;
         synthesis)   echo "claude-opus-4-6" ;;
         review)      echo "claude-sonnet-4-6" ;;
         *)           echo "claude-opus-4-6" ;;

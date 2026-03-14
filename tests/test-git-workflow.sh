@@ -268,6 +268,9 @@ assert_equals "claude-sonnet-4-6" "$result" "select_model: mechanical uses sonne
 result=$(select_model "review")
 assert_equals "claude-sonnet-4-6" "$result" "select_model: review uses sonnet"
 
+result=$(select_model "extraction")
+assert_equals "claude-haiku-4-5-20251001" "$result" "select_model: extraction uses haiku"
+
 result=$(select_model "unknown-type")
 assert_equals "claude-opus-4-6" "$result" "select_model: unknown type defaults to opus"
 
