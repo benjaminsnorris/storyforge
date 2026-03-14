@@ -724,10 +724,9 @@ $(echo "$character_list" | sed 's/^/- /')"
         _SF_INVOCATION_START=$(date +%s)
         export _SF_INVOCATION_START
 
-        local api_log="${LOG_DIR}/score-novel-level.json"
+        api_log="${LOG_DIR}/score-novel-level.json"
         if invoke_anthropic_api "$prompt" "$SONNET_MODEL" "$api_log" 4096; then
             # Extract text for parse_score_output compatibility
-            local novel_text
             novel_text=$(extract_api_response "$api_log") || true
             echo "$novel_text" > "$log_file"
             log_api_usage "$api_log" "score" "novel-level" "$SONNET_MODEL"
