@@ -1185,6 +1185,8 @@ ensure_all_labels() {
     ensure_label "evaluation"     "d93f0b" "Multi-agent evaluation panel"           "$project_dir"
     ensure_label "revision"       "c5def5" "Revision pass execution"               "$project_dir"
     ensure_label "assembly"       "bfdadc" "Manuscript assembly and production"     "$project_dir"
+    ensure_label "scoring"        "fbca04" "Principled craft scoring"               "$project_dir"
+    ensure_label "enrichment"     "d4c5f9" "Metadata enrichment"                    "$project_dir"
 }
 
 # Create a draft PR for the current branch.
