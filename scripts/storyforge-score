@@ -519,14 +519,20 @@ batch)
 
     log "Submitting batch ($(wc -c < "$BATCH_FILE" | tr -d ' ') bytes)..."
 
+    # Build the request body as a file to avoid "Argument list too long" on large batches
+    BATCH_BODY="${TMPDIR:-/tmp}/storyforge-batch-body-$$.json"
+    jq -s '{requests: .}' "$BATCH_FILE" > "$BATCH_BODY"
+
     BATCH_RESPONSE=$(curl -s "https://api.anthropic.com/v1/messages/batches" \
         -H "x-api-key: ${ANTHROPIC_API_KEY}" \
         -H "anthropic-version: 2023-06-01" \
         -H "content-type: application/json" \
-        -d "{\"requests\": $(jq -s '.' "$BATCH_FILE")}") || {
+        -d @"$BATCH_BODY") || {
+        rm -f "$BATCH_BODY"
         log "ERROR: Failed to submit batch"
         exit 1
     }
+    rm -f "$BATCH_BODY"
 
     BATCH_ID=$(echo "$BATCH_RESPONSE" | jq -r '.id // empty')
     if [[ -z "$BATCH_ID" ]]; then
