@@ -123,6 +123,8 @@ log "Generating manuscript dashboard for ${PROJECT_TITLE}..."
 # --- Build JSON data ---
 SCENES_JSON="[$(csv_to_json "$METADATA_CSV")]"
 INTENTS_JSON="[$(csv_to_json "$INTENT_CSV")]"
+CHARACTERS_CSV="${PROJECT_DIR}/reference/characters.csv"
+CHARACTERS_JSON="[$(csv_to_json "$CHARACTERS_CSV")]"
 SCORES_JSON="[$(csv_to_json "$SCORES_CSV")]"
 WEIGHTS_JSON="[$(csv_to_json "$WEIGHTS_CSV")]"
 
@@ -653,6 +655,7 @@ HTMLEOF
 cat >> "$DASHBOARD_FILE" << EOF
 const SCENES = ${SCENES_JSON};
 const INTENTS = ${INTENTS_JSON};
+const CHARACTERS = ${CHARACTERS_JSON};
 const SCORES = ${SCORES_JSON};
 const WEIGHTS = ${WEIGHTS_JSON};
 const PROJECT = ${PROJECT_JSON};
@@ -686,6 +689,25 @@ const scoreById = {};
 SCENES.forEach(s => { sceneById[s.id] = s; });
 INTENTS.forEach(i => { intentById[i.id] = i; });
 SCORES.forEach(s => { scoreById[s.id] = s; });
+
+// Build character alias map: {lowercase_alias: canonical_name}
+const charAliasMap = {};
+CHARACTERS.forEach(c => {
+    if (!c.name) return;
+    charAliasMap[c.name.toLowerCase()] = c.name;
+    if (c.aliases) {
+        c.aliases.split(';').forEach(a => {
+            a = a.trim();
+            if (a) charAliasMap[a.toLowerCase()] = c.name;
+        });
+    }
+});
+
+// Normalize a character name against the alias map
+function normalizeChar(name) {
+    if (!name) return name;
+    return charAliasMap[name.toLowerCase().trim()] || name.trim();
+}
 
 // Parse scenes sorted by seq
 const sortedScenes = [...SCENES].sort((a, b) => (+a.seq) - (+b.seq));
@@ -982,13 +1004,14 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     INTENTS.forEach(intent => {
         const chars = (intent.characters || '').split(';').map(c => c.trim()).filter(Boolean);
         chars.forEach(c => {
-            charFreq[c] = (charFreq[c] || 0) + 1;
+            const normalized = normalizeChar(c);
+            charFreq[normalized] = (charFreq[normalized] || 0) + 1;
         });
     });
 
-    // Also add POV characters
+    // Also add POV characters (normalized to match intent characters)
     sortedScenes.forEach(s => {
-        const p = (s.pov || '').toLowerCase().trim();
+        const p = normalizeChar(s.pov || '');
         if (p) charFreq[p] = (charFreq[p] || 0) + 1;
     });
 
@@ -1016,9 +1039,9 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
         sortedScenes.forEach((s, ci) => {
             const intent = intentById[s.id];
-            const chars = intent ? (intent.characters || '').toLowerCase().split(';').map(c => c.trim()) : [];
-            const isPov = (s.pov || '').toLowerCase() === char.toLowerCase();
-            const isPresent = chars.includes(char.toLowerCase());
+            const chars = intent ? (intent.characters || '').split(';').map(c => normalizeChar(c)) : [];
+            const isPov = normalizeChar(s.pov || '') === char;
+            const isPresent = chars.includes(char);
 
             if (isPov || isPresent) {
                 const cx = LABEL_W + ci * COL_W + COL_W / 2;

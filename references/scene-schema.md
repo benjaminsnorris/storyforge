@@ -41,7 +41,7 @@ If a project has `scenes/scene-index.yaml` but no `scene-metadata.csv`, it is us
 | `id` | string | Scene ID — must match the `id` in metadata.csv. |
 | `function` | string | Why this scene exists for the story. Must be specific — not "advance the plot" but "she discovers he kept the letter." A scene without a clear function should be cut or merged. |
 | `emotional_arc` | string | The emotional journey within the scene. Where does the reader start and end emotionally? |
-| `characters` | array | All characters present or referenced in the scene. Semicolon separated (e.g., `Dorren Hayle;Tessa Merrin;Pell`). |
+| `characters` | array | All characters present or referenced in the scene. Semicolon separated (e.g., `Dorren Hayle;Tessa Merrin;Pell`). When `reference/characters.csv` exists, names are normalized against canonical entries during enrichment and visualization. |
 | `threads` | array | Story threads this scene touches. Semicolon separated. Must match threads tracked in the continuity tracker. |
 | `motifs` | array | Motifs or recurring elements that appear in this scene. Semicolon separated. |
 | `notes` | string | Free-form notes about the scene. |

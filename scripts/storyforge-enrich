@@ -607,6 +607,17 @@ else
 fi
 
 # ============================================================================
+# Step 6.5: Load character aliases for normalization (if characters.csv exists)
+# ============================================================================
+
+CHARACTERS_CSV="${PROJECT_DIR}/reference/characters.csv"
+ALIASES_FILE=""
+if [[ -f "$CHARACTERS_CSV" ]]; then
+    ALIASES_FILE=$(load_character_aliases "$CHARACTERS_CSV")
+    log "Loaded character aliases from characters.csv"
+fi
+
+# ============================================================================
 # Step 7: Claude enrichment for remaining gaps
 # ============================================================================
 
@@ -786,6 +797,11 @@ while (( batch_start < CLAUDE_COUNT )); do
                 threads_val=$(echo "$response" | grep "^THREADS:" | sed 's/^THREADS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
                 motifs_val=$(echo "$response" | grep "^MOTIFS:" | sed 's/^MOTIFS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
 
+                # Normalize character names against characters.csv
+                if [[ -n "$ALIASES_FILE" ]]; then
+                    characters_val=$(normalize_characters "$ALIASES_FILE" "$characters_val")
+                fi
+
                 # Validate
                 type_val=$(validate_type "$type_val")
                 timeline_day_val=$(validate_timeline_day "$timeline_day_val")
@@ -886,6 +902,9 @@ log ""
 log "Enrichment complete: ${ENRICHED} scenes enriched, ${FAILED} failures"
 
 fi  # end if CLAUDE_COUNT > 0
+
+# Clean up aliases temp file
+[[ -n "$ALIASES_FILE" ]] && rm -f "$ALIASES_FILE"
 
 # ============================================================================
 # Update PR tasks

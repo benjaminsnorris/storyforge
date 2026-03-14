@@ -138,6 +138,8 @@ Present the author with two options:
 > ```
 > Add `--dry-run` to preview. Add `--fields type,characters` for specific fields. Add `--act 2` for one act.
 
+**Character name normalization:** If `reference/characters.csv` exists, the enrichment script automatically normalizes extracted character names against it — resolving aliases like "Maren" to "Maren Cole". For best results, create `characters.csv` from the character bible before running enrichment. The dashboard also normalizes at render time as a safety net.
+
 After enrichment, suggest generating the dashboard: "Run `/storyforge:visualize` to see your book's structure."
 
 ---

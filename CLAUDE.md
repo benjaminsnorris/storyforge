@@ -53,6 +53,10 @@ Before writing new code, check if a shared function already exists. Duplicating 
 - `apply_scene_filter(metadata_csv, mode, [value], [value2])` — filter into FILTERED_IDS
   - Modes: `all`, `scenes` (comma-separated), `single`, `act` (CSV part column), `from_seq` (N or N-M range), `range` (start_id, end_id)
 
+**characters.sh:**
+- `load_character_aliases(characters_csv)` — build alias lookup temp file from characters.csv, returns path (caller must cleanup)
+- `normalize_characters(aliases_file, raw_characters_string)` — resolve aliases in semicolon-separated string, case-insensitive, deduplicates
+
 **costs.sh:**
 - `log_usage(log_file, operation, target, model, [ledger])` — parse stream-json for usage, calculate cost, append to ledger
 - `estimate_cost(operation, count, avg_words, model)` — forecast cost
