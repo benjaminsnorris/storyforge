@@ -90,6 +90,7 @@ while [[ $# -gt 0 ]]; do
             echo "  PASS_NUM        Start from this pass number (1-indexed; default: first pending)"
             echo ""
             echo "Environment:"
+            echo "  ANTHROPIC_API_KEY           Required for non-interactive mode"
             echo "  STORYFORGE_MODEL            Override model (default: opus for creative, sonnet for mechanical)"
             echo "  STORYFORGE_COACHING         Override coaching level (default: from storyforge.yaml or full)"
             echo "  STORYFORGE_REJOIN_TIMEOUT   Seconds to wait for 'i' keypress in autopilot (default: 5)"
@@ -116,6 +117,14 @@ if [[ -n "$COACHING_LEVEL" ]]; then
 fi
 
 EFFECTIVE_COACHING=$(get_coaching_level)
+
+# --- API key check for non-interactive mode ---
+if [[ "$DRY_RUN" != true && "$INTERACTIVE" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    log "ERROR: ANTHROPIC_API_KEY not set. Required for direct API mode."
+    log "  Set it with: export ANTHROPIC_API_KEY=your-key"
+    log "  Or use --interactive to run via claude -p instead."
+    exit 1
+fi
 
 # Ensure coaching directory exists
 mkdir -p "${PROJECT_DIR}/working/coaching"
@@ -661,26 +670,60 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
             --append-system-prompt "$INTERACTIVE_SYSTEM"
         EXIT_CODE=$?
     else
-        # --- Headless mode ---
-        log "  Invoking claude for revision (model: ${PASS_MODEL})..."
-        log "  Pass log: $(basename "$STEP_LOG") (tail -f for live output)"
+        # --- Headless mode (direct API) ---
+        log "  Invoking API for revision (model: ${PASS_MODEL})..."
+        log "  Pass log: $(basename "$STEP_LOG")"
 
         # Start background monitor
         revision_monitor "$PASS_NAME" "$HEAD_BEFORE" "$START_TIME" &
         MONITOR_PID=$!
         register_child_pid $MONITOR_PID
 
-        claude -p "$PROMPT" \
-            --model "$PASS_MODEL" \
-            --dangerously-skip-permissions \
-            --output-format stream-json \
-            --verbose \
-            > "$STEP_LOG" 2>&1
+        invoke_anthropic_api "$PROMPT" "$PASS_MODEL" "$STEP_LOG" 8192
         EXIT_CODE=$?
 
         # Stop the monitor
         kill $MONITOR_PID 2>/dev/null || true
         wait $MONITOR_PID 2>/dev/null || true
+
+        # Extract response and apply revision to scene files
+        if (( EXIT_CODE == 0 )); then
+            response=$(extract_api_response "$STEP_LOG" || true)
+            if [[ -n "$response" ]]; then
+                # The revision prompt instructs Claude to write files directly.
+                # In API mode, the response contains the revised content that
+                # needs to be applied. Parse scene blocks from the response.
+                # Each scene is delimited by markers like: === SCENE: scene-id ===
+                # If the response doesn't use markers, it's a single-scene or
+                # non-file-writing pass (e.g., continuity check).
+                if echo "$response" | grep -qE '^=== SCENE: .+ ===$'; then
+                    current_scene_id=""
+                    current_content=""
+                    while IFS= read -r line; do
+                        if [[ "$line" =~ ^'=== SCENE: '(.+)' ===' ]]; then
+                            # Write previous scene if any
+                            if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
+                                echo "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
+                                log "  Wrote revised scene: ${current_scene_id}"
+                            fi
+                            current_scene_id="${BASH_REMATCH[1]}"
+                            current_content=""
+                        else
+                            current_content="${current_content:+${current_content}
+}${line}"
+                        fi
+                    done <<< "$response"
+                    # Write last scene
+                    if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
+                        echo "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
+                        log "  Wrote revised scene: ${current_scene_id}"
+                    fi
+                else
+                    # Single-target or analytical pass — log response for reference
+                    log "  API response received ($(echo "$response" | wc -w | tr -d ' ') words)"
+                fi
+            fi
+        fi
     fi
 
     END_TIME=$(date +%s)
@@ -688,11 +731,15 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     MINUTES=$(( DURATION / 60 ))
     SECS=$(( DURATION % 60 ))
 
-    # Log usage for cost tracking
-    log_usage "$STEP_LOG" "revise" "$PASS_NAME" "$PASS_MODEL"
+    # Log usage for cost tracking (API mode vs interactive)
+    if [[ -f "$INTERACTIVE_FILE" ]]; then
+        log_usage "$STEP_LOG" "revise" "$PASS_NAME" "$PASS_MODEL"
+    else
+        log_api_usage "$STEP_LOG" "revise" "$PASS_NAME" "$PASS_MODEL"
+    fi
 
     if (( EXIT_CODE != 0 )); then
-        log "ERROR: claude exited with code ${EXIT_CODE} for pass '${PASS_NAME}' after ${MINUTES}m${SECS}s"
+        log "ERROR: API call failed with code ${EXIT_CODE} for pass '${PASS_NAME}' after ${MINUTES}m${SECS}s"
         log "See full output: ${STEP_LOG}"
         log "Fix the issue and re-run: storyforge-revise ${PASS_NUM}"
         false

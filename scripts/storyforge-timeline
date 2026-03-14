@@ -40,6 +40,7 @@ FILTER_SCENES=""
 FILTER_ACT=""
 FILTER_FROM_SEQ=""
 PARALLEL=${STORYFORGE_TIMELINE_PARALLEL:-6}
+TIMELINE_MODE="batch"
 
 usage() {
     cat <<EOF
@@ -57,6 +58,7 @@ Scene selection:
 
 Options:
   --interactive, -i   Interactive mode with review checkpoints
+  --direct            Use direct API calls instead of batch (default: batch)
   --parallel N        Haiku extraction workers (default: 6, env: STORYFORGE_TIMELINE_PARALLEL)
   --force             Overwrite existing timeline_day values
   --dry-run           Show what would happen without invoking Claude
@@ -103,6 +105,10 @@ while [[ $# -gt 0 ]]; do
             EMBEDDED=true
             shift
             ;;
+        --direct)
+            TIMELINE_MODE="direct"
+            shift
+            ;;
         --skip-phase1)
             SKIP_PHASE1=true
             shift
@@ -146,6 +152,20 @@ done
 # ============================================================================
 
 detect_project_root
+
+# --- API key check for non-interactive modes ---
+if [[ "$DRY_RUN" != true && "$INTERACTIVE" != true && "$EMBEDDED" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    log "ERROR: ANTHROPIC_API_KEY is required for autonomous mode (batch/direct API)."
+    log "  Set it with: export ANTHROPIC_API_KEY=your-key"
+    log "  Or use --interactive mode which uses 'claude -p' instead."
+    exit 1
+fi
+
+# --- Interactive mode forces claude -p, not API ---
+if [[ "$INTERACTIVE" == true ]]; then
+    TIMELINE_MODE="interactive"
+fi
+
 PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
 
 # --- Resolve paths ---
@@ -200,6 +220,7 @@ log "Project: ${PROJECT_TITLE}"
 log "Scenes: ${SCENE_COUNT}"
 log "Phase 1 model: ${HAIKU_MODEL}"
 log "Phase 2 model: ${SONNET_MODEL}"
+log "API mode: ${TIMELINE_MODE}"
 log "Mode: $(if [[ -f "$INTERACTIVE_FILE" ]]; then echo "interactive"; else echo "autonomous"; fi)"
 if [[ "$EMBEDDED" == true ]]; then log "Running embedded (no branch/PR)"; fi
 log "============================================"
@@ -221,7 +242,13 @@ if [[ "$DRY_RUN" == true ]]; then
     if [[ "$SKIP_PHASE1" == true ]]; then
         log "Phase 1: SKIPPED (reusing cached indicators)"
     else
-        log "Phase 1: ${SCENE_COUNT} Haiku calls (parallel, ${PARALLEL} workers)"
+        if [[ "$TIMELINE_MODE" == "batch" ]]; then
+            log "Phase 1: ${SCENE_COUNT} Haiku calls (batch API, 50% discount)"
+        elif [[ "$TIMELINE_MODE" == "direct" ]]; then
+            log "Phase 1: ${SCENE_COUNT} Haiku calls (direct API, ${PARALLEL} workers)"
+        else
+            log "Phase 1: ${SCENE_COUNT} Haiku calls (claude -p, ${PARALLEL} workers)"
+        fi
     fi
     if [[ "$PHASE1_ONLY" == true ]]; then
         log "Phase 2: DEFERRED (--phase1-only)"
@@ -248,6 +275,10 @@ done
 AVG_WORDS=$(( TOTAL_WORDS / (SCENE_COUNT > 0 ? SCENE_COUNT : 1) ))
 (( AVG_WORDS < 100 )) && AVG_WORDS=100
 PHASE1_COST=$(estimate_cost "extraction" "$SCENE_COUNT" "$AVG_WORDS" "$HAIKU_MODEL")
+# Apply 50% batch discount for phase 1 when using batch mode
+if [[ "$TIMELINE_MODE" == "batch" ]]; then
+    PHASE1_COST=$(awk "BEGIN { printf \"%.6f\", ${PHASE1_COST} * 0.5 }")
+fi
 # Phase 2: Sonnet reads compact indicators (~50 words per scene)
 PHASE2_COST=$(estimate_cost "evaluation" "1" "$(( SCENE_COUNT * 50 ))" "$SONNET_MODEL")
 
@@ -288,7 +319,7 @@ fi
 
 run_phase1() {
     log ""
-    log "Phase 1: Temporal analysis (${SCENE_COUNT} scenes, ${PARALLEL} workers)"
+    log "Phase 1: Temporal analysis (${SCENE_COUNT} scenes, mode: ${TIMELINE_MODE})"
     log "--------------------------------------------"
 
     # Pre-build previous scene context for each scene
@@ -308,6 +339,172 @@ run_phase1() {
         fi
     done
 
+    # --- Build prompt for a scene (used by all modes) ---
+    _build_phase1_prompt() {
+        local idx="$1"
+        local id="${SCENE_IDS[$idx]}"
+        local scene_file="${SCENES_DIR}/${id}.md"
+        local scene_title
+        scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+        local scene_tod
+        scene_tod=$(get_csv_field "$METADATA_CSV" "$id" "time_of_day")
+        local scene_pov
+        scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
+
+        local prose=""
+        if [[ -f "$scene_file" ]]; then
+            prose=$(cat "$scene_file")
+        fi
+
+        if [[ -z "$prose" ]]; then
+            echo ""
+            return
+        fi
+
+        cat <<PROMPTEOF
+You are analyzing the temporal relationship between two consecutive scenes in a novel. Read the current scene's prose and answer three questions.
+
+## Previous Scene
+Title: ${prev_titles[$idx]}
+Time of day: ${prev_tods[$idx]}
+
+## Current Scene
+Title: ${scene_title:-untitled}
+POV: ${scene_pov:-unknown}
+Time of day: ${scene_tod:-unknown}
+
+## Scene Prose
+${prose}
+
+## Questions — answer ALL three on separate labeled lines
+
+DELTA: How much time has passed between the previous scene and this one? Choose exactly one: same_moment / same_day / next_day / days_later / weeks_later / unknown
+EVIDENCE: Quote the single strongest piece of textual evidence for your answer (the exact words from the prose that most clearly establish when this scene happens relative to the previous one). If no evidence, write "none".
+ANCHOR: Is there an absolute time reference in this scene (a specific day of week, date, month, season, or named event that pins this to a calendar)? If yes, quote it. If no, write "none".
+PROMPTEOF
+    }
+
+    # --- Parse DELTA/EVIDENCE/ANCHOR from response text ---
+    _parse_indicators() {
+        local response="$1"
+        local id="$2"
+        local indicator_file="${TIMELINE_DIR}/.indicators-${id}"
+
+        local delta="" evidence="" anchor=""
+        if [[ -n "$response" ]]; then
+            delta=$(echo "$response" | grep -i "^DELTA:" | sed 's/^DELTA:[[:space:]]*//' | head -1 || true)
+            evidence=$(echo "$response" | grep -i "^EVIDENCE:" | sed 's/^EVIDENCE:[[:space:]]*//' | head -1 || true)
+            anchor=$(echo "$response" | grep -i "^ANCHOR:" | sed 's/^ANCHOR:[[:space:]]*//' | head -1 || true)
+        fi
+        [[ -z "$delta" ]] && delta="unknown"
+        [[ -z "$evidence" ]] && evidence="none"
+        [[ -z "$anchor" ]] && anchor="none"
+
+        echo "DELTA: ${delta} | EVIDENCE: ${evidence} | ANCHOR: ${anchor}" > "$indicator_file"
+        echo "ok" > "${TIMELINE_DIR}/.status-${id}"
+    }
+
+    # ---- Batch mode: build JSONL, submit, poll, download, parse ----
+    if [[ "$TIMELINE_MODE" == "batch" ]]; then
+        log "Building batch request for ${SCENE_COUNT} scenes..."
+        local batch_file="${LOG_DIR}/timeline-phase1-batch.jsonl"
+        local skipped_ids=()
+        > "$batch_file"
+
+        for (( i=0; i<SCENE_COUNT; i++ )); do
+            id="${SCENE_IDS[$i]}"
+            prompt=$(_build_phase1_prompt "$i")
+
+            if [[ -z "$prompt" ]]; then
+                # No prose — write indicator directly
+                echo "DELTA: unknown | EVIDENCE: (no prose) | ANCHOR: none" > "${TIMELINE_DIR}/.indicators-${id}"
+                echo "ok" > "${TIMELINE_DIR}/.status-${id}"
+                skipped_ids+=("$id")
+                continue
+            fi
+
+            # Build JSONL line
+            local json_prompt
+            json_prompt=$(jq -Rs '.' <<< "$prompt")
+            printf '{"custom_id":"%s","params":{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":%s}]}}\n' \
+                "$id" "$HAIKU_MODEL" "$json_prompt" >> "$batch_file"
+        done
+
+        # Check if any API requests to submit
+        local api_count
+        api_count=$(wc -l < "$batch_file" | tr -d ' ')
+        if (( api_count == 0 )); then
+            log "No scenes with prose to analyze — all skipped"
+        else
+            log "Submitting batch with ${api_count} requests..."
+            local batch_id
+            batch_id=$(submit_batch "$batch_file") || {
+                log "ERROR: Batch submission failed"
+                return 1
+            }
+            log "Batch submitted: ${batch_id}"
+
+            log "Polling for completion..."
+            poll_batch "$batch_id" || {
+                log "ERROR: Batch polling failed"
+                return 1
+            }
+
+            log "Downloading results..."
+            download_batch_results "$batch_id" "$TIMELINE_DIR" "$LOG_DIR" || {
+                log "ERROR: Failed to download batch results"
+                return 1
+            }
+
+            # Parse results from downloaded text files
+            for (( i=0; i<SCENE_COUNT; i++ )); do
+                id="${SCENE_IDS[$i]}"
+                local txt_file="${LOG_DIR}/${id}.txt"
+                local json_file="${LOG_DIR}/${id}.json"
+
+                # Skip scenes that were handled without API (no prose)
+                local is_skipped=false
+                for sid in "${skipped_ids[@]}"; do
+                    [[ "$sid" == "$id" ]] && is_skipped=true && break
+                done
+                [[ "$is_skipped" == true ]] && continue
+
+                if [[ -f "$txt_file" ]]; then
+                    local response
+                    response=$(cat "$txt_file")
+                    _parse_indicators "$response" "$id"
+                    # Log usage from the per-item JSON
+                    if [[ -f "$json_file" ]]; then
+                        _SF_INVOCATION_START=$(date +%s)
+                        export _SF_INVOCATION_START
+                        log_api_usage "$json_file" "timeline-phase1" "$id" "$HAIKU_MODEL"
+                    fi
+                else
+                    log "  WARNING: No result for ${id}"
+                    echo "DELTA: unknown | EVIDENCE: (extraction failed) | ANCHOR: none" > "${TIMELINE_DIR}/.indicators-${id}"
+                    echo "fail" > "${TIMELINE_DIR}/.status-${id}"
+                fi
+            done
+        fi
+
+        # Report all results
+        local completed=0
+        for id in "${SCENE_IDS[@]}"; do
+            completed=$((completed + 1))
+            indicator_file="${TIMELINE_DIR}/.indicators-${id}"
+            if [[ -f "$indicator_file" ]]; then
+                indicators=$(cat "$indicator_file")
+                log "  [${completed}/${SCENE_COUNT}] ${id}: ${indicators}"
+            else
+                log "  [${completed}/${SCENE_COUNT}] ${id}: (extraction failed)"
+            fi
+        done
+
+        log "Phase 1 complete: ${completed} scenes processed (batch mode)"
+        return
+    fi
+
+    # ---- Direct / Interactive mode: parallel workers ----
     local batch_start=0
     local completed=0
 
@@ -321,75 +518,44 @@ run_phase1() {
             id="${SCENE_IDS[$i]}"
             batch_ids+=("$id")
             (
-                scene_file="${SCENES_DIR}/${id}.md"
                 indicator_file="${TIMELINE_DIR}/.indicators-${id}"
                 log_file="${LOG_DIR}/timeline-phase1-${id}.log"
 
-                scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-                scene_tod=$(get_csv_field "$METADATA_CSV" "$id" "time_of_day")
-                scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
+                prompt=$(_build_phase1_prompt "$i")
 
-                # Read scene prose
-                prose=""
-                if [[ -f "$scene_file" ]]; then
-                    prose=$(cat "$scene_file")
-                fi
-
-                if [[ -z "$prose" ]]; then
+                if [[ -z "$prompt" ]]; then
                     echo "DELTA: unknown | EVIDENCE: (no prose) | ANCHOR: none" > "$indicator_file"
                     echo "ok" > "${TIMELINE_DIR}/.status-${id}"
                     exit 0
                 fi
 
-                # Build Haiku prompt — focused temporal analysis
-                prompt="You are analyzing the temporal relationship between two consecutive scenes in a novel. Read the current scene's prose and answer three questions.
-
-## Previous Scene
-Title: ${prev_titles[$i]}
-Time of day: ${prev_tods[$i]}
-
-## Current Scene
-Title: ${scene_title:-untitled}
-POV: ${scene_pov:-unknown}
-Time of day: ${scene_tod:-unknown}
-
-## Scene Prose
-${prose}
-
-## Questions — answer ALL three on separate labeled lines
-
-DELTA: How much time has passed between the previous scene and this one? Choose exactly one: same_moment / same_day / next_day / days_later / weeks_later / unknown
-EVIDENCE: Quote the single strongest piece of textual evidence for your answer (the exact words from the prose that most clearly establish when this scene happens relative to the previous one). If no evidence, write \"none\".
-ANCHOR: Is there an absolute time reference in this scene (a specific day of week, date, month, season, or named event that pins this to a calendar)? If yes, quote it. If no, write \"none\"."
-
                 _SF_INVOCATION_START=$(date +%s)
                 export _SF_INVOCATION_START
 
-                claude -p "$prompt" \
-                    --model "$HAIKU_MODEL" \
-                    --dangerously-skip-permissions \
-                    --output-format stream-json \
-                    --verbose \
-                    > "$log_file" 2>&1 || true
+                if [[ "$TIMELINE_MODE" == "direct" ]]; then
+                    # Direct API mode
+                    begin_healing_zone "timeline phase 1 extraction: ${id}"
 
-                response=$(extract_claude_response "$log_file" 2>/dev/null || true)
-                log_usage "$log_file" "timeline-phase1" "$id" "$HAIKU_MODEL"
+                    invoke_anthropic_api "$prompt" "$HAIKU_MODEL" "$log_file" 1024 || true
 
-                # Parse structured response
-                delta=""
-                evidence=""
-                anchor=""
-                if [[ -n "$response" ]]; then
-                    delta=$(echo "$response" | grep -i "^DELTA:" | sed 's/^DELTA:[[:space:]]*//' | head -1 || true)
-                    evidence=$(echo "$response" | grep -i "^EVIDENCE:" | sed 's/^EVIDENCE:[[:space:]]*//' | head -1 || true)
-                    anchor=$(echo "$response" | grep -i "^ANCHOR:" | sed 's/^ANCHOR:[[:space:]]*//' | head -1 || true)
+                    end_healing_zone
+
+                    response=$(extract_api_response "$log_file" 2>/dev/null || true)
+                    log_api_usage "$log_file" "timeline-phase1" "$id" "$HAIKU_MODEL"
+                else
+                    # Interactive mode — keep claude -p
+                    claude -p "$prompt" \
+                        --model "$HAIKU_MODEL" \
+                        --dangerously-skip-permissions \
+                        --output-format stream-json \
+                        --verbose \
+                        > "$log_file" 2>&1 || true
+
+                    response=$(extract_claude_response "$log_file" 2>/dev/null || true)
+                    log_usage "$log_file" "timeline-phase1" "$id" "$HAIKU_MODEL"
                 fi
-                [[ -z "$delta" ]] && delta="unknown"
-                [[ -z "$evidence" ]] && evidence="none"
-                [[ -z "$anchor" ]] && anchor="none"
 
-                echo "DELTA: ${delta} | EVIDENCE: ${evidence} | ANCHOR: ${anchor}" > "$indicator_file"
-                echo "ok" > "${TIMELINE_DIR}/.status-${id}"
+                _parse_indicators "$response" "$id"
             ) &
             batch_pids+=($!)
             register_child_pid $!
@@ -502,31 +668,49 @@ ${id}|<day>"
     _SF_INVOCATION_START=$_PHASE2_START
     export _SF_INVOCATION_START
 
-    begin_healing_zone "timeline phase 2 assignment"
+    if [[ "$TIMELINE_MODE" == "interactive" ]]; then
+        # Interactive mode — keep claude -p
+        begin_healing_zone "timeline phase 2 assignment"
 
-    # Run claude in background so we can track its PID for interrupt handling
-    claude -p "$timeline_prompt" \
-        --model "$SONNET_MODEL" \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --verbose \
-        > "$tl_log" 2>&1 &
-    local claude_pid=$!
-    register_child_pid $claude_pid
+        claude -p "$timeline_prompt" \
+            --model "$SONNET_MODEL" \
+            --dangerously-skip-permissions \
+            --output-format stream-json \
+            --verbose \
+            > "$tl_log" 2>&1 &
+        local claude_pid=$!
+        register_child_pid $claude_pid
 
-    wait "$claude_pid" 2>/dev/null || true
-    unregister_child_pid "$claude_pid" 2>/dev/null || true
+        wait "$claude_pid" 2>/dev/null || true
+        unregister_child_pid "$claude_pid" 2>/dev/null || true
 
-    end_healing_zone
+        end_healing_zone
 
-    # Kill monitor
-    kill "$monitor_pid" 2>/dev/null || true
-    wait "$monitor_pid" 2>/dev/null || true
-    unregister_child_pid "$monitor_pid" 2>/dev/null || true
+        # Kill monitor
+        kill "$monitor_pid" 2>/dev/null || true
+        wait "$monitor_pid" 2>/dev/null || true
+        unregister_child_pid "$monitor_pid" 2>/dev/null || true
 
-    local response
-    response=$(extract_claude_response "$tl_log" 2>/dev/null || true)
-    log_usage "$tl_log" "timeline-phase2" "all" "$SONNET_MODEL"
+        local response
+        response=$(extract_claude_response "$tl_log" 2>/dev/null || true)
+        log_usage "$tl_log" "timeline-phase2" "all" "$SONNET_MODEL"
+    else
+        # Direct API mode (both batch and direct use this for the single Phase 2 call)
+        begin_healing_zone "timeline phase 2 assignment"
+
+        invoke_anthropic_api "$timeline_prompt" "$SONNET_MODEL" "$tl_log" 4096 || true
+
+        end_healing_zone
+
+        # Kill monitor
+        kill "$monitor_pid" 2>/dev/null || true
+        wait "$monitor_pid" 2>/dev/null || true
+        unregister_child_pid "$monitor_pid" 2>/dev/null || true
+
+        local response
+        response=$(extract_api_response "$tl_log" 2>/dev/null || true)
+        log_api_usage "$tl_log" "timeline-phase2" "all" "$SONNET_MODEL"
+    fi
 
     if [[ -z "$response" ]]; then
         log "WARNING: No response from Sonnet for timeline assignment"

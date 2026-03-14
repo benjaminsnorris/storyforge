@@ -60,6 +60,7 @@ mkdir -p "${PROJECT_DIR}/working/coaching"
 DRY_RUN=false
 INTERACTIVE=false
 COACHING_LEVEL=""
+WRITE_MODE="batch"      # batch (default) | direct | interactive
 FILTER_MODE="all"       # all | single | range | act | from_seq | scenes
 FILTER_VALUE=""
 FILTER_SCENES=""
@@ -83,12 +84,14 @@ Scope:
   --from-seq N-M              Draft scenes in sequence range N through M
 
 Options:
+  --direct                    Use direct API calls (one at a time, not batch)
   --coaching LEVEL            Set coaching level: full, coach, or strict
   --interactive               Draft with supervision — watch, give feedback, redirect
   --dry-run                   Build prompts without invoking Claude
   -h, --help                  Show this help
 
 Environment:
+  ANTHROPIC_API_KEY           Required for batch/direct modes (not interactive)
   STORYFORGE_MODEL            Override model (default: opus for drafting)
   STORYFORGE_COACHING         Override coaching level (default: from storyforge.yaml or full)
   STORYFORGE_REJOIN_TIMEOUT   Seconds to wait for 'i' keypress in autopilot (default: 5)
@@ -121,6 +124,10 @@ while [[ $# -gt 0 ]]; do
                 *) echo "ERROR: Invalid coaching level '${COACHING_LEVEL}'. Must be full, coach, or strict." >&2; exit 1 ;;
             esac
             shift 2
+            ;;
+        --direct)
+            WRITE_MODE="direct"
+            shift
             ;;
         --interactive|-i)
             INTERACTIVE=true
@@ -172,6 +179,19 @@ fi
 
 # Resolve effective coaching level for conditional logic in this script
 EFFECTIVE_COACHING=$(get_coaching_level)
+
+# --- Resolve write mode ---
+if [[ "$INTERACTIVE" == true ]]; then
+    WRITE_MODE="interactive"
+fi
+
+# --- API key check for non-interactive modes ---
+if [[ "$DRY_RUN" != true && "$WRITE_MODE" != "interactive" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    log "ERROR: ANTHROPIC_API_KEY not set. Required for batch/direct API modes."
+    log "  Set it with: export ANTHROPIC_API_KEY=your-key"
+    log "  Or use --interactive to run via claude -p instead."
+    exit 1
+fi
 
 # ============================================================================
 # Prerequisites
@@ -272,7 +292,11 @@ if [[ "$DRY_RUN" != true ]]; then
     ' "$METADATA_CSV")
     FORECAST_MODEL=$(select_model "drafting")
     ESTIMATED_COST=$(estimate_cost "draft" "${#PENDING_IDS[@]}" "$AVG_WORDS" "$FORECAST_MODEL")
-    log "Cost forecast: ~\$${ESTIMATED_COST} for ${#PENDING_IDS[@]} scenes (avg ${AVG_WORDS} words, model ${FORECAST_MODEL})"
+    # Batch mode gets 50% discount on API pricing
+    if [[ "$WRITE_MODE" == "batch" ]]; then
+        ESTIMATED_COST=$(awk "BEGIN { printf \"%.2f\", ${ESTIMATED_COST} * 0.5 }")
+    fi
+    log "Cost forecast: ~\$${ESTIMATED_COST} for ${#PENDING_IDS[@]} scenes (avg ${AVG_WORDS} words, model ${FORECAST_MODEL}, mode ${WRITE_MODE})"
     if ! check_cost_threshold "$ESTIMATED_COST"; then
         log "Aborting — cost threshold exceeded."
         exit 0
@@ -325,6 +349,7 @@ fi
 log "============================================"
 log "Starting Storyforge drafting session"
 log "Project: $(read_yaml_field 'project.title' 2>/dev/null || read_yaml_field 'title' 2>/dev/null || echo 'Unknown')"
+log "Mode: ${WRITE_MODE}"
 log "Coaching level: ${EFFECTIVE_COACHING}"
 log "Scenes to draft: ${#PENDING_IDS[@]} (${SKIPPED} already-drafted skipped)"
 log "Scene list: ${PENDING_IDS[*]}"
@@ -337,211 +362,337 @@ log "============================================"
 DRAFTED_COUNT=0
 TOTAL_WORDS=0
 
-for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
-    SCENE_ID="${PENDING_IDS[$i]}"
-    SCENE_FILE="${SCENES_DIR}/${SCENE_ID}.md"
-    SCENE_NUM=$((i + 1))
-
-    log "--- Scene ${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]}) ---"
-
-    # --- Check if scene file already has substantial content (defensive) ---
-    if [[ -f "$SCENE_FILE" && "$FILTER_MODE" != "single" ]]; then
-        existing_wc=$(wc -w < "$SCENE_FILE" 2>/dev/null | tr -d ' ')
-        if (( existing_wc > 200 )); then
-            log "Scene file already has ${existing_wc} words, skipping"
-            continue
-        fi
-    fi
-
-    # --- Build the prompt (outside zone — needed for dry-run check) ---
-    PROMPT=$(build_scene_prompt "$SCENE_ID" "$PROJECT_DIR")
-
-    if [[ -z "$PROMPT" ]]; then
-        log "ERROR: Failed to build prompt for scene ${SCENE_ID}"
-        log "Stopping — prompt generation failed."
-        exit 1
-    fi
-
-    # --- Dry-run mode: print prompt and continue (outside zone) ---
-    if [[ "$DRY_RUN" == true ]]; then
-        echo "===== DRY RUN: ${SCENE_ID} ====="
-        echo "$PROMPT"
-        echo "===== END DRY RUN: ${SCENE_ID} ====="
-        echo ""
-        DRAFTED_COUNT=$((DRAFTED_COUNT + 1))
-        continue
-    fi
-
-    # --- Check interactive mode (outside zone) ---
-    # Offer mode switch if currently headless (including before first step)
-    if [[ ! -f "$INTERACTIVE_FILE" ]]; then
-        offer_interactive "$PROJECT_DIR" "${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]})" || true
-    fi
-
-    # --- Healing zone: invoke → verify → commit ---
-    begin_healing_zone "drafting scene ${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]})"
-
-    # --- Record git HEAD before invocation ---
-    HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
-
-    # --- Per-scene log file ---
-    SCENE_LOG="${LOG_DIR}/drafting-${SCENE_ID}.log"
-
-    START_TIME=$(date +%s)
-
-    if [[ -f "$INTERACTIVE_FILE" ]]; then
-        # --- Interactive mode ---
-        show_interactive_banner "Scene ${SCENE_NUM} of ${#PENDING_IDS[@]}" "multi"
-
-        INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$PROJECT_DIR" "scene")
-        SCENE_MODEL=$(select_model "drafting")
-
-        set +e
-        claude "$PROMPT" \
-            --model "$SCENE_MODEL" \
-            --dangerously-skip-permissions \
-            --append-system-prompt "$INTERACTIVE_SYSTEM"
-        EXIT_CODE=$?
-        set -e
-    else
-        # --- Headless mode ---
-        SCENE_MODEL=$(select_model "drafting")
-        log "Invoking claude for scene ${SCENE_ID} (model: ${SCENE_MODEL})..."
-        log "  Per-scene log: ${SCENE_LOG} (tail -f for live output)"
-
-        # Start background monitor
-        monitor_progress "$SCENE_ID" "$HEAD_BEFORE" "$START_TIME" &
-        MONITOR_PID=$!
-        register_child_pid $MONITOR_PID
-
-        _SF_INVOCATION_START=$(date +%s)
-        set +e
-        claude -p "$PROMPT" \
-            --model "$SCENE_MODEL" \
-            --dangerously-skip-permissions \
-            --output-format stream-json \
-            --verbose \
-            $BUDGET_FLAG \
-            > "$SCENE_LOG" 2>&1
-        EXIT_CODE=$?
-        set -e
-
-        # Stop the monitor
-        kill "$MONITOR_PID" 2>/dev/null || true
-        wait "$MONITOR_PID" 2>/dev/null || true
-
-        # Log usage/cost data
-        log_usage "$SCENE_LOG" "draft" "$SCENE_ID" "$SCENE_MODEL"
-    fi
-
-    # --- Timing ---
-    END_TIME=$(date +%s)
-    DURATION=$(( END_TIME - START_TIME ))
-    MINUTES=$(( DURATION / 60 ))
-    SECS=$(( DURATION % 60 ))
-
-    if (( EXIT_CODE != 0 )); then
-        log "ERROR: claude exited with code ${EXIT_CODE} for scene ${SCENE_ID} after ${MINUTES}m${SECS}s"
-        log "See full output: ${SCENE_LOG}"
-        log "Stopping — continuity may be broken."
-        false  # Trigger healing
-    fi
-
-    # --- Verification ---
+# --- Helper: verify and commit a single drafted scene ---
+# Usage: verify_and_commit_scene SCENE_ID SCENE_LOG [HEAD_BEFORE]
+verify_and_commit_scene() {
+    local vid="$1"
+    local vlog="$2"
+    local vhead_before="${3:-$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")}"
+    local vscene_file="${SCENES_DIR}/${vid}.md"
+    local vword_count=0
 
     if [[ "$EFFECTIVE_COACHING" == "coach" || "$EFFECTIVE_COACHING" == "strict" ]]; then
-        # Coach/strict mode: check for coaching output instead of scene file
         if [[ "$EFFECTIVE_COACHING" == "coach" ]]; then
-            COACHING_OUTPUT="${PROJECT_DIR}/working/coaching/brief-${SCENE_ID}.md"
+            local vcoaching="${PROJECT_DIR}/working/coaching/brief-${vid}.md"
         else
-            COACHING_OUTPUT="${PROJECT_DIR}/working/coaching/constraints-${SCENE_ID}.md"
+            local vcoaching="${PROJECT_DIR}/working/coaching/constraints-${vid}.md"
         fi
-
-        if [[ ! -f "$COACHING_OUTPUT" ]]; then
-            log "WARNING: Coaching output not created: ${COACHING_OUTPUT}"
-            log "See full output: ${SCENE_LOG}"
+        if [[ ! -f "$vcoaching" ]]; then
+            log "WARNING: Coaching output not created: ${vcoaching}"
         fi
-
-        WORD_COUNT=0
-        if [[ -f "$COACHING_OUTPUT" ]]; then
-            WORD_COUNT=$(wc -w < "$COACHING_OUTPUT" | tr -d ' ')
-        fi
+        [[ -f "$vcoaching" ]] && vword_count=$(wc -w < "$vcoaching" | tr -d ' ')
     else
-        # Full mode: check scene file was created
-        # 1. Check scene file was created
-        if [[ ! -f "$SCENE_FILE" ]]; then
-            log "ERROR: Scene file not created: ${SCENE_FILE}"
-            log "Claude ran successfully but did not produce the file."
-            log "See full output: ${SCENE_LOG}"
-            log "Stopping — cannot continue without the scene."
-            false  # Trigger healing
+        if [[ ! -f "$vscene_file" ]]; then
+            log "ERROR: Scene file not created: ${vscene_file}"
+            return 1
         fi
-
-        # 2. Get word count and sanity-check
-        WORD_COUNT=$(wc -w < "$SCENE_FILE" | tr -d ' ')
-
-        if (( WORD_COUNT < 100 )); then
-            log "ERROR: Scene file suspiciously short (${WORD_COUNT} words): ${SCENE_FILE}"
-            log "See full output: ${SCENE_LOG}"
-            log "Stopping — likely incomplete draft."
-            false  # Trigger healing
+        vword_count=$(wc -w < "$vscene_file" | tr -d ' ')
+        if (( vword_count < 100 )); then
+            log "ERROR: Scene file suspiciously short (${vword_count} words): ${vscene_file}"
+            return 1
         fi
-
-        # Update metadata.csv with word count and status
-        update_csv_field "$METADATA_CSV" "$SCENE_ID" "word_count" "$WORD_COUNT"
-        update_csv_field "$METADATA_CSV" "$SCENE_ID" "status" "drafted"
-        log "Updated metadata.csv: ${SCENE_ID} word_count=${WORD_COUNT} status=drafted"
+        update_csv_field "$METADATA_CSV" "$vid" "word_count" "$vword_count"
+        update_csv_field "$METADATA_CSV" "$vid" "status" "drafted"
+        log "Updated metadata.csv: ${vid} word_count=${vword_count} status=drafted"
     fi
 
-    # 3. Check/create git commit
-    HEAD_AFTER=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
-
-    if [[ "$HEAD_BEFORE" == "$HEAD_AFTER" ]]; then
-        log "WARNING: No git commit detected. Attempting manual commit..."
+    # Check/create git commit
+    local vhead_after
+    vhead_after=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+    if [[ "$vhead_before" == "$vhead_after" ]]; then
+        log "Creating commit for scene ${vid}..."
         (
             cd "$PROJECT_DIR"
             if [[ "$EFFECTIVE_COACHING" == "coach" || "$EFFECTIVE_COACHING" == "strict" ]]; then
                 git add working/coaching/ 2>/dev/null || true
                 git add working/logs/ 2>/dev/null || true
-                git commit -m "${EFFECTIVE_COACHING^}: ${SCENE_ID}" 2>/dev/null || true
+                git commit -m "${EFFECTIVE_COACHING^}: ${vid}" 2>/dev/null || true
             else
-                git add "scenes/${SCENE_ID}.md" 2>/dev/null || true
+                git add "scenes/${vid}.md" 2>/dev/null || true
                 git add reference/ 2>/dev/null || true
                 git add working/logs/ 2>/dev/null || true
-                git commit -m "Draft scene ${SCENE_ID}" 2>/dev/null || true
+                git commit -m "Draft scene ${vid}" 2>/dev/null || true
             fi
         )
-        HEAD_AFTER=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+    fi
 
-        if [[ "$HEAD_BEFORE" == "$HEAD_AFTER" ]]; then
-            log "ERROR: Could not create git commit for scene ${SCENE_ID}"
-            log "Stopping — next scene needs committed state."
+    # Push (warn on failure)
+    local vcommit_short
+    vcommit_short=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    if ! git -C "$PROJECT_DIR" push 2>/dev/null; then
+        log "WARNING: git push failed for scene ${vid} (commit ${vcommit_short}). Continuing."
+    fi
+
+    DRAFTED_COUNT=$((DRAFTED_COUNT + 1))
+    TOTAL_WORDS=$((TOTAL_WORDS + vword_count))
+    log "SUCCESS: Scene ${vid} — ${vword_count} words, commit ${vcommit_short}"
+    update_pr_task "Draft scene ${vid}" "$PROJECT_DIR"
+}
+
+# ============================================================================
+# Batch mode — build all prompts, submit batch, download and process results
+# ============================================================================
+
+if [[ "$WRITE_MODE" == "batch" && "$DRY_RUN" != true ]]; then
+    log "Building prompts for batch submission..."
+    BATCH_JSONL="${LOG_DIR}/drafting-batch-$$.jsonl"
+    BATCH_SCENE_MODEL=$(select_model "drafting")
+    BATCH_SCENE_IDS=()
+
+    for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
+        SCENE_ID="${PENDING_IDS[$i]}"
+        SCENE_FILE="${SCENES_DIR}/${SCENE_ID}.md"
+
+        # Skip scenes that already have substantial content
+        if [[ -f "$SCENE_FILE" && "$FILTER_MODE" != "single" ]]; then
+            existing_wc=$(wc -w < "$SCENE_FILE" 2>/dev/null | tr -d ' ')
+            if (( existing_wc > 200 )); then
+                log "Scene ${SCENE_ID} already has ${existing_wc} words, skipping"
+                continue
+            fi
+        fi
+
+        PROMPT=$(build_scene_prompt "$SCENE_ID" "$PROJECT_DIR")
+        if [[ -z "$PROMPT" ]]; then
+            log "ERROR: Failed to build prompt for scene ${SCENE_ID}"
+            exit 1
+        fi
+
+        # Build JSONL line for batch request
+        json_prompt=$(jq -Rs '.' <<< "$PROMPT")
+        printf '{"custom_id":"%s","params":{"model":"%s","max_tokens":8192,"messages":[{"role":"user","content":%s}]}}\n' \
+            "$SCENE_ID" "$BATCH_SCENE_MODEL" "$json_prompt" >> "$BATCH_JSONL"
+        BATCH_SCENE_IDS+=("$SCENE_ID")
+    done
+
+    if [[ ${#BATCH_SCENE_IDS[@]} -eq 0 ]]; then
+        log "No scenes to submit in batch."
+    else
+        log "Submitting batch with ${#BATCH_SCENE_IDS[@]} scenes..."
+        _SF_INVOCATION_START=$(date +%s)
+        export _SF_INVOCATION_START
+
+        begin_healing_zone "batch drafting ${#BATCH_SCENE_IDS[@]} scenes"
+
+        BATCH_ID=$(submit_batch "$BATCH_JSONL")
+        if [[ -z "$BATCH_ID" ]]; then
+            log "ERROR: Failed to submit batch."
+            false
+        fi
+        log "Batch submitted: ${BATCH_ID}"
+
+        log "Polling batch for completion..."
+        poll_batch "$BATCH_ID"
+        log "Batch complete. Downloading results..."
+
+        BATCH_OUTPUT_DIR="${LOG_DIR}/batch-$$"
+        mkdir -p "$BATCH_OUTPUT_DIR"
+        download_batch_results "$BATCH_ID" "$BATCH_OUTPUT_DIR" "$BATCH_OUTPUT_DIR"
+
+        end_healing_zone
+
+        # Process each scene result
+        for SCENE_ID in "${BATCH_SCENE_IDS[@]}"; do
+            SCENE_FILE="${SCENES_DIR}/${SCENE_ID}.md"
+            SCENE_LOG="${BATCH_OUTPUT_DIR}/${SCENE_ID}.json"
+
+            HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+
+            # Check batch status for this scene
+            batch_status="fail"
+            [[ -f "${BATCH_OUTPUT_DIR}/.status-${SCENE_ID}" ]] && batch_status=$(cat "${BATCH_OUTPUT_DIR}/.status-${SCENE_ID}")
+
+            if [[ "$batch_status" != "ok" ]]; then
+                log "ERROR: Batch failed for scene ${SCENE_ID}. Skipping."
+                continue
+            fi
+
+            # Write scene text from batch result
+            SCENE_TEXT_FILE="${BATCH_OUTPUT_DIR}/${SCENE_ID}.txt"
+            if [[ -f "$SCENE_TEXT_FILE" ]]; then
+                # Extract just the prose from the response (Claude writes the scene file content)
+                cp "$SCENE_TEXT_FILE" "$SCENE_FILE"
+                log "Wrote scene file: ${SCENE_FILE}"
+            fi
+
+            # Log usage from the per-scene JSON response
+            log_api_usage "$SCENE_LOG" "draft" "$SCENE_ID" "$BATCH_SCENE_MODEL"
+
+            # Verify and commit
+            verify_and_commit_scene "$SCENE_ID" "$SCENE_LOG" "$HEAD_BEFORE"
+        done
+
+        rm -f "$BATCH_JSONL"
+        rm -rf "$BATCH_OUTPUT_DIR"
+    fi
+
+# ============================================================================
+# Direct / Interactive mode — one scene at a time
+# ============================================================================
+
+else
+    for (( i=0; i<${#PENDING_IDS[@]}; i++ )); do
+        SCENE_ID="${PENDING_IDS[$i]}"
+        SCENE_FILE="${SCENES_DIR}/${SCENE_ID}.md"
+        SCENE_NUM=$((i + 1))
+
+        log "--- Scene ${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]}) ---"
+
+        # --- Check if scene file already has substantial content (defensive) ---
+        if [[ -f "$SCENE_FILE" && "$FILTER_MODE" != "single" ]]; then
+            existing_wc=$(wc -w < "$SCENE_FILE" 2>/dev/null | tr -d ' ')
+            if (( existing_wc > 200 )); then
+                log "Scene file already has ${existing_wc} words, skipping"
+                continue
+            fi
+        fi
+
+        # --- Build the prompt (outside zone — needed for dry-run check) ---
+        PROMPT=$(build_scene_prompt "$SCENE_ID" "$PROJECT_DIR")
+
+        if [[ -z "$PROMPT" ]]; then
+            log "ERROR: Failed to build prompt for scene ${SCENE_ID}"
+            log "Stopping — prompt generation failed."
+            exit 1
+        fi
+
+        # --- Dry-run mode: print prompt and continue (outside zone) ---
+        if [[ "$DRY_RUN" == true ]]; then
+            echo "===== DRY RUN: ${SCENE_ID} ====="
+            echo "$PROMPT"
+            echo "===== END DRY RUN: ${SCENE_ID} ====="
+            echo ""
+            DRAFTED_COUNT=$((DRAFTED_COUNT + 1))
+            continue
+        fi
+
+        # --- Check interactive mode (outside zone) ---
+        if [[ "$WRITE_MODE" == "interactive" && ! -f "$INTERACTIVE_FILE" ]]; then
+            offer_interactive "$PROJECT_DIR" "${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]})" || true
+        fi
+
+        # --- Healing zone: invoke → verify → commit ---
+        begin_healing_zone "drafting scene ${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]})"
+
+        # --- Record git HEAD before invocation ---
+        HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+
+        # --- Per-scene log file ---
+        SCENE_LOG="${LOG_DIR}/drafting-${SCENE_ID}.log"
+
+        START_TIME=$(date +%s)
+
+        if [[ "$WRITE_MODE" == "interactive" && -f "$INTERACTIVE_FILE" ]]; then
+            # --- Interactive mode (claude -p) ---
+            show_interactive_banner "Scene ${SCENE_NUM} of ${#PENDING_IDS[@]}" "multi"
+
+            INTERACTIVE_SYSTEM=$(build_interactive_system_prompt "$PROJECT_DIR" "scene")
+            SCENE_MODEL=$(select_model "drafting")
+
+            set +e
+            claude "$PROMPT" \
+                --model "$SCENE_MODEL" \
+                --dangerously-skip-permissions \
+                --append-system-prompt "$INTERACTIVE_SYSTEM"
+            EXIT_CODE=$?
+            set -e
+        elif [[ "$WRITE_MODE" == "direct" ]]; then
+            # --- Direct API mode ---
+            SCENE_MODEL=$(select_model "drafting")
+            log "Invoking API for scene ${SCENE_ID} (model: ${SCENE_MODEL})..."
+            log "  Per-scene log: ${SCENE_LOG}"
+
+            # Start background monitor
+            monitor_progress "$SCENE_ID" "$HEAD_BEFORE" "$START_TIME" &
+            MONITOR_PID=$!
+            register_child_pid $MONITOR_PID
+
+            _SF_INVOCATION_START=$(date +%s)
+            export _SF_INVOCATION_START
+
+            set +e
+            invoke_anthropic_api "$PROMPT" "$SCENE_MODEL" "$SCENE_LOG" 8192
+            EXIT_CODE=$?
+            set -e
+
+            # Stop the monitor
+            kill "$MONITOR_PID" 2>/dev/null || true
+            wait "$MONITOR_PID" 2>/dev/null || true
+
+            # Extract response and write scene file
+            if (( EXIT_CODE == 0 )); then
+                response=$(extract_api_response "$SCENE_LOG" || true)
+                if [[ -n "$response" ]]; then
+                    echo "$response" > "$SCENE_FILE"
+                    log "Wrote scene file from API response: ${SCENE_FILE}"
+                fi
+            fi
+
+            # Log usage/cost data
+            log_api_usage "$SCENE_LOG" "draft" "$SCENE_ID" "$SCENE_MODEL"
+        else
+            # --- Headless interactive (offer_interactive switched to headless) ---
+            SCENE_MODEL=$(select_model "drafting")
+            log "Invoking API for scene ${SCENE_ID} (model: ${SCENE_MODEL})..."
+            log "  Per-scene log: ${SCENE_LOG}"
+
+            # Start background monitor
+            monitor_progress "$SCENE_ID" "$HEAD_BEFORE" "$START_TIME" &
+            MONITOR_PID=$!
+            register_child_pid $MONITOR_PID
+
+            _SF_INVOCATION_START=$(date +%s)
+            export _SF_INVOCATION_START
+
+            set +e
+            invoke_anthropic_api "$PROMPT" "$SCENE_MODEL" "$SCENE_LOG" 8192
+            EXIT_CODE=$?
+            set -e
+
+            # Stop the monitor
+            kill "$MONITOR_PID" 2>/dev/null || true
+            wait "$MONITOR_PID" 2>/dev/null || true
+
+            # Extract response and write scene file
+            if (( EXIT_CODE == 0 )); then
+                response=$(extract_api_response "$SCENE_LOG" || true)
+                if [[ -n "$response" ]]; then
+                    echo "$response" > "$SCENE_FILE"
+                    log "Wrote scene file from API response: ${SCENE_FILE}"
+                fi
+            fi
+
+            # Log usage/cost data
+            log_api_usage "$SCENE_LOG" "draft" "$SCENE_ID" "$SCENE_MODEL"
+        fi
+
+        # --- Timing ---
+        END_TIME=$(date +%s)
+        DURATION=$(( END_TIME - START_TIME ))
+        MINUTES=$(( DURATION / 60 ))
+        SECS=$(( DURATION % 60 ))
+
+        if (( EXIT_CODE != 0 )); then
+            log "ERROR: API call failed with code ${EXIT_CODE} for scene ${SCENE_ID} after ${MINUTES}m${SECS}s"
+            log "See full output: ${SCENE_LOG}"
+            log "Stopping — continuity may be broken."
             false  # Trigger healing
         fi
-        log "Manual commit created."
-    fi
 
-    end_healing_zone
+        # --- Verify and commit ---
+        verify_and_commit_scene "$SCENE_ID" "$SCENE_LOG" "$HEAD_BEFORE"
 
-    COMMIT_SHORT=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        end_healing_zone
 
-    # 4. Push to remote (warn on failure, don't stop)
-    if ! git -C "$PROJECT_DIR" push 2>/dev/null; then
-        log "WARNING: git push failed for scene ${SCENE_ID} (commit ${COMMIT_SHORT}). Continuing."
-    fi
+        log "  Time: ${MINUTES}m${SECS}s"
 
-    # --- Success ---
-    DRAFTED_COUNT=$((DRAFTED_COUNT + 1))
-    TOTAL_WORDS=$((TOTAL_WORDS + WORD_COUNT))
-    log "SUCCESS: Scene ${SCENE_ID} — ${WORD_COUNT} words, ${MINUTES}m${SECS}s, commit ${COMMIT_SHORT}"
-    update_pr_task "Draft scene ${SCENE_ID}" "$PROJECT_DIR"
-
-    # --- Pause between scenes (headless only) ---
-    if (( i < ${#PENDING_IDS[@]} - 1 )) && [[ ! -f "$INTERACTIVE_FILE" ]]; then
-        log "Pausing 10s before next scene..."
-        sleep 10
-    fi
-done
+        # --- Pause between scenes (headless only) ---
+        if (( i < ${#PENDING_IDS[@]} - 1 )) && [[ ! -f "$INTERACTIVE_FILE" ]]; then
+            log "Pausing 10s before next scene..."
+            sleep 10
+        fi
+    done
+fi
 
 # Clean up interactive file
 rm -f "$INTERACTIVE_FILE"

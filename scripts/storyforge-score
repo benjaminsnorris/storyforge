@@ -432,7 +432,7 @@ FAILED=0
 # ============================================================================
 
 # Require API key for direct API scoring
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+if [[ "$DRY_RUN" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     log "ERROR: ANTHROPIC_API_KEY not set."
     log "  Scoring uses the Anthropic API directly (no claude -p overhead)."
     log "  Set it with: export ANTHROPIC_API_KEY=your-key"
@@ -519,129 +519,19 @@ batch)
 
     log "Submitting batch ($(wc -c < "$BATCH_FILE" | tr -d ' ') bytes)..."
 
-    # Build the request body as a file to avoid "Argument list too long" on large batches
-    BATCH_BODY="${TMPDIR:-/tmp}/storyforge-batch-body-$$.json"
-    jq -s '{requests: .}' "$BATCH_FILE" > "$BATCH_BODY"
-
-    BATCH_RESPONSE=$(curl -s "https://api.anthropic.com/v1/messages/batches" \
-        -H "x-api-key: ${ANTHROPIC_API_KEY}" \
-        -H "anthropic-version: 2023-06-01" \
-        -H "content-type: application/json" \
-        -d @"$BATCH_BODY") || {
-        rm -f "$BATCH_BODY"
-        log "ERROR: Failed to submit batch"
-        exit 1
-    }
-    rm -f "$BATCH_BODY"
-
-    BATCH_ID=$(echo "$BATCH_RESPONSE" | jq -r '.id // empty')
-    if [[ -z "$BATCH_ID" ]]; then
-        log "ERROR: No batch ID returned"
-        log "  Response: $(echo "$BATCH_RESPONSE" | head -3)"
-        exit 1
-    fi
-
+    BATCH_ID=$(submit_batch "$BATCH_FILE") || { log "ERROR: Batch submission failed"; exit 1; }
     log "Batch submitted: ${BATCH_ID}"
     log "Polling for results..."
-
-    # Poll until done
-    POLL_INTERVAL=15
-    while true; do
-        sleep "$POLL_INTERVAL"
-        BATCH_STATUS=$(curl -s "https://api.anthropic.com/v1/messages/batches/${BATCH_ID}" \
-            -H "x-api-key: ${ANTHROPIC_API_KEY}" \
-            -H "anthropic-version: 2023-06-01")
-
-        pstatus=$(echo "$BATCH_STATUS" | jq -r '.processing_status')
-        succeeded=$(echo "$BATCH_STATUS" | jq -r '.request_counts.succeeded')
-        errored=$(echo "$BATCH_STATUS" | jq -r '.request_counts.errored')
-        elapsed=$(( $(date +%s) - SCORE_START_TIME ))
-
-        log "  ${elapsed}s: ${pstatus} (${succeeded} succeeded, ${errored} errored)"
-
-        if [[ "$pstatus" == "ended" ]]; then
-            break
-        fi
-
-        # Increase poll interval over time
-        (( POLL_INTERVAL < 30 )) && POLL_INTERVAL=$((POLL_INTERVAL + 5))
-    done
-
-    # Download results
-    RESULTS_URL=$(echo "$BATCH_STATUS" | jq -r '.results_url // empty')
-    if [[ -z "$RESULTS_URL" ]]; then
-        log "ERROR: No results URL in batch response"
-        exit 1
-    fi
-
-    RESULTS_FILE="${CYCLE_DIR}/.batch-results.jsonl"
-    curl -s "$RESULTS_URL" \
-        -H "x-api-key: ${ANTHROPIC_API_KEY}" \
-        -H "anthropic-version: 2023-06-01" \
-        > "$RESULTS_FILE"
-
+    poll_batch "$BATCH_ID"
     log "Results downloaded. Parsing..."
-
-    # Parse each result — use python for robust JSON handling (control chars in text)
-    python3 -c "
-import json, sys, os
-
-results_file = '${RESULTS_FILE}'
-cycle_dir = '${CYCLE_DIR}'
-log_dir = '${LOG_DIR}'
-
-with open(results_file) as f:
-    for line in f:
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        cid = obj.get('custom_id', '')
-        result = obj.get('result', {})
-        rtype = result.get('type', '')
-
-        if rtype != 'succeeded':
-            # Write fail status
-            with open(os.path.join(cycle_dir, f'.status-{cid}'), 'w') as sf:
-                sf.write('fail')
-            continue
-
-        msg = result.get('message', {})
-        usage = msg.get('usage', {})
-
-        # Extract text
-        text = ''
-        for block in msg.get('content', []):
-            if block.get('type') == 'text':
-                text = block.get('text', '')
-
-        # Write the API response as JSON for log_api_usage
-        response_file = os.path.join(log_dir, f'score-{cid}.json')
-        with open(response_file, 'w') as rf:
-            json.dump({'usage': usage, 'content': msg.get('content', [])}, rf)
-
-        # Write the text content for parse_scene_evaluation
-        text_file = os.path.join(log_dir, f'score-{cid}.txt')
-        with open(text_file, 'w') as tf:
-            tf.write(text)
-
-        # Write ok status
-        with open(os.path.join(cycle_dir, f'.status-{cid}'), 'w') as sf:
-            sf.write('ok')
-
-print('done')
-" || {
-        log "ERROR: Failed to parse batch results"
-        exit 1
-    }
+    download_batch_results "$BATCH_ID" "$CYCLE_DIR" "$LOG_DIR"
 
     # Process parsed results
     for id in "${SCENE_IDS[@]}"; do
         local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
         status_file="${CYCLE_DIR}/.status-${id}"
-        text_file="${LOG_DIR}/score-${id}.txt"
-        json_file="${LOG_DIR}/score-${id}.json"
+        text_file="${LOG_DIR}/${id}.txt"
+        json_file="${LOG_DIR}/${id}.json"
 
         if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]] && [[ -f "$text_file" ]]; then
             # Log usage from the JSON response
@@ -669,7 +559,7 @@ print('done')
     done
 
     # Clean up batch temp files
-    rm -f "$BATCH_FILE" "$RESULTS_FILE"
+    rm -f "$BATCH_FILE"
     ;;
 
 # ================================================================

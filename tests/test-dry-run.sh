@@ -75,19 +75,26 @@ assert_contains "$plan_content" 'status: "pending"' "revise dry-run: plan status
 # storyforge-evaluate --dry-run
 # ============================================================================
 
-result=$(run_dry_run "storyforge-evaluate")
+eval_result_file="${TMPDIR:-/tmp}/storyforge-eval-dry-run-$$.txt"
+run_dry_run "storyforge-evaluate" > "$eval_result_file"
 rc=$?
 
+# Use file-based grep for evaluate dry-run since output can be ~75KB
+# which causes SIGPIPE issues with echo|grep -q under pipefail
 assert_exit_code "0" "$rc" "evaluate dry-run: exits 0"
-assert_contains "$result" "DRY RUN: developmental-editor" "evaluate dry-run: has dev-editor evaluator"
-assert_contains "$result" "DRY RUN: line-editor" "evaluate dry-run: has line-editor evaluator"
-assert_contains "$result" "DRY RUN: literary-agent" "evaluate dry-run: has literary-agent evaluator"
-assert_contains "$result" "DRY RUN: first-reader" "evaluate dry-run: has first-reader evaluator"
-assert_contains "$result" "DRY RUN: genre-expert" "evaluate dry-run: has genre-expert evaluator"
-assert_contains "$result" "DRY RUN: writing-coach" "evaluate dry-run: has writing-coach evaluator"
-assert_contains "$result" "DRY RUN: synthesis" "evaluate dry-run: has synthesis section"
-assert_contains "$result" "The Cartographer's Silence" "evaluate dry-run: prompt contains title"
-assert_contains "$result" "scenes/act1-sc01.md" "evaluate dry-run: prompt lists scene files"
+_eval_file_contains() {
+    grep -qF "$1" "$eval_result_file"
+}
+_eval_file_contains "DRY RUN: developmental-editor" && { PASS=$((PASS+1)); echo "  PASS: evaluate dry-run: has dev-editor evaluator"; } || { FAIL=$((FAIL+1)); echo "  FAIL: evaluate dry-run: has dev-editor evaluator"; }
+_eval_file_contains "DRY RUN: line-editor" && { PASS=$((PASS+1)); echo "  PASS: evaluate dry-run: has line-editor evaluator"; } || { FAIL=$((FAIL+1)); echo "  FAIL: evaluate dry-run: has line-editor evaluator"; }
+_eval_file_contains "DRY RUN: literary-agent" && { PASS=$((PASS+1)); echo "  PASS: evaluate dry-run: has literary-agent evaluator"; } || { FAIL=$((FAIL+1)); echo "  FAIL: evaluate dry-run: has literary-agent evaluator"; }
+_eval_file_contains "DRY RUN: first-reader" && { PASS=$((PASS+1)); echo "  PASS: evaluate dry-run: has first-reader evaluator"; } || { FAIL=$((FAIL+1)); echo "  FAIL: evaluate dry-run: has first-reader evaluator"; }
+_eval_file_contains "DRY RUN: genre-expert" && { PASS=$((PASS+1)); echo "  PASS: evaluate dry-run: has genre-expert evaluator"; } || { FAIL=$((FAIL+1)); echo "  FAIL: evaluate dry-run: has genre-expert evaluator"; }
+_eval_file_contains "DRY RUN: writing-coach" && { PASS=$((PASS+1)); echo "  PASS: evaluate dry-run: has writing-coach evaluator"; } || { FAIL=$((FAIL+1)); echo "  FAIL: evaluate dry-run: has writing-coach evaluator"; }
+_eval_file_contains "DRY RUN: synthesis" && { PASS=$((PASS+1)); echo "  PASS: evaluate dry-run: has synthesis section"; } || { FAIL=$((FAIL+1)); echo "  FAIL: evaluate dry-run: has synthesis section"; }
+_eval_file_contains "The Cartographer's Silence" && { PASS=$((PASS+1)); echo "  PASS: evaluate dry-run: prompt contains title"; } || { FAIL=$((FAIL+1)); echo "  FAIL: evaluate dry-run: prompt contains title"; }
+_eval_file_contains "scenes/act1-sc01.md" && { PASS=$((PASS+1)); echo "  PASS: evaluate dry-run: prompt lists scene files"; } || { FAIL=$((FAIL+1)); echo "  FAIL: evaluate dry-run: prompt lists scene files"; }
+rm -f "$eval_result_file"
 
 # Evaluate dry-run should not create new evaluation directories
 eval_dirs_before=$(ls -d "${FIXTURE_DIR}/working/evaluations/"*/ 2>/dev/null | wc -l | tr -d ' ')
