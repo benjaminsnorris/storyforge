@@ -1,0 +1,639 @@
+#!/bin/bash
+set -eo pipefail
+
+# ============================================================================
+# storyforge-timeline — Timeline day assignment for Storyforge projects
+#
+# Two-phase architecture:
+#   Phase 1 (Haiku): Extract temporal indicators from each scene in parallel
+#   Phase 2 (Sonnet): Assign timeline_day values via multi-scene analysis
+#
+# Usage:
+#   ./storyforge-timeline                     # All scenes, autonomous
+#   ./storyforge-timeline --interactive       # Interactive with review checkpoints
+#   ./storyforge-timeline --act 2             # Scenes in act 2 only
+#   ./storyforge-timeline --embedded          # Called from enrich (no branch/PR)
+#   ./storyforge-timeline --dry-run           # Show plan without invoking Claude
+# ============================================================================
+
+# --- Locate script directory and source libraries ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+
+if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
+    echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
+    exit 1
+fi
+
+# shellcheck source=lib/common.sh
+source "${LIB_DIR}/common.sh"
+
+# --- Default options ---
+DRY_RUN=false
+FORCE=false
+INTERACTIVE=false
+EMBEDDED=false
+SKIP_PHASE1=false
+FILTER_MODE="all"
+FILTER_SCENES=""
+FILTER_ACT=""
+FILTER_FROM_SEQ=""
+PARALLEL=${STORYFORGE_TIMELINE_PARALLEL:-6}
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [options]
+
+Assign timeline_day values to scenes via two-phase Claude analysis.
+Phase 1 (Haiku): Extract temporal indicators from scene prose.
+Phase 2 (Sonnet): Assign timeline_day via multi-scene analysis.
+
+Scene selection:
+  --scenes ID,ID,...  Specific scenes only (comma-separated)
+  --act N             Scenes in part N
+  --from-seq N        From sequence N onward
+  --from-seq N-M      Sequence range N through M
+
+Options:
+  --interactive, -i   Interactive mode with review checkpoints
+  --parallel N        Haiku extraction workers (default: 6, env: STORYFORGE_TIMELINE_PARALLEL)
+  --force             Overwrite existing timeline_day values
+  --dry-run           Show what would happen without invoking Claude
+  --skip-phase1       Skip Haiku extraction; reuse cached indicators or fall back to raw metadata
+  --embedded          Called as subprocess (skip branch/PR/commit)
+  -h, --help          Show this help
+
+Environment:
+  STORYFORGE_MODEL              Override model for all invocations
+  STORYFORGE_TIMELINE_PARALLEL  Override parallel workers (default: 6)
+  STORYFORGE_REJOIN_TIMEOUT     Seconds to wait for 'i' keypress (default: 5)
+
+Examples:
+  $(basename "$0")                          # All scenes, autonomous
+  $(basename "$0") --interactive            # Interactive with review gates
+  $(basename "$0") --act 2                  # Act 2 only
+  $(basename "$0") --from-seq 10-20         # Scenes 10 through 20
+  $(basename "$0") --embedded --force       # Called from enrich
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
+        --interactive|-i)
+            INTERACTIVE=true
+            shift
+            ;;
+        --embedded)
+            EMBEDDED=true
+            shift
+            ;;
+        --skip-phase1)
+            SKIP_PHASE1=true
+            shift
+            ;;
+        --scenes)
+            FILTER_MODE="scenes"
+            FILTER_SCENES="${2:?ERROR: --scenes requires comma-separated scene IDs}"
+            shift 2
+            ;;
+        --act)
+            FILTER_MODE="act"
+            FILTER_ACT="${2:?ERROR: --act requires an act number}"
+            shift 2
+            ;;
+        --from-seq)
+            FILTER_MODE="from_seq"
+            FILTER_FROM_SEQ="${2:?ERROR: --from-seq requires a sequence number or range}"
+            shift 2
+            ;;
+        --parallel)
+            PARALLEL="${2:?ERROR: --parallel requires a number}"
+            shift 2
+            ;;
+        -*)
+            echo "ERROR: Unknown option: $1" >&2
+            usage
+            ;;
+        *)
+            echo "ERROR: Unexpected argument: $1" >&2
+            usage
+            ;;
+    esac
+done
+
+# ============================================================================
+# Project setup
+# ============================================================================
+
+detect_project_root
+PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
+
+# --- Resolve paths ---
+METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
+SCENES_DIR="${PROJECT_DIR}/scenes"
+LOG_DIR="${PROJECT_DIR}/working/logs"
+TIMELINE_DIR="${PROJECT_DIR}/working/timeline"
+
+mkdir -p "$LOG_DIR" "$TIMELINE_DIR"
+
+if [[ ! -f "$METADATA_CSV" ]]; then
+    log "ERROR: reference/scene-metadata.csv not found."
+    exit 1
+fi
+
+# --- Interactive mode file ---
+INTERACTIVE_FILE="${PROJECT_DIR}/working/.interactive"
+if [[ "$EMBEDDED" != true ]]; then
+    rm -f "$INTERACTIVE_FILE"
+    if [[ "$INTERACTIVE" == true ]]; then
+        touch "$INTERACTIVE_FILE"
+    fi
+fi
+
+# --- Build scene list ---
+build_scene_list "$METADATA_CSV"
+
+case "$FILTER_MODE" in
+    all)       apply_scene_filter "$METADATA_CSV" "all" ;;
+    scenes)    apply_scene_filter "$METADATA_CSV" "scenes" "$FILTER_SCENES" ;;
+    act)       apply_scene_filter "$METADATA_CSV" "act" "$FILTER_ACT" ;;
+    from_seq)  apply_scene_filter "$METADATA_CSV" "from_seq" "$FILTER_FROM_SEQ" ;;
+esac
+
+SCENE_IDS=("${FILTERED_IDS[@]}")
+SCENE_COUNT=${#SCENE_IDS[@]}
+
+if (( SCENE_COUNT == 0 )); then
+    log "No scenes match the filter. Nothing to do."
+    exit 0
+fi
+
+# --- Model selection ---
+HAIKU_MODEL=$(select_model "extraction")
+SONNET_MODEL=$(select_model "evaluation")
+
+log "============================================"
+log "Storyforge Timeline"
+log "============================================"
+log "Project: ${PROJECT_TITLE}"
+log "Scenes: ${SCENE_COUNT}"
+log "Phase 1 model: ${HAIKU_MODEL}"
+log "Phase 2 model: ${SONNET_MODEL}"
+log "Mode: $(if [[ -f "$INTERACTIVE_FILE" ]]; then echo "interactive"; else echo "autonomous"; fi)"
+if [[ "$EMBEDDED" == true ]]; then log "Running embedded (no branch/PR)"; fi
+log "============================================"
+
+# ============================================================================
+# Dry-run mode
+# ============================================================================
+
+if [[ "$DRY_RUN" == true ]]; then
+    log ""
+    log "DRY RUN — would analyze these scenes:"
+    for id in "${SCENE_IDS[@]}"; do
+        title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+        seq_val=$(get_csv_field "$METADATA_CSV" "$id" "seq")
+        existing=$(get_csv_field "$METADATA_CSV" "$id" "timeline_day")
+        log "  SEQ ${seq_val}: ${id} — ${title:-untitled} (current day: ${existing:-unset})"
+    done
+    log ""
+    log "Phase 1: ${SCENE_COUNT} Haiku calls (parallel, ${PARALLEL} workers)"
+    log "Phase 2: 1 Sonnet call (all scenes)"
+    exit 0
+fi
+
+# ============================================================================
+# Cost forecast
+# ============================================================================
+
+TOTAL_WORDS=0
+for id in "${SCENE_IDS[@]}"; do
+    sf="${SCENES_DIR}/${id}.md"
+    if [[ -f "$sf" ]]; then
+        wc_val=$(wc -w < "$sf" | tr -d ' ')
+        TOTAL_WORDS=$((TOTAL_WORDS + wc_val))
+    fi
+done
+
+# Phase 1: Haiku reads full prose per scene
+AVG_WORDS=$(( TOTAL_WORDS / (SCENE_COUNT > 0 ? SCENE_COUNT : 1) ))
+(( AVG_WORDS < 100 )) && AVG_WORDS=100
+PHASE1_COST=$(estimate_cost "extraction" "$SCENE_COUNT" "$AVG_WORDS" "$HAIKU_MODEL")
+# Phase 2: Sonnet reads compact indicators (~50 words per scene)
+PHASE2_COST=$(estimate_cost "evaluation" "1" "$(( SCENE_COUNT * 50 ))" "$SONNET_MODEL")
+
+log "Cost forecast: Phase 1 ~\$${PHASE1_COST}, Phase 2 ~\$${PHASE2_COST}"
+check_cost_threshold "$PHASE1_COST" || { log "Cost threshold exceeded. Aborting."; exit 1; }
+
+# ============================================================================
+# Branch & PR (standalone mode only)
+# ============================================================================
+
+if [[ "$EMBEDDED" != true ]]; then
+    create_branch "timeline" "$PROJECT_DIR"
+    ensure_branch_pushed "$PROJECT_DIR"
+
+    PR_BODY="## Timeline Assignment
+
+**Project:** ${PROJECT_TITLE}
+**Scenes:** ${SCENE_COUNT}
+
+### Tasks
+- [ ] Phase 1: Extract temporal indicators (Haiku)
+- [ ] Phase 2: Assign timeline_day values (Sonnet)
+"
+    create_draft_pr "Enrich: timeline for ${PROJECT_TITLE}" "$PR_BODY" "$PROJECT_DIR" "enrichment"
+fi
+
+# ============================================================================
+# Phase 1: Haiku temporal indicator extraction (parallel)
+# ============================================================================
+
+run_phase1() {
+    log ""
+    log "Phase 1: Extracting temporal indicators (${SCENE_COUNT} scenes, ${PARALLEL} workers)"
+    log "--------------------------------------------"
+
+    local batch_start=0
+    local completed=0
+
+    while (( batch_start < SCENE_COUNT )); do
+        batch_pids=()
+        batch_ids=()
+        batch_end=$(( batch_start + PARALLEL ))
+        (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
+
+        for (( i=batch_start; i<batch_end; i++ )); do
+            id="${SCENE_IDS[$i]}"
+            batch_ids+=("$id")
+            (
+                scene_file="${SCENES_DIR}/${id}.md"
+                indicator_file="${TIMELINE_DIR}/.indicators-${id}"
+                log_file="${LOG_DIR}/timeline-phase1-${id}.log"
+
+                # Read scene prose
+                prose=""
+                if [[ -f "$scene_file" ]]; then
+                    prose=$(cat "$scene_file")
+                fi
+
+                if [[ -z "$prose" ]]; then
+                    echo "(no prose)" > "$indicator_file"
+                    echo "ok" > "${TIMELINE_DIR}/.status-${id}"
+                    exit 0
+                fi
+
+                # Build Haiku prompt
+                prompt="You are extracting temporal indicators from a scene in a novel. Read the prose below and list ONLY time-related signals. Do not interpret, analyze, or assign day numbers.
+
+Extract these types of indicators:
+- Explicit time references: \"the next morning\", \"three days later\", \"Tuesday\"
+- Temporal transitions: \"later that evening\", \"by nightfall\"
+- Sleep/wake cycles: \"she woke\", \"he went to bed\"
+- Meal references: \"over breakfast\", \"dinner was cold\"
+- Continuity cues: \"still wearing yesterday's clothes\", \"the wound had healed\"
+
+Output format — one line of comma-separated indicators, or \"(none)\" if no temporal signals found:
+INDICATORS: \"the next morning\", wakes up, breakfast
+
+## Scene Prose
+${prose}"
+
+                _SF_INVOCATION_START=$(date +%s)
+                export _SF_INVOCATION_START
+
+                claude -p "$prompt" \
+                    --model "$HAIKU_MODEL" \
+                    --dangerously-skip-permissions \
+                    --output-format stream-json \
+                    --verbose \
+                    > "$log_file" 2>&1 || true
+
+                response=$(extract_claude_response "$log_file" 2>/dev/null || true)
+                log_usage "$log_file" "timeline-phase1" "$id" "$HAIKU_MODEL"
+
+                # Parse INDICATORS: line
+                indicators=""
+                if [[ -n "$response" ]]; then
+                    indicators=$(echo "$response" | grep -i "^INDICATORS:" | sed 's/^INDICATORS:[[:space:]]*//' | head -1 || true)
+                fi
+                [[ -z "$indicators" ]] && indicators="(none)"
+
+                echo "$indicators" > "$indicator_file"
+                echo "ok" > "${TIMELINE_DIR}/.status-${id}"
+            ) &
+            batch_pids+=($!)
+            register_child_pid $!
+        done
+
+        # Wait for batch
+        for pid in "${batch_pids[@]}"; do
+            wait "$pid" 2>/dev/null || true
+            unregister_child_pid "$pid" 2>/dev/null || true
+        done
+
+        # Report progress for this batch
+        for id in "${batch_ids[@]}"; do
+            completed=$((completed + 1))
+            indicator_file="${TIMELINE_DIR}/.indicators-${id}"
+            if [[ -f "$indicator_file" ]]; then
+                indicators=$(cat "$indicator_file")
+                log "  [${completed}/${SCENE_COUNT}] ${id}: ${indicators}"
+            else
+                log "  [${completed}/${SCENE_COUNT}] ${id}: (extraction failed)"
+            fi
+        done
+
+        batch_start=$batch_end
+    done
+
+    log "Phase 1 complete: ${completed} scenes processed"
+}
+
+# ============================================================================
+# Phase 2: Sonnet timeline_day assignment (single pass)
+# ============================================================================
+
+run_phase2() {
+    log ""
+    log "Phase 2: Assigning timeline_day values (single Sonnet pass)"
+    log "--------------------------------------------"
+
+    # Build the scene summary from Phase 1 indicators + metadata
+    local scene_summaries=""
+    for id in "${SCENE_IDS[@]}"; do
+        title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+        seq_val=$(get_csv_field "$METADATA_CSV" "$id" "seq")
+        tod=$(get_csv_field "$METADATA_CSV" "$id" "time_of_day")
+        existing_day=$(get_csv_field "$METADATA_CSV" "$id" "timeline_day")
+
+        # Get indicators from Phase 1 (or fallback)
+        indicator_file="${TIMELINE_DIR}/.indicators-${id}"
+        if [[ -f "$indicator_file" ]]; then
+            indicators=$(cat "$indicator_file")
+        else
+            # Fallback: raw metadata only
+            indicators="(no extraction available)"
+        fi
+
+        scene_summaries="${scene_summaries}
+SEQ ${seq_val}: ${title} (${id})
+  Time of day: ${tod:-unknown}
+  Existing timeline_day: ${existing_day:-unset}
+  Temporal indicators: ${indicators}
+"
+    done
+
+    # Build Sonnet prompt
+    local timeline_prompt="You are assigning timeline_day values to scenes in a novel. Each scene happens on a specific day in the story's internal chronology. Day 1 is the first day of the story.
+
+Read the scenes below IN ORDER (they are sorted by narrative sequence). Use the temporal indicators extracted from the prose, time-of-day cues, and narrative logic to determine which day each scene falls on. Scenes can share a day. Days can be skipped (e.g., day 1, day 1, day 3 if two days pass between scenes).
+
+If a scene already has a timeline_day value, keep it unless your analysis strongly suggests it's wrong.
+
+## Scenes (in narrative order)
+${scene_summaries}
+
+## Instructions
+
+Assign a timeline_day (positive integer) to every scene. Output ONLY a pipe-delimited CSV block:
+
+TIMELINE:
+id|timeline_day"
+
+    for id in "${SCENE_IDS[@]}"; do
+        timeline_prompt="${timeline_prompt}
+${id}|<day>"
+    done
+
+    local tl_log="${LOG_DIR}/timeline-phase2.log"
+
+    log "Sending ${SCENE_COUNT} scene summaries to Sonnet..."
+
+    # Background monitor for progress heartbeat
+    _PHASE2_START=$(date +%s)
+    (
+        ticks=0
+        while true; do
+            sleep 30
+            ticks=$((ticks + 1))
+            elapsed=$(( $(date +%s) - _PHASE2_START ))
+            mins=$(( elapsed / 60 ))
+            secs=$(( elapsed % 60 ))
+            log "  Phase 2: ${mins}m${secs}s elapsed..."
+        done
+    ) &
+    monitor_pid=$!
+    register_child_pid $monitor_pid
+
+    _SF_INVOCATION_START=$_PHASE2_START
+    export _SF_INVOCATION_START
+
+    begin_healing_zone "timeline phase 2 assignment"
+
+    claude -p "$timeline_prompt" \
+        --model "$SONNET_MODEL" \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        > "$tl_log" 2>&1 || true
+
+    end_healing_zone
+
+    # Kill monitor
+    kill "$monitor_pid" 2>/dev/null || true
+    wait "$monitor_pid" 2>/dev/null || true
+    unregister_child_pid "$monitor_pid" 2>/dev/null || true
+
+    local response
+    response=$(extract_claude_response "$tl_log" 2>/dev/null || true)
+    log_usage "$tl_log" "timeline-phase2" "all" "$SONNET_MODEL"
+
+    if [[ -z "$response" ]]; then
+        log "WARNING: No response from Sonnet for timeline assignment"
+        return 1
+    fi
+
+    # Parse TIMELINE: CSV block
+    ASSIGNED=0
+    SKIPPED=0
+    local in_block=false
+    while IFS= read -r line; do
+        if [[ "$line" == "TIMELINE:" ]]; then
+            in_block=true
+            continue
+        fi
+        [[ "$in_block" != true ]] && continue
+        [[ "$line" == "id|timeline_day" ]] && continue
+        [[ -z "$line" ]] && continue
+        [[ "$line" == *":"* && "$line" != *"|"* ]] && break
+
+        local scene_id day_val
+        scene_id=$(echo "$line" | cut -d'|' -f1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        day_val=$(echo "$line" | cut -d'|' -f2 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+        if [[ "$day_val" =~ ^[0-9]+$ ]] && (( day_val > 0 )); then
+            local existing
+            existing=$(get_csv_field "$METADATA_CSV" "$scene_id" "timeline_day")
+            if [[ -n "$existing" && "$FORCE" != true ]]; then
+                SKIPPED=$((SKIPPED + 1))
+            else
+                update_csv_field "$METADATA_CSV" "$scene_id" "timeline_day" "$day_val"
+                ASSIGNED=$((ASSIGNED + 1))
+            fi
+        fi
+    done <<< "$response"
+
+    log "Phase 2 complete: ${ASSIGNED} assigned, ${SKIPPED} skipped (already set)"
+}
+
+# ============================================================================
+# Interactive checkpoint helper
+# ============================================================================
+
+run_interactive_checkpoint() {
+    local phase_label="$1"
+    local display_content="$2"
+    local work_unit="$3"
+
+    show_interactive_banner "Timeline — ${phase_label}" "single"
+
+    local interactive_system
+    interactive_system=$(build_interactive_system_prompt "$PROJECT_DIR" "$work_unit")
+
+    local checkpoint_prompt="Here are the results from ${phase_label}. Review them and let me know if you'd like any changes.
+
+${display_content}
+
+When you're satisfied, type /exit to continue."
+
+    set +e
+    claude "$checkpoint_prompt" \
+        --model "$SONNET_MODEL" \
+        --dangerously-skip-permissions \
+        --append-system-prompt "$interactive_system"
+    set -e
+}
+
+# ============================================================================
+# Main execution flow
+# ============================================================================
+
+# --- Phase 1 ---
+if [[ "$SKIP_PHASE1" == true ]]; then
+    # Check for cached indicators
+    cached_count=0
+    for id in "${SCENE_IDS[@]}"; do
+        [[ -f "${TIMELINE_DIR}/.indicators-${id}" ]] && cached_count=$((cached_count + 1))
+    done
+    if (( cached_count > 0 )); then
+        log "Skipping Phase 1: using ${cached_count} cached indicator files"
+    else
+        log "Skipping Phase 1: no cached indicators, Phase 2 will use raw metadata"
+    fi
+else
+    run_phase1
+fi
+
+# --- Interactive checkpoint 1 (after Phase 1) ---
+if [[ -f "$INTERACTIVE_FILE" ]]; then
+    # Build display of all indicators
+    indicator_display=""
+    for id in "${SCENE_IDS[@]}"; do
+        seq_val=$(get_csv_field "$METADATA_CSV" "$id" "seq")
+        title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+        indicator_file="${TIMELINE_DIR}/.indicators-${id}"
+        indicators="(not extracted)"
+        [[ -f "$indicator_file" ]] && indicators=$(cat "$indicator_file")
+        indicator_display="${indicator_display}
+SEQ ${seq_val}: ${title} (${id})
+  Indicators: ${indicators}
+"
+    done
+
+    run_interactive_checkpoint "Phase 1: Temporal Indicators" "$indicator_display" "review"
+fi
+
+# --- Offer interactive rejoin between phases (autonomous mode) ---
+if [[ ! -f "$INTERACTIVE_FILE" && "$EMBEDDED" != true ]]; then
+    offer_interactive "$PROJECT_DIR" "Phase 2: Sonnet timeline assignment" || true
+fi
+
+# Update PR task (standalone mode)
+if [[ "$EMBEDDED" != true ]]; then
+    update_pr_task "enrichment" "$PROJECT_DIR" 2>/dev/null || true
+fi
+
+# --- Phase 2 ---
+run_phase2
+
+# --- Interactive checkpoint 2 (after Phase 2) ---
+if [[ -f "$INTERACTIVE_FILE" ]]; then
+    # Build display of assignments
+    assignment_display="Timeline assignments:
+"
+    for id in "${SCENE_IDS[@]}"; do
+        seq_val=$(get_csv_field "$METADATA_CSV" "$id" "seq")
+        title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+        day_val=$(get_csv_field "$METADATA_CSV" "$id" "timeline_day")
+        assignment_display="${assignment_display}  SEQ ${seq_val}: Day ${day_val:-?} — ${title} (${id})
+"
+    done
+
+    run_interactive_checkpoint "Phase 2: Timeline Assignments" "$assignment_display" "review"
+fi
+
+# ============================================================================
+# Commit & cleanup
+# ============================================================================
+
+if [[ "$EMBEDDED" != true ]]; then
+    (
+        cd "$PROJECT_DIR"
+        git add "reference/scene-metadata.csv" 2>/dev/null || true
+        git add "working/logs/" 2>/dev/null || true
+        git commit -m "Enrich: timeline_day assignment" 2>/dev/null || true
+        git push 2>/dev/null || true
+    )
+
+    # Update PR task
+    update_pr_task "enrichment" "$PROJECT_DIR" 2>/dev/null || true
+fi
+
+# Clean up temp files
+rm -f "${TIMELINE_DIR}"/.indicators-* "${TIMELINE_DIR}"/.status-*
+
+# Cleanup interactive file (standalone mode only)
+if [[ "$EMBEDDED" != true ]]; then
+    rm -f "$INTERACTIVE_FILE"
+fi
+
+# ============================================================================
+# Summary
+# ============================================================================
+
+log ""
+log "============================================"
+log "Timeline assignment complete"
+log "  Scenes analyzed: ${SCENE_COUNT}"
+log "  Assigned: ${ASSIGNED:-0}"
+log "  Skipped: ${SKIPPED:-0}"
+log "============================================"
+
+if [[ "$EMBEDDED" != true ]]; then
+    print_cost_summary "timeline-phase1"
+    print_cost_summary "timeline-phase2"
+fi
