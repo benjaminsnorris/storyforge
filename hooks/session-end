@@ -1,0 +1,116 @@
+#!/bin/bash
+set -eo pipefail
+
+# ============================================================================
+# session-end — SessionEnd hook for interactive cost tracking
+#
+# Reads the Claude Code transcript JSONL, sums token usage per model,
+# computes cost, and appends rows to the project's cost ledger.
+#
+# Input (stdin): JSON with session_id, transcript_path, cwd, reason
+# Output: None (appends to ledger silently)
+# ============================================================================
+
+# --- Read hook input from stdin ---
+INPUT=$(cat)
+
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
+TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // empty')
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+
+# --- Guard: require all fields ---
+[[ -z "$SESSION_ID" || -z "$TRANSCRIPT_PATH" || -z "$CWD" ]] && exit 0
+
+# --- Guard: must be a storyforge project ---
+[[ ! -f "${CWD}/storyforge.yaml" ]] && exit 0
+
+# --- Guard: transcript must exist ---
+[[ ! -f "$TRANSCRIPT_PATH" ]] && exit 0
+
+# --- Pricing constants (per million tokens, env-overridable) ---
+# Matches scripts/lib/costs.sh pricing tiers
+PRICING_OPUS_INPUT="${PRICING_OPUS_INPUT:-15.00}"
+PRICING_OPUS_OUTPUT="${PRICING_OPUS_OUTPUT:-75.00}"
+PRICING_OPUS_CACHE_READ="${PRICING_OPUS_CACHE_READ:-1.50}"
+PRICING_OPUS_CACHE_CREATE="${PRICING_OPUS_CACHE_CREATE:-18.75}"
+
+PRICING_SONNET_INPUT="${PRICING_SONNET_INPUT:-3.00}"
+PRICING_SONNET_OUTPUT="${PRICING_SONNET_OUTPUT:-15.00}"
+PRICING_SONNET_CACHE_READ="${PRICING_SONNET_CACHE_READ:-0.30}"
+PRICING_SONNET_CACHE_CREATE="${PRICING_SONNET_CACHE_CREATE:-3.75}"
+
+PRICING_HAIKU_INPUT="${PRICING_HAIKU_INPUT:-0.80}"
+PRICING_HAIKU_OUTPUT="${PRICING_HAIKU_OUTPUT:-4.00}"
+PRICING_HAIKU_CACHE_READ="${PRICING_HAIKU_CACHE_READ:-0.08}"
+PRICING_HAIKU_CACHE_CREATE="${PRICING_HAIKU_CACHE_CREATE:-1.00}"
+
+# --- Parse transcript: sum tokens per model ---
+# Extract assistant records with usage data, group by model, sum tokens.
+# Output: one line per model with pipe-delimited fields.
+USAGE_DATA=$(jq -r '
+  select(.type == "assistant" and .message.usage != null)
+  | {
+      model: .message.model,
+      input: (.message.usage.input_tokens // 0),
+      output: (.message.usage.output_tokens // 0),
+      cache_read: (.message.usage.cache_read_input_tokens // 0),
+      cache_create: (.message.usage.cache_creation_input_tokens // 0)
+    }
+' "$TRANSCRIPT_PATH" 2>/dev/null | jq -sr '
+  group_by(.model)
+  | map({
+      model: .[0].model,
+      input: (map(.input) | add),
+      output: (map(.output) | add),
+      cache_read: (map(.cache_read) | add),
+      cache_create: (map(.cache_create) | add)
+    })
+  | .[]
+  | [.model, .input, .output, .cache_read, .cache_create]
+  | join("|")
+' 2>/dev/null) || exit 0
+
+# --- Guard: no usage data found ---
+[[ -z "$USAGE_DATA" ]] && exit 0
+
+# --- Ensure ledger exists ---
+LEDGER_DIR="${CWD}/working/costs"
+LEDGER="${LEDGER_DIR}/ledger.csv"
+LEDGER_HEADER="timestamp|operation|target|model|input_tokens|output_tokens|cache_read|cache_create|cost_usd|duration_s"
+
+mkdir -p "$LEDGER_DIR"
+if [[ ! -f "$LEDGER" ]]; then
+    echo "$LEDGER_HEADER" > "$LEDGER"
+fi
+
+TIMESTAMP=$(date '+%Y-%m-%dT%H:%M:%S')
+
+# --- Append one row per model ---
+while IFS='|' read -r model input output cache_read cache_create; do
+    [[ -z "$model" ]] && continue
+
+    # Determine pricing tier
+    tier="SONNET"
+    case "$model" in
+        *opus*|*Opus*|*OPUS*)   tier="OPUS" ;;
+        *haiku*|*Haiku*|*HAIKU*) tier="HAIKU" ;;
+    esac
+
+    price_in=$(eval echo "\${PRICING_${tier}_INPUT}")
+    price_out=$(eval echo "\${PRICING_${tier}_OUTPUT}")
+    price_cr=$(eval echo "\${PRICING_${tier}_CACHE_READ}")
+    price_cc=$(eval echo "\${PRICING_${tier}_CACHE_CREATE}")
+
+    cost_usd=$(awk "BEGIN {
+        cost = ($input * $price_in / 1000000) + \
+               ($output * $price_out / 1000000) + \
+               ($cache_read * $price_cr / 1000000) + \
+               ($cache_create * $price_cc / 1000000)
+        printf \"%.6f\", cost
+    }")
+
+    echo "${TIMESTAMP}|interactive|${SESSION_ID}|${model}|${input}|${output}|${cache_read}|${cache_create}|${cost_usd}|0" >> "$LEDGER"
+
+done <<< "$USAGE_DATA"
+
+exit 0

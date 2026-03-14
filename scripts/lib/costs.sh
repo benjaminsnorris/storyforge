@@ -20,6 +20,11 @@ PRICING_SONNET_OUTPUT="${PRICING_SONNET_OUTPUT:-15.00}"
 PRICING_SONNET_CACHE_READ="${PRICING_SONNET_CACHE_READ:-0.30}"
 PRICING_SONNET_CACHE_CREATE="${PRICING_SONNET_CACHE_CREATE:-3.75}"
 
+PRICING_HAIKU_INPUT="${PRICING_HAIKU_INPUT:-0.80}"
+PRICING_HAIKU_OUTPUT="${PRICING_HAIKU_OUTPUT:-4.00}"
+PRICING_HAIKU_CACHE_READ="${PRICING_HAIKU_CACHE_READ:-0.08}"
+PRICING_HAIKU_CACHE_CREATE="${PRICING_HAIKU_CACHE_CREATE:-1.00}"
+
 # ============================================================================
 # get_model_pricing — return per-million-token price for a model
 # ============================================================================
@@ -33,6 +38,8 @@ get_model_pricing() {
     local tier="SONNET"
     if echo "$model" | grep -qi "opus"; then
         tier="OPUS"
+    elif echo "$model" | grep -qi "haiku"; then
+        tier="HAIKU"
     fi
 
     case "$token_type" in
