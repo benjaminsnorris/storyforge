@@ -638,7 +638,7 @@ collect_exemplars() {
 
     local rationale_file="${scores_dir}/scene-rationale.csv"
 
-    # Find cells with score >= 9
+    # Find cells with score >= 5 (masterful on 1-5 scale)
     local header
     header=$(head -1 "$scores_file")
     local col_count
@@ -650,10 +650,10 @@ collect_exemplars() {
         principle=$(echo "$header" | awk -F'|' -v c="$col" '{ print $c }')
         [[ -z "$principle" ]] && { col=$((col + 1)); continue; }
 
-        # Find rows with score >= 9 in this column
+        # Find rows with score >= 5 in this column
         awk -F'|' -v c="$col" -v p="$principle" '
             NR == 1 { next }
-            $c + 0 >= 9 { print $1 "|" p "|" $c }
+            $c + 0 >= 5 { print $1 "|" p "|" $c }
         ' "$scores_file" | while IFS='|' read -r scene_id prin score_val; do
             [[ -z "$scene_id" ]] && continue
 
