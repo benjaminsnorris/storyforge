@@ -1360,3 +1360,136 @@ build_principle_guide() {
         found { print }
     ' "$guide_file"
 }
+
+# parse_scene_evaluation(log_file, output_scores, output_rationale, scene_id)
+# Parses the SCORES: block from a single-pass scene evaluation.
+# Input format: principle|score|deficits|evidence_lines (one row per principle)
+# Outputs: pivoted CSVs with principles as columns (matching existing format).
+parse_scene_evaluation() {
+    local log_file="$1"
+    local output_scores="$2"
+    local output_rationale="$3"
+    local scene_id="$4"
+
+    if [[ ! -f "$log_file" ]]; then
+        log "WARNING: Log file not found: $log_file"
+        return 1
+    fi
+
+    local text_content
+    text_content=$(extract_claude_response "$log_file") || {
+        log "WARNING: No text content found in $log_file"
+        return 1
+    }
+
+    # Extract SCORES: block
+    local scores_block
+    scores_block=$(echo "$text_content" | awk '
+        /^SCORES:/ { found=1; next }
+        found && /^[[:space:]]*$/ { found=0 }
+        found && /^[A-Z_]+:/ { found=0 }
+        found { print }
+    ')
+
+    # Fallback: look for principle|score|deficits header directly
+    if [[ -z "$scores_block" ]]; then
+        scores_block=$(echo "$text_content" | awk '
+            /^principle\|/ { found=1 }
+            found && /^[[:space:]]*$/ { found=0 }
+            found { print }
+        ')
+    fi
+
+    if [[ -z "$scores_block" ]]; then
+        log "WARNING: No SCORES block found in $log_file"
+        return 1
+    fi
+
+    # Pivot rows into columns: principle|score|deficits|evidence -> id|p1|p2|... format
+    # Build header and score/rationale rows from the vertical format
+    local header="id"
+    local score_row="${scene_id}"
+    local rationale_row="${scene_id}"
+
+    while IFS='|' read -r principle score deficits evidence_lines; do
+        [[ "$principle" == "principle" ]] && continue  # skip header
+        [[ -z "$principle" ]] && continue
+        header="${header}|${principle}"
+        score_row="${score_row}|${score}"
+        # Combine deficits and evidence into rationale
+        if [[ "$deficits" == "none" || -z "$deficits" ]]; then
+            rationale_row="${rationale_row}|No deficits"
+        else
+            # Replace pipes in deficits/evidence with dashes to preserve CSV
+            deficits_clean="${deficits//|/-}"
+            evidence_clean="${evidence_lines//|/-}"
+            rationale_row="${rationale_row}|${deficits_clean} (${evidence_clean})"
+        fi
+    done <<< "$scores_block"
+
+    echo "$header" > "$output_scores"
+    echo "$score_row" >> "$output_scores"
+
+    echo "$header" > "$output_rationale"
+    echo "$rationale_row" >> "$output_rationale"
+
+    return 0
+}
+
+# build_evaluation_criteria(diagnostics_csv, guide_file)
+# Builds the combined evaluation criteria block for the single-pass Sonnet prompt.
+# For each principle: the diagnostic checklist + the principle guide description.
+build_evaluation_criteria() {
+    local diagnostics_csv="$1"
+    local guide_file="$2"
+
+    if [[ ! -f "$diagnostics_csv" || ! -f "$guide_file" ]]; then
+        log "WARNING: Missing diagnostics or guide file"
+        return 1
+    fi
+
+    local current_principle=""
+    local output=""
+
+    # Collect markers per principle
+    while IFS='|' read -r section principle marker_id question deficit_if weight evidence_required; do
+        [[ "$section" == "section" ]] && continue
+
+        if [[ "$principle" != "$current_principle" ]]; then
+            # Close previous principle and start new one
+            if [[ -n "$current_principle" ]]; then
+                # Append the principle guide
+                guide=$(build_principle_guide "$current_principle" "$guide_file")
+                if [[ -n "$guide" ]]; then
+                    output="${output}
+${guide}
+"
+                fi
+            fi
+
+            current_principle="$principle"
+            output="${output}
+---
+
+### ${principle}
+
+**Diagnostic checklist:**
+"
+        fi
+
+        output="${output}- ${question}
+"
+    done < "$diagnostics_csv"
+
+    # Close the last principle
+    if [[ -n "$current_principle" ]]; then
+        guide=$(build_principle_guide "$current_principle" "$guide_file")
+        if [[ -n "$guide" ]]; then
+            output="${output}
+${guide}
+"
+        fi
+    fi
+
+    echo "$output"
+}

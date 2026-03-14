@@ -7,10 +7,10 @@ set -eo pipefail
 # Evaluates manuscript scenes against the craft engine's scoring rubrics,
 # producing per-scene, per-act, and novel-level scores in CSV format.
 #
-# Three scoring modes, all diagnostic-based:
-#   (default)   Haiku binary screen + Sonnet deep dive for deficit principles
-#   --quick     Haiku binary screen only (no Sonnet deep dive)
-#   --deep      Haiku binary screen + Sonnet deep dive for ALL principles
+# Three scoring modes:
+#   (default)   One Sonnet call per scene — all 25 principles (recommended)
+#   --quick     One Haiku call per scene — faster, cheaper, less critical
+#   --deep      One Sonnet call per scene — same as default (reserved for future use)
 #
 # Usage:
 #   ./storyforge-score                        # All scenes, default two-pass
@@ -55,9 +55,9 @@ framework scores and novel-level character/genre scores. Produces
 diagnosis, improvement proposals, and an HTML report.
 
 Modes:
-  (default)         Haiku screen + Sonnet deep dive for deficit principles (recommended)
-  --quick           Haiku screen only — no Sonnet deep dive (fast, cheap)
-  --deep            Haiku screen + Sonnet deep dive for ALL principles (most thorough)
+  (default)         One Sonnet call per scene, all 25 principles (recommended)
+  --quick           One Haiku call per scene (faster, cheaper, less critical)
+  --deep            Same as default (reserved for future per-principle deep dive)
 
 Scope:
   --scenes ID,ID    Score specific scenes only (comma-separated slug IDs)
@@ -154,7 +154,7 @@ PROMPTS_DIR="${SCRIPT_DIR}/prompts/scoring"
 # Haiku for Pass 1 (diagnostic screen), Sonnet for Pass 2 (deep dive) and act/novel scoring
 HAIKU_MODEL=$(select_model "extraction")
 SONNET_MODEL=$(select_model "evaluation")
-log "Models: ${HAIKU_MODEL} (screen) + ${SONNET_MODEL} (deep dive)"
+log "Models: ${HAIKU_MODEL} (quick) / ${SONNET_MODEL} (default/deep)"
 
 # --- Initialize craft weights ---
 init_craft_weights "$PROJECT_DIR" "$PLUGIN_DIR"
@@ -285,48 +285,20 @@ if (( AVG_WORDS == 0 )); then
     fi
 fi
 
-# Cost estimate depends on mode
-ACT_INVOCATIONS=3   # Rough estimate for act-level
+# Cost estimate: 1 call per scene
+ACT_INVOCATIONS=3
 NOVEL_INVOCATIONS=1
 
 case "$SCORE_MODE" in
     quick)
-        # Haiku only, no Sonnet deep dive
-        PASS2_ESTIMATE=0
+        SCENE_COST=$(estimate_cost "score" "$SCENE_COUNT" "$AVG_WORDS" "$HAIKU_MODEL")
+        log "Cost forecast: ~\$${SCENE_COST} (${SCENE_COUNT} Haiku calls)"
         ;;
-    default)
-        # Haiku + Sonnet for deficit principles (~40% of scene-principle pairs)
-        PASS2_ESTIMATE=$(( SCENE_COUNT * 2 ))
-        ;;
-    deep)
-        # Haiku + Sonnet for ALL principles
-        PASS2_ESTIMATE=$(( SCENE_COUNT * 25 ))
+    *)
+        SCENE_COST=$(estimate_cost "score" "$SCENE_COUNT" "$AVG_WORDS" "$SONNET_MODEL")
+        log "Cost forecast: ~\$${SCENE_COST} (${SCENE_COUNT} Sonnet calls)"
         ;;
 esac
-
-# Pass 1: 4 Haiku calls per scene (one per section: scene_craft, prose_craft, character_craft, rules)
-HAIKU_CALLS=$(( SCENE_COUNT * 4 ))
-HAIKU_COST=$(estimate_cost "extraction" "$HAIKU_CALLS" "$AVG_WORDS" "$HAIKU_MODEL")
-if (( PASS2_ESTIMATE > 0 )); then
-    SONNET_COST=$(estimate_cost "score" "$PASS2_ESTIMATE" "$(( AVG_WORDS / 2 ))" "$SONNET_MODEL")
-else
-    SONNET_COST="0.00"
-fi
-SCENE_COST=$(awk "BEGIN { printf \"%.2f\", $HAIKU_COST + $SONNET_COST }")
-
-case "$SCORE_MODE" in
-    quick)
-        log "Cost forecast: ~\$${SCENE_COST} (${HAIKU_CALLS} Haiku calls, no Sonnet)"
-        ;;
-    default)
-        log "Cost forecast: ~\$${SCENE_COST} (Pass 1: ${HAIKU_CALLS} Haiku, Pass 2: ~${PASS2_ESTIMATE} Sonnet)"
-        ;;
-    deep)
-        log "Cost forecast: ~\$${SCENE_COST} (Pass 1: ${HAIKU_CALLS} Haiku, Pass 2: ${PASS2_ESTIMATE} Sonnet)"
-        ;;
-esac
-log "  Haiku model: ${HAIKU_MODEL}"
-log "  Sonnet model: ${SONNET_MODEL}"
 
 if [[ "$DRY_RUN" == false ]]; then
     check_cost_threshold "$SCENE_COST" || { log "Cost threshold check declined. Aborting."; exit 1; }
@@ -404,7 +376,11 @@ if [[ "$DRY_RUN" == true ]]; then
     log "Scenes:   ${SCENE_COUNT}"
     log "Parallel: ${PARALLEL}"
     log "Cycle:    ${CYCLE}"
-    log "Models:   ${HAIKU_MODEL} (Pass 1) + ${SONNET_MODEL} (Pass 2)"
+    if [[ "$SCORE_MODE" == "quick" ]]; then
+        log "Model:    ${HAIKU_MODEL}"
+    else
+        log "Model:    ${SONNET_MODEL}"
+    fi
     log "Estimate: ~\$${SCENE_COST}"
     log ""
     log "Scenes to score:"
@@ -415,19 +391,13 @@ if [[ "$DRY_RUN" == true ]]; then
     log ""
     case "$SCORE_MODE" in
         quick)
-            log "Quick mode: Haiku binary screen only"
-            log "  Pass 1: ${HAIKU_CALLS} Haiku calls (${SCENE_COUNT} scenes x 4 groups)"
-            log "  Pass 2: none"
+            log "Quick mode: 1 Haiku call per scene (${SCENE_COUNT} calls)"
             ;;
         default)
-            log "Default mode: Haiku screen + Sonnet deep dive for deficit principles"
-            log "  Pass 1: ${HAIKU_CALLS} Haiku calls (${SCENE_COUNT} scenes x 4 groups)"
-            log "  Pass 2: ~${PASS2_ESTIMATE} Sonnet calls (estimated)"
+            log "Default mode: 1 Sonnet call per scene (${SCENE_COUNT} calls)"
             ;;
         deep)
-            log "Deep mode: Haiku screen + Sonnet deep dive for ALL principles"
-            log "  Pass 1: ${HAIKU_CALLS} Haiku calls (${SCENE_COUNT} scenes x 4 groups)"
-            log "  Pass 2: ${PASS2_ESTIMATE} Sonnet calls"
+            log "Deep mode: 1 Sonnet call per scene (${SCENE_COUNT} calls)"
             ;;
     esac
     log ""
@@ -451,63 +421,42 @@ log "============================================"
 SCORED=0
 FAILED=0
 
-# Determine deep-dive threshold based on mode
-case "$SCORE_MODE" in
-    quick)   DEEP_DIVE_THRESHOLD=0 ;;   # No deep dive
-    default) DEEP_DIVE_THRESHOLD=3 ;;   # Deep dive for scores ≤ 3
-    deep)    DEEP_DIVE_THRESHOLD=5 ;;   # Deep dive for ALL principles
-esac
-
 # ============================================================================
-# Diagnostic scoring — all modes use this architecture
+# Scene-level scoring — one Sonnet call per scene, all 25 principles
 # ============================================================================
 
 DIAGNOSTICS_CSV="${PLUGIN_DIR}/references/diagnostics.csv"
 GUIDE_FILE="${PLUGIN_DIR}/references/principle-guide.md"
-HAIKU_TEMPLATE_FILE="${PROMPTS_DIR}/haiku-diagnostics.md"
-DEEP_TEMPLATE_FILE="${PROMPTS_DIR}/sonnet-deep-dive.md"
+EVAL_TEMPLATE_FILE="${PROMPTS_DIR}/scene-evaluation.md"
 
 if [[ ! -f "$DIAGNOSTICS_CSV" ]]; then
     log "ERROR: Diagnostics CSV not found: ${DIAGNOSTICS_CSV}"
     exit 1
 fi
-if [[ ! -f "$HAIKU_TEMPLATE_FILE" ]]; then
-    log "ERROR: Haiku diagnostics template not found: ${HAIKU_TEMPLATE_FILE}"
+if [[ ! -f "$EVAL_TEMPLATE_FILE" ]]; then
+    log "ERROR: Scene evaluation template not found: ${EVAL_TEMPLATE_FILE}"
     exit 1
 fi
 
-HAIKU_TEMPLATE=$(cat "$HAIKU_TEMPLATE_FILE")
+EVAL_TEMPLATE=$(cat "$EVAL_TEMPLATE_FILE")
+EVALUATION_CRITERIA=$(build_evaluation_criteria "$DIAGNOSTICS_CSV" "$GUIDE_FILE")
+WEIGHTED_TEXT=$(build_weighted_text "$WEIGHTS_FILE")
 
-# Build per-section marker texts for grouped Haiku calls
-DIAG_SECTIONS=()
-while IFS= read -r sect; do
-    DIAG_SECTIONS+=("$sect")
-done < <(list_diagnostic_sections "$DIAGNOSTICS_CSV")
-DIAG_SECTION_COUNT=${#DIAG_SECTIONS[@]}
-
-# Pre-build marker text for each section
-for sect in "${DIAG_SECTIONS[@]}"; do
-    sect_markers=$(build_diagnostic_markers "$DIAGNOSTICS_CSV" "$sect")
-    sect_count=$(count_diagnostic_markers "$DIAGNOSTICS_CSV" "$sect")
-    # Store in temp files (bash 3 compat — no associative arrays)
-    echo "$sect_markers" > "${CYCLE_DIR}/.markers-${sect}.txt"
-    log "  Section ${sect}: ${sect_count} markers"
-done
+# Select model based on mode
+case "$SCORE_MODE" in
+    quick)   EVAL_MODEL="$HAIKU_MODEL" ;;
+    *)       EVAL_MODEL="$SONNET_MODEL" ;;
+esac
 
 log "Parallel workers: ${PARALLEL}"
-log "Deep-dive threshold: ${DEEP_DIVE_THRESHOLD} (mode: ${SCORE_MODE})"
+log "Evaluation model: ${EVAL_MODEL} (mode: ${SCORE_MODE})"
 log ""
 
-# ============================================================================
-# Pass 1: Haiku diagnostic screening
-# ============================================================================
 log "============================================"
-log "Pass 1: Haiku Diagnostic Screening"
+log "Scene-Level Scoring"
 log "============================================"
 
 SCORE_START_TIME=$(date +%s)
-DIAG_DIR="${CYCLE_DIR}/diagnostics"
-mkdir -p "$DIAG_DIR"
 
 batch_start=0
 while (( batch_start < SCENE_COUNT )); do
@@ -524,75 +473,59 @@ while (( batch_start < SCENE_COUNT )); do
         id="${SCENE_IDS[$i]}"
         batch_ids+=("$id")
         local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-        log "  Launching diagnostic screen for ${local_title:-$id} ($((i+1))/${SCENE_COUNT})..."
+        log "  Scoring ${local_title:-$id} ($((i+1))/${SCENE_COUNT})..."
 
         (
-            # Worker subshell — Haiku diagnostic screen for one scene
-            # Runs one Haiku call per section, merges results
+            # Worker subshell — one call per scene, all 25 principles
             scene_file="${SCENES_DIR}/${id}.md"
             scene_text=""
             [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
             scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
             scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
+            scene_function=""
+            scene_emotional_arc=""
+            [[ -f "$INTENT_CSV" ]] && scene_function=$(get_csv_field "$INTENT_CSV" "$id" "function")
+            [[ -f "$INTENT_CSV" ]] && scene_emotional_arc=$(get_csv_field "$INTENT_CSV" "$id" "emotional_arc")
 
-            group_num=0
-            group_failed=0
-            combined_diag="${DIAG_DIR}/.diag-${id}.csv"
-            echo "marker_id|answer|evidence" > "$combined_diag"
+            # Add line numbers to scene text for evidence references
+            scene_text_numbered=$(echo "$scene_text" | awk '{ printf "%d: %s\n", NR, $0 }')
 
-            for sect in "${DIAG_SECTIONS[@]}"; do
-                group_num=$((group_num + 1))
-                markers_file="${CYCLE_DIR}/.markers-${sect}.txt"
-                [[ -f "$markers_file" ]] || continue
-                sect_markers=$(cat "$markers_file")
+            prompt="$EVAL_TEMPLATE"
+            prompt="${prompt//\{\{SCENE_TITLE\}\}/${scene_title:-Unknown}}"
+            prompt="${prompt//\{\{SCENE_POV\}\}/${scene_pov:-Unknown}}"
+            prompt="${prompt//\{\{SCENE_FUNCTION\}\}/${scene_function:-Not specified}}"
+            prompt="${prompt//\{\{SCENE_EMOTIONAL_ARC\}\}/${scene_emotional_arc:-Not specified}}"
+            prompt="${prompt//\{\{EVALUATION_CRITERIA\}\}/$EVALUATION_CRITERIA}"
+            prompt="${prompt//\{\{WEIGHTED_PRINCIPLES\}\}/$WEIGHTED_TEXT}"
+            prompt="${prompt//\{\{SCENE_TEXT\}\}/$scene_text_numbered}"
 
-                log "    [${id}] Group ${group_num}/${DIAG_SECTION_COUNT}: ${sect}..."
+            log_file="${LOG_DIR}/score-${id}.log"
 
-                prompt="$HAIKU_TEMPLATE"
-                prompt="${prompt//\{\{SCENE_TITLE\}\}/${scene_title:-Unknown}}"
-                prompt="${prompt//\{\{SCENE_POV\}\}/${scene_pov:-Unknown}}"
-                prompt="${prompt//\{\{DIAGNOSTIC_MARKERS\}\}/$sect_markers}"
-                prompt="${prompt//\{\{SCENE_TEXT\}\}/$scene_text}"
+            _SF_INVOCATION_START=$(date +%s)
+            export _SF_INVOCATION_START
 
-                log_file="${LOG_DIR}/score-diag-${id}-${sect}.log"
+            begin_healing_zone "scene evaluation ${id}"
 
-                _SF_INVOCATION_START=$(date +%s)
-                export _SF_INVOCATION_START
+            claude -p "$prompt" \
+                --model "$EVAL_MODEL" \
+                --dangerously-skip-permissions \
+                --output-format stream-json \
+                --verbose \
+                > "$log_file" 2>&1 || true
 
-                begin_healing_zone "diagnostic screen ${id}/${sect}"
+            end_healing_zone
 
-                claude -p "$prompt" \
-                    --model "$HAIKU_MODEL" \
-                    --dangerously-skip-permissions \
-                    --output-format stream-json \
-                    --verbose \
-                    > "$log_file" 2>&1 || true
+            log_usage "$log_file" "score" "$id" "$EVAL_MODEL"
 
-                end_healing_zone
+            tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}.csv"
+            tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
 
-                log_usage "$log_file" "score-diag" "${id}/${sect}" "$HAIKU_MODEL"
-
-                # Parse this section's results into a temp file
-                sect_diag="${DIAG_DIR}/.diag-${id}-${sect}.csv"
-                if parse_diagnostic_output "$log_file" "$DIAG_DIR" "${id}-${sect}"; then
-                    # Append data rows (skip header) to combined file
-                    tail -n +2 "$sect_diag" >> "$combined_diag"
-                    rm -f "$sect_diag"
-                    log "    [${id}] Group ${group_num}/${DIAG_SECTION_COUNT}: ${sect} done"
-                else
-                    group_failed=$((group_failed + 1))
-                    log "    [${id}] Group ${group_num}/${DIAG_SECTION_COUNT}: ${sect} FAILED"
-                fi
-            done
-
-            if (( group_failed == 0 )); then
-                echo "ok" > "${DIAG_DIR}/.status-${id}"
-            elif (( group_failed < DIAG_SECTION_COUNT )); then
-                # Partial success — still usable
-                echo "ok" > "${DIAG_DIR}/.status-${id}"
-                log "    [${id}] ${group_failed}/${DIAG_SECTION_COUNT} groups failed (partial results)"
+            if parse_scene_evaluation "$log_file" "$tmp_scores" "$tmp_rationale" "$id"; then
+                log "    [${id}] scored"
+                echo "ok" > "${CYCLE_DIR}/.status-${id}"
             else
-                echo "fail" > "${DIAG_DIR}/.status-${id}"
+                log "    [${id}] FAILED"
+                echo "fail" > "${CYCLE_DIR}/.status-${id}"
             fi
         ) &
         batch_pids+=($!)
@@ -605,198 +538,31 @@ while (( batch_start < SCENE_COUNT )); do
         unregister_child_pid "$pid" 2>/dev/null || true
     done
 
-    # Aggregate diagnostic scores for this batch
+    # Merge results for this batch
     for id in "${batch_ids[@]}"; do
         local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-        status_file="${DIAG_DIR}/.status-${id}"
-        diag_file="${DIAG_DIR}/.diag-${id}.csv"
+        status_file="${CYCLE_DIR}/.status-${id}"
+        tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}.csv"
+        tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
 
-        if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]] && [[ -f "$diag_file" ]]; then
-            tmp_scores="${DIAG_DIR}/.tmp-scores-${id}.csv"
-            tmp_rationale="${DIAG_DIR}/.tmp-rationale-${id}.csv"
-
-            if aggregate_diagnostic_scores "$diag_file" "$DIAGNOSTICS_CSV" "$tmp_scores" "$tmp_rationale" "$id"; then
-                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
-                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
-                rm -f "$tmp_scores" "$tmp_rationale"
-                SCORED=$((SCORED + 1))
-                log "  Pass 1: ${local_title:-$id} scored (${SCORED}/${SCENE_COUNT})"
-            else
-                FAILED=$((FAILED + 1))
-                log "  WARNING: Failed to aggregate diagnostics for ${id}"
-            fi
+        if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]]; then
+            merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
+            merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
+            SCORED=$((SCORED + 1))
+            log "  ${local_title:-$id} scored (${SCORED}/${SCENE_COUNT})"
         else
             FAILED=$((FAILED + 1))
-            log "  WARNING: Failed diagnostic screen for ${id}"
+            log "  WARNING: Failed to score ${id}"
         fi
-        rm -f "$status_file"
+        rm -f "$tmp_scores" "$tmp_rationale" "$status_file"
     done
 
-        batch_elapsed=$(( $(date +%s) - batch_start_time ))
-        total_elapsed=$(( $(date +%s) - SCORE_START_TIME ))
-        log "  Batch done in ${batch_elapsed}s (${SCORED}/${SCENE_COUNT} scored, ${total_elapsed}s elapsed)"
+    batch_elapsed=$(( $(date +%s) - batch_start_time ))
+    total_elapsed=$(( $(date +%s) - SCORE_START_TIME ))
+    log "  Batch done in ${batch_elapsed}s (${SCORED}/${SCENE_COUNT} scored, ${total_elapsed}s elapsed)"
 
-        batch_start=$batch_end
-    done
-
-log ""
-log "Pass 1 complete: ${SCORED} scenes screened, ${FAILED} failures"
-
-# ============================================================================
-# Pass 2: Sonnet deep dive (skipped in quick mode)
-# ============================================================================
-
-if (( DEEP_DIVE_THRESHOLD > 0 )) && [[ -f "$DEEP_TEMPLATE_FILE" ]]; then
-    DEEP_TEMPLATE=$(cat "$DEEP_TEMPLATE_FILE")
-    weighted_text=$(build_weighted_text "$WEIGHTS_FILE")
-
-    log ""
-    log "============================================"
-    log "Pass 2: Sonnet Deep Dive (threshold: ≤${DEEP_DIVE_THRESHOLD})"
-    log "============================================"
-
-    PASS2_START=$(date +%s)
-    DEEP_COUNT=0
-    DEEP_FAILED=0
-
-    # Collect all scene-principle pairs needing deep dive
-    DEEP_TARGETS=()
-    for id in "${SCENE_IDS[@]}"; do
-        diag_file="${DIAG_DIR}/.diag-${id}.csv"
-        [[ -f "$diag_file" ]] || continue
-
-        targets=$(identify_deep_dive_targets "$diag_file" "$DIAGNOSTICS_CSV" "$DEEP_DIVE_THRESHOLD")
-        [[ -z "$targets" ]] && continue
-
-        while IFS='|' read -r principle score deficit_markers; do
-            DEEP_TARGETS+=("${id}|${principle}|${score}|${deficit_markers}")
-        done <<< "$targets"
-    done
-
-    DEEP_TOTAL=${#DEEP_TARGETS[@]}
-    log "Identified ${DEEP_TOTAL} scene-principle pairs for deep evaluation"
-
-    if (( DEEP_TOTAL > 0 )); then
-        batch_start=0
-        while (( batch_start < DEEP_TOTAL )); do
-            batch_pids=()
-            batch_keys=()
-            batch_end=$(( batch_start + PARALLEL ))
-            (( batch_end > DEEP_TOTAL )) && batch_end=$DEEP_TOTAL
-
-            for (( i=batch_start; i<batch_end; i++ )); do
-                IFS='|' read -r dd_id dd_principle dd_score dd_markers <<< "${DEEP_TARGETS[$i]}"
-                batch_keys+=("${dd_id}|${dd_principle}")
-                log "  Launching deep dive: ${dd_id} / ${dd_principle} (score: ${dd_score})..."
-
-                (
-                    scene_file="${SCENES_DIR}/${dd_id}.md"
-                    scene_text=""
-                    [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
-                    scene_title=$(get_csv_field "$METADATA_CSV" "$dd_id" "title")
-                    scene_pov=$(get_csv_field "$METADATA_CSV" "$dd_id" "pov")
-                    scene_function=""
-                    scene_emotional_arc=""
-                    [[ -f "$INTENT_CSV" ]] && scene_function=$(get_csv_field "$INTENT_CSV" "$dd_id" "function")
-                    [[ -f "$INTENT_CSV" ]] && scene_emotional_arc=$(get_csv_field "$INTENT_CSV" "$dd_id" "emotional_arc")
-
-                    principle_guide=$(build_principle_guide "$dd_principle" "$GUIDE_FILE")
-
-                    # Build diagnostic results text from deficit markers
-                    diag_results=""
-                    IFS=';' read -ra marker_arr <<< "$dd_markers"
-                    diag_file="${DIAG_DIR}/.diag-${dd_id}.csv"
-                    for marker in "${marker_arr[@]}"; do
-                        if [[ -f "$diag_file" ]]; then
-                            marker_line=$(awk -F'|' -v m="$marker" '$1 == m { print }' "$diag_file")
-                            if [[ -n "$marker_line" ]]; then
-                                diag_results="${diag_results}
-- **${marker}**: $(echo "$marker_line" | cut -d'|' -f3)"
-                            fi
-                        fi
-                    done
-
-                    prompt="$DEEP_TEMPLATE"
-                    prompt="${prompt//\{\{SCENE_TITLE\}\}/${scene_title:-Unknown}}"
-                    prompt="${prompt//\{\{SCENE_POV\}\}/${scene_pov:-Unknown}}"
-                    prompt="${prompt//\{\{SCENE_FUNCTION\}\}/${scene_function:-Not specified}}"
-                    prompt="${prompt//\{\{SCENE_EMOTIONAL_ARC\}\}/${scene_emotional_arc:-Not specified}}"
-                    prompt="${prompt//\{\{SCENE_ID\}\}/$dd_id}"
-                    prompt="${prompt//\{\{PRINCIPLE_NAME\}\}/$dd_principle}"
-                    prompt="${prompt//\{\{PRINCIPLE_GUIDE\}\}/$principle_guide}"
-                    prompt="${prompt//\{\{DIAGNOSTIC_RESULTS\}\}/$diag_results}"
-                    prompt="${prompt//\{\{WEIGHTED_PRINCIPLES\}\}/$weighted_text}"
-                    prompt="${prompt//\{\{SCENE_TEXT\}\}/$scene_text}"
-
-                    deep_log="${LOG_DIR}/score-deep-${dd_id}-${dd_principle}.log"
-
-                    _SF_INVOCATION_START=$(date +%s)
-                    export _SF_INVOCATION_START
-
-                    begin_healing_zone "deep dive ${dd_id}/${dd_principle}"
-
-                    claude -p "$prompt" \
-                        --model "$SONNET_MODEL" \
-                        --dangerously-skip-permissions \
-                        --output-format stream-json \
-                        --verbose \
-                        > "$deep_log" 2>&1 || true
-
-                    end_healing_zone
-
-                    log_usage "$deep_log" "score-deep" "${dd_id}/${dd_principle}" "$SONNET_MODEL"
-
-                    deep_scores="${DIAG_DIR}/.deep-scores-${dd_id}-${dd_principle}.csv"
-                    deep_rationale="${DIAG_DIR}/.deep-rationale-${dd_id}-${dd_principle}.csv"
-
-                    if parse_score_output "$deep_log" "$deep_scores" "$deep_rationale"; then
-                        log "    [${dd_id}/${dd_principle}] deep dive done"
-                        echo "ok" > "${DIAG_DIR}/.deep-status-${dd_id}-${dd_principle}"
-                    else
-                        log "    [${dd_id}/${dd_principle}] deep dive FAILED"
-                        echo "fail" > "${DIAG_DIR}/.deep-status-${dd_id}-${dd_principle}"
-                    fi
-                ) &
-                batch_pids+=($!)
-                register_child_pid $!
-            done
-
-            for pid in "${batch_pids[@]}"; do
-                wait "$pid" 2>/dev/null || true
-                unregister_child_pid "$pid" 2>/dev/null || true
-            done
-
-            for key in "${batch_keys[@]}"; do
-                IFS='|' read -r dd_id dd_principle <<< "$key"
-                status_file="${DIAG_DIR}/.deep-status-${dd_id}-${dd_principle}"
-                deep_scores="${DIAG_DIR}/.deep-scores-${dd_id}-${dd_principle}.csv"
-                deep_rationale="${DIAG_DIR}/.deep-rationale-${dd_id}-${dd_principle}.csv"
-
-                if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]]; then
-                    merge_score_files "${CYCLE_DIR}/deep-scores.csv" "$deep_scores"
-                    merge_score_files "${CYCLE_DIR}/deep-rationale.csv" "$deep_rationale"
-                    DEEP_COUNT=$((DEEP_COUNT + 1))
-                else
-                    DEEP_FAILED=$((DEEP_FAILED + 1))
-                fi
-                rm -f "$deep_scores" "$deep_rationale" "$status_file"
-            done
-
-            batch_start=$batch_end
-        done
-    fi
-
-    pass2_elapsed=$(( $(date +%s) - PASS2_START ))
-    log ""
-    log "Pass 2 complete: ${DEEP_COUNT} deep evaluations, ${DEEP_FAILED} failures (${pass2_elapsed}s)"
-elif (( DEEP_DIVE_THRESHOLD == 0 )); then
-    log ""
-    log "Quick mode: skipping Pass 2 (Sonnet deep dive)"
-fi
-
-# Clean up diagnostic temp files
-rm -f "${DIAG_DIR}"/.status-* "${DIAG_DIR}"/.tmp-*
-
+    batch_start=$batch_end
+done
 
 log ""
 log "Scene scoring complete: ${SCORED} scenes scored, ${FAILED} failures"
