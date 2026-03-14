@@ -21,7 +21,7 @@ Store this resolved plugin path for use throughout the session.
 Before doing anything else, orient yourself:
 
 1. **Read `storyforge.yaml`** — title, genre, target word count, phase, artifact status. **Note the `project.coaching_level` field** — it controls how proactive you should be with chapter creation (see Coaching Level Behavior below).
-2. **Read `scenes/scene-index.yaml`** — how many scenes, their status (drafted/revised/pending), groupings (acts/parts).
+2. **Read `reference/scene-metadata.csv`** — how many scenes, their status (drafted/revised/pending), groupings (acts/parts).
 3. **Check for existing production artifacts:**
    - `reference/chapter-map.yaml` — does it exist? How many chapters?
    - `manuscript/` directory — has assembly been run before?
@@ -247,7 +247,7 @@ chapters:
 Each chapter has:
 - `title` — the chapter title
 - `heading` — format for the chapter heading: `numbered`, `titled`, `numbered-titled`, `none`
-- `scenes` — ordered list of scene IDs from scene-index.yaml
+- `scenes` — ordered list of scene IDs from scene-metadata.csv
 
 ### `production` — formatting and metadata settings
 

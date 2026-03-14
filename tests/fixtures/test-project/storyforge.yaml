@@ -38,7 +38,7 @@ artifacts:
 
   scene_index:
     exists: true
-    path: scenes/scene-index.yaml
+    path: reference/scene-metadata.csv
     updated: "2026-02-25"
 
   continuity_tracker:

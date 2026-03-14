@@ -54,7 +54,8 @@ resolve_scene_file() {
 #
 # Scope formats:
 #   "full"                           — all scenes
-#   "act-2" or "act-1"              — all scenes whose ID starts with the act prefix
+#   "act-2" or "act-1"              — scenes in part/act 2 (CSV part column)
+#   "part-2"                        — same as act-2
 #   "act1-sc03,act2-sc07,act3-sc12" — comma-separated scene IDs
 #
 # Usage:
@@ -62,19 +63,19 @@ resolve_scene_file() {
 #   file_list=$(resolve_scope "full" "/path/to/project")
 #   file_list=$(resolve_scope "act1-sc03,act2-sc07" "/path/to/project")
 #
-# Prints one file path per line. Exits with error if scene-index.yaml is
-# missing or a named scene file does not exist.
+# Prints one file path per line. Uses reference/scene-metadata.csv for scene list.
 resolve_scope() {
     local scope="$1"
     local project_dir="$2"
-    local index_file="${project_dir}/scenes/scene-index.yaml"
+    local csv_file="${project_dir}/reference/scene-metadata.csv"
+    [[ ! -f "$csv_file" ]] && csv_file="${project_dir}/scenes/metadata.csv"
 
-    if [[ ! -f "$index_file" ]]; then
-        log "ERROR: scene-index.yaml not found at ${index_file}"
+    if [[ ! -f "$csv_file" ]]; then
+        log "ERROR: scene-metadata.csv not found"
         return 1
     fi
 
-    # Normalize YAML inline list syntax: [30, 31] -> 30,31
+    # Normalize inline list syntax: [30, 31] -> 30,31
     if [[ "$scope" =~ ^\[.*\]$ ]]; then
         scope="${scope#\[}"
         scope="${scope%\]}"
@@ -84,81 +85,35 @@ resolve_scope() {
     local scene_dir="${project_dir}/scenes"
     local matched_files=()
 
+    # Build scene list and apply filter using shared functions
+    # Redirect log output to stderr so it doesn't pollute the file list
+    build_scene_list "$csv_file" >&2
+
     if [[ "$scope" == "full" ]]; then
-        # Every scene ID listed in the index
-        local ids
-        ids=$(grep -E '^\s*-\s*id:\s*' "$index_file" \
-            | sed 's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*//' \
-            | sed 's/^["'"'"']//' | sed 's/["'"'"']$//' \
-            | sed 's/[[:space:]]*$//')
-
-        while IFS= read -r sid; do
-            [[ -z "$sid" ]] && continue
+        apply_scene_filter "$csv_file" "all" >&2
+        for sid in "${FILTERED_IDS[@]}"; do
             local f
             f=$(resolve_scene_file "$scene_dir" "$sid")
             if [[ -n "$f" ]]; then
                 matched_files+=("$f")
             else
-                log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md"
+                log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md" >&2
             fi
-        done <<< "$ids"
-
-    elif [[ "$scope" =~ ^act-[0-9]+$ ]]; then
-        # Act-level scope: "act-2" matches IDs starting with "act2-"
-        local act_num="${scope#act-}"
-        local prefix="act${act_num}-"
-
-        local ids
-        ids=$(grep -E '^\s*-\s*id:\s*' "$index_file" \
-            | sed 's/^[[:space:]]*-[[:space:]]*id:[[:space:]]*//' \
-            | sed 's/^["'"'"']//' | sed 's/["'"'"']$//' \
-            | sed 's/[[:space:]]*$//')
-
-        while IFS= read -r sid; do
-            [[ -z "$sid" ]] && continue
-            if [[ "$sid" == ${prefix}* ]]; then
-                local f
-                f=$(resolve_scene_file "$scene_dir" "$sid")
-                if [[ -n "$f" ]]; then
-                    matched_files+=("$f")
-                else
-                    log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md"
-                fi
-            fi
-        done <<< "$ids"
-
-    elif [[ "$scope" =~ ^part-[0-9]+$ ]]; then
-        # Part-level scope: "part-2" collects all scene IDs between
-        # the "# PART 2:" section header and the next "# PART" header
-        # in scene-index.yaml. Skips scenes whose files don't exist (cuts).
-        local part_num="${scope#part-}"
-        local part_label="PART ${part_num}"
-
-        local ids
-        ids=$(awk -v label="$part_label" '
-            $0 ~ "#[[:space:]]+" label ":" { in_part = 1; next }
-            in_part && /^[[:space:]]*#.*PART [0-9]+:/ { exit }
-            in_part && /^[[:space:]]*-[[:space:]]*id:/ {
-                sub(/^[[:space:]]*-[[:space:]]*id:[[:space:]]*/, "")
-                gsub(/["'"'"']/, "")
-                gsub(/[[:space:]]*$/, "")
-                print
-            }
-        ' "$index_file")
-
-        while IFS= read -r sid; do
-            [[ -z "$sid" ]] && continue
+        done
+    elif [[ "$scope" =~ ^(act|part)-[0-9]+$ ]]; then
+        local part_num="${scope##*-}"
+        apply_scene_filter "$csv_file" "act" "$part_num" >&2
+        for sid in "${FILTERED_IDS[@]}"; do
             local f
             f=$(resolve_scene_file "$scene_dir" "$sid")
             if [[ -n "$f" ]]; then
                 matched_files+=("$f")
             else
-                log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md"
+                log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md" >&2
             fi
-        done <<< "$ids"
-
+        done
     else
-        # Comma-separated scene IDs: "act1-sc03,act2-sc07,act3-sc12"
+        # Comma-separated scene IDs — resolve directly (supports legacy ID fallback)
         IFS=',' read -ra id_list <<< "$scope"
         for sid in "${id_list[@]}"; do
             sid=$(echo "$sid" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
@@ -168,7 +123,7 @@ resolve_scope() {
             if [[ -n "$f" ]]; then
                 matched_files+=("$f")
             else
-                log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md"
+                log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md" >&2
             fi
         done
     fi
@@ -349,7 +304,7 @@ Before making any changes, read these reference files to understand the project'
 
 - \`reference/voice-guide.md\` — the established voice rules, prose style, and per-character dialogue fingerprints. Every edit you make must be consistent with this guide.
 - \`reference/continuity-tracker.md\` — the living ledger of continuity facts, promises, and threads. Consult this before changing any plot-relevant detail.
-- \`scenes/scene-index.yaml\` — the master scene list for structural context.
+- \`reference/scene-metadata.csv\` — the master scene list for structural context.
 
 ### 2. Read All In-Scope Scene Files
 

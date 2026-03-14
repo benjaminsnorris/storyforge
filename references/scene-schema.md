@@ -13,7 +13,7 @@ Both files use pipe (`|`) as the field delimiter. Array values within a single c
 
 ### Legacy Format
 
-If a project has `scenes/scene-index.yaml` but no `scene-metadata.csv`, it is using the legacy YAML format. Run `./storyforge migrate --execute` to convert to CSV. Scripts support both formats with CSV preferred and YAML as fallback.
+If a project has `scenes/scene-index.yaml` but no `scene-metadata.csv`, it is using the legacy YAML format. Run `./storyforge migrate --execute` to convert to CSV. As of v0.22.0, all scripts require CSV — YAML fallbacks have been removed.
 
 ## Core Fields
 

@@ -41,7 +41,6 @@ PLUGIN_DIR=$(get_plugin_dir)
 PERSONA_DIR="${PLUGIN_DIR}/scripts/prompts/evaluators"
 
 # --- Configuration ---
-SCENE_INDEX="${PROJECT_DIR}/scenes/scene-index.yaml"
 SCENES_DIR="${PROJECT_DIR}/scenes"
 LOG_DIR="${PROJECT_DIR}/working/logs"
 LOG_FILE="${LOG_DIR}/evaluation-log.txt"

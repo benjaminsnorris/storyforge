@@ -69,7 +69,7 @@ Use the **Bash tool** to create the full directory tree:
 ├── reference/
 │   └── key-decisions.md
 ├── scenes/
-│   └── scene-index.yaml
+│   └── (scene .md files go here)
 ├── manuscript/
 │   └── press-kit/        (marketing materials — blurbs, jacket copy, bios)
 └── working/
@@ -152,17 +152,19 @@ Use the **Glob tool** to discover available templates, then use the **Read tool*
 
 If no templates are found in the plugin directory, note this to the author and let them know they can add reference documents manually later.
 
-## Step 5: Create the Scene Index
+## Step 5: Create the Scene CSV Files
 
-Use the **Write tool** to create `{project-dir}/scenes/scene-index.yaml` with the following content:
+Use the **Write tool** to create the two scene CSV files with headers only:
 
-```yaml
-# Scene Index — {title}
-# Scenes are the atomic unit of the story. Chapters are assembled from scenes later.
-scenes: []
+**`{project-dir}/reference/scene-metadata.csv`:**
+```
+id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words
 ```
 
-Replace `{title}` with the author's working title.
+**`{project-dir}/reference/scene-intent.csv`:**
+```
+id|function|emotional_arc|characters|threads|motifs|notes
+```
 
 ## Step 6: Generate the Project CLAUDE.md
 

@@ -27,7 +27,7 @@ Before doing anything else, orient yourself:
    - `reference/story-architecture.md`
    - `reference/voice-guide.md`
    - `reference/timeline.md`
-   - `reference/scene-metadata.csv` (preferred) or `scenes/scene-index.yaml` (legacy)
+   - `reference/scene-metadata.csv`
    - `working/evaluations/*/findings.csv` (preferred) or `working/evaluations/findings.yaml` (legacy)
    - `working/plans/revision-plan.csv` (preferred) or `working/plans/revision-plan.yaml` (legacy)
    - The `scenes/` directory (any `.md` files = drafted scenes)
@@ -60,14 +60,12 @@ Invoke the `scenes` skill. This covers scene index population, scene design, sce
 Check prerequisites before proceeding:
 
 - *Hard prerequisites* (will not proceed without):
-  - `reference/scene-metadata.csv` (or legacy `scenes/scene-index.yaml`) must exist and contain at least one scene
+  - `reference/scene-metadata.csv` must exist and contain at least one scene
   - `reference/voice-guide.md` must exist
 - *Soft prerequisites* (recommend but allow override):
   - `reference/character-bible.md`
   - `reference/world-bible.md`
   - `reference/story-architecture.md`
-
-If the project uses legacy `scene-index.yaml` without `metadata.csv`, suggest running the migration script first: `./storyforge migrate --execute`.
 
 If hard prerequisites are met, tell the author how to run the drafting script:
 
@@ -206,7 +204,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 
 | Command | Requires |
 |---|---|
-| `storyforge write` | `reference/scene-metadata.csv` (or `scenes/scene-index.yaml`) with at least one scene, `reference/voice-guide.md` |
+| `storyforge write` | `reference/scene-metadata.csv` with at least one scene, `reference/voice-guide.md` |
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | `plan-revision` | Evaluation results in `working/evaluations/` |
 | `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.yaml`) |

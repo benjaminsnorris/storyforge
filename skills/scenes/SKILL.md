@@ -22,7 +22,7 @@ Store this resolved plugin path for use throughout the session.
 Read the following files to understand the full context before doing any scene work:
 
 - `storyforge.yaml` — project configuration, active extensions, current state. **Note the `project.coaching_level` field** — it controls how proactive you should be (see Coaching Level Behavior below).
-- `reference/scene-metadata.csv` — the existing scene metadata (pipe-delimited CSV: `id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words`). If this does not exist, fall back to `scene-index.yaml` for legacy projects.
+- `reference/scene-metadata.csv` — the existing scene metadata (pipe-delimited CSV: `id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words`).
 - `reference/scene-intent.csv` — scene intent data (pipe-delimited CSV: `id|function|emotional_arc|characters|threads|motifs|notes`). Array fields use `;` (semicolon) as the internal separator.
 - `reference/story-architecture.md` — structural context: acts, parts, arcs, turning points.
 - `reference/character-bible.md` — character arcs, relationships, and motivations.
@@ -114,7 +114,7 @@ Read `reference/scene-metadata.csv` and `reference/scene-intent.csv`. Count empt
 Your 102 scenes have:
   type:          0/102 populated
   characters:    0/102 populated
-  threads:       98/102 populated (recovered from scene-index.yaml)
+  threads:       98/102 populated
   motifs:        0/102 populated
   emotional_arc: 0/102 populated
   timeline_day:  0/102 populated
@@ -124,7 +124,7 @@ Your 102 scenes have:
 ### Delegate to the Enrichment Script
 
 The enrichment script runs in two phases:
-1. **Phase 1 (Free):** Update word counts, infer time_of_day from keywords, recover threads from scene-index.yaml
+1. **Phase 1 (Free):** Update word counts, infer time_of_day from keywords, recover threads from intent CSV
 2. **Phase 2 (Claude):** Only for fields still missing after Phase 1 — targeted prompts per scene
 
 Present the author with two options:
@@ -300,7 +300,7 @@ Every time you add, modify, or remove scenes — an act designed, scenes reorder
 
 **After each deliverable:**
 
-1. Write the updated `reference/scene-metadata.csv` and `reference/scene-intent.csv`. If the project still has a legacy `scene-index.yaml`, you may update it for backward compatibility, but the CSV files are the canonical source.
+1. Write the updated `reference/scene-metadata.csv` and `reference/scene-intent.csv`.
 2. Update `storyforge.yaml` with the current scene count, last-modified date, and any structural changes. If scenes were added and the project phase is still `development`, advance it to `scene-design`.
 3. Regenerate relevant sections of `CLAUDE.md` to reflect the current scene state (active scenes, next scenes to draft, thread status).
 4. **Commit and push immediately:**

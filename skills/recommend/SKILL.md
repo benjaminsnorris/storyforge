@@ -29,7 +29,7 @@ Read all of the following. Do not skip any — the recommendation depends on hav
    - `reference/story-architecture.md`
    - `reference/voice-guide.md`
    - `reference/timeline.md`
-   - `scenes/scene-index.yaml` (read it — check if it has entries or is empty)
+   - `reference/scene-metadata.csv` (read it — check if it has entries or is empty)
    - `reference/chapter-map.yaml`
 6. **Scene status** — count scene files in `scenes/*.md`. Compare planned (from scene-index) vs. drafted (files exist) vs. revised (check frontmatter or pass status). Calculate current word count vs. target.
 7. **Evaluation state** — check for `working/evaluations/`. If evaluations exist, read the most recent `findings.yaml` or `synthesis.md` to understand outstanding issues. Note severity counts (critical/major/minor).
