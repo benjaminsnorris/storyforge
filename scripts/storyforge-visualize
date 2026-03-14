@@ -132,6 +132,13 @@ LOCATIONS_JSON="[$(csv_to_json "$LOCATIONS_CSV")]"
 SCORES_JSON="[$(csv_to_json "$SCORES_CSV")]"
 WEIGHTS_JSON="[$(csv_to_json "$WEIGHTS_CSV")]"
 
+# Narrative scores (novel-level)
+NARRATIVE_SCORES_CSV="${PROJECT_DIR}/working/scores/latest/narrative-scores.csv"
+NARRATIVE_SCORES_JSON="[]"
+if [[ -f "$NARRATIVE_SCORES_CSV" ]]; then
+    NARRATIVE_SCORES_JSON="[$(csv_to_json "$NARRATIVE_SCORES_CSV")]"
+fi
+
 PROJECT_JSON="{\"title\":\"${PROJECT_TITLE}\",\"genre\":\"${PROJECT_GENRE}\",\"scene_count\":\"${SCENE_COUNT}\",\"generated\":\"$(date '+%Y-%m-%d %H:%M')\"}"
 
 # --- Generate HTML ---
@@ -176,11 +183,11 @@ cat > "$DASHBOARD_FILE" << 'HTMLEOF'
     --type-transition: #8b5cf6;
     --type-confrontation: #ec4899;
 
-    --score-low: #dc2626;
-    --score-mid-low: #d97706;
-    --score-mid: #a3a3a3;
+    --score-low: #18181b;
+    --score-mid-low: #dc2626;
+    --score-mid: #d97706;
     --score-mid-high: #16a34a;
-    --score-high: #059669;
+    --score-high: #2563eb;
 
     --shadow: 0 1px 3px rgba(44,36,32,0.06);
     --shadow-elevated: 0 4px 16px rgba(44,36,32,0.1);
@@ -210,11 +217,11 @@ cat > "$DASHBOARD_FILE" << 'HTMLEOF'
         --type-transition: #a78bfa;
         --type-confrontation: #f472b6;
 
-        --score-low: #f87171;
-        --score-mid-low: #fbbf24;
-        --score-mid: #737373;
+        --score-low: #3f3f46;
+        --score-mid-low: #f87171;
+        --score-mid: #fbbf24;
         --score-mid-high: #4ade80;
-        --score-high: #34d399;
+        --score-high: #60a5fa;
 
         --shadow: 0 1px 3px rgba(0,0,0,0.3);
         --shadow-elevated: 0 4px 16px rgba(0,0,0,0.4);
@@ -627,7 +634,17 @@ body {
     <div class="vis-container" id="score-heatmap"></div>
 </div>
 
-<!-- 9. Motif Constellation -->
+<!-- 9. Narrative Framework Radar -->
+<div class="section" id="narrative-radar-section" style="display:none;">
+    <div class="section-header">
+        <span class="dot"></span>
+        <h2>Narrative Framework Radar</h2>
+        <span class="subtitle">Novel-level alignment with 7 narrative structures</span>
+    </div>
+    <div class="vis-container" id="narrative-radar"></div>
+</div>
+
+<!-- 10. Motif Constellation -->
 <div class="section">
     <div class="section-header">
         <span class="dot"></span>
@@ -637,7 +654,7 @@ body {
     <div class="vis-container" id="motif-constellation"></div>
 </div>
 
-<!-- 10. Timeline vs Reading Order -->
+<!-- 11. Timeline vs Reading Order -->
 <div class="section" id="timeline-section" style="display:none;">
     <div class="section-header">
         <span class="dot"></span>
@@ -664,6 +681,7 @@ const MOTIF_TAXONOMY = ${MOTIF_TAXONOMY_JSON};
 const LOCATIONS = ${LOCATIONS_JSON};
 const SCORES = ${SCORES_JSON};
 const WEIGHTS = ${WEIGHTS_JSON};
+const NARRATIVE_SCORES = ${NARRATIVE_SCORES_JSON};
 const PROJECT = ${PROJECT_JSON};
 EOF
 
@@ -867,7 +885,7 @@ function updateDetailPanel(sceneId) {
             if (k === 'id') continue;
             const num = parseInt(v);
             if (isNaN(num)) continue;
-            const color = num >= 4 ? 'var(--score-high)' : num >= 3 ? 'var(--score-mid-high)' : num >= 2 ? 'var(--score-mid-low)' : 'var(--score-low)';
+            const color = num >= 5 ? 'var(--score-high)' : num >= 4 ? 'var(--score-mid-high)' : num >= 3 ? 'var(--score-mid)' : num >= 2 ? 'var(--score-mid-low)' : 'var(--score-low)';
             html += `<span class="sg-label">${k.replace(/_/g, ' ')}</span><span class="sg-value" style="color:${color}">${num}</span>`;
         }
         html += '</div></div>';
@@ -1452,7 +1470,118 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 })();
 
 // ============================================================================
-// 9. MOTIF CONSTELLATION
+// 9. NARRATIVE FRAMEWORK RADAR
+// ============================================================================
+
+(function renderNarrativeRadar() {
+    if (!NARRATIVE_SCORES || NARRATIVE_SCORES.length === 0) return;
+    document.getElementById('narrative-radar-section').style.display = '';
+    const container = document.getElementById('narrative-radar');
+
+    const W = 500, H = 500;
+    const CX = W / 2, CY = H / 2;
+    const R = 180; // max radius
+    const RINGS = 5;
+    const principles = NARRATIVE_SCORES;
+    const N = principles.length;
+    const angleStep = (2 * Math.PI) / N;
+    const startAngle = -Math.PI / 2; // top
+
+    // Readable labels for each principle
+    const LABELS = {
+        three_act: 'Three Act',
+        campbells_monomyth: "Campbell's Monomyth",
+        save_the_cat: 'Save the Cat',
+        truby_22: 'Truby 22',
+        harmon_circle: 'Harmon Circle',
+        kishotenketsu: 'Kishotenketsu',
+        freytag: "Freytag's Pyramid"
+    };
+
+    const svg = makeSvg(container, W, H);
+
+    // Draw concentric rings
+    for (var ring = 1; ring <= RINGS; ring++) {
+        var r = (ring / RINGS) * R;
+        svg.appendChild(svgEl('circle', {
+            cx: CX, cy: CY, r: r,
+            fill: 'none', stroke: 'var(--border)', 'stroke-width': 0.5,
+            'stroke-dasharray': ring < RINGS ? '2,3' : 'none'
+        }));
+        // Ring number label along the top spoke
+        svg.appendChild(svgEl('text', {
+            x: CX + 4, y: CY - r + 12,
+            'font-family': 'var(--font-mono)', 'font-size': 9,
+            fill: 'var(--text-dim)', opacity: 0.6
+        })).textContent = ring;
+    }
+
+    // Draw spokes, data polygon, and labels
+    var points = [];
+    principles.forEach(function(p, i) {
+        var angle = startAngle + i * angleStep;
+        var score = parseInt(p.score) || 0;
+        var sr = (score / RINGS) * R;
+
+        // Spoke line
+        var spokeX = CX + Math.cos(angle) * R;
+        var spokeY = CY + Math.sin(angle) * R;
+        svg.appendChild(svgEl('line', {
+            x1: CX, y1: CY, x2: spokeX, y2: spokeY,
+            stroke: 'var(--border)', 'stroke-width': 0.5
+        }));
+
+        // Data point
+        var px = CX + Math.cos(angle) * sr;
+        var py = CY + Math.sin(angle) * sr;
+        points.push({ x: px, y: py, score: score, principle: p.principle });
+
+        // Framework label around perimeter
+        var labelR = R + 24;
+        var lx = CX + Math.cos(angle) * labelR;
+        var ly = CY + Math.sin(angle) * labelR;
+        var anchor = Math.abs(Math.cos(angle)) < 0.05 ? 'middle' : (lx > CX ? 'start' : 'end');
+        var label = LABELS[p.principle] || p.principle.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+        svg.appendChild(svgEl('text', {
+            x: lx, y: ly + 4, 'text-anchor': anchor,
+            'font-family': 'var(--font)', 'font-size': 11,
+            fill: 'var(--text)', 'font-weight': 500
+        })).textContent = label;
+
+        // Score value near dot
+        svg.appendChild(svgEl('text', {
+            x: px, y: py - 8, 'text-anchor': 'middle',
+            'font-family': 'var(--font-mono)', 'font-size': 10,
+            fill: 'var(--text)', 'font-weight': 700
+        })).textContent = score;
+    });
+
+    // Draw filled polygon
+    if (points.length > 0) {
+        var polyPoints = points.map(function(p) { return p.x + ',' + p.y; }).join(' ');
+        svg.appendChild(svgEl('polygon', {
+            points: polyPoints,
+            fill: 'var(--score-high)', 'fill-opacity': 0.15,
+            stroke: 'var(--score-high)', 'stroke-width': 2
+        }));
+
+        // Draw score dots colored by score scale
+        points.forEach(function(p) {
+            var color = p.score <= 1 ? 'var(--score-low)' :
+                        p.score <= 2 ? 'var(--score-mid-low)' :
+                        p.score <= 3 ? 'var(--score-mid)' :
+                        p.score <= 4 ? 'var(--score-mid-high)' :
+                        'var(--score-high)';
+            svg.appendChild(svgEl('circle', {
+                cx: p.x, cy: p.y, r: 5,
+                fill: color, stroke: 'var(--surface)', 'stroke-width': 2
+            }));
+        });
+    }
+})();
+
+// ============================================================================
+// 10. MOTIF CONSTELLATION
 // ============================================================================
 
 (function renderMotifConstellation() {
@@ -1594,7 +1723,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 })();
 
 // ============================================================================
-// 10. TIMELINE VS READING ORDER
+// 11. TIMELINE VS READING ORDER
 // ============================================================================
 
 (function renderTimelineScatter() {

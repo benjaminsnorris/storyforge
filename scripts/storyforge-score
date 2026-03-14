@@ -409,7 +409,8 @@ if [[ "$DRY_RUN" == true ]]; then
     log ""
     log "After scene scoring:"
     log "  - Act-level scoring (~${ACT_INVOCATIONS} invocations)"
-    log "  - Novel-level scoring (1 invocation)"
+    log "  - Novel-level character + genre scoring (1 invocation)"
+    log "  - Novel-level narrative framework scoring (1 invocation)"
     log ""
     log "Output directory: ${CYCLE_DIR}"
     log "============================================"
@@ -454,7 +455,8 @@ fi
 
 EVAL_TEMPLATE=$(cat "$EVAL_TEMPLATE_FILE")
 EVALUATION_CRITERIA=$(build_evaluation_criteria "$DIAGNOSTICS_CSV" "$GUIDE_FILE")
-WEIGHTED_TEXT=$(build_weighted_text "$WEIGHTS_FILE")
+# Exclude narrative principles from scene-level weighted text (scored at novel level)
+WEIGHTED_TEXT=$(build_weighted_text "$WEIGHTS_FILE" "narrative")
 
 log "Evaluation model: ${EVAL_MODEL} (mode: ${SCORE_MODE})"
 log ""
@@ -845,6 +847,71 @@ else
     log "WARNING: Novel-level template not found, skipping"
 fi
 update_pr_task "Novel-level scoring" "$PROJECT_DIR" 2>/dev/null || true
+
+# ============================================================================
+# Novel-level narrative framework scoring
+# ============================================================================
+
+log ""
+log "============================================"
+log "Narrative Framework Scoring"
+log "============================================"
+
+NARRATIVE_TEMPLATE_FILE="${PROMPTS_DIR}/novel-narrative.md"
+if [[ ! -f "$NARRATIVE_TEMPLATE_FILE" ]]; then
+    log "WARNING: Narrative template not found at ${NARRATIVE_TEMPLATE_FILE}, skipping"
+else
+    NARRATIVE_TEMPLATE=$(cat "$NARRATIVE_TEMPLATE_FILE")
+
+    # Build context: story architecture, scene index, chapter map
+    NARR_STORY_ARCH=""
+    for ref in "reference/story-architecture.md" "references/story-architecture.md"; do
+        if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
+            NARR_STORY_ARCH=$(cat "${PROJECT_DIR}/${ref}")
+            break
+        fi
+    done
+
+    NARR_SCENE_INDEX=""
+    if [[ -f "$METADATA_CSV" ]]; then
+        NARR_SCENE_INDEX=$(awk -F'|' 'NR==1 || $NF != "cut" { print }' "$METADATA_CSV")
+    fi
+
+    NARR_CHAPTER_MAP=""
+    NARR_CHAPTER_MAP_FILE="${PROJECT_DIR}/reference/chapter-map.csv"
+    [[ -f "$NARR_CHAPTER_MAP_FILE" ]] && NARR_CHAPTER_MAP=$(cat "$NARR_CHAPTER_MAP_FILE")
+
+    # Build weighted text for narrative principles only (no exclusion)
+    NARR_WEIGHTED_TEXT=$(build_weighted_text "$WEIGHTS_FILE")
+
+    # Substitute template
+    NARRATIVE_PROMPT="$NARRATIVE_TEMPLATE"
+    NARRATIVE_PROMPT="${NARRATIVE_PROMPT//\{\{PROJECT_TITLE\}\}/$PROJECT_TITLE}"
+    NARRATIVE_PROMPT="${NARRATIVE_PROMPT//\{\{STORY_ARCHITECTURE\}\}/${NARR_STORY_ARCH:-No story architecture found.}}"
+    NARRATIVE_PROMPT="${NARRATIVE_PROMPT//\{\{SCENE_INDEX\}\}/${NARR_SCENE_INDEX:-No scene metadata available.}}"
+    NARRATIVE_PROMPT="${NARRATIVE_PROMPT//\{\{CHAPTER_MAP\}\}/${NARR_CHAPTER_MAP:-No chapter map available.}}"
+    NARRATIVE_PROMPT="${NARRATIVE_PROMPT//\{\{WEIGHTED_PRINCIPLES\}\}/$NARR_WEIGHTED_TEXT}"
+
+    NARRATIVE_LOG="${LOG_DIR}/score-narrative.log"
+    NARRATIVE_MODEL=$(select_model "evaluation")
+
+    log "  Scoring narrative frameworks (model: ${NARRATIVE_MODEL})..."
+
+    if [[ "$DRY_RUN" == false ]]; then
+        narr_scores="${CYCLE_DIR}/narrative-scores.csv"
+        narr_rationale="${CYCLE_DIR}/narrative-rationale.csv"
+
+        if invoke_and_parse "$NARRATIVE_PROMPT" "$NARRATIVE_LOG" "$narr_scores" "$narr_rationale" "SCORES" "RATIONALE" "$NARRATIVE_MODEL"; then
+            if [[ -f "$narr_scores" ]]; then
+                log "  Narrative scores saved to $(basename "$narr_scores")"
+            else
+                log "  WARNING: Failed to parse narrative scores"
+            fi
+        else
+            log "  WARNING: Narrative scoring API call failed"
+        fi
+    fi
+fi
 
 # ============================================================================
 # Update latest symlink
