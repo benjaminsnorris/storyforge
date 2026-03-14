@@ -526,12 +526,18 @@ case "$SCORE_MODE" in
 grouped)
     log "Parallel workers: ${PARALLEL}"
 
+    SCORE_START_TIME=$(date +%s)
+
     batch_start=0
     while (( batch_start < SCENE_COUNT )); do
         batch_pids=()
         batch_ids=()
         batch_end=$(( batch_start + PARALLEL ))
         (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
+        batch_start_time=$(date +%s)
+
+        log ""
+        log "Batch $((batch_start / PARALLEL + 1)): scenes $((batch_start + 1))-${batch_end} of ${SCENE_COUNT}"
 
         # Launch batch — each worker scores all 4 groups for one scene
         for (( i=batch_start; i<batch_end; i++ )); do
@@ -543,18 +549,25 @@ grouped)
             (
                 # Worker subshell — runs all scoring groups for one scene
                 group_failed=0
+                group_num=0
+                group_total=${#SCORING_GROUPS[@]}
                 for group in "${SCORING_GROUPS[@]}"; do
+                    group_num=$((group_num + 1))
                     template_file="${PROMPTS_DIR}/${group}.md"
                     [[ ! -f "$template_file" ]] && continue
 
+                    log "    [${id}] Group ${group_num}/${group_total}: ${group}..."
                     template=$(cat "$template_file")
                     prompt=$(substitute_prompt "$template" "$id")
                     log_file="${LOG_DIR}/score-${id}-${group}.log"
                     tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-${group}.csv"
                     tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}-${group}.csv"
 
-                    if ! invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
+                    if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
+                        log "    [${id}] Group ${group_num}/${group_total}: ${group} done"
+                    else
                         group_failed=$((group_failed + 1))
+                        log "    [${id}] Group ${group_num}/${group_total}: ${group} FAILED"
                     fi
                 done
 
@@ -610,6 +623,10 @@ grouped)
             rm -f "$combined_scores" "$combined_rationale" "$status_file"
         done
 
+        batch_elapsed=$(( $(date +%s) - batch_start_time ))
+        total_elapsed=$(( $(date +%s) - SCORE_START_TIME ))
+        log "  Batch done in ${batch_elapsed}s (${SCORED}/${SCENE_COUNT} scored, ${total_elapsed}s elapsed)"
+
         batch_start=$batch_end
     done
     ;;
@@ -625,6 +642,8 @@ quick)
 
     log "Parallel workers: ${PARALLEL}"
 
+    SCORE_START_TIME=$(date +%s)
+
     # Process scenes in batches of $PARALLEL
     batch_start=0
     while (( batch_start < SCENE_COUNT )); do
@@ -632,6 +651,10 @@ quick)
         batch_ids=()
         batch_end=$(( batch_start + PARALLEL ))
         (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
+        batch_start_time=$(date +%s)
+
+        log ""
+        log "Batch $((batch_start / PARALLEL + 1)): scenes $((batch_start + 1))-${batch_end} of ${SCENE_COUNT}"
 
         # Launch batch
         for (( i=batch_start; i<batch_end; i++ )); do
@@ -642,6 +665,7 @@ quick)
 
             (
                 # Worker subshell — scores one scene, writes status file
+                log "    [${id}] Scoring all principles..."
                 prompt=$(substitute_prompt "$template" "$id")
                 log_file="${LOG_DIR}/score-${id}-quick.log"
                 tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}-quick.csv"
@@ -649,8 +673,10 @@ quick)
                 status_file="${CYCLE_DIR}/.status-${id}"
 
                 if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
+                    log "    [${id}] done"
                     echo "ok" > "$status_file"
                 else
+                    log "    [${id}] FAILED"
                     echo "fail" > "$status_file"
                 fi
             ) &
@@ -683,6 +709,10 @@ quick)
             rm -f "$tmp_scores" "$tmp_rationale" "$status_file"
         done
 
+        batch_elapsed=$(( $(date +%s) - batch_start_time ))
+        total_elapsed=$(( $(date +%s) - SCORE_START_TIME ))
+        log "  Batch done in ${batch_elapsed}s (${SCORED}/${SCENE_COUNT} scored, ${total_elapsed}s elapsed)"
+
         batch_start=$batch_end
     done
     ;;
@@ -705,12 +735,18 @@ deep)
     log "Deep mode: ${PRINCIPLE_COUNT} principles x ${SCENE_COUNT} scenes"
     log "Parallel workers: ${PARALLEL}"
 
+    SCORE_START_TIME=$(date +%s)
+
     batch_start=0
     while (( batch_start < SCENE_COUNT )); do
         batch_pids=()
         batch_ids=()
         batch_end=$(( batch_start + PARALLEL ))
         (( batch_end > SCENE_COUNT )) && batch_end=$SCENE_COUNT
+        batch_start_time=$(date +%s)
+
+        log ""
+        log "Batch $((batch_start / PARALLEL + 1)): scenes $((batch_start + 1))-${batch_end} of ${SCENE_COUNT}"
 
         for (( i=batch_start; i<batch_end; i++ )); do
             id="${SCENE_IDS[$i]}"
@@ -734,7 +770,10 @@ deep)
                 combined_rationale="${CYCLE_DIR}/.combined-rationale-${id}.csv"
                 p_failed=0
 
+                p_num=0
                 for principle in "${DEEP_PRINCIPLES[@]}"; do
+                    p_num=$((p_num + 1))
+                    log "    [${id}] Principle ${p_num}/${PRINCIPLE_COUNT}: ${principle}..."
                     rubric_content=$(extract_rubric_section "Scene Craft")
                     principle_rubric=$(echo "$rubric_content" | awk -v p="$principle" '
                         BEGIN { gsub(/_/, " ", p); }
@@ -798,8 +837,10 @@ ${id}|<assessment>"
                         merge_score_files "$combined_scores" "$tmp_scores"
                         merge_score_files "$combined_rationale" "$tmp_rationale"
                         rm -f "$tmp_scores" "$tmp_rationale"
+                        log "    [${id}] Principle ${p_num}/${PRINCIPLE_COUNT}: ${principle} done"
                     else
                         p_failed=$((p_failed + 1))
+                        log "    [${id}] Principle ${p_num}/${PRINCIPLE_COUNT}: ${principle} FAILED"
                     fi
                 done
 
@@ -835,6 +876,10 @@ ${id}|<assessment>"
             fi
             rm -f "$combined_scores" "$combined_rationale" "$status_file"
         done
+
+        batch_elapsed=$(( $(date +%s) - batch_start_time ))
+        total_elapsed=$(( $(date +%s) - SCORE_START_TIME ))
+        log "  Batch done in ${batch_elapsed}s (${SCORED}/${SCENE_COUNT} scored, ${total_elapsed}s elapsed)"
 
         batch_start=$batch_end
     done
