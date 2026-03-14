@@ -36,6 +36,18 @@ source "${LIB_DIR}/common.sh"
 detect_project_root
 log "Project root: ${PROJECT_DIR}"
 
+# --- API key check for non-interactive modes ---
+# (Checked early so we fail fast before doing branch/PR setup work)
+_sf_check_api_key() {
+    if [[ "$EVAL_MODE" != "interactive" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+        echo "ERROR: ANTHROPIC_API_KEY is required for batch and direct modes." >&2
+        echo "  Set it with: export ANTHROPIC_API_KEY=your-key" >&2
+        echo "  Or use --interactive to run with claude -p instead." >&2
+        exit 1
+    fi
+}
+# Deferred — called after argument parsing completes (see below)
+
 # --- Resolve plugin directory (where evaluator persona files live) ---
 PLUGIN_DIR=$(get_plugin_dir)
 PERSONA_DIR="${PLUGIN_DIR}/scripts/prompts/evaluators"
@@ -69,6 +81,7 @@ CORE_EVALUATORS=(
 
 DRY_RUN=false
 INTERACTIVE=false
+EVAL_MODE="batch"       # batch | direct | interactive
 FILTER_MODE="all"       # all | act | range | single | scenes | from_seq | manuscript | chapter
 FILTER_VALUE=""
 FILTER_SCENES=""
@@ -95,10 +108,12 @@ Scope:
 
 Options:
   --interactive                 Supervise the synthesis step interactively
+  --direct                      Use direct API calls instead of batch (default: batch)
   --dry-run                     Print prompts without invoking Claude
   -h, --help                    Show this help
 
 Environment:
+  ANTHROPIC_API_KEY             Required for batch and direct modes
   STORYFORGE_MODEL              Override model (default: sonnet for evaluators, opus for synthesis)
 
 Examples:
@@ -125,6 +140,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --interactive|-i)
             INTERACTIVE=true
+            EVAL_MODE="interactive"
+            shift
+            ;;
+        --direct)
+            EVAL_MODE="direct"
             shift
             ;;
         --manuscript)
@@ -175,6 +195,9 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# --- Check API key (now that args are parsed) ---
+_sf_check_api_key
 
 # ============================================================================
 # Prerequisites
@@ -392,6 +415,7 @@ ALL_EVALUATOR_COUNT=$(( ${#CORE_EVALUATORS[@]} + CUSTOM_EVAL_COUNT ))
 build_eval_prompt() {
     local evaluator=$1
     local is_custom=${2:-false}
+    local api_mode=${3:-false}  # true for batch/direct API (inline files, no save instructions)
     local persona_file
 
     if [[ "$is_custom" == true ]]; then
@@ -423,8 +447,9 @@ build_eval_prompt() {
         persona="${persona//\{GENRE\}/fiction}"
     fi
 
-    # Build reference file list
+    # Build reference file content (inline for API mode, list for interactive)
     local ref_files=""
+    local ref_inline=""
     for ref in "reference/key-decisions.md" \
                "reference/voice-guide.md" "references/voice-guide.md" \
                "reference/story-architecture.md" "references/story-architecture.md" \
@@ -432,8 +457,34 @@ build_eval_prompt() {
         if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
             ref_files="${ref_files}   - ${ref}
 "
+            if [[ "$api_mode" == true ]]; then
+                ref_inline="${ref_inline}
+===== REFERENCE: ${ref} =====
+
+$(cat "${PROJECT_DIR}/${ref}")
+
+===== END REFERENCE: ${ref} =====
+"
+            fi
         fi
     done
+
+    # Build inline manuscript content for API mode
+    local manuscript_inline=""
+    if [[ "$api_mode" == true ]]; then
+        for sf in "${SCENE_FILES[@]}"; do
+            sf_path="${PROJECT_DIR}/${sf}"
+            if [[ -f "$sf_path" ]]; then
+                manuscript_inline="${manuscript_inline}
+===== ${sf} =====
+
+$(cat "$sf_path")
+
+===== END ${sf} =====
+"
+            fi
+        done
+    fi
 
     cat <<EVAL_PROMPT
 You are evaluating the manuscript of "${PROJECT_TITLE}."
@@ -459,30 +510,47 @@ else
     echo "No voice guide provided. Evaluate the prose on its own terms."
 fi)
 
+$(if [[ "$api_mode" == true ]]; then
+    cat <<APIFILES
+===== MANUSCRIPT =====
+
+${manuscript_inline}
+
+===== REFERENCE FILES =====
+
+${ref_inline}
+
+===== INSTRUCTIONS =====
+
+The manuscript and reference files are provided above. Evaluate the manuscript following the structure defined in your role description.
+
+APIFILES
+else
+    cat <<CLIFILES
 ===== INSTRUCTIONS =====
 
 $(if [[ "$INPUT_TYPE" == "chapters" ]]; then
-    cat <<'CHAPTER_INST'
-1. Read the assembled chapter files that comprise the evaluation scope. These are the final manuscript chapters with scenes already combined, scene breaks in place, and chapter headings applied. Read them in order:
-CHAPTER_INST
+    echo "1. Read the assembled chapter files that comprise the evaluation scope. These are the final manuscript chapters with scenes already combined, scene breaks in place, and chapter headings applied. Read them in order:"
 else
-    cat <<'SCENE_INST'
-1. Read the scene files that comprise the evaluation scope. Read them in order:
-SCENE_INST
+    echo "1. Read the scene files that comprise the evaluation scope. Read them in order:"
 fi)
 ${SCENE_LIST_STR}
 2. Also read these reference files for context (if they exist):
 ${ref_files}
+CLIFILES
+fi)
 
 IMPORTANT: If \`reference/key-decisions.md\` exists, it is the authoritative record of the author's creative decisions. When a key decision contradicts information in other reference files (character bible, story architecture, voice guide, etc.), the key decision takes precedence — the author has deliberately superseded the earlier material. Do not flag contradictions between key decisions and other reference files as issues. Evaluate the manuscript against the key decisions, not against outdated reference material.
 
-3. Write your evaluation report following the structure defined in your role description above.
-
-4. Save your report to: working/evaluations/eval-${EVAL_TIMESTAMP}/${evaluator}.md
-
+$(if [[ "$api_mode" != true ]]; then
+    echo "3. Write your evaluation report following the structure defined in your role description above."
+    echo ""
+    echo "4. Save your report to: working/evaluations/eval-${EVAL_TIMESTAMP}/${evaluator}.md"
+    echo ""
+fi)
 $(if [[ "$INPUT_TYPE" == "chapters" ]]; then
     cat <<'CHAPTER_CITE'
-5. Be specific. Cite chapter numbers, character names, and quote brief passages when making points. Pay particular attention to:
+Be specific. Cite chapter numbers, character names, and quote brief passages when making points. Pay particular attention to:
    - Chapter-level pacing: Does each chapter have a satisfying arc? Does it open with momentum and close with a reason to turn the page?
    - Chapter transitions: How does the end of one chapter flow into the beginning of the next? Are cliffhangers, hooks, and tonal shifts effective?
    - Chapter length variation: Are chapters appropriately varied in length, or do they feel monotonous? Do short chapters create urgency where needed?
@@ -491,12 +559,18 @@ $(if [[ "$INPUT_TYPE" == "chapters" ]]; then
 CHAPTER_CITE
 else
     cat <<'SCENE_CITE'
-5. Be specific. Cite scene IDs, character names, and quote brief passages when making points. Vague praise or criticism is unhelpful. The author wants to know exactly what works, what does not, and why.
+Be specific. Cite scene IDs, character names, and quote brief passages when making points. Vague praise or criticism is unhelpful. The author wants to know exactly what works, what does not, and why.
 SCENE_CITE
 fi)
 
-6. Be honest. The author is looking for professional-grade feedback, not encouragement. If something is broken, say so clearly. If something is excellent, say that too — protecting strengths is as important as fixing weaknesses.
+Be honest. The author is looking for professional-grade feedback, not encouragement. If something is broken, say so clearly. If something is excellent, say that too — protecting strengths is as important as fixing weaknesses.
 
+$(if [[ "$api_mode" == true ]]; then
+    echo "===== OUTPUT ====="
+    echo ""
+    echo "Output your complete evaluation report directly. Do not include any preamble or explanation — just the evaluation report content."
+else
+    cat <<CLIOUTPUT
 ===== OUTPUT =====
 
 Save your complete evaluation to: working/evaluations/eval-${EVAL_TIMESTAMP}/${evaluator}.md
@@ -510,6 +584,8 @@ After saving your report, stage and commit:
   git push
 
 This is required — the author follows progress by pulling commits as you work.
+CLIOUTPUT
+fi)
 EVAL_PROMPT
 }
 
@@ -613,9 +689,13 @@ synthesis_monitor() {
 
 # --- Dry-run mode: print all prompts and exit ---
 if [[ "$DRY_RUN" == true ]]; then
+    DRY_RUN_API=false
+    [[ "$EVAL_MODE" == "batch" || "$EVAL_MODE" == "direct" ]] && DRY_RUN_API=true
+    echo "# Mode: ${EVAL_MODE} (api_prompts: ${DRY_RUN_API})"
+    echo ""
     for EVAL in "${CORE_EVALUATORS[@]}"; do
         echo "===== DRY RUN: ${EVAL} ====="
-        build_eval_prompt "$EVAL" false
+        build_eval_prompt "$EVAL" false "$DRY_RUN_API"
         echo "===== END DRY RUN: ${EVAL} ====="
         echo ""
     done
@@ -623,7 +703,7 @@ if [[ "$DRY_RUN" == true ]]; then
         for EVAL in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
             [[ -z "$EVAL" ]] && continue
             echo "===== DRY RUN: ${EVAL} (custom) ====="
-            build_eval_prompt "$EVAL" true
+            build_eval_prompt "$EVAL" true "$DRY_RUN_API"
             echo "===== END DRY RUN: ${EVAL} ====="
             echo ""
         done
@@ -633,6 +713,9 @@ if [[ "$DRY_RUN" == true ]]; then
     echo "===== DRY RUN: synthesis ====="
     echo "# Synthesis prompt would read reports from: working/evaluations/eval-${EVAL_TIMESTAMP}/"
     echo "# Evaluators: ${CORE_EVALUATORS[*]}"
+    if [[ "$DRY_RUN_API" == true ]]; then
+        echo "# Mode: direct API (reports will be inlined in synthesis prompt)"
+    fi
     echo "===== END DRY RUN: synthesis ====="
     exit 0
 fi
@@ -742,9 +825,16 @@ fi
 # Each evaluator reads all scenes; synthesis reads reports
 EVALUATOR_COST=$(estimate_cost "evaluate" "${#SCENE_FILES[@]}" "$AVG_WORDS" "$EVAL_MODEL_FORECAST")
 SYNTH_COST=$(estimate_cost "evaluate" "1" "$((AVG_WORDS * ${#SCENE_FILES[@]}))" "$SYNTH_MODEL_FORECAST")
-TOTAL_FORECAST=$(awk "BEGIN { printf \"%.2f\", ${EVALUATOR_COST} * ${ALL_EVALUATOR_COUNT} + ${SYNTH_COST} }")
+if [[ "$EVAL_MODE" == "batch" ]]; then
+    # Batch API gets 50% discount on input tokens — approximate as 25% total discount
+    TOTAL_FORECAST=$(awk "BEGIN { printf \"%.2f\", (${EVALUATOR_COST} * ${ALL_EVALUATOR_COUNT}) * 0.75 + ${SYNTH_COST} }")
+    COST_MODE_LABEL="batch, ~25% discount"
+else
+    TOTAL_FORECAST=$(awk "BEGIN { printf \"%.2f\", ${EVALUATOR_COST} * ${ALL_EVALUATOR_COUNT} + ${SYNTH_COST} }")
+    COST_MODE_LABEL="${EVAL_MODE}"
+fi
 
-log "Cost forecast: ~\$${TOTAL_FORECAST} (${ALL_EVALUATOR_COUNT} evaluators @ ~\$${EVALUATOR_COST} + synthesis ~\$${SYNTH_COST})"
+log "Cost forecast: ~\$${TOTAL_FORECAST} (${ALL_EVALUATOR_COUNT} evaluators @ ~\$${EVALUATOR_COST} + synthesis ~\$${SYNTH_COST}, mode: ${COST_MODE_LABEL})"
 check_cost_threshold "$TOTAL_FORECAST" || { log "Cost threshold check declined. Aborting."; exit 1; }
 
 # --- Offer interactive mode before starting ---
@@ -752,103 +842,257 @@ if [[ ! -f "$INTERACTIVE_FILE" ]]; then
     offer_interactive "$PROJECT_DIR" "Evaluation panel (${ALL_EVALUATOR_COUNT} evaluators)" || true
 fi
 
-# --- Launch all evaluators in parallel ---
-PIDS=()
+# --- Launch all evaluators ---
 EVAL_NAMES=()
 EVAL_MODELS=()
 _SF_INVOCATION_START=$(date +%s)
 export _SF_INVOCATION_START
 
-# Launch core evaluators
+# Collect all evaluator names + models + prompts
+ALL_EVAL_PROMPTS=()
+ALL_EVAL_IS_CUSTOM=()
+
+# Determine if prompts need inline file content (API modes can't read files)
+USE_API_PROMPTS=false
+if [[ "$EVAL_MODE" == "batch" || "$EVAL_MODE" == "direct" ]]; then
+    USE_API_PROMPTS=true
+fi
+
 for EVAL in "${CORE_EVALUATORS[@]}"; do
-    EVAL_LOG="${LOG_DIR}/eval-${EVAL}.log"
-
     EVAL_MODEL=$(select_model "evaluation")
-    log "Launching evaluator: ${EVAL} (model: ${EVAL_MODEL})"
-
-    PROMPT=$(build_eval_prompt "$EVAL" false)
-    EVAL_MODELS+=("$EVAL_MODEL")
-
-    claude -p "$PROMPT" \
-        --model "$EVAL_MODEL" \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --verbose \
-        $BUDGET_FLAG \
-        > "$EVAL_LOG" 2>&1 &
-
-    PIDS+=($!)
-    register_child_pid $!
     EVAL_NAMES+=("$EVAL")
+    EVAL_MODELS+=("$EVAL_MODEL")
+    ALL_EVAL_PROMPTS+=("$(build_eval_prompt "$EVAL" false "$USE_API_PROMPTS")")
+    ALL_EVAL_IS_CUSTOM+=(false)
 done
 
-# Launch custom evaluators
 for EVAL in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
     [[ -z "$EVAL" ]] && continue
-    EVAL_LOG="${LOG_DIR}/eval-${EVAL}.log"
-
     EVAL_MODEL=$(select_model "evaluation")
-    log "Launching custom evaluator: ${EVAL} (model: ${EVAL_MODEL})"
-
-    PROMPT=$(build_eval_prompt "$EVAL" true)
-    EVAL_MODELS+=("$EVAL_MODEL")
-
-    claude -p "$PROMPT" \
-        --model "$EVAL_MODEL" \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --verbose \
-        $BUDGET_FLAG \
-        > "$EVAL_LOG" 2>&1 &
-
-    PIDS+=($!)
-    register_child_pid $!
     EVAL_NAMES+=("$EVAL")
+    EVAL_MODELS+=("$EVAL_MODEL")
+    ALL_EVAL_PROMPTS+=("$(build_eval_prompt "$EVAL" true "$USE_API_PROMPTS")")
+    ALL_EVAL_IS_CUSTOM+=(true)
 done
 
-log "All ${#PIDS[@]} evaluators launched. Waiting for completion..."
-
-# Launch background progress monitor
-evaluation_monitor "$EVAL_DIR" "${EVAL_NAMES[*]}" "${#PIDS[@]}" "$(date +%s)" &
-EVAL_MONITOR_PID=$!
-register_child_pid $EVAL_MONITOR_PID
-
-# --- Wait for all evaluators, tracking results ---
 FAILED=()
 SUCCEEDED=()
 
-for i in "${!PIDS[@]}"; do
-    PID=${PIDS[$i]}
-    EVAL_NAME=${EVAL_NAMES[$i]}
+if [[ "$EVAL_MODE" == "batch" ]]; then
+    # ---- BATCH MODE: submit all evaluators as a single batch ----
+    log "Building batch request for ${#EVAL_NAMES[@]} evaluators..."
+    BATCH_FILE="${LOG_DIR}/eval-batch-${EVAL_TIMESTAMP}.jsonl"
+    > "$BATCH_FILE"
 
-    set +e
-    wait "$PID"
-    EXIT_CODE=$?
-    set -e
+    for i in "${!EVAL_NAMES[@]}"; do
+        EVAL_NAME="${EVAL_NAMES[$i]}"
+        EVAL_MODEL="${EVAL_MODELS[$i]}"
+        PROMPT="${ALL_EVAL_PROMPTS[$i]}"
 
-    # Log usage for cost tracking
-    EVAL_LOG_FILE="${LOG_DIR}/eval-${EVAL_NAME}.log"
-    EVAL_MODEL_USED="${EVAL_MODELS[$i]:-unknown}"
-    log_usage "$EVAL_LOG_FILE" "evaluate" "$EVAL_NAME" "$EVAL_MODEL_USED"
+        # Build JSONL line — escape prompt for JSON
+        json_prompt=$(jq -Rs '.' <<< "$PROMPT")
+        cat <<BATCHLINE >> "$BATCH_FILE"
+{"custom_id": "${EVAL_NAME}", "params": {"model": "${EVAL_MODEL}", "max_tokens": 8192, "messages": [{"role": "user", "content": ${json_prompt}}]}}
+BATCHLINE
+        log "  Added to batch: ${EVAL_NAME} (model: ${EVAL_MODEL})"
+    done
 
-    if (( EXIT_CODE != 0 )); then
-        log "FAILED: ${EVAL_NAME} (exit code $EXIT_CODE)"
-        FAILED+=("$EVAL_NAME")
-    elif [[ ! -f "${EVAL_DIR}/${EVAL_NAME}.md" ]]; then
-        log "FAILED: ${EVAL_NAME} (no output file created)"
-        FAILED+=("$EVAL_NAME")
-    else
-        WORD_COUNT=$(wc -w < "${EVAL_DIR}/${EVAL_NAME}.md" | tr -d ' ')
-        log "SUCCESS: ${EVAL_NAME} (${WORD_COUNT} words)"
-        SUCCEEDED+=("$EVAL_NAME")
-        # Update PR task checkbox (use the pre-built label from EVAL_TASK_LABELS)
-        update_pr_task "${EVAL_TASK_LABELS[$i]}" "$PROJECT_DIR"
-    fi
-done
+    log "Submitting batch (${#EVAL_NAMES[@]} requests)..."
+    BATCH_ID=$(submit_batch "$BATCH_FILE")
+    log "Batch submitted: ${BATCH_ID}"
 
-# Stop the evaluation progress monitor
-kill "$EVAL_MONITOR_PID" 2>/dev/null || true
-wait "$EVAL_MONITOR_PID" 2>/dev/null || true
+    log "Polling batch for completion..."
+    poll_batch "$BATCH_ID"
+    log "Batch complete. Downloading results..."
+
+    download_batch_results "$BATCH_ID" "$EVAL_DIR" "$LOG_DIR"
+
+    # Process results for each evaluator
+    for i in "${!EVAL_NAMES[@]}"; do
+        EVAL_NAME="${EVAL_NAMES[$i]}"
+        EVAL_MODEL="${EVAL_MODELS[$i]}"
+        STATUS_FILE="${EVAL_DIR}/.status-${EVAL_NAME}"
+        EVAL_JSON="${LOG_DIR}/${EVAL_NAME}.json"
+        EVAL_TXT="${LOG_DIR}/${EVAL_NAME}.txt"
+
+        # Log usage from the per-evaluator JSON response
+        if [[ -f "$EVAL_JSON" ]]; then
+            log_api_usage "$EVAL_JSON" "evaluate" "$EVAL_NAME" "$EVAL_MODEL"
+        fi
+
+        if [[ -f "$STATUS_FILE" ]] && [[ "$(cat "$STATUS_FILE")" == "ok" ]]; then
+            # Batch responses are text — the evaluator prompt asked Claude to save a file,
+            # but in API mode Claude can't write files. Save the response as the report.
+            if [[ -f "$EVAL_TXT" ]]; then
+                mkdir -p "$EVAL_DIR"
+                cp "$EVAL_TXT" "${EVAL_DIR}/${EVAL_NAME}.md"
+            fi
+
+            if [[ -f "${EVAL_DIR}/${EVAL_NAME}.md" ]]; then
+                WORD_COUNT=$(wc -w < "${EVAL_DIR}/${EVAL_NAME}.md" | tr -d ' ')
+                log "SUCCESS: ${EVAL_NAME} (${WORD_COUNT} words)"
+                SUCCEEDED+=("$EVAL_NAME")
+                update_pr_task "${EVAL_TASK_LABELS[$i]}" "$PROJECT_DIR"
+            else
+                log "FAILED: ${EVAL_NAME} (no output file created)"
+                FAILED+=("$EVAL_NAME")
+            fi
+        else
+            log "FAILED: ${EVAL_NAME} (batch request failed)"
+            FAILED+=("$EVAL_NAME")
+        fi
+    done
+
+    # Clean up batch artifacts
+    rm -f "$BATCH_FILE"
+
+elif [[ "$EVAL_MODE" == "direct" ]]; then
+    # ---- DIRECT MODE: parallel invoke_anthropic_api calls ----
+    PIDS=()
+
+    for i in "${!EVAL_NAMES[@]}"; do
+        EVAL_NAME="${EVAL_NAMES[$i]}"
+        EVAL_MODEL="${EVAL_MODELS[$i]}"
+        EVAL_LOG="${LOG_DIR}/eval-${EVAL_NAME}.log"
+        PROMPT="${ALL_EVAL_PROMPTS[$i]}"
+
+        IS_CUSTOM="${ALL_EVAL_IS_CUSTOM[$i]}"
+        if [[ "$IS_CUSTOM" == true ]]; then
+            log "Launching custom evaluator (direct API): ${EVAL_NAME} (model: ${EVAL_MODEL})"
+        else
+            log "Launching evaluator (direct API): ${EVAL_NAME} (model: ${EVAL_MODEL})"
+        fi
+
+        (
+            invoke_anthropic_api "$PROMPT" "$EVAL_MODEL" "$EVAL_LOG" 8192 || true
+
+            # Save response as the evaluator report
+            if [[ -f "$EVAL_LOG" ]]; then
+                response=$(extract_api_response "$EVAL_LOG" || true)
+                if [[ -n "$response" ]]; then
+                    mkdir -p "$EVAL_DIR"
+                    echo "$response" > "${EVAL_DIR}/${EVAL_NAME}.md"
+                    echo "ok" > "${EVAL_DIR}/.status-${EVAL_NAME}"
+                else
+                    echo "fail" > "${EVAL_DIR}/.status-${EVAL_NAME}"
+                fi
+            else
+                echo "fail" > "${EVAL_DIR}/.status-${EVAL_NAME}"
+            fi
+        ) &
+
+        PIDS+=($!)
+        register_child_pid $!
+    done
+
+    log "All ${#PIDS[@]} evaluators launched (direct API). Waiting for completion..."
+
+    # Launch background progress monitor
+    evaluation_monitor "$EVAL_DIR" "${EVAL_NAMES[*]}" "${#PIDS[@]}" "$(date +%s)" &
+    EVAL_MONITOR_PID=$!
+    register_child_pid $EVAL_MONITOR_PID
+
+    for i in "${!PIDS[@]}"; do
+        PID=${PIDS[$i]}
+        EVAL_NAME=${EVAL_NAMES[$i]}
+
+        set +e
+        wait "$PID"
+        EXIT_CODE=$?
+        set -e
+
+        EVAL_LOG_FILE="${LOG_DIR}/eval-${EVAL_NAME}.log"
+        EVAL_MODEL_USED="${EVAL_MODELS[$i]:-unknown}"
+        log_api_usage "$EVAL_LOG_FILE" "evaluate" "$EVAL_NAME" "$EVAL_MODEL_USED"
+
+        STATUS_FILE="${EVAL_DIR}/.status-${EVAL_NAME}"
+        if [[ -f "$STATUS_FILE" ]] && [[ "$(cat "$STATUS_FILE")" == "ok" ]]; then
+            if [[ -f "${EVAL_DIR}/${EVAL_NAME}.md" ]]; then
+                WORD_COUNT=$(wc -w < "${EVAL_DIR}/${EVAL_NAME}.md" | tr -d ' ')
+                log "SUCCESS: ${EVAL_NAME} (${WORD_COUNT} words)"
+                SUCCEEDED+=("$EVAL_NAME")
+                update_pr_task "${EVAL_TASK_LABELS[$i]}" "$PROJECT_DIR"
+            else
+                log "FAILED: ${EVAL_NAME} (no output file created)"
+                FAILED+=("$EVAL_NAME")
+            fi
+        else
+            log "FAILED: ${EVAL_NAME} (exit code ${EXIT_CODE})"
+            FAILED+=("$EVAL_NAME")
+        fi
+    done
+
+    # Stop the evaluation progress monitor
+    kill "$EVAL_MONITOR_PID" 2>/dev/null || true
+    wait "$EVAL_MONITOR_PID" 2>/dev/null || true
+
+else
+    # ---- INTERACTIVE MODE: keep claude -p unchanged ----
+    PIDS=()
+
+    for i in "${!EVAL_NAMES[@]}"; do
+        EVAL_NAME="${EVAL_NAMES[$i]}"
+        EVAL_MODEL="${EVAL_MODELS[$i]}"
+        EVAL_LOG="${LOG_DIR}/eval-${EVAL_NAME}.log"
+        PROMPT="${ALL_EVAL_PROMPTS[$i]}"
+
+        IS_CUSTOM="${ALL_EVAL_IS_CUSTOM[$i]}"
+        if [[ "$IS_CUSTOM" == true ]]; then
+            log "Launching custom evaluator: ${EVAL_NAME} (model: ${EVAL_MODEL})"
+        else
+            log "Launching evaluator: ${EVAL_NAME} (model: ${EVAL_MODEL})"
+        fi
+
+        claude -p "$PROMPT" \
+            --model "$EVAL_MODEL" \
+            --dangerously-skip-permissions \
+            --output-format stream-json \
+            --verbose \
+            $BUDGET_FLAG \
+            > "$EVAL_LOG" 2>&1 &
+
+        PIDS+=($!)
+        register_child_pid $!
+    done
+
+    log "All ${#PIDS[@]} evaluators launched. Waiting for completion..."
+
+    # Launch background progress monitor
+    evaluation_monitor "$EVAL_DIR" "${EVAL_NAMES[*]}" "${#PIDS[@]}" "$(date +%s)" &
+    EVAL_MONITOR_PID=$!
+    register_child_pid $EVAL_MONITOR_PID
+
+    for i in "${!PIDS[@]}"; do
+        PID=${PIDS[$i]}
+        EVAL_NAME=${EVAL_NAMES[$i]}
+
+        set +e
+        wait "$PID"
+        EXIT_CODE=$?
+        set -e
+
+        EVAL_LOG_FILE="${LOG_DIR}/eval-${EVAL_NAME}.log"
+        EVAL_MODEL_USED="${EVAL_MODELS[$i]:-unknown}"
+        log_usage "$EVAL_LOG_FILE" "evaluate" "$EVAL_NAME" "$EVAL_MODEL_USED"
+
+        if (( EXIT_CODE != 0 )); then
+            log "FAILED: ${EVAL_NAME} (exit code $EXIT_CODE)"
+            FAILED+=("$EVAL_NAME")
+        elif [[ ! -f "${EVAL_DIR}/${EVAL_NAME}.md" ]]; then
+            log "FAILED: ${EVAL_NAME} (no output file created)"
+            FAILED+=("$EVAL_NAME")
+        else
+            WORD_COUNT=$(wc -w < "${EVAL_DIR}/${EVAL_NAME}.md" | tr -d ' ')
+            log "SUCCESS: ${EVAL_NAME} (${WORD_COUNT} words)"
+            SUCCEEDED+=("$EVAL_NAME")
+            update_pr_task "${EVAL_TASK_LABELS[$i]}" "$PROJECT_DIR"
+        fi
+    done
+
+    # Stop the evaluation progress monitor
+    kill "$EVAL_MONITOR_PID" 2>/dev/null || true
+    wait "$EVAL_MONITOR_PID" 2>/dev/null || true
+fi
 
 log "Evaluator results: ${#SUCCEEDED[@]} succeeded, ${#FAILED[@]} failed"
 
@@ -1003,7 +1247,7 @@ After saving both files, stage and commit:
 This is required — the author follows progress by pulling commits as you work.
 SYNTH_EOF
 
-if [[ -f "$INTERACTIVE_FILE" ]]; then
+if [[ "$EVAL_MODE" == "interactive" ]]; then
     # Interactive synthesis — user can guide how findings are interpreted
     show_interactive_banner "Evaluation Synthesis"
 
@@ -1014,24 +1258,172 @@ if [[ -f "$INTERACTIVE_FILE" ]]; then
         --dangerously-skip-permissions \
         --append-system-prompt "$SYNTH_SYSTEM" || false
 else
-    log "Running synthesis (model: ${SYNTH_MODEL})..."
+    # Non-interactive (batch or direct): use direct API for synthesis
+    # Build an augmented prompt that includes report contents inline
+    # (API mode can't read files from disk)
+    SYNTH_INLINE_REPORTS=""
+    for EVAL_NAME in "${SUCCEEDED[@]}"; do
+        REPORT_FILE="${EVAL_DIR}/${EVAL_NAME}.md"
+        if [[ -f "$REPORT_FILE" ]]; then
+            SYNTH_INLINE_REPORTS="${SYNTH_INLINE_REPORTS}
+===== REPORT: ${EVAL_NAME} =====
+
+$(cat "$REPORT_FILE")
+
+===== END REPORT: ${EVAL_NAME} =====
+"
+        fi
+    done
+
+    # Also inline reference files
+    SYNTH_INLINE_REFS=""
+    for ref in "reference/key-decisions.md" \
+               "reference/voice-guide.md" "references/voice-guide.md" \
+               "reference/story-architecture.md" "references/story-architecture.md"; do
+        if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
+            SYNTH_INLINE_REFS="${SYNTH_INLINE_REFS}
+===== REFERENCE: ${ref} =====
+
+$(cat "${PROJECT_DIR}/${ref}")
+
+===== END REFERENCE: ${ref} =====
+"
+        fi
+    done
+
+    # Build API-mode synthesis prompt (replaces file-reading instructions with inline content)
+    read -r -d '' SYNTH_API_PROMPT <<SYNTH_API_EOF || true
+You are synthesizing the evaluation reports from a multi-agent review panel for "${PROJECT_TITLE}."
+
+===== PROJECT CONTEXT =====
+
+Title: ${PROJECT_TITLE}
+Genre: ${GENRE_DISPLAY:-Not specified}
+Logline: ${PROJECT_LOGLINE:-Not provided}
+Evaluation scope: ${SCOPE_DESCRIPTION}
+
+===== EVALUATION REPORTS =====
+
+${SYNTH_INLINE_REPORTS}
+
+===== REFERENCE FILES =====
+
+${SYNTH_INLINE_REFS}
+
+===== INSTRUCTIONS =====
+
+IMPORTANT: If a \`key-decisions\` reference was provided above, it is the authoritative record of the author's creative decisions. When a key decision contradicts information in other reference files, the key decision takes precedence. If an evaluator flagged something that is actually consistent with a key decision, note it as a false positive in the synthesis — do not carry it forward as a finding.
+
+Produce TWO sections in your response, clearly delimited:
+
+--- BEGIN synthesis.md ---
+
+A prose synthesis report with these sections:
+
+## Consensus Findings
+Issues or strengths identified by 3+ evaluators. These are high-confidence findings.
+
+## Contested Points
+Areas where evaluators disagree. Present both sides fairly and note why the disagreement exists.
+
+## Prioritized Action Items
+A numbered list of the most impactful changes, ordered by priority. For each:
+- What the issue is
+- Which evaluators flagged it
+- Suggested approach
+- Estimated effort (minor/moderate/major)
+
+## Strengths to Protect
+Elements that evaluators praised and that must be preserved in any further revision.
+
+## Overall Assessment
+A brief (2-3 paragraph) synthesis of where the manuscript stands. Be direct.
+
+--- END synthesis.md ---
+
+--- BEGIN findings.yaml ---
+
+A structured YAML file containing all findings. Use this exact format:
+
+\`\`\`yaml
+# Evaluation Findings — ${PROJECT_TITLE}
+# Generated: ${EVAL_TIMESTAMP}
+# Scope: ${SCOPE_DESCRIPTION}
+
+metadata:
+  title: "${PROJECT_TITLE}"
+  genre: "${GENRE_DISPLAY:-Not specified}"
+  scope: "${SCOPE_DESCRIPTION}"
+  evaluators_succeeded:
+    - evaluator-name
+  evaluators_failed:
+    - evaluator-name
+  timestamp: "${EVAL_TIMESTAMP}"
+
+findings:
+  - id: F001
+    category: structure|character|pacing|prose|worldbuilding|theme|market|genre|continuity
+    severity: critical|major|minor|suggestion
+    summary: "One-line description of the finding"
+    detail: "Full explanation with context"
+    affected_locations:
+      - $(if [[ "$INPUT_TYPE" == "chapters" ]]; then echo "chapter-number-or-range"; else echo "scene-id"; fi)
+    flagged_by:
+      - evaluator-name
+    recommendation: "Specific, actionable suggestion"
+
+strengths:
+  - id: S001
+    category: structure|character|pacing|prose|worldbuilding|theme|voice|craft
+    summary: "One-line description of the strength"
+    detail: "Why this works and why it must be protected"
+    examples:
+      - $(if [[ "$INPUT_TYPE" == "chapters" ]]; then echo "chapter-number-or-range"; else echo "scene-id"; fi)
+    flagged_by:
+      - evaluator-name
+\`\`\`
+
+IMPORTANT: The findings.yaml must be valid YAML. Use quoted strings for values that contain colons, special characters, or newlines. Categorize every substantive point from every evaluator report. Severity levels:
+- critical: Structural or fundamental issue that must be addressed
+- major: Significant issue that weakens the manuscript
+- minor: Worth fixing but not urgent
+- suggestion: Nice-to-have improvement
+
+--- END findings.yaml ---
+SYNTH_API_EOF
+
+    log "Running synthesis via direct API (model: ${SYNTH_MODEL})..."
 
     # Launch synthesis progress monitor (headless only)
     synthesis_monitor "$EVAL_DIR" "$(date +%s)" &
     SYNTH_MONITOR_PID=$!
     register_child_pid $SYNTH_MONITOR_PID
 
-    claude -p "$SYNTHESIS_PROMPT" \
-        --model "$SYNTH_MODEL" \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --verbose \
-        $BUDGET_FLAG \
-        > "$SYNTHESIS_LOG" 2>&1 || false
+    invoke_anthropic_api "$SYNTH_API_PROMPT" "$SYNTH_MODEL" "$SYNTHESIS_LOG" 8192 || false
 
     # Stop the synthesis progress monitor
     kill "$SYNTH_MONITOR_PID" 2>/dev/null || true
     wait "$SYNTH_MONITOR_PID" 2>/dev/null || true
+
+    # Parse the API response into the two output files
+    SYNTH_RESPONSE=$(extract_api_response "$SYNTHESIS_LOG" || true)
+
+    if [[ -n "$SYNTH_RESPONSE" ]]; then
+        # Extract synthesis.md content (between the delimiters)
+        SYNTH_MD=$(echo "$SYNTH_RESPONSE" | sed -n '/^--- BEGIN synthesis\.md ---$/,/^--- END synthesis\.md ---$/p' | sed '1d;$d')
+        if [[ -z "$SYNTH_MD" ]]; then
+            # Fallback: save the entire response as synthesis.md
+            SYNTH_MD="$SYNTH_RESPONSE"
+        fi
+        echo "$SYNTH_MD" > "${EVAL_DIR}/synthesis.md"
+
+        # Extract findings.yaml content (between the delimiters, strip yaml code fences)
+        FINDINGS_YAML=$(echo "$SYNTH_RESPONSE" | sed -n '/^--- BEGIN findings\.yaml ---$/,/^--- END findings\.yaml ---$/p' | sed '1d;$d')
+        if [[ -n "$FINDINGS_YAML" ]]; then
+            # Strip ```yaml and ``` fences if present
+            echo "$FINDINGS_YAML" | sed '/^```yaml$/d' | sed '/^```$/d' > "${EVAL_DIR}/findings.yaml"
+        fi
+    fi
 fi
 
 SYNTH_END=$(date +%s)
@@ -1054,7 +1446,11 @@ fi
 end_healing_zone
 
 # Log synthesis usage
-log_usage "$SYNTHESIS_LOG" "synthesize" "synthesis" "$SYNTH_MODEL"
+if [[ "$EVAL_MODE" == "interactive" ]]; then
+    log_usage "$SYNTHESIS_LOG" "synthesize" "synthesis" "$SYNTH_MODEL"
+else
+    log_api_usage "$SYNTHESIS_LOG" "synthesize" "synthesis" "$SYNTH_MODEL"
+fi
 
 SYNTH_WORDS=$(wc -w < "${EVAL_DIR}/synthesis.md" | tr -d ' ')
 log "SUCCESS: Synthesis complete (${SYNTH_WORDS} words, ${SYNTH_MINS}m${SYNTH_SECS}s)"
