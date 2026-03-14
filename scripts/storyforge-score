@@ -304,7 +304,9 @@ case "$SCORE_MODE" in
         ;;
 esac
 
-HAIKU_COST=$(estimate_cost "extraction" "$SCENE_COUNT" "$AVG_WORDS" "$HAIKU_MODEL")
+# Pass 1: 4 Haiku calls per scene (one per section: scene_craft, prose_craft, character_craft, rules)
+HAIKU_CALLS=$(( SCENE_COUNT * 4 ))
+HAIKU_COST=$(estimate_cost "extraction" "$HAIKU_CALLS" "$AVG_WORDS" "$HAIKU_MODEL")
 if (( PASS2_ESTIMATE > 0 )); then
     SONNET_COST=$(estimate_cost "score" "$PASS2_ESTIMATE" "$(( AVG_WORDS / 2 ))" "$SONNET_MODEL")
 else
@@ -314,13 +316,13 @@ SCENE_COST=$(awk "BEGIN { printf \"%.2f\", $HAIKU_COST + $SONNET_COST }")
 
 case "$SCORE_MODE" in
     quick)
-        log "Cost forecast: ~\$${SCENE_COST} (${SCENE_COUNT} Haiku calls, no Sonnet)"
+        log "Cost forecast: ~\$${SCENE_COST} (${HAIKU_CALLS} Haiku calls, no Sonnet)"
         ;;
     default)
-        log "Cost forecast: ~\$${SCENE_COST} (Pass 1: ${SCENE_COUNT} Haiku, Pass 2: ~${PASS2_ESTIMATE} Sonnet)"
+        log "Cost forecast: ~\$${SCENE_COST} (Pass 1: ${HAIKU_CALLS} Haiku, Pass 2: ~${PASS2_ESTIMATE} Sonnet)"
         ;;
     deep)
-        log "Cost forecast: ~\$${SCENE_COST} (Pass 1: ${SCENE_COUNT} Haiku, Pass 2: ${PASS2_ESTIMATE} Sonnet)"
+        log "Cost forecast: ~\$${SCENE_COST} (Pass 1: ${HAIKU_CALLS} Haiku, Pass 2: ${PASS2_ESTIMATE} Sonnet)"
         ;;
 esac
 log "  Haiku model: ${HAIKU_MODEL}"
@@ -414,17 +416,17 @@ if [[ "$DRY_RUN" == true ]]; then
     case "$SCORE_MODE" in
         quick)
             log "Quick mode: Haiku binary screen only"
-            log "  Pass 1: ${SCENE_COUNT} Haiku calls"
+            log "  Pass 1: ${HAIKU_CALLS} Haiku calls (${SCENE_COUNT} scenes x 4 groups)"
             log "  Pass 2: none"
             ;;
         default)
             log "Default mode: Haiku screen + Sonnet deep dive for deficit principles"
-            log "  Pass 1: ${SCENE_COUNT} Haiku calls"
+            log "  Pass 1: ${HAIKU_CALLS} Haiku calls (${SCENE_COUNT} scenes x 4 groups)"
             log "  Pass 2: ~${PASS2_ESTIMATE} Sonnet calls (estimated)"
             ;;
         deep)
             log "Deep mode: Haiku screen + Sonnet deep dive for ALL principles"
-            log "  Pass 1: ${SCENE_COUNT} Haiku calls"
+            log "  Pass 1: ${HAIKU_CALLS} Haiku calls (${SCENE_COUNT} scenes x 4 groups)"
             log "  Pass 2: ${PASS2_ESTIMATE} Sonnet calls"
             ;;
     esac
@@ -475,7 +477,22 @@ if [[ ! -f "$HAIKU_TEMPLATE_FILE" ]]; then
 fi
 
 HAIKU_TEMPLATE=$(cat "$HAIKU_TEMPLATE_FILE")
-DIAGNOSTIC_MARKERS_TEXT=$(build_diagnostic_markers "$DIAGNOSTICS_CSV")
+
+# Build per-section marker texts for grouped Haiku calls
+DIAG_SECTIONS=()
+while IFS= read -r sect; do
+    DIAG_SECTIONS+=("$sect")
+done < <(list_diagnostic_sections "$DIAGNOSTICS_CSV")
+DIAG_SECTION_COUNT=${#DIAG_SECTIONS[@]}
+
+# Pre-build marker text for each section
+for sect in "${DIAG_SECTIONS[@]}"; do
+    sect_markers=$(build_diagnostic_markers "$DIAGNOSTICS_CSV" "$sect")
+    sect_count=$(count_diagnostic_markers "$DIAGNOSTICS_CSV" "$sect")
+    # Store in temp files (bash 3 compat — no associative arrays)
+    echo "$sect_markers" > "${CYCLE_DIR}/.markers-${sect}.txt"
+    log "  Section ${sect}: ${sect_count} markers"
+done
 
 log "Parallel workers: ${PARALLEL}"
 log "Deep-dive threshold: ${DEEP_DIVE_THRESHOLD} (mode: ${SCORE_MODE})"
@@ -511,41 +528,70 @@ while (( batch_start < SCENE_COUNT )); do
 
         (
             # Worker subshell — Haiku diagnostic screen for one scene
+            # Runs one Haiku call per section, merges results
             scene_file="${SCENES_DIR}/${id}.md"
             scene_text=""
             [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
             scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
             scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
 
-            prompt="$HAIKU_TEMPLATE"
-            prompt="${prompt//\{\{SCENE_TITLE\}\}/${scene_title:-Unknown}}"
-            prompt="${prompt//\{\{SCENE_POV\}\}/${scene_pov:-Unknown}}"
-            prompt="${prompt//\{\{DIAGNOSTIC_MARKERS\}\}/$DIAGNOSTIC_MARKERS_TEXT}"
-            prompt="${prompt//\{\{SCENE_TEXT\}\}/$scene_text}"
+            group_num=0
+            group_failed=0
+            combined_diag="${DIAG_DIR}/.diag-${id}.csv"
+            echo "marker_id|answer|evidence" > "$combined_diag"
 
-            log_file="${LOG_DIR}/score-diag-${id}.log"
+            for sect in "${DIAG_SECTIONS[@]}"; do
+                group_num=$((group_num + 1))
+                markers_file="${CYCLE_DIR}/.markers-${sect}.txt"
+                [[ -f "$markers_file" ]] || continue
+                sect_markers=$(cat "$markers_file")
 
-            _SF_INVOCATION_START=$(date +%s)
-            export _SF_INVOCATION_START
+                log "    [${id}] Group ${group_num}/${DIAG_SECTION_COUNT}: ${sect}..."
 
-            begin_healing_zone "diagnostic screen ${id}"
+                prompt="$HAIKU_TEMPLATE"
+                prompt="${prompt//\{\{SCENE_TITLE\}\}/${scene_title:-Unknown}}"
+                prompt="${prompt//\{\{SCENE_POV\}\}/${scene_pov:-Unknown}}"
+                prompt="${prompt//\{\{DIAGNOSTIC_MARKERS\}\}/$sect_markers}"
+                prompt="${prompt//\{\{SCENE_TEXT\}\}/$scene_text}"
 
-            claude -p "$prompt" \
-                --model "$HAIKU_MODEL" \
-                --dangerously-skip-permissions \
-                --output-format stream-json \
-                --verbose \
-                > "$log_file" 2>&1 || true
+                log_file="${LOG_DIR}/score-diag-${id}-${sect}.log"
 
-            end_healing_zone
+                _SF_INVOCATION_START=$(date +%s)
+                export _SF_INVOCATION_START
 
-            log_usage "$log_file" "score-diag" "$id" "$HAIKU_MODEL"
+                begin_healing_zone "diagnostic screen ${id}/${sect}"
 
-            if parse_diagnostic_output "$log_file" "$DIAG_DIR" "$id"; then
-                log "    [${id}] diagnostic screen done"
+                claude -p "$prompt" \
+                    --model "$HAIKU_MODEL" \
+                    --dangerously-skip-permissions \
+                    --output-format stream-json \
+                    --verbose \
+                    > "$log_file" 2>&1 || true
+
+                end_healing_zone
+
+                log_usage "$log_file" "score-diag" "${id}/${sect}" "$HAIKU_MODEL"
+
+                # Parse this section's results into a temp file
+                sect_diag="${DIAG_DIR}/.diag-${id}-${sect}.csv"
+                if parse_diagnostic_output "$log_file" "$DIAG_DIR" "${id}-${sect}"; then
+                    # Append data rows (skip header) to combined file
+                    tail -n +2 "$sect_diag" >> "$combined_diag"
+                    rm -f "$sect_diag"
+                    log "    [${id}] Group ${group_num}/${DIAG_SECTION_COUNT}: ${sect} done"
+                else
+                    group_failed=$((group_failed + 1))
+                    log "    [${id}] Group ${group_num}/${DIAG_SECTION_COUNT}: ${sect} FAILED"
+                fi
+            done
+
+            if (( group_failed == 0 )); then
                 echo "ok" > "${DIAG_DIR}/.status-${id}"
+            elif (( group_failed < DIAG_SECTION_COUNT )); then
+                # Partial success — still usable
+                echo "ok" > "${DIAG_DIR}/.status-${id}"
+                log "    [${id}] ${group_failed}/${DIAG_SECTION_COUNT} groups failed (partial results)"
             else
-                log "    [${id}] diagnostic screen FAILED"
                 echo "fail" > "${DIAG_DIR}/.status-${id}"
             fi
         ) &
