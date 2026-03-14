@@ -53,9 +53,10 @@ Before writing new code, check if a shared function already exists. Duplicating 
 - `apply_scene_filter(metadata_csv, mode, [value], [value2])` — filter into FILTERED_IDS
   - Modes: `all`, `scenes` (comma-separated), `single`, `act` (CSV part column), `from_seq` (N or N-M range), `range` (start_id, end_id)
 
-**characters.sh:**
-- `load_character_aliases(characters_csv)` — build alias lookup temp file from characters.csv, returns path (caller must cleanup)
-- `normalize_characters(aliases_file, raw_characters_string)` — resolve aliases in semicolon-separated string, case-insensitive, deduplicates
+**aliases.sh:**
+- `load_alias_map(csv_file)` — build alias lookup temp file from any CSV with name|aliases columns, returns path (caller must cleanup)
+- `normalize_aliases(map_file, semicolon_string)` — resolve aliases in semicolon-separated string, case-insensitive, deduplicates
+- `load_character_aliases` / `normalize_characters` — backwards-compatible wrappers for the generic functions
 
 **costs.sh:**
 - `log_usage(log_file, operation, target, model, [ledger])` — parse stream-json for usage, calculate cost, append to ledger
@@ -192,7 +193,7 @@ All structured data uses pipe-delimited CSV:
 - **Empty fields:** zero characters between delimiters
 
 ### Key CSV Files
-- `reference/scene-metadata.csv` — structural metadata (id, seq, title, pov, setting, part, type, etc.)
+- `reference/scene-metadata.csv` — structural metadata (id, seq, title, pov, location, part, type, etc.)
 - `reference/scene-intent.csv` — creative intent (id, function, emotional_arc, characters, threads, motifs)
 - `working/craft-weights.csv` — craft principle weights (keyed by `principle` column, not `id`)
 - `working/costs/ledger.csv` — per-invocation cost tracking

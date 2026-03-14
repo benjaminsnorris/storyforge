@@ -39,10 +39,10 @@ FILTER_SCENES=""
 FILTER_ACT=""
 FILTER_FROM_SEQ=""
 PARALLEL=${STORYFORGE_ENRICH_PARALLEL:-6}
-ENRICH_FIELDS="type,timeline_day,time_of_day,characters,emotional_arc,threads,motifs"
+ENRICH_FIELDS="type,location,timeline_day,time_of_day,characters,emotional_arc,threads,motifs"
 
 # All valid enrichment fields
-VALID_FIELDS="type,timeline_day,time_of_day,characters,emotional_arc,threads,motifs"
+VALID_FIELDS="type,location,timeline_day,time_of_day,characters,emotional_arc,threads,motifs"
 
 # Minimum word count for enrichment
 MIN_WORDS=50
@@ -121,7 +121,7 @@ while [[ $# -gt 0 ]]; do
             IFS=',' read -ra _check_fields <<< "$ENRICH_FIELDS"
             for _f in "${_check_fields[@]}"; do
                 case "$_f" in
-                    type|timeline_day|time_of_day|characters|emotional_arc|threads|motifs) ;;
+                    type|location|timeline_day|time_of_day|characters|emotional_arc|threads|motifs) ;;
                     *)
                         echo "ERROR: Invalid field '$_f'. Valid fields: ${VALID_FIELDS}" >&2
                         exit 1
@@ -226,7 +226,7 @@ for scene_file in "${SCENES_DIR}"/*.md; do
         # Extract title from first heading or use filename
         title=$(grep -m1 '^#' "$scene_file" 2>/dev/null | sed 's/^#\+[[:space:]]*//' || echo "$fname")
         [[ -z "$title" ]] && title="$fname"
-        # metadata.csv header: id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words
+        # metadata.csv header: id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words
         append_csv_row "$METADATA_CSV" "${fname}|${MAX_SEQ}|${title}||||||||"
         ADDED_ROWS=$((ADDED_ROWS + 1))
         log "  Added metadata row for ${fname}"
@@ -375,7 +375,7 @@ IFS=',' read -ra FIELDS_ARRAY <<< "$ENRICH_FIELDS"
 # Metadata fields vs intent fields
 is_metadata_field() {
     case "$1" in
-        type|timeline_day|time_of_day) return 0 ;;
+        type|location|timeline_day|time_of_day) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -550,7 +550,7 @@ for id in "${SCENE_IDS[@]}"; do
     current_tod=$(get_csv_field "$METADATA_CSV" "$id" "time_of_day")
     if [[ -z "$current_tod" ]] || [[ "$FORCE" == true ]]; then
         # Check setting field first
-        setting_val=$(get_csv_field "$METADATA_CSV" "$id" "setting")
+        setting_val=$(get_csv_field "$METADATA_CSV" "$id" "location")
         inferred=$(infer_time_of_day "$setting_val")
         # If not found in setting, check first 500 chars of scene prose
         if [[ -z "$inferred" ]]; then
@@ -584,6 +584,10 @@ for id in "${SCENE_IDS[@]}"; do
                 current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
                 [[ -z "$current_val" ]] && still_needs=true
                 ;;
+            location)
+                current_val=$(get_csv_field "$METADATA_CSV" "$id" "location")
+                [[ -z "$current_val" || "$FORCE" == true ]] && still_needs=true
+                ;;
             type|timeline_day)
                 current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
                 [[ -z "$current_val" || "$FORCE" == true ]] && still_needs=true
@@ -607,14 +611,29 @@ else
 fi
 
 # ============================================================================
-# Step 6.5: Load character aliases for normalization (if characters.csv exists)
+# Step 6.5: Load alias maps for normalization (if registry files exist)
 # ============================================================================
 
+CHAR_MAP=""
+MOTIF_MAP=""
+LOCATION_MAP=""
+
 CHARACTERS_CSV="${PROJECT_DIR}/reference/characters.csv"
-ALIASES_FILE=""
 if [[ -f "$CHARACTERS_CSV" ]]; then
-    ALIASES_FILE=$(load_character_aliases "$CHARACTERS_CSV")
+    CHAR_MAP=$(load_alias_map "$CHARACTERS_CSV")
     log "Loaded character aliases from characters.csv"
+fi
+
+MOTIF_TAXONOMY="${PROJECT_DIR}/reference/motif-taxonomy.csv"
+if [[ -f "$MOTIF_TAXONOMY" ]]; then
+    MOTIF_MAP=$(load_alias_map "$MOTIF_TAXONOMY")
+    log "Loaded motif taxonomy from motif-taxonomy.csv"
+fi
+
+LOCATIONS_CSV="${PROJECT_DIR}/reference/locations.csv"
+if [[ -f "$LOCATIONS_CSV" ]]; then
+    LOCATION_MAP=$(load_alias_map "$LOCATIONS_CSV")
+    log "Loaded location aliases from locations.csv"
 fi
 
 # ============================================================================
@@ -678,7 +697,7 @@ build_enrich_prompt() {
     local title pov setting part function_val
     title=$(get_csv_field "$METADATA_CSV" "$scene_id" "title")
     pov=$(get_csv_field "$METADATA_CSV" "$scene_id" "pov")
-    setting=$(get_csv_field "$METADATA_CSV" "$scene_id" "setting")
+    setting=$(get_csv_field "$METADATA_CSV" "$scene_id" "location")
     part=$(get_csv_field "$METADATA_CSV" "$scene_id" "part")
     function_val=""
     [[ -f "$INTENT_CSV" ]] && function_val=$(get_csv_field "$INTENT_CSV" "$scene_id" "function")
@@ -697,6 +716,8 @@ build_enrich_prompt() {
         case "$field" in
             type) field_instructions="${field_instructions}
 TYPE: <one of: character, plot, world, action, transition, confrontation>" ;;
+            location) field_instructions="${field_instructions}
+LOCATION: <the physical location where this scene takes place — use a short, reusable label (the name of the place, not a description of the scene). If two scenes happen in the same place, use the same location string. Do not include time of day, room-level detail, or character actions.>" ;;
             timeline_day) field_instructions="${field_instructions}
 TIMELINE_DAY: <integer day number in the story's internal timeline, starting from 1>" ;;
             time_of_day) field_instructions="${field_instructions}
@@ -790,6 +811,7 @@ while (( batch_start < CLAUDE_COUNT )); do
             # Parse response into result file
             if [[ -n "$response" ]]; then
                 type_val=$(echo "$response" | grep "^TYPE:" | sed 's/^TYPE:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+                location_val=$(echo "$response" | grep "^LOCATION:" | sed 's/^LOCATION:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
                 timeline_day_val=$(echo "$response" | grep "^TIMELINE_DAY:" | sed 's/^TIMELINE_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
                 time_of_day_val=$(echo "$response" | grep "^TIME_OF_DAY:" | sed 's/^TIME_OF_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
                 characters_val=$(echo "$response" | grep "^CHARACTERS:" | sed 's/^CHARACTERS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
@@ -797,9 +819,15 @@ while (( batch_start < CLAUDE_COUNT )); do
                 threads_val=$(echo "$response" | grep "^THREADS:" | sed 's/^THREADS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
                 motifs_val=$(echo "$response" | grep "^MOTIFS:" | sed 's/^MOTIFS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
 
-                # Normalize character names against characters.csv
-                if [[ -n "$ALIASES_FILE" ]]; then
-                    characters_val=$(normalize_characters "$ALIASES_FILE" "$characters_val")
+                # Normalize against alias maps
+                if [[ -n "$CHAR_MAP" ]]; then
+                    characters_val=$(normalize_aliases "$CHAR_MAP" "$characters_val")
+                fi
+                if [[ -n "$MOTIF_MAP" ]]; then
+                    motifs_val=$(normalize_aliases "$MOTIF_MAP" "$motifs_val")
+                fi
+                if [[ -n "$LOCATION_MAP" && -n "$location_val" ]]; then
+                    location_val=$(normalize_aliases "$LOCATION_MAP" "$location_val")
                 fi
 
                 # Validate
@@ -810,6 +838,7 @@ while (( batch_start < CLAUDE_COUNT )); do
                 # Write results to temp file (pipe-delimited key|value pairs)
                 {
                     echo "TYPE|${type_val}"
+                    echo "LOCATION|${location_val}"
                     echo "TIMELINE_DAY|${timeline_day_val}"
                     echo "TIME_OF_DAY|${time_of_day_val}"
                     echo "CHARACTERS|${characters_val}"
@@ -857,6 +886,7 @@ while (( batch_start < CLAUDE_COUNT )); do
             result_key=""
             case "$field" in
                 type)           result_key="TYPE" ;;
+                location)       result_key="LOCATION" ;;
                 timeline_day)   result_key="TIMELINE_DAY" ;;
                 time_of_day)    result_key="TIME_OF_DAY" ;;
                 characters)     result_key="CHARACTERS" ;;
@@ -903,8 +933,10 @@ log "Enrichment complete: ${ENRICHED} scenes enriched, ${FAILED} failures"
 
 fi  # end if CLAUDE_COUNT > 0
 
-# Clean up aliases temp file
-[[ -n "$ALIASES_FILE" ]] && rm -f "$ALIASES_FILE"
+# Clean up alias map temp files
+[[ -n "$CHAR_MAP" ]] && rm -f "$CHAR_MAP"
+[[ -n "$MOTIF_MAP" ]] && rm -f "$MOTIF_MAP"
+[[ -n "$LOCATION_MAP" ]] && rm -f "$LOCATION_MAP"
 
 # ============================================================================
 # Update PR tasks

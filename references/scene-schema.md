@@ -25,7 +25,7 @@ If a project has `scenes/scene-index.yaml` but no `scene-metadata.csv`, it is us
 | `seq` | integer | Sequence number controlling scene order. Scenes are sorted by `seq` for reading order. |
 | `title` | string | Scene title — evocative but not spoilery. Used for reference, not necessarily reader-facing. |
 | `pov` | string | POV character's full name. Must match a character in the character bible. |
-| `setting` | string | Where the scene takes place. Specific enough to visualize. |
+| `location` | string | The physical location where this scene takes place. Use a short, reusable label — the name of the place, not a description. If two scenes happen in the same place, they should have the same location string. When `reference/locations.csv` exists, values are normalized against canonical entries during enrichment and visualization. |
 | `part` | integer | Which part or act this scene belongs to. |
 | `type` | string | Scene type. One of: `character`, `plot`, `world`, `action`, `transition`. Most scenes blend types — pick the dominant one. |
 | `timeline_day` | integer or string | Position in the story's chronology. Can be a day number, a date, or a relative marker. |
@@ -58,9 +58,9 @@ If a project has `scenes/scene-index.yaml` but no `scene-metadata.csv`, it is us
 ### Example metadata.csv
 
 ```
-id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words
+id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words
 geometry-of-dying|1|The Geometry of Dying|Dorren Hayle|Pressure Cartography Office|1|character|1|morning|drafted|2400|2500
-sheriffs-ledger|2|The Sheriff's Ledger|Kael Maren|The Deep Archive|1|plot|2|afternoon|pending|0|1500
+sheriffs-ledger|2|The Sheriff's Ledger|Kael Maren|Deep Archive|1|plot|2|afternoon|pending|0|1500
 ```
 
 ### Example intent.csv
