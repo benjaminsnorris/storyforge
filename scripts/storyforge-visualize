@@ -1395,10 +1395,10 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     function scoreColor(val) {
         const n = parseInt(val);
         if (isNaN(n)) return 'var(--border)';
-        if (n <= 3) return 'var(--score-low)';
-        if (n <= 5) return 'var(--score-mid-low)';
-        if (n <= 7) return 'var(--score-mid)';
-        if (n <= 9) return 'var(--score-mid-high)';
+        if (n <= 1) return 'var(--score-low)';
+        if (n <= 2) return 'var(--score-mid-low)';
+        if (n <= 3) return 'var(--score-mid)';
+        if (n <= 4) return 'var(--score-mid-high)';
         return 'var(--score-high)';
     }
 
