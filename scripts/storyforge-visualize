@@ -125,6 +125,10 @@ SCENES_JSON="[$(csv_to_json "$METADATA_CSV")]"
 INTENTS_JSON="[$(csv_to_json "$INTENT_CSV")]"
 CHARACTERS_CSV="${PROJECT_DIR}/reference/characters.csv"
 CHARACTERS_JSON="[$(csv_to_json "$CHARACTERS_CSV")]"
+MOTIF_TAXONOMY="${PROJECT_DIR}/reference/motif-taxonomy.csv"
+MOTIF_TAXONOMY_JSON="[$(csv_to_json "$MOTIF_TAXONOMY")]"
+LOCATIONS_CSV="${PROJECT_DIR}/reference/locations.csv"
+LOCATIONS_JSON="[$(csv_to_json "$LOCATIONS_CSV")]"
 SCORES_JSON="[$(csv_to_json "$SCORES_CSV")]"
 WEIGHTS_JSON="[$(csv_to_json "$WEIGHTS_CSV")]"
 
@@ -607,8 +611,8 @@ body {
 <div class="section">
     <div class="section-header">
         <span class="dot"></span>
-        <h2>Setting Map</h2>
-        <span class="subtitle">Top 15 settings by frequency</span>
+        <h2>Location Map</h2>
+        <span class="subtitle">Top 15 locations by frequency</span>
     </div>
     <div class="vis-container" id="setting-map"></div>
 </div>
@@ -656,6 +660,8 @@ cat >> "$DASHBOARD_FILE" << EOF
 const SCENES = ${SCENES_JSON};
 const INTENTS = ${INTENTS_JSON};
 const CHARACTERS = ${CHARACTERS_JSON};
+const MOTIF_TAXONOMY = ${MOTIF_TAXONOMY_JSON};
+const LOCATIONS = ${LOCATIONS_JSON};
 const SCORES = ${SCORES_JSON};
 const WEIGHTS = ${WEIGHTS_JSON};
 const PROJECT = ${PROJECT_JSON};
@@ -690,24 +696,40 @@ SCENES.forEach(s => { sceneById[s.id] = s; });
 INTENTS.forEach(i => { intentById[i.id] = i; });
 SCORES.forEach(s => { scoreById[s.id] = s; });
 
-// Build character alias map: {lowercase_alias: canonical_name}
-const charAliasMap = {};
-CHARACTERS.forEach(c => {
-    if (!c.name) return;
-    charAliasMap[c.name.toLowerCase()] = c.name;
-    if (c.aliases) {
-        c.aliases.split(';').forEach(a => {
-            a = a.trim();
-            if (a) charAliasMap[a.toLowerCase()] = c.name;
-        });
-    }
+// Generic alias map builder
+function buildAliasMap(entries) {
+    const map = {};
+    entries.forEach(e => {
+        if (!e.name) return;
+        map[e.name.toLowerCase()] = e.name;
+        if (e.aliases) {
+            e.aliases.split(';').forEach(a => {
+                a = a.trim();
+                if (a) map[a.toLowerCase()] = e.name;
+            });
+        }
+    });
+    return map;
+}
+
+const charAliasMap = buildAliasMap(CHARACTERS);
+const motifAliasMap = buildAliasMap(MOTIF_TAXONOMY);
+const locationAliasMap = buildAliasMap(LOCATIONS);
+
+// Motif tier lookup: {canonical_name: tier}
+const motifTierMap = {};
+MOTIF_TAXONOMY.forEach(m => {
+    if (m.name && m.tier) motifTierMap[m.name] = m.tier;
 });
 
-// Normalize a character name against the alias map
-function normalizeChar(name) {
+// Normalize a name against an alias map
+function normalizeName(map, name) {
     if (!name) return name;
-    return charAliasMap[name.toLowerCase().trim()] || name.trim();
+    return map[name.toLowerCase().trim()] || name.trim();
 }
+function normalizeChar(name) { return normalizeName(charAliasMap, name); }
+function normalizeMotif(name) { return normalizeName(motifAliasMap, name); }
+function normalizeLocation(name) { return normalizeName(locationAliasMap, name); }
 
 // Parse scenes sorted by seq
 const sortedScenes = [...SCENES].sort((a, b) => (+a.seq) - (+b.seq));
@@ -789,13 +811,13 @@ function attachSceneHandlers(el, sceneId) {
         const s = sceneById[sceneId];
         if (!s) return;
         const wc = getWordCount(s);
-        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Setting: ${(s.setting || '').substring(0, 60)}</div>`);
+        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${(s.location || '').substring(0, 60)}</div>`);
     });
     el.addEventListener('mousemove', (e) => {
         const s = sceneById[sceneId];
         if (!s) return;
         const wc = getWordCount(s);
-        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Setting: ${(s.setting || '').substring(0, 60)}</div>`);
+        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${(s.location || '').substring(0, 60)}</div>`);
     });
     el.addEventListener('mouseleave', hideTooltip);
 }
@@ -821,7 +843,7 @@ function updateDetailPanel(sceneId) {
 
     let html = `<h3>${s.seq}. ${s.title}</h3>`;
     html += detailRow('POV', s.pov);
-    html += detailRow('Setting', s.setting);
+    html += detailRow('Location', s.location);
     html += detailRow('Part', s.part);
     html += detailRow('Type', s.type);
     html += detailRow('Words', (+getWordCount(s)).toLocaleString());
@@ -1260,8 +1282,9 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     const settingScenes = {};
 
     sortedScenes.forEach(s => {
-        const setting = (s.setting || '').trim();
-        if (!setting) return;
+        const raw = (s.location || '').trim();
+        if (!raw) return;
+        const setting = normalizeLocation(raw);
         const key = setting.toLowerCase();
         settingFreq[key] = (settingFreq[key] || 0) + 1;
         if (!(key in settingFirst)) settingFirst[key] = +s.seq;
@@ -1442,17 +1465,44 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         const s = sceneById[intent.id];
         if (!s) return;
         const seq = +s.seq;
-        motifs.forEach(m => {
+        // Normalize and deduplicate within this scene
+        const seen = new Set();
+        motifs.forEach(raw => {
+            const m = normalizeMotif(raw);
+            if (seen.has(m.toLowerCase())) return;
+            seen.add(m.toLowerCase());
             if (!motifFirst[m]) motifFirst[m] = seq;
             if (!motifScenes[m]) motifScenes[m] = [];
             motifScenes[m].push({ id: intent.id, seq });
         });
     });
 
-    const motifList = Object.keys(motifFirst).sort((a, b) => motifFirst[a] - motifFirst[b]);
+    // Suppress motifs appearing in >90% of scenes (universal motifs)
+    const threshold = sceneCount * 0.9;
+    const universalMotifs = [];
+    Object.keys(motifScenes).forEach(m => {
+        if (motifScenes[m].length > threshold) {
+            universalMotifs.push(m + ' (' + motifScenes[m].length + '/' + sceneCount + ')');
+            delete motifFirst[m];
+            delete motifScenes[m];
+        }
+    });
+
+    // Sort by tier (primary first), then by first appearance
+    const tierOrder = { primary: 0, secondary: 1, tertiary: 2 };
+    const motifList = Object.keys(motifFirst).sort((a, b) => {
+        const ta = tierOrder[motifTierMap[a]] ?? 3;
+        const tb = tierOrder[motifTierMap[b]] ?? 3;
+        if (ta !== tb) return ta - tb;
+        return motifFirst[a] - motifFirst[b];
+    });
 
     if (motifList.length === 0) {
-        container.innerHTML = '<div style="padding:16px;color:var(--text-dim);font-size:13px">No motif data found in intent.csv</div>';
+        let msg = '<div style="padding:16px;color:var(--text-dim);font-size:13px">No motif data found in intent.csv</div>';
+        if (universalMotifs.length > 0) {
+            msg = '<div style="padding:16px;color:var(--text-dim);font-size:13px">All motifs appear in >90% of scenes (universal): ' + universalMotifs.join(', ') + '</div>';
+        }
+        container.innerHTML = msg;
         return;
     }
 
@@ -1533,6 +1583,14 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         attachSceneHandlers(rect, s.id);
         svg.appendChild(rect);
     });
+
+    // Note universal motifs that were suppressed
+    if (universalMotifs.length > 0) {
+        const note = document.createElement('div');
+        note.style.cssText = 'padding:4px 0 0 ' + LABEL_W + 'px;color:var(--text-dim);font-size:11px;font-family:var(--font-mono)';
+        note.textContent = 'Universal (>90%): ' + universalMotifs.join(', ');
+        container.appendChild(note);
+    }
 })();
 
 // ============================================================================

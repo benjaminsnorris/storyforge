@@ -1,30 +1,31 @@
 #!/bin/bash
-# characters.sh — Character alias normalization for Storyforge
+# aliases.sh — Generic alias normalization for Storyforge
 #
-# Provides functions to load a canonical character registry (reference/characters.csv)
-# and normalize extracted character names against it. Case-insensitive matching,
-# graceful passthrough for unknown names.
+# Provides functions to load any pipe-delimited CSV with name|aliases columns
+# and normalize semicolon-separated strings against it. Used for characters,
+# motifs, locations, and any future taxonomy files.
+#
+# Case-insensitive matching, graceful passthrough for unknown values.
 #
 # Source this file via common.sh; do not execute it directly.
-# Requires csv.sh to be loaded first.
 
 # ============================================================================
-# load_character_aliases — build a lookup file from characters.csv
+# load_alias_map — build a lookup file from any CSV with name|aliases columns
 # ============================================================================
 #
-# Usage: ALIASES_FILE=$(load_character_aliases <characters_csv>)
+# Usage: MAP_FILE=$(load_alias_map <csv_file>)
 #
-# Reads the characters.csv file and writes a temp file with one
-# lowercase_alias|canonical_name pair per line. Includes canonical names
-# as self-mappings. Returns the temp file path via stdout.
+# Reads a CSV file with at least `name` and `aliases` columns, writes a temp
+# file with one lowercase_alias|canonical_name pair per line. Includes
+# canonical names as self-mappings. Returns the temp file path via stdout.
 #
 # Caller is responsible for cleanup (rm) after use.
-load_character_aliases() {
-    local characters_csv="$1"
+load_alias_map() {
+    local csv_file="$1"
     local tmp
     tmp=$(mktemp "${TMPDIR:-/tmp}/sf-aliases.XXXXXX")
 
-    [[ -f "$characters_csv" ]] || { echo "$tmp"; return; }
+    [[ -f "$csv_file" ]] || { echo "$tmp"; return; }
 
     awk -F'|' '
         NR == 1 {
@@ -52,30 +53,29 @@ load_character_aliases() {
                 }
             }
         }
-    ' "$characters_csv" > "$tmp"
+    ' "$csv_file" > "$tmp"
 
     echo "$tmp"
 }
 
 # ============================================================================
-# normalize_characters — resolve aliases in a semicolon-separated string
+# normalize_aliases — resolve aliases in a semicolon-separated string
 # ============================================================================
 #
-# Usage: normalized=$(normalize_characters <aliases_file> <characters_string>)
+# Usage: normalized=$(normalize_aliases <map_file> <semicolon_string>)
 #
-# Takes a semicolon-separated character string (as returned by Claude),
-# looks up each name case-insensitively in the aliases file, replaces
-# matches with canonical names, passes through unknowns unchanged,
-# deduplicates preserving first-occurrence order, and returns the
-# normalized semicolon-separated string.
+# Takes a semicolon-separated string, looks up each value case-insensitively
+# in the alias map file, replaces matches with canonical names, passes through
+# unknowns unchanged, deduplicates preserving first-occurrence order, and
+# returns the normalized semicolon-separated string.
 #
-# If aliases_file is empty or doesn't exist, returns the input unchanged.
-normalize_characters() {
-    local aliases_file="$1"
+# If map_file is empty or doesn't exist, returns the input unchanged.
+normalize_aliases() {
+    local map_file="$1"
     local raw="$2"
 
-    # No aliases file or empty string — passthrough
-    if [[ -z "$aliases_file" || ! -s "$aliases_file" || -z "$raw" ]]; then
+    # No map file or empty string — passthrough
+    if [[ -z "$map_file" || ! -s "$map_file" || -z "$raw" ]]; then
         echo "$raw"
         return
     fi
@@ -94,11 +94,11 @@ normalize_characters() {
         trimmed=$(echo "$part" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         [[ -z "$trimmed" ]] && continue
 
-        # Lookup: lowercase the name, find in aliases file
+        # Lookup: lowercase the name, find in map file
         local lower
         lower=$(echo "$trimmed" | tr '[:upper:]' '[:lower:]')
         local canonical
-        canonical=$(awk -F'|' -v key="$lower" '$1 == key { print $2; exit }' "$aliases_file")
+        canonical=$(awk -F'|' -v key="$lower" '$1 == key { print $2; exit }' "$map_file")
 
         # Use canonical if found, otherwise passthrough
         local name
@@ -119,3 +119,7 @@ normalize_characters() {
 
     echo "$result"
 }
+
+# Backwards-compatible aliases for existing callers
+load_character_aliases() { load_alias_map "$@"; }
+normalize_characters() { normalize_aliases "$@"; }

@@ -1,0 +1,6 @@
+id|name|aliases|tier
+maps|Maps|cartography;maps/cartography;map-making|primary
+governance|Governance|governance-as-weight;institutional weight;bureaucracy|primary
+depth|Depth|depth/descent;descent;underground|secondary
+blindness|Blindness|blindness/seeing;chosen blindness;willful ignorance|secondary
+water|Water|acceptable variance;lake|tertiary

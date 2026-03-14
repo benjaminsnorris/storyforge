@@ -95,7 +95,11 @@ If no custom extensions are needed, this section can be an empty list (`[]`).
 
 > **Note on structured data formats:** As of v0.16.0, Storyforge uses pipe-delimited CSV (not YAML) for structured data files that scripts read and write programmatically. This includes scene metadata (`reference/scene-metadata.csv`, `reference/scene-intent.csv`), evaluation findings (`working/evaluations/*/findings.csv`), and revision plans (`working/plans/revision-plan.csv`). The `storyforge.yaml` project config remains YAML. See `references/scene-schema.md` for CSV format conventions.
 
-> **Optional reference file:** `reference/characters.csv` is an author-maintained character registry that maps canonical names to aliases. When present, `storyforge-enrich` normalizes extracted character names against it, and the manuscript dashboard resolves aliases at render time. Format: `id|name|aliases|role` (pipe-delimited, aliases semicolon-separated). See `templates/reference/characters.csv` for the template.
+> **Optional reference files for normalization:** These author-maintained CSV files map canonical names to aliases. When present, `storyforge-enrich` normalizes extracted values against them at write time, and the manuscript dashboard resolves aliases at render time. All use pipe-delimited format with semicolon-separated aliases.
+>
+> - `reference/characters.csv` — Character registry. Format: `id|name|aliases|role`. See `templates/reference/characters.csv`.
+> - `reference/motif-taxonomy.csv` — Motif taxonomy. Format: `id|name|aliases|tier` (tier: primary/secondary/tertiary). See `templates/reference/motif-taxonomy.csv`.
+> - `reference/locations.csv` — Location registry. Format: `id|name|aliases`. See `templates/reference/locations.csv`.
 
 ---
 
