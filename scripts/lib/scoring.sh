@@ -1085,8 +1085,13 @@ parse_diagnostic_output() {
     fi
 
     local diag_file="${output_dir}/.diag-${scene_id}.csv"
-    echo "marker_id|answer|evidence" > "$diag_file"
-    echo "$diag_block" >> "$diag_file"
+    # If block starts with the header line, use it directly; otherwise add header
+    if echo "$diag_block" | head -1 | grep -q "^marker_id"; then
+        echo "$diag_block" > "$diag_file"
+    else
+        echo "marker_id|answer|evidence" > "$diag_file"
+        echo "$diag_block" >> "$diag_file"
+    fi
 
     return 0
 }
@@ -1214,10 +1219,11 @@ aggregate_diagnostic_scores() {
     ' "$diagnostics_csv" "$diag_file" > "$tmp_results"
 
     # Parse the temp results into scores and rationale files
+    # Use sed to strip the prefix (H|, S|, R|) — avoids awk OFS issues
     local header_line score_line rationale_line
-    header_line=$(awk -F'|' '$1 == "H" { $1=""; sub(/^\|/, ""); print }' "$tmp_results")
-    score_line=$(awk -F'|' '$1 == "S" { $1=""; sub(/^\|/, ""); print }' "$tmp_results")
-    rationale_line=$(awk -F'|' '$1 == "R" { $1=""; sub(/^\|/, ""); print }' "$tmp_results")
+    header_line=$(grep '^H|' "$tmp_results" | sed 's/^H|//')
+    score_line=$(grep '^S|' "$tmp_results" | sed 's/^S|//')
+    rationale_line=$(grep '^R|' "$tmp_results" | sed 's/^R|//')
 
     echo "$header_line" > "$output_scores"
     echo "${scene_id}|${score_line}" >> "$output_scores"
