@@ -1551,27 +1551,65 @@ parse_scene_evaluation() {
         return 1
     fi
 
-    # Pivot rows into columns: principle|score|deficits|evidence -> id|p1|p2|... format
-    # Build header and score/rationale rows from the vertical format
+    # Pivot rows into columns using canonical principle order from diagnostics.csv
+    # This ensures all scenes produce identical headers regardless of model output order
+    local plugin_dir
+    plugin_dir=$(get_plugin_dir)
+    local diagnostics_csv="${plugin_dir}/references/diagnostics.csv"
+
+    # Build canonical principle list
+    local canonical_principles=""
+    if [[ -f "$diagnostics_csv" ]]; then
+        canonical_principles=$(awk -F'|' 'NR > 1 && !seen[$2]++ { print $2 }' "$diagnostics_csv")
+    fi
+
+    # Parse model output into a lookup (principle -> score, principle -> rationale)
+    # Use temp files for bash 3 compat (no associative arrays)
+    local tmp_lookup="${output_scores}.lookup.$$"
+    while IFS='|' read -r principle score deficits evidence_lines; do
+        [[ "$principle" == "principle" ]] && continue
+        [[ -z "$principle" ]] && continue
+        local rationale
+        if [[ "$deficits" == "none" || -z "$deficits" ]]; then
+            rationale="No deficits"
+        else
+            deficits_clean="${deficits//|/-}"
+            evidence_clean="${evidence_lines//|/-}"
+            rationale="${deficits_clean} (${evidence_clean})"
+        fi
+        echo "${principle}|${score}|${rationale}" >> "$tmp_lookup"
+    done <<< "$scores_block"
+
+    # Build header and rows in canonical order
     local header="id"
     local score_row="${scene_id}"
     local rationale_row="${scene_id}"
 
-    while IFS='|' read -r principle score deficits evidence_lines; do
-        [[ "$principle" == "principle" ]] && continue  # skip header
-        [[ -z "$principle" ]] && continue
-        header="${header}|${principle}"
-        score_row="${score_row}|${score}"
-        # Combine deficits and evidence into rationale
-        if [[ "$deficits" == "none" || -z "$deficits" ]]; then
-            rationale_row="${rationale_row}|No deficits"
-        else
-            # Replace pipes in deficits/evidence with dashes to preserve CSV
-            deficits_clean="${deficits//|/-}"
-            evidence_clean="${evidence_lines//|/-}"
-            rationale_row="${rationale_row}|${deficits_clean} (${evidence_clean})"
-        fi
-    done <<< "$scores_block"
+    if [[ -n "$canonical_principles" ]]; then
+        while IFS= read -r principle; do
+            header="${header}|${principle}"
+            # Look up this principle's score and rationale
+            local entry
+            entry=$(grep "^${principle}|" "$tmp_lookup" 2>/dev/null | head -1)
+            if [[ -n "$entry" ]]; then
+                score_row="${score_row}|$(echo "$entry" | cut -d'|' -f2)"
+                rationale_row="${rationale_row}|$(echo "$entry" | cut -d'|' -f3-)"
+            else
+                score_row="${score_row}|"
+                rationale_row="${rationale_row}|"
+            fi
+        done <<< "$canonical_principles"
+    else
+        # Fallback: use model output order (no diagnostics.csv available)
+        while IFS='|' read -r principle score rationale; do
+            [[ -z "$principle" ]] && continue
+            header="${header}|${principle}"
+            score_row="${score_row}|${score}"
+            rationale_row="${rationale_row}|${rationale}"
+        done < "$tmp_lookup"
+    fi
+
+    rm -f "$tmp_lookup"
 
     echo "$header" > "$output_scores"
     echo "$score_row" >> "$output_scores"
