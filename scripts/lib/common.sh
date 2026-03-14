@@ -93,7 +93,7 @@ _sf_handle_interrupt() {
             log "Committing partial work before exit..."
             (
                 cd "$PROJECT_DIR"
-                git add working/evaluations/ working/logs/ working/scores/ working/costs/ scenes/ 2>/dev/null || true
+                git add working/evaluations/ working/logs/ working/scores/ working/costs/ working/timeline/ scenes/ reference/ 2>/dev/null || true
                 git commit -m "Interrupted: partial work saved" 2>/dev/null || true
                 git push 2>/dev/null || true
             )

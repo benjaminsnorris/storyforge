@@ -264,8 +264,25 @@ fi
 
 run_phase1() {
     log ""
-    log "Phase 1: Extracting temporal indicators (${SCENE_COUNT} scenes, ${PARALLEL} workers)"
+    log "Phase 1: Temporal analysis (${SCENE_COUNT} scenes, ${PARALLEL} workers)"
     log "--------------------------------------------"
+
+    # Pre-build previous scene context for each scene
+    # (needed so parallel workers know what came before)
+    local prev_titles=()
+    local prev_tods=()
+    for (( i=0; i<SCENE_COUNT; i++ )); do
+        if (( i == 0 )); then
+            prev_titles+=("(first scene)")
+            prev_tods+=("unknown")
+        else
+            prev_id="${SCENE_IDS[$((i-1))]}"
+            pt=$(get_csv_field "$METADATA_CSV" "$prev_id" "title")
+            ptod=$(get_csv_field "$METADATA_CSV" "$prev_id" "time_of_day")
+            prev_titles+=("${pt:-untitled}")
+            prev_tods+=("${ptod:-unknown}")
+        fi
+    done
 
     local batch_start=0
     local completed=0
@@ -284,6 +301,10 @@ run_phase1() {
                 indicator_file="${TIMELINE_DIR}/.indicators-${id}"
                 log_file="${LOG_DIR}/timeline-phase1-${id}.log"
 
+                scene_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+                scene_tod=$(get_csv_field "$METADATA_CSV" "$id" "time_of_day")
+                scene_pov=$(get_csv_field "$METADATA_CSV" "$id" "pov")
+
                 # Read scene prose
                 prose=""
                 if [[ -f "$scene_file" ]]; then
@@ -291,26 +312,31 @@ run_phase1() {
                 fi
 
                 if [[ -z "$prose" ]]; then
-                    echo "(no prose)" > "$indicator_file"
+                    echo "DELTA: unknown | EVIDENCE: (no prose) | ANCHOR: none" > "$indicator_file"
                     echo "ok" > "${TIMELINE_DIR}/.status-${id}"
                     exit 0
                 fi
 
-                # Build Haiku prompt
-                prompt="You are extracting temporal indicators from a scene in a novel. Read the prose below and list ONLY time-related signals. Do not interpret, analyze, or assign day numbers.
+                # Build Haiku prompt — focused temporal analysis
+                prompt="You are analyzing the temporal relationship between two consecutive scenes in a novel. Read the current scene's prose and answer three questions.
 
-Extract these types of indicators:
-- Explicit time references: \"the next morning\", \"three days later\", \"Tuesday\"
-- Temporal transitions: \"later that evening\", \"by nightfall\"
-- Sleep/wake cycles: \"she woke\", \"he went to bed\"
-- Meal references: \"over breakfast\", \"dinner was cold\"
-- Continuity cues: \"still wearing yesterday's clothes\", \"the wound had healed\"
+## Previous Scene
+Title: ${prev_titles[$i]}
+Time of day: ${prev_tods[$i]}
 
-Output format — one line of comma-separated indicators, or \"(none)\" if no temporal signals found:
-INDICATORS: \"the next morning\", wakes up, breakfast
+## Current Scene
+Title: ${scene_title:-untitled}
+POV: ${scene_pov:-unknown}
+Time of day: ${scene_tod:-unknown}
 
 ## Scene Prose
-${prose}"
+${prose}
+
+## Questions — answer ALL three on separate labeled lines
+
+DELTA: How much time has passed between the previous scene and this one? Choose exactly one: same_moment / same_day / next_day / days_later / weeks_later / unknown
+EVIDENCE: Quote the single strongest piece of textual evidence for your answer (the exact words from the prose that most clearly establish when this scene happens relative to the previous one). If no evidence, write \"none\".
+ANCHOR: Is there an absolute time reference in this scene (a specific day of week, date, month, season, or named event that pins this to a calendar)? If yes, quote it. If no, write \"none\"."
 
                 _SF_INVOCATION_START=$(date +%s)
                 export _SF_INVOCATION_START
@@ -325,14 +351,20 @@ ${prose}"
                 response=$(extract_claude_response "$log_file" 2>/dev/null || true)
                 log_usage "$log_file" "timeline-phase1" "$id" "$HAIKU_MODEL"
 
-                # Parse INDICATORS: line
-                indicators=""
+                # Parse structured response
+                delta=""
+                evidence=""
+                anchor=""
                 if [[ -n "$response" ]]; then
-                    indicators=$(echo "$response" | grep -i "^INDICATORS:" | sed 's/^INDICATORS:[[:space:]]*//' | head -1 || true)
+                    delta=$(echo "$response" | grep -i "^DELTA:" | sed 's/^DELTA:[[:space:]]*//' | head -1 || true)
+                    evidence=$(echo "$response" | grep -i "^EVIDENCE:" | sed 's/^EVIDENCE:[[:space:]]*//' | head -1 || true)
+                    anchor=$(echo "$response" | grep -i "^ANCHOR:" | sed 's/^ANCHOR:[[:space:]]*//' | head -1 || true)
                 fi
-                [[ -z "$indicators" ]] && indicators="(none)"
+                [[ -z "$delta" ]] && delta="unknown"
+                [[ -z "$evidence" ]] && evidence="none"
+                [[ -z "$anchor" ]] && anchor="none"
 
-                echo "$indicators" > "$indicator_file"
+                echo "DELTA: ${delta} | EVIDENCE: ${evidence} | ANCHOR: ${anchor}" > "$indicator_file"
                 echo "ok" > "${TIMELINE_DIR}/.status-${id}"
             ) &
             batch_pids+=($!)
@@ -372,7 +404,7 @@ run_phase2() {
     log "Phase 2: Assigning timeline_day values (single Sonnet pass)"
     log "--------------------------------------------"
 
-    # Build the scene summary from Phase 1 indicators + metadata
+    # Build the scene summary from Phase 1 structured analysis + metadata
     local scene_summaries=""
     for id in "${SCENE_IDS[@]}"; do
         title=$(get_csv_field "$METADATA_CSV" "$id" "title")
@@ -380,29 +412,33 @@ run_phase2() {
         tod=$(get_csv_field "$METADATA_CSV" "$id" "time_of_day")
         existing_day=$(get_csv_field "$METADATA_CSV" "$id" "timeline_day")
 
-        # Get indicators from Phase 1 (or fallback)
+        # Get structured analysis from Phase 1
         indicator_file="${TIMELINE_DIR}/.indicators-${id}"
         if [[ -f "$indicator_file" ]]; then
-            indicators=$(cat "$indicator_file")
+            analysis=$(cat "$indicator_file")
         else
-            # Fallback: raw metadata only
-            indicators="(no extraction available)"
+            analysis="DELTA: unknown | EVIDENCE: none | ANCHOR: none"
         fi
 
         scene_summaries="${scene_summaries}
 SEQ ${seq_val}: ${title} (${id})
   Time of day: ${tod:-unknown}
   Existing timeline_day: ${existing_day:-unset}
-  Temporal indicators: ${indicators}
+  ${analysis}
 "
     done
 
     # Build Sonnet prompt
-    local timeline_prompt="You are assigning timeline_day values to scenes in a novel. Each scene happens on a specific day in the story's internal chronology. Day 1 is the first day of the story.
+    local timeline_prompt="You are assigning timeline_day values to scenes in a novel. Day 1 is the first day of the story.
 
-Read the scenes below IN ORDER (they are sorted by narrative sequence). Use the temporal indicators extracted from the prose, time-of-day cues, and narrative logic to determine which day each scene falls on. Scenes can share a day. Days can be skipped (e.g., day 1, day 1, day 3 if two days pass between scenes).
+Each scene below includes a temporal analysis from a prior pass:
+- **DELTA**: estimated time gap from the previous scene (same_moment, same_day, next_day, days_later, weeks_later, unknown)
+- **EVIDENCE**: the strongest textual evidence for the delta
+- **ANCHOR**: any absolute time reference (day of week, date, month, season)
 
-If a scene already has a timeline_day value, keep it unless your analysis strongly suggests it's wrong.
+Use the deltas to build a cumulative day count. Where the delta is \"unknown\", use narrative logic, time_of_day, and surrounding context to make your best judgment. Anchors should pin the timeline — if scene 30 says \"Friday\" and scene 28 was assigned to a Wednesday, adjust.
+
+Scenes can share a day. Days can be skipped. If a scene already has a timeline_day value, keep it unless the evidence clearly contradicts it.
 
 ## Scenes (in narrative order)
 ${scene_summaries}
@@ -444,12 +480,18 @@ ${id}|<day>"
 
     begin_healing_zone "timeline phase 2 assignment"
 
+    # Run claude in background so we can track its PID for interrupt handling
     claude -p "$timeline_prompt" \
         --model "$SONNET_MODEL" \
         --dangerously-skip-permissions \
         --output-format stream-json \
         --verbose \
-        > "$tl_log" 2>&1 || true
+        > "$tl_log" 2>&1 &
+    local claude_pid=$!
+    register_child_pid $claude_pid
+
+    wait "$claude_pid" 2>/dev/null || true
+    unregister_child_pid "$claude_pid" 2>/dev/null || true
 
     end_healing_zone
 
