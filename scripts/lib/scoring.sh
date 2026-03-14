@@ -1104,8 +1104,17 @@ parse_diagnostic_output() {
         found { print }
     ')
 
+    # Fallback: if no DIAGNOSTICS: header, look for marker_id|answer|evidence directly
     if [[ -z "$diag_block" ]]; then
-        log "WARNING: No DIAGNOSTICS block found in $log_file"
+        diag_block=$(echo "$text_content" | awk '
+            /^marker_id\|/ { found=1 }
+            found && /^[[:space:]]*$/ { found=0 }
+            found { print }
+        ')
+    fi
+
+    if [[ -z "$diag_block" ]]; then
+        log "WARNING: No diagnostic output found in $log_file"
         return 1
     fi
 
