@@ -119,7 +119,7 @@ fi
 EFFECTIVE_COACHING=$(get_coaching_level)
 
 # --- API key check for non-interactive mode ---
-if [[ "$INTERACTIVE" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+if [[ "$DRY_RUN" != true && "$INTERACTIVE" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     log "ERROR: ANTHROPIC_API_KEY not set. Required for direct API mode."
     log "  Set it with: export ANTHROPIC_API_KEY=your-key"
     log "  Or use --interactive to run via claude -p instead."

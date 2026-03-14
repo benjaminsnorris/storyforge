@@ -154,7 +154,7 @@ done
 detect_project_root
 
 # --- API key check for non-interactive modes ---
-if [[ "$INTERACTIVE" != true && "$EMBEDDED" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+if [[ "$DRY_RUN" != true && "$INTERACTIVE" != true && "$EMBEDDED" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     log "ERROR: ANTHROPIC_API_KEY is required for autonomous mode (batch/direct API)."
     log "  Set it with: export ANTHROPIC_API_KEY=your-key"
     log "  Or use --interactive mode which uses 'claude -p' instead."

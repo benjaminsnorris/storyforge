@@ -186,7 +186,7 @@ if [[ "$INTERACTIVE" == true ]]; then
 fi
 
 # --- API key check for non-interactive modes ---
-if [[ "$WRITE_MODE" != "interactive" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+if [[ "$DRY_RUN" != true && "$WRITE_MODE" != "interactive" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     log "ERROR: ANTHROPIC_API_KEY not set. Required for batch/direct API modes."
     log "  Set it with: export ANTHROPIC_API_KEY=your-key"
     log "  Or use --interactive to run via claude -p instead."

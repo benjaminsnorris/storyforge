@@ -432,7 +432,7 @@ FAILED=0
 # ============================================================================
 
 # Require API key for direct API scoring
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+if [[ "$DRY_RUN" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     log "ERROR: ANTHROPIC_API_KEY not set."
     log "  Scoring uses the Anthropic API directly (no claude -p overhead)."
     log "  Set it with: export ANTHROPIC_API_KEY=your-key"

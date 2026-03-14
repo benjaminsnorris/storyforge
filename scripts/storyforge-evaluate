@@ -39,6 +39,7 @@ log "Project root: ${PROJECT_DIR}"
 # --- API key check for non-interactive modes ---
 # (Checked early so we fail fast before doing branch/PR setup work)
 _sf_check_api_key() {
+    if [[ "$DRY_RUN" == true ]]; then return 0; fi
     if [[ "$EVAL_MODE" != "interactive" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
         echo "ERROR: ANTHROPIC_API_KEY is required for batch and direct modes." >&2
         echo "  Set it with: export ANTHROPIC_API_KEY=your-key" >&2

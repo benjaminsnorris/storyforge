@@ -117,7 +117,7 @@ detect_project_root
 log "Project root: ${PROJECT_DIR}"
 
 # --- API key check (required for both batch and direct modes) ---
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+if [[ "$DRY_RUN" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     log "ERROR: ANTHROPIC_API_KEY is required. Set it with: export ANTHROPIC_API_KEY=your-key"
     exit 1
 fi
