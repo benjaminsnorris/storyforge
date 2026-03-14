@@ -2,74 +2,66 @@
 # assembly.sh — Library functions for chapter assembly and book production
 #
 # Source this file from storyforge-assemble; do not execute directly.
-# Requires common.sh to be sourced first.
+# Requires common.sh to be sourced first (for csv.sh, read_yaml_field).
 
 # ============================================================================
-# Chapter map parsing
+# Chapter map parsing (reads reference/chapter-map.csv)
 # ============================================================================
+#
+# CSV format: chapter|title|heading|part|scenes
+# - chapter: integer (1-indexed)
+# - title: chapter title
+# - heading: numbered, titled, numbered-titled, none
+# - part: part number (part titles stored in storyforge.yaml under parts:)
+# - scenes: semicolon-separated scene IDs in reading order
 
-# Get the total number of chapters in chapter-map.yaml
+# Get the total number of chapters
 # Usage: count_chapters "/path/to/project"
 count_chapters() {
     local project_dir="$1"
-    local chapter_map="${project_dir}/reference/chapter-map.yaml"
+    local csv="${project_dir}/reference/chapter-map.csv"
 
-    if [[ ! -f "$chapter_map" ]]; then
+    if [[ ! -f "$csv" ]]; then
         echo "0"
         return 1
     fi
 
-    grep -cE '^[[:space:]]*- title:' "$chapter_map" 2>/dev/null || echo "0"
+    awk -F'|' 'NR > 1 && $1 != "" { count++ } END { print count+0 }' "$csv"
 }
 
-# Get the Nth chapter block (1-indexed) from chapter-map.yaml
-# Usage: get_chapter_block 1 "/path/to/project"
-get_chapter_block() {
-    local chapter_num="$1"
-    local project_dir="$2"
-    local chapter_map="${project_dir}/reference/chapter-map.yaml"
-
-    if [[ ! -f "$chapter_map" ]]; then
-        return 1
-    fi
-
-    awk -v num="$chapter_num" '
-        /^[[:space:]]*- title:/ { count++ }
-        count == num { print }
-        count > num { exit }
-    ' "$chapter_map"
-}
-
-# Read a field from a chapter block
+# Read a field from a chapter row (1-indexed chapter number)
 # Usage: read_chapter_field 1 "/path/to/project" "title"
 read_chapter_field() {
     local chapter_num="$1"
     local project_dir="$2"
     local field="$3"
+    local csv="${project_dir}/reference/chapter-map.csv"
 
-    local block
-    block=$(get_chapter_block "$chapter_num" "$project_dir")
-    if [[ -z "$block" ]]; then
-        return 1
-    fi
-
-    # Match field with optional leading "- " (YAML list item prefix)
-    echo "$block" \
-        | grep -E "[[:space:]](-[[:space:]]+)?${field}:" \
-        | head -1 \
-        | sed "s/^.*${field}:[[:space:]]*//" \
-        | sed 's/^["'"'"']//' \
-        | sed 's/["'"'"']$//' \
-        | sed 's/[[:space:]]*$//'
+    [[ -f "$csv" ]] || return 1
+    get_csv_field "$csv" "$chapter_num" "$field" "chapter"
 }
 
-# Count the number of parts defined in chapter-map.yaml
+# Get the scene IDs for a chapter (semicolon-separated in CSV, returned one per line)
+# Usage: get_chapter_scenes 1 "/path/to/project"
+get_chapter_scenes() {
+    local chapter_num="$1"
+    local project_dir="$2"
+
+    local scenes
+    scenes=$(read_chapter_field "$chapter_num" "$project_dir" "scenes")
+    [[ -z "$scenes" ]] && return 1
+
+    # Split semicolons to one ID per line
+    echo "$scenes" | tr ';' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$'
+}
+
+# Count the number of parts (from storyforge.yaml parts: list)
 # Usage: count_parts "/path/to/project"
 count_parts() {
     local project_dir="$1"
-    local chapter_map="${project_dir}/reference/chapter-map.yaml"
+    local yaml="${project_dir}/storyforge.yaml"
 
-    if [[ ! -f "$chapter_map" ]]; then
+    if [[ ! -f "$yaml" ]]; then
         echo "0"
         return 0
     fi
@@ -79,49 +71,32 @@ count_parts() {
         in_parts && /^[^ ]/ { exit }
         in_parts && /^[[:space:]]*- number:/ { count++ }
         END { print count+0 }
-    ' "$chapter_map"
+    ' "$yaml"
 }
 
-# Get the Nth part block (1-indexed) from chapter-map.yaml
-# Usage: get_part_block 1 "/path/to/project"
-get_part_block() {
-    local part_num="$1"
-    local project_dir="$2"
-    local chapter_map="${project_dir}/reference/chapter-map.yaml"
-
-    if [[ ! -f "$chapter_map" ]]; then
-        return 1
-    fi
-
-    awk -v num="$part_num" '
-        /^parts:/ { in_parts=1; next }
-        in_parts && /^[^ ]/ { exit }
-        in_parts && /^[[:space:]]*- number:/ { count++ }
-        in_parts && count == num { print }
-        in_parts && count > num { exit }
-    ' "$chapter_map"
-}
-
-# Read a field from a part block
+# Read a field from a part block in storyforge.yaml
 # Usage: read_part_field 1 "/path/to/project" "title"
 read_part_field() {
     local part_num="$1"
     local project_dir="$2"
     local field="$3"
+    local yaml="${project_dir}/storyforge.yaml"
 
-    local block
-    block=$(get_part_block "$part_num" "$project_dir")
-    if [[ -z "$block" ]]; then
-        return 1
-    fi
+    [[ -f "$yaml" ]] || return 1
 
-    echo "$block" \
-        | grep -E "[[:space:]](-[[:space:]]+)?${field}:" \
-        | head -1 \
-        | sed "s/^.*${field}:[[:space:]]*//" \
-        | sed 's/^["'"'"']//' \
-        | sed 's/["'"'"']$//' \
-        | sed 's/[[:space:]]*$//'
+    awk -v num="$part_num" -v field="$field" '
+        /^parts:/ { in_parts=1; next }
+        in_parts && /^[^ ]/ { exit }
+        in_parts && /^[[:space:]]*- number:/ { count++ }
+        in_parts && count == num && $0 ~ "[[:space:]]" field ":" {
+            val = $0
+            sub("^.*" field ":[[:space:]]*", "", val)
+            gsub(/^["'"'"'"]|["'"'"'"]$/, "", val)
+            gsub(/[[:space:]]*$/, "", val)
+            print val
+            exit
+        }
+    ' "$yaml"
 }
 
 # Get the part title for a given chapter number
@@ -138,28 +113,6 @@ get_chapter_part_title() {
     fi
 
     read_part_field "$part_num" "$project_dir" "title"
-}
-
-# Get the scene IDs for a chapter (from the scenes list in the chapter block)
-# Usage: get_chapter_scenes 1 "/path/to/project"
-get_chapter_scenes() {
-    local chapter_num="$1"
-    local project_dir="$2"
-
-    local block
-    block=$(get_chapter_block "$chapter_num" "$project_dir")
-    if [[ -z "$block" ]]; then
-        return 1
-    fi
-
-    # Extract scene IDs from the scenes list within the block
-    echo "$block" \
-        | sed -n '/scenes:/,/^[[:space:]]*[^-[:space:]]/p' \
-        | grep -E '^[[:space:]]*-[[:space:]]' \
-        | sed 's/^[[:space:]]*-[[:space:]]*//' \
-        | sed 's/^["'"'"']//' \
-        | sed 's/["'"'"']$//' \
-        | sed 's/[[:space:]]*$//'
 }
 
 # ============================================================================
@@ -285,18 +238,16 @@ assemble_chapter() {
 # Production config parsing
 # ============================================================================
 
-# Read a production config value from chapter-map.yaml's production: section
+# Read a production config value from storyforge.yaml's production: section
 # Usage: read_production_field "/path/to/project" "scene_break"
 read_production_field() {
     local project_dir="$1"
     local field="$2"
-    local chapter_map="${project_dir}/reference/chapter-map.yaml"
+    local yaml="${project_dir}/storyforge.yaml"
 
-    if [[ ! -f "$chapter_map" ]]; then
-        return 1
-    fi
+    [[ -f "$yaml" ]] || return 1
 
-    sed -n '/^production:/,/^[^ ]/p' "$chapter_map" \
+    sed -n '/^production:/,/^[^ ]/p' "$yaml" \
         | grep -E "^[[:space:]]+${field}:" \
         | head -1 \
         | sed "s/^[[:space:]]*${field}:[[:space:]]*//" \
@@ -305,19 +256,16 @@ read_production_field() {
         | sed 's/[[:space:]]*$//'
 }
 
-# Read a nested production field (e.g., production.front_matter.title)
-# Usage: read_production_nested "/path/to/project" "front_matter" "title"
+# Read a nested production field (e.g., production > copyright > year)
+# Usage: read_production_nested "/path/to/project" "copyright" "year"
 read_production_nested() {
     local project_dir="$1"
     local parent="$2"
     local child="$3"
-    local chapter_map="${project_dir}/reference/chapter-map.yaml"
+    local yaml="${project_dir}/storyforge.yaml"
 
-    if [[ ! -f "$chapter_map" ]]; then
-        return 1
-    fi
+    [[ -f "$yaml" ]] || return 1
 
-    # Use awk to extract the nested value from production > parent > child
     awk -v parent="$parent" -v child="$child" '
         /^production:/ { in_prod=1; next }
         in_prod && /^[^ ]/ { in_prod=0 }
@@ -331,7 +279,7 @@ read_production_nested() {
             print val
             exit
         }
-    ' "$chapter_map"
+    ' "$yaml"
 }
 
 # ============================================================================
@@ -539,7 +487,7 @@ assemble_manuscript() {
     total=$(count_chapters "$project_dir")
 
     if [[ "$total" == "0" ]]; then
-        log "ERROR: No chapters found in chapter-map.yaml"
+        log "ERROR: No chapters found in chapter-map.csv"
         return 1
     fi
 
@@ -718,12 +666,12 @@ generate_cover_if_missing() {
         return 0
     fi
 
-    # Update chapter-map.yaml with the generated cover path
+    # Update storyforge.yaml with the generated cover path
     local relative_path="${cover_output#${project_dir}/}"
-    local chapter_map="${project_dir}/reference/chapter-map.yaml"
-    if [[ -f "$chapter_map" ]]; then
-        sed -i '' "s|^[[:space:]]*cover_image:.*|  cover_image: \"${relative_path}\"|" "$chapter_map" 2>/dev/null || true
-        log "Updated chapter-map.yaml: cover_image: ${relative_path}"
+    local yaml="${project_dir}/storyforge.yaml"
+    if [[ -f "$yaml" ]]; then
+        sed -i '' "s|^[[:space:]]*cover_image:.*|  cover_image: \"${relative_path}\"|" "$yaml" 2>/dev/null || true
+        log "Updated storyforge.yaml: cover_image: ${relative_path}"
     fi
 
     return 0

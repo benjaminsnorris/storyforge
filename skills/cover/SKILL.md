@@ -22,7 +22,7 @@ Store this resolved plugin path for use throughout the session.
 Before doing anything else, orient yourself:
 
 1. **Read `storyforge.yaml`** — title, genre, subgenre, logline, phase, coaching level.
-2. **Read `reference/chapter-map.yaml`** (if it exists) — check `production.cover_image`, `production.cover.subtitle`, `production.cover.palette`, `production.author`.
+2. **Read `storyforge.yaml`** production settings — check `production.cover_image`, `production.cover.subtitle`, `production.cover.palette`, `production.author`.
 3. **Read key reference documents** for visual inspiration (all that exist):
    - `reference/story-architecture.md` — themes, central conflict, premise, structure
    - `reference/character-bible.md` — protagonist details, imagery, defining traits
@@ -105,7 +105,7 @@ Author has their own cover image (external file).
 1. Accept the file path from the author.
 2. Verify the file exists.
 3. Copy or reference the file in `manuscript/assets/`.
-4. Update `production.cover_image` in `reference/chapter-map.yaml`.
+4. Update `production.cover_image` in `storyforge.yaml`.
 5. Commit and push.
 
 ## Tier 1: Claude-Designed SVG Covers
@@ -216,7 +216,7 @@ Do not move to the next step until `cover.png` exists and is valid.
 
 ### Step T1.6: Update Configuration and Commit
 
-1. Update `production.cover_image` in `reference/chapter-map.yaml` (if it exists) to point to the cover file.
+1. Update `production.cover_image` in `storyforge.yaml` to point to the cover file.
 2. Commit and push:
 ```
 git add -A && git commit -m "Cover: design custom SVG cover for {title}" && git push

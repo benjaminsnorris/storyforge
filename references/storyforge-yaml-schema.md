@@ -13,6 +13,8 @@ This document defines the complete schema for the `storyforge.yaml` file that li
 | `scene_extensions` | Custom per-scene fields added to the scene index |
 | `evaluation` | Configuration for custom evaluation personas |
 | `phase` | Current workflow phase of the project |
+| `production` | Formatting, metadata, and output settings for manuscript assembly |
+| `parts` | Optional part/act groupings for multi-part books |
 
 ---
 
@@ -74,7 +76,7 @@ Every artifact entry shares the same three-field structure:
 | `scene_index` | The master list of every scene with metadata (POV, location, status, word count, and any scene extensions). Stored as two pipe-delimited CSV files: `reference/scene-metadata.csv` (structural data) and `reference/scene-intent.csv` (creative intent). | `reference/scene-metadata.csv` |
 | `continuity_tracker` | A living ledger of continuity facts — promises made, details established, threads opened — used during evaluation and revision. | `reference/continuity-tracker.md` |
 | `key_decisions` | A canonical log of author decisions — creative, structural, editorial. All skills consult this before asking questions and append new decisions immediately when the author makes them. If a decision is recorded here, it is settled and must not be re-asked. | `reference/key-decisions.md` |
-| `chapter_map` | Maps scenes to chapters for manuscript assembly. Includes chapter titles, scene ordering, production settings (author, copyright, scene break style, genre preset), cover generation settings (`cover.subtitle`, `cover.palette`), and web book settings (`web.base_url`, `web.description`). Created by the `produce` skill or manually. | `reference/chapter-map.yaml` |
+| `chapter_map` | Maps scenes to chapters for manuscript assembly as a pipe-delimited CSV. Includes chapter numbers, titles, heading format, and semicolon-separated scene IDs. Production settings (author, copyright, scene break style, genre preset), cover generation settings, and web book settings are stored in `storyforge.yaml` under the `production` key. Created by the `produce` skill or manually. | `reference/chapter-map.csv` |
 | `manuscript` | The assembled manuscript output directory. Contains individual chapter files, front/back matter, assets (CSS, cover), and generated output (epub, PDF, HTML, web). Created by `./storyforge assemble`. Output formats: `epub` (default), `pdf`, `html` (single-file), `web` (multi-page hostable site), `markdown`, `all`. | `manuscript/` |
 
 ---
@@ -142,6 +144,76 @@ If no custom evaluators are defined, this section can be omitted or set to an em
 
 ---
 
+## `production`
+
+Settings for manuscript assembly and book production. Previously stored in `reference/chapter-map.yaml`, these now live in `storyforge.yaml` so all project configuration is centralized.
+
+| Field | Type | Required | Description | Default | Example |
+|-------|------|----------|-------------|---------|---------|
+| `author` | string | required | Author name as it appears on the title page and copyright. | — | `"Jane Smith"` |
+| `language` | string | optional | Language code for the book. | `"en"` | `"en"` |
+| `scene_break` | string | optional | How scene breaks within a chapter are rendered. Values: `blank`, `ornamental`, `line`, `custom`. | `"blank"` | `"ornamental"` |
+| `scene_break_symbol` | string | optional | Custom symbol for scene breaks when `scene_break` is `custom`. | `null` | `"~"` |
+| `default_heading` | string | optional | Default chapter heading format. Values: `numbered`, `titled`, `numbered-titled`, `none`. | `"numbered-titled"` | `"titled"` |
+| `include_toc` | bool | optional | Whether to include a table of contents. | `true` | `true` |
+| `cover_image` | string | optional | Path to the cover image file. | `null` | `"manuscript/assets/cover.png"` |
+| `genre_preset` | string | optional | Typography preset. Values: `default`, `literary-fiction`, `thriller`, `romance`, `fantasy`, `science-fiction`. | `"default"` | `"fantasy"` |
+
+### `production.copyright`
+
+| Field | Type | Required | Description | Default | Example |
+|-------|------|----------|-------------|---------|---------|
+| `year` | number | optional | Copyright year. | current year | `2026` |
+| `isbn` | string | optional | ISBN if available. | `null` | `"978-0-123456-78-9"` |
+| `license` | string | optional | License text. | `"All rights reserved."` | `"All rights reserved."` |
+
+### `production.cover`
+
+| Field | Type | Required | Description | Default | Example |
+|-------|------|----------|-------------|---------|---------|
+| `subtitle` | string | optional | Subtitle or tagline for the cover. | `null` | `"A Novel"` |
+| `palette` | string | optional | Color palette hint for cover generation. | `null` | `"dark blues and gold"` |
+
+### `production.front_matter`
+
+A map of front matter items to their file paths. Common keys: `dedication`, `epigraph`, `authors_note`.
+
+### `production.back_matter`
+
+A map of back matter items to their file paths. Common keys: `acknowledgments`, `about_the_author`, `also_by`.
+
+### `production.web`
+
+| Field | Type | Required | Description | Default | Example |
+|-------|------|----------|-------------|---------|---------|
+| `base_url` | string | optional | Base URL for the web book output. | `null` | `"https://example.com/my-book"` |
+| `description` | string | optional | Description for web book metadata. | `null` | `"A science fiction novel about first contact."` |
+
+---
+
+## `parts`
+
+Optional part or act groupings for multi-part books. Each entry defines a named part that groups a range of chapters.
+
+| Field | Type | Required | Description | Default | Example |
+|-------|------|----------|-------------|---------|---------|
+| `title` | string | required | The part title as it appears in the book. | — | `"Part One: The Signal"` |
+| `chapters` | list | required | List of chapter numbers (from chapter-map.csv) that belong to this part. | — | `[1, 2, 3, 4]` |
+
+### Example
+
+```yaml
+parts:
+  - title: "Part One: The Signal"
+    chapters: [1, 2, 3, 4]
+  - title: "Part Two: First Contact"
+    chapters: [5, 6, 7, 8, 9]
+  - title: "Part Three: The Reckoning"
+    chapters: [10, 11, 12]
+```
+
+---
+
 ## Full Example
 
 ```yaml
@@ -192,7 +264,7 @@ artifacts:
     updated: null
   chapter_map:
     exists: false
-    path: reference/chapter-map.yaml
+    path: reference/chapter-map.csv
     updated: null
   manuscript:
     exists: false
@@ -214,4 +286,36 @@ evaluation:
       description: "Analyzes scene-level and act-level pacing against genre expectations"
 
 phase: drafting
+
+production:
+  author: "Jane Smith"
+  language: en
+  scene_break: ornamental
+  default_heading: numbered-titled
+  include_toc: true
+  cover_image: manuscript/assets/cover.png
+  genre_preset: science-fiction
+  copyright:
+    year: 2026
+    isbn:
+    license: "All rights reserved."
+  cover:
+    subtitle: "A Novel"
+    palette:
+  front_matter:
+    dedication: manuscript/front-matter/dedication.md
+    epigraph:
+  back_matter:
+    acknowledgments:
+    about_the_author:
+    also_by:
+  web:
+    base_url:
+    description:
+
+parts:
+  - title: "Part One: The Signal"
+    chapters: [1, 2, 3, 4]
+  - title: "Part Two: First Contact"
+    chapters: [5, 6, 7, 8, 9]
 ```

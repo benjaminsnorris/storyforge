@@ -108,7 +108,7 @@ Scene IDs are descriptive slugs that identify the scene by its content, not its 
 - **Format:** lowercase, hyphen-separated words (e.g., `geometry-of-dying`, `sheriffs-ledger`, `hidden-canyon`)
 - **Length:** 2-5 words — specific enough to identify, short enough to type
 - **Content-based:** Name describes what happens or the key image, not sequence
-- **No numbers:** Avoid numeric IDs or positional prefixes — ordering lives in the `seq` column of `metadata.csv` and in `chapter-map.yaml`
+- **No numbers:** Avoid numeric IDs or positional prefixes — ordering lives in the `seq` column of `metadata.csv` and in `chapter-map.csv`
 - **Also the filename:** The scene ID is the filename in `scenes/` (e.g., `geometry-of-dying` → `scenes/geometry-of-dying.md`)
 
 Good: `geometry-of-dying`, `first-meridian`, `woman-in-cellars-light`

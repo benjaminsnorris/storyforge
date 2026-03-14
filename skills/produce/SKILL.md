@@ -23,7 +23,7 @@ Before doing anything else, orient yourself:
 1. **Read `storyforge.yaml`** — title, genre, target word count, phase, artifact status. **Note the `project.coaching_level` field** — it controls how proactive you should be with chapter creation (see Coaching Level Behavior below).
 2. **Read `reference/scene-metadata.csv`** — how many scenes, their status (drafted/revised/pending), groupings (acts/parts).
 3. **Check for existing production artifacts:**
-   - `reference/chapter-map.yaml` — does it exist? How many chapters?
+   - `reference/chapter-map.csv` — does it exist? How many chapters?
    - `manuscript/` directory — has assembly been run before?
 4. **Read the key decisions file** — check for any production-related decisions already made.
 5. **Count scene files** in `scenes/` — verify that referenced scenes have actual content.
@@ -66,11 +66,11 @@ The chapter map doesn't exist yet. Guide the author through creating it. **How y
 
 **Creating the chapter map:**
 
-Read the chapter map template from `templates/production/chapter-map-template.yaml` in the plugin directory. Populate it with:
-- Chapter titles and scene mappings from the approved proposal
-- Default production settings
+Read the chapter map template from `templates/production/chapter-map-template.csv` in the plugin directory. Populate it with chapter titles and scene mappings from the approved proposal.
 
-Write to `reference/chapter-map.yaml`.
+Write to `reference/chapter-map.csv`.
+
+Production settings (author, copyright, scene break style, genre preset, cover, front/back matter) are stored in `storyforge.yaml` under the `production` key — not in the chapter map.
 
 Then ask about production settings **one question at a time** using `AskUserQuestion`:
 
@@ -82,7 +82,7 @@ Then ask about production settings **one question at a time** using `AskUserQues
    - **Line** — short horizontal rule (thriller/science-fiction default)
    - **Custom** — author provides a symbol (e.g., `~`, `⁂`, `§`)
 
-   Genre defaults: literary-fiction → space, thriller → line, romance → ornamental, fantasy → ornamental, science-fiction → line. Present the default for the project's genre and let the author confirm or change.
+   Genre defaults: literary-fiction → space, thriller → line, romance → ornamental, fantasy → ornamental, science-fiction → line. Present the default for the project's genre and let the author confirm or change. Save to `production.scene_break` in `storyforge.yaml`.
 
 3. **Chapter heading format** — "How should chapter headings appear?"
    - Numbered + titled (e.g., "Chapter 1: The Finest Cartographer")
@@ -124,7 +124,7 @@ Then ask about production settings **one question at a time** using `AskUserQues
    - ISBN (if available, otherwise skip)
    - License text (default: "All rights reserved.")
 
-Update `reference/chapter-map.yaml` with all production settings after each answer.
+Update `storyforge.yaml` under the `production` key with all production settings after each answer.
 
 **After all settings are configured**, execute these steps **in this exact order**. Do not write any files before step 2 is complete.
 
@@ -139,7 +139,7 @@ git rev-parse --abbrev-ref HEAD
 ```
 The output must start with `storyforge/assemble-`. If it does not, stop and fix the branch before writing any files.
 
-**3. Write the chapter map** to `reference/chapter-map.yaml` with all production settings.
+**3. Write the chapter map** to `reference/chapter-map.csv` and production settings to `storyforge.yaml` under the `production` key.
 
 **4. Update project state:** set `chapter_map.exists: true` and `chapter_map.updated` to today's date in `storyforge.yaml`.
 
@@ -226,30 +226,25 @@ git add -A && git commit -m "Produce: {what was done}" && git push
 
 ## The Chapter Map Format
 
-The chapter map (`reference/chapter-map.yaml`) has two sections:
+The chapter map (`reference/chapter-map.csv`) is a pipe-delimited CSV that maps scenes to chapters.
 
-### `chapters` — the scene-to-chapter mapping
+### Chapter Map CSV
 
-```yaml
-chapters:
-  - title: "The Finest Cartographer"
-    heading: numbered-titled
-    scenes:
-      - act1-sc01
-      - act1-sc02
-
-  - title: "Into the Blank"
-    heading: numbered-titled
-    scenes:
-      - act2-sc01
+```
+chapter|title|heading|scenes
+1|The Finest Cartographer|numbered-titled|act1-sc01;act1-sc02
+2|Into the Blank|numbered-titled|act2-sc01
 ```
 
-Each chapter has:
+Each row has:
+- `chapter` — chapter number
 - `title` — the chapter title
 - `heading` — format for the chapter heading: `numbered`, `titled`, `numbered-titled`, `none`
-- `scenes` — ordered list of scene IDs from scene-metadata.csv
+- `scenes` — semicolon-separated ordered list of scene IDs from scene-metadata.csv
 
-### `production` — formatting and metadata settings
+### Production Settings in `storyforge.yaml`
+
+Production settings live in `storyforge.yaml` under the `production` key:
 
 ```yaml
 production:
@@ -278,7 +273,7 @@ production:
 Only record genuine creative decisions in the key decisions file — not configuration or routine choices. Chapter structure (how scenes group into chapters, pacing, flow) is a creative decision worth recording. Typography presets, scene break style, and format choices are configuration saved in the chapter map — they do not belong in key decisions.
 
 **Record:** "15 chapters following act breaks, with the midpoint cliffhanger isolated as its own short chapter" (creative/structural)
-**Don't record:** "Fantasy genre preset with ornamental scene breaks" (configuration — already in chapter-map.yaml)
+**Don't record:** "Fantasy genre preset with ornamental scene breaks" (configuration — already in storyforge.yaml)
 
 ## Coaching Level Behavior
 
