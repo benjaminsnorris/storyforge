@@ -812,13 +812,13 @@ while (( batch_start < CLAUDE_COUNT )); do
 
             # Parse response into result file
             if [[ -n "$response" ]]; then
-                type_val=$(echo "$response" | grep "^TYPE:" | sed 's/^TYPE:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
-                timeline_day_val=$(echo "$response" | grep "^TIMELINE_DAY:" | sed 's/^TIMELINE_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
-                time_of_day_val=$(echo "$response" | grep "^TIME_OF_DAY:" | sed 's/^TIME_OF_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
-                characters_val=$(echo "$response" | grep "^CHARACTERS:" | sed 's/^CHARACTERS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
-                emotional_arc_val=$(echo "$response" | grep "^EMOTIONAL_ARC:" | sed 's/^EMOTIONAL_ARC:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
-                threads_val=$(echo "$response" | grep "^THREADS:" | sed 's/^THREADS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
-                motifs_val=$(echo "$response" | grep "^MOTIFS:" | sed 's/^MOTIFS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1)
+                type_val=$(echo "$response" | grep "^TYPE:" | sed 's/^TYPE:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+                timeline_day_val=$(echo "$response" | grep "^TIMELINE_DAY:" | sed 's/^TIMELINE_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+                time_of_day_val=$(echo "$response" | grep "^TIME_OF_DAY:" | sed 's/^TIME_OF_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+                characters_val=$(echo "$response" | grep "^CHARACTERS:" | sed 's/^CHARACTERS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+                emotional_arc_val=$(echo "$response" | grep "^EMOTIONAL_ARC:" | sed 's/^EMOTIONAL_ARC:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+                threads_val=$(echo "$response" | grep "^THREADS:" | sed 's/^THREADS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+                motifs_val=$(echo "$response" | grep "^MOTIFS:" | sed 's/^MOTIFS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
 
                 # Validate
                 type_val=$(validate_type "$type_val")
