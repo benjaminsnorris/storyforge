@@ -34,6 +34,7 @@ FORCE=false
 INTERACTIVE=false
 EMBEDDED=false
 SKIP_PHASE1=false
+PHASE1_ONLY=false
 FILTER_MODE="all"
 FILTER_SCENES=""
 FILTER_ACT=""
@@ -60,6 +61,7 @@ Options:
   --force             Overwrite existing timeline_day values
   --dry-run           Show what would happen without invoking Claude
   --skip-phase1       Skip Haiku extraction; reuse cached indicators or fall back to raw metadata
+  --phase1-only       Run Phase 1 only; keep indicator files for review before Phase 2
   --embedded          Called as subprocess (skip branch/PR/commit)
   -h, --help          Show this help
 
@@ -73,7 +75,9 @@ Examples:
   $(basename "$0") --interactive            # Interactive with review gates
   $(basename "$0") --act 2                  # Act 2 only
   $(basename "$0") --from-seq 10-20         # Scenes 10 through 20
-  $(basename "$0") --embedded --force       # Called from enrich
+  $(basename "$0") --phase1-only              # Extract indicators, stop for review
+  $(basename "$0") --skip-phase1              # Reuse cached indicators, run Phase 2 only
+  $(basename "$0") --embedded --force         # Called from enrich
 EOF
     exit 0
 }
@@ -101,6 +105,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-phase1)
             SKIP_PHASE1=true
+            shift
+            ;;
+        --phase1-only)
+            PHASE1_ONLY=true
             shift
             ;;
         --scenes)
@@ -210,8 +218,16 @@ if [[ "$DRY_RUN" == true ]]; then
         log "  SEQ ${seq_val}: ${id} — ${title:-untitled} (current day: ${existing:-unset})"
     done
     log ""
-    log "Phase 1: ${SCENE_COUNT} Haiku calls (parallel, ${PARALLEL} workers)"
-    log "Phase 2: 1 Sonnet call (all scenes)"
+    if [[ "$SKIP_PHASE1" == true ]]; then
+        log "Phase 1: SKIPPED (reusing cached indicators)"
+    else
+        log "Phase 1: ${SCENE_COUNT} Haiku calls (parallel, ${PARALLEL} workers)"
+    fi
+    if [[ "$PHASE1_ONLY" == true ]]; then
+        log "Phase 2: DEFERRED (--phase1-only)"
+    else
+        log "Phase 2: 1 Sonnet call (all scenes)"
+    fi
     exit 0
 fi
 
@@ -235,8 +251,16 @@ PHASE1_COST=$(estimate_cost "extraction" "$SCENE_COUNT" "$AVG_WORDS" "$HAIKU_MOD
 # Phase 2: Sonnet reads compact indicators (~50 words per scene)
 PHASE2_COST=$(estimate_cost "evaluation" "1" "$(( SCENE_COUNT * 50 ))" "$SONNET_MODEL")
 
-log "Cost forecast: Phase 1 ~\$${PHASE1_COST}, Phase 2 ~\$${PHASE2_COST}"
-check_cost_threshold "$PHASE1_COST" || { log "Cost threshold exceeded. Aborting."; exit 1; }
+if [[ "$SKIP_PHASE1" == true ]]; then
+    log "Cost forecast: Phase 2 ~\$${PHASE2_COST} (Phase 1 skipped)"
+    check_cost_threshold "$PHASE2_COST" || { log "Cost threshold exceeded. Aborting."; exit 1; }
+elif [[ "$PHASE1_ONLY" == true ]]; then
+    log "Cost forecast: Phase 1 ~\$${PHASE1_COST} (Phase 2 deferred)"
+    check_cost_threshold "$PHASE1_COST" || { log "Cost threshold exceeded. Aborting."; exit 1; }
+else
+    log "Cost forecast: Phase 1 ~\$${PHASE1_COST}, Phase 2 ~\$${PHASE2_COST}"
+    check_cost_threshold "$PHASE1_COST" || { log "Cost threshold exceeded. Aborting."; exit 1; }
+fi
 
 # ============================================================================
 # Branch & PR (standalone mode only)
@@ -546,6 +570,22 @@ ${id}|<day>"
 # Interactive checkpoint helper
 # ============================================================================
 
+build_indicator_display() {
+    local display=""
+    for id in "${SCENE_IDS[@]}"; do
+        seq_val=$(get_csv_field "$METADATA_CSV" "$id" "seq")
+        title=$(get_csv_field "$METADATA_CSV" "$id" "title")
+        indicator_file="${TIMELINE_DIR}/.indicators-${id}"
+        indicators="(not extracted)"
+        [[ -f "$indicator_file" ]] && indicators=$(cat "$indicator_file")
+        display="${display}
+SEQ ${seq_val}: ${title} (${id})
+  Indicators: ${indicators}
+"
+    done
+    echo "$display"
+}
+
 run_interactive_checkpoint() {
     local phase_label="$1"
     local display_content="$2"
@@ -590,43 +630,35 @@ else
     run_phase1
 fi
 
+# --- Phase 1 only: stop here ---
+if [[ "$PHASE1_ONLY" == true ]]; then
+    indicator_display=$(build_indicator_display)
+    log ""
+    log "Phase 1 complete. Indicator files saved to: ${TIMELINE_DIR}/"
+    log ""
+    log "Results:"
+    echo "$indicator_display"
+    log ""
+    log "Review and edit indicator files as needed, then run Phase 2:"
+    log "  $(basename "$0") --skip-phase1 [same scene filters]"
+
+    if [[ "$EMBEDDED" != true ]]; then
+        print_cost_summary "timeline-phase1"
+        rm -f "$INTERACTIVE_FILE"
+    fi
+    exit 0
+fi
+
 # --- Interactive checkpoint 1 (after Phase 1) ---
 if [[ -f "$INTERACTIVE_FILE" ]]; then
-    # Build display of all indicators
-    indicator_display=""
-    for id in "${SCENE_IDS[@]}"; do
-        seq_val=$(get_csv_field "$METADATA_CSV" "$id" "seq")
-        title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-        indicator_file="${TIMELINE_DIR}/.indicators-${id}"
-        indicators="(not extracted)"
-        [[ -f "$indicator_file" ]] && indicators=$(cat "$indicator_file")
-        indicator_display="${indicator_display}
-SEQ ${seq_val}: ${title} (${id})
-  Indicators: ${indicators}
-"
-    done
-
-    run_interactive_checkpoint "Phase 1: Temporal Indicators" "$indicator_display" "review"
+    run_interactive_checkpoint "Phase 1: Temporal Indicators" "$(build_indicator_display)" "review"
 fi
 
 # --- Offer interactive rejoin between phases (autonomous mode) ---
 if [[ ! -f "$INTERACTIVE_FILE" && "$EMBEDDED" != true ]]; then
     if offer_interactive "$PROJECT_DIR" "Phase 2: Sonnet timeline assignment"; then
         # User just rejoined — show Phase 1 results before proceeding
-        indicator_display=""
-        for id in "${SCENE_IDS[@]}"; do
-            seq_val=$(get_csv_field "$METADATA_CSV" "$id" "seq")
-            title=$(get_csv_field "$METADATA_CSV" "$id" "title")
-            indicator_file="${TIMELINE_DIR}/.indicators-${id}"
-            indicators="(not extracted)"
-            [[ -f "$indicator_file" ]] && indicators=$(cat "$indicator_file")
-            indicator_display="${indicator_display}
-SEQ ${seq_val}: ${title} (${id})
-  Indicators: ${indicators}
-"
-        done
-
-        run_interactive_checkpoint "Phase 1: Temporal Indicators" "$indicator_display" "review"
+        run_interactive_checkpoint "Phase 1: Temporal Indicators" "$(build_indicator_display)" "review"
     fi
 fi
 
