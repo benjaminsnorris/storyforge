@@ -338,30 +338,34 @@ invoke_and_parse() {
     local invoke_model="${7:-$SONNET_MODEL}"
 
     if [[ "$DRY_RUN" == true ]]; then
-        log "[DRY RUN] Would invoke Claude (${#prompt} chars prompt)"
+        log "[DRY RUN] Would invoke API (${#prompt} chars prompt)"
         return 0
     fi
 
     _SF_INVOCATION_START=$(date +%s)
     export _SF_INVOCATION_START
 
-    begin_healing_zone "scoring invocation"
+    # Use .json extension for direct API response
+    local api_log="${log_file%.log}.json"
 
-    claude -p "$prompt" \
-        --model "$invoke_model" \
-        --dangerously-skip-permissions \
-        --output-format stream-json \
-        --verbose \
-        > "$log_file" 2>&1 || true
+    if ! invoke_anthropic_api "$prompt" "$invoke_model" "$api_log" 4096; then
+        log "WARNING: API call failed"
+        log_api_usage "$api_log" "score" "$(basename "$score_file" .csv)" "$invoke_model"
+        return 1
+    fi
 
-    end_healing_zone
+    log_api_usage "$api_log" "score" "$(basename "$score_file" .csv)" "$invoke_model"
+
+    # Extract text and write to log file for parse_score_output compatibility
+    local text_content
+    text_content=$(extract_api_response "$api_log") || {
+        log "WARNING: No text in API response"
+        return 1
+    }
+    echo "$text_content" > "$log_file"
 
     parse_score_output "$log_file" "$score_file" "$rationale_file" "$score_marker" "$rationale_marker"
-    local parse_rc=$?
-
-    log_usage "$log_file" "score" "$(basename "$score_file" .csv)" "$invoke_model"
-
-    return $parse_rc
+    return $?
 }
 
 # ============================================================================
@@ -424,6 +428,14 @@ FAILED=0
 # ============================================================================
 # Scene-level scoring — one Sonnet call per scene, all 25 principles
 # ============================================================================
+
+# Require API key for direct API scoring
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    log "ERROR: ANTHROPIC_API_KEY not set."
+    log "  Scoring uses the Anthropic API directly (no claude -p overhead)."
+    log "  Set it with: export ANTHROPIC_API_KEY=your-key"
+    exit 1
+fi
 
 DIAGNOSTICS_CSV="${PLUGIN_DIR}/references/diagnostics.csv"
 GUIDE_FILE="${PLUGIN_DIR}/references/principle-guide.md"
@@ -499,32 +511,26 @@ while (( batch_start < SCENE_COUNT )); do
             prompt="${prompt//\{\{WEIGHTED_PRINCIPLES\}\}/$WEIGHTED_TEXT}"
             prompt="${prompt//\{\{SCENE_TEXT\}\}/$scene_text_numbered}"
 
-            log_file="${LOG_DIR}/score-${id}.log"
+            log_file="${LOG_DIR}/score-${id}.json"
 
             _SF_INVOCATION_START=$(date +%s)
             export _SF_INVOCATION_START
 
-            begin_healing_zone "scene evaluation ${id}"
+            if invoke_anthropic_api "$prompt" "$EVAL_MODEL" "$log_file" 4096; then
+                log_api_usage "$log_file" "score" "$id" "$EVAL_MODEL"
 
-            claude -p "$prompt" \
-                --model "$EVAL_MODEL" \
-                --dangerously-skip-permissions \
-                --output-format stream-json \
-                --verbose \
-                > "$log_file" 2>&1 || true
+                tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}.csv"
+                tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
 
-            end_healing_zone
-
-            log_usage "$log_file" "score" "$id" "$EVAL_MODEL"
-
-            tmp_scores="${CYCLE_DIR}/.tmp-scores-${id}.csv"
-            tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
-
-            if parse_scene_evaluation "$log_file" "$tmp_scores" "$tmp_rationale" "$id"; then
-                log "    [${id}] scored"
-                echo "ok" > "${CYCLE_DIR}/.status-${id}"
+                if parse_scene_evaluation "$log_file" "$tmp_scores" "$tmp_rationale" "$id"; then
+                    log "    [${id}] scored"
+                    echo "ok" > "${CYCLE_DIR}/.status-${id}"
+                else
+                    log "    [${id}] FAILED (parse error)"
+                    echo "fail" > "${CYCLE_DIR}/.status-${id}"
+                fi
             else
-                log "    [${id}] FAILED"
+                log "    [${id}] FAILED (API error)"
                 echo "fail" > "${CYCLE_DIR}/.status-${id}"
             fi
         ) &
@@ -718,16 +724,17 @@ $(echo "$character_list" | sed 's/^/- /')"
         _SF_INVOCATION_START=$(date +%s)
         export _SF_INVOCATION_START
 
-        begin_healing_zone "novel-level scoring"
-
-        claude -p "$prompt" \
-            --model "$SONNET_MODEL" \
-            --dangerously-skip-permissions \
-            --output-format stream-json \
-            --verbose \
-            > "$log_file" 2>&1 || true
-
-        end_healing_zone
+        local api_log="${LOG_DIR}/score-novel-level.json"
+        if invoke_anthropic_api "$prompt" "$SONNET_MODEL" "$api_log" 4096; then
+            # Extract text for parse_score_output compatibility
+            local novel_text
+            novel_text=$(extract_api_response "$api_log") || true
+            echo "$novel_text" > "$log_file"
+            log_api_usage "$api_log" "score" "novel-level" "$SONNET_MODEL"
+        else
+            log "WARNING: Novel-level API call failed"
+            log_api_usage "$api_log" "score" "novel-level" "$SONNET_MODEL"
+        fi
 
         # Parse character scores
     char_scores="${CYCLE_DIR}/.tmp-char-scores.csv"
@@ -755,7 +762,6 @@ $(echo "$character_list" | sed 's/^/- /')"
             rm -f "$genre_rationale"
         fi
 
-        log_usage "$log_file" "score" "novel-level" "$SONNET_MODEL"
         log "  Novel-level scoring complete"
     fi
 else
