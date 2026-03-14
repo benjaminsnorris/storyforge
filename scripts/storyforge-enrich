@@ -36,6 +36,7 @@ source "${LIB_DIR}/common.sh"
 DRY_RUN=false
 FORCE=false
 SKIP_TIMELINE=false
+SKIP_DASHBOARD=false
 FILTER_MODE="all"
 FILTER_SCENES=""
 FILTER_ACT=""
@@ -71,6 +72,7 @@ Options:
                     Valid: type,location,time_of_day,characters,emotional_arc,threads,motifs
   --force           Re-enrich scenes that already have data (overwrite)
   --skip-timeline   Skip the timeline_day analysis pass (Step 8)
+  --skip-dashboard  Skip the dashboard generation (Step 9)
   --dry-run         Show what would be enriched without invoking Claude
   -h, --help        Show this help
 
@@ -94,6 +96,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --skip-dashboard)
+            SKIP_DASHBOARD=true
             shift
             ;;
         --skip-timeline)
@@ -858,6 +864,27 @@ if [[ "$SKIP_TIMELINE" != true && "$DRY_RUN" != true ]]; then
 elif [[ "$SKIP_TIMELINE" == true ]]; then
     log ""
     log "Step 8: Timeline analysis (skipped via --skip-timeline)"
+fi
+
+# ============================================================================
+# Step 9: Dashboard generation
+# ============================================================================
+
+if [[ "$SKIP_DASHBOARD" != true && "$DRY_RUN" != true ]]; then
+    log ""
+    log "Step 9: Generating manuscript dashboard..."
+    VISUALIZE_SCRIPT="${SCRIPT_DIR}/storyforge-visualize"
+
+    if [[ -x "$VISUALIZE_SCRIPT" ]]; then
+        "$VISUALIZE_SCRIPT" || {
+            log "WARNING: Dashboard generation failed (non-fatal, continuing)"
+        }
+    else
+        log "WARNING: storyforge-visualize not found at ${VISUALIZE_SCRIPT}, skipping dashboard"
+    fi
+elif [[ "$SKIP_DASHBOARD" == true ]]; then
+    log ""
+    log "Step 9: Dashboard generation (skipped via --skip-dashboard)"
 fi
 
 # ============================================================================
