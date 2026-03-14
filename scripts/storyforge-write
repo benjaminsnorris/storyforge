@@ -193,7 +193,9 @@ fi
 # Build scene list — CSV-first with YAML fallback
 # ============================================================================
 
-METADATA_CSV="${SCENES_DIR}/metadata.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+# Fallback to old location
+[[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${SCENES_DIR}/metadata.csv"
 CSV_MODE=false
 
 ALL_SCENE_IDS=()

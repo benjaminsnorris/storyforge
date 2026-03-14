@@ -65,7 +65,7 @@ The filename (without `.md`) is the scene ID. This ID is the key that links to a
 
 Organized by access pattern — scripts that only need structural data do not pay for loading creative intent.
 
-#### `scenes/metadata.csv` — Structural Metadata
+#### `reference/scene-metadata.csv` — Structural Metadata
 
 Read by all scripts (drafting, evaluation, revision, assembly, review).
 
@@ -94,7 +94,7 @@ the-finest-cartographer|1|The Finest Cartographer|Dorren Hayle|Pressure Cartogra
 the-footnote|2|The Footnote|Tessa Merrin|Pressure Cartography Office|1|confrontation|2|morning|revised|780|800
 ```
 
-#### `scenes/intent.csv` — Creative Intent
+#### `reference/scene-intent.csv` — Creative Intent
 
 Read during drafting, revision, scene design, and revision planning.
 

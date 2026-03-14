@@ -38,7 +38,7 @@ If no evaluation results exist at all, tell the author that evaluation needs to 
 Read the following files to understand the full project context:
 
 - **`storyforge.yaml`** — project configuration, phase, genre, target word count
-- **`scenes/metadata.csv`** and **`scenes/intent.csv`** — the scene inventory and intent data (pipe-delimited CSV). If these do not exist, fall back to `scenes/scene-index.yaml` for legacy projects.
+- **`reference/scene-metadata.csv`** and **`reference/scene-intent.csv`** — the scene inventory and intent data (pipe-delimited CSV). If these do not exist, fall back to `scenes/scene-index.yaml` for legacy projects.
 - **`reference/voice-guide.md`** — the established voice rules and style parameters
 - **`references/craft-engine.md`** from the plugin directory — the craft reference that informs revision strategy
 - **Key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. **Settled decisions must be respected in the plan — do not propose alternatives to decisions already made, and do not present them as open questions in guidance entries.**
@@ -84,7 +84,7 @@ Based on the analysis, design a custom set of revision passes. Each pass is a fo
       rationale: "Why this is the right call"
 ```
 
-**CRITICAL: Scene IDs in scope lists must match `scenes/metadata.csv` exactly.** Read the `id` column from `scenes/metadata.csv` and use the values verbatim. Scene IDs are descriptive slugs (e.g., `geometry-of-dying`, `the-last-calibrator`) — do NOT construct IDs by adding prefixes, padding numbers, or guessing formats. Copy them character-for-character from the CSV. If metadata.csv has `geometry-of-dying` in the id column, the scope must say `geometry-of-dying`.
+**CRITICAL: Scene IDs in scope lists must match `reference/scene-metadata.csv` exactly.** Read the `id` column from `reference/scene-metadata.csv` and use the values verbatim. Scene IDs are descriptive slugs (e.g., `geometry-of-dying`, `the-last-calibrator`) — do NOT construct IDs by adding prefixes, padding numbers, or guessing formats. Copy them character-for-character from the CSV. If metadata.csv has `geometry-of-dying` in the id column, the scope must say `geometry-of-dying`.
 
 All passes run autonomously. When a pass involves creative judgment — restructuring, character arc deepening, thematic reinterpretation — make the creative calls yourself and document them as `guidance` entries with rationale. The author reviews the plan before execution and can edit any guidance entry they disagree with.
 
@@ -124,7 +124,7 @@ Be specific and opinionated. "Deepen character arcs" is not guidance — it's a 
 
 - Use `full` when an issue pervades the manuscript
 - Use act-level scope when issues are localized to a narrative section
-- Use scene-id lists when only specific scenes are affected — **copy IDs exactly from `scenes/metadata.csv`**
+- Use scene-id lists when only specific scenes are affected — **copy IDs exactly from `reference/scene-metadata.csv`**
 - Prefer narrower scopes — a targeted pass is faster and less risky than a full-manuscript pass
 
 ## Step 5: Present the Plan

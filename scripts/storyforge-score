@@ -147,12 +147,15 @@ WEIGHTS_FILE="${PROJECT_DIR}/working/craft-weights.csv"
 # Build scene list from metadata.csv
 # ============================================================================
 
-METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
-INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
+# Fallback to old locations
+[[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+[[ ! -f "$INTENT_CSV" ]] && INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
 SCENES_DIR="${PROJECT_DIR}/scenes"
 
 if [[ ! -f "$METADATA_CSV" ]]; then
-    log "ERROR: scenes/metadata.csv not found. Run 'storyforge scenes' to create scene metadata."
+    log "ERROR: reference/scene-metadata.csv not found. Run 'storyforge scenes' to create scene metadata."
     exit 1
 fi
 

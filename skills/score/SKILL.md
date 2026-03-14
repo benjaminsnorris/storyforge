@@ -32,7 +32,7 @@ Read the following files to understand the full context:
 - `working/tuning.csv` -- history of weight tuning decisions (if exists)
 - `working/exemplars.csv` -- bank of high-scoring passages (if exists)
 - `scenes/author-scores.csv` -- author's own scores (if exists)
-- `scenes/metadata.csv` -- scene metadata for context
+- `reference/scene-metadata.csv` -- scene metadata for context
 
 ## Step 2: Read Craft References
 

@@ -520,7 +520,8 @@ if [[ "$DRY_RUN" != true ]]; then
     done
 
     # Estimate average word count from metadata.csv or scene files
-    METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+    METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+    [[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
     AVG_WORDS=0
     if [[ -f "$METADATA_CSV" ]]; then
         TOTAL_WC=0
@@ -720,7 +721,8 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     fi
 
     # --- Update word counts in metadata.csv after revision ---
-    METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+    METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+    [[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
     if [[ -f "$METADATA_CSV" && "$EFFECTIVE_COACHING" == "full" ]]; then
         while IFS= read -r scene_id; do
             [[ -z "$scene_id" ]] && continue

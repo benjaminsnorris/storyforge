@@ -4,8 +4,8 @@
 # Run via: ./tests/run-tests.sh
 # Depends on: FIXTURE_DIR, PROJECT_DIR, assertion functions (from run-tests.sh)
 
-META_CSV="${FIXTURE_DIR}/scenes/metadata.csv"
-INTENT_CSV="${FIXTURE_DIR}/scenes/intent.csv"
+META_CSV="${FIXTURE_DIR}/reference/scene-metadata.csv"
+INTENT_CSV="${FIXTURE_DIR}/reference/scene-intent.csv"
 
 # ============================================================================
 # get_csv_field

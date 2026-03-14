@@ -1,19 +1,19 @@
 # Scene Metadata Schema
 
-Scenes are the atomic unit of a Storyforge project. Scene files are **pure prose** (no YAML frontmatter) — the filename is the scene ID. All metadata lives in two canonical CSV files: `scenes/metadata.csv` and `scenes/intent.csv`.
+Scenes are the atomic unit of a Storyforge project. Scene files are **pure prose** (no YAML frontmatter) — the filename is the scene ID. All metadata lives in two canonical CSV files: `reference/scene-metadata.csv` and `reference/scene-intent.csv`.
 
 ## Data Storage
 
 Scene data is split across two pipe-delimited CSV files:
 
-- **`scenes/metadata.csv`** — structural and tracking metadata (POV, setting, part, status, word counts)
-- **`scenes/intent.csv`** — creative intent data (function, emotional arc, characters, threads, motifs)
+- **`reference/scene-metadata.csv`** — structural and tracking metadata (POV, setting, part, status, word counts)
+- **`reference/scene-intent.csv`** — creative intent data (function, emotional arc, characters, threads, motifs)
 
 Both files use pipe (`|`) as the field delimiter. Array values within a single column use semicolon (`;`) as the separator. The first row is always the header. The `id` column appears first in both files and is the join key.
 
 ### Legacy Format
 
-If a project has `scenes/scene-index.yaml` but no `metadata.csv`, it is using the legacy YAML format. Run `./storyforge migrate --execute` to convert to CSV. Scripts support both formats with CSV preferred and YAML as fallback.
+If a project has `scenes/scene-index.yaml` but no `scene-metadata.csv`, it is using the legacy YAML format. Run `./storyforge migrate --execute` to convert to CSV. Scripts support both formats with CSV preferred and YAML as fallback.
 
 ## Core Fields
 

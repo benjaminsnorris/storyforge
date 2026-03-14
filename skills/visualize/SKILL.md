@@ -18,8 +18,8 @@ Store this resolved plugin path for use throughout the session.
 Read the following files to assess readiness:
 
 - `storyforge.yaml` — project configuration
-- `scenes/metadata.csv` — check field completeness (id, title, pov, setting, part, type, word_count, timeline_day, time_of_day)
-- `scenes/intent.csv` — check field completeness (characters, threads, motifs, emotional_arc)
+- `reference/scene-metadata.csv` — check field completeness (id, title, pov, setting, part, type, word_count, timeline_day, time_of_day)
+- `reference/scene-intent.csv` — check field completeness (characters, threads, motifs, emotional_arc)
 - `working/scores/latest/scene-scores.csv` — if scoring data exists
 - `working/dashboard.html` — if a dashboard already exists
 

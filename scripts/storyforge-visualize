@@ -55,8 +55,11 @@ done
 # --- Detect project ---
 detect_project_root
 
-METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
-INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
+# Fallback to old locations
+[[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+[[ ! -f "$INTENT_CSV" ]] && INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
 SCORES_CSV="${PROJECT_DIR}/working/scores/latest/scene-scores.csv"
 WEIGHTS_CSV="${PROJECT_DIR}/working/craft-weights.csv"
 CHAPTER_MAP_CSV="${PROJECT_DIR}/reference/chapter-map.csv"
@@ -64,11 +67,11 @@ DASHBOARD_FILE="${PROJECT_DIR}/working/dashboard.html"
 
 # --- Validate required files ---
 if [[ ! -f "$METADATA_CSV" ]]; then
-    echo "ERROR: scenes/metadata.csv not found at ${METADATA_CSV}" >&2
+    echo "ERROR: reference/scene-metadata.csv not found at ${METADATA_CSV}" >&2
     exit 1
 fi
 if [[ ! -f "$INTENT_CSV" ]]; then
-    echo "ERROR: scenes/intent.csv not found at ${INTENT_CSV}" >&2
+    echo "ERROR: reference/scene-intent.csv not found at ${INTENT_CSV}" >&2
     exit 1
 fi
 

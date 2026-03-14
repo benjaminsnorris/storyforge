@@ -129,8 +129,11 @@ log "Project root: ${PROJECT_DIR}"
 PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
 
 # --- Resolve paths ---
-METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
-INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
+# Fallback to old locations
+[[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+[[ ! -f "$INTENT_CSV" ]] && INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
 SCENES_DIR="${PROJECT_DIR}/scenes"
 SCENE_INDEX="${PROJECT_DIR}/scenes/scene-index.yaml"
 LOG_DIR="${PROJECT_DIR}/working/logs"
@@ -140,12 +143,12 @@ mkdir -p "$LOG_DIR"
 mkdir -p "$ENRICH_DIR"
 
 if [[ ! -f "$METADATA_CSV" ]]; then
-    log "ERROR: scenes/metadata.csv not found. Run 'storyforge scenes' to create scene metadata."
+    log "ERROR: reference/scene-metadata.csv not found. Run 'storyforge scenes' to create scene metadata."
     exit 1
 fi
 
 if [[ ! -f "$INTENT_CSV" ]]; then
-    log "ERROR: scenes/intent.csv not found. Run 'storyforge scenes' to create scene metadata."
+    log "ERROR: reference/scene-intent.csv not found. Run 'storyforge scenes' to create scene metadata."
     exit 1
 fi
 
@@ -537,7 +540,7 @@ create_branch "enrich" "$PROJECT_DIR"
 # Commit any files already changed by discovery and thread recovery
 (
     cd "$PROJECT_DIR"
-    git add scenes/metadata.csv scenes/intent.csv 2>/dev/null || true
+    git add reference/scene-metadata.csv reference/scene-intent.csv 2>/dev/null || true
     git add -A 2>/dev/null || true
     git commit -m "Enrich: discover scenes and recover threads" 2>/dev/null || true
 )
@@ -943,8 +946,8 @@ log "Committing enrichment results..."
 
 (
     cd "$PROJECT_DIR"
-    git add "scenes/metadata.csv" 2>/dev/null || true
-    git add "scenes/intent.csv" 2>/dev/null || true
+    git add "reference/scene-metadata.csv" 2>/dev/null || true
+    git add "reference/scene-intent.csv" 2>/dev/null || true
     git add "working/costs/" 2>/dev/null || true
     git add "working/logs/" 2>/dev/null || true
     git add "working/enrich/" 2>/dev/null || true

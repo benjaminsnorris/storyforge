@@ -22,8 +22,8 @@ Store this resolved plugin path for use throughout the session.
 Read the following files to understand the full context before doing any scene work:
 
 - `storyforge.yaml` — project configuration, active extensions, current state. **Note the `project.coaching_level` field** — it controls how proactive you should be (see Coaching Level Behavior below).
-- `scenes/metadata.csv` — the existing scene metadata (pipe-delimited CSV: `id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words`). If this does not exist, fall back to `scene-index.yaml` for legacy projects.
-- `scenes/intent.csv` — scene intent data (pipe-delimited CSV: `id|function|emotional_arc|characters|threads|motifs|notes`). Array fields use `;` (semicolon) as the internal separator.
+- `reference/scene-metadata.csv` — the existing scene metadata (pipe-delimited CSV: `id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words`). If this does not exist, fall back to `scene-index.yaml` for legacy projects.
+- `reference/scene-intent.csv` — scene intent data (pipe-delimited CSV: `id|function|emotional_arc|characters|threads|motifs|notes`). Array fields use `;` (semicolon) as the internal separator.
 - `reference/story-architecture.md` — structural context: acts, parts, arcs, turning points.
 - `reference/character-bible.md` — character arcs, relationships, and motivations.
 - `reference/voice-guide.md` — voice and POV rules (if it exists), especially POV-specific voice rules that affect scene assignment.
@@ -108,7 +108,7 @@ Use this when scene files exist but metadata is sparse — empty fields for type
 
 ### Assess Gaps
 
-Read `scenes/metadata.csv` and `scenes/intent.csv`. Count empty fields:
+Read `reference/scene-metadata.csv` and `reference/scene-intent.csv`. Count empty fields:
 
 ```
 Your 102 scenes have:
@@ -156,13 +156,13 @@ Use this when the author wants to plan new scenes for a section of the novel.
 
 For each proposed scene, present the full core metadata. Scene data is stored in two CSV files:
 
-**`scenes/metadata.csv`** — one row per scene (pipe-delimited):
+**`reference/scene-metadata.csv`** — one row per scene (pipe-delimited):
 ```
 id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words
 geometry-of-dying|1|The Geometry of Dying|Character Name|Location|1|character|1|morning|pending|0|2500
 ```
 
-**`scenes/intent.csv`** — one row per scene (pipe-delimited, arrays use `;`):
+**`reference/scene-intent.csv`** — one row per scene (pipe-delimited, arrays use `;`):
 ```
 id|function|emotional_arc|characters|threads|motifs|notes
 geometry-of-dying|Specific function description|Emotional start to end|Char A;Char B|thread-1;thread-2|motif-1;motif-2|
@@ -293,7 +293,7 @@ Every time you add, modify, or remove scenes — an act designed, scenes reorder
 
 **After each deliverable:**
 
-1. Write the updated `scenes/metadata.csv` and `scenes/intent.csv`. If the project still has a legacy `scene-index.yaml`, you may update it for backward compatibility, but the CSV files are the canonical source.
+1. Write the updated `reference/scene-metadata.csv` and `reference/scene-intent.csv`. If the project still has a legacy `scene-index.yaml`, you may update it for backward compatibility, but the CSV files are the canonical source.
 2. Update `storyforge.yaml` with the current scene count, last-modified date, and any structural changes. If scenes were added and the project phase is still `development`, advance it to `scene-design`.
 3. Regenerate relevant sections of `CLAUDE.md` to reflect the current scene state (active scenes, next scenes to draft, thread status).
 4. **Commit and push immediately:**

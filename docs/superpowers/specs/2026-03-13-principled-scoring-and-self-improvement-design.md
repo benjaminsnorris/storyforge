@@ -212,7 +212,7 @@ Based on diagnosis, generate proposals for specific lever changes. The system pr
 
 1. **Craft weights** (`working/craft-weights.csv`) — adjust emphasis for the next rewrite
 2. **Voice guide** (`reference/voice-guide.md`) — add concrete prose directives when weight changes aren't enough
-3. **Scene intent** (`scenes/intent.csv`) — sharpen function/emotional_arc for specific scenes
+3. **Scene intent** (`reference/scene-intent.csv`) — sharpen function/emotional_arc for specific scenes
 4. **Per-scene overrides** (`working/scores/latest/overrides.csv`) — temporary scene-specific instructions
 5. **Tuning ledger** (`working/tuning.csv`) — always recorded regardless of other actions
 
@@ -232,7 +232,7 @@ Approved proposals update their targets:
 
 - Craft weight changes → update `working/craft-weights.csv`
 - Voice guide changes → append to `reference/voice-guide.md` (with a marker comment indicating system-generated)
-- Scene intent changes → update `scenes/intent.csv` via `update_csv_field`
+- Scene intent changes → update `reference/scene-intent.csv` via `update_csv_field`
 - Per-scene overrides → write to `working/scores/latest/overrides.csv`
 
 #### Step 6: Rewrite

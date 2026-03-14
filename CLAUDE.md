@@ -183,8 +183,8 @@ All structured data uses pipe-delimited CSV:
 - **Empty fields:** zero characters between delimiters
 
 ### Key CSV Files
-- `scenes/metadata.csv` — structural metadata (id, seq, title, pov, setting, part, type, etc.)
-- `scenes/intent.csv` — creative intent (id, function, emotional_arc, characters, threads, motifs)
+- `reference/scene-metadata.csv` — structural metadata (id, seq, title, pov, setting, part, type, etc.)
+- `reference/scene-intent.csv` — creative intent (id, function, emotional_arc, characters, threads, motifs)
 - `working/craft-weights.csv` — craft principle weights (keyed by `principle` column, not `id`)
 - `working/costs/ledger.csv` — per-invocation cost tracking
 - `reference/chapter-map.csv` — chapter-to-scene mapping

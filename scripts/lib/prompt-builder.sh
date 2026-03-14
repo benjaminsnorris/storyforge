@@ -9,14 +9,16 @@
 # ============================================================================
 
 # Extract metadata for a given scene ID.
-# CSV-first: checks scenes/metadata.csv, formats as "key: value" pairs.
-# Falls back to YAML scene-index.yaml block if CSV not found.
+# CSV-first: checks reference/scene-metadata.csv (with fallback to scenes/metadata.csv),
+# formats as "key: value" pairs. Falls back to YAML scene-index.yaml block if CSV not found.
 #
 # Usage: get_scene_metadata "act1-sc05" "/path/to/project"
 get_scene_metadata() {
     local scene_id="$1"
     local project_dir="$2"
-    local csv_file="${project_dir}/scenes/metadata.csv"
+    local csv_file="${project_dir}/reference/scene-metadata.csv"
+    # Fallback to old location
+    [[ ! -f "$csv_file" ]] && csv_file="${project_dir}/scenes/metadata.csv"
 
     # CSV-first path
     if [[ -f "$csv_file" ]]; then
@@ -46,7 +48,7 @@ get_scene_metadata() {
         return 1
     fi
 
-    log "DEPRECATION: Reading scene metadata from YAML. Migrate to scenes/metadata.csv." >&2
+    log "DEPRECATION: Reading scene metadata from YAML. Migrate to reference/scene-metadata.csv." >&2
 
     # Find the line with this scene ID and extract its block.
     # Scene entries look like:
@@ -65,14 +67,16 @@ get_scene_metadata() {
 # Scene intent extraction
 # ============================================================================
 
-# Read intent data for a given scene from scenes/intent.csv.
+# Read intent data for a given scene from reference/scene-intent.csv.
 # Returns key-value pairs, or empty if file/row doesn't exist.
 #
 # Usage: get_scene_intent "act1-sc05" "/path/to/project"
 get_scene_intent() {
     local scene_id="$1"
     local project_dir="$2"
-    local csv_file="${project_dir}/scenes/intent.csv"
+    local csv_file="${project_dir}/reference/scene-intent.csv"
+    # Fallback to old location
+    [[ ! -f "$csv_file" ]] && csv_file="${project_dir}/scenes/intent.csv"
 
     if [[ ! -f "$csv_file" ]]; then
         return 0
@@ -173,7 +177,9 @@ read_scene_field() {
     local scene_id="$1"
     local project_dir="$2"
     local field="$3"
-    local csv_file="${project_dir}/scenes/metadata.csv"
+    local csv_file="${project_dir}/reference/scene-metadata.csv"
+    # Fallback to old location
+    [[ ! -f "$csv_file" ]] && csv_file="${project_dir}/scenes/metadata.csv"
 
     # CSV-first path
     if [[ -f "$csv_file" ]]; then
@@ -201,7 +207,9 @@ get_scene_status() {
     local project_dir="$2"
 
     # CSV-first path
-    local csv_file="${project_dir}/scenes/metadata.csv"
+    local csv_file="${project_dir}/reference/scene-metadata.csv"
+    # Fallback to old location
+    [[ ! -f "$csv_file" ]] && csv_file="${project_dir}/scenes/metadata.csv"
     if [[ -f "$csv_file" ]]; then
         local csv_status
         csv_status=$(get_csv_field "$csv_file" "$scene_id" "status")
@@ -352,7 +360,9 @@ build_scene_prompt() {
 
     # --- Detect CSV mode ---
     local csv_mode=false
-    local csv_file="${project_dir}/scenes/metadata.csv"
+    local csv_file="${project_dir}/reference/scene-metadata.csv"
+    # Fallback to old location
+    [[ ! -f "$csv_file" ]] && csv_file="${project_dir}/scenes/metadata.csv"
     if [[ -f "$csv_file" ]]; then
         csv_mode=true
     fi
