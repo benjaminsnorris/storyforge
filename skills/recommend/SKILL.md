@@ -91,6 +91,9 @@ Required artifacts that don't exist yet:
 - **Character bible missing** → Recommend `/storyforge:develop` focused on character development. Be specific: "Build the character bible — start with your protagonist's wound/lie/need structure."
 - **World bible missing** → Recommend `/storyforge:develop` focused on world-building.
 - **Story architecture missing** → Recommend `/storyforge:develop` focused on story structure.
+- **Scene metadata sparse** → If `scenes/metadata.csv` and `scenes/intent.csv` have many empty fields (type, characters, threads, motifs, emotional_arc), recommend `/storyforge:scenes` for enrichment. "Your scene metadata is sparse — enrichment will populate characters, threads, motifs, and emotional arcs, which unlocks the full dashboard."
+- **Scene files need setup** → If scene files have numeric names, or if chapters exist but scene files don't, recommend `/storyforge:scenes` for setup.
+- **Dashboard stale or missing** → If `working/dashboard.html` doesn't exist, or if metadata has changed significantly since it was last generated, recommend `/storyforge:visualize`. "Your metadata has been updated — regenerate the dashboard to see the changes."
 - **Placeholder or generic title** → If the project has significant content (scenes drafted or revised) and the title looks like a placeholder ("Untitled," "My Novel," or something obviously temporary), recommend `/storyforge:title` to develop a strong title before production.
 - **No cover image** → If the phase is `production` or `complete` and no cover exists (`production.cover_image` is empty or the file is missing), recommend `/storyforge:cover` to design a cover before final assembly.
 

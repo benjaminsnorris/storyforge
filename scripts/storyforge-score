@@ -1261,6 +1261,13 @@ fi
 
 update_pr_task "Review" "$PROJECT_DIR" 2>/dev/null || true
 
+# Regenerate manuscript dashboard with updated score data
+VISUALIZE_SCRIPT="${SCRIPT_DIR}/storyforge-visualize"
+if [[ -x "$VISUALIZE_SCRIPT" ]]; then
+    log "Regenerating manuscript dashboard..."
+    "$VISUALIZE_SCRIPT" 2>/dev/null || log "WARNING: Dashboard generation failed"
+fi
+
 log "Committing scoring results..."
 
 (

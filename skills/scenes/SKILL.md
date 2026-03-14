@@ -1,6 +1,6 @@
 ---
 name: scenes
-description: Design, review, and manage the novel's scene index. Use when the user wants to plan scenes, review scene structure, check pacing, reorder scenes, add or remove scenes, split or merge scenes, or work with the scene index in any way.
+description: Design, review, and manage the novel's scene index. Use when the user wants to plan scenes, review scene structure, check pacing, reorder scenes, add or remove scenes, split or merge scenes, set up scenes from a manuscript or chapters, rename scene files, or enrich scene metadata.
 ---
 
 # Storyforge Scenes Skill
@@ -39,9 +39,106 @@ From the Storyforge plugin directory:
 
 **If invoked with specific direction** (e.g., "design scenes for Act 2" or "review pacing in Act 1"), go directly to the appropriate mode and execute. Do not ask clarifying sub-questions — make the creative calls and produce work.
 
-**If invoked without direction** (e.g., via hub routing or "surprise me"), assess the scene index state and execute the highest-impact work: if no scenes exist, enter Design mode for the opening act; if scenes exist but have gaps, enter Review mode and identify what needs attention; if the author has flagged specific changes, enter Edit mode.
+**If invoked without direction** (e.g., via hub routing or "surprise me"), assess the scene index state and route to the highest-impact mode:
 
-Based on the direction (given or self-determined), operate in one of three modes:
+1. **No scene files exist** but a manuscript or chapter files do → **Setup Mode** (split manuscript/chapters into scenes)
+2. **Scene files exist but have wrong names** (numeric IDs like `001.md`) → **Setup Mode** (rename to slugs)
+3. **Scene files exist but metadata is sparse** (empty type, characters, threads, motifs, emotional_arc) → **Enrich Mode** (populate missing metadata)
+4. **No scenes exist at all** → **Design Mode** for the opening act
+5. **Scenes exist with good metadata** but the author wants changes → **Edit Mode**
+6. **Scenes exist and the author wants analysis** → **Review Mode**
+
+Based on the direction (given or self-determined), operate in one of five modes:
+
+---
+
+## Setup Mode: Creating Scene Files from Existing Work
+
+Use this when the project has a manuscript or chapter files but no properly formatted scene files, or when scene files need renaming.
+
+### Detect Input Format
+
+Check what exists:
+- `scenes/*.md` with numeric names (`001.md`, `ch01-sc01.md`) → **Rename** to slug-based names
+- `chapters/*.md` or `manuscript/*.md` or files in a `--source` directory → **Split chapters** into scenes
+- A single manuscript file → **Split manuscript** into chapters, then scenes
+- A mix (some scenes, some chapters) → handle each appropriately
+
+### Delegate to the Setup Script
+
+Present the author with two options:
+
+> **Option A: Run it here**
+> I'll run the scene setup script in this conversation.
+> [If splitting is needed: "This uses Claude to identify scene boundaries, so I need to unset CLAUDECODE."]
+> [If only renaming: "This is a rename operation — no API calls needed."]
+>
+> **Option B: Run it yourself**
+> ```bash
+> cd [project_dir] && [plugin_path]/scripts/storyforge-scenes-setup --rename
+> cd [project_dir] && [plugin_path]/scripts/storyforge-scenes-setup --split-chapters --source chapters/
+> cd [project_dir] && [plugin_path]/scripts/storyforge-scenes-setup --split-manuscript --source manuscript.md
+> ```
+> Add `--dry-run` to preview.
+
+### For Renaming:
+
+```bash
+# No Claude needed — pure file operations
+[plugin_path]/scripts/storyforge-scenes-setup --rename
+```
+
+This renames files to slugs, updates metadata.csv, intent.csv, and chapter-map.csv.
+
+### For Splitting:
+
+The script has two phases:
+1. **Free:** Split on explicit scene break markers (`***`, `---`, `# # #`) — no API cost
+2. **Claude:** For chapters without markers, Claude identifies scene boundaries — costs ~$0.03/chapter
+
+The script shows proposed splits interactively and asks for confirmation before writing.
+
+After setup completes, suggest running Enrich Mode to populate the metadata.
+
+---
+
+## Enrich Mode: Populating Missing Metadata
+
+Use this when scene files exist but metadata is sparse — empty fields for type, characters, threads, motifs, emotional_arc, or timeline_day.
+
+### Assess Gaps
+
+Read `scenes/metadata.csv` and `scenes/intent.csv`. Count empty fields:
+
+```
+Your 102 scenes have:
+  type:          0/102 populated
+  characters:    0/102 populated
+  threads:       98/102 populated (recovered from scene-index.yaml)
+  motifs:        0/102 populated
+  emotional_arc: 0/102 populated
+  timeline_day:  0/102 populated
+  time_of_day:   44/102 populated (inferred from keywords)
+```
+
+### Delegate to the Enrichment Script
+
+The enrichment script runs in two phases:
+1. **Phase 1 (Free):** Update word counts, infer time_of_day from keywords, recover threads from scene-index.yaml
+2. **Phase 2 (Claude):** Only for fields still missing after Phase 1 — targeted prompts per scene
+
+Present the author with two options:
+
+> **Option A: Run it here**
+> I'll run the enrichment script. This uses Claude for Phase 2, so I need to unset CLAUDECODE. Estimated cost: ~$X for N scenes.
+>
+> **Option B: Run it yourself**
+> ```bash
+> cd [project_dir] && [plugin_path]/scripts/storyforge-enrich
+> ```
+> Add `--dry-run` to preview. Add `--fields type,characters` for specific fields. Add `--act 2` for one act.
+
+After enrichment, suggest generating the dashboard: "Run `/storyforge:visualize` to see your book's structure."
 
 ---
 

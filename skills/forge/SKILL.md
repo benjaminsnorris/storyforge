@@ -126,6 +126,18 @@ If the project's coaching level is `coach` or `strict`, remind the author that r
 
 If the revision plan doesn't exist, explain that a revision plan is needed first and offer to invoke `plan-revision`.
 
+**"Score" / "Score my scenes" / "Run scoring":**
+Invoke the `score` skill.
+
+**"Set up scenes" / "Split my manuscript" / "Rename scene files" / "Enrich metadata":**
+Invoke the `scenes` skill — it handles setup (splitting manuscripts/chapters into scenes, renaming files to slugs) and enrichment (populating missing metadata).
+
+**"Show me my book" / "Visualize" / "Dashboard":**
+Invoke the `visualize` skill. If metadata is sparse, suggest running enrichment through the `scenes` skill first.
+
+**"What should I do next?":**
+Invoke the `recommend` skill. Note: recommend should be aware that if scoring was recently run and the dashboard is stale, regenerating the dashboard (`./storyforge visualize`) is a good recommendation. Similarly, if scene metadata is sparse, enrichment via the `scenes` skill is high value.
+
 **"Review revision" / "How did the revision go?" / "What changed?":**
 Invoke the `review` skill. This is the natural next step after a revision cycle completes.
 
