@@ -47,18 +47,19 @@ _sf_handle_interrupt() {
     local killed=0
     for pid in "${_SF_CHILD_PIDS[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
-            # Try process group kill first (kills subshell + its children)
-            kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+            # Kill the subshell and all its descendants
+            # pkill -P kills children of the PID (e.g., claude processes inside subshells)
+            pkill -TERM -P "$pid" 2>/dev/null || true
+            kill "$pid" 2>/dev/null || true
             killed=$((killed + 1))
         fi
     done
 
     if (( killed > 0 )); then
-        log "Sent SIGTERM to ${killed} background process(es). Waiting up to 10s..."
+        log "Sent SIGTERM to ${killed} background process(es). Waiting up to 5s..."
 
-        # Give children a moment to exit cleanly
         local waited=0
-        while (( waited < 10 )); do
+        while (( waited < 5 )); do
             local still_running=0
             for pid in "${_SF_CHILD_PIDS[@]}"; do
                 kill -0 "$pid" 2>/dev/null && still_running=$((still_running + 1))
@@ -68,10 +69,11 @@ _sf_handle_interrupt() {
             waited=$((waited + 1))
         done
 
-        # Force-kill any stragglers (process group + individual)
+        # Force-kill any stragglers and their children
         for pid in "${_SF_CHILD_PIDS[@]}"; do
             if kill -0 "$pid" 2>/dev/null; then
-                kill -9 -- -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+                pkill -9 -P "$pid" 2>/dev/null || true
+                kill -9 "$pid" 2>/dev/null || true
                 log "Force-killed process ${pid}"
             fi
         done
