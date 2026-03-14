@@ -185,8 +185,8 @@ if [[ ! -f "$INTENT_CSV" ]]; then
     exit 1
 fi
 
-# --- Select model (analytical task -> Sonnet) ---
-MODEL=$(select_model "evaluation")
+# --- Select model (structured extraction -> Haiku) ---
+MODEL=$(select_model "extraction")
 log "Enrichment model: ${MODEL}"
 
 # ============================================================================
