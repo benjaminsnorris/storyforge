@@ -600,6 +600,19 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         _csv_guidance=$(read_csv_pass_field "$PASS_NUM" "guidance")
         _csv_protection=$(read_csv_pass_field "$PASS_NUM" "protection")
         _csv_findings=$(read_csv_pass_field "$PASS_NUM" "findings")
+
+        # "scene-level" and "targeted" scopes mean "use the targets column"
+        # Convert semicolon-separated targets to comma-separated for resolve_scope
+        EFFECTIVE_SCOPE="$PASS_SCOPE"
+        if [[ "$PASS_SCOPE" == "scene-level" || "$PASS_SCOPE" == "targeted" ]]; then
+            if [[ -n "$_csv_targets" ]]; then
+                EFFECTIVE_SCOPE=$(echo "$_csv_targets" | tr ';' ',')
+            else
+                # No targets specified — fall back to full manuscript
+                EFFECTIVE_SCOPE="full"
+            fi
+        fi
+
         PASS_BLOCK="- name: ${PASS_NAME}
     purpose: ${PASS_PURPOSE}
     scope: ${PASS_SCOPE}"
@@ -616,7 +629,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     fi
     log "  Building revision prompt..."
     set +e
-    PROMPT=$(build_revision_prompt "$PASS_NAME" "$PASS_PURPOSE" "$PASS_SCOPE" "$PROJECT_DIR" "$PASS_BLOCK")
+    PROMPT=$(build_revision_prompt "$PASS_NAME" "$PASS_PURPOSE" "${EFFECTIVE_SCOPE:-$PASS_SCOPE}" "$PROJECT_DIR" "$PASS_BLOCK")
     PROMPT_EXIT=$?
     set -e
 
