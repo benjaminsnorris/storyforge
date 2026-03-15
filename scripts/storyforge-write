@@ -20,6 +20,7 @@ set -eo pipefail
 # --- Locate script directory and source libraries ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
 
 if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
     echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
@@ -467,7 +468,11 @@ if [[ "$WRITE_MODE" == "batch" && "$DRY_RUN" != true ]]; then
             fi
         fi
 
-        PROMPT=$(build_scene_prompt "$SCENE_ID" "$PROJECT_DIR")
+        # Detect API mode flag
+        API_FLAG=""
+        [[ -n "${ANTHROPIC_API_KEY:-}" ]] && API_FLAG="--api-mode"
+
+        PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts build-scene "$SCENE_ID" "$PROJECT_DIR" --coaching "$EFFECTIVE_COACHING" $API_FLAG)
         if [[ -z "$PROMPT" ]]; then
             log "ERROR: Failed to build prompt for scene ${SCENE_ID}"
             exit 1
@@ -561,7 +566,10 @@ else
         fi
 
         # --- Build the prompt (outside zone — needed for dry-run check) ---
-        PROMPT=$(build_scene_prompt "$SCENE_ID" "$PROJECT_DIR")
+        API_FLAG=""
+        [[ -n "${ANTHROPIC_API_KEY:-}" ]] && API_FLAG="--api-mode"
+
+        PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts build-scene "$SCENE_ID" "$PROJECT_DIR" --coaching "$EFFECTIVE_COACHING" $API_FLAG)
 
         if [[ -z "$PROMPT" ]]; then
             log "ERROR: Failed to build prompt for scene ${SCENE_ID}"
