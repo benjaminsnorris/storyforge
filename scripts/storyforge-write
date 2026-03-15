@@ -68,10 +68,10 @@ _extract_scene_from_response() {
     local extracted=""
     local in_scene=false
     while IFS= read -r line; do
-        if [[ "$line" =~ '=== SCENE: '.*' ===' && ! "$line" =~ '=== END SCENE:' ]]; then
+        if echo "$line" | grep -qE '^=== SCENE: .+ ===$' && ! echo "$line" | grep -qF '=== END SCENE:'; then
             in_scene=true
             continue
-        elif [[ "$line" =~ '=== END SCENE:' ]]; then
+        elif echo "$line" | grep -qF '=== END SCENE:'; then
             in_scene=false
             continue
         elif [[ "$in_scene" == true ]]; then
