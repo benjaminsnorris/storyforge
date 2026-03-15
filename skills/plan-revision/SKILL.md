@@ -87,7 +87,7 @@ Based on the analysis, design a custom set of revision passes. Each pass is a fo
 
 ```yaml
 - name: descriptive-kebab-case-name
-  scope: full | act-1 | act-2 | act-3 | [scene-id-list]
+  scope: full | act-N | scene-level
   purpose: "One sentence explaining what this pass fixes and why"
   estimated_effort: minor | moderate | major
   findings: [list of finding IDs or descriptions this pass addresses]
@@ -229,7 +229,8 @@ pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier
 - First row is always the header
 - One row per pass, in execution order
 - `pass` column is the pass number (1-based)
-- `targets` column lists scene IDs when scope is scene-level (empty for `full` or act-level scope)
+- `scope` column must be one of: `full`, `act-N` (e.g., `act-1`), or `scene-level` (meaning: use the targets column for specific scene IDs)
+- `targets` column lists semicolon-separated scene IDs when scope is `scene-level` (empty for `full` or act-level scope)
 - `guidance` column contains concise revision guidance text
 - `protection` column lists things NOT to change (semicolon separated)
 - `findings` column lists finding IDs this pass addresses (semicolon separated)
