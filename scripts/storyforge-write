@@ -468,9 +468,9 @@ if [[ "$WRITE_MODE" == "batch" && "$DRY_RUN" != true ]]; then
             fi
         fi
 
-        # Detect API mode flag
+        # Detect API mode flag (skip for dry-run — prompts should show claude -p format)
         API_FLAG=""
-        [[ -n "${ANTHROPIC_API_KEY:-}" ]] && API_FLAG="--api-mode"
+        [[ "$DRY_RUN" != true && -n "${ANTHROPIC_API_KEY:-}" ]] && API_FLAG="--api-mode"
 
         PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts build-scene "$SCENE_ID" "$PROJECT_DIR" --coaching "$EFFECTIVE_COACHING" $API_FLAG)
         if [[ -z "$PROMPT" ]]; then
@@ -566,8 +566,9 @@ else
         fi
 
         # --- Build the prompt (outside zone — needed for dry-run check) ---
+        # Skip API mode for dry-run — prompts should show claude -p format
         API_FLAG=""
-        [[ -n "${ANTHROPIC_API_KEY:-}" ]] && API_FLAG="--api-mode"
+        [[ "$DRY_RUN" != true && -n "${ANTHROPIC_API_KEY:-}" ]] && API_FLAG="--api-mode"
 
         PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts build-scene "$SCENE_ID" "$PROJECT_DIR" --coaching "$EFFECTIVE_COACHING" $API_FLAG)
 

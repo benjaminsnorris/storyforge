@@ -630,8 +630,9 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     fi
     log "  Building revision prompt..."
     set +e
+    # Skip API mode for dry-run — prompts should show claude -p format
     API_FLAG=""
-    [[ -n "${ANTHROPIC_API_KEY:-}" && ! -f "$INTERACTIVE_FILE" ]] && API_FLAG="--api-mode"
+    [[ "${DRY_RUN:-false}" != true && -n "${ANTHROPIC_API_KEY:-}" && ! -f "$INTERACTIVE_FILE" ]] && API_FLAG="--api-mode"
 
     PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.revision build-prompt \
         "$PASS_NAME" "$PASS_PURPOSE" "${EFFECTIVE_SCOPE:-$PASS_SCOPE}" "$PROJECT_DIR" \
