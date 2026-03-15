@@ -21,6 +21,7 @@ set -eo pipefail
 # --- Resolve script and library paths ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
 
 # Source shared libraries
 source "${LIB_DIR}/common.sh"
@@ -629,7 +630,12 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     fi
     log "  Building revision prompt..."
     set +e
-    PROMPT=$(build_revision_prompt "$PASS_NAME" "$PASS_PURPOSE" "${EFFECTIVE_SCOPE:-$PASS_SCOPE}" "$PROJECT_DIR" "$PASS_BLOCK")
+    API_FLAG=""
+    [[ -n "${ANTHROPIC_API_KEY:-}" && ! -f "$INTERACTIVE_FILE" ]] && API_FLAG="--api-mode"
+
+    PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.revision build-prompt \
+        "$PASS_NAME" "$PASS_PURPOSE" "${EFFECTIVE_SCOPE:-$PASS_SCOPE}" "$PROJECT_DIR" \
+        --config "$PASS_BLOCK" --coaching "$EFFECTIVE_COACHING" $API_FLAG)
     PROMPT_EXIT=$?
     set -e
 
@@ -702,7 +708,6 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
 
         # Extract response and apply revision to scene files (Python parser)
         if (( EXIT_CODE == 0 )); then
-            PYTHON_LIB="${SCRIPT_DIR}/lib/python"
             parse_output=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.parsing extract-scenes "$STEP_LOG" "${PROJECT_DIR}/scenes" 2>/dev/null || true)
             if [[ -n "$parse_output" ]]; then
                 # Log each written scene
