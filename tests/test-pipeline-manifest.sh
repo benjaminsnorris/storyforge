@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-pipeline-manifest.sh — Tests for pipeline manifest CRUD functions
+# test-pipeline-manifest.sh — Tests for pipeline manifest CRUD functions (CSV format)
 #
 # Run via: ./tests/run-tests.sh
 # Depends on: FIXTURE_DIR, PROJECT_DIR, assertion functions (from run-tests.sh)
@@ -11,8 +11,6 @@
 PIPELINE_ORIG_PROJECT_DIR="$PROJECT_DIR"
 PIPELINE_TMP_DIR=$(mktemp -d)
 
-# Copy fixture structure into temp
-cp -R "$FIXTURE_DIR"/* "$PIPELINE_TMP_DIR/" 2>/dev/null || true
 mkdir -p "$PIPELINE_TMP_DIR/working/plans"
 mkdir -p "$PIPELINE_TMP_DIR/working/evaluations"
 
@@ -23,7 +21,7 @@ export PROJECT_DIR="$PIPELINE_TMP_DIR"
 # ============================================================================
 
 result=$(get_pipeline_file)
-assert_equals "${PIPELINE_TMP_DIR}/working/pipeline.yaml" "$result" \
+assert_equals "${PIPELINE_TMP_DIR}/working/pipeline.csv" "$result" \
     "get_pipeline_file: returns correct path"
 
 # ============================================================================
@@ -31,9 +29,8 @@ assert_equals "${PIPELINE_TMP_DIR}/working/pipeline.yaml" "$result" \
 # ============================================================================
 
 # Should create the file when it doesn't exist
-rm -f "${PIPELINE_TMP_DIR}/working/pipeline.yaml"
 ensure_pipeline_manifest
-assert_file_exists "${PIPELINE_TMP_DIR}/working/pipeline.yaml" \
+assert_file_exists "${PIPELINE_TMP_DIR}/working/pipeline.csv" \
     "ensure_pipeline_manifest: creates file"
 
 result=$(get_current_cycle)
@@ -104,9 +101,9 @@ update_cycle_field "2" "status" "evaluating"
 result=$(read_cycle_field "2" "status")
 assert_equals "evaluating" "$result" "update_cycle_field: cycle 2 status → evaluating"
 
-update_cycle_field "1" "plan" "revision-plan-1.yaml"
+update_cycle_field "1" "plan" "revision-plan-1.csv"
 result=$(read_cycle_field "1" "plan")
-assert_equals "revision-plan-1.yaml" "$result" "update_cycle_field: cycle 1 plan set"
+assert_equals "revision-plan-1.csv" "$result" "update_cycle_field: cycle 1 plan set"
 
 update_cycle_field "1" "status" "complete"
 result=$(read_cycle_field "1" "status")
@@ -121,18 +118,18 @@ assert_equals "Addressed 8/12 findings." "$result" "update_cycle_field: cycle 1 
 # ============================================================================
 
 result=$(get_cycle_plan_file "1")
-assert_equals "${PIPELINE_TMP_DIR}/working/plans/revision-plan-1.yaml" "$result" \
+assert_equals "${PIPELINE_TMP_DIR}/working/plans/revision-plan-1.csv" "$result" \
     "get_cycle_plan_file: cycle 1 returns named plan"
 
-# Cycle 2 has no plan set — should fall back to legacy path
+# Cycle 2 has no plan set — should fall back to default path
 result=$(get_cycle_plan_file "2")
-assert_equals "${PIPELINE_TMP_DIR}/working/plans/revision-plan.yaml" "$result" \
-    "get_cycle_plan_file: cycle with no plan falls back to legacy"
+assert_equals "${PIPELINE_TMP_DIR}/working/plans/revision-plan.csv" "$result" \
+    "get_cycle_plan_file: cycle with no plan falls back to default"
 
 # Default (no arg) uses current cycle
-update_cycle_field "2" "plan" "revision-plan-2.yaml"
+update_cycle_field "2" "plan" "revision-plan-2.csv"
 result=$(get_cycle_plan_file)
-assert_equals "${PIPELINE_TMP_DIR}/working/plans/revision-plan-2.yaml" "$result" \
+assert_equals "${PIPELINE_TMP_DIR}/working/plans/revision-plan-2.csv" "$result" \
     "get_cycle_plan_file: default uses current cycle"
 
 # ============================================================================
@@ -158,7 +155,7 @@ assert_equals "${PIPELINE_TMP_DIR}/working/evaluations/eval-20260305-120000" "$r
 # ============================================================================
 
 # Reset for lifecycle test
-rm -f "${PIPELINE_TMP_DIR}/working/pipeline.yaml"
+rm -f "${PIPELINE_TMP_DIR}/working/pipeline.csv"
 ensure_pipeline_manifest
 
 # Evaluate starts a new cycle
@@ -175,11 +172,11 @@ assert_equals "evaluating" "$result" "lifecycle: status is evaluating"
 update_cycle_field "$LIFECYCLE_CYCLE" "status" "planning"
 
 # Plan-revision saves plan
-update_cycle_field "$LIFECYCLE_CYCLE" "plan" "revision-plan-1.yaml"
+update_cycle_field "$LIFECYCLE_CYCLE" "plan" "revision-plan-1.csv"
 
 # Revise reads the plan and starts
 result=$(get_cycle_plan_file "$LIFECYCLE_CYCLE")
-assert_contains "$result" "revision-plan-1.yaml" "lifecycle: revise reads correct plan"
+assert_contains "$result" "revision-plan-1.csv" "lifecycle: revise reads correct plan"
 
 update_cycle_field "$LIFECYCLE_CYCLE" "status" "revising"
 

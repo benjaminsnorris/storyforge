@@ -21,7 +21,7 @@ Read all of the following. Do not skip any — the recommendation depends on hav
 
 1. **`storyforge.yaml`** — phase, coaching level, genre, target word count, status
 2. **`CLAUDE.md`** — recent activity, standing instructions, artifact status
-3. **`working/pipeline.yaml`** — if it exists: current cycle ID, cycle status, linked evaluation/plan/review. Read the full cycle history to understand where the project is in the eval→plan→revise→review loop.
+3. **`working/pipeline.csv`** — if it exists: current cycle ID, cycle status, linked evaluation/plan/review. Read the full cycle history to understand where the project is in the eval→plan→revise→review loop.
 4. **Key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it. Do not recommend anything that contradicts a settled decision.
 5. **Scan for artifacts** — check existence (not contents) of:
    - `reference/character-bible.md`
@@ -166,7 +166,7 @@ If this skill was invoked in a context where a written recommendation is needed 
 ```markdown
 # Next Steps — {title}
 **After:** {what just completed}
-**Cycle:** {cycle_id from pipeline.yaml, or "N/A"}
+**Cycle:** {cycle_id from pipeline.csv, or "N/A"}
 **Date:** {YYYY-MM-DD}
 
 ## Recommended Next Step
@@ -184,7 +184,7 @@ Save to `working/recommendations-{cycle_id}.md` (or `working/recommendations.md`
 
 Commit and push:
 ```
-git add working/recommendations*.md working/pipeline.yaml
+git add working/recommendations*.md working/pipeline.csv
 git commit -m "Recommend: next steps after {context}"
 git push
 ```

@@ -785,7 +785,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
             git add working/coaching/ 2>/dev/null || true
             git add working/logs/ 2>/dev/null || true
             git add working/costs/ 2>/dev/null || true
-            git add working/pipeline.yaml 2>/dev/null || true
+            git add working/pipeline.csv 2>/dev/null || true
             git commit -m "${EFFECTIVE_COACHING^}: ${PASS_NAME}" 2>/dev/null || true
         else
             git add -A
@@ -867,7 +867,7 @@ if (( COMPLETED == TOTAL_PASSES )); then
     (
         cd "$PROJECT_DIR"
         git add storyforge.yaml 2>/dev/null || true
-        git add working/pipeline.yaml 2>/dev/null || true
+        git add working/pipeline.csv 2>/dev/null || true
         git commit -m "Revision complete: advance phase to review" 2>/dev/null || true
         git push 2>/dev/null || true
     )

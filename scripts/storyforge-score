@@ -224,18 +224,9 @@ log "Scoring ${SCENE_COUNT} scenes in ${SCORE_MODE} mode"
 # Determine cycle number
 # ============================================================================
 
-PIPELINE_YAML="${PROJECT_DIR}/working/pipeline.yaml"
-CYCLE=1
-
-# Check pipeline.yaml for active cycle
-if [[ -f "$PIPELINE_YAML" ]]; then
-    active_cycle=$(grep -E '^\s*cycle:' "$PIPELINE_YAML" 2>/dev/null \
-        | head -1 \
-        | sed 's/^[[:space:]]*cycle:[[:space:]]*//' \
-        | sed 's/[[:space:]]*$//' || true)
-    if [[ -n "$active_cycle" && "$active_cycle" =~ ^[0-9]+$ ]]; then
-        CYCLE="$active_cycle"
-    fi
+CYCLE=$(get_current_cycle)
+if [[ "$CYCLE" == "0" ]]; then
+    CYCLE=1
 fi
 
 # If no active cycle, find highest existing cycle-N and increment

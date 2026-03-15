@@ -839,17 +839,18 @@ get_coaching_level() {
 # ============================================================================
 # Pipeline manifest (multi-cycle evaluation/revision tracking)
 # ============================================================================
+# Uses pipe-delimited CSV: working/pipeline.csv
+# Header: cycle|started|status|evaluation|plan|review|recommendations|summary
+
+PIPELINE_HEADER="cycle|started|status|evaluation|plan|review|recommendations|summary"
 
 # Get the pipeline manifest path.
-# Usage: pipeline_file=$(get_pipeline_file)
 get_pipeline_file() {
-    echo "${PROJECT_DIR}/working/pipeline.yaml"
+    echo "${PROJECT_DIR}/working/pipeline.csv"
 }
 
 # Initialize the pipeline manifest if it doesn't exist.
-# Creates working/pipeline.yaml with current_cycle: 0 and empty cycles list.
 # Idempotent — no-op if file already exists.
-# Usage: ensure_pipeline_manifest
 ensure_pipeline_manifest() {
     local pipeline_file
     pipeline_file=$(get_pipeline_file)
@@ -859,20 +860,11 @@ ensure_pipeline_manifest() {
     fi
 
     mkdir -p "$(dirname "$pipeline_file")"
-
-    cat > "$pipeline_file" <<'MANIFEST_EOF'
-# Pipeline Manifest — tracks evaluation/revision cycles
-# Auto-maintained by Storyforge scripts. Do not edit manually.
-
-current_cycle: 0
-
-cycles: []
-MANIFEST_EOF
+    echo "$PIPELINE_HEADER" > "$pipeline_file"
 }
 
-# Get the current cycle number from the pipeline manifest.
-# Returns 0 if manifest doesn't exist or current_cycle is not set.
-# Usage: cycle=$(get_current_cycle)
+# Get the current (highest) cycle number from the pipeline manifest.
+# Returns 0 if manifest doesn't exist or has no cycles.
 get_current_cycle() {
     local pipeline_file
     pipeline_file=$(get_pipeline_file)
@@ -882,54 +874,26 @@ get_current_cycle() {
         return 0
     fi
 
-    local cycle
-    cycle=$(grep -E '^current_cycle:' "$pipeline_file" \
-        | head -1 \
-        | sed 's/^current_cycle:[[:space:]]*//' \
-        | sed 's/[[:space:]]*$//')
+    local last_cycle
+    last_cycle=$(tail -1 "$pipeline_file" | awk -F'|' 'NR==1 && $1 != "cycle" { print $1 }')
 
-    echo "${cycle:-0}"
+    echo "${last_cycle:-0}"
 }
 
 # Read a field from a specific cycle in the pipeline manifest.
-# Usage: read_cycle_field 2 "evaluation" → "eval-20260305-091500"
+# Usage: read_cycle_field 2 "evaluation"
 read_cycle_field() {
     local cycle_id="$1"
     local field="$2"
     local pipeline_file
     pipeline_file=$(get_pipeline_file)
 
-    if [[ ! -f "$pipeline_file" ]]; then
-        echo ""
-        return 1
-    fi
-
-    # Extract the value of the field from the matching cycle block
-    awk -v cid="$cycle_id" -v fld="$field" '
-        /^cycles:/ { in_cycles = 1; next }
-        !in_cycles { next }
-        /^[^ \t]/ && !/^[[:space:]]/ { exit }
-        /^[[:space:]]*- id:/ {
-            match($0, /id:[[:space:]]*/)
-            val = substr($0, RSTART + RLENGTH)
-            gsub(/[[:space:]]*$/, "", val)
-            gsub(/^["'"'"']|["'"'"']$/, "", val)
-            found = (val == cid) ? 1 : 0
-        }
-        found && $0 ~ "^[[:space:]]+" fld ":" {
-            sub("^[[:space:]]+" fld ":[[:space:]]*", "")
-            gsub(/^["'"'"']|["'"'"']$/, "")
-            gsub(/[[:space:]]*$/, "")
-            print
-            exit
-        }
-    ' "$pipeline_file"
+    [[ -f "$pipeline_file" ]] || { echo ""; return 1; }
+    get_csv_field "$pipeline_file" "$cycle_id" "$field" "cycle"
 }
 
 # Start a new cycle in the pipeline manifest.
-# Increments current_cycle, appends a new cycle entry.
 # Returns the new cycle ID.
-# Usage: CYCLE_ID=$(start_new_cycle)
 start_new_cycle() {
     ensure_pipeline_manifest
 
@@ -942,32 +906,13 @@ start_new_cycle() {
     local today
     today=$(date '+%Y-%m-%d')
 
-    # Update current_cycle
-    sed -i '' "s/^current_cycle:.*/current_cycle: ${new_id}/" "$pipeline_file"
-
-    # Append new cycle entry
-    # Handle the empty list case: replace "cycles: []" with "cycles:" + entry
-    if grep -q '^cycles: \[\]' "$pipeline_file"; then
-        sed -i '' "s/^cycles: \[\]/cycles:/" "$pipeline_file"
-    fi
-
-    cat >> "$pipeline_file" <<CYCLE_EOF
-  - id: ${new_id}
-    started: "${today}"
-    status: pending
-    evaluation:
-    plan:
-    review:
-    recommendations:
-    summary:
-CYCLE_EOF
+    append_csv_row "$pipeline_file" "${new_id}|${today}|pending||||||"
 
     echo "$new_id"
 }
 
 # Update a field on a specific cycle in the pipeline manifest.
 # Usage: update_cycle_field 2 "status" "revising"
-# Usage: update_cycle_field 2 "plan" "revision-plan-2.yaml"
 update_cycle_field() {
     local cycle_id="$1"
     local field="$2"
@@ -975,49 +920,14 @@ update_cycle_field() {
     local pipeline_file
     pipeline_file=$(get_pipeline_file)
 
-    if [[ ! -f "$pipeline_file" ]]; then
-        return 1
-    fi
-
-    local tmp_file="${pipeline_file}.tmp"
-
-    awk -v cid="$cycle_id" -v fld="$field" -v newval="$value" '
-        /^cycles:/ { in_cycles = 1; print; next }
-        !in_cycles { print; next }
-        /^[^ \t]/ && !/^[[:space:]]/ { in_cycles = 0; print; next }
-        /^[[:space:]]*- id:/ {
-            match($0, /id:[[:space:]]*/)
-            val = substr($0, RSTART + RLENGTH)
-            gsub(/[[:space:]]*$/, "", val)
-            gsub(/^["'"'"']|["'"'"']$/, "", val)
-            in_target = (val == cid) ? 1 : 0
-            print; next
-        }
-        in_target && $0 ~ "^[[:space:]]+" fld ":" {
-            match($0, /^[[:space:]]+/)
-            indent = substr($0, RSTART, RLENGTH)
-            if (newval == "") {
-                print indent fld ":"
-            } else {
-                print indent fld ": " newval
-            }
-            next
-        }
-        { print }
-    ' "$pipeline_file" > "$tmp_file"
-
-    mv "$tmp_file" "$pipeline_file"
+    [[ -f "$pipeline_file" ]] || return 1
+    update_csv_field "$pipeline_file" "$cycle_id" "$field" "$value" "cycle"
 }
 
 # Get the plan file path for the current or specified cycle.
-# Falls back to the legacy hardcoded path if no manifest or no plan set.
-# Usage: plan_file=$(get_cycle_plan_file)
-# Usage: plan_file=$(get_cycle_plan_file 2)
 get_cycle_plan_file() {
     local cycle="${1:-}"
-    if [[ -z "$cycle" ]]; then
-        cycle=$(get_current_cycle)
-    fi
+    [[ -z "$cycle" ]] && cycle=$(get_current_cycle)
 
     local plan_name
     plan_name=$(read_cycle_field "$cycle" "plan")
@@ -1025,19 +935,14 @@ get_cycle_plan_file() {
     if [[ -n "$plan_name" ]]; then
         echo "${PROJECT_DIR}/working/plans/${plan_name}"
     else
-        # Fallback to legacy path
-        echo "${PROJECT_DIR}/working/plans/revision-plan.yaml"
+        echo "${PROJECT_DIR}/working/plans/revision-plan.csv"
     fi
 }
 
 # Get the evaluation directory for the current or specified cycle.
-# Usage: eval_dir=$(get_cycle_eval_dir)
-# Usage: eval_dir=$(get_cycle_eval_dir 2)
 get_cycle_eval_dir() {
     local cycle="${1:-}"
-    if [[ -z "$cycle" ]]; then
-        cycle=$(get_current_cycle)
-    fi
+    [[ -z "$cycle" ]] && cycle=$(get_current_cycle)
 
     local eval_name
     eval_name=$(read_cycle_field "$cycle" "evaluation")
@@ -1421,7 +1326,7 @@ run_recommend_step() {
     local pipeline_file
     pipeline_file=$(get_pipeline_file)
     if [[ -f "$pipeline_file" ]]; then
-        pipeline_context="- working/pipeline.yaml (pipeline manifest — shows cycle history)"
+        pipeline_context="- working/pipeline.csv (pipeline manifest — shows cycle history)"
     fi
 
     local recommend_prompt
@@ -1510,7 +1415,7 @@ RECOMMEND_EOF
         head_before=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || echo "none")
         (
             cd "$project_dir"
-            git add "${recommend_file}" working/logs/ working/pipeline.yaml 2>/dev/null || true
+            git add "${recommend_file}" working/logs/ working/pipeline.csv 2>/dev/null || true
             git commit -m "Recommend: next steps after ${review_type} (cycle ${cycle_id})" 2>/dev/null || true
             git push 2>/dev/null || true
         )
@@ -1751,7 +1656,7 @@ REVIEW_EOF
     if [[ "$head_before" == "$head_after" && -f "$review_file" ]]; then
         (
             cd "$project_dir"
-            git add working/reviews/ working/logs/ working/pipeline.yaml 2>/dev/null || true
+            git add working/reviews/ working/logs/ working/pipeline.csv 2>/dev/null || true
             git commit -m "Review: pipeline review (${review_type})" 2>/dev/null || true
             git push 2>/dev/null || true
         )
@@ -1812,7 +1717,7 @@ REVIEW_EOF
             if [[ -f "$review_file" ]]; then
                 (
                     cd "$project_dir"
-                    git add working/reviews/ working/logs/ working/pipeline.yaml 2>/dev/null || true
+                    git add working/reviews/ working/logs/ working/pipeline.csv 2>/dev/null || true
                     git commit -m "Review: re-review after cleanup $((cleanup_iter + 1)) (${review_type})" 2>/dev/null || true
                     git push 2>/dev/null || true
                 )

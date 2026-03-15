@@ -199,7 +199,7 @@ estimate_cost() {
 # Non-interactive (no tty) always proceeds.
 check_cost_threshold() {
     local estimated_cost="$1"
-    local threshold="${STORYFORGE_COST_THRESHOLD:-10}"
+    local threshold="${STORYFORGE_COST_THRESHOLD:-100}"
 
     # Check if estimated exceeds threshold
     local exceeds

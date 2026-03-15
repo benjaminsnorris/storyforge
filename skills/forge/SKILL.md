@@ -108,7 +108,7 @@ Invoke the `plan-revision` skill.
 **"Run revision" / "Revise the draft":**
 Check prerequisites:
 
-- *Hard prerequisite*: A revision plan must exist for the current pipeline cycle (check `working/plans/revision-plan.csv`, or `working/pipeline.yaml` for the plan field, or fall back to `working/plans/revision-plan.yaml`)
+- *Hard prerequisite*: A revision plan must exist for the current pipeline cycle (check `working/plans/revision-plan.csv`, or `working/pipeline.csv` for the plan field, or fall back to `working/plans/revision-plan.yaml`)
 
 If met, provide the revision command:
 
@@ -207,7 +207,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 | `storyforge write` | `reference/scene-metadata.csv` with at least one scene, `reference/voice-guide.md` |
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | `plan-revision` | Evaluation results in `working/evaluations/` |
-| `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.yaml`) |
+| `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.csv`) |
 | `storyforge assemble` | `reference/chapter-map.csv` with at least one chapter, scene files for referenced scenes |
 | `storyforge review` | Must be on a feature branch (ideally with a PR) |
 

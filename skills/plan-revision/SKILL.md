@@ -19,9 +19,9 @@ Store this resolved plugin path for use throughout the session.
 
 Look for evaluation output using the pipeline manifest:
 
-1. **Pipeline manifest:** Read `working/pipeline.yaml` if it exists. Find the current cycle and use its `evaluation` field to locate the evaluation directory (e.g., `working/evaluations/eval-20260305-091500/`). This is the authoritative link between the current cycle and its evaluation.
+1. **Pipeline manifest:** Read `working/pipeline.csv` if it exists. Find the current cycle and use its `evaluation` field to locate the evaluation directory (e.g., `working/evaluations/eval-20260305-091500/`). This is the authoritative link between the current cycle and its evaluation.
 
-2. **Fallback (no manifest):** If `working/pipeline.yaml` does not exist (older project), look for the most recent `eval-*` directory in `working/evaluations/`.
+2. **Fallback (no manifest):** If `working/pipeline.csv` does not exist (older project), look for the most recent `eval-*` directory in `working/evaluations/`.
 
 3. **Primary source (CSV):** Read `findings.csv` in the evaluation directory if it exists. This is a pipe-delimited CSV with columns: `id|severity|category|location|finding|suggestion`. Array values (like multiple scene IDs in `location`) use `;` (semicolon) as separator. Also check for `strengths.csv` and `false-positives.csv` in the same directory.
 
@@ -201,7 +201,7 @@ The output must start with `storyforge/revise-`. If it does not, stop and fix th
 
 **3. Determine the plan filename using the pipeline manifest.**
 
-Read `working/pipeline.yaml` (or `working/pipeline.csv` if the project has migrated to CSV) to find the current cycle ID. Save the plan as a pipe-delimited CSV:
+Read `working/pipeline.csv` to find the current cycle ID. Save the plan as a pipe-delimited CSV:
 - Save to `working/plans/revision-plan.csv`
 
 After writing the plan file, update the manifest's current cycle entry to set the `plan` field to `revision-plan.csv`.

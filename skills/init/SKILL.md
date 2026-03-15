@@ -73,7 +73,7 @@ Use the **Bash tool** to create the full directory tree:
 ├── manuscript/
 │   └── press-kit/        (marketing materials — blurbs, jacket copy, bios)
 └── working/
-    ├── pipeline.yaml     (pipeline manifest — tracks eval/revision cycles)
+    ├── pipeline.csv      (pipeline manifest — tracks eval/revision cycles)
     ├── logs/
     ├── evaluations/
     └── plans/
@@ -88,14 +88,7 @@ mkdir -p {project-dir}/{reference,scenes,manuscript/press-kit,working/{logs,eval
 Then create the initial pipeline manifest:
 
 ```bash
-cat > {project-dir}/working/pipeline.yaml <<'EOF'
-# Pipeline Manifest — tracks evaluation/revision cycles
-# Auto-maintained by Storyforge scripts. Do not edit manually.
-
-current_cycle: 0
-
-cycles: []
-EOF
+echo "cycle|started|status|evaluation|plan|review|recommendations|summary" > {project-dir}/working/pipeline.csv
 ```
 
 Do NOT create a `draft/` directory. Storyforge works on scene files in `scenes/` throughout the entire pipeline — drafting, evaluation, and revision all operate on scenes. Manuscript assembly is a separate, late-stage step. The `manuscript/press-kit/` directory is created as a placeholder for marketing materials; the rest of `manuscript/` is populated by the assembly pipeline later.

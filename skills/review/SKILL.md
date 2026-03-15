@@ -18,7 +18,7 @@ Store this resolved plugin path for use throughout the session.
 ## Step 1: Read Project State
 
 1. **Read `storyforge.yaml`** — project config, current phase, artifacts.
-2. **Read the pipeline manifest** — `working/pipeline.yaml` if it exists. Find the current cycle. Use its fields to locate the linked evaluation directory and revision plan file. This gives you the exact chain: which evaluation led to which plan led to which revision.
+2. **Read the pipeline manifest** — `working/pipeline.csv` if it exists. Find the current cycle. Use its fields to locate the linked evaluation directory and revision plan file. This gives you the exact chain: which evaluation led to which plan led to which revision.
 3. **Read the revision plan** — check for `working/plans/revision-plan.csv` first (pipe-delimited CSV with columns: `pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier`). If CSV does not exist, use the `plan` field from the current cycle in the manifest (e.g., `working/plans/revision-plan-2.yaml`). If no manifest exists, fall back to `working/plans/revision-plan.yaml`. Read every pass: name, purpose, scope, guidance, status, and summary fields.
 4. **Read evaluation findings** — use the `evaluation` field from the current cycle in the manifest to locate the exact evaluation directory (e.g., `working/evaluations/eval-20260305-091500/`). If no manifest exists, find the most recent evaluation in `working/evaluations/`. Read `findings.csv` first (pipe-delimited: `id|severity|category|location|finding|suggestion`). If CSV does not exist, fall back to `findings.yaml`. Also read `synthesis.md` (prose synthesis). These are the findings the revision was meant to address.
 5. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full.
@@ -79,7 +79,7 @@ Save the full review to `working/reviews/review-{date}.md` with this structure:
 ```markdown
 # Revision Review — {title}
 **Date:** {YYYY-MM-DD}
-**Cycle:** {cycle_id from pipeline.yaml, or "N/A" if no manifest}
+**Cycle:** {cycle_id from pipeline.csv, or "N/A" if no manifest}
 **Revision plan:** {path from manifest's plan field, or working/plans/revision-plan.yaml}
 **Based on evaluation:** {path from manifest's evaluation field, or most recent eval-* dir}
 
