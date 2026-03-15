@@ -113,19 +113,57 @@ resolve_scope() {
             fi
         done
     else
-        # Comma-separated scene IDs — resolve directly (supports legacy ID fallback)
+        # Comma-separated scene IDs or seq numbers
         IFS=',' read -ra id_list <<< "$scope"
+
+        # Detect if values are seq numbers (all purely numeric)
+        local all_numeric=true
         for sid in "${id_list[@]}"; do
             sid=$(echo "$sid" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
             [[ -z "$sid" ]] && continue
-            local f
-            f=$(resolve_scene_file "$scene_dir" "$sid")
-            if [[ -n "$f" ]]; then
-                matched_files+=("$f")
-            else
-                log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md" >&2
+            if [[ ! "$sid" =~ ^[0-9]+$ ]]; then
+                all_numeric=false
+                break
             fi
         done
+
+        if [[ "$all_numeric" == true ]]; then
+            # Seq numbers — resolve to scene IDs via metadata CSV
+            for sid in "${id_list[@]}"; do
+                sid=$(echo "$sid" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                [[ -z "$sid" ]] && continue
+                # Find scene ID with matching seq number
+                local resolved_id=""
+                resolved_id=$(awk -F'|' -v seq="$sid" '
+                    NR == 1 { for (i=1; i<=NF; i++) { if ($i == "seq") sc=i; if ($i == "id") ic=i } next }
+                    $sc == seq { print $ic; exit }
+                ' "$csv_file")
+                if [[ -n "$resolved_id" ]]; then
+                    local f
+                    f=$(resolve_scene_file "$scene_dir" "$resolved_id")
+                    if [[ -n "$f" ]]; then
+                        matched_files+=("$f")
+                    else
+                        log "WARNING: Scene file missing for seq ${sid} (id: ${resolved_id})" >&2
+                    fi
+                else
+                    log "WARNING: No scene found with seq number ${sid}" >&2
+                fi
+            done
+        else
+            # Scene IDs (slug names) — resolve directly
+            for sid in "${id_list[@]}"; do
+                sid=$(echo "$sid" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                [[ -z "$sid" ]] && continue
+                local f
+                f=$(resolve_scene_file "$scene_dir" "$sid")
+                if [[ -n "$f" ]]; then
+                    matched_files+=("$f")
+                else
+                    log "WARNING: Scene file missing for id '${sid}': ${scene_dir}/${sid}.md" >&2
+                fi
+            done
+        fi
     fi
 
     if [[ ${#matched_files[@]} -eq 0 ]]; then

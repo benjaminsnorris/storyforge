@@ -230,7 +230,7 @@ pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier
 - One row per pass, in execution order
 - `pass` column is the pass number (1-based)
 - `scope` column must be one of: `full`, `act-N` (e.g., `act-1`), or `scene-level` (meaning: use the targets column for specific scene IDs)
-- `targets` column lists semicolon-separated scene IDs when scope is `scene-level` (empty for `full` or act-level scope)
+- `targets` column lists semicolon-separated **scene IDs (slugs)** when scope is `scene-level` (empty for `full` or act-level scope). **NEVER use seq numbers** — always use the `id` column values from `scene-metadata.csv` (e.g., `geometry-of-dying;the-last-calibrator`, NOT `30;31`). The revision script uses these IDs to find scene files on disk.
 - `guidance` column contains concise revision guidance text
 - `protection` column lists things NOT to change (semicolon separated)
 - `findings` column lists finding IDs this pass addresses (semicolon separated)
