@@ -91,4 +91,104 @@ assert_equals "2" "$row_count" "api: ledger has header + 1 row"
 data_row=$(tail -1 "$ledger")
 assert_contains "$data_row" "test-op|test-target|claude-sonnet-4-6|1000|500" "api: row has correct data"
 
+# ============================================================================
+# storyforge.prompts
+# ============================================================================
+
+echo "  --- prompts: read_csv_field ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+from storyforge.prompts import read_csv_field
+print(read_csv_field('${FIXTURE_DIR}/reference/scene-metadata.csv', 'act1-sc01', 'title'))
+" 2>/dev/null)
+assert_equals "The Finest Cartographer" "$result" "prompts: read_csv_field reads title"
+
+echo "  --- prompts: get_scene_metadata ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.prompts get-metadata act1-sc01 "$FIXTURE_DIR" 2>/dev/null)
+assert_contains "$result" "title: The Finest Cartographer" "prompts: get_scene_metadata has title"
+assert_contains "$result" "pov:" "prompts: get_scene_metadata has pov"
+
+echo "  --- prompts: get_previous_scene ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.prompts get-previous act1-sc02 "$FIXTURE_DIR" 2>/dev/null)
+assert_equals "act1-sc01" "$result" "prompts: get_previous_scene returns correct id"
+
+echo "  --- prompts: list_reference_files ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.prompts list-refs "$FIXTURE_DIR" 2>/dev/null)
+assert_contains "$result" "reference/" "prompts: list_reference_files returns relative paths"
+
+# ============================================================================
+# storyforge.revision
+# ============================================================================
+
+echo "  --- revision: resolve_scope ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.revision resolve-scope full "$FIXTURE_DIR" 2>/dev/null)
+assert_contains "$result" "act1-sc01.md" "revision: resolve_scope full includes first scene"
+assert_contains "$result" "act2-sc01.md" "revision: resolve_scope full includes act2 scene"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.revision resolve-scope act1-sc01,act1-sc02 "$FIXTURE_DIR" 2>/dev/null)
+assert_contains "$result" "act1-sc01.md" "revision: resolve_scope csv includes first id"
+assert_contains "$result" "act1-sc02.md" "revision: resolve_scope csv includes second id"
+
+# ============================================================================
+# storyforge.scoring
+# ============================================================================
+
+echo "  --- scoring: parse_score_output ---"
+
+SCORE_TMP="$(mktemp -d)"
+cat > "${SCORE_TMP}/scores-text.txt" <<'TXT'
+Some analysis text.
+
+{{SCORES:}}
+principle|score
+economy_clarity|4
+enter_late_leave_early|3
+{{END_SCORES}}
+
+{{RATIONALE:}}
+principle|rationale
+economy_clarity|Good prose density
+enter_late_leave_early|Opens a bit early
+{{END_RATIONALE}}
+TXT
+
+PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.scoring parse-output "${SCORE_TMP}/scores-text.txt" "${SCORE_TMP}/scores.csv" "${SCORE_TMP}/rationale.csv" 2>/dev/null
+assert_file_exists "${SCORE_TMP}/scores.csv" "scoring: parse_output creates scores file"
+assert_file_exists "${SCORE_TMP}/rationale.csv" "scoring: parse_output creates rationale file"
+
+scores_content=$(cat "${SCORE_TMP}/scores.csv")
+assert_contains "$scores_content" "economy_clarity|4" "scoring: scores has correct value"
+
+echo "  --- scoring: build_weighted_text ---"
+
+# Use default weights from plugin
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.scoring weighted-text "${PLUGIN_DIR}/references/default-craft-weights.csv" 2>/dev/null)
+if [[ -n "$result" ]]; then
+    PASS=$((PASS + 1))
+    echo "  PASS: scoring: weighted_text returns output"
+else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL: scoring: weighted_text returned empty"
+fi
+
+echo "  --- scoring: effective_weight ---"
+
+# Create a temp weights file for testing
+cat > "${SCORE_TMP}/weights.csv" <<'CSV'
+section|principle|weight|author_weight|notes
+scene_craft|enter_late_leave_early|5||
+scene_craft|every_scene_must_turn|7|9|author override
+CSV
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.scoring effective-weight "${SCORE_TMP}/weights.csv" every_scene_must_turn 2>/dev/null)
+assert_equals "9" "$result" "scoring: effective_weight returns author_weight when set"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.scoring effective-weight "${SCORE_TMP}/weights.csv" enter_late_leave_early 2>/dev/null)
+assert_equals "5" "$result" "scoring: effective_weight returns weight when no author_weight"
+
+rm -rf "$SCORE_TMP"
 rm -rf "$PARSE_TMP"
