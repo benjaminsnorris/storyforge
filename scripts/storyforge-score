@@ -34,6 +34,9 @@ fi
 # shellcheck source=lib/common.sh
 source "${LIB_DIR}/common.sh"
 
+# Python scoring module path
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
+
 # --- Default options ---
 DRY_RUN=false
 INTERACTIVE=false
@@ -369,7 +372,7 @@ invoke_and_parse() {
     }
     echo "$text_content" > "$log_file"
 
-    parse_score_output "$log_file" "$score_file" "$rationale_file" "$score_marker" "$rationale_marker"
+    PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring parse-output "$log_file" "$score_file" "$rationale_file" --score-marker "$score_marker" --rationale-marker "$rationale_marker"
     return $?
 }
 
@@ -456,7 +459,7 @@ fi
 EVAL_TEMPLATE=$(cat "$EVAL_TEMPLATE_FILE")
 EVALUATION_CRITERIA=$(build_evaluation_criteria "$DIAGNOSTICS_CSV" "$GUIDE_FILE")
 # Exclude narrative principles from scene-level weighted text (scored at novel level)
-WEIGHTED_TEXT=$(build_weighted_text "$WEIGHTS_FILE" "narrative")
+WEIGHTED_TEXT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring weighted-text "$WEIGHTS_FILE" --exclude-section narrative)
 
 log "Evaluation model: ${EVAL_MODEL} (mode: ${SCORE_MODE})"
 log ""
@@ -544,8 +547,8 @@ batch)
             tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
 
             if parse_scene_evaluation "$text_file" "$tmp_scores" "$tmp_rationale" "$id"; then
-                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
-                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
+                PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring merge "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
+                PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring merge "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
                 SCORED=$((SCORED + 1))
                 log "  ${local_title:-$id} scored (${SCORED}/${SCENE_COUNT})"
             else
@@ -629,8 +632,8 @@ direct|direct-deep)
             tmp_rationale="${CYCLE_DIR}/.tmp-rationale-${id}.csv"
 
             if [[ -f "$status_file" ]] && [[ "$(cat "$status_file")" == "ok" ]]; then
-                merge_score_files "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
-                merge_score_files "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
+                PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring merge "${CYCLE_DIR}/scene-scores.csv" "$tmp_scores"
+                PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring merge "${CYCLE_DIR}/scene-rationale.csv" "$tmp_rationale"
                 SCORED=$((SCORED + 1))
                 log "  ${local_title:-$id} scored (${SCORED}/${SCENE_COUNT})"
             else
@@ -709,7 +712,7 @@ $(cat "$scene_file")
         # Build rubric content
         narrative_rubric=$(extract_rubric_section "Narrative Frameworks")
         character_act_rubric=$(extract_rubric_section "Character Craft")
-        weighted_text=$(build_weighted_text "$WEIGHTS_FILE")
+        weighted_text=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring weighted-text "$WEIGHTS_FILE")
 
         # Substitute into template
     prompt="$ACT_TEMPLATE"
@@ -728,8 +731,8 @@ $(cat "$scene_file")
         log "  Scoring act ${act_label} (${act_scene_count} scenes)..."
 
         if invoke_and_parse "$prompt" "$log_file" "$tmp_scores" "$tmp_rationale"; then
-            merge_score_files "${CYCLE_DIR}/act-scores.csv" "$tmp_scores"
-            merge_score_files "${CYCLE_DIR}/act-rationale.csv" "$tmp_rationale"
+            PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring merge "${CYCLE_DIR}/act-scores.csv" "$tmp_scores"
+            PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring merge "${CYCLE_DIR}/act-rationale.csv" "$tmp_rationale"
             rm -f "$tmp_scores" "$tmp_rationale"
             log "  Act ${act_label} scored"
         else
@@ -785,7 +788,7 @@ $(echo "$character_list" | sed 's/^/- /')"
     # Build rubrics
     character_novel_rubric=$(extract_rubric_section "Character Craft")
     genre_rubric=$(extract_rubric_section "Tropes and Genre")
-    weighted_text=$(build_weighted_text "$WEIGHTS_FILE")
+    weighted_text=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring weighted-text "$WEIGHTS_FILE")
 
     # Substitute into template
     prompt="$NOVEL_TEMPLATE"
@@ -818,7 +821,7 @@ $(echo "$character_list" | sed 's/^/- /')"
         # Parse character scores
     char_scores="${CYCLE_DIR}/.tmp-char-scores.csv"
     char_rationale="${CYCLE_DIR}/.tmp-char-rationale.csv"
-        parse_score_output "$log_file" "$char_scores" "$char_rationale" "CHARACTER_SCORES" "CHARACTER_RATIONALE"
+        PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring parse-output "$log_file" "$char_scores" "$char_rationale" --score-marker CHARACTER_SCORES --rationale-marker CHARACTER_RATIONALE
         if [[ -f "$char_scores" ]]; then
             cp "$char_scores" "${CYCLE_DIR}/character-scores.csv"
             rm -f "$char_scores"
@@ -831,7 +834,7 @@ $(echo "$character_list" | sed 's/^/- /')"
         # Parse genre scores
     genre_scores="${CYCLE_DIR}/.tmp-genre-scores.csv"
     genre_rationale="${CYCLE_DIR}/.tmp-genre-rationale.csv"
-        parse_score_output "$log_file" "$genre_scores" "$genre_rationale" "GENRE_SCORES" "GENRE_RATIONALE"
+        PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring parse-output "$log_file" "$genre_scores" "$genre_rationale" --score-marker GENRE_SCORES --rationale-marker GENRE_RATIONALE
         if [[ -f "$genre_scores" ]]; then
             cp "$genre_scores" "${CYCLE_DIR}/genre-scores.csv"
             rm -f "$genre_scores"
@@ -882,7 +885,7 @@ else
     [[ -f "$NARR_CHAPTER_MAP_FILE" ]] && NARR_CHAPTER_MAP=$(cat "$NARR_CHAPTER_MAP_FILE")
 
     # Build weighted text for narrative principles only (no exclusion)
-    NARR_WEIGHTED_TEXT=$(build_weighted_text "$WEIGHTS_FILE")
+    NARR_WEIGHTED_TEXT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring weighted-text "$WEIGHTS_FILE")
 
     # Substitute template
     NARRATIVE_PROMPT="$NARRATIVE_TEMPLATE"
@@ -943,8 +946,8 @@ if (( CYCLE > 1 )); then
 fi
 
 # Generate diagnosis and proposals
-generate_diagnosis "$CYCLE_DIR" "$PREV_DIR" "$WEIGHTS_FILE"
-generate_proposals "$CYCLE_DIR" "$WEIGHTS_FILE"
+PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring diagnose "$CYCLE_DIR" "${PREV_DIR:-"-"}" "$WEIGHTS_FILE"
+PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring propose "$CYCLE_DIR" "$WEIGHTS_FILE"
 
 PROPOSALS_FILE="${CYCLE_DIR}/proposals.csv"
 DIAGNOSIS_FILE="${CYCLE_DIR}/diagnosis.csv"

@@ -181,6 +181,9 @@ run_suite() {
     PASS=0
     FAIL=0
 
+    # Reset PROJECT_DIR to fixture between suites (prevents cross-contamination)
+    export PROJECT_DIR="$FIXTURE_DIR"
+
     echo ""
     echo "=== ${suite_name} ==="
 
