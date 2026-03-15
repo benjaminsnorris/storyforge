@@ -1375,8 +1375,16 @@ Rules:
 CLEANUP_EOF
 
     log "  Cleanup pass ${iteration} (model: ${cleanup_model})..."
-    _run_headless_session "$cleanup_prompt" "$cleanup_model" "$cleanup_log"
+    # Cleanup requires tool use (reading/editing files, git) — must use claude -p
+    set +e
+    claude -p "$cleanup_prompt" \
+        --model "$cleanup_model" \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        > "$cleanup_log" 2>&1
     local rc=$?
+    set -e
 
     if (( rc != 0 )); then
         log "WARNING: Cleanup pass ${iteration} failed (exit code ${rc})"
@@ -1483,6 +1491,17 @@ RECOMMEND_EOF
 
     if (( rc != 0 )); then
         log "WARNING: Recommend step failed (exit code ${rc})"
+    fi
+
+    # When using the API, Claude can't write files directly — extract and write
+    if [[ -n "${ANTHROPIC_API_KEY:-}" && ! -f "${project_dir}/${recommend_file}" ]]; then
+        local recommend_text
+        recommend_text=$(_extract_headless_response "$recommend_log" 2>/dev/null || true)
+        if [[ -n "$recommend_text" ]]; then
+            mkdir -p "$(dirname "${project_dir}/${recommend_file}")"
+            echo "$recommend_text" > "${project_dir}/${recommend_file}"
+            log "Recommendations saved to ${recommend_file}"
+        fi
     fi
 
     # Fallback commit if Claude didn't
@@ -1708,6 +1727,17 @@ REVIEW_EOF
         log "Invoking claude for review (model: ${review_model})..."
         _run_headless_session "$review_prompt" "$review_model" "$review_log"
         local review_exit=$?
+
+        # When using the API (not claude -p), Claude can't write files directly.
+        # Extract the response and write the review file ourselves.
+        if [[ -n "${ANTHROPIC_API_KEY:-}" && ! -f "$review_file" ]]; then
+            local review_text
+            review_text=$(_extract_headless_response "$review_log" 2>/dev/null || true)
+            if [[ -n "$review_text" ]]; then
+                echo "$review_text" > "$review_file"
+                log "Review saved to $(basename "$review_file")"
+            fi
+        fi
     fi
 
     if (( review_exit != 0 )); then
