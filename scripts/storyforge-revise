@@ -717,21 +717,29 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
                     # Use sed to extract scene ID from marker lines (avoids bash regex compat issues)
                     while IFS= read -r line; do
                         if echo "$line" | grep -qE '^=== SCENE: .+ ===$' && ! echo "$line" | grep -qF '=== END SCENE:'; then
+                            # Extract scene ID between "=== SCENE: " and " ==="
+                            local new_scene_id
+                            new_scene_id=$(echo "$line" | sed 's/^=== SCENE: //; s/ ===$//')
+
+                            # Skip entries with parenthetical suffixes like "(revised note)"
+                            if echo "$new_scene_id" | grep -qF '('; then
+                                current_scene_id=""
+                                current_content=""
+                                continue
+                            fi
+
                             # Write previous scene if any
                             if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
-                                current_content=$(echo "$current_content" | sed '/./,$!d' | sed -e :a -e '/^[[:space:]]*$/{ $d; N; ba; }')
-                                echo "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
+                                printf '%s\n' "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
                                 log "  Wrote revised scene: ${current_scene_id}"
                                 scenes_written=$((scenes_written + 1))
                             fi
-                            # Extract scene ID between "=== SCENE: " and " ==="
-                            current_scene_id=$(echo "$line" | sed 's/^=== SCENE: //; s/ ===$//')
+                            current_scene_id="$new_scene_id"
                             current_content=""
                         elif echo "$line" | grep -qF '=== END SCENE:'; then
                             # End marker — write this scene
                             if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
-                                current_content=$(echo "$current_content" | sed '/./,$!d' | sed -e :a -e '/^[[:space:]]*$/{ $d; N; ba; }')
-                                echo "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
+                                printf '%s\n' "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
                                 log "  Wrote revised scene: ${current_scene_id}"
                                 scenes_written=$((scenes_written + 1))
                             fi
@@ -744,8 +752,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
                     done <<< "$response"
                     # Write last scene if no end marker
                     if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
-                        current_content=$(echo "$current_content" | sed '/./,$!d' | sed -e :a -e '/^[[:space:]]*$/{ $d; N; ba; }')
-                        echo "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
+                        printf '%s\n' "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
                         log "  Wrote revised scene: ${current_scene_id}"
                         scenes_written=$((scenes_written + 1))
                     fi

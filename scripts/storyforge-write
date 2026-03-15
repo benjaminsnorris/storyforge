@@ -81,12 +81,10 @@ _extract_scene_from_response() {
     done <<< "$response"
 
     if [[ -n "$extracted" ]]; then
-        # Trim leading/trailing blank lines
-        extracted=$(echo "$extracted" | sed '/./,$!d' | sed -e :a -e '/^[[:space:]]*$/{ $d; N; ba; }')
-        echo "$extracted" > "$scene_file"
+        printf '%s\n' "$extracted" > "$scene_file"
     else
         # No markers found — use the full response (legacy behavior)
-        echo "$response" > "$scene_file"
+        printf '%s\n' "$response" > "$scene_file"
     fi
     log "Wrote scene file: ${scene_file}"
 }
