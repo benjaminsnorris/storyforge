@@ -692,7 +692,8 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         MONITOR_PID=$!
         register_child_pid $MONITOR_PID
 
-        invoke_anthropic_api "$PROMPT" "$PASS_MODEL" "$STEP_LOG" 8192
+        # Revision passes output full scene content — need high max_tokens
+        invoke_anthropic_api "$PROMPT" "$PASS_MODEL" "$STEP_LOG" 32768
         EXIT_CODE=$?
 
         # Stop the monitor
@@ -709,28 +710,45 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
                 # Each scene is delimited by markers like: === SCENE: scene-id ===
                 # If the response doesn't use markers, it's a single-scene or
                 # non-file-writing pass (e.g., continuity check).
-                if echo "$response" | grep -qE '^=== SCENE: .+ ===$'; then
+                if echo "$response" | grep -qE '=== SCENE: .+ ==='; then
                     current_scene_id=""
                     current_content=""
+                    scenes_written=0
                     while IFS= read -r line; do
-                        if [[ "$line" =~ ^'=== SCENE: '(.+)' ===' ]]; then
+                        if [[ "$line" =~ '=== SCENE: '(.+)' ===' && ! "$line" =~ '=== END SCENE:' ]]; then
                             # Write previous scene if any
                             if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
+                                # Trim leading/trailing blank lines
+                                current_content=$(echo "$current_content" | sed '/./,$!d' | sed -e :a -e '/^[[:space:]]*$/{ $d; N; ba; }')
                                 echo "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
                                 log "  Wrote revised scene: ${current_scene_id}"
+                                scenes_written=$((scenes_written + 1))
                             fi
                             current_scene_id="${BASH_REMATCH[1]}"
                             current_content=""
-                        else
+                        elif [[ "$line" =~ '=== END SCENE:' ]]; then
+                            # End marker — write this scene
+                            if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
+                                current_content=$(echo "$current_content" | sed '/./,$!d' | sed -e :a -e '/^[[:space:]]*$/{ $d; N; ba; }')
+                                echo "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
+                                log "  Wrote revised scene: ${current_scene_id}"
+                                scenes_written=$((scenes_written + 1))
+                            fi
+                            current_scene_id=""
+                            current_content=""
+                        elif [[ -n "$current_scene_id" ]]; then
                             current_content="${current_content:+${current_content}
 }${line}"
                         fi
                     done <<< "$response"
-                    # Write last scene
+                    # Write last scene if no end marker
                     if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
+                        current_content=$(echo "$current_content" | sed '/./,$!d' | sed -e :a -e '/^[[:space:]]*$/{ $d; N; ba; }')
                         echo "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
                         log "  Wrote revised scene: ${current_scene_id}"
+                        scenes_written=$((scenes_written + 1))
                     fi
+                    log "  Revision applied: ${scenes_written} scene(s) written"
                 else
                     # Single-target or analytical pass — log response for reference
                     log "  API response received ($(echo "$response" | wc -w | tr -d ' ') words)"

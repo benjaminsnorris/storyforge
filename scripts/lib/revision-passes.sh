@@ -249,12 +249,40 @@ build_revision_prompt() {
     local file_count
     file_count=$(echo "$file_list" | wc -l | tr -d ' ')
 
-    # Build the file list as a readable block for the prompt
+    # Detect API mode — if set, we must inline file content since the API can't read disk
+    local api_mode=false
+    [[ -n "${ANTHROPIC_API_KEY:-}" ]] && api_mode=true
+
+    # Build the file list and optionally inline content
     local file_block=""
+    local inline_scenes=""
     while IFS= read -r fpath; do
         local rel="${fpath#${project_dir}/}"
         file_block+="- ${rel}"$'\n'
+        if [[ "$api_mode" == true && -f "$fpath" ]]; then
+            local scene_id
+            scene_id=$(basename "$fpath" .md)
+            inline_scenes+="
+=== SCENE: ${scene_id} ===
+$(cat "$fpath")
+=== END SCENE: ${scene_id} ===
+"
+        fi
     done <<< "$file_list"
+
+    # In API mode, inline reference files too
+    local inline_references=""
+    if [[ "$api_mode" == true ]]; then
+        for ref_file in "reference/voice-guide.md" "reference/continuity-tracker.md" "reference/scene-metadata.csv"; do
+            if [[ -f "${project_dir}/${ref_file}" ]]; then
+                inline_references+="
+=== FILE: ${ref_file} ===
+$(cat "${project_dir}/${ref_file}")
+=== END FILE ===
+"
+            fi
+        done
+    fi
 
     # Build the pass configuration section if provided
     local config_section=""
@@ -331,6 +359,43 @@ The following craft principles are relevant to this revision pass. Let them guid
 
 ${craft_sections}
 }
+PROMPT_EOF
+
+    if [[ "$api_mode" == true ]]; then
+        # API mode: inline all content and instruct Claude to output revised scenes
+        cat <<API_PROMPT_EOF
+## Reference Context
+
+${inline_references:-No reference files found.}
+
+## Scene Content
+
+Below are the full contents of every in-scope scene file. Read them all before making changes.
+
+${inline_scenes}
+
+## Instructions
+
+You are performing a revision pass on a novel manuscript. Apply the revision purpose stated above to the scene files provided.
+
+### Output Format
+
+For EACH scene you modify, output the complete revised scene using this exact format:
+
+\`\`\`
+=== SCENE: scene-id ===
+[complete revised scene prose — the ENTIRE file content, not just changed parts]
+=== END SCENE: scene-id ===
+\`\`\`
+
+**CRITICAL:** Output the COMPLETE file content for every modified scene. Do not use ellipsis, "[rest unchanged]", or partial content. If you change even one word in a scene, output the entire scene.
+
+Only output scenes you actually changed. Skip scenes that need no edits for this pass.
+
+API_PROMPT_EOF
+    else
+        # claude -p mode: Claude can read files and write directly
+        cat <<CLAUDEP_PROMPT_EOF
 ## Instructions
 
 You are performing a revision pass on a novel manuscript. Follow these rules precisely:
@@ -347,12 +412,13 @@ Before making any changes, read these reference files to understand the project'
 
 Read every scene file listed above in full before making changes. Understand the narrative arc across these scenes before editing any individual scene.
 
-PROMPT_EOF
+CLAUDEP_PROMPT_EOF
+    fi
 
     # Coaching-level-specific instructions
     if [[ "$coaching_level" == "coach" ]]; then
         cat <<COACH_EOF
-### 3. Produce Editorial Notes
+### Produce Editorial Notes
 
 You are in COACH mode. Do NOT edit scene files. Do NOT change any prose.
 
@@ -368,19 +434,27 @@ Your notes should include:
 - Concrete suggestions for how to revise (but do not make the edits)
 - Voice preservation warnings — places where revision could damage the voice
 - Continuity implications of potential changes
+COACH_EOF
+        if [[ "$api_mode" == true ]]; then
+            echo ""
+            echo "Output your editorial notes directly as markdown."
+        else
+            cat <<COACH_SAVE_EOF
 
 Save to: \`working/coaching/${pass_name}-notes.md\`
 
-### 4. Commit and Push
-
+Then commit and push:
 \`\`\`
 mkdir -p working/coaching
 git add working/coaching/${pass_name}-notes.md
 git commit -m "Coach: editorial notes for ${pass_name}"
 git push
 \`\`\`
+COACH_SAVE_EOF
+        fi
+        cat <<COACH_SUMMARY_EOF
 
-### 5. Post-Pass Summary
+### Post-Pass Summary
 
 Print a structured summary:
 - **Scenes analyzed:** List each scene file reviewed
@@ -389,11 +463,11 @@ Print a structured summary:
 - **Priority edits:** Which changes would have the most impact, in order
 - **Voice risks:** Where the revision is most likely to damage voice if not careful
 - **Issues discovered:** Anything that may need a separate pass
-COACH_EOF
+COACH_SUMMARY_EOF
 
     elif [[ "$coaching_level" == "strict" ]]; then
         cat <<STRICT_EOF
-### 3. Produce Revision Checklist
+### Produce Revision Checklist
 
 You are in STRICT mode. Do NOT edit scene files. Do NOT provide editorial suggestions or craft guidance.
 
@@ -408,30 +482,81 @@ Your checklist should include:
 - Specific locations (with quotes) where targets are relevant
 - Current counts or measurements for quantitative targets
 - Protection list verification — confirm protected passages are identified
+STRICT_EOF
+        if [[ "$api_mode" == true ]]; then
+            echo ""
+            echo "Output your checklist directly as markdown."
+        else
+            cat <<STRICT_SAVE_EOF
 
 Save to: \`working/coaching/${pass_name}-checklist.md\`
 
-### 4. Commit and Push
-
+Then commit and push:
 \`\`\`
 mkdir -p working/coaching
 git add working/coaching/${pass_name}-checklist.md
 git commit -m "Strict: revision checklist for ${pass_name}"
 git push
 \`\`\`
+STRICT_SAVE_EOF
+        fi
+        cat <<STRICT_SUMMARY_EOF
 
-### 5. Post-Pass Summary
+### Post-Pass Summary
 
 Print a structured summary:
 - **Scenes analyzed:** List each scene file reviewed
 - **Target counts:** For each target, the current measurement per scene
 - **Applicable locations:** How many locations per scene per target
 - **Protected passages:** Confirmed locations of all protected passages
-STRICT_EOF
+STRICT_SUMMARY_EOF
 
     else
         # full mode (default)
-        cat <<FULL_EOF
+        if [[ "$api_mode" == true ]]; then
+            cat <<FULL_API_EOF
+### Apply the Revision
+
+For each in-scope scene, apply the revision purpose stated above:
+
+> ${purpose}
+
+If a pass configuration was provided above, follow its targets, guidance, and protection lists precisely. These represent the author's intent — execute on them, do not second-guess them.
+
+### Preserve Voice
+
+Every edit must be consistent with the voice guide provided in the reference context above. Do not flatten distinctive character voices. Do not introduce vocabulary, rhythms, or registers that violate the established style. When in doubt, preserve the original phrasing.
+
+### Maintain Continuity
+
+Do not create contradictions with other scenes. Consult the continuity tracker in the reference context above before changing any plot-relevant detail.
+
+### Output Your Revisions
+
+For EACH scene you modify, output the complete revised scene using this exact format:
+
+\`\`\`
+=== SCENE: scene-id ===
+[complete revised scene prose — the ENTIRE file content, not just changed parts]
+=== END SCENE: scene-id ===
+\`\`\`
+
+**CRITICAL:** Output the COMPLETE file content for every modified scene. Do not use ellipsis, "[rest unchanged]", or partial content. If you change even one word in a scene, output the entire scene.
+
+Only output scenes you actually changed. Skip scenes that need no edits for this pass.
+
+### Post-Pass Summary
+
+After all revised scenes, print a structured summary:
+- **Files modified:** List each scene that was changed
+- **Changes made:** Brief description of the kinds of edits applied
+- **Target progress:** For each target in the pass configuration, report how close you came
+- **Protected passages:** Confirm all protected passages were left untouched
+- **Net word count change:** Approximate words added or removed
+- **Issues discovered:** Anything that may need a separate pass
+FULL_API_EOF
+        else
+            cat <<FULL_CLAUDE_EOF
 ### 3. Apply the Revision
 
 For each in-scope scene file, apply the revision purpose stated above:
@@ -472,7 +597,8 @@ After completing all edits, print a structured summary:
 - **Continuity updates:** Any changes to the continuity tracker
 - **Net word count change:** Approximate words added or removed (e.g., "+1,200" or "-800")
 - **Issues discovered:** Anything that may need a separate pass
-FULL_EOF
+FULL_CLAUDE_EOF
+        fi
     fi
 }
 
