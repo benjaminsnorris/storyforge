@@ -148,7 +148,7 @@ count_csv_passes() {
 read_csv_pass_field() {
     local pass_num="$1"
     local field="$2"
-    get_csv_field "$CSV_PLAN_FILE" "$pass_num" "$field"
+    get_csv_field "$CSV_PLAN_FILE" "$pass_num" "$field" "pass"
 }
 
 # Update a field in the CSV plan for a given pass number.
@@ -157,7 +157,7 @@ update_csv_pass_field() {
     local pass_num="$1"
     local field="$2"
     local value="$3"
-    update_csv_field "$CSV_PLAN_FILE" "$pass_num" "$field" "$value"
+    update_csv_field "$CSV_PLAN_FILE" "$pass_num" "$field" "$value" "pass"
 }
 
 # ============================================================================
