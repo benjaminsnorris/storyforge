@@ -1,0 +1,351 @@
+"""Direct Anthropic API invocation and Batch API helpers.
+
+Replaces api.sh — provides reliable JSON handling, HTTP calls, and
+cost calculation without jq/curl/awk compatibility issues.
+"""
+
+import json
+import os
+import sys
+import time
+import csv
+from datetime import datetime
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+
+
+API_BASE = 'https://api.anthropic.com/v1'
+API_VERSION = '2023-06-01'
+
+# Pricing per million tokens (defaults, env-overridable)
+PRICING = {
+    'opus':   {'input': 15.00, 'output': 75.00, 'cache_read': 1.50, 'cache_create': 18.75},
+    'sonnet': {'input': 3.00,  'output': 15.00, 'cache_read': 0.30, 'cache_create': 3.75},
+    'haiku':  {'input': 0.80,  'output': 4.00,  'cache_read': 0.08, 'cache_create': 1.00},
+}
+
+
+def get_api_key() -> str:
+    key = os.environ.get('ANTHROPIC_API_KEY', '')
+    if not key:
+        raise RuntimeError('ANTHROPIC_API_KEY not set')
+    return key
+
+
+def _detect_tier(model: str) -> str:
+    model_lower = model.lower()
+    if 'opus' in model_lower:
+        return 'opus'
+    elif 'haiku' in model_lower:
+        return 'haiku'
+    return 'sonnet'
+
+
+def _get_pricing(model: str, token_type: str) -> float:
+    tier = _detect_tier(model)
+    env_key = f'PRICING_{tier.upper()}_{token_type.upper()}'
+    env_val = os.environ.get(env_key)
+    if env_val:
+        return float(env_val)
+    return PRICING[tier][token_type]
+
+
+def _api_request(path: str, body: dict | None = None, method: str = 'GET') -> dict:
+    """Make an authenticated API request."""
+    url = f'{API_BASE}/{path}'
+    headers = {
+        'x-api-key': get_api_key(),
+        'anthropic-version': API_VERSION,
+        'content-type': 'application/json',
+    }
+
+    data = json.dumps(body).encode() if body else None
+    req = Request(url, data=data, headers=headers, method=method)
+
+    try:
+        with urlopen(req) as resp:
+            return json.loads(resp.read().decode())
+    except HTTPError as e:
+        error_body = e.read().decode() if e.fp else ''
+        raise RuntimeError(f'API returned HTTP {e.code}: {error_body[:500]}') from e
+
+
+def invoke(prompt: str, model: str, max_tokens: int = 4096) -> dict:
+    """Call the Anthropic Messages API.
+
+    Args:
+        prompt: The user message text.
+        model: Model ID (e.g., 'claude-opus-4-6').
+        max_tokens: Maximum output tokens.
+
+    Returns:
+        Full API response dict.
+    """
+    body = {
+        'model': model,
+        'max_tokens': max_tokens,
+        'messages': [{'role': 'user', 'content': prompt}],
+    }
+    return _api_request('messages', body, method='POST')
+
+
+def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096) -> dict:
+    """Call the API and write the response to a JSON file.
+
+    Args:
+        prompt: The user message text.
+        model: Model ID.
+        log_file: Path to write the JSON response.
+        max_tokens: Maximum output tokens.
+
+    Returns:
+        Full API response dict.
+    """
+    response = invoke(prompt, model, max_tokens)
+    os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+    with open(log_file, 'w') as f:
+        json.dump(response, f)
+    return response
+
+
+def extract_text(response: dict) -> str:
+    """Extract text content from an API response dict."""
+    texts = []
+    for block in response.get('content', []):
+        if block.get('type') == 'text':
+            texts.append(block.get('text', ''))
+    return '\n'.join(texts)
+
+
+def extract_text_from_file(log_file: str) -> str:
+    """Extract text content from a JSON response file."""
+    try:
+        with open(log_file) as f:
+            return extract_text(json.load(f))
+    except (json.JSONDecodeError, FileNotFoundError):
+        return ''
+
+
+def extract_usage(response: dict) -> dict:
+    """Extract usage data from an API response."""
+    usage = response.get('usage', {})
+    return {
+        'input_tokens': usage.get('input_tokens', 0),
+        'output_tokens': usage.get('output_tokens', 0),
+        'cache_read': usage.get('cache_read_input_tokens', 0),
+        'cache_create': usage.get('cache_creation_input_tokens', 0),
+    }
+
+
+def calculate_cost(usage: dict, model: str) -> float:
+    """Calculate cost in USD from usage data."""
+    cost = 0.0
+    cost += usage['input_tokens'] * _get_pricing(model, 'input') / 1_000_000
+    cost += usage['output_tokens'] * _get_pricing(model, 'output') / 1_000_000
+    cost += usage['cache_read'] * _get_pricing(model, 'cache_read') / 1_000_000
+    cost += usage['cache_create'] * _get_pricing(model, 'cache_create') / 1_000_000
+    return cost
+
+
+def log_usage(log_file: str, operation: str, target: str, model: str,
+              ledger_file: str | None = None, duration_s: int = 0):
+    """Parse an API response file and append a cost row to the ledger CSV."""
+    if ledger_file is None:
+        project_dir = os.environ.get('PROJECT_DIR', '.')
+        ledger_file = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
+
+    os.makedirs(os.path.dirname(ledger_file), exist_ok=True)
+
+    header = 'timestamp|operation|target|model|input_tokens|output_tokens|cache_read|cache_create|cost_usd|duration_s'
+
+    if not os.path.exists(ledger_file):
+        with open(ledger_file, 'w') as f:
+            f.write(header + '\n')
+
+    try:
+        with open(log_file) as f:
+            response = json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        response = {}
+
+    usage = extract_usage(response)
+    cost = calculate_cost(usage, model)
+    timestamp = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+
+    row = f"{timestamp}|{operation}|{target}|{model}|{usage['input_tokens']}|{usage['output_tokens']}|{usage['cache_read']}|{usage['cache_create']}|{cost:.6f}|{duration_s}"
+
+    with open(ledger_file, 'a') as f:
+        f.write(row + '\n')
+
+
+# ============================================================================
+# Batch API
+# ============================================================================
+
+def submit_batch(batch_file: str) -> str:
+    """Submit a JSONL batch file. Returns the batch ID."""
+    with open(batch_file) as f:
+        requests = [json.loads(line) for line in f if line.strip()]
+
+    body = {'requests': requests}
+    response = _api_request('messages/batches', body, method='POST')
+
+    batch_id = response.get('id', '')
+    if not batch_id:
+        raise RuntimeError(f'No batch ID returned: {json.dumps(response)[:500]}')
+
+    return batch_id
+
+
+def poll_batch(batch_id: str, log_fn=None) -> str:
+    """Poll a batch until it ends. Returns the results_url."""
+    interval = 15
+    start = time.time()
+
+    while True:
+        time.sleep(interval)
+        status = _api_request(f'messages/batches/{batch_id}')
+
+        pstatus = status.get('processing_status', 'unknown')
+        counts = status.get('request_counts', {})
+        elapsed = int(time.time() - start)
+
+        msg = f"  {elapsed}s: {pstatus} ({counts.get('succeeded', 0)} succeeded, {counts.get('errored', 0)} errored)"
+        if log_fn:
+            log_fn(msg)
+        else:
+            print(msg, file=sys.stderr)
+
+        if pstatus == 'ended':
+            return status.get('results_url', '')
+
+        if interval < 30:
+            interval += 5
+
+
+def download_batch_results(results_url: str, output_dir: str, log_dir: str) -> list[str]:
+    """Download and parse batch results into per-item files.
+
+    Creates for each item:
+        output_dir/.status-{custom_id}  — "ok" or "fail"
+        log_dir/{custom_id}.json        — API response (for log_usage)
+        log_dir/{custom_id}.txt         — text content
+
+    Returns:
+        List of custom_ids that succeeded.
+    """
+    headers = {
+        'x-api-key': get_api_key(),
+        'anthropic-version': API_VERSION,
+    }
+    req = Request(results_url, headers=headers)
+
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+
+    succeeded = []
+
+    with urlopen(req) as resp:
+        for line in resp.read().decode().splitlines():
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            cid = obj.get('custom_id', '')
+            result = obj.get('result', {})
+            rtype = result.get('type', '')
+
+            if rtype != 'succeeded':
+                with open(os.path.join(output_dir, f'.status-{cid}'), 'w') as f:
+                    f.write('fail')
+                continue
+
+            msg = result.get('message', {})
+            usage = msg.get('usage', {})
+
+            # Extract text
+            text = ''
+            for block in msg.get('content', []):
+                if block.get('type') == 'text':
+                    text = block.get('text', '')
+
+            # Write JSON response (for log_usage)
+            with open(os.path.join(log_dir, f'{cid}.json'), 'w') as f:
+                json.dump({'usage': usage, 'content': msg.get('content', [])}, f)
+
+            # Write text content
+            with open(os.path.join(log_dir, f'{cid}.txt'), 'w') as f:
+                f.write(text)
+
+            # Write status
+            with open(os.path.join(output_dir, f'.status-{cid}'), 'w') as f:
+                f.write('ok')
+
+            succeeded.append(cid)
+
+    return succeeded
+
+
+# --- CLI interface for calling from bash ---
+
+def main():
+    """CLI entry point. Usage:
+
+    python3 -m storyforge.api invoke <prompt_file> <model> <log_file> [max_tokens]
+    python3 -m storyforge.api extract-text <log_file>
+    python3 -m storyforge.api log-usage <log_file> <operation> <target> <model> [ledger] [duration]
+    python3 -m storyforge.api submit-batch <batch_file>
+    python3 -m storyforge.api poll-batch <batch_id>
+    python3 -m storyforge.api download-results <results_url> <output_dir> <log_dir>
+    """
+    if len(sys.argv) < 2:
+        print('Usage: python3 -m storyforge.api <command> [args]', file=sys.stderr)
+        sys.exit(1)
+
+    command = sys.argv[1]
+
+    if command == 'invoke':
+        prompt_file, model, log_file = sys.argv[2], sys.argv[3], sys.argv[4]
+        max_tokens = int(sys.argv[5]) if len(sys.argv) > 5 else 4096
+        with open(prompt_file) as f:
+            prompt = f.read()
+        invoke_to_file(prompt, model, log_file, max_tokens)
+        print('ok')
+
+    elif command == 'extract-text':
+        log_file = sys.argv[2]
+        print(extract_text_from_file(log_file))
+
+    elif command == 'log-usage':
+        log_file, operation, target, model = sys.argv[2:6]
+        ledger = sys.argv[6] if len(sys.argv) > 6 else None
+        duration = int(sys.argv[7]) if len(sys.argv) > 7 else 0
+        log_usage(log_file, operation, target, model, ledger, duration)
+        print('ok')
+
+    elif command == 'submit-batch':
+        batch_file = sys.argv[2]
+        batch_id = submit_batch(batch_file)
+        print(batch_id)
+
+    elif command == 'poll-batch':
+        batch_id = sys.argv[2]
+        results_url = poll_batch(batch_id)
+        print(results_url)
+
+    elif command == 'download-results':
+        results_url, output_dir, log_dir = sys.argv[2:5]
+        succeeded = download_batch_results(results_url, output_dir, log_dir)
+        for cid in succeeded:
+            print(cid)
+
+    else:
+        print(f'Unknown command: {command}', file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

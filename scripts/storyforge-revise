@@ -700,67 +700,17 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         kill $MONITOR_PID 2>/dev/null || true
         wait $MONITOR_PID 2>/dev/null || true
 
-        # Extract response and apply revision to scene files
+        # Extract response and apply revision to scene files (Python parser)
         if (( EXIT_CODE == 0 )); then
-            response=$(extract_api_response "$STEP_LOG" || true)
-            if [[ -n "$response" ]]; then
-                # The revision prompt instructs Claude to write files directly.
-                # In API mode, the response contains the revised content that
-                # needs to be applied. Parse scene blocks from the response.
-                # Each scene is delimited by markers like: === SCENE: scene-id ===
-                # If the response doesn't use markers, it's a single-scene or
-                # non-file-writing pass (e.g., continuity check).
-                if echo "$response" | grep -qE '=== SCENE: .+ ==='; then
-                    current_scene_id=""
-                    current_content=""
-                    scenes_written=0
-                    # Use sed to extract scene ID from marker lines (avoids bash regex compat issues)
-                    while IFS= read -r line; do
-                        if echo "$line" | grep -qE '^=== SCENE: .+ ===$' && ! echo "$line" | grep -qF '=== END SCENE:'; then
-                            # Extract scene ID between "=== SCENE: " and " ==="
-                            local new_scene_id
-                            new_scene_id=$(echo "$line" | sed 's/^=== SCENE: //; s/ ===$//')
-
-                            # Skip entries with parenthetical suffixes like "(revised note)"
-                            if echo "$new_scene_id" | grep -qF '('; then
-                                current_scene_id=""
-                                current_content=""
-                                continue
-                            fi
-
-                            # Write previous scene if any
-                            if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
-                                printf '%s\n' "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
-                                log "  Wrote revised scene: ${current_scene_id}"
-                                scenes_written=$((scenes_written + 1))
-                            fi
-                            current_scene_id="$new_scene_id"
-                            current_content=""
-                        elif echo "$line" | grep -qF '=== END SCENE:'; then
-                            # End marker — write this scene
-                            if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
-                                printf '%s\n' "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
-                                log "  Wrote revised scene: ${current_scene_id}"
-                                scenes_written=$((scenes_written + 1))
-                            fi
-                            current_scene_id=""
-                            current_content=""
-                        elif [[ -n "$current_scene_id" ]]; then
-                            current_content="${current_content:+${current_content}
-}${line}"
-                        fi
-                    done <<< "$response"
-                    # Write last scene if no end marker
-                    if [[ -n "$current_scene_id" && -n "$current_content" ]]; then
-                        printf '%s\n' "$current_content" > "${PROJECT_DIR}/scenes/${current_scene_id}.md"
-                        log "  Wrote revised scene: ${current_scene_id}"
-                        scenes_written=$((scenes_written + 1))
-                    fi
-                    log "  Revision applied: ${scenes_written} scene(s) written"
-                else
-                    # Single-target or analytical pass — log response for reference
-                    log "  API response received ($(echo "$response" | wc -w | tr -d ' ') words)"
-                fi
+            PYTHON_LIB="${SCRIPT_DIR}/lib/python"
+            parse_output=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.parsing extract-scenes "$STEP_LOG" "${PROJECT_DIR}/scenes" 2>/dev/null || true)
+            if [[ -n "$parse_output" ]]; then
+                # Log each written scene
+                while IFS= read -r parse_line; do
+                    [[ -n "$parse_line" ]] && log "  ${parse_line}"
+                done <<< "$parse_output"
+            else
+                log "  API response received (analytical pass, no scene markers)"
             fi
         fi
     fi

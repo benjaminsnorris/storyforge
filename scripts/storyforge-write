@@ -54,38 +54,17 @@ mkdir -p "$SCENES_DIR" "$LOG_DIR"
 mkdir -p "${PROJECT_DIR}/working/coaching"
 
 # ============================================================================
-# Helper: extract scene prose from API response
+# Helper: extract scene prose from API response (delegates to Python)
 # ============================================================================
-# The API response may contain === SCENE: id === markers plus summary text.
-# Extract just the scene content between markers, or use the full response
-# if no markers are present.
 _extract_scene_from_response() {
-    local response="$1"
-    local scene_id="$2"
-    local scene_file="$3"
+    local log_file="$1"
+    local scene_file="$2"
+    local python_lib="${SCRIPT_DIR}/lib/python"
 
-    # Try to extract content between === SCENE: id === and === END SCENE: id ===
-    local extracted=""
-    local in_scene=false
-    while IFS= read -r line; do
-        if echo "$line" | grep -qE '^=== SCENE: .+ ===$' && ! echo "$line" | grep -qF '=== END SCENE:'; then
-            in_scene=true
-            continue
-        elif echo "$line" | grep -qF '=== END SCENE:'; then
-            in_scene=false
-            continue
-        elif [[ "$in_scene" == true ]]; then
-            extracted="${extracted:+${extracted}
-}${line}"
-        fi
-    done <<< "$response"
-
-    if [[ -n "$extracted" ]]; then
-        printf '%s\n' "$extracted" > "$scene_file"
-    else
-        # No markers found — use the full response (legacy behavior)
-        printf '%s\n' "$response" > "$scene_file"
-    fi
+    PYTHONPATH="$python_lib" python3 -m storyforge.parsing extract-single "$log_file" "$scene_file" 2>/dev/null || {
+        log "WARNING: Python scene extraction failed, falling back to raw response"
+        extract_api_response "$log_file" > "$scene_file" 2>/dev/null || true
+    }
     log "Wrote scene file: ${scene_file}"
 }
 
@@ -544,9 +523,9 @@ if [[ "$WRITE_MODE" == "batch" && "$DRY_RUN" != true ]]; then
             fi
 
             # Write scene text from batch result
-            SCENE_TEXT_FILE="${BATCH_OUTPUT_DIR}/${SCENE_ID}.txt"
-            if [[ -f "$SCENE_TEXT_FILE" ]]; then
-                _extract_scene_from_response "$(cat "$SCENE_TEXT_FILE")" "$SCENE_ID" "$SCENE_FILE"
+            SCENE_JSON_FILE="${BATCH_OUTPUT_DIR}/${SCENE_ID}.json"
+            if [[ -f "$SCENE_JSON_FILE" ]]; then
+                _extract_scene_from_response "$SCENE_JSON_FILE" "$SCENE_FILE"
             fi
 
             # Log usage from the per-scene JSON response
@@ -655,10 +634,7 @@ else
 
             # Extract response and write scene file
             if (( EXIT_CODE == 0 )); then
-                response=$(extract_api_response "$SCENE_LOG" || true)
-                if [[ -n "$response" ]]; then
-                    _extract_scene_from_response "$response" "$SCENE_ID" "$SCENE_FILE"
-                fi
+                _extract_scene_from_response "$SCENE_LOG" "$SCENE_FILE"
             fi
 
             # Log usage/cost data
@@ -688,10 +664,7 @@ else
 
             # Extract response and write scene file
             if (( EXIT_CODE == 0 )); then
-                response=$(extract_api_response "$SCENE_LOG" || true)
-                if [[ -n "$response" ]]; then
-                    _extract_scene_from_response "$response" "$SCENE_ID" "$SCENE_FILE"
-                fi
+                _extract_scene_from_response "$SCENE_LOG" "$SCENE_FILE"
             fi
 
             # Log usage/cost data
