@@ -510,8 +510,9 @@ def build_scene_prompt(scene_id: str, project_dir: str,
     craft_sections = build_weighted_directive(project_dir)
     if not craft_sections:
         # Fallback: extract from craft engine
+        # __file__ is scripts/lib/python/storyforge/prompts.py — 5 levels to repo root
         plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__)))))
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
         craft_sections = extract_craft_sections(plugin_dir, 2, 3, 4, 5)
 
     overrides = _get_scene_overrides(scene_id, project_dir)
