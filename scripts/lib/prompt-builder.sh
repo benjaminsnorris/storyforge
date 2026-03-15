@@ -335,16 +335,35 @@ build_scene_prompt() {
         fi
     fi
 
+    # --- Detect API mode ---
+    local api_mode=false
+    [[ -n "${ANTHROPIC_API_KEY:-}" ]] && api_mode=true
+
     # --- Collect existing reference files ---
     local ref_files
     ref_files=$(list_reference_files "$project_dir")
 
     local ref_list=""
+    local ref_inline=""
     while IFS= read -r rf; do
         [[ -z "$rf" ]] && continue
         ref_list="${ref_list}
 - ${rf}"
+        # In API mode, inline the file content
+        if [[ "$api_mode" == true && -f "${project_dir}/${rf}" ]]; then
+            ref_inline="${ref_inline}
+=== FILE: ${rf} ===
+$(cat "${project_dir}/${rf}")
+=== END FILE ===
+"
+        fi
     done <<< "$ref_files"
+
+    # --- Previous scene content (for API mode) ---
+    local prev_scene_content=""
+    if [[ "$api_mode" == true && -n "$prev_scene" && -f "${project_dir}/scenes/${prev_scene}.md" ]]; then
+        prev_scene_content=$(cat "${project_dir}/scenes/${prev_scene}.md")
+    fi
 
     # --- Craft principles ---
     local craft_sections=""
@@ -367,14 +386,21 @@ ${overrides}"
     cat <<PROMPT_EOF
 You are drafting scene ${scene_id}${scene_title:+ ("${scene_title}")} of "${title:-Untitled}"${genre:+, a ${genre}}. Follow these steps exactly and completely. Do not skip any step.
 
-===== STEP 1: READ ALL REFERENCE MATERIALS =====
-
-Read every one of these files. Do not skip any:
-${ref_list}
-
-These files contain the world bible, character bible, story architecture, timeline, and all other reference material for the project. Internalize them before writing.
+===== STEP 1: REFERENCE MATERIALS =====
+$(if [[ "$api_mode" == true ]]; then
+    echo ""
+    echo "The following reference materials contain the world bible, character bible, story architecture, timeline, and all other reference material for the project. Internalize them before writing."
+    echo ""
+    echo "${ref_inline}"
+else
+    echo ""
+    echo "Read every one of these files. Do not skip any:"
+    echo "${ref_list}"
+    echo ""
+    echo "These files contain the world bible, character bible, story architecture, timeline, and all other reference material for the project. Internalize them before writing."
+fi)
 ${voice_guide:+
-Pay special attention to ${voice_guide} — this is the voice and style guide. Follow it exactly.}
+Pay special attention to the voice guide — this is the voice and style guide. Follow it exactly.}
 ${craft_sections:+
 
 ===== CRAFT PRINCIPLES =====
@@ -383,10 +409,17 @@ The following craft principles govern how you write this scene. Internalize them
 
 ${craft_sections}
 }
-===== STEP 2: READ THE PREVIOUS SCENE =====
+===== STEP 2: PREVIOUS SCENE =====
 $(if [[ -n "$prev_scene" ]]; then
-    echo ""
-    echo "Read scenes/${prev_scene}.md to understand where the story left off — the emotional state, scene transitions, and narrative momentum."
+    if [[ "$api_mode" == true && -n "$prev_scene_content" ]]; then
+        echo ""
+        echo "Here is the previous scene (${prev_scene}) — understand where the story left off, the emotional state, scene transitions, and narrative momentum:"
+        echo ""
+        echo "${prev_scene_content}"
+    else
+        echo ""
+        echo "Read scenes/${prev_scene}.md to understand where the story left off — the emotional state, scene transitions, and narrative momentum."
+    fi
 else
     echo ""
     echo "This is the first scene. There is no previous scene to read. Begin the story."
@@ -408,7 +441,7 @@ PROMPT_EOF
     # Coaching-level-specific steps
     if [[ "$coaching_level" == "coach" ]]; then
         cat <<COACH_EOF
-===== STEP 4: PRODUCE SCENE BRIEF =====
+===== PRODUCE SCENE BRIEF =====
 
 You are in COACH mode. Do NOT write prose. Do NOT create the scene file.
 
@@ -418,17 +451,22 @@ Instead, produce a detailed scene brief covering:
 - Emotional arc targets: where the scene starts emotionally, where it must arrive, the turn
 - Craft guidance: pacing recommendations, dialogue density, sensory priorities, scene structure advice
 - Specific suggestions the author can use when writing this scene themselves
+$(if [[ "$api_mode" == true ]]; then
+    echo ""
+    echo "Output your scene brief directly as markdown."
+else
+    cat <<COACH_SAVE
+
 
 Save to: working/coaching/brief-${scene_id}.md
 
-===== STEP 5: GIT COMMIT =====
-
-Stage and commit using the Bash tool:
-
+Then commit:
   mkdir -p working/coaching
   git add "working/coaching/brief-${scene_id}.md"
   git commit -m "Coach: scene brief for ${scene_id}${scene_title:+: ${scene_title}}"
   git push
+COACH_SAVE
+fi)
 
 ===== IMPORTANT NOTES =====
 - Do NOT write the scene. Your job is to prepare the author to write it.
@@ -438,43 +476,78 @@ COACH_EOF
 
     elif [[ "$coaching_level" == "strict" ]]; then
         cat <<STRICT_EOF
-===== STEP 4: CREATE SCENE FILE AND CONSTRAINT LIST =====
+===== PRODUCE CONSTRAINT LIST =====
 
-You are in STRICT mode. Do NOT write prose. You may create files, add metadata, and do structural work.
+You are in STRICT mode. Do NOT write prose.
 
-**4a. Create the scene file** — an empty file (metadata is tracked in CSV, not frontmatter):
-
-Save to: scenes/${scene_id}.md
-
-(Create the file empty. The author writes the prose. Do not include any YAML frontmatter or metadata.)
-
-**4b. Produce a constraint list** covering:
+Produce a constraint list covering:
 - Voice rules: which voice guide rules apply to this scene and POV character
 - Continuity requirements: locked details, character states, thread obligations
 - Structural obligations: what must turn in this scene, what the scene must set up for later scenes
 - Metadata: target word count, scene type, emotional arc endpoints
+$(if [[ "$api_mode" == true ]]; then
+    echo ""
+    echo "Output your constraint list directly as markdown."
+else
+    cat <<STRICT_SAVE
 
-Save to: working/coaching/constraints-${scene_id}.md
 
-===== STEP 5: GIT COMMIT =====
+**Create the scene file** — an empty file (metadata is tracked in CSV, not frontmatter):
+Save to: scenes/${scene_id}.md
 
-Stage and commit using the Bash tool:
+**Save constraints to:** working/coaching/constraints-${scene_id}.md
 
+Then commit:
   mkdir -p working/coaching
   git add "scenes/${scene_id}.md"
   git add "working/coaching/constraints-${scene_id}.md"
   git commit -m "Strict: constraints for ${scene_id}${scene_title:+: ${scene_title}}"
   git push
+STRICT_SAVE
+fi)
 
 ===== IMPORTANT NOTES =====
-- Do NOT write prose. The scene file should be empty.
-- Do NOT provide editorial suggestions or craft guidance. List facts and requirements only.
-- You CAN create files, add metadata, and do structural/organizational work.
+- Do NOT write prose. List facts and requirements only.
+- Do NOT provide editorial suggestions or craft guidance.
 STRICT_EOF
 
     else
         # full mode (default)
-        cat <<FULL_EOF
+        if [[ "$api_mode" == true ]]; then
+            cat <<FULL_API_EOF
+===== DRAFT THE SCENE =====
+
+Write the complete scene following these rules:
+
+VOICE AND STYLE:
+- Follow the voice guide exactly
+- Maintain the POV character's distinct voice throughout
+- Let the style rules govern every sentence — word choice, rhythm, metaphor, dialogue density
+
+CONTINUITY:
+- Do not contradict ANY locked details in the continuity tracker (provided in reference materials above)
+- Respect all current character states (physical, emotional, relational)
+- Advance active threads as appropriate per the scene outline
+- Maintain consistency with the previous scene's ending
+
+Write ONLY the scene prose. Do not include any YAML frontmatter or metadata.
+
+===== OUTPUT FORMAT =====
+
+Output the complete scene using this exact format:
+
+=== SCENE: ${scene_id} ===
+[Your complete scene prose here]
+=== END SCENE: ${scene_id} ===
+
+**CRITICAL:** Output the COMPLETE scene. Do not truncate, summarize, or use placeholders.
+
+===== IMPORTANT NOTES =====
+- Focus entirely on writing the best possible scene.
+- Let the craft principles, voice guide, and continuity tracker guide every sentence.
+FULL_API_EOF
+        else
+            cat <<FULL_CLAUDE_EOF
 ===== STEP 4: DRAFT THE SCENE =====
 
 Write the complete scene following these rules:
@@ -534,6 +607,7 @@ Stage and commit using the Bash tool:
 - Complete ALL eight steps. The next scene's drafting depends on accurate continuity state.
 - If you encounter an issue with the draft, fix it before updating continuity files.
 - The continuity updates are as important as the scene itself — future scenes rely on them.
-FULL_EOF
+FULL_CLAUDE_EOF
+        fi
     fi
 }
