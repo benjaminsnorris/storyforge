@@ -28,6 +28,30 @@ build_scene_list "$TMPCSV"
 assert_equals "4" "${#ALL_SCENE_IDS[@]}" "build_scene_list: excludes cut scenes"
 rm -f "$TMPCSV"
 
+# Test that merged scenes are excluded
+TMPCSV="${TMPDIR}/scene-metadata-merged.csv"
+cp "$METADATA_CSV" "$TMPCSV"
+echo "merged-scene|5|Merged Scene|Someone|Somewhere|1|character|1|morning|merged|3|500" >> "$TMPCSV"
+build_scene_list "$TMPCSV"
+assert_equals "4" "${#ALL_SCENE_IDS[@]}" "build_scene_list: excludes merged scenes"
+rm -f "$TMPCSV"
+
+# Test that stub scenes (below MIN_SCENE_WORDS) are excluded
+TMPCSV="${TMPDIR}/scene-metadata-stub.csv"
+cp "$METADATA_CSV" "$TMPCSV"
+echo "stub-scene|5|Stub Scene|Someone|Somewhere|1|character|1|morning|drafted|3|500" >> "$TMPCSV"
+build_scene_list "$TMPCSV"
+assert_equals "4" "${#ALL_SCENE_IDS[@]}" "build_scene_list: excludes scenes below MIN_SCENE_WORDS"
+rm -f "$TMPCSV"
+
+# Test that MIN_SCENE_WORDS threshold is respected
+TMPCSV="${TMPDIR}/scene-metadata-threshold.csv"
+cp "$METADATA_CSV" "$TMPCSV"
+echo "short-scene|5|Short Scene|Someone|Somewhere|1|character|1|morning|drafted|51|500" >> "$TMPCSV"
+build_scene_list "$TMPCSV"
+assert_equals "5" "${#ALL_SCENE_IDS[@]}" "build_scene_list: includes scenes at MIN_SCENE_WORDS+1"
+rm -f "$TMPCSV"
+
 # Restore for subsequent tests
 build_scene_list "$METADATA_CSV"
 
