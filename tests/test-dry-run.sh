@@ -129,11 +129,14 @@ else
 fi
 
 # ============================================================================
-# --annotate flag
+# --no-annotate flag
 # ============================================================================
 
-result=$(cd "$PROJECT_DIR" && "${PLUGIN_DIR}/scripts/storyforge-assemble" --dry-run --annotate --format web 2>&1)
-assert_contains "$result" "annotate" "storyforge-assemble: --annotate flag recognized in dry-run"
+result=$(cd "$PROJECT_DIR" && "${PLUGIN_DIR}/scripts/storyforge-assemble" --dry-run --format web 2>&1)
+assert_contains "$result" "annotations: true" "storyforge-assemble: annotations on by default in dry-run"
+
+result=$(cd "$PROJECT_DIR" && "${PLUGIN_DIR}/scripts/storyforge-assemble" --dry-run --no-annotate --format web 2>&1)
+assert_contains "$result" "annotations: false" "storyforge-assemble: --no-annotate disables annotations in dry-run"
 
 # ============================================================================
 # storyforge-review --dry-run
