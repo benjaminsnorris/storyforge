@@ -154,7 +154,7 @@ Every time you produce or substantially update the voice guide — a new voice b
 **After each deliverable:**
 
 1. Update `storyforge.yaml` to reflect that the voice guide exists and its last-modified date.
-2. Update `CLAUDE.md` with any voice rules that should be active during all writing sessions (especially style rules and POV voice rules).
+2. If there are voice rules that should be active during all writing sessions (especially style rules and POV voice rules), add them to the "Standing Instructions" section of `CLAUDE.md`.
 3. **Commit and push immediately:**
    ```
    git add -A && git commit -m "Voice: {what was done}" && git push

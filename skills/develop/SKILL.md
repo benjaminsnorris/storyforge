@@ -272,11 +272,7 @@ Every time you produce or substantially update a document — a character bible 
    - Update the `path` field to the correct file path.
    - Update the `last_modified` date to today's date.
 
-2. **Update the project `CLAUDE.md`:**
-   - Reflect the new state of development — what exists, what's changed, what the author decided.
-   - Keep it concise. This is context for future sessions, not a transcript of this one.
-
-3. **Commit and push immediately:**
+2. **Commit and push immediately:**
    ```
    git add -A && git commit -m "Develop: {what was done}" && git push
    ```
