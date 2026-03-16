@@ -1121,9 +1121,9 @@ create_draft_pr() {
     # Ensure all labels exist
     ensure_all_labels "$project_dir"
 
-    # Check if PR already exists for this branch
+    # Check if an open PR already exists for this branch (skip merged/closed)
     local existing_pr
-    existing_pr=$(cd "$project_dir" && gh pr view --json number --jq '.number' 2>/dev/null || echo "")
+    existing_pr=$(cd "$project_dir" && gh pr view --json number,state --jq 'select(.state == "OPEN") | .number' 2>/dev/null || echo "")
 
     if [[ -n "$existing_pr" ]]; then
         STORYFORGE_PR_NUMBER="$existing_pr"
