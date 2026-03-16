@@ -370,9 +370,305 @@ migrate_storyforge_yaml() {
 }
 
 # ============================================================================
+# CSV Integrity Report
+# ============================================================================
+
+report_csv_integrity() {
+    local project_dir="$1"
+    local meta_csv="${project_dir}/reference/scene-metadata.csv"
+    local intent_csv="${project_dir}/reference/scene-intent.csv"
+    local chapter_csv="${project_dir}/reference/chapter-map.csv"
+    local chars_csv="${project_dir}/reference/characters.csv"
+    local scenes_dir="${project_dir}/scenes"
+
+    # Scene files vs metadata
+    if [[ -f "$meta_csv" ]] && [[ -d "$scenes_dir" ]]; then
+        local meta_ids file_ids
+        meta_ids=$(tail -n +2 "$meta_csv" | cut -d'|' -f1 | sort)
+        file_ids=$(ls "${scenes_dir}"/*.md 2>/dev/null | xargs -I{} basename {} .md | sort)
+        comm -23 <(echo "$file_ids") <(echo "$meta_ids") | while IFS= read -r id; do
+            [[ -n "$id" ]] && echo "ORPHAN_FILE:${id}"
+        done
+        comm -13 <(echo "$file_ids") <(echo "$meta_ids") | while IFS= read -r id; do
+            [[ -n "$id" ]] && echo "ORPHAN_META:${id}"
+        done
+    fi
+
+    # Metadata vs intent
+    if [[ -f "$meta_csv" ]] && [[ -f "$intent_csv" ]]; then
+        local meta_ids intent_ids
+        meta_ids=$(tail -n +2 "$meta_csv" | cut -d'|' -f1 | sort)
+        intent_ids=$(tail -n +2 "$intent_csv" | cut -d'|' -f1 | sort)
+        comm -23 <(echo "$meta_ids") <(echo "$intent_ids") | while IFS= read -r id; do
+            [[ -n "$id" ]] && echo "MISSING_INTENT:${id}"
+        done
+        comm -13 <(echo "$meta_ids") <(echo "$intent_ids") | while IFS= read -r id; do
+            [[ -n "$id" ]] && echo "EXTRA_INTENT:${id}"
+        done
+    fi
+
+    # Chapter map references
+    if [[ -f "$chapter_csv" ]] && [[ -f "$meta_csv" ]]; then
+        local meta_ids
+        meta_ids=$(tail -n +2 "$meta_csv" | cut -d'|' -f1 | sort)
+        tail -n +2 "$chapter_csv" | cut -d'|' -f5 | tr ';' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | sort -u | while IFS= read -r id; do
+            if ! echo "$meta_ids" | grep -qx "$id"; then
+                echo "BAD_CHAPTER_REF:${id}"
+            fi
+        done
+    fi
+
+    # Sequence gaps
+    if [[ -f "$meta_csv" ]]; then
+        local prev=0
+        tail -n +2 "$meta_csv" | cut -d'|' -f2 | sort -n | while IFS= read -r seq; do
+            [[ -z "$seq" ]] && continue
+            if (( seq > prev + 1 )); then
+                echo "SEQ_GAP:$((prev + 1))-$((seq - 1))"
+            fi
+            prev=$seq
+        done
+    fi
+
+    # Unknown characters
+    if [[ -f "$intent_csv" ]] && [[ -f "$chars_csv" ]]; then
+        local known used
+        known=$(tail -n +2 "$chars_csv" | cut -d'|' -f2,3 | tr '|' ';' | tr ';' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | sort -u)
+        used=$(tail -n +2 "$intent_csv" | cut -d'|' -f4 | tr ';' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | sort -u)
+        comm -23 <(echo "$used") <(echo "$known") | while IFS= read -r name; do
+            [[ -n "$name" ]] && echo "UNKNOWN_CHARACTER:${name}"
+        done
+    fi
+}
+
+# ============================================================================
+# Unexpected Files Report
+# ============================================================================
+
+EXPECTED_TOP_DIRS="scenes reference working manuscript storyforge .git"
+EXPECTED_TOP_FILES="storyforge.yaml CLAUDE.md .gitignore .DS_Store"
+EXPECTED_WORKING_DIRS="logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup"
+EXPECTED_WORKING_FILES="pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html"
+
+report_unexpected_files() {
+    local project_dir="$1"
+
+    for d in "${project_dir}"/*/; do
+        [[ -d "$d" ]] || continue
+        local name
+        name=$(basename "$d")
+        if ! echo " $EXPECTED_TOP_DIRS " | grep -q " $name "; then
+            echo "UNEXPECTED_DIR:${name}"
+        fi
+    done
+
+    for f in "${project_dir}"/*; do
+        [[ -f "$f" ]] || continue
+        local name
+        name=$(basename "$f")
+        if ! echo " $EXPECTED_TOP_FILES " | grep -q " $name "; then
+            echo "UNEXPECTED_FILE:${name}"
+        fi
+    done
+
+    if [[ -d "${project_dir}/working" ]]; then
+        for d in "${project_dir}"/working/*/; do
+            [[ -d "$d" ]] || continue
+            local name
+            name=$(basename "$d")
+            if ! echo " $EXPECTED_WORKING_DIRS " | grep -q " $name "; then
+                echo "UNEXPECTED_DIR:working/${name}"
+            fi
+        done
+        for f in "${project_dir}"/working/*; do
+            [[ -f "$f" ]] || continue
+            local name
+            name=$(basename "$f")
+            if ! echo " $EXPECTED_WORKING_FILES " | grep -q " $name "; then
+                echo "UNEXPECTED_FILE:working/${name}"
+            fi
+        done
+    fi
+}
+
+# ============================================================================
 # Main (skip if sourced for testing)
 # ============================================================================
 
 if [[ "${_CLEANUP_SOURCE_ONLY:-}" == "true" ]]; then
     return 0 2>/dev/null || true
 fi
+
+# ============================================================================
+# Argument Parsing
+# ============================================================================
+
+DRY_RUN=false
+VERBOSE=false
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Clean up and migrate a Storyforge novel project.
+
+Options:
+  --dry-run     Report what would change without modifying anything
+  --verbose     Detailed output for each step
+  -h, --help    Show this help
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help) usage ;;
+        --dry-run) DRY_RUN=true; shift ;;
+        --verbose) VERBOSE=true; shift ;;
+        *) echo "ERROR: Unknown option '$1'" >&2; exit 1 ;;
+    esac
+done
+
+# ============================================================================
+# Main Execution
+# ============================================================================
+
+detect_project_root
+log "Project root: ${PROJECT_DIR}"
+
+vlog() { $VERBOSE && log "$1" || true; }
+
+if $DRY_RUN; then
+    log "=== DRY RUN — no changes will be made ==="
+fi
+
+# Step 1: Gitignore
+log "Checking .gitignore..."
+if $DRY_RUN; then
+    DRY_TMP="${TMPDIR}/cleanup-dry-$$"
+    mkdir -p "$DRY_TMP"
+    cp "${PROJECT_DIR}/.gitignore" "$DRY_TMP/.gitignore" 2>/dev/null || touch "$DRY_TMP/.gitignore"
+    update_gitignore "$DRY_TMP"
+    if ! diff -q "${PROJECT_DIR}/.gitignore" "$DRY_TMP/.gitignore" > /dev/null 2>&1; then
+        log "  Would update .gitignore with missing entries"
+    fi
+    rm -rf "$DRY_TMP"
+else
+    update_gitignore "$PROJECT_DIR"
+    if command -v git > /dev/null 2>&1 && [[ -d "${PROJECT_DIR}/.git" ]]; then
+        ignored_tracked=$(cd "$PROJECT_DIR" && git ls-files -i --exclude-standard 2>/dev/null || true)
+        if [[ -n "$ignored_tracked" ]]; then
+            log "  Untracking $(echo "$ignored_tracked" | wc -l | tr -d ' ') newly-gitignored files"
+            cd "$PROJECT_DIR" && echo "$ignored_tracked" | xargs git rm --cached -q 2>/dev/null || true
+        fi
+    fi
+fi
+
+# Step 2: Missing directories
+log "Checking directories..."
+if $DRY_RUN; then
+    for dir in "${EXPECTED_DIRS[@]}"; do
+        [[ ! -d "${PROJECT_DIR}/${dir}" ]] && log "  Would create ${dir}/"
+    done
+else
+    CREATED=$(create_missing_dirs "$PROJECT_DIR")
+    [[ -n "$CREATED" ]] && echo "$CREATED" | while IFS= read -r d; do
+        [[ -n "$d" ]] && vlog "  Created ${d}/"
+    done
+fi
+
+# Step 3: storyforge.yaml migration
+log "Checking storyforge.yaml..."
+if $DRY_RUN; then
+    DRY_TMP="${TMPDIR}/cleanup-dry-yaml-$$"
+    mkdir -p "$DRY_TMP/reference"
+    cp "${PROJECT_DIR}/storyforge.yaml" "$DRY_TMP/storyforge.yaml" 2>/dev/null
+    cp -R "${PROJECT_DIR}/reference/" "$DRY_TMP/reference/" 2>/dev/null || true
+    migrate_storyforge_yaml "$DRY_TMP"
+    if ! diff -q "${PROJECT_DIR}/storyforge.yaml" "$DRY_TMP/storyforge.yaml" > /dev/null 2>&1; then
+        log "  Would migrate storyforge.yaml (missing sections, artifact flags)"
+    fi
+    rm -rf "$DRY_TMP"
+else
+    migrate_storyforge_yaml "$PROJECT_DIR"
+fi
+
+# Step 4: Pipeline CSV
+log "Checking pipeline.csv..."
+if $DRY_RUN; then
+    HEADER=$(head -1 "${PROJECT_DIR}/working/pipeline.csv" 2>/dev/null || echo "")
+    [[ "$HEADER" != "$PIPELINE_EXPECTED" ]] && log "  Would add missing columns to pipeline.csv"
+else
+    migrate_pipeline_csv "$PROJECT_DIR"
+fi
+
+# Step 5: Junk files
+log "Cleaning junk files..."
+if $DRY_RUN; then
+    COUNT=$(find "${PROJECT_DIR}/working/evaluations" -name ".status-*" 2>/dev/null | wc -l | tr -d ' ')
+    (( COUNT > 0 )) && log "  Would remove $COUNT .status-* files"
+    COUNT=$(find "${PROJECT_DIR}/working/scores" -name ".markers-*" 2>/dev/null | wc -l | tr -d ' ')
+    (( COUNT > 0 )) && log "  Would remove $COUNT .markers-* files"
+    COUNT=$(find "${PROJECT_DIR}/working/scores" -name ".batch-requests.jsonl" -not -path "*/latest/*" 2>/dev/null | wc -l | tr -d ' ')
+    (( COUNT > 0 )) && log "  Would remove $COUNT .batch-requests.jsonl files"
+    COUNT=$(find "${PROJECT_DIR}/working/logs" -type f 2>/dev/null | wc -l | tr -d ' ')
+    (( COUNT > 0 )) && log "  Would remove $COUNT log files"
+else
+    clean_junk_files "$PROJECT_DIR"
+fi
+
+# Step 6: Legacy files
+log "Checking legacy files..."
+if $DRY_RUN; then
+    for f in "working/pipeline.yaml" "working/assemble.py"; do
+        [[ -f "${PROJECT_DIR}/${f}" ]] && log "  Would delete ${f}"
+    done
+else
+    delete_legacy_files "$PROJECT_DIR"
+fi
+
+# Step 7: Reorganize loose files
+log "Reorganizing loose files..."
+if $DRY_RUN; then
+    COUNT=$(ls "${PROJECT_DIR}"/working/recommendations*.md 2>/dev/null | wc -l | tr -d ' ')
+    (( COUNT > 0 )) && log "  Would move $COUNT recommendation files to working/recommendations/"
+else
+    reorganize_loose_files "$PROJECT_DIR"
+fi
+
+# Step 8: Pipeline review dedup
+log "Deduplicating pipeline reviews..."
+if $DRY_RUN; then
+    log "  Would deduplicate pipeline reviews (keep latest per day)"
+else
+    dedup_pipeline_reviews "$PROJECT_DIR"
+fi
+
+# Step 9: CSV integrity report
+log ""
+log "=== CSV Integrity Report ==="
+report_csv_integrity "$PROJECT_DIR"
+
+# Step 10: Unexpected files report
+log ""
+log "=== Unexpected Files Report ==="
+report_unexpected_files "$PROJECT_DIR"
+
+# Step 11: Commit (unless dry-run)
+if ! $DRY_RUN; then
+    if command -v git > /dev/null 2>&1 && [[ -d "${PROJECT_DIR}/.git" ]]; then
+        cd "$PROJECT_DIR"
+        if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+            log ""
+            log "Committing changes..."
+            git add -A
+            git commit -m "Cleanup: project structure and working files"
+            git push 2>/dev/null || log "WARNING: git push failed (no remote or auth issue)"
+        else
+            log "No changes to commit."
+        fi
+    fi
+fi
+
+log ""
+log "Cleanup complete."

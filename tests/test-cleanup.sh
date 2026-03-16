@@ -193,3 +193,41 @@ assert_file_exists "$WORK_DIR/reference/characters.csv" "yaml: characters.csv ex
 assert_contains "$AFTER" "characters:" "yaml: characters artifact entry added"
 
 rm -rf "$WORK_DIR"
+
+# ============================================================================
+# CSV integrity report tests
+# ============================================================================
+WORK_DIR="${TMPDIR}/cleanup-csv-$$"
+cp -R "$CLEANUP_FIXTURE" "$WORK_DIR"
+source "${PLUGIN_DIR}/scripts/storyforge-cleanup" --source-only
+
+REPORT=$(report_csv_integrity "$WORK_DIR")
+
+assert_contains "$REPORT" "ORPHAN_FILE:orphan-scene" "csv: detects orphan scene file"
+assert_contains "$REPORT" "ORPHAN_META:missing-scene" "csv: detects orphan metadata row"
+assert_contains "$REPORT" "MISSING_INTENT:act1-sc02" "csv: detects metadata without intent"
+assert_contains "$REPORT" "EXTRA_INTENT:extra-intent" "csv: detects intent without metadata"
+assert_contains "$REPORT" "BAD_CHAPTER_REF:nonexistent-scene" "csv: detects bad chapter-map ref"
+assert_contains "$REPORT" "SEQ_GAP:3-3" "csv: detects sequence gap"
+assert_contains "$REPORT" "UNKNOWN_CHARACTER:Bob" "csv: detects unknown character Bob"
+assert_contains "$REPORT" "UNKNOWN_CHARACTER:Carol" "csv: detects unknown character Carol"
+assert_contains "$REPORT" "UNKNOWN_CHARACTER:Dave" "csv: detects unknown character Dave"
+
+rm -rf "$WORK_DIR"
+
+# ============================================================================
+# Unexpected files report tests
+# ============================================================================
+WORK_DIR="${TMPDIR}/cleanup-unexpected-$$"
+cp -R "$CLEANUP_FIXTURE" "$WORK_DIR"
+source "${PLUGIN_DIR}/scripts/storyforge-cleanup" --source-only
+
+REPORT=$(report_unexpected_files "$WORK_DIR")
+
+assert_contains "$REPORT" "UNEXPECTED_DIR:draft" "unexpected: detects draft/"
+assert_contains "$REPORT" "UNEXPECTED_DIR:working/diagrams" "unexpected: detects working/diagrams/"
+assert_not_contains "$REPORT" "UNEXPECTED_DIR:scenes" "unexpected: scenes/ is expected"
+assert_not_contains "$REPORT" "UNEXPECTED_DIR:reference" "unexpected: reference/ is expected"
+assert_not_contains "$REPORT" "UNEXPECTED_DIR:working/evaluations" "unexpected: working/evaluations/ is expected"
+
+rm -rf "$WORK_DIR"
