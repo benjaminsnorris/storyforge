@@ -25,14 +25,23 @@ This project uses [Storyforge](https://github.com/benjaminsnorris/storyforge). A
 - `/storyforge:title` — Title and subtitle development, refinement, assessment
 - `/storyforge:press-kit` — Blurbs, jacket copy, author bio, social media, marketing materials
 - `/storyforge:cover` — Cover design: Claude-designed SVG artwork or AI-generated illustrations
+- `/storyforge:score` — Review scores, calibrate craft weights, author scoring
+- `/storyforge:visualize` — Manuscript dashboard with 10 interconnected visualizations
+- `/storyforge:annotate` — Import annotations from web book export, generate revision plan
+- `/storyforge:cleanup` — Project cleanup: fix structural drift, prune working files, resolve integrity issues
 
-Scripts (via project runner — all support `--interactive` and `--dry-run`):
+Scripts (via project runner — all support `--dry-run`; write/evaluate/revise also support `--interactive`):
 - `./storyforge write` — Autonomous scene drafting
 - `./storyforge evaluate` — Multi-agent evaluation panel
 - `./storyforge revise` — Execute revision pipeline
+- `./storyforge score` — Score scenes against craft principles
 - `./storyforge assemble` — Assemble scenes into chapters, generate epub/PDF/HTML/web
 - `./storyforge cover` — Generate typographic cover from title and genre
 - `./storyforge review` — Run pipeline review on current branch, post to PR
+- `./storyforge cleanup` — Fix structural drift, prune working directory, report integrity issues
+- `./storyforge enrich` — Populate missing scene metadata automatically
+- `./storyforge timeline` — Analyze and assign timeline days to scenes
+- `./storyforge visualize` — Generate manuscript dashboard HTML
 
 ## Suggested Next Steps
 
