@@ -725,6 +725,19 @@ def main():
             sys.exit(1)
         print(get_genre_css(sys.argv[2], sys.argv[3]))
 
+    elif command == 'count-chapters':
+        if len(sys.argv) < 3:
+            print('Usage: count-chapters <project_dir>', file=sys.stderr)
+            sys.exit(1)
+        print(count_chapters(sys.argv[2]))
+
+    elif command == 'read-chapter-field':
+        if len(sys.argv) < 5:
+            print('Usage: read-chapter-field <chapter_num> <project_dir> <field>',
+                  file=sys.stderr)
+            sys.exit(1)
+        print(read_chapter_field(int(sys.argv[2]), sys.argv[3], sys.argv[4]))
+
     else:
         print(f'Unknown command: {command}', file=sys.stderr)
         sys.exit(1)

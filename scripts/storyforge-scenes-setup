@@ -19,6 +19,7 @@ set -eo pipefail
 # --- Locate script directory and source libraries ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
 
 if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
     echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
@@ -451,36 +452,13 @@ find_content_start() {
     echo "$after_line"
 }
 
-# Build the scene detection prompt for a chapter
+# Build the scene detection prompt for a chapter (delegates to Python)
 build_scene_prompt() {
     local chapter_text="$1"
-
-    cat <<PROMPTEOF
-You are identifying scene boundaries in a chapter of a novel.
-
-A scene is a continuous unit of action in one time and place. A new scene begins when there is a significant shift in:
-- Time (hours or days pass)
-- Setting/location (characters move to a new place)
-- Point of view (the perspective character changes)
-- Narrative focus (a distinct new dramatic situation begins)
-
-Minor transitions within the same time/place/focus are NOT scene breaks.
-
-## Chapter Text
-
-${chapter_text}
-
-## Instructions
-
-Identify where each scene begins. For each scene boundary (including the very start of the chapter), output one line:
-
-SCENE: <line_number> | <suggested_title> | <brief_reason>
-
-Where line_number is the line in the chapter text where this scene begins (1-indexed).
-The first scene always starts at line 1.
-
-Output ONLY SCENE: lines, nothing else.
-PROMPTEOF
+    local tmp_chapter="${WORK_DIR}/.tmp-chapter-prompt.$$"
+    echo "$chapter_text" > "$tmp_chapter"
+    PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scenes build-boundary-prompt "$tmp_chapter"
+    rm -f "$tmp_chapter"
 }
 
 # Use direct API to detect scene boundaries (single chapter)

@@ -167,7 +167,7 @@ esac
 check_file_exists "$CHAPTER_MAP" "Chapter map (reference/chapter-map.csv)"
 
 # Verify chapter map has chapters
-TOTAL_CHAPTERS=$(PYTHONPATH="$PYTHON_LIB" python3 -c "from storyforge.assembly import count_chapters; print(count_chapters('$PROJECT_DIR'))")
+TOTAL_CHAPTERS=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.assembly count-chapters "$PROJECT_DIR")
 if [[ "$TOTAL_CHAPTERS" == "0" ]]; then
     log "ERROR: No chapters found in ${CHAPTER_MAP}"
     log "Add chapters with scene mappings to reference/chapter-map.csv"
@@ -271,7 +271,7 @@ if [[ "$DRY_RUN" == true ]]; then
     echo ""
     echo "Chapter map:"
     for (( ch=1; ch<=TOTAL_CHAPTERS; ch++ )); do
-        ch_title=$(read_chapter_field "$ch" "$PROJECT_DIR" "title")
+        ch_title=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.assembly read-chapter-field "$ch" "$PROJECT_DIR" "title")
         echo "  Chapter ${ch}: ${ch_title}"
         scene_ids=$(get_chapter_scenes "$ch" "$PROJECT_DIR")
         while IFS= read -r scene_id; do
@@ -330,7 +330,7 @@ BREAK_STYLE=$(read_production_field "$PROJECT_DIR" "scene_break" 2>/dev/null || 
 TOTAL_WORDS=0
 begin_healing_zone "assembling chapters"
 for (( ch=1; ch<=TOTAL_CHAPTERS; ch++ )); do
-    ch_title=$(read_chapter_field "$ch" "$PROJECT_DIR" "title")
+    ch_title=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.assembly read-chapter-field "$ch" "$PROJECT_DIR" "title")
     ch_file="${CHAPTERS_DIR}/chapter-$(printf '%02d' "$ch").md"
 
     log "  Chapter ${ch}: ${ch_title}"

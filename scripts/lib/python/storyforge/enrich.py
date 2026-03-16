@@ -633,6 +633,121 @@ def main():
             print('(no fields need enrichment)', file=sys.stderr)
             sys.exit(0)
 
+    elif command == 'apply-response':
+        # Full pipeline: parse response, normalize aliases, validate, optionally apply to CSVs
+        # Usage: apply-response <response_file> <scene_id> <project_dir> [--aliases <json_file>] [--force] [--result-file <path>] [--parse-only]
+        if len(sys.argv) < 5:
+            print('Usage: apply-response <response_file> <scene_id> <project_dir> '
+                  '[--aliases <json_file>] [--force] [--result-file <path>] '
+                  '[--parse-only]',
+                  file=sys.stderr)
+            sys.exit(1)
+
+        response_file = sys.argv[2]
+        scene_id = sys.argv[3]
+        project_dir = sys.argv[4]
+        alias_file = ''
+        force = False
+        result_file = ''
+        parse_only = False
+
+        i = 5
+        while i < len(sys.argv):
+            if sys.argv[i] == '--aliases' and i + 1 < len(sys.argv):
+                alias_file = sys.argv[i + 1]
+                i += 2
+            elif sys.argv[i] == '--force':
+                force = True
+                i += 1
+            elif sys.argv[i] == '--result-file' and i + 1 < len(sys.argv):
+                result_file = sys.argv[i + 1]
+                i += 2
+            elif sys.argv[i] == '--parse-only':
+                parse_only = True
+                i += 1
+            else:
+                i += 1
+
+        with open(response_file) as f:
+            response_text = f.read()
+
+        # Load alias maps if provided
+        alias_maps = None
+        if alias_file and os.path.isfile(alias_file):
+            with open(alias_file) as f:
+                alias_maps = json.load(f)
+
+        if parse_only:
+            # Parse + normalize + validate only, no CSV writes
+            result = parse_enrich_response(response_text, scene_id)
+            if result.get('_status') == 'ok' and alias_maps:
+                if 'characters' in alias_maps and 'characters' in result:
+                    result['characters'] = normalize_aliases(
+                        alias_maps['characters'], result['characters'])
+                if 'motifs' in alias_maps and 'motifs' in result:
+                    result['motifs'] = normalize_aliases(
+                        alias_maps['motifs'], result['motifs'])
+                if 'locations' in alias_maps and 'location' in result:
+                    result['location'] = normalize_aliases(
+                        alias_maps['locations'], result['location'])
+                if 'threads' in alias_maps and 'threads' in result:
+                    result['threads'] = normalize_aliases(
+                        alias_maps['threads'], result['threads'])
+            if 'type' in result:
+                result['type'] = validate_type(result['type'])
+                if not result['type']:
+                    del result['type']
+            if 'time_of_day' in result:
+                result['time_of_day'] = validate_time_of_day(
+                    result['time_of_day'])
+                if not result['time_of_day']:
+                    del result['time_of_day']
+        else:
+            result = enrich_and_apply(scene_id, response_text, project_dir,
+                                      alias_maps=alias_maps, force=force)
+
+        # Write result file in pipe-delimited format (for bash compat)
+        if result_file:
+            with open(result_file, 'w') as f:
+                for label, key in _LABEL_TO_KEY.items():
+                    val = result.get(key, '')
+                    f.write(f'{label}|{val}\n')
+                f.write(f'STATUS|{result.get("_status", "fail")}\n')
+            print(result.get('_status', 'fail'))
+        else:
+            # Print status to stdout
+            status = result.get('_status', 'fail')
+            print(status)
+
+    elif command == 'load-alias-maps':
+        # Load all alias maps from a project directory, output as JSON
+        # Usage: load-alias-maps <project_dir>
+        if len(sys.argv) < 3:
+            print('Usage: load-alias-maps <project_dir>', file=sys.stderr)
+            sys.exit(1)
+
+        project_dir = sys.argv[2]
+        maps = {}
+
+        chars_csv = os.path.join(project_dir, 'reference', 'characters.csv')
+        if os.path.isfile(chars_csv):
+            maps['characters'] = load_alias_map(chars_csv)
+
+        motifs_csv = os.path.join(project_dir, 'reference', 'motif-taxonomy.csv')
+        if os.path.isfile(motifs_csv):
+            maps['motifs'] = load_alias_map(motifs_csv)
+
+        locations_csv = os.path.join(project_dir, 'reference', 'locations.csv')
+        if os.path.isfile(locations_csv):
+            maps['locations'] = load_alias_map(locations_csv)
+
+        threads_csv = os.path.join(project_dir, 'reference', 'threads.csv')
+        if os.path.isfile(threads_csv):
+            maps['threads'] = load_alias_map(threads_csv)
+
+        json.dump(maps, sys.stdout)
+        print()
+
     elif command == 'validate-type':
         if len(sys.argv) < 3:
             print('Usage: validate-type <value>', file=sys.stderr)
@@ -648,7 +763,8 @@ def main():
     else:
         print(f'Unknown command: {command}', file=sys.stderr)
         print('Available commands: parse-response, load-aliases, normalize, '
-              'build-prompt, validate-type, validate-time', file=sys.stderr)
+              'build-prompt, validate-type, validate-time, apply-response, '
+              'load-alias-maps', file=sys.stderr)
         sys.exit(1)
 
 

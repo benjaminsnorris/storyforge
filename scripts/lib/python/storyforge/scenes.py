@@ -387,6 +387,45 @@ def _title_from_file(filepath: str) -> str:
 
 
 # ============================================================================
+# Scene boundary detection prompt
+# ============================================================================
+
+def build_boundary_prompt(chapter_text: str) -> str:
+    """Build a prompt for Claude to detect scene boundaries in a chapter.
+
+    Args:
+        chapter_text: The full text of a chapter.
+
+    Returns:
+        The assembled prompt string.
+    """
+    return f"""You are identifying scene boundaries in a chapter of a novel.
+
+A scene is a continuous unit of action in one time and place. A new scene begins when there is a significant shift in:
+- Time (hours or days pass)
+- Setting/location (characters move to a new place)
+- Point of view (the perspective character changes)
+- Narrative focus (a distinct new dramatic situation begins)
+
+Minor transitions within the same time/place/focus are NOT scene breaks.
+
+## Chapter Text
+
+{chapter_text}
+
+## Instructions
+
+Identify where each scene begins. For each scene boundary (including the very start of the chapter), output one line:
+
+SCENE: <line_number> | <suggested_title> | <brief_reason>
+
+Where line_number is the line in the chapter text where this scene begins (1-indexed).
+The first scene always starts at line 1.
+
+Output ONLY SCENE: lines, nothing else."""
+
+
+# ============================================================================
 # CLI interface
 # ============================================================================
 
@@ -498,6 +537,17 @@ def main():
         rows = generate_intent_rows(scenes)
         for row in rows:
             print(row)
+
+    elif command == 'build-boundary-prompt':
+        # Build scene boundary detection prompt from chapter text
+        # Usage: build-boundary-prompt <chapter_file>
+        if len(sys.argv) < 3:
+            print('Usage: build-boundary-prompt <chapter_file>',
+                  file=sys.stderr)
+            sys.exit(1)
+        with open(sys.argv[2]) as f:
+            chapter_text = f.read()
+        print(build_boundary_prompt(chapter_text))
 
     else:
         print(f'Unknown command: {command}', file=sys.stderr)

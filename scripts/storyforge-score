@@ -489,6 +489,50 @@ build_scene_prompt() {
     echo "$prompt"
 }
 
+# --- Helper: parse scene evaluation using Python ---
+# Replaces the bash parse_scene_evaluation from scoring.sh.
+# Handles both .txt files (batch mode) and .json files (direct mode).
+parse_scene_evaluation() {
+    local log_file="$1"
+    local output_scores="$2"
+    local output_rationale="$3"
+    local scene_id="$4"
+
+    if [[ ! -f "$log_file" ]]; then
+        log "WARNING: Log file not found: $log_file"
+        return 1
+    fi
+
+    # Extract text content based on file type
+    local text_file
+    if [[ "$log_file" == *.txt ]]; then
+        text_file="$log_file"
+    else
+        # Extract text from API JSON or stream-json to a temp file
+        text_file="${output_scores}.extracted.$$"
+        local text_content
+        text_content=$(extract_api_response "$log_file" 2>/dev/null) || true
+        if [[ -z "$text_content" ]]; then
+            text_content=$(extract_claude_response "$log_file") || {
+                log "WARNING: No text content found in $log_file"
+                return 1
+            }
+        fi
+        echo "$text_content" > "$text_file"
+    fi
+
+    # Call Python to parse, pivot, and write score/rationale CSVs
+    PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring parse-evaluation \
+        "$text_file" "$output_scores" "$output_rationale" "$scene_id" \
+        --diagnostics "$DIAGNOSTICS_CSV" 2>/dev/null
+    local rc=$?
+
+    # Clean up extracted temp file
+    [[ "$log_file" != *.txt ]] && rm -f "$text_file"
+
+    return $rc
+}
+
 case "$SCORE_MODE" in
 
 # ================================================================

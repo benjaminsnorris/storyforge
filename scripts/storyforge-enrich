@@ -34,6 +34,9 @@ fi
 # shellcheck source=lib/common.sh
 source "${LIB_DIR}/common.sh"
 
+# Python library path
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
+
 # --- Default options ---
 DRY_RUN=false
 FORCE=false
@@ -562,33 +565,18 @@ fi
 # Step 6.5: Load alias maps for normalization (if registry files exist)
 # ============================================================================
 
-CHAR_MAP=""
-MOTIF_MAP=""
-LOCATION_MAP=""
-THREAD_MAP=""
+ALIAS_MAPS_JSON="${ENRICH_DIR}/.alias-maps.json"
 
-CHARACTERS_CSV="${PROJECT_DIR}/reference/characters.csv"
-if [[ -f "$CHARACTERS_CSV" ]]; then
-    CHAR_MAP=$(load_alias_map "$CHARACTERS_CSV")
-    log "Loaded character aliases from characters.csv"
-fi
+# Load all alias maps via Python (characters, motifs, locations, threads)
+PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.enrich load-alias-maps "$PROJECT_DIR" > "$ALIAS_MAPS_JSON" 2>/dev/null || echo "{}" > "$ALIAS_MAPS_JSON"
 
-MOTIF_TAXONOMY="${PROJECT_DIR}/reference/motif-taxonomy.csv"
-if [[ -f "$MOTIF_TAXONOMY" ]]; then
-    MOTIF_MAP=$(load_alias_map "$MOTIF_TAXONOMY")
-    log "Loaded motif taxonomy from motif-taxonomy.csv"
-fi
-
-LOCATIONS_CSV="${PROJECT_DIR}/reference/locations.csv"
-if [[ -f "$LOCATIONS_CSV" ]]; then
-    LOCATION_MAP=$(load_alias_map "$LOCATIONS_CSV")
-    log "Loaded location aliases from locations.csv"
-fi
-
-THREADS_CSV="${PROJECT_DIR}/reference/threads.csv"
-if [[ -f "$THREADS_CSV" ]]; then
-    THREAD_MAP=$(load_alias_map "$THREADS_CSV")
-    log "Loaded thread aliases from threads.csv"
+# Log which maps were loaded
+if [[ -f "$ALIAS_MAPS_JSON" ]]; then
+    for map_name in characters motifs locations threads; do
+        if PYTHONPATH="$PYTHON_LIB" python3 -c "import json,sys; d=json.load(open('$ALIAS_MAPS_JSON')); sys.exit(0 if d.get('$map_name') else 1)" 2>/dev/null; then
+            log "Loaded ${map_name} aliases via Python"
+        fi
+    done
 fi
 
 # ============================================================================
@@ -718,49 +706,25 @@ validate_time_of_day() {
 }
 
 # Helper: parse a response text into a result file (pipe-delimited key|value pairs)
-# Used by all three modes to process the extracted text identically.
+# Uses Python for parsing, alias normalization, and validation.
 parse_enrich_response() {
     local response="$1"
     local result_file="$2"
 
     if [[ -n "$response" ]]; then
-        type_val=$(echo "$response" | grep "^TYPE:" | sed 's/^TYPE:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-        location_val=$(echo "$response" | grep "^LOCATION:" | sed 's/^LOCATION:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-        time_of_day_val=$(echo "$response" | grep "^TIME_OF_DAY:" | sed 's/^TIME_OF_DAY:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-        characters_val=$(echo "$response" | grep "^CHARACTERS:" | sed 's/^CHARACTERS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-        emotional_arc_val=$(echo "$response" | grep "^EMOTIONAL_ARC:" | sed 's/^EMOTIONAL_ARC:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-        threads_val=$(echo "$response" | grep "^THREADS:" | sed 's/^THREADS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
-        motifs_val=$(echo "$response" | grep "^MOTIFS:" | sed 's/^MOTIFS:[[:space:]]*//' | sed 's/[[:space:]]*$//' | head -1 || true)
+        # Write response to temp file for Python to read
+        local tmp_response="${result_file}.response.$$"
+        echo "$response" > "$tmp_response"
 
-        # Normalize against alias maps
-        if [[ -n "$CHAR_MAP" ]]; then
-            characters_val=$(normalize_aliases "$CHAR_MAP" "$characters_val")
-        fi
-        if [[ -n "$MOTIF_MAP" ]]; then
-            motifs_val=$(normalize_aliases "$MOTIF_MAP" "$motifs_val")
-        fi
-        if [[ -n "$LOCATION_MAP" && -n "$location_val" ]]; then
-            location_val=$(normalize_aliases "$LOCATION_MAP" "$location_val")
-        fi
-        if [[ -n "$THREAD_MAP" && -n "$threads_val" ]]; then
-            threads_val=$(normalize_aliases "$THREAD_MAP" "$threads_val")
-        fi
+        # Parse response and normalize aliases via Python (--parse-only skips CSV writes)
+        PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.enrich apply-response \
+            "$tmp_response" "placeholder" "$PROJECT_DIR" \
+            --aliases "$ALIAS_MAPS_JSON" \
+            --result-file "$result_file" \
+            --parse-only \
+            2>/dev/null || echo "STATUS|fail" > "$result_file"
 
-        # Validate
-        type_val=$(validate_type "$type_val")
-        time_of_day_val=$(validate_time_of_day "$time_of_day_val")
-
-        # Write results to temp file
-        {
-            echo "TYPE|${type_val}"
-            echo "LOCATION|${location_val}"
-            echo "TIME_OF_DAY|${time_of_day_val}"
-            echo "CHARACTERS|${characters_val}"
-            echo "EMOTIONAL_ARC|${emotional_arc_val}"
-            echo "THREADS|${threads_val}"
-            echo "MOTIFS|${motifs_val}"
-            echo "STATUS|ok"
-        } > "$result_file"
+        rm -f "$tmp_response"
     else
         echo "STATUS|fail" > "$result_file"
     fi

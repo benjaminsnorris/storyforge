@@ -504,6 +504,149 @@ def generate_proposals(scores_dir: str, weights_file: str):
 
 
 # ============================================================================
+# parse_scene_evaluation — pivot single-pass scores into columnar CSVs
+# ============================================================================
+
+def _extract_scores_block(text: str) -> str:
+    """Extract the SCORES: block from evaluation text.
+
+    Tries two strategies:
+      1. A ``SCORES:`` header line followed by data rows until a blank line
+         or another ``UPPERCASE:`` marker.
+      2. A line starting with ``principle|`` (direct CSV without header marker).
+    """
+    lines = text.splitlines()
+
+    # Strategy 1: SCORES: marker
+    found = False
+    collected: list[str] = []
+    for line in lines:
+        if line.strip() == 'SCORES:' or line.strip().startswith('SCORES:'):
+            if line.strip() == 'SCORES:':
+                found = True
+                continue
+        if found:
+            stripped = line.strip()
+            if not stripped:
+                break
+            if re.match(r'^[A-Z_]+:\s*$', line):
+                break
+            collected.append(line)
+
+    if collected:
+        return '\n'.join(collected)
+
+    # Strategy 2: principle| header directly
+    found = False
+    collected = []
+    for line in lines:
+        if line.startswith('principle|'):
+            found = True
+        if found:
+            stripped = line.strip()
+            if not stripped:
+                break
+            collected.append(line)
+
+    return '\n'.join(collected)
+
+
+def parse_scene_evaluation(
+    text: str,
+    scene_id: str,
+    diagnostics_csv: str = '',
+) -> tuple[str, str]:
+    """Parse a single-pass scene evaluation into pivoted score/rationale CSVs.
+
+    Input format (per row): ``principle|score|deficits|evidence_lines``
+    Output: two CSV strings with principles as columns and the scene as a row.
+
+    If *diagnostics_csv* is provided, the canonical principle order is read
+    from its ``principle`` column (unique, in file order). Otherwise, the
+    model's output order is used.
+
+    Args:
+        text: Full text content from Claude's response.
+        scene_id: Scene identifier for the id column.
+        diagnostics_csv: Optional path to diagnostics.csv for canonical ordering.
+
+    Returns:
+        Tuple of (scores_csv, rationale_csv). Either may be empty if parsing
+        fails.
+    """
+    scores_block = _extract_scores_block(text)
+    if not scores_block:
+        return '', ''
+
+    # Parse rows into a lookup dict: principle -> (score, rationale)
+    lookup: dict[str, tuple[str, str]] = {}
+    for line in scores_block.splitlines():
+        parts = line.split('|')
+        if len(parts) < 2:
+            continue
+        principle = parts[0].strip()
+        if principle == 'principle' or not principle:
+            continue
+        score = parts[1].strip() if len(parts) > 1 else ''
+        deficits = parts[2].strip() if len(parts) > 2 else ''
+        evidence = '|'.join(parts[3:]).strip() if len(parts) > 3 else ''
+
+        if deficits == 'none' or not deficits:
+            rationale = 'No deficits'
+        else:
+            deficits_clean = deficits.replace('|', '-')
+            evidence_clean = evidence.replace('|', '-')
+            rationale = f'{deficits_clean} ({evidence_clean})'
+
+        lookup[principle] = (score, rationale)
+
+    if not lookup:
+        return '', ''
+
+    # Build canonical principle list
+    canonical: list[str] = []
+    if diagnostics_csv and os.path.isfile(diagnostics_csv):
+        header, rows = _read_csv(diagnostics_csv)
+        if header:
+            try:
+                p_idx = header.index('principle')
+            except ValueError:
+                p_idx = 1  # fallback to second column
+            seen: set[str] = set()
+            for row in rows:
+                if len(row) > p_idx:
+                    p = row[p_idx]
+                    if p and p not in seen:
+                        seen.add(p)
+                        canonical.append(p)
+
+    # Fall back to model output order if no canonical list
+    if not canonical:
+        canonical = list(lookup.keys())
+
+    # Build pivoted CSVs
+    header_parts = ['id']
+    score_parts = [scene_id]
+    rationale_parts = [scene_id]
+
+    for principle in canonical:
+        header_parts.append(principle)
+        if principle in lookup:
+            s, r = lookup[principle]
+            score_parts.append(s)
+            rationale_parts.append(r)
+        else:
+            score_parts.append('')
+            rationale_parts.append('')
+
+    header_line = '|'.join(header_parts)
+    scores_csv = header_line + '\n' + '|'.join(score_parts)
+    rationale_csv = header_line + '\n' + '|'.join(rationale_parts)
+
+    return scores_csv, rationale_csv
+
+
+# ============================================================================
 # CLI interface
 # ============================================================================
 
@@ -600,6 +743,48 @@ def main():
             print('Usage: effective-weight <weights_file> <principle>', file=sys.stderr)
             sys.exit(1)
         print(get_effective_weight(sys.argv[2], sys.argv[3]))
+
+    elif command == 'parse-evaluation':
+        # Parse single-pass scene evaluation into pivoted CSVs
+        # Usage: parse-evaluation <text_file> <scores_out> <rationale_out> <scene_id> [--diagnostics <csv>]
+        if len(sys.argv) < 6:
+            print('Usage: parse-evaluation <text_file> <scores_out> '
+                  '<rationale_out> <scene_id> [--diagnostics <csv>]',
+                  file=sys.stderr)
+            sys.exit(1)
+
+        text_file = sys.argv[2]
+        scores_out = sys.argv[3]
+        rationale_out = sys.argv[4]
+        scene_id = sys.argv[5]
+        diag_csv = ''
+
+        i = 6
+        while i < len(sys.argv):
+            if sys.argv[i] == '--diagnostics' and i + 1 < len(sys.argv):
+                diag_csv = sys.argv[i + 1]
+                i += 2
+            else:
+                i += 1
+
+        with open(text_file) as f:
+            text = f.read()
+
+        scores_csv, rationale_csv = parse_scene_evaluation(
+            text, scene_id, diagnostics_csv=diag_csv)
+
+        if scores_csv:
+            with open(scores_out, 'w') as f:
+                f.write(scores_csv + '\n')
+        else:
+            print('WARNING: No SCORES block found', file=sys.stderr)
+            sys.exit(1)
+
+        if rationale_csv:
+            with open(rationale_out, 'w') as f:
+                f.write(rationale_csv + '\n')
+
+        print('ok')
 
     else:
         print(f'Unknown command: {command}', file=sys.stderr)
