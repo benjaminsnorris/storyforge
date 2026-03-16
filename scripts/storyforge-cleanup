@@ -1,0 +1,117 @@
+#!/bin/bash
+set -eo pipefail
+
+# ============================================================================
+# storyforge-cleanup — Project structure cleanup and migration
+#
+# Fixes structural drift in Storyforge novel projects: updates gitignore,
+# creates missing directories, migrates storyforge.yaml, adds CSV columns,
+# removes junk files, deletes legacy artifacts, and reports integrity issues.
+#
+# Usage:
+#   ./storyforge cleanup                  # Apply all fixes and commit
+#   ./storyforge cleanup --dry-run        # Report what would change
+#   ./storyforge cleanup --verbose        # Detailed output
+# ============================================================================
+
+# --- Allow sourcing for tests ---
+if [[ "${1:-}" == "--source-only" ]]; then
+    _CLEANUP_SOURCE_ONLY=true
+    shift
+fi
+
+# --- Locate script directory and source libraries ---
+if [[ "${_CLEANUP_SOURCE_ONLY:-}" != "true" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    LIB_DIR="${SCRIPT_DIR}/lib"
+
+    if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
+        echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
+        exit 1
+    fi
+    source "${LIB_DIR}/common.sh"
+fi
+
+# ============================================================================
+# Gitignore
+# ============================================================================
+
+GITIGNORE_REQUIRED=(
+    "working/logs/"
+    "working/scores/**/.batch-requests.jsonl"
+    "working/evaluations/**/.status-*"
+    "working/scores/**/.markers-*"
+    ".DS_Store"
+    "working/.autopilot"
+    "working/.interactive"
+)
+
+update_gitignore() {
+    local project_dir="$1"
+    local gitignore="${project_dir}/.gitignore"
+
+    if [[ ! -f "$gitignore" ]]; then
+        cat > "$gitignore" << 'GIEOF'
+# Storyforge — Novel Project .gitignore
+
+# macOS
+.DS_Store
+
+GIEOF
+    fi
+
+    local content
+    content=$(cat "$gitignore")
+    local added=false
+
+    for entry in "${GITIGNORE_REQUIRED[@]}"; do
+        if ! grep -qF "$entry" "$gitignore"; then
+            added=true
+        fi
+    done
+
+    if $added; then
+        local new_content="$content"
+        [[ "${new_content: -1}" != $'\n' ]] && new_content="${new_content}"$'\n'
+
+        if ! grep -qF "working/logs/" "$gitignore"; then
+            new_content+=$'\n'"# Logs (debugging output, value extracted at write time)"$'\n'
+            new_content+="working/logs/"$'\n'
+        fi
+
+        if ! grep -qF "working/scores/**/.batch-requests.jsonl" "$gitignore"; then
+            new_content+=$'\n'"# Batch API payloads (keep only latest for debugging)"$'\n'
+            new_content+="working/scores/**/.batch-requests.jsonl"$'\n'
+        fi
+
+        if ! grep -qF "working/evaluations/**/.status-*" "$gitignore"; then
+            new_content+=$'\n'"# Intermediate scoring/eval state"$'\n'
+            new_content+="working/evaluations/**/.status-*"$'\n'
+        fi
+
+        if ! grep -qF "working/scores/**/.markers-*" "$gitignore"; then
+            new_content+="working/scores/**/.markers-*"$'\n'
+        fi
+
+        if ! grep -qF "working/.interactive" "$gitignore"; then
+            if grep -qF "working/.autopilot" "$gitignore" && ! grep -qF "working/.interactive" "$gitignore"; then
+                new_content=$(echo "$new_content" | sed '/working\/.autopilot/a\
+working/.interactive')
+            else
+                new_content+=$'\n'"# Temporary flag files (cleaned up by scripts)"$'\n'
+                new_content+="working/.autopilot"$'\n'
+                new_content+="working/.interactive"$'\n'
+            fi
+        fi
+
+        echo "$new_content" > "$gitignore"
+    fi
+}
+
+# ============================================================================
+# Main (skip if sourced for testing)
+# ============================================================================
+
+if [[ "${_CLEANUP_SOURCE_ONLY:-}" == "true" ]]; then
+    return 0 2>/dev/null || true
+fi
