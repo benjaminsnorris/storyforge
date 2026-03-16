@@ -191,4 +191,96 @@ result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.scoring effective-weight
 assert_equals "5" "$result" "scoring: effective_weight returns weight when no author_weight"
 
 rm -rf "$SCORE_TMP"
+
+# ============================================================================
+# storyforge.assembly
+# ============================================================================
+
+echo "  --- assembly: extract_scene_prose ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.assembly extract-prose "${FIXTURE_DIR}/scenes/act1-sc01.md" 2>/dev/null)
+assert_not_empty "$result" "assembly: extract_scene_prose returns content"
+# Should not contain frontmatter markers
+assert_not_contains "$result" "---" "assembly: extract_scene_prose strips frontmatter delimiters"
+
+echo "  --- assembly: count_chapters ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+from storyforge.assembly import count_chapters
+print(count_chapters('${FIXTURE_DIR}'))
+" 2>/dev/null)
+assert_equals "2" "$result" "assembly: count_chapters finds 2 chapters"
+
+echo "  --- assembly: read_chapter_field ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+from storyforge.assembly import read_chapter_field
+print(read_chapter_field(1, '${FIXTURE_DIR}', 'title'))
+" 2>/dev/null)
+assert_equals "The Finest Cartographer" "$result" "assembly: read_chapter_field reads title"
+
+echo "  --- assembly: get_chapter_scenes ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+from storyforge.assembly import get_chapter_scenes
+scenes = get_chapter_scenes(1, '${FIXTURE_DIR}')
+print(';'.join(scenes))
+" 2>/dev/null)
+assert_contains "$result" "act1-sc01" "assembly: get_chapter_scenes includes first scene"
+assert_contains "$result" "act1-sc02" "assembly: get_chapter_scenes includes second scene"
+
+echo "  --- assembly: assemble_chapter ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.assembly chapter 1 "${FIXTURE_DIR}" 2>/dev/null)
+assert_contains "$result" "Finest Cartographer" "assembly: assemble_chapter has title"
+assert_not_empty "$result" "assembly: assemble_chapter returns content"
+
+echo "  --- assembly: generate_toc ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.assembly toc "${FIXTURE_DIR}" 2>/dev/null)
+assert_contains "$result" "Finest Cartographer" "assembly: generate_toc includes chapter 1"
+assert_contains "$result" "Into the Blank" "assembly: generate_toc includes chapter 2"
+
+echo "  --- assembly: word_count ---"
+
+# Create a temp manuscript
+ASSEMBLY_TMP="$(mktemp -d)"
+echo "One two three four five six seven eight nine ten." > "${ASSEMBLY_TMP}/test.md"
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.assembly word-count "${ASSEMBLY_TMP}/test.md" 2>/dev/null)
+assert_equals "10" "$result" "assembly: word_count counts correctly"
+rm -rf "$ASSEMBLY_TMP"
+
+# ============================================================================
+# storyforge.visualize
+# ============================================================================
+
+echo "  --- visualize: csv_to_records ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import json
+from storyforge.visualize import csv_to_records
+records = csv_to_records('${FIXTURE_DIR}/reference/scene-metadata.csv')
+print(len(records))
+" 2>/dev/null)
+# Fixture has 4 scenes (3 data rows + act2-sc01 which might be 4 total)
+if [[ "$result" -ge 3 ]]; then
+    PASS=$((PASS + 1))
+    echo "  PASS: visualize: csv_to_records returns records ($result)"
+else
+    FAIL=$((FAIL + 1))
+    echo "  FAIL: visualize: csv_to_records expected >= 3 records, got $result"
+fi
+
+echo "  --- visualize: load_dashboard_data ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import json
+from storyforge.visualize import load_dashboard_data
+data = load_dashboard_data('${FIXTURE_DIR}')
+print(json.dumps(list(data.keys())))
+" 2>/dev/null)
+assert_contains "$result" "scenes" "visualize: load_dashboard_data has scenes key"
+assert_contains "$result" "intents" "visualize: load_dashboard_data has intents key"
+assert_contains "$result" "project" "visualize: load_dashboard_data has project key"
+
 rm -rf "$PARSE_TMP"
