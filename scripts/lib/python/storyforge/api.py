@@ -8,21 +8,14 @@ import json
 import os
 import sys
 import time
-import csv
-from datetime import datetime
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+
+from storyforge.costs import PRICING, calculate_cost, log_operation
 
 
 API_BASE = 'https://api.anthropic.com/v1'
 API_VERSION = '2023-06-01'
-
-# Pricing per million tokens (defaults, env-overridable)
-PRICING = {
-    'opus':   {'input': 15.00, 'output': 75.00, 'cache_read': 1.50, 'cache_create': 18.75},
-    'sonnet': {'input': 3.00,  'output': 15.00, 'cache_read': 0.30, 'cache_create': 3.75},
-    'haiku':  {'input': 0.80,  'output': 4.00,  'cache_read': 0.08, 'cache_create': 1.00},
-}
 
 
 def get_api_key() -> str:
@@ -30,24 +23,6 @@ def get_api_key() -> str:
     if not key:
         raise RuntimeError('ANTHROPIC_API_KEY not set')
     return key
-
-
-def _detect_tier(model: str) -> str:
-    model_lower = model.lower()
-    if 'opus' in model_lower:
-        return 'opus'
-    elif 'haiku' in model_lower:
-        return 'haiku'
-    return 'sonnet'
-
-
-def _get_pricing(model: str, token_type: str) -> float:
-    tier = _detect_tier(model)
-    env_key = f'PRICING_{tier.upper()}_{token_type.upper()}'
-    env_val = os.environ.get(env_key)
-    if env_val:
-        return float(env_val)
-    return PRICING[tier][token_type]
 
 
 def _api_request(path: str, body: dict | None = None, method: str = 'GET') -> dict:
@@ -137,45 +112,18 @@ def extract_usage(response: dict) -> dict:
     }
 
 
-def calculate_cost(usage: dict, model: str) -> float:
-    """Calculate cost in USD from usage data."""
-    cost = 0.0
-    cost += usage['input_tokens'] * _get_pricing(model, 'input') / 1_000_000
-    cost += usage['output_tokens'] * _get_pricing(model, 'output') / 1_000_000
-    cost += usage['cache_read'] * _get_pricing(model, 'cache_read') / 1_000_000
-    cost += usage['cache_create'] * _get_pricing(model, 'cache_create') / 1_000_000
-    return cost
+def calculate_cost_from_usage(usage: dict, model: str) -> float:
+    """Calculate cost in USD from a usage dict (as returned by extract_usage).
 
-
-def log_usage(log_file: str, operation: str, target: str, model: str,
-              ledger_file: str | None = None, duration_s: int = 0):
-    """Parse an API response file and append a cost row to the ledger CSV."""
-    if ledger_file is None:
-        project_dir = os.environ.get('PROJECT_DIR', '.')
-        ledger_file = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
-
-    os.makedirs(os.path.dirname(ledger_file), exist_ok=True)
-
-    header = 'timestamp|operation|target|model|input_tokens|output_tokens|cache_read|cache_create|cost_usd|duration_s'
-
-    if not os.path.exists(ledger_file):
-        with open(ledger_file, 'w') as f:
-            f.write(header + '\n')
-
-    try:
-        with open(log_file) as f:
-            response = json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        response = {}
-
-    usage = extract_usage(response)
-    cost = calculate_cost(usage, model)
-    timestamp = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-
-    row = f"{timestamp}|{operation}|{target}|{model}|{usage['input_tokens']}|{usage['output_tokens']}|{usage['cache_read']}|{usage['cache_create']}|{cost:.6f}|{duration_s}"
-
-    with open(ledger_file, 'a') as f:
-        f.write(row + '\n')
+    Thin wrapper around costs.calculate_cost for backward compatibility.
+    """
+    return calculate_cost(
+        model,
+        usage['input_tokens'],
+        usage['output_tokens'],
+        cache_read=usage.get('cache_read', 0),
+        cache_create=usage.get('cache_create', 0),
+    )
 
 
 # ============================================================================
@@ -296,7 +244,7 @@ def main():
 
     python3 -m storyforge.api invoke <prompt_file> <model> <log_file> [max_tokens]
     python3 -m storyforge.api extract-text <log_file>
-    python3 -m storyforge.api log-usage <log_file> <operation> <target> <model> [ledger] [duration]
+    python3 -m storyforge.api log-usage <log_file> <operation> <target> <model> [unused] [duration]
     python3 -m storyforge.api submit-batch <batch_file>
     python3 -m storyforge.api poll-batch <batch_id>
     python3 -m storyforge.api download-results <results_url> <output_dir> <log_dir>
@@ -320,10 +268,20 @@ def main():
         print(extract_text_from_file(log_file))
 
     elif command == 'log-usage':
+        # Legacy CLI: parse an API response file and log to ledger
         log_file, operation, target, model = sys.argv[2:6]
-        ledger = sys.argv[6] if len(sys.argv) > 6 else None
         duration = int(sys.argv[7]) if len(sys.argv) > 7 else 0
-        log_usage(log_file, operation, target, model, ledger, duration)
+        try:
+            with open(log_file) as f:
+                response = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            response = {}
+        usage = extract_usage(response)
+        cost = calculate_cost_from_usage(usage, model)
+        project_dir = os.environ.get('PROJECT_DIR', '.')
+        log_operation(project_dir, operation, model,
+                      usage['input_tokens'], usage['output_tokens'],
+                      cost, duration)
         print('ok')
 
     elif command == 'submit-batch':

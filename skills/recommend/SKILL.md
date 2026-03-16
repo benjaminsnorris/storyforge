@@ -20,7 +20,7 @@ Store this resolved plugin path for use throughout the session.
 Read all of the following. Do not skip any — the recommendation depends on having the complete picture.
 
 1. **`storyforge.yaml`** — phase, coaching level, genre, target word count, status
-2. **`CLAUDE.md`** — recent activity, standing instructions, artifact status
+2. **`CLAUDE.md`** — orientation and standing instructions (project state lives in `storyforge.yaml` and `working/pipeline.csv`)
 3. **`working/pipeline.csv`** — if it exists: current cycle ID, cycle status, linked evaluation/plan/review. Read the full cycle history to understand where the project is in the eval→plan→revise→review loop.
 4. **Key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it. Do not recommend anything that contradicts a settled decision.
 5. **Scan for artifacts** — check existence (not contents) of:

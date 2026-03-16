@@ -206,7 +206,7 @@ Read `working/pipeline.csv` to find the current cycle ID. Save the plan as a pip
 
 After writing the plan file, update the manifest's current cycle entry to set the `plan` field to `revision-plan.csv`.
 
-**4. Update project state:** set `phase: revision` in `storyforge.yaml`. Update `CLAUDE.md` if needed.
+**4. Update project state:** set `phase: revision` in `storyforge.yaml`.
 
 **5. Commit and push** all changes to the new branch:
 ```bash

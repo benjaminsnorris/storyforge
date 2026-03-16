@@ -113,7 +113,7 @@ Save the full review to `working/reviews/review-{date}.md` with this structure:
 ## Step 7: Update Project Files, Commit, and Push
 
 1. Update `storyforge.yaml` — set the review artifact as existing if you want to track it, or leave as-is.
-2. Update `CLAUDE.md` — reflect the current state: revision complete, review produced, recommended next step.
+2. Update `storyforge.yaml` — reflect the current phase and artifact state.
 3. Record genuine creative or structural decisions the author makes during review (e.g., "cut the subplot entirely" or "the pacing issue in Act 2 is intentional"). Do not record routine choices like "run another evaluation" or "looks good."
 4. **Commit and push immediately:**
    ```

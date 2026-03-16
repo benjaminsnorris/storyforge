@@ -88,7 +88,7 @@ mkdir -p {project-dir}/{reference,scenes,manuscript/press-kit,working/{logs,eval
 Then create the initial pipeline manifest:
 
 ```bash
-echo "cycle|started|status|evaluation|plan|review|recommendations|summary" > {project-dir}/working/pipeline.csv
+echo "cycle|started|status|evaluation|scoring|plan|review|recommendations|summary" > {project-dir}/working/pipeline.csv
 ```
 
 Do NOT create a `draft/` directory. Storyforge works on scene files in `scenes/` throughout the entire pipeline — drafting, evaluation, and revision all operate on scenes. Manuscript assembly is a separate, late-stage step. The `manuscript/press-kit/` directory is created as a placeholder for marketing materials; the rest of `manuscript/` is populated by the assembly pipeline later.
@@ -161,63 +161,33 @@ id|function|emotional_arc|characters|threads|motifs|notes
 
 ## Step 6: Generate the Project CLAUDE.md
 
-Read the `CLAUDE.md` template from the Storyforge plugin's `templates/` directory if available. Fill in:
-
-- Project title
-- Genre and subgenre
-- Logline
-- Target word count
-- Current phase: **development**
-- All artifacts marked as **not yet created**
-- Suggested next steps pointing to `/storyforge:develop` for world-building, character development, and story concept work
-
-If the template cannot be found, generate a project `CLAUDE.md` that includes:
+Generate a project `CLAUDE.md` that serves as **orientation only** — no status checklists, no artifact tracking, no phase display. Project state lives in `storyforge.yaml` and `working/pipeline.csv`.
 
 ```markdown
-# {Title}
+# {Title} — Storyforge Project
 
-## Project Overview
-- **Genre**: {genre} {subgenre if applicable}
-- **Target word count**: {word_count}
-- **Logline**: {logline}
-- **Phase**: Development
-- **Status**: Active
+## About This Project
+{genre} novel. {logline}
 
-## Artifacts
-- [ ] World bible — not yet created
-- [ ] Character profiles — not yet created
-- [ ] Story concept / synopsis — not yet created
-- [ ] Key decisions — initialized (empty)
-- [ ] Scene index — initialized (empty)
+## Working with Storyforge
+This project uses the Storyforge plugin for Claude Code. Key commands:
+- `/storyforge:forge` — main hub, recommends what to work on next
+- `./storyforge score` — score the manuscript against craft principles
+- `./storyforge revise` — execute revision passes from a plan
+- `./storyforge evaluate` — run multi-evaluator assessment
+- `./storyforge write` — draft scenes autonomously
 
-## Current Phase: Development
+## Where to Find Things
+- `storyforge.yaml` — project configuration (title, genre, phase, coaching level)
+- `working/pipeline.csv` — pipeline history (evaluation/revision/scoring cycles)
+- `reference/` — scene metadata, character bible, voice guide, world bible
+- `scenes/` — scene prose files
+- `working/scores/latest/` — most recent scoring results
+- `working/evaluations/` — evaluation reports
+- `working/plans/` — revision plans
 
-This project is in the **development** phase. The focus is on building the creative foundation before drafting begins.
-
-### Available Skills
-- `/storyforge:forge` — Hub: status, routing, routes to other skills
-- `/storyforge:develop` — World, character, story, timeline development
-- `/storyforge:voice` — Voice and style refinement
-- `/storyforge:scenes` — Scene index management
-- `/storyforge:plan-revision` — Plan revision passes from evaluation results
-- `/storyforge:review` — Review revision results, map findings to changes
-- `/storyforge:recommend` — Assess project state, recommend the highest-value next action
-- `/storyforge:title` — Title and subtitle development, refinement, assessment
-- `/storyforge:press-kit` — Blurbs, jacket copy, author bio, social media, marketing materials
-- `/storyforge:cover` — Cover design: Claude-designed SVG artwork or AI-generated illustrations
-
-### Scripts (via project runner)
-- `./storyforge write` — Autonomous scene drafting
-- `./storyforge evaluate` — Multi-agent evaluation panel
-- `./storyforge revise` — Execute revision pipeline
-
-### Suggested Next Steps
-Use `/storyforge:develop` to begin working on:
-- **World-building** — establish the setting, rules, and texture of the world
-- **Character development** — create the cast and their inner lives
-- **Story concept** — shape the premise into a working structure
-
-Start with whichever element pulls you in the strongest.
+## Standing Instructions
+{Any author-specific instructions go here}
 ```
 
 Use the **Write tool** to save this to `{project-dir}/CLAUDE.md`.

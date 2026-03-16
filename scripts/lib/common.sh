@@ -838,9 +838,9 @@ get_coaching_level() {
 # Pipeline manifest (multi-cycle evaluation/revision tracking)
 # ============================================================================
 # Uses pipe-delimited CSV: working/pipeline.csv
-# Header: cycle|started|status|evaluation|plan|review|recommendations|summary
+# Header: cycle|started|status|evaluation|scoring|plan|review|recommendations|summary
 
-PIPELINE_HEADER="cycle|started|status|evaluation|plan|review|recommendations|summary"
+PIPELINE_HEADER="cycle|started|status|evaluation|scoring|plan|review|recommendations|summary"
 
 # Get the pipeline manifest path.
 get_pipeline_file() {
@@ -904,7 +904,7 @@ start_new_cycle() {
     local today
     today=$(date '+%Y-%m-%d')
 
-    append_csv_row "$pipeline_file" "${new_id}|${today}|pending||||||"
+    append_csv_row "$pipeline_file" "${new_id}|${today}|pending|||||||"
 
     echo "$new_id"
 }
@@ -1397,7 +1397,7 @@ ${inline_recommend}
     echo "Read ALL of the following files to understand the full picture:
 - storyforge.yaml (project config, phase, coaching level, artifact status)
 ${pipeline_context}
-- CLAUDE.md (recent activity, standing instructions)
+- CLAUDE.md (orientation, standing instructions)
 - The most recent review report in working/reviews/
 - The most recent evaluation findings in working/evaluations/ — read findings.yaml or synthesis.md if they exist. Note severity counts (critical/major/minor).
 - The current cycle's revision plan in working/plans/ (if it exists) — check pass completion status

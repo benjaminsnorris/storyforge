@@ -20,7 +20,7 @@ Store this resolved plugin path for use throughout the session.
 Before doing anything else, orient yourself:
 
 1. **Read `storyforge.yaml`** in the current project directory. This tells you the title, genre, target word count, logline, current phase, and status.
-2. **Read the project `CLAUDE.md`**. This tells you what artifacts exist, what phase the project is in, recent activity, and any standing instructions from the author.
+2. **Read the project `CLAUDE.md`**. This contains orientation and any standing instructions from the author.
 3. **Scan for key artifacts** — check for the existence of:
    - `reference/character-bible.md`
    - `reference/world-bible.md`
@@ -194,7 +194,7 @@ The author wants to see where things stand. Present a clean summary:
 - **Scene progress:** planned vs. drafted vs. revised (counts)
 - **Word count:** current vs. target (if drafting has begun)
 - **Active threads:** any open questions, unresolved character decisions, dangling plot points noted in the project files
-- **Recent activity:** what was worked on last, based on file modification times or notes in CLAUDE.md
+- **Recent activity:** what was worked on last, based on file modification times and `working/pipeline.csv`
 
 Suggest next steps but don't push. Let the author absorb the information and decide.
 
@@ -309,7 +309,7 @@ This is especially important during long autonomous sessions where a skill is ex
 - Produced a voice guide section? Commit and push. Then produce the next section.
 - Updated a reference document? Commit and push.
 
-Every commit includes updated `storyforge.yaml` and `CLAUDE.md` so the project state files are always current.
+Every commit includes updated `storyforge.yaml` so the project state is always current.
 
 Commit messages are descriptive and prefixed: `"Develop: ..."`, `"Voice: ..."`, `"Scenes: ..."`, `"Plan revision: ..."`.
 
