@@ -4,7 +4,16 @@
 # macOS
 .DS_Store
 
+# Logs (debugging output, value extracted at write time)
+working/logs/
+
+# Batch API payloads (keep only latest for debugging)
+working/scores/**/.batch-requests.jsonl
+
+# Intermediate scoring/eval state
+working/evaluations/**/.status-*
+working/scores/**/.markers-*
+
 # Temporary flag files (cleaned up by scripts)
 working/.autopilot
 working/.interactive
-

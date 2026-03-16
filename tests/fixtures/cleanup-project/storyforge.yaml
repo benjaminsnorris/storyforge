@@ -1,0 +1,26 @@
+project:
+  title: "Test Novel"
+  genre: "fantasy"
+  target_words: 80000
+  logline: "A test novel."
+
+artifacts:
+  world_bible:
+    exists: false
+    path: reference/world-bible.md
+    updated:
+  character_bible:
+    exists: false
+    path: reference/character-bible.md
+    updated:
+  scene_index:
+    exists: true
+    path: reference/scene-metadata.csv
+    updated: "2026-03-01"
+
+chapter_map:
+  exists: true
+  path: reference/chapter-map.csv
+  updated: "2026-03-01"
+
+phase: drafting
