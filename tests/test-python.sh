@@ -89,7 +89,7 @@ row_count=$(wc -l < "$ledger" | tr -d ' ')
 assert_equals "2" "$row_count" "api: ledger has header + 1 row"
 
 data_row=$(tail -1 "$ledger")
-assert_contains "$data_row" "test-op|test-target|claude-sonnet-4-6|1000|500" "api: row has correct data"
+assert_contains "$data_row" "test-op|claude-sonnet-4-6|1000|500" "api: row has correct data"
 
 # ============================================================================
 # storyforge.prompts
@@ -460,4 +460,60 @@ assert_contains "$content" "Test Author" "cover: render substitutes author"
 assert_not_contains "$content" "{{TITLE}}" "cover: render removes placeholders"
 
 rm -rf "$COVER_TMP"
+
+# ============================================================================
+# storyforge.costs
+# ============================================================================
+
+echo "  --- costs: calculate_cost ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+from storyforge.costs import calculate_cost
+print(f'{calculate_cost(\"claude-sonnet-4-6\", 1000000, 0):.2f}')
+" 2>/dev/null)
+assert_equals "3.00" "$result" "costs: calculate_cost sonnet input pricing"
+
+echo "  --- costs: estimate_cost ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.costs estimate score 100 2000 claude-sonnet-4-6 2>/dev/null)
+assert_not_empty "$result" "costs: estimate returns a value"
+
+echo "  --- costs: check_threshold ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.costs check 5.00 100 2>/dev/null)
+assert_equals "ok" "$result" "costs: check_threshold under threshold"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.costs check 150.00 100 2>/dev/null || true)
+assert_equals "over" "$result" "costs: check_threshold over threshold"
+
+# ============================================================================
+# storyforge.project
+# ============================================================================
+
+echo "  --- project: project_config ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import json
+from storyforge.project import project_config
+cfg = project_config('${FIXTURE_DIR}')
+print(cfg.get('title', ''))
+" 2>/dev/null)
+assert_equals "The Cartographer's Silence" "$result" "project: project_config reads title"
+
+echo "  --- project: current_cycle ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import json
+from storyforge.project import current_cycle
+c = current_cycle('${FIXTURE_DIR}')
+print(c['cycle'] if c else 'none')
+" 2>/dev/null)
+assert_equals "3" "$result" "project: current_cycle returns latest cycle"
+
+echo "  --- project: project_summary ---"
+
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.project summary "${FIXTURE_DIR}" 2>/dev/null)
+assert_contains "$result" "Cartographer" "project: summary includes title"
+assert_contains "$result" "cycle" "project: summary includes cycle info"
+
 rm -rf "$PARSE_TMP"
