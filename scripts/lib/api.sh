@@ -8,6 +8,47 @@
 # Source this file from your script; do not execute it directly.
 
 # ============================================================================
+# API key validation
+# ============================================================================
+
+# _sf_api_key_verified — skip re-checking after first success
+_sf_api_key_verified=false
+
+# verify_api_key()
+# Lightweight auth check — sends a minimal request that returns 400 (valid key)
+# or 401 (invalid key). No tokens consumed. Caches result for the session.
+# Returns 0 if key is valid, 1 if not.
+verify_api_key() {
+    if [[ "$_sf_api_key_verified" == true ]]; then
+        return 0
+    fi
+
+    if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+        log "ERROR: ANTHROPIC_API_KEY not set."
+        return 1
+    fi
+
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+        "https://api.anthropic.com/v1/messages" \
+        -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "content-type: application/json" \
+        -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' 2>/dev/null) || {
+        log "ERROR: Could not reach Anthropic API"
+        return 1
+    }
+
+    if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+        log "ERROR: ANTHROPIC_API_KEY is invalid (HTTP ${http_code})"
+        return 1
+    fi
+
+    _sf_api_key_verified=true
+    return 0
+}
+
+# ============================================================================
 # Direct API invocation
 # ============================================================================
 
@@ -22,11 +63,7 @@ invoke_anthropic_api() {
     local log_file="$3"
     local max_tokens="${4:-4096}"
 
-    if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-        log "ERROR: ANTHROPIC_API_KEY not set. Required for direct API calls."
-        log "  Set it with: export ANTHROPIC_API_KEY=your-key"
-        return 1
-    fi
+    verify_api_key || return 1
 
     # Build the JSON request — escape the prompt for JSON embedding
     local json_prompt
@@ -159,10 +196,7 @@ _SF_BATCH_RESULTS_URL=""
 submit_batch() {
     local batch_file="$1"
 
-    if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-        log "ERROR: ANTHROPIC_API_KEY not set."
-        return 1
-    fi
+    verify_api_key || return 1
 
     local batch_body="${TMPDIR:-/tmp}/storyforge-batch-body-$$.json"
     jq -s '{requests: .}' "$batch_file" > "$batch_body"
