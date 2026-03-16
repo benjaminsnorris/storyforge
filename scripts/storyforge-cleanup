@@ -109,6 +109,73 @@ working/.interactive')
 }
 
 # ============================================================================
+# Missing directories
+# ============================================================================
+
+EXPECTED_DIRS=(
+    "manuscript/press-kit"
+    "working/logs"
+    "working/evaluations"
+    "working/plans"
+    "working/recommendations"
+)
+
+create_missing_dirs() {
+    local project_dir="$1"
+    local created=""
+    for dir in "${EXPECTED_DIRS[@]}"; do
+        if [[ ! -d "${project_dir}/${dir}" ]]; then
+            mkdir -p "${project_dir}/${dir}"
+            touch "${project_dir}/${dir}/.gitkeep"
+            created+="${dir}"$'\n'
+        fi
+    done
+    echo -n "$created"
+}
+
+# ============================================================================
+# Junk file cleanup
+# ============================================================================
+
+clean_junk_files() {
+    local project_dir="$1"
+    find "${project_dir}/working/evaluations" -name ".status-*" -delete 2>/dev/null || true
+    find "${project_dir}/working/scores" -name ".markers-*" -delete 2>/dev/null || true
+    find "${project_dir}/working/scores" -name ".batch-requests.jsonl" -not -path "*/latest/*" -delete 2>/dev/null || true
+    if [[ -d "${project_dir}/working/logs" ]]; then
+        find "${project_dir}/working/logs" -type f -delete 2>/dev/null || true
+    fi
+    for dir in enrich coaching backups scenes-setup; do
+        local target="${project_dir}/working/${dir}"
+        if [[ -d "$target" ]] && [[ -z "$(ls -A "$target" 2>/dev/null)" ]]; then
+            rmdir "$target"
+        fi
+    done
+}
+
+# ============================================================================
+# Legacy files and reorganization
+# ============================================================================
+
+delete_legacy_files() {
+    local project_dir="$1"
+    for f in "working/pipeline.yaml" "working/assemble.py"; do
+        if [[ -f "${project_dir}/${f}" ]]; then
+            rm "${project_dir}/${f}"
+        fi
+    done
+}
+
+reorganize_loose_files() {
+    local project_dir="$1"
+    mkdir -p "${project_dir}/working/recommendations"
+    for f in "${project_dir}"/working/recommendations*.md; do
+        [[ -f "$f" ]] || continue
+        mv -n "$f" "${project_dir}/working/recommendations/"
+    done
+}
+
+# ============================================================================
 # Main (skip if sourced for testing)
 # ============================================================================
 
