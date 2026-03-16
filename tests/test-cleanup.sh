@@ -166,3 +166,30 @@ assert_file_exists "$WORK_DIR/working/reviews/review-20260301.md" "dedup: summar
 
 rm -rf "$WORK_DIR"
 
+# ============================================================================
+# storyforge.yaml migration tests
+# ============================================================================
+WORK_DIR="${TMPDIR}/cleanup-yaml-$$"
+cp -R "$CLEANUP_FIXTURE" "$WORK_DIR"
+source "${PLUGIN_DIR}/scripts/storyforge-cleanup" --source-only
+
+YAML="$WORK_DIR/storyforge.yaml"
+assert_contains "$(cat "$YAML")" "chapter_map:" "yaml: has top-level chapter_map before"
+
+migrate_storyforge_yaml "$WORK_DIR"
+
+AFTER=$(cat "$YAML")
+
+TOP_CM=$(echo "$AFTER" | grep -c '^chapter_map:' || true)
+assert_equals "0" "$TOP_CM" "yaml: top-level chapter_map removed"
+assert_contains "$AFTER" "  chapter_map:" "yaml: chapter_map under artifacts"
+assert_contains "$AFTER" "scene_extensions:" "yaml: scene_extensions added"
+assert_contains "$AFTER" "evaluation:" "yaml: evaluation added"
+assert_contains "$AFTER" "# production:" "yaml: production section added (commented)"
+assert_contains "$AFTER" "# parts:" "yaml: parts section added (commented)"
+
+# characters.csv exists on disk — should get artifact entry
+assert_file_exists "$WORK_DIR/reference/characters.csv" "yaml: characters.csv exists on disk"
+assert_contains "$AFTER" "characters:" "yaml: characters artifact entry added"
+
+rm -rf "$WORK_DIR"

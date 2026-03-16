@@ -239,6 +239,137 @@ dedup_pipeline_reviews() {
 }
 
 # ============================================================================
+# storyforge.yaml migration
+# ============================================================================
+
+migrate_storyforge_yaml() {
+    local project_dir="$1"
+    local yaml="${project_dir}/storyforge.yaml"
+    [[ -f "$yaml" ]] || return 0
+
+    local content
+    content=$(cat "$yaml")
+    local modified=false
+
+    # --- Move misplaced chapter_map to under artifacts ---
+    if echo "$content" | grep -q '^chapter_map:'; then
+        local cm_exists cm_path cm_updated
+        cm_exists=$(echo "$content" | sed -n '/^chapter_map:/,/^[^ ]/{/exists:/{ s/.*exists: *//; p; };}')
+        cm_path=$(echo "$content" | sed -n '/^chapter_map:/,/^[^ ]/{/path:/{ s/.*path: *//; p; };}')
+        cm_updated=$(echo "$content" | sed -n '/^chapter_map:/,/^[^ ]/{/updated:/{ s/.*updated: *//; p; };}')
+
+        # Remove the top-level chapter_map block
+        content=$(echo "$content" | awk '
+            /^chapter_map:/ { skip=1; next }
+            skip && /^  / { next }
+            skip { skip=0 }
+            { print }
+        ')
+        # Remove consecutive blank lines left behind
+        content=$(echo "$content" | awk 'NR==1{print;prev=$0;next} /^$/{if(prev==""){next}} {print;prev=$0}')
+
+        # Insert chapter_map under artifacts using awk
+        content=$(echo "$content" | awk -v ce="$cm_exists" -v cp="$cm_path" -v cu="$cm_updated" '
+            /^artifacts:/ { in_art=1; print; next }
+            in_art && /^[^ ]/ {
+                print "  chapter_map:"
+                print "    exists: " ce
+                print "    path: " cp
+                print "    updated: " cu
+                in_art=0
+            }
+            { print }
+        ')
+        modified=true
+    fi
+
+    # --- Add missing sections ---
+    if ! echo "$content" | grep -q '^scene_extensions:'; then
+        content+=$'\n'"scene_extensions: []"$'\n'
+        modified=true
+    fi
+    if ! echo "$content" | grep -q '^evaluation:'; then
+        content+=$'\n'"evaluation:"$'\n'"  custom_evaluators: []"$'\n'
+        modified=true
+    fi
+    if ! echo "$content" | grep -q '^production:' && ! echo "$content" | grep -q '^# production:'; then
+        content+=$'\n'"# production:"$'\n'"#   author: \"\""$'\n'"#   language: en"$'\n'"#   scene_break: ornamental"$'\n'"#   default_heading: numbered-titled"$'\n'
+        modified=true
+    fi
+    if ! echo "$content" | grep -q '^parts:' && ! echo "$content" | grep -q '^# parts:'; then
+        content+=$'\n'"# parts:"$'\n'"#   - number: 1"$'\n'"#     title: \"Part One\""$'\n'
+        modified=true
+    fi
+
+    # --- Add missing artifact entries for files on disk ---
+    local artifact_files
+    artifact_files=(
+        "characters:reference/characters.csv"
+        "locations:reference/locations.csv"
+        "threads:reference/threads.csv"
+        "motif_taxonomy:reference/motif-taxonomy.csv"
+        "scene_intent:reference/scene-intent.csv"
+        "scene_log:reference/scene-log.md"
+        "resolved_threads:reference/resolved-threads.md"
+        "title_development:reference/title-development.md"
+    )
+    for entry in "${artifact_files[@]}"; do
+        local aid="${entry%%:*}"
+        local apath="${entry#*:}"
+        if [[ -f "${project_dir}/${apath}" ]] && ! echo "$content" | grep -q "  ${aid}:"; then
+            content=$(echo "$content" | awk -v aid="$aid" -v apath="$apath" '
+                /^artifacts:/ { in_art=1; print; next }
+                in_art && /^[^ ]/ {
+                    print "  " aid ":"
+                    print "    exists: true"
+                    print "    path: " apath
+                    print "    updated:"
+                    in_art=0
+                }
+                { print }
+            ')
+            modified=true
+        fi
+    done
+
+    # --- Fix exists flags using awk block-level awareness ---
+    content=$(echo "$content" | awk -v proj="$project_dir" '
+    /^  [a-z_]+:$/ || /^  [a-z_]+: *$/ {
+        block_name = $0; block_lines[0] = $0; block_count = 1; in_block = 1; next
+    }
+    in_block && /^    exists:/ { block_lines[block_count++] = $0; next }
+    in_block && /^    path:/ {
+        block_lines[block_count++] = $0
+        sub(/^    path: */, ""); gsub(/"/, ""); gsub(/ *$/, "")
+        block_path = $0; next
+    }
+    in_block && /^    updated:/ {
+        block_lines[block_count++] = $0
+        cmd = "test -e \"" proj "/" block_path "\" && echo yes || echo no"
+        cmd | getline disk_exists; close(cmd)
+        for (i = 0; i < block_count; i++) {
+            line = block_lines[i]
+            if (line ~ /exists: false/ && disk_exists == "yes") sub(/exists: false/, "exists: true", line)
+            else if (line ~ /exists: true/ && disk_exists == "no") sub(/exists: true/, "exists: false", line)
+            print line
+        }
+        in_block = 0; block_count = 0; block_path = ""; next
+    }
+    in_block && !/^    / {
+        for (i = 0; i < block_count; i++) print block_lines[i]
+        in_block = 0; block_count = 0; print; next
+    }
+    in_block { block_lines[block_count++] = $0; next }
+    { print }
+    ')
+    modified=true
+
+    if $modified; then
+        echo "$content" > "$yaml"
+    fi
+}
+
+# ============================================================================
 # Main (skip if sourced for testing)
 # ============================================================================
 
