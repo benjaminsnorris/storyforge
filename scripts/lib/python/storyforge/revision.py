@@ -658,6 +658,65 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
 
 
 # ============================================================================
+# Change verification
+# ============================================================================
+
+def verify_revision_changes(head_before: str, project_dir: str) -> bool:
+    """Check if a revision pass produced changes.
+
+    Checks for new commits since head_before, uncommitted changes
+    (staged or unstaged), and untracked files in scenes/ or reference/.
+
+    Args:
+        head_before: Git commit hash recorded before the pass started.
+        project_dir: Path to the project root.
+
+    Returns:
+        True if changes exist, False if the pass produced no changes.
+    """
+    import subprocess
+
+    def _git(*args: str) -> str:
+        try:
+            result = subprocess.run(
+                ['git', '-C', project_dir] + list(args),
+                capture_output=True, text=True, timeout=10,
+            )
+            return result.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return ''
+
+    def _git_rc(*args: str) -> int:
+        try:
+            result = subprocess.run(
+                ['git', '-C', project_dir] + list(args),
+                capture_output=True, text=True, timeout=10,
+            )
+            return result.returncode
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return 1
+
+    # Check for new commits
+    head_now = _git('rev-parse', 'HEAD')
+    if head_now and head_now != head_before:
+        return True
+
+    # Check for uncommitted changes (staged or unstaged)
+    if _git_rc('diff', '--quiet') != 0:
+        return True
+    if _git_rc('diff', '--cached', '--quiet') != 0:
+        return True
+
+    # Check for untracked files in scenes/ or reference/
+    untracked = _git('ls-files', '--others', '--exclude-standard',
+                      '--', 'scenes/', 'reference/')
+    if untracked:
+        return True
+
+    return False
+
+
+# ============================================================================
 # CLI interface
 # ============================================================================
 
@@ -732,6 +791,22 @@ def main():
             print(prompt)
         except (FileNotFoundError, ValueError) as e:
             print(f'ERROR: {e}', file=sys.stderr)
+            sys.exit(1)
+
+    elif command == 'verify-changes':
+        # Usage: verify-changes <head_before> <project_dir>
+        if len(sys.argv) < 4:
+            print('Usage: verify-changes <head_before> <project_dir>',
+                  file=sys.stderr)
+            sys.exit(1)
+        head_before = sys.argv[2]
+        project_dir = sys.argv[3]
+        has_changes = verify_revision_changes(head_before, project_dir)
+        if has_changes:
+            print('changes')
+            sys.exit(0)
+        else:
+            print('no-changes')
             sys.exit(1)
 
     else:

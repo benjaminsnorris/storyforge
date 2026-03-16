@@ -167,7 +167,7 @@ esac
 log "Mode: ${SCORE_MODE}, Model: ${EVAL_MODEL}"
 
 # --- Initialize craft weights ---
-init_craft_weights "$PROJECT_DIR" "$PLUGIN_DIR"
+PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring init-weights "$PROJECT_DIR" "$PLUGIN_DIR"
 WEIGHTS_FILE="${PROJECT_DIR}/working/craft-weights.csv"
 
 # ============================================================================
@@ -448,7 +448,7 @@ if [[ ! -f "$EVAL_TEMPLATE_FILE" ]]; then
 fi
 
 EVAL_TEMPLATE=$(cat "$EVAL_TEMPLATE_FILE")
-EVALUATION_CRITERIA=$(build_evaluation_criteria "$DIAGNOSTICS_CSV" "$GUIDE_FILE")
+EVALUATION_CRITERIA=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring build-evaluation-criteria "$DIAGNOSTICS_CSV" "$GUIDE_FILE")
 # Exclude narrative principles from scene-level weighted text (scored at novel level)
 WEIGHTED_TEXT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring weighted-text "$WEIGHTS_FILE" --exclude-section narrative)
 
@@ -745,8 +745,8 @@ $(cat "$scene_file")
         fi
 
         # Build rubric content
-        narrative_rubric=$(extract_rubric_section "Narrative Frameworks")
-        character_act_rubric=$(extract_rubric_section "Character Craft")
+        narrative_rubric=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring extract-rubric-section "Narrative Frameworks" "$PLUGIN_DIR")
+        character_act_rubric=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring extract-rubric-section "Character Craft" "$PLUGIN_DIR")
         weighted_text=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring weighted-text "$WEIGHTS_FILE")
 
         # Substitute into template
@@ -821,8 +821,8 @@ $(echo "$character_list" | sed 's/^/- /')"
     done
 
     # Build rubrics
-    character_novel_rubric=$(extract_rubric_section "Character Craft")
-    genre_rubric=$(extract_rubric_section "Tropes and Genre")
+    character_novel_rubric=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring extract-rubric-section "Character Craft" "$PLUGIN_DIR")
+    genre_rubric=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring extract-rubric-section "Tropes and Genre" "$PLUGIN_DIR")
     weighted_text=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring weighted-text "$WEIGHTS_FILE")
 
     # Substitute into template

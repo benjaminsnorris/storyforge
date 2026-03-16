@@ -211,12 +211,14 @@ echo "Fixture: ${FIXTURE_DIR}"
 
 # Source the libraries under test
 source "${PLUGIN_DIR}/scripts/lib/common.sh"
-source "${PLUGIN_DIR}/scripts/lib/prompt-builder.sh"
-source "${PLUGIN_DIR}/scripts/lib/revision-passes.sh"
 source "${PLUGIN_DIR}/scripts/lib/assembly.sh"
 source "${PLUGIN_DIR}/scripts/lib/cover-api.sh"
 source "${PLUGIN_DIR}/scripts/lib/csv.sh"
 source "${PLUGIN_DIR}/scripts/lib/costs.sh"
+# Legacy bash libraries kept on disk but no longer sourced by default.
+# Source them here for backward-compat tests that still exercise bash functions.
+source "${PLUGIN_DIR}/scripts/lib/prompt-builder.sh"
+source "${PLUGIN_DIR}/scripts/lib/revision-passes.sh"
 source "${PLUGIN_DIR}/scripts/lib/scoring.sh"
 
 # Set PROJECT_DIR to the fixture

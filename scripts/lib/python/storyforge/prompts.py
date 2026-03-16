@@ -299,6 +299,45 @@ def list_reference_files(project_dir: str) -> list[str]:
 
 
 # ============================================================================
+# Scene status
+# ============================================================================
+
+def get_scene_status(scene_id: str, project_dir: str) -> str:
+    """Get the status of a scene from metadata CSV.
+
+    Checks CSV status field first. If no CSV status, checks if the scene
+    file exists with substantial content (>100 words) and returns 'drafted'.
+    Falls back to 'pending'.
+
+    Args:
+        scene_id: The scene identifier.
+        project_dir: Root directory of the project.
+
+    Returns:
+        Status string: 'pending', 'drafted', 'revised', 'cut', etc.
+    """
+    csv_file = _resolve_metadata_csv(project_dir)
+    if csv_file:
+        csv_status = read_csv_field(csv_file, scene_id, 'status')
+        if csv_status:
+            return csv_status
+
+    # If no CSV status, check if file exists with content
+    scene_file = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+    if os.path.isfile(scene_file):
+        try:
+            with open(scene_file) as f:
+                content = f.read()
+            word_count = len(content.split())
+            if word_count > 100:
+                return 'drafted'
+        except OSError:
+            pass
+
+    return 'pending'
+
+
+# ============================================================================
 # Craft weights / directives
 # ============================================================================
 
@@ -944,6 +983,13 @@ def main():
         result = build_weighted_directive(sys.argv[2])
         if result:
             print(result)
+
+    elif command == 'scene-status':
+        if len(sys.argv) < 4:
+            print('Usage: scene-status <scene_id> <project_dir>',
+                  file=sys.stderr)
+            sys.exit(1)
+        print(get_scene_status(sys.argv[2], sys.argv[3]))
 
     else:
         print(f'Unknown command: {command}', file=sys.stderr)

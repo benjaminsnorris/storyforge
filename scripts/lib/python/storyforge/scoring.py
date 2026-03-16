@@ -647,6 +647,149 @@ def parse_scene_evaluation(
 
 
 # ============================================================================
+# init_craft_weights
+# ============================================================================
+
+def init_craft_weights(project_dir: str, plugin_dir: str):
+    """Copy default craft-weights.csv to project if it doesn't exist.
+
+    Args:
+        project_dir: Path to the novel project root.
+        plugin_dir: Path to the storyforge plugin directory.
+    """
+    weights_file = os.path.join(project_dir, 'working', 'craft-weights.csv')
+    defaults = os.path.join(plugin_dir, 'references', 'default-craft-weights.csv')
+    if not os.path.isfile(weights_file):
+        os.makedirs(os.path.dirname(weights_file), exist_ok=True)
+        shutil.copy2(defaults, weights_file)
+
+
+# ============================================================================
+# extract_rubric_section
+# ============================================================================
+
+def extract_rubric_section(section_name: str, plugin_dir: str) -> str:
+    """Extract a section from scoring-rubrics.md by heading name.
+
+    Looks for ``## section_name`` and extracts everything until the
+    next ``## `` heading.
+
+    Args:
+        section_name: The heading text to match (e.g. "Narrative Frameworks").
+        plugin_dir: Path to the storyforge plugin directory.
+
+    Returns:
+        The section content, or empty string if not found.
+    """
+    rubric_file = os.path.join(plugin_dir, 'references', 'scoring-rubrics.md')
+    if not os.path.isfile(rubric_file):
+        return ''
+
+    with open(rubric_file) as f:
+        content = f.read()
+
+    # Match ## section_name through next ## or end
+    pattern = rf'^## {re.escape(section_name)}\s*\n(.*?)(?=^## |\Z)'
+    m = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+    if m:
+        return m.group(1).rstrip()
+    return ''
+
+
+# ============================================================================
+# build_principle_guide
+# ============================================================================
+
+def _build_principle_guide(principle_name: str, guide_file: str) -> str:
+    """Extract the guide section for a specific principle.
+
+    The guide uses ``### principle_name`` headers. Extracts everything
+    between the matching header and the next ``###`` or ``##`` header.
+
+    Args:
+        principle_name: The principle name to match.
+        guide_file: Path to the principle-guide.md file.
+
+    Returns:
+        The guide content, or empty string if not found.
+    """
+    if not os.path.isfile(guide_file):
+        return ''
+
+    with open(guide_file) as f:
+        content = f.read()
+
+    pattern = rf'^### {re.escape(principle_name)}\s*\n(.*?)(?=^###? |\Z)'
+    m = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+    if m:
+        return m.group(1).rstrip()
+    return ''
+
+
+# ============================================================================
+# build_evaluation_criteria
+# ============================================================================
+
+def build_evaluation_criteria(diagnostics_csv: str, guide_file: str) -> str:
+    """Build combined evaluation criteria from diagnostics CSV and principle guide.
+
+    For each principle found in the diagnostics CSV, produces a section with:
+    - A diagnostic checklist (the questions from the CSV)
+    - The principle guide content (what it looks like / doesn't look like)
+
+    Args:
+        diagnostics_csv: Path to the diagnostics CSV file (pipe-delimited).
+        guide_file: Path to the principle-guide.md file.
+
+    Returns:
+        Formatted markdown text with evaluation criteria per principle.
+    """
+    if not os.path.isfile(diagnostics_csv) or not os.path.isfile(guide_file):
+        return ''
+
+    header, rows = _read_csv(diagnostics_csv)
+    if not header or not rows:
+        return ''
+
+    # Locate columns by name
+    col = {name: i for i, name in enumerate(header)}
+    principle_idx = col.get('principle', 1)
+    question_idx = col.get('question', 3)
+
+    # Group questions by principle, preserving order
+    from collections import OrderedDict
+    principles: OrderedDict[str, list[str]] = OrderedDict()
+    for row in rows:
+        principle = row[principle_idx] if len(row) > principle_idx else ''
+        question = row[question_idx] if len(row) > question_idx else ''
+        if not principle:
+            continue
+        if principle not in principles:
+            principles[principle] = []
+        if question:
+            principles[principle].append(question)
+
+    # Build output
+    parts = []
+    for principle, questions in principles.items():
+        parts.append('---')
+        parts.append('')
+        parts.append(f'### {principle}')
+        parts.append('')
+        parts.append('**Diagnostic checklist:**')
+        for q in questions:
+            parts.append(f'- {q}')
+
+        guide = _build_principle_guide(principle, guide_file)
+        if guide:
+            parts.append('')
+            parts.append(guide)
+        parts.append('')
+
+    return '\n'.join(parts)
+
+
+# ============================================================================
 # CLI interface
 # ============================================================================
 
@@ -785,6 +928,36 @@ def main():
                 f.write(rationale_csv + '\n')
 
         print('ok')
+
+    elif command == 'init-weights':
+        # Usage: init-weights <project_dir> <plugin_dir>
+        if len(sys.argv) < 4:
+            print('Usage: init-weights <project_dir> <plugin_dir>', file=sys.stderr)
+            sys.exit(1)
+        init_craft_weights(sys.argv[2], sys.argv[3])
+        print('ok')
+
+    elif command == 'build-evaluation-criteria':
+        # Usage: build-evaluation-criteria <diagnostics_csv> <guide_file>
+        if len(sys.argv) < 4:
+            print('Usage: build-evaluation-criteria <diagnostics_csv> <guide_file>',
+                  file=sys.stderr)
+            sys.exit(1)
+        result = build_evaluation_criteria(sys.argv[2], sys.argv[3])
+        if result:
+            print(result)
+        else:
+            sys.exit(1)
+
+    elif command == 'extract-rubric-section':
+        # Usage: extract-rubric-section <section_name> <plugin_dir>
+        if len(sys.argv) < 4:
+            print('Usage: extract-rubric-section <section_name> <plugin_dir>',
+                  file=sys.stderr)
+            sys.exit(1)
+        result = extract_rubric_section(sys.argv[2], sys.argv[3])
+        if result:
+            print(result)
 
     else:
         print(f'Unknown command: {command}', file=sys.stderr)

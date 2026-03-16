@@ -25,7 +25,6 @@ PYTHON_LIB="${SCRIPT_DIR}/lib/python"
 
 # Source shared libraries
 source "${LIB_DIR}/common.sh"
-source "${LIB_DIR}/revision-passes.sh"
 
 # --- Detect project root ---
 detect_project_root
@@ -755,7 +754,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
             log "  Coaching output: ${COACHING_OUTPUT}"
         fi
     else
-        verify_revision_changes "$HEAD_BEFORE" "$PROJECT_DIR" || {
+        PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.revision verify-changes "$HEAD_BEFORE" "$PROJECT_DIR" || {
             log "WARNING: Pass '${PASS_NAME}' produced no detectable changes."
             log "This may be expected if the pass found nothing to fix."
             log "Marking as completed and continuing."

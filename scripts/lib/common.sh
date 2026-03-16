@@ -596,9 +596,7 @@ _sf_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "${_sf_lib_dir}/csv.sh" ]] && source "${_sf_lib_dir}/csv.sh"
 [[ -f "${_sf_lib_dir}/costs.sh" ]] && source "${_sf_lib_dir}/costs.sh"
 [[ -f "${_sf_lib_dir}/api.sh" ]] && source "${_sf_lib_dir}/api.sh"
-[[ -f "${_sf_lib_dir}/scoring.sh" ]] && source "${_sf_lib_dir}/scoring.sh"
 [[ -f "${_sf_lib_dir}/scene-filter.sh" ]] && source "${_sf_lib_dir}/scene-filter.sh"
-[[ -f "${_sf_lib_dir}/aliases.sh" ]] && source "${_sf_lib_dir}/aliases.sh"
 unset _sf_lib_dir
 
 # ============================================================================
