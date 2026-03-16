@@ -1209,7 +1209,7 @@ _run_headless_session() {
 
     if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
         # Direct API (preferred for autonomous mode)
-        invoke_anthropic_api "$prompt" "$model" "$log_file" 8192
+        invoke_anthropic_api "$prompt" "$model" "$log_file" 16384
         return $?
     fi
 
@@ -1235,13 +1235,22 @@ _extract_headless_response() {
     # Try API JSON format first (has .content array)
     local api_text
     api_text=$(extract_api_response "$log_file" 2>/dev/null)
-    if [[ -n "$api_text" ]]; then
-        echo "$api_text"
-        return 0
+    if [[ -z "$api_text" ]]; then
+        # Fall back to stream-json format
+        api_text=$(extract_claude_response "$log_file" 2>/dev/null)
     fi
 
-    # Fall back to stream-json format
-    extract_claude_response "$log_file" 2>/dev/null
+    [[ -z "$api_text" ]] && return 1
+
+    # Detect hallucinated tool calls — a clear signal the model is
+    # fabricating file access it doesn't have
+    if echo "$api_text" | grep -qE '<tool_call>|<tool_response>|<function_call>'; then
+        log "WARNING: Response contains hallucinated tool calls — model lacks file access" >&2
+        # Strip the hallucinated XML and return whatever real text exists
+        api_text=$(echo "$api_text" | sed '/<tool_call>/,/<\/tool_call>/d; /<tool_response>/,/<\/tool_response>/d; /<function_call>/,/<\/function_call>/d')
+    fi
+
+    echo "$api_text"
 }
 
 # Run a cleanup pass — fix items identified in the review report.
@@ -1329,13 +1338,65 @@ run_recommend_step() {
         pipeline_context="- working/pipeline.csv (pipeline manifest — shows cycle history)"
     fi
 
+    # In API mode, inline all referenced files since the API can't read them
+    local inline_recommend=""
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+        _inline_if_exists() {
+            local fpath="$1" label="$2"
+            if [[ -f "$fpath" ]]; then
+                local fsize
+                fsize=$(wc -c < "$fpath" | tr -d ' ')
+                if (( fsize < 51200 )); then
+                    inline_recommend="${inline_recommend}
+=== FILE: ${label} ===
+$(cat "$fpath")
+=== END FILE ===
+"
+                fi
+            fi
+        }
+
+        _inline_if_exists "${project_dir}/storyforge.yaml" "storyforge.yaml"
+        _inline_if_exists "${project_dir}/CLAUDE.md" "CLAUDE.md"
+        [[ -f "$pipeline_file" ]] && _inline_if_exists "$pipeline_file" "working/pipeline.csv"
+        _inline_if_exists "${project_dir}/reference/key-decisions.md" "reference/key-decisions.md"
+
+        # Most recent review
+        local latest_review
+        latest_review=$(ls -t "${project_dir}"/working/reviews/*.md 2>/dev/null | head -1)
+        [[ -n "$latest_review" ]] && _inline_if_exists "$latest_review" "working/reviews/$(basename "$latest_review")"
+
+        # Most recent evaluation findings
+        local latest_eval_dir
+        latest_eval_dir=$(ls -dt "${project_dir}"/working/evaluations/eval-* 2>/dev/null | head -1)
+        if [[ -n "$latest_eval_dir" ]]; then
+            for ef in "$latest_eval_dir"/synthesis.md "$latest_eval_dir"/findings.yaml "$latest_eval_dir"/findings.csv; do
+                [[ -f "$ef" ]] && _inline_if_exists "$ef" "working/evaluations/$(basename "$latest_eval_dir")/$(basename "$ef")"
+            done
+        fi
+
+        # Current cycle revision plan
+        local cycle_plan
+        cycle_plan=$(get_cycle_plan_file "$cycle_id" 2>/dev/null)
+        [[ -n "$cycle_plan" && -f "$cycle_plan" ]] && _inline_if_exists "$cycle_plan" "working/plans/$(basename "$cycle_plan")"
+
+        # Prior recommendations
+        for rec in "${project_dir}"/working/recommendations*.md; do
+            [[ -f "$rec" ]] && _inline_if_exists "$rec" "working/$(basename "$rec")"
+        done
+    fi
+
     local recommend_prompt
     read -r -d '' recommend_prompt <<RECOMMEND_EOF || true
 You are writing next-step recommendations for a Storyforge novel project after a ${review_type} pipeline run.
 
-## Read Project State
+## Project State
+${inline_recommend:+
+The following files contain the project state. Read them all before making recommendations.
 
-Read ALL of the following files to understand the full picture:
+${inline_recommend}
+}$(if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    echo "Read ALL of the following files to understand the full picture:
 - storyforge.yaml (project config, phase, coaching level, artifact status)
 ${pipeline_context}
 - CLAUDE.md (recent activity, standing instructions)
@@ -1343,7 +1404,8 @@ ${pipeline_context}
 - The most recent evaluation findings in working/evaluations/ — read findings.yaml or synthesis.md if they exist. Note severity counts (critical/major/minor).
 - The current cycle's revision plan in working/plans/ (if it exists) — check pass completion status
 - reference/key-decisions.md (if it exists) — do not recommend against settled decisions
-- Prior recommendations in working/recommendations*.md — avoid repeating the same recommendation
+- Prior recommendations in working/recommendations*.md — avoid repeating the same recommendation"
+fi)
 
 ## Decision Framework
 
@@ -1549,6 +1611,33 @@ run_review_phase() {
             ;;
     esac
 
+    # In API mode, inline file contents since the API can't read files
+    local inline_files=""
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+        while IFS= read -r fname; do
+            [[ -z "$fname" ]] && continue
+            local fpath="${project_dir}/${fname}"
+            if [[ -f "$fpath" ]]; then
+                # Limit to 50KB per file to avoid token explosion
+                local fsize
+                fsize=$(wc -c < "$fpath" | tr -d ' ')
+                if (( fsize < 51200 )); then
+                    inline_files="${inline_files}
+=== FILE: ${fname} ===
+$(cat "$fpath")
+=== END FILE ===
+"
+                else
+                    inline_files="${inline_files}
+=== FILE: ${fname} ===
+(${fsize} bytes — too large to inline, skipped)
+=== END FILE ===
+"
+                fi
+            fi
+        done <<< "$changed_files"
+    fi
+
     local review_prompt
     read -r -d '' review_prompt <<REVIEW_EOF || true
 You are performing a pipeline review for "${title}"${genre:+ (${genre})}. This is a quality check at the end of a ${review_type} session.
@@ -1562,10 +1651,16 @@ ${changed_files}
 ## Diff Summary
 
 ${diff_stat}
+${inline_files:+
+## File Contents
 
+The following are the actual contents of the changed files:
+
+${inline_files}
+}
 ## Instructions
 
-1. Read every changed file listed above.
+1. Review the file contents provided above.
 2. Based on the review type (${review_type}), assess:
 ${review_criteria}
 
