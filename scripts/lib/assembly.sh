@@ -38,7 +38,15 @@ read_chapter_field() {
     local csv="${project_dir}/reference/chapter-map.csv"
 
     [[ -f "$csv" ]] || return 1
-    get_csv_field "$csv" "$chapter_num" "$field" "chapter"
+
+    # Support both "chapter" and "seq" as the key column name
+    local key_col="chapter"
+    local header
+    header=$(head -1 "$csv")
+    if [[ "$header" == seq\|* ]]; then
+        key_col="seq"
+    fi
+    get_csv_field "$csv" "$chapter_num" "$field" "$key_col"
 }
 
 # Get the scene IDs for a chapter (semicolon-separated in CSV, returned one per line)
@@ -129,8 +137,10 @@ extract_scene_prose() {
     fi
 
     # Strip YAML frontmatter (between --- delimiters)
+    # If the file doesn't start with ---, print everything
     awk '
         BEGIN { in_frontmatter=0; past_frontmatter=0 }
+        NR==1 && !/^---$/ { past_frontmatter=1 }
         /^---$/ {
             if (in_frontmatter) { past_frontmatter=1; in_frontmatter=0; next }
             if (!past_frontmatter) { in_frontmatter=1; next }
