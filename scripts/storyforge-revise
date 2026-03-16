@@ -202,6 +202,80 @@ unified_update_pass_field() {
 }
 
 # ============================================================================
+# New scene registration
+#
+# When a revision pass creates new scenes (NEW: prefix in targets),
+# this function adds rows to scene-metadata.csv and scene-intent.csv
+# for any scenes that were actually written to disk.
+# ============================================================================
+
+_register_new_scenes() {
+    local project_dir="$1"
+    local targets="$2"
+    local pass_name="$3"
+    local meta_csv="${project_dir}/reference/scene-metadata.csv"
+    local intent_csv="${project_dir}/reference/scene-intent.csv"
+
+    # Extract NEW: prefixed scene IDs
+    local new_ids=()
+    IFS=';' read -ra target_parts <<< "$targets"
+    for t in "${target_parts[@]}"; do
+        t=$(echo "$t" | sed 's/^ *//;s/ *$//')
+        if [[ "$t" == NEW:* ]]; then
+            new_ids+=("${t#NEW:}")
+        fi
+    done
+
+    (( ${#new_ids[@]} == 0 )) && return 0
+
+    # Find the current max sequence number
+    local max_seq=0
+    if [[ -f "$meta_csv" ]]; then
+        max_seq=$(tail -n +2 "$meta_csv" | cut -d'|' -f2 | sort -n | tail -1)
+        max_seq=${max_seq:-0}
+    fi
+
+    local registered=0
+    for sid in "${new_ids[@]}"; do
+        local scene_file="${project_dir}/scenes/${sid}.md"
+
+        # Only register if the scene file was actually created
+        [[ -f "$scene_file" ]] || continue
+
+        # Skip if already in metadata (idempotent)
+        if [[ -f "$meta_csv" ]] && grep -q "^${sid}|" "$meta_csv"; then
+            continue
+        fi
+
+        max_seq=$((max_seq + 1))
+        local wc
+        wc=$(wc -w < "$scene_file" | tr -d ' ')
+
+        # Generate a title from the slug: the-rupture → The Rupture
+        local title
+        title=$(echo "$sid" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1')
+
+        # Append to scene-metadata.csv
+        if [[ -f "$meta_csv" ]]; then
+            append_csv_row "$meta_csv" "${sid}|${max_seq}|${title}|||||||drafted|${wc}|"
+            log "  Registered new scene in metadata: ${sid} (seq ${max_seq})"
+        fi
+
+        # Append to scene-intent.csv
+        if [[ -f "$intent_csv" ]]; then
+            append_csv_row "$intent_csv" "${sid}|Created by revision pass: ${pass_name}|||||"
+            log "  Registered new scene in intent: ${sid}"
+        fi
+
+        registered=$((registered + 1))
+    done
+
+    if (( registered > 0 )); then
+        log "  Registered ${registered} new scene(s) in metadata and intent CSVs"
+    fi
+}
+
+# ============================================================================
 # YAML helpers for revision-plan.yaml
 #
 # The revision plan has nested YAML: top-level passes may contain subtasks
@@ -732,6 +806,11 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
                 done <<< "$parse_output"
             else
                 log "  API response received (analytical pass, no scene markers)"
+            fi
+
+            # Register newly created scenes (NEW: targets) in metadata and intent CSVs
+            if [[ -n "${_csv_targets:-}" ]]; then
+                _register_new_scenes "$PROJECT_DIR" "$_csv_targets" "$PASS_NAME"
             fi
         fi
     fi
