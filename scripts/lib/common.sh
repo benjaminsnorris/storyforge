@@ -1205,10 +1205,14 @@ _run_headless_session() {
     local model="$2"
     local log_file="$3"
 
+    if [[ "$_SF_SHUTTING_DOWN" == true ]]; then return 130; fi
+
     if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
         # Direct API (preferred for autonomous mode)
         invoke_anthropic_api "$prompt" "$model" "$log_file" 16384
-        return $?
+        local rc=$?
+        [[ "$_SF_SHUTTING_DOWN" == true ]] && return 130
+        return $rc
     fi
 
     # Fallback to claude -p if no API key
@@ -1221,6 +1225,7 @@ _run_headless_session() {
         > "$log_file" 2>&1
     local rc=$?
     set -e
+    [[ "$_SF_SHUTTING_DOWN" == true ]] && return 130
     return $rc
 }
 
@@ -1286,6 +1291,8 @@ Rules:
 - If an item is ambiguous or requires author judgment, skip it
 CLEANUP_EOF
 
+    if [[ "$_SF_SHUTTING_DOWN" == true ]]; then return 130; fi
+
     log "  Cleanup pass ${iteration} (model: ${cleanup_model})..."
     # Cleanup requires tool use (reading/editing files, git) — must use claude -p
     set +e
@@ -1297,6 +1304,8 @@ CLEANUP_EOF
         > "$cleanup_log" 2>&1
     local rc=$?
     set -e
+
+    [[ "$_SF_SHUTTING_DOWN" == true ]] && return 130
 
     if (( rc != 0 )); then
         log "WARNING: Cleanup pass ${iteration} failed (exit code ${rc})"
@@ -1738,6 +1747,11 @@ REVIEW_EOF
         fi
     fi
 
+    if [[ "$_SF_SHUTTING_DOWN" == true ]]; then
+        log "Interrupted during review — exiting review phase"
+        return 130
+    fi
+
     if (( review_exit != 0 )); then
         log "WARNING: Review claude invocation failed (exit code ${review_exit})"
         log "See: ${review_log}"
@@ -1772,6 +1786,8 @@ REVIEW_EOF
         local cleanup_iter=0
 
         while (( cleanup_iter < max_cleanup )); do
+            [[ "$_SF_SHUTTING_DOWN" == true ]] && break
+
             # Parse review report for fixable items
             local fixable_section
             fixable_section=$(sed -n '/^## Fixable Items/,/^## /p' "$review_file" 2>/dev/null \
@@ -1793,6 +1809,7 @@ REVIEW_EOF
             log "Review found ${item_count} fixable item(s). Running cleanup pass $((cleanup_iter + 1))..."
 
             run_cleanup_pass "$review_file" "$review_type" "$project_dir" "$((cleanup_iter + 1))"
+            [[ "$_SF_SHUTTING_DOWN" == true ]] && break
 
             # Re-run review to check if cleanup was successful
             log "Re-running review after cleanup..."
