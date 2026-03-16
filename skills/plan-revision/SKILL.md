@@ -149,17 +149,11 @@ When scoring data is available alongside evaluation findings:
 
 ## Step 5: Present the Plan
 
-Walk the author through the proposed revision plan. For each pass:
+Present a **summary** of the proposed revision plan in the Claude Code session. Keep it concise — the full details will be written to the draft PR body in Step 6, where the author can read them at leisure. In the session, present:
 
-1. **Name and purpose** — what it does and why it matters
-2. **Scope** — what parts of the manuscript it touches
-3. **Guidance** — the creative decisions you're recommending (if any), with rationale
-4. **Effort estimate** — how much work is involved
-5. **What it addresses** — which evaluation findings this pass resolves
-
-After presenting all passes, summarize:
-- Total number of passes
-- Which evaluation findings are covered and which (if any) are deliberately deferred
+1. A numbered list of passes with **name**, **scope**, and **one-line purpose**
+2. Any guidance entries that involve significant creative decisions (skip mechanical passes)
+3. Total pass count and which findings are covered vs. deferred
 
 Then invite the author to adjust. They may:
 
@@ -213,7 +207,47 @@ After writing the plan file, update the manifest's current cycle entry to set th
 git add -A && git commit -m "Plan revision: {N} passes for {title}" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
-When the author runs `./storyforge revise`, the script will detect this branch, create a draft PR with a task list, and track progress there. The repo should reflect the approved plan before execution begins.
+**6. Create a draft PR with the full plan in the body.** Use `gh pr create` to open a draft PR. The body should contain the complete revision plan so the author can read it on GitHub:
+
+```bash
+gh pr create --draft \
+    --title "Revise: {title}" \
+    --label in-progress --label revision \
+    --body "$(cat <<'EOF'
+## Revision Plan
+
+**Project:** {title}
+**Passes:** {N}
+**Cycle:** {cycle_id}
+
+{For each pass, render a section like this:}
+
+### Pass {number}: {name}
+**Purpose:** {purpose}
+**Scope:** {scope} {targets if scene-level}
+**Effort:** {estimated_effort}
+**Model:** {model_tier}
+**Addresses:** {finding IDs}
+
+{If guidance entries exist:}
+**Guidance:**
+- {decision} — {rationale}
+
+**Protections:** {protection list, if any}
+
+---
+
+{End of passes}
+
+## Summary
+- {N} total passes
+- Findings covered: {list}
+- Findings deferred: {list, or "none"}
+EOF
+)"
+```
+
+The author can review the full plan on GitHub. When `./storyforge revise` runs, it will detect this PR and update the body to add its task checklist for tracking progress.
 
 The file is a pipe-delimited CSV with this header and format:
 
@@ -250,12 +284,13 @@ If the project doesn't have a `./storyforge` runner script, offer to create one
 by copying the template from the plugin's `templates/storyforge-runner.sh` and
 making it executable.
 
-Explain what to expect:
+Point the author to the draft PR for the full plan details, and explain what to expect:
+- The full revision plan is in the draft PR — review it there before running
 - The revision script runs all passes in order, autonomously
+- When `./storyforge revise` starts, it updates the PR body to add a task checklist for tracking progress
 - Each pass follows its guidance entries (if any) and produces a summary when done
 - Progress is tracked in `revision-plan.csv` — each pass's status column is updated as it progresses
 - The author can stop and resume at any time; the script picks up where it left off
-- After each pass, the author can review the summary and diff before the next pass runs
 - If a pass reveals new issues, they can re-run `plan-revision` to update the plan
 - To edit creative direction before execution, modify the `guidance` column in the plan CSV directly
 

@@ -574,21 +574,40 @@ if [[ "$DRY_RUN" != true ]]; then
 
     ensure_branch_pushed "$PROJECT_DIR"
 
+    TASK_CHECKLIST="### Progress
+"
+    for (( _i = 1; _i <= TOTAL_PASSES; _i++ )); do
+        _pname=$(unified_read_pass_field "$_i" "name")
+        TASK_CHECKLIST="${TASK_CHECKLIST}- [ ] Pass: ${_pname}
+"
+    done
+    TASK_CHECKLIST="${TASK_CHECKLIST}- [ ] Review"
+
     PR_BODY="## Revision
 
 **Project:** ${PROJECT_TITLE}
 **Passes:** ${TOTAL_PASSES}
 
-### Tasks
-"
-    for (( _i = 1; _i <= TOTAL_PASSES; _i++ )); do
-        _pname=$(unified_read_pass_field "$_i" "name")
-        PR_BODY="${PR_BODY}- [ ] Pass: ${_pname}
-"
-    done
-    PR_BODY="${PR_BODY}- [ ] Review"
+${TASK_CHECKLIST}"
 
     create_draft_pr "Revise: ${PROJECT_TITLE}" "$PR_BODY" "$PROJECT_DIR" "revision"
+
+    # If the PR already existed (created by plan-revision skill), append the
+    # task checklist to the existing body so progress can be tracked.
+    if has_gh && [[ -n "${STORYFORGE_PR_NUMBER:-}" ]]; then
+        existing_body=$(cd "$PROJECT_DIR" && gh pr view "$STORYFORGE_PR_NUMBER" --json body --jq '.body' 2>/dev/null || echo "")
+        if [[ -n "$existing_body" && ! "$existing_body" =~ "### Progress" ]]; then
+            updated_body="${existing_body}
+
+---
+
+${TASK_CHECKLIST}"
+            (cd "$PROJECT_DIR" && gh pr edit "$STORYFORGE_PR_NUMBER" --body "$updated_body" 2>/dev/null) || {
+                log "WARNING: Failed to update PR body with task checklist"
+            }
+            log "Updated PR #${STORYFORGE_PR_NUMBER} with task checklist"
+        fi
+    fi
 fi
 
 # Update pipeline cycle status to revising
