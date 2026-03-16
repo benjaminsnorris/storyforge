@@ -710,7 +710,7 @@ generate_epub() {
     genre=$(read_yaml_field "project.genre" 2>/dev/null || read_yaml_field "genre" 2>/dev/null || echo "default")
 
     local css_file
-    css_file=$(get_genre_css "$plugin_dir" "$genre")
+    css_file=$(PYTHONPATH="${PYTHON_LIB:-${SCRIPT_DIR}/lib/python}" python3 -m storyforge.assembly genre-css "$plugin_dir" "$genre")
 
     # Check for custom CSS in project
     local project_css="${project_dir}/manuscript/assets/custom.css"
@@ -720,7 +720,7 @@ generate_epub() {
 
     # Generate metadata file
     local metadata_file="${project_dir}/manuscript/metadata.yaml"
-    generate_epub_metadata "$project_dir" > "$metadata_file"
+    PYTHONPATH="${PYTHON_LIB:-${SCRIPT_DIR}/lib/python}" python3 -m storyforge.assembly metadata "$project_dir" > "$metadata_file"
 
     # Build pandoc command
     local pandoc_args=(
@@ -811,7 +811,7 @@ generate_html() {
     genre=$(read_yaml_field "project.genre" 2>/dev/null || read_yaml_field "genre" 2>/dev/null || echo "default")
 
     local css_file
-    css_file=$(get_genre_css "$plugin_dir" "$genre")
+    css_file=$(PYTHONPATH="${PYTHON_LIB:-${SCRIPT_DIR}/lib/python}" python3 -m storyforge.assembly genre-css "$plugin_dir" "$genre")
 
     local project_css="${project_dir}/manuscript/assets/custom.css"
     if [[ -f "$project_css" ]]; then
@@ -1398,7 +1398,7 @@ generate_pdf() {
         local genre
         genre=$(read_yaml_field "project.genre" 2>/dev/null || echo "default")
         local css_file
-        css_file=$(get_genre_css "$plugin_dir" "$genre")
+        css_file=$(PYTHONPATH="${PYTHON_LIB:-${SCRIPT_DIR}/lib/python}" python3 -m storyforge.assembly genre-css "$plugin_dir" "$genre")
 
         local html_tmp="${output_pdf%.pdf}.tmp.html"
 

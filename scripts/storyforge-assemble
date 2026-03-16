@@ -21,6 +21,7 @@ set -eo pipefail
 # --- Locate script directory and source libraries ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
 
 if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
     echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
@@ -166,7 +167,7 @@ esac
 check_file_exists "$CHAPTER_MAP" "Chapter map (reference/chapter-map.csv)"
 
 # Verify chapter map has chapters
-TOTAL_CHAPTERS=$(count_chapters "$PROJECT_DIR")
+TOTAL_CHAPTERS=$(PYTHONPATH="$PYTHON_LIB" python3 -c "from storyforge.assembly import count_chapters; print(count_chapters('$PROJECT_DIR'))")
 if [[ "$TOTAL_CHAPTERS" == "0" ]]; then
     log "ERROR: No chapters found in ${CHAPTER_MAP}"
     log "Add chapters with scene mappings to reference/chapter-map.csv"
@@ -333,7 +334,7 @@ for (( ch=1; ch<=TOTAL_CHAPTERS; ch++ )); do
     ch_file="${CHAPTERS_DIR}/chapter-$(printf '%02d' "$ch").md"
 
     log "  Chapter ${ch}: ${ch_title}"
-    assemble_chapter "$ch" "$PROJECT_DIR" "$BREAK_STYLE" > "$ch_file" || false
+    PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.assembly chapter "$ch" "$PROJECT_DIR" --break-style "$BREAK_STYLE" > "$ch_file" || false
 
     ch_words=$(wc -w < "$ch_file" | tr -d ' ')
     TOTAL_WORDS=$((TOTAL_WORDS + ch_words))
@@ -351,8 +352,7 @@ update_pr_task "Assemble chapters" "$PROJECT_DIR"
 MANUSCRIPT_FILE="${MANUSCRIPT_DIR}/manuscript.md"
 
 log "Assembling full manuscript..."
-assemble_manuscript "$PROJECT_DIR" "$MANUSCRIPT_FILE"
-MANUSCRIPT_WORDS=$(manuscript_word_count "$MANUSCRIPT_FILE")
+MANUSCRIPT_WORDS=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.assembly assemble "$PROJECT_DIR" "$MANUSCRIPT_FILE")
 log "Full manuscript assembled: ${MANUSCRIPT_WORDS} words → manuscript.md"
 
 # If draft mode, stop here
