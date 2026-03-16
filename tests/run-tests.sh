@@ -178,27 +178,46 @@ run_suite() {
     local suite_name
     suite_name="$(basename "$test_file" .sh)"
 
-    PASS=0
-    FAIL=0
-
-    # Reset PROJECT_DIR to fixture between suites (prevents cross-contamination)
-    export PROJECT_DIR="$FIXTURE_DIR"
-
     echo ""
     echo "=== ${suite_name} ==="
 
-    # Source the test file (it uses the assertion functions above)
-    source "$test_file"
+    # Run each suite in a subshell so a crash in one suite doesn't kill the runner.
+    # The subshell inherits all sourced functions/libraries.
+    local result_file="${TMPDIR:-/tmp}/storyforge-test-result-$$.txt"
+    (
+        PASS=0
+        FAIL=0
+        export PROJECT_DIR="$FIXTURE_DIR"
 
-    TOTAL_PASS=$((TOTAL_PASS + PASS))
-    TOTAL_FAIL=$((TOTAL_FAIL + FAIL))
-    TOTAL_SUITES=$((TOTAL_SUITES + 1))
+        source "$test_file"
 
-    if [[ $FAIL -gt 0 ]]; then
-        FAILED_SUITES+=("$suite_name")
-        echo "  --- ${PASS} passed, ${FAIL} FAILED ---"
-    else
-        echo "  --- ${PASS} passed ---"
+        if [[ $FAIL -gt 0 ]]; then
+            echo "  --- ${PASS} passed, ${FAIL} FAILED ---"
+        else
+            echo "  --- ${PASS} passed ---"
+        fi
+        echo "${PASS} ${FAIL}" > "$result_file"
+    )
+    local suite_rc=$?
+
+    # Parse results from the subshell
+    if [[ -f "$result_file" ]]; then
+        local suite_pass suite_fail
+        read -r suite_pass suite_fail < "$result_file"
+        rm -f "$result_file"
+        TOTAL_PASS=$((TOTAL_PASS + suite_pass))
+        TOTAL_FAIL=$((TOTAL_FAIL + suite_fail))
+        TOTAL_SUITES=$((TOTAL_SUITES + 1))
+        if [[ $suite_fail -gt 0 ]]; then
+            FAILED_SUITES+=("$suite_name")
+        fi
+    elif [[ $suite_rc -ne 0 ]]; then
+        # Suite crashed before writing results
+        rm -f "$result_file"
+        echo "  --- CRASHED (exit code ${suite_rc}) ---"
+        TOTAL_FAIL=$((TOTAL_FAIL + 1))
+        TOTAL_SUITES=$((TOTAL_SUITES + 1))
+        FAILED_SUITES+=("${suite_name} (crashed)")
     fi
 }
 
