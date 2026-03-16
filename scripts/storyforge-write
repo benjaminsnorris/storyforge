@@ -26,15 +26,8 @@ if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
     echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
     exit 1
 fi
-if [[ ! -f "${LIB_DIR}/prompt-builder.sh" ]]; then
-    echo "ERROR: Cannot find lib/prompt-builder.sh at ${LIB_DIR}" >&2
-    exit 1
-fi
-
 # shellcheck source=lib/common.sh
 source "${LIB_DIR}/common.sh"
-# shellcheck source=lib/prompt-builder.sh
-source "${LIB_DIR}/prompt-builder.sh"
 
 # --- Detect project root ---
 detect_project_root
@@ -268,7 +261,7 @@ PENDING_IDS=()
 SKIPPED=0
 
 for id in "${FILTERED_IDS[@]}"; do
-    status=$(get_scene_status "$id" "$PROJECT_DIR")
+    status=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts scene-status "$id" "$PROJECT_DIR")
     case "$status" in
         drafted|revised|final)
             if [[ "$FILTER_MODE" == "single" ]]; then

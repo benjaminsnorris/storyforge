@@ -504,6 +504,292 @@ def generate_proposals(scores_dir: str, weights_file: str):
 
 
 # ============================================================================
+# parse_scene_evaluation — pivot single-pass scores into columnar CSVs
+# ============================================================================
+
+def _extract_scores_block(text: str) -> str:
+    """Extract the SCORES: block from evaluation text.
+
+    Tries two strategies:
+      1. A ``SCORES:`` header line followed by data rows until a blank line
+         or another ``UPPERCASE:`` marker.
+      2. A line starting with ``principle|`` (direct CSV without header marker).
+    """
+    lines = text.splitlines()
+
+    # Strategy 1: SCORES: marker
+    found = False
+    collected: list[str] = []
+    for line in lines:
+        if line.strip() == 'SCORES:' or line.strip().startswith('SCORES:'):
+            if line.strip() == 'SCORES:':
+                found = True
+                continue
+        if found:
+            stripped = line.strip()
+            if not stripped:
+                break
+            if re.match(r'^[A-Z_]+:\s*$', line):
+                break
+            collected.append(line)
+
+    if collected:
+        return '\n'.join(collected)
+
+    # Strategy 2: principle| header directly
+    found = False
+    collected = []
+    for line in lines:
+        if line.startswith('principle|'):
+            found = True
+        if found:
+            stripped = line.strip()
+            if not stripped:
+                break
+            collected.append(line)
+
+    return '\n'.join(collected)
+
+
+def parse_scene_evaluation(
+    text: str,
+    scene_id: str,
+    diagnostics_csv: str = '',
+) -> tuple[str, str]:
+    """Parse a single-pass scene evaluation into pivoted score/rationale CSVs.
+
+    Input format (per row): ``principle|score|deficits|evidence_lines``
+    Output: two CSV strings with principles as columns and the scene as a row.
+
+    If *diagnostics_csv* is provided, the canonical principle order is read
+    from its ``principle`` column (unique, in file order). Otherwise, the
+    model's output order is used.
+
+    Args:
+        text: Full text content from Claude's response.
+        scene_id: Scene identifier for the id column.
+        diagnostics_csv: Optional path to diagnostics.csv for canonical ordering.
+
+    Returns:
+        Tuple of (scores_csv, rationale_csv). Either may be empty if parsing
+        fails.
+    """
+    scores_block = _extract_scores_block(text)
+    if not scores_block:
+        return '', ''
+
+    # Parse rows into a lookup dict: principle -> (score, rationale)
+    lookup: dict[str, tuple[str, str]] = {}
+    for line in scores_block.splitlines():
+        parts = line.split('|')
+        if len(parts) < 2:
+            continue
+        principle = parts[0].strip()
+        if principle == 'principle' or not principle:
+            continue
+        score = parts[1].strip() if len(parts) > 1 else ''
+        deficits = parts[2].strip() if len(parts) > 2 else ''
+        evidence = '|'.join(parts[3:]).strip() if len(parts) > 3 else ''
+
+        if deficits == 'none' or not deficits:
+            rationale = 'No deficits'
+        else:
+            deficits_clean = deficits.replace('|', '-')
+            evidence_clean = evidence.replace('|', '-')
+            rationale = f'{deficits_clean} ({evidence_clean})'
+
+        lookup[principle] = (score, rationale)
+
+    if not lookup:
+        return '', ''
+
+    # Build canonical principle list
+    canonical: list[str] = []
+    if diagnostics_csv and os.path.isfile(diagnostics_csv):
+        header, rows = _read_csv(diagnostics_csv)
+        if header:
+            try:
+                p_idx = header.index('principle')
+            except ValueError:
+                p_idx = 1  # fallback to second column
+            seen: set[str] = set()
+            for row in rows:
+                if len(row) > p_idx:
+                    p = row[p_idx]
+                    if p and p not in seen:
+                        seen.add(p)
+                        canonical.append(p)
+
+    # Fall back to model output order if no canonical list
+    if not canonical:
+        canonical = list(lookup.keys())
+
+    # Build pivoted CSVs
+    header_parts = ['id']
+    score_parts = [scene_id]
+    rationale_parts = [scene_id]
+
+    for principle in canonical:
+        header_parts.append(principle)
+        if principle in lookup:
+            s, r = lookup[principle]
+            score_parts.append(s)
+            rationale_parts.append(r)
+        else:
+            score_parts.append('')
+            rationale_parts.append('')
+
+    header_line = '|'.join(header_parts)
+    scores_csv = header_line + '\n' + '|'.join(score_parts)
+    rationale_csv = header_line + '\n' + '|'.join(rationale_parts)
+
+    return scores_csv, rationale_csv
+
+
+# ============================================================================
+# init_craft_weights
+# ============================================================================
+
+def init_craft_weights(project_dir: str, plugin_dir: str):
+    """Copy default craft-weights.csv to project if it doesn't exist.
+
+    Args:
+        project_dir: Path to the novel project root.
+        plugin_dir: Path to the storyforge plugin directory.
+    """
+    weights_file = os.path.join(project_dir, 'working', 'craft-weights.csv')
+    defaults = os.path.join(plugin_dir, 'references', 'default-craft-weights.csv')
+    if not os.path.isfile(weights_file):
+        os.makedirs(os.path.dirname(weights_file), exist_ok=True)
+        shutil.copy2(defaults, weights_file)
+
+
+# ============================================================================
+# extract_rubric_section
+# ============================================================================
+
+def extract_rubric_section(section_name: str, plugin_dir: str) -> str:
+    """Extract a section from scoring-rubrics.md by heading name.
+
+    Looks for ``## section_name`` and extracts everything until the
+    next ``## `` heading.
+
+    Args:
+        section_name: The heading text to match (e.g. "Narrative Frameworks").
+        plugin_dir: Path to the storyforge plugin directory.
+
+    Returns:
+        The section content, or empty string if not found.
+    """
+    rubric_file = os.path.join(plugin_dir, 'references', 'scoring-rubrics.md')
+    if not os.path.isfile(rubric_file):
+        return ''
+
+    with open(rubric_file) as f:
+        content = f.read()
+
+    # Match ## section_name through next ## or end
+    pattern = rf'^## {re.escape(section_name)}\s*\n(.*?)(?=^## |\Z)'
+    m = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+    if m:
+        return m.group(1).rstrip()
+    return ''
+
+
+# ============================================================================
+# build_principle_guide
+# ============================================================================
+
+def _build_principle_guide(principle_name: str, guide_file: str) -> str:
+    """Extract the guide section for a specific principle.
+
+    The guide uses ``### principle_name`` headers. Extracts everything
+    between the matching header and the next ``###`` or ``##`` header.
+
+    Args:
+        principle_name: The principle name to match.
+        guide_file: Path to the principle-guide.md file.
+
+    Returns:
+        The guide content, or empty string if not found.
+    """
+    if not os.path.isfile(guide_file):
+        return ''
+
+    with open(guide_file) as f:
+        content = f.read()
+
+    pattern = rf'^### {re.escape(principle_name)}\s*\n(.*?)(?=^###? |\Z)'
+    m = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+    if m:
+        return m.group(1).rstrip()
+    return ''
+
+
+# ============================================================================
+# build_evaluation_criteria
+# ============================================================================
+
+def build_evaluation_criteria(diagnostics_csv: str, guide_file: str) -> str:
+    """Build combined evaluation criteria from diagnostics CSV and principle guide.
+
+    For each principle found in the diagnostics CSV, produces a section with:
+    - A diagnostic checklist (the questions from the CSV)
+    - The principle guide content (what it looks like / doesn't look like)
+
+    Args:
+        diagnostics_csv: Path to the diagnostics CSV file (pipe-delimited).
+        guide_file: Path to the principle-guide.md file.
+
+    Returns:
+        Formatted markdown text with evaluation criteria per principle.
+    """
+    if not os.path.isfile(diagnostics_csv) or not os.path.isfile(guide_file):
+        return ''
+
+    header, rows = _read_csv(diagnostics_csv)
+    if not header or not rows:
+        return ''
+
+    # Locate columns by name
+    col = {name: i for i, name in enumerate(header)}
+    principle_idx = col.get('principle', 1)
+    question_idx = col.get('question', 3)
+
+    # Group questions by principle, preserving order
+    from collections import OrderedDict
+    principles: OrderedDict[str, list[str]] = OrderedDict()
+    for row in rows:
+        principle = row[principle_idx] if len(row) > principle_idx else ''
+        question = row[question_idx] if len(row) > question_idx else ''
+        if not principle:
+            continue
+        if principle not in principles:
+            principles[principle] = []
+        if question:
+            principles[principle].append(question)
+
+    # Build output
+    parts = []
+    for principle, questions in principles.items():
+        parts.append('---')
+        parts.append('')
+        parts.append(f'### {principle}')
+        parts.append('')
+        parts.append('**Diagnostic checklist:**')
+        for q in questions:
+            parts.append(f'- {q}')
+
+        guide = _build_principle_guide(principle, guide_file)
+        if guide:
+            parts.append('')
+            parts.append(guide)
+        parts.append('')
+
+    return '\n'.join(parts)
+
+
+# ============================================================================
 # CLI interface
 # ============================================================================
 
@@ -600,6 +886,78 @@ def main():
             print('Usage: effective-weight <weights_file> <principle>', file=sys.stderr)
             sys.exit(1)
         print(get_effective_weight(sys.argv[2], sys.argv[3]))
+
+    elif command == 'parse-evaluation':
+        # Parse single-pass scene evaluation into pivoted CSVs
+        # Usage: parse-evaluation <text_file> <scores_out> <rationale_out> <scene_id> [--diagnostics <csv>]
+        if len(sys.argv) < 6:
+            print('Usage: parse-evaluation <text_file> <scores_out> '
+                  '<rationale_out> <scene_id> [--diagnostics <csv>]',
+                  file=sys.stderr)
+            sys.exit(1)
+
+        text_file = sys.argv[2]
+        scores_out = sys.argv[3]
+        rationale_out = sys.argv[4]
+        scene_id = sys.argv[5]
+        diag_csv = ''
+
+        i = 6
+        while i < len(sys.argv):
+            if sys.argv[i] == '--diagnostics' and i + 1 < len(sys.argv):
+                diag_csv = sys.argv[i + 1]
+                i += 2
+            else:
+                i += 1
+
+        with open(text_file) as f:
+            text = f.read()
+
+        scores_csv, rationale_csv = parse_scene_evaluation(
+            text, scene_id, diagnostics_csv=diag_csv)
+
+        if scores_csv:
+            with open(scores_out, 'w') as f:
+                f.write(scores_csv + '\n')
+        else:
+            print('WARNING: No SCORES block found', file=sys.stderr)
+            sys.exit(1)
+
+        if rationale_csv:
+            with open(rationale_out, 'w') as f:
+                f.write(rationale_csv + '\n')
+
+        print('ok')
+
+    elif command == 'init-weights':
+        # Usage: init-weights <project_dir> <plugin_dir>
+        if len(sys.argv) < 4:
+            print('Usage: init-weights <project_dir> <plugin_dir>', file=sys.stderr)
+            sys.exit(1)
+        init_craft_weights(sys.argv[2], sys.argv[3])
+        print('ok')
+
+    elif command == 'build-evaluation-criteria':
+        # Usage: build-evaluation-criteria <diagnostics_csv> <guide_file>
+        if len(sys.argv) < 4:
+            print('Usage: build-evaluation-criteria <diagnostics_csv> <guide_file>',
+                  file=sys.stderr)
+            sys.exit(1)
+        result = build_evaluation_criteria(sys.argv[2], sys.argv[3])
+        if result:
+            print(result)
+        else:
+            sys.exit(1)
+
+    elif command == 'extract-rubric-section':
+        # Usage: extract-rubric-section <section_name> <plugin_dir>
+        if len(sys.argv) < 4:
+            print('Usage: extract-rubric-section <section_name> <plugin_dir>',
+                  file=sys.stderr)
+            sys.exit(1)
+        result = extract_rubric_section(sys.argv[2], sys.argv[3])
+        if result:
+            print(result)
 
     else:
         print(f'Unknown command: {command}', file=sys.stderr)

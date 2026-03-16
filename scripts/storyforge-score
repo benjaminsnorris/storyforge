@@ -167,7 +167,7 @@ esac
 log "Mode: ${SCORE_MODE}, Model: ${EVAL_MODEL}"
 
 # --- Initialize craft weights ---
-init_craft_weights "$PROJECT_DIR" "$PLUGIN_DIR"
+PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring init-weights "$PROJECT_DIR" "$PLUGIN_DIR"
 WEIGHTS_FILE="${PROJECT_DIR}/working/craft-weights.csv"
 
 # ============================================================================
@@ -448,7 +448,7 @@ if [[ ! -f "$EVAL_TEMPLATE_FILE" ]]; then
 fi
 
 EVAL_TEMPLATE=$(cat "$EVAL_TEMPLATE_FILE")
-EVALUATION_CRITERIA=$(build_evaluation_criteria "$DIAGNOSTICS_CSV" "$GUIDE_FILE")
+EVALUATION_CRITERIA=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring build-evaluation-criteria "$DIAGNOSTICS_CSV" "$GUIDE_FILE")
 # Exclude narrative principles from scene-level weighted text (scored at novel level)
 WEIGHTED_TEXT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring weighted-text "$WEIGHTS_FILE" --exclude-section narrative)
 
@@ -487,6 +487,50 @@ build_scene_prompt() {
     prompt="${prompt//\{\{WEIGHTED_PRINCIPLES\}\}/$WEIGHTED_TEXT}"
     prompt="${prompt//\{\{SCENE_TEXT\}\}/$scene_text_numbered}"
     echo "$prompt"
+}
+
+# --- Helper: parse scene evaluation using Python ---
+# Replaces the bash parse_scene_evaluation from scoring.sh.
+# Handles both .txt files (batch mode) and .json files (direct mode).
+parse_scene_evaluation() {
+    local log_file="$1"
+    local output_scores="$2"
+    local output_rationale="$3"
+    local scene_id="$4"
+
+    if [[ ! -f "$log_file" ]]; then
+        log "WARNING: Log file not found: $log_file"
+        return 1
+    fi
+
+    # Extract text content based on file type
+    local text_file
+    if [[ "$log_file" == *.txt ]]; then
+        text_file="$log_file"
+    else
+        # Extract text from API JSON or stream-json to a temp file
+        text_file="${output_scores}.extracted.$$"
+        local text_content
+        text_content=$(extract_api_response "$log_file" 2>/dev/null) || true
+        if [[ -z "$text_content" ]]; then
+            text_content=$(extract_claude_response "$log_file") || {
+                log "WARNING: No text content found in $log_file"
+                return 1
+            }
+        fi
+        echo "$text_content" > "$text_file"
+    fi
+
+    # Call Python to parse, pivot, and write score/rationale CSVs
+    PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring parse-evaluation \
+        "$text_file" "$output_scores" "$output_rationale" "$scene_id" \
+        --diagnostics "$DIAGNOSTICS_CSV" 2>/dev/null
+    local rc=$?
+
+    # Clean up extracted temp file
+    [[ "$log_file" != *.txt ]] && rm -f "$text_file"
+
+    return $rc
 }
 
 case "$SCORE_MODE" in
@@ -701,8 +745,8 @@ $(cat "$scene_file")
         fi
 
         # Build rubric content
-        narrative_rubric=$(extract_rubric_section "Narrative Frameworks")
-        character_act_rubric=$(extract_rubric_section "Character Craft")
+        narrative_rubric=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring extract-rubric-section "Narrative Frameworks" "$PLUGIN_DIR")
+        character_act_rubric=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring extract-rubric-section "Character Craft" "$PLUGIN_DIR")
         weighted_text=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring weighted-text "$WEIGHTS_FILE")
 
         # Substitute into template
@@ -777,8 +821,8 @@ $(echo "$character_list" | sed 's/^/- /')"
     done
 
     # Build rubrics
-    character_novel_rubric=$(extract_rubric_section "Character Craft")
-    genre_rubric=$(extract_rubric_section "Tropes and Genre")
+    character_novel_rubric=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring extract-rubric-section "Character Craft" "$PLUGIN_DIR")
+    genre_rubric=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring extract-rubric-section "Tropes and Genre" "$PLUGIN_DIR")
     weighted_text=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring weighted-text "$WEIGHTS_FILE")
 
     # Substitute into template
