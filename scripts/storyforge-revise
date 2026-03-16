@@ -441,9 +441,19 @@ if (( START_PASS == 0 )); then
     # Find the first pending or in_progress pass
     for (( i = 1; i <= TOTAL_PASSES; i++ )); do
         local_status=$(unified_read_pass_field "$i" "status")
+        # Normalize common mismatch: "planned" should be "pending"
+        if [[ "$local_status" == "planned" ]]; then
+            log "WARNING: Pass $i has status 'planned' — normalizing to 'pending'"
+            unified_update_pass_field "$i" "status" "pending"
+            local_status="pending"
+        fi
         if [[ "$local_status" == "pending" || "$local_status" == "in_progress" ]]; then
             START_PASS=$i
             break
+        fi
+        # Warn on unrecognized status values
+        if [[ "$local_status" != "completed" && -n "$local_status" ]]; then
+            log "WARNING: Pass $i has unrecognized status '${local_status}' — skipping"
         fi
     done
 
@@ -578,6 +588,12 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     PASS_SCOPE=$(unified_read_pass_scope "$PASS_NUM")
     PASS_PURPOSE=$(unified_read_pass_field "$PASS_NUM" "purpose")
     PASS_STATUS=$(unified_read_pass_field "$PASS_NUM" "status")
+
+    # Normalize "planned" → "pending"
+    if [[ "$PASS_STATUS" == "planned" ]]; then
+        unified_update_pass_field "$PASS_NUM" "status" "pending"
+        PASS_STATUS="pending"
+    fi
 
     # --- Skip completed passes ---
     if [[ "$PASS_STATUS" == "completed" ]]; then

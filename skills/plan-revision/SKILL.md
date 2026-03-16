@@ -236,7 +236,7 @@ pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier
 - `findings` column lists finding IDs this pass addresses (semicolon separated)
 - `model_tier` is `opus` for creative passes, `sonnet` for mechanical passes
 
-Every pass should have `status: pending` when first saved. The revision script will update status as passes are executed.
+**CRITICAL: Every pass MUST have `status` set to exactly `pending` when first saved.** Do NOT use `planned`, `new`, or any other value — the revision script only recognizes `pending`, `in_progress`, and `completed`. Using any other value will cause the pass to be silently skipped.
 
 ## Step 7: Explain Execution
 
