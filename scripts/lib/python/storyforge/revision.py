@@ -138,9 +138,9 @@ def resolve_scope(scope: str, project_dir: str) -> list[str]:
     else:
         # Comma-separated list — detect if all numeric (seq numbers)
         parts = [s.strip() for s in scope.split(',') if s.strip()]
-        all_numeric = all(p.isdigit() for p in parts)
+        all_numeric = all(p.isdigit() for p in parts if not p.startswith('NEW:'))
 
-        if all_numeric:
+        if all_numeric and not any(p.startswith('NEW:') for p in parts):
             # Resolve seq numbers to scene IDs
             seq_to_id = {r.get('seq', '').strip(): r['id'].strip() for r in active_rows}
             target_ids = []
@@ -153,15 +153,28 @@ def resolve_scope(scope: str, project_dir: str) -> list[str]:
         else:
             target_ids = parts
 
-    # Resolve IDs to file paths
-    matched = []
+    # Separate NEW: prefixed targets (scenes to create) from existing scenes
+    new_scene_ids = []
+    existing_ids = []
     for sid in target_ids:
+        if sid.startswith('NEW:'):
+            new_scene_ids.append(sid[4:])  # strip prefix
+        else:
+            existing_ids.append(sid)
+
+    # Resolve existing IDs to file paths
+    matched = []
+    for sid in existing_ids:
         path = resolve_scene_file(scene_dir, sid)
         if path:
             matched.append(path)
         else:
             print(f"WARNING: Scene file missing for id '{sid}': {scene_dir}/{sid}.md",
                   file=sys.stderr)
+
+    # Add virtual paths for new scenes (marked with NEW: prefix for downstream)
+    for sid in new_scene_ids:
+        matched.append(os.path.join(scene_dir, f'NEW:{sid}.md'))
 
     if not matched:
         raise ValueError(f"No scene files matched scope '{scope}'")
@@ -338,12 +351,21 @@ def build_revision_prompt(
     """
     # Resolve scene files
     file_paths = resolve_scope(scope, project_dir)
-    file_count = len(file_paths)
+
+    # Separate existing scenes from NEW: scenes to create
+    existing_paths = []
+    new_scene_ids = []
+    for fpath in file_paths:
+        basename = os.path.basename(fpath)
+        if basename.startswith('NEW:'):
+            new_scene_ids.append(os.path.splitext(basename[4:])[0])
+        else:
+            existing_paths.append(fpath)
 
     # Build file list block and optionally inline content
     file_lines = []
     inline_scenes = []
-    for fpath in file_paths:
+    for fpath in existing_paths:
         rel = os.path.relpath(fpath, project_dir)
         file_lines.append(f'- {rel}')
         if api_mode and os.path.isfile(fpath):
@@ -356,7 +378,26 @@ def build_revision_prompt(
                 f'\n=== END SCENE: {scene_id} ==='
             )
 
+    # Add new scene creation targets to file list
+    for sid in new_scene_ids:
+        file_lines.append(f'- scenes/{sid}.md (NEW — to be created)')
+
     file_block = '\n'.join(file_lines)
+    file_count = len(existing_paths) + len(new_scene_ids)
+
+    # New scene creation instructions
+    new_scenes_section = ''
+    if new_scene_ids:
+        new_list = '\n'.join(f'- `scenes/{sid}.md`' for sid in new_scene_ids)
+        new_scenes_section = (
+            '\n## New Scenes to Create\n\n'
+            'The following scenes do not yet exist. **Create** them as new files '
+            '(do not look for existing content to revise):\n\n'
+            f'{new_list}\n\n'
+            'Write each scene following the voice guide, scene intent, and any '
+            'guidance in the pass configuration. Each scene should be pure prose '
+            'markdown with no YAML frontmatter.\n'
+        )
 
     # Inline reference files for API mode
     inline_references = ''
@@ -414,6 +455,7 @@ def build_revision_prompt(
         f'## Purpose\n\n{purpose}\n',
         f'## Scope\n\nThis pass covers {file_count} scene file(s):\n\n{file_block}',
         config_section,
+        new_scenes_section,
         overrides_section,
         craft_section,
     ]
@@ -458,7 +500,8 @@ def _api_output_format_block() -> str:
         '**CRITICAL:** Output the COMPLETE file content for every modified scene. '
         'Do not use ellipsis, "[rest unchanged]", or partial content. '
         'If you change even one word in a scene, output the entire scene.\n\n'
-        'Only output scenes you actually changed. Skip scenes that need no edits for this pass.\n'
+        'Only output scenes you actually changed — skip scenes that need no edits for this pass. '
+        'Always output newly created scenes using the same marker format.\n'
     )
 
 

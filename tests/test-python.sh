@@ -133,6 +133,16 @@ result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.revision resolve-scope a
 assert_contains "$result" "act1-sc01.md" "revision: resolve_scope csv includes first id"
 assert_contains "$result" "act1-sc02.md" "revision: resolve_scope csv includes second id"
 
+# NEW: prefixed targets
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.revision resolve-scope "NEW:the-rupture,act1-sc01" "$FIXTURE_DIR" 2>/dev/null)
+assert_contains "$result" "act1-sc01.md" "revision: resolve_scope NEW: mixed keeps existing scene"
+assert_contains "$result" "NEW:the-rupture.md" "revision: resolve_scope NEW: includes virtual new scene path"
+
+# All NEW: targets (no existing scenes)
+result=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.revision resolve-scope "NEW:scene-a,NEW:scene-b" "$FIXTURE_DIR" 2>/dev/null)
+assert_contains "$result" "NEW:scene-a.md" "revision: resolve_scope all-NEW includes first new scene"
+assert_contains "$result" "NEW:scene-b.md" "revision: resolve_scope all-NEW includes second new scene"
+
 # ============================================================================
 # storyforge.scoring
 # ============================================================================
