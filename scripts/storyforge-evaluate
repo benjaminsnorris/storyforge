@@ -734,13 +734,6 @@ SESSION_START=$(date +%s)
 # --- Branch + PR setup ---
 create_branch "evaluate" "$PROJECT_DIR"
 
-# Advance project phase before pushing — gives the branch an initial commit
-CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
-if [[ "$CURRENT_PHASE" != "evaluation" && "$CURRENT_PHASE" != "revision" && "$CURRENT_PHASE" != "complete" ]]; then
-    sed -i '' "s/^[[:space:]]*phase:.*/phase: evaluation/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
-    log "Project phase advanced to: evaluation"
-fi
-
 ensure_branch_pushed "$PROJECT_DIR"
 
 PR_BODY="## Evaluation Panel

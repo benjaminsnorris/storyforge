@@ -12,10 +12,15 @@
 # build_scene_list — populate ALL_SCENE_IDS from metadata.csv
 # ============================================================================
 #
+# Minimum word count for a scene to be included in processing.
+# Scenes below this threshold (stubs, merged redirects) are skipped.
+MIN_SCENE_WORDS=${STORYFORGE_MIN_SCENE_WORDS:-50}
+
 # Usage: build_scene_list <metadata_csv>
 #
 # Sets global array ALL_SCENE_IDS with scene IDs sorted by seq, excluding
-# scenes with status "cut". Exits with error if no scenes found.
+# scenes with status "cut" or "merged", and scenes below MIN_SCENE_WORDS.
+# Exits with error if no scenes found.
 build_scene_list() {
     local metadata_csv="$1"
 
@@ -26,12 +31,20 @@ build_scene_list() {
     fi
 
     ALL_SCENE_IDS=()
+    local skipped=0
     while IFS= read -r id; do
         [[ -z "$id" ]] && continue
         local_status=$(get_csv_field "$metadata_csv" "$id" "status")
-        if [[ "$local_status" != "cut" ]]; then
-            ALL_SCENE_IDS+=("$id")
+        if [[ "$local_status" == "cut" || "$local_status" == "merged" ]]; then
+            skipped=$((skipped + 1))
+            continue
         fi
+        local_wc=$(get_csv_field "$metadata_csv" "$id" "word_count")
+        if [[ -n "$local_wc" && "$local_wc" -gt 0 && "$local_wc" -lt "$MIN_SCENE_WORDS" ]] 2>/dev/null; then
+            skipped=$((skipped + 1))
+            continue
+        fi
+        ALL_SCENE_IDS+=("$id")
     done < <(awk -F'|' '
         NR == 1 {
             for (i = 1; i <= NF; i++) {
@@ -47,7 +60,7 @@ build_scene_list() {
         exit 1
     fi
 
-    log "Found ${#ALL_SCENE_IDS[@]} scenes in metadata.csv"
+    log "Found ${#ALL_SCENE_IDS[@]} scenes in metadata.csv${skipped:+ (skipped ${skipped} cut/stub)}"
 }
 
 # ============================================================================

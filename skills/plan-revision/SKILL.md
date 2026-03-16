@@ -200,14 +200,12 @@ Read `working/pipeline.csv` to find the current cycle ID. Save the plan as a pip
 
 After writing the plan file, update the manifest's current cycle entry to set the `plan` field to `revision-plan.csv`.
 
-**4. Update project state:** set `phase: revision` in `storyforge.yaml`.
-
-**5. Commit and push** all changes to the new branch:
+**4. Commit and push** all changes to the new branch:
 ```bash
 git add -A && git commit -m "Plan revision: {N} passes for {title}" && git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
 ```
 
-**6. Create a draft PR with the full plan in the body.** Use `gh pr create` to open a draft PR. The body should contain the complete revision plan so the author can read it on GitHub:
+**5. Create a draft PR with the full plan in the body.** Use `gh pr create` to open a draft PR. The body should contain the complete revision plan so the author can read it on GitHub:
 
 ```bash
 gh pr create --draft \

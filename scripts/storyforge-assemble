@@ -9,11 +9,12 @@ set -eo pipefail
 # pandoc required for epub/HTML; pandoc + LaTeX or weasyprint for PDF.
 #
 # Usage:
-#   ./storyforge assemble                    # Full assembly + epub
+#   ./storyforge assemble                    # Full assembly + epub + web
 #   ./storyforge assemble --format epub      # Epub only
 #   ./storyforge assemble --format pdf       # PDF only
 #   ./storyforge assemble --format html      # HTML only
 #   ./storyforge assemble --format markdown  # Assembled markdown only
+#   ./storyforge assemble --all              # All available formats
 #   ./storyforge assemble --draft            # Quick assembly, no formatting
 #   ./storyforge assemble --dry-run          # Show what would be done
 # ============================================================================
@@ -61,11 +62,11 @@ mkdir -p "$LOG_DIR"
 # ============================================================================
 
 DRY_RUN=false
-FORMAT="epub"           # epub | pdf | html | web | markdown | all
+FORMATS=()              # populated by --format flags; defaults applied later
 DRAFT_MODE=false
 SKIP_VALIDATION=false
 INTERACTIVE=false
-ANNOTATE=false
+ANNOTATE=true
 NO_PR=false
 
 usage() {
@@ -75,8 +76,11 @@ Usage: $(basename "$0") [OPTIONS]
 Assemble scenes into chapters and generate book output.
 
 Options:
-  --format FORMAT     Output format: epub, pdf, html, web, markdown, all (default: epub)
+  --format FORMAT     Output format (repeatable, comma-separated ok):
+                        epub, pdf, html, web, markdown (default: epub,web)
+  --all               Generate all available formats
   --draft             Quick assembly — markdown only, no formatting
+  --no-annotate       Disable web annotations (on by default)
   --interactive       Run the review phase interactively
   --dry-run           Show what would be done without doing it
   --skip-validation   Skip epubcheck validation
@@ -88,16 +92,16 @@ Formats:
   html       Generate single-file HTML (requires pandoc)
   web        Generate multi-page web book for hosting (requires pandoc)
   markdown   Assemble manuscript markdown only (no external tools)
-  all        Generate all available formats
 
 Environment:
   STORYFORGE_MODEL    Override model selection for the review phase
 
 Examples:
-  $(basename "$0")
-  $(basename "$0") --format markdown
-  $(basename "$0") --format all
-  $(basename "$0") --draft
+  $(basename "$0")                          # epub + web (default)
+  $(basename "$0") --format epub            # epub only
+  $(basename "$0") --format epub,pdf        # epub + pdf
+  $(basename "$0") --all                    # all available formats
+  $(basename "$0") --draft                  # markdown only, no formatting
 EOF
     exit 0
 }
@@ -113,12 +117,19 @@ while [[ $# -gt 0 ]]; do
             ;;
         --draft)
             DRAFT_MODE=true
-            FORMAT="markdown"
+            FORMATS=("markdown")
             shift
             ;;
         --format)
-            FORMAT="${2:?ERROR: --format requires a value (epub, pdf, html, markdown, all)}"
+            val="${2:?ERROR: --format requires a value (epub, pdf, html, web, markdown)}"
+            # Support comma-separated: --format epub,web
+            IFS=',' read -ra _fmts <<< "$val"
+            FORMATS+=("${_fmts[@]}")
             shift 2
+            ;;
+        --all)
+            FORMATS=("all")
+            shift
             ;;
         --skip-validation)
             SKIP_VALIDATION=true
@@ -126,6 +137,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --annotate)
             ANNOTATE=true
+            shift
+            ;;
+        --no-annotate)
+            ANNOTATE=false
             shift
             ;;
         --no-pr)
@@ -147,14 +162,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate format
-case "$FORMAT" in
-    epub|pdf|html|web|markdown|all) ;;
-    *)
-        echo "ERROR: Unknown format '${FORMAT}'. Use: epub, pdf, html, web, markdown, all" >&2
-        exit 1
-        ;;
-esac
+# Apply defaults if no formats specified
+if [[ ${#FORMATS[@]} -eq 0 ]]; then
+    FORMATS=("epub" "web")
+fi
+
+# Validate each format
+for fmt in "${FORMATS[@]}"; do
+    case "$fmt" in
+        epub|pdf|html|web|markdown|all) ;;
+        *)
+            echo "ERROR: Unknown format '${fmt}'. Use: epub, pdf, html, web, markdown" >&2
+            exit 1
+            ;;
+    esac
+done
 
 # ============================================================================
 # CSV chapter map support (CSV-first, YAML fallback)
@@ -192,16 +214,34 @@ if [[ $MISSING_SCENES -gt 0 ]]; then
     log "WARNING: ${MISSING_SCENES} scene file(s) missing. Assembly will proceed with available scenes."
 fi
 
+# Helper: check if a format is in the FORMATS array
+has_format() {
+    local target="$1"
+    for fmt in "${FORMATS[@]}"; do
+        [[ "$fmt" == "$target" ]] && return 0
+    done
+    return 1
+}
+
+# Build FORMAT_LABEL for display
+FORMAT_LABEL=$(IFS=','; echo "${FORMATS[*]}")
+
 # Check tool availability for non-markdown formats (skip in dry-run mode)
 PANDOC_VERSION=""
-if [[ "$FORMAT" != "markdown" && "$DRY_RUN" != true ]]; then
+NEEDS_PANDOC=false
+for fmt in "${FORMATS[@]}"; do
+    [[ "$fmt" != "markdown" ]] && NEEDS_PANDOC=true
+done
+
+if [[ "$NEEDS_PANDOC" == true && "$DRY_RUN" != true ]]; then
     PANDOC_VERSION=$(check_pandoc 2>/dev/null || echo "")
     if [[ -z "$PANDOC_VERSION" ]]; then
-        if [[ "$FORMAT" == "all" ]]; then
+        if has_format "all"; then
             log "WARNING: pandoc not found — will generate markdown only"
-            FORMAT="markdown"
+            FORMATS=("markdown")
+            FORMAT_LABEL="markdown"
         else
-            log "ERROR: pandoc is required for ${FORMAT} output but not found"
+            log "ERROR: pandoc is required for ${FORMAT_LABEL} output but not found"
             log "Install: https://pandoc.org/installing.html"
             exit 1
         fi
@@ -224,19 +264,13 @@ GENRE=$(read_yaml_field "project.genre" 2>/dev/null || read_yaml_field "genre" 2
 if [[ "$DRY_RUN" != true ]]; then
     create_branch "assemble" "$PROJECT_DIR"
 
-    # Advance phase to production before pushing (gives the branch an initial commit)
-    CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
-    if [[ "$CURRENT_PHASE" != "production" && "$CURRENT_PHASE" != "complete" ]]; then
-        sed -i '' "s/^[[:space:]]*phase:.*/phase: production/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
-    fi
-
     ensure_branch_pushed "$PROJECT_DIR"
 
     PR_BODY="## Assembly
 
 **Project:** ${TITLE}
 **Chapters:** ${TOTAL_CHAPTERS}
-**Format:** ${FORMAT}
+**Formats:** ${FORMAT_LABEL}
 
 ### Tasks
 - [ ] Assemble chapters
@@ -252,7 +286,7 @@ log "============================================"
 log "Starting Storyforge assembly"
 log "Project: ${TITLE}"
 log "Chapters: ${TOTAL_CHAPTERS}"
-log "Format: ${FORMAT}"
+log "Formats: ${FORMAT_LABEL}"
 if [[ "$DRAFT_MODE" == true ]]; then
     log "Mode: draft (quick assembly)"
 fi
@@ -267,7 +301,8 @@ if [[ "$DRY_RUN" == true ]]; then
     echo ""
     echo "Project: ${TITLE}"
     echo "Chapters: ${TOTAL_CHAPTERS}"
-    echo "Format: ${FORMAT}"
+    echo "Formats: ${FORMAT_LABEL}"
+    echo "Annotations: ${ANNOTATE}"
     echo ""
     echo "Chapter map:"
     for (( ch=1; ch<=TOTAL_CHAPTERS; ch++ )); do
@@ -287,24 +322,23 @@ if [[ "$DRY_RUN" == true ]]; then
     done
     echo ""
     echo "Output directory: ${MANUSCRIPT_DIR}"
-    echo "annotate: ${ANNOTATE}"
     echo "Formats to generate:"
-    case "$FORMAT" in
-        epub) echo "  - epub3" ;;
-        pdf) echo "  - PDF" ;;
-        html) echo "  - HTML (single file)" ;;
-        web) echo "  - Web book (multi-page)" ;;
-        markdown) echo "  - Markdown" ;;
-        all)
-            echo "  - Markdown"
-            [[ -n "$PANDOC_VERSION" ]] && echo "  - epub3"
-            [[ -n "$PANDOC_VERSION" ]] && echo "  - HTML (single file)"
-            [[ -n "$PANDOC_VERSION" ]] && echo "  - Web book (multi-page)"
-            if check_weasyprint 2>/dev/null || [[ -n "$PANDOC_VERSION" ]]; then
+    for fmt in "${FORMATS[@]}"; do
+        case "$fmt" in
+            epub) echo "  - epub3" ;;
+            pdf) echo "  - PDF" ;;
+            html) echo "  - HTML (single file)" ;;
+            web) echo "  - Web book (multi-page, annotations: ${ANNOTATE})" ;;
+            markdown) echo "  - Markdown" ;;
+            all)
+                echo "  - Markdown"
+                echo "  - epub3"
+                echo "  - HTML (single file)"
+                echo "  - Web book (multi-page, annotations: ${ANNOTATE})"
                 echo "  - PDF"
-            fi
-            ;;
-    esac
+                ;;
+        esac
+    done
     echo ""
     echo "===== END DRY RUN: assemble ====="
     exit 0
@@ -407,24 +441,26 @@ generate_format() {
     esac
 }
 
-begin_healing_zone "generating ${FORMAT} output"
-case "$FORMAT" in
-    all)
-        generate_format "markdown"
-        if [[ -n "${PANDOC_VERSION:-}" ]]; then
-            generate_format "epub"
-            generate_format "html"
-            generate_format "web"
-            # PDF is optional — try it, warn on failure
-            set +e
-            generate_format "pdf"
-            set -e
-        fi
-        ;;
-    *)
-        generate_format "$FORMAT"
-        ;;
-esac
+begin_healing_zone "generating ${FORMAT_LABEL} output"
+for fmt in "${FORMATS[@]}"; do
+    case "$fmt" in
+        all)
+            generate_format "markdown"
+            if [[ -n "${PANDOC_VERSION:-}" ]]; then
+                generate_format "epub"
+                generate_format "html"
+                generate_format "web"
+                # PDF is optional — try it, warn on failure
+                set +e
+                generate_format "pdf"
+                set -e
+            fi
+            ;;
+        *)
+            generate_format "$fmt"
+            ;;
+    esac
+done
 end_healing_zone
 
 # ============================================================================
@@ -447,12 +483,6 @@ sed -i '' "/manuscript:/,/updated:/{
 
 update_pr_task "Generate formats" "$PROJECT_DIR"
 
-# Advance phase to production if appropriate
-CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
-if [[ "$CURRENT_PHASE" == "complete" || "$CURRENT_PHASE" == "review" ]]; then
-    sed -i '' "s/^[[:space:]]*phase:.*/phase: production/" "${PROJECT_DIR}/storyforge.yaml" 2>/dev/null || true
-    log "Project phase advanced to: production"
-fi
 
 # ============================================================================
 # Session complete
@@ -485,6 +515,6 @@ log "============================================"
     git add manuscript/ storyforge.yaml 2>/dev/null || true
     git add working/logs/ 2>/dev/null || true
     git add working/costs/ 2>/dev/null || true
-    git commit -m "Assemble: ${TITLE} (${FORMAT})" 2>/dev/null || true
+    git commit -m "Assemble: ${TITLE} (${FORMAT_LABEL})" 2>/dev/null || true
     git push 2>/dev/null || true
 )
