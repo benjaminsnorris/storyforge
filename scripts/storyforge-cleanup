@@ -446,7 +446,7 @@ report_csv_integrity() {
 # ============================================================================
 
 EXPECTED_TOP_DIRS="scenes reference working manuscript storyforge .git"
-EXPECTED_TOP_FILES="storyforge.yaml CLAUDE.md .gitignore .DS_Store"
+EXPECTED_TOP_FILES="storyforge.yaml CLAUDE.md .gitignore .DS_Store storyforge"
 EXPECTED_WORKING_DIRS="logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup"
 EXPECTED_WORKING_FILES="pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html"
 
