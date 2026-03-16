@@ -176,6 +176,69 @@ reorganize_loose_files() {
 }
 
 # ============================================================================
+# Pipeline CSV migration
+# ============================================================================
+
+PIPELINE_EXPECTED="cycle|started|status|evaluation|scoring|plan|review|recommendations|summary"
+
+migrate_pipeline_csv() {
+    local project_dir="$1"
+    local csv="${project_dir}/working/pipeline.csv"
+    [[ -f "$csv" ]] || return 0
+    local header
+    header=$(head -1 "$csv")
+    [[ "$header" == "$PIPELINE_EXPECTED" ]] && return 0
+
+    local tmp="${csv}.tmp"
+    awk -F'|' -v expected="$PIPELINE_EXPECTED" '
+    BEGIN { n_exp = split(expected, exp_cols, "|") }
+    NR == 1 {
+        n_old = split($0, old_cols, "|")
+        for (i = 1; i <= n_old; i++) old_pos[old_cols[i]] = i
+        printf "%s\n", expected
+        next
+    }
+    {
+        n_old = split($0, vals, "|")
+        for (i = 1; i <= n_exp; i++) {
+            if (i > 1) printf "|"
+            col = exp_cols[i]
+            if (col in old_pos) printf "%s", vals[old_pos[col]]
+        }
+        printf "\n"
+    }
+    ' "$csv" > "$tmp"
+    mv "$tmp" "$csv"
+}
+
+# ============================================================================
+# Pipeline review deduplication
+# ============================================================================
+
+# Pipeline reviews named pipeline-review-YYYYMMDD-HHMMSS.md
+# Same YYYYMMDD = same cycle. Keep only latest timestamp per date.
+# Standalone review-YYYYMMDD.md files are always kept.
+dedup_pipeline_reviews() {
+    local project_dir="$1"
+    local reviews_dir="${project_dir}/working/reviews"
+    [[ -d "$reviews_dir" ]] || return 0
+
+    local prev_date=""
+    # Reverse sort: latest timestamp per date seen first
+    for f in $(ls -r "${reviews_dir}"/pipeline-review-*.md 2>/dev/null); do
+        local basename
+        basename=$(basename "$f")
+        local date
+        date=$(echo "$basename" | sed 's/pipeline-review-\([0-9]*\)-.*/\1/')
+        if [[ "$date" == "$prev_date" ]]; then
+            rm "$f"
+        else
+            prev_date="$date"
+        fi
+    done
+}
+
+# ============================================================================
 # Main (skip if sourced for testing)
 # ============================================================================
 

@@ -115,3 +115,54 @@ assert_file_exists "$WORK_DIR/working/recommendations/recommendations-3.md" "reo
 
 rm -rf "$WORK_DIR"
 
+# ============================================================================
+# Pipeline CSV column tests
+# ============================================================================
+WORK_DIR="${TMPDIR}/cleanup-pipeline-$$"
+cp -R "$CLEANUP_FIXTURE" "$WORK_DIR"
+source "${PLUGIN_DIR}/scripts/storyforge-cleanup" --source-only
+
+HEADER=$(head -1 "$WORK_DIR/working/pipeline.csv")
+assert_not_contains "$HEADER" "scoring" "pipeline: missing scoring column before"
+
+migrate_pipeline_csv "$WORK_DIR"
+
+HEADER=$(head -1 "$WORK_DIR/working/pipeline.csv")
+assert_contains "$HEADER" "scoring" "pipeline: scoring column added"
+assert_contains "$HEADER" "review" "pipeline: review column added"
+assert_contains "$HEADER" "recommendations" "pipeline: recommendations column added"
+
+DATA_LINE=$(tail -1 "$WORK_DIR/working/pipeline.csv")
+EXPECTED_FIELDS=$(head -1 "$WORK_DIR/working/pipeline.csv" | awk -F'|' '{print NF}')
+ACTUAL_FIELDS=$(echo "$DATA_LINE" | awk -F'|' '{print NF}')
+assert_equals "$EXPECTED_FIELDS" "$ACTUAL_FIELDS" "pipeline: data rows have correct field count"
+
+migrate_pipeline_csv "$WORK_DIR"
+HEADER2=$(head -1 "$WORK_DIR/working/pipeline.csv")
+assert_equals "$HEADER" "$HEADER2" "pipeline: idempotent"
+
+rm -rf "$WORK_DIR"
+
+# ============================================================================
+# Pipeline review dedup tests
+# ============================================================================
+WORK_DIR="${TMPDIR}/cleanup-dedup-$$"
+cp -R "$CLEANUP_FIXTURE" "$WORK_DIR"
+source "${PLUGIN_DIR}/scripts/storyforge-cleanup" --source-only
+
+BEFORE_COUNT=$(ls "$WORK_DIR/working/reviews/pipeline-review-"* 2>/dev/null | wc -l | tr -d ' ')
+assert_equals "4" "$BEFORE_COUNT" "dedup: 4 pipeline reviews before"
+
+dedup_pipeline_reviews "$WORK_DIR"
+
+AFTER_COUNT=$(ls "$WORK_DIR/working/reviews/pipeline-review-"* 2>/dev/null | wc -l | tr -d ' ')
+assert_equals "2" "$AFTER_COUNT" "dedup: 2 pipeline reviews after (1 per day)"
+
+assert_file_exists "$WORK_DIR/working/reviews/pipeline-review-20260301-120000.md" "dedup: keeps latest from day 1"
+RESULT=$(ls "$WORK_DIR/working/reviews/pipeline-review-20260301-100000.md" 2>/dev/null || echo "gone")
+assert_equals "gone" "$RESULT" "dedup: removes earlier from day 1"
+
+assert_file_exists "$WORK_DIR/working/reviews/review-20260301.md" "dedup: summary review preserved"
+
+rm -rf "$WORK_DIR"
+
