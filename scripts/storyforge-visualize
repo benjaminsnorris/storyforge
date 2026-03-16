@@ -16,6 +16,7 @@ set -eo pipefail
 # --- Locate script directory and source libraries ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
 
 if [[ ! -f "${LIB_DIR}/common.sh" ]]; then
     echo "ERROR: Cannot find lib/common.sh at ${LIB_DIR}" >&2
@@ -80,31 +81,6 @@ PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "
 PROJECT_GENRE=$(read_yaml_field "project.genre" 2>/dev/null || read_yaml_field "genre" 2>/dev/null || echo "")
 SCENE_COUNT=$(awk -F'|' 'NR>1' "$METADATA_CSV" | wc -l | tr -d ' ')
 
-# --- CSV to JSON converter ---
-# Converts pipe-delimited CSV to a JSON array of objects.
-# Handles quoting and escaping for safe injection into HTML <script> tags.
-csv_to_json() {
-    local file="$1"
-    [[ -f "$file" ]] || { echo "[]"; return; }
-    awk -F'|' '
-        NR==1 { for(i=1;i<=NF;i++) h[i]=$i; ncols=NF; next }
-        {
-            if(NR>2) printf ","
-            printf "{"
-            for(i=1;i<=ncols;i++) {
-                if(i>1) printf ","
-                # Escape backslashes first, then double quotes, then angle brackets
-                gsub(/\\/, "\\\\", $i)
-                gsub(/"/, "\\\"", $i)
-                gsub(/</, "\\u003c", $i)
-                gsub(/>/, "\\u003e", $i)
-                printf "\"%s\":\"%s\"", h[i], $i
-            }
-            printf "}"
-        }
-    ' "$file"
-}
-
 # --- Dry run ---
 if [[ "$DRY_RUN" == true ]]; then
     log "DRY RUN — would generate dashboard at ${DASHBOARD_FILE}"
@@ -120,26 +96,11 @@ fi
 
 log "Generating manuscript dashboard for ${PROJECT_TITLE}..."
 
-# --- Build JSON data ---
-SCENES_JSON="[$(csv_to_json "$METADATA_CSV")]"
-INTENTS_JSON="[$(csv_to_json "$INTENT_CSV")]"
-CHARACTERS_CSV="${PROJECT_DIR}/reference/characters.csv"
-CHARACTERS_JSON="[$(csv_to_json "$CHARACTERS_CSV")]"
-MOTIF_TAXONOMY="${PROJECT_DIR}/reference/motif-taxonomy.csv"
-MOTIF_TAXONOMY_JSON="[$(csv_to_json "$MOTIF_TAXONOMY")]"
-LOCATIONS_CSV="${PROJECT_DIR}/reference/locations.csv"
-LOCATIONS_JSON="[$(csv_to_json "$LOCATIONS_CSV")]"
-SCORES_JSON="[$(csv_to_json "$SCORES_CSV")]"
-WEIGHTS_JSON="[$(csv_to_json "$WEIGHTS_CSV")]"
-
-# Narrative scores (novel-level)
-NARRATIVE_SCORES_CSV="${PROJECT_DIR}/working/scores/latest/narrative-scores.csv"
-NARRATIVE_SCORES_JSON="[]"
-if [[ -f "$NARRATIVE_SCORES_CSV" ]]; then
-    NARRATIVE_SCORES_JSON="[$(csv_to_json "$NARRATIVE_SCORES_CSV")]"
-fi
-
-PROJECT_JSON="{\"title\":\"${PROJECT_TITLE}\",\"genre\":\"${PROJECT_GENRE}\",\"scene_count\":\"${SCENE_COUNT}\",\"generated\":\"$(date '+%Y-%m-%d %H:%M')\"}"
+# --- Build JSON data via Python module ---
+DATA_JSON=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.visualize data "$PROJECT_DIR") || {
+    echo "ERROR: Failed to load dashboard data via Python module" >&2
+    exit 1
+}
 
 # --- Generate HTML ---
 mkdir -p "$(dirname "$DASHBOARD_FILE")"
@@ -672,17 +633,18 @@ body {
 // ============================================================================
 HTMLEOF
 
-# Inject JSON data
+# Inject JSON data from Python module
 cat >> "$DASHBOARD_FILE" << EOF
-const SCENES = ${SCENES_JSON};
-const INTENTS = ${INTENTS_JSON};
-const CHARACTERS = ${CHARACTERS_JSON};
-const MOTIF_TAXONOMY = ${MOTIF_TAXONOMY_JSON};
-const LOCATIONS = ${LOCATIONS_JSON};
-const SCORES = ${SCORES_JSON};
-const WEIGHTS = ${WEIGHTS_JSON};
-const NARRATIVE_SCORES = ${NARRATIVE_SCORES_JSON};
-const PROJECT = ${PROJECT_JSON};
+const _DATA = ${DATA_JSON};
+const SCENES = _DATA.scenes;
+const INTENTS = _DATA.intents;
+const CHARACTERS = _DATA.characters;
+const MOTIF_TAXONOMY = _DATA.motif_taxonomy;
+const LOCATIONS = _DATA.locations;
+const SCORES = _DATA.scores;
+const WEIGHTS = _DATA.weights;
+const NARRATIVE_SCORES = _DATA.narrative_scores;
+const PROJECT = _DATA.project;
 EOF
 
 cat >> "$DASHBOARD_FILE" << 'HTMLEOF'
