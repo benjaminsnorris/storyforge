@@ -1440,9 +1440,17 @@ git push
 
 - [ ] **Step 1: Write the main section**
 
-Replace the placeholder main section at the bottom of `scripts/storyforge-cleanup` with:
+Replace the placeholder main section at the bottom of `scripts/storyforge-cleanup` with (keeping the `_CLEANUP_SOURCE_ONLY` guard before argument parsing):
 
 ```bash
+# ============================================================================
+# Main (skip if sourced for testing)
+# ============================================================================
+
+if [[ "${_CLEANUP_SOURCE_ONLY:-}" == "true" ]]; then
+    return 0 2>/dev/null || true
+fi
+
 # ============================================================================
 # Argument Parsing
 # ============================================================================
@@ -1644,12 +1652,18 @@ git push
 **Files:**
 - Modify: `templates/storyforge-runner.sh`
 
-- [ ] **Step 1: Update the usage line**
+- [ ] **Step 1: Update the usage and error message**
 
 In `templates/storyforge-runner.sh`, update the COMMAND line:
 
 ```bash
 COMMAND="${1:?Usage: ./storyforge <write|evaluate|revise|assemble|review|cleanup|test> [options]}"
+```
+
+And update the error message in the `*)` case:
+
+```bash
+      echo "Error: Unknown command '$COMMAND'. Available: write, evaluate, revise, assemble, review, cleanup, test" >&2
 ```
 
 - [ ] **Step 2: Commit**
@@ -1799,6 +1813,10 @@ If the author agrees:
 2. Populate with current project data from storyforge.yaml
 3. Append any custom sections from the old CLAUDE.md
 4. Write and commit
+
+## Coaching Level
+
+Cleanup is structural/mechanical work, not creative. Behavior is the same at all coaching levels.
 
 ## Step 7: Git History Note
 
