@@ -81,17 +81,41 @@ invoke_anthropic_api() {
 JSONEOF
 )
 
-    # Make the API call
-    local http_code
-    http_code=$(curl -s -w "%{http_code}" -o "$log_file" \
-        "https://api.anthropic.com/v1/messages" \
-        -H "x-api-key: ${ANTHROPIC_API_KEY}" \
-        -H "anthropic-version: 2023-06-01" \
-        -H "content-type: application/json" \
-        -d "$request_body" 2>/dev/null) || {
+    # Make the API call.
+    # Write http_code to a temp file so we can background curl and still
+    # capture it (command substitution doesn't work with background jobs).
+    local http_code_file="${TMPDIR:-/tmp}/storyforge-http-code-$$.txt"
+    (
+        curl -s -w "%{http_code}" -o "$log_file" \
+            "https://api.anthropic.com/v1/messages" \
+            -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d "$request_body" 2>/dev/null > "$http_code_file"
+    ) &
+    local pid=$!
+    register_child_pid $pid
+
+    set +e
+    wait "$pid" 2>/dev/null
+    local curl_rc=$?
+    set -e
+    unregister_child_pid "$pid" 2>/dev/null || true
+
+    if [[ "$_SF_SHUTTING_DOWN" == true ]]; then
+        rm -f "$http_code_file"
+        return 130
+    fi
+
+    if [[ $curl_rc -ne 0 ]]; then
+        rm -f "$http_code_file"
         log "WARNING: curl failed for API call"
         return 1
-    }
+    fi
+
+    local http_code
+    http_code=$(cat "$http_code_file" 2>/dev/null || echo "000")
+    rm -f "$http_code_file"
 
     if [[ "$http_code" != "200" ]]; then
         log "WARNING: API returned HTTP ${http_code}"

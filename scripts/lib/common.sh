@@ -338,21 +338,27 @@ HEAL_EOF
         } >> "$_SF_HEALING_LOG"
     fi
 
-    # Invoke Claude to fix the issue
+    # Invoke Claude to fix the issue.
+    # Run in background + wait so Ctrl+C trap fires immediately.
     local heal_rc=0
     if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
         invoke_anthropic_api "$heal_prompt" "$heal_model" "$heal_log" 8192 || heal_rc=$?
     else
-        set +e
         claude -p "$heal_prompt" \
             --model "$heal_model" \
             --dangerously-skip-permissions \
             --output-format stream-json \
             --verbose \
-            > "$heal_log" 2>&1
+            > "$heal_log" 2>&1 &
+        local _hpid=$!
+        register_child_pid $_hpid
+        set +e
+        wait "$_hpid" 2>/dev/null
         heal_rc=$?
         set -e
+        unregister_child_pid "$_hpid" 2>/dev/null || true
     fi
+    [[ "$_SF_SHUTTING_DOWN" == true ]] && return 130
 
     # Append Claude's output to healing log
     if [[ -n "$_SF_HEALING_LOG" && -f "$heal_log" ]]; then
@@ -1215,16 +1221,24 @@ _run_headless_session() {
         return $rc
     fi
 
-    # Fallback to claude -p if no API key
-    set +e
+    # Fallback to claude -p if no API key.
+    # Run in background + wait so the interrupt trap can fire immediately
+    # on Ctrl+C (foreground processes block trap delivery in bash).
     claude -p "$prompt" \
         --model "$model" \
         --dangerously-skip-permissions \
         --output-format stream-json \
         --verbose \
-        > "$log_file" 2>&1
+        > "$log_file" 2>&1 &
+    local pid=$!
+    register_child_pid $pid
+
+    set +e
+    wait "$pid" 2>/dev/null
     local rc=$?
     set -e
+    unregister_child_pid "$pid" 2>/dev/null || true
+
     [[ "$_SF_SHUTTING_DOWN" == true ]] && return 130
     return $rc
 }
@@ -1294,16 +1308,22 @@ CLEANUP_EOF
     if [[ "$_SF_SHUTTING_DOWN" == true ]]; then return 130; fi
 
     log "  Cleanup pass ${iteration} (model: ${cleanup_model})..."
-    # Cleanup requires tool use (reading/editing files, git) — must use claude -p
-    set +e
+    # Cleanup requires tool use (reading/editing files, git) — must use claude -p.
+    # Run in background + wait so Ctrl+C trap fires immediately.
     claude -p "$cleanup_prompt" \
         --model "$cleanup_model" \
         --dangerously-skip-permissions \
         --output-format stream-json \
         --verbose \
-        > "$cleanup_log" 2>&1
+        > "$cleanup_log" 2>&1 &
+    local pid=$!
+    register_child_pid $pid
+
+    set +e
+    wait "$pid" 2>/dev/null
     local rc=$?
     set -e
+    unregister_child_pid "$pid" 2>/dev/null || true
 
     [[ "$_SF_SHUTTING_DOWN" == true ]] && return 130
 
@@ -1723,13 +1743,18 @@ REVIEW_EOF
 
         log "Invoking interactive claude for review..."
 
-        set +e
         claude "$review_prompt" \
             --model "$review_model" \
             --dangerously-skip-permissions \
-            --append-system-prompt "You are in interactive mode for the pipeline review. Complete the review, then wait for the user. They may ask questions about findings or request adjustments. Type /exit when done."
+            --append-system-prompt "You are in interactive mode for the pipeline review. Complete the review, then wait for the user. They may ask questions about findings or request adjustments. Type /exit when done." &
+        local _rpid=$!
+        register_child_pid $_rpid
+
+        set +e
+        wait "$_rpid" 2>/dev/null
         local review_exit=$?
         set -e
+        unregister_child_pid "$_rpid" 2>/dev/null || true
     else
         log "Invoking claude for review (model: ${review_model})..."
         _run_headless_session "$review_prompt" "$review_model" "$review_log"
