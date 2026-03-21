@@ -235,6 +235,12 @@
 
   .sf-toolbar button.sf-hidden { display: none; }
 
+  /* Pulse the toolbar border when a selection is active */
+  .sf-toolbar.sf-toolbar-active {
+    border-top-color: var(--accent);
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+  }
+
   /* Ensure content isn't hidden behind the fixed toolbar */
   .reading-column { padding-bottom: 70px; }
 }

@@ -417,6 +417,13 @@
     hlBtn.className = 'sf-hidden';
     hlBtn.dataset.action = 'highlight';
     hlBtn.textContent = 'Highlight';
+    // Use touchstart so it fires before iOS clears the selection
+    hlBtn.addEventListener('touchstart', function(e) {
+      e.preventDefault();
+      if (pendingRange) {
+        showMobileColorPicker(pendingRange);
+      }
+    });
     hlBtn.addEventListener('click', function() {
       if (pendingRange) {
         showMobileColorPicker(pendingRange);
@@ -427,6 +434,12 @@
     cmBtn.className = 'sf-hidden';
     cmBtn.dataset.action = 'comment';
     cmBtn.textContent = 'Comment';
+    cmBtn.addEventListener('touchstart', function(e) {
+      e.preventDefault();
+      if (pendingRange) {
+        showMobileCommentInput(pendingRange);
+      }
+    });
     cmBtn.addEventListener('click', function() {
       if (pendingRange) {
         showMobileCommentInput(pendingRange);
@@ -446,24 +459,37 @@
     document.body.appendChild(toolbar);
   }
 
+  var _hideTimer = null;
+
   document.addEventListener('selectionchange', function() {
     if (window.innerWidth >= 640) return;
     if (!toolbar) return;
 
     var selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-      // Delay hide to allow tap registration
-      setTimeout(function() {
+      // Keep buttons visible for 1.5s so the user can tap them.
+      // On iOS, tapping a toolbar button clears the selection BEFORE
+      // the click event fires. The longer window + touchstart listeners
+      // on the buttons ensure the tap registers.
+      if (_hideTimer) clearTimeout(_hideTimer);
+      _hideTimer = setTimeout(function() {
+        _hideTimer = null;
+        // Only hide if selection is still gone AND pendingRange wasn't consumed
         var sel = window.getSelection();
-        if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+        if ((!sel || sel.isCollapsed || !sel.toString().trim()) && pendingRange) {
           var hlBtn = toolbar.querySelector('[data-action="highlight"]');
           var cmBtn = toolbar.querySelector('[data-action="comment"]');
           if (hlBtn) hlBtn.classList.add('sf-hidden');
           if (cmBtn) cmBtn.classList.add('sf-hidden');
+          pendingRange = null;
+          toolbar.classList.remove('sf-toolbar-active');
         }
-      }, 200);
+      }, 1500);
       return;
     }
+
+    // New valid selection — cancel any pending hide
+    if (_hideTimer) { clearTimeout(_hideTimer); _hideTimer = null; }
 
     var range = selection.getRangeAt(0);
     var container = range.commonAncestorContainer;
@@ -475,6 +501,7 @@
     var cmBtn = toolbar.querySelector('[data-action="comment"]');
     if (hlBtn) hlBtn.classList.remove('sf-hidden');
     if (cmBtn) cmBtn.classList.remove('sf-hidden');
+    toolbar.classList.add('sf-toolbar-active');
   });
 
   function clearMobileSelection() {
