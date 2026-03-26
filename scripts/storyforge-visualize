@@ -1365,70 +1365,52 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     });
 
     const povList = Object.keys(povs).sort((a, b) => povs[b].total - povs[a].total);
-    const isNarrow = window.innerWidth < 768;
-    const LABEL_W = isNarrow ? 0 : GRID_LABEL_W;
-    const LABEL_ROW_H = isNarrow ? 16 : 0;
+    const LABEL_H = 16;
     const LANE_H = 32;
-    const GAP = 4;
+    const GAP = 8;
     const W = container.clientWidth - 24 || 1100;
-    const ROW_H = LANE_H + GAP + LABEL_ROW_H;
-    const H = povList.length * ROW_H + 40;
-    const CHART_W = W - LABEL_W - 80;
+    const ROW_H = LABEL_H + LANE_H + GAP;
+    const H = povList.length * ROW_H + 8;
     const svg = makeSvg(container, W, H);
 
     const totalWC = sortedScenes.reduce((s, sc) => s + getWordCount(sc), 0) || 1;
 
     povList.forEach((pov, i) => {
-        const baseY = i * ROW_H + 8;
-        const laneY = baseY + LABEL_ROW_H;
+        const labelY = i * ROW_H + 12;
+        const laneY = labelY + LABEL_H;
 
-        // Label
-        if (isNarrow) {
-            // Label above the bar
-            const label = svgEl('text', {
-                x: 4, y: baseY + 10,
-                'font-family': 'var(--font-mono)',
-                'font-size': 11, fill: 'var(--text-secondary)'
-            });
-            const pct = ((povs[pov].total / totalWC) * 100).toFixed(0);
-            label.textContent = `${pov} — ${povs[pov].total.toLocaleString()} (${pct}%)`;
-            svg.appendChild(label);
-        } else {
-            // Label to the left
-            const label = svgEl('text', {
-                x: LABEL_W - 8, y: laneY + LANE_H / 2 + 4,
-                'text-anchor': 'end', 'font-family': 'var(--font-mono)',
-                'font-size': 11, fill: 'var(--text-secondary)'
-            });
-            label.textContent = pov;
-            svg.appendChild(label);
+        // Name on the left above the bar
+        const label = svgEl('text', {
+            x: 0, y: labelY,
+            'font-family': 'var(--font-mono)',
+            'font-size': 11, fill: 'var(--text-secondary)'
+        });
+        label.textContent = pov;
+        svg.appendChild(label);
 
-            // Stats to the right
-            const pct = ((povs[pov].total / totalWC) * 100).toFixed(0);
-            const stat = svgEl('text', {
-                x: W - 4, y: laneY + LANE_H / 2 + 4,
-                'text-anchor': 'end', 'font-family': 'var(--font-mono)',
-                'font-size': 10, fill: 'var(--text-dim)'
-            });
-            stat.textContent = `${povs[pov].total.toLocaleString()} (${pct}%)`;
-            svg.appendChild(stat);
-        }
+        // Stats on the right above the bar
+        const pct = ((povs[pov].total / totalWC) * 100).toFixed(0);
+        const stat = svgEl('text', {
+            x: W, y: labelY,
+            'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+            'font-size': 10, fill: 'var(--text-dim)'
+        });
+        stat.textContent = povs[pov].total.toLocaleString() + ' (' + pct + '%)';
+        svg.appendChild(stat);
 
-        // Lane background
-        const chartX = isNarrow ? 4 : LABEL_W;
-        const chartEnd = isNarrow ? W - 8 : CHART_W;
+        // Lane background — full width
         svg.appendChild(svgEl('rect', {
-            x: chartX, y: laneY, width: chartEnd, height: LANE_H,
+            x: 0, y: laneY, width: W, height: LANE_H,
             fill: 'var(--border-light)', rx: 3
         }));
 
-        // Scene blocks
+        // Scene blocks — full width, same scale as spine
         sortedScenes.forEach(s => {
             if ((s.pov || '').toLowerCase() !== pov) return;
-            const seq = +s.seq;
             const wc = getWordCount(s);
-            const bx = chartX + ((seq - 1) / sceneCount) * chartEnd;
-            const bw = Math.max(2, (wc / totalWC) * chartEnd);
+            const seq = +s.seq;
+            const bx = (seq - 1) / sceneCount * W;
+            const bw = Math.max(2, (wc / totalWC) * W);
             const color = TYPE_COLORS[s.type] || 'var(--teal)';
             const rect = svgEl('rect', {
                 x: bx, y: laneY + 2, width: bw, height: LANE_H - 4,
@@ -1438,6 +1420,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             svg.appendChild(rect);
         });
     });
+})();
+
 })();
 
 // ============================================================================
