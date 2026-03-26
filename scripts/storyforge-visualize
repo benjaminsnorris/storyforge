@@ -1365,11 +1365,11 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     });
 
     const povList = Object.keys(povs).sort((a, b) => povs[b].total - povs[a].total);
-    const LABEL_H = 16;
+    const LABEL_GAP = 4;
     const LANE_H = 32;
-    const GAP = 8;
+    const ROW_GAP = 16;
     const W = container.clientWidth - 24 || 1100;
-    const ROW_H = LABEL_H + LANE_H + GAP;
+    const ROW_H = 14 + LABEL_GAP + LANE_H + ROW_GAP;
     const H = povList.length * ROW_H + 8;
     const svg = makeSvg(container, W, H);
 
@@ -1377,7 +1377,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     povList.forEach((pov, i) => {
         const labelY = i * ROW_H + 12;
-        const laneY = labelY + LABEL_H;
+        const laneY = labelY + LABEL_GAP + 2;
 
         // Name on the left above the bar
         const label = svgEl('text', {
@@ -1409,8 +1409,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             if ((s.pov || '').toLowerCase() !== pov) return;
             const wc = getWordCount(s);
             const seq = +s.seq;
-            const bx = (seq - 1) / sceneCount * W;
-            const bw = Math.max(2, (wc / totalWC) * W);
+            const bx = ((seq - 1) / (sceneCount - 1 || 1)) * (W - 12);
+            const bw = Math.min(Math.max(2, (wc / totalWC) * W), W - bx);
             const color = TYPE_COLORS[s.type] || 'var(--teal)';
             const rect = svgEl('rect', {
                 x: bx, y: laneY + 2, width: bw, height: LANE_H - 4,
