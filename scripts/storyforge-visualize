@@ -570,7 +570,7 @@ body {
         overflow: hidden;
         padding: 0;
     }
-    .detail-panel .panel-controls { display: flex; }
+    .detail-panel .panel-controls { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
     .detail-panel .minimize-btn { display: inline-block; }
     .detail-panel .desktop-close { display: none; }
     .detail-panel.minimized #detail-content { display: none; }
@@ -629,7 +629,7 @@ body {
 <body>
 <div class="tooltip" id="tooltip"></div>
 <div class="detail-panel" id="detail-panel" onclick="event.stopPropagation()">
-    <div class="panel-controls" style="display:flex;align-items:center;gap:8px;justify-content:space-between">
+    <div class="panel-controls">
         <span id="panel-mini-title" style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--teal);overflow:hidden;white-space:nowrap;text-overflow:ellipsis"></span>
         <span style="display:flex;gap:4px;flex-shrink:0">
             <button class="minimize-btn" id="panel-minimize-btn" onclick="event.stopPropagation();toggleMinimizePanel()" title="Minimize">&#8595;</button>
