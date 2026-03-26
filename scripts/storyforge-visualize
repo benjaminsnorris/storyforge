@@ -540,29 +540,27 @@ body {
 }
 
 /* ── Responsive ────────────────────────────────────── */
-.narrow-msg {
-    display: none;
-    background: var(--teal-bg);
-    border: 1px solid var(--teal-border);
-    border-radius: var(--radius);
-    padding: 16px 20px;
-    margin-bottom: 24px;
-    font-size: 13px;
-    color: var(--teal);
-    text-align: center;
-}
-
 @media (max-width: 959px) {
-    .narrow-msg { display: block; }
-    .detail-panel { transform: translateX(100%) !important; }
-    .page.panel-open { margin-right: 0; }
     .page { padding: 16px 12px 60px; }
-}
+    .page.panel-open { margin-right: 0; }
 
-@media (max-width: 767px) {
-    .section:not(#spine-wrapper):not(.section-spine) {
-        display: none;
+    /* Detail panel becomes a bottom sheet */
+    .detail-panel {
+        position: fixed;
+        right: 0;
+        left: 0;
+        bottom: 0;
+        top: auto;
+        width: 100%;
+        height: auto;
+        max-height: 50vh;
+        border-left: none;
+        border-top: 2px solid var(--teal);
+        border-radius: var(--radius) var(--radius) 0 0;
+        transform: translateY(100%);
+        transition: transform 0.25s ease-out;
     }
+    .detail-panel.visible { transform: translateY(0); }
 }
 
 /* ── Fade-in animation ─────────────────────────────── */
@@ -610,9 +608,6 @@ body {
     </div>
 </div>
 
-<div class="narrow-msg">
-    For the best experience, view this dashboard at 960px or wider.
-</div>
 
 <!-- 1. Manuscript Spine -->
 <div id="spine-wrapper" class="section section-spine">
