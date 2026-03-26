@@ -1321,41 +1321,60 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     });
 
     const povList = Object.keys(povs).sort((a, b) => povs[b].total - povs[a].total);
-    const LABEL_W = 120;
+    const isNarrow = window.innerWidth < 768;
+    const LABEL_W = isNarrow ? 0 : 120;
+    const LABEL_ROW_H = isNarrow ? 16 : 0;
     const LANE_H = 32;
     const GAP = 4;
     const W = container.clientWidth - 24 || 1100;
-    const H = povList.length * (LANE_H + GAP) + 40;
+    const ROW_H = LANE_H + GAP + LABEL_ROW_H;
+    const H = povList.length * ROW_H + 40;
     const CHART_W = W - LABEL_W - 80;
     const svg = makeSvg(container, W, H);
 
     const totalWC = sortedScenes.reduce((s, sc) => s + getWordCount(sc), 0) || 1;
 
     povList.forEach((pov, i) => {
-        const y = i * (LANE_H + GAP) + 8;
+        const baseY = i * ROW_H + 8;
+        const laneY = baseY + LABEL_ROW_H;
 
         // Label
-        const label = svgEl('text', {
-            x: LABEL_W - 8, y: y + LANE_H / 2 + 4,
-            'text-anchor': 'end', 'font-family': 'var(--font-mono)',
-            'font-size': 11, fill: 'var(--text-secondary)'
-        });
-        label.textContent = pov;
-        svg.appendChild(label);
+        if (isNarrow) {
+            // Label above the bar
+            const label = svgEl('text', {
+                x: 4, y: baseY + 10,
+                'font-family': 'var(--font-mono)',
+                'font-size': 11, fill: 'var(--text-secondary)'
+            });
+            const pct = ((povs[pov].total / totalWC) * 100).toFixed(0);
+            label.textContent = `${pov} — ${povs[pov].total.toLocaleString()} (${pct}%)`;
+            svg.appendChild(label);
+        } else {
+            // Label to the left
+            const label = svgEl('text', {
+                x: LABEL_W - 8, y: laneY + LANE_H / 2 + 4,
+                'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+                'font-size': 11, fill: 'var(--text-secondary)'
+            });
+            label.textContent = pov;
+            svg.appendChild(label);
 
-        // Stats
-        const pct = ((povs[pov].total / totalWC) * 100).toFixed(0);
-        const stat = svgEl('text', {
-            x: W - 4, y: y + LANE_H / 2 + 4,
-            'text-anchor': 'end', 'font-family': 'var(--font-mono)',
-            'font-size': 10, fill: 'var(--text-dim)'
-        });
-        stat.textContent = `${povs[pov].total.toLocaleString()} (${pct}%)`;
-        svg.appendChild(stat);
+            // Stats to the right
+            const pct = ((povs[pov].total / totalWC) * 100).toFixed(0);
+            const stat = svgEl('text', {
+                x: W - 4, y: laneY + LANE_H / 2 + 4,
+                'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+                'font-size': 10, fill: 'var(--text-dim)'
+            });
+            stat.textContent = `${povs[pov].total.toLocaleString()} (${pct}%)`;
+            svg.appendChild(stat);
+        }
 
         // Lane background
+        const chartX = isNarrow ? 4 : LABEL_W;
+        const chartEnd = isNarrow ? W - 8 : CHART_W;
         svg.appendChild(svgEl('rect', {
-            x: LABEL_W, y, width: CHART_W, height: LANE_H,
+            x: chartX, y: laneY, width: chartEnd, height: LANE_H,
             fill: 'var(--border-light)', rx: 3
         }));
 
@@ -1364,11 +1383,11 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             if ((s.pov || '').toLowerCase() !== pov) return;
             const seq = +s.seq;
             const wc = getWordCount(s);
-            const bx = LABEL_W + ((seq - 1) / sceneCount) * CHART_W;
-            const bw = Math.max(2, (wc / totalWC) * CHART_W);
+            const bx = chartX + ((seq - 1) / sceneCount) * chartEnd;
+            const bw = Math.max(2, (wc / totalWC) * chartEnd);
             const color = TYPE_COLORS[s.type] || 'var(--teal)';
             const rect = svgEl('rect', {
-                x: bx, y: y + 2, width: bw, height: LANE_H - 4,
+                x: bx, y: laneY + 2, width: bw, height: LANE_H - 4,
                 fill: color, rx: 2, opacity: 0.85
             });
             attachSceneHandlers(rect, s.id);
@@ -1743,10 +1762,12 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     }
 
     const W = container.clientWidth - 24 || 1100;
-    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
+    const heatmapNarrow = window.innerWidth < 768;
+    const HEATMAP_LABEL_W = heatmapNarrow ? 0 : GRID_LABEL_W;
+    const CHART_W = W - HEATMAP_LABEL_W - GRID_RIGHT_PAD;
     const CELL = Math.max(2, Math.floor(CHART_W / sceneCount) - 1);
     const GAP = Math.max(1, Math.floor(CHART_W / sceneCount) - CELL);
-    const SEC_GAP = 8;
+    const SEC_GAP = heatmapNarrow ? 2 : 8;
 
     // Calculate height with section gaps
     let totalRows = orderedPrinciples.length;
@@ -1771,34 +1792,38 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         const sec = sectionMap[principle] || 'other';
         if (sec !== currentSection) {
             if (currentSection !== '') yOffset += SEC_GAP;
-            // Section label
-            const secLabel = svgEl('text', {
-                x: 4, y: yOffset + 3,
-                'font-family': 'var(--font-mono)', 'font-size': 9,
-                'font-weight': 600, fill: 'var(--teal)',
-                'text-transform': 'uppercase'
-            });
-            secLabel.textContent = sec.replace(/_/g, ' ');
-            svg.appendChild(secLabel);
+            if (!heatmapNarrow) {
+                // Section label
+                const secLabel = svgEl('text', {
+                    x: 4, y: yOffset + 3,
+                    'font-family': 'var(--font-mono)', 'font-size': 9,
+                    'font-weight': 600, fill: 'var(--teal)',
+                    'text-transform': 'uppercase'
+                });
+                secLabel.textContent = sec.replace(/_/g, ' ');
+                svg.appendChild(secLabel);
+            }
             currentSection = sec;
         }
 
         const y = yOffset;
 
-        const label = svgEl('text', {
-            x: GRID_LABEL_W - 6, y: y + CELL / 2 + 3,
-            'text-anchor': 'end', 'font-family': 'var(--font-mono)',
-            'font-size': 9, fill: 'var(--text-dim)'
-        });
-        label.textContent = principle.replace(/_/g, ' ');
-        svg.appendChild(label);
+        if (!heatmapNarrow) {
+            const label = svgEl('text', {
+                x: GRID_LABEL_W - 6, y: y + CELL / 2 + 3,
+                'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+                'font-size': 9, fill: 'var(--text-dim)'
+            });
+            label.textContent = principle.replace(/_/g, ' ');
+            svg.appendChild(label);
+        }
 
         // Build a lookup for this principle across scenes
         sortedScenes.forEach((s, ci) => {
             const score = scoreById[s.id];
             const val = score ? score[principle] : '';
             const rect = svgEl('rect', {
-                x: GRID_LABEL_W + ci * (CELL + GAP),
+                x: HEATMAP_LABEL_W + ci * (CELL + GAP),
                 y,
                 width: CELL, height: CELL,
                 fill: scoreColor(val),
