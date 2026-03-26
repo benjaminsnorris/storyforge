@@ -1852,10 +1852,11 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     var genreRat = GENRE_RATIONALES.length > 0 ? GENRE_RATIONALES[0] : {};
     var principles = Object.keys(genreData);
 
-    var LABEL_W = 180;
+    var barNarrow = window.innerWidth < 768;
+    var LABEL_W = barNarrow ? 100 : 180;
     var BAR_H = 24;
     var BAR_GAP = 6;
-    var MAX_BAR_W = 300;
+    var MAX_BAR_W = barNarrow ? 140 : 300;
     var H = principles.length * (BAR_H + BAR_GAP) + 8;
     var W = LABEL_W + MAX_BAR_W + 60;
     var svg = makeSvg(container, W, H);
@@ -1916,11 +1917,12 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     var principles = Object.keys(CHARACTER_SCORES[0]).filter(function(k) { return k !== 'character'; });
     var chars = CHARACTER_SCORES;
 
-    var LABEL_W = 180;
+    var barNarrow = window.innerWidth < 768;
+    var LABEL_W = barNarrow ? 100 : 180;
     var BAR_H = 18;
     var BAR_GAP = 3;
     var GROUP_GAP = 16;
-    var MAX_BAR_W = 300;
+    var MAX_BAR_W = barNarrow ? 140 : 300;
     var groupH = principles.length * (BAR_H + BAR_GAP);
     var H = chars.length * (groupH + GROUP_GAP + 16) + 8;
     var W = LABEL_W + MAX_BAR_W + 60;
@@ -1999,11 +2001,12 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     var principles = Object.keys(ACT_SCORES[0]).filter(function(k) { return k !== 'id'; });
     var acts = ACT_SCORES;
 
-    var LABEL_W = 200;
+    var barNarrow = window.innerWidth < 768;
+    var LABEL_W = barNarrow ? 100 : 200;
     var BAR_H = 18;
     var BAR_GAP = 3;
     var GROUP_GAP = 16;
-    var MAX_BAR_W = 280;
+    var MAX_BAR_W = barNarrow ? 140 : 280;
     var groupH = principles.length * (BAR_H + BAR_GAP);
     var H = acts.length * (groupH + GROUP_GAP + 16) + 8;
     var W = LABEL_W + MAX_BAR_W + 60;
@@ -2360,8 +2363,9 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     document.getElementById('timeline-section').style.display = '';
     const container = document.getElementById('timeline-scatter');
     const W = container.clientWidth - 24 || 1100;
+    const timeNarrow = window.innerWidth < 768;
     const H = 260;
-    const PAD_L = 60, PAD_R = 20, PAD_T = 16, PAD_B = 32;
+    const PAD_L = timeNarrow ? 20 : 60, PAD_R = 20, PAD_T = 16, PAD_B = timeNarrow ? 16 : 32;
     const svg = makeSvg(container, W, H);
 
     const days = sortedScenes.map(s => parseFloat(s.timeline_day) || 0);
@@ -2382,16 +2386,18 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     });
 
     // Axes
-    svg.appendChild(svgEl('text', {
-        x: W / 2, y: H - 4, 'text-anchor': 'middle',
-        'font-family': 'var(--font-mono)', 'font-size': 10, fill: 'var(--text-dim)'
-    })).textContent = 'Reading Order →';
+    if (!timeNarrow) {
+        svg.appendChild(svgEl('text', {
+            x: W / 2, y: H - 4, 'text-anchor': 'middle',
+            'font-family': 'var(--font-mono)', 'font-size': 10, fill: 'var(--text-dim)'
+        })).textContent = 'Reading Order →';
 
-    svg.appendChild(svgEl('text', {
-        x: 12, y: H / 2, 'text-anchor': 'middle',
-        'font-family': 'var(--font-mono)', 'font-size': 10, fill: 'var(--text-dim)',
-        transform: `rotate(-90, 12, ${H/2})`
-    })).textContent = 'Timeline Day →';
+        svg.appendChild(svgEl('text', {
+            x: 12, y: H / 2, 'text-anchor': 'middle',
+            'font-family': 'var(--font-mono)', 'font-size': 10, fill: 'var(--text-dim)',
+            transform: `rotate(-90, 12, ${H/2})`
+        })).textContent = 'Timeline Day →';
+    }
 
     // Grid lines
     for (let i = 0; i <= 4; i++) {
