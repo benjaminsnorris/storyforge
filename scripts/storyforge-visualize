@@ -561,6 +561,15 @@ body {
         transition: transform 0.25s ease-out;
     }
     .detail-panel.visible { transform: translateY(0); }
+
+    /* Stack section headers vertically */
+    .section-header {
+        flex-wrap: wrap;
+    }
+    .section-header .subtitle {
+        width: 100%;
+        margin-left: 16px;
+    }
 }
 
 /* ── Fade-in animation ─────────────────────────────── */
