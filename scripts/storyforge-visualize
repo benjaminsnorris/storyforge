@@ -377,9 +377,9 @@ body {
 .detail-panel h3 {
     font-size: 16px;
     font-weight: 600;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
     padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-light);
+    border-bottom: 4px solid var(--border);
 }
 
 .detail-panel .detail-row {
@@ -387,6 +387,10 @@ body {
     justify-content: space-between;
     padding: 4px 0;
     border-bottom: 1px solid var(--border-light);
+}
+
+.detail-panel .detail-section-end .detail-row:last-child {
+    border-bottom: 4px solid var(--border);
 }
 
 .detail-panel .detail-label {
@@ -1232,7 +1236,7 @@ function updateDetailPanel(sceneId) {
     html += detailRow('Part', s.part);
     html += detailRow('Type', s.type);
     html += detailRow('Words', (+getWordCount(s)).toLocaleString());
-    html += detailRow('Status', s.status);
+    html += detailRow('Status', s.status, true);
 
     if (intent) {
         let intentHtml = '';
@@ -1241,11 +1245,11 @@ function updateDetailPanel(sceneId) {
         if (intent.characters) intentHtml += detailRow('Characters', intent.characters.replace(/;/g, ', '));
         if (intent.threads) intentHtml += detailRow('Threads', intent.threads.replace(/;/g, ', '));
         if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.replace(/;/g, ', '));
-        if (intentHtml) html += '<div style="margin-top:4px;padding-top:4px;border-top:1px solid var(--border-light)">' + intentHtml + '</div>';
+        if (intentHtml) html += '<div class="detail-section-end">' + intentHtml + '</div>';
     }
 
     if (score) {
-        html += '<div style="margin-top:4px;padding-top:4px;border-top:1px solid var(--border-light)">';
+        html += '<div style="margin-top:4px">';
         html += '<div class="detail-label" style="margin-bottom:4px">CRAFT SCORES</div>';
         html += '<div class="scores-grid">';
         for (const [k, v] of Object.entries(score)) {
@@ -1278,9 +1282,10 @@ function updateDetailPanel(sceneId) {
     }
 }
 
-function detailRow(label, value) {
+function detailRow(label, value, sectionEnd) {
     if (!value) return '';
-    return `<div class="detail-row"><span class="detail-label">${label}</span><span class="detail-value">${value}</span></div>`;
+    var border = sectionEnd ? 'border-bottom:4px solid var(--border);' : '';
+    return `<div class="detail-row" style="${border}"><span class="detail-label">${label}</span><span class="detail-value">${value}</span></div>`;
 }
 
 // ============================================================================
