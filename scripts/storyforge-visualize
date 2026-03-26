@@ -1252,13 +1252,13 @@ function updateDetailPanel(sceneId) {
     html += detailRow('Status', s.status);
 
     if (intent) {
-        html += '<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border-light)">';
-        if (intent.function) html += detailRow('Function', intent.function.substring(0, 120));
-        if (intent.emotional_arc) html += detailRow('Emotion', intent.emotional_arc.substring(0, 80));
-        if (intent.characters) html += detailRow('Characters', intent.characters.replace(/;/g, ', '));
-        if (intent.threads) html += detailRow('Threads', intent.threads.replace(/;/g, ', '));
-        if (intent.motifs) html += detailRow('Motifs', intent.motifs.replace(/;/g, ', '));
-        html += '</div>';
+        let intentHtml = '';
+        if (intent.function) intentHtml += detailRow('Function', intent.function.substring(0, 120));
+        if (intent.emotional_arc) intentHtml += detailRow('Emotion', intent.emotional_arc.substring(0, 80));
+        if (intent.characters) intentHtml += detailRow('Characters', intent.characters.replace(/;/g, ', '));
+        if (intent.threads) intentHtml += detailRow('Threads', intent.threads.replace(/;/g, ', '));
+        if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.replace(/;/g, ', '));
+        if (intentHtml) html += '<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border-light)">' + intentHtml + '</div>';
     }
 
     if (score) {
