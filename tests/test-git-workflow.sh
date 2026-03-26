@@ -126,9 +126,10 @@ else
 fi
 
 # ensure_branch_pushed creates empty commit when no changes exist
+# Create the branch from main (not from storyforge/test-branch which is already ahead)
 (
     cd "$PUSH_TEST_DIR"
-    git checkout -b "storyforge/empty-test" -q 2>/dev/null
+    git checkout -b "storyforge/empty-test" main -q 2>/dev/null
 )
 empty_before=$(cd "$PUSH_TEST_DIR" && git rev-parse HEAD)
 (

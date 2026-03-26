@@ -527,3 +527,85 @@ assert_contains "$result" "Cartographer" "project: summary includes title"
 assert_contains "$result" "cycle" "project: summary includes cycle info"
 
 rm -rf "$PARSE_TMP"
+
+# ============================================================================
+# storyforge.visualize — rationale and extended score loading
+# ============================================================================
+
+echo "  --- visualize: loads rationale and extended score CSVs ---"
+
+VIS_TMP="$(mktemp -d)"
+mkdir -p "${VIS_TMP}/working/scores/latest" "${VIS_TMP}/reference"
+
+# Create storyforge.yaml
+cat > "${VIS_TMP}/storyforge.yaml" <<'YAML'
+project:
+  title: Test Novel
+  genre: thriller
+YAML
+
+# Create minimal required CSVs
+echo "id|seq|title|pov|word_count|status|type|location|part" > "${VIS_TMP}/reference/scene-metadata.csv"
+echo "s1|1|Scene One|Alice|1000|draft|character|Home|act-1" >> "${VIS_TMP}/reference/scene-metadata.csv"
+
+echo "id|function|emotional_arc|characters|threads|motifs" > "${VIS_TMP}/reference/scene-intent.csv"
+echo "s1|opener|tension|Alice|main-plot|light" >> "${VIS_TMP}/reference/scene-intent.csv"
+
+# Create rationale CSVs
+echo "id|principle_a|principle_b" > "${VIS_TMP}/working/scores/latest/scene-rationale.csv"
+echo "s1|Good pacing here|Needs more tension" >> "${VIS_TMP}/working/scores/latest/scene-rationale.csv"
+
+echo "id|framework_a|framework_b" > "${VIS_TMP}/working/scores/latest/act-scores.csv"
+echo "act-1|4|3" >> "${VIS_TMP}/working/scores/latest/act-scores.csv"
+
+echo "id|framework_a|framework_b" > "${VIS_TMP}/working/scores/latest/act-rationale.csv"
+echo "act-1|Strong structure|Needs pacing work" >> "${VIS_TMP}/working/scores/latest/act-rationale.csv"
+
+echo "character|want_need|voice_as_character" > "${VIS_TMP}/working/scores/latest/character-scores.csv"
+echo "Alice|5|4" >> "${VIS_TMP}/working/scores/latest/character-scores.csv"
+
+echo "character|want_need|voice_as_character" > "${VIS_TMP}/working/scores/latest/character-rationale.csv"
+echo "Alice|Clear want/need arc|Distinct voice" >> "${VIS_TMP}/working/scores/latest/character-rationale.csv"
+
+echo "trope_awareness|genre_contract" > "${VIS_TMP}/working/scores/latest/genre-scores.csv"
+echo "5|4" >> "${VIS_TMP}/working/scores/latest/genre-scores.csv"
+
+echo "trope_awareness|genre_contract" > "${VIS_TMP}/working/scores/latest/genre-rationale.csv"
+echo "Tropes handled well|Contract fulfilled" >> "${VIS_TMP}/working/scores/latest/genre-rationale.csv"
+
+echo "principle|rationale" > "${VIS_TMP}/working/scores/latest/narrative-rationale.csv"
+echo "three_act|Well structured" >> "${VIS_TMP}/working/scores/latest/narrative-rationale.csv"
+
+# Run the data loader
+VIS_JSON=$(PYTHONPATH="$PYTHON_DIR" python3 -m storyforge.visualize data "${VIS_TMP}" 2>/dev/null)
+
+# Check new keys exist and have data
+scene_rat_count=$(echo "$VIS_JSON" | jq '.scene_rationales | length')
+assert_equals "1" "$scene_rat_count" "visualize: loads scene rationales"
+
+act_scores_count=$(echo "$VIS_JSON" | jq '.act_scores | length')
+assert_equals "1" "$act_scores_count" "visualize: loads act scores"
+
+act_rat_count=$(echo "$VIS_JSON" | jq '.act_rationales | length')
+assert_equals "1" "$act_rat_count" "visualize: loads act rationales"
+
+char_scores_count=$(echo "$VIS_JSON" | jq '.character_scores | length')
+assert_equals "1" "$char_scores_count" "visualize: loads character scores"
+
+char_rat_count=$(echo "$VIS_JSON" | jq '.character_rationales | length')
+assert_equals "1" "$char_rat_count" "visualize: loads character rationales"
+
+genre_scores_count=$(echo "$VIS_JSON" | jq '.genre_scores | length')
+assert_equals "1" "$genre_scores_count" "visualize: loads genre scores"
+
+genre_rat_count=$(echo "$VIS_JSON" | jq '.genre_rationales | length')
+assert_equals "1" "$genre_rat_count" "visualize: loads genre rationales"
+
+narrative_rat_count=$(echo "$VIS_JSON" | jq '.narrative_rationales | length')
+assert_equals "1" "$narrative_rat_count" "visualize: loads narrative rationales"
+
+# Check a specific value to verify content
+scene_rat_val=$(echo "$VIS_JSON" | jq -r '.scene_rationales[0].principle_a')
+assert_equals "Good pacing here" "$scene_rat_val" "visualize: scene rationale has correct content"
+
+rm -rf "$VIS_TMP"
