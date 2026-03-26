@@ -919,6 +919,27 @@ function showAllRationales(sceneId) {
     document.getElementById('heatmap-drawer').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+function showAllCharacterRationales(characterName) {
+    var scores = charScoreByName[characterName];
+    var rat = charRationaleByName[characterName];
+    if (!rat) return;
+
+    var principles = Object.keys(rat).filter(function(k) { return k !== 'character'; });
+    var html = '';
+    principles.forEach(function(p) {
+        if (!rat[p]) return;
+        var scoreVal = scores ? parseInt(scores[p]) : 0;
+        var color = scoreColorClass(scoreVal);
+        html += '<p><strong style="font-family:var(--font-mono);font-size:10px">' +
+            formatPrincipleLabel(p) +
+            ' <span style="color:' + color + '">' + scoreVal + '/5</span></strong></p>' +
+            '<p>' + rat[p] + '</p>';
+    });
+
+    openRationaleDrawer('character-drawer', characterName + ' — All Rationales', html);
+    document.getElementById('character-drawer').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 // Generic alias map builder
 function buildAliasMap(entries) {
     const map = {};
@@ -1818,13 +1839,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             });
             rect.addEventListener('click', function(e) {
                 e.stopPropagation();
-                var ratText = rat[p];
-                if (!ratText) return;
-                var html = '<div class="rationale-principle">' + formatPrincipleLabel(p) +
-                    '<span class="rationale-score" style="color:' + color + '">' + score + '/5</span></div>' +
-                    '<p><strong>' + ch.character + '</strong></p>' +
-                    '<p>' + ratText + '</p>';
-                openRationaleDrawer('character-drawer', 'Character Rationale', html);
+                showAllCharacterRationales(ch.character);
             });
             svg.appendChild(rect);
 
