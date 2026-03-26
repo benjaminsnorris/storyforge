@@ -1111,13 +1111,13 @@ function attachSceneHandlers(el, sceneId) {
         const s = sceneById[sceneId];
         if (!s) return;
         const wc = getWordCount(s);
-        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${(s.location || '').substring(0, 60)}</div>`);
+        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${(s.setting || '').substring(0, 60)}</div>`);
     });
     el.addEventListener('mousemove', (e) => {
         const s = sceneById[sceneId];
         if (!s) return;
         const wc = getWordCount(s);
-        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${(s.location || '').substring(0, 60)}</div>`);
+        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${(s.setting || '').substring(0, 60)}</div>`);
     });
     el.addEventListener('mouseleave', hideTooltip);
 }
@@ -1146,7 +1146,7 @@ function updateDetailPanel(sceneId) {
 
     let html = `<h3>${s.seq}. ${s.title}</h3>`;
     html += detailRow('POV', s.pov);
-    html += detailRow('Location', s.location);
+    html += detailRow('Location', s.setting);
     html += detailRow('Part', s.part);
     html += detailRow('Type', s.type);
     html += detailRow('Words', (+getWordCount(s)).toLocaleString());
@@ -1601,7 +1601,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     const settingScenes = {};
 
     sortedScenes.forEach(s => {
-        const raw = (s.location || '').trim();
+        const raw = (s.setting || '').trim();
         if (!raw) return;
         const setting = normalizeLocation(raw);
         const key = setting.toLowerCase();
