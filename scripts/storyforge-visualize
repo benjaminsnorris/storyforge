@@ -416,9 +416,10 @@ body {
 
 .detail-panel .close-btn:hover { color: var(--text); }
 
-/* Mini-title and minimize button only shown on mobile */
+/* Mini-title, minimize button, and controls bar only shown on mobile */
 #panel-mini-title { display: none; }
 .detail-panel .minimize-btn { display: none; }
+.detail-panel .panel-controls { display: none; }
 
 .detail-panel .scores-grid {
     display: grid;
@@ -569,7 +570,9 @@ body {
         overflow: hidden;
         padding: 0;
     }
+    .detail-panel .panel-controls { display: flex; }
     .detail-panel .minimize-btn { display: inline-block; }
+    .detail-panel .desktop-close { display: none; }
     .detail-panel.minimized #detail-content { display: none; }
     .detail-panel.minimized .panel-controls { padding: 10px 16px; }
     .detail-panel.minimized #panel-mini-title { display: inline; }
@@ -1240,7 +1243,7 @@ function updateDetailPanel(sceneId) {
     if (minBtn) { minBtn.innerHTML = '&#8595;'; minBtn.title = 'Minimize'; }
     if (miniTitle) miniTitle.textContent = s.seq + '. ' + s.title;
 
-    let html = `<h3>${s.seq}. ${s.title}</h3>`;
+    let html = `<h3 style="display:flex;justify-content:space-between;align-items:start"><span>${s.seq}. ${s.title}</span><button class="close-btn desktop-close" onclick="event.stopPropagation();selectScene(null)" title="Close" style="flex-shrink:0">&times;</button></h3>`;
     html += detailRow('POV', s.pov);
     html += detailRow('Location', s.location);
     html += detailRow('Part', s.part);
