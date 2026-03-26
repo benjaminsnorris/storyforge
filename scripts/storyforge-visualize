@@ -804,14 +804,12 @@ INTENTS.forEach(i => { intentById[i.id] = i; });
 SCORES.forEach(s => { scoreById[s.id] = s; });
 
 const sceneRationaleById = {};
-const actScoreById = {};
 const actRationaleById = {};
 const charScoreByName = {};
 const charRationaleByName = {};
 const narrativeRationaleByPrinciple = {};
 
 SCENE_RATIONALES.forEach(r => { sceneRationaleById[r.id] = r; });
-ACT_SCORES.forEach(s => { actScoreById[s.id] = s; });
 ACT_RATIONALES.forEach(r => { actRationaleById[r.id] = r; });
 CHARACTER_SCORES.forEach(s => { charScoreByName[s.character] = s; });
 CHARACTER_RATIONALES.forEach(r => { charRationaleByName[r.character] = r; });
