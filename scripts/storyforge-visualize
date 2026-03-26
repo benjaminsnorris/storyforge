@@ -430,6 +430,87 @@ body {
     font-weight: 600;
 }
 
+/* ── Rationale drawer ─────────────────────────────── */
+.rationale-drawer {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out, padding 0.3s ease-out;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--teal);
+    border-radius: 0 0 var(--radius) var(--radius);
+    margin-top: -1px;
+}
+
+.rationale-drawer.open {
+    max-height: 40vh;
+    overflow-y: auto;
+    padding: 16px 20px;
+}
+
+.rationale-drawer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.rationale-drawer-header h3 {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--teal);
+    margin: 0;
+}
+
+.rationale-drawer .close-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px;
+}
+
+.rationale-drawer .close-btn:hover { color: var(--text); }
+
+.rationale-drawer .rationale-text {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-secondary);
+}
+
+.rationale-drawer .rationale-text p {
+    margin-bottom: 12px;
+}
+
+.rationale-drawer .rationale-text p:last-child {
+    margin-bottom: 0;
+}
+
+.rationale-drawer .rationale-principle {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--teal);
+    margin-bottom: 4px;
+}
+
+.rationale-drawer .rationale-score {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    margin-left: 8px;
+}
+
 /* ── SVG shared styles ─────────────────────────────── */
 [data-scene] { cursor: pointer; transition: opacity 0.15s; }
 [data-scene].dimmed { opacity: 0.15; }
@@ -593,6 +674,7 @@ body {
         <span class="subtitle">25 principles &times; scenes</span>
     </div>
     <div class="vis-container" id="score-heatmap"></div>
+    <div class="rationale-drawer" id="heatmap-drawer"></div>
 </div>
 
 <!-- 9. Narrative Framework Radar -->
@@ -603,6 +685,7 @@ body {
         <span class="subtitle">Novel-level alignment with 7 narrative structures</span>
     </div>
     <div class="vis-container" id="narrative-radar"></div>
+    <div class="rationale-drawer" id="narrative-radar-drawer"></div>
 </div>
 
 <!-- 10. Motif Constellation -->
@@ -697,6 +780,53 @@ ACT_RATIONALES.forEach(r => { actRationaleById[r.id] = r; });
 CHARACTER_SCORES.forEach(s => { charScoreByName[s.character] = s; });
 CHARACTER_RATIONALES.forEach(r => { charRationaleByName[r.character] = r; });
 NARRATIVE_RATIONALES.forEach(r => { narrativeRationaleByPrinciple[r.principle] = r; });
+
+// ============================================================================
+// RATIONALE DRAWER
+// ============================================================================
+
+const openDrawers = [];
+
+function openRationaleDrawer(drawerId, title, contentHtml) {
+    const drawer = document.getElementById(drawerId);
+    if (!drawer) return;
+    drawer.innerHTML = '<div class="rationale-drawer-header">' +
+        '<h3>' + title + '</h3>' +
+        '<button class="close-btn" onclick="closeRationaleDrawer(\'' + drawerId + '\')">&times;</button>' +
+        '</div>' +
+        '<div class="rationale-text">' + contentHtml + '</div>';
+    drawer.classList.add('open');
+    if (openDrawers.indexOf(drawerId) === -1) openDrawers.push(drawerId);
+}
+
+function closeRationaleDrawer(drawerId) {
+    const drawer = document.getElementById(drawerId);
+    if (!drawer) return;
+    drawer.classList.remove('open');
+    var idx = openDrawers.indexOf(drawerId);
+    if (idx !== -1) openDrawers.splice(idx, 1);
+}
+
+function formatPrincipleLabel(key) {
+    return key.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+}
+
+function scoreColorClass(val) {
+    var n = parseInt(val);
+    if (isNaN(n)) return 'var(--text-dim)';
+    if (n <= 1) return 'var(--score-low)';
+    if (n <= 2) return 'var(--score-mid-low)';
+    if (n <= 3) return 'var(--score-mid)';
+    if (n <= 4) return 'var(--score-mid-high)';
+    return 'var(--score-high)';
+}
+
+// Escape closes the most recently opened drawer
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && openDrawers.length > 0) {
+        closeRationaleDrawer(openDrawers[openDrawers.length - 1]);
+    }
+});
 
 // Generic alias map builder
 function buildAliasMap(entries) {
