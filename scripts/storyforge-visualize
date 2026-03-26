@@ -1833,7 +1833,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     var GROUP_GAP = 16;
     var MAX_BAR_W = 300;
     var groupH = principles.length * (BAR_H + BAR_GAP);
-    var H = chars.length * (groupH + GROUP_GAP) + 8;
+    var H = chars.length * (groupH + GROUP_GAP + 16) + 8;
     var W = LABEL_W + MAX_BAR_W + 60;
     var svg = makeSvg(container, W, H);
 
@@ -1912,7 +1912,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     var GROUP_GAP = 16;
     var MAX_BAR_W = 280;
     var groupH = principles.length * (BAR_H + BAR_GAP);
-    var H = acts.length * (groupH + GROUP_GAP) + 8;
+    var H = acts.length * (groupH + GROUP_GAP + 16) + 8;
     var W = LABEL_W + MAX_BAR_W + 60;
     var svg = makeSvg(container, W, H);
 
