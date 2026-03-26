@@ -431,6 +431,13 @@ body {
 }
 
 /* ── Rationale drawer ─────────────────────────────── */
+/* When a drawer follows a vis-container, merge their borders */
+.vis-container:has(+ .rationale-drawer) {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom: none;
+}
+
 .rationale-drawer {
     max-height: 0;
     overflow: hidden;
@@ -439,7 +446,7 @@ body {
     border: 1px solid var(--border);
     border-top: 2px solid var(--teal);
     border-radius: 0 0 var(--radius) var(--radius);
-    margin-top: -1px;
+    margin-top: 0;
 }
 
 .rationale-drawer.open {
