@@ -645,6 +645,14 @@ const SCORES = _DATA.scores;
 const WEIGHTS = _DATA.weights;
 const NARRATIVE_SCORES = _DATA.narrative_scores;
 const PROJECT = _DATA.project;
+const SCENE_RATIONALES = _DATA.scene_rationales;
+const ACT_SCORES = _DATA.act_scores;
+const ACT_RATIONALES = _DATA.act_rationales;
+const CHARACTER_SCORES = _DATA.character_scores;
+const CHARACTER_RATIONALES = _DATA.character_rationales;
+const GENRE_SCORES = _DATA.genre_scores;
+const GENRE_RATIONALES = _DATA.genre_rationales;
+const NARRATIVE_RATIONALES = _DATA.narrative_rationales;
 EOF
 
 cat >> "$DASHBOARD_FILE" << 'HTMLEOF'
@@ -675,6 +683,20 @@ const scoreById = {};
 SCENES.forEach(s => { sceneById[s.id] = s; });
 INTENTS.forEach(i => { intentById[i.id] = i; });
 SCORES.forEach(s => { scoreById[s.id] = s; });
+
+const sceneRationaleById = {};
+const actScoreById = {};
+const actRationaleById = {};
+const charScoreByName = {};
+const charRationaleByName = {};
+const narrativeRationaleByPrinciple = {};
+
+SCENE_RATIONALES.forEach(r => { sceneRationaleById[r.id] = r; });
+ACT_SCORES.forEach(s => { actScoreById[s.id] = s; });
+ACT_RATIONALES.forEach(r => { actRationaleById[r.id] = r; });
+CHARACTER_SCORES.forEach(s => { charScoreByName[s.character] = s; });
+CHARACTER_RATIONALES.forEach(r => { charRationaleByName[r.character] = r; });
+NARRATIVE_RATIONALES.forEach(r => { narrativeRationaleByPrinciple[r.principle] = r; });
 
 // Generic alias map builder
 function buildAliasMap(entries) {
