@@ -1102,7 +1102,7 @@ function updateDetailPanel(sceneId) {
         if (rat) {
             html += '<div style="margin-top:8px;text-align:center">';
             html += '<a href="#" style="font-family:var(--font-mono);font-size:10px;color:var(--teal);text-decoration:none" ';
-            html += 'onclick="event.preventDefault();showAllRationales(\'' + sceneId + '\')">View rationales &rarr;</a>';
+            html += 'onclick="event.preventDefault();document.getElementById(\'heatmap-drawer\').scrollIntoView({behavior:\'smooth\',block:\'nearest\'})">View rationales &rarr;</a>';
             html += '</div>';
         }
 
