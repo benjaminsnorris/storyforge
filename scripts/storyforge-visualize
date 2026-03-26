@@ -618,12 +618,12 @@ body {
 </head>
 <body>
 <div class="tooltip" id="tooltip"></div>
-<div class="detail-panel" id="detail-panel">
+<div class="detail-panel" id="detail-panel" onclick="event.stopPropagation()">
     <div class="panel-controls" style="display:flex;align-items:center;gap:8px;justify-content:space-between">
         <span id="panel-mini-title" style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--teal);overflow:hidden;white-space:nowrap;text-overflow:ellipsis"></span>
         <span style="display:flex;gap:4px;flex-shrink:0">
-            <button class="minimize-btn" id="panel-minimize-btn" onclick="toggleMinimizePanel()" title="Minimize">&#8595;</button>
-            <button class="close-btn" onclick="selectScene(null)" title="Close">&times;</button>
+            <button class="minimize-btn" id="panel-minimize-btn" onclick="event.stopPropagation();toggleMinimizePanel()" title="Minimize">&#8595;</button>
+            <button class="close-btn" onclick="event.stopPropagation();selectScene(null)" title="Close">&times;</button>
         </span>
     </div>
     <div id="detail-content"></div>
