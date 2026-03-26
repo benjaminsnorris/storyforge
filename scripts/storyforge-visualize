@@ -1241,11 +1241,11 @@ function updateDetailPanel(sceneId) {
         if (intent.characters) intentHtml += detailRow('Characters', intent.characters.replace(/;/g, ', '));
         if (intent.threads) intentHtml += detailRow('Threads', intent.threads.replace(/;/g, ', '));
         if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.replace(/;/g, ', '));
-        if (intentHtml) html += '<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border-light)">' + intentHtml + '</div>';
+        if (intentHtml) html += '<div style="margin-top:4px;padding-top:4px;border-top:1px solid var(--border-light)">' + intentHtml + '</div>';
     }
 
     if (score) {
-        html += '<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border-light)">';
+        html += '<div style="margin-top:4px;padding-top:4px;border-top:1px solid var(--border-light)">';
         html += '<div class="detail-label" style="margin-bottom:4px">CRAFT SCORES</div>';
         html += '<div class="scores-grid">';
         for (const [k, v] of Object.entries(score)) {
