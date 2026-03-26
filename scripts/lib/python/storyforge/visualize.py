@@ -148,6 +148,14 @@ def load_dashboard_data(project_dir: str) -> dict:
     motif_csv = os.path.join(project_dir, 'reference/motif-taxonomy.csv')
     locations_csv = os.path.join(project_dir, 'reference/locations.csv')
     narrative_csv = os.path.join(project_dir, 'working/scores/latest/narrative-scores.csv')
+    scene_rationale_csv = os.path.join(project_dir, 'working/scores/latest/scene-rationale.csv')
+    act_scores_csv = os.path.join(project_dir, 'working/scores/latest/act-scores.csv')
+    act_rationale_csv = os.path.join(project_dir, 'working/scores/latest/act-rationale.csv')
+    character_scores_csv = os.path.join(project_dir, 'working/scores/latest/character-scores.csv')
+    character_rationale_csv = os.path.join(project_dir, 'working/scores/latest/character-rationale.csv')
+    genre_scores_csv = os.path.join(project_dir, 'working/scores/latest/genre-scores.csv')
+    genre_rationale_csv = os.path.join(project_dir, 'working/scores/latest/genre-rationale.csv')
+    narrative_rationale_csv = os.path.join(project_dir, 'working/scores/latest/narrative-rationale.csv')
 
     scenes = csv_to_records(metadata_csv)
 
@@ -170,6 +178,14 @@ def load_dashboard_data(project_dir: str) -> dict:
         'scores': csv_to_records(scores_csv),
         'weights': csv_to_records(weights_csv),
         'narrative_scores': csv_to_records(narrative_csv),
+        'scene_rationales': csv_to_records(scene_rationale_csv),
+        'act_scores': csv_to_records(act_scores_csv),
+        'act_rationales': csv_to_records(act_rationale_csv),
+        'character_scores': csv_to_records(character_scores_csv),
+        'character_rationales': csv_to_records(character_rationale_csv),
+        'genre_scores': csv_to_records(genre_scores_csv),
+        'genre_rationales': csv_to_records(genre_rationale_csv),
+        'narrative_rationales': csv_to_records(narrative_rationale_csv),
         'project': {
             'title': title,
             'genre': genre,
