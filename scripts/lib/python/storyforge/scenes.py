@@ -136,7 +136,7 @@ def parse_scene_boundaries(response: str) -> list[dict]:
 # CSV generation
 # ============================================================================
 
-_METADATA_HEADER = 'id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words'
+_METADATA_HEADER = 'id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words'
 _INTENT_HEADER = 'id|function|emotional_arc|characters|threads|motifs|notes'
 
 
@@ -146,7 +146,7 @@ def generate_metadata_rows(scenes: list[dict],
     """Generate pipe-delimited CSV rows for ``scene-metadata.csv``.
 
     Each row uses the header order:
-    ``id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words``
+    ``id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words``
 
     The scene dicts must have at least ``title`` (str).  They may
     optionally include ``word_count`` (int) and ``slug`` (str).  If
