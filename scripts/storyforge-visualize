@@ -1368,7 +1368,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     const povList = Object.keys(povs).sort((a, b) => povs[b].total - povs[a].total);
     const isNarrow = window.innerWidth < 768;
-    const LABEL_W = isNarrow ? 0 : 120;
+    const LABEL_W = isNarrow ? 0 : GRID_LABEL_W;
     const LABEL_ROW_H = isNarrow ? 16 : 0;
     const LANE_H = 32;
     const GAP = 4;
