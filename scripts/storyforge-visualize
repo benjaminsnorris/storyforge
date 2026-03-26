@@ -680,7 +680,7 @@ body {
     <div class="section-header">
         <span class="dot"></span>
         <h2>Location Map</h2>
-        <span class="subtitle">Top 15 locations by frequency</span>
+        <span class="subtitle">Top 15 locations by frequency &middot; shaded bars = 3+ consecutive scenes</span>
     </div>
     <div class="vis-container" id="setting-map"></div>
 </div>
@@ -1413,6 +1413,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             'font-size': 10, fill: 'var(--text-dim)'
         });
         label.textContent = char.length > 24 ? char.substring(0, 22) + '..' : char;
+        if (char.length > 24) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = char; label.appendChild(t); }
         svg.appendChild(label);
 
         sortedScenes.forEach((s, ci) => {
@@ -1474,6 +1475,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             'font-size': 10, fill: 'var(--text-dim)'
         });
         label.textContent = thread.length > 24 ? thread.substring(0, 22) + '..' : thread;
+        if (thread.length > 24) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = thread; label.appendChild(t); }
         svg.appendChild(label);
 
         // Sort scenes for this thread
@@ -1666,6 +1668,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             'font-size': 10, fill: 'var(--text-dim)'
         });
         label.textContent = displayLabel;
+        if (settingScenes[key].label.length > 24) { const t = document.createElementNS(SVG_NS, 'title'); t.textContent = settingScenes[key].label; label.appendChild(t); }
         svg.appendChild(label);
 
         const scenes = settingScenes[key].scenes.sort((a, b) => a.seq - b.seq);
@@ -2244,6 +2247,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             'font-size': 10, fill: 'var(--text-dim)'
         });
         label.textContent = motif.length > 24 ? motif.substring(0, 22) + '..' : motif;
+        if (motif.length > 24) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = motif; label.appendChild(t); }
         svg.appendChild(label);
 
         const scenes = (motifScenes[motif] || []).sort((a, b) => a.seq - b.seq);
