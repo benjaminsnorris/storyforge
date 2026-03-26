@@ -1058,6 +1058,12 @@ function getWordCount(s) {
 
 const totalWords = sortedScenes.reduce((sum, s) => sum + getWordCount(s), 0);
 
+// Shared grid layout constants — all grid visualizations use these so scene columns align
+const GRID_LABEL_W = 180;
+const GRID_RIGHT_PAD = 20;
+// sceneX(index) returns the x position for a scene in any grid visualization
+function sceneX(idx, chartW) { return GRID_LABEL_W + (idx / (sceneCount - 1 || 1)) * chartW; }
+
 // SVG namespace
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -1393,21 +1399,20 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         .slice(0, 15)
         .map(e => e[0]);
 
-    const LABEL_W = 120;
-    const COL_W = 6;
     const ROW_H = 18;
-    const W = LABEL_W + sceneCount * COL_W + 20;
+    const W = container.clientWidth - 24 || 1100;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
     const H = topChars.length * ROW_H + 20;
     const svg = makeSvg(container, W, H);
 
     topChars.forEach((char, ri) => {
         const y = ri * ROW_H + 10;
         const label = svgEl('text', {
-            x: LABEL_W - 6, y: y + ROW_H / 2 + 3,
+            x: GRID_LABEL_W - 6, y: y + ROW_H / 2 + 3,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
-        label.textContent = char.length > 18 ? char.substring(0, 16) + '..' : char;
+        label.textContent = char.length > 24 ? char.substring(0, 22) + '..' : char;
         svg.appendChild(label);
 
         sortedScenes.forEach((s, ci) => {
@@ -1417,15 +1422,13 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             const isPresent = chars.includes(char);
 
             if (isPov || isPresent) {
-                const cx = LABEL_W + ci * COL_W + COL_W / 2;
+                const cx = sceneX(ci, CHART_W);
                 const cy = y + ROW_H / 2;
                 const r = isPov ? 3 : 1.5;
                 const circle = svgEl('circle', {
                     cx, cy, r,
                     fill: isPov ? 'var(--teal)' : 'var(--text-dim)',
-                    opacity: isPov ? 1 : 0.5,
-                    'data-scene-col': s.id,
-                    'data-col-x': cx
+                    opacity: isPov ? 1 : 0.5
                 });
                 attachSceneHandlers(circle, s.id);
                 svg.appendChild(circle);
@@ -1457,17 +1460,16 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     const threadList = Object.keys(threadFirst).sort((a, b) => threadFirst[a] - threadFirst[b]);
 
-    const LABEL_W = 160;
     const ROW_H = 24;
     const W = container.clientWidth - 24 || 1100;
-    const CHART_W = W - LABEL_W - 20;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
     const H = threadList.length * ROW_H + 20;
     const svg = makeSvg(container, W, H);
 
     threadList.forEach((thread, ri) => {
         const y = ri * ROW_H + 12;
         const label = svgEl('text', {
-            x: LABEL_W - 8, y: y + 4,
+            x: GRID_LABEL_W - 8, y: y + 4,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
@@ -1479,8 +1481,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
         // Draw connecting lines
         for (let i = 1; i < scenes.length; i++) {
-            const x1 = LABEL_W + ((scenes[i-1].seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
-            const x2 = LABEL_W + ((scenes[i].seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
+            const x1 = sceneX(scenes[i-1].seq - 1, CHART_W);
+            const x2 = sceneX(scenes[i].seq - 1, CHART_W);
             const gap = scenes[i].seq - scenes[i-1].seq;
             svg.appendChild(svgEl('line', {
                 x1, y1: y, x2, y2: y,
@@ -1492,7 +1494,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
         // Draw dots
         scenes.forEach(sc => {
-            const cx = LABEL_W + ((sc.seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
+            const cx = sceneX(sc.seq - 1, CHART_W);
             const dot = svgEl('circle', {
                 cx, cy: y, r: 3.5,
                 fill: 'var(--teal)', opacity: 0.8
@@ -1649,18 +1651,17 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         .sort((a, b) => settingFreq[b] - settingFreq[a])
         .slice(0, 15);
 
-    const LABEL_W = 200;
     const ROW_H = 22;
     const W = container.clientWidth - 24 || 1100;
-    const CHART_W = W - LABEL_W - 20;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
     const H = topSettings.length * ROW_H + 20;
     const svg = makeSvg(container, W, H);
 
     topSettings.forEach((key, ri) => {
         const y = ri * ROW_H + 10;
-        const displayLabel = settingScenes[key].label.substring(0, 30) + (settingScenes[key].label.length > 30 ? '..' : '');
+        const displayLabel = settingScenes[key].label.substring(0, 24) + (settingScenes[key].label.length > 24 ? '..' : '');
         const label = svgEl('text', {
-            x: LABEL_W - 8, y: y + 4,
+            x: GRID_LABEL_W - 8, y: y + 4,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
@@ -1675,8 +1676,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             if (i < scenes.length && scenes[i].seq === scenes[i-1].seq + 1) continue;
             const runLen = i - runStart;
             if (runLen >= 3) {
-                const x1 = LABEL_W + ((scenes[runStart].seq - 1) / (sceneCount - 1 || 1)) * CHART_W - 4;
-                const x2 = LABEL_W + ((scenes[i-1].seq - 1) / (sceneCount - 1 || 1)) * CHART_W + 4;
+                const x1 = sceneX(scenes[runStart].seq - 1, CHART_W) - 4;
+                const x2 = sceneX(scenes[i-1].seq - 1, CHART_W) + 4;
                 svg.appendChild(svgEl('rect', {
                     x: x1, y: y - 8, width: x2 - x1, height: 16,
                     fill: 'var(--teal-bg)', rx: 3
@@ -1686,12 +1687,10 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         }
 
         scenes.forEach(sc => {
-            const cx = LABEL_W + ((sc.seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
+            const cx = sceneX(sc.seq - 1, CHART_W);
             const dot = svgEl('circle', {
                 cx, cy: y, r: 3,
-                fill: 'var(--teal)', opacity: 0.7,
-                'data-scene-col': sc.id,
-                'data-col-x': cx
+                fill: 'var(--teal)', opacity: 0.7
             });
             attachSceneHandlers(dot, sc.id);
             svg.appendChild(dot);
@@ -1735,11 +1734,11 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         orderedPrinciples.push(...prns);
     }
 
-    const LABEL_W = 180;
-    const CELL = 7;
-    const GAP = 1;
+    const W = container.clientWidth - 24 || 1100;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
+    const CELL = Math.max(2, Math.floor(CHART_W / sceneCount) - 1);
+    const GAP = Math.max(1, Math.floor(CHART_W / sceneCount) - CELL);
     const SEC_GAP = 8;
-    const W = LABEL_W + sceneCount * (CELL + GAP) + 40;
 
     // Calculate height with section gaps
     let totalRows = orderedPrinciples.length;
@@ -1779,7 +1778,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         const y = yOffset;
 
         const label = svgEl('text', {
-            x: LABEL_W - 6, y: y + CELL / 2 + 3,
+            x: GRID_LABEL_W - 6, y: y + CELL / 2 + 3,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 9, fill: 'var(--text-dim)'
         });
@@ -1791,7 +1790,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             const score = scoreById[s.id];
             const val = score ? score[principle] : '';
             const rect = svgEl('rect', {
-                x: LABEL_W + ci * (CELL + GAP),
+                x: GRID_LABEL_W + ci * (CELL + GAP),
                 y,
                 width: CELL, height: CELL,
                 fill: scoreColor(val),
@@ -2230,18 +2229,17 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         return;
     }
 
-    const LABEL_W = 160;
     const ROW_H = 22;
     const DENSITY_H = 24;
     const W = container.clientWidth - 24 || 1100;
-    const CHART_W = W - LABEL_W - 20;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
     const H = motifList.length * ROW_H + DENSITY_H + 30;
     const svg = makeSvg(container, W, H);
 
     motifList.forEach((motif, ri) => {
         const y = ri * ROW_H + 10;
         const label = svgEl('text', {
-            x: LABEL_W - 8, y: y + 4,
+            x: GRID_LABEL_W - 8, y: y + 4,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
@@ -2252,8 +2250,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
         // Lines
         for (let i = 1; i < scenes.length; i++) {
-            const x1 = LABEL_W + ((scenes[i-1].seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
-            const x2 = LABEL_W + ((scenes[i].seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
+            const x1 = sceneX(scenes[i-1].seq - 1, CHART_W);
+            const x2 = sceneX(scenes[i].seq - 1, CHART_W);
             const gap = scenes[i].seq - scenes[i-1].seq;
             svg.appendChild(svgEl('line', {
                 x1, y1: y, x2, y2: y,
@@ -2265,7 +2263,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
         // Dots
         scenes.forEach(sc => {
-            const cx = LABEL_W + ((sc.seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
+            const cx = sceneX(sc.seq - 1, CHART_W);
             const dot = svgEl('circle', {
                 cx, cy: y, r: 3,
                 fill: 'var(--type-confrontation)', opacity: 0.7
@@ -2288,7 +2286,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     // Density label
     svg.appendChild(svgEl('text', {
-        x: LABEL_W - 8, y: densityY + DENSITY_H / 2 + 3,
+        x: GRID_LABEL_W - 8, y: densityY + DENSITY_H / 2 + 3,
         'text-anchor': 'end', 'font-family': 'var(--font-mono)',
         'font-size': 9, fill: 'var(--text-dim)'
     })).textContent = 'density';
@@ -2296,7 +2294,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     sortedScenes.forEach((s, i) => {
         const h = (density[i] / maxDensity) * DENSITY_H;
         const rect = svgEl('rect', {
-            x: LABEL_W + (i / sceneCount) * CHART_W,
+            x: GRID_LABEL_W + (i / sceneCount) * CHART_W,
             y: densityY + DENSITY_H - h,
             width: Math.max(CHART_W / sceneCount - 1, 2),
             height: h,
@@ -2311,7 +2309,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     // Note universal motifs that were suppressed
     if (universalMotifs.length > 0) {
         const note = document.createElement('div');
-        note.style.cssText = 'padding:4px 0 0 ' + LABEL_W + 'px;color:var(--text-dim);font-size:11px;font-family:var(--font-mono)';
+        note.style.cssText = 'padding:4px 0 0 ' + GRID_LABEL_W + 'px;color:var(--text-dim);font-size:11px;font-family:var(--font-mono)';
         note.textContent = 'Universal (>90%): ' + universalMotifs.join(', ');
         container.appendChild(note);
     }
