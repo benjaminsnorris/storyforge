@@ -1114,6 +1114,22 @@ function selectScene(sceneId) {
             el.classList.remove('selected', 'dimmed');
         }
     });
+    // Show/hide column highlight lines in grid visualizations
+    document.querySelectorAll('.scene-col-highlight').forEach(el => el.remove());
+    if (sceneId) {
+        document.querySelectorAll('[data-scene-col="' + sceneId + '"]').forEach(el => {
+            var svg = el.closest('svg');
+            if (!svg) return;
+            var cx = parseFloat(el.getAttribute('data-col-x'));
+            if (isNaN(cx)) return;
+            var line = svgEl('line', {
+                x1: cx, y1: 0, x2: cx, y2: svg.getAttribute('height'),
+                stroke: 'var(--teal)', 'stroke-width': 1.5, opacity: 0.3,
+                'class': 'scene-col-highlight'
+            });
+            svg.insertBefore(line, svg.firstChild);
+        });
+    }
     updateDetailPanel(sceneId);
 }
 
@@ -1407,7 +1423,9 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
                 const circle = svgEl('circle', {
                     cx, cy, r,
                     fill: isPov ? 'var(--teal)' : 'var(--text-dim)',
-                    opacity: isPov ? 1 : 0.5
+                    opacity: isPov ? 1 : 0.5,
+                    'data-scene-col': s.id,
+                    'data-col-x': cx
                 });
                 attachSceneHandlers(circle, s.id);
                 svg.appendChild(circle);
@@ -1671,7 +1689,9 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             const cx = LABEL_W + ((sc.seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
             const dot = svgEl('circle', {
                 cx, cy: y, r: 3,
-                fill: 'var(--teal)', opacity: 0.7
+                fill: 'var(--teal)', opacity: 0.7,
+                'data-scene-col': sc.id,
+                'data-col-x': cx
             });
             attachSceneHandlers(dot, sc.id);
             svg.appendChild(dot);
