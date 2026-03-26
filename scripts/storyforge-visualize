@@ -677,6 +677,39 @@ body {
     <div class="rationale-drawer" id="heatmap-drawer"></div>
 </div>
 
+<!-- Genre Scores -->
+<div class="section" id="genre-section" style="display:none;">
+    <div class="section-header">
+        <span class="dot"></span>
+        <h2>Genre Scores</h2>
+        <span class="subtitle">Genre craft assessment</span>
+    </div>
+    <div class="vis-container" id="genre-scores"></div>
+    <div class="rationale-drawer" id="genre-drawer"></div>
+</div>
+
+<!-- Character Scores -->
+<div class="section" id="character-section" style="display:none;">
+    <div class="section-header">
+        <span class="dot"></span>
+        <h2>Character Scores</h2>
+        <span class="subtitle">Character craft by principle</span>
+    </div>
+    <div class="vis-container" id="character-scores-vis"></div>
+    <div class="rationale-drawer" id="character-drawer"></div>
+</div>
+
+<!-- Act Scores -->
+<div class="section" id="act-section" style="display:none;">
+    <div class="section-header">
+        <span class="dot"></span>
+        <h2>Act Scores</h2>
+        <span class="subtitle">Narrative framework alignment by act</span>
+    </div>
+    <div class="vis-container" id="act-scores-vis"></div>
+    <div class="rationale-drawer" id="act-drawer"></div>
+</div>
+
 <!-- 9. Narrative Framework Radar -->
 <div class="section" id="narrative-radar-section" style="display:none;">
     <div class="section-header">
@@ -1595,6 +1628,254 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         });
 
         yOffset += CELL + GAP;
+    });
+})();
+
+// ============================================================================
+// GENRE SCORES
+// ============================================================================
+
+(function renderGenreScores() {
+    if (!GENRE_SCORES || GENRE_SCORES.length === 0) return;
+    document.getElementById('genre-section').style.display = '';
+    var container = document.getElementById('genre-scores');
+
+    var genreData = GENRE_SCORES[0];
+    var genreRat = GENRE_RATIONALES.length > 0 ? GENRE_RATIONALES[0] : {};
+    var principles = Object.keys(genreData);
+
+    var LABEL_W = 180;
+    var BAR_H = 24;
+    var BAR_GAP = 6;
+    var MAX_BAR_W = 300;
+    var H = principles.length * (BAR_H + BAR_GAP) + 8;
+    var W = LABEL_W + MAX_BAR_W + 60;
+    var svg = makeSvg(container, W, H);
+
+    principles.forEach(function(p, i) {
+        var y = i * (BAR_H + BAR_GAP) + 4;
+        var score = parseInt(genreData[p]) || 0;
+        var barW = (score / 5) * MAX_BAR_W;
+        var color = scoreColorClass(score);
+
+        // Label
+        var label = svgEl('text', {
+            x: LABEL_W - 8, y: y + BAR_H / 2 + 4,
+            'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+            'font-size': 11, fill: 'var(--text-dim)'
+        });
+        label.textContent = formatPrincipleLabel(p);
+        svg.appendChild(label);
+
+        // Bar
+        var rect = svgEl('rect', {
+            x: LABEL_W, y: y,
+            width: barW, height: BAR_H,
+            fill: color, rx: 3, opacity: 0.85,
+            style: 'cursor:pointer'
+        });
+        rect.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var ratText = genreRat[p];
+            if (!ratText) return;
+            var html = '<div class="rationale-principle">' + formatPrincipleLabel(p) +
+                '<span class="rationale-score" style="color:' + color + '">' + score + '/5</span></div>' +
+                '<p>' + ratText + '</p>';
+            openRationaleDrawer('genre-drawer', 'Genre Rationale', html);
+        });
+        svg.appendChild(rect);
+
+        // Score label
+        var scoreLabel = svgEl('text', {
+            x: LABEL_W + barW + 8, y: y + BAR_H / 2 + 4,
+            'font-family': 'var(--font-mono)', 'font-size': 12,
+            'font-weight': 700, fill: color
+        });
+        scoreLabel.textContent = score;
+        svg.appendChild(scoreLabel);
+    });
+})();
+
+// ============================================================================
+// CHARACTER SCORES
+// ============================================================================
+
+(function renderCharacterScores() {
+    if (!CHARACTER_SCORES || CHARACTER_SCORES.length === 0) return;
+    document.getElementById('character-section').style.display = '';
+    var container = document.getElementById('character-scores-vis');
+
+    var principles = Object.keys(CHARACTER_SCORES[0]).filter(function(k) { return k !== 'character'; });
+    var chars = CHARACTER_SCORES;
+
+    var LABEL_W = 180;
+    var BAR_H = 18;
+    var BAR_GAP = 3;
+    var GROUP_GAP = 16;
+    var MAX_BAR_W = 300;
+    var groupH = principles.length * (BAR_H + BAR_GAP);
+    var H = chars.length * (groupH + GROUP_GAP) + 8;
+    var W = LABEL_W + MAX_BAR_W + 60;
+    var svg = makeSvg(container, W, H);
+
+    var yOffset = 4;
+    chars.forEach(function(ch) {
+        var rat = charRationaleByName[ch.character] || {};
+
+        // Character name header
+        var nameLabel = svgEl('text', {
+            x: 4, y: yOffset + 3,
+            'font-family': 'var(--font-mono)', 'font-size': 11,
+            'font-weight': 600, fill: 'var(--teal)'
+        });
+        nameLabel.textContent = ch.character;
+        svg.appendChild(nameLabel);
+        yOffset += 16;
+
+        principles.forEach(function(p) {
+            var score = parseInt(ch[p]) || 0;
+            var barW = (score / 5) * MAX_BAR_W;
+            var color = scoreColorClass(score);
+
+            // Label
+            var label = svgEl('text', {
+                x: LABEL_W - 8, y: yOffset + BAR_H / 2 + 4,
+                'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+                'font-size': 10, fill: 'var(--text-dim)'
+            });
+            label.textContent = formatPrincipleLabel(p);
+            svg.appendChild(label);
+
+            // Bar
+            var rect = svgEl('rect', {
+                x: LABEL_W, y: yOffset,
+                width: barW, height: BAR_H,
+                fill: color, rx: 3, opacity: 0.85,
+                style: 'cursor:pointer'
+            });
+            rect.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var ratText = rat[p];
+                if (!ratText) return;
+                var html = '<div class="rationale-principle">' + formatPrincipleLabel(p) +
+                    '<span class="rationale-score" style="color:' + color + '">' + score + '/5</span></div>' +
+                    '<p><strong>' + ch.character + '</strong></p>' +
+                    '<p>' + ratText + '</p>';
+                openRationaleDrawer('character-drawer', 'Character Rationale', html);
+            });
+            svg.appendChild(rect);
+
+            // Score label
+            var scoreLabel = svgEl('text', {
+                x: LABEL_W + barW + 8, y: yOffset + BAR_H / 2 + 4,
+                'font-family': 'var(--font-mono)', 'font-size': 11,
+                'font-weight': 700, fill: color
+            });
+            scoreLabel.textContent = score;
+            svg.appendChild(scoreLabel);
+
+            yOffset += BAR_H + BAR_GAP;
+        });
+
+        yOffset += GROUP_GAP;
+    });
+})();
+
+// ============================================================================
+// ACT SCORES
+// ============================================================================
+
+(function renderActScores() {
+    if (!ACT_SCORES || ACT_SCORES.length === 0) return;
+    document.getElementById('act-section').style.display = '';
+    var container = document.getElementById('act-scores-vis');
+
+    var principles = Object.keys(ACT_SCORES[0]).filter(function(k) { return k !== 'id'; });
+    var acts = ACT_SCORES;
+
+    var LABEL_W = 200;
+    var BAR_H = 18;
+    var BAR_GAP = 3;
+    var GROUP_GAP = 16;
+    var MAX_BAR_W = 280;
+    var groupH = principles.length * (BAR_H + BAR_GAP);
+    var H = acts.length * (groupH + GROUP_GAP) + 8;
+    var W = LABEL_W + MAX_BAR_W + 60;
+    var svg = makeSvg(container, W, H);
+
+    var FRAMEWORK_LABELS = {
+        campbells_monomyth: "Campbell's Monomyth",
+        three_act: 'Three Act',
+        save_the_cat: 'Save the Cat',
+        truby_22: 'Truby 22',
+        harmon_circle: 'Harmon Circle',
+        kishotenketsu: 'Kishotenketsu',
+        freytag: "Freytag's Pyramid",
+        character_web: 'Character Web',
+        character_as_theme: 'Character as Theme'
+    };
+
+    var yOffset = 4;
+    acts.forEach(function(act) {
+        var rat = actRationaleById[act.id] || {};
+
+        // Act name header
+        var nameLabel = svgEl('text', {
+            x: 4, y: yOffset + 3,
+            'font-family': 'var(--font-mono)', 'font-size': 11,
+            'font-weight': 600, fill: 'var(--teal)'
+        });
+        nameLabel.textContent = act.id.replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+        svg.appendChild(nameLabel);
+        yOffset += 16;
+
+        principles.forEach(function(p) {
+            var score = parseInt(act[p]) || 0;
+            var barW = (score / 5) * MAX_BAR_W;
+            var color = scoreColorClass(score);
+
+            // Label
+            var label = svgEl('text', {
+                x: LABEL_W - 8, y: yOffset + BAR_H / 2 + 4,
+                'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+                'font-size': 10, fill: 'var(--text-dim)'
+            });
+            label.textContent = FRAMEWORK_LABELS[p] || formatPrincipleLabel(p);
+            svg.appendChild(label);
+
+            // Bar
+            var rect = svgEl('rect', {
+                x: LABEL_W, y: yOffset,
+                width: barW, height: BAR_H,
+                fill: color, rx: 3, opacity: 0.85,
+                style: 'cursor:pointer'
+            });
+            rect.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var ratText = rat[p];
+                if (!ratText) return;
+                var actLabel = act.id.replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+                var html = '<div class="rationale-principle">' + (FRAMEWORK_LABELS[p] || formatPrincipleLabel(p)) +
+                    '<span class="rationale-score" style="color:' + color + '">' + score + '/5</span></div>' +
+                    '<p><strong>' + actLabel + '</strong></p>' +
+                    '<p>' + ratText + '</p>';
+                openRationaleDrawer('act-drawer', 'Act Rationale', html);
+            });
+            svg.appendChild(rect);
+
+            // Score label
+            var scoreLabel = svgEl('text', {
+                x: LABEL_W + barW + 8, y: yOffset + BAR_H / 2 + 4,
+                'font-family': 'var(--font-mono)', 'font-size': 11,
+                'font-weight': 700, fill: color
+            });
+            scoreLabel.textContent = score;
+            svg.appendChild(scoreLabel);
+
+            yOffset += BAR_H + BAR_GAP;
+        });
+
+        yOffset += GROUP_GAP;
     });
 })();
 
