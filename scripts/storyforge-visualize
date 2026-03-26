@@ -1063,8 +1063,9 @@ function getWordCount(s) {
 const totalWords = sortedScenes.reduce((sum, s) => sum + getWordCount(s), 0);
 
 // Shared grid layout constants — all grid visualizations use these so scene columns align
-const GRID_LABEL_W = 180;
+const GRID_LABEL_W = window.innerWidth < 768 ? 100 : 180;
 const GRID_RIGHT_PAD = 20;
+const GRID_LABEL_TRUNC = window.innerWidth < 768 ? 12 : 24;
 // sceneX(index) returns the x position for a scene in any grid visualization
 function sceneX(idx, chartW) { return GRID_LABEL_W + (idx / (sceneCount - 1 || 1)) * chartW; }
 
@@ -1416,8 +1417,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
-        label.textContent = char.length > 24 ? char.substring(0, 22) + '..' : char;
-        if (char.length > 24) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = char; label.appendChild(t); }
+        label.textContent = char.length > GRID_LABEL_TRUNC ? char.substring(0, GRID_LABEL_TRUNC - 2) + '..' : char;
+        if (char.length > GRID_LABEL_TRUNC) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = char; label.appendChild(t); }
         svg.appendChild(label);
 
         sortedScenes.forEach((s, ci) => {
@@ -1478,8 +1479,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
-        label.textContent = thread.length > 24 ? thread.substring(0, 22) + '..' : thread;
-        if (thread.length > 24) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = thread; label.appendChild(t); }
+        label.textContent = thread.length > GRID_LABEL_TRUNC ? thread.substring(0, GRID_LABEL_TRUNC - 2) + '..' : thread;
+        if (thread.length > GRID_LABEL_TRUNC) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = thread; label.appendChild(t); }
         svg.appendChild(label);
 
         // Sort scenes for this thread
@@ -1665,14 +1666,14 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     topSettings.forEach((key, ri) => {
         const y = ri * ROW_H + 10;
-        const displayLabel = settingScenes[key].label.substring(0, 24) + (settingScenes[key].label.length > 24 ? '..' : '');
+        const displayLabel = settingScenes[key].label.substring(0, GRID_LABEL_TRUNC) + (settingScenes[key].label.length > GRID_LABEL_TRUNC ? '..' : '');
         const label = svgEl('text', {
             x: GRID_LABEL_W - 8, y: y + 4,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
         label.textContent = displayLabel;
-        if (settingScenes[key].label.length > 24) { const t = document.createElementNS(SVG_NS, 'title'); t.textContent = settingScenes[key].label; label.appendChild(t); }
+        if (settingScenes[key].label.length > GRID_LABEL_TRUNC) { const t = document.createElementNS(SVG_NS, 'title'); t.textContent = settingScenes[key].label; label.appendChild(t); }
         svg.appendChild(label);
 
         const scenes = settingScenes[key].scenes.sort((a, b) => a.seq - b.seq);
@@ -2250,8 +2251,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
-        label.textContent = motif.length > 24 ? motif.substring(0, 22) + '..' : motif;
-        if (motif.length > 24) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = motif; label.appendChild(t); }
+        label.textContent = motif.length > GRID_LABEL_TRUNC ? motif.substring(0, GRID_LABEL_TRUNC - 2) + '..' : motif;
+        if (motif.length > GRID_LABEL_TRUNC) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = motif; label.appendChild(t); }
         svg.appendChild(label);
 
         const scenes = (motifScenes[motif] || []).sort((a, b) => a.seq - b.seq);
