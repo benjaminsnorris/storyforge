@@ -570,6 +570,9 @@ body {
 .section:nth-child(10) { animation-delay: 0.45s; }
 .section:nth-child(11) { animation-delay: 0.5s; }
 .section:nth-child(12) { animation-delay: 0.55s; }
+.section:nth-child(13) { animation-delay: 0.6s; }
+.section:nth-child(14) { animation-delay: 0.65s; }
+.section:nth-child(15) { animation-delay: 0.7s; }
 </style>
 </head>
 <body>
