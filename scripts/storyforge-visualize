@@ -567,6 +567,7 @@ body {
     }
     .detail-panel.minimized #detail-content { display: none; }
     .detail-panel.minimized .panel-controls { padding: 10px 16px; }
+    .detail-panel:not(.minimized) #panel-mini-title { display: none; }
 
     .detail-panel .minimize-btn {
         background: none;
