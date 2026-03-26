@@ -940,6 +940,41 @@ function showAllCharacterRationales(characterName) {
     document.getElementById('character-drawer').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+function showAllActRationales(actId) {
+    var rat = actRationaleById[actId];
+    var scores = ACT_SCORES.filter(function(a) { return a.id === actId; })[0];
+    if (!rat) return;
+
+    var FRAMEWORK_LABELS = {
+        campbells_monomyth: "Campbell's Monomyth",
+        three_act: 'Three Act',
+        save_the_cat: 'Save the Cat',
+        truby_22: 'Truby 22',
+        harmon_circle: 'Harmon Circle',
+        kishotenketsu: 'Kishotenketsu',
+        freytag: "Freytag's Pyramid",
+        character_web: 'Character Web',
+        character_as_theme: 'Character as Theme'
+    };
+
+    var principles = Object.keys(rat).filter(function(k) { return k !== 'id'; });
+    var html = '';
+    principles.forEach(function(p) {
+        if (!rat[p]) return;
+        var scoreVal = scores ? parseInt(scores[p]) : 0;
+        var color = scoreColorClass(scoreVal);
+        var label = FRAMEWORK_LABELS[p] || formatPrincipleLabel(p);
+        html += '<p><strong style="font-family:var(--font-mono);font-size:10px">' +
+            label +
+            ' <span style="color:' + color + '">' + scoreVal + '/5</span></strong></p>' +
+            '<p>' + rat[p] + '</p>';
+    });
+
+    var actLabel = actId.replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    openRationaleDrawer('act-drawer', actLabel + ' — All Rationales', html);
+    document.getElementById('act-drawer').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 // Generic alias map builder
 function buildAliasMap(entries) {
     const map = {};
@@ -1930,14 +1965,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             });
             rect.addEventListener('click', function(e) {
                 e.stopPropagation();
-                var ratText = rat[p];
-                if (!ratText) return;
-                var actLabel = act.id.replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-                var html = '<div class="rationale-principle">' + (FRAMEWORK_LABELS[p] || formatPrincipleLabel(p)) +
-                    '<span class="rationale-score" style="color:' + color + '">' + score + '/5</span></div>' +
-                    '<p><strong>' + actLabel + '</strong></p>' +
-                    '<p>' + ratText + '</p>';
-                openRationaleDrawer('act-drawer', 'Act Rationale', html);
+                showAllActRationales(act.id);
             });
             svg.appendChild(rect);
 
