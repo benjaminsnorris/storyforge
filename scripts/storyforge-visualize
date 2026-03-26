@@ -349,22 +349,30 @@ body {
 /* ── Detail panel ──────────────────────────────────── */
 .detail-panel {
     position: fixed;
-    right: 24px;
-    top: 80px;
-    width: 320px;
-    max-height: calc(100vh - 120px);
+    right: 0;
+    top: 0;
+    width: 340px;
+    height: 100vh;
     overflow-y: auto;
     background: var(--surface-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
+    border-left: 1px solid var(--border);
+    padding: 24px 20px;
     box-shadow: var(--shadow-elevated);
     z-index: 150;
-    display: none;
+    transform: translateX(100%);
+    transition: transform 0.25s ease-out;
     font-size: 13px;
 }
 
-.detail-panel.visible { display: block; }
+.detail-panel.visible { transform: translateX(0); }
+
+.page {
+    transition: margin-right 0.25s ease-out;
+}
+
+.page.panel-open {
+    margin-right: 340px;
+}
 
 .detail-panel h3 {
     font-size: 16px;
@@ -546,7 +554,8 @@ body {
 
 @media (max-width: 959px) {
     .narrow-msg { display: block; }
-    .detail-panel { display: none !important; }
+    .detail-panel { transform: translateX(100%) !important; }
+    .page.panel-open { margin-right: 0; }
     .page { padding: 16px 12px 60px; }
 }
 
@@ -1046,8 +1055,10 @@ document.addEventListener('click', () => selectScene(null));
 function updateDetailPanel(sceneId) {
     const panel = document.getElementById('detail-panel');
     const content = document.getElementById('detail-content');
+    const page = document.querySelector('.page');
     if (!sceneId) {
         panel.classList.remove('visible');
+        page.classList.remove('panel-open');
         return;
     }
     const s = sceneById[sceneId];
@@ -1099,6 +1110,7 @@ function updateDetailPanel(sceneId) {
 
     content.innerHTML = html;
     panel.classList.add('visible');
+    page.classList.add('panel-open');
 }
 
 function detailRow(label, value) {
