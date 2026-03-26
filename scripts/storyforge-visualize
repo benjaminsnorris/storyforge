@@ -1370,6 +1370,16 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     const totalWC = sortedScenes.reduce((s, sc) => s + getWordCount(sc), 0) || 1;
 
+    // Precompute spine layout so POV bars align exactly with the manuscript spine
+    const spineLayout = {};
+    let sx = 0;
+    sortedScenes.forEach(s => {
+        const wc = getWordCount(s);
+        const sw = Math.min(Math.max(2, (wc / totalWC) * W), W - sx);
+        spineLayout[s.id] = { x: sx, w: sw };
+        sx += sw;
+    });
+
     povList.forEach((pov, i) => {
         const labelY = i * ROW_H + 12;
         const laneY = labelY + LABEL_GAP + 2;
@@ -1399,16 +1409,14 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             fill: 'var(--border-light)', rx: 3
         }));
 
-        // Scene blocks — full width, same scale as spine
+        // Scene blocks — positioned exactly as in spine
         sortedScenes.forEach(s => {
             if ((s.pov || '').toLowerCase() !== pov) return;
-            const wc = getWordCount(s);
-            const seq = +s.seq;
-            const bx = ((seq - 1) / sceneCount) * W;
-            const bw = Math.min(Math.max(2, (wc / totalWC) * W), W - bx);
+            const layout = spineLayout[s.id];
+            if (!layout) return;
             const color = TYPE_COLORS[s.type] || 'var(--teal)';
             const rect = svgEl('rect', {
-                x: bx, y: laneY + 2, width: bw, height: LANE_H - 4,
+                x: layout.x, y: laneY + 2, width: layout.w, height: LANE_H - 4,
                 fill: color, rx: 2, opacity: 0.85
             });
             attachSceneHandlers(rect, s.id);
