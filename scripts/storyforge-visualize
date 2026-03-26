@@ -1059,6 +1059,7 @@ function updateDetailPanel(sceneId) {
     if (!sceneId) {
         panel.classList.remove('visible');
         page.classList.remove('panel-open');
+        closeRationaleDrawer('heatmap-drawer');
         return;
     }
     const s = sceneById[sceneId];
@@ -1111,6 +1112,11 @@ function updateDetailPanel(sceneId) {
     content.innerHTML = html;
     panel.classList.add('visible');
     page.classList.add('panel-open');
+
+    // Auto-open rationale drawer if data exists
+    if (sceneRationaleById[sceneId]) {
+        showAllRationales(sceneId);
+    }
 }
 
 function detailRow(label, value) {
@@ -1681,12 +1687,6 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
                 style: val ? 'cursor:pointer' : ''
             });
             attachSceneHandlers(rect, s.id);
-            if (val) {
-                rect.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    if (sceneRationaleById[s.id]) showAllRationales(s.id);
-                });
-            }
             svg.appendChild(rect);
         });
 
