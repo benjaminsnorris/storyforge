@@ -861,6 +861,47 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
+function showAllRationales(sceneId) {
+    var s = sceneById[sceneId];
+    var score = scoreById[sceneId];
+    var rat = sceneRationaleById[sceneId];
+    if (!s || !rat) return;
+
+    // Group by section using weights
+    var sectionMap = {};
+    WEIGHTS.forEach(function(w) {
+        if (w.section && w.principle) sectionMap[w.principle] = w.section;
+    });
+
+    var sections = {};
+    var principles = Object.keys(rat).filter(function(k) { return k !== 'id'; });
+    principles.forEach(function(p) {
+        var sec = sectionMap[p] || 'other';
+        if (!sections[sec]) sections[sec] = [];
+        sections[sec].push(p);
+    });
+
+    var html = '';
+    for (var sec in sections) {
+        html += '<div class="rationale-principle" style="margin-top:16px;margin-bottom:8px">' +
+            sec.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }) + '</div>';
+        sections[sec].forEach(function(p) {
+            if (!rat[p]) return;
+            var scoreVal = score ? parseInt(score[p]) : 0;
+            var color = scoreColorClass(scoreVal);
+            html += '<p><strong style="font-family:var(--font-mono);font-size:10px">' +
+                formatPrincipleLabel(p) +
+                ' <span style="color:' + color + '">' + scoreVal + '/5</span></strong></p>' +
+                '<p>' + rat[p] + '</p>';
+        });
+    }
+
+    openRationaleDrawer('heatmap-drawer', s.seq + '. ' + s.title + ' — All Rationales', html);
+
+    // Scroll to the drawer
+    document.getElementById('heatmap-drawer').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 // Generic alias map builder
 function buildAliasMap(entries) {
     const map = {};
@@ -1035,7 +1076,17 @@ function updateDetailPanel(sceneId) {
             const color = num >= 5 ? 'var(--score-high)' : num >= 4 ? 'var(--score-mid-high)' : num >= 3 ? 'var(--score-mid)' : num >= 2 ? 'var(--score-mid-low)' : 'var(--score-low)';
             html += `<span class="sg-label">${k.replace(/_/g, ' ')}</span><span class="sg-value" style="color:${color}">${num}</span>`;
         }
-        html += '</div></div>';
+        html += '</div>';
+
+        const rat = sceneRationaleById[sceneId];
+        if (rat) {
+            html += '<div style="margin-top:8px;text-align:center">';
+            html += '<a href="#" style="font-family:var(--font-mono);font-size:10px;color:var(--teal);text-decoration:none" ';
+            html += 'onclick="event.preventDefault();showAllRationales(\'' + sceneId + '\')">View rationales &rarr;</a>';
+            html += '</div>';
+        }
+
+        html += '</div>';
     }
 
     content.innerHTML = html;
