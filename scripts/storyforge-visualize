@@ -416,10 +416,19 @@ body {
 
 .detail-panel .close-btn:hover { color: var(--text); }
 
-/* Mini-title, minimize button, and controls bar only shown on mobile */
-#panel-mini-title { display: none; }
-.detail-panel .minimize-btn { display: none; }
-.detail-panel .panel-controls { display: none; }
+/* Minimize button only on mobile */
+.detail-panel .minimize-btn {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 4px;
+    font-family: var(--font-mono);
+}
+.detail-panel .minimize-btn:hover { color: var(--text); }
 
 .detail-panel .scores-grid {
     display: grid;
@@ -563,6 +572,7 @@ body {
         transition: transform 0.25s ease-out;
     }
     .detail-panel.visible { transform: translateY(0); }
+    .detail-panel .minimize-btn { display: inline-block; }
     .detail-panel.minimized {
         transform: translateY(0);
         max-height: none;
@@ -570,25 +580,8 @@ body {
         overflow: hidden;
         padding: 0;
     }
-    .detail-panel .panel-controls { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
-    .detail-panel .minimize-btn { display: inline-block; }
-    .detail-panel .desktop-close { display: none; }
-    .detail-panel h3 { display: none; }
-    .detail-panel.minimized #detail-content { display: none; }
-    .detail-panel.minimized .panel-controls { padding: 10px 16px; }
-    #panel-mini-title { display: inline; }
-
-    .detail-panel .minimize-btn {
-        background: none;
-        border: none;
-        color: var(--text-dim);
-        cursor: pointer;
-        font-size: 16px;
-        line-height: 1;
-        padding: 4px;
-        font-family: var(--font-mono);
-    }
-    .detail-panel .minimize-btn:hover { color: var(--text); }
+    .detail-panel.minimized h3 { padding: 10px 16px; margin: 0; border: none; }
+    .detail-panel.minimized h3 ~ * { display: none; }
 
     /* Stack section headers vertically */
     .section-header {
@@ -629,13 +622,6 @@ body {
 <body>
 <div class="tooltip" id="tooltip"></div>
 <div class="detail-panel" id="detail-panel" onclick="event.stopPropagation()">
-    <div class="panel-controls">
-        <span id="panel-mini-title" style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--teal);overflow:hidden;white-space:nowrap;text-overflow:ellipsis"></span>
-        <span style="display:flex;gap:4px;flex-shrink:0">
-            <button class="minimize-btn" id="panel-minimize-btn" onclick="event.stopPropagation();toggleMinimizePanel()" title="Minimize">&#8595;</button>
-            <button class="close-btn" onclick="event.stopPropagation();selectScene(null)" title="Close">&times;</button>
-        </span>
-    </div>
     <div id="detail-content"></div>
 </div>
 
@@ -1208,15 +1194,12 @@ document.addEventListener('click', () => selectScene(null));
 
 function toggleMinimizePanel() {
     var panel = document.getElementById('detail-panel');
-    var btn = document.getElementById('panel-minimize-btn');
-    if (panel.classList.contains('minimized')) {
-        panel.classList.remove('minimized');
-        btn.innerHTML = '&#8595;';
-        btn.title = 'Minimize';
-    } else {
-        panel.classList.add('minimized');
-        btn.innerHTML = '&#8593;';
-        btn.title = 'Expand';
+    var btn = panel.querySelector('.minimize-btn');
+    panel.classList.toggle('minimized');
+    if (btn) {
+        var isMin = panel.classList.contains('minimized');
+        btn.innerHTML = isMin ? '&#8593;' : '&#8595;';
+        btn.title = isMin ? 'Expand' : 'Minimize';
     }
 }
 
@@ -1224,12 +1207,9 @@ function updateDetailPanel(sceneId) {
     const panel = document.getElementById('detail-panel');
     const content = document.getElementById('detail-content');
     const page = document.querySelector('.page');
-    const miniTitle = document.getElementById('panel-mini-title');
-    const minBtn = document.getElementById('panel-minimize-btn');
     if (!sceneId) {
         panel.classList.remove('visible', 'minimized');
         page.classList.remove('panel-open');
-        if (minBtn) { minBtn.innerHTML = '&#8595;'; minBtn.title = 'Minimize'; }
         closeRationaleDrawer('heatmap-drawer');
         return;
     }
@@ -1240,10 +1220,13 @@ function updateDetailPanel(sceneId) {
 
     // Reset minimized state when selecting a new scene
     panel.classList.remove('minimized');
-    if (minBtn) { minBtn.innerHTML = '&#8595;'; minBtn.title = 'Minimize'; }
-    if (miniTitle) miniTitle.textContent = s.seq + '. ' + s.title;
 
-    let html = `<h3 style="display:flex;justify-content:space-between;align-items:start"><span>${s.seq}. ${s.title}</span><button class="close-btn desktop-close" onclick="event.stopPropagation();selectScene(null)" title="Close" style="flex-shrink:0">&times;</button></h3>`;
+    let html = '<h3 style="display:flex;justify-content:space-between;align-items:center">';
+    html += '<span>' + s.seq + '. ' + s.title + '</span>';
+    html += '<span style="display:flex;gap:4px;flex-shrink:0">';
+    html += '<button class="minimize-btn" onclick="event.stopPropagation();toggleMinimizePanel()" title="Minimize">&#8595;</button>';
+    html += '<button class="close-btn" onclick="event.stopPropagation();selectScene(null)" title="Close">&times;</button>';
+    html += '</span></h3>';
     html += detailRow('POV', s.pov);
     html += detailRow('Location', s.location);
     html += detailRow('Part', s.part);
