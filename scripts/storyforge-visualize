@@ -1886,19 +1886,22 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 (function renderNarrativeRadar() {
     if (!NARRATIVE_SCORES || NARRATIVE_SCORES.length === 0) return;
     document.getElementById('narrative-radar-section').style.display = '';
-    const container = document.getElementById('narrative-radar');
+    var container = document.getElementById('narrative-radar');
 
-    const W = 500, H = 500;
-    const CX = W / 2, CY = H / 2;
-    const R = 180; // max radius
-    const RINGS = 5;
-    const principles = NARRATIVE_SCORES;
-    const N = principles.length;
-    const angleStep = (2 * Math.PI) / N;
-    const startAngle = -Math.PI / 2; // top
+    var PAD_X = 120;
+    var PAD_Y = 40;
+    var R = 180;
+    var W = R * 2 + PAD_X * 2;
+    var H = R * 2 + PAD_Y * 2;
+    var CX = W / 2;
+    var CY = H / 2;
+    var RINGS = 5;
+    var principles = NARRATIVE_SCORES;
+    var N = principles.length;
+    var angleStep = (2 * Math.PI) / N;
+    var startAngle = -Math.PI / 2;
 
-    // Readable labels for each principle
-    const LABELS = {
+    var LABELS = {
         three_act: 'Three Act',
         campbells_monomyth: "Campbell's Monomyth",
         save_the_cat: 'Save the Cat',
@@ -1908,7 +1911,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         freytag: "Freytag's Pyramid"
     };
 
-    const svg = makeSvg(container, W, H);
+    var svg = makeSvg(container, W, H);
 
     // Draw concentric rings
     for (var ring = 1; ring <= RINGS; ring++) {
@@ -1918,7 +1921,6 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             fill: 'none', stroke: 'var(--border)', 'stroke-width': 0.5,
             'stroke-dasharray': ring < RINGS ? '2,3' : 'none'
         }));
-        // Ring number label along the top spoke
         svg.appendChild(svgEl('text', {
             x: CX + 4, y: CY - r + 12,
             'font-family': 'var(--font-mono)', 'font-size': 9,
@@ -1975,17 +1977,29 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             stroke: 'var(--score-high)', 'stroke-width': 2
         }));
 
-        // Draw score dots colored by score scale
+        // Draw clickable score dots
         points.forEach(function(p) {
             var color = p.score <= 1 ? 'var(--score-low)' :
                         p.score <= 2 ? 'var(--score-mid-low)' :
                         p.score <= 3 ? 'var(--score-mid)' :
                         p.score <= 4 ? 'var(--score-mid-high)' :
                         'var(--score-high)';
-            svg.appendChild(svgEl('circle', {
+            var dot = svgEl('circle', {
                 cx: p.x, cy: p.y, r: 5,
-                fill: color, stroke: 'var(--surface)', 'stroke-width': 2
-            }));
+                fill: color, stroke: 'var(--surface)', 'stroke-width': 2,
+                style: 'cursor:pointer'
+            });
+            dot.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var rat = narrativeRationaleByPrinciple[p.principle];
+                if (!rat || !rat.rationale) return;
+                var label = LABELS[p.principle] || formatPrincipleLabel(p.principle);
+                var html = '<div class="rationale-principle">' + label +
+                    '<span class="rationale-score" style="color:' + color + '">' + p.score + '/5</span></div>' +
+                    '<p>' + rat.rationale + '</p>';
+                openRationaleDrawer('narrative-radar-drawer', 'Narrative Rationale', html);
+            });
+            svg.appendChild(dot);
         });
     }
 })();
