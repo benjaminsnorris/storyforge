@@ -1029,7 +1029,23 @@ function normalizeName(map, name) {
 }
 function normalizeChar(name) { return normalizeName(charAliasMap, name); }
 function normalizeMotif(name) { return normalizeName(motifAliasMap, name); }
-function normalizeLocation(name) { return normalizeName(locationAliasMap, name); }
+function normalizeLocation(name) {
+    if (!name) return name;
+    // Try exact match first
+    var exact = normalizeName(locationAliasMap, name);
+    if (exact !== name.trim()) return exact;
+    // Fuzzy: check if the setting starts with any known alias
+    var lower = name.toLowerCase().trim();
+    var bestKey = '';
+    var bestCanonical = '';
+    for (var alias in locationAliasMap) {
+        if (lower.indexOf(alias) === 0 && alias.length > bestKey.length) {
+            bestKey = alias;
+            bestCanonical = locationAliasMap[alias];
+        }
+    }
+    return bestCanonical || name.trim();
+}
 
 // Parse scenes sorted by seq
 const sortedScenes = [...SCENES].sort((a, b) => (+a.seq) - (+b.seq));
