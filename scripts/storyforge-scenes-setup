@@ -230,7 +230,7 @@ title_from_file() {
 
 ensure_metadata_csv() {
     if [[ ! -f "$METADATA_CSV" ]]; then
-        echo "id|seq|title|pov|setting|part|type|timeline_day|time_of_day|status|word_count|target_words" > "$METADATA_CSV"
+        echo "id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words" > "$METADATA_CSV"
         log "Created reference/scene-metadata.csv"
     fi
 }

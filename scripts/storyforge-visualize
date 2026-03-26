@@ -349,29 +349,37 @@ body {
 /* ── Detail panel ──────────────────────────────────── */
 .detail-panel {
     position: fixed;
-    right: 24px;
-    top: 80px;
-    width: 320px;
-    max-height: calc(100vh - 120px);
+    right: 0;
+    top: 0;
+    width: 340px;
+    height: 100vh;
     overflow-y: auto;
     background: var(--surface-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
+    border-left: 1px solid var(--border);
+    padding: 24px 20px;
     box-shadow: var(--shadow-elevated);
     z-index: 150;
-    display: none;
+    transform: translateX(100%);
+    transition: transform 0.25s ease-out;
     font-size: 13px;
 }
 
-.detail-panel.visible { display: block; }
+.detail-panel.visible { transform: translateX(0); }
+
+.page {
+    transition: margin-right 0.25s ease-out;
+}
+
+.page.panel-open {
+    margin-right: 340px;
+}
 
 .detail-panel h3 {
     font-size: 16px;
     font-weight: 600;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
     padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-light);
+    border-bottom: 4px solid var(--border);
 }
 
 .detail-panel .detail-row {
@@ -379,6 +387,10 @@ body {
     justify-content: space-between;
     padding: 4px 0;
     border-bottom: 1px solid var(--border-light);
+}
+
+.detail-panel .detail-section-end .detail-row:last-child {
+    border-bottom: 4px solid var(--border);
 }
 
 .detail-panel .detail-label {
@@ -397,9 +409,6 @@ body {
 }
 
 .detail-panel .close-btn {
-    position: absolute;
-    top: 12px;
-    right: 12px;
     background: none;
     border: none;
     color: var(--text-dim);
@@ -410,6 +419,20 @@ body {
 }
 
 .detail-panel .close-btn:hover { color: var(--text); }
+
+/* Minimize button only on mobile */
+.detail-panel .minimize-btn {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 4px;
+    font-family: var(--font-mono);
+}
+.detail-panel .minimize-btn:hover { color: var(--text); }
 
 .detail-panel .scores-grid {
     display: grid;
@@ -431,6 +454,13 @@ body {
 }
 
 /* ── Rationale drawer ─────────────────────────────── */
+/* When a drawer follows a vis-container, merge their borders */
+.vis-container:has(+ .rationale-drawer) {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom: none;
+}
+
 .rationale-drawer {
     max-height: 0;
     overflow: hidden;
@@ -439,7 +469,7 @@ body {
     border: 1px solid var(--border);
     border-top: 2px solid var(--teal);
     border-radius: 0 0 var(--radius) var(--radius);
-    margin-top: -1px;
+    margin-top: 0;
 }
 
 .rationale-drawer.open {
@@ -525,27 +555,45 @@ body {
 }
 
 /* ── Responsive ────────────────────────────────────── */
-.narrow-msg {
-    display: none;
-    background: var(--teal-bg);
-    border: 1px solid var(--teal-border);
-    border-radius: var(--radius);
-    padding: 16px 20px;
-    margin-bottom: 24px;
-    font-size: 13px;
-    color: var(--teal);
-    text-align: center;
-}
-
 @media (max-width: 959px) {
-    .narrow-msg { display: block; }
-    .detail-panel { display: none !important; }
     .page { padding: 16px 12px 60px; }
-}
+    .page.panel-open { margin-right: 0; }
 
-@media (max-width: 767px) {
-    .section:not(#spine-wrapper):not(.section-spine) {
-        display: none;
+    /* Detail panel becomes a bottom sheet */
+    .detail-panel {
+        position: fixed;
+        right: 0;
+        left: 0;
+        bottom: 0;
+        top: auto;
+        width: 100%;
+        height: auto;
+        max-height: 50vh;
+        border-left: none;
+        border-top: 2px solid var(--teal);
+        border-radius: var(--radius) var(--radius) 0 0;
+        transform: translateY(100%);
+        transition: transform 0.25s ease-out;
+    }
+    .detail-panel.visible { transform: translateY(0); }
+    .detail-panel .minimize-btn { display: inline-block; }
+    .detail-panel.minimized {
+        transform: translateY(0);
+        max-height: none;
+        height: auto;
+        overflow: hidden;
+        padding: 0;
+    }
+    .detail-panel.minimized h3 { padding: 10px 16px; margin: 0; border: none; }
+    .detail-panel.minimized h3 ~ * { display: none; }
+
+    /* Stack section headers vertically */
+    .section-header {
+        flex-wrap: wrap;
+    }
+    .section-header .subtitle {
+        width: 100%;
+        margin-left: 16px;
     }
 }
 
@@ -577,8 +625,7 @@ body {
 </head>
 <body>
 <div class="tooltip" id="tooltip"></div>
-<div class="detail-panel" id="detail-panel">
-    <button class="close-btn" onclick="selectScene(null)">&times;</button>
+<div class="detail-panel" id="detail-panel" onclick="event.stopPropagation()">
     <div id="detail-content"></div>
 </div>
 
@@ -594,9 +641,6 @@ body {
     </div>
 </div>
 
-<div class="narrow-msg">
-    For the best experience, view this dashboard at 960px or wider.
-</div>
 
 <!-- 1. Manuscript Spine -->
 <div id="spine-wrapper" class="section section-spine">
@@ -664,7 +708,7 @@ body {
     <div class="section-header">
         <span class="dot"></span>
         <h2>Location Map</h2>
-        <span class="subtitle">Top 15 locations by frequency</span>
+        <span class="subtitle">Top 15 locations by frequency &middot; shaded bars = 3+ consecutive scenes</span>
     </div>
     <div class="vis-container" id="setting-map"></div>
 </div>
@@ -839,6 +883,9 @@ function closeRationaleDrawer(drawerId) {
     drawer.classList.remove('open');
     var idx = openDrawers.indexOf(drawerId);
     if (idx !== -1) openDrawers.splice(idx, 1);
+    // Clear any group dimming associated with this drawer
+    if (drawerId === 'character-drawer') clearGroupDimming('data-char-group');
+    if (drawerId === 'act-drawer') clearGroupDimming('data-act-group');
 }
 
 function formatPrincipleLabel(key) {
@@ -898,9 +945,78 @@ function showAllRationales(sceneId) {
     }
 
     openRationaleDrawer('heatmap-drawer', s.seq + '. ' + s.title + ' — All Rationales', html);
+}
 
-    // Scroll to the drawer
-    document.getElementById('heatmap-drawer').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+function dimGroups(attr, selectedValue) {
+    document.querySelectorAll('[' + attr + ']').forEach(function(el) {
+        if (el.getAttribute(attr) === selectedValue) {
+            el.style.opacity = '';
+        } else {
+            el.style.opacity = '0.15';
+        }
+    });
+}
+
+function clearGroupDimming(attr) {
+    document.querySelectorAll('[' + attr + ']').forEach(function(el) {
+        el.style.opacity = '';
+    });
+}
+
+function showAllCharacterRationales(characterName) {
+    var scores = charScoreByName[characterName];
+    var rat = charRationaleByName[characterName];
+    if (!rat) return;
+    dimGroups('data-char-group', characterName);
+
+    var principles = Object.keys(rat).filter(function(k) { return k !== 'character'; });
+    var html = '';
+    principles.forEach(function(p) {
+        if (!rat[p]) return;
+        var scoreVal = scores ? parseInt(scores[p]) : 0;
+        var color = scoreColorClass(scoreVal);
+        html += '<p><strong style="font-family:var(--font-mono);font-size:10px">' +
+            formatPrincipleLabel(p) +
+            ' <span style="color:' + color + '">' + scoreVal + '/5</span></strong></p>' +
+            '<p>' + rat[p] + '</p>';
+    });
+
+    openRationaleDrawer('character-drawer', characterName + ' — All Rationales', html);
+}
+
+function showAllActRationales(actId) {
+    var rat = actRationaleById[actId];
+    var scores = ACT_SCORES.filter(function(a) { return a.id === actId; })[0];
+    if (!rat) return;
+    dimGroups('data-act-group', actId);
+
+    var FRAMEWORK_LABELS = {
+        campbells_monomyth: "Campbell's Monomyth",
+        three_act: 'Three Act',
+        save_the_cat: 'Save the Cat',
+        truby_22: 'Truby 22',
+        harmon_circle: 'Harmon Circle',
+        kishotenketsu: 'Kishotenketsu',
+        freytag: "Freytag's Pyramid",
+        character_web: 'Character Web',
+        character_as_theme: 'Character as Theme'
+    };
+
+    var principles = Object.keys(rat).filter(function(k) { return k !== 'id'; });
+    var html = '';
+    principles.forEach(function(p) {
+        if (!rat[p]) return;
+        var scoreVal = scores ? parseInt(scores[p]) : 0;
+        var color = scoreColorClass(scoreVal);
+        var label = FRAMEWORK_LABELS[p] || formatPrincipleLabel(p);
+        html += '<p><strong style="font-family:var(--font-mono);font-size:10px">' +
+            label +
+            ' <span style="color:' + color + '">' + scoreVal + '/5</span></strong></p>' +
+            '<p>' + rat[p] + '</p>';
+    });
+
+    var actLabel = actId.replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    openRationaleDrawer('act-drawer', actLabel + ' — All Rationales', html);
 }
 
 // Generic alias map builder
@@ -936,7 +1052,23 @@ function normalizeName(map, name) {
 }
 function normalizeChar(name) { return normalizeName(charAliasMap, name); }
 function normalizeMotif(name) { return normalizeName(motifAliasMap, name); }
-function normalizeLocation(name) { return normalizeName(locationAliasMap, name); }
+function normalizeLocation(name) {
+    if (!name) return name;
+    // Try exact match first
+    var exact = normalizeName(locationAliasMap, name);
+    if (exact !== name.trim()) return exact;
+    // Fuzzy: check if the setting starts with any known alias
+    var lower = name.toLowerCase().trim();
+    var bestKey = '';
+    var bestCanonical = '';
+    for (var alias in locationAliasMap) {
+        if (lower.indexOf(alias) === 0 && alias.length > bestKey.length) {
+            bestKey = alias;
+            bestCanonical = locationAliasMap[alias];
+        }
+    }
+    return bestCanonical || name.trim();
+}
 
 // Parse scenes sorted by seq
 const sortedScenes = [...SCENES].sort((a, b) => (+a.seq) - (+b.seq));
@@ -948,6 +1080,13 @@ function getWordCount(s) {
 }
 
 const totalWords = sortedScenes.reduce((sum, s) => sum + getWordCount(s), 0);
+
+// Shared grid layout constants — all grid visualizations use these so scene columns align
+const GRID_LABEL_W = window.innerWidth < 768 ? 100 : 180;
+const GRID_RIGHT_PAD = 20;
+const GRID_LABEL_TRUNC = window.innerWidth < 768 ? 12 : 24;
+// sceneX(index) returns the x position for a scene in any grid visualization
+function sceneX(idx, chartW) { return GRID_LABEL_W + (idx / (sceneCount - 1 || 1)) * chartW; }
 
 // SVG namespace
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -1005,6 +1144,22 @@ function selectScene(sceneId) {
             el.classList.remove('selected', 'dimmed');
         }
     });
+    // Show/hide column highlight lines in grid visualizations
+    document.querySelectorAll('.scene-col-highlight').forEach(el => el.remove());
+    if (sceneId) {
+        document.querySelectorAll('[data-scene-col="' + sceneId + '"]').forEach(el => {
+            var svg = el.closest('svg');
+            if (!svg) return;
+            var cx = parseFloat(el.getAttribute('data-col-x'));
+            if (isNaN(cx)) return;
+            var line = svgEl('line', {
+                x1: cx, y1: 0, x2: cx, y2: svg.getAttribute('height'),
+                stroke: 'var(--teal)', 'stroke-width': 1.5, opacity: 0.3,
+                'class': 'scene-col-highlight'
+            });
+            svg.insertBefore(line, svg.firstChild);
+        });
+    }
     updateDetailPanel(sceneId);
 }
 
@@ -1036,11 +1191,25 @@ document.addEventListener('click', () => selectScene(null));
 // DETAIL PANEL
 // ============================================================================
 
+function toggleMinimizePanel() {
+    var panel = document.getElementById('detail-panel');
+    var btn = panel.querySelector('.minimize-btn');
+    panel.classList.toggle('minimized');
+    if (btn) {
+        var isMin = panel.classList.contains('minimized');
+        btn.innerHTML = isMin ? '&#8593;' : '&#8595;';
+        btn.title = isMin ? 'Expand' : 'Minimize';
+    }
+}
+
 function updateDetailPanel(sceneId) {
     const panel = document.getElementById('detail-panel');
     const content = document.getElementById('detail-content');
+    const page = document.querySelector('.page');
     if (!sceneId) {
-        panel.classList.remove('visible');
+        panel.classList.remove('visible', 'minimized');
+        page.classList.remove('panel-open');
+        closeRationaleDrawer('heatmap-drawer');
         return;
     }
     const s = sceneById[sceneId];
@@ -1048,26 +1217,34 @@ function updateDetailPanel(sceneId) {
     const score = scoreById[sceneId];
     if (!s) return;
 
-    let html = `<h3>${s.seq}. ${s.title}</h3>`;
+    // Reset minimized state when selecting a new scene
+    panel.classList.remove('minimized');
+
+    let html = '<h3 style="display:flex;justify-content:space-between;align-items:center">';
+    html += '<span>' + s.seq + '. ' + s.title + '</span>';
+    html += '<span style="display:flex;gap:4px;flex-shrink:0">';
+    html += '<button class="minimize-btn" onclick="event.stopPropagation();toggleMinimizePanel()" title="Minimize">&#8595;</button>';
+    html += '<button class="close-btn" onclick="event.stopPropagation();selectScene(null)" title="Close">&times;</button>';
+    html += '</span></h3>';
     html += detailRow('POV', s.pov);
     html += detailRow('Location', s.location);
     html += detailRow('Part', s.part);
     html += detailRow('Type', s.type);
     html += detailRow('Words', (+getWordCount(s)).toLocaleString());
-    html += detailRow('Status', s.status);
+    html += detailRow('Status', s.status, true);
 
     if (intent) {
-        html += '<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border-light)">';
-        if (intent.function) html += detailRow('Function', intent.function.substring(0, 120));
-        if (intent.emotional_arc) html += detailRow('Emotion', intent.emotional_arc.substring(0, 80));
-        if (intent.characters) html += detailRow('Characters', intent.characters.replace(/;/g, ', '));
-        if (intent.threads) html += detailRow('Threads', intent.threads.replace(/;/g, ', '));
-        if (intent.motifs) html += detailRow('Motifs', intent.motifs.replace(/;/g, ', '));
-        html += '</div>';
+        let intentHtml = '';
+        if (intent.function) intentHtml += detailRow('Function', intent.function.substring(0, 120));
+        if (intent.emotional_arc) intentHtml += detailRow('Emotion', intent.emotional_arc.substring(0, 80));
+        if (intent.characters) intentHtml += detailRow('Characters', intent.characters.replace(/;/g, ', '));
+        if (intent.threads) intentHtml += detailRow('Threads', intent.threads.replace(/;/g, ', '));
+        if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.replace(/;/g, ', '));
+        if (intentHtml) html += '<div class="detail-section-end">' + intentHtml + '</div>';
     }
 
     if (score) {
-        html += '<div style="margin-top:12px;padding-top:8px;border-top:1px solid var(--border-light)">';
+        html += '<div style="margin-top:4px">';
         html += '<div class="detail-label" style="margin-bottom:4px">CRAFT SCORES</div>';
         html += '<div class="scores-grid">';
         for (const [k, v] of Object.entries(score)) {
@@ -1083,7 +1260,7 @@ function updateDetailPanel(sceneId) {
         if (rat) {
             html += '<div style="margin-top:8px;text-align:center">';
             html += '<a href="#" style="font-family:var(--font-mono);font-size:10px;color:var(--teal);text-decoration:none" ';
-            html += 'onclick="event.preventDefault();showAllRationales(\'' + sceneId + '\')">View rationales &rarr;</a>';
+            html += 'onclick="event.preventDefault();document.getElementById(\'heatmap-drawer\').scrollIntoView({behavior:\'smooth\',block:\'nearest\'})">View rationales &rarr;</a>';
             html += '</div>';
         }
 
@@ -1092,11 +1269,18 @@ function updateDetailPanel(sceneId) {
 
     content.innerHTML = html;
     panel.classList.add('visible');
+    page.classList.add('panel-open');
+
+    // Auto-open rationale drawer if data exists
+    if (sceneRationaleById[sceneId]) {
+        showAllRationales(sceneId);
+    }
 }
 
-function detailRow(label, value) {
+function detailRow(label, value, sectionEnd) {
     if (!value) return '';
-    return `<div class="detail-row"><span class="detail-label">${label}</span><span class="detail-value">${value}</span></div>`;
+    var border = sectionEnd ? 'border-bottom:4px solid var(--border);' : '';
+    return `<div class="detail-row" style="${border}"><span class="detail-label">${label}</span><span class="detail-value">${value}</span></div>`;
 }
 
 // ============================================================================
@@ -1126,7 +1310,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     sortedScenes.forEach(s => {
         const wc = getWordCount(s);
-        const w = Math.max(2, (wc / totalWC) * W);
+        const w = Math.min(Math.max(2, (wc / totalWC) * W), W - x);
         const color = TYPE_COLORS[s.type] || 'var(--text-dim)';
 
         // Part divider
@@ -1176,54 +1360,63 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     });
 
     const povList = Object.keys(povs).sort((a, b) => povs[b].total - povs[a].total);
-    const LABEL_W = 120;
+    const LABEL_GAP = 4;
     const LANE_H = 32;
-    const GAP = 4;
+    const ROW_GAP = 16;
     const W = container.clientWidth - 24 || 1100;
-    const H = povList.length * (LANE_H + GAP) + 40;
-    const CHART_W = W - LABEL_W - 80;
+    const ROW_H = 14 + LABEL_GAP + LANE_H + ROW_GAP;
+    const H = povList.length * ROW_H + 8;
     const svg = makeSvg(container, W, H);
 
     const totalWC = sortedScenes.reduce((s, sc) => s + getWordCount(sc), 0) || 1;
 
-    povList.forEach((pov, i) => {
-        const y = i * (LANE_H + GAP) + 8;
+    // Precompute spine layout so POV bars align exactly with the manuscript spine
+    const spineLayout = {};
+    let sx = 0;
+    sortedScenes.forEach(s => {
+        const wc = getWordCount(s);
+        const sw = Math.min(Math.max(2, (wc / totalWC) * W), W - sx);
+        spineLayout[s.id] = { x: sx, w: sw };
+        sx += sw;
+    });
 
-        // Label
+    povList.forEach((pov, i) => {
+        const labelY = i * ROW_H + 12;
+        const laneY = labelY + LABEL_GAP + 2;
+
+        // Name on the left above the bar
         const label = svgEl('text', {
-            x: LABEL_W - 8, y: y + LANE_H / 2 + 4,
-            'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+            x: 0, y: labelY,
+            'font-family': 'var(--font-mono)',
             'font-size': 11, fill: 'var(--text-secondary)'
         });
         label.textContent = pov;
         svg.appendChild(label);
 
-        // Stats
+        // Stats on the right above the bar
         const pct = ((povs[pov].total / totalWC) * 100).toFixed(0);
         const stat = svgEl('text', {
-            x: W - 4, y: y + LANE_H / 2 + 4,
+            x: W, y: labelY,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
-        stat.textContent = `${povs[pov].total.toLocaleString()} (${pct}%)`;
+        stat.textContent = povs[pov].total.toLocaleString() + ' (' + pct + '%)';
         svg.appendChild(stat);
 
-        // Lane background
+        // Lane background — full width
         svg.appendChild(svgEl('rect', {
-            x: LABEL_W, y, width: CHART_W, height: LANE_H,
+            x: 0, y: laneY, width: W, height: LANE_H,
             fill: 'var(--border-light)', rx: 3
         }));
 
-        // Scene blocks
+        // Scene blocks — positioned exactly as in spine
         sortedScenes.forEach(s => {
             if ((s.pov || '').toLowerCase() !== pov) return;
-            const seq = +s.seq;
-            const wc = getWordCount(s);
-            const bx = LABEL_W + ((seq - 1) / sceneCount) * CHART_W;
-            const bw = Math.max(2, (wc / totalWC) * CHART_W);
+            const layout = spineLayout[s.id];
+            if (!layout) return;
             const color = TYPE_COLORS[s.type] || 'var(--teal)';
             const rect = svgEl('rect', {
-                x: bx, y: y + 2, width: bw, height: LANE_H - 4,
+                x: layout.x, y: laneY + 2, width: layout.w, height: LANE_H - 4,
                 fill: color, rx: 2, opacity: 0.85
             });
             attachSceneHandlers(rect, s.id);
@@ -1259,21 +1452,21 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         .slice(0, 15)
         .map(e => e[0]);
 
-    const LABEL_W = 120;
-    const COL_W = 6;
     const ROW_H = 18;
-    const W = LABEL_W + sceneCount * COL_W + 20;
+    const W = container.clientWidth - 24 || 1100;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
     const H = topChars.length * ROW_H + 20;
     const svg = makeSvg(container, W, H);
 
     topChars.forEach((char, ri) => {
         const y = ri * ROW_H + 10;
         const label = svgEl('text', {
-            x: LABEL_W - 6, y: y + ROW_H / 2 + 3,
+            x: GRID_LABEL_W - 6, y: y + ROW_H / 2 + 3,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
-        label.textContent = char.length > 18 ? char.substring(0, 16) + '..' : char;
+        label.textContent = char.length > GRID_LABEL_TRUNC ? char.substring(0, GRID_LABEL_TRUNC - 2) + '..' : char;
+        if (char.length > GRID_LABEL_TRUNC) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = char; label.appendChild(t); }
         svg.appendChild(label);
 
         sortedScenes.forEach((s, ci) => {
@@ -1283,7 +1476,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             const isPresent = chars.includes(char);
 
             if (isPov || isPresent) {
-                const cx = LABEL_W + ci * COL_W + COL_W / 2;
+                const cx = sceneX(ci, CHART_W);
                 const cy = y + ROW_H / 2;
                 const r = isPov ? 3 : 1.5;
                 const circle = svgEl('circle', {
@@ -1321,21 +1514,21 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     const threadList = Object.keys(threadFirst).sort((a, b) => threadFirst[a] - threadFirst[b]);
 
-    const LABEL_W = 160;
     const ROW_H = 24;
     const W = container.clientWidth - 24 || 1100;
-    const CHART_W = W - LABEL_W - 20;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
     const H = threadList.length * ROW_H + 20;
     const svg = makeSvg(container, W, H);
 
     threadList.forEach((thread, ri) => {
         const y = ri * ROW_H + 12;
         const label = svgEl('text', {
-            x: LABEL_W - 8, y: y + 4,
+            x: GRID_LABEL_W - 8, y: y + 4,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
-        label.textContent = thread.length > 24 ? thread.substring(0, 22) + '..' : thread;
+        label.textContent = thread.length > GRID_LABEL_TRUNC ? thread.substring(0, GRID_LABEL_TRUNC - 2) + '..' : thread;
+        if (thread.length > GRID_LABEL_TRUNC) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = thread; label.appendChild(t); }
         svg.appendChild(label);
 
         // Sort scenes for this thread
@@ -1343,8 +1536,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
         // Draw connecting lines
         for (let i = 1; i < scenes.length; i++) {
-            const x1 = LABEL_W + ((scenes[i-1].seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
-            const x2 = LABEL_W + ((scenes[i].seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
+            const x1 = sceneX(scenes[i-1].seq - 1, CHART_W);
+            const x2 = sceneX(scenes[i].seq - 1, CHART_W);
             const gap = scenes[i].seq - scenes[i-1].seq;
             svg.appendChild(svgEl('line', {
                 x1, y1: y, x2, y2: y,
@@ -1356,7 +1549,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
         // Draw dots
         scenes.forEach(sc => {
-            const cx = LABEL_W + ((sc.seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
+            const cx = sceneX(sc.seq - 1, CHART_W);
             const dot = svgEl('circle', {
                 cx, cy: y, r: 3.5,
                 fill: 'var(--teal)', opacity: 0.8
@@ -1513,22 +1706,22 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         .sort((a, b) => settingFreq[b] - settingFreq[a])
         .slice(0, 15);
 
-    const LABEL_W = 200;
     const ROW_H = 22;
     const W = container.clientWidth - 24 || 1100;
-    const CHART_W = W - LABEL_W - 20;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
     const H = topSettings.length * ROW_H + 20;
     const svg = makeSvg(container, W, H);
 
     topSettings.forEach((key, ri) => {
         const y = ri * ROW_H + 10;
-        const displayLabel = settingScenes[key].label.substring(0, 30) + (settingScenes[key].label.length > 30 ? '..' : '');
+        const displayLabel = settingScenes[key].label.substring(0, GRID_LABEL_TRUNC) + (settingScenes[key].label.length > GRID_LABEL_TRUNC ? '..' : '');
         const label = svgEl('text', {
-            x: LABEL_W - 8, y: y + 4,
+            x: GRID_LABEL_W - 8, y: y + 4,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
         label.textContent = displayLabel;
+        if (settingScenes[key].label.length > GRID_LABEL_TRUNC) { const t = document.createElementNS(SVG_NS, 'title'); t.textContent = settingScenes[key].label; label.appendChild(t); }
         svg.appendChild(label);
 
         const scenes = settingScenes[key].scenes.sort((a, b) => a.seq - b.seq);
@@ -1539,8 +1732,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             if (i < scenes.length && scenes[i].seq === scenes[i-1].seq + 1) continue;
             const runLen = i - runStart;
             if (runLen >= 3) {
-                const x1 = LABEL_W + ((scenes[runStart].seq - 1) / (sceneCount - 1 || 1)) * CHART_W - 4;
-                const x2 = LABEL_W + ((scenes[i-1].seq - 1) / (sceneCount - 1 || 1)) * CHART_W + 4;
+                const x1 = sceneX(scenes[runStart].seq - 1, CHART_W) - 4;
+                const x2 = sceneX(scenes[i-1].seq - 1, CHART_W) + 4;
                 svg.appendChild(svgEl('rect', {
                     x: x1, y: y - 8, width: x2 - x1, height: 16,
                     fill: 'var(--teal-bg)', rx: 3
@@ -1550,7 +1743,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         }
 
         scenes.forEach(sc => {
-            const cx = LABEL_W + ((sc.seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
+            const cx = sceneX(sc.seq - 1, CHART_W);
             const dot = svgEl('circle', {
                 cx, cy: y, r: 3,
                 fill: 'var(--teal)', opacity: 0.7
@@ -1597,11 +1790,13 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         orderedPrinciples.push(...prns);
     }
 
-    const LABEL_W = 180;
-    const CELL = 7;
-    const GAP = 1;
-    const SEC_GAP = 8;
-    const W = LABEL_W + sceneCount * (CELL + GAP) + 40;
+    const W = container.clientWidth - 24 || 1100;
+    const heatmapNarrow = window.innerWidth < 768;
+    const HEATMAP_LABEL_W = heatmapNarrow ? 0 : GRID_LABEL_W;
+    const CHART_W = W - HEATMAP_LABEL_W - GRID_RIGHT_PAD;
+    const CELL = Math.max(2, Math.floor(CHART_W / sceneCount) - 1);
+    const GAP = Math.max(1, Math.floor(CHART_W / sceneCount) - CELL);
+    const SEC_GAP = heatmapNarrow ? 2 : 8;
 
     // Calculate height with section gaps
     let totalRows = orderedPrinciples.length;
@@ -1626,34 +1821,38 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         const sec = sectionMap[principle] || 'other';
         if (sec !== currentSection) {
             if (currentSection !== '') yOffset += SEC_GAP;
-            // Section label
-            const secLabel = svgEl('text', {
-                x: 4, y: yOffset + 3,
-                'font-family': 'var(--font-mono)', 'font-size': 9,
-                'font-weight': 600, fill: 'var(--teal)',
-                'text-transform': 'uppercase'
-            });
-            secLabel.textContent = sec.replace(/_/g, ' ');
-            svg.appendChild(secLabel);
+            if (!heatmapNarrow) {
+                // Section label
+                const secLabel = svgEl('text', {
+                    x: 4, y: yOffset + 3,
+                    'font-family': 'var(--font-mono)', 'font-size': 9,
+                    'font-weight': 600, fill: 'var(--teal)',
+                    'text-transform': 'uppercase'
+                });
+                secLabel.textContent = sec.replace(/_/g, ' ');
+                svg.appendChild(secLabel);
+            }
             currentSection = sec;
         }
 
         const y = yOffset;
 
-        const label = svgEl('text', {
-            x: LABEL_W - 6, y: y + CELL / 2 + 3,
-            'text-anchor': 'end', 'font-family': 'var(--font-mono)',
-            'font-size': 9, fill: 'var(--text-dim)'
-        });
-        label.textContent = principle.replace(/_/g, ' ');
-        svg.appendChild(label);
+        if (!heatmapNarrow) {
+            const label = svgEl('text', {
+                x: GRID_LABEL_W - 6, y: y + CELL / 2 + 3,
+                'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+                'font-size': 9, fill: 'var(--text-dim)'
+            });
+            label.textContent = principle.replace(/_/g, ' ');
+            svg.appendChild(label);
+        }
 
         // Build a lookup for this principle across scenes
         sortedScenes.forEach((s, ci) => {
             const score = scoreById[s.id];
             const val = score ? score[principle] : '';
             const rect = svgEl('rect', {
-                x: LABEL_W + ci * (CELL + GAP),
+                x: HEATMAP_LABEL_W + ci * (CELL + GAP),
                 y,
                 width: CELL, height: CELL,
                 fill: scoreColor(val),
@@ -1662,20 +1861,6 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
                 style: val ? 'cursor:pointer' : ''
             });
             attachSceneHandlers(rect, s.id);
-            if (val) {
-                rect.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    var rat = sceneRationaleById[s.id];
-                    if (!rat || !rat[principle]) return;
-                    var scoreNum = parseInt(val);
-                    var html = '<div class="rationale-principle">' + formatPrincipleLabel(principle) +
-                        '<span class="rationale-score" style="color:' + scoreColor(scoreNum) + '">' + scoreNum + '/5</span>' +
-                        '</div>' +
-                        '<p><strong>' + s.seq + '. ' + s.title + '</strong></p>' +
-                        '<p>' + rat[principle] + '</p>';
-                    openRationaleDrawer('heatmap-drawer', 'Scene Craft Rationale', html);
-                });
-            }
             svg.appendChild(rect);
         });
 
@@ -1696,10 +1881,11 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     var genreRat = GENRE_RATIONALES.length > 0 ? GENRE_RATIONALES[0] : {};
     var principles = Object.keys(genreData);
 
-    var LABEL_W = 180;
+    var barNarrow = window.innerWidth < 768;
+    var LABEL_W = barNarrow ? 100 : 180;
     var BAR_H = 24;
     var BAR_GAP = 6;
-    var MAX_BAR_W = 300;
+    var MAX_BAR_W = barNarrow ? 140 : 300;
     var H = principles.length * (BAR_H + BAR_GAP) + 8;
     var W = LABEL_W + MAX_BAR_W + 60;
     var svg = makeSvg(container, W, H);
@@ -1760,13 +1946,14 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     var principles = Object.keys(CHARACTER_SCORES[0]).filter(function(k) { return k !== 'character'; });
     var chars = CHARACTER_SCORES;
 
-    var LABEL_W = 180;
+    var barNarrow = window.innerWidth < 768;
+    var LABEL_W = barNarrow ? 100 : 180;
     var BAR_H = 18;
     var BAR_GAP = 3;
     var GROUP_GAP = 16;
-    var MAX_BAR_W = 300;
+    var MAX_BAR_W = barNarrow ? 140 : 300;
     var groupH = principles.length * (BAR_H + BAR_GAP);
-    var H = chars.length * (groupH + GROUP_GAP) + 8;
+    var H = chars.length * (groupH + GROUP_GAP + 16) + 8;
     var W = LABEL_W + MAX_BAR_W + 60;
     var svg = makeSvg(container, W, H);
 
@@ -1778,7 +1965,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         var nameLabel = svgEl('text', {
             x: 4, y: yOffset + 3,
             'font-family': 'var(--font-mono)', 'font-size': 11,
-            'font-weight': 600, fill: 'var(--teal)'
+            'font-weight': 600, fill: 'var(--teal)',
+            'data-char-group': ch.character
         });
         nameLabel.textContent = ch.character;
         svg.appendChild(nameLabel);
@@ -1793,7 +1981,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             var label = svgEl('text', {
                 x: LABEL_W - 8, y: yOffset + BAR_H / 2 + 4,
                 'text-anchor': 'end', 'font-family': 'var(--font-mono)',
-                'font-size': 10, fill: 'var(--text-dim)'
+                'font-size': 10, fill: 'var(--text-dim)',
+                'data-char-group': ch.character
             });
             label.textContent = formatPrincipleLabel(p);
             svg.appendChild(label);
@@ -1803,17 +1992,12 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
                 x: LABEL_W, y: yOffset,
                 width: barW, height: BAR_H,
                 fill: color, rx: 3, opacity: 0.85,
-                style: 'cursor:pointer'
+                style: 'cursor:pointer',
+                'data-char-group': ch.character
             });
             rect.addEventListener('click', function(e) {
                 e.stopPropagation();
-                var ratText = rat[p];
-                if (!ratText) return;
-                var html = '<div class="rationale-principle">' + formatPrincipleLabel(p) +
-                    '<span class="rationale-score" style="color:' + color + '">' + score + '/5</span></div>' +
-                    '<p><strong>' + ch.character + '</strong></p>' +
-                    '<p>' + ratText + '</p>';
-                openRationaleDrawer('character-drawer', 'Character Rationale', html);
+                showAllCharacterRationales(ch.character);
             });
             svg.appendChild(rect);
 
@@ -1821,7 +2005,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             var scoreLabel = svgEl('text', {
                 x: LABEL_W + barW + 8, y: yOffset + BAR_H / 2 + 4,
                 'font-family': 'var(--font-mono)', 'font-size': 11,
-                'font-weight': 700, fill: color
+                'font-weight': 700, fill: color,
+                'data-char-group': ch.character
             });
             scoreLabel.textContent = score;
             svg.appendChild(scoreLabel);
@@ -1845,13 +2030,14 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     var principles = Object.keys(ACT_SCORES[0]).filter(function(k) { return k !== 'id'; });
     var acts = ACT_SCORES;
 
-    var LABEL_W = 200;
+    var barNarrow = window.innerWidth < 768;
+    var LABEL_W = barNarrow ? 100 : 200;
     var BAR_H = 18;
     var BAR_GAP = 3;
     var GROUP_GAP = 16;
-    var MAX_BAR_W = 280;
+    var MAX_BAR_W = barNarrow ? 140 : 280;
     var groupH = principles.length * (BAR_H + BAR_GAP);
-    var H = acts.length * (groupH + GROUP_GAP) + 8;
+    var H = acts.length * (groupH + GROUP_GAP + 16) + 8;
     var W = LABEL_W + MAX_BAR_W + 60;
     var svg = makeSvg(container, W, H);
 
@@ -1875,7 +2061,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         var nameLabel = svgEl('text', {
             x: 4, y: yOffset + 3,
             'font-family': 'var(--font-mono)', 'font-size': 11,
-            'font-weight': 600, fill: 'var(--teal)'
+            'font-weight': 600, fill: 'var(--teal)',
+            'data-act-group': act.id
         });
         nameLabel.textContent = act.id.replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
         svg.appendChild(nameLabel);
@@ -1890,7 +2077,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             var label = svgEl('text', {
                 x: LABEL_W - 8, y: yOffset + BAR_H / 2 + 4,
                 'text-anchor': 'end', 'font-family': 'var(--font-mono)',
-                'font-size': 10, fill: 'var(--text-dim)'
+                'font-size': 10, fill: 'var(--text-dim)',
+                'data-act-group': act.id
             });
             label.textContent = FRAMEWORK_LABELS[p] || formatPrincipleLabel(p);
             svg.appendChild(label);
@@ -1900,18 +2088,12 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
                 x: LABEL_W, y: yOffset,
                 width: barW, height: BAR_H,
                 fill: color, rx: 3, opacity: 0.85,
-                style: 'cursor:pointer'
+                style: 'cursor:pointer',
+                'data-act-group': act.id
             });
             rect.addEventListener('click', function(e) {
                 e.stopPropagation();
-                var ratText = rat[p];
-                if (!ratText) return;
-                var actLabel = act.id.replace(/-/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-                var html = '<div class="rationale-principle">' + (FRAMEWORK_LABELS[p] || formatPrincipleLabel(p)) +
-                    '<span class="rationale-score" style="color:' + color + '">' + score + '/5</span></div>' +
-                    '<p><strong>' + actLabel + '</strong></p>' +
-                    '<p>' + ratText + '</p>';
-                openRationaleDrawer('act-drawer', 'Act Rationale', html);
+                showAllActRationales(act.id);
             });
             svg.appendChild(rect);
 
@@ -1919,7 +2101,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             var scoreLabel = svgEl('text', {
                 x: LABEL_W + barW + 8, y: yOffset + BAR_H / 2 + 4,
                 'font-family': 'var(--font-mono)', 'font-size': 11,
-                'font-weight': 700, fill: color
+                'font-weight': 700, fill: color,
+                'data-act-group': act.id
             });
             scoreLabel.textContent = score;
             svg.appendChild(scoreLabel);
@@ -2111,30 +2294,30 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         return;
     }
 
-    const LABEL_W = 160;
     const ROW_H = 22;
     const DENSITY_H = 24;
     const W = container.clientWidth - 24 || 1100;
-    const CHART_W = W - LABEL_W - 20;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
     const H = motifList.length * ROW_H + DENSITY_H + 30;
     const svg = makeSvg(container, W, H);
 
     motifList.forEach((motif, ri) => {
         const y = ri * ROW_H + 10;
         const label = svgEl('text', {
-            x: LABEL_W - 8, y: y + 4,
+            x: GRID_LABEL_W - 8, y: y + 4,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
-        label.textContent = motif.length > 24 ? motif.substring(0, 22) + '..' : motif;
+        label.textContent = motif.length > GRID_LABEL_TRUNC ? motif.substring(0, GRID_LABEL_TRUNC - 2) + '..' : motif;
+        if (motif.length > GRID_LABEL_TRUNC) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = motif; label.appendChild(t); }
         svg.appendChild(label);
 
         const scenes = (motifScenes[motif] || []).sort((a, b) => a.seq - b.seq);
 
         // Lines
         for (let i = 1; i < scenes.length; i++) {
-            const x1 = LABEL_W + ((scenes[i-1].seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
-            const x2 = LABEL_W + ((scenes[i].seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
+            const x1 = sceneX(scenes[i-1].seq - 1, CHART_W);
+            const x2 = sceneX(scenes[i].seq - 1, CHART_W);
             const gap = scenes[i].seq - scenes[i-1].seq;
             svg.appendChild(svgEl('line', {
                 x1, y1: y, x2, y2: y,
@@ -2146,7 +2329,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
         // Dots
         scenes.forEach(sc => {
-            const cx = LABEL_W + ((sc.seq - 1) / (sceneCount - 1 || 1)) * CHART_W;
+            const cx = sceneX(sc.seq - 1, CHART_W);
             const dot = svgEl('circle', {
                 cx, cy: y, r: 3,
                 fill: 'var(--type-confrontation)', opacity: 0.7
@@ -2169,7 +2352,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     // Density label
     svg.appendChild(svgEl('text', {
-        x: LABEL_W - 8, y: densityY + DENSITY_H / 2 + 3,
+        x: GRID_LABEL_W - 8, y: densityY + DENSITY_H / 2 + 3,
         'text-anchor': 'end', 'font-family': 'var(--font-mono)',
         'font-size': 9, fill: 'var(--text-dim)'
     })).textContent = 'density';
@@ -2177,7 +2360,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     sortedScenes.forEach((s, i) => {
         const h = (density[i] / maxDensity) * DENSITY_H;
         const rect = svgEl('rect', {
-            x: LABEL_W + (i / sceneCount) * CHART_W,
+            x: GRID_LABEL_W + (i / sceneCount) * CHART_W,
             y: densityY + DENSITY_H - h,
             width: Math.max(CHART_W / sceneCount - 1, 2),
             height: h,
@@ -2192,7 +2375,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     // Note universal motifs that were suppressed
     if (universalMotifs.length > 0) {
         const note = document.createElement('div');
-        note.style.cssText = 'padding:4px 0 0 ' + LABEL_W + 'px;color:var(--text-dim);font-size:11px;font-family:var(--font-mono)';
+        note.style.cssText = 'padding:4px 0 0 ' + GRID_LABEL_W + 'px;color:var(--text-dim);font-size:11px;font-family:var(--font-mono)';
         note.textContent = 'Universal (>90%): ' + universalMotifs.join(', ');
         container.appendChild(note);
     }
@@ -2209,8 +2392,9 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     document.getElementById('timeline-section').style.display = '';
     const container = document.getElementById('timeline-scatter');
     const W = container.clientWidth - 24 || 1100;
+    const timeNarrow = window.innerWidth < 768;
     const H = 260;
-    const PAD_L = 60, PAD_R = 20, PAD_T = 16, PAD_B = 32;
+    const PAD_L = timeNarrow ? 20 : 60, PAD_R = 20, PAD_T = 16, PAD_B = timeNarrow ? 16 : 32;
     const svg = makeSvg(container, W, H);
 
     const days = sortedScenes.map(s => parseFloat(s.timeline_day) || 0);
@@ -2231,16 +2415,18 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     });
 
     // Axes
-    svg.appendChild(svgEl('text', {
-        x: W / 2, y: H - 4, 'text-anchor': 'middle',
-        'font-family': 'var(--font-mono)', 'font-size': 10, fill: 'var(--text-dim)'
-    })).textContent = 'Reading Order →';
+    if (!timeNarrow) {
+        svg.appendChild(svgEl('text', {
+            x: W / 2, y: H - 4, 'text-anchor': 'middle',
+            'font-family': 'var(--font-mono)', 'font-size': 10, fill: 'var(--text-dim)'
+        })).textContent = 'Reading Order →';
 
-    svg.appendChild(svgEl('text', {
-        x: 12, y: H / 2, 'text-anchor': 'middle',
-        'font-family': 'var(--font-mono)', 'font-size': 10, fill: 'var(--text-dim)',
-        transform: `rotate(-90, 12, ${H/2})`
-    })).textContent = 'Timeline Day →';
+        svg.appendChild(svgEl('text', {
+            x: 12, y: H / 2, 'text-anchor': 'middle',
+            'font-family': 'var(--font-mono)', 'font-size': 10, fill: 'var(--text-dim)',
+            transform: `rotate(-90, 12, ${H/2})`
+        })).textContent = 'Timeline Day →';
+    }
 
     // Grid lines
     for (let i = 0; i <= 4; i++) {
