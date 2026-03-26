@@ -1573,9 +1573,24 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
                 width: CELL, height: CELL,
                 fill: scoreColor(val),
                 rx: 1,
-                opacity: val ? 0.85 : 0.15
+                opacity: val ? 0.85 : 0.15,
+                style: val ? 'cursor:pointer' : ''
             });
             attachSceneHandlers(rect, s.id);
+            if (val) {
+                rect.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var rat = sceneRationaleById[s.id];
+                    if (!rat || !rat[principle]) return;
+                    var scoreNum = parseInt(val);
+                    var html = '<div class="rationale-principle">' + formatPrincipleLabel(principle) +
+                        '<span class="rationale-score" style="color:' + scoreColor(scoreNum) + '">' + scoreNum + '/5</span>' +
+                        '</div>' +
+                        '<p><strong>' + s.seq + '. ' + s.title + '</strong></p>' +
+                        '<p>' + rat[principle] + '</p>';
+                    openRationaleDrawer('heatmap-drawer', 'Scene Craft Rationale', html);
+                });
+            }
             svg.appendChild(rect);
         });
 
