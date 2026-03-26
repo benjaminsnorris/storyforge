@@ -1684,15 +1684,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             if (val) {
                 rect.addEventListener('click', function(e) {
                     e.stopPropagation();
-                    var rat = sceneRationaleById[s.id];
-                    if (!rat || !rat[principle]) return;
-                    var scoreNum = parseInt(val);
-                    var html = '<div class="rationale-principle">' + formatPrincipleLabel(principle) +
-                        '<span class="rationale-score" style="color:' + scoreColor(scoreNum) + '">' + scoreNum + '/5</span>' +
-                        '</div>' +
-                        '<p><strong>' + s.seq + '. ' + s.title + '</strong></p>' +
-                        '<p>' + rat[principle] + '</p>';
-                    openRationaleDrawer('heatmap-drawer', 'Scene Craft Rationale', html);
+                    if (sceneRationaleById[s.id]) showAllRationales(s.id);
                 });
             }
             svg.appendChild(rect);
