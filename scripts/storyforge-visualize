@@ -573,10 +573,10 @@ body {
     .detail-panel .panel-controls { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
     .detail-panel .minimize-btn { display: inline-block; }
     .detail-panel .desktop-close { display: none; }
+    .detail-panel h3 { display: none; }
     .detail-panel.minimized #detail-content { display: none; }
     .detail-panel.minimized .panel-controls { padding: 10px 16px; }
-    .detail-panel.minimized #panel-mini-title { display: inline; }
-    .detail-panel:not(.minimized) #panel-mini-title { display: none; }
+    #panel-mini-title { display: inline; }
 
     .detail-panel .minimize-btn {
         background: none;
