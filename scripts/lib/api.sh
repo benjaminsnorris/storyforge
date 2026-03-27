@@ -84,7 +84,8 @@ JSONEOF
     # Make the API call.
     # Write http_code to a temp file so we can background curl and still
     # capture it (command substitution doesn't work with background jobs).
-    local http_code_file="${TMPDIR:-/tmp}/storyforge-http-code-$$.txt"
+    local http_code_file
+    http_code_file=$(mktemp "${TMPDIR:-/tmp}/storyforge-http-code-XXXXXX")
     (
         curl -s -w "%{http_code}" -o "$log_file" \
             "https://api.anthropic.com/v1/messages" \
