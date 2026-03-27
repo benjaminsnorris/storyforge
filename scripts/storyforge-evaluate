@@ -82,6 +82,7 @@ CORE_EVALUATORS=(
 
 DRY_RUN=false
 INTERACTIVE=false
+FINAL_EVAL=false
 EVAL_MODE="batch"       # batch | direct | interactive
 FILTER_MODE="all"       # all | act | range | single | scenes | from_seq | manuscript | chapter
 FILTER_VALUE=""
@@ -108,6 +109,7 @@ Scope:
   --from-seq N-M                Evaluate scenes in sequence range N through M
 
 Options:
+  --final                       Final evaluation before beta readers (shifts evaluator lens)
   --interactive                 Supervise the synthesis step interactively
   --direct                      Use direct API calls instead of batch (default: batch)
   --dry-run                     Print prompts without invoking Claude
@@ -137,6 +139,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --final)
+            FINAL_EVAL=true
             shift
             ;;
         --interactive|-i)
@@ -487,6 +493,45 @@ $(cat "$sf_path")
         done
     fi
 
+    # Build final evaluation context block (if --final flag is set)
+    local final_eval_block=""
+    if [[ "$FINAL_EVAL" == true ]]; then
+        final_eval_block="===== EVALUATION CONTEXT =====
+
+This is a final evaluation. The author plans to send this manuscript to beta
+readers after this cycle. Evaluate with that lens:
+
+- Focus on issues that outside readers would notice, stumble on, or be
+  confused by.
+- Minor craft refinements that wouldn't affect a reader's experience should
+  be noted briefly but should not dominate your report or be prioritized
+  highly.
+- Assess whether this manuscript is ready for outside eyes. What would
+  embarrass the book in front of readers who don't know the author?
+
+"
+        case "$evaluator" in
+            first-reader)
+                final_eval_block+="Your perspective is the closest proxy for these beta readers — be explicit about where you'd put the book down, where you'd lose trust, and where you'd text a friend to say they have to read this."
+                ;;
+            developmental-editor)
+                final_eval_block+="Focus on structural issues that would leave a reader feeling the story didn't hold together — dropped threads, unearned turns, pacing dead zones. Save fine-grained scene function notes for a future pass."
+                ;;
+            line-editor)
+                final_eval_block+="Focus on prose issues that would pull a non-specialist reader out of the story — confusing sentences, jarring tense shifts, dialogue that rings false. Pattern-level tics that only another writer would notice can be flagged briefly."
+                ;;
+            genre-expert)
+                final_eval_block+="Focus on where genre readers' expectations would be violated in ways that feel like mistakes rather than deliberate subversions. Would a reader of this genre feel they got what they came for?"
+                ;;
+            literary-agent)
+                final_eval_block+="Assess this as if the author is about to share it with a small group before querying. What would you want fixed before anyone outside the author's circle sees it."
+                ;;
+            writing-coach)
+                final_eval_block+="This is the last evaluation before outside readers. Focus your guidance on what the author should protect during any final touch-ups, and flag only growth edges that are actively visible to readers — not long-term craft development."
+                ;;
+        esac
+    fi
+
     cat <<EVAL_PROMPT
 You are evaluating the manuscript of "${PROJECT_TITLE}."
 
@@ -510,6 +555,8 @@ $(if [[ -n "$VOICE_GUIDE_CONTENT" ]]; then
 else
     echo "No voice guide provided. Evaluate the prose on its own terms."
 fi)
+
+${final_eval_block}
 
 $(if [[ "$api_mode" == true ]]; then
     cat <<APIFILES
@@ -1116,6 +1163,24 @@ export _SF_INVOCATION_START
 
 begin_healing_zone "evaluation synthesis"
 
+# Build beta reader readiness section for synthesis (if --final)
+SYNTH_READINESS=""
+if [[ "$FINAL_EVAL" == true ]]; then
+    SYNTH_READINESS="
+## Beta Reader Readiness
+
+Assess whether this manuscript is ready for beta readers. Use one of these three ratings:
+
+**Ready with high confidence** — The manuscript is solid. Beta readers will engage with the story on its own terms. Any remaining issues are minor and won't undermine the reading experience.
+
+**Ready with reservations** — The manuscript can go to beta readers, but certain issues may surface in their feedback. List what those issues are and what the author should expect to hear.
+
+**Not ready** — There are issues that should be addressed before outside readers see this. List the specific blockers and why they matter.
+
+Whichever rating you choose, explain your reasoning in 2-3 paragraphs. Ground it in the evaluator reports — this should feel like a synthesis judgment, not a new opinion.
+"
+fi
+
 # Build list of available reports for the synthesis prompt
 REPORT_LIST=""
 for EVAL_NAME in "${SUCCEEDED[@]}"; do
@@ -1177,6 +1242,8 @@ Elements that evaluators praised and that must be preserved in any further revis
 
 ## Overall Assessment
 A brief (2-3 paragraph) synthesis of where the manuscript stands. Be direct.
+
+${SYNTH_READINESS}
 
 --- FILE 2: findings.yaml ---
 
@@ -1332,6 +1399,8 @@ Elements that evaluators praised and that must be preserved in any further revis
 
 ## Overall Assessment
 A brief (2-3 paragraph) synthesis of where the manuscript stands. Be direct.
+
+${SYNTH_READINESS}
 
 --- END synthesis.md ---
 
