@@ -159,6 +159,11 @@ def load_dashboard_data(project_dir: str) -> dict:
 
     scenes = csv_to_records(metadata_csv)
 
+    # Normalize 'setting' column to 'location' for dashboard JS compatibility
+    for scene in scenes:
+        if 'setting' in scene and 'location' not in scene:
+            scene['location'] = scene['setting']
+
     title = _read_yaml_field(project_dir, 'project.title')
     if not title:
         title = _read_yaml_field(project_dir, 'title')
