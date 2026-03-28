@@ -780,8 +780,7 @@ for EVAL in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
 "
 done
 PR_BODY="${PR_BODY}- [ ] Synthesis
-- [ ] Assessment
-- [ ] Review"
+- [ ] Assessment"
 
 create_draft_pr "Evaluate: ${PROJECT_TITLE} (${SCOPE_DESCRIPTION})" "$PR_BODY" "$PROJECT_DIR" "evaluation"
 
@@ -1726,8 +1725,13 @@ print_cost_summary "evaluate"
 print_cost_summary "synthesize"
 print_cost_summary "assess"
 
-# --- Review phase ---
-run_review_phase "evaluation" "$PROJECT_DIR"
+# Skip review phase — evaluation is self-contained (synthesis + assessment)
+
+# Mark cycle complete
+CYCLE_ID_CHECK=$(get_current_cycle)
+if [[ "$CYCLE_ID_CHECK" != "0" ]]; then
+    update_cycle_field "$CYCLE_ID_CHECK" "status" "complete"
+fi
 
 # Clean up interactive file
 rm -f "${PROJECT_DIR}/working/.interactive"
