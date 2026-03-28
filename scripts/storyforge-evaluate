@@ -454,28 +454,6 @@ build_eval_prompt() {
         persona="${persona//\{GENRE\}/fiction}"
     fi
 
-    # Build reference file content (inline for API mode, list for interactive)
-    local ref_files=""
-    local ref_inline=""
-    for ref in "reference/key-decisions.md" \
-               "reference/voice-guide.md" "references/voice-guide.md" \
-               "reference/story-architecture.md" "references/story-architecture.md" \
-               "reference/character-bible.md" "references/character-bible.md"; do
-        if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
-            ref_files="${ref_files}   - ${ref}
-"
-            if [[ "$api_mode" == true ]]; then
-                ref_inline="${ref_inline}
-===== REFERENCE: ${ref} =====
-
-$(cat "${PROJECT_DIR}/${ref}")
-
-===== END REFERENCE: ${ref} =====
-"
-            fi
-        fi
-    done
-
     # Build inline manuscript content for API mode
     local manuscript_inline=""
     if [[ "$api_mode" == true ]]; then
@@ -546,16 +524,6 @@ Evaluation scope: ${SCOPE_DESCRIPTION}
 
 ${persona}
 
-===== VOICE GUIDE =====
-
-$(if [[ -n "$VOICE_GUIDE_CONTENT" ]]; then
-    echo "The author's voice guide for this project:"
-    echo ""
-    echo "$VOICE_GUIDE_CONTENT"
-else
-    echo "No voice guide provided. Evaluate the prose on its own terms."
-fi)
-
 ${final_eval_block}
 
 $(if [[ "$api_mode" == true ]]; then
@@ -564,13 +532,9 @@ $(if [[ "$api_mode" == true ]]; then
 
 ${manuscript_inline}
 
-===== REFERENCE FILES =====
-
-${ref_inline}
-
 ===== INSTRUCTIONS =====
 
-The manuscript and reference files are provided above. Evaluate the manuscript following the structure defined in your role description.
+The manuscript is provided above. Evaluate it following the structure defined in your role description.
 
 APIFILES
 else
@@ -583,17 +547,13 @@ else
     echo "1. Read the scene files that comprise the evaluation scope. Read them in order:"
 fi)
 ${SCENE_LIST_STR}
-2. Also read these reference files for context (if they exist):
-${ref_files}
 CLIFILES
 fi)
 
-IMPORTANT: If \`reference/key-decisions.md\` exists, it is the authoritative record of the author's creative decisions. When a key decision contradicts information in other reference files (character bible, story architecture, voice guide, etc.), the key decision takes precedence — the author has deliberately superseded the earlier material. Do not flag contradictions between key decisions and other reference files as issues. Evaluate the manuscript against the key decisions, not against outdated reference material.
-
 $(if [[ "$api_mode" != true ]]; then
-    echo "3. Write your evaluation report following the structure defined in your role description above."
+    echo "2. Write your evaluation report following the structure defined in your role description above."
     echo ""
-    echo "4. Save your report to: working/evaluations/eval-${EVAL_TIMESTAMP}/${evaluator}.md"
+    echo "3. Save your report to: working/evaluations/eval-${EVAL_TIMESTAMP}/${evaluator}.md"
     echo ""
 fi)
 $(if [[ "$INPUT_TYPE" == "chapters" ]]; then
@@ -758,13 +718,26 @@ if [[ "$DRY_RUN" == true ]]; then
     fi
 
     # Synthesis prompt (placeholder — full synthesis depends on evaluator output)
-    echo "===== DRY RUN: synthesis ====="
-    echo "# Synthesis prompt would read reports from: working/evaluations/eval-${EVAL_TIMESTAMP}/"
+    echo "===== DRY RUN: synthesis (Pass 1 — reconciliation) ====="
+    echo "# Reconciliation prompt would read reports from: working/evaluations/eval-${EVAL_TIMESTAMP}/"
     echo "# Evaluators: ${CORE_EVALUATORS[*]}"
+    echo "# No reference files — pure panel feedback synthesis"
     if [[ "$DRY_RUN_API" == true ]]; then
-        echo "# Mode: direct API (reports will be inlined in synthesis prompt)"
+        echo "# Mode: direct API (reports will be inlined in prompt)"
     fi
     echo "===== END DRY RUN: synthesis ====="
+    echo ""
+
+    # Assessment prompt (placeholder — depends on synthesis output + reference files)
+    echo "===== DRY RUN: assessment (Pass 2 — execution vs. intent) ====="
+    echo "# Assessment reads: synthesis.md + reference files"
+    echo "# Reference files checked: key-decisions.md, voice-guide.md, story-architecture.md"
+    echo "# Sections: Voice Guide Alignment, Story Architecture Alignment, Key Decisions Audit, Revised Priorities"
+    if [[ "$FINAL_EVAL" == true ]]; then
+        echo "# --final: includes Beta Reader Readiness section"
+    fi
+    echo "# Skipped if no reference files exist"
+    echo "===== END DRY RUN: assessment ====="
     exit 0
 fi
 
@@ -807,6 +780,7 @@ for EVAL in "${CUSTOM_EVALUATOR_NAMES[@]}"; do
 "
 done
 PR_BODY="${PR_BODY}- [ ] Synthesis
+- [ ] Assessment
 - [ ] Review"
 
 create_draft_pr "Evaluate: ${PROJECT_TITLE} (${SCOPE_DESCRIPTION})" "$PR_BODY" "$PROJECT_DIR" "evaluation"
@@ -1188,19 +1162,10 @@ for EVAL_NAME in "${SUCCEEDED[@]}"; do
 "
 done
 
-# Build reference file list for synthesis
-SYNTH_REF_FILES=""
-for ref in "reference/key-decisions.md" \
-           "reference/voice-guide.md" "references/voice-guide.md" \
-           "reference/story-architecture.md" "references/story-architecture.md"; do
-    if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
-        SYNTH_REF_FILES="${SYNTH_REF_FILES}   - ${ref}
-"
-    fi
-done
-
 read -r -d '' SYNTHESIS_PROMPT <<SYNTH_EOF || true
-You are synthesizing the evaluation reports from a multi-agent review panel for "${PROJECT_TITLE}."
+You are reconciling the evaluation reports from a multi-agent review panel for "${PROJECT_TITLE}."
+
+Your job is to synthesize what the panel said — consensus, disagreements, and priorities. Do not filter or reinterpret findings based on the author's intentions. Report what the evaluators experienced.
 
 ===== PROJECT CONTEXT =====
 
@@ -1213,10 +1178,7 @@ Evaluation scope: ${SCOPE_DESCRIPTION}
 
 1. Read ALL of the following evaluation reports:
 ${REPORT_LIST}
-2. Also read the manuscript reference files for context:
-${SYNTH_REF_FILES}
-IMPORTANT: If \`reference/key-decisions.md\` exists, it is the authoritative record of the author's creative decisions. When a key decision contradicts information in other reference files, the key decision takes precedence. If an evaluator flagged something that is actually consistent with a key decision, note it as a false positive in the synthesis — do not carry it forward as a finding.
-3. Produce TWO output files:
+2. Produce TWO output files:
 
 --- FILE 1: synthesis.md ---
 
@@ -1242,8 +1204,6 @@ Elements that evaluators praised and that must be preserved in any further revis
 
 ## Overall Assessment
 A brief (2-3 paragraph) synthesis of where the manuscript stands. Be direct.
-
-${SYNTH_READINESS}
 
 --- FILE 2: findings.yaml ---
 
@@ -1336,25 +1296,11 @@ $(cat "$REPORT_FILE")
         fi
     done
 
-    # Also inline reference files
-    SYNTH_INLINE_REFS=""
-    for ref in "reference/key-decisions.md" \
-               "reference/voice-guide.md" "references/voice-guide.md" \
-               "reference/story-architecture.md" "references/story-architecture.md"; do
-        if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
-            SYNTH_INLINE_REFS="${SYNTH_INLINE_REFS}
-===== REFERENCE: ${ref} =====
-
-$(cat "${PROJECT_DIR}/${ref}")
-
-===== END REFERENCE: ${ref} =====
-"
-        fi
-    done
-
     # Build API-mode synthesis prompt (replaces file-reading instructions with inline content)
     read -r -d '' SYNTH_API_PROMPT <<SYNTH_API_EOF || true
-You are synthesizing the evaluation reports from a multi-agent review panel for "${PROJECT_TITLE}."
+You are reconciling the evaluation reports from a multi-agent review panel for "${PROJECT_TITLE}."
+
+Your job is to synthesize what the panel said — consensus, disagreements, and priorities. Do not filter or reinterpret findings based on the author's intentions. Report what the evaluators experienced.
 
 ===== PROJECT CONTEXT =====
 
@@ -1367,13 +1313,7 @@ Evaluation scope: ${SCOPE_DESCRIPTION}
 
 ${SYNTH_INLINE_REPORTS}
 
-===== REFERENCE FILES =====
-
-${SYNTH_INLINE_REFS}
-
 ===== INSTRUCTIONS =====
-
-IMPORTANT: If a \`key-decisions\` reference was provided above, it is the authoritative record of the author's creative decisions. When a key decision contradicts information in other reference files, the key decision takes precedence. If an evaluator flagged something that is actually consistent with a key decision, note it as a false positive in the synthesis — do not carry it forward as a finding.
 
 Produce TWO sections in your response, clearly delimited:
 
@@ -1399,8 +1339,6 @@ Elements that evaluators praised and that must be preserved in any further revis
 
 ## Overall Assessment
 A brief (2-3 paragraph) synthesis of where the manuscript stands. Be direct.
-
-${SYNTH_READINESS}
 
 --- END synthesis.md ---
 
@@ -1529,6 +1467,194 @@ if [[ -f "${EVAL_DIR}/findings.yaml" ]]; then
 fi
 
 # ============================================================================
+# Pass 2: Assessment — execution vs. intent (only if reference files exist)
+# ============================================================================
+
+# Collect available reference files for assessment
+ASSESS_REF_LIST=()
+for ref in "reference/key-decisions.md" \
+           "reference/voice-guide.md" "references/voice-guide.md" \
+           "reference/story-architecture.md" "references/story-architecture.md"; do
+    if [[ -f "${PROJECT_DIR}/${ref}" ]]; then
+        ASSESS_REF_LIST+=("$ref")
+    fi
+done
+
+if (( ${#ASSESS_REF_LIST[@]} > 0 )); then
+    log "Running assessment pass (${#ASSESS_REF_LIST[@]} reference files)..."
+    ASSESS_LOG="${LOG_DIR}/eval-assessment.log"
+    ASSESS_START=$(date +%s)
+    ASSESS_MODEL=$(select_model "synthesis")
+
+    _SF_INVOCATION_START=$(date +%s)
+    export _SF_INVOCATION_START
+
+    begin_healing_zone "evaluation assessment"
+
+    # Build reference file content for assessment
+    ASSESS_REF_FILE_LIST=""
+    ASSESS_REF_INLINE=""
+    for ref in "${ASSESS_REF_LIST[@]}"; do
+        ASSESS_REF_FILE_LIST="${ASSESS_REF_FILE_LIST}   - ${ref}
+"
+        ASSESS_REF_INLINE="${ASSESS_REF_INLINE}
+===== REFERENCE: ${ref} =====
+
+$(cat "${PROJECT_DIR}/${ref}")
+
+===== END REFERENCE: ${ref} =====
+"
+    done
+
+    # Determine which assessment sections to include based on available files
+    ASSESS_VOICE_SECTION=""
+    ASSESS_ARCH_SECTION=""
+    ASSESS_DECISIONS_SECTION=""
+    for ref in "${ASSESS_REF_LIST[@]}"; do
+        case "$ref" in
+            *voice-guide*)
+                ASSESS_VOICE_SECTION="## Voice Guide Alignment
+Did the prose deliver the voice described in the voice guide? Where did evaluators feel it working, where did they feel it breaking?"
+                ;;
+            *story-architecture*)
+                ASSESS_ARCH_SECTION="## Story Architecture Alignment
+Did the structural intentions land? Did the arcs, turning points, and thematic throughlines that the architecture describes actually register with the panel?"
+                ;;
+            *key-decisions*)
+                ASSESS_DECISIONS_SECTION="## Key Decisions Audit
+Which deliberate choices read as intentional to the panel? Which read as mistakes? For the ones that read as mistakes — is it an execution problem or just the inherent friction of a subversion?"
+                ;;
+        esac
+    done
+
+    ASSESS_SECTIONS="${ASSESS_VOICE_SECTION}
+
+${ASSESS_ARCH_SECTION}
+
+${ASSESS_DECISIONS_SECTION}
+
+## Revised Priorities
+In light of the author's intentions, which findings from the reconciliation are the most important to address? Which can be set aside because they conflict with deliberate choices that are landing well enough?"
+
+    if [[ "$EVAL_MODE" == "interactive" ]]; then
+        # Interactive assessment
+        read -r -d '' ASSESS_PROMPT <<ASSESS_EOF || true
+You are assessing the manuscript's execution against the author's stated intentions for "${PROJECT_TITLE}."
+
+The evaluation panel has already read the manuscript cold and provided their reports. A reconciliation of their feedback has been produced. Now you will compare what the panel experienced against what the author intended.
+
+===== PROJECT CONTEXT =====
+
+Title: ${PROJECT_TITLE}
+Genre: ${GENRE_DISPLAY:-Not specified}
+Evaluation scope: ${SCOPE_DESCRIPTION}
+
+===== INSTRUCTIONS =====
+
+1. Read the reconciliation report:
+   - working/evaluations/eval-${EVAL_TIMESTAMP}/synthesis.md
+2. Read the author's reference files:
+${ASSESS_REF_FILE_LIST}
+3. Produce an assessment report with these sections:
+
+${ASSESS_SECTIONS}
+
+${SYNTH_READINESS}
+
+4. Save your report to: working/evaluations/eval-${EVAL_TIMESTAMP}/assessment.md
+
+After saving, stage and commit:
+
+  git add "working/evaluations/eval-${EVAL_TIMESTAMP}/assessment.md"
+  git commit -m "Evaluate: assessment (${SCOPE_DESCRIPTION})"
+  git push
+ASSESS_EOF
+
+        show_interactive_banner "Evaluation Assessment"
+        ASSESS_SYSTEM=$(build_interactive_system_prompt "$PROJECT_DIR" "assessment")
+
+        claude "$ASSESS_PROMPT" \
+            --model "$ASSESS_MODEL" \
+            --dangerously-skip-permissions \
+            --append-system-prompt "$ASSESS_SYSTEM" || false
+    else
+        # API-mode assessment — inline synthesis.md and reference files
+        SYNTH_CONTENT=""
+        if [[ -f "${EVAL_DIR}/synthesis.md" ]]; then
+            SYNTH_CONTENT=$(cat "${EVAL_DIR}/synthesis.md")
+        fi
+
+        read -r -d '' ASSESS_API_PROMPT <<ASSESS_API_EOF || true
+You are assessing the manuscript's execution against the author's stated intentions for "${PROJECT_TITLE}."
+
+The evaluation panel has already read the manuscript cold and provided their reports. A reconciliation of their feedback has been produced. Now you will compare what the panel experienced against what the author intended.
+
+===== PROJECT CONTEXT =====
+
+Title: ${PROJECT_TITLE}
+Genre: ${GENRE_DISPLAY:-Not specified}
+Evaluation scope: ${SCOPE_DESCRIPTION}
+
+===== RECONCILIATION =====
+
+${SYNTH_CONTENT}
+
+===== AUTHOR'S REFERENCE FILES =====
+
+${ASSESS_REF_INLINE}
+
+===== INSTRUCTIONS =====
+
+Produce a single assessment report with these sections:
+
+${ASSESS_SECTIONS}
+
+${SYNTH_READINESS}
+
+===== OUTPUT =====
+
+Output your complete assessment report directly. Do not include any preamble or explanation — just the assessment report content.
+ASSESS_API_EOF
+
+        log "Running assessment via direct API (model: ${ASSESS_MODEL})..."
+
+        invoke_anthropic_api "$ASSESS_API_PROMPT" "$ASSESS_MODEL" "$ASSESS_LOG" 8192 || false
+
+        # Parse the API response and save assessment.md
+        ASSESS_RESPONSE=$(extract_api_response "$ASSESS_LOG" || true)
+        if [[ -n "$ASSESS_RESPONSE" ]]; then
+            echo "$ASSESS_RESPONSE" > "${EVAL_DIR}/assessment.md"
+        fi
+    fi
+
+    ASSESS_END=$(date +%s)
+    ASSESS_DURATION=$(( ASSESS_END - ASSESS_START ))
+    ASSESS_MINS=$(( ASSESS_DURATION / 60 ))
+    ASSESS_SECS=$(( ASSESS_DURATION % 60 ))
+
+    # Verify assessment output
+    if [[ -f "${EVAL_DIR}/assessment.md" ]]; then
+        ASSESS_WORDS=$(wc -w < "${EVAL_DIR}/assessment.md" | tr -d ' ')
+        log "SUCCESS: Assessment complete (${ASSESS_WORDS} words, ${ASSESS_MINS}m${ASSESS_SECS}s)"
+    else
+        log "WARNING: assessment.md not created"
+    fi
+
+    end_healing_zone
+
+    # Log assessment usage
+    if [[ "$EVAL_MODE" == "interactive" ]]; then
+        log_usage "$ASSESS_LOG" "assess" "assessment" "$ASSESS_MODEL"
+    else
+        log_api_usage "$ASSESS_LOG" "assess" "assessment" "$ASSESS_MODEL"
+    fi
+
+    update_pr_task "Assessment" "$PROJECT_DIR"
+else
+    log "No reference files found — skipping assessment pass"
+fi
+
+# ============================================================================
 # Git commit all evaluation files
 # ============================================================================
 
@@ -1576,6 +1702,9 @@ log "  Project: ${PROJECT_TITLE}"
 log "  Scope: ${SCOPE_DESCRIPTION}"
 log "  Reports: ${EVAL_DIR}/"
 log "  Succeeded: ${#SUCCEEDED[@]}/${ALL_EVALUATOR_COUNT} evaluators + synthesis"
+if [[ -f "${EVAL_DIR}/assessment.md" ]]; then
+    log "  Assessment: yes (execution vs. intent)"
+fi
 if [[ ${#FAILED[@]} -gt 0 ]]; then
     log "  Failed: ${FAILED[*]}"
 fi
@@ -1584,6 +1713,9 @@ log "============================================"
 log ""
 log "Next steps:"
 log "  Read the synthesis:  cat ${EVAL_DIR}/synthesis.md"
+if [[ -f "${EVAL_DIR}/assessment.md" ]]; then
+    log "  Read the assessment: cat ${EVAL_DIR}/assessment.md"
+fi
 if [[ -f "${EVAL_DIR}/findings.yaml" ]]; then
     log "  Browse findings:    cat ${EVAL_DIR}/findings.yaml"
 fi
@@ -1592,6 +1724,7 @@ log "  Read individual:    ls ${EVAL_DIR}/"
 # --- Cost summary ---
 print_cost_summary "evaluate"
 print_cost_summary "synthesize"
+print_cost_summary "assess"
 
 # --- Review phase ---
 run_review_phase "evaluation" "$PROJECT_DIR"
