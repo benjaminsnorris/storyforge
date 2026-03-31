@@ -91,9 +91,9 @@ Required artifacts that don't exist yet:
 - **Character bible missing** → Recommend `/storyforge:develop` focused on character development. Be specific: "Build the character bible — start with your protagonist's wound/lie/need structure."
 - **World bible missing** → Recommend `/storyforge:develop` focused on world-building.
 - **Story architecture missing** → Recommend `/storyforge:develop` focused on story structure.
-- **Scene metadata sparse** → If `reference/scene-metadata.csv` and `reference/scene-intent.csv` have many empty fields (type, characters, threads, motifs, emotional_arc), recommend `/storyforge:scenes` for enrichment. "Your scene metadata is sparse — enrichment will populate characters, threads, motifs, and emotional arcs, which unlocks the full dashboard."
+- **Scene metadata sparse** → If `reference/scene-metadata.csv` and `reference/scene-intent.csv` have many empty fields (type, characters, threads, motifs, emotional_arc), recommend enrichment: prompt the author to run `./storyforge enrich` in their terminal. "Your scene metadata is sparse — enrichment will populate characters, threads, motifs, and emotional arcs, which unlocks the full dashboard."
 - **Scene files need setup** → If scene files have numeric names, or if chapters exist but scene files don't, recommend `/storyforge:scenes` for setup.
-- **Dashboard stale or missing** → If `working/dashboard.html` doesn't exist, or if metadata has changed significantly since it was last generated, recommend `/storyforge:visualize`. "Your metadata has been updated — regenerate the dashboard to see the changes."
+- **Dashboard stale or missing** → If `working/dashboard.html` doesn't exist, or if metadata has changed significantly since it was last generated, recommend `/storyforge:visualize`. "Your metadata has been updated — regenerate the dashboard to see the changes." See the Dashboard Metadata Timing reference below to determine what's stale.
 - **Placeholder or generic title** → If the project has significant content (scenes drafted or revised) and the title looks like a placeholder ("Untitled," "My Novel," or something obviously temporary), recommend `/storyforge:title` to develop a strong title before production.
 - **No cover image** → If the phase is `production` or `complete` and no cover exists (`production.cover_image` is empty or the file is missing), recommend `/storyforge:cover` to design a cover before final assembly.
 
@@ -188,6 +188,46 @@ git add working/recommendations*.md working/pipeline.csv
 git commit -m "Recommend: next steps after {context}"
 git push
 ```
+
+## Dashboard Metadata Timing
+
+The dashboard is a static HTML snapshot — it must be regenerated with `/storyforge:visualize` to reflect changes. When assessing project state or recommending next steps, use this reference to determine what metadata is needed, when it gets created, and whether the dashboard is stale.
+
+### What creates metadata and when
+
+| Milestone | What gets populated | What it unlocks on dashboard |
+|---|---|---|
+| **Scene design** (`/storyforge:scenes`) | `scene-metadata.csv`: id, seq, title, pov, part, target_words. `scene-intent.csv`: id, function, emotional_arc, characters, threads, motifs | Manuscript spine, POV river, character web (basic) |
+| **Enrichment** (`./storyforge enrich`) | Fills empty fields: location, type, time_of_day, word_count, timeline_day. Normalizes names against registry CSVs (characters.csv, locations.csv, motif-taxonomy.csv) | Timeline, location map, scene type coloring, full detail panel |
+| **Drafting** (`./storyforge write`) | Updates word_count, status changes to `drafted` | Spine widths adjust to actual word counts |
+| **Scoring** (`./storyforge score`) | Creates scene-scores.csv, act-scores.csv, character-scores.csv, genre-scores.csv, narrative-scores.csv + all rationale CSVs | Craft heatmap, narrative radar, character/act/genre score panels, rationale drawers |
+| **Revision** (`./storyforge revise`) | Updates scene prose, word_count, status to `revised` | Word counts update; re-score to refresh heatmap |
+
+### When to recommend enrichment
+
+Recommend enrichment (`./storyforge enrich`) when:
+- Scene files exist but `scene-metadata.csv` has empty location, type, or time_of_day columns
+- `scene-intent.csv` has empty characters, threads, or motifs columns
+- New scenes have been drafted since the last enrichment
+- The dashboard location map or timeline is empty
+
+Enrichment is incremental and non-destructive — it only fills empty fields unless `--force` is used.
+
+### When to recommend visualization
+
+Recommend `/storyforge:visualize` when:
+- `working/dashboard.html` doesn't exist
+- Enrichment just ran (new metadata to display)
+- Scoring just completed (new craft scores to display)
+- Significant drafting or revision work completed (word counts changed)
+- The author asks about project state and would benefit from seeing it visually
+
+### Registry files that improve normalization
+
+If the dashboard shows duplicate entries (e.g., "Maren" and "Maren Cole" as separate characters), the fix is creating or updating the relevant registry CSV, then re-running enrichment:
+- `reference/characters.csv` (id|name|aliases|role) — normalizes character name variants
+- `reference/locations.csv` (id|name|aliases) — normalizes location strings
+- `reference/motif-taxonomy.csv` (id|name|aliases|tier) — collapses motif variants
 
 ## Important
 
