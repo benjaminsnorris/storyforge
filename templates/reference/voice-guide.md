@@ -144,6 +144,32 @@ Specific, concrete rules for this novel's prose. These are the guardrails that k
 
 ---
 
+## Prose Naturalness
+
+Rules for avoiding patterns that read as machine-generated rather than human-written. These target linguistic categories, not individual phrases -- the goal is prose that sounds like a person wrote it.
+
+### Punctuation
+- Em dashes are rare. Use at most one per scene, and only when no other punctuation works. Default to commas, parentheses, colons, or sentence breaks.
+- Semicolons are acceptable between closely related independent clauses. They are not decorative.
+
+### Sentence Patterns to Avoid
+- **Antithesis as default framing.** Do not structure observations as contrasting pairs where the first element is negated and the second affirmed. When contrast is needed, let it emerge from the content rather than imposing a rhetorical formula. Reserve explicit antithesis for moments that genuinely turn on a reversal.
+- **Compulsive parallelism.** Do not default to tricolon (lists of three). If two items make the point, stop at two. If one makes it, stop at one.
+- **Symmetrical paragraph structure.** Vary paragraph length. A one-sentence paragraph followed by a long one followed by a medium one is more natural than three paragraphs of similar size.
+
+### Vocabulary
+- Avoid words that signal summarizing rather than rendering: *multifaceted, nuanced, tapestry, palpable, pivotal, intricate, profound, foster, harness*.
+- Prefer concrete and specific over abstract and categorical. "The oak" not "the tree." "Tuesday" not "one day."
+- Use contractions in interiority and dialogue. Uncontracted prose reads as formal narration -- deploy that register deliberately, not by default.
+
+### Rhetorical Habits
+- Do not signpost transitions. No "Let's turn to," "What followed was," "It was then that."
+- Do not open scenes with sweeping contextual statements. Start in the middle of something.
+- Do not close scenes with summary or thematic restatement. End on an image, action, or line of dialogue.
+- Do not hedge with stacked qualifiers: "perhaps," "somewhat," "in a way," "almost as if." Choose: either the thing is true in the scene or it isn't.
+
+---
+
 ## Recurring Language
 
 Words, phrases, or constructions that recur deliberately throughout the novel. These create texture and resonance -- they are not tics but motifs.

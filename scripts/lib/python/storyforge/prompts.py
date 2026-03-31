@@ -774,6 +774,21 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('- Let the style rules govern every sentence — word '
                      'choice, rhythm, metaphor, dialogue density')
         lines.append('')
+        lines.append('PROSE NATURALNESS:')
+        lines.append('- Em dashes are rare — use at most one per scene. '
+                     'Default to commas, parentheses, or sentence breaks.')
+        lines.append('- No antithesis framing. Do not structure observations '
+                     'as contrasting pairs where the first element is negated '
+                     'and the second affirmed. Let contrast emerge from content, '
+                     'not rhetorical formula.')
+        lines.append('- Do not default to tricolon or parallel structure. '
+                     'If two items make the point, stop at two.')
+        lines.append('- Vary sentence and paragraph length. Symmetry reads '
+                     'as artificial.')
+        lines.append('- Use contractions in interiority and dialogue.')
+        lines.append('- Start scenes in the middle of something. End on image, '
+                     'action, or dialogue — not summary.')
+        lines.append('')
         lines.append('CONTINUITY:')
         lines.append('- Do not contradict ANY locked details in the continuity '
                      'tracker (provided in reference materials above)')
@@ -814,6 +829,21 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append("- Maintain the POV character's distinct voice throughout")
         lines.append('- Let the style rules govern every sentence — word '
                      'choice, rhythm, metaphor, dialogue density')
+        lines.append('')
+        lines.append('PROSE NATURALNESS:')
+        lines.append('- Em dashes are rare — use at most one per scene. '
+                     'Default to commas, parentheses, or sentence breaks.')
+        lines.append('- No antithesis framing. Do not structure observations '
+                     'as contrasting pairs where the first element is negated '
+                     'and the second affirmed. Let contrast emerge from content, '
+                     'not rhetorical formula.')
+        lines.append('- Do not default to tricolon or parallel structure. '
+                     'If two items make the point, stop at two.')
+        lines.append('- Vary sentence and paragraph length. Symmetry reads '
+                     'as artificial.')
+        lines.append('- Use contractions in interiority and dialogue.')
+        lines.append('- Start scenes in the middle of something. End on image, '
+                     'action, or dialogue — not summary.')
         lines.append('')
         lines.append('CONTINUITY:')
         lines.append('- Do not contradict ANY locked details in the continuity '
