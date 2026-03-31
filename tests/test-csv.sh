@@ -174,3 +174,31 @@ assert_equals "Scholarly calm to urgent alarm" "$result" "intent.csv: emotional_
 
 result=$(list_csv_ids "$INTENT_CSV" | wc -l | tr -d ' ')
 assert_equals "4" "$result" "intent.csv: 4 IDs"
+
+# ============================================================================
+# renumber_scenes
+# ============================================================================
+
+RN_CSV="${TMPDIR}/renumber-test-$$.csv"
+cat > "$RN_CSV" <<'RNEOF'
+id|seq|title|pov
+scene-a|5|Scene A|Alice
+scene-b|10|Scene B|Bob
+scene-c|2|Scene C|Carol
+RNEOF
+
+renumber_scenes "$RN_CSV"
+result=$(get_csv_field "$RN_CSV" "scene-c" "seq")
+assert_equals "1" "$result" "renumber_scenes: lowest seq becomes 1"
+
+result=$(get_csv_field "$RN_CSV" "scene-a" "seq")
+assert_equals "2" "$result" "renumber_scenes: middle seq becomes 2"
+
+result=$(get_csv_field "$RN_CSV" "scene-b" "seq")
+assert_equals "3" "$result" "renumber_scenes: highest seq becomes 3"
+
+# Verify other columns untouched
+result=$(get_csv_field "$RN_CSV" "scene-a" "title")
+assert_equals "Scene A" "$result" "renumber_scenes: title preserved"
+
+rm -f "$RN_CSV"

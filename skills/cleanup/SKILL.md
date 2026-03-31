@@ -88,8 +88,8 @@ Present the full list of characters found in scenes but not in characters.csv. A
 **Bad chapter references** (`BAD_CHAPTER_REF:`):
 "Chapter map references these scenes that don't exist: [list]. These need manual attention in the chapter map."
 
-**Sequence gaps** (`SEQ_GAP:`):
-"Sequence gap found: [range]. This may be intentional (cut scenes) or accidental. Want me to renumber to close the gaps?"
+**Sequence needs renumbering** (`SEQ_NEEDS_RENUMBER:`):
+"Scene sequence numbers have gaps or non-integer values. Want me to renumber all scenes sequentially from 1? This preserves the current reading order — only the seq numbers change, not scene IDs or file names."
 
 ## Step 4: Run the Script
 
@@ -105,7 +105,7 @@ Apply the author's decisions from Step 3:
 - Delete or keep unexpected files/dirs
 - Add/remove CSV rows as directed
 - Add character entries if requested
-- Renumber sequences if requested
+- Renumber sequences if requested (call `renumber_scenes` from csv.sh on `reference/scene-metadata.csv`)
 
 After all interactive fixes, commit:
 ```bash

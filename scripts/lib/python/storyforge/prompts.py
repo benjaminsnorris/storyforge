@@ -252,7 +252,7 @@ def get_previous_scene(scene_id: str, project_dir: str) -> str:
     for row in rows:
         if len(row) > max(id_idx, seq_idx):
             try:
-                seq_val = float(row[seq_idx]) if row[seq_idx] else 0
+                seq_val = int(row[seq_idx]) if row[seq_idx] else 0
             except ValueError:
                 seq_val = 0
             pairs.append((row[id_idx], seq_val))

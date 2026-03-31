@@ -418,16 +418,27 @@ report_csv_integrity() {
         done
     fi
 
-    # Sequence gaps
+    # Sequence gaps or non-integer seq values
     if [[ -f "$meta_csv" ]]; then
+        local needs_renumber=false
         local prev=0
-        tail -n +2 "$meta_csv" | cut -d'|' -f2 | sort -n | while IFS= read -r seq; do
+        while IFS= read -r seq; do
             [[ -z "$seq" ]] && continue
-            if (( seq > prev + 1 )); then
-                echo "SEQ_GAP:$((prev + 1))-$((seq - 1))"
+            # Non-integer seq (e.g., 20.5) means renumber is needed
+            if [[ "$seq" == *.* ]]; then
+                needs_renumber=true
             fi
-            prev=$seq
-        done
+            # Gap detection (integer comparison, skip non-integers)
+            if [[ "$seq" =~ ^[0-9]+$ ]] && (( seq > prev + 1 )); then
+                needs_renumber=true
+            fi
+            if [[ "$seq" =~ ^[0-9]+$ ]]; then
+                prev=$seq
+            fi
+        done < <(tail -n +2 "$meta_csv" | cut -d'|' -f2 | sort -n)
+        if [[ "$needs_renumber" == true ]]; then
+            echo "SEQ_NEEDS_RENUMBER:gaps or non-integer seq values found"
+        fi
     fi
 
     # Unknown characters

@@ -288,7 +288,17 @@ After any edit, run validation checks:
 - Reasonable pacing (no new monotonous stretches created by the edit).
 - Timeline consistency (especially after reordering).
 - Scene IDs remain unique and use descriptive slugs (e.g., `geometry-of-dying`), never numeric or positional IDs.
-- The `seq` column in `metadata.csv` is consistent with the intended scene order.
+
+### Renumber After Every Structural Change
+
+After any add, remove, reorder, split, or merge — renumber the `seq` column in `reference/scene-metadata.csv` so that seq values are sequential integers from 1 with no gaps. Use the `renumber_scenes` function from `scripts/lib/csv.sh`:
+
+```bash
+source [plugin_path]/scripts/lib/csv.sh
+renumber_scenes "reference/scene-metadata.csv"
+```
+
+This preserves reading order (sorts by current seq before renumbering) and only changes the seq values — scene IDs and all other columns are untouched. Seq must always be integers. Do not use fractional values like 20.5 to insert scenes between existing ones.
 
 ---
 

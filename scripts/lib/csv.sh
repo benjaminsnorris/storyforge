@@ -99,3 +99,48 @@ append_csv_row() {
     [[ -f "$file" ]] || return 0
     echo "$row" >> "$file"
 }
+
+# Renumber the seq column in a CSV file sequentially from 1.
+# Rows are sorted by current seq (numerically) before renumbering,
+# so the existing order is preserved. Writes atomically.
+# Usage: renumber_scenes <file>
+renumber_scenes() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    local tmp="${file}.tmp.$$"
+    awk -F'|' -v OFS='|' '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "seq") seq_col = i
+            }
+            print
+            next
+        }
+        seq_col {
+            rows[NR] = $0
+            seqs[NR] = $seq_col + 0
+            count++
+        }
+        END {
+            # Sort indices by seq value (insertion sort — fine for < 1000 scenes)
+            for (i = 2; i <= NR; i++) {
+                for (j = i; j > 2 && seqs[j] < seqs[j-1]; j--) {
+                    tmp_row = rows[j]; rows[j] = rows[j-1]; rows[j-1] = tmp_row
+                    tmp_seq = seqs[j]; seqs[j] = seqs[j-1]; seqs[j-1] = tmp_seq
+                }
+            }
+            # Output rows with renumbered seq
+            new_seq = 1
+            for (i = 2; i <= NR; i++) {
+                if (rows[i] != "") {
+                    split(rows[i], fields, "|")
+                    fields[seq_col] = new_seq
+                    line = fields[1]
+                    for (k = 2; k <= length(fields); k++) line = line "|" fields[k]
+                    print line
+                    new_seq++
+                }
+            }
+        }
+    ' "$file" > "$tmp" && mv "$tmp" "$file"
+}

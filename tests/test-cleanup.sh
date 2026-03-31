@@ -208,7 +208,7 @@ assert_contains "$REPORT" "ORPHAN_META:missing-scene" "csv: detects orphan metad
 assert_contains "$REPORT" "MISSING_INTENT:act1-sc02" "csv: detects metadata without intent"
 assert_contains "$REPORT" "EXTRA_INTENT:extra-intent" "csv: detects intent without metadata"
 assert_contains "$REPORT" "BAD_CHAPTER_REF:nonexistent-scene" "csv: detects bad chapter-map ref"
-assert_contains "$REPORT" "SEQ_GAP:3-3" "csv: detects sequence gap"
+assert_contains "$REPORT" "SEQ_NEEDS_RENUMBER" "csv: detects sequence needs renumber"
 assert_contains "$REPORT" "UNKNOWN_CHARACTER:Bob" "csv: detects unknown character Bob"
 assert_contains "$REPORT" "UNKNOWN_CHARACTER:Carol" "csv: detects unknown character Carol"
 assert_contains "$REPORT" "UNKNOWN_CHARACTER:Dave" "csv: detects unknown character Dave"
