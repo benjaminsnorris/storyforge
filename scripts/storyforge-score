@@ -324,6 +324,38 @@ if [[ "$DRY_RUN" != true ]]; then
 fi
 
 # ============================================================================
+# Helper: submit plugin insight as GitHub issue
+# ============================================================================
+
+submit_plugin_insight() {
+    local principle="$1" lever="$2" change="$3" avg_improvement="$4"
+    local project_title="$5" evidence="$6"
+
+    local auto_issues
+    auto_issues=$(read_yaml_field "auto_issues" 2>/dev/null || echo "true")
+    [[ "${STORYFORGE_AUTO_ISSUES:-$auto_issues}" == "false" ]] && return 0
+    has_gh 2>/dev/null || return 0
+
+    local body="## Plugin Insight: ${principle}
+
+**Source project:** ${project_title}
+**Average improvement:** ${avg_improvement}
+
+### Change
+${change}
+
+### Evidence
+${evidence}"
+
+    gh issue create \
+        --repo benjaminsnorris/storyforge \
+        --title "Plugin Insight: ${principle} — ${lever}" \
+        --body "$body" \
+        --label "plugin-insight" \
+        2>/dev/null || log "WARNING: Failed to create plugin insight issue"
+}
+
+# ============================================================================
 # Helper: invoke Claude and parse results (used by act/novel-level scoring)
 # ============================================================================
 
@@ -1103,10 +1135,10 @@ update_pr_task "Diagnosis and proposals" "$PROJECT_DIR" 2>/dev/null || true
 update_pr_task "Improvement cycle" "$PROJECT_DIR" 2>/dev/null || true
 
 # Collect exemplars from high-scoring scenes
-collect_exemplars "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE"
+PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring collect-exemplars "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE"
 
 # Check for validated patterns from tuning history
-validated=$(check_validated_patterns "$PROJECT_DIR")
+validated=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring check-validated-patterns "$PROJECT_DIR")
 if [[ -n "$validated" ]]; then
     log "Validated tuning patterns found:"
     project_title=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
@@ -1141,11 +1173,11 @@ TOTAL_COST=$(awk -F'|' '
     END { printf "%.2f", sum }
 ' "${PROJECT_DIR}/working/costs/ledger.csv" 2>/dev/null || echo "0.00")
 
-generate_score_report "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE" "$SCORE_MODE" "$SCENE_COUNT" "$TOTAL_COST"
+PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring generate-report "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE" "$SCORE_MODE" "$SCENE_COUNT" "$TOTAL_COST"
 
 # Post PR comment with scoring summary
 if has_gh 2>/dev/null; then
-    PR_COMMENT=$(build_score_pr_comment "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE" "$SCORE_MODE" "$SCENE_COUNT" "$TOTAL_COST")
+    PR_COMMENT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.scoring pr-comment "$CYCLE_DIR" "$PROJECT_DIR" "$CYCLE" "$SCORE_MODE" "$SCENE_COUNT" "$TOTAL_COST")
     if [[ -n "$PR_COMMENT" ]]; then
         # Find the PR for the current branch
         CURRENT_PR=$(gh pr view --json number -q '.number' 2>/dev/null || true)

@@ -790,6 +790,475 @@ def build_evaluation_criteria(diagnostics_csv: str, guide_file: str) -> str:
 
 
 # ============================================================================
+# Exemplar collection
+# ============================================================================
+
+def collect_exemplars(scores_dir: str, project_dir: str, cycle: str):
+    """Collect high-scoring scenes (5/5) into the exemplar bank."""
+    exemplars_file = os.path.join(project_dir, 'working', 'exemplars.csv')
+    scores_file = os.path.join(scores_dir, 'scene-scores.csv')
+
+    if not os.path.isfile(scores_file):
+        return
+
+    if not os.path.isfile(exemplars_file):
+        os.makedirs(os.path.dirname(exemplars_file), exist_ok=True)
+        with open(exemplars_file, 'w') as f:
+            f.write('principle|scene_id|score|excerpt|cycle\n')
+
+    # Read existing exemplars to avoid duplicates
+    existing = set()
+    with open(exemplars_file) as f:
+        for line in f:
+            if line.startswith('principle|'):
+                continue
+            parts = line.strip().split('|')
+            if len(parts) >= 2:
+                existing.add((parts[0], parts[1]))
+
+    header, rows = _read_csv(scores_file)
+    rationale_file = os.path.join(scores_dir, 'scene-rationale.csv')
+    rat_header, rat_rows = ([], [])
+    if os.path.isfile(rationale_file):
+        rat_header, rat_rows = _read_csv(rationale_file)
+
+    # Build rationale lookup: {(scene_id, principle): text}
+    rat_lookup = {}
+    if rat_header and rat_rows:
+        for row in rat_rows:
+            scene_id = row[0] if row else ''
+            for ci, col in enumerate(rat_header):
+                if ci == 0:
+                    continue
+                if ci < len(row) and row[ci]:
+                    rat_lookup[(scene_id, col)] = row[ci]
+
+    new_rows = []
+    for row in rows:
+        scene_id = row[0] if row else ''
+        for ci, principle in enumerate(header):
+            if ci == 0:
+                continue
+            if ci >= len(row) or not row[ci]:
+                continue
+            try:
+                score_val = int(row[ci])
+            except ValueError:
+                continue
+            if score_val >= 5 and (principle, scene_id) not in existing:
+                excerpt = rat_lookup.get((scene_id, principle), 'high-scoring passage')
+                excerpt = excerpt.replace('|', '-')
+                new_rows.append(f'{principle}|{scene_id}|{score_val}|{excerpt}|{cycle}')
+
+    if new_rows:
+        with open(exemplars_file, 'a') as f:
+            for r in new_rows:
+                f.write(r + '\n')
+
+
+# ============================================================================
+# Validated patterns
+# ============================================================================
+
+def check_validated_patterns(project_dir: str) -> str:
+    """Find tuning patterns validated across 3+ cycles. Returns pipe-delimited lines."""
+    tuning_file = os.path.join(project_dir, 'working', 'tuning.csv')
+    if not os.path.isfile(tuning_file):
+        return ''
+
+    counts: dict[str, int] = {}
+    improvements: dict[str, float] = {}
+
+    with open(tuning_file) as f:
+        for line in f:
+            if line.startswith('cycle') or line.startswith('#'):
+                continue
+            parts = line.strip().split('|')
+            if len(parts) < 8 or parts[7] != 'true':
+                continue
+            key = f'{parts[2]}|{parts[3]}'
+            counts[key] = counts.get(key, 0) + 1
+            try:
+                improvements[key] = improvements.get(key, 0.0) + (float(parts[6]) - float(parts[5]))
+            except (ValueError, IndexError):
+                pass
+
+    results = []
+    for key, count in counts.items():
+        if count >= 3:
+            avg_imp = improvements.get(key, 0.0) / count
+            results.append(f'{key}|{avg_imp:.1f}')
+    return '\n'.join(results)
+
+
+# ============================================================================
+# Score report generation
+# ============================================================================
+
+def _score_icon(score: int) -> str:
+    if score >= 4:
+        return '\U0001f7e2'  # green circle
+    elif score >= 3:
+        return '\U0001f7e1'  # yellow circle
+    else:
+        return '\U0001f534'  # red circle
+
+
+def _sc_class(val: str) -> str:
+    """Return CSS class for a score value."""
+    try:
+        n = int(val)
+    except (ValueError, TypeError):
+        return ''
+    if 1 <= n <= 5:
+        return f'sc-{n}'
+    return ''
+
+
+def generate_score_report(cycle_dir: str, project_dir: str, cycle: str,
+                          mode: str, scene_count: int, cost: str):
+    """Generate an HTML scoring report."""
+    import subprocess
+    report_file = os.path.join(cycle_dir, 'report.html')
+
+    # Read project title
+    project_title = 'Unknown'
+    yaml_file = os.path.join(project_dir, 'storyforge.yaml')
+    if os.path.isfile(yaml_file):
+        with open(yaml_file) as f:
+            for line in f:
+                m = re.match(r'\s*title:\s*(.+)', line)
+                if m:
+                    project_title = m.group(1).strip().strip('"').strip("'")
+                    break
+
+    # Character arcs table
+    char_rows = ''
+    char_file = os.path.join(cycle_dir, 'character-scores.csv')
+    if os.path.isfile(char_file):
+        header, rows = _read_csv(char_file)
+        for row in rows:
+            if not row or row[0] == 'character':
+                continue
+            vals = [(float(row[i]) if i < len(row) and row[i] else 0) for i in range(1, 5)]
+            avg = sum(vals) / max(len(vals), 1)
+            cells = ''.join(f'<td class="{_sc_class(row[i] if i < len(row) else "")}">{row[i] if i < len(row) else ""}</td>'
+                           for i in range(1, 5))
+            char_rows += f'<tr><td>{row[0]}</td>{cells}<td><strong>{avg:.1f}</strong></td></tr>\n'
+
+    # Act structure table
+    act_rows = ''
+    act_file = os.path.join(cycle_dir, 'act-scores.csv')
+    if os.path.isfile(act_file):
+        header, rows = _read_csv(act_file)
+        for row in rows:
+            if not row or row[0] == 'id':
+                continue
+            label = row[0].replace('act-', 'Part ')
+            cells = ''.join(f'<td class="{_sc_class(row[i] if i < len(row) else "")}">{row[i] if i < len(row) else ""}</td>'
+                           for i in range(1, len(header)))
+            act_rows += f'<tr><td>{label}</td>{cells}</tr>\n'
+
+    # Genre row
+    genre_row = ''
+    genre_file = os.path.join(cycle_dir, 'genre-scores.csv')
+    if os.path.isfile(genre_file):
+        header, rows = _read_csv(genre_file)
+        if rows:
+            row = rows[0]
+            genre_row = ''.join(f'<td class="{_sc_class(row[i] if i < len(row) else "")}">{row[i] if i < len(row) else ""}</td>'
+                               for i in range(len(row)))
+
+    # Strengths / weaknesses from diagnosis
+    strengths = ''
+    weaknesses = ''
+    diag_file = os.path.join(cycle_dir, 'diagnosis.csv')
+    if os.path.isfile(diag_file):
+        header, rows = _read_csv(diag_file)
+        scored = []
+        for row in rows:
+            if len(row) >= 4:
+                try:
+                    avg = float(row[2]) if row[2] else 0
+                except ValueError:
+                    avg = 0
+                if avg > 0:
+                    scored.append((avg, row[0].replace('_', ' '), row[3] if len(row) > 3 else ''))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        for avg, prin, scenes in scored[:5]:
+            strengths += f'<tr><td>{prin}</td><td>{avg}</td><td>{scenes}</td></tr>\n'
+        scored.sort(key=lambda x: x[0])
+        for avg, prin, scenes in scored[:5]:
+            weaknesses += f'<tr><td>{prin}</td><td>{avg}</td><td>{scenes}</td></tr>\n'
+
+    # Proposals table
+    proposal_rows = ''
+    proposals_file = os.path.join(cycle_dir, 'proposals.csv')
+    if os.path.isfile(proposals_file):
+        header, rows = _read_csv(proposals_file)
+        for row in rows:
+            if not row or row[0] == 'id':
+                continue
+            prin = row[1].replace('_', ' ') if len(row) > 1 else ''
+            lever = row[2].replace('_', ' ') if len(row) > 2 else ''
+            change = row[4] if len(row) > 4 else ''
+            rationale = row[5] if len(row) > 5 else ''
+            status = row[6] if len(row) > 6 else 'pending'
+            badge_cls = {'applied': 'badge-applied', 'approved': 'badge-approved',
+                        'rejected': 'badge-rejected'}.get(status, 'badge-pending')
+            proposal_rows += (f'<tr><td>{prin}</td><td>{lever}</td><td>{change}</td>'
+                            f'<td>{rationale}</td><td><span class="badge {badge_cls}">{status}</span></td></tr>\n')
+
+    # Scene heatmap
+    scene_heatmap = ''
+    scene_file = os.path.join(cycle_dir, 'scene-scores.csv')
+    if os.path.isfile(scene_file):
+        header, rows = _read_csv(scene_file)
+        for row in rows:
+            if not row or row[0] == 'id':
+                continue
+            vals = []
+            for i in range(1, len(row)):
+                try:
+                    v = float(row[i])
+                    if v > 0:
+                        vals.append(v)
+                except (ValueError, IndexError):
+                    pass
+            avg = _power_mean(vals) if vals else 0
+            scene_heatmap += f'<tr><td>{row[0]}</td><td class="{_sc_class(str(round(avg)))}">{avg:.1f}</td></tr>\n'
+
+    from datetime import datetime
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scoring Report</title>
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+:root {{
+    --bg: #faf8f6; --surface: #fff; --border: #e5e1db; --text: #2c2420;
+    --text-dim: #8a7d73; --teal: #0f766e; --teal-dim: rgba(15,118,110,0.07);
+    --red: #dc2626; --amber: #d97706; --green: #16a34a;
+}}
+@media (prefers-color-scheme: dark) {{
+    :root {{
+        --bg: #1a1614; --surface: #262019; --border: rgba(255,255,255,0.08);
+        --text: #ede5dd; --text-dim: #a69889; --teal: #2dd4bf; --teal-dim: rgba(45,212,191,0.08);
+        --red: #f87171; --amber: #fbbf24; --green: #4ade80;
+    }}
+}}
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }}
+.page {{ max-width: 960px; margin: 0 auto; padding: 40px 24px; }}
+h1 {{ font-size: 28px; font-weight: 700; margin-bottom: 4px; }}
+h2 {{ font-size: 18px; font-weight: 600; margin: 32px 0 12px; color: var(--teal); border-bottom: 2px solid var(--teal-dim); padding-bottom: 6px; }}
+.meta {{ font-size: 13px; color: var(--text-dim); margin-bottom: 24px; }}
+.meta span {{ margin-right: 16px; }}
+table {{ width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; }}
+th {{ text-align: left; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); }}
+td {{ padding: 6px 10px; border: 1px solid var(--border); }}
+.sc-1 {{ background: rgba(220,38,38,0.15); color: var(--red); font-weight: 600; }}
+.sc-2 {{ background: rgba(217,119,6,0.12); color: var(--amber); font-weight: 600; }}
+.sc-3 {{ background: rgba(217,119,6,0.06); }}
+.sc-4 {{ background: rgba(22,163,74,0.08); }}
+.sc-5 {{ background: rgba(22,163,74,0.15); color: var(--green); font-weight: 600; }}
+.badge {{ display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }}
+.badge-applied {{ background: rgba(22,163,74,0.12); color: var(--green); }}
+.badge-approved {{ background: rgba(22,163,74,0.06); color: var(--green); }}
+.badge-rejected {{ background: rgba(220,38,38,0.08); color: var(--red); }}
+.badge-pending {{ background: rgba(217,119,6,0.08); color: var(--amber); }}
+.two-col {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }}
+@media (max-width: 640px) {{ .two-col {{ grid-template-columns: 1fr; }} }}
+</style>
+</head>
+<body>
+<div class="page">
+<h1>{project_title} &mdash; Scoring Report</h1>
+<div class="meta">
+    <span>Cycle {cycle}</span>
+    <span>Mode: {mode}</span>
+    <span>Scenes: {scene_count}</span>
+    <span>Cost: ${cost}</span>
+    <span>{now}</span>
+</div>
+
+<h2>Character Arcs</h2>
+<table>
+<tr><th>Character</th><th>Want/Need</th><th>Wound/Lie</th><th>Flaws</th><th>Voice</th><th>Avg</th></tr>
+{char_rows}</table>
+
+<h2>Act Structure</h2>
+<table>
+<tr><th>Act</th><th>Campbell</th><th>3-Act</th><th>Save Cat</th><th>Truby</th><th>Harmon</th><th>Kishoten.</th><th>Freytag</th><th>Char Web</th><th>Char Theme</th></tr>
+{act_rows}</table>
+
+<h2>Genre Contract</h2>
+<table>
+<tr><th>Trope Awareness</th><th>Archetype vs Cliche</th><th>Genre Contract</th><th>Subversion</th></tr>
+<tr>{genre_row}</tr>
+</table>
+
+<div class="two-col">
+<div>
+<h2>Top Strengths</h2>
+<table>
+<tr><th>Principle</th><th>Avg</th><th>Best Scenes</th></tr>
+{strengths}</table>
+</div>
+<div>
+<h2>Areas for Improvement</h2>
+<table>
+<tr><th>Principle</th><th>Avg</th><th>Weakest Scenes</th></tr>
+{weaknesses}</table>
+</div>
+</div>
+
+<h2>Improvement Proposals</h2>
+<table>
+<tr><th>Principle</th><th>Lever</th><th>Change</th><th>Rationale</th><th>Status</th></tr>
+{proposal_rows}</table>
+
+<h2>Scene Averages</h2>
+<table>
+<tr><th>Scene</th><th>Avg Score</th></tr>
+{scene_heatmap}</table>
+
+</div>
+</body>
+</html>'''
+
+    with open(report_file, 'w') as f:
+        f.write(html)
+
+    print(f'Generated scoring report: {report_file}', file=sys.stderr)
+
+
+def build_score_pr_comment(cycle_dir: str, project_dir: str, cycle: str,
+                           mode: str, scene_count: int, cost: str) -> str:
+    """Build a markdown PR comment with scoring summary."""
+    # Read project title
+    project_title = 'Unknown'
+    yaml_file = os.path.join(project_dir, 'storyforge.yaml')
+    if os.path.isfile(yaml_file):
+        with open(yaml_file) as f:
+            for line in f:
+                m = re.match(r'\s*title:\s*(.+)', line)
+                if m:
+                    project_title = m.group(1).strip().strip('"').strip("'")
+                    break
+
+    parts = [f'## Scoring Report \u2014 Cycle {cycle}',
+             f'**{project_title}** | {mode} mode | {scene_count} scenes | ${cost}', '']
+
+    # Character arcs
+    char_file = os.path.join(cycle_dir, 'character-scores.csv')
+    if os.path.isfile(char_file):
+        header, rows = _read_csv(char_file)
+        parts.append('### Character Arcs')
+        parts.append('| Character | Want/Need | Wound/Lie | Flaws | Voice | Avg |')
+        parts.append('|-----------|-----------|-----------|-------|-------|-----|')
+        for row in rows:
+            if not row or row[0] == 'character':
+                continue
+            vals = []
+            cells = []
+            for i in range(1, 5):
+                v = row[i] if i < len(row) and row[i] else '0'
+                try:
+                    vals.append(float(v))
+                except ValueError:
+                    vals.append(0)
+                cells.append(f'{_score_icon(int(float(v)))} {v}')
+            avg = sum(vals) / max(len(vals), 1)
+            parts.append(f'| {row[0]} | {" | ".join(cells)} | **{avg:.1f}** |')
+        parts.append('')
+
+    # Act structure
+    act_file = os.path.join(cycle_dir, 'act-scores.csv')
+    if os.path.isfile(act_file):
+        header, rows = _read_csv(act_file)
+        parts.append('### Act Structure')
+        parts.append('| Act | Campbell | 3-Act | Save Cat | Truby | Harmon | Kishoten. | Freytag | Char Web | Theme |')
+        parts.append('|-----|----------|-------|----------|-------|--------|-----------|---------|----------|-------|')
+        for row in rows:
+            if not row or row[0] == 'id':
+                continue
+            label = row[0].replace('act-', 'Part ')
+            cells = ' | '.join(row[i] if i < len(row) else '' for i in range(1, len(header)))
+            parts.append(f'| {label} | {cells} |')
+        parts.append('')
+
+    # Genre
+    genre_file = os.path.join(cycle_dir, 'genre-scores.csv')
+    if os.path.isfile(genre_file):
+        header, rows = _read_csv(genre_file)
+        if rows:
+            row = rows[0]
+            parts.append('### Genre Contract')
+            parts.append('| Trope Awareness | Archetype vs Cliche | Genre Contract | Subversion |')
+            parts.append('|-----------------|---------------------|----------------|------------|')
+            cells = ' | '.join(row[i] if i < len(row) else '' for i in range(len(row)))
+            parts.append(f'| {cells} |')
+            parts.append('')
+
+    # Strengths / weaknesses
+    diag_file = os.path.join(cycle_dir, 'diagnosis.csv')
+    if os.path.isfile(diag_file):
+        header, rows = _read_csv(diag_file)
+        scored = []
+        for row in rows:
+            if len(row) >= 4:
+                try:
+                    avg = float(row[2]) if row[2] else 0
+                except ValueError:
+                    avg = 0
+                if avg > 0:
+                    scored.append((avg, row[0].replace('_', ' '), row[3] if len(row) > 3 else ''))
+
+        scored_asc = sorted(scored, key=lambda x: x[0])
+        scored_desc = sorted(scored, key=lambda x: x[0], reverse=True)
+
+        parts.append('### Top Strengths')
+        parts.append('| Principle | Avg | Best Scenes |')
+        parts.append('|-----------|-----|-------------|')
+        for avg, prin, scenes in scored_desc[:5]:
+            parts.append(f'| {prin} | {avg} | {scenes} |')
+        parts.append('')
+
+        parts.append('### Areas for Improvement')
+        parts.append('| Principle | Avg | Weakest Scenes |')
+        parts.append('|-----------|-----|----------------|')
+        for avg, prin, scenes in scored_asc[:5]:
+            parts.append(f'| {prin} | {avg} | {scenes} |')
+        parts.append('')
+
+    # Proposals
+    proposals_file = os.path.join(cycle_dir, 'proposals.csv')
+    if os.path.isfile(proposals_file):
+        header, rows = _read_csv(proposals_file)
+        data_rows = [r for r in rows if r and r[0] != 'id']
+        if data_rows:
+            parts.append(f'### Improvement Proposals ({len(data_rows)})')
+            parts.append('| Principle | Lever | Change | Status |')
+            parts.append('|-----------|-------|--------|--------|')
+            for row in data_rows:
+                prin = row[1].replace('_', ' ') if len(row) > 1 else ''
+                lever = row[2].replace('_', ' ') if len(row) > 2 else ''
+                change = row[4] if len(row) > 4 else ''
+                status = row[6] if len(row) > 6 else 'pending'
+                parts.append(f'| {prin} | {lever} | {change} | {status} |')
+            parts.append('')
+
+    parts.append('---')
+    parts.append(f'*Report: `working/scores/cycle-{cycle}/report.html`*')
+
+    return '\n'.join(parts)
+
+
+# ============================================================================
 # CLI interface
 # ============================================================================
 
@@ -958,6 +1427,44 @@ def main():
         result = extract_rubric_section(sys.argv[2], sys.argv[3])
         if result:
             print(result)
+
+    elif command == 'collect-exemplars':
+        # Usage: collect-exemplars <scores_dir> <project_dir> <cycle>
+        if len(sys.argv) < 5:
+            print('Usage: collect-exemplars <scores_dir> <project_dir> <cycle>',
+                  file=sys.stderr)
+            sys.exit(1)
+        collect_exemplars(sys.argv[2], sys.argv[3], sys.argv[4])
+        print('ok')
+
+    elif command == 'check-validated-patterns':
+        # Usage: check-validated-patterns <project_dir>
+        if len(sys.argv) < 3:
+            print('Usage: check-validated-patterns <project_dir>', file=sys.stderr)
+            sys.exit(1)
+        result = check_validated_patterns(sys.argv[2])
+        if result:
+            print(result)
+
+    elif command == 'generate-report':
+        # Usage: generate-report <cycle_dir> <project_dir> <cycle> <mode> <scene_count> <cost>
+        if len(sys.argv) < 8:
+            print('Usage: generate-report <cycle_dir> <project_dir> <cycle> <mode> <scene_count> <cost>',
+                  file=sys.stderr)
+            sys.exit(1)
+        generate_score_report(sys.argv[2], sys.argv[3], sys.argv[4],
+                             sys.argv[5], int(sys.argv[6]), sys.argv[7])
+        print('ok')
+
+    elif command == 'pr-comment':
+        # Usage: pr-comment <cycle_dir> <project_dir> <cycle> <mode> <scene_count> <cost>
+        if len(sys.argv) < 8:
+            print('Usage: pr-comment <cycle_dir> <project_dir> <cycle> <mode> <scene_count> <cost>',
+                  file=sys.stderr)
+            sys.exit(1)
+        result = build_score_pr_comment(sys.argv[2], sys.argv[3], sys.argv[4],
+                                        sys.argv[5], int(sys.argv[6]), sys.argv[7])
+        print(result)
 
     else:
         print(f'Unknown command: {command}', file=sys.stderr)
