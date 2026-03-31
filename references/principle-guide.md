@@ -168,6 +168,16 @@ This document provides concise, evaluator-facing descriptions of each scene-leve
 
 ---
 
+### prose_naturalness
+
+**When it works:** The prose feels like a human voice thinking on the page. Sentence rhythms follow thought patterns, not rhetorical templates. Word choices feel inevitable rather than composed. The writer's technique is invisible — the reader hears a character, not an author performing craft. Contractions appear in interiority and dialogue. Sentence and paragraph lengths vary organically. The prose sounds like someone, not something.
+
+**When it fails:** The prose feels "written" — technically proficient but recognizably artificial. Em dashes appear in every other sentence. Observations are framed as antithesis: "Not X. It's Y." or "This isn't about X — it's about Y." Parallel structures and tricolon (lists of three) recur compulsively. Paragraphs are suspiciously symmetrical in length. Hedging qualifiers stack up ("perhaps," "somewhat," "almost as if"). Scenes open with sweeping contextual statements or close with thematic summaries. The prose reads as composed rather than voiced.
+
+**What to look for:** Em dash frequency — more than one per scene is a warning sign. Antithesis framing — contrasting pairs where the first element is negated and the second affirmed. Compulsive parallelism and tricolon. Symmetrical paragraph structure. Hedging stacks. Signposted transitions. Sweeping openers and summary closers. Absence of contractions in interiority and dialogue. Vocabulary that signals summarizing rather than rendering (multifaceted, nuanced, tapestry, palpable, pivotal, intricate, profound).
+
+---
+
 ## Character Craft (Scene-Level)
 
 ### egri_premise

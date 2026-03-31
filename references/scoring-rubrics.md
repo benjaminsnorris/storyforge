@@ -278,6 +278,22 @@ These nine principles are scored per-scene.
 
 ---
 
+### Prose Naturalness
+
+**1-3 (Weak):** The prose reads as machine-generated. Em dashes appear in nearly every paragraph. Observations are consistently framed as antithesis ("Not X. It's Y."). Parallel structures and tricolon dominate. Paragraphs are suspiciously uniform in length. Hedging qualifiers stack up. The prose is technically competent but has an uncanny-valley quality -- it sounds like something, not someone.
+> Prose where every other sentence contains an em dash, every observation uses contrasting-pair framing, and paragraphs march in lockstep lengths. The reader may not be able to name the problem, but they feel it: something is off about this voice.
+
+**4-6 (Developing):** The prose is mostly natural but slips into artificial patterns in patches. Em dashes appear more than occasionally. Antithesis framing or parallelism surfaces in clusters, especially during exposition or thematic passages. Some paragraphs vary naturally while others fall into symmetrical rhythms. The writer's natural voice is present but intermittently overridden by compositional habits.
+> A scene where the dialogue and action feel human, but the interiority passages drift into rhetorical templates -- hedging, summarizing, or reaching for balanced contrasts that the character would not naturally produce.
+
+**7-8 (Strong):** The prose feels consistently human. Em dashes are rare and intentional. Sentence patterns follow thought rather than rhetoric. Paragraph lengths vary organically. Contractions appear naturally in interiority and dialogue. Scenes begin in the middle of something and end without summary. The reader hears a specific voice, not a craft exercise.
+> King in *On Writing*: "I am convinced that fear is at the root of most bad writing." Strong natural prose has the quality of a person thinking out loud -- it follows the mind's rhythm, not a template's structure.
+
+**9-10 (Masterful):** The prose is so natural that the reader forgets it is written. Voice is particular, idiosyncratic, alive. Sentence rhythms follow the character's thought patterns with such fidelity that the prose feels overheard rather than composed. Every word choice feels inevitable -- not selected from alternatives but arrived at as the only possibility.
+> Denis Johnson's *Jesus' Son*: "All the great moments of profundity were over. It was just ordinary day followed by ordinary day." The prose sounds like a person remembering, not a writer composing. Similarly, Rachel Cusk's *Outline* -- the narrator's voice is so controlled and particular that every sentence feels like testimony rather than fiction.
+
+---
+
 ## Character Craft
 
 Character craft principles are scored at different scales: some per-scene, some per-act, some per-novel.
