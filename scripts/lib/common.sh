@@ -1806,79 +1806,26 @@ REVIEW_EOF
     coaching=$(get_coaching_level)
 
     if [[ "$coaching" == "full" && -f "$review_file" ]]; then
-        # Cleanup loop: fix minor items, re-review, max 3 iterations
-        local max_cleanup=3
-        local cleanup_iter=0
+        # Single cleanup pass: fix minor items identified in the review.
+        # No re-review loop — it's diminishing returns and the large inlined
+        # prompt causes pathological hangs in some environments.
+        local fixable_section
+        fixable_section=$(sed -n '/^## Fixable Items/,/^## /p' "$review_file" 2>/dev/null \
+                       | tail -n +2 | sed '/^## /d')
 
-        while (( cleanup_iter < max_cleanup )); do
-            [[ "$_SF_SHUTTING_DOWN" == true ]] && break
-
-            # Parse review report for fixable items
-            local fixable_section
-            fixable_section=$(sed -n '/^## Fixable Items/,/^## /p' "$review_file" 2>/dev/null \
-                           | tail -n +2 | sed '/^## /d')
-
-            # Exit if section is empty, says "None", or has no unchecked items
-            if [[ -z "$fixable_section" ]]; then
-                break
-            fi
-            if echo "$fixable_section" | grep -qi "^None"; then
-                break
-            fi
-            if ! echo "$fixable_section" | grep -q '^\- \[ \]'; then
-                break
-            fi
+        if [[ -n "$fixable_section" ]] \
+            && ! echo "$fixable_section" | grep -qi "^None" \
+            && echo "$fixable_section" | grep -q '^\- \[ \]'; then
 
             local item_count
             item_count=$(echo "$fixable_section" | grep -c '^\- \[ \]' || echo "0")
-            log "Review found ${item_count} fixable item(s). Running cleanup pass $((cleanup_iter + 1))..."
+            log "Review found ${item_count} fixable item(s). Running cleanup..."
 
-            run_cleanup_pass "$review_file" "$review_type" "$project_dir" "$((cleanup_iter + 1))"
-            [[ "$_SF_SHUTTING_DOWN" == true ]] && break
+            run_cleanup_pass "$review_file" "$review_type" "$project_dir" 1
 
-            # Re-run review to check if cleanup was successful
-            log "Re-running review after cleanup..."
-            local prev_review_file="$review_file"
-            review_timestamp=$(date '+%Y%m%d-%H%M%S')
-            review_file="${project_dir}/working/reviews/pipeline-review-${review_timestamp}.md"
-            review_log="${project_dir}/working/logs/review-${review_timestamp}.log"
-
-            # Update the review prompt with the new file path.
-            # Use exact string replacement (not glob *) to avoid O(n²) bash
-            # pattern matching on the potentially huge inlined-files prompt.
-            local prev_basename
-            prev_basename=$(basename "$prev_review_file")
-            review_prompt="${review_prompt/${prev_basename}/pipeline-review-${review_timestamp}.md}"
-
-            _run_headless_session "$review_prompt" "$review_model" "$review_log"
-
-            # When using the API, Claude can't write files — extract the
-            # response and write the review file ourselves (same as initial review).
-            if [[ -n "${ANTHROPIC_API_KEY:-}" && ! -f "$review_file" ]]; then
-                local rerev_text
-                rerev_text=$(_extract_headless_response "$review_log" 2>/dev/null || true)
-                if [[ -n "$rerev_text" ]]; then
-                    echo "$rerev_text" > "$review_file"
-                    log "Re-review saved to $(basename "$review_file")"
-                fi
+            if [[ "$_SF_SHUTTING_DOWN" != true ]]; then
+                log "Cleanup complete."
             fi
-
-            # Fallback commit
-            head_before=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || echo "none")
-            if [[ -f "$review_file" ]]; then
-                (
-                    cd "$project_dir"
-                    git add working/reviews/ working/logs/ working/pipeline.csv 2>/dev/null || true
-                    git commit -m "Review: re-review after cleanup $((cleanup_iter + 1)) (${review_type})" 2>/dev/null || true
-                    git push 2>/dev/null || true
-                )
-            fi
-
-            cleanup_iter=$((cleanup_iter + 1))
-        done
-
-        if (( cleanup_iter > 0 )); then
-            log "Cleanup complete after ${cleanup_iter} pass(es)."
         fi
 
         # Recommend step (also sets cycle status to complete)
