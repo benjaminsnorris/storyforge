@@ -71,14 +71,19 @@ If a dashboard is available (pre-existing or just generated):
 
 If no dashboard is available, skip this step.
 
-## Step 7: Cover (Automatic)
+## Step 7: Cover
 
-The publish script automatically handles the cover:
-- It looks for `manuscript/assets/cover.png` (or `.jpg`) in the book project
-- If found, it copies to `<bookshelf_path>/public/covers/<slug>.png` and sets `cover_image_url` in the database
-- If not found, it reports "none found" — no action needed
+The cover is only published when the author asks for it (e.g. "publish the cover too", "include the cover", "update the cover").
 
-You do not need to copy the cover manually. The script output will confirm whether a cover was published.
+When requested, add `--cover` to the publish command in Step 5:
+
+```bash
+cd <bookshelf_path> && npx tsx scripts/publish-book.ts <book_repo_path> --cover
+```
+
+The script handles everything: copies `manuscript/assets/cover.png` (or `.jpg`) to `public/covers/<slug>.png` and sets `cover_image_url` in the database.
+
+If the author doesn't mention the cover, run the publish command without `--cover`.
 
 ## Step 8: Commit and Push in Bookshelf
 
