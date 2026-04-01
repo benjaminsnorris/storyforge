@@ -71,23 +71,21 @@ If a dashboard is available (pre-existing or just generated):
 
 If no dashboard is available, skip this step.
 
-## Step 7: Copy Cover (Only If Requested)
+## Step 7: Cover (Automatic)
 
-This step only runs when the author explicitly asks to publish the cover. It is never performed automatically.
+The publish script automatically handles the cover:
+- It looks for `manuscript/assets/cover.png` (or `.jpg`) in the book project
+- If found, it copies to `<bookshelf_path>/public/covers/<slug>.png` and sets `cover_image_url` in the database
+- If not found, it reports "none found" — no action needed
 
-When requested:
-1. Locate the cover image in the book project (check `manuscript/assets/cover.png`, `manuscript/assets/cover.jpg`, or similar).
-2. Copy or upload it to the bookshelf project's expected cover location.
-3. Include the cover file in the commit in Step 8.
-
-If the author did not request cover publishing, skip this step entirely.
+You do not need to copy the cover manually. The script output will confirm whether a cover was published.
 
 ## Step 8: Commit and Push in Bookshelf
 
 If any files were copied to the bookshelf repo (dashboard, cover):
 
 1. Stage the new/changed files.
-2. Commit with message: `Publish <book-title> dashboard` (adjust if cover was also included: `Publish <book-title> dashboard and cover`).
+2. Commit with message: `Publish <book-title>` (include what was copied, e.g. "dashboard", "dashboard and cover").
 3. Push to remote.
 
 Skip this step only if the author explicitly asks not to commit, or if no files were copied.
