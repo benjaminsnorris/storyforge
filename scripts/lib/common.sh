@@ -1838,14 +1838,30 @@ REVIEW_EOF
 
             # Re-run review to check if cleanup was successful
             log "Re-running review after cleanup..."
+            local prev_review_file="$review_file"
             review_timestamp=$(date '+%Y%m%d-%H%M%S')
             review_file="${project_dir}/working/reviews/pipeline-review-${review_timestamp}.md"
             review_log="${project_dir}/working/logs/review-${review_timestamp}.log"
 
-            # Update the review prompt with the new file path
-            review_prompt="${review_prompt/pipeline-review-*.md/pipeline-review-${review_timestamp}.md}"
+            # Update the review prompt with the new file path.
+            # Use exact string replacement (not glob *) to avoid O(n²) bash
+            # pattern matching on the potentially huge inlined-files prompt.
+            local prev_basename
+            prev_basename=$(basename "$prev_review_file")
+            review_prompt="${review_prompt/${prev_basename}/pipeline-review-${review_timestamp}.md}"
 
             _run_headless_session "$review_prompt" "$review_model" "$review_log"
+
+            # When using the API, Claude can't write files — extract the
+            # response and write the review file ourselves (same as initial review).
+            if [[ -n "${ANTHROPIC_API_KEY:-}" && ! -f "$review_file" ]]; then
+                local rerev_text
+                rerev_text=$(_extract_headless_response "$review_log" 2>/dev/null || true)
+                if [[ -n "$rerev_text" ]]; then
+                    echo "$rerev_text" > "$review_file"
+                    log "Re-review saved to $(basename "$review_file")"
+                fi
+            fi
 
             # Fallback commit
             head_before=$(git -C "$project_dir" rev-parse HEAD 2>/dev/null || echo "none")
