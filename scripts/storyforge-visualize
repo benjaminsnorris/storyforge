@@ -285,8 +285,8 @@ body {
     top: 0;
     z-index: 100;
     background: var(--bg);
-    padding: 12px 0 8px;
-    margin-bottom: 32px;
+    padding: 12px 0 4px;
+    margin-bottom: 0;
 }
 
 #spine-wrapper .vis-container {
@@ -627,11 +627,7 @@ body {
     display: flex;
     gap: 0;
     border-bottom: 1px solid var(--border);
-    margin-bottom: 16px;
-    position: sticky;
-    top: 0;
-    z-index: 90;
-    background: var(--bg);
+    margin: 0 0 0;
     padding: 0 4px;
 }
 .dash-nav a {
@@ -673,16 +669,7 @@ body {
     </div>
 </div>
 
-<nav class="dash-nav">
-    <a href="#overview" class="active" data-page="overview">Overview</a>
-    <a href="#structure" data-page="structure">Structure</a>
-    <a href="#scores" data-page="scores">Scores</a>
-</nav>
-
-<!-- ═══ OVERVIEW PAGE ═══ -->
-<div class="dash-page active" id="page-overview">
-
-<!-- 1. Manuscript Spine -->
+<!-- Spine + nav — single sticky element -->
 <div id="spine-wrapper" class="section section-spine">
     <div class="section-header">
         <span class="dot"></span>
@@ -691,7 +678,15 @@ body {
     </div>
     <div class="vis-container" id="spine"></div>
     <div class="legend" id="spine-legend"></div>
+    <nav class="dash-nav">
+        <a href="#overview" class="active" data-page="overview">Overview</a>
+        <a href="#structure" data-page="structure">Structure</a>
+        <a href="#scores" data-page="scores">Scores</a>
+    </nav>
 </div>
+
+<!-- ═══ OVERVIEW PAGE ═══ -->
+<div class="dash-page active" id="page-overview">
 
 <!-- 2. POV River -->
 <div class="section">
