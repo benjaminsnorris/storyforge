@@ -6,3 +6,4 @@ working/
 __pycache__/
 *.pyc
 .worktrees/
+.worktrees/
