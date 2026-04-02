@@ -723,6 +723,13 @@ for cat in ['timeline', 'knowledge', 'mice_threads']:
         else
             log "  No cleanup fixes needed"
         fi
+
+        # Claude-powered cleanup removed — deterministic cleanup handles
+        # the high-confidence fixes (timeline interpolation, knowledge fuzzy
+        # match, MICE duplicate/orphan removal). The remaining issues after
+        # deterministic cleanup genuinely need author review. Claude knowledge
+        # reconciliation was tested and produced marginal improvement (1 additional
+        # fix on a 64-scene manuscript) at high token cost (252KB prompt).
     fi
 fi
 
