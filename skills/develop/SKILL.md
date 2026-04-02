@@ -34,7 +34,17 @@ Do NOT skip this step. You need to know what already exists before you can help 
 
 ---
 
-## Step 2: Determine Execution Mode
+## Step 2: Check for Elaboration Pipeline
+
+If `storyforge.yaml` phase is `spine`, `architecture`, `scene-map`, or `briefs`, this project uses the elaboration pipeline. During elaboration, character development, world building, and story architecture are integrated into the elaborate stages — they're not done separately.
+
+Tell the author: "This project is in the elaboration pipeline (phase: {phase}). Character, world, and story architecture work is part of `/storyforge:elaborate`. Would you like to go there instead?"
+
+If the author insists on doing standalone develop work during elaboration (e.g., deepening a specific character outside the pipeline), that's fine — proceed normally. The elaborate skill will pick up the reference material changes.
+
+If the phase is NOT an elaboration phase, proceed normally.
+
+## Step 3: Determine Execution Mode
 
 **If invoked with specific direction** (e.g., "deepen Maren's wound/lie structure" or "build out the economic system in the world bible"):
 Skip assessment. Go directly to the relevant sub-workflow and execute. Make creative sub-decisions autonomously. Do not ask "what aspect?" or "which character?" — the direction tells you what to do. Do it.

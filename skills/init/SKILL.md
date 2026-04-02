@@ -53,6 +53,12 @@ Ask the author for the following details **one question at a time** using `AskUs
 
    You can change this anytime in storyforge.yaml."
 
+7. **Pipeline approach** — "How do you want to build your novel?
+   - **Elaboration** (recommended) — Build structural integrity before writing prose. Progressive stages: spine → architecture → scene map → briefs → draft → polish. Catches continuity issues before they become prose problems. Enables parallel scene drafting.
+   - **Traditional** — Jump into scene design and drafting. Evaluate and revise after. Good for authors who prefer to discover the story through writing.
+
+   The elaboration approach is newer and produces cleaner first drafts. Traditional is the established workflow."
+
 Store all answers for use in subsequent steps.
 
 ## Step 2: Create the Project Directory Structure
@@ -126,7 +132,7 @@ project:
   subgenre: "{subgenre or empty}"
   target_word_count: {word_count}
   logline: "{logline}"
-  phase: development
+  phase: spine  # or "development" if traditional pipeline
   status: active
 
 structure:
@@ -147,7 +153,28 @@ If no templates are found in the plugin directory, note this to the author and l
 
 ## Step 5: Create the Scene CSV Files
 
-Use the **Write tool** to create the two scene CSV files with headers only:
+The CSV files depend on which pipeline the author chose.
+
+**If elaboration pipeline:** Create three files with headers only:
+
+**`{project-dir}/reference/scenes.csv`:**
+```
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|status|word_count|target_words
+```
+
+**`{project-dir}/reference/scene-intent.csv`:**
+```
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+```
+
+**`{project-dir}/reference/scene-briefs.csv`:**
+```
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+```
+
+Copy these from the plugin's `templates/reference/` directory if available.
+
+**If traditional pipeline:** Create two files with headers only:
 
 **`{project-dir}/reference/scene-metadata.csv`:**
 ```
