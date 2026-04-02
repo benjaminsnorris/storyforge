@@ -79,14 +79,76 @@ body { background-image: radial-gradient(ellipse at 50% 0%, var(--gold-dim) 0%, 
 <div class="page">
 
 <div class="hero">
-  <h1>Write novels with <span>structural integrity</span></h1>
-  <p class="lead">Storyforge helps you build the bones of your story before you write a word of prose — so your first draft is dramatically better.</p>
+  <h1><span>Storyforge</span></h1>
+  <p class="lead">Write novels with structural integrity</p>
 </div>
 
+<!-- Pipeline diagram -->
+<svg viewBox="0 0 720 120" style="width:100%;max-width:720px;margin:0 auto 48px;display:block;" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .stage-box { rx: 8; ry: 8; stroke-width: 1; }
+    .stage-text { font-family: 'JetBrains Mono', monospace; font-size: 10px; fill: var(--text); text-anchor: middle; }
+    .stage-label { font-family: 'Instrument Serif', Georgia, serif; font-size: 13px; fill: var(--text-dim); text-anchor: middle; }
+    .arrow-line { stroke: var(--text-light); stroke-width: 1; }
+    .gate-dot { fill: var(--teal); }
+    .gate-text { font-family: 'JetBrains Mono', monospace; font-size: 7px; fill: var(--teal); text-anchor: middle; }
+  </style>
+  <!-- Stages -->
+  <rect x="0" y="20" width="80" height="50" class="stage-box" fill="var(--gold-dim)" stroke="var(--gold)"/>
+  <text x="40" y="42" class="stage-text" style="fill:var(--gold)">Spine</text>
+  <text x="40" y="56" class="stage-label">5–10 events</text>
+
+  <line x1="84" y1="45" x2="104" y2="45" class="arrow-line"/>
+  <circle cx="94" cy="45" r="3" class="gate-dot"/>
+  <text x="94" y="82" class="gate-text">validate</text>
+
+  <rect x="108" y="20" width="80" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--deep-blue)"/>
+  <text x="148" y="42" class="stage-text" style="fill:var(--deep-blue)">Architecture</text>
+  <text x="148" y="56" class="stage-label">15–25 scenes</text>
+
+  <line x1="192" y1="45" x2="212" y2="45" class="arrow-line"/>
+  <circle cx="202" cy="45" r="3" class="gate-dot"/>
+  <text x="202" y="82" class="gate-text">validate</text>
+
+  <rect x="216" y="20" width="65" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--rose)"/>
+  <text x="248" y="42" class="stage-text" style="fill:var(--rose)">Voice</text>
+  <text x="248" y="56" class="stage-label">style guide</text>
+
+  <line x1="285" y1="45" x2="305" y2="45" class="arrow-line"/>
+
+  <rect x="309" y="20" width="80" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--teal)"/>
+  <text x="349" y="42" class="stage-text" style="fill:var(--teal)">Scene Map</text>
+  <text x="349" y="56" class="stage-label">40–60 scenes</text>
+
+  <line x1="393" y1="45" x2="413" y2="45" class="arrow-line"/>
+  <circle cx="403" cy="45" r="3" class="gate-dot"/>
+  <text x="403" y="82" class="gate-text">validate</text>
+
+  <rect x="417" y="20" width="70" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--gold)"/>
+  <text x="452" y="42" class="stage-text" style="fill:var(--gold)">Briefs</text>
+  <text x="452" y="56" class="stage-label">per scene</text>
+
+  <line x1="491" y1="45" x2="511" y2="45" class="arrow-line"/>
+  <circle cx="501" cy="45" r="3" class="gate-dot"/>
+  <text x="501" y="82" class="gate-text">validate</text>
+
+  <rect x="515" y="20" width="65" height="50" class="stage-box" fill="var(--gold-dim)" stroke="var(--gold)"/>
+  <text x="547" y="42" class="stage-text" style="fill:var(--gold)">Draft</text>
+  <text x="547" y="56" class="stage-label">parallel</text>
+
+  <line x1="584" y1="45" x2="604" y2="45" class="arrow-line"/>
+
+  <rect x="608" y="20" width="65" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--rose)"/>
+  <text x="640" y="42" class="stage-text" style="fill:var(--rose)">Polish</text>
+  <text x="640" y="56" class="stage-label">one pass</text>
+
+  <!-- Subtitle -->
+  <text x="360" y="110" style="font-family:'Instrument Serif',Georgia,serif; font-size:12px; fill:var(--text-light); text-anchor:middle;">Build the structure first. Validate at every stage. Draft with confidence.</text>
+</svg>
+
 <div class="prose">
-  <h2>The problem with drafting first</h2>
-  <p>Most novelists write their way into the story, then spend months fixing what they find: continuity errors, dropped subplots, characters who know things they shouldn't, a middle that sags because the structure wasn't there to hold it up.</p>
-  <p>Storyforge takes a different approach. <strong>Build the structural skeleton first — scene by scene, validated at every step — so that when you write prose, the foundation is already sound.</strong> Continuity, knowledge flow, pacing, and thread management are checked before they become prose problems.</p>
+  <p>Most novelists write their way into the story, then spend months fixing continuity errors, dropped subplots, and characters who know things they shouldn't.</p>
+  <p>Storyforge takes a different approach. <strong>Build the structural skeleton first — scene by scene, validated at every step — so that when you write prose, the foundation is already sound.</strong></p>
 </div>
 
 <div class="prose">
