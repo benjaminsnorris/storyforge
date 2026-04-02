@@ -918,6 +918,148 @@ def _build_full_steps(scene_id: str, scene_title: str,
 
 
 # ============================================================================
+# Brief-aware prompt builder (elaboration pipeline)
+# ============================================================================
+
+def build_scene_prompt_from_briefs(
+    scene_id: str,
+    project_dir: str,
+    plugin_dir: str,
+    coaching_level: str = 'full',
+    dep_scenes: list[str] | None = None,
+) -> str:
+    """Build a drafting prompt from the three-file scene CSV model.
+
+    Unlike build_scene_prompt which reads scene-metadata.csv + scene-intent.csv,
+    this reads scenes.csv + scene-intent.csv + scene-briefs.csv and includes
+    the full brief as the drafting contract. The full manuscript is NOT included —
+    only dependency scene briefs for context.
+
+    Args:
+        scene_id: The scene to draft.
+        project_dir: Path to the book project.
+        plugin_dir: Path to the Storyforge plugin root.
+        coaching_level: full/coach/strict.
+        dep_scenes: Scene IDs this scene depends on (from continuity_deps).
+                    Their brief rows are included for context.
+    """
+    from .elaborate import get_scene, get_scenes
+
+    yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+    title = read_yaml_field(yaml_path, 'project.title') or 'Untitled'
+    genre = read_yaml_field(yaml_path, 'project.genre') or ''
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    scene = get_scene(scene_id, ref_dir)
+    if not scene:
+        return f"ERROR: Scene {scene_id} not found in scenes.csv"
+
+    # Build scene data block
+    scene_block = '\n'.join(f"**{k}:** {v}" for k, v in scene.items()
+                            if v and k != 'id')
+
+    # Build dependency context
+    dep_block = ''
+    if dep_scenes:
+        dep_parts = []
+        for dep_id in dep_scenes:
+            dep = get_scene(dep_id, ref_dir)
+            if dep:
+                dep_summary = (
+                    f"**{dep_id}** — {dep.get('function', '')}\n"
+                    f"  outcome: {dep.get('outcome', '')}\n"
+                    f"  knowledge_out: {dep.get('knowledge_out', '')}\n"
+                    f"  emotional_arc: {dep.get('emotional_arc', '')}"
+                )
+                dep_parts.append(dep_summary)
+        if dep_parts:
+            dep_block = "## Dependency Scenes\n\nThese scenes happen before this one. Their outcomes and knowledge states are your starting context.\n\n" + '\n\n'.join(dep_parts)
+
+    # Voice guide
+    voice_guide = ''
+    voice_path = os.path.join(ref_dir, 'voice-guide.md')
+    if os.path.isfile(voice_path):
+        with open(voice_path) as f:
+            voice_guide = f"## Voice Guide\n\n{f.read().strip()}"
+
+    # Character bible entries for on-stage characters
+    char_block = ''
+    char_path = os.path.join(ref_dir, 'character-bible.md')
+    if os.path.isfile(char_path):
+        on_stage = scene.get('on_stage', '')
+        if on_stage:
+            char_block = f"## Character Bible (on-stage: {on_stage})\n\n"
+            with open(char_path) as f:
+                char_block += f.read().strip()
+
+    # Craft principles
+    craft = build_weighted_directive(project_dir)
+    craft_block = f"## Craft Principles\n\n{craft}" if craft else ''
+
+    # Coaching-specific instructions
+    if coaching_level == 'full':
+        task_block = f"""## Task
+
+Write the complete prose for scene **{scene_id}** ("{scene.get('title', '')}").
+
+The brief is your contract. Deliver:
+- The value shift specified ({scene.get('value_shift', '')})
+- The outcome specified ({scene.get('outcome', '')})
+- The key dialogue lines (or close paraphrases)
+- The emotional arc from {scene.get('emotional_arc', '')}
+- The POV character must know {scene.get('knowledge_out', '')} by scene end
+
+**Prose naturalness rules:**
+- Em dashes rare (max one per scene)
+- No antithesis framing (negation + affirmation as structural pair)
+- Vary sentence and paragraph length
+- Contractions in interiority and dialogue
+- Enter late, leave early — start mid-action, end on image/action/dialogue
+
+Output the scene prose only. No metadata, no frontmatter, no commentary."""
+
+    elif coaching_level == 'coach':
+        task_block = f"""## Task
+
+Produce an expanded writing guide for scene **{scene_id}** ("{scene.get('title', '')}").
+
+Include:
+- Voice notes specific to this scene and POV character
+- Craft reminders relevant to the scene type ({scene.get('scene_type', '')})
+- How to land the value shift ({scene.get('value_shift', '')})
+- Suggested approach for the crisis/decision moment
+- Line-level suggestions for key dialogue
+- Pacing guidance given the emotional arc
+
+Do NOT write the prose. The author writes from your guide."""
+
+    else:  # strict
+        task_block = f"""## Task
+
+Format the brief data for scene **{scene_id}** ("{scene.get('title', '')}") as a clean reference for the author.
+
+Include all structural data, knowledge states, and continuity constraints.
+Do NOT add creative interpretation or suggestions."""
+
+    return f"""You are drafting a scene for "{title}" ({genre}).
+
+## Scene Brief: {scene_id}
+
+{scene_block}
+
+{dep_block}
+
+{voice_guide}
+
+{char_block}
+
+{craft_block}
+
+{task_block}
+"""
+
+
+# ============================================================================
 # CLI interface for calling from bash
 # ============================================================================
 
@@ -966,6 +1108,47 @@ def main():
 
         prompt = build_scene_prompt(scene_id, project_dir, coaching, api_mode)
         print(prompt)
+
+    elif command == 'build-from-briefs':
+        if len(sys.argv) < 4:
+            print('Usage: build-from-briefs <scene_id> <project_dir> '
+                  '[--plugin-dir DIR] [--coaching full|coach|strict] '
+                  '[--deps id1;id2;...]',
+                  file=sys.stderr)
+            sys.exit(1)
+
+        scene_id = sys.argv[2]
+        project_dir = sys.argv[3]
+        plugin_dir = project_dir  # default fallback
+        coaching = 'full'
+        dep_scenes = None
+
+        i = 4
+        while i < len(sys.argv):
+            if sys.argv[i] == '--coaching' and i + 1 < len(sys.argv):
+                coaching = sys.argv[i + 1]
+                i += 2
+            elif sys.argv[i] == '--plugin-dir' and i + 1 < len(sys.argv):
+                plugin_dir = sys.argv[i + 1]
+                i += 2
+            elif sys.argv[i] == '--deps' and i + 1 < len(sys.argv):
+                dep_scenes = [d.strip() for d in sys.argv[i + 1].split(';') if d.strip()]
+                i += 2
+            else:
+                i += 1
+
+        prompt = build_scene_prompt_from_briefs(
+            scene_id, project_dir, plugin_dir, coaching, dep_scenes)
+        print(prompt)
+
+    elif command == 'build-waves':
+        if len(sys.argv) < 3:
+            print('Usage: build-waves <project_dir>', file=sys.stderr)
+            sys.exit(1)
+        from .elaborate import compute_drafting_waves
+        import json
+        waves = compute_drafting_waves(os.path.join(sys.argv[2], 'reference'))
+        print(json.dumps(waves))
 
     elif command == 'get-metadata':
         if len(sys.argv) < 4:

@@ -256,6 +256,141 @@ def add_scenes(ref_dir: str, scenes: list[dict[str, str]]) -> None:
 
 
 # ============================================================================
+# Wave planner — parallel drafting groups
+# ============================================================================
+
+def compute_drafting_waves(ref_dir: str) -> list[list[str]]:
+    """Compute parallel drafting waves from continuity_deps.
+
+    Scenes with no deps go in wave 1. Scenes whose deps are all in
+    earlier waves go in the next wave. Returns a list of waves, each
+    wave being a list of scene IDs that can be drafted in parallel.
+
+    Args:
+        ref_dir: Path to the reference/ directory.
+
+    Returns:
+        List of waves, e.g. [['scene-a', 'scene-b'], ['scene-c'], ['scene-d']]
+    """
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+
+    # Only include briefed/drafted scenes
+    eligible = set()
+    for sid, scene in scenes_map.items():
+        status = scene.get('status', '')
+        if status in ('briefed', 'drafted', 'polished'):
+            eligible.add(sid)
+
+    # Build dependency graph
+    deps: dict[str, set[str]] = {}
+    for sid in eligible:
+        brief = briefs_map.get(sid, {})
+        dep_str = brief.get('continuity_deps', '').strip()
+        if dep_str:
+            deps[sid] = {d.strip() for d in dep_str.split(';') if d.strip() and d.strip() in eligible}
+        else:
+            deps[sid] = set()
+
+    # Topological sort into waves
+    waves: list[list[str]] = []
+    assigned: set[str] = set()
+    remaining = set(eligible)
+
+    while remaining:
+        # Find scenes whose deps are all assigned
+        wave = []
+        for sid in sorted(remaining, key=lambda s: int(scenes_map.get(s, {}).get('seq', 0))):
+            if deps.get(sid, set()).issubset(assigned):
+                wave.append(sid)
+
+        if not wave:
+            # Circular dependency — break it by taking the lowest-seq scene
+            lowest = min(remaining, key=lambda s: int(scenes_map.get(s, {}).get('seq', 0)))
+            wave = [lowest]
+
+        waves.append(wave)
+        assigned.update(wave)
+        remaining -= set(wave)
+
+    return waves
+
+
+# ============================================================================
+# Structural scoring — pre-draft quality checks on brief data
+# ============================================================================
+
+def score_structure(ref_dir: str) -> list[dict]:
+    """Score structural quality of scenes based on brief and intent data.
+
+    Returns a list of per-scene score dicts with:
+      - scene_id
+      - score (0-5)
+      - issues (list of strings describing problems)
+
+    Scenes without briefs get score 0. Scenes with complete, well-formed
+    briefs that pass all checks get score 5.
+    """
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+
+    results = []
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+
+    for sid in sorted_ids:
+        scene = scenes_map[sid]
+        intent = intent_map.get(sid, {})
+        brief = briefs_map.get(sid, {})
+        issues = []
+        score = 5  # Start perfect, deduct for problems
+
+        # No brief at all
+        if not brief or not brief.get('goal', '').strip():
+            results.append({'scene_id': sid, 'score': 0, 'issues': ['No brief data']})
+            continue
+
+        # Goal/conflict/outcome chain
+        if not brief.get('goal', '').strip():
+            issues.append('Missing goal')
+            score -= 1
+        if not brief.get('conflict', '').strip():
+            issues.append('Missing conflict')
+            score -= 1
+        if not brief.get('outcome', '').strip():
+            issues.append('Missing outcome')
+            score -= 1
+
+        # Crisis should be a genuine dilemma
+        crisis = brief.get('crisis', '').strip()
+        if not crisis:
+            issues.append('Missing crisis')
+            score -= 1
+
+        # Value shift should not be flat
+        vs = intent.get('value_shift', '').strip()
+        if vs:
+            parts = vs.split('/')
+            if len(parts) == 2 and parts[0].strip() == parts[1].strip():
+                issues.append(f'Flat value shift: {vs}')
+                score -= 1
+
+        # Knowledge flow
+        if not brief.get('knowledge_in', '').strip() and int(scene.get('seq', 0)) > 1:
+            issues.append('Missing knowledge_in (not the first scene)')
+            score -= 1
+        if not brief.get('knowledge_out', '').strip():
+            issues.append('Missing knowledge_out')
+            score -= 1
+
+        score = max(0, min(5, score))
+        results.append({'scene_id': sid, 'score': score, 'issues': issues})
+
+    return results
+
+
+# ============================================================================
 # Structural validation
 # ============================================================================
 

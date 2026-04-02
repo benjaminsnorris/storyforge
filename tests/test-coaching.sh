@@ -131,14 +131,14 @@ result=$(run_dry_run "storyforge-write" --coaching coach act1-sc01)
 rc=$?
 assert_exit_code "0" "$rc" "write --coaching coach dry-run: exits 0"
 assert_contains "$result" "Coaching level: coach" "write --coaching coach dry-run: logs coaching level"
-assert_contains "$result" "working/coaching/brief-act1-sc01.md" "write --coaching coach dry-run: prompt references coaching output path"
+assert_contains "$result" "writing guide" "write --coaching coach dry-run: prompt requests writing guide"
 
 # --coaching strict
 result=$(run_dry_run "storyforge-write" --coaching strict act1-sc01)
 rc=$?
 assert_exit_code "0" "$rc" "write --coaching strict dry-run: exits 0"
 assert_contains "$result" "Coaching level: strict" "write --coaching strict dry-run: logs coaching level"
-assert_contains "$result" "working/coaching/constraints-act1-sc01.md" "write --coaching strict dry-run: prompt references constraints path"
+assert_contains "$result" "brief data" "write --coaching strict dry-run: prompt outputs brief data"
 
 # --coaching full should produce standard draft output (no coaching paths)
 result=$(run_dry_run "storyforge-write" --coaching full act1-sc01)
@@ -188,15 +188,13 @@ assert_not_contains "$result" "Coaching level" "evaluate dry-run: does not menti
 # coaching affects output path — coach mode references working/coaching/
 # ============================================================================
 
-# Write dry-run in coach mode should reference brief- files
+# Write dry-run in coach mode should reference writing guide
 result=$(run_dry_run "storyforge-write" --coaching coach act1-sc01)
-assert_contains "$result" "working/coaching/" "write coach dry-run: prompt references working/coaching/ directory"
-assert_contains "$result" "brief-" "write coach dry-run: prompt references brief- file prefix"
+assert_contains "$result" "writing guide" "write coach dry-run: prompt requests writing guide"
 
-# Write dry-run in strict mode should reference constraints- files
+# Write dry-run in strict mode should reference brief data
 result=$(run_dry_run "storyforge-write" --coaching strict act1-sc01)
-assert_contains "$result" "working/coaching/" "write strict dry-run: prompt references working/coaching/ directory"
-assert_contains "$result" "constraints-" "write strict dry-run: prompt references constraints- file prefix"
+assert_contains "$result" "brief data" "write strict dry-run: prompt outputs brief data"
 
 # Revise dry-run in coach mode should reference notes files
 result=$(run_dry_run "storyforge-revise" --coaching coach)
@@ -218,7 +216,7 @@ result=$(
 rc=$?
 assert_exit_code "0" "$rc" "write env STORYFORGE_COACHING=coach dry-run: exits 0"
 assert_contains "$result" "Coaching level: coach" "write env STORYFORGE_COACHING=coach dry-run: logs coaching level"
-assert_contains "$result" "working/coaching/brief-act1-sc01.md" "write env STORYFORGE_COACHING=coach dry-run: prompt references coaching output"
+assert_contains "$result" "writing guide" "write env STORYFORGE_COACHING=coach dry-run: prompt requests writing guide"
 
 result=$(
     cd "$FIXTURE_DIR"
@@ -227,7 +225,7 @@ result=$(
 rc=$?
 assert_exit_code "0" "$rc" "write env STORYFORGE_COACHING=strict dry-run: exits 0"
 assert_contains "$result" "Coaching level: strict" "write env STORYFORGE_COACHING=strict dry-run: logs coaching level"
-assert_contains "$result" "working/coaching/constraints-act1-sc01.md" "write env STORYFORGE_COACHING=strict dry-run: prompt references constraints path"
+assert_contains "$result" "brief data" "write env STORYFORGE_COACHING=strict dry-run: prompt outputs brief data"
 
 # ============================================================================
 # --coaching flag overrides STORYFORGE_COACHING env var

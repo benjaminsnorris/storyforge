@@ -350,3 +350,92 @@ print(len(failed) > 0)
 assert_equals "True" "$RESULT" "validate_structure: detects flat polarity stretch"
 
 rm -rf "$TMP_REF"
+
+# ============================================================================
+# compute_drafting_waves
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import compute_drafting_waves
+import json
+waves = compute_drafting_waves('${FIXTURE_DIR}/reference')
+print(json.dumps(waves))
+")
+
+# act1-sc01 has no deps → wave 1
+# act1-sc02 depends on act1-sc01 → wave 2
+# act2-sc03 depends on act1-sc02 and new-x1 → wave 2 or 3
+assert_contains "$RESULT" "act1-sc01" "compute_waves: act1-sc01 appears in waves"
+assert_contains "$RESULT" "act2-sc03" "compute_waves: act2-sc03 appears in waves"
+
+WAVE_COUNT=$(python3 -c "
+${PY}
+from storyforge.elaborate import compute_drafting_waves
+waves = compute_drafting_waves('${FIXTURE_DIR}/reference')
+print(len(waves))
+")
+
+assert_not_empty "$WAVE_COUNT" "compute_waves: returns non-empty waves"
+
+# First wave should contain scenes with no deps
+WAVE1=$(python3 -c "
+${PY}
+from storyforge.elaborate import compute_drafting_waves
+waves = compute_drafting_waves('${FIXTURE_DIR}/reference')
+print(' '.join(waves[0]) if waves else '')
+")
+
+assert_contains "$WAVE1" "act1-sc01" "compute_waves: wave 1 contains act1-sc01 (no deps)"
+
+# ============================================================================
+# score_structure
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import score_structure
+import json
+scores = score_structure('${FIXTURE_DIR}/reference')
+for s in scores:
+    print(f\"{s['scene_id']}: {s['score']} issues={len(s['issues'])}\")
+")
+
+# Fully briefed scenes should score high
+assert_contains "$RESULT" "act1-sc01: 5" "score_structure: fully briefed scene scores 5"
+# Scene with no brief (act2-sc01) should score 0
+assert_contains "$RESULT" "act2-sc01: 0" "score_structure: unbriefed scene scores 0"
+# new-x1 has empty brief fields → should score 0
+assert_contains "$RESULT" "new-x1: 0" "score_structure: empty brief scene scores 0"
+
+# ============================================================================
+# build_scene_prompt_from_briefs (via CLI)
+# ============================================================================
+
+RESULT=$(PYTHONPATH="${PLUGIN_DIR}/scripts/lib/python" python3 -m storyforge.prompts build-from-briefs \
+    "act1-sc01" "${FIXTURE_DIR}" \
+    --plugin-dir "${PLUGIN_DIR}" \
+    --coaching full 2>&1)
+
+assert_contains "$RESULT" "Dorren Hayle" "build_from_briefs: includes POV character"
+assert_contains "$RESULT" "goal" "build_from_briefs: includes brief goal"
+assert_contains "$RESULT" "Write the complete prose" "build_from_briefs: full mode asks for prose"
+
+# Coach mode
+RESULT=$(PYTHONPATH="${PLUGIN_DIR}/scripts/lib/python" python3 -m storyforge.prompts build-from-briefs \
+    "act1-sc01" "${FIXTURE_DIR}" \
+    --plugin-dir "${PLUGIN_DIR}" \
+    --coaching coach 2>&1)
+
+assert_contains "$RESULT" "writing guide" "build_from_briefs: coach mode asks for guide"
+assert_not_contains "$RESULT" "Write the complete prose" "build_from_briefs: coach mode does not ask for prose"
+
+# With deps
+RESULT=$(PYTHONPATH="${PLUGIN_DIR}/scripts/lib/python" python3 -m storyforge.prompts build-from-briefs \
+    "act1-sc02" "${FIXTURE_DIR}" \
+    --plugin-dir "${PLUGIN_DIR}" \
+    --coaching full \
+    --deps "act1-sc01" 2>&1)
+
+assert_contains "$RESULT" "Dependency Scenes" "build_from_briefs: includes dep context"
+assert_contains "$RESULT" "act1-sc01" "build_from_briefs: dep scene ID referenced"
