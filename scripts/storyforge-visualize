@@ -2559,10 +2559,12 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             stroke: 'var(--border)', 'stroke-width': 0.5, 'stroke-dasharray': v === 0 ? 'none' : '2,4'
         }));
         const labels = { 2: '++', 1: '+', 0: '0', '-1': '-', '-2': '--' };
-        svg.appendChild(svgEl('text', {
+        const lbl = svgEl('text', {
             x: labelW - 8, y: y + 4, 'text-anchor': 'end',
             fill: 'var(--muted)', 'font-size': '11px'
-        }, labels[v] || ''));
+        });
+        lbl.textContent = labels[v] || '';
+        svg.appendChild(lbl);
     });
 
     // Plot value shifts as arrows
@@ -2614,58 +2616,57 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     const mobile = window.innerWidth < 768;
     const W = container.clientWidth || 800;
-    const H = 100;
+    const H = 60;
     const labelW = mobile ? 80 : 120;
     const chartW = W - labelW - 20;
-    const barH = 20;
+    const barH = 22;
 
     const svg = svgEl('svg', { width: W, height: H, class: 'chart' });
 
-    // Row 1: Scene type (action vs sequel)
-    svg.appendChild(svgEl('text', {
-        x: 8, y: 16, fill: 'var(--muted)', 'font-size': '11px'
-    }, 'Scene Type'));
-
-    types.forEach((t, i) => {
-        const x = labelW + (i / types.length) * chartW;
-        const w = Math.max(chartW / types.length - 1, 2);
-        const color = t.sceneType === 'action' ? 'var(--red, #ef4444)' : 'var(--blue, #3b82f6)';
-        const rect = svgEl('rect', {
-            x: x, y: 4, width: w, height: barH,
-            fill: color, opacity: 0.7, rx: 2
-        });
-        attachSceneHandlers(rect, t.id);
-        svg.appendChild(rect);
+    // Single row: Scene type (action vs sequel) — color-coded by Swain type
+    const rowLabel = svgEl('text', {
+        x: 8, y: 18, fill: 'var(--muted)', 'font-size': '11px'
     });
-
-    // Row 2: Turning point type (action vs revelation)
-    svg.appendChild(svgEl('text', {
-        x: 8, y: 52, fill: 'var(--muted)', 'font-size': '11px'
-    }, 'Turning Point'));
+    rowLabel.textContent = 'Action / Sequel';
+    svg.appendChild(rowLabel);
 
     types.forEach((t, i) => {
         const x = labelW + (i / types.length) * chartW;
         const w = Math.max(chartW / types.length - 1, 2);
-        const color = t.turningPoint === 'action' ? 'var(--orange, #f59e0b)' : 'var(--purple, #8b5cf6)';
+        const isAction = t.sceneType === 'action';
+        const color = isAction ? '#ef4444' : '#3b82f6';
         const rect = svgEl('rect', {
-            x: x, y: 40, width: w, height: barH,
+            x: x, y: 4, width: w, height: barH + 4,
             fill: color, opacity: 0.7, rx: 2
         });
         attachSceneHandlers(rect, t.id);
         svg.appendChild(rect);
+
+        // Turning point indicator — small mark at bottom of bar
+        if (t.turningPoint) {
+            const tpColor = t.turningPoint === 'action' ? '#f59e0b' : '#8b5cf6';
+            svg.appendChild(svgEl('rect', {
+                x: x, y: barH + 6, width: w, height: 3,
+                fill: tpColor, opacity: 0.9, rx: 1
+            }));
+        }
     });
 
     // Legend
-    const legendY = 75;
+    const legendY = barH + 18;
     const legends = [
-        { label: 'Action', color: 'var(--red, #ef4444)', x: labelW },
-        { label: 'Sequel', color: 'var(--blue, #3b82f6)', x: labelW + 80 },
-        { label: 'Action TP', color: 'var(--orange, #f59e0b)', x: labelW + 160 },
-        { label: 'Revelation TP', color: 'var(--purple, #8b5cf6)', x: labelW + 260 },
+        { label: 'Action scene', color: '#ef4444' },
+        { label: 'Sequel scene', color: '#3b82f6' },
+        { label: 'Action turning point', color: '#f59e0b' },
+        { label: 'Revelation turning point', color: '#8b5cf6' },
     ];
+    let legendX = labelW;
     legends.forEach(l => {
-        svg.appendChild(svgEl('rect', { x: l.x, y: legendY, width: 10, height: 10, fill: l.color, rx: 2 }));
-        svg.appendChild(svgEl('text', { x: l.x + 14, y: legendY + 9, fill: 'var(--muted)', 'font-size': '10px' }, l.label));
+        svg.appendChild(svgEl('rect', { x: legendX, y: legendY, width: 10, height: 10, fill: l.color, rx: 2, opacity: 0.8 }));
+        const txt = svgEl('text', { x: legendX + 14, y: legendY + 9, fill: 'var(--muted)', 'font-size': '10px' });
+        txt.textContent = l.label;
+        svg.appendChild(txt);
+        legendX += l.label.length * 6.5 + 28;
     });
 
     container.appendChild(svg);
@@ -2700,10 +2701,12 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         const barW = (avg / 5) * chartW;
 
         // Label
-        svg.appendChild(svgEl('text', {
-            x: labelW - 8, y: y + 10, 'text-anchor': 'end',
+        const lbl = svgEl('text', {
+            x: labelW - 8, y: y + 14, 'text-anchor': 'end',
             fill: 'var(--fg)', 'font-size': '11px'
-        }, el.replace(/_/g, ' ')));
+        });
+        lbl.textContent = el.replace(/_/g, ' ');
+        svg.appendChild(lbl);
 
         // Background
         svg.appendChild(svgEl('rect', {
@@ -2719,10 +2722,12 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         }));
 
         // Score text
-        svg.appendChild(svgEl('text', {
+        const scoreTxt = svgEl('text', {
             x: labelW + barW + 6, y: y + 14,
             fill: 'var(--muted)', 'font-size': '11px'
-        }, avg.toFixed(1)));
+        });
+        scoreTxt.textContent = avg.toFixed(1);
+        svg.appendChild(scoreTxt);
     });
 
     container.appendChild(svg);
