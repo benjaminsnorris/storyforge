@@ -156,7 +156,10 @@ for sid in scene_ids:
     print(sid)
 " 2>/dev/null)
 
-readarray -t SORTED_SCENE_IDS <<< "$SORTED_IDS"
+SORTED_SCENE_IDS=()
+while IFS= read -r line; do
+    [[ -n "$line" ]] && SORTED_SCENE_IDS+=("$line")
+done <<< "$SORTED_IDS"
 
 # ============================================================================
 # Phase 0: Characterize
