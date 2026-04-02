@@ -498,3 +498,205 @@ def csv_block_to_rows(csv_text: str) -> list[dict[str, str]]:
             row[col] = values[i].strip() if i < len(values) else ''
         rows.append(row)
     return rows
+
+
+# ============================================================================
+# Gap-fill prompt builders
+# ============================================================================
+
+_FIELD_INSTRUCTIONS = {
+    'type': (
+        'Classify the scene type. Choose exactly one from: '
+        'character, plot, world, action, transition, confrontation, dialogue, introspection, revelation.'
+    ),
+    'time_of_day': (
+        'Determine the time of day. Choose exactly one from: '
+        'morning, afternoon, evening, night, dawn, dusk.'
+    ),
+    'duration': (
+        'Estimate the in-story duration of this scene (e.g., "2 hours", "30 minutes", "15 minutes").'
+    ),
+    'part': (
+        'Determine which act/part this scene belongs to (integer, e.g., 1, 2, 3).'
+    ),
+    'scene_type': (
+        'Classify as action or sequel using Swain\'s scene/sequel pattern. '
+        'Action: character pursues a goal and meets conflict. '
+        'Sequel: character reacts, processes, and decides next move.'
+    ),
+    'emotional_arc': (
+        'Describe the emotional progression in the format "starting_emotion to ending_emotion" '
+        '(e.g., "controlled competence to buried unease").'
+    ),
+    'value_at_stake': (
+        'Identify the abstract value at stake. Choose from: '
+        'safety, love, justice, truth, freedom, honor, life, identity, loyalty, power — '
+        'or name a specific value if none fit.'
+    ),
+    'value_shift': (
+        'Determine the polarity shift using +/- notation: '
+        '+/- (positive to negative), -/+ (negative to positive), '
+        '+/++ (good to better), -/-- (bad to worse), '
+        '+/+ (no change, positive), -/- (no change, negative).'
+    ),
+    'turning_point': (
+        'Identify the turning point type. Choose: action (character does something) '
+        'or revelation (character learns something new).'
+    ),
+    'threads': (
+        'List the story threads this scene advances, semicolon-separated '
+        '(e.g., "trust;betrayal;investigation").'
+    ),
+    'mice_threads': (
+        'List MICE thread operations: +type:name to open, -type:name to close. '
+        'Types: milieu, inquiry, character, event. '
+        'Semicolon-separated (e.g., "+inquiry:who-killed-X;-milieu:the-castle").'
+    ),
+    'location': (
+        'Identify the primary location where this scene takes place. '
+        'Use a canonical name consistent with other scenes.'
+    ),
+    'timeline_day': (
+        'Determine what day number this scene takes place on (integer, starting from 1). '
+        'Consider the surrounding scenes for context.'
+    ),
+}
+
+
+def build_gap_fill_prompt(
+    scene_id: str,
+    gap_group: str,
+    missing_fields: list,
+    project_dir: str,
+    scenes_dir: str,
+) -> str:
+    """Build a focused prompt to fill specific missing fields for one scene.
+
+    Args:
+        scene_id: The scene to fill gaps for.
+        gap_group: Name of the gap group (for context in prompt).
+        missing_fields: List of field names that need values.
+        project_dir: Path to the book project.
+        scenes_dir: Path to the scenes/ directory with prose files.
+
+    Returns:
+        Prompt string for Claude.
+    """
+    from .elaborate import get_scene
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    scene_data = get_scene(scene_id, ref_dir)
+
+    # Read prose excerpt (first 500 words)
+    prose_path = os.path.join(scenes_dir, f'{scene_id}.md')
+    prose = _read_file(prose_path)
+    if prose:
+        words = prose.split()
+        if len(words) > 500:
+            prose = ' '.join(words[:500]) + '\n[... truncated ...]'
+
+    # Build field instructions
+    field_instructions = []
+    for field in missing_fields:
+        instruction = _FIELD_INSTRUCTIONS.get(field, f'Provide a value for {field}.')
+        field_instructions.append(f'- **{field}**: {instruction}')
+
+    # Build existing data summary
+    existing_data = []
+    if scene_data:
+        for key, val in scene_data.items():
+            if val and key not in ('id',) and key not in missing_fields:
+                existing_data.append(f'- {key}: {val}')
+
+    return f"""You are filling missing metadata for a scene in a novel. Read the prose excerpt and existing data, then provide ONLY the missing fields.
+
+## Scene: {scene_id}
+
+### Existing Data
+{chr(10).join(existing_data) if existing_data else '(no existing data)'}
+
+### Prose Excerpt
+{prose if prose else '(no prose available)'}
+
+## Missing Fields — Fill These
+
+{chr(10).join(field_instructions)}
+
+## Output Format
+
+Respond with ONLY a pipe-delimited CSV row. The header is:
+
+id|{"|".join(missing_fields)}
+
+Provide exactly one data row:
+
+{scene_id}|<values>
+
+No explanation. No markdown fencing. Just the header line and the data line.
+"""
+
+
+def build_knowledge_fix_prompt(
+    scene_id: str,
+    project_dir: str,
+    scenes_dir: str,
+    available_knowledge: set,
+) -> str:
+    """Build a prompt to fix knowledge_in/knowledge_out wording for one scene.
+
+    Args:
+        scene_id: The scene to fix.
+        project_dir: Path to the book project.
+        scenes_dir: Path to the scenes/ directory with prose files.
+        available_knowledge: Set of exact knowledge_out strings from all prior scenes.
+
+    Returns:
+        Prompt string for Claude.
+    """
+    from .elaborate import get_scene
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    scene_data = get_scene(scene_id, ref_dir)
+
+    # Read prose excerpt
+    prose_path = os.path.join(scenes_dir, f'{scene_id}.md')
+    prose = _read_file(prose_path)
+    if prose:
+        words = prose.split()
+        if len(words) > 500:
+            prose = ' '.join(words[:500]) + '\n[... truncated ...]'
+
+    current_kin = scene_data.get('knowledge_in', '') if scene_data else ''
+    current_kout = scene_data.get('knowledge_out', '') if scene_data else ''
+
+    sorted_knowledge = sorted(available_knowledge) if available_knowledge else ['(none yet — this is the first scene)']
+
+    return f"""You are fixing the knowledge chain for a scene in a novel. The knowledge_in field must use EXACT wording from prior scenes' knowledge_out.
+
+## Scene: {scene_id}
+
+### Prose Excerpt
+{prose if prose else '(no prose available)'}
+
+### Current Values (may have wording mismatches)
+- knowledge_in: {current_kin}
+- knowledge_out: {current_kout}
+
+### Available Knowledge (exact wording from all prior scenes' knowledge_out)
+{chr(10).join(f'- {k}' for k in sorted_knowledge)}
+
+## Instructions
+
+1. Rewrite knowledge_in using ONLY facts from the available knowledge list above, using their EXACT wording. Drop any facts not in the list. Add any facts from the list that this POV character would know entering this scene.
+2. Rewrite knowledge_out as: the corrected knowledge_in PLUS any new facts learned during this scene (read the prose to determine what's new).
+3. List continuity_deps: the scene IDs whose knowledge_out contributed facts to this scene's knowledge_in.
+
+## Output Format
+
+Respond with ONLY a pipe-delimited CSV row. The header is:
+
+id|knowledge_in|knowledge_out|continuity_deps
+
+Provide exactly one data row. Semicolon-separate multiple values within a field.
+No explanation. No markdown fencing. Just the header line and the data line.
+"""

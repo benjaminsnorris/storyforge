@@ -439,3 +439,179 @@ RESULT=$(PYTHONPATH="${PLUGIN_DIR}/scripts/lib/python" python3 -m storyforge.pro
 
 assert_contains "$RESULT" "Dependency Scenes" "build_from_briefs: includes dep context"
 assert_contains "$RESULT" "act1-sc01" "build_from_briefs: dep scene ID referenced"
+
+# ============================================================================
+# analyze_gaps
+# ============================================================================
+
+# Create a post-extraction fixture: drafted scenes with gaps
+TMP_REF=$(mktemp -d)
+
+# scenes.csv — all drafted, but some missing time_of_day and timeline_day
+cat > "${TMP_REF}/scenes.csv" <<'GAPCSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+scene-01|1|Opening|1|Alice|The Lab|1|morning|2 hours|character|drafted|2500|2500
+scene-02|2|Discovery|1|Alice|The Lab||afternoon||action|drafted|3000|3000
+scene-03|3|Confrontation|1|Bob|Council Room|2||1 hour|action|drafted|2000|2000
+scene-04|4|Escape|2|Alice|The Tunnel|3|night|30 minutes|action|drafted|1800|1800
+GAPCSV
+
+# scene-intent.csv — some missing value_shift and scene_type
+cat > "${TMP_REF}/scene-intent.csv" <<'GAPCSV'
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+scene-01|Establish the lab|action|calm to focused|truth|+/-|revelation|discovery|Alice;Bob|Alice|+inquiry:anomaly
+scene-02|Find the anomaly||tense to shocked|safety||action|discovery;danger|Alice|Alice|
+scene-03|Confront the council|sequel|resolve to anger|justice|+/-|revelation|politics|Bob;Council|Bob;Council|
+scene-04|Escape the collapse|action|fear to relief|life|-/+|action|danger|Alice|Alice|-inquiry:anomaly
+GAPCSV
+
+# scene-briefs.csv — all populated (post-extraction state)
+cat > "${TMP_REF}/scene-briefs.csv" <<'GAPCSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+scene-01|Set up the experiment|Equipment is faulty|yes-but|Fix equipment or start anyway|Starts anyway|Lab is funded|Lab equipment is faulty;experiment started|Checks equipment;Starts experiment|"We proceed"|calm;determination|lab-lights||false
+scene-02|Investigate the anomaly|Anomaly is dangerous|no-and|Retreat or push deeper|Pushes deeper|Lab equipment is faulty;experiment started|Anomaly is real;it is spreading|Scans anomaly;Takes samples|"This shouldn't be possible"|curiosity;shock;fear|anomaly-glow|scene-01|false
+scene-03|Get council to act|Council dismisses evidence|no|Accept dismissal or go rogue|Goes rogue|Anomaly is real;it is spreading|Council will not help;must act alone|Presents evidence;Council votes no|"Noted for the record"|resolve;anger;defiance|governance-weight|scene-02|false
+scene-04|Escape the tunnel|Tunnel is collapsing|yes|Save samples or save self|Saves self|Council will not help;must act alone|Survived;samples lost|Runs;Dodges debris;Reaches exit|"Leave it!"|fear;relief|depth-descent|scene-03|false
+GAPCSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import analyze_gaps
+import json
+gaps = analyze_gaps('${TMP_REF}')
+print(json.dumps(gaps, indent=2))
+")
+
+# Should detect gap groups
+assert_contains "$RESULT" '"scene-fields"' "analyze_gaps: detects scene-fields group"
+assert_contains "$RESULT" '"intent-fields"' "analyze_gaps: detects intent-fields group"
+assert_contains "$RESULT" '"scene-03"' "analyze_gaps: scene-03 missing time_of_day"
+assert_contains "$RESULT" '"scene-02"' "analyze_gaps: scene-02 missing timeline_day"
+
+# Should include total counts
+TOTAL=$(python3 -c "
+${PY}
+from storyforge.elaborate import analyze_gaps
+gaps = analyze_gaps('${TMP_REF}')
+print(gaps['total_gaps'])
+")
+
+assert_equals "4" "$TOTAL" "analyze_gaps: total_gaps count is exact (scene-02: timeline_day+scene_type+value_shift, scene-03: time_of_day)"
+
+# Should not flag scenes with no gaps
+assert_not_contains "$RESULT" '"scene-01": {' "analyze_gaps: scene-01 has no completeness gaps"
+
+# Should return empty structural list for this fixture
+STRUCTURAL=$(python3 -c "
+${PY}
+from storyforge.elaborate import analyze_gaps
+gaps = analyze_gaps('${TMP_REF}')
+print(len(gaps['structural']))
+")
+
+assert_equals "0" "$STRUCTURAL" "analyze_gaps: no structural issues in clean fixture"
+
+rm -rf "$TMP_REF"
+
+# ============================================================================
+# build_gap_fill_prompt
+# ============================================================================
+
+TMP_REF=$(mktemp -d)
+TMP_SCENES="${TMP_REF}/scenes"
+mkdir -p "${TMP_SCENES}"
+mkdir -p "${TMP_REF}/reference"
+
+# Create a scene file
+cat > "${TMP_SCENES}/scene-03.md" <<'PROSE'
+Bob strode into the council chamber. The long table gleamed under the gas lamps.
+"We have evidence," he said, laying the maps flat. "The eastern ridge is failing."
+The council members exchanged glances. No one spoke for a long moment.
+PROSE
+
+# Create minimal CSVs
+cat > "${TMP_REF}/reference/scenes.csv" <<'GAPCSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+scene-03|3|Confrontation|1|Bob|Council Room|2|evening|1 hour||drafted|2000|2000
+GAPCSV
+
+cat > "${TMP_REF}/reference/scene-intent.csv" <<'GAPCSV'
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+scene-03|Confront the council|sequel|resolve to anger|justice|+/-|revelation|politics|Bob;Council|Bob;Council|
+GAPCSV
+
+cat > "${TMP_REF}/reference/scene-briefs.csv" <<'GAPCSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+scene-03|Get council to act|Council dismisses|no|Accept or go rogue|Goes rogue|Evidence exists|Council will not help|Presents evidence|"Noted"|resolve;anger|governance|scene-02|false
+GAPCSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.prompts_elaborate import build_gap_fill_prompt
+prompt = build_gap_fill_prompt(
+    scene_id='scene-03',
+    gap_group='scene-fields',
+    missing_fields=['type'],
+    project_dir='${TMP_REF}',
+    scenes_dir='${TMP_SCENES}',
+)
+print(prompt)
+")
+
+assert_contains "$RESULT" "scene-03" "build_gap_fill_prompt: includes scene ID"
+assert_contains "$RESULT" "type" "build_gap_fill_prompt: asks for missing field"
+assert_contains "$RESULT" "Bob" "build_gap_fill_prompt: includes prose excerpt"
+assert_contains "$RESULT" "council chamber" "build_gap_fill_prompt: includes scene prose"
+
+rm -rf "$TMP_REF"
+
+# ============================================================================
+# build_knowledge_fix_prompt
+# ============================================================================
+
+TMP_REF=$(mktemp -d)
+TMP_SCENES="${TMP_REF}/scenes"
+mkdir -p "${TMP_SCENES}" "${TMP_REF}/reference"
+
+cat > "${TMP_SCENES}/scene-02.md" <<'PROSE'
+Alice ran the scanner across the anomaly. The readings confirmed what she feared.
+"This shouldn't be possible," she whispered. The anomaly was real, and spreading.
+PROSE
+
+cat > "${TMP_REF}/reference/scenes.csv" <<'GAPCSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+scene-01|1|Opening|1|Alice|The Lab|1|morning|2 hours|character|drafted|2500|2500
+scene-02|2|Discovery|1|Alice|The Lab|1|afternoon|1 hour|action|drafted|3000|3000
+GAPCSV
+
+cat > "${TMP_REF}/reference/scene-intent.csv" <<'GAPCSV'
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+scene-01|Establish the lab|action|calm to focused|truth|+/-|revelation|discovery|Alice|Alice|
+scene-02|Find the anomaly|action|tense to shocked|safety|-/+|action|discovery|Alice|Alice|
+GAPCSV
+
+cat > "${TMP_REF}/reference/scene-briefs.csv" <<'GAPCSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+scene-01|Set up experiment|Equipment faulty|yes-but|Fix or start|Starts anyway||Lab equipment is faulty;experiment started|Checks equipment|"We proceed"|calm|lights||false
+scene-02|Investigate anomaly|Dangerous|no-and|Retreat or push|Pushes deeper|Equipment is broken;experiment began|Anomaly is real;it is spreading|Scans anomaly|"Impossible"|shock|glow|scene-01|false
+GAPCSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.prompts_elaborate import build_knowledge_fix_prompt
+
+prior_knowledge = {'Lab equipment is faulty', 'experiment started'}
+prompt = build_knowledge_fix_prompt(
+    scene_id='scene-02',
+    project_dir='${TMP_REF}',
+    scenes_dir='${TMP_SCENES}',
+    available_knowledge=prior_knowledge,
+)
+print(prompt)
+")
+
+assert_contains "$RESULT" "scene-02" "build_knowledge_fix_prompt: includes scene ID"
+assert_contains "$RESULT" "Lab equipment is faulty" "build_knowledge_fix_prompt: includes available knowledge"
+assert_contains "$RESULT" "knowledge_in" "build_knowledge_fix_prompt: asks for knowledge_in"
+
+rm -rf "$TMP_REF"
