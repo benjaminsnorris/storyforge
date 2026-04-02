@@ -890,6 +890,11 @@ SCENES.forEach(s => { sceneById[s.id] = s; });
 INTENTS.forEach(i => { intentById[i.id] = i; });
 SCORES.forEach(s => { scoreById[s.id] = s; });
 
+const briefById = {};
+const fidelityById = {};
+BRIEFS.forEach(b => { briefById[b.id] = b; });
+FIDELITY_SCORES.forEach(f => { fidelityById[f.id] = f; });
+
 const sceneRationaleById = {};
 const actRationaleById = {};
 const charScoreByName = {};
@@ -1278,12 +1283,56 @@ function updateDetailPanel(sceneId) {
 
     if (intent) {
         let intentHtml = '';
-        if (intent.function) intentHtml += detailRow('Function', intent.function.substring(0, 120));
+        if (intent.function) intentHtml += detailRow('Function', intent.function.substring(0, 150));
+        if (intent.scene_type) {
+            const stFirst = intent.scene_type.split(/[\s—–]/)[0].trim();
+            intentHtml += detailRow('Scene Type', stFirst.charAt(0).toUpperCase() + stFirst.slice(1));
+        }
+        if (intent.value_at_stake) intentHtml += detailRow('Value at Stake', intent.value_at_stake.split(/[\s—–]/)[0].trim());
+        if (intent.value_shift) {
+            const vsMatch = intent.value_shift.match(/^([+\-]+)\s*\/\s*([+\-]+)/);
+            if (vsMatch) intentHtml += detailRow('Value Shift', vsMatch[1] + ' → ' + vsMatch[2]);
+        }
+        if (intent.turning_point) {
+            const tpFirst = intent.turning_point.split(/[\s—–]/)[0].trim();
+            intentHtml += detailRow('Turning Point', tpFirst.charAt(0).toUpperCase() + tpFirst.slice(1));
+        }
         if (intent.emotional_arc) intentHtml += detailRow('Emotion', intent.emotional_arc.substring(0, 80));
         if (intent.characters) intentHtml += detailRow('Characters', intent.characters.replace(/;/g, ', '));
         if (intent.threads) intentHtml += detailRow('Threads', intent.threads.replace(/;/g, ', '));
-        if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.replace(/;/g, ', '));
+        if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.replace(/;/g, ', ').substring(0, 100));
         if (intentHtml) html += '<div class="detail-section-end">' + intentHtml + '</div>';
+    }
+
+    // Brief data
+    const brief = briefById[sceneId];
+    if (brief) {
+        let briefHtml = '';
+        if (brief.goal) briefHtml += detailRow('Goal', brief.goal.substring(0, 120));
+        if (brief.conflict) briefHtml += detailRow('Conflict', brief.conflict.substring(0, 120));
+        if (brief.outcome) briefHtml += detailRow('Outcome', brief.outcome.split(/[\s—–]/)[0].trim());
+        if (brief.crisis) briefHtml += detailRow('Crisis', brief.crisis.substring(0, 120));
+        if (brief.decision) briefHtml += detailRow('Decision', brief.decision.substring(0, 120));
+        if (briefHtml) {
+            html += '<div style="margin-top:4px"><div class="detail-label" style="margin-bottom:4px">BRIEF</div>';
+            html += briefHtml + '</div>';
+        }
+    }
+
+    // Fidelity scores
+    const fidelity = fidelityById[sceneId];
+    if (fidelity) {
+        html += '<div style="margin-top:4px">';
+        html += '<div class="detail-label" style="margin-bottom:4px">FIDELITY</div>';
+        html += '<div class="scores-grid">';
+        const fElements = ['goal', 'conflict', 'outcome', 'crisis', 'decision', 'key_actions', 'key_dialogue', 'emotions', 'knowledge'];
+        fElements.forEach(el => {
+            const val = parseInt(fidelity[el]);
+            if (isNaN(val)) return;
+            const color = val >= 4 ? 'var(--score-mid-high)' : val >= 3 ? 'var(--score-mid)' : 'var(--score-mid-low)';
+            html += '<span class="sg-label">' + el.replace(/_/g, ' ') + '</span><span class="sg-value" style="color:' + color + '">' + val + '</span>';
+        });
+        html += '</div></div>';
     }
 
     if (score) {
