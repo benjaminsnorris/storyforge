@@ -167,13 +167,13 @@ rm -f "$TMP_CSV"
 # ============================================================================
 
 result=$(get_csv_field "$INTENT_CSV" "act1-sc01" "function")
-assert_equals "Establishes Dorren as institutional gatekeeper" "$result" "intent.csv: function field"
+assert_equals "Establishes Dorren as institutional gatekeeper who notices anomalies but chooses protocol over investigation" "$result" "intent.csv: function field"
 
 result=$(get_csv_field "$INTENT_CSV" "new-x1" "emotional_arc")
 assert_equals "Scholarly calm to urgent alarm" "$result" "intent.csv: emotional_arc field"
 
 result=$(list_csv_ids "$INTENT_CSV" | wc -l | tr -d ' ')
-assert_equals "4" "$result" "intent.csv: 4 IDs"
+assert_equals "6" "$result" "intent.csv: 6 IDs"
 
 # ============================================================================
 # renumber_scenes
