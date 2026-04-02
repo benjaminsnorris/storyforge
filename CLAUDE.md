@@ -297,23 +297,17 @@ Run: `./tests/run-tests.sh` (all suites) or `./tests/run-tests.sh tests/test-thi
 
 | Skill | Purpose |
 |-------|---------|
-| `forge` | Main hub — routes to appropriate sub-skill based on project state |
-| `elaborate` | Progressive elaboration pipeline (spine → architecture → map → briefs) |
+| `forge` | Hub — reads project state, recommends next action, routes to skills |
+| `elaborate` | All creative development: spine → architecture → voice → map → briefs. Character, world, story architecture. |
 | `extract` | Reverse elaboration — extract structural data from existing prose |
-| `develop` | Creative development (character, world, architecture, timeline) |
-| `voice` | Voice and style guide development |
-| `scenes` | Scene index management (setup, design, review, edit) |
-| `plan-revision` | Design revision passes from evaluation findings |
-| `review` | Assess revision results |
-| `recommend` | Determine highest-value next action |
-| `score` | Craft scoring and weight calibration |
-| `produce` | Manuscript assembly and book production |
-| `visualize` | Manuscript dashboard generation |
+| `revise` | Plan + execute revision (upstream CSV fixes + prose polish). `--polish` for craft-only. |
+| `score` | Craft + fidelity scoring |
+| `publish` | Assemble web book + generate dashboard + push to bookshelf |
+| `produce` | Epub, PDF, print formats |
 | `init` | New project initialization |
-| `publish` | Push to Bookshelf app |
+| `cover` | Cover design |
 | `title` | Title development |
 | `press-kit` | Marketing materials |
-| `cover` | Book cover design |
 
 ### Elaboration Pipeline
 

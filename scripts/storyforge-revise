@@ -50,6 +50,16 @@ elif [[ -f "$PLAN_FILE" ]]; then
     log "DEPRECATION: Using YAML revision plan. Migrate to working/plans/revision-plan.csv."
 fi
 
+# --- Polish mode: auto-generate a craft-only plan targeting all drafted scenes ---
+if [[ "$POLISH_MODE" == true ]]; then
+    log "Polish mode — generating craft-only revision plan..."
+    mkdir -p "$(dirname "$CSV_PLAN_FILE")"
+    echo "pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location" > "$CSV_PLAN_FILE"
+    echo "1|prose-polish|Voice consistency, prose naturalness, dialogue authenticity, AI pattern cleanup|full||Follow the voice guide strictly. Focus on: em dash overuse, antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. Enter late, leave early.|voice-quality|polish|pending|opus|craft" >> "$CSV_PLAN_FILE"
+    USE_CSV_PLAN=true
+    log "Generated single-pass polish plan: ${CSV_PLAN_FILE}"
+fi
+
 LOG_DIR="${PROJECT_DIR}/working/logs"
 LOG_FILE="${LOG_DIR}/revision-log.txt"
 export LOG_FILE
@@ -60,10 +70,15 @@ mkdir -p "$LOG_DIR"
 DRY_RUN=false
 INTERACTIVE=false
 COACHING_LEVEL=""
+POLISH_MODE=false
 START_PASS=0  # 0 means "find first pending"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --polish)
+            POLISH_MODE=true
+            shift
+            ;;
         --dry-run)
             DRY_RUN=true
             shift

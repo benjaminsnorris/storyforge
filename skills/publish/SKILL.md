@@ -1,11 +1,11 @@
 ---
 name: publish
-description: Publish a book to the Bookshelf app — push content to Supabase and copy the dashboard. Use when the author wants to publish, deploy, or push their book to bookshelf for test readers.
+description: Publish a book to the Bookshelf app — assemble web book, generate dashboard, push content to Supabase, and copy assets. Use when the author wants to publish, deploy, push their book to bookshelf, generate a dashboard, or update the web book.
 ---
 
 # Storyforge Publish Skill
 
-You are helping an author publish their assembled book to the Bookshelf app. This is mechanical work — locate the bookshelf project, run the existing publish script, copy the dashboard, and commit.
+You are helping an author publish their book to the Bookshelf app. This handles the full publish pipeline: assemble the web book, generate the manuscript dashboard, push content to Supabase, and copy assets.
 
 ## Locating the Storyforge Plugin
 
@@ -31,21 +31,25 @@ Check for the publish script at `~/Developer/bookshelf/scripts/publish-book.ts`.
 - If found, store the bookshelf path (`~/Developer/bookshelf`) and continue.
 - If not found, tell the author: "I couldn't find the Bookshelf project at `~/Developer/bookshelf`. Where is your bookshelf project?" Wait for the path, then verify `scripts/publish-book.ts` exists there.
 
-## Step 3: Validate Readiness
+## Step 3: Assemble Web Book
 
-**Web chapters are required.** Check that `manuscript/output/web/chapters/` contains at least one `chapter-*.html` file.
+Check if `manuscript/output/web/chapters/` contains chapter files. If not (or if the author wants a fresh build), assemble:
 
-If no web chapters exist, stop and tell the author:
-> "The assembled web book doesn't exist yet. Run `/storyforge:produce` to assemble your manuscript first."
+```bash
+cd <project_dir> && ./storyforge assemble --format web
+```
 
-Do not proceed without web chapters.
+If the runner script doesn't exist, offer to create one. If `reference/chapter-map.csv` doesn't exist, help the author create it first (invoke `produce` skill for chapter mapping).
 
-## Step 4: Check Dashboard
+## Step 4: Generate Dashboard
 
-Look for `working/dashboard.html`:
+Generate or regenerate the manuscript dashboard:
 
-- **If it exists:** Note it for copying in Step 6.
-- **If it does not exist:** Ask the author: "The manuscript dashboard hasn't been generated yet. Would you like to create it before publishing?" If yes, invoke the `visualize` skill and return here when done. If no, proceed without the dashboard.
+```bash
+cd <project_dir> && ./storyforge visualize
+```
+
+This creates `working/dashboard.html` with the multi-page visualization (overview, structure, scores). If scoring data exists, it will be included automatically.
 
 ## Step 5: Publish Content
 

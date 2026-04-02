@@ -76,23 +76,17 @@ Seed → Spine → Architecture → Scene Map → Briefs → Draft → Evaluate 
 
 | Skill | Purpose |
 |-------|---------|
-| `/storyforge:forge` | Hub — reads project state, routes to the right skill |
-| `/storyforge:elaborate` | Progressive elaboration (spine → architecture → map → briefs) |
+| `/storyforge:forge` | Hub — reads project state, recommends next action, routes to the right skill |
+| `/storyforge:elaborate` | All creative development: spine → architecture → voice → map → briefs. Also character, world, and story architecture work. |
 | `/storyforge:extract` | Reverse elaboration — extract structure from existing prose |
-| `/storyforge:init` | Initialize a new project (elaboration or traditional) |
-| `/storyforge:develop` | World building, character development, story architecture |
-| `/storyforge:voice` | Voice and style guide development |
-| `/storyforge:scenes` | Scene index design, review, and editing |
-| `/storyforge:score` | Craft scoring and weight calibration |
-| `/storyforge:plan-revision` | Plan revision passes from evaluation findings |
-| `/storyforge:review` | Assess revision results |
-| `/storyforge:recommend` | Recommend the highest-value next action |
-| `/storyforge:produce` | Chapter mapping, production settings, book assembly |
-| `/storyforge:visualize` | Multi-page manuscript dashboard |
-| `/storyforge:publish` | Push to Bookshelf web reader |
-| `/storyforge:title` | Title development and refinement |
-| `/storyforge:press-kit` | Blurbs, jacket copy, marketing materials |
-| `/storyforge:cover` | Cover design (SVG artwork or AI illustration) |
+| `/storyforge:revise` | Plan + execute revision (upstream CSV fixes + prose polish). Absorbs planning, execution, and review. `--polish` for craft-only. |
+| `/storyforge:score` | Craft + fidelity scoring |
+| `/storyforge:publish` | Assemble web book + generate dashboard + push to bookshelf |
+| `/storyforge:produce` | Epub, PDF, print formats |
+| `/storyforge:init` | Initialize a new project |
+| `/storyforge:cover` | Cover design |
+| `/storyforge:title` | Title development |
+| `/storyforge:press-kit` | Marketing materials |
 
 ## Scripts
 

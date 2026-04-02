@@ -1,0 +1,141 @@
+---
+name: revise
+description: Plan and execute revision — analyze evaluation findings, create upstream + craft passes, execute them, and review results. Use when the author has evaluation results and wants to revise, or after scoring reveals issues, or when the author asks to polish prose.
+---
+
+# Storyforge Revise
+
+You are helping an author plan and execute revisions. This skill handles the full cycle: analyze findings, build a revision plan, execute passes (upstream CSV fixes + prose polish), and assess results.
+
+## Locating the Storyforge Plugin
+
+The Storyforge plugin root is two levels up from this skill file's directory (this skill's directory → `skills/` → plugin root).
+
+Store this resolved plugin path for use throughout the session.
+
+## Step 1: Read Project State
+
+1. `storyforge.yaml` — phase, coaching level
+2. `working/pipeline.csv` — current cycle status
+3. Latest evaluation: `working/evaluations/eval-*/findings.yaml` or `synthesis.md`
+4. Latest scoring: `working/scores/latest/diagnosis.csv`, `fidelity-scores.csv`
+5. Existing revision plan: `working/plans/revision-plan.csv`
+6. Latest review: `working/reviews/` (most recent)
+
+## Step 2: Determine Mode
+
+Based on the author's request and project state:
+
+### "Revise" / "Fix the issues" / "Plan revision"
+→ Full revision cycle: analyze findings, plan passes, execute, review.
+
+### "Polish" / "Clean up the prose" / "Polish pass"
+→ Craft-only revision: skip planning, target scenes with low craft scores. Equivalent to `./storyforge revise --polish`.
+
+### "How did the revision go?" / "Review results"
+→ Assessment mode: read the most recent revision results, compare before/after, identify remaining issues, recommend next steps.
+
+### Evaluation exists but no plan yet
+→ Start at planning. Analyze findings and propose passes.
+
+### Plan exists with pending passes
+→ Start at execution. Offer to run the pending passes.
+
+### All passes completed
+→ Start at review. Assess what changed.
+
+## Step 3: Plan the Revision
+
+Read evaluation findings and scoring data. Categorize each finding by where the fix belongs:
+
+| fix_location | Target file | What it fixes |
+|-------------|-------------|---------------|
+| `structural` | scenes.csv | POV, timeline, part structure, scene additions/removals |
+| `intent` | scene-intent.csv | Value shifts, threads, scene type, character presence |
+| `brief` | scene-briefs.csv | Knowledge chain, goal/conflict/outcome, key actions |
+| `craft` | Prose directly | Voice, rhythm, dialogue, naturalness |
+
+### Ordering Principles (upstream first)
+
+1. **Structural passes first** — scene additions, removals, reordering
+2. **Intent passes second** — value shift corrections, thread management
+3. **Brief passes third** — knowledge chain fixes, goal/conflict/outcome
+4. **Craft passes last** — prose polish (only after all upstream changes settle)
+5. **Validate** after all passes
+
+Each upstream pass automatically re-drafts affected scenes from updated briefs.
+
+### Plan Format
+
+Write the plan to `working/plans/revision-plan.csv`:
+
+```
+pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location
+1|knowledge-chain-fix|Fix knowledge violations flagged in evaluation|scene-level|scene-a;scene-b|Specific guidance here|voice-quality|F001;F003|pending|sonnet|brief
+2|thread-dormancy|Reactivate dormant threads|full||Add thread references in gaps|all-strengths|F007|pending|sonnet|intent
+3|prose-tightening|Voice consistency and AI pattern cleanup|full||Follow voice guide strictly|scene-30b|F012;F015|pending|opus|craft
+```
+
+### Presenting the Plan
+
+Present each pass with:
+- Name and purpose
+- Which scenes are affected
+- What will change (upstream CSV updates or prose edits)
+- Key guidance decisions (with rationale the author can review)
+
+Ask the author to approve before executing. They can edit any guidance entry.
+
+## Step 4: Execute the Revision
+
+Offer two options:
+
+> **Option A: Run it here**
+> I'll execute the revision passes in this conversation.
+>
+> **Option B: Run it yourself**
+> ```bash
+> cd [project_dir] && [plugin_path]/scripts/storyforge-revise [flags]
+> ```
+> For craft-only: `./storyforge revise --polish`
+
+If Option A, delegate to the revise script with the plan already saved.
+
+The revise script:
+- Reads the plan CSV
+- For upstream passes (fix_location: brief/intent/structural): asks Claude to produce corrected CSV rows, applies them, re-drafts affected scenes
+- For craft passes: edits prose directly
+- Commits after each pass
+- Runs validation after all passes
+
+## Step 5: Review Results
+
+After all passes complete (or when the author asks "how did it go"):
+
+1. Read the revision branch's diff (what changed)
+2. Run validation — how many issues remain vs before?
+3. Check scoring — did craft scores improve?
+4. Check fidelity — did the re-drafted scenes deliver their updated briefs?
+
+Present:
+- **What improved:** Specific findings resolved, validation failures reduced
+- **What remains:** Outstanding issues, new issues introduced
+- **Recommendation:** Ready to merge, needs another cycle, or needs author attention
+
+## Step 6: Commit
+
+After every deliverable:
+```bash
+git add -A && git commit -m "Revision: [what was done]" && git push
+```
+
+## Coaching Level Behavior
+
+### Full (default)
+Analyze findings, propose the plan with specific guidance, execute all passes autonomously, present results.
+
+### Coach
+Analyze findings, present options for each pass ("I see three approaches to the knowledge chain issue — which direction?"). Author decides. Execute on approval.
+
+### Strict
+Report findings and validation data. Author creates the plan. Skill formats it into CSV and provides the execution command.
