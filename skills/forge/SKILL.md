@@ -157,6 +157,8 @@ Determine the single highest-value next action based on project state. Work thro
 
 **1. Elaboration phase:** If phase is `spine`/`architecture`/`scene-map`/`briefs` → "Continue elaboration" → invoke `elaborate`.
 
+**1.5. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns failures > 0 → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state).
+
 **2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write` command.
 
 **3. Drafted, not evaluated:** If scenes exist but no evaluation → "Run evaluation" → provide `./storyforge evaluate` command.
