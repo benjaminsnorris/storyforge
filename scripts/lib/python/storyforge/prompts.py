@@ -868,7 +868,7 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('2. Read the continuity tracker '
                      '(reference/continuity-tracker.md if it exists)')
         lines.append('3. Read the scene metadata from '
-                     'reference/scene-metadata.csv')
+                     'reference/scenes.csv')
         lines.append('4. Check for:')
         lines.append('   - Contradictions with locked details')
         lines.append('   - Active threads that should advance but don\'t '
@@ -932,7 +932,7 @@ def build_scene_prompt_from_briefs(
 ) -> str:
     """Build a drafting prompt from the three-file scene CSV model.
 
-    Unlike build_scene_prompt which reads scene-metadata.csv + scene-intent.csv,
+    Unlike build_scene_prompt which reads scenes.csv + scene-intent.csv,
     this reads scenes.csv + scene-intent.csv + scene-briefs.csv and includes
     the full brief as the drafting contract. The full manuscript is NOT included —
     only dependency scene briefs for context.
