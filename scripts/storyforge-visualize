@@ -648,8 +648,11 @@ body {
     color: var(--teal);
     border-bottom-color: var(--teal);
 }
-.dash-page { display: none; }
-.dash-page.active { display: block; }
+/* Pages start visible so charts can measure width during rendering.
+   The router hides inactive pages after all charts have rendered. */
+.dash-page { display: block; }
+.dash-page.routed { display: none; }
+.dash-page.routed.active { display: block; }
 </style>
 </head>
 <body>
@@ -916,7 +919,8 @@ cat >> "$DASHBOARD_FILE" << 'HTMLEOF'
 // PAGE ROUTER
 // ============================================================================
 
-(function initRouter() {
+// Router runs AFTER all charts render (see bottom of file)
+function _initRouter() {
     // Move sections with data-target-page to the correct page container
     document.querySelectorAll('[data-target-page]').forEach(el => {
         const targetId = 'page-' + el.getAttribute('data-target-page');
@@ -925,7 +929,10 @@ cat >> "$DASHBOARD_FILE" << 'HTMLEOF'
     });
 
     function showPage(pageId) {
-        document.querySelectorAll('.dash-page').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.dash-page').forEach(p => {
+            p.classList.add('routed');
+            p.classList.remove('active');
+        });
         document.querySelectorAll('.dash-nav a').forEach(a => a.classList.remove('active'));
         const page = document.getElementById('page-' + pageId);
         if (page) page.classList.add('active');
@@ -943,10 +950,10 @@ cat >> "$DASHBOARD_FILE" << 'HTMLEOF'
         });
     });
 
-    // Handle initial hash
+    // Handle initial hash — NOW hide inactive pages (all were visible during rendering)
     const hash = (window.location.hash || '#overview').replace('#', '');
     showPage(hash);
-})();
+}
 
 // ============================================================================
 // UTILITIES
@@ -2870,6 +2877,9 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     container.appendChild(svg);
 })();
+
+// All charts rendered — now activate the page router to hide inactive pages
+_initRouter();
 
 </script>
 </body>
