@@ -375,7 +375,7 @@ migrate_storyforge_yaml() {
 
 report_csv_integrity() {
     local project_dir="$1"
-    local meta_csv="${project_dir}/reference/scene-metadata.csv"
+    local meta_csv="${project_dir}/reference/scenes.csv"
     local intent_csv="${project_dir}/reference/scene-intent.csv"
     local chapter_csv="${project_dir}/reference/chapter-map.csv"
     local chars_csv="${project_dir}/reference/characters.csv"

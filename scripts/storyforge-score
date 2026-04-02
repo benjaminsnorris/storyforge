@@ -174,20 +174,11 @@ WEIGHTS_FILE="${PROJECT_DIR}/working/craft-weights.csv"
 # Build scene list from metadata.csv
 # ============================================================================
 
-# Detect elaboration pipeline (scenes.csv) or legacy (scene-metadata.csv)
+METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
+INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
+BRIEFS_CSV="${PROJECT_DIR}/reference/scene-briefs.csv"
 HAS_BRIEFS=false
-if [[ -f "${PROJECT_DIR}/reference/scenes.csv" ]]; then
-    METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
-    INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
-    BRIEFS_CSV="${PROJECT_DIR}/reference/scene-briefs.csv"
-    [[ -f "$BRIEFS_CSV" ]] && HAS_BRIEFS=true
-else
-    METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
-    INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
-    # Fallback to old locations
-    [[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
-    [[ ! -f "$INTENT_CSV" ]] && INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
-fi
+[[ -f "$BRIEFS_CSV" ]] && HAS_BRIEFS=true
 SCENES_DIR="${PROJECT_DIR}/scenes"
 
 build_scene_list "$METADATA_CSV"

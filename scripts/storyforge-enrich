@@ -195,11 +195,8 @@ fi
 PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
 
 # --- Resolve paths ---
-METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
 INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
-# Fallback to old locations
-[[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
-[[ ! -f "$INTENT_CSV" ]] && INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
 SCENES_DIR="${PROJECT_DIR}/scenes"
 LOG_DIR="${PROJECT_DIR}/working/logs"
 ENRICH_DIR="${PROJECT_DIR}/working/enrich"
@@ -208,7 +205,7 @@ mkdir -p "$LOG_DIR"
 mkdir -p "$ENRICH_DIR"
 
 if [[ ! -f "$METADATA_CSV" ]]; then
-    log "ERROR: reference/scene-metadata.csv not found. Run 'storyforge scenes' to create scene metadata."
+    log "ERROR: reference/scenes.csv not found. Run 'storyforge scenes' to create scene metadata."
     exit 1
 fi
 
@@ -454,7 +451,7 @@ create_branch "enrich" "$PROJECT_DIR"
 # Commit any files already changed by discovery
 (
     cd "$PROJECT_DIR"
-    git add reference/scene-metadata.csv reference/scene-intent.csv 2>/dev/null || true
+    git add reference/scenes.csv reference/scene-intent.csv 2>/dev/null || true
     git add -A 2>/dev/null || true
     git commit -m "Enrich: discover new scenes" 2>/dev/null || true
 )
@@ -1108,7 +1105,7 @@ seed_alias_csv() {
 }
 
 INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
-METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
 
 seed_alias_csv "${PROJECT_DIR}/reference/characters.csv" "$INTENT_CSV" "characters" "id|name|aliases|role"
 seed_alias_csv "${PROJECT_DIR}/reference/threads.csv" "$INTENT_CSV" "threads" "id|name|aliases"
@@ -1123,7 +1120,7 @@ log "Committing enrichment results..."
 
 (
     cd "$PROJECT_DIR"
-    git add "reference/scene-metadata.csv" 2>/dev/null || true
+    git add "reference/scenes.csv" 2>/dev/null || true
     git add "reference/scene-intent.csv" 2>/dev/null || true
     git add "reference/characters.csv" 2>/dev/null || true
     git add "reference/threads.csv" 2>/dev/null || true

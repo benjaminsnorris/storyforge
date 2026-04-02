@@ -139,7 +139,7 @@ scene_ids = '''$(printf '%s\n' "${SCENE_IDS[@]}")'''.strip().split('\n')
 
 # Try to read seq from existing CSV
 seq_map = {}
-for csv_name in ['scenes.csv', 'scene-metadata.csv']:
+for csv_name in ['scenes.csv']:
     csv_path = os.path.join(ref_dir, csv_name)
     if os.path.isfile(csv_path):
         with open(csv_path) as f:

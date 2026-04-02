@@ -170,7 +170,7 @@ fi
 PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "title" 2>/dev/null || echo "Unknown")
 
 # --- Resolve paths ---
-METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
 INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
 SCENES_DIR="${PROJECT_DIR}/scenes"
 LOG_DIR="${PROJECT_DIR}/working/logs"
@@ -179,7 +179,7 @@ TIMELINE_DIR="${PROJECT_DIR}/working/timeline"
 mkdir -p "$LOG_DIR" "$TIMELINE_DIR"
 
 if [[ ! -f "$METADATA_CSV" ]]; then
-    log "ERROR: reference/scene-metadata.csv not found."
+    log "ERROR: reference/scenes.csv not found."
     exit 1
 fi
 
@@ -878,7 +878,7 @@ fi
 if [[ "$EMBEDDED" != true ]]; then
     (
         cd "$PROJECT_DIR"
-        git add "reference/scene-metadata.csv" 2>/dev/null || true
+        git add "reference/scenes.csv" 2>/dev/null || true
         git add "working/logs/" 2>/dev/null || true
         git commit -m "Enrich: timeline_day assignment" 2>/dev/null || true
         git push 2>/dev/null || true

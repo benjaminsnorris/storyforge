@@ -325,8 +325,7 @@ if [[ "$MANUSCRIPT_MODE" == true ]]; then
     done
 else
     # --- Scene mode: read from metadata.csv ---
-    METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
-    [[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+    METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
 
     build_scene_list "$METADATA_CSV"
 
@@ -856,9 +855,7 @@ EVAL_MODEL_FORECAST=$(select_model "evaluation")
 SYNTH_MODEL_FORECAST=$(select_model "synthesis")
 
 # Estimate average word count from metadata.csv or scene files
-METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
-# Fallback to old location
-[[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
 AVG_WORDS=0
 if [[ -f "$METADATA_CSV" ]]; then
     TOTAL_WC=0

@@ -220,7 +220,7 @@ unified_update_pass_field() {
 # New scene registration
 #
 # When a revision pass creates new scenes (NEW: prefix in targets),
-# this function adds rows to scene-metadata.csv and scene-intent.csv
+# this function adds rows to scenes.csv and scene-intent.csv
 # for any scenes that were actually written to disk.
 # ============================================================================
 
@@ -228,7 +228,7 @@ _register_new_scenes() {
     local project_dir="$1"
     local targets="$2"
     local pass_name="$3"
-    local meta_csv="${project_dir}/reference/scene-metadata.csv"
+    local meta_csv="${project_dir}/reference/scenes.csv"
     local intent_csv="${project_dir}/reference/scene-intent.csv"
 
     # Extract NEW: prefixed scene IDs
@@ -270,7 +270,7 @@ _register_new_scenes() {
         local title
         title=$(echo "$sid" | sed 's/-/ /g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1')
 
-        # Append to scene-metadata.csv
+        # Append to scenes.csv
         if [[ -f "$meta_csv" ]]; then
             append_csv_row "$meta_csv" "${sid}|${max_seq}|${title}|||||||drafted|${wc}|"
             log "  Registered new scene in metadata: ${sid} (seq ${max_seq})"
@@ -640,9 +640,8 @@ if [[ "$DRY_RUN" != true ]]; then
         [[ "$_fc_status" != "completed" ]] && PENDING_PASSES=$((PENDING_PASSES + 1))
     done
 
-    # Estimate average word count from metadata.csv or scene files
-    METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
-    [[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+    # Estimate average word count from scenes.csv or scene files
+    METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
     AVG_WORDS=0
     if [[ -f "$METADATA_CSV" ]]; then
         TOTAL_WC=0
@@ -1071,9 +1070,8 @@ update_scene('${_rid}', '${PROJECT_DIR}/reference', {'word_count': '${_NEW_WC}'}
         }
     fi
 
-    # --- Update word counts in metadata.csv after revision ---
-    METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
-    [[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+    # --- Update word counts in scenes.csv after revision ---
+    METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
     if [[ -f "$METADATA_CSV" && "$EFFECTIVE_COACHING" == "full" ]]; then
         while IFS= read -r scene_id; do
             [[ -z "$scene_id" ]] && continue
