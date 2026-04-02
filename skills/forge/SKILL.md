@@ -27,7 +27,7 @@ Before doing anything else, orient yourself:
    - `reference/story-architecture.md`
    - `reference/voice-guide.md`
    - `reference/timeline.md`
-   - `reference/scenes.csv` (elaboration pipeline) or `reference/scene-metadata.csv` (legacy)
+   - `reference/scenes.csv`
    - `working/evaluations/*/findings.csv` (preferred) or `working/evaluations/findings.yaml` (legacy)
    - `working/plans/revision-plan.csv` (preferred) or `working/plans/revision-plan.yaml` (legacy)
    - The `scenes/` directory (any `.md` files = drafted scenes)
@@ -64,7 +64,7 @@ The author has a specific request. Parse what they want and route to the right s
 Invoke the `elaborate` skill. This handles all creative development work — from spine through briefs, including character deepening, world building, voice guide creation, and scene-level design.
 
 **"Start drafting" / "Write scenes":**
-Check that `reference/scenes.csv` or `reference/scene-metadata.csv` exists with scenes, and `reference/voice-guide.md` exists. If ready, provide the command:
+Check that `reference/scenes.csv` exists with scenes, and `reference/voice-guide.md` exists. If ready, provide the command:
 ```bash
 ./storyforge write [options]
 ```
@@ -195,7 +195,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 
 | Command | Requires |
 |---|---|
-| `storyforge write` | Scene data (`reference/scenes.csv` or `reference/scene-metadata.csv`) with at least one scene, `reference/voice-guide.md` |
+| `storyforge write` | Scene data (`reference/scenes.csv`) with at least one scene, `reference/voice-guide.md` |
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | `plan-revision` | Evaluation results in `working/evaluations/` |
 | `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.csv`) |

@@ -19,7 +19,7 @@ Store this resolved plugin path for use throughout the session.
 
 1. `storyforge.yaml` — project title, genre, coaching level
 2. `scenes/` directory — check how many scene files exist
-3. `reference/scenes.csv` or `reference/scene-metadata.csv` — does scene data already exist?
+3. `reference/scenes.csv` — does scene data already exist?
 4. `reference/scene-intent.csv` — does intent data exist?
 5. `reference/scene-briefs.csv` — does brief data exist?
 

@@ -176,9 +176,9 @@ Copy these from the plugin's `templates/reference/` directory if available.
 
 **If traditional pipeline:** Create two files with headers only:
 
-**`{project-dir}/reference/scene-metadata.csv`:**
+**`{project-dir}/reference/scenes.csv`:**
 ```
-id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
 ```
 
 **`{project-dir}/reference/scene-intent.csv`:**
