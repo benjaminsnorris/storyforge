@@ -2,10 +2,76 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="refresh" content="0;url=../index.html">
-<title>Redirecting to Storyforge</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storyforge — Documentation</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: Georgia, serif; background: #faf8f5; color: #1e1a14; padding: 60px 24px; }
+.page { max-width: 640px; margin: 0 auto; }
+h1 { font-size: 32px; font-weight: 400; margin-bottom: 8px; }
+.sub { color: #8a7e6f; margin-bottom: 32px; font-size: 16px; }
+.links { display: flex; flex-direction: column; gap: 12px; }
+a { display: block; padding: 16px; background: white; border: 1px solid rgba(0,0,0,0.07); border-radius: 8px; text-decoration: none; color: inherit; transition: border-color 0.15s; }
+a:hover { border-color: rgba(0,0,0,0.2); }
+a strong { display: block; font-size: 16px; margin-bottom: 2px; }
+a span { font-size: 13px; color: #8a7e6f; }
+.divider { border-top: 1px solid rgba(0,0,0,0.07); margin: 20px 0; }
+.section-label { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: #b5a898; margin-bottom: 8px; }
+@media (prefers-color-scheme: dark) {
+  body { background: #141210; color: #ede5d8; }
+  a { background: #1e1b18; border-color: rgba(255,255,255,0.06); }
+  a:hover { border-color: rgba(255,255,255,0.15); }
+  a span { color: #a69880; }
+  .sub { color: #a69880; }
+  .divider { border-color: rgba(255,255,255,0.06); }
+  .section-label { color: #6b6054; }
+}
+</style>
 </head>
 <body>
-<p>Redirecting to <a href="../index.html">Storyforge home</a>&hellip;</p>
+<div class="page">
+
+<h1>Storyforge</h1>
+<p class="sub">A novel-writing toolkit for authors, powered by Claude Code.</p>
+
+<div class="section-label">Core Concepts</div>
+<div class="links">
+  <a href="elaboration-pipeline.html">
+    <strong>The Elaboration Pipeline</strong>
+    <span>Build structural integrity before writing prose. Spine → architecture → voice → map → briefs → draft → polish.</span>
+  </a>
+  <a href="extraction.html">
+    <strong>Extraction: Reverse Elaboration</strong>
+    <span>Take an existing manuscript and extract structural data. Four phases from prose to validated scene model.</span>
+  </a>
+  <a href="scoring-and-fidelity.html">
+    <strong>Scoring &amp; Fidelity</strong>
+    <span>25 craft principles per scene. Brief fidelity checks whether prose delivers what briefs promised.</span>
+  </a>
+</div>
+
+<div class="divider"></div>
+
+<div class="section-label">Supporting Topics</div>
+<div class="links">
+  <a href="coaching-levels.html">
+    <strong>Coaching Levels</strong>
+    <span>Three ways to work: creative partner, dramaturg, or continuity editor.</span>
+  </a>
+  <a href="craft-engine.html">
+    <strong>The Craft Engine</strong>
+    <span>The principles and rubrics that drive scoring and evaluation.</span>
+  </a>
+  <a href="evaluation-panel.html">
+    <strong>Evaluation Panel</strong>
+    <span>Six expert perspectives reading the manuscript.</span>
+  </a>
+  <a href="production-pipeline.html">
+    <strong>Production Pipeline</strong>
+    <span>Assembly, epub, web book, and bookshelf publishing.</span>
+  </a>
+</div>
+
+</div>
 </body>
 </html>

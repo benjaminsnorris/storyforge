@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storyforge — Scoring &amp; Fidelity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700&family=Fragment+Mono&display=swap" rel="stylesheet">
+<style>
+:root {
+  --font-body: 'Bricolage Grotesque', system-ui, sans-serif;
+  --font-mono: 'Fragment Mono', 'SF Mono', Consolas, monospace;
+  --bg: #faf9f7;
+  --surface: #ffffff;
+  --surface2: #f0ede8;
+  --border: rgba(0,0,0,0.07);
+  --text: #1c1917;
+  --text-dim: #78716c;
+  --text-light: #a8a29e;
+  --amber: #b45309;
+  --amber-dim: rgba(180,83,9,0.06);
+  --emerald: #047857;
+  --emerald-dim: rgba(4,120,87,0.06);
+  --rose: #be123c;
+  --rose-dim: rgba(190,18,60,0.06);
+  --blue: #1e40af;
+  --blue-dim: rgba(30,64,175,0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1917;
+    --surface: #262220;
+    --surface2: #302b27;
+    --border: rgba(255,255,255,0.06);
+    --text: #e7e5e4;
+    --text-dim: #a8a29e;
+    --text-light: #78716c;
+    --amber: #fbbf24;
+    --amber-dim: rgba(251,191,36,0.08);
+    --emerald: #34d399;
+    --emerald-dim: rgba(52,211,153,0.08);
+    --rose: #fda4af;
+    --rose-dim: rgba(253,164,175,0.08);
+    --blue: #93c5fd;
+    --blue-dim: rgba(147,197,253,0.08);
+  }
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: var(--font-body); background: var(--bg); color: var(--text); line-height: 1.6; }
+body { background-image: radial-gradient(ellipse at 40% 10%, var(--amber-dim) 0%, transparent 50%); }
+.page { max-width: 860px; margin: 0 auto; padding: 60px 24px 80px; }
+.hero { text-align: center; margin-bottom: 48px; }
+.hero h1 { font-size: 38px; font-weight: 700; margin-bottom: 8px; }
+.hero h1 span { color: var(--amber); }
+.hero .lead { font-size: 17px; color: var(--text-dim); max-width: 580px; margin: 0 auto; }
+.mono { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-light); }
+
+.sec-title { font-size: 24px; font-weight: 700; margin: 48px 0 6px; }
+.sec-sub { font-size: 15px; color: var(--text-dim); margin-bottom: 20px; }
+
+/* Score scale */
+.scale { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 24px 0; }
+.scale-item { text-align: center; padding: 16px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); }
+.scale-num { font-family: var(--font-mono); font-size: 28px; font-weight: 700; }
+.scale-label { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+.s1 .scale-num { color: var(--rose); }
+.s2 .scale-num { color: #d97706; }
+.s3 .scale-num { color: var(--text-dim); }
+.s4 .scale-num { color: var(--emerald); }
+.s5 .scale-num { color: var(--blue); }
+
+/* Principle groups */
+.groups { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 24px 0; }
+.group-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.group-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.group-card .count { font-family: var(--font-mono); font-size: 11px; color: var(--text-light); }
+.group-card ul { list-style: none; margin-top: 8px; }
+.group-card li { font-size: 12px; color: var(--text-dim); padding: 2px 0; font-family: var(--font-mono); }
+
+/* Fidelity section */
+.fidelity-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 24px 0; }
+.f-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
+.f-card h4 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.f-card p { font-size: 11px; color: var(--text-dim); }
+
+/* Flow */
+.flow { display: flex; flex-direction: column; gap: 0; margin: 24px 0; }
+.flow-step { display: grid; grid-template-columns: 32px 1fr; gap: 12px; align-items: start; }
+.flow-dot { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: white; margin-top: 4px; }
+.flow-content { padding: 8px 0 20px; border-left: 2px solid var(--border); padding-left: 16px; margin-left: -25px; }
+.flow-content h4 { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+.flow-content p { font-size: 13px; color: var(--text-dim); }
+
+.d1 { background: var(--amber); }
+.d2 { background: var(--emerald); }
+.d3 { background: var(--blue); }
+.d4 { background: var(--rose); }
+
+@media (max-width: 640px) {
+  .scale { grid-template-columns: repeat(5, 1fr); }
+  .scale-item { padding: 10px 4px; }
+  .scale-num { font-size: 20px; }
+  .groups, .fidelity-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="hero">
+  <div class="mono">Storyforge</div>
+  <h1>Scoring <span>&amp;</span> Fidelity</h1>
+  <p class="lead">25 craft principles scored per scene, plus fidelity scoring that checks whether the prose delivers what the brief promised.</p>
+</div>
+
+<h2 class="sec-title">The 1–5 Scale</h2>
+<p class="sec-sub">The median scene in a solid manuscript should score 3. If most scenes score 4+, the scoring isn't looking hard enough.</p>
+
+<div class="scale">
+  <div class="scale-item s1"><div class="scale-num">1</div><div class="scale-label">Absent</div></div>
+  <div class="scale-item s2"><div class="scale-num">2</div><div class="scale-label">Developing</div></div>
+  <div class="scale-item s3"><div class="scale-num">3</div><div class="scale-label">Competent</div></div>
+  <div class="scale-item s4"><div class="scale-num">4</div><div class="scale-label">Strong</div></div>
+  <div class="scale-item s5"><div class="scale-num">5</div><div class="scale-label">Masterful</div></div>
+</div>
+
+<h2 class="sec-title">25 Craft Principles</h2>
+<p class="sec-sub">Every scene is evaluated against principles from four categories.</p>
+
+<div class="groups">
+  <div class="group-card" style="border-left: 3px solid var(--amber);">
+    <h4>Scene Craft</h4>
+    <div class="count">7 principles</div>
+    <ul>
+      <li>Enter Late, Leave Early</li>
+      <li>Every Scene Must Turn</li>
+      <li>Scene vs Character Emotion</li>
+      <li>Psychic Distance</li>
+      <li>Show vs Tell</li>
+      <li>Thread Management</li>
+      <li>Pacing Through Variety</li>
+    </ul>
+  </div>
+  <div class="group-card" style="border-left: 3px solid var(--emerald);">
+    <h4>Prose Craft</h4>
+    <div class="count">9 principles</div>
+    <ul>
+      <li>Economy and Clarity</li>
+      <li>Sentence as Unit of Thought</li>
+      <li>Writer's Toolbox</li>
+      <li>Syntax Control</li>
+      <li>Active Prose</li>
+      <li>Dialogue Craft</li>
+      <li>Sensory Specificity</li>
+      <li>Metaphor and Symbol</li>
+      <li>Pacing Prose</li>
+    </ul>
+  </div>
+  <div class="group-card" style="border-left: 3px solid var(--blue);">
+    <h4>Character Craft</h4>
+    <div class="count">9 principles (scene + act + novel level)</div>
+    <ul>
+      <li>Character Distinction</li>
+      <li>Flaws Driving Action</li>
+      <li>Vulnerability Moments</li>
+      <li>Character Web</li>
+      <li>Character as Theme</li>
+      <li>Want vs Need</li>
+      <li>Wound/Lie Depth</li>
+      <li>Flaws as Strengths</li>
+      <li>Voice Distinctiveness</li>
+    </ul>
+  </div>
+  <div class="group-card" style="border-left: 3px solid var(--rose);">
+    <h4>Genre &amp; Narrative</h4>
+    <div class="count">11 principles</div>
+    <ul>
+      <li>Trope Awareness</li>
+      <li>Archetype vs Cliché</li>
+      <li>Genre Contract</li>
+      <li>Subversion Awareness</li>
+      <li>7 Narrative Frameworks</li>
+    </ul>
+  </div>
+</div>
+
+<h2 class="sec-title">Brief Fidelity</h2>
+<p class="sec-sub">Did the prose deliver what the brief promised? Nine elements scored per scene.</p>
+
+<div class="fidelity-grid">
+  <div class="f-card"><h4>Goal</h4><p>Does the character pursue the stated objective?</p></div>
+  <div class="f-card"><h4>Conflict</h4><p>Is the stated opposition present and felt?</p></div>
+  <div class="f-card"><h4>Outcome</h4><p>Does the scene end as specified (yes/no/yes-but/no-and)?</p></div>
+  <div class="f-card"><h4>Crisis</h4><p>Does the character face the stated dilemma?</p></div>
+  <div class="f-card"><h4>Decision</h4><p>Does the character make the stated choice?</p></div>
+  <div class="f-card"><h4>Key Actions</h4><p>Are the specified actions present in the prose?</p></div>
+  <div class="f-card"><h4>Key Dialogue</h4><p>Do the specified lines appear (or close paraphrases)?</p></div>
+  <div class="f-card"><h4>Emotions</h4><p>Does the emotional sequence match the brief?</p></div>
+  <div class="f-card"><h4>Knowledge</h4><p>Does the character know the right things at start and end?</p></div>
+</div>
+
+<p style="font-size: 14px; color: var(--text-dim); margin-top: 16px;">A score of 4 means the prose delivers the brief element clearly. A score of 5 means the prose found something <em>better</em> than what the brief specified. Low scores point to one of two problems: either the brief was right and the prose needs revision, or the prose is right and the brief needs updating.</p>
+
+<h2 class="sec-title">How Findings Route</h2>
+<p class="sec-sub">Evaluation findings are categorized by where the fix belongs — not all problems are prose problems.</p>
+
+<div class="flow">
+  <div class="flow-step">
+    <div class="flow-dot d1">1</div>
+    <div class="flow-content">
+      <h4>Evaluate</h4>
+      <p>Six expert perspectives read the manuscript. Each finding gets a <code style="font-family:var(--font-mono);font-size:12px;background:var(--surface2);padding:1px 4px;border-radius:3px;">fix_location</code> tag.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-dot d2">2</div>
+    <div class="flow-content">
+      <h4>Route Upstream</h4>
+      <p><strong>brief</strong> → fix scene-briefs.csv (knowledge, goal/conflict). <strong>intent</strong> → fix scene-intent.csv (value shifts, threads). <strong>structural</strong> → fix scenes.csv (POV, timeline).</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-dot d3">3</div>
+    <div class="flow-content">
+      <h4>Re-draft</h4>
+      <p>Upstream CSV fixes trigger automatic re-drafting of affected scenes from updated briefs.</p>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-dot d4">4</div>
+    <div class="flow-content">
+      <h4>Polish</h4>
+      <p><strong>craft</strong> findings go directly to prose polish — voice, rhythm, naturalness. No upstream changes needed.</p>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center; margin-top:48px; color:var(--text-light); font-family:var(--font-mono); font-size:11px;">
+  Storyforge — A novel-writing toolkit for authors, powered by Claude Code
+</div>
+
+</div>
+</body>
+</html>

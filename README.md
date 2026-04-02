@@ -1,6 +1,6 @@
 # Storyforge
 
-A novel-writing toolkit for Claude Code. Build structural integrity before writing prose — progressive elaboration catches continuity errors, knowledge violations, and pacing problems when they're CSV edits, not prose rewrites.
+A novel-writing toolkit for authors, powered by Claude Code. Build structural integrity before writing prose — progressive elaboration catches continuity errors, knowledge violations, and pacing problems when they're CSV edits, not prose rewrites.
 
 Interactive skills guide creative development. Autonomous scripts handle execution. Deep craft knowledge throughout — grounded in McKee, Swain, Story Grid, Kowal, Weiland, and Sanderson.
 
