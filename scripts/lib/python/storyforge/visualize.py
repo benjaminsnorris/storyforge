@@ -136,17 +136,25 @@ def load_dashboard_data(project_dir: str) -> dict:
         locations, scores, weights, narrative_scores, project.
         All values are JSON-serializable.
     """
+    # Detect elaboration pipeline (scenes.csv) or legacy (scene-metadata.csv)
     metadata_csv = _resolve_csv(project_dir,
-                                'reference/scene-metadata.csv',
-                                'scenes/metadata.csv')
+                                'reference/scenes.csv',
+                                'reference/scene-metadata.csv')
+    if not os.path.isfile(metadata_csv):
+        metadata_csv = _resolve_csv(project_dir,
+                                    'reference/scene-metadata.csv',
+                                    'scenes/metadata.csv')
     intent_csv = _resolve_csv(project_dir,
                               'reference/scene-intent.csv',
                               'scenes/intent.csv')
+    briefs_csv = os.path.join(project_dir, 'reference/scene-briefs.csv')
     scores_csv = os.path.join(project_dir, 'working/scores/latest/scene-scores.csv')
     weights_csv = os.path.join(project_dir, 'working/craft-weights.csv')
     characters_csv = os.path.join(project_dir, 'reference/characters.csv')
     motif_csv = os.path.join(project_dir, 'reference/motif-taxonomy.csv')
     locations_csv = os.path.join(project_dir, 'reference/locations.csv')
+    fidelity_csv = os.path.join(project_dir, 'working/scores/latest/fidelity-scores.csv')
+    fidelity_rationale_csv = os.path.join(project_dir, 'working/scores/latest/fidelity-rationale.csv')
     narrative_csv = os.path.join(project_dir, 'working/scores/latest/narrative-scores.csv')
     scene_rationale_csv = os.path.join(project_dir, 'working/scores/latest/scene-rationale.csv')
     act_scores_csv = os.path.join(project_dir, 'working/scores/latest/act-scores.csv')
@@ -174,9 +182,15 @@ def load_dashboard_data(project_dir: str) -> dict:
     if not genre:
         genre = _read_yaml_field(project_dir, 'genre')
 
+    # Compute total word count
+    total_words = sum(int(s.get('word_count', 0) or 0) for s in scenes)
+    target_words = _read_yaml_field(project_dir, 'project.target_words') or ''
+    phase = _read_yaml_field(project_dir, 'phase') or ''
+
     return {
         'scenes': scenes,
         'intents': csv_to_records(intent_csv),
+        'briefs': csv_to_records(briefs_csv),
         'characters': csv_to_records(characters_csv),
         'motif_taxonomy': csv_to_records(motif_csv),
         'locations': csv_to_records(locations_csv),
@@ -191,10 +205,15 @@ def load_dashboard_data(project_dir: str) -> dict:
         'genre_scores': csv_to_records(genre_scores_csv),
         'genre_rationales': csv_to_records(genre_rationale_csv),
         'narrative_rationales': csv_to_records(narrative_rationale_csv),
+        'fidelity_scores': csv_to_records(fidelity_csv),
+        'fidelity_rationales': csv_to_records(fidelity_rationale_csv),
         'project': {
             'title': title,
             'genre': genre,
+            'phase': phase,
             'scene_count': str(len(scenes)),
+            'total_words': str(total_words),
+            'target_words': target_words,
             'generated': datetime.now().strftime('%Y-%m-%d %H:%M'),
         },
     }

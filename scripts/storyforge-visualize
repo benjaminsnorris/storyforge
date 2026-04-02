@@ -788,6 +788,33 @@ body {
     <div class="vis-container" id="timeline-scatter"></div>
 </div>
 
+<div class="section" id="value-shift-section" style="display:none;">
+    <div class="section-header">
+        <span class="dot"></span>
+        <h2>Value Shift Arc</h2>
+        <span class="subtitle">McKee polarity changes across the manuscript</span>
+    </div>
+    <div class="vis-container" id="value-shift-arc"></div>
+</div>
+
+<div class="section" id="scene-rhythm-section" style="display:none;">
+    <div class="section-header">
+        <span class="dot"></span>
+        <h2>Scene Rhythm</h2>
+        <span class="subtitle">Swain action/sequel pattern + turning point variety</span>
+    </div>
+    <div class="vis-container" id="scene-rhythm"></div>
+</div>
+
+<div class="section" id="fidelity-section" style="display:none;">
+    <div class="section-header">
+        <span class="dot"></span>
+        <h2>Brief Fidelity</h2>
+        <span class="subtitle">Did the prose deliver what the brief promised?</span>
+    </div>
+    <div class="vis-container" id="fidelity-chart"></div>
+</div>
+
 </div><!-- .page -->
 
 <script>
@@ -816,6 +843,9 @@ const CHARACTER_RATIONALES = _DATA.character_rationales;
 const GENRE_SCORES = _DATA.genre_scores;
 const GENRE_RATIONALES = _DATA.genre_rationales;
 const NARRATIVE_RATIONALES = _DATA.narrative_rationales;
+const BRIEFS = _DATA.briefs || [];
+const FIDELITY_SCORES = _DATA.fidelity_scores || [];
+const FIDELITY_RATIONALES = _DATA.fidelity_rationales || [];
 EOF
 
 cat >> "$DASHBOARD_FILE" << 'HTMLEOF'
@@ -2455,6 +2485,228 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         attachSceneHandlers(dot, p.id);
         svg.appendChild(dot);
     });
+})();
+
+// ============================================================================
+// VALUE SHIFT ARC — McKee polarity tracking
+// ============================================================================
+
+(function renderValueShiftArc() {
+    const container = document.getElementById('value-shift-arc');
+    const section = document.getElementById('value-shift-section');
+    if (!container || !INTENTS.length) return;
+
+    // Parse value shifts: +/-, -/+, +/++, -/--, etc.
+    const shifts = [];
+    INTENTS.forEach((intent, i) => {
+        const vs = (intent.value_shift || '').trim();
+        if (!vs || !vs.includes('/')) return;
+        const parts = vs.split('/');
+        const fromVal = parts[0].trim();
+        const toVal = parts[1].trim();
+
+        // Convert to numeric: + = 1, ++ = 2, - = -1, -- = -2
+        function toNum(s) {
+            if (s === '++') return 2;
+            if (s === '+') return 1;
+            if (s === '-') return -1;
+            if (s === '--') return -2;
+            return 0;
+        }
+        shifts.push({
+            id: intent.id,
+            index: i,
+            from: toNum(fromVal),
+            to: toNum(toVal),
+            raw: vs,
+            valueAtStake: intent.value_at_stake || ''
+        });
+    });
+
+    if (shifts.length < 3) return;
+    if (section) section.style.display = '';
+
+    const mobile = window.innerWidth < 768;
+    const W = container.clientWidth || 800;
+    const H = 200;
+    const labelW = mobile ? 60 : 100;
+    const chartW = W - labelW - 20;
+    const midY = H / 2;
+    const scaleY = 40;
+
+    const svg = svgEl('svg', { width: W, height: H, class: 'chart' });
+
+    // Y-axis labels
+    [2, 1, 0, -1, -2].forEach(v => {
+        const y = midY - v * scaleY;
+        svg.appendChild(svgEl('line', {
+            x1: labelW, y1: y, x2: W - 20, y2: y,
+            stroke: 'var(--border)', 'stroke-width': 0.5, 'stroke-dasharray': v === 0 ? 'none' : '2,4'
+        }));
+        const labels = { 2: '++', 1: '+', 0: '0', '-1': '-', '-2': '--' };
+        svg.appendChild(svgEl('text', {
+            x: labelW - 8, y: y + 4, 'text-anchor': 'end',
+            fill: 'var(--muted)', 'font-size': '11px'
+        }, labels[v] || ''));
+    });
+
+    // Plot value shifts as arrows
+    shifts.forEach((s, i) => {
+        const x = labelW + (i / (shifts.length - 1)) * chartW;
+        const y1 = midY - s.from * scaleY;
+        const y2 = midY - s.to * scaleY;
+
+        // Arrow line
+        const color = s.to > s.from ? 'var(--green, #22c55e)' : s.to < s.from ? 'var(--red, #ef4444)' : 'var(--muted)';
+        svg.appendChild(svgEl('line', {
+            x1: x, y1: y1, x2: x, y2: y2,
+            stroke: color, 'stroke-width': 2
+        }));
+
+        // Endpoint dot
+        const dot = svgEl('circle', {
+            cx: x, cy: y2, r: 3, fill: color
+        });
+        attachSceneHandlers(dot, s.id);
+        svg.appendChild(dot);
+    });
+
+    container.appendChild(svg);
+})();
+
+// ============================================================================
+// SCENE RHYTHM — action/sequel + turning point variety
+// ============================================================================
+
+(function renderSceneRhythm() {
+    const container = document.getElementById('scene-rhythm');
+    const section = document.getElementById('scene-rhythm-section');
+    if (!container || !INTENTS.length) return;
+
+    const types = [];
+    INTENTS.forEach(intent => {
+        const st = (intent.scene_type || '').trim().toLowerCase();
+        const tp = (intent.turning_point || '').trim().toLowerCase();
+        if (st) types.push({ id: intent.id, sceneType: st, turningPoint: tp });
+    });
+
+    if (types.length < 3) return;
+    if (section) section.style.display = '';
+
+    const mobile = window.innerWidth < 768;
+    const W = container.clientWidth || 800;
+    const H = 100;
+    const labelW = mobile ? 80 : 120;
+    const chartW = W - labelW - 20;
+    const barH = 20;
+
+    const svg = svgEl('svg', { width: W, height: H, class: 'chart' });
+
+    // Row 1: Scene type (action vs sequel)
+    svg.appendChild(svgEl('text', {
+        x: 8, y: 16, fill: 'var(--muted)', 'font-size': '11px'
+    }, 'Scene Type'));
+
+    types.forEach((t, i) => {
+        const x = labelW + (i / types.length) * chartW;
+        const w = Math.max(chartW / types.length - 1, 2);
+        const color = t.sceneType === 'action' ? 'var(--red, #ef4444)' : 'var(--blue, #3b82f6)';
+        const rect = svgEl('rect', {
+            x: x, y: 4, width: w, height: barH,
+            fill: color, opacity: 0.7, rx: 2
+        });
+        attachSceneHandlers(rect, t.id);
+        svg.appendChild(rect);
+    });
+
+    // Row 2: Turning point type (action vs revelation)
+    svg.appendChild(svgEl('text', {
+        x: 8, y: 52, fill: 'var(--muted)', 'font-size': '11px'
+    }, 'Turning Point'));
+
+    types.forEach((t, i) => {
+        const x = labelW + (i / types.length) * chartW;
+        const w = Math.max(chartW / types.length - 1, 2);
+        const color = t.turningPoint === 'action' ? 'var(--orange, #f59e0b)' : 'var(--purple, #8b5cf6)';
+        const rect = svgEl('rect', {
+            x: x, y: 40, width: w, height: barH,
+            fill: color, opacity: 0.7, rx: 2
+        });
+        attachSceneHandlers(rect, t.id);
+        svg.appendChild(rect);
+    });
+
+    // Legend
+    const legendY = 75;
+    const legends = [
+        { label: 'Action', color: 'var(--red, #ef4444)', x: labelW },
+        { label: 'Sequel', color: 'var(--blue, #3b82f6)', x: labelW + 80 },
+        { label: 'Action TP', color: 'var(--orange, #f59e0b)', x: labelW + 160 },
+        { label: 'Revelation TP', color: 'var(--purple, #8b5cf6)', x: labelW + 260 },
+    ];
+    legends.forEach(l => {
+        svg.appendChild(svgEl('rect', { x: l.x, y: legendY, width: 10, height: 10, fill: l.color, rx: 2 }));
+        svg.appendChild(svgEl('text', { x: l.x + 14, y: legendY + 9, fill: 'var(--muted)', 'font-size': '10px' }, l.label));
+    });
+
+    container.appendChild(svg);
+})();
+
+// ============================================================================
+// BRIEF FIDELITY — did prose deliver what brief promised?
+// ============================================================================
+
+(function renderFidelity() {
+    const container = document.getElementById('fidelity-chart');
+    const section = document.getElementById('fidelity-section');
+    if (!container || !FIDELITY_SCORES.length) return;
+    if (section) section.style.display = '';
+
+    const mobile = window.innerWidth < 768;
+    const W = container.clientWidth || 800;
+    const elements = ['goal', 'conflict', 'outcome', 'crisis', 'decision', 'key_actions', 'key_dialogue', 'emotions', 'knowledge'];
+    const H = elements.length * 28 + 40;
+    const labelW = mobile ? 80 : 120;
+    const chartW = W - labelW - 40;
+
+    const svg = svgEl('svg', { width: W, height: H, class: 'chart' });
+
+    // Calculate average per element across all scenes
+    elements.forEach((el, i) => {
+        const scores = FIDELITY_SCORES.map(s => parseInt(s[el] || '0')).filter(v => v > 0);
+        if (!scores.length) return;
+
+        const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+        const y = i * 28 + 20;
+        const barW = (avg / 5) * chartW;
+
+        // Label
+        svg.appendChild(svgEl('text', {
+            x: labelW - 8, y: y + 10, 'text-anchor': 'end',
+            fill: 'var(--fg)', 'font-size': '11px'
+        }, el.replace(/_/g, ' ')));
+
+        // Background
+        svg.appendChild(svgEl('rect', {
+            x: labelW, y: y, width: chartW, height: 20,
+            fill: 'var(--border)', opacity: 0.2, rx: 3
+        }));
+
+        // Bar
+        const color = avg >= 4 ? 'var(--green, #22c55e)' : avg >= 3 ? 'var(--teal)' : avg >= 2 ? 'var(--orange, #f59e0b)' : 'var(--red, #ef4444)';
+        svg.appendChild(svgEl('rect', {
+            x: labelW, y: y, width: barW, height: 20,
+            fill: color, opacity: 0.8, rx: 3
+        }));
+
+        // Score text
+        svg.appendChild(svgEl('text', {
+            x: labelW + barW + 6, y: y + 14,
+            fill: 'var(--muted)', 'font-size': '11px'
+        }, avg.toFixed(1)));
+    });
+
+    container.appendChild(svg);
 })();
 
 </script>
