@@ -644,6 +644,14 @@ body {
     color: var(--teal);
     border-bottom-color: var(--teal);
 }
+.dash-nav-spacer { flex: 1; }
+.dash-nav-meta {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    align-self: center;
+    padding-right: 8px;
+}
 /* Pages start visible so charts can measure width during rendering.
    The router hides inactive pages after all charts have rendered. */
 .dash-page { display: block; padding-top: 20px; }
@@ -675,6 +683,8 @@ body {
         <a href="#overview" class="active" data-page="overview">Overview</a>
         <a href="#structure" data-page="structure">Structure</a>
         <a href="#scores" data-page="scores">Scores</a>
+        <span class="dash-nav-spacer"></span>
+        <span id="spine-subtitle" class="dash-nav-meta"></span>
     </nav>
     <div class="legend" id="spine-legend"></div>
     <div class="vis-container" id="spine"></div>
