@@ -706,3 +706,95 @@ def validate_structure(ref_dir: str) -> dict:
         'checks': checks,
         'failures': failures,
     }
+
+
+# Gap group definitions: which fields belong to which group
+_GAP_GROUPS = {
+    'scene-fields': {
+        'fields': ['type', 'time_of_day', 'duration', 'part'],
+        'file': 'scenes.csv',
+        'batch_type': 'parallel',
+    },
+    'intent-fields': {
+        'fields': ['scene_type', 'emotional_arc', 'value_at_stake',
+                   'value_shift', 'turning_point'],
+        'file': 'scene-intent.csv',
+        'batch_type': 'parallel',
+    },
+    'thread-fields': {
+        'fields': ['threads', 'mice_threads'],
+        'file': 'scene-intent.csv',
+        'batch_type': 'parallel',
+    },
+    'location-timeline': {
+        'fields': ['location', 'timeline_day'],
+        'file': 'scenes.csv',
+        'batch_type': 'parallel',
+    },
+    'knowledge': {
+        'fields': ['knowledge_in', 'knowledge_out', 'continuity_deps'],
+        'file': 'scene-briefs.csv',
+        'batch_type': 'sequential',
+    },
+}
+
+
+def analyze_gaps(ref_dir: str) -> dict:
+    """Analyze validation failures and categorize them into gap groups.
+
+    Returns a dict with:
+        - 'groups': dict of group_name -> {'fields': [...], 'scenes': {scene_id: [missing_fields]}, 'batch_type': str}
+        - 'structural': list of non-completeness validation failures (MICE, timeline, knowledge-availability)
+        - 'total_gaps': int count of all individual field gaps
+        - 'validation': the full validation report
+    """
+    report = validate_structure(ref_dir)
+
+    # Collect per-scene missing fields from completeness failures
+    scene_missing: dict = {}
+    for failure in report['failures']:
+        if failure['category'] == 'completeness' and failure.get('scene_id'):
+            sid = failure['scene_id']
+            msg = failure['message']
+            # Extract field names from "missing required columns: ['field1', 'field2']"
+            if 'missing required columns:' in msg:
+                bracket_start = msg.index('[')
+                bracket_end = msg.index(']') + 1
+                fields = eval(msg[bracket_start:bracket_end])
+                scene_missing[sid] = fields
+
+    # Categorize into gap groups
+    groups: dict = {}
+    total_gaps = 0
+
+    for group_name, group_def in _GAP_GROUPS.items():
+        group_fields = set(group_def['fields'])
+        scenes_in_group: dict = {}
+
+        for sid, missing in scene_missing.items():
+            overlap = [f for f in missing if f in group_fields]
+            if overlap:
+                scenes_in_group[sid] = overlap
+                total_gaps += len(overlap)
+
+        if scenes_in_group:
+            groups[group_name] = {
+                'fields': group_def['fields'],
+                'scenes': scenes_in_group,
+                'batch_type': group_def['batch_type'],
+                'count': sum(len(v) for v in scenes_in_group.values()),
+            }
+
+    # Collect structural failures (non-completeness)
+    structural = [
+        f for f in report['failures']
+        if f['category'] in ('threads', 'timeline', 'knowledge')
+        and f['severity'] == 'blocking'
+    ]
+
+    return {
+        'groups': groups,
+        'structural': structural,
+        'total_gaps': total_gaps,
+        'validation': report,
+    }
