@@ -285,7 +285,7 @@ body {
     top: 0;
     z-index: 100;
     background: var(--bg);
-    padding: 12px 0 4px;
+    padding: 0 0 4px;
     margin-bottom: 0;
 }
 
@@ -646,7 +646,7 @@ body {
 }
 /* Pages start visible so charts can measure width during rendering.
    The router hides inactive pages after all charts have rendered. */
-.dash-page { display: block; }
+.dash-page { display: block; padding-top: 20px; }
 .dash-page.routed { display: none; }
 .dash-page.routed.active { display: block; }
 </style>
@@ -669,20 +669,15 @@ body {
     </div>
 </div>
 
-<!-- Spine + nav — single sticky element -->
+<!-- Nav + spine — single sticky element -->
 <div id="spine-wrapper" class="section section-spine">
-    <div class="section-header">
-        <span class="dot"></span>
-        <h2>Manuscript Spine</h2>
-        <span class="subtitle" id="spine-subtitle"></span>
-    </div>
-    <div class="vis-container" id="spine"></div>
-    <div class="legend" id="spine-legend"></div>
     <nav class="dash-nav">
         <a href="#overview" class="active" data-page="overview">Overview</a>
         <a href="#structure" data-page="structure">Structure</a>
         <a href="#scores" data-page="scores">Scores</a>
     </nav>
+    <div class="legend" id="spine-legend"></div>
+    <div class="vis-container" id="spine"></div>
 </div>
 
 <!-- ═══ OVERVIEW PAGE ═══ -->
