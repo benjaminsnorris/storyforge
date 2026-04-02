@@ -52,18 +52,6 @@ def csv_to_records(csv_file: str) -> list[dict]:
     return records
 
 
-def _resolve_csv(project_dir: str, primary: str, fallback: str = '') -> str:
-    """Return the first existing path, or primary if neither exists."""
-    path = os.path.join(project_dir, primary)
-    if os.path.isfile(path):
-        return path
-    if fallback:
-        alt = os.path.join(project_dir, fallback)
-        if os.path.isfile(alt):
-            return alt
-    return path
-
-
 def _read_yaml_field(project_dir: str, field: str) -> str:
     """Minimal YAML field reader — handles dotted keys like project.title.
 
@@ -136,18 +124,10 @@ def load_dashboard_data(project_dir: str) -> dict:
         locations, scores, weights, narrative_scores, project.
         All values are JSON-serializable.
     """
-    # Detect elaboration pipeline (scenes.csv) or legacy (scene-metadata.csv)
-    metadata_csv = _resolve_csv(project_dir,
-                                'reference/scenes.csv',
-                                'reference/scene-metadata.csv')
-    if not os.path.isfile(metadata_csv):
-        metadata_csv = _resolve_csv(project_dir,
-                                    'reference/scene-metadata.csv',
-                                    'scenes/metadata.csv')
-    intent_csv = _resolve_csv(project_dir,
-                              'reference/scene-intent.csv',
-                              'scenes/intent.csv')
-    briefs_csv = os.path.join(project_dir, 'reference/scene-briefs.csv')
+    # Three-file model: scenes.csv + scene-intent.csv + scene-briefs.csv
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    intent_csv = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+    briefs_csv = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
     scores_csv = os.path.join(project_dir, 'working/scores/latest/scene-scores.csv')
     weights_csv = os.path.join(project_dir, 'working/craft-weights.csv')
     characters_csv = os.path.join(project_dir, 'reference/characters.csv')
