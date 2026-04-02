@@ -1,0 +1,478 @@
+#!/bin/bash
+# storyforge-elaborate — Run an elaboration stage (spine/architecture/map/briefs)
+#
+# Usage:
+#   ./storyforge elaborate --stage spine              # Build the spine
+#   ./storyforge elaborate --stage architecture       # Expand to architecture
+#   ./storyforge elaborate --stage map                # Full scene map
+#   ./storyforge elaborate --stage briefs             # Write drafting briefs
+#   ./storyforge elaborate --stage spine --dry-run    # Print prompt, don't invoke
+#   ./storyforge elaborate --stage spine -i           # Interactive mode
+#
+# Each stage creates a branch, does the work, runs validation, and opens a PR.
+set -eo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
+
+source "${LIB_DIR}/common.sh"
+detect_project_root
+
+LOG_DIR="${PROJECT_DIR}/working/logs"
+mkdir -p "$LOG_DIR"
+
+# ============================================================================
+# Arguments
+# ============================================================================
+
+STAGE=""
+DRY_RUN=false
+INTERACTIVE=false
+COACHING_LEVEL=""
+SEED=""
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") --stage STAGE [OPTIONS]
+
+Stages:
+  spine          Build the 5-10 irreducible story events
+  architecture   Expand spine to 15-25 scenes with structure
+  map            Full scene map with locations, timeline, characters
+  briefs         Write drafting contracts for each scene
+
+Options:
+  --stage STAGE    Required. Which elaboration stage to run.
+  --seed TEXT      Seed text for spine stage (overrides logline).
+  --dry-run        Print the prompt without invoking Claude.
+  --interactive    Run interactively via claude -p.
+  --coaching LEVEL Override coaching level (full/coach/strict).
+  -h, --help       Show this help.
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --stage)     STAGE="${2:?ERROR: --stage requires a value}"; shift 2 ;;
+        --seed)      SEED="${2:?ERROR: --seed requires a value}"; shift 2 ;;
+        --dry-run)   DRY_RUN=true; shift ;;
+        --interactive|-i) INTERACTIVE=true; shift ;;
+        --coaching)  COACHING_LEVEL="${2:?ERROR: --coaching requires a value}"; shift 2 ;;
+        -h|--help)   usage ;;
+        -*)          echo "ERROR: Unknown option: $1" >&2; usage ;;
+        *)           shift ;;
+    esac
+done
+
+if [[ -z "$STAGE" ]]; then
+    echo "ERROR: --stage is required" >&2
+    usage
+fi
+
+case "$STAGE" in
+    spine|architecture|map|briefs) ;;
+    *) echo "ERROR: Unknown stage: $STAGE (expected: spine|architecture|map|briefs)" >&2; exit 1 ;;
+esac
+
+# API key required for non-interactive, non-dry-run
+if [[ "$DRY_RUN" != true && "$INTERACTIVE" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    log "ERROR: ANTHROPIC_API_KEY not set. Required for autonomous mode."
+    log "  Set it with: export ANTHROPIC_API_KEY=your-key"
+    log "  Or use --interactive to run via claude -p."
+    exit 1
+fi
+
+# Coaching
+if [[ -n "$COACHING_LEVEL" ]]; then
+    STORYFORGE_COACHING="$COACHING_LEVEL"
+    export STORYFORGE_COACHING
+fi
+
+# ============================================================================
+# Project info
+# ============================================================================
+
+PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || echo "Untitled")
+PLUGIN_DIR="${SCRIPT_DIR}/.."
+
+log "============================================"
+log "Storyforge Elaborate: ${STAGE}"
+log "Project: ${PROJECT_TITLE}"
+log "============================================"
+
+# ============================================================================
+# Build prompt
+# ============================================================================
+
+log "Building ${STAGE} prompt..."
+
+PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys
+from storyforge.prompts_elaborate import (
+    build_spine_prompt, build_architecture_prompt,
+    build_map_prompt, build_briefs_prompt,
+)
+stage = '${STAGE}'
+project_dir = '${PROJECT_DIR}'
+plugin_dir = '${PLUGIN_DIR}'
+seed = '''${SEED}'''
+
+if stage == 'spine':
+    print(build_spine_prompt(project_dir, plugin_dir, seed))
+elif stage == 'architecture':
+    print(build_architecture_prompt(project_dir, plugin_dir))
+elif stage == 'map':
+    print(build_map_prompt(project_dir, plugin_dir))
+elif stage == 'briefs':
+    print(build_briefs_prompt(project_dir, plugin_dir))
+")
+
+if [[ "$DRY_RUN" == true ]]; then
+    echo "===== DRY RUN: elaborate ${STAGE} ====="
+    echo "$PROMPT"
+    echo "===== END DRY RUN ====="
+    exit 0
+fi
+
+# ============================================================================
+# Branch and PR
+# ============================================================================
+
+create_branch "elaborate-${STAGE}" "$PROJECT_DIR"
+ensure_branch_pushed "$PROJECT_DIR"
+
+PR_BODY="## Elaboration: ${STAGE}
+
+**Project:** ${PROJECT_TITLE}
+**Stage:** ${STAGE}
+
+### Tasks
+- [ ] Run ${STAGE} stage
+- [ ] Validate
+- [ ] Review"
+
+create_draft_pr "Elaborate: ${PROJECT_TITLE} — ${STAGE}" "$PR_BODY" "$PROJECT_DIR" "elaboration"
+
+# ============================================================================
+# Invoke Claude
+# ============================================================================
+
+STAGE_LOG="${LOG_DIR}/elaborate-${STAGE}.log"
+STAGE_MODEL=$(select_model "drafting")  # Opus for creative work
+
+_SF_INVOCATION_START=$(date +%s)
+export _SF_INVOCATION_START
+
+if [[ "$INTERACTIVE" == true ]]; then
+    log "Invoking interactive claude for ${STAGE}..."
+
+    claude -p "$PROMPT" \
+        --model "$STAGE_MODEL" \
+        --dangerously-skip-permissions \
+        --output-format stream-json \
+        --verbose \
+        > "$STAGE_LOG" 2>&1 &
+    CLAUDE_PID=$!
+    register_child_pid $CLAUDE_PID
+
+    set +e
+    wait "$CLAUDE_PID" 2>/dev/null
+    CLAUDE_RC=$?
+    set -e
+    unregister_child_pid "$CLAUDE_PID" 2>/dev/null || true
+else
+    log "Invoking API for ${STAGE} (model: ${STAGE_MODEL})..."
+
+    begin_healing_zone "elaborate ${STAGE}"
+    invoke_anthropic_api "$PROMPT" "$STAGE_MODEL" "$STAGE_LOG" 16384
+    CLAUDE_RC=$?
+    end_healing_zone
+fi
+
+if [[ "$_SF_SHUTTING_DOWN" == true ]]; then
+    log "Interrupted during ${STAGE} — partial work may be committed"
+    exit 130
+fi
+
+if [[ $CLAUDE_RC -ne 0 ]]; then
+    log "ERROR: Claude invocation failed (exit code ${CLAUDE_RC})"
+    log "See: ${STAGE_LOG}"
+    exit 1
+fi
+
+# Log cost
+log_api_usage "$STAGE_LOG" "elaborate-${STAGE}" "${STAGE}" "$STAGE_MODEL" 2>/dev/null || true
+
+# ============================================================================
+# Parse response and apply updates
+# ============================================================================
+
+log "Parsing ${STAGE} response..."
+
+RESPONSE=$(extract_api_response "$STAGE_LOG" 2>/dev/null)
+if [[ -z "$RESPONSE" ]]; then
+    RESPONSE=$(extract_claude_response "$STAGE_LOG" 2>/dev/null)
+fi
+
+if [[ -z "$RESPONSE" ]]; then
+    log "ERROR: Could not extract response from ${STAGE_LOG}"
+    exit 1
+fi
+
+REF_DIR="${PROJECT_DIR}/reference"
+
+PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os
+from storyforge.prompts_elaborate import parse_stage_response, csv_block_to_rows
+from storyforge.elaborate import _read_csv, _write_csv, _read_csv_as_map, _FILE_MAP
+
+response = open('${STAGE_LOG}', encoding='utf-8').read()
+
+# Try API JSON format first
+try:
+    import json
+    data = json.loads(response)
+    text = ''
+    for item in data.get('content', []):
+        if item.get('type') == 'text':
+            text += item.get('text', '')
+    if text:
+        response = text
+except (json.JSONDecodeError, KeyError):
+    pass
+
+# Try stream-json format
+if not response.strip().startswith('{'):
+    # Already text, use as-is
+    pass
+else:
+    # Try extracting from stream-json
+    lines = response.strip().split('\n')
+    texts = []
+    for line in lines:
+        try:
+            obj = json.loads(line)
+            if obj.get('type') == 'content_block_delta':
+                texts.append(obj.get('delta', {}).get('text', ''))
+        except json.JSONDecodeError:
+            pass
+    if texts:
+        response = ''.join(texts)
+
+blocks = parse_stage_response(response)
+
+ref_dir = '${REF_DIR}'
+written = []
+
+# Apply CSV blocks
+for label, content in blocks.items():
+    if label == 'scenes-csv':
+        rows = csv_block_to_rows(content)
+        if rows:
+            path = os.path.join(ref_dir, 'scenes.csv')
+            existing = _read_csv_as_map(path)
+            for row in rows:
+                sid = row.get('id', '')
+                if not sid:
+                    continue
+                if sid in existing:
+                    existing[sid].update({k: v for k, v in row.items() if v})
+                else:
+                    new = {c: '' for c in _FILE_MAP['scenes.csv']}
+                    new.update(row)
+                    existing[sid] = new
+            ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)))
+            _write_csv(path, ordered, _FILE_MAP['scenes.csv'])
+            written.append(f'scenes.csv ({len(rows)} rows)')
+
+    elif label == 'intent-csv':
+        rows = csv_block_to_rows(content)
+        if rows:
+            path = os.path.join(ref_dir, 'scene-intent.csv')
+            existing = _read_csv_as_map(path)
+            for row in rows:
+                sid = row.get('id', '')
+                if not sid:
+                    continue
+                if sid in existing:
+                    existing[sid].update({k: v for k, v in row.items() if v})
+                else:
+                    new = {c: '' for c in _FILE_MAP['scene-intent.csv']}
+                    new.update(row)
+                    existing[sid] = new
+            ordered = sorted(existing.values(),
+                             key=lambda r: r.get('id', ''))
+            _write_csv(path, ordered, _FILE_MAP['scene-intent.csv'])
+            written.append(f'scene-intent.csv ({len(rows)} rows)')
+
+    elif label == 'briefs-csv':
+        rows = csv_block_to_rows(content)
+        if rows:
+            path = os.path.join(ref_dir, 'scene-briefs.csv')
+            existing = _read_csv_as_map(path)
+            for row in rows:
+                sid = row.get('id', '')
+                if not sid:
+                    continue
+                if sid in existing:
+                    existing[sid].update({k: v for k, v in row.items() if v})
+                else:
+                    new = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
+                    new.update(row)
+                    existing[sid] = new
+            ordered = sorted(existing.values(),
+                             key=lambda r: r.get('id', ''))
+            _write_csv(path, ordered, _FILE_MAP['scene-briefs.csv'])
+            written.append(f'scene-briefs.csv ({len(rows)} rows)')
+
+    elif label == 'scenes-csv-update':
+        # Partial update (just status changes)
+        rows = csv_block_to_rows(content)
+        if rows:
+            path = os.path.join(ref_dir, 'scenes.csv')
+            existing = _read_csv_as_map(path)
+            for row in rows:
+                sid = row.get('id', '')
+                if sid in existing:
+                    existing[sid].update({k: v for k, v in row.items() if v and k != 'id'})
+            ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)))
+            _write_csv(path, ordered, _FILE_MAP['scenes.csv'])
+            written.append(f'scenes.csv status updates ({len(rows)} rows)')
+
+    elif label in ('story-architecture', 'character-bible', 'world-bible', 'voice-guide'):
+        filename = label + '.md'
+        path = os.path.join(ref_dir, filename)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content + '\n')
+        written.append(filename)
+
+if written:
+    print('Updated: ' + ', '.join(written))
+else:
+    print('WARNING: No structured output blocks found in response')
+" 2>&1 | while IFS= read -r line; do log "  $line"; done
+
+# ============================================================================
+# Validate
+# ============================================================================
+
+log "Running validation..."
+
+VALIDATE_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import json
+from storyforge.elaborate import validate_structure
+report = validate_structure('${REF_DIR}')
+print(json.dumps(report))
+")
+
+VALIDATE_PASSED=$(echo "$VALIDATE_RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r['passed'])")
+VALIDATE_FAILURES=$(echo "$VALIDATE_RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(len(r['failures']))")
+
+if [[ "$VALIDATE_PASSED" == "True" ]]; then
+    log "Validation passed"
+else
+    log "Validation found ${VALIDATE_FAILURES} issue(s):"
+    echo "$VALIDATE_RESULT" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+for f in r['failures']:
+    sev = f.get('severity', 'blocking')
+    scene = f.get('scene_id', '')
+    prefix = f'  [{sev}]'
+    if scene:
+        prefix += f' {scene}:'
+    print(f\"{prefix} {f['message']}\")
+" | while IFS= read -r line; do log "$line"; done
+fi
+
+# Save validation report
+VALIDATE_FILE="${PROJECT_DIR}/working/validation/validate-$(date '+%Y%m%d-%H%M%S').md"
+mkdir -p "$(dirname "$VALIDATE_FILE")"
+echo "$VALIDATE_RESULT" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+print(f'# Validation Report: ${STAGE}')
+print(f'')
+print(f'**Passed:** {r[\"passed\"]}')
+print(f'**Checks:** {len(r[\"checks\"])}')
+print(f'**Failures:** {len(r[\"failures\"])}')
+print()
+if r['failures']:
+    print('## Failures')
+    print()
+    for f in r['failures']:
+        sev = f.get('severity', 'blocking')
+        scene = f.get('scene_id', '')
+        msg = f['message']
+        if scene:
+            print(f'- **[{sev}]** {scene}: {msg}')
+        else:
+            print(f'- **[{sev}]** {msg}')
+" > "$VALIDATE_FILE"
+
+# ============================================================================
+# Commit and update PR
+# ============================================================================
+
+log "Committing ${STAGE} results..."
+
+(
+    cd "$PROJECT_DIR"
+    git add -A
+    git commit -m "Elaborate: ${STAGE} stage" 2>/dev/null || true
+    git push 2>/dev/null || true
+)
+
+update_pr_task "Run ${STAGE} stage" "$PROJECT_DIR" 2>/dev/null || true
+update_pr_task "Validate" "$PROJECT_DIR" 2>/dev/null || true
+
+# ============================================================================
+# Update phase in storyforge.yaml
+# ============================================================================
+
+# Map stage to next phase
+case "$STAGE" in
+    spine)        NEXT_PHASE="architecture" ;;
+    architecture) NEXT_PHASE="scene-map" ;;
+    map)          NEXT_PHASE="briefs" ;;
+    briefs)       NEXT_PHASE="drafting" ;;
+esac
+
+# Only advance phase if validation passed
+if [[ "$VALIDATE_PASSED" == "True" ]]; then
+    CURRENT_PHASE=$(read_yaml_field "phase" 2>/dev/null || echo "")
+    if [[ "$CURRENT_PHASE" == "$STAGE" || "$CURRENT_PHASE" == "spine" || "$CURRENT_PHASE" == "development" ]]; then
+        sed -i '' "s/^phase:.*/phase: ${NEXT_PHASE}/" "${PROJECT_DIR}/storyforge.yaml"
+        (
+            cd "$PROJECT_DIR"
+            git add storyforge.yaml
+            git commit -m "Elaborate: advance phase to ${NEXT_PHASE}" 2>/dev/null || true
+            git push 2>/dev/null || true
+        )
+        log "Phase advanced to: ${NEXT_PHASE}"
+    fi
+fi
+
+# ============================================================================
+# Review phase
+# ============================================================================
+
+run_review_phase "elaboration" "$PROJECT_DIR"
+
+# ============================================================================
+# Summary
+# ============================================================================
+
+log ""
+log "============================================"
+log "Elaboration ${STAGE} complete."
+if [[ "$VALIDATE_PASSED" == "True" ]]; then
+    log "Validation: PASSED"
+else
+    log "Validation: ${VALIDATE_FAILURES} issue(s) — review before advancing"
+fi
+log "============================================"
+
+print_cost_summary "elaborate-${STAGE}" 2>/dev/null || true
