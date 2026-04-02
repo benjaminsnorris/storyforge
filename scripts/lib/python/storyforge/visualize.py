@@ -172,6 +172,14 @@ def load_dashboard_data(project_dir: str) -> dict:
         if 'setting' in scene and 'location' not in scene:
             scene['location'] = scene['setting']
 
+    # Build seq ordering map from scenes for sorting intents/briefs
+    seq_by_id = {}
+    for scene in scenes:
+        try:
+            seq_by_id[scene.get('id', '')] = int(scene.get('seq', 0))
+        except (ValueError, TypeError):
+            pass
+
     title = _read_yaml_field(project_dir, 'project.title')
     if not title:
         title = _read_yaml_field(project_dir, 'title')
@@ -187,10 +195,16 @@ def load_dashboard_data(project_dir: str) -> dict:
     target_words = _read_yaml_field(project_dir, 'project.target_words') or ''
     phase = _read_yaml_field(project_dir, 'phase') or ''
 
+    # Sort intents and briefs by scene seq order (extraction may write alphabetically)
+    intents = csv_to_records(intent_csv)
+    intents.sort(key=lambda r: seq_by_id.get(r.get('id', ''), 999))
+    briefs = csv_to_records(briefs_csv)
+    briefs.sort(key=lambda r: seq_by_id.get(r.get('id', ''), 999))
+
     return {
         'scenes': scenes,
-        'intents': csv_to_records(intent_csv),
-        'briefs': csv_to_records(briefs_csv),
+        'intents': intents,
+        'briefs': briefs,
         'characters': csv_to_records(characters_csv),
         'motif_taxonomy': csv_to_records(motif_csv),
         'locations': csv_to_records(locations_csv),
