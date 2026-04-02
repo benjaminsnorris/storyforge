@@ -1,0 +1,309 @@
+#!/bin/bash
+# storyforge-polish — Targeted prose polish based on craft scores
+#
+# Usage:
+#   ./storyforge polish                     # Polish all scenes with low craft scores
+#   ./storyforge polish --scenes ID,ID      # Polish specific scenes
+#   ./storyforge polish --threshold 3       # Only polish scenes scoring <= 3
+#   ./storyforge polish --dry-run           # Print prompts without invoking
+#
+# This is a prose-only pass. It does NOT fix structural issues (continuity,
+# knowledge violations, thread management). Those are fixed upstream in briefs.
+set -eo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
+
+source "${LIB_DIR}/common.sh"
+detect_project_root
+
+LOG_DIR="${PROJECT_DIR}/working/logs"
+mkdir -p "$LOG_DIR"
+
+# ============================================================================
+# Arguments
+# ============================================================================
+
+DRY_RUN=false
+INTERACTIVE=false
+COACHING_LEVEL=""
+SCENE_FILTER=""
+THRESHOLD=3
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Options:
+  --scenes ID,ID     Polish specific scenes only
+  --threshold N      Score threshold — only polish scenes scoring <= N (default: 3)
+  --dry-run          Print prompts without invoking Claude
+  --interactive/-i   Run interactively via claude -p
+  --coaching LEVEL   Override coaching level (full/coach/strict)
+  -h, --help         Show this help
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --scenes)     SCENE_FILTER="${2:?ERROR: --scenes requires a value}"; shift 2 ;;
+        --threshold)  THRESHOLD="${2:?ERROR: --threshold requires a value}"; shift 2 ;;
+        --dry-run)    DRY_RUN=true; shift ;;
+        --interactive|-i) INTERACTIVE=true; shift ;;
+        --coaching)   COACHING_LEVEL="${2:?ERROR: --coaching requires a value}"; shift 2 ;;
+        -h|--help)    usage ;;
+        -*)           echo "ERROR: Unknown option: $1" >&2; usage ;;
+        *)            shift ;;
+    esac
+done
+
+if [[ "$DRY_RUN" != true && "$INTERACTIVE" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    log "ERROR: ANTHROPIC_API_KEY not set. Required for autonomous mode."
+    exit 1
+fi
+
+if [[ -n "$COACHING_LEVEL" ]]; then
+    STORYFORGE_COACHING="$COACHING_LEVEL"
+    export STORYFORGE_COACHING
+fi
+EFFECTIVE_COACHING=$(get_coaching_level)
+
+# ============================================================================
+# Project info
+# ============================================================================
+
+PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || echo "Untitled")
+SCENES_DIR="${PROJECT_DIR}/scenes"
+REF_DIR="${PROJECT_DIR}/reference"
+
+log "============================================"
+log "Storyforge Polish"
+log "Project: ${PROJECT_TITLE}"
+log "Threshold: score <= ${THRESHOLD}"
+log "============================================"
+
+# ============================================================================
+# Identify scenes to polish
+# ============================================================================
+
+if [[ -n "$SCENE_FILTER" ]]; then
+    # Explicit scene list
+    IFS=',' read -ra POLISH_IDS <<< "$SCENE_FILTER"
+    log "Polishing ${#POLISH_IDS[@]} specified scene(s)"
+else
+    # Find scenes with low craft scores, or all drafted scenes if no scores exist
+    SCORES_DIR="${PROJECT_DIR}/working/scores/latest"
+    if [[ -f "${SCORES_DIR}/scene-scores.csv" ]]; then
+        # Read scores and filter by threshold
+        POLISH_IDS=()
+        while IFS='|' read -r id score rest; do
+            [[ "$id" == "id" ]] && continue  # skip header
+            if (( $(echo "$score <= $THRESHOLD" | bc -l 2>/dev/null || echo 0) )); then
+                POLISH_IDS+=("$id")
+            fi
+        done < "${SCORES_DIR}/scene-scores.csv"
+        log "Found ${#POLISH_IDS[@]} scene(s) scoring <= ${THRESHOLD}"
+    else
+        # No scores — polish all drafted scenes
+        POLISH_IDS=()
+        if [[ -f "${REF_DIR}/scenes.csv" ]]; then
+            while IFS='|' read -r id seq title part pov loc day tod dur status rest; do
+                [[ "$id" == "id" ]] && continue
+                [[ "$status" == "drafted" ]] && POLISH_IDS+=("$id")
+            done < "${REF_DIR}/scenes.csv"
+        else
+            while IFS='|' read -r id seq title pov loc part type day tod status wc tw; do
+                [[ "$id" == "id" ]] && continue
+                [[ "$status" == "drafted" || "$status" == "revised" ]] && POLISH_IDS+=("$id")
+            done < "$(ls "${REF_DIR}/scene-metadata.csv" 2>/dev/null || echo /dev/null)"
+        fi
+        log "No craft scores found — polishing all ${#POLISH_IDS[@]} drafted scene(s)"
+    fi
+fi
+
+if [[ ${#POLISH_IDS[@]} -eq 0 ]]; then
+    log "No scenes to polish."
+    exit 0
+fi
+
+# ============================================================================
+# Branch and PR
+# ============================================================================
+
+if [[ "$DRY_RUN" != true ]]; then
+    create_branch "polish" "$PROJECT_DIR"
+    ensure_branch_pushed "$PROJECT_DIR"
+
+    PR_BODY="## Polish Pass
+
+**Project:** ${PROJECT_TITLE}
+**Scenes:** ${#POLISH_IDS[@]}
+**Threshold:** score <= ${THRESHOLD}
+
+### Tasks
+"
+    for id in "${POLISH_IDS[@]}"; do
+        PR_BODY="${PR_BODY}- [ ] Polish ${id}
+"
+    done
+    PR_BODY="${PR_BODY}- [ ] Review"
+
+    create_draft_pr "Polish: ${PROJECT_TITLE} (${#POLISH_IDS[@]} scenes)" "$PR_BODY" "$PROJECT_DIR" "polish"
+fi
+
+# ============================================================================
+# Polish each scene
+# ============================================================================
+
+POLISH_MODEL=$(select_model "revision")
+POLISHED_COUNT=0
+
+for (( i=0; i<${#POLISH_IDS[@]}; i++ )); do
+    SCENE_ID="${POLISH_IDS[$i]}"
+    SCENE_FILE="${SCENES_DIR}/${SCENE_ID}.md"
+    SCENE_NUM=$((i + 1))
+
+    log "[${SCENE_NUM}/${#POLISH_IDS[@]}] Polishing ${SCENE_ID}..."
+
+    if [[ ! -f "$SCENE_FILE" ]]; then
+        log "WARNING: Scene file not found: ${SCENE_FILE}, skipping"
+        continue
+    fi
+
+    SCENE_PROSE=$(cat "$SCENE_FILE")
+
+    # Read voice guide
+    VOICE_GUIDE=""
+    [[ -f "${REF_DIR}/voice-guide.md" ]] && VOICE_GUIDE=$(cat "${REF_DIR}/voice-guide.md")
+
+    # Build polish prompt
+    POLISH_PROMPT="You are polishing a scene for \"${PROJECT_TITLE}\". This is a prose-quality pass ONLY.
+
+## Scene: ${SCENE_ID}
+
+## Current Prose
+
+${SCENE_PROSE}
+
+## Voice Guide
+
+${VOICE_GUIDE:-"(no voice guide available)"}
+
+## Instructions
+
+Polish this scene for prose quality. Focus on:
+- Voice consistency with the voice guide
+- Enter late, leave early — trim setup, end on image/action/dialogue
+- Sentence and paragraph rhythm — vary lengths, break monotony
+- Prose naturalness — eliminate AI patterns (antithesis framing, tricolon, hedge-stacking)
+- Dialogue authenticity — characters sound like themselves, not the author
+- Psychic distance — appropriate closeness to POV character's experience
+- Precision — every word earns its place
+
+## Rules
+
+- Do NOT change the story events, character knowledge, or scene outcome
+- Do NOT add new information or plot developments
+- Do NOT modify the emotional arc or value shift
+- Preserve all key dialogue (may rephrase for naturalness, not for content)
+- Output the complete polished scene prose, nothing else"
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "===== DRY RUN: ${SCENE_ID} ====="
+        echo "$POLISH_PROMPT" | head -20
+        echo "... (${#POLISH_PROMPT} chars total)"
+        echo "===== END DRY RUN ====="
+        POLISHED_COUNT=$((POLISHED_COUNT + 1))
+        continue
+    fi
+
+    SCENE_LOG="${LOG_DIR}/polish-${SCENE_ID}.log"
+    HEAD_BEFORE=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+
+    _SF_INVOCATION_START=$(date +%s)
+    export _SF_INVOCATION_START
+
+    if [[ "$INTERACTIVE" == true ]]; then
+        claude -p "$POLISH_PROMPT" \
+            --model "$POLISH_MODEL" \
+            --dangerously-skip-permissions \
+            --output-format stream-json \
+            --verbose \
+            > "$SCENE_LOG" 2>&1 &
+        CLAUDE_PID=$!
+        register_child_pid $CLAUDE_PID
+        set +e; wait "$CLAUDE_PID" 2>/dev/null; CLAUDE_RC=$?; set -e
+        unregister_child_pid "$CLAUDE_PID" 2>/dev/null || true
+    else
+        begin_healing_zone "polishing ${SCENE_ID}"
+        invoke_anthropic_api "$POLISH_PROMPT" "$POLISH_MODEL" "$SCENE_LOG" 8192
+        CLAUDE_RC=$?
+        end_healing_zone
+    fi
+
+    [[ "$_SF_SHUTTING_DOWN" == true ]] && break
+
+    if [[ $CLAUDE_RC -ne 0 ]]; then
+        log "WARNING: Polish failed for ${SCENE_ID} (exit code ${CLAUDE_RC})"
+        continue
+    fi
+
+    # Extract polished prose
+    POLISHED=$(extract_api_response "$SCENE_LOG" 2>/dev/null)
+    if [[ -z "$POLISHED" ]]; then
+        POLISHED=$(extract_claude_response "$SCENE_LOG" 2>/dev/null)
+    fi
+
+    if [[ -z "$POLISHED" || ${#POLISHED} -lt 100 ]]; then
+        log "WARNING: Polish response too short for ${SCENE_ID}, skipping"
+        continue
+    fi
+
+    # Write polished prose
+    echo "$POLISHED" > "$SCENE_FILE"
+
+    # Update word count
+    NEW_WC=$(wc -w < "$SCENE_FILE" | tr -d ' ')
+    if [[ -f "${REF_DIR}/scenes.csv" ]]; then
+        PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import update_scene
+update_scene('${SCENE_ID}', '${REF_DIR}', {'word_count': '${NEW_WC}', 'status': 'polished'})
+" 2>/dev/null || true
+    else
+        update_csv_field "$METADATA_CSV" "$SCENE_ID" "word_count" "$NEW_WC" 2>/dev/null || true
+        update_csv_field "$METADATA_CSV" "$SCENE_ID" "status" "polished" 2>/dev/null || true
+    fi
+
+    # Log cost
+    log_api_usage "$SCENE_LOG" "polish" "$SCENE_ID" "$POLISH_MODEL" 2>/dev/null || true
+
+    # Commit
+    (
+        cd "$PROJECT_DIR"
+        git add "scenes/${SCENE_ID}.md" reference/ working/logs/ 2>/dev/null || true
+        git commit -m "Polish: ${SCENE_ID}" 2>/dev/null || true
+        git push 2>/dev/null || true
+    )
+
+    POLISHED_COUNT=$((POLISHED_COUNT + 1))
+    log "  Polished: ${SCENE_ID} (${NEW_WC} words)"
+    update_pr_task "Polish ${SCENE_ID}" "$PROJECT_DIR" 2>/dev/null || true
+done
+
+# ============================================================================
+# Summary
+# ============================================================================
+
+if [[ "$DRY_RUN" != true ]]; then
+    run_review_phase "polish" "$PROJECT_DIR" 2>/dev/null || true
+fi
+
+log ""
+log "============================================"
+log "Polish complete. ${POLISHED_COUNT}/${#POLISH_IDS[@]} scenes polished."
+log "============================================"
+
+print_cost_summary "polish" 2>/dev/null || true

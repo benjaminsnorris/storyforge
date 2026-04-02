@@ -439,6 +439,59 @@ verify_and_commit_scene() {
 }
 
 # ============================================================================
+# Brief detection — use elaboration pipeline prompts if briefs exist
+# ============================================================================
+
+USE_BRIEFS=false
+BRIEFS_CSV="${PROJECT_DIR}/reference/scene-briefs.csv"
+if [[ -f "$BRIEFS_CSV" ]]; then
+    BRIEF_ROWS=$(tail -n +2 "$BRIEFS_CSV" | grep -v '^[^|]*|||||' | wc -l | tr -d ' ')
+    if (( BRIEF_ROWS > 0 )); then
+        USE_BRIEFS=true
+        log "Detected ${BRIEF_ROWS} scene briefs — using brief-aware drafting"
+
+        # Compute drafting waves
+        WAVES_JSON=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts build-waves "$PROJECT_DIR" 2>/dev/null || echo "[]")
+        WAVE_COUNT=$(echo "$WAVES_JSON" | python3 -c "import sys, json; w=json.load(sys.stdin); print(len(w))" 2>/dev/null || echo "0")
+        if (( WAVE_COUNT > 0 )); then
+            log "Drafting waves: ${WAVE_COUNT} (scenes grouped by continuity_deps)"
+        fi
+    fi
+fi
+
+# Helper: build prompt for a scene, choosing the right builder
+_build_prompt() {
+    local scene_id="$1"
+    local api_flag=""
+    [[ "$DRY_RUN" != true && -n "${ANTHROPIC_API_KEY:-}" ]] && api_flag="--api-mode"
+
+    if [[ "$USE_BRIEFS" == true ]]; then
+        # Get deps for this scene
+        local deps
+        deps=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import get_scene
+scene = get_scene('${scene_id}', '${PROJECT_DIR}/reference')
+if scene:
+    print(scene.get('continuity_deps', ''))
+" 2>/dev/null || echo "")
+
+        local deps_flag=""
+        [[ -n "$deps" ]] && deps_flag="--deps $deps"
+
+        PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts build-from-briefs \
+            "$scene_id" "$PROJECT_DIR" \
+            --plugin-dir "${SCRIPT_DIR}/.." \
+            --coaching "$EFFECTIVE_COACHING" \
+            $deps_flag
+    else
+        PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts build-scene \
+            "$scene_id" "$PROJECT_DIR" \
+            --coaching "$EFFECTIVE_COACHING" $api_flag
+    fi
+}
+
+# ============================================================================
 # Batch mode — build all prompts, submit batch, download and process results
 # ============================================================================
 
@@ -461,11 +514,7 @@ if [[ "$WRITE_MODE" == "batch" && "$DRY_RUN" != true ]]; then
             fi
         fi
 
-        # Detect API mode flag (skip for dry-run — prompts should show claude -p format)
-        API_FLAG=""
-        [[ "$DRY_RUN" != true && -n "${ANTHROPIC_API_KEY:-}" ]] && API_FLAG="--api-mode"
-
-        PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts build-scene "$SCENE_ID" "$PROJECT_DIR" --coaching "$EFFECTIVE_COACHING" $API_FLAG)
+        PROMPT=$(_build_prompt "$SCENE_ID")
         if [[ -z "$PROMPT" ]]; then
             log "ERROR: Failed to build prompt for scene ${SCENE_ID}"
             exit 1
@@ -559,11 +608,7 @@ else
         fi
 
         # --- Build the prompt (outside zone — needed for dry-run check) ---
-        # Skip API mode for dry-run — prompts should show claude -p format
-        API_FLAG=""
-        [[ "$DRY_RUN" != true && -n "${ANTHROPIC_API_KEY:-}" ]] && API_FLAG="--api-mode"
-
-        PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts build-scene "$SCENE_ID" "$PROJECT_DIR" --coaching "$EFFECTIVE_COACHING" $API_FLAG)
+        PROMPT=$(_build_prompt "$SCENE_ID")
 
         if [[ -z "$PROMPT" ]]; then
             log "ERROR: Failed to build prompt for scene ${SCENE_ID}"

@@ -36,9 +36,9 @@ assert_exit_code "0" "$rc" "write dry-run: exits 0"
 assert_contains "$result" "DRY RUN: act1-sc01" "write dry-run: has dry-run header"
 assert_contains "$result" "END DRY RUN: act1-sc01" "write dry-run: has dry-run footer"
 assert_contains "$result" "The Cartographer's Silence" "write dry-run: prompt contains title"
-assert_contains "$result" "STEP 1:" "write dry-run: prompt has step structure"
-assert_contains "$result" "CRAFT PRINCIPLES" "write dry-run: prompt has craft principles"
-assert_contains "$result" "reference/voice-guide.md" "write dry-run: prompt references voice guide"
+assert_contains "$result" "Scene Brief:" "write dry-run: prompt has scene brief section"
+assert_contains "$result" "drafting a scene" "write dry-run: prompt has drafting instruction"
+assert_contains "$result" "Voice Guide" "write dry-run: prompt references voice guide"
 
 # Dry-run doesn't modify scene files
 before_mtime=$(stat -f %m "${FIXTURE_DIR}/scenes/act1-sc01.md" 2>/dev/null || stat -c %Y "${FIXTURE_DIR}/scenes/act1-sc01.md" 2>/dev/null)
