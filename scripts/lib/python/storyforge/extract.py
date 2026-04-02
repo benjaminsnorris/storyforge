@@ -181,6 +181,7 @@ LOCATION: [the primary physical location — use a consistent canonical name]
 TIMELINE_DAY: [integer day number within the story chronology, starting from 1]
 TIME_OF_DAY: [morning / afternoon / evening / night / dawn / dusk]
 DURATION: [approximate in-story duration, e.g., "2 hours", "30 minutes", "an afternoon"]
+TYPE: [the scene's primary narrative purpose — one of: character, plot, world, action, transition, confrontation, dialogue, introspection, revelation]
 TARGET_WORDS: [current word count is a reasonable target — output the approximate word count]
 PART: [which act/part number this scene belongs to, based on its position in the story]"""
 
@@ -195,6 +196,7 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
         'TIMELINE_DAY': 'timeline_day',
         'TIME_OF_DAY': 'time_of_day',
         'DURATION': 'duration',
+        'TYPE': 'type',
         'TARGET_WORDS': 'target_words',
         'PART': 'part',
     }
@@ -741,7 +743,7 @@ def cleanup_mice_threads(ref_dir: str) -> list[dict]:
 
 
 def run_cleanup(ref_dir: str) -> dict:
-    """Run all cleanup passes. Returns a summary dict."""
+    """Run all deterministic cleanup passes. Returns a summary dict."""
     timeline_fixes = cleanup_timeline(ref_dir)
     knowledge_fixes = cleanup_knowledge(ref_dir)
     mice_fixes = cleanup_mice_threads(ref_dir)
@@ -752,3 +754,236 @@ def run_cleanup(ref_dir: str) -> dict:
         'mice_threads': {'count': len(mice_fixes), 'fixes': mice_fixes},
         'total_fixes': len(timeline_fixes) + len(knowledge_fixes) + len(mice_fixes),
     }
+
+
+# ============================================================================
+# Claude-powered cleanup (for full coaching mode)
+# ============================================================================
+
+def build_knowledge_cleanup_prompt(ref_dir: str) -> str:
+    """Build a prompt for Claude to reconcile knowledge wording mismatches.
+
+    Gives Claude the full knowledge chain and asks it to normalize wording
+    so knowledge_in references exactly match prior knowledge_out entries.
+    """
+    from .elaborate import _read_csv_as_map, validate_structure
+
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda s: int(scenes_map[s].get('seq', 0)))
+
+    # Build the knowledge chain view
+    chain_lines = []
+    for sid in sorted_ids:
+        brief = briefs_map.get(sid, {})
+        k_in = brief.get('knowledge_in', '').strip()
+        k_out = brief.get('knowledge_out', '').strip()
+        pov = scenes_map[sid].get('pov', '')
+        if k_in or k_out:
+            chain_lines.append(f"Scene: {sid} (POV: {pov})")
+            if k_in:
+                chain_lines.append(f"  knowledge_in: {k_in}")
+            if k_out:
+                chain_lines.append(f"  knowledge_out: {k_out}")
+            chain_lines.append("")
+
+    # Get validation failures for knowledge
+    report = validate_structure(ref_dir)
+    knowledge_failures = [c for c in report['failures'] if c['category'] == 'knowledge']
+
+    failure_lines = []
+    for f in knowledge_failures:
+        failure_lines.append(f"- {f.get('scene_id', '')}: {f['message']}")
+
+    return f"""You are normalizing knowledge wording across a novel's scene briefs.
+
+## Problem
+
+The knowledge chain has wording mismatches — a scene's knowledge_in uses different phrasing than the prior scene's knowledge_out for the same fact. Validation requires exact string matches.
+
+## Current Knowledge Chain
+
+{chr(10).join(chain_lines)}
+
+## Validation Failures
+
+{chr(10).join(failure_lines) if failure_lines else "No failures — chain is consistent."}
+
+## Instructions
+
+For each validation failure, determine whether the knowledge_in fact refers to the same narrative fact as a prior knowledge_out entry. If so, output the correction.
+
+Output ONLY lines in this format — one per fix:
+
+FIX: scene_id | old_knowledge_in_fact | corrected_knowledge_in_fact
+
+The corrected fact MUST be an exact copy of a knowledge_out entry from a prior scene.
+
+If a knowledge_in fact is genuinely new information not established in any prior scene (e.g., starting knowledge for the first scene of a new POV character), output:
+
+VALID: scene_id | fact | reason it's valid starting knowledge
+
+If you cannot determine the match, output:
+
+SKIP: scene_id | fact | reason it's ambiguous
+
+Do not invent facts. Do not add knowledge that isn't in the chain. Only normalize wording."""
+
+
+def build_mice_cleanup_prompt(ref_dir: str) -> str:
+    """Build a prompt for Claude to reconcile MICE thread nesting."""
+    from .elaborate import _read_csv_as_map, validate_structure
+
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda s: int(scenes_map[s].get('seq', 0)))
+
+    # Build the thread timeline
+    thread_lines = []
+    for sid in sorted_ids:
+        intent = intent_map.get(sid, {})
+        mice = intent.get('mice_threads', '').strip()
+        function = intent.get('function', '').strip()
+        if mice:
+            thread_lines.append(f"Scene {sid}: {mice}")
+            thread_lines.append(f"  (function: {function[:80]})")
+
+    # Get thread validation failures
+    report = validate_structure(ref_dir)
+    thread_failures = [c for c in report['failures'] if c['category'] == 'threads']
+
+    failure_lines = []
+    for f in thread_failures:
+        failure_lines.append(f"- {f['message']}")
+
+    return f"""You are fixing MICE thread nesting in a novel's scene intent data.
+
+## MICE Thread Rules
+
+MICE threads follow FILO (first in, last out) nesting — like HTML tags:
+- +type:name opens a thread
+- -type:name closes a thread
+- Types: milieu (place), inquiry (question), character (transformation), event (disruption)
+- Threads must close in reverse order of opening
+
+## Current Thread Timeline
+
+{chr(10).join(thread_lines) if thread_lines else "(no MICE threads found)"}
+
+## Validation Failures
+
+{chr(10).join(failure_lines) if failure_lines else "No failures — nesting is valid."}
+
+## Instructions
+
+Fix the MICE thread nesting. For each scene that needs changes, output:
+
+UPDATE: scene_id | new_mice_threads_value
+
+The new value should be a semicolon-separated list of thread operations (e.g., "+inquiry:question;-milieu:place").
+
+Rules:
+- Every opened thread must eventually close
+- Closes must happen in reverse order of opens (FILO)
+- If a thread is legitimately unclosed at the end of the manuscript (e.g., the story is incomplete), output: UNCLOSED: thread_name | reason
+- Remove duplicate opens
+- Remove closes for threads that were never opened
+- If reordering closes fixes the nesting, do that rather than removing them
+- Preserve the narrative intent — don't remove threads that are genuinely part of the story
+
+Output ONLY UPDATE, UNCLOSED, or REMOVE lines. No commentary."""
+
+
+def parse_knowledge_cleanup_response(response: str, ref_dir: str) -> list[dict]:
+    """Parse the Claude knowledge cleanup response and apply fixes.
+
+    Returns list of fixes applied.
+    """
+    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    fixes = []
+
+    for line in response.split('\n'):
+        line = line.strip()
+        if line.startswith('FIX:'):
+            parts = line[4:].split('|')
+            if len(parts) >= 3:
+                scene_id = parts[0].strip()
+                old_fact = parts[1].strip()
+                new_fact = parts[2].strip()
+
+                if scene_id in briefs_map:
+                    k_in = briefs_map[scene_id].get('knowledge_in', '')
+                    # Replace the old fact with the new one
+                    facts = [f.strip() for f in k_in.split(';')]
+                    new_facts = []
+                    for f in facts:
+                        if _similarity(f.lower(), old_fact.lower()) >= 0.5:
+                            new_facts.append(new_fact)
+                        else:
+                            new_facts.append(f)
+                    new_k_in = '; '.join(new_facts)
+                    if new_k_in != k_in:
+                        briefs_map[scene_id]['knowledge_in'] = new_k_in
+                        fixes.append({
+                            'scene_id': scene_id,
+                            'field': 'knowledge_in',
+                            'old_value': old_fact[:60],
+                            'new_value': new_fact[:60],
+                        })
+
+    if fixes:
+        ordered = sorted(briefs_map.values(), key=lambda r: r.get('id', ''))
+        _write_csv(os.path.join(ref_dir, 'scene-briefs.csv'), ordered, _FILE_MAP['scene-briefs.csv'])
+
+    return fixes
+
+
+def parse_mice_cleanup_response(response: str, ref_dir: str) -> list[dict]:
+    """Parse the Claude MICE cleanup response and apply fixes.
+
+    Returns list of fixes applied.
+    """
+    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+    intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+    fixes = []
+
+    for line in response.split('\n'):
+        line = line.strip()
+        if line.startswith('UPDATE:'):
+            parts = line[7:].split('|')
+            if len(parts) >= 2:
+                scene_id = parts[0].strip()
+                new_value = parts[1].strip()
+                if scene_id in intent_map:
+                    old_value = intent_map[scene_id].get('mice_threads', '')
+                    intent_map[scene_id]['mice_threads'] = new_value
+                    fixes.append({
+                        'scene_id': scene_id,
+                        'field': 'mice_threads',
+                        'old_value': old_value[:60],
+                        'new_value': new_value[:60],
+                    })
+        elif line.startswith('REMOVE:'):
+            parts = line[7:].split('|')
+            if len(parts) >= 1:
+                scene_id = parts[0].strip()
+                if scene_id in intent_map:
+                    old_value = intent_map[scene_id].get('mice_threads', '')
+                    intent_map[scene_id]['mice_threads'] = ''
+                    fixes.append({
+                        'scene_id': scene_id,
+                        'field': 'mice_threads',
+                        'old_value': old_value[:60],
+                        'new_value': '(removed)',
+                    })
+
+    if fixes:
+        ordered = sorted(intent_map.values(), key=lambda r: r.get('id', ''))
+        _write_csv(os.path.join(ref_dir, 'scene-intent.csv'), ordered, _FILE_MAP['scene-intent.csv'])
+
+    return fixes

@@ -18,7 +18,7 @@ DELIMITER = '|'
 # Column-to-file mapping (which file owns which columns)
 _SCENES_COLS = [
     'id', 'seq', 'title', 'part', 'pov', 'location',
-    'timeline_day', 'time_of_day', 'duration', 'status',
+    'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',
 ]
 _INTENT_COLS = [
