@@ -2687,7 +2687,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     if (section) section.style.display = '';
 
     const mobile = window.innerWidth < 768;
-    const W = container.clientWidth || 800;
+    const W = container.clientWidth - 24 || 1100;
     const H = 200;
     const labelW = mobile ? 60 : 100;
     const chartW = W - labelW - 20;
@@ -2760,7 +2760,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     if (section) section.style.display = '';
 
     const mobile = window.innerWidth < 768;
-    const W = container.clientWidth || 800;
+    const W = container.clientWidth - 24 || 1100;
     const labelW = mobile ? 100 : 140;
     const chartW = W - labelW - 20;
     const rowH = 18;
@@ -2842,7 +2842,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     if (section) section.style.display = '';
 
     const mobile = window.innerWidth < 768;
-    const W = container.clientWidth || 800;
+    const W = container.clientWidth - 24 || 1100;
     const elements = ['goal', 'conflict', 'outcome', 'crisis', 'decision', 'key_actions', 'key_dialogue', 'emotions', 'knowledge'];
     const H = elements.length * 28 + 40;
     const labelW = mobile ? 80 : 120;
