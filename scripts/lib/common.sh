@@ -1104,6 +1104,9 @@ ensure_all_labels() {
     ensure_label "assembly"       "bfdadc" "Manuscript assembly and production"     "$project_dir"
     ensure_label "scoring"        "fbca04" "Principled craft scoring"               "$project_dir"
     ensure_label "enrichment"     "d4c5f9" "Metadata enrichment"                    "$project_dir"
+    ensure_label "elaboration"   "0075ca" "Elaboration pipeline stage"             "$project_dir"
+    ensure_label "extraction"    "e99695" "Reverse elaboration — prose extraction"  "$project_dir"
+    ensure_label "polish"        "c2e0c6" "Prose polish pass"                      "$project_dir"
 }
 
 # Create a draft PR for the current branch.
@@ -1150,10 +1153,10 @@ create_draft_pr() {
         --title "$title" \
         --body "$body" \
         $label_args 2>/dev/null) || {
-        log "WARNING: Failed to create draft PR"
+        log "WARNING: Failed to create draft PR — continuing without PR"
         STORYFORGE_PR_NUMBER=""
         export STORYFORGE_PR_NUMBER
-        return 1
+        return 0
     }
 
     # Extract PR number from URL (format: https://github.com/owner/repo/pull/123)
