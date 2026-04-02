@@ -4,7 +4,7 @@
 # Run via: ./tests/run-tests.sh
 # Depends on: FIXTURE_DIR, PROJECT_DIR, assertion functions (from run-tests.sh)
 
-META_CSV="${FIXTURE_DIR}/reference/scene-metadata.csv"
+META_CSV="${FIXTURE_DIR}/reference/scenes.csv"
 INTENT_CSV="${FIXTURE_DIR}/reference/scene-intent.csv"
 
 # ============================================================================
@@ -15,16 +15,16 @@ result=$(get_csv_field "$META_CSV" "act1-sc01" "title")
 assert_equals "The Finest Cartographer" "$result" "get_csv_field: title of act1-sc01"
 
 result=$(get_csv_field "$META_CSV" "act1-sc01" "word_count")
-assert_equals "2400" "$result" "get_csv_field: word_count of act1-sc01"
+assert_equals "0" "$result" "get_csv_field: word_count of act1-sc01"
 
 result=$(get_csv_field "$META_CSV" "act2-sc01" "status")
-assert_equals "pending" "$result" "get_csv_field: status of act2-sc01"
+assert_equals "architecture" "$result" "get_csv_field: status of act2-sc01"
 
 result=$(get_csv_field "$META_CSV" "act1-sc02" "pov")
 assert_equals "Dorren Hayle" "$result" "get_csv_field: pov of act1-sc02"
 
 result=$(get_csv_field "$META_CSV" "new-x1" "type")
-assert_equals "plot" "$result" "get_csv_field: type of new-x1"
+assert_equals "revelation" "$result" "get_csv_field: type of new-x1"
 
 # Nonexistent ID returns empty
 result=$(get_csv_field "$META_CSV" "no-such-id" "title")
@@ -45,7 +45,7 @@ assert_empty "$result" "get_csv_field: missing file returns empty"
 result=$(get_csv_row "$META_CSV" "act1-sc01")
 assert_contains "$result" "act1-sc01" "get_csv_row: contains id"
 assert_contains "$result" "The Finest Cartographer" "get_csv_row: contains title"
-assert_contains "$result" "2400" "get_csv_row: contains word_count"
+assert_contains "$result" "2500" "get_csv_row: contains target_words"
 
 result=$(get_csv_row "$META_CSV" "act2-sc01")
 assert_contains "$result" "Tessa Merrin" "get_csv_row: act2-sc01 contains pov"
@@ -67,11 +67,11 @@ assert_contains "$result" "act1-sc01" "get_csv_column: id column contains act1-s
 assert_contains "$result" "act2-sc01" "get_csv_column: id column contains act2-sc01"
 
 result=$(get_csv_column "$META_CSV" "status")
-assert_contains "$result" "drafted" "get_csv_column: status column contains drafted"
-assert_contains "$result" "pending" "get_csv_column: status column contains pending"
+assert_contains "$result" "briefed" "get_csv_column: status column contains briefed"
+assert_contains "$result" "architecture" "get_csv_column: status column contains architecture"
 
 line_count=$(get_csv_column "$META_CSV" "title" | wc -l | tr -d ' ')
-assert_equals "4" "$line_count" "get_csv_column: title column has 4 rows"
+assert_equals "6" "$line_count" "get_csv_column: title column has 6 rows"
 
 # Nonexistent column
 result=$(get_csv_column "$META_CSV" "nonexistent")
@@ -91,7 +91,7 @@ assert_contains "$result" "new-x1" "list_csv_ids: contains new-x1"
 assert_contains "$result" "act2-sc01" "list_csv_ids: contains act2-sc01"
 
 line_count=$(list_csv_ids "$META_CSV" | wc -l | tr -d ' ')
-assert_equals "4" "$line_count" "list_csv_ids: returns 4 IDs"
+assert_equals "6" "$line_count" "list_csv_ids: returns 6 IDs"
 
 # First ID should be act1-sc01 (file order)
 first_id=$(list_csv_ids "$META_CSV" | head -1)
@@ -115,7 +115,7 @@ assert_equals "2800" "$result" "update_csv_field: word_count updated to 2800"
 
 # Other rows untouched
 result=$(get_csv_field "$TMP_CSV" "act1-sc01" "word_count")
-assert_equals "2400" "$result" "update_csv_field: other row unchanged"
+assert_equals "0" "$result" "update_csv_field: other row unchanged"
 
 # Update status
 update_csv_field "$TMP_CSV" "act2-sc01" "status" "drafted"
@@ -139,7 +139,7 @@ rm -f "$TMP_CSV"
 TMP_CSV=$(mktemp)
 cp "$META_CSV" "$TMP_CSV"
 
-append_csv_row "$TMP_CSV" "act3-sc01|5|The Final Descent|Dorren Hayle|The Chasm|3|plot|5|night|planned|0|3000"
+append_csv_row "$TMP_CSV" "act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000"
 
 # New row readable
 result=$(get_csv_field "$TMP_CSV" "act3-sc01" "title")
@@ -150,7 +150,7 @@ assert_equals "planned" "$result" "append_csv_row: new row status readable"
 
 # ID count increased
 line_count=$(list_csv_ids "$TMP_CSV" | wc -l | tr -d ' ')
-assert_equals "5" "$line_count" "append_csv_row: now 5 IDs"
+assert_equals "7" "$line_count" "append_csv_row: now 7 IDs"
 
 # Existing rows untouched
 result=$(get_csv_field "$TMP_CSV" "act1-sc01" "title")

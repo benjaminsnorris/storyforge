@@ -26,7 +26,7 @@ Before doing anything else, orient yourself:
    - `reference/voice-guide.md` — tone, mood, register
    - `reference/world-bible.md` — setting, atmosphere
    - `reference/key-decisions.md` — settled creative decisions
-   - `reference/scene-metadata.csv` — scene count, structure
+   - `reference/scenes.csv` — scene count, structure
 3. **Read evaluation synthesis** if it exists (`working/evaluations/synthesis.md` or most recent `findings.yaml`) — this tells you the manuscript's strengths, which are marketing gold.
 4. **Check for existing press kit** — does `manuscript/press-kit/` already exist? If so, read existing components to understand what's been done.
 5. **Verify content exists** — at least some scene files must exist in `scenes/`. A press kit needs story content to draw from. If no scenes exist, tell the author the press kit needs manuscript content and suggest drafting first.

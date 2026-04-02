@@ -375,7 +375,7 @@ migrate_storyforge_yaml() {
 
 report_csv_integrity() {
     local project_dir="$1"
-    local meta_csv="${project_dir}/reference/scene-metadata.csv"
+    local meta_csv="${project_dir}/reference/scenes.csv"
     local intent_csv="${project_dir}/reference/scene-intent.csv"
     local chapter_csv="${project_dir}/reference/chapter-map.csv"
     local chars_csv="${project_dir}/reference/characters.csv"
@@ -445,7 +445,7 @@ report_csv_integrity() {
     if [[ -f "$intent_csv" ]] && [[ -f "$chars_csv" ]]; then
         local known used
         known=$(tail -n +2 "$chars_csv" | cut -d'|' -f2,3 | tr '|' ';' | tr ';' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | sort -u)
-        used=$(tail -n +2 "$intent_csv" | cut -d'|' -f4 | tr ';' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | sort -u)
+        used=$(awk -F'|' 'NR==1{for(i=1;i<=NF;i++)if($i=="characters")c=i} NR>1&&c{print $c}' "$intent_csv" | tr ';' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' | sort -u)
         comm -23 <(echo "$used") <(echo "$known") | while IFS= read -r name; do
             [[ -n "$name" ]] && echo "UNKNOWN_CHARACTER:${name}"
         done

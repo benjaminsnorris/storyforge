@@ -128,7 +128,7 @@ PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || read_yaml_field "
 
 # --- Resolve paths ---
 SCENES_DIR="${PROJECT_DIR}/scenes"
-METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
 INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
 CHAPTER_MAP_CSV="${PROJECT_DIR}/reference/chapter-map.csv"
 LOG_DIR="${PROJECT_DIR}/working/logs"
@@ -140,10 +140,6 @@ mkdir -p "$SCENES_DIR"
 mkdir -p "${PROJECT_DIR}/reference"
 
 # Move CSVs from old location if needed
-if [[ -f "${PROJECT_DIR}/scenes/metadata.csv" ]] && [[ ! -f "${PROJECT_DIR}/reference/scene-metadata.csv" ]]; then
-    mv "${PROJECT_DIR}/scenes/metadata.csv" "${PROJECT_DIR}/reference/scene-metadata.csv"
-    log "Moved scenes/metadata.csv → reference/scene-metadata.csv"
-fi
 if [[ -f "${PROJECT_DIR}/scenes/intent.csv" ]] && [[ ! -f "${PROJECT_DIR}/reference/scene-intent.csv" ]]; then
     mv "${PROJECT_DIR}/scenes/intent.csv" "${PROJECT_DIR}/reference/scene-intent.csv"
     log "Moved scenes/intent.csv → reference/scene-intent.csv"
@@ -230,8 +226,8 @@ title_from_file() {
 
 ensure_metadata_csv() {
     if [[ ! -f "$METADATA_CSV" ]]; then
-        echo "id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words" > "$METADATA_CSV"
-        log "Created reference/scene-metadata.csv"
+        echo "id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words" > "$METADATA_CSV"
+        log "Created reference/scenes.csv"
     fi
 }
 
@@ -1138,7 +1134,7 @@ case "$MODE" in
             (
                 cd "$PROJECT_DIR"
                 git add scenes/ 2>/dev/null || true
-                git add reference/scene-metadata.csv reference/scene-intent.csv 2>/dev/null || true
+                git add reference/scenes.csv reference/scene-intent.csv 2>/dev/null || true
                 git add reference/chapter-map.csv 2>/dev/null || true
                 git commit -m "Scenes setup: rename ${RENAME_COUNT} scene files to slugs" 2>/dev/null || true
                 git push 2>/dev/null || true
@@ -1210,7 +1206,7 @@ case "$MODE" in
             (
                 cd "$PROJECT_DIR"
                 git add scenes/ 2>/dev/null || true
-                git add reference/scene-metadata.csv reference/scene-intent.csv 2>/dev/null || true
+                git add reference/scenes.csv reference/scene-intent.csv 2>/dev/null || true
                 git add working/ 2>/dev/null || true
                 git commit -m "Scenes setup: split chapters into ${total_new_scenes:-0} scenes" 2>/dev/null || true
                 git push 2>/dev/null || true
@@ -1255,7 +1251,7 @@ case "$MODE" in
             (
                 cd "$PROJECT_DIR"
                 git add scenes/ 2>/dev/null || true
-                git add reference/scene-metadata.csv reference/scene-intent.csv 2>/dev/null || true
+                git add reference/scenes.csv reference/scene-intent.csv 2>/dev/null || true
                 git add working/ 2>/dev/null || true
                 git commit -m "Scenes setup: split manuscript into scenes" 2>/dev/null || true
                 git push 2>/dev/null || true

@@ -15,7 +15,7 @@ import tempfile
 from .prompts import (
     _read_csv_header_and_rows,
     read_csv_field,
-    _resolve_metadata_csv,
+    _resolve_scenes_csv,
     _resolve_intent_csv,
 )
 
@@ -24,7 +24,7 @@ from .prompts import (
 # Constants
 # ============================================================================
 
-#: Fields stored in scene-metadata.csv
+#: Fields stored in scenes.csv
 METADATA_FIELDS = frozenset({'type', 'location', 'time_of_day'})
 
 #: Fields stored in scene-intent.csv
@@ -316,7 +316,7 @@ def apply_enrich_result(scene_id: str, result: dict,
         scene_id: The scene identifier.
         result: Dict as returned by :func:`parse_enrich_response`, with
             optional alias normalization and validation already applied.
-        metadata_csv: Path to scene-metadata.csv.
+        metadata_csv: Path to scenes.csv.
         intent_csv: Path to scene-intent.csv.
         force: If True, overwrite existing non-empty values.
 
@@ -386,7 +386,7 @@ def build_enrich_prompt(scene_id: str, project_dir: str,
         scene_text = f.read()
 
     # Read existing metadata for context
-    metadata_csv = _resolve_metadata_csv(project_dir)
+    metadata_csv = _resolve_scenes_csv(project_dir)
     intent_csv = _resolve_intent_csv(project_dir)
 
     title = ''
@@ -520,7 +520,7 @@ def enrich_and_apply(scene_id: str, response: str, project_dir: str,
             del result['time_of_day']
 
     # Apply to CSVs
-    metadata_csv = _resolve_metadata_csv(project_dir)
+    metadata_csv = _resolve_scenes_csv(project_dir)
     intent_csv = _resolve_intent_csv(project_dir)
 
     if metadata_csv and intent_csv:

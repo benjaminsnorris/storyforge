@@ -136,17 +136,17 @@ def parse_scene_boundaries(response: str) -> list[dict]:
 # CSV generation
 # ============================================================================
 
-_METADATA_HEADER = 'id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words'
-_INTENT_HEADER = 'id|function|emotional_arc|characters|threads|motifs|notes'
+_SCENES_HEADER = 'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words'
+_INTENT_HEADER = 'id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads'
 
 
-def generate_metadata_rows(scenes: list[dict],
-                           part_num: int | None = None,
-                           seq_start: int = 1) -> list[str]:
-    """Generate pipe-delimited CSV rows for ``scene-metadata.csv``.
+def generate_scenes_rows(scenes: list[dict],
+                         part_num: int | None = None,
+                         seq_start: int = 1) -> list[str]:
+    """Generate pipe-delimited CSV rows for ``scenes.csv``.
 
     Each row uses the header order:
-    ``id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words``
+    ``id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words``
 
     The scene dicts must have at least ``title`` (str).  They may
     optionally include ``word_count`` (int) and ``slug`` (str).  If
@@ -176,7 +176,7 @@ def generate_metadata_rows(scenes: list[dict],
         part = str(part_num) if part_num is not None else ''
         word_count = str(scene.get('word_count', ''))
 
-        row = f'{slug}|{seq}|{title}|||{part}|||||{word_count}|'
+        row = f'{slug}|{seq}|{title}|{part}|||||||||{word_count}|'
         rows.append(row)
 
     return rows
@@ -186,7 +186,7 @@ def generate_intent_rows(scenes: list[dict]) -> list[str]:
     """Generate pipe-delimited CSV rows for ``scene-intent.csv``.
 
     Each row uses the header order:
-    ``id|function|emotional_arc|characters|threads|motifs|notes``
+    ``id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads``
 
     Args:
         scenes: Scene dicts (must have at least ``title``; ``slug`` is
@@ -205,15 +205,15 @@ def generate_intent_rows(scenes: list[dict]) -> list[str]:
             slug = f'scene-unknown'
         slug = unique_slug(slug, used_slugs)
 
-        row = f'{slug}||||||'
+        row = f'{slug}||||||||||'
         rows.append(row)
 
     return rows
 
 
-def metadata_header() -> str:
-    """Return the canonical metadata CSV header line."""
-    return _METADATA_HEADER
+def scenes_header() -> str:
+    """Return the canonical scenes CSV header line."""
+    return _SCENES_HEADER
 
 
 def intent_header() -> str:
@@ -302,7 +302,7 @@ def generate_rename_plan(scenes_dir: str,
 
     Args:
         scenes_dir: Path to the ``scenes/`` directory.
-        metadata_csv: Path to ``reference/scene-metadata.csv``.
+        metadata_csv: Path to ``reference/scenes.csv``.
 
     Returns:
         List of ``(old_path, new_path)`` tuples for files that need
@@ -523,8 +523,8 @@ def main():
             else:
                 i += 1
 
-        rows = generate_metadata_rows(scenes, part_num=part_num,
-                                       seq_start=seq_start)
+        rows = generate_scenes_rows(scenes, part_num=part_num,
+                                    seq_start=seq_start)
         for row in rows:
             print(row)
 

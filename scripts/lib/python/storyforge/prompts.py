@@ -142,30 +142,32 @@ def _get_csv_row_dict(csv_file: str, row_id: str,
 # Scene metadata and intent
 # ============================================================================
 
-def _resolve_metadata_csv(project_dir: str) -> str:
-    """Find the scene-metadata CSV, checking the fallback location."""
-    primary = os.path.join(project_dir, 'reference', 'scene-metadata.csv')
-    if os.path.isfile(primary):
-        return primary
-    fallback = os.path.join(project_dir, 'scenes', 'metadata.csv')
-    if os.path.isfile(fallback):
-        return fallback
+def _resolve_scenes_csv(project_dir: str) -> str:
+    """Find the scenes CSV (structural identity)."""
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if os.path.isfile(path):
+        return path
     return ''
 
 
 def _resolve_intent_csv(project_dir: str) -> str:
-    """Find the scene-intent CSV, checking the fallback location."""
-    primary = os.path.join(project_dir, 'reference', 'scene-intent.csv')
-    if os.path.isfile(primary):
-        return primary
-    fallback = os.path.join(project_dir, 'scenes', 'intent.csv')
-    if os.path.isfile(fallback):
-        return fallback
+    """Find the scene-intent CSV."""
+    path = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+    if os.path.isfile(path):
+        return path
+    return ''
+
+
+def _resolve_briefs_csv(project_dir: str) -> str:
+    """Find the scene-briefs CSV (drafting contracts)."""
+    path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    if os.path.isfile(path):
+        return path
     return ''
 
 
 def get_scene_metadata(scene_id: str, project_dir: str) -> str:
-    """Read metadata for a scene from reference/scene-metadata.csv.
+    """Read metadata for a scene from reference/scenes.csv.
 
     Args:
         scene_id: The scene identifier.
@@ -174,7 +176,7 @@ def get_scene_metadata(scene_id: str, project_dir: str) -> str:
     Returns:
         Formatted ``key: value`` pairs (one per line), or empty string.
     """
-    csv_file = _resolve_metadata_csv(project_dir)
+    csv_file = _resolve_scenes_csv(project_dir)
     if not csv_file:
         return ''
 
@@ -232,7 +234,7 @@ def get_previous_scene(scene_id: str, project_dir: str) -> str:
     Returns:
         The previous scene's ID, or empty string if first or not found.
     """
-    csv_file = _resolve_metadata_csv(project_dir)
+    csv_file = _resolve_scenes_csv(project_dir)
     if not csv_file:
         return ''
 
@@ -316,7 +318,7 @@ def get_scene_status(scene_id: str, project_dir: str) -> str:
     Returns:
         Status string: 'pending', 'drafted', 'revised', 'cut', etc.
     """
-    csv_file = _resolve_metadata_csv(project_dir)
+    csv_file = _resolve_scenes_csv(project_dir)
     if csv_file:
         csv_status = read_csv_field(csv_file, scene_id, 'status')
         if csv_status:
@@ -496,7 +498,7 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         genre = read_yaml_field(yaml_file, 'genre')
 
     # --- Scene metadata ---
-    csv_file = _resolve_metadata_csv(project_dir)
+    csv_file = _resolve_scenes_csv(project_dir)
     scene_metadata = get_scene_metadata(scene_id, project_dir)
 
     scene_title = ''
@@ -866,7 +868,7 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('2. Read the continuity tracker '
                      '(reference/continuity-tracker.md if it exists)')
         lines.append('3. Read the scene metadata from '
-                     'reference/scene-metadata.csv')
+                     'reference/scenes.csv')
         lines.append('4. Check for:')
         lines.append('   - Contradictions with locked details')
         lines.append('   - Active threads that should advance but don\'t '
@@ -930,7 +932,7 @@ def build_scene_prompt_from_briefs(
 ) -> str:
     """Build a drafting prompt from the three-file scene CSV model.
 
-    Unlike build_scene_prompt which reads scene-metadata.csv + scene-intent.csv,
+    Unlike build_scene_prompt which reads scenes.csv + scene-intent.csv,
     this reads scenes.csv + scene-intent.csv + scene-briefs.csv and includes
     the full brief as the drafting contract. The full manuscript is NOT included —
     only dependency scene briefs for context.

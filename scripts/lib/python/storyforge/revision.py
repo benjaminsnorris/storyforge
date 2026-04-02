@@ -62,7 +62,7 @@ def resolve_scene_file(scene_dir: str, scene_id: str) -> str | None:
 
 
 # ============================================================================
-# Metadata CSV helpers
+# Scene CSV helpers
 # ============================================================================
 
 def _read_pipe_csv(csv_path: str) -> list[dict]:
@@ -75,15 +75,12 @@ def _read_pipe_csv(csv_path: str) -> list[dict]:
     return rows
 
 
-def _find_metadata_csv(project_dir: str) -> str:
-    """Locate the scene metadata CSV, checking both canonical and legacy paths."""
-    canonical = os.path.join(project_dir, 'reference', 'scene-metadata.csv')
-    if os.path.isfile(canonical):
-        return canonical
-    legacy = os.path.join(project_dir, 'scenes', 'metadata.csv')
-    if os.path.isfile(legacy):
-        return legacy
-    raise FileNotFoundError('scene-metadata.csv not found in reference/ or scenes/')
+def _find_scenes_csv(project_dir: str) -> str:
+    """Locate the scenes CSV."""
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if os.path.isfile(path):
+        return path
+    raise FileNotFoundError('scenes.csv not found in reference/')
 
 
 # ============================================================================
@@ -112,7 +109,7 @@ def resolve_scope(scope: str, project_dir: str) -> list[str]:
         FileNotFoundError: If metadata CSV is missing.
         ValueError: If no scene files match the scope.
     """
-    csv_path = _find_metadata_csv(project_dir)
+    csv_path = _find_scenes_csv(project_dir)
     scene_dir = os.path.join(project_dir, 'scenes')
     rows = _read_pipe_csv(csv_path)
 
@@ -406,7 +403,7 @@ def build_revision_prompt(
         ref_files = [
             'reference/voice-guide.md',
             'reference/continuity-tracker.md',
-            'reference/scene-metadata.csv',
+            'reference/scenes.csv',
         ]
         ref_parts = []
         for ref in ref_files:
@@ -517,7 +514,7 @@ def _claudep_read_instructions() -> str:
         'per-character dialogue fingerprints. Every edit you make must be consistent with this guide.\n'
         '- `reference/continuity-tracker.md` — the living ledger of continuity facts, promises, '
         'and threads. Consult this before changing any plot-relevant detail.\n'
-        '- `reference/scene-metadata.csv` — the master scene list for structural context.\n\n'
+        '- `reference/scenes.csv` — the master scene list for structural context.\n\n'
         '### 2. Read All In-Scope Scene Files\n\n'
         'Read every scene file listed above in full before making changes. '
         'Understand the narrative arc across these scenes before editing any individual scene.\n'

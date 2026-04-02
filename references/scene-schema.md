@@ -27,7 +27,7 @@ update_scene('hidden-canyon', 'reference/', {'status': 'drafted', 'word_count': 
 
 ### Legacy Format
 
-Projects created before v0.40.0 use a two-file model: `reference/scene-metadata.csv` and `reference/scene-intent.csv` (with fewer columns). Run `./storyforge extract` to populate the three-file model from existing prose. The write and score scripts auto-detect which model is in use.
+Projects created before v0.40.0 used a two-file model with fewer columns. Run `./storyforge extract` to populate the three-file model from existing prose. The write and score scripts auto-detect which model is in use.
 
 ## Column Reference
 

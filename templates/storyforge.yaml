@@ -71,7 +71,7 @@ artifacts:
 
   scene_index:
     exists: false
-    path: reference/scene-metadata.csv
+    path: reference/scenes.csv
     updated:
 
   continuity_tracker:

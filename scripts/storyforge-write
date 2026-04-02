@@ -234,9 +234,7 @@ fi
 # Build scene list from metadata.csv
 # ============================================================================
 
-METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
-# Fallback to old location
-[[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${SCENES_DIR}/metadata.csv"
+METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
 
 build_scene_list "$METADATA_CSV"
 

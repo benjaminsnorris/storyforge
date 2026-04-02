@@ -15,7 +15,7 @@ artifacts:
     updated:
   scene_index:
     exists: true
-    path: reference/scene-metadata.csv
+    path: reference/scenes.csv
     updated: "2026-03-01"
 
 chapter_map:

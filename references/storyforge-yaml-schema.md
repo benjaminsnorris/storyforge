@@ -73,7 +73,7 @@ Every artifact entry shares the same three-field structure:
 | `story_architecture` | The structural blueprint: act breaks, major turning points, subplot threading, and thematic throughlines. | `reference/story-architecture.md` |
 | `voice_guide` | Prose style reference capturing POV strategy, sentence rhythm, diction registers, and per-character dialogue fingerprints. | `reference/voice-guide.md` |
 | `timeline` | Chronological event log ensuring temporal consistency across scenes, subplots, and character arcs. | `reference/timeline.md` |
-| `scene_index` | The master list of every scene with metadata (POV, location, status, word count, and any scene extensions). Stored as two pipe-delimited CSV files: `reference/scene-metadata.csv` (structural data) and `reference/scene-intent.csv` (creative intent). | `reference/scene-metadata.csv` |
+| `scene_index` | The master list of every scene with metadata (POV, location, status, word count, and any scene extensions). Stored as pipe-delimited CSV files: `reference/scenes.csv` (structural identity), `reference/scene-intent.csv` (narrative dynamics), and `reference/scene-briefs.csv` (drafting contracts). | `reference/scenes.csv` |
 | `continuity_tracker` | A living ledger of continuity facts — promises made, details established, threads opened — used during evaluation and revision. | `reference/continuity-tracker.md` |
 | `key_decisions` | A canonical log of author decisions — creative, structural, editorial. All skills consult this before asking questions and append new decisions immediately when the author makes them. If a decision is recorded here, it is settled and must not be re-asked. | `reference/key-decisions.md` |
 | `chapter_map` | Maps scenes to chapters for manuscript assembly as a pipe-delimited CSV. Includes chapter numbers, titles, heading format, and semicolon-separated scene IDs. Production settings (author, copyright, scene break style, genre preset), cover generation settings, and web book settings are stored in `storyforge.yaml` under the `production` key. Created by the `produce` skill or manually. | `reference/chapter-map.csv` |
@@ -95,7 +95,7 @@ Each item in the list has the following fields:
 
 If no custom extensions are needed, this section can be an empty list (`[]`).
 
-> **Note on structured data formats:** As of v0.16.0, Storyforge uses pipe-delimited CSV (not YAML) for structured data files that scripts read and write programmatically. This includes scene metadata (`reference/scene-metadata.csv`, `reference/scene-intent.csv`), evaluation findings (`working/evaluations/*/findings.csv`), and revision plans (`working/plans/revision-plan.csv`). The `storyforge.yaml` project config remains YAML. See `references/scene-schema.md` for CSV format conventions.
+> **Note on structured data formats:** As of v0.16.0, Storyforge uses pipe-delimited CSV (not YAML) for structured data files that scripts read and write programmatically. This includes scene data (`reference/scenes.csv`, `reference/scene-intent.csv`, `reference/scene-briefs.csv`), evaluation findings (`working/evaluations/*/findings.csv`), and revision plans (`working/plans/revision-plan.csv`). The `storyforge.yaml` project config remains YAML. See `references/scene-schema.md` for CSV format conventions.
 
 > **Optional reference files for normalization:** These author-maintained CSV files map canonical names to aliases. When present, `storyforge-enrich` normalizes extracted values against them at write time, and the manuscript dashboard resolves aliases at render time. All use pipe-delimited format with semicolon-separated aliases.
 >
@@ -252,7 +252,7 @@ artifacts:
     updated: null
   scene_index:
     exists: false
-    path: reference/scene-metadata.csv
+    path: reference/scenes.csv
     updated: null
   continuity_tracker:
     exists: false

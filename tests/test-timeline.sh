@@ -9,10 +9,10 @@
 #   Libraries (common.sh, csv.sh, scene-filter.sh) are already sourced
 # ============================================================================
 
-METADATA_CSV="${FIXTURE_DIR}/reference/scene-metadata.csv"
+METADATA_CSV="${FIXTURE_DIR}/reference/scenes.csv"
 
 # --- Make a working copy so we don't pollute fixtures ---
-TEST_META="${TMPDIR}/scene-metadata.csv"
+TEST_META="${TMPDIR}/scenes.csv"
 cp "$METADATA_CSV" "$TEST_META"
 
 # ============================================================================
@@ -23,13 +23,13 @@ build_scene_list "$TEST_META"
 assert_not_empty "${ALL_SCENE_IDS[*]}" "timeline: scene list is populated"
 
 apply_scene_filter "$TEST_META" "all"
-assert_equals "4" "${#FILTERED_IDS[@]}" "timeline: all filter returns all scenes"
+assert_equals "6" "${#FILTERED_IDS[@]}" "timeline: all filter returns all scenes"
 
 apply_scene_filter "$TEST_META" "act" "1"
 assert_equals "3" "${#FILTERED_IDS[@]}" "timeline: act 1 filter returns 3 scenes"
 
 apply_scene_filter "$TEST_META" "act" "2"
-assert_equals "1" "${#FILTERED_IDS[@]}" "timeline: act 2 filter returns 1 scene"
+assert_equals "3" "${#FILTERED_IDS[@]}" "timeline: act 2 filter returns 3 scenes"
 
 # ============================================================================
 # Timeline CSV field operations

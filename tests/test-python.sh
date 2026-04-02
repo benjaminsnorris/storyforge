@@ -99,7 +99,7 @@ echo "  --- prompts: read_csv_field ---"
 
 result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
 from storyforge.prompts import read_csv_field
-print(read_csv_field('${FIXTURE_DIR}/reference/scene-metadata.csv', 'act1-sc01', 'title'))
+print(read_csv_field('${FIXTURE_DIR}/reference/scenes.csv', 'act1-sc01', 'title'))
 " 2>/dev/null)
 assert_equals "The Finest Cartographer" "$result" "prompts: read_csv_field reads title"
 
@@ -269,7 +269,7 @@ echo "  --- visualize: csv_to_records ---"
 result=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
 import json
 from storyforge.visualize import csv_to_records
-records = csv_to_records('${FIXTURE_DIR}/reference/scene-metadata.csv')
+records = csv_to_records('${FIXTURE_DIR}/reference/scenes.csv')
 print(len(records))
 " 2>/dev/null)
 # Fixture has 4 scenes (3 data rows + act2-sc01 which might be 4 total)
@@ -545,8 +545,8 @@ project:
 YAML
 
 # Create minimal required CSVs
-echo "id|seq|title|pov|word_count|status|type|location|part" > "${VIS_TMP}/reference/scene-metadata.csv"
-echo "s1|1|Scene One|Alice|1000|draft|character|Home|act-1" >> "${VIS_TMP}/reference/scene-metadata.csv"
+echo "id|seq|title|pov|word_count|status|type|location|part" > "${VIS_TMP}/reference/scenes.csv"
+echo "s1|1|Scene One|Alice|1000|draft|character|Home|act-1" >> "${VIS_TMP}/reference/scenes.csv"
 
 echo "id|function|emotional_arc|characters|threads|motifs" > "${VIS_TMP}/reference/scene-intent.csv"
 echo "s1|opener|tension|Alice|main-plot|light" >> "${VIS_TMP}/reference/scene-intent.csv"
