@@ -1,0 +1,679 @@
+#!/bin/bash
+# storyforge-extract — Extract structural data from existing prose
+#
+# Usage:
+#   ./storyforge extract                        # Run all phases
+#   ./storyforge extract --phase 0              # Characterize only
+#   ./storyforge extract --phase 1              # Skeleton only
+#   ./storyforge extract --phase 2              # Intent only (needs phase 1)
+#   ./storyforge extract --phase 3              # Briefs only (needs phases 1-2)
+#   ./storyforge extract --expand               # Run expansion analysis after extraction
+#   ./storyforge extract --dry-run              # Print prompts without invoking
+#
+# Extracts structural data from scene prose into the three-file CSV model:
+#   scenes.csv, scene-intent.csv, scene-briefs.csv
+set -eo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
+
+source "${LIB_DIR}/common.sh"
+detect_project_root
+
+LOG_DIR="${PROJECT_DIR}/working/logs"
+mkdir -p "$LOG_DIR"
+
+# ============================================================================
+# Arguments
+# ============================================================================
+
+PHASE=""  # empty = all phases
+DRY_RUN=false
+EXPAND=false
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Options:
+  --phase N         Run only phase N (0=characterize, 1=skeleton, 2=intent, 3=briefs)
+  --expand          Run expansion analysis after extraction
+  --dry-run         Print prompts without invoking Claude
+  -h, --help        Show this help
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --phase)   PHASE="${2:?ERROR: --phase requires a value}"; shift 2 ;;
+        --expand)  EXPAND=true; shift ;;
+        --dry-run) DRY_RUN=true; shift ;;
+        -h|--help) usage ;;
+        -*)        echo "ERROR: Unknown option: $1" >&2; usage ;;
+        *)         shift ;;
+    esac
+done
+
+if [[ "$DRY_RUN" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    log "ERROR: ANTHROPIC_API_KEY not set. Required for extraction."
+    exit 1
+fi
+
+# ============================================================================
+# Project info
+# ============================================================================
+
+PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || echo "Untitled")
+REF_DIR="${PROJECT_DIR}/reference"
+SCENES_DIR="${PROJECT_DIR}/scenes"
+PLUGIN_DIR="${SCRIPT_DIR}/.."
+
+# Check for scene files
+SCENE_COUNT=$(ls "${SCENES_DIR}"/*.md 2>/dev/null | wc -l | tr -d ' ')
+if (( SCENE_COUNT == 0 )); then
+    log "ERROR: No scene files found in ${SCENES_DIR}/"
+    log "  Split your manuscript into scenes first using /storyforge:scenes (setup mode)"
+    exit 1
+fi
+
+log "============================================"
+log "Storyforge Extract"
+log "Project: ${PROJECT_TITLE}"
+log "Scenes: ${SCENE_COUNT}"
+log "============================================"
+
+# ============================================================================
+# Branch and PR
+# ============================================================================
+
+if [[ "$DRY_RUN" != true ]]; then
+    create_branch "extract" "$PROJECT_DIR"
+    ensure_branch_pushed "$PROJECT_DIR"
+
+    PR_BODY="## Extraction: Reverse Elaboration
+
+**Project:** ${PROJECT_TITLE}
+**Scenes:** ${SCENE_COUNT}
+
+### Tasks
+- [ ] Phase 0: Characterize manuscript
+- [ ] Phase 1: Extract skeleton (scenes.csv)
+- [ ] Phase 2: Extract intent (scene-intent.csv)
+- [ ] Phase 3: Extract briefs (scene-briefs.csv)
+- [ ] Validate
+- [ ] Review"
+
+    create_draft_pr "Extract: ${PROJECT_TITLE} (${SCENE_COUNT} scenes)" "$PR_BODY" "$PROJECT_DIR" "extraction"
+fi
+
+# ============================================================================
+# Scene list
+# ============================================================================
+
+SCENE_IDS=()
+for f in "${SCENES_DIR}"/*.md; do
+    [[ -f "$f" ]] || continue
+    SCENE_IDS+=("$(basename "$f" .md)")
+done
+
+# Sort by seq if CSV exists
+SORTED_IDS=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import os, sys
+sys.path.insert(0, '${PYTHON_LIB}')
+
+ref_dir = '${REF_DIR}'
+scene_ids = '''$(printf '%s\n' "${SCENE_IDS[@]}")'''.strip().split('\n')
+
+# Try to read seq from existing CSV
+seq_map = {}
+for csv_name in ['scenes.csv', 'scene-metadata.csv']:
+    csv_path = os.path.join(ref_dir, csv_name)
+    if os.path.isfile(csv_path):
+        with open(csv_path) as f:
+            lines = [l.strip() for l in f if l.strip()]
+        if len(lines) > 1:
+            header = lines[0].split('|')
+            id_idx = header.index('id') if 'id' in header else 0
+            seq_idx = header.index('seq') if 'seq' in header else 1
+            for line in lines[1:]:
+                fields = line.split('|')
+                if len(fields) > max(id_idx, seq_idx):
+                    try:
+                        seq_map[fields[id_idx]] = int(fields[seq_idx])
+                    except (ValueError, IndexError):
+                        pass
+        break
+
+# Sort: by seq if available, else alphabetically
+if seq_map:
+    scene_ids.sort(key=lambda s: seq_map.get(s, 999))
+else:
+    scene_ids.sort()
+
+for sid in scene_ids:
+    print(sid)
+" 2>/dev/null)
+
+readarray -t SORTED_SCENE_IDS <<< "$SORTED_IDS"
+
+# ============================================================================
+# Phase 0: Characterize
+# ============================================================================
+
+PROFILE_FILE="${PROJECT_DIR}/working/extraction-profile.json"
+
+if [[ -z "$PHASE" || "$PHASE" == "0" ]]; then
+    log ""
+    log "--- Phase 0: Characterize manuscript ---"
+
+    CHAR_PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import build_characterize_prompt
+print(build_characterize_prompt('${PROJECT_DIR}'))
+")
+
+    if [[ -z "$CHAR_PROMPT" ]]; then
+        log "ERROR: Could not build characterize prompt — no manuscript content found"
+        exit 1
+    fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "===== DRY RUN: Phase 0 (characterize) ====="
+        echo "$CHAR_PROMPT" | head -20
+        echo "... (${#CHAR_PROMPT} chars total)"
+        echo "===== END DRY RUN ====="
+    else
+        CHAR_LOG="${LOG_DIR}/extract-phase0.log"
+        CHAR_MODEL=$(select_model "synthesis")  # Opus for full-manuscript comprehension
+
+        log "  Invoking ${CHAR_MODEL} for manuscript characterization..."
+        _SF_INVOCATION_START=$(date +%s); export _SF_INVOCATION_START
+
+        begin_healing_zone "characterize manuscript"
+        invoke_anthropic_api "$CHAR_PROMPT" "$CHAR_MODEL" "$CHAR_LOG" 4096
+        end_healing_zone
+
+        RESPONSE=$(extract_api_response "$CHAR_LOG" 2>/dev/null)
+        log_api_usage "$CHAR_LOG" "extract-characterize" "manuscript" "$CHAR_MODEL" 2>/dev/null || true
+
+        # Parse and save profile
+        PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import parse_characterize_response
+response = open('${CHAR_LOG}', encoding='utf-8').read()
+try:
+    data = json.loads(response)
+    text = ''.join(item.get('text', '') for item in data.get('content', []) if item.get('type') == 'text')
+    if text: response = text
+except (json.JSONDecodeError, KeyError):
+    pass
+profile = parse_characterize_response(response)
+with open('${PROFILE_FILE}', 'w') as f:
+    json.dump(profile, f, indent=2)
+print(f'Characterized: {len(profile)} fields extracted')
+for k, v in sorted(profile.items()):
+    print(f'  {k}: {v[:80]}')
+" 2>&1 | while IFS= read -r line; do log "  $line"; done
+
+        (cd "$PROJECT_DIR" && git add working/ && git commit -m "Extract: Phase 0 — manuscript characterization" && git push) 2>/dev/null || true
+        update_pr_task "Phase 0: Characterize manuscript" "$PROJECT_DIR" 2>/dev/null || true
+    fi
+fi
+
+# ============================================================================
+# Phase 1: Skeleton (scenes.csv)
+# ============================================================================
+
+if [[ -z "$PHASE" || "$PHASE" == "1" ]]; then
+    log ""
+    log "--- Phase 1: Extract skeleton (scenes.csv) ---"
+
+    # Load profile
+    PROFILE="{}"
+    [[ -f "$PROFILE_FILE" ]] && PROFILE=$(cat "$PROFILE_FILE")
+
+    if [[ "$DRY_RUN" == true ]]; then
+        SAMPLE_ID="${SORTED_SCENE_IDS[0]}"
+        SAMPLE_TEXT=$(cat "${SCENES_DIR}/${SAMPLE_ID}.md" 2>/dev/null | head -20)
+        echo "===== DRY RUN: Phase 1 (skeleton) — sample for ${SAMPLE_ID} ====="
+        PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import build_skeleton_prompt
+profile = json.loads('${PROFILE}')
+print(build_skeleton_prompt('${SAMPLE_ID}', '''${SAMPLE_TEXT}''', profile)[:500])
+"
+        echo "... (${#SORTED_SCENE_IDS[@]} scenes total)"
+        echo "===== END DRY RUN ====="
+    else
+        SKEL_MODEL=$(select_model "evaluation")  # Sonnet for structured extraction
+        BATCH_FILE="${LOG_DIR}/extract-phase1-batch.jsonl"
+        rm -f "$BATCH_FILE"
+
+        log "  Building batch for ${#SORTED_SCENE_IDS[@]} scenes..."
+        for SCENE_ID in "${SORTED_SCENE_IDS[@]}"; do
+            SCENE_TEXT=$(cat "${SCENES_DIR}/${SCENE_ID}.md" 2>/dev/null || echo "")
+            [[ -z "$SCENE_TEXT" ]] && continue
+
+            PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import build_skeleton_prompt
+profile = json.loads(open('${PROFILE_FILE}').read()) if __import__('os').path.isfile('${PROFILE_FILE}') else {}
+scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
+print(build_skeleton_prompt('${SCENE_ID}', scene_text, profile))
+")
+            json_prompt=$(jq -Rs '.' <<< "$PROMPT")
+            printf '{"custom_id":"%s","params":{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":%s}]}}\n' \
+                "$SCENE_ID" "$SKEL_MODEL" "$json_prompt" >> "$BATCH_FILE"
+        done
+
+        log "  Submitting batch..."
+        _SF_INVOCATION_START=$(date +%s); export _SF_INVOCATION_START
+        begin_healing_zone "extract skeleton batch"
+
+        BATCH_ID=$(submit_batch "$BATCH_FILE")
+        poll_batch "$BATCH_ID"
+
+        SKEL_OUTPUT="${LOG_DIR}/extract-phase1-output"
+        mkdir -p "$SKEL_OUTPUT"
+        download_batch_results "$BATCH_ID" "$SKEL_OUTPUT" "$LOG_DIR"
+
+        end_healing_zone
+
+        # Process results → scenes.csv
+        log "  Processing skeleton results..."
+        PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import parse_skeleton_response
+from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+output_dir = '${SKEL_OUTPUT}'
+ref_dir = '${REF_DIR}'
+scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
+
+# Read existing scenes.csv or start fresh
+existing = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+
+count = 0
+for i, sid in enumerate(scene_ids):
+    txt_file = os.path.join(output_dir, f'{sid}.txt')
+    if not os.path.isfile(txt_file):
+        continue
+    response = open(txt_file, encoding='utf-8').read()
+    result = parse_skeleton_response(response, sid)
+
+    # Merge with existing or create new
+    if sid in existing:
+        for k, v in result.items():
+            if v and k != 'id':
+                existing[sid][k] = v
+    else:
+        row = {c: '' for c in _FILE_MAP['scenes.csv']}
+        row.update(result)
+        row['seq'] = str(i + 1)
+        row['status'] = 'drafted'
+        # Count words from scene file
+        scene_file = os.path.join('${SCENES_DIR}', f'{sid}.md')
+        if os.path.isfile(scene_file):
+            wc = len(open(scene_file).read().split())
+            row['word_count'] = str(wc)
+        existing[sid] = row
+    count += 1
+
+# Write sorted by seq
+ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)))
+_write_csv(os.path.join(ref_dir, 'scenes.csv'), ordered, _FILE_MAP['scenes.csv'])
+print(f'Updated scenes.csv: {count} scenes')
+" 2>&1 | while IFS= read -r line; do log "  $line"; done
+
+        (cd "$PROJECT_DIR" && git add reference/scenes.csv working/ && git commit -m "Extract: Phase 1 — skeleton (scenes.csv)" && git push) 2>/dev/null || true
+        update_pr_task "Phase 1: Extract skeleton" "$PROJECT_DIR" 2>/dev/null || true
+        rm -f "$BATCH_FILE"
+        rm -rf "$SKEL_OUTPUT"
+    fi
+fi
+
+# ============================================================================
+# Phase 2: Intent (scene-intent.csv) — batch, parallel
+# ============================================================================
+
+if [[ -z "$PHASE" || "$PHASE" == "2" ]]; then
+    log ""
+    log "--- Phase 2: Extract intent (scene-intent.csv) ---"
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "===== DRY RUN: Phase 2 (intent) — ${#SORTED_SCENE_IDS[@]} scenes ====="
+        echo "===== END DRY RUN ====="
+    else
+        INTENT_MODEL=$(select_model "evaluation")
+        BATCH_FILE="${LOG_DIR}/extract-phase2-batch.jsonl"
+        rm -f "$BATCH_FILE"
+
+        log "  Building batch for ${#SORTED_SCENE_IDS[@]} scenes..."
+        for SCENE_ID in "${SORTED_SCENE_IDS[@]}"; do
+            PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import build_intent_prompt
+from storyforge.elaborate import get_scene
+
+profile = json.loads(open('${PROFILE_FILE}').read()) if os.path.isfile('${PROFILE_FILE}') else {}
+skeleton = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
+scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
+print(build_intent_prompt('${SCENE_ID}', scene_text, profile, skeleton))
+")
+            json_prompt=$(jq -Rs '.' <<< "$PROMPT")
+            printf '{"custom_id":"%s","params":{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":%s}]}}\n' \
+                "$SCENE_ID" "$INTENT_MODEL" "$json_prompt" >> "$BATCH_FILE"
+        done
+
+        log "  Submitting batch..."
+        _SF_INVOCATION_START=$(date +%s); export _SF_INVOCATION_START
+        begin_healing_zone "extract intent batch"
+
+        BATCH_ID=$(submit_batch "$BATCH_FILE")
+        poll_batch "$BATCH_ID"
+
+        INTENT_OUTPUT="${LOG_DIR}/extract-phase2-output"
+        mkdir -p "$INTENT_OUTPUT"
+        download_batch_results "$BATCH_ID" "$INTENT_OUTPUT" "$LOG_DIR"
+
+        end_healing_zone
+
+        # Process results → scene-intent.csv
+        log "  Processing intent results..."
+        PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import parse_intent_response
+from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+output_dir = '${INTENT_OUTPUT}'
+ref_dir = '${REF_DIR}'
+scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
+
+existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+
+count = 0
+for sid in scene_ids:
+    txt_file = os.path.join(output_dir, f'{sid}.txt')
+    if not os.path.isfile(txt_file):
+        continue
+    response = open(txt_file, encoding='utf-8').read()
+    result = parse_intent_response(response, sid)
+
+    if sid in existing:
+        for k, v in result.items():
+            if v and k != 'id' and not k.startswith('_'):
+                existing[sid][k] = v
+    else:
+        row = {c: '' for c in _FILE_MAP['scene-intent.csv']}
+        row.update({k: v for k, v in result.items() if not k.startswith('_')})
+        existing[sid] = row
+    count += 1
+
+ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
+_write_csv(os.path.join(ref_dir, 'scene-intent.csv'), ordered, _FILE_MAP['scene-intent.csv'])
+print(f'Updated scene-intent.csv: {count} scenes')
+" 2>&1 | while IFS= read -r line; do log "  $line"; done
+
+        (cd "$PROJECT_DIR" && git add reference/scene-intent.csv working/ && git commit -m "Extract: Phase 2 — intent (scene-intent.csv)" && git push) 2>/dev/null || true
+        update_pr_task "Phase 2: Extract intent" "$PROJECT_DIR" 2>/dev/null || true
+        rm -f "$BATCH_FILE"
+        rm -rf "$INTENT_OUTPUT"
+    fi
+fi
+
+# ============================================================================
+# Phase 3: Briefs — 3a parallel + 3b sequential knowledge chain
+# ============================================================================
+
+if [[ -z "$PHASE" || "$PHASE" == "3" ]]; then
+    log ""
+    log "--- Phase 3a: Extract briefs (parallel fields) ---"
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "===== DRY RUN: Phase 3a (briefs parallel) — ${#SORTED_SCENE_IDS[@]} scenes ====="
+        echo "===== END DRY RUN ====="
+    else
+        BRIEF_MODEL=$(select_model "evaluation")
+        BATCH_FILE="${LOG_DIR}/extract-phase3a-batch.jsonl"
+        rm -f "$BATCH_FILE"
+
+        log "  Building batch for ${#SORTED_SCENE_IDS[@]} scenes..."
+        for SCENE_ID in "${SORTED_SCENE_IDS[@]}"; do
+            PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import build_brief_parallel_prompt
+from storyforge.elaborate import get_scene
+
+profile = json.loads(open('${PROFILE_FILE}').read()) if os.path.isfile('${PROFILE_FILE}') else {}
+scene_data = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
+skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
+intent = {k: scene_data.get(k, '') for k in ['function', 'scene_type', 'value_at_stake', 'value_shift', 'emotional_arc']}
+scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
+print(build_brief_parallel_prompt('${SCENE_ID}', scene_text, profile, skeleton, intent))
+")
+            json_prompt=$(jq -Rs '.' <<< "$PROMPT")
+            printf '{"custom_id":"%s","params":{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":%s}]}}\n' \
+                "$SCENE_ID" "$BRIEF_MODEL" "$json_prompt" >> "$BATCH_FILE"
+        done
+
+        log "  Submitting batch..."
+        _SF_INVOCATION_START=$(date +%s); export _SF_INVOCATION_START
+        begin_healing_zone "extract briefs batch"
+
+        BATCH_ID=$(submit_batch "$BATCH_FILE")
+        poll_batch "$BATCH_ID"
+
+        BRIEF_OUTPUT="${LOG_DIR}/extract-phase3a-output"
+        mkdir -p "$BRIEF_OUTPUT"
+        download_batch_results "$BATCH_ID" "$BRIEF_OUTPUT" "$LOG_DIR"
+
+        end_healing_zone
+
+        # Process results → scene-briefs.csv (partial — no knowledge fields yet)
+        log "  Processing brief results..."
+        PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import parse_brief_parallel_response
+from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+output_dir = '${BRIEF_OUTPUT}'
+ref_dir = '${REF_DIR}'
+scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
+
+existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+
+count = 0
+for sid in scene_ids:
+    txt_file = os.path.join(output_dir, f'{sid}.txt')
+    if not os.path.isfile(txt_file):
+        continue
+    response = open(txt_file, encoding='utf-8').read()
+    result = parse_brief_parallel_response(response, sid)
+
+    if sid in existing:
+        for k, v in result.items():
+            if v and k != 'id':
+                existing[sid][k] = v
+    else:
+        row = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
+        row.update(result)
+        existing[sid] = row
+    count += 1
+
+ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
+_write_csv(os.path.join(ref_dir, 'scene-briefs.csv'), ordered, _FILE_MAP['scene-briefs.csv'])
+print(f'Updated scene-briefs.csv: {count} scenes (knowledge fields pending)')
+" 2>&1 | while IFS= read -r line; do log "  $line"; done
+
+        (cd "$PROJECT_DIR" && git add reference/scene-briefs.csv working/ && git commit -m "Extract: Phase 3a — briefs (parallel fields)" && git push) 2>/dev/null || true
+        rm -f "$BATCH_FILE"
+        rm -rf "$BRIEF_OUTPUT"
+
+        # --- Phase 3b: Knowledge chain (sequential) ---
+        log ""
+        log "--- Phase 3b: Extract knowledge chain (sequential) ---"
+
+        KNOWLEDGE_MODEL=$(select_model "evaluation")
+        KNOWLEDGE_STATE="{}"  # accumulated per-character knowledge
+        SCENE_SUMMARIES=""
+
+        for SCENE_ID in "${SORTED_SCENE_IDS[@]}"; do
+            SCENE_TEXT=$(cat "${SCENES_DIR}/${SCENE_ID}.md" 2>/dev/null || echo "")
+            [[ -z "$SCENE_TEXT" ]] && continue
+
+            KNOWLEDGE_LOG="${LOG_DIR}/extract-knowledge-${SCENE_ID}.log"
+
+            PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import build_knowledge_prompt
+from storyforge.elaborate import get_scene
+
+scene_data = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
+skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
+intent = {k: scene_data.get(k, '') for k in ['function', 'scene_type']}
+
+prior_knowledge = json.loads('''${KNOWLEDGE_STATE}''')
+prior_summaries = [s for s in '''${SCENE_SUMMARIES}'''.strip().split('\n') if s.strip()]
+
+scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
+print(build_knowledge_prompt('${SCENE_ID}', scene_text, skeleton, intent, prior_knowledge, prior_summaries))
+")
+
+            _SF_INVOCATION_START=$(date +%s); export _SF_INVOCATION_START
+            invoke_anthropic_api "$PROMPT" "$KNOWLEDGE_MODEL" "$KNOWLEDGE_LOG" 1024 || {
+                log "  WARNING: Knowledge extraction failed for ${SCENE_ID}"
+                continue
+            }
+
+            RESPONSE=$(extract_api_response "$KNOWLEDGE_LOG" 2>/dev/null)
+            log_api_usage "$KNOWLEDGE_LOG" "extract-knowledge" "$SCENE_ID" "$KNOWLEDGE_MODEL" 2>/dev/null || true
+
+            # Parse and apply
+            PARSED=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import parse_knowledge_response
+from storyforge.elaborate import update_scene, get_scene
+
+response = open('${KNOWLEDGE_LOG}', encoding='utf-8').read()
+try:
+    data = json.loads(response)
+    text = ''.join(item.get('text', '') for item in data.get('content', []) if item.get('type') == 'text')
+    if text: response = text
+except (json.JSONDecodeError, KeyError):
+    pass
+
+result = parse_knowledge_response(response, '${SCENE_ID}')
+
+# Update briefs CSV
+updates = {}
+for k in ['knowledge_in', 'knowledge_out', 'continuity_deps']:
+    if k in result and result[k]:
+        updates[k] = result[k]
+if updates:
+    update_scene('${SCENE_ID}', '${REF_DIR}', updates)
+
+# Output for bash: knowledge_out and summary for next iteration
+scene_data = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
+pov = scene_data.get('pov', 'unknown')
+knowledge_out = result.get('knowledge_out', '')
+summary = result.get('_summary', '')
+
+# Output as JSON for bash to capture
+print(json.dumps({'pov': pov, 'knowledge_out': knowledge_out, 'summary': summary}))
+")
+
+            # Update accumulated state for next scene
+            POV=$(echo "$PARSED" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('pov', ''))")
+            K_OUT=$(echo "$PARSED" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('knowledge_out', ''))")
+            SUMMARY=$(echo "$PARSED" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('summary', ''))")
+
+            # Update knowledge state (replace POV character's knowledge)
+            KNOWLEDGE_STATE=$(echo "$KNOWLEDGE_STATE" | python3 -c "
+import sys, json
+state = json.load(sys.stdin)
+pov = '${POV}'
+k_out = '${K_OUT}'
+if pov and k_out:
+    state[pov] = k_out
+print(json.dumps(state))
+")
+
+            # Append summary
+            [[ -n "$SUMMARY" ]] && SCENE_SUMMARIES="${SCENE_SUMMARIES}${SCENE_ID}: ${SUMMARY}
+"
+
+            log "  ${SCENE_ID}: knowledge extracted"
+        done
+
+        (cd "$PROJECT_DIR" && git add reference/scene-briefs.csv working/ && git commit -m "Extract: Phase 3b — knowledge chain" && git push) 2>/dev/null || true
+        update_pr_task "Phase 3: Extract briefs" "$PROJECT_DIR" 2>/dev/null || true
+    fi
+fi
+
+# ============================================================================
+# Validate
+# ============================================================================
+
+if [[ "$DRY_RUN" != true ]]; then
+    log ""
+    log "--- Running validation ---"
+
+    VALIDATE_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import json; import sys; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import validate_structure
+report = validate_structure('${REF_DIR}')
+print(json.dumps(report))
+")
+
+    VALIDATE_PASSED=$(echo "$VALIDATE_RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r['passed'])")
+    VALIDATE_FAILURES=$(echo "$VALIDATE_RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(len(r['failures']))")
+
+    if [[ "$VALIDATE_PASSED" == "True" ]]; then
+        log "Validation passed"
+    else
+        log "Validation found ${VALIDATE_FAILURES} issue(s) — review recommended"
+    fi
+
+    update_pr_task "Validate" "$PROJECT_DIR" 2>/dev/null || true
+fi
+
+# ============================================================================
+# Expansion analysis
+# ============================================================================
+
+if [[ "$EXPAND" == true && "$DRY_RUN" != true ]]; then
+    log ""
+    log "--- Expansion analysis ---"
+
+    PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import analyze_expansion_opportunities
+
+opps = analyze_expansion_opportunities('${REF_DIR}')
+if not opps:
+    print('No expansion opportunities identified.')
+else:
+    print(f'{len(opps)} expansion opportunities:')
+    for o in opps:
+        print(f'  [{o[\"priority\"]}] {o[\"type\"]}: {o[\"description\"]} ({o[\"scene_id\"]})')
+" 2>&1 | while IFS= read -r line; do log "$line"; done
+fi
+
+# ============================================================================
+# Review and summary
+# ============================================================================
+
+if [[ "$DRY_RUN" != true ]]; then
+    run_review_phase "extraction" "$PROJECT_DIR" 2>/dev/null || true
+fi
+
+log ""
+log "============================================"
+log "Extraction complete."
+log "  scenes.csv, scene-intent.csv, scene-briefs.csv populated"
+log "  Run /storyforge:validate to verify, then review and correct the extracted data"
+log "============================================"
+
+print_cost_summary "extract" 2>/dev/null || true
