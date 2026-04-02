@@ -621,6 +621,35 @@ body {
 .section:nth-child(13) { animation-delay: 0.6s; }
 .section:nth-child(14) { animation-delay: 0.65s; }
 .section:nth-child(15) { animation-delay: 0.7s; }
+
+/* ── Nav bar ──────────────────────────────────────── */
+.dash-nav {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 90;
+    background: var(--bg);
+    padding: 0 4px;
+}
+.dash-nav a {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 10px 16px;
+    color: var(--text-dim);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+}
+.dash-nav a:hover { color: var(--text); }
+.dash-nav a.active {
+    color: var(--teal);
+    border-bottom-color: var(--teal);
+}
+.dash-page { display: none; }
+.dash-page.active { display: block; }
 </style>
 </head>
 <body>
@@ -641,6 +670,14 @@ body {
     </div>
 </div>
 
+<nav class="dash-nav">
+    <a href="#overview" class="active" data-page="overview">Overview</a>
+    <a href="#structure" data-page="structure">Structure</a>
+    <a href="#scores" data-page="scores">Scores</a>
+</nav>
+
+<!-- ═══ OVERVIEW PAGE ═══ -->
+<div class="dash-page active" id="page-overview">
 
 <!-- 1. Manuscript Spine -->
 <div id="spine-wrapper" class="section section-spine">
@@ -662,6 +699,11 @@ body {
     </div>
     <div class="vis-container" id="pov-river"></div>
 </div>
+
+</div><!-- /page-overview -->
+
+<!-- ═══ STRUCTURE PAGE ═══ -->
+<div class="dash-page" id="page-structure">
 
 <!-- 3. Character Presence Grid -->
 <div class="section">
@@ -712,6 +754,11 @@ body {
     </div>
     <div class="vis-container" id="setting-map"></div>
 </div>
+
+</div><!-- /page-structure -->
+
+<!-- ═══ SCORES PAGE ═══ -->
+<div class="dash-page" id="page-scores">
 
 <!-- 8. Craft Score Heatmap -->
 <div class="section" id="heatmap-section" style="display:none;">
@@ -768,8 +815,9 @@ body {
     <div class="rationale-drawer" id="narrative-radar-drawer"></div>
 </div>
 
-<!-- 10. Motif Constellation -->
-<div class="section">
+<!-- Sections below get moved to the correct page by the router -->
+
+<div class="section" data-target-page="structure">
     <div class="section-header">
         <span class="dot"></span>
         <h2>Motif Constellation</h2>
@@ -778,8 +826,7 @@ body {
     <div class="vis-container" id="motif-constellation"></div>
 </div>
 
-<!-- 11. Timeline vs Reading Order -->
-<div class="section" id="timeline-section" style="display:none;">
+<div class="section" id="timeline-section" style="display:none;" data-target-page="structure">
     <div class="section-header">
         <span class="dot"></span>
         <h2>Timeline vs Reading Order</h2>
@@ -788,7 +835,7 @@ body {
     <div class="vis-container" id="timeline-scatter"></div>
 </div>
 
-<div class="section" id="value-shift-section" style="display:none;">
+<div class="section" id="value-shift-section" style="display:none;" data-target-page="overview">
     <div class="section-header">
         <span class="dot"></span>
         <h2>Value Shift Arc</h2>
@@ -797,7 +844,7 @@ body {
     <div class="vis-container" id="value-shift-arc"></div>
 </div>
 
-<div class="section" id="scene-rhythm-section" style="display:none;">
+<div class="section" id="scene-rhythm-section" style="display:none;" data-target-page="overview">
     <div class="section-header">
         <span class="dot"></span>
         <h2>Scene Rhythm</h2>
@@ -806,7 +853,7 @@ body {
     <div class="vis-container" id="scene-rhythm"></div>
 </div>
 
-<div class="section" id="fidelity-section" style="display:none;">
+<div class="section" id="fidelity-section" style="display:none;" data-target-page="scores">
     <div class="section-header">
         <span class="dot"></span>
         <h2>Brief Fidelity</h2>
@@ -814,6 +861,8 @@ body {
     </div>
     <div class="vis-container" id="fidelity-chart"></div>
 </div>
+
+</div><!-- /page-scores -->
 
 </div><!-- .page -->
 
@@ -862,6 +911,42 @@ if (BRIEFS.length) {
 EOF
 
 cat >> "$DASHBOARD_FILE" << 'HTMLEOF'
+
+// ============================================================================
+// PAGE ROUTER
+// ============================================================================
+
+(function initRouter() {
+    // Move sections with data-target-page to the correct page container
+    document.querySelectorAll('[data-target-page]').forEach(el => {
+        const targetId = 'page-' + el.getAttribute('data-target-page');
+        const target = document.getElementById(targetId);
+        if (target) target.appendChild(el);
+    });
+
+    function showPage(pageId) {
+        document.querySelectorAll('.dash-page').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.dash-nav a').forEach(a => a.classList.remove('active'));
+        const page = document.getElementById('page-' + pageId);
+        if (page) page.classList.add('active');
+        const link = document.querySelector('.dash-nav a[data-page="' + pageId + '"]');
+        if (link) link.classList.add('active');
+    }
+
+    // Handle nav clicks
+    document.querySelectorAll('.dash-nav a').forEach(a => {
+        a.addEventListener('click', function(e) {
+            e.preventDefault();
+            const pageId = this.getAttribute('data-page');
+            showPage(pageId);
+            history.replaceState(null, '', '#' + pageId);
+        });
+    });
+
+    // Handle initial hash
+    const hash = (window.location.hash || '#overview').replace('#', '');
+    showPage(hash);
+})();
 
 // ============================================================================
 // UTILITIES
