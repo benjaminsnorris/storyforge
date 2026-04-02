@@ -563,6 +563,8 @@ assert_contains "$RESULT" "type" "build_gap_fill_prompt: asks for missing field"
 assert_contains "$RESULT" "Bob" "build_gap_fill_prompt: includes prose excerpt"
 assert_contains "$RESULT" "council chamber" "build_gap_fill_prompt: includes scene prose"
 
+rm -rf "$TMP_REF"
+
 # ============================================================================
 # build_knowledge_fix_prompt
 # ============================================================================
@@ -611,7 +613,5 @@ print(prompt)
 assert_contains "$RESULT" "scene-02" "build_knowledge_fix_prompt: includes scene ID"
 assert_contains "$RESULT" "Lab equipment is faulty" "build_knowledge_fix_prompt: includes available knowledge"
 assert_contains "$RESULT" "knowledge_in" "build_knowledge_fix_prompt: asks for knowledge_in"
-
-rm -rf "$TMP_REF"
 
 rm -rf "$TMP_REF"

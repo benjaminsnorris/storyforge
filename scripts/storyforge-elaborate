@@ -192,11 +192,11 @@ print(json.dumps(parallel))
             BATCH_LOGS="${GAP_DIR}/batch-logs"
             mkdir -p "$BATCH_OUTPUT" "$BATCH_LOGS"
 
-            PYTHONPATH="$PYTHON_LIB" python3 -c "
+            echo "$PARALLEL_GROUPS" | PYTHONPATH="$PYTHON_LIB" python3 -c "
 import json, sys
 from storyforge.prompts_elaborate import build_gap_fill_prompt
 
-parallel_groups = json.loads('''${PARALLEL_GROUPS}''')
+parallel_groups = json.load(sys.stdin)
 project_dir = '${PROJECT_DIR}'
 scenes_dir = '${SCENES_DIR}'
 model = '${GAP_MODEL}'
