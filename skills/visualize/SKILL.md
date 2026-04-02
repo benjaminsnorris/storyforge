@@ -18,33 +18,55 @@ Store this resolved plugin path for use throughout the session.
 Read the following files to assess readiness:
 
 - `storyforge.yaml` — project configuration
-- `reference/scene-metadata.csv` — check field completeness (id, title, pov, setting, part, type, word_count, timeline_day, time_of_day)
-- `reference/scene-intent.csv` — check field completeness (characters, threads, motifs, emotional_arc)
-- `working/scores/latest/scene-scores.csv` — if scoring data exists
+- `reference/scenes.csv` (elaboration) or `reference/scene-metadata.csv` (legacy) — scene structural data
+- `reference/scene-intent.csv` — narrative dynamics (function, value_shift, scene_type, threads, characters)
+- `reference/scene-briefs.csv` — drafting contracts (goal, conflict, outcome, knowledge states, motifs)
+- `working/scores/latest/scene-scores.csv` — craft scores (if scoring has run)
+- `working/scores/latest/fidelity-scores.csv` — brief fidelity scores (if scoring has run)
 - `working/dashboard.html` — if a dashboard already exists
 
 ## Step 2: Assess Data Quality
 
-The dashboard's 10 visualizations need different data:
+The multi-page dashboard has three pages with different data needs:
 
-| Visualization | Required Fields | Optional |
+**Overview page:**
+
+| Visualization | Required Fields | Source |
 |---|---|---|
-| Manuscript Spine | word_count, type | part |
-| POV River | pov, word_count | part |
-| Character Presence Grid | characters (intent.csv) | pov |
-| Thread Weave | threads (intent.csv) | |
-| Emotional Terrain | emotional_arc (intent.csv) | |
-| Scene Type Sequence | type | |
-| Setting Map | setting | |
-| Craft Score Heatmap | scene-scores.csv | craft-weights.csv |
-| Motif Constellation | motifs (intent.csv) | |
-| Timeline vs Reading Order | timeline_day | |
+| Manuscript Spine | word_count, type | scenes.csv |
+| POV River | pov, word_count | scenes.csv |
+| Value Shift Arc | value_shift | scene-intent.csv |
+| Scene Rhythm | scene_type, turning_point | scene-intent.csv |
 
-Report which visualizations will be populated vs empty based on current data:
-- "POV River and Setting Map are ready (pov and setting are fully populated)."
-- "Character Presence, Thread Weave, and Motif Constellation will be empty — those fields haven't been enriched yet."
+**Structure page:**
 
-If many fields are missing, suggest running enrichment first: "Would you like to run `/storyforge:enrich` first to fill in the missing metadata? The dashboard will be much richer."
+| Visualization | Required Fields | Source |
+|---|---|---|
+| Character Presence Grid | characters | scene-intent.csv |
+| Thread Weave | threads | scene-intent.csv |
+| Emotional Terrain | emotional_arc | scene-intent.csv |
+| Scene Type Sequence | type | scenes.csv |
+| Location Map | location | scenes.csv |
+| Motif Constellation | motifs | scene-briefs.csv |
+| Timeline vs Reading Order | timeline_day | scenes.csv |
+
+**Scores page:**
+
+| Visualization | Required Fields | Source |
+|---|---|---|
+| Craft Score Heatmap | scene-scores.csv | working/scores/latest/ |
+| Brief Fidelity | fidelity-scores.csv | working/scores/latest/ |
+| Genre Scores | genre-scores.csv | working/scores/latest/ |
+| Character Scores | character-scores.csv | working/scores/latest/ |
+| Act Scores | act-scores.csv | working/scores/latest/ |
+| Narrative Radar | narrative-scores.csv | working/scores/latest/ |
+
+Report which pages will be populated:
+- "Overview is ready — scenes.csv has pov, word_count, and intent has value_shift."
+- "Structure page needs enrichment — threads and characters are empty."
+- "Scores page needs a scoring cycle — run `./storyforge score` first."
+
+If intent/brief data is missing, suggest extraction: "Would you like to run `./storyforge extract` to populate the scene data from prose? The dashboard will be much richer."
 
 ## Step 3: Generate Dashboard
 

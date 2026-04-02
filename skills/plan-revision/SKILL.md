@@ -95,36 +95,47 @@ Build a mental model of the manuscript's strengths and weaknesses before proposi
 
 Based on the analysis, design a custom set of revision passes. Each pass is a focused editing operation with a clear purpose, scope, and type.
 
-### Pass Format
+### Pass Format (CSV)
 
-```yaml
-- name: descriptive-kebab-case-name
-  scope: full | act-N | scene-level
-  purpose: "One sentence explaining what this pass fixes and why"
-  estimated_effort: minor | moderate | major
-  findings: [list of finding IDs or descriptions this pass addresses]
-  guidance:  # optional — for passes involving creative judgment
-    - decision: "What to do"
-      rationale: "Why this is the right call"
+The revision plan CSV has these columns:
+
+```
+pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location
 ```
 
-**CRITICAL: Scene IDs in scope lists must match `reference/scene-metadata.csv` exactly.** Read the `id` column from `reference/scene-metadata.csv` and use the values verbatim. Scene IDs are descriptive slugs (e.g., `geometry-of-dying`, `the-last-calibrator`) — do NOT construct IDs by adding prefixes, padding numbers, or guessing formats. Copy them character-for-character from the CSV. If metadata.csv has `geometry-of-dying` in the id column, the scope must say `geometry-of-dying`.
+The `fix_location` column determines how the pass operates:
 
-All passes run autonomously. When a pass involves creative judgment — restructuring, character arc deepening, thematic reinterpretation — make the creative calls yourself and document them as `guidance` entries with rationale. The author reviews the plan before execution and can edit any guidance entry they disagree with.
+| fix_location | What it does | When to use |
+|-------------|-------------|-------------|
+| `brief` | Updates scene-briefs.csv, then re-drafts affected scenes | Knowledge violations, goal/conflict/outcome problems, missing key actions |
+| `intent` | Updates scene-intent.csv, cascades to briefs, re-drafts | Value shift issues, thread problems, scene type misclassification |
+| `structural` | Updates scenes.csv, cascades through intent/briefs, re-drafts | POV changes, timeline fixes, part restructuring |
+| `craft` | Edits prose directly (standard revision) | Voice, rhythm, dialogue, prose naturalness |
+| (empty) | Defaults to `craft` for backward compatibility | Legacy plans without fix_location |
 
-The `guidance` list is the author's control surface. Each entry is a specific creative decision with a rationale the author can evaluate. This replaces the old interactive/autonomous distinction: instead of pausing execution to ask the author what to do, you make the recommendation upfront and the author edits it before running the pipeline.
+**Upstream passes (brief/intent/structural)** ask Claude to produce corrected CSV rows. The revise script applies the CSV changes, then re-drafts affected scenes from the updated briefs. This fixes problems at their source rather than patching prose.
+
+**Craft passes** operate on prose directly — the existing behavior.
+
+**CRITICAL: Scene IDs must match `reference/scenes.csv` (elaboration) or `reference/scene-metadata.csv` (legacy) exactly.** Read the `id` column and use values verbatim. Do NOT construct IDs by adding prefixes or guessing formats.
+
+All passes run autonomously. When a pass involves creative judgment, document decisions as `guidance` entries with rationale. The author reviews the plan before execution and can edit any entry they disagree with.
 
 ### Ordering Principles
 
-Passes should be ordered to minimize wasted work:
+Passes should be ordered upstream-first to minimize wasted work:
 
-1. **Structural changes first.** Adding, removing, reordering, splitting, or merging scenes. These are the most disruptive changes — everything downstream depends on structure being settled. If a scene gets cut, there's no point having polished its prose.
+1. **Structural upstream first** (fix_location: `structural`). Scene additions, removals, reordering, POV changes, timeline fixes. These cascade through everything — no point fixing briefs for a scene that gets cut.
 
-2. **Character and arc deepening second.** Once the structure is stable, deepen character work — transformation beats, relationship dynamics, motivation clarity. This may touch many scenes but shouldn't change what scenes exist.
+2. **Intent upstream second** (fix_location: `intent`). Value shift corrections, thread management, scene type fixes, character arc adjustments. These change what scenes are supposed to accomplish.
 
-3. **Voice and prose polish third.** Line-level work: tightening prose, fixing voice drift, improving dialogue, strengthening sensory detail. No point polishing prose that might get rewritten in an earlier pass.
+3. **Brief upstream third** (fix_location: `brief`). Knowledge chain fixes, goal/conflict/outcome corrections, crisis strengthening, key action/dialogue updates. These change the drafting contract.
 
-4. **Continuity audit last.** A clean sweep for anything the other passes introduced — timeline errors, dropped details, setting contradictions, knowledge violations. This pass exists precisely because the earlier passes may have created new continuity issues.
+4. **Re-draft** happens automatically after each upstream pass — the revise script re-drafts affected scenes from updated briefs.
+
+5. **Craft polish last** (fix_location: `craft`). Voice consistency, prose rhythm, dialogue authenticity, AI pattern cleanup. Only after all structural changes are settled — no point polishing prose that will be re-drafted.
+
+6. **Validation run** after all passes. Run `./storyforge validate` to confirm upstream fixes resolved the flagged issues.
 
 ### Guidance Entries
 
@@ -148,7 +159,7 @@ Be specific and opinionated. "Deepen character arcs" is not guidance — it's a 
 
 - Use `full` when an issue pervades the manuscript
 - Use act-level scope when issues are localized to a narrative section
-- Use scene-id lists when only specific scenes are affected — **copy IDs exactly from `reference/scene-metadata.csv`**
+- Use scene-id lists when only specific scenes are affected — **copy IDs exactly from `reference/scenes.csv` (or legacy `scene-metadata.csv`)**
 - Prefer narrower scopes — a targeted pass is faster and less risky than a full-manuscript pass
 
 ### Integrating Scoring Data
@@ -274,7 +285,7 @@ pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier
 - One row per pass, in execution order
 - `pass` column is the pass number (1-based)
 - `scope` column must be one of: `full`, `act-N` (e.g., `act-1`), or `scene-level` (meaning: use the targets column for specific scene IDs)
-- `targets` column lists semicolon-separated **scene IDs (slugs)** when scope is `scene-level` (empty for `full` or act-level scope). **NEVER use seq numbers** — always use the `id` column values from `scene-metadata.csv` (e.g., `geometry-of-dying;the-last-calibrator`, NOT `30;31`). The revision script uses these IDs to find scene files on disk.
+- `targets` column lists semicolon-separated **scene IDs (slugs)** when scope is `scene-level` (empty for `full` or act-level scope). **NEVER use seq numbers** — always use the `id` column values from `scenes.csv` (or legacy `scene-metadata.csv`) (e.g., `geometry-of-dying;the-last-calibrator`, NOT `30;31`). The revision script uses these IDs to find scene files on disk.
 - `guidance` column contains concise revision guidance text
 - `protection` column lists things NOT to change (semicolon separated)
 - `findings` column lists finding IDs this pass addresses (semicolon separated)

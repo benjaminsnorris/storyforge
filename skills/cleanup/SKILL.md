@@ -20,7 +20,7 @@ Store this resolved plugin path for use throughout the session.
 Read the following files to understand the current project:
 
 - `storyforge.yaml` — project configuration
-- `reference/scene-metadata.csv` — scene metadata
+- `reference/scenes.csv (or legacy scene-metadata.csv)` — scene metadata
 - `reference/scene-intent.csv` — scene intent data (if it exists)
 - `reference/characters.csv` — character reference (if it exists)
 - `reference/chapter-map.csv` — chapter mapping (if it exists)
@@ -105,7 +105,7 @@ Apply the author's decisions from Step 3:
 - Delete or keep unexpected files/dirs
 - Add/remove CSV rows as directed
 - Add character entries if requested
-- Renumber sequences if requested (call `renumber_scenes` from csv.sh on `reference/scene-metadata.csv`)
+- Renumber sequences if requested (call `renumber_scenes` from csv.sh on `reference/scenes.csv (or legacy scene-metadata.csv)`)
 
 After all interactive fixes, commit:
 ```bash
