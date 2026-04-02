@@ -519,8 +519,10 @@ print(f'Updated scene-briefs.csv: {count} scenes (knowledge fields pending)')
         log "--- Phase 3b: Extract knowledge chain (sequential) ---"
 
         KNOWLEDGE_MODEL=$(select_model "evaluation")
-        KNOWLEDGE_STATE="{}"  # accumulated per-character knowledge
-        SCENE_SUMMARIES=""
+        KNOWLEDGE_STATE_FILE="${LOG_DIR}/.knowledge-state.json"
+        SUMMARIES_FILE="${LOG_DIR}/.scene-summaries.txt"
+        echo '{}' > "$KNOWLEDGE_STATE_FILE"
+        echo '' > "$SUMMARIES_FILE"
 
         for SCENE_ID in "${SORTED_SCENE_IDS[@]}"; do
             SCENE_TEXT=$(cat "${SCENES_DIR}/${SCENE_ID}.md" 2>/dev/null || echo "")
@@ -537,8 +539,10 @@ scene_data = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
 skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
 intent = {k: scene_data.get(k, '') for k in ['function', 'scene_type']}
 
-prior_knowledge = json.loads('''${KNOWLEDGE_STATE}''')
-prior_summaries = [s for s in '''${SCENE_SUMMARIES}'''.strip().split('\n') if s.strip()]
+with open('${KNOWLEDGE_STATE_FILE}') as f:
+    prior_knowledge = json.load(f)
+with open('${SUMMARIES_FILE}') as f:
+    prior_summaries = [s.strip() for s in f.readlines() if s.strip()]
 
 scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
 print(build_knowledge_prompt('${SCENE_ID}', scene_text, skeleton, intent, prior_knowledge, prior_summaries))
@@ -587,25 +591,34 @@ summary = result.get('_summary', '')
 print(json.dumps({'pov': pov, 'knowledge_out': knowledge_out, 'summary': summary}))
 ")
 
-            # Update accumulated state for next scene
-            POV=$(echo "$PARSED" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('pov', ''))")
-            K_OUT=$(echo "$PARSED" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('knowledge_out', ''))")
-            SUMMARY=$(echo "$PARSED" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('summary', ''))")
+            # Update accumulated state for next scene.
+            # Use temp files to avoid quoting issues with prose content.
+            KNOWLEDGE_STATE_FILE="${LOG_DIR}/.knowledge-state.json"
+            [[ ! -f "$KNOWLEDGE_STATE_FILE" ]] && echo '{}' > "$KNOWLEDGE_STATE_FILE"
 
-            # Update knowledge state (replace POV character's knowledge)
-            KNOWLEDGE_STATE=$(echo "$KNOWLEDGE_STATE" | python3 -c "
+            SCENE_SUMMARY=$(python3 -c "
 import sys, json
-state = json.load(sys.stdin)
-pov = '${POV}'
-k_out = '${K_OUT}'
+
+parsed = json.loads(sys.stdin.read())
+state_file = '${KNOWLEDGE_STATE_FILE}'
+
+with open(state_file) as f:
+    state = json.load(f)
+
+pov = parsed.get('pov', '')
+k_out = parsed.get('knowledge_out', '')
+summary = parsed.get('summary', '')
+
 if pov and k_out:
     state[pov] = k_out
-print(json.dumps(state))
-")
 
-            # Append summary
-            [[ -n "$SUMMARY" ]] && SCENE_SUMMARIES="${SCENE_SUMMARIES}${SCENE_ID}: ${SUMMARY}
-"
+with open(state_file, 'w') as f:
+    json.dump(state, f)
+
+print(summary)
+" <<< "$PARSED")
+
+            [[ -n "$SCENE_SUMMARY" ]] && echo "${SCENE_ID}: ${SCENE_SUMMARY}" >> "$SUMMARIES_FILE"
 
             log "  ${SCENE_ID}: knowledge extracted"
         done
