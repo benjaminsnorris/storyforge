@@ -174,11 +174,20 @@ WEIGHTS_FILE="${PROJECT_DIR}/working/craft-weights.csv"
 # Build scene list from metadata.csv
 # ============================================================================
 
-METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
-INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
-# Fallback to old locations
-[[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
-[[ ! -f "$INTENT_CSV" ]] && INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
+# Detect elaboration pipeline (scenes.csv) or legacy (scene-metadata.csv)
+HAS_BRIEFS=false
+if [[ -f "${PROJECT_DIR}/reference/scenes.csv" ]]; then
+    METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
+    INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
+    BRIEFS_CSV="${PROJECT_DIR}/reference/scene-briefs.csv"
+    [[ -f "$BRIEFS_CSV" ]] && HAS_BRIEFS=true
+else
+    METADATA_CSV="${PROJECT_DIR}/reference/scene-metadata.csv"
+    INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
+    # Fallback to old locations
+    [[ ! -f "$METADATA_CSV" ]] && METADATA_CSV="${PROJECT_DIR}/scenes/metadata.csv"
+    [[ ! -f "$INTENT_CSV" ]] && INTENT_CSV="${PROJECT_DIR}/scenes/intent.csv"
+fi
 SCENES_DIR="${PROJECT_DIR}/scenes"
 
 build_scene_list "$METADATA_CSV"
@@ -723,6 +732,116 @@ esac
 log ""
 log "Scene scoring complete: ${SCORED} scenes scored, ${FAILED} failures"
 update_pr_task "Scene-level scoring (${SCENE_COUNT} scenes)" "$PROJECT_DIR" 2>/dev/null || true
+
+# ============================================================================
+# Brief fidelity scoring (elaboration pipeline only)
+# ============================================================================
+
+if [[ "$HAS_BRIEFS" == true ]]; then
+    # Check if any scenes have brief data
+    BRIEF_COUNT=$(tail -n +2 "$BRIEFS_CSV" 2>/dev/null | awk -F'|' '$2 != ""' | wc -l | tr -d ' ')
+    if (( BRIEF_COUNT > 0 )); then
+        log "Running brief fidelity scoring (${BRIEF_COUNT} scenes with briefs)..."
+
+        FIDELITY_RESULTS="[]"
+        for id in "${FILTERED_IDS[@]}"; do
+            SCENE_FILE="${SCENES_DIR}/${id}.md"
+            [[ ! -f "$SCENE_FILE" ]] && continue
+
+            FIDELITY_PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.scoring import build_fidelity_prompt
+print(build_fidelity_prompt('${id}', '${PROJECT_DIR}', '${PLUGIN_DIR}'))
+" 2>/dev/null)
+
+            [[ -z "$FIDELITY_PROMPT" ]] && continue
+
+            FIDELITY_LOG="${LOG_DIR}/fidelity-${id}.log"
+
+            if [[ "$SCORE_MODE" == "batch" ]]; then
+                # Add to batch file for later submission
+                FIDELITY_BATCH="${LOG_DIR}/fidelity-batch-$$.jsonl"
+                json_prompt=$(jq -Rs '.' <<< "$FIDELITY_PROMPT")
+                printf '{"custom_id":"fidelity-%s","params":{"model":"%s","max_tokens":2048,"messages":[{"role":"user","content":%s}]}}\n' \
+                    "$id" "$SONNET_MODEL" "$json_prompt" >> "$FIDELITY_BATCH"
+            else
+                _SF_INVOCATION_START=$(date +%s); export _SF_INVOCATION_START
+                invoke_anthropic_api "$FIDELITY_PROMPT" "$SONNET_MODEL" "$FIDELITY_LOG" 2048 || {
+                    log "  WARNING: Fidelity scoring failed for ${id}"
+                    continue
+                }
+                log_api_usage "$FIDELITY_LOG" "score-fidelity" "$id" "$SONNET_MODEL" 2>/dev/null || true
+            fi
+        done
+
+        # Submit batch if in batch mode
+        if [[ "$SCORE_MODE" == "batch" && -f "${FIDELITY_BATCH:-}" ]]; then
+            FIDELITY_BATCH_COUNT=$(wc -l < "$FIDELITY_BATCH" | tr -d ' ')
+            if (( FIDELITY_BATCH_COUNT > 0 )); then
+                log "  Submitting fidelity batch (${FIDELITY_BATCH_COUNT} scenes)..."
+                _SF_INVOCATION_START=$(date +%s); export _SF_INVOCATION_START
+                begin_healing_zone "fidelity batch"
+                FIDELITY_BATCH_ID=$(submit_batch "$FIDELITY_BATCH")
+                poll_batch "$FIDELITY_BATCH_ID"
+                download_batch_results "$FIDELITY_BATCH_ID" "${LOG_DIR}/fidelity-output" "$LOG_DIR"
+                end_healing_zone
+            fi
+            rm -f "$FIDELITY_BATCH"
+        fi
+
+        # Process fidelity results
+        PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.scoring import parse_fidelity_response, write_fidelity_csv, generate_fidelity_diagnosis
+
+log_dir = '${LOG_DIR}'
+cycle_dir = '${CYCLE_DIR}'
+scene_ids = '''$(printf '%s\n' "${FILTERED_IDS[@]}")'''.strip().split('\n')
+
+results = []
+for sid in scene_ids:
+    # Try batch output first, then direct log
+    for path in [
+        os.path.join(log_dir, f'fidelity-{sid}.txt'),
+        os.path.join(log_dir, f'fidelity-{sid}.log'),
+    ]:
+        if not os.path.isfile(path):
+            continue
+        text = open(path, encoding='utf-8').read()
+        # Parse API JSON if needed
+        try:
+            data = json.loads(text)
+            text = ''.join(item.get('text', '') for item in data.get('content', []) if item.get('type') == 'text')
+        except (json.JSONDecodeError, KeyError):
+            pass
+        if text:
+            result = parse_fidelity_response(text, sid)
+            if result['scores']:
+                results.append(result)
+            break
+
+if results:
+    write_fidelity_csv(results, cycle_dir)
+    diagnosis = generate_fidelity_diagnosis(results)
+
+    avg_overall = sum(r['overall'] for r in results) / len(results) if results else 0
+    print(f'Fidelity: {len(results)} scenes scored, avg {avg_overall:.1f}/5')
+
+    high_priority = [d for d in diagnosis if d['priority'] == 'high']
+    if high_priority:
+        print('High-priority fidelity gaps:')
+        for d in high_priority:
+            print(f'  {d[\"element\"]}: avg {d[\"avg_score\"]}/5 ({d[\"weak_count\"]}/{d[\"total_scenes\"]} weak)')
+else:
+    print('No fidelity results to process')
+" 2>&1 | while IFS= read -r line; do log "  $line"; done
+
+    else
+        log "No scenes with brief data — skipping fidelity scoring"
+    fi
+else
+    log "No briefs CSV — skipping fidelity scoring (legacy project)"
+fi
 
 # ============================================================================
 # Act-level scoring

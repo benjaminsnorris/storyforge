@@ -305,3 +305,67 @@ print(f'mice: {result[\"mice_threads\"][\"count\"]}')
 ")
 
 assert_contains "$RESULT" "total:" "run_cleanup: returns summary"
+
+# ============================================================================
+# Fidelity scoring (scoring.py)
+# ============================================================================
+
+# parse_fidelity_response
+RESULT=$(python3 -c "
+${PY}
+from storyforge.scoring import parse_fidelity_response
+response = '''SCORES
+id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|emotions|knowledge
+act1-sc01|4|3|4|3|4|5|4|3|4
+
+RATIONALE
+id|element|score|evidence
+act1-sc01|goal|4|Character clearly pursues the audit objective throughout
+act1-sc01|conflict|3|Anomaly creates tension but opposition is indirect
+act1-sc01|outcome|4|Scene ends with filing as error — clear no-and
+act1-sc01|crisis|3|Dilemma present but could be sharper'''
+
+result = parse_fidelity_response(response, 'act1-sc01')
+print(result['scores'].get('goal', ''))
+print(result['scores'].get('conflict', ''))
+print(result['overall'])
+print(len(result['rationale']))
+")
+
+assert_contains "$RESULT" "4" "parse_fidelity: extracts goal score"
+assert_contains "$RESULT" "3" "parse_fidelity: extracts conflict score"
+
+# generate_fidelity_diagnosis
+RESULT=$(python3 -c "
+${PY}
+from storyforge.scoring import parse_fidelity_response, generate_fidelity_diagnosis
+
+r1 = parse_fidelity_response('''SCORES
+id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|emotions|knowledge
+s1|4|2|4|2|4|4|3|3|4''', 's1')
+r2 = parse_fidelity_response('''SCORES
+id|goal|conflict|outcome|crisis|decision|key_actions|key_dialogue|emotions|knowledge
+s2|4|2|3|1|3|4|3|2|3''', 's2')
+
+diagnosis = generate_fidelity_diagnosis([r1, r2])
+for d in diagnosis:
+    print(f'{d[\"element\"]}: avg={d[\"avg_score\"]} priority={d[\"priority\"]}')
+")
+
+assert_contains "$RESULT" "crisis" "fidelity_diagnosis: identifies crisis as weak"
+assert_contains "$RESULT" "conflict" "fidelity_diagnosis: identifies conflict as weak"
+assert_contains "$RESULT" "high" "fidelity_diagnosis: flags high priority"
+
+# build_fidelity_prompt
+RESULT=$(python3 -c "
+${PY}
+from storyforge.scoring import build_fidelity_prompt
+prompt = build_fidelity_prompt('act1-sc01', '${FIXTURE_DIR}', '${PLUGIN_DIR}')
+print(len(prompt))
+print('goal' in prompt.lower() and 'conflict' in prompt.lower())
+")
+
+# Fixture scene has a brief, so prompt should be non-empty
+PROMPT_LEN=$(echo "$RESULT" | head -1)
+assert_not_empty "$PROMPT_LEN" "build_fidelity: produces prompt"
+assert_contains "$RESULT" "True" "build_fidelity: prompt contains brief elements"

@@ -23,6 +23,7 @@ SCORE_FILES = [
     ('act-scores.csv', 'act'),
     ('character-scores.csv', 'character'),
     ('genre-scores.csv', 'genre'),
+    ('fidelity-scores.csv', 'fidelity'),
 ]
 
 
@@ -1256,6 +1257,211 @@ def build_score_pr_comment(cycle_dir: str, project_dir: str, cycle: str,
     parts.append(f'*Report: `working/scores/cycle-{cycle}/report.html`*')
 
     return '\n'.join(parts)
+
+
+# ============================================================================
+# Brief fidelity scoring
+# ============================================================================
+
+FIDELITY_ELEMENTS = [
+    'goal', 'conflict', 'outcome', 'crisis', 'decision',
+    'key_actions', 'key_dialogue', 'emotions', 'knowledge',
+]
+
+
+def build_fidelity_prompt(scene_id: str, project_dir: str,
+                          plugin_dir: str) -> str:
+    """Build a brief fidelity evaluation prompt for a single scene.
+
+    Reads the scene's brief data and prose, formats them into the
+    brief-fidelity prompt template.
+
+    Returns empty string if the scene has no brief or no prose.
+    """
+    from .elaborate import get_scene
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    scene = get_scene(scene_id, ref_dir)
+    if not scene:
+        return ''
+
+    # Check that brief data exists
+    if not scene.get('goal', '').strip():
+        return ''
+
+    # Read prose
+    scene_file = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+    if not os.path.isfile(scene_file):
+        return ''
+    with open(scene_file, encoding='utf-8') as f:
+        prose = f.read().strip()
+    if not prose or len(prose) < 100:
+        return ''
+
+    # Format brief data
+    brief_lines = []
+    for key in ['goal', 'conflict', 'outcome', 'crisis', 'decision',
+                'key_actions', 'key_dialogue', 'emotions', 'motifs',
+                'knowledge_in', 'knowledge_out']:
+        val = scene.get(key, '').strip()
+        if val:
+            brief_lines.append(f"**{key}:** {val}")
+
+    brief_data = '\n'.join(brief_lines)
+
+    # Read prompt template
+    template_path = os.path.join(plugin_dir, 'scripts', 'prompts', 'scoring',
+                                  'brief-fidelity.md')
+    if os.path.isfile(template_path):
+        with open(template_path, encoding='utf-8') as f:
+            template = f.read()
+    else:
+        # Inline fallback
+        template = (
+            "Evaluate brief fidelity for scene {SCENE_ID}.\n\n"
+            "Brief:\n{BRIEF_DATA}\n\nProse:\n{SCENE_PROSE}\n\n"
+            "Output SCORES and RATIONALE blocks as pipe-delimited CSV."
+        )
+
+    prompt = template.replace('{BRIEF_DATA}', brief_data)
+    prompt = prompt.replace('{SCENE_PROSE}', prose)
+    prompt = prompt.replace('{SCENE_ID}', scene_id)
+
+    return prompt
+
+
+def parse_fidelity_response(response: str, scene_id: str) -> dict:
+    """Parse a brief fidelity response into scores and rationale.
+
+    Returns:
+        {
+            'scores': {'goal': 4, 'conflict': 3, ...},
+            'rationale': [{'element': 'goal', 'score': 4, 'evidence': '...'}],
+            'overall': 3.5,  # power mean
+        }
+    """
+    scores = {}
+    rationale = []
+
+    # Parse line by line — look for CSV rows after SCORES and RATIONALE markers
+    in_section = None
+    for line in response.split('\n'):
+        stripped = line.strip()
+        if stripped.upper().startswith('SCORES'):
+            in_section = 'scores'
+            continue
+        elif stripped.upper().startswith('RATIONALE'):
+            in_section = 'rationale'
+            continue
+        elif not stripped:
+            continue
+
+        parts = stripped.split('|')
+
+        if in_section == 'scores' and len(parts) >= 10:
+            if parts[0].strip() == 'id':
+                continue  # header row
+            for i, element in enumerate(FIDELITY_ELEMENTS):
+                try:
+                    scores[element] = int(parts[i + 1].strip())
+                except (ValueError, IndexError):
+                    pass
+
+        elif in_section == 'rationale' and len(parts) >= 4:
+            if parts[0].strip() == 'id':
+                continue  # header row
+            try:
+                rationale.append({
+                    'element': parts[1].strip(),
+                    'score': int(parts[2].strip()),
+                    'evidence': parts[3].strip(),
+                })
+            except (ValueError, IndexError):
+                pass
+
+    # Calculate overall as power mean
+    score_values = [float(v) for v in scores.values() if v > 0]
+    overall = _power_mean(score_values) if score_values else 0.0
+
+    return {
+        'scene_id': scene_id,
+        'scores': scores,
+        'rationale': rationale,
+        'overall': round(overall, 1),
+    }
+
+
+def write_fidelity_csv(results: list[dict], output_dir: str):
+    """Write fidelity scores and rationale to CSV files.
+
+    Args:
+        results: List of parse_fidelity_response outputs.
+        output_dir: Directory to write CSVs to.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Scores CSV
+    header = ['id'] + FIDELITY_ELEMENTS + ['overall']
+    rows = []
+    for r in results:
+        row = [r['scene_id']]
+        for el in FIDELITY_ELEMENTS:
+            row.append(str(r['scores'].get(el, '')))
+        row.append(str(r['overall']))
+        rows.append(row)
+    _write_csv(os.path.join(output_dir, 'fidelity-scores.csv'), header, rows)
+
+    # Rationale CSV
+    rat_header = ['id', 'element', 'score', 'evidence']
+    rat_rows = []
+    for r in results:
+        for entry in r['rationale']:
+            rat_rows.append([
+                r['scene_id'],
+                entry.get('element', ''),
+                str(entry.get('score', '')),
+                entry.get('evidence', ''),
+            ])
+    _write_csv(os.path.join(output_dir, 'fidelity-rationale.csv'),
+               rat_header, rat_rows)
+
+
+def generate_fidelity_diagnosis(results: list[dict]) -> list[dict]:
+    """Analyze fidelity scores and identify patterns.
+
+    Returns a list of findings, sorted by severity:
+        {'element': str, 'avg_score': float, 'weak_scenes': list, 'priority': str}
+    """
+    from collections import defaultdict
+
+    element_scores: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for r in results:
+        for el, score in r['scores'].items():
+            element_scores[el].append((r['scene_id'], score))
+
+    findings = []
+    for el, scene_scores in element_scores.items():
+        scores = [s for _, s in scene_scores]
+        avg = sum(scores) / len(scores) if scores else 0
+        weak = [(sid, s) for sid, s in scene_scores if s <= 2]
+
+        priority = 'low'
+        if avg < 2.5:
+            priority = 'high'
+        elif avg < 3.5 or len(weak) > len(scores) * 0.3:
+            priority = 'medium'
+
+        findings.append({
+            'element': el,
+            'avg_score': round(avg, 1),
+            'weak_scenes': [sid for sid, _ in weak],
+            'weak_count': len(weak),
+            'total_scenes': len(scores),
+            'priority': priority,
+        })
+
+    findings.sort(key=lambda f: {'high': 0, 'medium': 1, 'low': 2}[f['priority']])
+    return findings
 
 
 # ============================================================================
