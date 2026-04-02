@@ -1,7 +1,15 @@
-The forty-year archive occupied the lowest level of the Cartography Office, where the air smelled of foxed paper and lamp oil. Dorren carried three maps: the current quarter, the twenty-year survey, and the oldest he could find — a hand-drawn sheet from the founding era.
+---
+id: "act1-sc02"
+title: "The Missing Village"
+pov: "Dorren Hayle"
+setting: "Dorren's private study"
+status: "drafted"
+---
 
-He overlaid them on the comparison table. The village was there forty years ago. It was there twenty years ago. It was not there now.
+Dorren sat at her desk with the overlay sheets spread across every surface. The village — Tarren's Hollow, population four hundred and twelve at last census — should have been exactly here.
 
-"It was there forty years ago. It isn't there now. There is no note," he whispered, running his fingers across the blank space where the village should have been. No removal order. No marginal annotation. No record at all.
+She tapped the empty space on the map. Blank parchment. Not even a contour line.
 
-Someone had erased a village from the maps, and done so without leaving a trace.
+"It was here last quarter," she murmured, pulling the older survey. There. Tarren's Hollow. Roads, wells, the little temple marked with its standard sigil. Four hundred and twelve people going about their lives.
+
+She returned to the new map. Nothing.
