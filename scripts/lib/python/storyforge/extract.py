@@ -507,3 +507,248 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
     priority_order = {'high': 0, 'medium': 1, 'low': 2}
     opportunities.sort(key=lambda o: priority_order.get(o['priority'], 3))
     return opportunities
+
+
+# ============================================================================
+# Post-extraction cleanup
+# ============================================================================
+
+def cleanup_timeline(ref_dir: str) -> list[dict]:
+    """Fill empty timeline_day fields by interpolating from adjacent scenes.
+
+    Returns a list of fixes applied: [{scene_id, field, old_value, new_value}]
+    """
+    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda s: int(scenes_map[s].get('seq', 0)))
+
+    fixes = []
+
+    # Build list of (id, day_or_none)
+    days = []
+    for sid in sorted_ids:
+        day_str = scenes_map[sid].get('timeline_day', '').strip()
+        try:
+            days.append((sid, int(day_str)))
+        except (ValueError, TypeError):
+            days.append((sid, None))
+
+    # Fill gaps by interpolation
+    for i, (sid, day) in enumerate(days):
+        if day is not None:
+            continue
+
+        # Find nearest known day before and after
+        prev_day = None
+        for j in range(i - 1, -1, -1):
+            if days[j][1] is not None:
+                prev_day = days[j][1]
+                break
+
+        next_day = None
+        for j in range(i + 1, len(days)):
+            if days[j][1] is not None:
+                next_day = days[j][1]
+                break
+
+        # Infer
+        inferred = None
+        if prev_day is not None and next_day is not None:
+            # Between two known days — use the previous day (same day until proven otherwise)
+            inferred = prev_day
+        elif prev_day is not None:
+            inferred = prev_day  # Assume same day as previous
+        elif next_day is not None:
+            inferred = next_day  # Assume same day as next
+
+        if inferred is not None:
+            old_val = scenes_map[sid].get('timeline_day', '')
+            scenes_map[sid]['timeline_day'] = str(inferred)
+            days[i] = (sid, inferred)
+            fixes.append({
+                'scene_id': sid,
+                'field': 'timeline_day',
+                'old_value': old_val,
+                'new_value': str(inferred),
+            })
+
+    if fixes:
+        ordered = sorted(scenes_map.values(), key=lambda r: int(r.get('seq', 0)))
+        _write_csv(os.path.join(ref_dir, 'scenes.csv'), ordered, _FILE_MAP['scenes.csv'])
+
+    return fixes
+
+
+def cleanup_knowledge(ref_dir: str) -> list[dict]:
+    """Normalize knowledge wording so knowledge_in matches prior knowledge_out.
+
+    Uses fuzzy matching: if a knowledge_in fact is >80% similar to a
+    knowledge_out fact from a prior scene, replace it with the exact
+    knowledge_out wording.
+
+    Returns a list of fixes applied.
+    """
+    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda s: int(scenes_map[s].get('seq', 0)))
+
+    fixes = []
+
+    # Build cumulative knowledge pool with exact wording
+    knowledge_pool = set()
+
+    for sid in sorted_ids:
+        brief = briefs_map.get(sid, {})
+        knowledge_in = brief.get('knowledge_in', '').strip()
+
+        if knowledge_in and knowledge_pool:
+            facts_in = [f.strip() for f in knowledge_in.split(';') if f.strip()]
+            new_facts = []
+            changed = False
+
+            for fact in facts_in:
+                if fact in knowledge_pool:
+                    new_facts.append(fact)
+                    continue
+
+                # Fuzzy match against pool
+                best_match = None
+                best_score = 0.0
+                fact_lower = fact.lower()
+                for pool_fact in knowledge_pool:
+                    score = _similarity(fact_lower, pool_fact.lower())
+                    if score > best_score:
+                        best_score = score
+                        best_match = pool_fact
+
+                if best_match and best_score >= 0.7:
+                    new_facts.append(best_match)
+                    changed = True
+                else:
+                    new_facts.append(fact)
+
+            if changed:
+                old_val = knowledge_in
+                new_val = '; '.join(new_facts)
+                briefs_map[sid]['knowledge_in'] = new_val
+                fixes.append({
+                    'scene_id': sid,
+                    'field': 'knowledge_in',
+                    'old_value': old_val[:80] + '...' if len(old_val) > 80 else old_val,
+                    'new_value': new_val[:80] + '...' if len(new_val) > 80 else new_val,
+                })
+
+        # Add this scene's knowledge_out to pool
+        knowledge_out = brief.get('knowledge_out', '').strip()
+        if knowledge_out:
+            for fact in knowledge_out.split(';'):
+                fact = fact.strip()
+                if fact:
+                    knowledge_pool.add(fact)
+
+    if fixes:
+        ordered = sorted(briefs_map.values(), key=lambda r: r.get('id', ''))
+        _write_csv(os.path.join(ref_dir, 'scene-briefs.csv'), ordered, _FILE_MAP['scene-briefs.csv'])
+
+    return fixes
+
+
+def _similarity(a: str, b: str) -> float:
+    """Simple word-overlap similarity between two strings. Returns 0.0-1.0."""
+    words_a = set(a.split())
+    words_b = set(b.split())
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    union = words_a | words_b
+    return len(intersection) / len(union)
+
+
+def cleanup_mice_threads(ref_dir: str) -> list[dict]:
+    """Fix unambiguous MICE thread nesting violations.
+
+    - Remove duplicate opens (thread opened twice without close)
+    - Remove closes for threads that were never opened
+    - Reorder closes when the fix is unambiguous (only one thread to close)
+
+    Returns a list of fixes applied.
+    """
+    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+    intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda s: int(scenes_map[s].get('seq', 0)))
+
+    fixes = []
+    open_threads = set()  # currently open thread names
+
+    for sid in sorted_ids:
+        intent = intent_map.get(sid, {})
+        mice = intent.get('mice_threads', '').strip()
+        if not mice:
+            continue
+
+        entries = [e.strip() for e in mice.split(';') if e.strip()]
+        new_entries = []
+        changed = False
+
+        for entry in entries:
+            if entry.startswith('+'):
+                thread_name = entry[1:]
+                if thread_name in open_threads:
+                    # Duplicate open — skip it
+                    changed = True
+                    fixes.append({
+                        'scene_id': sid,
+                        'field': 'mice_threads',
+                        'old_value': entry,
+                        'new_value': '(removed duplicate open)',
+                    })
+                else:
+                    open_threads.add(thread_name)
+                    new_entries.append(entry)
+            elif entry.startswith('-'):
+                thread_name = entry[1:]
+                if thread_name not in open_threads:
+                    # Close for unopened thread — skip it
+                    changed = True
+                    fixes.append({
+                        'scene_id': sid,
+                        'field': 'mice_threads',
+                        'old_value': entry,
+                        'new_value': '(removed close for unopened thread)',
+                    })
+                else:
+                    open_threads.discard(thread_name)
+                    new_entries.append(entry)
+            else:
+                new_entries.append(entry)
+
+        if changed:
+            intent_map[sid]['mice_threads'] = ';'.join(new_entries)
+
+    if fixes:
+        ordered = sorted(intent_map.values(), key=lambda r: r.get('id', ''))
+        _write_csv(os.path.join(ref_dir, 'scene-intent.csv'), ordered, _FILE_MAP['scene-intent.csv'])
+
+    return fixes
+
+
+def run_cleanup(ref_dir: str) -> dict:
+    """Run all cleanup passes. Returns a summary dict."""
+    timeline_fixes = cleanup_timeline(ref_dir)
+    knowledge_fixes = cleanup_knowledge(ref_dir)
+    mice_fixes = cleanup_mice_threads(ref_dir)
+
+    return {
+        'timeline': {'count': len(timeline_fixes), 'fixes': timeline_fixes},
+        'knowledge': {'count': len(knowledge_fixes), 'fixes': knowledge_fixes},
+        'mice_threads': {'count': len(mice_fixes), 'fixes': mice_fixes},
+        'total_fixes': len(timeline_fixes) + len(knowledge_fixes) + len(mice_fixes),
+    }

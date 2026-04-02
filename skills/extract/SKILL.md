@@ -28,8 +28,7 @@ Store this resolved plugin path for use throughout the session.
 Based on project state:
 
 - **No scene files** → Author needs to split their manuscript first. Route to `/storyforge:scenes` (setup mode) or help them split interactively.
-- **Scene files exist, no CSV data** → Full extraction needed (all 4 phases)
-- **Scene files + old metadata CSV** → Migration + extraction. Run `./storyforge migrate-elaborate` first, then extract to fill the new columns.
+- **Scene files exist, no CSV data or old metadata CSV** → Full extraction needed (all 4 phases). The extraction will read the prose and build all three CSVs from scratch.
 - **Scene files + partial elaboration data** → Targeted extraction — only run phases for missing data.
 
 ## Step 3: Execute Extraction
@@ -50,8 +49,11 @@ Options:
 - `--expand` — Include expansion analysis (for novella-to-novel work)
 - `--dry-run` — Print prompts without calling the API
 
-For full extraction: `./storyforge extract` (runs all phases)
+For full extraction with cleanup: `./storyforge extract` (runs all phases + cleanup)
 For expansion planning: `./storyforge extract --expand`
+For cleanup only (on already-extracted data): `./storyforge extract --cleanup-only`
+
+Cleanup runs automatically after full extraction. It normalizes knowledge wording (fuzzy-matches mismatched facts), fills timeline gaps (interpolates from adjacent scenes), and fixes MICE thread issues (removes duplicates and orphaned closes). In full/coach mode, fixes are applied automatically. In strict mode, issues are reported for the author to fix.
 
 ### Option B: Run Interactively
 

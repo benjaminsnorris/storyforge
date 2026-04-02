@@ -194,3 +194,114 @@ print('FUNCTION' in prompt and 'VALUE_SHIFT' in prompt and 'MICE_THREADS' in pro
 ")
 
 assert_equals "True" "$RESULT" "build_intent: prompt contains expected field labels"
+
+# ============================================================================
+# cleanup_timeline
+# ============================================================================
+
+TMP_REF=$(mktemp -d)
+cp "${FIXTURE_DIR}/reference/scenes.csv" "${TMP_REF}/scenes.csv"
+cp "${FIXTURE_DIR}/reference/scene-intent.csv" "${TMP_REF}/scene-intent.csv"
+cp "${FIXTURE_DIR}/reference/scene-briefs.csv" "${TMP_REF}/scene-briefs.csv"
+
+# Clear timeline_day for scene 2 to create a gap
+python3 -c "
+${PY}
+from storyforge.elaborate import update_scene
+update_scene('act1-sc02', '${TMP_REF}', {'timeline_day': ''})
+"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.extract import cleanup_timeline
+import json
+fixes = cleanup_timeline('${TMP_REF}')
+print(len(fixes))
+for f in fixes:
+    print(f'{f[\"scene_id\"]}: {f[\"new_value\"]}')
+")
+
+assert_contains "$RESULT" "act1-sc02" "cleanup_timeline: fills gap for act1-sc02"
+assert_contains "$RESULT" "1" "cleanup_timeline: infers day 1 from adjacent scenes"
+
+rm -rf "$TMP_REF"
+
+# ============================================================================
+# cleanup_knowledge
+# ============================================================================
+
+TMP_REF=$(mktemp -d)
+cp "${FIXTURE_DIR}/reference/scenes.csv" "${TMP_REF}/scenes.csv"
+cp "${FIXTURE_DIR}/reference/scene-intent.csv" "${TMP_REF}/scene-intent.csv"
+cp "${FIXTURE_DIR}/reference/scene-briefs.csv" "${TMP_REF}/scene-briefs.csv"
+
+# Introduce a knowledge wording mismatch
+python3 -c "
+${PY}
+from storyforge.elaborate import update_scene
+# act1-sc01 knowledge_out says 'Eastern readings don't match'
+# Change act1-sc02 knowledge_in to use slightly different wording
+update_scene('act1-sc02', '${TMP_REF}', {'knowledge_in': 'Eastern readings do not match; has private note about anomaly'})
+"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.extract import cleanup_knowledge
+import json
+fixes = cleanup_knowledge('${TMP_REF}')
+print(len(fixes))
+")
+
+# Should find and fix the wording mismatch via fuzzy matching
+FIXES=$(echo "$RESULT" | head -1)
+assert_not_empty "$FIXES" "cleanup_knowledge: detects wording mismatch"
+
+rm -rf "$TMP_REF"
+
+# ============================================================================
+# cleanup_mice_threads
+# ============================================================================
+
+TMP_REF=$(mktemp -d)
+cp "${FIXTURE_DIR}/reference/scenes.csv" "${TMP_REF}/scenes.csv"
+cp "${FIXTURE_DIR}/reference/scene-intent.csv" "${TMP_REF}/scene-intent.csv"
+cp "${FIXTURE_DIR}/reference/scene-briefs.csv" "${TMP_REF}/scene-briefs.csv"
+
+# Add a duplicate open and a close for an unopened thread
+python3 -c "
+${PY}
+from storyforge.elaborate import update_scene
+update_scene('new-x1', '${TMP_REF}', {'mice_threads': '+inquiry:archive-erasure;+inquiry:archive-erasure;-event:nonexistent'})
+"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.extract import cleanup_mice_threads
+import json
+fixes = cleanup_mice_threads('${TMP_REF}')
+print(len(fixes))
+for f in fixes:
+    print(f'{f[\"scene_id\"]}: {f[\"old_value\"]} → {f[\"new_value\"]}')
+")
+
+assert_contains "$RESULT" "duplicate open" "cleanup_mice: removes duplicate open"
+assert_contains "$RESULT" "unopened thread" "cleanup_mice: removes close for unopened thread"
+
+rm -rf "$TMP_REF"
+
+# ============================================================================
+# run_cleanup (integration)
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.extract import run_cleanup
+import json
+result = run_cleanup('${FIXTURE_DIR}/reference')
+print(f'total: {result[\"total_fixes\"]}')
+print(f'timeline: {result[\"timeline\"][\"count\"]}')
+print(f'knowledge: {result[\"knowledge\"][\"count\"]}')
+print(f'mice: {result[\"mice_threads\"][\"count\"]}')
+")
+
+assert_contains "$RESULT" "total:" "run_cleanup: returns summary"
