@@ -84,7 +84,7 @@ body { background-image: radial-gradient(ellipse at 50% 0%, var(--gold-dim) 0%, 
 </div>
 
 <!-- Pipeline diagram -->
-<svg viewBox="0 0 720 120" style="width:100%;max-width:720px;margin:0 auto 48px;display:block;" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 730 120" style="width:100%;max-width:720px;margin:0 auto 48px;display:block;" xmlns="http://www.w3.org/2000/svg">
   <style>
     .stage-box { rx: 8; ry: 8; stroke-width: 1; }
     .stage-text { font-family: 'JetBrains Mono', monospace; font-size: 10px; fill: var(--text); text-anchor: middle; }
@@ -118,7 +118,7 @@ body { background-image: radial-gradient(ellipse at 50% 0%, var(--gold-dim) 0%, 
 
   <rect x="309" y="20" width="80" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--teal)"/>
   <text x="349" y="42" class="stage-text" style="fill:var(--teal)">Scene Map</text>
-  <text x="349" y="56" class="stage-label">40–60 scenes</text>
+  <text x="349" y="56" class="stage-label">40–100 scenes</text>
 
   <line x1="393" y1="45" x2="413" y2="45" class="arrow-line"/>
   <circle cx="403" cy="45" r="3" class="gate-dot"/>
@@ -132,18 +132,24 @@ body { background-image: radial-gradient(ellipse at 50% 0%, var(--gold-dim) 0%, 
   <circle cx="501" cy="45" r="3" class="gate-dot"/>
   <text x="501" y="82" class="gate-text">validate</text>
 
-  <rect x="515" y="20" width="65" height="50" class="stage-box" fill="var(--gold-dim)" stroke="var(--gold)"/>
-  <text x="547" y="42" class="stage-text" style="fill:var(--gold)">Draft</text>
-  <text x="547" y="56" class="stage-label">parallel</text>
+  <rect x="515" y="20" width="55" height="50" class="stage-box" fill="var(--gold-dim)" stroke="var(--gold)"/>
+  <text x="542" y="42" class="stage-text" style="fill:var(--gold)">Draft</text>
+  <text x="542" y="56" class="stage-label">parallel</text>
 
-  <line x1="584" y1="45" x2="604" y2="45" class="arrow-line"/>
+  <line x1="574" y1="45" x2="589" y2="45" class="arrow-line"/>
 
-  <rect x="608" y="20" width="65" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--rose)"/>
-  <text x="640" y="42" class="stage-text" style="fill:var(--rose)">Polish</text>
-  <text x="640" y="56" class="stage-label">one pass</text>
+  <rect x="593" y="20" width="60" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--deep-blue)"/>
+  <text x="623" y="42" class="stage-text" style="fill:var(--deep-blue)">Evaluate</text>
+  <text x="623" y="56" class="stage-label">6 experts</text>
+
+  <line x1="657" y1="45" x2="672" y2="45" class="arrow-line"/>
+
+  <rect x="676" y="20" width="44" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--rose)"/>
+  <text x="698" y="42" class="stage-text" style="fill:var(--rose)">Polish</text>
+  <text x="698" y="56" class="stage-label">craft</text>
 
   <!-- Subtitle -->
-  <text x="360" y="110" style="font-family:'Instrument Serif',Georgia,serif; font-size:12px; fill:var(--text-light); text-anchor:middle;">Build the structure first. Validate at every stage. Draft with confidence.</text>
+  <text x="365" y="110" style="font-family:'Instrument Serif',Georgia,serif; font-size:12px; fill:var(--text-light); text-anchor:middle;">Build the structure first. Validate at every stage. Draft with confidence.</text>
 </svg>
 
 <div class="prose">
