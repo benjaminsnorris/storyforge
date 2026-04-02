@@ -41,6 +41,7 @@ Stages:
   architecture   Expand spine to 15-25 scenes with structure
   map            Full scene map with locations, timeline, characters
   briefs         Write drafting contracts for each scene
+  gap-fill       Fill missing fields in extracted scene data
 
 Options:
   --stage STAGE    Required. Which elaboration stage to run.
@@ -72,8 +73,8 @@ if [[ -z "$STAGE" ]]; then
 fi
 
 case "$STAGE" in
-    spine|architecture|map|briefs) ;;
-    *) echo "ERROR: Unknown stage: $STAGE (expected: spine|architecture|map|briefs)" >&2; exit 1 ;;
+    spine|architecture|map|briefs|gap-fill) ;;
+    *) echo "ERROR: Unknown stage: $STAGE (expected: spine|architecture|map|briefs|gap-fill)" >&2; exit 1 ;;
 esac
 
 # API key required for non-interactive, non-dry-run
@@ -105,6 +106,370 @@ log "============================================"
 # ============================================================================
 # Build prompt
 # ============================================================================
+
+if [[ "$STAGE" == "gap-fill" ]]; then
+    # ============================================================================
+    # Gap-fill: analyze gaps, batch-fill parallel fields, sequential knowledge fix
+    # ============================================================================
+
+    REF_DIR="${PROJECT_DIR}/reference"
+    SCENES_DIR="${PROJECT_DIR}/scenes"
+    GAP_DIR="${PROJECT_DIR}/working/gap-fill"
+    mkdir -p "$GAP_DIR"
+
+    log "Analyzing gaps..."
+
+    GAP_ANALYSIS=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import json
+from storyforge.elaborate import analyze_gaps
+gaps = analyze_gaps('${REF_DIR}')
+print(json.dumps(gaps))
+")
+
+    TOTAL_GAPS=$(echo "$GAP_ANALYSIS" | python3 -c "import sys, json; g=json.load(sys.stdin); print(g['total_gaps'])")
+    GROUP_COUNT=$(echo "$GAP_ANALYSIS" | python3 -c "import sys, json; g=json.load(sys.stdin); print(len(g['groups']))")
+
+    if [[ "$TOTAL_GAPS" == "0" && "$GROUP_COUNT" == "0" ]]; then
+        log "No gaps found — all validation checks pass."
+    else
+        log "Found ${TOTAL_GAPS} field gaps across ${GROUP_COUNT} group(s)"
+
+        # Print gap summary
+        echo "$GAP_ANALYSIS" | python3 -c "
+import sys, json
+gaps = json.load(sys.stdin)
+for name, group in gaps['groups'].items():
+    scenes = group['scenes']
+    count = group['count']
+    print(f'  {name}: {count} missing field(s) across {len(scenes)} scene(s)')
+" | while IFS= read -r line; do log "$line"; done
+
+        if [[ "$DRY_RUN" == true ]]; then
+            log "DRY RUN — would fill these gaps"
+            echo "$GAP_ANALYSIS" | python3 -c "
+import sys, json
+gaps = json.load(sys.stdin)
+for name, group in gaps['groups'].items():
+    print(f'=== {name} ({group[\"batch_type\"]}) ===')
+    for sid, fields in group['scenes'].items():
+        print(f'  {sid}: {fields}')
+"
+            exit 0
+        fi
+
+        # --- Branch and PR ---
+        create_branch "gap-fill" "$PROJECT_DIR"
+        ensure_branch_pushed "$PROJECT_DIR"
+
+        PR_BODY="## Gap-Fill: ${PROJECT_TITLE}
+
+**Gaps found:** ${TOTAL_GAPS} across ${GROUP_COUNT} group(s)
+
+### Tasks
+- [ ] Fill parallel field gaps
+- [ ] Fix knowledge chain
+- [ ] Validate"
+
+        create_draft_pr "Elaborate: ${PROJECT_TITLE} — gap-fill" "$PR_BODY" "$PROJECT_DIR" "elaboration"
+
+        GAP_MODEL=$(select_model "evaluation")  # Sonnet for analytical gap-fill
+
+        # --- Parallel gap groups: build single batch ---
+        PARALLEL_GROUPS=$(echo "$GAP_ANALYSIS" | python3 -c "
+import sys, json
+gaps = json.load(sys.stdin)
+parallel = {k: v for k, v in gaps['groups'].items() if v['batch_type'] == 'parallel'}
+print(json.dumps(parallel))
+")
+
+        PARALLEL_COUNT=$(echo "$PARALLEL_GROUPS" | python3 -c "import sys, json; g=json.load(sys.stdin); print(sum(len(v['scenes']) for v in g.values()))")
+
+        if [[ "$PARALLEL_COUNT" != "0" ]]; then
+            log "Building batch for ${PARALLEL_COUNT} parallel gap-fill requests..."
+
+            BATCH_FILE="${GAP_DIR}/gap-fill-batch.jsonl"
+            BATCH_OUTPUT="${GAP_DIR}/batch-output"
+            BATCH_LOGS="${GAP_DIR}/batch-logs"
+            mkdir -p "$BATCH_OUTPUT" "$BATCH_LOGS"
+
+            PYTHONPATH="$PYTHON_LIB" python3 -c "
+import json, sys
+from storyforge.prompts_elaborate import build_gap_fill_prompt
+
+parallel_groups = json.loads('''${PARALLEL_GROUPS}''')
+project_dir = '${PROJECT_DIR}'
+scenes_dir = '${SCENES_DIR}'
+model = '${GAP_MODEL}'
+
+with open('${BATCH_FILE}', 'w') as f:
+    for group_name, group_data in parallel_groups.items():
+        for scene_id, missing_fields in group_data['scenes'].items():
+            prompt = build_gap_fill_prompt(
+                scene_id=scene_id,
+                gap_group=group_name,
+                missing_fields=missing_fields,
+                project_dir=project_dir,
+                scenes_dir=scenes_dir,
+            )
+            custom_id = f'{group_name}:{scene_id}'
+            req = {
+                'custom_id': custom_id,
+                'params': {
+                    'model': model,
+                    'max_tokens': 256,
+                    'messages': [{'role': 'user', 'content': prompt}],
+                },
+            }
+            f.write(json.dumps(req) + '\n')
+print('ok')
+"
+
+            log "Submitting batch..."
+            BATCH_ID=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.api submit-batch "$BATCH_FILE")
+            log "Batch ID: ${BATCH_ID}"
+
+            log "Polling batch..."
+            RESULTS_URL=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.api poll-batch "$BATCH_ID")
+
+            log "Downloading results..."
+            SUCCEEDED=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.api download-results "$RESULTS_URL" "$BATCH_OUTPUT" "$BATCH_LOGS")
+
+            # Parse and apply results
+            log "Applying parallel gap-fill results..."
+
+            PYTHONPATH="$PYTHON_LIB" python3 -c "
+import os, json
+from storyforge.elaborate import update_scene
+from storyforge.prompts_elaborate import csv_block_to_rows
+
+batch_logs = '${BATCH_LOGS}'
+ref_dir = '${REF_DIR}'
+batch_output = '${BATCH_OUTPUT}'
+applied = 0
+
+for fname in os.listdir(batch_logs):
+    if not fname.endswith('.txt'):
+        continue
+    custom_id = fname[:-4]  # strip .txt
+    status_file = os.path.join(batch_output, f'.status-{custom_id}')
+    if not os.path.exists(status_file) or open(status_file).read().strip() != 'ok':
+        continue
+
+    text = open(os.path.join(batch_logs, fname)).read().strip()
+    rows = csv_block_to_rows(text)
+    if not rows:
+        continue
+
+    row = rows[0]
+    scene_id = row.get('id', '')
+    if not scene_id:
+        scene_id = custom_id.split(':', 1)[-1] if ':' in custom_id else ''
+    if not scene_id:
+        continue
+
+    updates = {k: v for k, v in row.items() if k != 'id' and v.strip()}
+    if updates:
+        update_scene(scene_id, ref_dir, updates)
+        applied += 1
+
+print(f'Applied {applied} gap-fill results')
+" 2>&1 | while IFS= read -r line; do log "  $line"; done
+
+            update_pr_task "Fill parallel field gaps" "$PROJECT_DIR" 2>/dev/null || true
+        fi
+
+        # --- Sequential knowledge fix ---
+        KNOWLEDGE_GROUP=$(echo "$GAP_ANALYSIS" | python3 -c "
+import sys, json
+gaps = json.load(sys.stdin)
+kg = gaps['groups'].get('knowledge', {})
+print(json.dumps(kg))
+")
+
+        KNOWLEDGE_COUNT=$(echo "$KNOWLEDGE_GROUP" | python3 -c "import sys, json; g=json.load(sys.stdin); print(len(g.get('scenes', {})))")
+
+        KNOWLEDGE_FAILURES=$(echo "$GAP_ANALYSIS" | python3 -c "
+import sys, json
+gaps = json.load(sys.stdin)
+kf = [f for f in gaps['validation']['failures'] if f['category'] == 'knowledge']
+print(len(kf))
+")
+
+        if [[ "$KNOWLEDGE_COUNT" != "0" || "$KNOWLEDGE_FAILURES" != "0" ]]; then
+            log "Running sequential knowledge fix (${KNOWLEDGE_COUNT} empty fields, ${KNOWLEDGE_FAILURES} wording mismatches)..."
+
+            _SF_INVOCATION_START=$(date +%s)
+            export _SF_INVOCATION_START
+
+            PYTHONPATH="$PYTHON_LIB" python3 -c "
+import os, json
+from storyforge.elaborate import get_scenes, update_scene
+from storyforge.prompts_elaborate import build_knowledge_fix_prompt, csv_block_to_rows
+from storyforge.api import invoke, extract_text
+
+ref_dir = '${REF_DIR}'
+scenes_dir = '${SCENES_DIR}'
+project_dir = '${PROJECT_DIR}'
+model = '${GAP_MODEL}'
+log_dir = '${GAP_DIR}/knowledge-logs'
+os.makedirs(log_dir, exist_ok=True)
+
+all_scenes = get_scenes(ref_dir, columns=[
+    'id', 'seq', 'knowledge_in', 'knowledge_out', 'continuity_deps',
+])
+
+available_knowledge = set()
+fixed = 0
+
+for scene in all_scenes:
+    sid = scene['id']
+    kin = scene.get('knowledge_in', '').strip()
+    kout = scene.get('knowledge_out', '').strip()
+
+    needs_fix = False
+    if not kin and int(scene.get('seq', 0)) > 1:
+        needs_fix = True
+    elif not kout:
+        needs_fix = True
+    elif kin and available_knowledge:
+        facts_in = {f.strip() for f in kin.split(';') if f.strip()}
+        if not facts_in.issubset(available_knowledge):
+            needs_fix = True
+
+    if needs_fix:
+        prompt = build_knowledge_fix_prompt(
+            scene_id=sid,
+            project_dir=project_dir,
+            scenes_dir=scenes_dir,
+            available_knowledge=available_knowledge,
+        )
+
+        log_file = os.path.join(log_dir, f'{sid}.json')
+        response = invoke(prompt, model, max_tokens=512)
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+
+        text = extract_text(response)
+        rows = csv_block_to_rows(text)
+        if rows:
+            row = rows[0]
+            updates = {k: v for k, v in row.items() if k != 'id' and v.strip()}
+            if updates:
+                update_scene(sid, ref_dir, updates)
+                fixed += 1
+                new_kout = updates.get('knowledge_out', kout)
+                if new_kout:
+                    for fact in new_kout.split(';'):
+                        fact = fact.strip()
+                        if fact:
+                            available_knowledge.add(fact)
+                continue
+
+    if kout:
+        for fact in kout.split(';'):
+            fact = fact.strip()
+            if fact:
+                available_knowledge.add(fact)
+
+print(f'Fixed {fixed} scenes')
+" 2>&1 | while IFS= read -r line; do log "  $line"; done
+
+            update_pr_task "Fix knowledge chain" "$PROJECT_DIR" 2>/dev/null || true
+        fi
+
+        # Commit gap-fill results
+        (
+            cd "$PROJECT_DIR"
+            git add -A
+            git commit -m "Elaborate: gap-fill pass" 2>/dev/null || true
+            git push 2>/dev/null || true
+        )
+    fi
+
+    # ============================================================================
+    # Validate (always runs, even if no gaps were found)
+    # ============================================================================
+
+    log "Running validation..."
+
+    VALIDATE_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import json
+from storyforge.elaborate import validate_structure
+report = validate_structure('${REF_DIR}')
+print(json.dumps(report))
+")
+
+    VALIDATE_PASSED=$(echo "$VALIDATE_RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r['passed'])")
+    VALIDATE_FAILURES=$(echo "$VALIDATE_RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(len(r['failures']))")
+    INITIAL_GAPS="${TOTAL_GAPS:-0}"
+
+    if [[ "$VALIDATE_PASSED" == "True" ]]; then
+        log "Validation passed — all gaps filled."
+    else
+        log "Validation: ${VALIDATE_FAILURES} issue(s) remaining (started with ${INITIAL_GAPS} field gaps)"
+        echo "$VALIDATE_RESULT" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+for f in r['failures']:
+    sev = f.get('severity', 'blocking')
+    scene = f.get('scene_id', '')
+    prefix = f'  [{sev}]'
+    if scene:
+        prefix += f' {scene}:'
+    print(f\"{prefix} {f['message']}\")
+" | while IFS= read -r line; do log "$line"; done
+        log ""
+        log "Run gap-fill again to continue filling remaining gaps."
+    fi
+
+    update_pr_task "Validate" "$PROJECT_DIR" 2>/dev/null || true
+
+    VALIDATE_FILE="${PROJECT_DIR}/working/validation/validate-$(date '+%Y%m%d-%H%M%S').md"
+    mkdir -p "$(dirname "$VALIDATE_FILE")"
+    echo "$VALIDATE_RESULT" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+print('# Validation Report: gap-fill')
+print()
+print(f'**Passed:** {r[\"passed\"]}')
+print(f'**Checks:** {len(r[\"checks\"])}')
+print(f'**Failures:** {len(r[\"failures\"])}')
+print()
+if r['failures']:
+    print('## Failures')
+    print()
+    for f in r['failures']:
+        sev = f.get('severity', 'blocking')
+        scene = f.get('scene_id', '')
+        msg = f['message']
+        if scene:
+            print(f'- **[{sev}]** {scene}: {msg}')
+        else:
+            print(f'- **[{sev}]** {msg}')
+" > "$VALIDATE_FILE"
+
+    (
+        cd "$PROJECT_DIR"
+        git add -A
+        git commit -m "Elaborate: gap-fill validation report" 2>/dev/null || true
+        git push 2>/dev/null || true
+    )
+
+    run_review_phase "elaboration" "$PROJECT_DIR"
+
+    log ""
+    log "============================================"
+    log "Gap-fill complete."
+    if [[ "$VALIDATE_PASSED" == "True" ]]; then
+        log "Validation: PASSED"
+    else
+        log "Validation: ${VALIDATE_FAILURES} issue(s) remaining — run again to continue"
+    fi
+    log "============================================"
+
+    print_cost_summary "elaborate-gap-fill" 2>/dev/null || true
+    exit 0
+fi
 
 log "Building ${STAGE} prompt..."
 
