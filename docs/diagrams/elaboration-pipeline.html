@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storyforge — The Elaboration Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --font-body: 'Instrument Serif', Georgia, serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+  --bg: #faf8f5;
+  --surface: #ffffff;
+  --surface2: #f3efe9;
+  --border: rgba(0,0,0,0.07);
+  --border-bright: rgba(0,0,0,0.14);
+  --text: #1e1a14;
+  --text-dim: #8a7e6f;
+  --text-light: #b5a898;
+  --deep-blue: #1e3a5f;
+  --deep-blue-dim: rgba(30,58,95,0.07);
+  --gold: #d4a73a;
+  --gold-dim: rgba(212,167,58,0.08);
+  --teal: #0f766e;
+  --teal-dim: rgba(15,118,110,0.06);
+  --rose: #be123c;
+  --rose-dim: rgba(190,18,60,0.06);
+  --sage: #4d7c0f;
+  --sage-dim: rgba(77,124,15,0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141210;
+    --surface: #1e1b18;
+    --surface2: #28241f;
+    --border: rgba(255,255,255,0.06);
+    --border-bright: rgba(255,255,255,0.12);
+    --text: #ede5d8;
+    --text-dim: #a69880;
+    --text-light: #6b6054;
+    --deep-blue: #7db4e0;
+    --deep-blue-dim: rgba(125,180,224,0.1);
+    --gold: #f0c84a;
+    --gold-dim: rgba(240,200,74,0.1);
+    --teal: #5eead4;
+    --teal-dim: rgba(94,234,212,0.08);
+    --rose: #fda4af;
+    --rose-dim: rgba(253,164,175,0.08);
+    --sage: #bef264;
+    --sage-dim: rgba(190,242,100,0.08);
+  }
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  background-image: radial-gradient(ellipse at 30% 0%, var(--gold-dim) 0%, transparent 50%),
+                    radial-gradient(ellipse at 70% 80%, var(--deep-blue-dim) 0%, transparent 50%);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+.page { max-width: 960px; margin: 0 auto; padding: 60px 24px 80px; }
+
+/* Header */
+.hero { text-align: center; margin-bottom: 56px; }
+.hero h1 { font-size: 42px; font-weight: 400; letter-spacing: -0.5px; margin-bottom: 12px; }
+.hero .accent { color: var(--gold); }
+.hero .lead { font-size: 20px; color: var(--text-dim); max-width: 640px; margin: 0 auto; line-height: 1.5; }
+.mono-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-light); }
+
+/* Pipeline flow */
+.pipeline { display: flex; flex-direction: column; gap: 0; margin: 40px 0; }
+.stage-row { display: grid; grid-template-columns: 120px 1fr; gap: 20px; align-items: start; }
+.stage-label { font-family: var(--font-mono); font-size: 12px; font-weight: 600; padding-top: 18px; text-align: right; color: var(--text-dim); }
+.stage-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 24px;
+  position: relative;
+  animation: fadeUp 0.5s ease both;
+}
+.stage-card h3 { font-size: 20px; font-weight: 400; margin-bottom: 6px; }
+.stage-card p { color: var(--text-dim); font-size: 15px; }
+.stage-card .outputs { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { font-family: var(--font-mono); font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface2); color: var(--text-dim); }
+
+/* Stage colors */
+.stage-spine { border-left: 3px solid var(--gold); }
+.stage-arch { border-left: 3px solid var(--deep-blue); }
+.stage-voice { border-left: 3px solid var(--rose); }
+.stage-map { border-left: 3px solid var(--teal); }
+.stage-brief { border-left: 3px solid var(--sage); }
+.stage-draft { border-left: 3px solid var(--gold); }
+.stage-eval { border-left: 3px solid var(--deep-blue); }
+.stage-polish { border-left: 3px solid var(--rose); }
+
+/* Arrow connector */
+.arrow { text-align: center; padding: 4px 0; color: var(--text-light); font-size: 18px; }
+
+/* Gate marker */
+.gate { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--teal); background: var(--teal-dim); padding: 3px 10px; border-radius: 12px; margin-top: 8px; }
+.gate::before { content: '✓'; font-weight: 600; }
+
+/* Comparison section */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 48px 0; }
+.compare-card { padding: 24px; border-radius: 10px; border: 1px solid var(--border); }
+.compare-card h3 { font-size: 16px; font-weight: 600; font-family: var(--font-mono); margin-bottom: 12px; }
+.compare-old { background: var(--rose-dim); }
+.compare-new { background: var(--sage-dim); }
+.compare-card ul { list-style: none; padding: 0; }
+.compare-card li { padding: 4px 0; font-size: 14px; color: var(--text-dim); }
+.compare-card li::before { content: '→ '; color: var(--text-light); }
+
+/* Data model section */
+.files { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 32px 0; }
+.file-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.file-card h4 { font-family: var(--font-mono); font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.file-card .desc { font-size: 13px; color: var(--text-dim); margin-bottom: 8px; }
+.file-card .cols { font-family: var(--font-mono); font-size: 10px; color: var(--text-light); line-height: 1.8; }
+
+/* Coaching section */
+.coaching { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 32px 0; }
+.coaching-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; text-align: center; }
+.coaching-card h4 { font-size: 18px; margin-bottom: 4px; }
+.coaching-card .role { font-family: var(--font-mono); font-size: 11px; color: var(--gold); margin-bottom: 12px; }
+.coaching-card p { font-size: 13px; color: var(--text-dim); }
+
+/* Section headers */
+.sec-title { font-size: 28px; font-weight: 400; margin: 56px 0 8px; }
+.sec-sub { color: var(--text-dim); font-size: 16px; margin-bottom: 24px; }
+
+/* Animations */
+@keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+.stage-card:nth-child(1) { animation-delay: 0s; }
+.stage-card:nth-child(2) { animation-delay: 0.05s; }
+.stage-card:nth-child(3) { animation-delay: 0.1s; }
+@media (prefers-reduced-motion: reduce) { .stage-card { animation: none; } }
+
+/* Responsive */
+@media (max-width: 680px) {
+  .hero h1 { font-size: 28px; }
+  .stage-row { grid-template-columns: 1fr; }
+  .stage-label { text-align: left; padding-top: 0; }
+  .compare { grid-template-columns: 1fr; }
+  .files { grid-template-columns: 1fr; }
+  .coaching { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="hero">
+  <div class="mono-label">Storyforge</div>
+  <h1>The <span class="accent">Elaboration</span> Pipeline</h1>
+  <p class="lead">Build structural integrity before writing prose. Catch continuity errors, knowledge violations, and pacing problems when they're CSV edits — not prose rewrites.</p>
+</div>
+
+<!-- ═══ THE PIPELINE ═══ -->
+
+<div class="pipeline">
+
+  <div class="stage-row">
+    <div class="stage-label">Stage 1</div>
+    <div class="stage-card stage-spine">
+      <h3>Spine</h3>
+      <p>The 5–10 irreducible story events. What must happen, and why. The protagonist's wound/lie/need, the antagonist force, the three-level conflict.</p>
+      <div class="outputs"><span class="tag">story-architecture.md</span><span class="tag">character-bible.md</span><span class="tag">scenes.csv (seed)</span></div>
+      <div class="gate">Validation gate — PR review</div>
+    </div>
+  </div>
+
+  <div class="arrow">↓</div>
+
+  <div class="stage-row">
+    <div class="stage-label">Stage 2</div>
+    <div class="stage-card stage-arch">
+      <h3>Architecture</h3>
+      <p>Expand to 15–25 scenes. Assign POV, acts, value shifts (McKee), scene types (Swain action/sequel), turning points (Story Grid), thread structure.</p>
+      <div class="outputs"><span class="tag">scene_type</span><span class="tag">value_shift</span><span class="tag">turning_point</span><span class="tag">threads</span></div>
+      <div class="gate">Validation gate — PR review</div>
+    </div>
+  </div>
+
+  <div class="arrow">↓</div>
+
+  <div class="stage-row">
+    <div class="stage-label">Stage 2.5</div>
+    <div class="stage-card stage-voice">
+      <h3>Voice</h3>
+      <p>Define the prose voice and style. POV-specific rules, character voice fingerprints, register, rhythm. Needs architecture (you know your characters); feeds briefs (they need voice rules).</p>
+      <div class="outputs"><span class="tag">voice-guide.md</span></div>
+    </div>
+  </div>
+
+  <div class="arrow">↓</div>
+
+  <div class="stage-row">
+    <div class="stage-label">Stage 3</div>
+    <div class="stage-card stage-map">
+      <h3>Scene Map</h3>
+      <p>Full scene count (40–60). Locations, timeline, characters present, MICE thread tracking with FILO nesting order (Kowal).</p>
+      <div class="outputs"><span class="tag">characters</span><span class="tag">on_stage</span><span class="tag">mice_threads</span><span class="tag">timeline_day</span><span class="tag">location</span></div>
+      <div class="gate">Validation gate — PR review</div>
+    </div>
+  </div>
+
+  <div class="arrow">↓</div>
+
+  <div class="stage-row">
+    <div class="stage-label">Stage 4</div>
+    <div class="stage-card stage-brief">
+      <h3>Briefs</h3>
+      <p>The drafting contract per scene. Goal, conflict, outcome, crisis, decision (Story Grid Five Commandments). Knowledge entering and leaving. Key actions and dialogue. Continuity dependencies for parallel drafting.</p>
+      <div class="outputs"><span class="tag">goal</span><span class="tag">conflict</span><span class="tag">outcome</span><span class="tag">knowledge_in</span><span class="tag">knowledge_out</span><span class="tag">continuity_deps</span></div>
+      <div class="gate">Validation gate — structural scoring + PR review</div>
+    </div>
+  </div>
+
+  <div class="arrow">↓</div>
+
+  <div class="stage-row">
+    <div class="stage-label">Draft</div>
+    <div class="stage-card stage-draft">
+      <h3>Parallel Drafting</h3>
+      <p>Scenes drafted in parallel waves from validated briefs. Each scene gets its brief + dependency context + voice guide. No full manuscript in context — the brief is the contract.</p>
+      <div class="outputs"><span class="tag">scenes/*.md</span><span class="tag">wave-based parallelism</span></div>
+    </div>
+  </div>
+
+  <div class="arrow">↓</div>
+
+  <div class="stage-row">
+    <div class="stage-label">Evaluate</div>
+    <div class="stage-card stage-eval">
+      <h3>Multi-Perspective Evaluation</h3>
+      <p>Six expert perspectives. Findings categorized by fix location: structural findings → fix CSV upstream. Craft findings → polish prose.</p>
+      <div class="outputs"><span class="tag">fix_location: brief</span><span class="tag">fix_location: intent</span><span class="tag">fix_location: craft</span></div>
+    </div>
+  </div>
+
+  <div class="arrow">↓</div>
+
+  <div class="stage-row">
+    <div class="stage-label">Polish</div>
+    <div class="stage-card stage-polish">
+      <h3>Prose Polish</h3>
+      <p>One targeted pass. Voice, rhythm, naturalness. Not structural — that's already handled upstream. The only revision pass needed.</p>
+      <div class="outputs"><span class="tag">polished scenes</span><span class="tag">fidelity scoring</span></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══ KEY PRINCIPLES ═══ -->
+
+<h2 class="sec-title">Key Principles</h2>
+<p class="sec-sub">The ideas that make elaboration work.</p>
+
+<div class="files" style="grid-template-columns: repeat(2, 1fr);">
+  <div class="file-card">
+    <h4 style="color: var(--gold);">Validate Cheap, Fix Cheap</h4>
+    <div class="desc">Problems caught as CSV edits cost nothing. Problems caught in prose cost revision cycles. Every stage runs validation before advancing.</div>
+  </div>
+  <div class="file-card">
+    <h4 style="color: var(--deep-blue);">Parallel Drafting</h4>
+    <div class="desc">Scenes with no continuity dependencies draft simultaneously. The dependency graph determines wave grouping — most novels need 3–5 waves for 40–60 scenes.</div>
+  </div>
+  <div class="file-card">
+    <h4 style="color: var(--teal);">Evaluation Feeds Upstream</h4>
+    <div class="desc">When evaluators find a problem, the fix goes to the CSV that owns it — not to the prose. Revised briefs produce revised scenes with the fix built in.</div>
+  </div>
+  <div class="file-card">
+    <h4 style="color: var(--rose);">Coaching Levels Are Roles</h4>
+    <div class="desc">Full = creative partner. Coach = dramaturg. Strict = continuity editor. Each role is genuinely valuable — the validation engine alone is worth the price of admission.</div>
+  </div>
+</div>
+
+<!-- ═══ DATA MODEL ═══ -->
+
+<h2 class="sec-title">Three-File Scene Model</h2>
+<p class="sec-sub">Each stage populates columns in three joined CSV files. Python helpers provide a unified interface.</p>
+
+<div class="files">
+  <div class="file-card">
+    <h4>scenes.csv</h4>
+    <div class="desc">Structural identity — where is this scene and what is it?</div>
+    <div class="cols">id · seq · title · part · pov<br>location · timeline_day · type<br>status · word_count · target_words</div>
+  </div>
+  <div class="file-card">
+    <h4>scene-intent.csv</h4>
+    <div class="desc">Narrative dynamics — what does this scene accomplish?</div>
+    <div class="cols">function · scene_type · emotional_arc<br>value_at_stake · value_shift<br>turning_point · threads<br>characters · on_stage · mice_threads</div>
+  </div>
+  <div class="file-card">
+    <h4>scene-briefs.csv</h4>
+    <div class="desc">Drafting contract — what exactly happens?</div>
+    <div class="cols">goal · conflict · outcome<br>crisis · decision<br>knowledge_in · knowledge_out<br>key_actions · key_dialogue<br>emotions · motifs · continuity_deps</div>
+  </div>
+</div>
+
+<!-- ═══ COACHING LEVELS ═══ -->
+
+<h2 class="sec-title">Three Ways to Work</h2>
+<p class="sec-sub">Coaching levels determine Claude's role — not how much help, but what kind.</p>
+
+<div class="coaching">
+  <div class="coaching-card">
+    <h4>Full</h4>
+    <div class="role">Creative Partner</div>
+    <p>Claude proposes the spine, builds architecture, writes briefs, drafts scenes. Author reviews at PR gates. Could be surprised by creative choices — the guardrails ensure quality.</p>
+  </div>
+  <div class="coaching-card">
+    <h4>Coach</h4>
+    <div class="role">Dramaturg</div>
+    <p>Claude presents options and asks questions. "Here are three possible spines — which resonates?" Author makes every creative decision; Claude structures and organizes.</p>
+  </div>
+  <div class="coaching-card">
+    <h4>Strict</h4>
+    <div class="role">Continuity Editor</div>
+    <p>Author writes everything. Claude runs validation — exhaustive structural checking across 50+ scenes that's genuinely hard for humans. The validation engine is the product.</p>
+  </div>
+</div>
+
+<!-- ═══ CRAFT FOUNDATIONS ═══ -->
+
+<h2 class="sec-title">Built on Craft</h2>
+<p class="sec-sub">Every column in the data model maps to an established craft principle.</p>
+
+<div class="files" style="grid-template-columns: repeat(2, 1fr);">
+  <div class="file-card">
+    <h4 style="color: var(--deep-blue);">Robert McKee</h4>
+    <div class="desc">Value at stake, value shift, polarity tracking. A scene that doesn't shift a value is a nonevent.</div>
+  </div>
+  <div class="file-card">
+    <h4 style="color: var(--gold);">Dwight Swain</h4>
+    <div class="desc">Action/sequel pattern. Goal → conflict → outcome. Reaction → dilemma → decision. The rhythm of breathing.</div>
+  </div>
+  <div class="file-card">
+    <h4 style="color: var(--teal);">Shawn Coyne</h4>
+    <div class="desc">Five Commandments per scene. Inciting incident, progressive complications, crisis, climax, resolution.</div>
+  </div>
+  <div class="file-card">
+    <h4 style="color: var(--rose);">Mary Robinette Kowal</h4>
+    <div class="desc">MICE quotient. Thread typing (milieu, inquiry, character, event) with FILO nesting order.</div>
+  </div>
+</div>
+
+<div style="text-align:center; margin-top:48px; color:var(--text-light); font-family:var(--font-mono); font-size:11px;">
+  Storyforge — A novel-writing toolkit for Claude Code
+</div>
+
+</div>
+</body>
+</html>
