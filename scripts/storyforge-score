@@ -783,6 +783,7 @@ print(build_fidelity_prompt('${id}', '${PROJECT_DIR}', '${PLUGIN_DIR}'))
                 begin_healing_zone "fidelity batch"
                 FIDELITY_BATCH_ID=$(submit_batch "$FIDELITY_BATCH")
                 poll_batch "$FIDELITY_BATCH_ID"
+                mkdir -p "${LOG_DIR}/fidelity-output"
                 download_batch_results "$FIDELITY_BATCH_ID" "${LOG_DIR}/fidelity-output" "$LOG_DIR"
                 end_healing_zone
             fi

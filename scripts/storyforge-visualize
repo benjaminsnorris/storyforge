@@ -846,6 +846,19 @@ const NARRATIVE_RATIONALES = _DATA.narrative_rationales;
 const BRIEFS = _DATA.briefs || [];
 const FIDELITY_SCORES = _DATA.fidelity_scores || [];
 const FIDELITY_RATIONALES = _DATA.fidelity_rationales || [];
+
+// Merge briefs data into intents for charts that need it (motifs moved to briefs in elaboration model)
+if (BRIEFS.length) {
+    const briefsById = {};
+    BRIEFS.forEach(b => { briefsById[b.id] = b; });
+    INTENTS.forEach(intent => {
+        const brief = briefsById[intent.id];
+        if (brief) {
+            if (!intent.motifs && brief.motifs) intent.motifs = brief.motifs;
+            if (!intent.notes && brief.key_actions) intent.notes = brief.key_actions;
+        }
+    });
+}
 EOF
 
 cat >> "$DASHBOARD_FILE" << 'HTMLEOF'
@@ -2496,14 +2509,16 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     const section = document.getElementById('value-shift-section');
     if (!container || !INTENTS.length) return;
 
-    // Parse value shifts: +/-, -/+, +/++, -/--, etc.
+    // Parse value shifts: "+/- — explanation..." → extract just the +/- part
     const shifts = [];
     INTENTS.forEach((intent, i) => {
-        const vs = (intent.value_shift || '').trim();
-        if (!vs || !vs.includes('/')) return;
-        const parts = vs.split('/');
-        const fromVal = parts[0].trim();
-        const toVal = parts[1].trim();
+        const vsRaw = (intent.value_shift || '').trim();
+        if (!vsRaw) return;
+        // Extract the polarity notation before any explanation
+        const match = vsRaw.match(/^([+\-]+)\s*\/\s*([+\-]+)/);
+        if (!match) return;
+        const fromVal = match[1].trim();
+        const toVal = match[2].trim();
 
         // Convert to numeric: + = 1, ++ = 2, - = -1, -- = -2
         function toNum(s) {
@@ -2518,7 +2533,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             index: i,
             from: toNum(fromVal),
             to: toNum(toVal),
-            raw: vs,
+            raw: fromVal + '/' + toVal,
             valueAtStake: intent.value_at_stake || ''
         });
     });
@@ -2585,8 +2600,12 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     const types = [];
     INTENTS.forEach(intent => {
-        const st = (intent.scene_type || '').trim().toLowerCase();
-        const tp = (intent.turning_point || '').trim().toLowerCase();
+        // scene_type may be "action" or "sequel — explanation..."; extract first word
+        const stRaw = (intent.scene_type || '').trim().toLowerCase();
+        const st = stRaw.split(/[\s—–-]/)[0].trim();
+        // turning_point may also have explanation
+        const tpRaw = (intent.turning_point || '').trim().toLowerCase();
+        const tp = tpRaw.split(/[\s—–-]/)[0].trim();
         if (st) types.push({ id: intent.id, sceneType: st, turningPoint: tp });
     });
 
