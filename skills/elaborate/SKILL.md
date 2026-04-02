@@ -30,14 +30,15 @@ Read the following files to understand where the project stands:
 
 Based on the project state, identify where the author is:
 
-| Phase in YAML | scenes.csv rows | Intent depth | Briefs | Current stage |
-|---------------|----------------|--------------|--------|---------------|
-| spine | 0 | — | — | Needs spine |
-| spine | 5-10 | function only | — | Spine done, ready for architecture |
-| architecture | 15-25 | has value_shift, threads | — | Architecture done, ready for map |
-| scene-map | 40-60 | has characters, on_stage | — | Map done, ready for briefs |
-| briefs | 40-60 | full | has goal/conflict/outcome | Briefs done, ready for drafting |
-| drafting+ | — | — | — | Past elaboration — redirect to forge |
+| Phase in YAML | scenes.csv rows | Intent depth | Briefs | Validation | Current stage |
+|---------------|----------------|--------------|--------|------------|---------------|
+| spine | 0 | — | — | — | Needs spine |
+| spine | 5-10 | function only | — | — | Spine done, ready for architecture |
+| architecture | 15-25 | has value_shift, threads | — | — | Architecture done, ready for map |
+| scene-map | 40-60 | has characters, on_stage | — | — | Map done, ready for briefs |
+| briefs | 40-60 | full | has goal/conflict/outcome | — | Briefs done, ready for drafting |
+| drafting+ | status=drafted | populated but gaps | populated | failures > 0 | **Gap-fill mode** |
+| drafting+ | — | — | — | passes | Past elaboration — redirect to forge |
 
 ## Step 3: Determine Mode
 
@@ -51,6 +52,7 @@ Based on the author's request:
 - **"Build the world"** / **"World building"** → World bible development. During elaboration, world building supports the architecture and scene map stages.
 - **"Story architecture"** / **"Theme"** / **"Structure"** → Story architecture refinement. The spine creates the initial architecture; this mode deepens thematic throughlines, conflict structure, and arc planning.
 - **"Validate"** → Run validation on the current state.
+- **Gap-fill state detected** (scenes are drafted, briefs populated, but validation fails) → Gap-fill mode. Analyze gaps and offer to fill them.
 - **Status question** → Report current stage, scene count, validation state.
 
 ## Step 4: Execute the Stage
@@ -159,6 +161,37 @@ Voice development typically happens after architecture (you know your POV charac
 Voice work in coach mode: ask questions about what the author hears in their head — tone, rhythm, register. Don't propose voice; help the author discover it.
 
 Voice work in strict mode: collect the author's voice preferences, format into the voice guide structure, provide the template.
+
+### Gap-Fill Stage (Interactive)
+
+This mode activates when post-extraction data has validation gaps. Run `analyze_gaps()` from `elaborate.py` to categorize failures.
+
+1. Present the gap summary to the author:
+   - List each gap group with count of scenes and missing fields
+   - Note any structural issues (MICE nesting, timeline order, knowledge wording)
+2. Adapt to coaching level:
+   - **Full:** "I found N gap types across M scenes. I'll fill them all — starting with the parallel batches."
+   - **Coach:** "Here are the gaps I found. Which would you like me to work on?" (present each group as a choice)
+   - **Strict:** "Validation report: X scenes missing `type`, Y missing `timeline_day`..." (data only)
+3. Offer the standard two execution options:
+
+> **Option A: Run it here**
+> I'll work through the gaps in this conversation, filling fields by reading the prose.
+>
+> **Option B: Run it autonomously**
+> Copy this command and run it in a separate terminal:
+> ```bash
+> cd [project_dir] && [plugin_path]/scripts/storyforge-elaborate --stage gap-fill
+> ```
+> This creates a branch, fills gaps via batch API, validates, and opens a PR.
+
+If Option A, work through each gap group interactively:
+- For each scene with missing fields, read the prose excerpt and propose values
+- Apply updates using `update_scene()` from `elaborate.py`
+- After all groups, re-run validation
+- If gaps remain, offer to continue
+
+4. Commit: `git add -A && git commit -m "Elaborate: gap-fill" && git push`
 
 ### Character Development (Interactive)
 
