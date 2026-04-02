@@ -31,6 +31,8 @@ mkdir -p "$LOG_DIR"
 PHASE=""  # empty = all phases
 DRY_RUN=false
 EXPAND=false
+CLEANUP=false
+CLEANUP_ONLY=false
 
 usage() {
     cat <<EOF
@@ -38,25 +40,34 @@ Usage: $(basename "$0") [OPTIONS]
 
 Options:
   --phase N         Run only phase N (0=characterize, 1=skeleton, 2=intent, 3=briefs)
+  --cleanup         Run cleanup after extraction (normalize knowledge, fill timeline, fix MICE)
+  --cleanup-only    Run cleanup only (skip extraction phases — use on already-extracted data)
   --expand          Run expansion analysis after extraction
   --dry-run         Print prompts without invoking Claude
   -h, --help        Show this help
+
+Cleanup adapts to coaching level:
+  full     Auto-fix everything possible, report what was fixed
+  coach    Show proposed fixes, ask for confirmation (interactive only)
+  strict   Report issues only, author fixes manually
 EOF
     exit 0
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --phase)   PHASE="${2:?ERROR: --phase requires a value}"; shift 2 ;;
-        --expand)  EXPAND=true; shift ;;
-        --dry-run) DRY_RUN=true; shift ;;
-        -h|--help) usage ;;
-        -*)        echo "ERROR: Unknown option: $1" >&2; usage ;;
-        *)         shift ;;
+        --phase)        PHASE="${2:?ERROR: --phase requires a value}"; shift 2 ;;
+        --cleanup)      CLEANUP=true; shift ;;
+        --cleanup-only) CLEANUP_ONLY=true; CLEANUP=true; shift ;;
+        --expand)       EXPAND=true; shift ;;
+        --dry-run)      DRY_RUN=true; shift ;;
+        -h|--help)      usage ;;
+        -*)             echo "ERROR: Unknown option: $1" >&2; usage ;;
+        *)              shift ;;
     esac
 done
 
-if [[ "$DRY_RUN" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+if [[ "$DRY_RUN" != true && "$CLEANUP_ONLY" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
     log "ERROR: ANTHROPIC_API_KEY not set. Required for extraction."
     exit 1
 fi
@@ -160,6 +171,16 @@ SORTED_SCENE_IDS=()
 while IFS= read -r line; do
     [[ -n "$line" ]] && SORTED_SCENE_IDS+=("$line")
 done <<< "$SORTED_IDS"
+
+# ============================================================================
+# Skip extraction phases if --cleanup-only
+# ============================================================================
+
+if [[ "$CLEANUP_ONLY" == true ]]; then
+    log "Cleanup-only mode — skipping extraction phases"
+    # Ensure cleanup flag is set (should already be)
+    CLEANUP=true
+else
 
 # ============================================================================
 # Phase 0: Characterize
@@ -625,6 +646,83 @@ print(summary)
 
         (cd "$PROJECT_DIR" && git add reference/scene-briefs.csv working/ && git commit -m "Extract: Phase 3b — knowledge chain" && git push) 2>/dev/null || true
         update_pr_task "Phase 3: Extract briefs" "$PROJECT_DIR" 2>/dev/null || true
+    fi
+fi
+
+fi  # end of CLEANUP_ONLY guard
+
+# ============================================================================
+# Cleanup (post-extraction normalization)
+# ============================================================================
+
+# Cleanup runs: always after full extraction, with --cleanup, or with --cleanup-only
+if [[ "$DRY_RUN" != true && ( "$CLEANUP" == true || ( -z "$PHASE" && "$CLEANUP_ONLY" != true ) ) ]]; then
+    log ""
+    log "--- Post-extraction cleanup ---"
+
+    EFFECTIVE_COACHING=$(get_coaching_level 2>/dev/null || echo "full")
+
+    if [[ "$EFFECTIVE_COACHING" == "strict" ]]; then
+        # Strict: report only, don't fix
+        log "  Coaching level: strict — reporting issues only"
+        PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import validate_structure
+
+report = validate_structure('${REF_DIR}')
+categories = {}
+for f in report['failures']:
+    cat = f['category']
+    categories.setdefault(cat, []).append(f)
+
+for cat, failures in sorted(categories.items()):
+    print(f'{cat}: {len(failures)} issue(s)')
+    for f in failures[:3]:
+        scene = f.get('scene_id', '')
+        print(f'  [{scene}] {f[\"message\"][:100]}')
+    if len(failures) > 3:
+        print(f'  ... and {len(failures) - 3} more')
+print(f'Total: {len(report[\"failures\"])} issues for author to review')
+" 2>&1 | while IFS= read -r line; do log "  $line"; done
+
+    else
+        # Full or coach: auto-fix
+        CLEANUP_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import run_cleanup
+result = run_cleanup('${REF_DIR}')
+print(json.dumps(result))
+")
+
+        TOTAL_FIXES=$(echo "$CLEANUP_RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r['total_fixes'])")
+
+        if (( TOTAL_FIXES > 0 )); then
+            log "  Cleanup applied ${TOTAL_FIXES} fixes:"
+            echo "$CLEANUP_RESULT" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+for cat in ['timeline', 'knowledge', 'mice_threads']:
+    data = r[cat]
+    if data['count'] > 0:
+        print(f'    {cat}: {data[\"count\"]} fixes')
+        for fix in data['fixes'][:3]:
+            sid = fix.get('scene_id', '')
+            old = fix.get('old_value', '')
+            new = fix.get('new_value', '')
+            print(f'      {sid}: {old[:40]} → {new[:40]}')
+        if data['count'] > 3:
+            print(f'      ... and {data[\"count\"] - 3} more')
+" 2>&1 | while IFS= read -r line; do log "$line"; done
+
+            (
+                cd "$PROJECT_DIR"
+                git add reference/ 2>/dev/null || true
+                git commit -m "Extract: cleanup — ${TOTAL_FIXES} fixes (timeline, knowledge, MICE)" 2>/dev/null || true
+                git push 2>/dev/null || true
+            )
+        else
+            log "  No cleanup fixes needed"
+        fi
     fi
 fi
 
