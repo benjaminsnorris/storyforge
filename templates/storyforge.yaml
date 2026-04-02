@@ -134,16 +134,20 @@ evaluation:
 # Current workflow phase. Controls which skills are available and which
 # guardrails are active. Advances as the project progresses.
 #
-# Valid values:
-#   development   — world-building, characters, systems design
-#   scene-design  — designing scenes, building the scene index
-#   drafting      — writing prose against the scene index
-#   evaluation    — reviewing drafts with evaluators
-#   revision      — revising based on evaluation feedback
-#   review        — assessing revision results, deciding next cycle
-#   complete      — manuscript finished, artifacts locked
+# Elaboration pipeline (new projects):
+#   spine         — irreducible story events, protagonist, premise
+#   architecture  — acts, POV, value shifts, threads, supporting characters
+#   scene-map     — full scene count, locations, timeline, MICE threads
+#   briefs        — drafting contracts: goal/conflict/outcome, knowledge states
+#   drafting      — writing prose from validated briefs
+#   evaluation    — multi-perspective review, findings routed upstream
+#   polish        — prose-level craft pass (voice, rhythm, naturalness)
 #   production    — assembling scenes into chapters, generating epub/PDF
-phase: development
+#
+# Legacy pipeline (existing projects):
+#   development, scene-design, drafting, evaluation, revision, review,
+#   complete, production
+phase: spine
 
 # ----------------------------------------------------------------------------
 # Parts (optional)

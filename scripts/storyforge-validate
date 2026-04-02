@@ -1,0 +1,92 @@
+#!/bin/bash
+# storyforge-validate — Run structural validation on scene CSVs
+#
+# Usage:
+#   ./storyforge validate                  # Validate current project
+#   ./storyforge validate --json           # Output as JSON
+#   ./storyforge validate --quiet          # Exit code only (0=pass, 1=fail)
+set -eo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
+
+detect_project_root
+
+# Parse args
+JSON_OUTPUT=false
+QUIET=false
+for arg in "$@"; do
+    case "$arg" in
+        --json)   JSON_OUTPUT=true ;;
+        --quiet)  QUIET=true ;;
+        -h|--help)
+            echo "Usage: storyforge validate [--json] [--quiet]"
+            echo "  --json   Output results as JSON"
+            echo "  --quiet  Exit code only (0=pass, 1=fail)"
+            exit 0
+            ;;
+    esac
+done
+
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
+REF_DIR="${PROJECT_DIR}/reference"
+
+if [[ ! -f "${REF_DIR}/scenes.csv" ]]; then
+    echo "Error: No scenes.csv found in ${REF_DIR}. Is this an elaboration pipeline project?"
+    exit 1
+fi
+
+RESULT=$(python3 -c "
+import sys, json
+sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import validate_structure
+report = validate_structure('${REF_DIR}')
+print(json.dumps(report, indent=2))
+")
+
+if [[ "$JSON_OUTPUT" == true ]]; then
+    echo "$RESULT"
+elif [[ "$QUIET" != true ]]; then
+    # Human-readable output
+    python3 -c "
+import sys, json
+r = json.loads('''${RESULT}'''.replace(\"'''\", ''))
+total = len(r['checks'])
+fail_count = len(r['failures'])
+if r['passed']:
+    print(f'Validation passed ({total} checks, 0 failures)')
+else:
+    print(f'Validation failed ({total} checks, {fail_count} failure(s)):')
+    for f in r['failures']:
+        severity = f.get('severity', 'blocking')
+        scene = f.get('scene_id', '')
+        prefix = f'  [{severity}]'
+        if scene:
+            prefix += f' {scene}:'
+        print(f\"{prefix} {f['message']}\")
+" 2>/dev/null || {
+        # Fallback if inline python fails (e.g., quotes in JSON)
+        PASSED=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r['passed'])")
+        TOTAL=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(len(r['checks']))")
+        FAIL_COUNT=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(len(r['failures']))")
+        if [[ "$PASSED" == "True" ]]; then
+            log "Validation passed (${TOTAL} checks, 0 failures)"
+        else
+            log "Validation failed (${TOTAL} checks, ${FAIL_COUNT} failure(s)):"
+            echo "$RESULT" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+for f in r['failures']:
+    severity = f.get('severity', 'blocking')
+    scene = f.get('scene_id', '')
+    prefix = f'  [{severity}]'
+    if scene:
+        prefix += f' {scene}:'
+    print(f\"{prefix} {f['message']}\")
+"
+        fi
+    }
+fi
+
+# Exit code based on pass/fail
+echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); sys.exit(0 if r['passed'] else 1)"
