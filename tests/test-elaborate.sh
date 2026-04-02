@@ -563,4 +563,55 @@ assert_contains "$RESULT" "type" "build_gap_fill_prompt: asks for missing field"
 assert_contains "$RESULT" "Bob" "build_gap_fill_prompt: includes prose excerpt"
 assert_contains "$RESULT" "council chamber" "build_gap_fill_prompt: includes scene prose"
 
+# ============================================================================
+# build_knowledge_fix_prompt
+# ============================================================================
+
+TMP_REF=$(mktemp -d)
+TMP_SCENES="${TMP_REF}/scenes"
+mkdir -p "${TMP_SCENES}" "${TMP_REF}/reference"
+
+cat > "${TMP_SCENES}/scene-02.md" <<'PROSE'
+Alice ran the scanner across the anomaly. The readings confirmed what she feared.
+"This shouldn't be possible," she whispered. The anomaly was real, and spreading.
+PROSE
+
+cat > "${TMP_REF}/reference/scenes.csv" <<'GAPCSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+scene-01|1|Opening|1|Alice|The Lab|1|morning|2 hours|character|drafted|2500|2500
+scene-02|2|Discovery|1|Alice|The Lab|1|afternoon|1 hour|action|drafted|3000|3000
+GAPCSV
+
+cat > "${TMP_REF}/reference/scene-intent.csv" <<'GAPCSV'
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+scene-01|Establish the lab|action|calm to focused|truth|+/-|revelation|discovery|Alice|Alice|
+scene-02|Find the anomaly|action|tense to shocked|safety|-/+|action|discovery|Alice|Alice|
+GAPCSV
+
+cat > "${TMP_REF}/reference/scene-briefs.csv" <<'GAPCSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+scene-01|Set up experiment|Equipment faulty|yes-but|Fix or start|Starts anyway||Lab equipment is faulty;experiment started|Checks equipment|"We proceed"|calm|lights||false
+scene-02|Investigate anomaly|Dangerous|no-and|Retreat or push|Pushes deeper|Equipment is broken;experiment began|Anomaly is real;it is spreading|Scans anomaly|"Impossible"|shock|glow|scene-01|false
+GAPCSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.prompts_elaborate import build_knowledge_fix_prompt
+
+prior_knowledge = {'Lab equipment is faulty', 'experiment started'}
+prompt = build_knowledge_fix_prompt(
+    scene_id='scene-02',
+    project_dir='${TMP_REF}',
+    scenes_dir='${TMP_SCENES}',
+    available_knowledge=prior_knowledge,
+)
+print(prompt)
+")
+
+assert_contains "$RESULT" "scene-02" "build_knowledge_fix_prompt: includes scene ID"
+assert_contains "$RESULT" "Lab equipment is faulty" "build_knowledge_fix_prompt: includes available knowledge"
+assert_contains "$RESULT" "knowledge_in" "build_knowledge_fix_prompt: asks for knowledge_in"
+
+rm -rf "$TMP_REF"
+
 rm -rf "$TMP_REF"

@@ -634,3 +634,69 @@ Provide exactly one data row:
 
 No explanation. No markdown fencing. Just the header line and the data line.
 """
+
+
+def build_knowledge_fix_prompt(
+    scene_id: str,
+    project_dir: str,
+    scenes_dir: str,
+    available_knowledge: set,
+) -> str:
+    """Build a prompt to fix knowledge_in/knowledge_out wording for one scene.
+
+    Args:
+        scene_id: The scene to fix.
+        project_dir: Path to the book project.
+        scenes_dir: Path to the scenes/ directory with prose files.
+        available_knowledge: Set of exact knowledge_out strings from all prior scenes.
+
+    Returns:
+        Prompt string for Claude.
+    """
+    from .elaborate import get_scene
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    scene_data = get_scene(scene_id, ref_dir)
+
+    # Read prose excerpt
+    prose_path = os.path.join(scenes_dir, f'{scene_id}.md')
+    prose = _read_file(prose_path)
+    if prose:
+        words = prose.split()
+        if len(words) > 500:
+            prose = ' '.join(words[:500]) + '\n[... truncated ...]'
+
+    current_kin = scene_data.get('knowledge_in', '') if scene_data else ''
+    current_kout = scene_data.get('knowledge_out', '') if scene_data else ''
+
+    sorted_knowledge = sorted(available_knowledge) if available_knowledge else ['(none yet — this is the first scene)']
+
+    return f"""You are fixing the knowledge chain for a scene in a novel. The knowledge_in field must use EXACT wording from prior scenes' knowledge_out.
+
+## Scene: {scene_id}
+
+### Prose Excerpt
+{prose if prose else '(no prose available)'}
+
+### Current Values (may have wording mismatches)
+- knowledge_in: {current_kin}
+- knowledge_out: {current_kout}
+
+### Available Knowledge (exact wording from all prior scenes' knowledge_out)
+{chr(10).join(f'- {k}' for k in sorted_knowledge)}
+
+## Instructions
+
+1. Rewrite knowledge_in using ONLY facts from the available knowledge list above, using their EXACT wording. Drop any facts not in the list. Add any facts from the list that this POV character would know entering this scene.
+2. Rewrite knowledge_out as: the corrected knowledge_in PLUS any new facts learned during this scene (read the prose to determine what's new).
+3. List continuity_deps: the scene IDs whose knowledge_out contributed facts to this scene's knowledge_in.
+
+## Output Format
+
+Respond with ONLY a pipe-delimited CSV row. The header is:
+
+id|knowledge_in|knowledge_out|continuity_deps
+
+Provide exactly one data row. Semicolon-separate multiple values within a field.
+No explanation. No markdown fencing. Just the header line and the data line.
+"""
