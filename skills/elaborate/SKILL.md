@@ -1,11 +1,13 @@
 ---
 name: elaborate
-description: Progressive elaboration pipeline — build a novel from seed through validated briefs. Use when the author wants to start a new novel using the elaboration approach, advance to the next stage, or work on spine/architecture/scene map/briefs.
+description: Progressive elaboration pipeline — build a novel from seed through validated briefs. Covers all creative development (character, world, architecture, voice, scene design). Use when the author wants to build or deepen their novel's structure, work on characters or world, develop voice, or advance to the next elaboration stage.
 ---
 
 # Storyforge Elaborate
 
 You are guiding an author through the elaboration pipeline — a progressive deepening process that builds structural integrity before any prose is written. Each stage adds detail to a unified scene data model, with validation gates between stages.
+
+This skill covers all creative development work: character development, world building, story architecture, voice and style, and scene-level design. In the elaboration pipeline, these are integrated into the stages rather than handled as separate workflows.
 
 ## Locating the Storyforge Plugin
 
@@ -44,6 +46,10 @@ Based on the author's request:
 - **"Start a new novel"** / **"Let's begin"** → Start at spine. Ask for the seed (logline, genre, characters, themes, constraints). Whatever they give you is the seed.
 - **"What's next?"** / **"Keep going"** → Advance to the next stage based on current state.
 - **"Work on the spine/architecture/map/briefs"** → Go to that specific stage.
+- **"Develop the voice"** / **"Voice guide"** / **"Style"** → Voice development (see Voice Stage below). Typically happens after architecture and before briefs.
+- **"Deepen characters"** / **"Work on [character name]"** → Character development. During elaboration, this deepens the character bible entries. The spine creates seed entries; this mode enriches them with wound/lie/need structure, voice fingerprints, and relationship dynamics.
+- **"Build the world"** / **"World building"** → World bible development. During elaboration, world building supports the architecture and scene map stages.
+- **"Story architecture"** / **"Theme"** / **"Structure"** → Story architecture refinement. The spine creates the initial architecture; this mode deepens thematic throughlines, conflict structure, and arc planning.
 - **"Validate"** → Run validation on the current state.
 - **Status question** → Report current stage, scene count, validation state.
 
@@ -139,6 +145,42 @@ If they choose Option B, provide the full command and end.
 5. Write updates
 6. Run validation — knowledge flow, completeness, DAG check
 7. Commit: `git add -A && git commit -m "Elaborate: briefs" && git push`
+
+### Voice Stage (Interactive)
+
+Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point.
+
+1. Read existing reference materials (character bible for voice fingerprints, story architecture for tone)
+2. If voice guide doesn't exist: explore the author's influences, genre voice expectations, POV rules, prose register. Build `reference/voice-guide.md` through conversation.
+3. If voice guide exists: refine it. Test against sample scenes. Develop POV-specific rules. Identify areas where voice drifts.
+4. For each POV character, define: their unique speech patterns, what metaphors they reach for, what they notice first, what they never say, their sentence rhythm.
+5. Commit: `git add -A && git commit -m "Elaborate: voice guide" && git push`
+
+Voice work in coach mode: ask questions about what the author hears in their head — tone, rhythm, register. Don't propose voice; help the author discover it.
+
+Voice work in strict mode: collect the author's voice preferences, format into the voice guide structure, provide the template.
+
+### Character Development (Interactive)
+
+Character work can happen at any elaboration stage. The spine creates seed entries (protagonist wound/lie/need/want, antagonist force). This mode deepens them.
+
+For each character:
+1. **Wound** — the formative damage that shaped their worldview. "What's the worst thing that happened to them before the story starts?"
+2. **Lie** — the false belief resulting from the wound. The operating system governing their decisions.
+3. **Need** — what they actually require for wholeness (usually opposite of their Want).
+4. **Want** — the conscious, concrete goal they pursue because of the Lie.
+5. **Voice fingerprint** — how they speak, what they notice, their sentence rhythm.
+6. **Relationships** — dynamic with every other major character. What each relationship tests.
+
+Update `reference/character-bible.md` and commit after each character.
+
+### World Building (Interactive)
+
+World building supports the architecture and scene map stages. Build what the story needs, not an encyclopedia.
+
+Focus on: what creates pressure on characters? What constrains their choices? What makes the setting specific rather than generic?
+
+Update `reference/world-bible.md` (and `reference/systems-bible.md` if the world has a formal system like magic or technology).
 
 ## Step 5: Validate and Report
 

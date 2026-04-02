@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storyforge — Extraction: Reverse Elaboration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'Fira Code', 'SF Mono', Consolas, monospace;
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface2: #eef0f4;
+  --border: rgba(0,0,0,0.07);
+  --border-bright: rgba(0,0,0,0.14);
+  --text: #1a1d24;
+  --text-dim: #6b7280;
+  --text-light: #9ca3af;
+  --teal: #0891b2;
+  --teal-dim: rgba(8,145,178,0.06);
+  --amber: #d97706;
+  --amber-dim: rgba(217,119,6,0.06);
+  --emerald: #059669;
+  --emerald-dim: rgba(5,150,105,0.06);
+  --slate: #475569;
+  --slate-dim: rgba(71,85,105,0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d26;
+    --surface2: #242833;
+    --border: rgba(255,255,255,0.06);
+    --border-bright: rgba(255,255,255,0.12);
+    --text: #e5e7eb;
+    --text-dim: #9ca3af;
+    --text-light: #6b7280;
+    --teal: #22d3ee;
+    --teal-dim: rgba(34,211,238,0.08);
+    --amber: #fbbf24;
+    --amber-dim: rgba(251,191,36,0.08);
+    --emerald: #34d399;
+    --emerald-dim: rgba(52,211,153,0.08);
+    --slate: #94a3b8;
+    --slate-dim: rgba(148,163,184,0.08);
+  }
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: var(--font-body); background: var(--bg); color: var(--text); line-height: 1.6; }
+body { background-image: radial-gradient(ellipse at 60% 0%, var(--teal-dim) 0%, transparent 50%); }
+.page { max-width: 880px; margin: 0 auto; padding: 60px 24px 80px; }
+.hero { text-align: center; margin-bottom: 48px; }
+.hero h1 { font-size: 36px; font-weight: 700; margin-bottom: 8px; }
+.hero h1 span { color: var(--teal); }
+.hero .lead { font-size: 17px; color: var(--text-dim); max-width: 600px; margin: 0 auto; }
+.mono { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-light); }
+
+.phases { display: flex; flex-direction: column; gap: 16px; margin: 32px 0; }
+.phase { display: grid; grid-template-columns: 80px 1fr; gap: 16px; align-items: start; }
+.phase-num { font-family: var(--font-mono); font-size: 32px; font-weight: 700; text-align: right; padding-top: 12px; }
+.phase-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+.phase-card h3 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+.phase-card .meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-light); margin-bottom: 8px; }
+.phase-card p { font-size: 14px; color: var(--text-dim); }
+.phase-card .extracts { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 4px; }
+.ext-tag { font-family: var(--font-mono); font-size: 10px; padding: 2px 7px; border-radius: 3px; background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+
+.p0 .phase-num { color: var(--amber); }
+.p1 .phase-num { color: var(--teal); }
+.p2 .phase-num { color: var(--emerald); }
+.p3 .phase-num { color: var(--slate); }
+
+.sec-title { font-size: 24px; font-weight: 700; margin: 48px 0 6px; }
+.sec-sub { font-size: 15px; color: var(--text-dim); margin-bottom: 20px; }
+
+.cleanup-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 20px 0; }
+.cleanup-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+.cleanup-card h4 { font-family: var(--font-mono); font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.cleanup-card p { font-size: 12px; color: var(--text-dim); }
+
+.expand-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 20px 0; }
+.expand-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; border-left: 3px solid var(--amber); }
+.expand-card h4 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.expand-card p { font-size: 12px; color: var(--text-dim); }
+
+.cmd { font-family: var(--font-mono); font-size: 13px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin: 16px 0; color: var(--text); }
+
+@media (max-width: 640px) {
+  .phase { grid-template-columns: 1fr; }
+  .phase-num { text-align: left; font-size: 24px; }
+  .cleanup-grid, .expand-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<div class="hero">
+  <div class="mono">Storyforge</div>
+  <h1>Reverse <span>Elaboration</span></h1>
+  <p class="lead">Take an existing manuscript and extract the structural data that the elaboration pipeline produces. Four phases, from prose to validated scene model.</p>
+</div>
+
+<div class="cmd">./storyforge extract</div>
+
+<div class="phases">
+
+  <div class="phase p0">
+    <div class="phase-num">0</div>
+    <div class="phase-card">
+      <h3>Characterize</h3>
+      <div class="meta">Opus · Full manuscript · ~30 seconds · ~$1</div>
+      <p>Read the entire manuscript and produce a structural profile: narrative mode, POV characters, timeline span, act structure, major threads, central conflict, protagonist arc, compression points, structural concerns.</p>
+      <div class="extracts"><span class="ext-tag">extraction-profile.json</span></div>
+    </div>
+  </div>
+
+  <div class="phase p1">
+    <div class="phase-num">1</div>
+    <div class="phase-card">
+      <h3>Skeleton</h3>
+      <div class="meta">Sonnet · Batch API · Per scene · ~$2</div>
+      <p>Extract structural identity for every scene: title, POV character, location, timeline position, duration, narrative purpose type, act assignment.</p>
+      <div class="extracts"><span class="ext-tag">scenes.csv</span><span class="ext-tag">85–99% fill rate</span></div>
+    </div>
+  </div>
+
+  <div class="phase p2">
+    <div class="phase-num">2</div>
+    <div class="phase-card">
+      <h3>Intent</h3>
+      <div class="meta">Sonnet · Batch API · Per scene · ~$3</div>
+      <p>Extract narrative dynamics: scene function, Swain type (action/sequel), McKee value shift, turning point type, emotional arc, threads, character presence, MICE thread tracking.</p>
+      <div class="extracts"><span class="ext-tag">scene-intent.csv</span><span class="ext-tag">99% fill rate</span></div>
+    </div>
+  </div>
+
+  <div class="phase p3">
+    <div class="phase-num">3</div>
+    <div class="phase-card">
+      <h3>Briefs</h3>
+      <div class="meta">Sonnet · Batch + Sequential · Per scene · ~$8</div>
+      <p>Extract drafting contracts in two sub-phases. <strong>3a (parallel):</strong> goal, conflict, outcome, crisis, decision, key actions, key dialogue, emotions, motifs. <strong>3b (sequential):</strong> knowledge chain — what each character knows entering and leaving each scene, tracked across the full manuscript.</p>
+      <div class="extracts"><span class="ext-tag">scene-briefs.csv</span><span class="ext-tag">88% fill rate</span></div>
+    </div>
+  </div>
+
+</div>
+
+<h2 class="sec-title">Automatic Cleanup</h2>
+<p class="sec-sub">After extraction, deterministic cleanup resolves ~67% of validation failures.</p>
+
+<div class="cleanup-grid">
+  <div class="cleanup-card">
+    <h4>Timeline</h4>
+    <p>Fills empty timeline_day fields by interpolating from adjacent scenes. Assumes same day until proven otherwise.</p>
+  </div>
+  <div class="cleanup-card">
+    <h4>Knowledge</h4>
+    <p>Fuzzy-matches knowledge_in wording to prior knowledge_out at ≥70% word overlap. Normalizes phrasing drift.</p>
+  </div>
+  <div class="cleanup-card">
+    <h4>MICE Threads</h4>
+    <p>Removes duplicate opens and closes for threads that were never opened. Preserves legitimate structural signals.</p>
+  </div>
+</div>
+
+<h2 class="sec-title">Expansion Analysis</h2>
+<p class="sec-sub">For novellas becoming novels. Identifies structural opportunities for growth.</p>
+
+<div class="expand-grid">
+  <div class="expand-card">
+    <h4>Compressed Scenes</h4>
+    <p>Major value shifts in very few words — the scene is doing too much too fast.</p>
+  </div>
+  <div class="expand-card">
+    <h4>Knowledge Jumps</h4>
+    <p>Character learns 3+ facts in one scene — may need multiple scenes to earn those revelations.</p>
+  </div>
+  <div class="expand-card">
+    <h4>Timeline Gaps</h4>
+    <p>Days missing between scenes where bridging material might be needed.</p>
+  </div>
+  <div class="expand-card">
+    <h4>Thin Threads</h4>
+    <p>Subplots appearing in only 1–2 scenes — underdeveloped, need expansion or removal.</p>
+  </div>
+</div>
+
+<div class="cmd">./storyforge extract --expand</div>
+
+<div style="text-align:center; margin-top:48px; color:var(--text-light); font-family:var(--font-mono); font-size:11px;">
+  Storyforge — A novel-writing toolkit for authors, powered by Claude Code
+</div>
+
+</div>
+</body>
+</html>

@@ -215,8 +215,17 @@ All structured data uses pipe-delimited CSV:
 - **Empty fields:** zero characters between delimiters
 
 ### Key CSV Files
+
+**Elaboration pipeline (new projects):**
+- `reference/scenes.csv` — structural identity (id, seq, title, part, pov, location, timeline_day, time_of_day, duration, type, status, word_count, target_words)
+- `reference/scene-intent.csv` — narrative dynamics (id, function, scene_type, emotional_arc, value_at_stake, value_shift, turning_point, threads, characters, on_stage, mice_threads)
+- `reference/scene-briefs.csv` — drafting contracts (id, goal, conflict, outcome, crisis, decision, knowledge_in, knowledge_out, key_actions, key_dialogue, emotions, motifs, continuity_deps, has_overflow)
+
+**Legacy (existing projects):**
 - `reference/scene-metadata.csv` — structural metadata (id, seq, title, pov, location, part, type, etc.)
 - `reference/scene-intent.csv` — creative intent (id, function, emotional_arc, characters, threads, motifs)
+
+**Shared:**
 - `working/craft-weights.csv` — craft principle weights (keyed by `principle` column, not `id`)
 - `working/costs/ledger.csv` — per-invocation cost tracking
 - `reference/chapter-map.csv` — chapter-to-scene mapping
@@ -258,17 +267,88 @@ Run: `./tests/run-tests.sh` (all suites) or `./tests/run-tests.sh tests/test-thi
 
 - **Scripts** (`scripts/storyforge-*`) — autonomous execution. Invoke Claude, create branches/PRs, commit.
 - **Skills** (`skills/*/SKILL.md`) — interactive Claude Code sessions. Guide the author, delegate to scripts.
-- **Libraries** (`scripts/lib/*.sh`) — shared functions. Sourced by common.sh.
+- **Libraries** (`scripts/lib/*.sh`) — shared bash functions. Sourced by common.sh.
+- **Python modules** (`scripts/lib/python/storyforge/`) — scene data helpers, extraction, scoring, prompts, visualization.
 - **Prompts** (`scripts/prompts/`) — prompt templates for evaluators and scoring.
 - **References** (`references/`) — craft engine, scoring rubrics, schemas, default weights.
 - **Templates** (`templates/`) — project scaffolding for init.
 - **Tests** (`tests/`) — assertion-based bash tests.
 - **Docs** (`docs/`) — GitHub Pages site with visualization pages.
 
+### Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `storyforge-write` | Draft scenes (reads briefs if available, supports parallel wave drafting) |
+| `storyforge-evaluate` | Multi-agent evaluation panel (6 evaluators + synthesis) |
+| `storyforge-revise` | Execute revision passes from a plan |
+| `storyforge-score` | Craft scoring (25 principles + fidelity scoring against briefs) |
+| `storyforge-elaborate` | Run elaboration stages (spine/architecture/map/briefs) |
+| `storyforge-extract` | Extract structural data from existing prose (reverse elaboration) |
+| `storyforge-polish` | Targeted prose polish on low-scoring scenes |
+| `storyforge-validate` | Structural validation against scene CSVs |
+| `storyforge-enrich` | Metadata enrichment from prose |
+| `storyforge-assemble` | Chapter assembly + epub/PDF/HTML generation |
+| `storyforge-visualize` | Multi-page manuscript dashboard |
+| `storyforge-timeline` | Timeline construction |
+| `storyforge-cleanup` | Project structure cleanup |
+
+### Skills
+
+| Skill | Purpose |
+|-------|---------|
+| `forge` | Hub — reads project state, recommends next action, routes to skills |
+| `elaborate` | All creative development: spine → architecture → voice → map → briefs. Character, world, story architecture. |
+| `extract` | Reverse elaboration — extract structural data from existing prose |
+| `revise` | Plan + execute revision (upstream CSV fixes + prose polish). `--polish` for craft-only. |
+| `score` | Craft + fidelity scoring |
+| `publish` | Assemble web book + generate dashboard + push to bookshelf |
+| `produce` | Epub, PDF, print formats |
+| `init` | New project initialization |
+| `cover` | Cover design |
+| `title` | Title development |
+| `press-kit` | Marketing materials |
+
+### Elaboration Pipeline
+
+New projects use the elaboration pipeline: progressive structural development before drafting.
+
+```
+Seed → Spine → Architecture → Scene Map → Briefs → Validate → Draft → Evaluate → Polish → Produce
+```
+
+Each stage populates columns in the three-file CSV model. Validation gates between stages catch structural issues before they become prose problems. Evaluation findings route back to the appropriate CSV (brief/intent/structural) for upstream fixes rather than prose revision.
+
+Key principles:
+- **Validate cheap, fix cheap** — catch problems as CSV edits, not prose rewrites
+- **Parallel drafting** — scenes with no `continuity_deps` can be drafted simultaneously
+- **Evaluation feeds upstream** — findings map to `fix_location` (brief/intent/structural/craft)
+- **Coaching levels are roles** — full=creative partner, coach=dramaturg, strict=continuity editor
+
+### Python Modules
+
+| Module | Purpose |
+|--------|---------|
+| `elaborate.py` | Scene data helpers (get/set/query), validation engine, wave planner, structural scoring |
+| `extract.py` | Extraction prompt builders, response parsers, cleanup, expansion analysis |
+| `prompts.py` | Scene drafting prompt builders (legacy + brief-aware) |
+| `prompts_elaborate.py` | Elaboration stage prompt builders |
+| `scoring.py` | Score parsing, diagnosis, proposals, fidelity scoring |
+| `visualize.py` | Dashboard data loading |
+| `enrich.py` | Metadata enrichment |
+| `assembly.py` | Chapter assembly |
+| `parsing.py` | Scene content extraction |
+| `api.py` | Anthropic API helpers |
+| `costs.py` | Cost calculation |
+| `project.py` | Project state management |
+
 ## Commit Message Prefixes
 Use domain-specific prefixes:
 - `Draft scene:` / `Develop:` / `Voice:` / `Evaluate:` / `Revision:` / `Produce:` / `Review:` / `Title:` / `Press kit:` / `Cover:` — for book project work
+- `Elaborate:` — elaboration pipeline stages
+- `Extract:` — reverse elaboration from prose
 - `Score:` — scoring cycles
+- `Polish:` — prose polish passes
 - `Enrich:` — metadata enrichment
 - `Visualize:` — dashboard generation
 - `Add` / `Update` / `Fix` / `Remove` — for plugin development

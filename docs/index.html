@@ -3,966 +3,270 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Storyforge — A Novel-Writing Toolkit for Claude Code</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;0,9..144,800;1,9..144,400;1,9..144,500&family=Source+Code+Pro:wght@400;500;600&display=swap" rel="stylesheet">
+<title>Storyforge — Write Novels with Structural Integrity</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  /* ============ THEME ============ */
+:root {
+  --font-body: 'Instrument Serif', Georgia, serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --bg: #faf8f5; --surface: #ffffff; --surface2: #f3efe9;
+  --border: rgba(0,0,0,0.07); --text: #1e1a14; --text-dim: #8a7e6f; --text-light: #b5a898;
+  --gold: #d4a73a; --gold-dim: rgba(212,167,58,0.08);
+  --deep-blue: #1e3a5f; --teal: #0f766e; --rose: #be123c;
+}
+@media (prefers-color-scheme: dark) {
   :root {
-    --font-body: 'Fraunces', Georgia, serif;
-    --font-mono: 'Source Code Pro', 'SF Mono', Consolas, monospace;
-
-    --bg: #faf8f6;
-    --bg-warm: #f5f0eb;
-    --surface: #ffffff;
-    --surface2: #f0ebe5;
-    --surface-elevated: #fffcf9;
-    --border: rgba(0, 0, 0, 0.07);
-    --border-bright: rgba(0, 0, 0, 0.13);
-    --text: #2c2420;
-    --text-dim: #8a7d73;
-    --text-light: #b5a99e;
-
-    --rose: #be123c;
-    --rose-dim: rgba(190, 18, 60, 0.07);
-    --cranberry: #881337;
-    --cranberry-dim: rgba(136, 19, 55, 0.06);
-    --amber: #b45309;
-    --amber-dim: rgba(180, 83, 9, 0.07);
-    --sage: #4d7c0f;
-    --sage-dim: rgba(77, 124, 15, 0.07);
-    --slate: #475569;
-    --slate-dim: rgba(71, 85, 105, 0.07);
-    --gruvbox: #d65d0e;
-    --gruvbox-dim: rgba(214, 93, 14, 0.07);
-    --nord: #5e81ac;
-    --nord-dim: rgba(94, 129, 172, 0.07);
-    --teal: #0f766e;
-    --teal-dim: rgba(15, 118, 110, 0.07);
-    --violet: #7c3aed;
-    --violet-dim: rgba(124, 58, 237, 0.07);
-    --indigo: #4338ca;
-    --indigo-dim: rgba(67, 56, 202, 0.07);
+    --bg: #141210; --surface: #1e1b18; --surface2: #28241f;
+    --border: rgba(255,255,255,0.06); --text: #ede5d8; --text-dim: #a69880; --text-light: #6b6054;
+    --gold: #f0c84a; --gold-dim: rgba(240,200,74,0.1);
+    --deep-blue: #7db4e0; --teal: #5eead4; --rose: #fda4af;
   }
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: var(--font-body); background: var(--bg); color: var(--text); line-height: 1.7; }
+body { background-image: radial-gradient(ellipse at 50% 0%, var(--gold-dim) 0%, transparent 40%); }
+.page { max-width: 720px; margin: 0 auto; padding: 80px 24px; }
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #1a1614;
-      --bg-warm: #211c19;
-      --surface: #262019;
-      --surface2: #302923;
-      --surface-elevated: #352e27;
-      --border: rgba(255, 255, 255, 0.06);
-      --border-bright: rgba(255, 255, 255, 0.11);
-      --text: #ede5dd;
-      --text-dim: #a69889;
-      --text-light: #6b5f54;
+.hero { text-align: center; margin-bottom: 72px; }
+.hero h1 { font-size: 52px; font-weight: 400; letter-spacing: -1px; margin-bottom: 20px; line-height: 1.15; }
+.hero h1 span { color: var(--gold); }
+.hero .lead { font-size: 21px; color: var(--text-dim); max-width: 560px; margin: 0 auto; }
 
-      --rose: #fb7185;
-      --rose-dim: rgba(251, 113, 133, 0.1);
-      --cranberry: #fda4af;
-      --cranberry-dim: rgba(253, 164, 175, 0.08);
-      --amber: #fbbf24;
-      --amber-dim: rgba(251, 191, 36, 0.08);
-      --sage: #a3e635;
-      --sage-dim: rgba(163, 230, 53, 0.08);
-      --slate: #94a3b8;
-      --slate-dim: rgba(148, 163, 184, 0.08);
-      --gruvbox: #fe8019;
-      --gruvbox-dim: rgba(254, 128, 25, 0.1);
-      --nord: #88c0d0;
-      --nord-dim: rgba(136, 192, 208, 0.1);
-      --teal: #2dd4bf;
-      --teal-dim: rgba(45, 212, 191, 0.08);
-      --violet: #a78bfa;
-      --violet-dim: rgba(167, 139, 250, 0.1);
-      --indigo: #818cf8;
-      --indigo-dim: rgba(129, 140, 248, 0.1);
-    }
-  }
+/* Prose sections */
+.prose { margin-bottom: 56px; }
+.prose h2 { font-size: 28px; font-weight: 400; margin-bottom: 12px; }
+.prose p { font-size: 17px; color: var(--text-dim); margin-bottom: 16px; }
+.prose p strong { color: var(--text); font-weight: 400; }
 
-  /* ============ RESET + BASE ============ */
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+/* Feature cards */
+.features { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 32px 0 56px; }
+.feature { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 24px; }
+.feature h3 { font-size: 18px; font-weight: 400; margin-bottom: 6px; }
+.feature p { font-size: 14px; color: var(--text-dim); }
 
-  body {
-    background: var(--bg);
-    background-image:
-      radial-gradient(ellipse at 30% 0%, var(--rose-dim) 0%, transparent 50%),
-      radial-gradient(ellipse at 70% 100%, var(--amber-dim) 0%, transparent 45%);
-    color: var(--text);
-    font-family: var(--font-body);
-    min-height: 100vh;
-    padding: 0;
-  }
+/* Three roles */
+.roles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 32px 0; }
+.role { text-align: center; padding: 24px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.role h3 { font-size: 20px; font-weight: 400; margin-bottom: 4px; }
+.role .subtitle { font-family: var(--font-mono); font-size: 11px; margin-bottom: 12px; }
+.role p { font-size: 13px; color: var(--text-dim); }
+.role-full .subtitle { color: var(--gold); }
+.role-coach .subtitle { color: var(--deep-blue); }
+.role-strict .subtitle { color: var(--teal); }
 
-  /* ============ ANIMATIONS ============ */
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(16px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  @keyframes fadeScale {
-    from { opacity: 0; transform: scale(0.95); }
-    to { opacity: 1; transform: scale(1); }
-  }
+/* Learn more links */
+.learn { display: flex; flex-direction: column; gap: 10px; margin: 32px 0; }
+.learn a { display: block; padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: inherit; transition: border-color 0.15s; }
+.learn a:hover { border-color: rgba(0,0,0,0.15); }
+.learn a strong { font-size: 15px; display: block; margin-bottom: 2px; }
+.learn a span { font-size: 13px; color: var(--text-dim); }
 
-  .anim {
-    animation: fadeUp 0.5s ease-out both;
-    animation-delay: calc(var(--i, 0) * 0.07s);
-  }
-  .anim-scale {
-    animation: fadeScale 0.4s ease-out both;
-    animation-delay: calc(var(--i, 0) * 0.07s);
-  }
+.divider { width: 40px; height: 1px; background: var(--border); margin: 56px auto; }
 
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      animation-duration: 0.01ms !important;
-      animation-delay: 0ms !important;
-      transition-duration: 0.01ms !important;
-    }
-  }
+.footer { text-align: center; color: var(--text-light); font-size: 14px; margin-top: 56px; }
 
-  /* ============ LAYOUT ============ */
-  .page {
-    max-width: 960px;
-    margin: 0 auto;
-    padding: 60px 40px 80px;
-  }
-
-  /* ============ HERO ============ */
-  .hero {
-    text-align: center;
-    margin-bottom: 64px;
-    padding-bottom: 48px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .hero-badge {
-    display: inline-block;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 2.5px;
-    color: var(--rose);
-    background: var(--rose-dim);
-    border: 1px solid color-mix(in srgb, var(--rose) 20%, transparent);
-    padding: 6px 16px;
-    border-radius: 100px;
-    margin-bottom: 28px;
-  }
-
-  .hero h1 {
-    font-size: clamp(36px, 5.5vw, 56px);
-    font-weight: 800;
-    letter-spacing: -1.5px;
-    line-height: 1.1;
-    margin-bottom: 20px;
-    text-wrap: balance;
-    font-variation-settings: 'opsz' 144;
-  }
-
-  .hero h1 .accent {
-    color: var(--rose);
-  }
-
-  .hero-sub {
-    font-size: clamp(16px, 2vw, 20px);
-    font-weight: 400;
-    color: var(--text-dim);
-    line-height: 1.6;
-    max-width: 600px;
-    margin: 0 auto;
-    font-style: italic;
-    font-variation-settings: 'opsz' 24;
-  }
-
-  /* ============ PULL QUOTE ============ */
-  .pull-quote {
-    position: relative;
-    margin: 0 auto 56px;
-    max-width: 680px;
-    padding: 28px 32px;
-    background: var(--surface-elevated);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--rose);
-    border-radius: 0 10px 10px 0;
-    font-size: 15px;
-    line-height: 1.7;
-    color: var(--text-dim);
-  }
-
-  .pull-quote strong {
-    color: var(--text);
-    font-weight: 600;
-  }
-
-  /* ============ CAPABILITIES ============ */
-  .section-label {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-dim);
-  }
-
-  .section-label .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    display: inline-block;
-    background: currentColor;
-  }
-
-  .caps-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 56px;
-  }
-
-  .cap-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 22px 24px;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-
-  .cap-card:hover {
-    border-color: var(--border-bright);
-    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
-  }
-
-  .cap-card .cap-num {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--rose);
-    margin-bottom: 8px;
-  }
-
-  .cap-card h3 {
-    font-size: 16px;
-    font-weight: 700;
-    margin-bottom: 6px;
-    font-variation-settings: 'opsz' 36;
-  }
-
-  .cap-card p {
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--text-dim);
-  }
-
-  .cap-card code {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    background: var(--rose-dim);
-    color: var(--rose);
-    padding: 1px 5px;
-    border-radius: 3px;
-  }
-
-  /* ============ HOW IT WORKS (mini pipeline) ============ */
-  .pipeline-section {
-    margin-bottom: 56px;
-  }
-
-  .mini-pipeline {
-    display: flex;
-    align-items: stretch;
-    gap: 0;
-    flex-wrap: wrap;
-    justify-content: center;
-    padding-bottom: 8px;
-    row-gap: 8px;
-  }
-
-  .pipe-step {
-    flex: 0 1 auto;
-    min-width: 76px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 8px;
-    text-align: center;
-    transition: border-color 0.2s;
-  }
-
-  .pipe-step:hover { border-color: var(--border-bright); }
-
-  .pipe-step .pipe-phase {
-    font-family: var(--font-mono);
-    font-size: 8px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
-  }
-
-  .pipe-step .pipe-name {
-    font-size: 11px;
-    font-weight: 600;
-    margin-bottom: 2px;
-  }
-
-  .pipe-step .pipe-type {
-    font-family: var(--font-mono);
-    font-size: 8px;
-    border-radius: 3px;
-    padding: 1px 5px;
-    display: inline-block;
-    margin-top: 3px;
-  }
-
-  .pipe-type--interactive {
-    color: var(--sage);
-    background: var(--sage-dim);
-  }
-
-  .pipe-type--autonomous {
-    color: var(--amber);
-    background: var(--amber-dim);
-  }
-
-  /* Phase colors */
-  .pipe-step--develop .pipe-phase { color: var(--sage); }
-  .pipe-step--develop { border-color: var(--sage-dim); }
-  .pipe-step--voice .pipe-phase { color: var(--slate); }
-  .pipe-step--voice { border-color: var(--slate-dim); }
-  .pipe-step--scenes .pipe-phase { color: var(--amber); }
-  .pipe-step--scenes { border-color: var(--amber-dim); }
-  .pipe-step--draft .pipe-phase { color: var(--rose); }
-  .pipe-step--draft { border-color: var(--rose-dim); }
-  .pipe-step--score .pipe-phase { color: var(--teal); }
-  .pipe-step--score { border-color: var(--teal-dim); }
-  .pipe-step--eval .pipe-phase { color: var(--cranberry); }
-  .pipe-step--eval { border-color: var(--cranberry-dim); }
-  .pipe-step--produce .pipe-phase { color: #7c3aed; }
-  .pipe-step--produce { border-color: rgba(124, 58, 237, 0.15); }
-
-  .pipe-type--produce {
-    color: #7c3aed;
-    background: rgba(124, 58, 237, 0.07);
-  }
-
-  .pipe-arrow {
-    display: flex;
-    align-items: center;
-    padding: 0 2px;
-    color: var(--text-light);
-    font-size: 10px;
-    flex-shrink: 0;
-  }
-
-  /* ============ ITERATION NOTE ============ */
-  .iter-note {
-    text-align: center;
-    margin-top: 12px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-dim);
-  }
-
-  .iter-note svg {
-    width: 14px;
-    height: 14px;
-    vertical-align: -2px;
-    fill: none;
-    stroke: var(--text-dim);
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  /* ============ DEEP DIVES ============ */
-  .dives-section {
-    margin-bottom: 48px;
-  }
-
-  .dives-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
-  }
-
-  .dive-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 28px 28px 24px;
-    text-decoration: none;
-    color: inherit;
-    display: flex;
-    flex-direction: column;
-    transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .dive-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-  }
-
-  .dive-card:hover {
-    border-color: var(--border-bright);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.06);
-    transform: translateY(-2px);
-  }
-
-  .dive-card--workflow::before { background: var(--rose); }
-  .dive-card--arch::before { background: var(--slate); }
-  .dive-card--eval::before { background: var(--amber); }
-  .dive-card--artifacts::before { background: var(--sage); }
-  .dive-card--craft::before { background: var(--gruvbox); }
-  .dive-card--scenes::before { background: var(--nord); }
-  .dive-card--coaching::before { background: var(--violet); }
-  .dive-card--produce::before { background: var(--teal); }
-  .dive-card--healing::before { background: var(--indigo); }
-  .dive-card--scoring::before { background: var(--teal); }
-  .dive-card--interactive::before { background: var(--cranberry); }
-  .dive-card--enrich::before { background: var(--amber); }
-  .dive-card--dashboard::before { background: var(--rose); }
-
-  .dive-card .dive-label {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin-bottom: 10px;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-  }
-
-  .dive-card--workflow .dive-label { color: var(--rose); }
-  .dive-card--arch .dive-label { color: var(--slate); }
-  .dive-card--eval .dive-label { color: var(--amber); }
-  .dive-card--artifacts .dive-label { color: var(--sage); }
-  .dive-card--craft .dive-label { color: var(--gruvbox); }
-  .dive-card--scenes .dive-label { color: var(--nord); }
-  .dive-card--coaching .dive-label { color: var(--violet); }
-  .dive-card--produce .dive-label { color: var(--teal); }
-  .dive-card--healing .dive-label { color: var(--indigo); }
-  .dive-card--scoring .dive-label { color: var(--teal); }
-  .dive-card--interactive .dive-label { color: var(--cranberry); }
-  .dive-card--enrich .dive-label { color: var(--amber); }
-  .dive-card--dashboard .dive-label { color: var(--rose); }
-
-  .dive-card .dive-label .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-  }
-
-  .dive-card h3 {
-    font-size: 19px;
-    font-weight: 700;
-    margin-bottom: 8px;
-    font-variation-settings: 'opsz' 36;
-  }
-
-  .dive-card p {
-    font-size: 13px;
-    line-height: 1.65;
-    color: var(--text-dim);
-    flex: 1;
-  }
-
-  .dive-card .dive-cta {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-dim);
-    margin-top: 16px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    transition: color 0.2s;
-  }
-
-  .dive-card:hover .dive-cta {
-    color: var(--text);
-  }
-
-  .dive-cta svg {
-    width: 14px;
-    height: 14px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    transition: transform 0.2s;
-  }
-
-  .dive-card:hover .dive-cta svg {
-    transform: translateX(3px);
-  }
-
-  /* ============ INSTALL ============ */
-  .install-section {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 28px 32px;
-    margin-bottom: 48px;
-  }
-
-  .install-section .section-label {
-    margin-bottom: 14px;
-  }
-
-  .install-cmd {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px 16px;
-    line-height: 1.7;
-    overflow-x: auto;
-    white-space: pre;
-    color: var(--text);
-  }
-
-  .install-cmd .comment { color: var(--text-dim); }
-  .install-cmd .cmd { color: var(--rose); }
-
-  /* ============ FOOTER ============ */
-  .footer {
-    text-align: center;
-    padding-top: 32px;
-    border-top: 1px solid var(--border);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-light);
-    letter-spacing: 0.5px;
-  }
-
-  .footer a {
-    color: var(--text-dim);
-    text-decoration: none;
-    border-bottom: 1px solid var(--border);
-    transition: color 0.2s, border-color 0.2s;
-  }
-
-  .footer a:hover {
-    color: var(--text);
-    border-color: var(--text-dim);
-  }
-
-  /* ============ RESPONSIVE ============ */
-  @media (max-width: 768px) {
-    .page { padding: 32px 20px 48px; }
-    .caps-grid { grid-template-columns: 1fr; }
-    .dives-grid { grid-template-columns: 1fr 1fr; }
-    .pipe-arrow { display: none; }
-    .pipe-step { min-width: 64px; }
-    .pull-quote { padding: 20px 20px; }
-  }
-
-  @media (max-width: 480px) {
-    .page { padding: 24px 16px 40px; }
-    .hero { margin-bottom: 40px; padding-bottom: 32px; }
-    .install-section { padding: 20px; }
-    .dives-grid { grid-template-columns: 1fr; }
-  }
+@media (max-width: 640px) {
+  .hero h1 { font-size: 36px; }
+  .features { grid-template-columns: 1fr; }
+  .roles { grid-template-columns: 1fr; }
+}
+@media (prefers-color-scheme: dark) {
+  .learn a:hover { border-color: rgba(255,255,255,0.12); }
+}
 </style>
 </head>
 <body>
-
 <div class="page">
 
-  <!-- HERO -->
-  <div class="hero">
-    <div class="hero-badge anim" style="--i:0">Novel-Writing Toolkit for Claude Code</div>
-    <h1 class="anim" style="--i:1">Story<span class="accent">forge</span></h1>
-    <p class="hero-sub anim" style="--i:2">
-      A confident collaborator that combines interactive creative guidance
-      with autonomous manuscript execution. You decide where to work.
-      Storyforge decides how.
-    </p>
-  </div>
-
-  <!-- PULL QUOTE -->
-  <div class="pull-quote anim" style="--i:3">
-    <strong>The philosophy:</strong> Rather than asking endless clarifying questions, Storyforge
-    makes creative decisions, executes them, and produces work for you to review and refine.
-    Three coaching levels let you control how much creative authority Claude holds &mdash;
-    from full partnership to strict author control.
-  </div>
-
-  <!-- CAPABILITIES -->
-  <div class="section-label anim" style="--i:4"><span class="dot"></span> What it does</div>
-  <div class="caps-grid">
-
-    <div class="cap-card anim" style="--i:5">
-      <div class="cap-num">01</div>
-      <h3>Guided Development</h3>
-      <p>
-        Interactive skills for world-building, character work, voice discovery,
-        and scene design. Storyforge challenges weak ideas, suggests alternatives,
-        and builds comprehensive reference documents.
-      </p>
-    </div>
-
-    <div class="cap-card anim" style="--i:6">
-      <div class="cap-num">02</div>
-      <h3>Autonomous Drafting</h3>
-      <p>
-        Once your foundation is solid, <code>./storyforge write</code> drafts
-        scenes autonomously &mdash; reading your world bible, character bible,
-        voice guide, and scene index to produce consistent prose.
-      </p>
-    </div>
-
-    <div class="cap-card anim" style="--i:7">
-      <div class="cap-num">03</div>
-      <h3>Multi-Persona Evaluation</h3>
-      <p>
-        Six evaluator personas &mdash; literary agent, developmental editor,
-        line editor, genre expert, writing coach, and first reader &mdash;
-        analyze your manuscript from every angle.
-      </p>
-    </div>
-
-    <div class="cap-card anim" style="--i:8">
-      <div class="cap-num">04</div>
-      <h3>Structured Revision</h3>
-      <p>
-        Plan targeted revision passes from evaluation findings. Each pass
-        has a clear purpose, scope, and guidance. Execute autonomously or
-        collaborate interactively &mdash; your choice.
-      </p>
-    </div>
-
-    <div class="cap-card anim" style="--i:9">
-      <div class="cap-num">05</div>
-      <h3>Book Production</h3>
-      <p>
-        Map scenes to chapters, configure typography with genre presets,
-        and assemble into epub, PDF, or HTML. Every autonomous step ends
-        with an automatic quality review.
-      </p>
-    </div>
-
-    <div class="cap-card anim" style="--i:10">
-      <div class="cap-num">06</div>
-      <h3>Coaching Levels</h3>
-      <p>
-        Three modes &mdash; <code>full</code>, <code>coach</code>, and
-        <code>strict</code> &mdash; let you control how much creative
-        authority Claude holds. From active partner to silent file clerk.
-      </p>
-    </div>
-
-  </div>
-
-  <!-- MINI PIPELINE -->
-  <div class="pipeline-section">
-    <div class="section-label anim" style="--i:9"><span class="dot"></span> The journey</div>
-    <div class="mini-pipeline anim" style="--i:10">
-      <div class="pipe-step pipe-step--develop">
-        <div class="pipe-phase">Phase 1</div>
-        <div class="pipe-name">Develop</div>
-        <span class="pipe-type pipe-type--interactive">interactive</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--voice">
-        <div class="pipe-phase">Phase 2</div>
-        <div class="pipe-name">Voice</div>
-        <span class="pipe-type pipe-type--interactive">interactive</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--scenes">
-        <div class="pipe-phase">Phase 3</div>
-        <div class="pipe-name">Scenes</div>
-        <span class="pipe-type pipe-type--interactive">interactive</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--draft">
-        <div class="pipe-phase">Phase 4</div>
-        <div class="pipe-name">Draft</div>
-        <span class="pipe-type pipe-type--autonomous">autonomous</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--score">
-        <div class="pipe-phase">Phase 5</div>
-        <div class="pipe-name">Score</div>
-        <span class="pipe-type pipe-type--autonomous">autonomous</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--eval">
-        <div class="pipe-phase">Phase 6</div>
-        <div class="pipe-name">Evaluate</div>
-        <span class="pipe-type pipe-type--autonomous">autonomous</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--draft">
-        <div class="pipe-phase">Phase 7</div>
-        <div class="pipe-name">Revise</div>
-        <span class="pipe-type pipe-type--autonomous">autonomous</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--eval">
-        <div class="pipe-phase">Phase 8</div>
-        <div class="pipe-name">Recommend</div>
-        <span class="pipe-type pipe-type--interactive">interactive</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--produce">
-        <div class="pipe-phase">Phase 9</div>
-        <div class="pipe-name">Title</div>
-        <span class="pipe-type pipe-type--interactive">interactive</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--produce">
-        <div class="pipe-phase">Phase 10</div>
-        <div class="pipe-name">Cover</div>
-        <span class="pipe-type pipe-type--interactive">interactive</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--produce">
-        <div class="pipe-phase">Phase 11</div>
-        <div class="pipe-name">Produce</div>
-        <span class="pipe-type pipe-type--produce">interactive + auto</span>
-      </div>
-      <div class="pipe-arrow">&rarr;</div>
-      <div class="pipe-step pipe-step--produce">
-        <div class="pipe-phase">Phase 12</div>
-        <div class="pipe-name">Press Kit</div>
-        <span class="pipe-type pipe-type--interactive">interactive</span>
-      </div>
-    </div>
-    <div class="iter-note anim" style="--i:11">
-      <svg viewBox="0 0 16 16"><path d="M2 8a6 6 0 0 1 10.3-4.1M14 8a6 6 0 0 1-10.3 4.1"/><path d="M14 2v4h-4M2 14v-4h4"/></svg>
-      Draft &rarr; Score forms a <strong>tight inner loop</strong> (rewrite until scores plateau) &middot; Evaluate through Recommend forms a <strong>pipeline cycle</strong> &middot; Repeat until ready
-    </div>
-  </div>
-
-  <!-- DEEP DIVES -->
-  <div class="dives-section">
-    <div class="section-label anim" style="--i:12"><span class="dot"></span> Explore in detail</div>
-    <div class="dives-grid">
-
-      <a href="diagrams/workflow-pipeline.html" class="dive-card dive-card--workflow anim" style="--i:13">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Workflow Pipeline</h3>
-        <p>
-          The full 13-phase journey from project initialization through drafting,
-          evaluation, revision, and production. See how interactive skills and autonomous scripts
-          interleave, and where the iteration loop lives.
-        </p>
-        <div class="dive-cta">
-          View pipeline
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/two-layer-architecture.html" class="dive-card dive-card--arch anim" style="--i:14">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Two-Layer Architecture</h3>
-        <p>
-          How the routing hub reads project state and dispatches to the execution
-          layer. Three operating modes (directed, guided, status), the
-          <code>recommend</code> skill for "what next" decisions, and the
-          "approve and go" contract.
-        </p>
-        <div class="dive-cta">
-          View architecture
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/evaluation-panel.html" class="dive-card dive-card--eval anim" style="--i:15">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Evaluation Panel</h3>
-        <p>
-          Six evaluator personas &mdash; each bringing a distinct professional
-          lens to your manuscript. See what each looks for, how findings are
-          structured, and how they feed into revision planning.
-        </p>
-        <div class="dive-cta">
-          View panel
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/artifact-ecosystem.html" class="dive-card dive-card--artifacts anim" style="--i:16">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Artifact Ecosystem</h3>
-        <p>
-          Eight interconnected reference documents that build on each other
-          across phases. World bible, character bible, voice guide, scene index,
-          and more &mdash; the knowledge base that makes the writing good.
-        </p>
-        <div class="dive-cta">
-          View ecosystem
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/craft-engine.html" class="dive-card dive-card--craft anim" style="--i:17">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>The Craft Engine</h3>
-        <p>
-          The foundational knowledge system: seven narrative frameworks, nine
-          prose principles, character craft, rules and when to break them, and
-          the coaching posture that defines how Storyforge interacts with authors.
-        </p>
-        <div class="dive-cta">
-          View craft engine
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/scene-schema.html" class="dive-card dive-card--scenes anim" style="--i:18">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>The Scene Schema</h3>
-        <p>
-          Scenes as structured data &mdash; every scene carries rich metadata
-          connecting it to characters, world, timeline, and story threads. See the
-          field groups, lifecycle states, and how scenes link to every artifact.
-        </p>
-        <div class="dive-cta">
-          View schema
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/coaching-levels.html" class="dive-card dive-card--coaching anim" style="--i:19">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Coaching Levels</h3>
-        <p>
-          Three modes of creative collaboration &mdash; full partnership, guided coaching,
-          or strict author control. See how each level adapts Claude's behavior across
-          every phase of the writing process.
-        </p>
-        <div class="dive-cta">
-          View levels
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/production-pipeline.html" class="dive-card dive-card--produce anim" style="--i:20">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Production Pipeline</h3>
-        <p>
-          From manuscript to book &mdash; chapter mapping, typography presets,
-          front and back matter, and epub/PDF generation. See how the review
-          process integrates as a quality gate after every autonomous step.
-        </p>
-        <div class="dive-cta">
-          View production
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/scoring-system.html" class="dive-card dive-card--scoring anim" style="--i:21">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Principled Scoring</h3>
-        <p>
-          Score every scene against 25 craft principles. A self-improving system that
-          diagnoses weaknesses, tunes prompts, and feeds validated improvements back
-          to the plugin itself.
-        </p>
-        <div class="dive-cta">
-          View scoring system
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/self-healing.html" class="dive-card dive-card--healing anim" style="--i:22">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Self-Healing Scripts</h3>
-        <p>
-          Autonomous error recovery for every script. When a command fails inside
-          a healing zone, Claude diagnoses the problem, applies a fix, and retries
-          &mdash; up to three attempts before escalating.
-        </p>
-        <div class="dive-cta">
-          View self-healing
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/interactive-mode.html" class="dive-card dive-card--interactive anim" style="--i:23">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Interactive Mode</h3>
-        <p>
-          Watch Claude work and intervene at any point. Switch between supervised
-          interaction and autonomous autopilot mid-task. Press 'i' to rejoin,
-          say "go auto" to step back.
-        </p>
-        <div class="dive-cta">
-          View interactive mode
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/enrichment.html" class="dive-card dive-card--enrich anim" style="--i:24">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Metadata Enrichment</h3>
-        <p>
-          Populate missing scene metadata automatically. Free heuristics extract
-          what they can &mdash; word counts, time of day, thread recovery. Claude
-          fills in the rest: characters, emotional arcs, threads, motifs, scene types.
-        </p>
-        <div class="dive-cta">
-          View enrichment
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-      <a href="diagrams/dashboard-preview.html" class="dive-card dive-card--dashboard anim" style="--i:25">
-        <div class="dive-label"><span class="dot"></span> Visualization</div>
-        <h3>Manuscript Dashboard</h3>
-        <p>
-          Ten interconnected visualizations that let you see your entire book at
-          a glance. POV rivers, character presence, thread weaving, emotional
-          terrain, craft score heatmaps &mdash; all linked by scene selection.
-        </p>
-        <div class="dive-cta">
-          View dashboard
-          <svg viewBox="0 0 16 16"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </div>
-      </a>
-
-    </div>
-  </div>
-
-  <!-- INSTALL -->
-  <div class="install-section anim" style="--i:26">
-    <div class="section-label"><span class="dot"></span> Get started</div>
-    <div class="install-cmd"><span class="comment"># Install from the Claude Code marketplace</span>
-<span class="cmd">/plugin marketplace add</span> benjaminsnorris/storyforge
-<span class="cmd">/plugin install</span> storyforge@storyforge-marketplace
-
-<span class="comment"># Initialize your first project</span>
-<span class="cmd">/storyforge:init</span></div>
-  </div>
-
-  <!-- FOOTER -->
-  <div class="footer anim" style="--i:27">
-    Storyforge &mdash; a <a href="https://github.com/benjaminsnorris/storyforge">Claude Code plugin</a> for novel writers
-  </div>
-
+<div class="hero">
+  <h1><span>Storyforge</span></h1>
+  <p class="lead">Write novels with structural integrity</p>
 </div>
 
+<!-- Pipeline diagram -->
+<svg viewBox="0 0 730 120" style="width:100%;max-width:720px;margin:0 auto 48px;display:block;" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .stage-box { rx: 8; ry: 8; stroke-width: 1; }
+    .stage-text { font-family: 'JetBrains Mono', monospace; font-size: 10px; fill: var(--text); text-anchor: middle; }
+    .stage-label { font-family: 'Instrument Serif', Georgia, serif; font-size: 13px; fill: var(--text-dim); text-anchor: middle; }
+    .arrow-line { stroke: var(--text-light); stroke-width: 1; }
+    .gate-dot { fill: var(--teal); }
+    .gate-text { font-family: 'JetBrains Mono', monospace; font-size: 7px; fill: var(--teal); text-anchor: middle; }
+  </style>
+  <!-- Stages -->
+  <rect x="0" y="20" width="80" height="50" class="stage-box" fill="var(--gold-dim)" stroke="var(--gold)"/>
+  <text x="40" y="42" class="stage-text" style="fill:var(--gold)">Spine</text>
+  <text x="40" y="56" class="stage-label">5–10 events</text>
+
+  <line x1="84" y1="45" x2="104" y2="45" class="arrow-line"/>
+  <circle cx="94" cy="45" r="3" class="gate-dot"/>
+  <text x="94" y="82" class="gate-text">validate</text>
+
+  <rect x="108" y="20" width="80" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--deep-blue)"/>
+  <text x="148" y="42" class="stage-text" style="fill:var(--deep-blue)">Architecture</text>
+  <text x="148" y="56" class="stage-label">15–25 scenes</text>
+
+  <line x1="192" y1="45" x2="212" y2="45" class="arrow-line"/>
+  <circle cx="202" cy="45" r="3" class="gate-dot"/>
+  <text x="202" y="82" class="gate-text">validate</text>
+
+  <rect x="216" y="20" width="65" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--rose)"/>
+  <text x="248" y="42" class="stage-text" style="fill:var(--rose)">Voice</text>
+  <text x="248" y="56" class="stage-label">style guide</text>
+
+  <line x1="285" y1="45" x2="305" y2="45" class="arrow-line"/>
+
+  <rect x="309" y="20" width="80" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--teal)"/>
+  <text x="349" y="42" class="stage-text" style="fill:var(--teal)">Scene Map</text>
+  <text x="349" y="56" class="stage-label">40–100 scenes</text>
+
+  <line x1="393" y1="45" x2="413" y2="45" class="arrow-line"/>
+  <circle cx="403" cy="45" r="3" class="gate-dot"/>
+  <text x="403" y="82" class="gate-text">validate</text>
+
+  <rect x="417" y="20" width="70" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--gold)"/>
+  <text x="452" y="42" class="stage-text" style="fill:var(--gold)">Briefs</text>
+  <text x="452" y="56" class="stage-label">per scene</text>
+
+  <line x1="491" y1="45" x2="511" y2="45" class="arrow-line"/>
+  <circle cx="501" cy="45" r="3" class="gate-dot"/>
+  <text x="501" y="82" class="gate-text">validate</text>
+
+  <rect x="515" y="20" width="55" height="50" class="stage-box" fill="var(--gold-dim)" stroke="var(--gold)"/>
+  <text x="542" y="42" class="stage-text" style="fill:var(--gold)">Draft</text>
+  <text x="542" y="56" class="stage-label">parallel</text>
+
+  <line x1="574" y1="45" x2="589" y2="45" class="arrow-line"/>
+
+  <rect x="593" y="20" width="60" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--deep-blue)"/>
+  <text x="623" y="42" class="stage-text" style="fill:var(--deep-blue)">Evaluate</text>
+  <text x="623" y="56" class="stage-label">6 experts</text>
+
+  <line x1="657" y1="45" x2="672" y2="45" class="arrow-line"/>
+
+  <rect x="676" y="20" width="44" height="50" class="stage-box" fill="var(--surface2)" stroke="var(--rose)"/>
+  <text x="698" y="42" class="stage-text" style="fill:var(--rose)">Polish</text>
+  <text x="698" y="56" class="stage-label">craft</text>
+
+  <!-- Subtitle -->
+  <text x="365" y="110" style="font-family:'Instrument Serif',Georgia,serif; font-size:12px; fill:var(--text-light); text-anchor:middle;">Build the structure first. Validate at every stage. Draft with confidence.</text>
+</svg>
+
+<div class="prose">
+  <p>Most novelists write their way into the story, then spend months fixing continuity errors, dropped subplots, and characters who know things they shouldn't.</p>
+  <p>Storyforge takes a different approach. <strong>Build the structural skeleton first — scene by scene, validated at every step — so that when you write prose, the foundation is already sound.</strong></p>
+</div>
+
+<div class="prose">
+  <h2>How it works</h2>
+  <p>You start with a seed — a logline, a character, a thematic obsession. From there, Storyforge guides you through progressively deeper levels of structural development:</p>
+</div>
+
+<div class="features">
+  <div class="feature">
+    <h3>Spine</h3>
+    <p>The 5–10 events that must happen. Your protagonist's wound, lie, and need. The three-level conflict. The ending.</p>
+  </div>
+  <div class="feature">
+    <h3>Architecture</h3>
+    <p>Expand to a full scene structure. Assign POV, track value shifts, classify action vs. sequel rhythm, map story threads.</p>
+  </div>
+  <div class="feature">
+    <h3>Scene Map</h3>
+    <p>Every scene gets a location, timeline position, character list, and thread tracking. The full spatial and temporal picture of your novel.</p>
+  </div>
+  <div class="feature">
+    <h3>Briefs</h3>
+    <p>The drafting contract per scene: goal, conflict, outcome, crisis, decision. Who knows what entering and leaving. Key actions and dialogue.</p>
+  </div>
+</div>
+
+<div class="prose">
+  <p>At each stage, automatic validation catches problems: timeline inconsistencies, knowledge violations, dropped threads, flat pacing stretches. <strong>You fix these as simple data edits — before they're baked into thousands of words of prose.</strong></p>
+  <p>When you're ready to draft, every scene has a validated brief. Scenes can even be written in parallel because their knowledge dependencies are mapped. The result: a first draft with structural integrity already built in.</p>
+</div>
+
+<div class="divider"></div>
+
+<div class="prose">
+  <h2>Already have a manuscript?</h2>
+  <p>Storyforge can read your existing prose and extract the structural data — character knowledge, value shifts, thread tracking, scene purposes — revealing what's working and where the problems are. Authors use this to understand their own manuscripts at a structural level that's genuinely hard to see from inside the draft.</p>
+</div>
+
+<div class="divider"></div>
+
+<div class="prose">
+  <h2>Three ways to work</h2>
+  <p>You choose how much Storyforge does and how much you do. This isn't a dial — it's a different role for your AI collaborator.</p>
+</div>
+
+<div class="roles">
+  <div class="role role-full">
+    <h3>Full</h3>
+    <div class="subtitle">Creative Partner</div>
+    <p>Storyforge proposes, builds, drafts. You review and redirect. You could be surprised by creative choices — the structural guardrails ensure quality.</p>
+  </div>
+  <div class="role role-coach">
+    <h3>Coach</h3>
+    <div class="subtitle">Dramaturg</div>
+    <p>Storyforge presents options and asks sharp questions. You make every creative decision. It structures and challenges — never generates prose.</p>
+  </div>
+  <div class="role role-strict">
+    <h3>Strict</h3>
+    <div class="subtitle">Continuity Editor</div>
+    <p>You write everything. Storyforge runs exhaustive validation — catching knowledge violations, thread drops, and timeline errors across 50+ scenes.</p>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<div class="prose">
+  <h2>Grounded in craft</h2>
+  <p>Every structural decision Storyforge tracks maps to an established craft principle. McKee's value shifts tell you if your scenes turn. Swain's action/sequel pattern reveals your pacing rhythm. Kowal's MICE threads track your subplot nesting. Story Grid's Five Commandments ensure every scene has a genuine crisis and an active decision.</p>
+  <p>This isn't a black box. It's a system you can learn from — and the more you understand the principles, the more powerful the tool becomes.</p>
+</div>
+
+<div class="divider"></div>
+
+<div class="prose" style="margin-bottom: 24px;">
+  <h2>Learn more</h2>
+</div>
+
+<div class="learn">
+  <a href="diagrams/elaboration-pipeline.html">
+    <strong>The Elaboration Pipeline</strong>
+    <span>The full structural development process, stage by stage.</span>
+  </a>
+  <a href="diagrams/extraction.html">
+    <strong>Extraction: Reverse Elaboration</strong>
+    <span>How Storyforge reads an existing manuscript and extracts structural data.</span>
+  </a>
+  <a href="diagrams/scoring-and-fidelity.html">
+    <strong>Scoring &amp; Fidelity</strong>
+    <span>25 craft principles, brief fidelity, and how findings route to the right fix.</span>
+  </a>
+  <a href="diagrams/coaching-levels.html">
+    <strong>Coaching Levels</strong>
+    <span>How the three roles work across every stage of the pipeline.</span>
+  </a>
+  <a href="diagrams/craft-engine.html">
+    <strong>The Craft Engine</strong>
+    <span>The principles and sources that drive structural and prose evaluation.</span>
+  </a>
+  <a href="diagrams/evaluation-panel.html">
+    <strong>Evaluation Panel</strong>
+    <span>Six expert perspectives reading the manuscript.</span>
+  </a>
+  <a href="diagrams/production-pipeline.html">
+    <strong>Production &amp; Publishing</strong>
+    <span>From manuscript to bookshelf — web, epub, PDF.</span>
+  </a>
+</div>
+
+<div class="footer">
+  Storyforge
+</div>
+
+</div>
 </body>
 </html>

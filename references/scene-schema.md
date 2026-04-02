@@ -1,125 +1,149 @@
-# Scene Metadata Schema
+# Scene Data Schema
 
-Scenes are the atomic unit of a Storyforge project. Scene files are **pure prose** (no YAML frontmatter) — the filename is the scene ID. All metadata lives in two canonical CSV files: `reference/scene-metadata.csv` and `reference/scene-intent.csv`.
+Scenes are the atomic unit of a Storyforge project. Scene files are **pure prose** (no YAML frontmatter) — the filename is the scene ID. All metadata lives in pipe-delimited CSV files in `reference/`.
 
-## Data Storage
+## Data Model
 
-Scene data is split across two pipe-delimited CSV files:
+Scene data is split across three CSV files, each with a clear purpose:
 
-- **`reference/scene-metadata.csv`** — structural and tracking metadata (POV, setting, part, status, word counts)
-- **`reference/scene-intent.csv`** — creative intent data (function, emotional arc, characters, threads, motifs)
+- **`reference/scenes.csv`** — structural identity and position (POV, location, timeline, status, word counts)
+- **`reference/scene-intent.csv`** — narrative dynamics and tracking (function, value shifts, threads, characters, MICE threads)
+- **`reference/scene-briefs.csv`** — drafting contracts (goal, conflict, outcome, knowledge states, key actions/dialogue)
 
-Both files use pipe (`|`) as the field delimiter. Array values within a single column use semicolon (`;`) as the separator. The first row is always the header. The `id` column appears first in both files and is the join key.
+All three files use pipe (`|`) as the field delimiter, semicolon (`;`) for array values within a column, and `id` as the join key. The first row is always the header.
+
+### Python Helpers
+
+The `storyforge.elaborate` module provides a unified interface over all three files:
+
+```python
+from storyforge.elaborate import get_scene, get_scenes, update_scene, add_scenes
+
+scene = get_scene('hidden-canyon', 'reference/')           # All columns merged
+scenes = get_scenes('reference/', columns=['id', 'pov', 'value_shift'])  # Selective
+scenes = get_scenes('reference/', filters={'pov': 'Lena Callis'})       # Filtered
+update_scene('hidden-canyon', 'reference/', {'status': 'drafted', 'word_count': '2400'})
+```
 
 ### Legacy Format
 
-If a project has `scenes/scene-index.yaml` but no `scene-metadata.csv`, it is using the legacy YAML format. Run `./storyforge migrate --execute` to convert to CSV. As of v0.22.0, all scripts require CSV — YAML fallbacks have been removed.
+Projects created before v0.40.0 use a two-file model: `reference/scene-metadata.csv` and `reference/scene-intent.csv` (with fewer columns). Run `./storyforge extract` to populate the three-file model from existing prose. The write and score scripts auto-detect which model is in use.
 
-## Core Fields
+## Column Reference
 
-### metadata.csv columns
+### scenes.csv — structural identity
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | string | Unique scene identifier — a descriptive slug (e.g., `geometry-of-dying`, `sheriffs-ledger`). Must be unique across the project. Also the scene filename (`scenes/{id}.md`). |
-| `seq` | integer | Sequence number controlling scene order. Scenes are sorted by `seq` for reading order. |
-| `title` | string | Scene title — evocative but not spoilery. Used for reference, not necessarily reader-facing. |
-| `pov` | string | POV character's full name. Must match a character in the character bible. |
-| `location` | string | The physical location where this scene takes place. Use a short, reusable label — the name of the place, not a description. If two scenes happen in the same place, they should have the same location string. When `reference/locations.csv` exists, values are normalized against canonical entries during enrichment and visualization. |
-| `part` | integer | Which part or act this scene belongs to. |
-| `type` | string | Scene type. One of: `character`, `plot`, `world`, `action`, `transition`. Most scenes blend types — pick the dominant one. |
-| `timeline_day` | integer or string | Position in the story's chronology. Can be a day number, a date, or a relative marker. |
-| `time_of_day` | string | Time of day (e.g., `morning`, `afternoon`, `evening`, `night`). |
-| `status` | string | One of: `pending`, `drafted`, `revised`, `cut`, `merged`. |
-| `word_count` | integer | Actual word count (filled after drafting, 0 if not yet drafted). |
-| `target_words` | integer | Target word count for the scene. |
+| Column | Type | Populated at | Description |
+|--------|------|-------------|-------------|
+| `id` | string | spine | Unique scene identifier — a descriptive slug (e.g., `hidden-canyon`). Also the filename (`scenes/{id}.md`). |
+| `seq` | integer | spine | Reading order. Scenes are sorted by `seq`. |
+| `title` | string | spine | Scene title — evocative, used for reference. |
+| `part` | integer | architecture | Which act/part this scene belongs to. |
+| `pov` | string | architecture | POV character's full name. Must match the character bible. |
+| `location` | string | map | Physical location — a short, reusable label. Normalized against `reference/locations.csv` if it exists. |
+| `timeline_day` | integer/string | map | Chronological position (day number, date, or relative marker). |
+| `time_of_day` | string | map | One of: `morning`, `afternoon`, `evening`, `night`, `dawn`, `dusk`. |
+| `duration` | string | map | In-story duration (e.g., "2 hours", "30 minutes"). |
+| `type` | string | map | Narrative purpose. One of: `character`, `plot`, `world`, `action`, `transition`, `confrontation`, `dialogue`, `introspection`, `revelation`. |
+| `status` | string | all | Elaboration depth: `spine`, `architecture`, `mapped`, `briefed`, `drafted`, `polished`. |
+| `word_count` | integer | draft | Actual word count (0 until drafted). |
+| `target_words` | integer | map | Target word count for the scene. |
 
-### intent.csv columns
+### scene-intent.csv — narrative dynamics
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | string | Scene ID — must match the `id` in metadata.csv. |
-| `function` | string | Why this scene exists for the story. Must be specific — not "advance the plot" but "she discovers he kept the letter." A scene without a clear function should be cut or merged. |
-| `emotional_arc` | string | The emotional journey within the scene. Where does the reader start and end emotionally? |
-| `characters` | array | All characters present or referenced in the scene. Semicolon separated (e.g., `Dorren Hayle;Tessa Merrin;Pell`). When `reference/characters.csv` exists, names are normalized against canonical entries during enrichment and visualization. |
-| `threads` | array | Story threads this scene touches. Semicolon separated. Must match threads tracked in the continuity tracker. |
-| `motifs` | array | Motifs or recurring elements that appear in this scene. Semicolon separated. |
-| `notes` | string | Free-form notes about the scene. |
+| Column | Type | Populated at | Description |
+|--------|------|-------------|-------------|
+| `id` | string | spine | Matches scenes.csv. |
+| `function` | string | spine | Why this scene exists — must be specific and testable. Not "advance the plot" but "she discovers he kept the letter." |
+| `scene_type` | string | architecture | Swain structural pattern: `action` (goal/conflict/outcome) or `sequel` (reaction/dilemma/decision). |
+| `emotional_arc` | string | architecture | Emotional journey: start → end (e.g., "controlled competence to buried unease"). |
+| `value_at_stake` | string | architecture | The abstract value being tested: safety, love, justice, truth, freedom, etc. (McKee). |
+| `value_shift` | string | architecture | Polarity change: `+/-`, `-/+`, `+/++`, `-/--` (Story Grid). A scene that doesn't shift a value is a nonevent. |
+| `turning_point` | string | architecture | `action` or `revelation` — vary these to prevent monotony (Story Grid). |
+| `threads` | array | architecture | Story threads this scene touches. Semicolon-separated. |
+| `characters` | array | map | All characters present or referenced. Semicolon-separated. Normalized against `reference/characters.csv`. |
+| `on_stage` | array | map | Characters physically present (subset of characters). |
+| `mice_threads` | array | map | MICE thread operations: `+milieu:canyon` (open), `-inquiry:who-killed` (close). FILO nesting order (Kowal). |
+
+### scene-briefs.csv — drafting contracts
+
+| Column | Type | Populated at | Description |
+|--------|------|-------------|-------------|
+| `id` | string | brief | Matches scenes.csv. |
+| `goal` | string | brief | POV character's concrete objective entering the scene (Swain). |
+| `conflict` | string | brief | What specifically opposes the goal. |
+| `outcome` | string | brief | How the scene ends: `yes`, `no`, `yes-but`, `no-and` (Weiland). |
+| `crisis` | string | brief | The dilemma: best bad choice or irreconcilable goods (Story Grid Five Commandments). |
+| `decision` | string | brief | What the character actively chooses. |
+| `knowledge_in` | array | brief | Facts the POV character knows entering. Semicolon-separated. Must use **exact wording** matching prior scenes' `knowledge_out`. |
+| `knowledge_out` | array | brief | Facts the POV character knows leaving. Includes `knowledge_in` plus anything new learned. |
+| `key_actions` | array | brief | Concrete things that happen. Semicolon-separated. |
+| `key_dialogue` | array | brief | Specific lines or exchanges that must appear. |
+| `emotions` | array | brief | Emotional beats in sequence. |
+| `motifs` | array | brief | Recurring images/symbols deployed. |
+| `continuity_deps` | array | brief | Scene IDs this scene depends on (for parallel drafting). |
+| `has_overflow` | boolean | brief | Whether `briefs/{id}.md` exists for extended detail. |
+
+## Elaboration Stages
+
+The `status` field tracks how deeply a scene has been elaborated:
+
+| Status | What's populated | Pipeline stage |
+|--------|-----------------|---------------|
+| `spine` | id, seq, title, function | Stage 1: irreducible story events |
+| `architecture` | + part, pov, scene_type, emotional_arc, value_shift, turning_point, threads | Stage 2: structure |
+| `mapped` | + location, timeline_day, time_of_day, duration, type, characters, on_stage, mice_threads | Stage 3: full scene map |
+| `briefed` | + goal, conflict, outcome, crisis, decision, knowledge_in/out, key_actions, key_dialogue, emotions, motifs, continuity_deps | Stage 4: drafting contracts |
+| `drafted` | + word_count (prose exists in scenes/{id}.md) | After drafting |
+| `polished` | Prose has been through craft polish | After polish pass |
+
+## Validation
+
+Run `./storyforge validate` to check structural integrity:
+
+- **Identity:** Every ID in intent/briefs exists in scenes.csv
+- **Completeness:** Required columns for the scene's status are populated
+- **Timeline:** No backwards jumps without explicit markers
+- **Knowledge flow:** knowledge_in references match prior scenes' knowledge_out
+- **Thread management:** MICE threads nest in valid FILO order; no thread dormant >8 scenes
+- **Pacing:** No flat polarity stretches (3+ scenes); action/sequel rhythm varied; turning point types varied
+
+## Scoring
+
+Two types of scoring reference scene data:
+
+- **Structural scoring** (`score_structure`): Pre-draft check on brief quality (0-5 per scene). Checks goal/conflict/outcome completeness, value shift, crisis, knowledge flow.
+- **Brief fidelity scoring** (`fidelity-scores.csv`): Post-draft check — did the prose deliver what the brief promised? Scores 9 elements: goal, conflict, outcome, crisis, decision, key_actions, key_dialogue, emotions, knowledge.
 
 ## CSV Format Conventions
 
 - **Delimiter:** `|` (pipe character)
-- **Array separator:** `;` (semicolon) within a single column — e.g., `thread-a;thread-b;thread-c`
+- **Array separator:** `;` (semicolon) within a single column
 - **Header row:** Always present, always the first line
-- **No quoting:** Values should not contain pipe characters; if unavoidable, rephrase the value
-- **Empty values:** Leave the field empty between delimiters (e.g., `id||title` means the second field is empty)
+- **No quoting:** Values should not contain pipe characters
+- **Empty values:** Leave the field empty between delimiters
 - **Encoding:** UTF-8
-
-### Example metadata.csv
-
-```
-id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words
-geometry-of-dying|1|The Geometry of Dying|Dorren Hayle|Pressure Cartography Office|1|character|1|morning|drafted|2400|2500
-sheriffs-ledger|2|The Sheriff's Ledger|Kael Maren|Deep Archive|1|plot|2|afternoon|pending|0|1500
-```
-
-### Example intent.csv
-
-```
-id|function|emotional_arc|characters|threads|motifs|notes
-geometry-of-dying|Establishes Dorren as institutional gatekeeper|Controlled competence to buried unease|Dorren Hayle;Tessa Merrin;Pell|institutional failure;chosen blindness|maps/cartography;governance-as-weight|
-sheriffs-ledger|Kael discovers archive inconsistencies|Scholarly calm to urgent alarm|Kael Maren;Dorren Hayle|the anomaly;archive corruption|blindness/seeing|
-```
-
-## Project Extensions
-
-Defined in `storyforge.yaml` under `scene_extensions`. Each extension adds a custom column to `metadata.csv` for project-specific tracking.
-
-```yaml
-# In storyforge.yaml:
-scene_extensions:
-  - name: tension_level
-    type: integer
-    description: "1-10 tension rating for pacing analysis"
-  - name: magic_cost
-    type: string
-    description: "What the magic system costs in this scene"
-```
-
-These fields appear as additional columns in `metadata.csv` after the core columns.
 
 ## Scene File Format
 
-Individual scene files live in `scenes/` as **pure Markdown with no frontmatter**:
+Scene files live in `scenes/` as **pure Markdown with no frontmatter**:
 
-```markdown
-Scene prose goes here. The filename is the scene ID.
-
-No YAML frontmatter block. All metadata lives in metadata.csv and intent.csv.
-The file `scenes/geometry-of-dying.md` contains only the prose for that scene.
+```
+scenes/hidden-canyon.md → id is "hidden-canyon"
 ```
 
-The filename (minus the `.md` extension) is the scene ID. For example, the file `scenes/geometry-of-dying.md` corresponds to the row with `id=geometry-of-dying` in both CSV files.
+The file contains only prose. All metadata lives in the CSV files.
 
 ## Scene ID Convention
 
-Scene IDs are descriptive slugs that identify the scene by its content, not its position:
-
-- **Format:** lowercase, hyphen-separated words (e.g., `geometry-of-dying`, `sheriffs-ledger`, `hidden-canyon`)
+- **Format:** lowercase, hyphen-separated words (e.g., `hidden-canyon`, `sheriffs-ledger`)
 - **Length:** 2-5 words — specific enough to identify, short enough to type
-- **Content-based:** Name describes what happens or the key image, not sequence
-- **No numbers:** Avoid numeric IDs or positional prefixes — ordering lives in the `seq` column of `metadata.csv` and in `chapter-map.csv`
-- **Also the filename:** The scene ID is the filename in `scenes/` (e.g., `geometry-of-dying` → `scenes/geometry-of-dying.md`)
-
-Good: `geometry-of-dying`, `first-meridian`, `woman-in-cellars-light`
-Bad: `1`, `scene-01`, `ch3-sc2`, `act1-opening`
-
-For new scenes without clear content yet, use a working slug: `opening-chase`, `bridge-confrontation`, `quiet-morning`. Rename later if the scene evolves.
+- **Content-based:** Describes what happens or the key image, not sequence position
+- **No numbers:** Ordering lives in the `seq` column
+- **Also the filename:** `scenes/{id}.md`
 
 ## What Is a Scene?
 
 A scene is a single continuous pass of experience — one camera angle before the lens shifts. The moment the POV changes, or time jumps, or location shifts, that's a new scene.
 
-Scenes are **not mini-chapters**. They may be extremely short (a single paragraph) or long (several pages). Length is dictated by the experience, not by structural convention.
-
-Scenes are designed to be **reshuffled**. The ordering in `metadata.csv` (the `seq` column) is a working sequence, not a permanent assignment. If the story is better served by moving a scene, move it — that's what the sequence number is for.
+Scenes are designed to be **reshuffled**. The `seq` column is a working sequence, not a permanent assignment.

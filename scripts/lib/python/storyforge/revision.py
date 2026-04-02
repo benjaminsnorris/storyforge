@@ -136,8 +136,9 @@ def resolve_scope(scope: str, project_dir: str) -> list[str]:
         ]
 
     else:
-        # Comma-separated list — detect if all numeric (seq numbers)
-        parts = [s.strip() for s in scope.split(',') if s.strip()]
+        # Comma- or semicolon-separated list — detect if all numeric (seq numbers)
+        normalized = scope.replace(';', ',')
+        parts = [s.strip() for s in normalized.split(',') if s.strip()]
         all_numeric = all(p.isdigit() for p in parts if not p.startswith('NEW:'))
 
         if all_numeric and not any(p.startswith('NEW:') for p in parts):

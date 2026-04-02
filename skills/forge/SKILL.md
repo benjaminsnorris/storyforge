@@ -56,82 +56,44 @@ Based on the author's message, operate in one of three modes:
 
 ### Directed Mode
 
-The author has a specific request. Parse what they want and route accordingly.
+The author has a specific request. Parse what they want and route to the right skill.
 
-**CRITICAL: Never run pipeline scripts directly.** The `./storyforge write`, `./storyforge evaluate`, `./storyforge revise`, and `./storyforge assemble` commands launch long-running Claude sub-sessions. Running them from inside an existing Claude session almost always fails. Instead, **always prompt the author to run the command themselves** in their terminal. This also lets the author choose `--interactive` mode to participate in the process. Present the command, explain the options, and let the author execute it.
+**CRITICAL: Never run pipeline scripts directly.** The `./storyforge write`, `./storyforge evaluate`, `./storyforge revise` commands launch long-running Claude sub-sessions. Running them from inside an existing Claude session almost always fails. Instead, **prompt the author to run the command themselves** in their terminal. Present the command, explain the options, and let the author execute it.
 
-**Character, world, story concept, or timeline work:**
-Invoke the `develop` skill. This covers character bible creation and deepening, world-building, story architecture, synopsis development, and timeline construction.
+**Creative development** (character, world, voice, story architecture, scene design):
+Invoke the `elaborate` skill. This handles all creative development work — from spine through briefs, including character deepening, world building, voice guide creation, and scene-level design.
 
-**Voice and style work:**
-Invoke the `voice` skill. This covers voice guide creation, voice sampling, voice refinement, and POV-specific voice rules.
-
-**Scene planning, scene design, or scene review:**
-Invoke the `scenes` skill. This covers scene index population, scene design, scene card creation, act-level planning, and scene auditing. When scenes are created or proposed, all scene IDs must use descriptive slugs (e.g., `geometry-of-dying`), never numeric or positional IDs. A scene is a single continuous pass of experience — one camera angle — designed to be reshuffled freely; order lives in the index, not the filename.
-
-**"Start drafting" / "Write scenes" / "Write the draft":**
-Check prerequisites before proceeding:
-
-- *Hard prerequisites* (will not proceed without):
-  - Scene data must exist: `reference/scenes.csv` (elaboration) or `reference/scene-metadata.csv` (legacy) with at least one scene
-  - `reference/voice-guide.md` must exist
-- *Soft prerequisites* (recommend but allow override):
-  - `reference/character-bible.md`
-  - `reference/world-bible.md`
-  - `reference/story-architecture.md`
-
-If hard prerequisites are met, tell the author how to run the drafting script:
-
-```
+**"Start drafting" / "Write scenes":**
+Check that `reference/scenes.csv` or `reference/scene-metadata.csv` exists with scenes, and `reference/voice-guide.md` exists. If ready, provide the command:
+```bash
 ./storyforge write [options]
 ```
+If prerequisites are missing, route to `elaborate` to build them.
 
-If the project doesn't have a `./storyforge` runner script, offer to create one
-by copying the template from the plugin's `templates/storyforge-runner.sh` and
-making it executable. Explain available options (scene selection, act scope, `--interactive` for supervised drafting, `--coaching coach|strict` for coaching mode).
-
-If the project's coaching level is `coach` or `strict`, remind the author that drafting will produce briefs or constraint lists instead of scene prose. They can override with `--coaching full` for a specific run.
-
-If a hard prerequisite is missing, explain what's needed and route to the skill that creates it — `scenes` for the scene index, `voice` for the voice guide.
-
-If soft prerequisites are missing, mention what's absent and ask the author whether they want to address it first or proceed anyway.
-
-**"Run evaluation" / "Evaluate the draft":**
-Check prerequisites:
-
-- *Hard prerequisite*: At least some scene files (`.md`) must exist in `scenes/`
-
-If met, provide the evaluation command:
-
-```
+**"Evaluate" / "Run evaluation":**
+Check that scene files exist in `scenes/`. If ready, provide the command:
+```bash
 ./storyforge evaluate [options]
 ```
 
-If the project doesn't have a `./storyforge` runner script, offer to create one
-by copying the template from the plugin's `templates/storyforge-runner.sh` and
-making it executable. Explain what the evaluation does, available options (`--interactive` for supervised synthesis), and what output to expect.
+**"Revise" / "Fix issues" / "Plan revision" / "Polish":**
+Invoke the `revise` skill. This handles the full cycle: analyze findings, plan upstream + craft passes, execute, review results.
+For polish-only: `./storyforge revise --polish`
 
-Evaluation runs on scene files in `scenes/`, not assembled chapters. This is intentional — get the scenes right first, assemble into chapters later.
+**"Score" / "Score my scenes":**
+Invoke the `score` skill.
 
-If no scene files exist, explain what's needed and suggest drafting first.
+**"Publish" / "Push to bookshelf" / "Generate dashboard":**
+Invoke the `publish` skill. This assembles the web book, generates the dashboard, and pushes to bookshelf.
 
-**"Plan revision" / "What should I revise?":**
-Invoke the `plan-revision` skill.
+**"Make an epub" / "PDF" / "Print":**
+Invoke the `produce` skill for non-web formats.
 
-**"Run revision" / "Revise the draft":**
-Check prerequisites:
+**"Extract" / "Analyze my manuscript":**
+Invoke the `extract` skill.
 
-- *Hard prerequisite*: A revision plan must exist for the current pipeline cycle (check `working/plans/revision-plan.csv`, or `working/pipeline.csv` for the plan field, or fall back to `working/plans/revision-plan.yaml`)
-
-If met, provide the revision command:
-
-```
-./storyforge revise [options]
-```
-
-If the project doesn't have a `./storyforge` runner script, offer to create one
-by copying the template from the plugin's `templates/storyforge-runner.sh` and
-making it executable. Explain that it runs all passes autonomously in sequence — the author steers by editing guidance entries in the plan before execution. Mention `--interactive` for supervised revision where the author can watch and redirect each pass. Mention `--coaching coach|strict` for editorial notes or checklists instead of direct edits.
+**"Title" / "Cover" / "Press kit":**
+Invoke the corresponding skill (`title`, `cover`, `press-kit`).
 
 If the project's coaching level is `coach` or `strict`, remind the author that revision will produce editorial notes or checklists instead of editing scene files. They can override with `--coaching full` for a specific run.
 
@@ -191,9 +153,25 @@ If the project doesn't have a `./storyforge` runner script, offer to create one 
 
 The author said "surprise me," "what should I work on?", or gave no specific direction.
 
-Invoke the `recommend` skill. It reads the full project state — phase, pipeline cycle, artifacts, evaluation findings, scene progress — and identifies the single highest-value next action using a structured decision framework. On approval, it executes immediately by invoking the appropriate skill with specific direction.
+Determine the single highest-value next action based on project state. Work through these priorities in order — stop at the first one that applies:
 
-Do not duplicate recommendation logic here. The `recommend` skill is the single authority on "what next."
+**1. Elaboration phase:** If phase is `spine`/`architecture`/`scene-map`/`briefs` → "Continue elaboration" → invoke `elaborate`.
+
+**2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write` command.
+
+**3. Drafted, not evaluated:** If scenes exist but no evaluation → "Run evaluation" → provide `./storyforge evaluate` command.
+
+**4. Evaluation exists, not revised:** If findings exist but no revision plan → "Plan and execute revision" → invoke `revise`.
+
+**5. Revision complete:** If revision cycle done → "Review and decide next step" → invoke `revise` in review mode.
+
+**6. Ready to polish:** If evaluation shows only craft issues → "Polish the prose" → provide `./storyforge revise --polish` command.
+
+**7. Ready to publish:** If manuscript is polished → "Publish" → invoke `publish`.
+
+**8. Artifact gaps:** Missing character bible, world bible, voice guide → "Deepen your foundations" → invoke `elaborate` with specific direction.
+
+On approval, execute immediately by invoking the appropriate skill.
 
 ---
 
@@ -201,13 +179,13 @@ Do not duplicate recommendation logic here. The `recommend` skill is the single 
 
 The author wants to see where things stand. Present a clean summary:
 
-- **Phase:** development / drafting / revision / polish
-- **Coaching level:** full / coach / strict — note if non-default
-- **Artifacts:** which exist, which are missing, which are incomplete
-- **Scene progress:** planned vs. drafted vs. revised (counts)
-- **Word count:** current vs. target (if drafting has begun)
-- **Active threads:** any open questions, unresolved character decisions, dangling plot points noted in the project files
-- **Recent activity:** what was worked on last, based on file modification times and `working/pipeline.csv`
+- **Phase:** spine / architecture / scene-map / briefs / drafting / evaluation / revision / polish / production
+- **Coaching level:** full / coach / strict
+- **Elaboration depth:** How many scenes at each status (spine/architecture/mapped/briefed/drafted/polished)
+- **Word count:** current vs. target
+- **Validation:** pass/fail counts if validation has run
+- **Pipeline cycle:** current cycle status (evaluating/planning/revising/reviewing)
+- **Recent activity:** what was worked on last
 
 Suggest next steps but don't push. Let the author absorb the information and decide.
 

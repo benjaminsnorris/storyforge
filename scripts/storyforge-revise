@@ -50,6 +50,16 @@ elif [[ -f "$PLAN_FILE" ]]; then
     log "DEPRECATION: Using YAML revision plan. Migrate to working/plans/revision-plan.csv."
 fi
 
+# --- Polish mode: auto-generate a craft-only plan targeting all drafted scenes ---
+if [[ "$POLISH_MODE" == true ]]; then
+    log "Polish mode — generating craft-only revision plan..."
+    mkdir -p "$(dirname "$CSV_PLAN_FILE")"
+    echo "pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location" > "$CSV_PLAN_FILE"
+    echo "1|prose-polish|Voice consistency, prose naturalness, dialogue authenticity, AI pattern cleanup|full||Follow the voice guide strictly. Focus on: em dash overuse, antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. Enter late, leave early.|voice-quality|polish|pending|opus|craft" >> "$CSV_PLAN_FILE"
+    USE_CSV_PLAN=true
+    log "Generated single-pass polish plan: ${CSV_PLAN_FILE}"
+fi
+
 LOG_DIR="${PROJECT_DIR}/working/logs"
 LOG_FILE="${LOG_DIR}/revision-log.txt"
 export LOG_FILE
@@ -60,10 +70,15 @@ mkdir -p "$LOG_DIR"
 DRY_RUN=false
 INTERACTIVE=false
 COACHING_LEVEL=""
+POLISH_MODE=false
 START_PASS=0  # 0 means "find first pending"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --polish)
+            POLISH_MODE=true
+            shift
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -736,10 +751,79 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     API_FLAG=""
     [[ "${DRY_RUN:-false}" != true && -n "${ANTHROPIC_API_KEY:-}" && ! -f "$INTERACTIVE_FILE" ]] && API_FLAG="--api-mode"
 
-    PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.revision build-prompt \
-        "$PASS_NAME" "$PASS_PURPOSE" "${EFFECTIVE_SCOPE:-$PASS_SCOPE}" "$PROJECT_DIR" \
-        --config "$PASS_BLOCK" --coaching "$EFFECTIVE_COACHING" $API_FLAG)
-    PROMPT_EXIT=$?
+    # Check fix_location for upstream vs prose revision
+    _fix_location=""
+    [[ "$USE_CSV_PLAN" == true ]] && _fix_location=$(read_csv_pass_field "$PASS_NUM" "fix_location" 2>/dev/null || echo "")
+
+    if [[ "$_fix_location" == "brief" || "$_fix_location" == "intent" || "$_fix_location" == "structural" ]]; then
+        # Build upstream revision prompt — operates on CSVs, not prose
+        PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import get_scenes
+
+ref_dir = os.path.join('${PROJECT_DIR}', 'reference')
+scenes = get_scenes(ref_dir)
+
+# Build a view of the affected scenes
+target_ids = [t.strip() for t in '${_csv_targets:-}'.split(';') if t.strip()]
+if not target_ids:
+    target_ids = [s['id'] for s in scenes]
+
+scene_data = []
+for s in scenes:
+    if s['id'] in target_ids:
+        scene_data.append(s)
+
+# Format scene data for the prompt
+data_block = []
+for s in scene_data:
+    data_block.append(f\"Scene: {s.get('id', '')} (seq {s.get('seq', '')}, POV: {s.get('pov', '')})\")
+    for k, v in s.items():
+        if k not in ('id', 'seq', 'pov') and v:
+            data_block.append(f'  {k}: {v[:120]}')
+    data_block.append('')
+
+print(f'''You are performing an upstream revision on scene data for a novel.
+
+## Pass: ${PASS_NAME}
+## Purpose: ${PASS_PURPOSE}
+## Fix Location: ${_fix_location}
+
+## Guidance
+${_csv_guidance:-No specific guidance provided.}
+
+## Protection
+${_csv_protection:-No protection constraints.}
+
+## Current Scene Data
+
+{chr(10).join(data_block)}
+
+## Instructions
+
+Revise the {'scene-briefs.csv' if '${_fix_location}' == 'brief' else 'scene-intent.csv' if '${_fix_location}' == 'intent' else 'scenes.csv'} data to address the purpose above.
+
+Output your changes as pipe-delimited CSV rows in a fenced block:
+
+\`\`\`{'briefs-csv' if '${_fix_location}' == 'brief' else 'intent-csv' if '${_fix_location}' == 'intent' else 'scenes-csv'}
+(header row)
+(one row per scene that needs changes — include only scenes you are modifying)
+\`\`\`
+
+Rules:
+- Only modify scenes listed in the targets, or scenes directly affected by the changes
+- Preserve all values you are not changing
+- For knowledge_in/knowledge_out: use EXACT wording that chains correctly
+- Output the full row for each modified scene (not just changed columns)
+''')
+" 2>/dev/null)
+        PROMPT_EXIT=$?
+    else
+        PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.revision build-prompt \
+            "$PASS_NAME" "$PASS_PURPOSE" "${EFFECTIVE_SCOPE:-$PASS_SCOPE}" "$PROJECT_DIR" \
+            --config "$PASS_BLOCK" --coaching "$EFFECTIVE_COACHING" $API_FLAG)
+        PROMPT_EXIT=$?
+    fi
     set -e
 
     if (( PROMPT_EXIT != 0 )); then
@@ -809,21 +893,139 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
         kill $MONITOR_PID 2>/dev/null || true
         wait $MONITOR_PID 2>/dev/null || true
 
-        # Extract response and apply revision to scene files (Python parser)
+        # Extract response and apply changes
         if (( EXIT_CODE == 0 )); then
-            parse_output=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.parsing extract-scenes "$STEP_LOG" "${PROJECT_DIR}/scenes" 2>/dev/null || true)
-            if [[ -n "$parse_output" ]]; then
-                # Log each written scene
-                while IFS= read -r parse_line; do
-                    [[ -n "$parse_line" ]] && log "  ${parse_line}"
-                done <<< "$parse_output"
-            else
-                log "  API response received (analytical pass, no scene markers)"
-            fi
+            # Check fix_location to determine what kind of pass this is
+            _fix_location=""
+            [[ "$USE_CSV_PLAN" == true ]] && _fix_location=$(read_csv_pass_field "$PASS_NUM" "fix_location" 2>/dev/null || echo "")
 
-            # Register newly created scenes (NEW: targets) in metadata and intent CSVs
-            if [[ -n "${_csv_targets:-}" ]]; then
-                _register_new_scenes "$PROJECT_DIR" "$_csv_targets" "$PASS_NAME"
+            if [[ "$_fix_location" == "brief" || "$_fix_location" == "intent" || "$_fix_location" == "structural" ]]; then
+                # --- Upstream revision: apply CSV updates, then re-draft affected scenes ---
+                log "  Upstream revision (fix_location: ${_fix_location}) — applying CSV updates..."
+
+                UPSTREAM_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json
+sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.prompts_elaborate import parse_stage_response, csv_block_to_rows
+from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+log_file = '${STEP_LOG}'
+ref_dir = '${PROJECT_DIR}/reference'
+
+# Read response
+response = open(log_file, encoding='utf-8').read()
+try:
+    data = json.loads(response)
+    text = ''.join(item.get('text', '') for item in data.get('content', []) if item.get('type') == 'text')
+    if text: response = text
+except (json.JSONDecodeError, KeyError):
+    pass
+
+blocks = parse_stage_response(response)
+updated_files = []
+affected_scenes = set()
+
+for label, content in blocks.items():
+    rows = csv_block_to_rows(content)
+    if not rows:
+        continue
+
+    # Map label to file
+    file_map = {
+        'scenes-csv': ('scenes.csv', _FILE_MAP['scenes.csv']),
+        'scenes-csv-update': ('scenes.csv', _FILE_MAP['scenes.csv']),
+        'intent-csv': ('scene-intent.csv', _FILE_MAP['scene-intent.csv']),
+        'briefs-csv': ('scene-briefs.csv', _FILE_MAP['scene-briefs.csv']),
+    }
+
+    if label not in file_map:
+        continue
+
+    fname, cols = file_map[label]
+    path = os.path.join(ref_dir, fname)
+    existing = _read_csv_as_map(path)
+
+    for row in rows:
+        sid = row.get('id', '')
+        if not sid:
+            continue
+        affected_scenes.add(sid)
+        if sid in existing:
+            existing[sid].update({k: v for k, v in row.items() if v and k != 'id'})
+        else:
+            new = {c: '' for c in cols}
+            new.update(row)
+            existing[sid] = new
+
+    if label == 'scenes-csv' or label == 'scenes-csv-update':
+        ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)))
+    else:
+        ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
+    _write_csv(path, ordered, cols)
+    updated_files.append(fname)
+
+print(f'Updated: {\", \".join(updated_files) if updated_files else \"no CSV blocks found\"}')
+print(f'Affected scenes: {\", \".join(sorted(affected_scenes)) if affected_scenes else \"none\"}')
+" 2>&1)
+
+                echo "$UPSTREAM_RESULT" | while IFS= read -r line; do log "  $line"; done
+
+                # Check if we should re-draft affected scenes
+                AFFECTED=$(echo "$UPSTREAM_RESULT" | grep "Affected scenes:" | sed 's/Affected scenes: //')
+                if [[ -n "$AFFECTED" && "$AFFECTED" != "none" ]]; then
+                    log "  Re-drafting affected scenes..."
+                    # Convert comma-separated to array
+                    IFS=',' read -ra REDRAFT_IDS <<< "$AFFECTED"
+                    for _rid in "${REDRAFT_IDS[@]}"; do
+                        _rid=$(echo "$_rid" | tr -d ' ')
+                        [[ -z "$_rid" ]] && continue
+                        SCENE_FILE="${PROJECT_DIR}/scenes/${_rid}.md"
+                        [[ ! -f "$SCENE_FILE" ]] && continue
+
+                        log "    Re-drafting ${_rid}..."
+                        _REDRAFT_PROMPT=$(_build_prompt "$_rid" 2>/dev/null || \
+                            PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts build-from-briefs \
+                                "$_rid" "$PROJECT_DIR" \
+                                --plugin-dir "${SCRIPT_DIR}/.." \
+                                --coaching "$EFFECTIVE_COACHING" 2>/dev/null || echo "")
+
+                        if [[ -n "$_REDRAFT_PROMPT" ]]; then
+                            _REDRAFT_LOG="${LOG_DIR}/redraft-${_rid}.log"
+                            _REDRAFT_MODEL=$(select_model "drafting")
+                            invoke_anthropic_api "$_REDRAFT_PROMPT" "$_REDRAFT_MODEL" "$_REDRAFT_LOG" 8192 || {
+                                log "    WARNING: Re-draft failed for ${_rid}"
+                                continue
+                            }
+                            _REDRAFT_TEXT=$(extract_api_response "$_REDRAFT_LOG" 2>/dev/null)
+                            if [[ -n "$_REDRAFT_TEXT" && ${#_REDRAFT_TEXT} -gt 100 ]]; then
+                                echo "$_REDRAFT_TEXT" > "$SCENE_FILE"
+                                _NEW_WC=$(wc -w < "$SCENE_FILE" | tr -d ' ')
+                                PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import update_scene
+update_scene('${_rid}', '${PROJECT_DIR}/reference', {'word_count': '${_NEW_WC}'})
+" 2>/dev/null || true
+                                log "    Re-drafted ${_rid} (${_NEW_WC} words)"
+                                log_api_usage "$_REDRAFT_LOG" "redraft" "$_rid" "$_REDRAFT_MODEL" 2>/dev/null || true
+                            fi
+                        fi
+                    done
+                fi
+            else
+                # --- Standard prose revision: extract scene content from response ---
+                parse_output=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.parsing extract-scenes "$STEP_LOG" "${PROJECT_DIR}/scenes" 2>/dev/null || true)
+                if [[ -n "$parse_output" ]]; then
+                    while IFS= read -r parse_line; do
+                        [[ -n "$parse_line" ]] && log "  ${parse_line}"
+                    done <<< "$parse_output"
+                else
+                    log "  API response received (analytical pass, no scene markers)"
+                fi
+
+                # Register newly created scenes in metadata CSVs
+                if [[ -n "${_csv_targets:-}" ]]; then
+                    _register_new_scenes "$PROJECT_DIR" "$_csv_targets" "$PASS_NAME"
+                fi
             fi
         fi
     fi
