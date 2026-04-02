@@ -311,11 +311,11 @@ def build_phase2_prompt(scene_summaries: list[dict],
 
 def apply_timeline_days(assignments: dict[str, int],
                         metadata_csv: str) -> int:
-    """Write timeline_day values to scene-metadata.csv.
+    """Write timeline_day values to scenes.csv.
 
     Args:
         assignments: Mapping of scene_id to timeline_day (int).
-        metadata_csv: Path to the pipe-delimited scene-metadata.csv file.
+        metadata_csv: Path to the pipe-delimited scenes.csv file.
 
     Returns:
         Number of scenes successfully updated.

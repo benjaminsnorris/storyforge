@@ -42,10 +42,10 @@ def _read_manuscript(project_dir: str) -> str:
     if not scenes:
         return ''
 
-    # Try to order by seq from scenes.csv or scene-metadata.csv
+    # Try to order by seq from scenes.csv
     ref_dir = os.path.join(project_dir, 'reference')
     seq_order = {}
-    for csv_name in ['scenes.csv', 'scene-metadata.csv']:
+    for csv_name in ['scenes.csv']:
         csv_path = os.path.join(ref_dir, csv_name)
         if os.path.isfile(csv_path):
             with open(csv_path, encoding='utf-8') as f:

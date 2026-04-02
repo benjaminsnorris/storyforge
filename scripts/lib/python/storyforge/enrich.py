@@ -316,7 +316,7 @@ def apply_enrich_result(scene_id: str, result: dict,
         scene_id: The scene identifier.
         result: Dict as returned by :func:`parse_enrich_response`, with
             optional alias normalization and validation already applied.
-        metadata_csv: Path to scene-metadata.csv.
+        metadata_csv: Path to scenes.csv.
         intent_csv: Path to scene-intent.csv.
         force: If True, overwrite existing non-empty values.
 
