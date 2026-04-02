@@ -29,7 +29,7 @@ Read all of the following. Do not skip any — the recommendation depends on hav
    - `reference/story-architecture.md`
    - `reference/voice-guide.md`
    - `reference/timeline.md`
-   - `reference/scene-metadata.csv` (read it — check if it has entries or is empty)
+   - `reference/scenes.csv` (elaboration) or `reference/scene-metadata.csv` (legacy) — read it, check if it has entries or is empty
    - `reference/chapter-map.csv`
 6. **Scene status** — count scene files in `scenes/*.md`. Compare planned (from scene-index) vs. drafted (files exist) vs. revised (check frontmatter or pass status). Calculate current word count vs. target.
 7. **Evaluation state** — check for `working/evaluations/`. If evaluations exist, read the most recent `findings.yaml` or `synthesis.md` to understand outstanding issues. Note severity counts (critical/major/minor).
@@ -43,7 +43,18 @@ Work through these priorities in order. Stop at the first one that applies — t
 
 ### Priority 1: Phase-Driven Actions
 
-Some phases have a single obvious next step:
+Some phases have a single obvious next step.
+
+**Elaboration pipeline phases:**
+
+- **Phase is `spine`** → Recommend `/storyforge:elaborate`. "Start with the spine — the 5-10 irreducible story events."
+- **Phase is `architecture`** → Recommend `/storyforge:elaborate`. "Expand the spine into a full architecture with POV assignments, value shifts, and thread structure."
+- **Phase is `scene-map`** → Recommend `/storyforge:elaborate`. "Map every scene with locations, timeline, characters, and MICE thread tracking."
+- **Phase is `briefs`** → Recommend `/storyforge:elaborate`. "Write the drafting contracts — goal, conflict, outcome, knowledge states for every scene."
+- **Phase is `drafting` and `reference/scene-briefs.csv` has data** → Recommend running `./storyforge write`. "Briefs are validated — ready to draft scenes in parallel from the briefs."
+- **Phase is `polish`** → Recommend running `./storyforge polish`. "Polish the prose — one targeted pass for voice, rhythm, and naturalness."
+
+**Legacy pipeline phases:**
 
 - **Phase is `review`** → The revision cycle just finished. Recommend `/storyforge:review` to assess what changed and determine if the revision landed. Do not recommend other work until the review is done.
 - **Phase is `complete`** → The manuscript is done. Recommend `/storyforge:produce` to set up production (chapter map, epub settings), or prompt the author to run `./storyforge assemble` if the chapter map already exists.

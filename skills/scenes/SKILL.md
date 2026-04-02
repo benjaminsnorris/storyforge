@@ -22,8 +22,11 @@ Store this resolved plugin path for use throughout the session.
 Read the following files to understand the full context before doing any scene work:
 
 - `storyforge.yaml` — project configuration, active extensions, current state. **Note the `project.coaching_level` field** — it controls how proactive you should be (see Coaching Level Behavior below).
-- `reference/scene-metadata.csv` — the existing scene metadata (pipe-delimited CSV: `id|seq|title|pov|location|part|type|timeline_day|time_of_day|status|word_count|target_words`).
-- `reference/scene-intent.csv` — scene intent data (pipe-delimited CSV: `id|function|emotional_arc|characters|threads|motifs|notes`). Array fields use `;` (semicolon) as the internal separator.
+- `reference/scenes.csv` (elaboration pipeline) or `reference/scene-metadata.csv` (legacy) — the scene structural data
+- `reference/scene-intent.csv` — scene intent data. In elaboration pipeline, this includes additional columns: `scene_type`, `value_at_stake`, `value_shift`, `turning_point`, `on_stage`, `mice_threads`.
+- `reference/scene-briefs.csv` (elaboration pipeline only) — drafting contracts with goal, conflict, outcome, knowledge states
+
+**Elaboration pipeline check:** If `storyforge.yaml` phase is `spine`, `architecture`, `scene-map`, or `briefs`, scene design is handled by the `/storyforge:elaborate` skill, not this skill. Tell the author: "This project uses the elaboration pipeline. Scene design happens through `/storyforge:elaborate`." However, this skill's **Review Mode** and **Edit Mode** (reordering, splitting, renaming) still work on elaboration projects — they operate on the CSV data regardless of pipeline type.
 - `reference/story-architecture.md` — structural context: acts, parts, arcs, turning points.
 - `reference/character-bible.md` — character arcs, relationships, and motivations.
 - `reference/voice-guide.md` — voice and POV rules (if it exists), especially POV-specific voice rules that affect scene assignment.

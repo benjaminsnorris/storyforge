@@ -15,6 +15,18 @@ and reference materials live at `references/` relative to that plugin root.
 
 Store this resolved plugin path for use throughout the session.
 
+## Step 0: Check Pipeline Type
+
+Read `storyforge.yaml` phase. If the phase is an elaboration phase (`spine`, `architecture`, `scene-map`, `briefs`), revision planning doesn't apply yet — the manuscript hasn't been drafted.
+
+Tell the author: "Revision planning happens after scenes are drafted. Your project is still in the elaboration phase ({phase}). Use `/storyforge:elaborate` to continue building toward drafting."
+
+If the phase is `drafting` or later AND `reference/scene-briefs.csv` exists with data, this is an elaboration-pipeline project. In this case, evaluation findings should include a `fix_location` field categorizing each finding as `brief`, `intent`, `structural`, or `craft`. When building revision passes:
+- **brief/intent/structural findings** → Create passes that update the CSV data upstream, then re-draft affected scenes
+- **craft findings** → Create passes that polish prose directly (or route to `./storyforge polish`)
+
+This upstream-first approach is the key difference from the legacy pipeline where all revision operates on prose.
+
 ## Step 1: Read Evaluation Results
 
 Look for evaluation output using the pipeline manifest:

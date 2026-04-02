@@ -27,7 +27,7 @@ Before doing anything else, orient yourself:
    - `reference/story-architecture.md`
    - `reference/voice-guide.md`
    - `reference/timeline.md`
-   - `reference/scene-metadata.csv`
+   - `reference/scenes.csv` (elaboration pipeline) or `reference/scene-metadata.csv` (legacy)
    - `working/evaluations/*/findings.csv` (preferred) or `working/evaluations/findings.yaml` (legacy)
    - `working/plans/revision-plan.csv` (preferred) or `working/plans/revision-plan.yaml` (legacy)
    - The `scenes/` directory (any `.md` files = drafted scenes)
@@ -35,7 +35,20 @@ Before doing anything else, orient yourself:
 
 Do not present this information unless the author asks for a status check. This is your internal orientation.
 
-## Step 2: Determine Mode
+## Step 2: Check for Elaboration Pipeline
+
+Read the `phase` field from `storyforge.yaml`. If it is one of: `spine`, `architecture`, `scene-map`, `briefs`, this project uses the elaboration pipeline.
+
+**If the project is in an elaboration phase:**
+- Route to the `elaborate` skill for most requests (scene work, drafting prep, "what's next", structural planning)
+- The `develop`, `voice`, `scenes`, and `plan-revision` skills are not used during elaboration — their work is integrated into the elaborate pipeline
+- Skills that still apply normally: `visualize`, `title`, `cover`, `press-kit`, `produce`, `score`, `publish`
+- If the author asks to start drafting and the phase is `briefs` (briefs are complete), check that `reference/scene-briefs.csv` has data and validation passes, then provide the write command (which will automatically detect briefs and use the brief-aware prompt builder)
+- If the author asks to evaluate or polish after drafting, those scripts work normally
+
+**If the project is NOT in an elaboration phase** (legacy phases: `development`, `scene-design`, `drafting`, `evaluation`, `revision`, `review`, `complete`, `production`), proceed with the existing routing below.
+
+## Step 3: Determine Mode
 
 Based on the author's message, operate in one of three modes:
 
@@ -60,7 +73,7 @@ Invoke the `scenes` skill. This covers scene index population, scene design, sce
 Check prerequisites before proceeding:
 
 - *Hard prerequisites* (will not proceed without):
-  - `reference/scene-metadata.csv` must exist and contain at least one scene
+  - Scene data must exist: `reference/scenes.csv` (elaboration) or `reference/scene-metadata.csv` (legacy) with at least one scene
   - `reference/voice-guide.md` must exist
 - *Soft prerequisites* (recommend but allow override):
   - `reference/character-bible.md`
@@ -204,7 +217,7 @@ Suggest next steps but don't push. Let the author absorb the information and dec
 
 | Command | Requires |
 |---|---|
-| `storyforge write` | `reference/scene-metadata.csv` with at least one scene, `reference/voice-guide.md` |
+| `storyforge write` | Scene data (`reference/scenes.csv` or `reference/scene-metadata.csv`) with at least one scene, `reference/voice-guide.md` |
 | `storyforge evaluate` | At least some scene files (`.md`) in `scenes/` |
 | `plan-revision` | Evaluation results in `working/evaluations/` |
 | `storyforge revise` | Revision plan for the current pipeline cycle (from `working/pipeline.csv`) |
