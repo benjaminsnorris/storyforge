@@ -291,7 +291,7 @@ import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import parse_skeleton_response
 from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
 
-output_dir = '${SKEL_OUTPUT}'
+output_dir = '${LOG_DIR}'
 ref_dir = '${REF_DIR}'
 scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
 
@@ -390,7 +390,7 @@ import sys, os; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import parse_intent_response
 from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
 
-output_dir = '${INTENT_OUTPUT}'
+output_dir = '${LOG_DIR}'
 ref_dir = '${REF_DIR}'
 scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
 
@@ -481,7 +481,7 @@ import sys, os; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import parse_brief_parallel_response
 from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
 
-output_dir = '${BRIEF_OUTPUT}'
+output_dir = '${LOG_DIR}'
 ref_dir = '${REF_DIR}'
 scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
 
