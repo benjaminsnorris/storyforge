@@ -423,7 +423,8 @@ _REQUIRED_BY_STATUS = {
 
 
 def _check(category: str, check: str, passed: bool, message: str,
-           severity: str = 'blocking', scene_id: str = '') -> dict:
+           severity: str = 'blocking', scene_id: str = '',
+           fields=None) -> dict:
     """Build a single check result."""
     result = {
         'category': category,
@@ -434,6 +435,8 @@ def _check(category: str, check: str, passed: bool, message: str,
     }
     if scene_id:
         result['scene_id'] = scene_id
+    if fields is not None:
+        result['fields'] = fields
     return result
 
 
@@ -692,6 +695,7 @@ def validate_structure(ref_dir: str) -> dict:
             f"Scene {sid} (status={status}) missing required columns: {missing}" if missing
             else f"Scene {sid} has all required columns for status={status}",
             scene_id=sid,
+            fields=missing if missing else None,
         ))
 
     # --- Thread, timeline, knowledge, pacing ---
@@ -755,12 +759,8 @@ def analyze_gaps(ref_dir: str) -> dict:
     for failure in report['failures']:
         if failure['category'] == 'completeness' and failure.get('scene_id'):
             sid = failure['scene_id']
-            msg = failure['message']
-            # Extract field names from "missing required columns: ['field1', 'field2']"
-            if 'missing required columns:' in msg:
-                bracket_start = msg.index('[')
-                bracket_end = msg.index(']') + 1
-                fields = eval(msg[bracket_start:bracket_end])
+            fields = failure.get('fields', [])
+            if fields:
                 scene_missing[sid] = fields
 
     # Categorize into gap groups

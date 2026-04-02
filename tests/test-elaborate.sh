@@ -496,9 +496,19 @@ gaps = analyze_gaps('${TMP_REF}')
 print(gaps['total_gaps'])
 ")
 
-assert_not_empty "$TOTAL" "analyze_gaps: returns total_gaps count"
+assert_equals "4" "$TOTAL" "analyze_gaps: total_gaps count is exact (scene-02: timeline_day+scene_type+value_shift, scene-03: time_of_day)"
 
 # Should not flag scenes with no gaps
 assert_not_contains "$RESULT" '"scene-01": {' "analyze_gaps: scene-01 has no completeness gaps"
+
+# Should return empty structural list for this fixture
+STRUCTURAL=$(python3 -c "
+${PY}
+from storyforge.elaborate import analyze_gaps
+gaps = analyze_gaps('${TMP_REF}')
+print(len(gaps['structural']))
+")
+
+assert_equals "0" "$STRUCTURAL" "analyze_gaps: no structural issues in clean fixture"
 
 rm -rf "$TMP_REF"
