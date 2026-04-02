@@ -512,3 +512,55 @@ print(len(gaps['structural']))
 assert_equals "0" "$STRUCTURAL" "analyze_gaps: no structural issues in clean fixture"
 
 rm -rf "$TMP_REF"
+
+# ============================================================================
+# build_gap_fill_prompt
+# ============================================================================
+
+TMP_REF=$(mktemp -d)
+TMP_SCENES="${TMP_REF}/scenes"
+mkdir -p "${TMP_SCENES}"
+mkdir -p "${TMP_REF}/reference"
+
+# Create a scene file
+cat > "${TMP_SCENES}/scene-03.md" <<'PROSE'
+Bob strode into the council chamber. The long table gleamed under the gas lamps.
+"We have evidence," he said, laying the maps flat. "The eastern ridge is failing."
+The council members exchanged glances. No one spoke for a long moment.
+PROSE
+
+# Create minimal CSVs
+cat > "${TMP_REF}/reference/scenes.csv" <<'GAPCSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+scene-03|3|Confrontation|1|Bob|Council Room|2|evening|1 hour||drafted|2000|2000
+GAPCSV
+
+cat > "${TMP_REF}/reference/scene-intent.csv" <<'GAPCSV'
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+scene-03|Confront the council|sequel|resolve to anger|justice|+/-|revelation|politics|Bob;Council|Bob;Council|
+GAPCSV
+
+cat > "${TMP_REF}/reference/scene-briefs.csv" <<'GAPCSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+scene-03|Get council to act|Council dismisses|no|Accept or go rogue|Goes rogue|Evidence exists|Council will not help|Presents evidence|"Noted"|resolve;anger|governance|scene-02|false
+GAPCSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.prompts_elaborate import build_gap_fill_prompt
+prompt = build_gap_fill_prompt(
+    scene_id='scene-03',
+    gap_group='scene-fields',
+    missing_fields=['type'],
+    project_dir='${TMP_REF}',
+    scenes_dir='${TMP_SCENES}',
+)
+print(prompt)
+")
+
+assert_contains "$RESULT" "scene-03" "build_gap_fill_prompt: includes scene ID"
+assert_contains "$RESULT" "type" "build_gap_fill_prompt: asks for missing field"
+assert_contains "$RESULT" "Bob" "build_gap_fill_prompt: includes prose excerpt"
+assert_contains "$RESULT" "council chamber" "build_gap_fill_prompt: includes scene prose"
+
+rm -rf "$TMP_REF"
