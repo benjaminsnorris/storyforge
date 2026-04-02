@@ -2308,12 +2308,16 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         });
     });
 
-    // Suppress motifs appearing in >90% of scenes (universal motifs)
-    const threshold = sceneCount * 0.9;
+    // Suppress motifs appearing in only 1 scene (noise) or >90% of scenes (universal)
+    const upperThreshold = sceneCount * 0.9;
+    const minOccurrences = 2;
     const universalMotifs = [];
     Object.keys(motifScenes).forEach(m => {
-        if (motifScenes[m].length > threshold) {
+        if (motifScenes[m].length > upperThreshold) {
             universalMotifs.push(m + ' (' + motifScenes[m].length + '/' + sceneCount + ')');
+            delete motifFirst[m];
+            delete motifScenes[m];
+        } else if (motifScenes[m].length < minOccurrences) {
             delete motifFirst[m];
             delete motifScenes[m];
         }
@@ -2561,7 +2565,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         const labels = { 2: '++', 1: '+', 0: '0', '-1': '-', '-2': '--' };
         const lbl = svgEl('text', {
             x: labelW - 8, y: y + 4, 'text-anchor': 'end',
-            fill: 'var(--muted)', 'font-size': '11px'
+            fill: 'var(--text-dim)', 'font-family': 'var(--font-mono)', 'font-size': 11
         });
         lbl.textContent = labels[v] || '';
         svg.appendChild(lbl);
@@ -2625,7 +2629,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     // Single row: Scene type (action vs sequel) — color-coded by Swain type
     const rowLabel = svgEl('text', {
-        x: 8, y: 18, fill: 'var(--muted)', 'font-size': '11px'
+        x: 8, y: 18, fill: 'var(--text-dim)', 'font-family': 'var(--font-mono)', 'font-size': 11
     });
     rowLabel.textContent = 'Action / Sequel';
     svg.appendChild(rowLabel);
@@ -2663,7 +2667,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     let legendX = labelW;
     legends.forEach(l => {
         svg.appendChild(svgEl('rect', { x: legendX, y: legendY, width: 10, height: 10, fill: l.color, rx: 2, opacity: 0.8 }));
-        const txt = svgEl('text', { x: legendX + 14, y: legendY + 9, fill: 'var(--muted)', 'font-size': '10px' });
+        const txt = svgEl('text', { x: legendX + 14, y: legendY + 9, fill: 'var(--text-dim)', 'font-family': 'var(--font-mono)', 'font-size': 10 });
         txt.textContent = l.label;
         svg.appendChild(txt);
         legendX += l.label.length * 6.5 + 28;
@@ -2703,7 +2707,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         // Label
         const lbl = svgEl('text', {
             x: labelW - 8, y: y + 14, 'text-anchor': 'end',
-            fill: 'var(--fg)', 'font-size': '11px'
+            fill: 'var(--text)', 'font-family': 'var(--font-mono)', 'font-size': 11
         });
         lbl.textContent = el.replace(/_/g, ' ');
         svg.appendChild(lbl);
@@ -2724,7 +2728,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         // Score text
         const scoreTxt = svgEl('text', {
             x: labelW + barW + 6, y: y + 14,
-            fill: 'var(--muted)', 'font-size': '11px'
+            fill: 'var(--text-dim)', 'font-family': 'var(--font-mono)', 'font-size': 11
         });
         scoreTxt.textContent = avg.toFixed(1);
         svg.appendChild(scoreTxt);
