@@ -725,6 +725,16 @@ body {
     <div class="vis-container" id="thread-weave"></div>
 </div>
 
+<!-- 4b. Knowledge Flow -->
+<div class="section" id="knowledge-flow-section" style="display:none;">
+    <div class="section-header">
+        <span class="dot"></span>
+        <h2>Knowledge Flow</h2>
+        <span class="subtitle">How facts propagate between scenes via knowledge_in / knowledge_out</span>
+    </div>
+    <div class="vis-container" id="knowledge-flow"></div>
+</div>
+
 <!-- 5. Emotional Terrain -->
 <div class="section">
     <div class="section-header">
@@ -1878,6 +1888,142 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
                     stroke: color, 'stroke-width': 2, opacity: 0.7
                 }));
             }
+        }
+    });
+})();
+
+// ============================================================================
+// 4b. KNOWLEDGE FLOW
+// ============================================================================
+
+(function renderKnowledgeFlow() {
+    const container = document.getElementById('knowledge-flow');
+    const section = document.getElementById('knowledge-flow-section');
+    if (!container || !BRIEFS.length) return;
+
+    // Build fact data from briefs
+    // For each fact: find origin scene (first knowledge_out) and receiver scenes (knowledge_in)
+    const factOrigin = {};   // factId -> { seq, sceneId }
+    const factReceivers = {}; // factId -> [{ seq, sceneId }, ...]
+    const allFacts = new Set();
+
+    sortedScenes.forEach(s => {
+        const brief = briefById[s.id];
+        if (!brief) return;
+        const seq = +s.seq;
+
+        const kOut = (brief.knowledge_out || '').split(';').map(f => f.trim()).filter(Boolean);
+        const kIn = (brief.knowledge_in || '').split(';').map(f => f.trim()).filter(Boolean);
+
+        kOut.forEach(fact => {
+            allFacts.add(fact);
+            if (!factOrigin[fact] || seq < factOrigin[fact].seq) {
+                factOrigin[fact] = { seq, sceneId: s.id };
+            }
+        });
+
+        kIn.forEach(fact => {
+            allFacts.add(fact);
+            if (!factReceivers[fact]) factReceivers[fact] = [];
+            factReceivers[fact].push({ seq, sceneId: s.id });
+        });
+    });
+
+    // Filter to facts that actually have flow (origin + at least one receiver, or multiple receivers)
+    const factsWithFlow = [...allFacts].filter(f => {
+        const hasOrigin = !!factOrigin[f];
+        const hasReceivers = (factReceivers[f] || []).length > 0;
+        return hasOrigin || hasReceivers;
+    });
+
+    if (factsWithFlow.length === 0) return;
+
+    // Sort by origin sequence (earliest first), facts without origin go last
+    factsWithFlow.sort((a, b) => {
+        const aSeq = factOrigin[a] ? factOrigin[a].seq : 9999;
+        const bSeq = factOrigin[b] ? factOrigin[b].seq : 9999;
+        return aSeq - bSeq;
+    });
+
+    // Show the section
+    if (section) section.style.display = '';
+
+    const ROW_H = 24;
+    const W = container.clientWidth - 24 || 1100;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
+    const H = factsWithFlow.length * ROW_H + 20;
+    const svg = makeSvg(container, W, H);
+
+    factsWithFlow.forEach((fact, ri) => {
+        const y = ri * ROW_H + 12;
+
+        // Row label
+        const factName = displayName(fact);
+        const label = svgEl('text', {
+            x: GRID_LABEL_W - 8, y: y + 4,
+            'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+            'font-size': 10, fill: 'var(--text-dim)'
+        });
+        label.textContent = factName.length > GRID_LABEL_TRUNC ? factName.substring(0, GRID_LABEL_TRUNC - 2) + '..' : factName;
+        if (factName.length > GRID_LABEL_TRUNC) {
+            var t = document.createElementNS(SVG_NS, 'title');
+            t.textContent = factName;
+            label.appendChild(t);
+        }
+        svg.appendChild(label);
+
+        const origin = factOrigin[fact];
+        const receivers = (factReceivers[fact] || []).sort((a, b) => a.seq - b.seq);
+
+        // Draw connection lines from origin to each receiver
+        if (origin) {
+            const originX = sceneX(origin.seq - 1, CHART_W);
+            receivers.forEach(rc => {
+                const rcX = sceneX(rc.seq - 1, CHART_W);
+                const gap = Math.abs(rc.seq - origin.seq);
+                svg.appendChild(svgEl('line', {
+                    x1: originX, y1: y, x2: rcX, y2: y,
+                    stroke: 'var(--teal)', 'stroke-width': 1.5,
+                    opacity: 0.3,
+                    'stroke-dasharray': gap > 2 ? '3,3' : 'none'
+                }));
+            });
+        } else if (receivers.length > 1) {
+            // No origin — connect receivers to each other (pre-existing fact)
+            for (let i = 1; i < receivers.length; i++) {
+                const x1 = sceneX(receivers[i-1].seq - 1, CHART_W);
+                const x2 = sceneX(receivers[i].seq - 1, CHART_W);
+                const gap = receivers[i].seq - receivers[i-1].seq;
+                svg.appendChild(svgEl('line', {
+                    x1, y1: y, x2, y2: y,
+                    stroke: 'var(--text-dim)', 'stroke-width': 1,
+                    opacity: 0.25,
+                    'stroke-dasharray': '2,3'
+                }));
+            }
+        }
+
+        // Draw receiver dots (smaller)
+        receivers.forEach(rc => {
+            const cx = sceneX(rc.seq - 1, CHART_W);
+            const dot = svgEl('circle', {
+                cx, cy: y, r: 3,
+                fill: 'var(--teal)', opacity: 0.6
+            });
+            attachSceneHandlers(dot, rc.sceneId);
+            svg.appendChild(dot);
+        });
+
+        // Draw origin dot (larger, on top)
+        if (origin) {
+            const cx = sceneX(origin.seq - 1, CHART_W);
+            const dot = svgEl('circle', {
+                cx, cy: y, r: 5,
+                fill: 'var(--teal)', opacity: 1.0,
+                stroke: 'var(--surface)', 'stroke-width': 1.5
+            });
+            attachSceneHandlers(dot, origin.sceneId);
+            svg.appendChild(dot);
         }
     });
 })();
