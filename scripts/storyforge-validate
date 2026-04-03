@@ -113,6 +113,9 @@ if schema is not None:
                 elif e['constraint'] == 'mice':
                     for p in e.get('problems', []):
                         print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{p[\"entry\"]}\" — {p[\"reason\"]}')
+                elif e['constraint'] == 'scene_ids':
+                    unresolved = ', '.join(e.get('unresolved', []))
+                    print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{unresolved}\" — not in scenes.csv')
 "
 fi
 

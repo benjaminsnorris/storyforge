@@ -211,8 +211,8 @@ COLUMN_SCHEMA = {
         'description': 'Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv.',
     },
     'continuity_deps': {
-        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Scene IDs this scene depends on (for parallel drafting).',
+        'type': 'scene_ids', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Scene IDs this scene depends on (for parallel drafting). Each entry must exist in scenes.csv.',
     },
     'has_overflow': {
         'type': 'boolean', 'file': 'scene-briefs.csv', 'stage': 'brief',
@@ -340,6 +340,15 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                     mice_alias, mice_type_map = load_mice_registry(path)
                     registries[csv_name] = mice_alias
 
+    # Collect all scene IDs for continuity_deps validation
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    all_scene_ids: set[str] = set()
+    if os.path.isfile(scenes_path):
+        for row in _read_csv(scenes_path):
+            sid = row.get('id', '').strip()
+            if sid:
+                all_scene_ids.add(sid)
+
     passed = 0
     failed = 0
     skipped = 0
@@ -451,6 +460,22 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                             'value': value,
                             'constraint': 'mice',
                             'problems': problems,
+                        })
+
+                elif constraint == 'scene_ids':
+                    bad = [s.strip() for s in value.split(';')
+                           if s.strip() and s.strip() not in all_scene_ids]
+                    if not bad:
+                        passed += 1
+                    else:
+                        failed += 1
+                        errors.append({
+                            'file': filename,
+                            'row': scene_id,
+                            'column': col,
+                            'value': value,
+                            'constraint': 'scene_ids',
+                            'unresolved': bad,
                         })
 
     return {

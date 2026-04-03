@@ -309,3 +309,51 @@ print(normalize_mice_threads('+inquiry:something', alias_map, type_map))
 
 assert_equals "0
 +inquiry:something" "$RESULT" "mice: missing registry returns empty, normalization passes through"
+
+# ============================================================================
+# continuity_deps validation (scene ID cross-reference)
+# ============================================================================
+
+echo "--- scene_ids: valid deps ---"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import json
+from storyforge.schema import validate_schema
+report = validate_schema('${FIXTURE_DIR}/reference', '${FIXTURE_DIR}')
+dep_errors = [e for e in report['errors'] if e['constraint'] == 'scene_ids']
+print(len(dep_errors))
+" 2>/dev/null)
+
+assert_equals "0" "$RESULT" "scene_ids: fixture deps all resolve"
+
+echo "--- scene_ids: catches bad dep ---"
+
+DEPS_TMP="${TMPDIR}/deps-test"
+mkdir -p "${DEPS_TMP}/reference"
+
+echo "id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words" > "${DEPS_TMP}/reference/scenes.csv"
+echo "sc-1|1|Test|||||||||1000|" >> "${DEPS_TMP}/reference/scenes.csv"
+echo "sc-2|2|Test2|||||||||1000|" >> "${DEPS_TMP}/reference/scenes.csv"
+
+echo "id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads" > "${DEPS_TMP}/reference/scene-intent.csv"
+echo "sc-1||||||||||" >> "${DEPS_TMP}/reference/scene-intent.csv"
+echo "sc-2||||||||||" >> "${DEPS_TMP}/reference/scene-intent.csv"
+
+echo "id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow" > "${DEPS_TMP}/reference/scene-briefs.csv"
+echo "sc-1||||||||||||sc-2|" >> "${DEPS_TMP}/reference/scene-briefs.csv"
+echo "sc-2||||||||||||sc-1;nonexistent-scene|" >> "${DEPS_TMP}/reference/scene-briefs.csv"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import json
+from storyforge.schema import validate_schema
+report = validate_schema('${DEPS_TMP}/reference')
+dep_errors = [e for e in report['errors'] if e['constraint'] == 'scene_ids']
+print(len(dep_errors))
+if dep_errors:
+    print(dep_errors[0]['unresolved'][0])
+" 2>/dev/null)
+
+assert_equals "1
+nonexistent-scene" "$RESULT" "scene_ids: catches nonexistent scene in deps"
+
+rm -rf "$DEPS_TMP"
