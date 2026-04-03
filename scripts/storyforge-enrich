@@ -7,9 +7,13 @@ set -eo pipefail
 # Reads scene prose files and uses Claude to extract missing metadata,
 # populating the CSV files that power the manuscript dashboard.
 #
-# Enriches metadata.csv fields: type, time_of_day
+# Enriches all registry-backed and structural fields across all three CSVs:
+# scenes.csv: pov, location, time_of_day, duration, type
+# scene-intent.csv: action_sequel, emotional_arc, value_at_stake, value_shift,
+#   turning_point, characters, on_stage, mice_threads
+# scene-briefs.csv: goal, conflict, outcome, crisis, decision, knowledge_in,
+#   knowledge_out, key_actions, key_dialogue, emotions, motifs
 # (timeline_day is handled by storyforge-timeline, called as Step 8)
-# Enriches intent.csv fields: emotional_arc, characters, threads, motifs
 #
 # Usage:
 #   ./storyforge-enrich                        # All scenes, batch mode (50% off)
@@ -49,10 +53,10 @@ FILTER_SCENES=""
 FILTER_ACT=""
 FILTER_FROM_SEQ=""
 PARALLEL=${STORYFORGE_ENRICH_PARALLEL:-6}
-ENRICH_FIELDS="type,location,time_of_day,characters,emotional_arc,threads,motifs"
+ENRICH_FIELDS="type,location,time_of_day,pov,duration,action_sequel,emotional_arc,value_at_stake,value_shift,turning_point,characters,on_stage,mice_threads,goal,conflict,outcome,crisis,decision,knowledge_in,knowledge_out,key_actions,key_dialogue,emotions,motifs"
 
 # All valid enrichment fields
-VALID_FIELDS="type,location,time_of_day,characters,emotional_arc,threads,motifs"
+VALID_FIELDS="type,location,time_of_day,pov,duration,action_sequel,emotional_arc,value_at_stake,value_shift,turning_point,characters,on_stage,mice_threads,goal,conflict,outcome,crisis,decision,knowledge_in,knowledge_out,key_actions,key_dialogue,emotions,motifs"
 
 # Minimum word count for enrichment
 MIN_WORDS=50
@@ -81,7 +85,11 @@ Scope:
 Options:
   --parallel N      Concurrent workers (default: 6, env: STORYFORGE_ENRICH_PARALLEL)
   --fields FIELDS   Comma-separated fields to enrich (default: all)
-                    Valid: type,location,time_of_day,characters,emotional_arc,threads,motifs
+                    scenes.csv: pov,location,time_of_day,duration,type
+                    scene-intent.csv: action_sequel,emotional_arc,value_at_stake,
+                      value_shift,turning_point,characters,on_stage,mice_threads
+                    scene-briefs.csv: goal,conflict,outcome,crisis,decision,
+                      knowledge_in,knowledge_out,key_actions,key_dialogue,emotions,motifs
   --force           Re-enrich scenes that already have data (overwrite)
   --skip-timeline   Skip the timeline_day analysis pass (Step 8)
   --skip-dashboard  Skip the dashboard generation (Step 9)
@@ -156,14 +164,16 @@ while [[ $# -gt 0 ]]; do
             ENRICH_FIELDS="${2:?ERROR: --fields requires comma-separated field names}"
             # Validate fields
             IFS=',' read -ra _check_fields <<< "$ENRICH_FIELDS"
+            IFS=',' read -ra _valid_arr <<< "$VALID_FIELDS"
             for _f in "${_check_fields[@]}"; do
-                case "$_f" in
-                    type|location|time_of_day|characters|emotional_arc|threads|motifs) ;;
-                    *)
-                        echo "ERROR: Invalid field '$_f'. Valid fields: ${VALID_FIELDS}" >&2
-                        exit 1
-                        ;;
-                esac
+                _found=false
+                for _v in "${_valid_arr[@]}"; do
+                    [[ "$_f" == "$_v" ]] && _found=true && break
+                done
+                if [[ "$_found" != true ]]; then
+                    echo "ERROR: Invalid field '$_f'. Valid fields: ${VALID_FIELDS}" >&2
+                    exit 1
+                fi
             done
             shift 2
             ;;
@@ -314,19 +324,37 @@ esac
 # Parse requested fields into an array
 IFS=',' read -ra FIELDS_ARRAY <<< "$ENRICH_FIELDS"
 
-# Metadata fields vs intent fields
+# Field-to-CSV routing
 is_metadata_field() {
     case "$1" in
-        type|location|time_of_day) return 0 ;;
+        pov|location|time_of_day|duration|type) return 0 ;;
         *) return 1 ;;
     esac
 }
 
 is_intent_field() {
     case "$1" in
-        emotional_arc|characters|threads|motifs) return 0 ;;
+        action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+is_briefs_field() {
+    case "$1" in
+        goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Get CSV path for a field
+csv_for_field() {
+    if is_metadata_field "$1"; then
+        echo "$METADATA_CSV"
+    elif is_intent_field "$1"; then
+        echo "$INTENT_CSV"
+    elif is_briefs_field "$1"; then
+        echo "${PROJECT_DIR}/reference/scene-briefs.csv"
+    fi
 }
 
 # Build list of scenes that need enrichment, tracking which fields are needed
@@ -353,12 +381,9 @@ for id in "${FILTERED_IDS[@]}"; do
     # Check if any requested fields are empty
     needs_enrichment=false
     for field in "${FIELDS_ARRAY[@]}"; do
+        csv_path=$(csv_for_field "$field")
         current_val=""
-        if is_metadata_field "$field"; then
-            current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
-        elif is_intent_field "$field"; then
-            current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
-        fi
+        [[ -n "$csv_path" && -f "$csv_path" ]] && current_val=$(get_csv_field "$csv_path" "$id" "$field")
 
         if [[ -z "$current_val" ]] || [[ "$FORCE" == true ]]; then
             needs_enrichment=true
@@ -425,12 +450,9 @@ if [[ "$DRY_RUN" == true ]]; then
         local_title=$(get_csv_field "$METADATA_CSV" "$id" "title")
         missing_fields=""
         for field in "${FIELDS_ARRAY[@]}"; do
+            csv_path=$(csv_for_field "$field")
             current_val=""
-            if is_metadata_field "$field"; then
-                current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
-            elif is_intent_field "$field"; then
-                current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
-            fi
+            [[ -n "$csv_path" && -f "$csv_path" ]] && current_val=$(get_csv_field "$csv_path" "$id" "$field")
             if [[ -z "$current_val" ]] || [[ "$FORCE" == true ]]; then
                 [[ -z "$missing_fields" ]] && missing_fields="$field" || missing_fields="${missing_fields}, ${field}"
             fi
@@ -525,26 +547,10 @@ CLAUDE_IDS=()
 for id in "${SCENE_IDS[@]}"; do
     still_needs=false
     for field in "${FIELDS_ARRAY[@]}"; do
-        # Skip fields that aren't Claude-dependent
-        case "$field" in
-            time_of_day)
-                # Already handled by heuristic — only ask Claude if still empty
-                current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
-                [[ -z "$current_val" ]] && still_needs=true
-                ;;
-            location)
-                current_val=$(get_csv_field "$METADATA_CSV" "$id" "location")
-                [[ -z "$current_val" || "$FORCE" == true ]] && still_needs=true
-                ;;
-            type)
-                current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
-                [[ -z "$current_val" || "$FORCE" == true ]] && still_needs=true
-                ;;
-            emotional_arc|characters|threads|motifs)
-                current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
-                [[ -z "$current_val" || "$FORCE" == true ]] && still_needs=true
-                ;;
-        esac
+        csv_path=$(csv_for_field "$field")
+        current_val=""
+        [[ -n "$csv_path" && -f "$csv_path" ]] && current_val=$(get_csv_field "$csv_path" "$id" "$field")
+        [[ -z "$current_val" || "$FORCE" == true ]] && still_needs=true
         [[ "$still_needs" == true ]] && break
     done
     [[ "$still_needs" == true ]] && CLAUDE_IDS+=("$id")
@@ -635,55 +641,13 @@ log "============================================"
 # Helper: build a TARGETED enrichment prompt (only asks for missing fields)
 build_enrich_prompt() {
     local scene_id="$1"
-    local scene_file="${SCENES_DIR}/${scene_id}.md"
-    local scene_text=""
-    [[ -f "$scene_file" ]] && scene_text=$(cat "$scene_file")
+    local force_flag=""
+    [[ "$FORCE" == true ]] && force_flag="--force"
 
-    local title pov setting part function_val
-    title=$(get_csv_field "$METADATA_CSV" "$scene_id" "title")
-    pov=$(get_csv_field "$METADATA_CSV" "$scene_id" "pov")
-    setting=$(get_csv_field "$METADATA_CSV" "$scene_id" "location")
-    part=$(get_csv_field "$METADATA_CSV" "$scene_id" "part")
-    function_val=""
-    [[ -f "$INTENT_CSV" ]] && function_val=$(get_csv_field "$INTENT_CSV" "$scene_id" "function")
-
-    # Build field instructions only for fields that are actually missing
-    local field_instructions=""
-    for field in "${FIELDS_ARRAY[@]}"; do
-        current_val=""
-        if is_metadata_field "$field"; then
-            current_val=$(get_csv_field "$METADATA_CSV" "$scene_id" "$field")
-        elif is_intent_field "$field"; then
-            current_val=$(get_csv_field "$INTENT_CSV" "$scene_id" "$field")
-        fi
-        [[ -n "$current_val" && "$FORCE" != true ]] && continue
-
-        case "$field" in
-            type) field_instructions="${field_instructions}
-TYPE: <one of: character, plot, world, action, transition, confrontation>" ;;
-            location) field_instructions="${field_instructions}
-LOCATION: <the physical location where this scene takes place — use a short, reusable label (the name of the place, not a description of the scene). If two scenes happen in the same place, use the same location string. Do not include time of day, room-level detail, or character actions.>" ;;
-            time_of_day) field_instructions="${field_instructions}
-TIME_OF_DAY: <one of: morning, afternoon, evening, night, dawn, dusk>" ;;
-            characters) field_instructions="${field_instructions}
-CHARACTERS: <semicolon-separated list of ALL character names who appear or are mentioned by name>" ;;
-            emotional_arc) field_instructions="${field_instructions}
-EMOTIONAL_ARC: <one sentence: \"[starting emotion] giving way to [ending emotion]\">" ;;
-            threads) field_instructions="${field_instructions}
-THREADS: <semicolon-separated list of story threads, e.g. \"investigation;family_secret\">" ;;
-            motifs) field_instructions="${field_instructions}
-MOTIFS: <semicolon-separated list of recurring images/symbols, e.g. \"hands;darkness;water\">" ;;
-        esac
-    done
-
-    cat <<PROMPT_EOF
-Analyze this scene and extract the requested metadata. Respond with ONLY the labeled lines below, nothing else.
-
-Title: ${title:-Unknown} | POV: ${pov:-Unknown} | Setting: ${setting:-Unknown}
-
-${scene_text}
-${field_instructions}
-PROMPT_EOF
+    PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.enrich build-prompt \
+        "$scene_id" "$PROJECT_DIR" \
+        --fields "$ENRICH_FIELDS" \
+        $force_flag
 }
 
 # Helper: validate a type value
@@ -768,23 +732,16 @@ apply_enrich_result() {
         [[ -z "$new_val" ]] && continue
 
         # Check if field already has data (skip unless force)
+        csv_path=$(csv_for_field "$field")
         current_val=""
-        if is_metadata_field "$field"; then
-            current_val=$(get_csv_field "$METADATA_CSV" "$id" "$field")
-        elif is_intent_field "$field"; then
-            current_val=$(get_csv_field "$INTENT_CSV" "$id" "$field")
-        fi
+        [[ -n "$csv_path" && -f "$csv_path" ]] && current_val=$(get_csv_field "$csv_path" "$id" "$field")
 
         if [[ -n "$current_val" ]] && [[ "$FORCE" != true ]]; then
             continue
         fi
 
         # Update the appropriate CSV
-        if is_metadata_field "$field"; then
-            update_csv_field "$METADATA_CSV" "$id" "$field" "$new_val"
-        elif is_intent_field "$field"; then
-            update_csv_field "$INTENT_CSV" "$id" "$field" "$new_val"
-        fi
+        [[ -n "$csv_path" && -f "$csv_path" ]] && update_csv_field "$csv_path" "$id" "$field" "$new_val"
     done
 
     ENRICHED=$((ENRICHED + 1))
