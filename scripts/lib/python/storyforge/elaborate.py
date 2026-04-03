@@ -23,7 +23,7 @@ _SCENES_COLS = [
 ]
 _INTENT_COLS = [
     'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
-    'value_shift', 'turning_point', 'threads', 'characters', 'on_stage',
+    'value_shift', 'turning_point', 'characters', 'on_stage',
     'mice_threads',
 ]
 _BRIEFS_COLS = [
@@ -399,25 +399,25 @@ _REQUIRED_BY_STATUS = {
     'spine': ['id', 'seq', 'title', 'function'],
     'architecture': ['id', 'seq', 'title', 'part', 'pov', 'function',
                       'action_sequel', 'emotional_arc', 'value_at_stake',
-                      'value_shift', 'turning_point', 'threads'],
+                      'value_shift', 'turning_point'],
     'mapped': ['id', 'seq', 'title', 'part', 'pov', 'location',
                'timeline_day', 'time_of_day', 'function', 'action_sequel',
                'emotional_arc', 'value_at_stake', 'value_shift',
-               'turning_point', 'threads', 'characters', 'on_stage'],
+               'turning_point', 'characters', 'on_stage'],
     'briefed': ['id', 'seq', 'title', 'part', 'pov', 'location',
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
-                'turning_point', 'threads', 'characters', 'on_stage',
+                'turning_point', 'characters', 'on_stage',
                 'goal', 'conflict', 'outcome'],
     'drafted': ['id', 'seq', 'title', 'part', 'pov', 'location',
                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
-                'turning_point', 'threads', 'characters', 'on_stage',
+                'turning_point', 'characters', 'on_stage',
                 'goal', 'conflict', 'outcome'],
     'polished': ['id', 'seq', 'title', 'part', 'pov', 'location',
                  'timeline_day', 'time_of_day', 'function', 'action_sequel',
                  'emotional_arc', 'value_at_stake', 'value_shift',
-                 'turning_point', 'threads', 'characters', 'on_stage',
+                 'turning_point', 'characters', 'on_stage',
                  'goal', 'conflict', 'outcome'],
 }
 

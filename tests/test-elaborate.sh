@@ -267,12 +267,12 @@ s04|4|Scene Four|2|Alice|Room|2|afternoon|1 hour|action|briefed|1000|2000
 s05|5|Scene Five|2|Alice|Room|3|morning|1 hour|action|briefed|1000|2000
 CSV
 cat > "${THREAD_DIR}/scene-intent.csv" <<'CSV'
-id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
-s01|test|action|flat|truth|+/-|revelation|a|Alice|Alice|+inquiry:mystery;+milieu:dungeon
-s02|test|action|flat|truth|+/-|revelation|a|Alice|Alice|+event:storm
-s03|test|action|flat|truth|+/-|revelation|a|Alice|Alice|-milieu:dungeon;-event:storm
-s04|test|action|flat|truth|+/-|revelation|a|Alice|Alice|-inquiry:mystery
-s05|test|action|flat|truth|+/-|revelation|a|Alice|Alice|
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|Alice|Alice|+inquiry:mystery;+milieu:dungeon
+s02|test|action|flat|truth|+/-|revelation|Alice|Alice|+event:storm
+s03|test|action|flat|truth|+/-|revelation|Alice|Alice|-milieu:dungeon;-event:storm
+s04|test|action|flat|truth|+/-|revelation|Alice|Alice|-inquiry:mystery
+s05|test|action|flat|truth|+/-|revelation|Alice|Alice|
 CSV
 cat > "${THREAD_DIR}/scene-briefs.csv" <<'CSV'
 id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow

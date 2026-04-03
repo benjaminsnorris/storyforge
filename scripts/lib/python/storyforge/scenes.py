@@ -137,7 +137,7 @@ def parse_scene_boundaries(response: str) -> list[dict]:
 # ============================================================================
 
 _SCENES_HEADER = 'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words'
-_INTENT_HEADER = 'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads'
+_INTENT_HEADER = 'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads'
 
 
 def generate_scenes_rows(scenes: list[dict],

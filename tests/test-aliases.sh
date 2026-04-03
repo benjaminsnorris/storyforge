@@ -7,7 +7,6 @@ PYTHON_DIR="${PLUGIN_DIR}/scripts/lib/python"
 CHARACTERS_CSV="${FIXTURE_DIR}/reference/characters.csv"
 MOTIF_CSV="${FIXTURE_DIR}/reference/motif-taxonomy.csv"
 LOCATIONS_CSV="${FIXTURE_DIR}/reference/locations.csv"
-THREADS_CSV="${FIXTURE_DIR}/reference/threads.csv"
 
 # ============================================================================
 # load_alias_map + normalize_aliases — characters
@@ -153,40 +152,6 @@ amap = load_alias_map('${MOTIF_CSV}')
 print(normalize_aliases(amap, 'CARTOGRAPHY;Depth/Descent'))
 " 2>/dev/null)
 assert_equals "maps;depth" "$RESULT" "normalize motifs: case-insensitive"
-
-# ============================================================================
-# load_alias_map + normalize_aliases — threads
-# ============================================================================
-
-echo "--- normalize_aliases: threads ---"
-
-RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
-from storyforge.enrich import load_alias_map, normalize_aliases
-amap = load_alias_map('${THREADS_CSV}')
-print(normalize_aliases(amap, 'succession;map trust;being erased'))
-" 2>/dev/null)
-assert_equals "succession;cartography-trust;erasure" "$RESULT" "normalize threads: aliases resolve"
-
-RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
-from storyforge.enrich import load_alias_map, normalize_aliases
-amap = load_alias_map('${THREADS_CSV}')
-print(normalize_aliases(amap, 'the succession;Succession crisis;who rules next'))
-" 2>/dev/null)
-assert_equals "succession" "$RESULT" "normalize threads: deduplicates variants"
-
-RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
-from storyforge.enrich import load_alias_map, normalize_aliases
-amap = load_alias_map('${THREADS_CSV}')
-print(normalize_aliases(amap, 'succession;unknown thread;erasure'))
-" 2>/dev/null)
-assert_equals "succession;unknown thread;erasure" "$RESULT" "normalize threads: unknown passthrough"
-
-RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
-from storyforge.enrich import load_alias_map, normalize_aliases
-amap = load_alias_map('${THREADS_CSV}')
-print(normalize_aliases(amap, 'SUCCESSION;Trusting Maps'))
-" 2>/dev/null)
-assert_equals "succession;cartography-trust" "$RESULT" "normalize threads: case-insensitive"
 
 # ============================================================================
 # strip_parentheticals

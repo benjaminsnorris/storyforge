@@ -34,7 +34,7 @@ Based on the project state, identify where the author is:
 |---------------|----------------|--------------|--------|------------|---------------|
 | spine | 0 | — | — | — | Needs spine |
 | spine | 5-10 | function only | — | — | Spine done, ready for architecture |
-| architecture | 15-25 | has value_shift, threads | — | — | Architecture done, ready for map |
+| architecture | 15-25 | has value_shift | — | — | Architecture done, ready for map |
 | scene-map | 40-60 | has characters, on_stage | — | — | Map done, ready for briefs |
 | briefs | 40-60 | full | has goal/conflict/outcome | — | Briefs done, ready for drafting |
 | drafting+ | status=drafted | populated but gaps | populated | failures > 0 | **Gap-fill mode** |
@@ -63,7 +63,7 @@ When the author doesn't specify a mode, detect the current stage from Step 2 and
 |---|---|
 | No scenes.csv (or 0 rows) | Start spine |
 | Spine done (5-10 rows, function only) | Run architecture |
-| Architecture done (has value_shift, threads) | Run scene map |
+| Architecture done (has value_shift) | Run scene map |
 | Map done (has characters, on_stage) | Run briefs |
 | Briefs done, validation passes | Announce ready for drafting, redirect to forge |
 | Drafted with validation failures > 0 | Run gap-fill |
@@ -152,7 +152,7 @@ If they choose Option B, provide the full command and end.
 
 1. Read the spine scenes and story architecture
 2. Expand to 15-25 scenes: add supporting scenes, transitions, subplot introductions
-3. Assign parts, POV, scene types (action/sequel), value shifts, turning points, threads
+3. Assign parts, POV, scene types (action/sequel), value shifts, turning points
 4. Deepen character bible with supporting characters
 5. Create world bible if needed
 6. Write updates to all CSV files and reference docs

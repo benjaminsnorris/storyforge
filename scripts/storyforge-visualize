@@ -720,7 +720,7 @@ body {
     <div class="section-header">
         <span class="dot"></span>
         <h2>Thread Weave</h2>
-        <span class="subtitle">Narrative threads across scenes</span>
+        <span class="subtitle">MICE threads across scenes</span>
     </div>
     <div class="vis-container" id="thread-weave"></div>
 </div>
@@ -1388,7 +1388,7 @@ function updateDetailPanel(sceneId) {
         }
         if (intent.emotional_arc) intentHtml += detailRow('Emotion', intent.emotional_arc.substring(0, 80));
         if (intent.characters) intentHtml += detailRow('Characters', intent.characters.replace(/;/g, ', '));
-        if (intent.threads) intentHtml += detailRow('Threads', intent.threads.replace(/;/g, ', '));
+        if (intent.mice_threads) intentHtml += detailRow('MICE Threads', intent.mice_threads.replace(/;/g, ', '));
         if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.replace(/;/g, ', ').substring(0, 100));
         if (intentHtml) html += '<div class="detail-section-end">' + intentHtml + '</div>';
     }
@@ -1682,14 +1682,22 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     const threadScenes = {};
 
     INTENTS.forEach(intent => {
-        const threads = (intent.threads || '').split(';').map(t => t.trim()).filter(Boolean);
+        const mice = (intent.mice_threads || '').split(';').map(t => t.trim()).filter(Boolean);
         const s = sceneById[intent.id];
         if (!s) return;
         const seq = +s.seq;
-        threads.forEach(t => {
+        mice.forEach(raw => {
+            // Strip +/- prefix and type prefix (e.g., "+inquiry:who-killed" -> "who-killed")
+            const stripped = raw.replace(/^[+-]/, '');
+            const colonIdx = stripped.indexOf(':');
+            const t = colonIdx >= 0 ? stripped.substring(colonIdx + 1) : stripped;
+            if (!t) return;
             if (!threadFirst[t]) threadFirst[t] = seq;
             if (!threadScenes[t]) threadScenes[t] = [];
-            threadScenes[t].push({ id: intent.id, seq });
+            // Avoid duplicate entries for the same scene
+            if (!threadScenes[t].some(sc => sc.id === intent.id)) {
+                threadScenes[t].push({ id: intent.id, seq });
+            }
         });
     });
 

@@ -28,7 +28,7 @@ from .prompts import (
 METADATA_FIELDS = frozenset({'type', 'location', 'time_of_day'})
 
 #: Fields stored in scene-intent.csv
-INTENT_FIELDS = frozenset({'emotional_arc', 'characters', 'threads', 'motifs'})
+INTENT_FIELDS = frozenset({'emotional_arc', 'characters', 'motifs'})
 
 #: All enrichable fields
 ALL_FIELDS = METADATA_FIELDS | INTENT_FIELDS
@@ -51,7 +51,6 @@ _LABEL_TO_KEY = {
     'TIME_OF_DAY': 'time_of_day',
     'CHARACTERS': 'characters',
     'EMOTIONAL_ARC': 'emotional_arc',
-    'THREADS': 'threads',
     'MOTIFS': 'motifs',
 }
 
@@ -232,8 +231,6 @@ def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
 _CHAR_FIELDS = ('pov', 'characters', 'on_stage')
 # Fields that hold location references
 _LOCATION_FIELDS = ('location',)
-# Fields that hold thread references
-_THREAD_FIELDS = ('threads',)
 # Fields that hold motif references
 _MOTIF_FIELDS = ('motifs',)
 
@@ -241,7 +238,7 @@ _MOTIF_FIELDS = ('motifs',)
 def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
     """Load alias maps from all registry CSVs in a project.
 
-    Returns a dict with keys 'characters', 'locations', 'threads', 'motifs'
+    Returns a dict with keys 'characters', 'locations', 'motifs'
     mapping to their respective alias dicts.  Missing registry files produce
     empty dicts.
     """
@@ -249,18 +246,17 @@ def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
     return {
         'characters': load_alias_map(os.path.join(ref_dir, 'characters.csv')),
         'locations': load_alias_map(os.path.join(ref_dir, 'locations.csv')),
-        'threads': load_alias_map(os.path.join(ref_dir, 'threads.csv')),
         'motifs': load_alias_map(os.path.join(ref_dir, 'motif-taxonomy.csv')),
     }
 
 
 def normalize_fields(result: dict[str, str],
                      alias_maps: dict[str, dict[str, str]]) -> dict[str, str]:
-    """Normalize character, location, thread, and motif fields in a result dict.
+    """Normalize character, location, and motif fields in a result dict.
 
     Applies alias maps to resolve free-text names to canonical IDs.
     Works with any dict that has scene-CSV field names (pov, characters,
-    on_stage, location, threads, motifs).
+    on_stage, location, motifs).
 
     Args:
         result: Parsed result dict (from any extraction, enrichment, or
@@ -275,7 +271,6 @@ def normalize_fields(result: dict[str, str],
 
     char_map = alias_maps.get('characters', {})
     loc_map = alias_maps.get('locations', {})
-    thread_map = alias_maps.get('threads', {})
     motif_map = alias_maps.get('motifs', {})
 
     for field in _CHAR_FIELDS:
@@ -284,9 +279,6 @@ def normalize_fields(result: dict[str, str],
     for field in _LOCATION_FIELDS:
         if field in result and loc_map:
             result[field] = normalize_aliases(loc_map, result[field])
-    for field in _THREAD_FIELDS:
-        if field in result and thread_map:
-            result[field] = normalize_aliases(thread_map, result[field])
     for field in _MOTIF_FIELDS:
         if field in result and motif_map:
             result[field] = normalize_aliases(motif_map, result[field])
@@ -557,10 +549,6 @@ def _field_instruction(field: str) -> str:
             'EMOTIONAL_ARC: <one sentence: "[starting emotion] giving way '
             'to [ending emotion]">'
         ),
-        'threads': (
-            'THREADS: <semicolon-separated list of story threads, e.g. '
-            '"investigation;family_secret">'
-        ),
         'motifs': (
             'MOTIFS: <semicolon-separated list of recurring images/symbols, '
             'e.g. "hands;darkness;water">'
@@ -582,7 +570,7 @@ def enrich_and_apply(scene_id: str, response: str, project_dir: str,
         response: Raw text response from Claude.
         project_dir: Root directory of the novel project.
         alias_maps: Optional dict with keys ``'characters'``, ``'motifs'``,
-            ``'locations'``, ``'threads'`` mapping to alias dicts.
+            ``'locations'`` mapping to alias dicts.
         force: If True, overwrite existing non-empty values.
 
     Returns:
@@ -592,7 +580,7 @@ def enrich_and_apply(scene_id: str, response: str, project_dir: str,
     if result.get('_status') != 'ok':
         return result
 
-    # Normalize aliases (characters, on_stage, pov, location, threads, motifs)
+    # Normalize aliases (characters, on_stage, pov, location, motifs)
     if alias_maps:
         normalize_fields(result, alias_maps)
 
@@ -777,9 +765,6 @@ def main():
                 if 'locations' in alias_maps and 'location' in result:
                     result['location'] = normalize_aliases(
                         alias_maps['locations'], result['location'])
-                if 'threads' in alias_maps and 'threads' in result:
-                    result['threads'] = normalize_aliases(
-                        alias_maps['threads'], result['threads'])
             if 'type' in result:
                 result['type'] = validate_type(result['type'])
                 if not result['type']:
@@ -827,10 +812,6 @@ def main():
         locations_csv = os.path.join(project_dir, 'reference', 'locations.csv')
         if os.path.isfile(locations_csv):
             maps['locations'] = load_alias_map(locations_csv)
-
-        threads_csv = os.path.join(project_dir, 'reference', 'threads.csv')
-        if os.path.isfile(threads_csv):
-            maps['threads'] = load_alias_map(threads_csv)
 
         json.dump(maps, sys.stdout)
         print()

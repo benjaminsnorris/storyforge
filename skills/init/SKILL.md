@@ -183,7 +183,7 @@ id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|wor
 
 **`{project-dir}/reference/scene-intent.csv`:**
 ```
-id|function|emotional_arc|characters|threads|motifs|notes
+id|function|emotional_arc|characters|motifs|notes
 ```
 
 ## Step 6: Generate the Project CLAUDE.md

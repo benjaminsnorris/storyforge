@@ -245,7 +245,6 @@ EMOTIONAL_ARC: [starting emotion giving way to ending emotion, e.g., "controlled
 VALUE_AT_STAKE: [the abstract value being tested: safety, love, justice, truth, freedom, honor, etc.]
 VALUE_SHIFT: [polarity change using +/- notation: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse]
 TURNING_POINT: [action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation]
-THREADS: [semicolon-separated story threads this scene advances]
 CHARACTERS: [semicolon-separated list of ALL characters present or referenced by name]
 ON_STAGE: [semicolon-separated list of characters physically present in the scene — subset of CHARACTERS]
 MICE_THREADS: [semicolon-separated MICE thread operations — +milieu:location-name to open, -inquiry:question to close, etc. Use + for opening, - for closing. Types: milieu, inquiry, character, event]
@@ -262,7 +261,6 @@ def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
         'VALUE_AT_STAKE': 'value_at_stake',
         'VALUE_SHIFT': 'value_shift',
         'TURNING_POINT': 'turning_point',
-        'THREADS': 'threads',
         'CHARACTERS': 'characters',
         'ON_STAGE': 'on_stage',
         'MICE_THREADS': 'mice_threads',
@@ -475,25 +473,6 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
             })
         prev_day = day
         prev_id = sid
-
-    # Thin threads: appear in only 1-2 scenes
-    thread_counts: dict[str, list[str]] = {}
-    for sid in sorted_ids:
-        intent = intent_map.get(sid, {})
-        threads = intent.get('threads', '').strip()
-        if threads:
-            for t in threads.split(';'):
-                t = t.strip()
-                if t:
-                    thread_counts.setdefault(t, []).append(sid)
-    for thread, sids in thread_counts.items():
-        if len(sids) <= 2:
-            opportunities.append({
-                'type': 'thin_thread',
-                'scene_id': ';'.join(sids),
-                'description': f"Thread '{thread}' appears in only {len(sids)} scene(s)",
-                'priority': 'medium',
-            })
 
     # Missing sequels: consecutive action scenes
     for i, sid in enumerate(sorted_ids[:-1]):

@@ -70,11 +70,6 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to check:** Flag 4+ consecutive same type. The Scene Rhythm chart shows this.
 **How to improve:** If too many revelations, look for scenes where a character's action could be the turning point instead of new information arriving.
 
-### threads — Story Threads
-**Why it matters:** Threads are subplots, themes, and ongoing concerns that weave through the manuscript. Dropped threads feel like broken promises. Threads that appear in only 1-2 scenes are underdeveloped.
-**How to check:** Run validation (flags dormant threads). Check the Thread Weave chart. Count scenes per thread.
-**How to improve:** If a thread goes dormant for 8+ scenes, add a reference to it (even a brief character thought) to keep it alive. If a thread appears in only 1-2 scenes, either develop it or remove it.
-
 ### characters / on_stage — Who's Present
 **Why it matters:** Character presence drives the reader's sense of the story's world. Characters who are mentioned but never appear on-stage feel like they exist only in exposition.
 **How to check:** Check the Character Presence Grid. Flag characters with many mentions but few on-stage appearances.

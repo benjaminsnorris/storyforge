@@ -548,8 +548,8 @@ YAML
 echo "id|seq|title|pov|word_count|status|type|location|part" > "${VIS_TMP}/reference/scenes.csv"
 echo "s1|1|Scene One|Alice|1000|draft|character|Home|act-1" >> "${VIS_TMP}/reference/scenes.csv"
 
-echo "id|function|emotional_arc|characters|threads|motifs" > "${VIS_TMP}/reference/scene-intent.csv"
-echo "s1|opener|tension|Alice|main-plot|light" >> "${VIS_TMP}/reference/scene-intent.csv"
+echo "id|function|emotional_arc|characters|motifs" > "${VIS_TMP}/reference/scene-intent.csv"
+echo "s1|opener|tension|Alice|light" >> "${VIS_TMP}/reference/scene-intent.csv"
 
 # Create rationale CSVs
 echo "id|principle_a|principle_b" > "${VIS_TMP}/working/scores/latest/scene-rationale.csv"

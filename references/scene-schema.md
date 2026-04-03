@@ -7,7 +7,7 @@ Scenes are the atomic unit of a Storyforge project. Scene files are **pure prose
 Scene data is split across three CSV files, each with a clear purpose:
 
 - **`reference/scenes.csv`** — structural identity and position (POV, location, timeline, status, word counts)
-- **`reference/scene-intent.csv`** — narrative dynamics and tracking (function, value shifts, threads, characters, MICE threads)
+- **`reference/scene-intent.csv`** — narrative dynamics and tracking (function, value shifts, characters, MICE threads)
 - **`reference/scene-briefs.csv`** — drafting contracts (goal, conflict, outcome, knowledge states, key actions/dialogue)
 
 All three files use pipe (`|`) as the field delimiter, semicolon (`;`) for array values within a column, and `id` as the join key. The first row is always the header.
@@ -60,7 +60,6 @@ Projects created before v0.40.0 used a two-file model with fewer columns. Run `.
 | `value_at_stake` | string | architecture | The abstract value being tested: safety, love, justice, truth, freedom, etc. (McKee). |
 | `value_shift` | string | architecture | Polarity change: `+/-`, `-/+`, `+/++`, `-/--` (Story Grid). A scene that doesn't shift a value is a nonevent. |
 | `turning_point` | string | architecture | `action` or `revelation` — vary these to prevent monotony (Story Grid). |
-| `threads` | array | architecture | Story threads this scene touches. Semicolon-separated. |
 | `characters` | array | map | All characters present or referenced. Semicolon-separated. Normalized against `reference/characters.csv`. |
 | `on_stage` | array | map | Characters physically present (subset of characters). |
 | `mice_threads` | array | map | MICE thread operations: `+milieu:canyon` (open), `-inquiry:who-killed` (close). FILO nesting order (Kowal). |
@@ -91,7 +90,7 @@ The `status` field tracks how deeply a scene has been elaborated:
 | Status | What's populated | Pipeline stage |
 |--------|-----------------|---------------|
 | `spine` | id, seq, title, function | Stage 1: irreducible story events |
-| `architecture` | + part, pov, action_sequel, emotional_arc, value_shift, turning_point, threads | Stage 2: structure |
+| `architecture` | + part, pov, action_sequel, emotional_arc, value_shift, turning_point | Stage 2: structure |
 | `mapped` | + location, timeline_day, time_of_day, duration, type, characters, on_stage, mice_threads | Stage 3: full scene map |
 | `briefed` | + goal, conflict, outcome, crisis, decision, knowledge_in/out, key_actions, key_dialogue, emotions, motifs, continuity_deps | Stage 4: drafting contracts |
 | `drafted` | + word_count (prose exists in scenes/{id}.md) | After drafting |
@@ -105,7 +104,7 @@ Run `./storyforge validate` to check structural integrity:
 - **Completeness:** Required columns for the scene's status are populated
 - **Timeline:** No backwards jumps without explicit markers
 - **Knowledge flow:** knowledge_in references match prior scenes' knowledge_out
-- **Thread management:** MICE threads nest in valid FILO order; no thread dormant >8 scenes
+- **Thread management:** MICE threads nest in valid FILO order
 - **Pacing:** No flat polarity stretches (3+ scenes); action/sequel rhythm varied; turning point types varied
 
 ## Scoring

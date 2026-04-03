@@ -228,8 +228,6 @@ Expand the spine (5-10 events) into 15-25 scenes. For each scene:
 5. Classify each as action or sequel (Swain's scene/sequel pattern)
 6. Define the value at stake and its polarity shift (McKee)
 7. Identify the turning point type (action or revelation — vary these)
-8. Assign story threads
-
 ### Output Format
 
 Update the scenes CSV with new columns filled:
@@ -242,7 +240,7 @@ id|seq|title|part|pov|status
 Update the intent CSV with new columns:
 
 ```intent-csv
-id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 (all scenes)
 ```
 
@@ -319,7 +317,7 @@ id|seq|title|part|pov|location|timeline_day|time_of_day|duration|status
 ```
 
 ```intent-csv
-id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
 (all scenes)
 ```
 
@@ -542,10 +540,6 @@ _FIELD_INSTRUCTIONS = {
     'turning_point': (
         'Identify the turning point type. Choose: action (character does something) '
         'or revelation (character learns something new).'
-    ),
-    'threads': (
-        'List the story threads this scene advances, semicolon-separated '
-        '(e.g., "trust;betrayal;investigation").'
     ),
     'mice_threads': (
         'List MICE thread operations: +type:name to open, -type:name to close. '
