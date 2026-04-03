@@ -255,6 +255,46 @@ for c in thread_checks:
 
 assert_contains "$RESULT" "mice-nesting True" "validate_structure: MICE threads nest correctly"
 
+# Test that closure checks use pre-populated registry (issue #67)
+THREAD_DIR="${TMPDIR}/thread-test/reference"
+mkdir -p "$THREAD_DIR"
+cat > "${THREAD_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|Scene One|1|Alice|Room|1|morning|1 hour|action|briefed|1000|2000
+s02|2|Scene Two|1|Alice|Room|1|afternoon|1 hour|action|briefed|1000|2000
+s03|3|Scene Three|1|Alice|Room|2|morning|1 hour|action|briefed|1000|2000
+s04|4|Scene Four|2|Alice|Room|2|afternoon|1 hour|action|briefed|1000|2000
+s05|5|Scene Five|2|Alice|Room|3|morning|1 hour|action|briefed|1000|2000
+CSV
+cat > "${THREAD_DIR}/scene-intent.csv" <<'CSV'
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|a|Alice|Alice|+inquiry:mystery;+milieu:dungeon
+s02|test|action|flat|truth|+/-|revelation|a|Alice|Alice|+event:storm
+s03|test|action|flat|truth|+/-|revelation|a|Alice|Alice|-milieu:dungeon;-event:storm
+s04|test|action|flat|truth|+/-|revelation|a|Alice|Alice|-inquiry:mystery
+s05|test|action|flat|truth|+/-|revelation|a|Alice|Alice|
+CSV
+cat > "${THREAD_DIR}/scene-briefs.csv" <<'CSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+s01|g|c|o|cr|d|k|k|a|d|e|m||false
+s02|g|c|o|cr|d|k|k|a|d|e|m||false
+s03|g|c|o|cr|d|k|k|a|d|e|m||false
+s04|g|c|o|cr|d|k|k|a|d|e|m||false
+s05|g|c|o|cr|d|k|k|a|d|e|m||false
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import validate_structure
+report = validate_structure('${THREAD_DIR}')
+thread_checks = [c for c in report['checks'] if c['category'] == 'threads']
+for c in thread_checks:
+    print(c['check'], c['passed'], c.get('message', ''))
+")
+
+assert_not_contains "$RESULT" "was never opened" "validate_structure: closures find openings from earlier scenes (issue #67)"
+assert_contains "$RESULT" "mice-nesting" "validate_structure: MICE nesting check present for cross-scene threads"
+
 # ============================================================================
 # validate_structure — timeline
 # ============================================================================
@@ -294,6 +334,78 @@ print(len(failed) > 0)
 assert_equals "True" "$RESULT" "validate_structure: detects backwards timeline jump"
 
 rm -rf "$TMP_REF"
+
+# Crosscut: backwards jump with POV change should be advisory, not blocking (issue #68)
+CROSSCUT_DIR="${TMPDIR}/crosscut-test/reference"
+mkdir -p "$CROSSCUT_DIR"
+cat > "${CROSSCUT_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|Scene One|1|Emmett|Town|13|morning|1 hour|action|briefed|1000|2000
+s02|2|Scene Two|1|Emmett|Town|14|morning|1 hour|action|briefed|1000|2000
+s03|3|Scene Three|1|Lena|Station|12|morning|1 hour|action|briefed|1000|2000
+s04|4|Scene Four|1|Emmett|Town|15|morning|1 hour|action|briefed|1000|2000
+CSV
+cat > "${CROSSCUT_DIR}/scene-intent.csv" <<'CSV'
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|a|Emmett|Emmett|
+s02|test|action|flat|truth|+/-|revelation|a|Emmett|Emmett|
+s03|test|action|flat|truth|+/-|revelation|a|Lena|Lena|
+s04|test|action|flat|truth|+/-|revelation|a|Emmett|Emmett|
+CSV
+cat > "${CROSSCUT_DIR}/scene-briefs.csv" <<'CSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+s01|g|c|o|cr|d|k|k|a|d|e|m||false
+s02|g|c|o|cr|d|k|k|a|d|e|m||false
+s03|g|c|o|cr|d|k|k|a|d|e|m||false
+s04|g|c|o|cr|d|k|k|a|d|e|m||false
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import validate_structure
+report = validate_structure('${CROSSCUT_DIR}')
+timeline_checks = [c for c in report['checks'] if c['category'] == 'timeline']
+for c in timeline_checks:
+    print(c.get('severity', 'blocking'), c['passed'], c.get('message', ''))
+")
+
+assert_contains "$RESULT" "advisory" "validate_structure: crosscut backwards jump is advisory (issue #68)"
+assert_contains "$RESULT" "crosscut" "validate_structure: crosscut message identifies POV change"
+assert_not_contains "$RESULT" "blocking" "validate_structure: crosscut does not produce blocking failure"
+
+rm -rf "${TMPDIR}/crosscut-test"
+
+# Same-POV backwards jump should remain blocking
+SAMEPOV_DIR="${TMPDIR}/samepov-test/reference"
+mkdir -p "$SAMEPOV_DIR"
+cat > "${SAMEPOV_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|Scene One|1|Alice|Room|3|morning|1 hour|action|briefed|1000|2000
+s02|2|Scene Two|1|Alice|Room|1|morning|1 hour|action|briefed|1000|2000
+CSV
+cat > "${SAMEPOV_DIR}/scene-intent.csv" <<'CSV'
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|a|Alice|Alice|
+s02|test|action|flat|truth|+/-|revelation|a|Alice|Alice|
+CSV
+cat > "${SAMEPOV_DIR}/scene-briefs.csv" <<'CSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+s01|g|c|o|cr|d|k|k|a|d|e|m||false
+s02|g|c|o|cr|d|k|k|a|d|e|m||false
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import validate_structure
+report = validate_structure('${SAMEPOV_DIR}')
+timeline_checks = [c for c in report['checks'] if c['category'] == 'timeline']
+blocking = [c for c in timeline_checks if c.get('severity', 'blocking') == 'blocking' and not c['passed']]
+print(len(blocking) > 0)
+")
+
+assert_equals "True" "$RESULT" "validate_structure: same-POV backwards jump stays blocking"
+
+rm -rf "${TMPDIR}/samepov-test"
 
 # ============================================================================
 # validate_structure — knowledge flow
