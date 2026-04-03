@@ -12,6 +12,7 @@ import os
 import re
 from typing import Any
 
+from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
 from .prompts import read_yaml_field
 
 

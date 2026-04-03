@@ -106,18 +106,19 @@ def parse_enrich_response(response: str, scene_id: str) -> dict:
 # ============================================================================
 
 def load_alias_map(csv_file: str) -> dict[str, str]:
-    """Build a case-insensitive alias lookup from a CSV with name|aliases columns.
+    """Build a case-insensitive alias lookup from a CSV with id|name|aliases columns.
 
-    Reads a pipe-delimited CSV file where the ``name`` column holds the
-    canonical name and the ``aliases`` column holds semicolon-separated
-    alternative names.  Returns a dict mapping each lowercased alias (and
-    the lowercased canonical name itself) to the canonical name.
+    Reads a pipe-delimited CSV file.  When an ``id`` column is present the
+    canonical value is the id (e.g. ``emmett-slade``); otherwise it falls
+    back to the ``name`` column.  The ``aliases`` column holds semicolon-
+    separated alternative names.  Returns a dict mapping each lowercased
+    alias, name, and id to the canonical value.
 
     Args:
         csv_file: Path to the pipe-delimited CSV file.
 
     Returns:
-        Dict mapping lowercase alias strings to canonical names.
+        Dict mapping lowercase alias strings to canonical IDs (or names).
         Empty dict if the file is missing or has no relevant columns.
     """
     if not csv_file or not os.path.isfile(csv_file):
@@ -133,6 +134,11 @@ def load_alias_map(csv_file: str) -> dict[str, str]:
         return {}
 
     try:
+        id_idx = header.index('id')
+    except ValueError:
+        id_idx = None
+
+    try:
         alias_idx = header.index('aliases')
     except ValueError:
         alias_idx = None
@@ -142,11 +148,19 @@ def load_alias_map(csv_file: str) -> dict[str, str]:
     for row in rows:
         if len(row) <= name_idx:
             continue
-        canonical = row[name_idx].strip()
-        if not canonical:
+        name = row[name_idx].strip()
+        if not name:
             continue
 
-        # Self-mapping
+        # Use id as canonical value when available, otherwise name
+        if id_idx is not None and len(row) > id_idx and row[id_idx].strip():
+            canonical = row[id_idx].strip()
+        else:
+            canonical = name
+
+        # Map name → canonical id
+        alias_map[name.lower()] = canonical
+        # Self-mapping for the id itself
         alias_map[canonical.lower()] = canonical
 
         # Alias mappings
@@ -159,16 +173,34 @@ def load_alias_map(csv_file: str) -> dict[str, str]:
     return alias_map
 
 
+def strip_parentheticals(value: str) -> str:
+    """Strip parenthetical qualifiers from a string.
+
+    Removes trailing parenthetical expressions like "(referenced)",
+    "(implied)", "(not named in scene)" that Claude adds to character
+    entries.  The ``on_stage`` column already captures presence vs
+    reference, so these qualifiers just break alias lookup.
+
+    Args:
+        value: A single entry (not semicolon-separated).
+
+    Returns:
+        The value with parenthetical suffixes removed and whitespace trimmed.
+    """
+    return re.sub(r'\s*\([^)]*\)\s*$', '', value).strip()
+
+
 def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
     """Resolve aliases in a semicolon-separated string.
 
-    Each entry is looked up case-insensitively in *alias_map*.  Matches
-    are replaced with the canonical name; unknowns pass through unchanged.
-    The result is deduplicated (first occurrence wins) and returned as a
+    Each entry is looked up case-insensitively in *alias_map*.  Parenthetical
+    qualifiers like "(referenced)" are stripped before lookup.  Matches are
+    replaced with the canonical ID; unknowns pass through unchanged.  The
+    result is deduplicated (first occurrence wins) and returned as a
     semicolon-separated string.
 
     Args:
-        alias_map: Mapping from lowercase alias to canonical name
+        alias_map: Mapping from lowercase alias to canonical ID
             (as returned by :func:`load_alias_map`).
         semicolon_string: Semicolon-separated values to normalize.
 
@@ -182,7 +214,7 @@ def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
     result: list[str] = []
 
     for part in semicolon_string.split(';'):
-        trimmed = part.strip()
+        trimmed = strip_parentheticals(part.strip())
         if not trimmed:
             continue
 
@@ -194,6 +226,72 @@ def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
             result.append(canonical)
 
     return ';'.join(result)
+
+
+# Fields that hold character references (semicolon-separated or single)
+_CHAR_FIELDS = ('pov', 'characters', 'on_stage')
+# Fields that hold location references
+_LOCATION_FIELDS = ('location',)
+# Fields that hold thread references
+_THREAD_FIELDS = ('threads',)
+# Fields that hold motif references
+_MOTIF_FIELDS = ('motifs',)
+
+
+def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
+    """Load alias maps from all registry CSVs in a project.
+
+    Returns a dict with keys 'characters', 'locations', 'threads', 'motifs'
+    mapping to their respective alias dicts.  Missing registry files produce
+    empty dicts.
+    """
+    ref_dir = os.path.join(project_dir, 'reference')
+    return {
+        'characters': load_alias_map(os.path.join(ref_dir, 'characters.csv')),
+        'locations': load_alias_map(os.path.join(ref_dir, 'locations.csv')),
+        'threads': load_alias_map(os.path.join(ref_dir, 'threads.csv')),
+        'motifs': load_alias_map(os.path.join(ref_dir, 'motif-taxonomy.csv')),
+    }
+
+
+def normalize_fields(result: dict[str, str],
+                     alias_maps: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Normalize character, location, thread, and motif fields in a result dict.
+
+    Applies alias maps to resolve free-text names to canonical IDs.
+    Works with any dict that has scene-CSV field names (pov, characters,
+    on_stage, location, threads, motifs).
+
+    Args:
+        result: Parsed result dict (from any extraction, enrichment, or
+            elaboration response parser).
+        alias_maps: Registry alias maps (from :func:`load_registry_alias_maps`).
+
+    Returns:
+        The result dict, modified in place and returned for convenience.
+    """
+    if not alias_maps:
+        return result
+
+    char_map = alias_maps.get('characters', {})
+    loc_map = alias_maps.get('locations', {})
+    thread_map = alias_maps.get('threads', {})
+    motif_map = alias_maps.get('motifs', {})
+
+    for field in _CHAR_FIELDS:
+        if field in result and char_map:
+            result[field] = normalize_aliases(char_map, result[field])
+    for field in _LOCATION_FIELDS:
+        if field in result and loc_map:
+            result[field] = normalize_aliases(loc_map, result[field])
+    for field in _THREAD_FIELDS:
+        if field in result and thread_map:
+            result[field] = normalize_aliases(thread_map, result[field])
+    for field in _MOTIF_FIELDS:
+        if field in result and motif_map:
+            result[field] = normalize_aliases(motif_map, result[field])
+
+    return result
 
 
 # ============================================================================
@@ -494,20 +592,9 @@ def enrich_and_apply(scene_id: str, response: str, project_dir: str,
     if result.get('_status') != 'ok':
         return result
 
-    # Normalize aliases
+    # Normalize aliases (characters, on_stage, pov, location, threads, motifs)
     if alias_maps:
-        if 'characters' in alias_maps and 'characters' in result:
-            result['characters'] = normalize_aliases(
-                alias_maps['characters'], result['characters'])
-        if 'motifs' in alias_maps and 'motifs' in result:
-            result['motifs'] = normalize_aliases(
-                alias_maps['motifs'], result['motifs'])
-        if 'locations' in alias_maps and 'location' in result:
-            result['location'] = normalize_aliases(
-                alias_maps['locations'], result['location'])
-        if 'threads' in alias_maps and 'threads' in result:
-            result['threads'] = normalize_aliases(
-                alias_maps['threads'], result['threads'])
+        normalize_fields(result, alias_maps)
 
     # Validate constrained fields
     if 'type' in result:
