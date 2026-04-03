@@ -186,12 +186,12 @@ COLUMN_SCHEMA = {
     'knowledge_in': {
         'type': 'registry', 'registry': 'knowledge.csv', 'array': True,
         'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Fact IDs the POV character knows entering. Normalized against reference/knowledge.csv.',
+        'description': 'Fact IDs the POV character knows entering. Normalized against reference/knowledge.csv. Only scene-gating facts (see knowledge-guidelines.md).',
     },
     'knowledge_out': {
         'type': 'registry', 'registry': 'knowledge.csv', 'array': True,
         'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Fact IDs the POV character knows leaving. Includes knowledge_in plus anything new learned.',
+        'description': 'Fact IDs the POV character knows leaving. Includes knowledge_in plus new facts learned. Target 0.5-1.5 new facts per scene (see knowledge-guidelines.md).',
     },
     'key_actions': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
@@ -483,6 +483,82 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
         'failed': failed,
         'skipped': skipped,
         'errors': errors,
+    }
+
+
+# ============================================================================
+# Knowledge granularity validation
+# ============================================================================
+
+MAX_FACT_NAME_WORDS = 15
+MAX_NEW_FACTS_PER_SCENE = 4
+
+
+def validate_knowledge_granularity(ref_dir: str, project_dir: str | None = None) -> dict:
+    """Check knowledge facts for over-granularity.
+
+    Registry-level: flag fact names longer than MAX_FACT_NAME_WORDS words.
+    Scene-level: flag scenes where knowledge_out has more than
+    MAX_NEW_FACTS_PER_SCENE facts not present in knowledge_in.
+
+    Args:
+        ref_dir: Path to reference/ directory.
+        project_dir: Project root (unused, kept for API consistency).
+
+    Returns:
+        Dict with total_facts, total_scenes, facts_per_scene, warnings.
+    """
+    warnings: list[dict] = []
+
+    # --- Registry-level checks ---
+    knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
+    total_facts = 0
+    if os.path.isfile(knowledge_path):
+        for row in _read_csv(knowledge_path):
+            total_facts += 1
+            name = row.get('name', '').strip()
+            if not name:
+                continue
+            word_count = len(name.split())
+            if word_count > MAX_FACT_NAME_WORDS:
+                warnings.append({
+                    'type': 'long_name',
+                    'id': row.get('id', '?'),
+                    'name': name,
+                    'word_count': word_count,
+                })
+
+    # --- Scene-level checks ---
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    total_scenes = 0
+    total_new_facts = 0
+    if os.path.isfile(briefs_path):
+        for row in _read_csv(briefs_path):
+            total_scenes += 1
+            k_in_raw = row.get('knowledge_in', '').strip()
+            k_out_raw = row.get('knowledge_out', '').strip()
+
+            k_in = {e.strip() for e in k_in_raw.split(';') if e.strip()} if k_in_raw else set()
+            k_out = {e.strip() for e in k_out_raw.split(';') if e.strip()} if k_out_raw else set()
+
+            new_facts = sorted(k_out - k_in)
+            total_new_facts += len(new_facts)
+
+            if len(new_facts) > MAX_NEW_FACTS_PER_SCENE:
+                warnings.append({
+                    'type': 'too_many_new_facts',
+                    'scene_id': row.get('id', '?'),
+                    'new_fact_count': len(new_facts),
+                    'facts': new_facts,
+                })
+
+    facts_per_scene = round(total_facts / total_scenes, 1) if total_scenes > 0 else 0.0
+
+    return {
+        'total_facts': total_facts,
+        'total_scenes': total_scenes,
+        'facts_per_scene': facts_per_scene,
+        'warnings': warnings,
     }
 
 
