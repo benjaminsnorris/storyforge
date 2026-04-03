@@ -481,7 +481,7 @@ from storyforge.elaborate import get_scene
 profile = json.loads(open('${PROFILE_FILE}').read()) if os.path.isfile('${PROFILE_FILE}') else {}
 scene_data = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
 skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
-intent = {k: scene_data.get(k, '') for k in ['function', 'scene_type', 'value_at_stake', 'value_shift', 'emotional_arc']}
+intent = {k: scene_data.get(k, '') for k in ['function', 'action_sequel', 'value_at_stake', 'value_shift', 'emotional_arc']}
 scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
 print(build_brief_parallel_prompt('${SCENE_ID}', scene_text, profile, skeleton, intent))
 ")
@@ -570,7 +570,7 @@ from storyforge.elaborate import get_scene
 
 scene_data = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
 skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
-intent = {k: scene_data.get(k, '') for k in ['function', 'scene_type']}
+intent = {k: scene_data.get(k, '') for k in ['function', 'action_sequel']}
 
 with open('${KNOWLEDGE_STATE_FILE}') as f:
     prior_knowledge = json.load(f)

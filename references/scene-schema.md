@@ -55,7 +55,7 @@ Projects created before v0.40.0 used a two-file model with fewer columns. Run `.
 |--------|------|-------------|-------------|
 | `id` | string | spine | Matches scenes.csv. |
 | `function` | string | spine | Why this scene exists — must be specific and testable. Not "advance the plot" but "she discovers he kept the letter." |
-| `scene_type` | string | architecture | Swain structural pattern: `action` (goal/conflict/outcome) or `sequel` (reaction/dilemma/decision). |
+| `action_sequel` | string | architecture | Action/sequel pattern (Swain): `action` (goal/conflict/outcome) or `sequel` (reaction/dilemma/decision). |
 | `emotional_arc` | string | architecture | Emotional journey: start → end (e.g., "controlled competence to buried unease"). |
 | `value_at_stake` | string | architecture | The abstract value being tested: safety, love, justice, truth, freedom, etc. (McKee). |
 | `value_shift` | string | architecture | Polarity change: `+/-`, `-/+`, `+/++`, `-/--` (Story Grid). A scene that doesn't shift a value is a nonevent. |
@@ -91,7 +91,7 @@ The `status` field tracks how deeply a scene has been elaborated:
 | Status | What's populated | Pipeline stage |
 |--------|-----------------|---------------|
 | `spine` | id, seq, title, function | Stage 1: irreducible story events |
-| `architecture` | + part, pov, scene_type, emotional_arc, value_shift, turning_point, threads | Stage 2: structure |
+| `architecture` | + part, pov, action_sequel, emotional_arc, value_shift, turning_point, threads | Stage 2: structure |
 | `mapped` | + location, timeline_day, time_of_day, duration, type, characters, on_stage, mice_threads | Stage 3: full scene map |
 | `briefed` | + goal, conflict, outcome, crisis, decision, knowledge_in/out, key_actions, key_dialogue, emotions, motifs, continuity_deps | Stage 4: drafting contracts |
 | `drafted` | + word_count (prose exists in scenes/{id}.md) | After drafting |

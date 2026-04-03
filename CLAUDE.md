@@ -217,7 +217,7 @@ All structured data uses pipe-delimited CSV:
 ### Key CSV Files
 
 - `reference/scenes.csv` — structural identity (id, seq, title, part, pov, location, timeline_day, time_of_day, duration, type, status, word_count, target_words)
-- `reference/scene-intent.csv` — narrative dynamics (id, function, scene_type, emotional_arc, value_at_stake, value_shift, turning_point, threads, characters, on_stage, mice_threads)
+- `reference/scene-intent.csv` — narrative dynamics (id, function, action_sequel, emotional_arc, value_at_stake, value_shift, turning_point, threads, characters, on_stage, mice_threads)
 - `reference/scene-briefs.csv` — drafting contracts (id, goal, conflict, outcome, crisis, decision, knowledge_in, knowledge_out, key_actions, key_dialogue, emotions, motifs, continuity_deps, has_overflow)
 
 **Shared:**

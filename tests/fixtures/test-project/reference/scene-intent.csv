@@ -1,4 +1,4 @@
-id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
 act1-sc01|Establishes Dorren as institutional gatekeeper who notices anomalies but chooses protocol over investigation|action|Controlled competence to buried unease|truth|+/-|revelation|institutional-failure;chosen-blindness|Dorren Hayle;Tessa Merrin;Pell|Dorren Hayle;Tessa Merrin|+inquiry:map-anomaly
 act1-sc02|Dorren discovers a village has vanished from the pressure maps|sequel|Routine giving way to dread|safety|-/--|revelation|the-anomaly;maps-and-territory|Dorren Hayle|Dorren Hayle|
 new-x1|Kael warns about archive inconsistencies pointing to systematic erasure|action|Scholarly calm to urgent alarm|truth|-/+|action|the-anomaly;archive-corruption|Kael Maren;Dorren Hayle|Kael Maren;Dorren Hayle|+inquiry:archive-erasure

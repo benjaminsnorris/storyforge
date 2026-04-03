@@ -50,7 +50,7 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to check:** Read each function. Can you verify from the prose that this actually happens? Is it specific ("she discovers the letter was forged") or vague ("develops the relationship")?
 **How to improve:** Rewrite vague functions to be testable. If you can't make it specific, the scene may lack a clear purpose.
 
-### scene_type — Swain Structural Pattern
+### action_sequel — Action/Sequel Pattern
 **Why it matters:** The action/sequel rhythm controls pacing. Action scenes (goal → conflict → outcome) create tension. Sequel scenes (reaction → dilemma → decision) process that tension. Too many consecutive action scenes is breathless. Too many sequels is a slog.
 **How to check:** Look at the Scene Rhythm chart. Flag 4+ consecutive same type.
 **How to improve:** If you have a run of action scenes, insert a sequel where a character processes what happened. If all sequels, find a scene where a character makes an active choice and hits opposition.

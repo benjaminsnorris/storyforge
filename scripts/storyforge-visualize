@@ -1373,8 +1373,8 @@ function updateDetailPanel(sceneId) {
     if (intent) {
         let intentHtml = '';
         if (intent.function) intentHtml += detailRow('Function', intent.function.substring(0, 150));
-        if (intent.scene_type) {
-            const stFirst = intent.scene_type.split(/[\s—–]/)[0].trim();
+        if (intent.action_sequel) {
+            const stFirst = intent.action_sequel.split(/[\s—–]/)[0].trim();
             intentHtml += detailRow('Scene Type', stFirst.charAt(0).toUpperCase() + stFirst.slice(1));
         }
         if (intent.value_at_stake) intentHtml += detailRow('Value at Stake', intent.value_at_stake.split(/[\s—–]/)[0].trim());
@@ -2744,8 +2744,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     const types = [];
     INTENTS.forEach(intent => {
-        // scene_type may be "action" or "sequel — explanation..."; extract first word
-        const stRaw = (intent.scene_type || '').trim().toLowerCase();
+        // action_sequel may be "action" or "sequel — explanation..."; extract first word
+        const stRaw = (intent.action_sequel || '').trim().toLowerCase();
         const st = stRaw.split(/[\s—–-]/)[0].trim();
         // turning_point may also have explanation
         const tpRaw = (intent.turning_point || '').trim().toLowerCase();

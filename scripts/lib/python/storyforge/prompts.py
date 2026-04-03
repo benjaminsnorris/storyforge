@@ -1027,7 +1027,7 @@ Produce an expanded writing guide for scene **{scene_id}** ("{scene.get('title',
 
 Include:
 - Voice notes specific to this scene and POV character
-- Craft reminders relevant to the scene type ({scene.get('scene_type', '')})
+- Craft reminders relevant to the scene type ({scene.get('action_sequel', '')})
 - How to land the value shift ({scene.get('value_shift', '')})
 - Suggested approach for the crisis/decision moment
 - Line-level suggestions for key dialogue

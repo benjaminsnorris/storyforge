@@ -22,7 +22,7 @@ _SCENES_COLS = [
     'word_count', 'target_words',
 ]
 _INTENT_COLS = [
-    'id', 'function', 'scene_type', 'emotional_arc', 'value_at_stake',
+    'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
     'value_shift', 'turning_point', 'threads', 'characters', 'on_stage',
     'mice_threads',
 ]
@@ -398,24 +398,24 @@ def score_structure(ref_dir: str) -> list[dict]:
 _REQUIRED_BY_STATUS = {
     'spine': ['id', 'seq', 'title', 'function'],
     'architecture': ['id', 'seq', 'title', 'part', 'pov', 'function',
-                      'scene_type', 'emotional_arc', 'value_at_stake',
+                      'action_sequel', 'emotional_arc', 'value_at_stake',
                       'value_shift', 'turning_point', 'threads'],
     'mapped': ['id', 'seq', 'title', 'part', 'pov', 'location',
-               'timeline_day', 'time_of_day', 'function', 'scene_type',
+               'timeline_day', 'time_of_day', 'function', 'action_sequel',
                'emotional_arc', 'value_at_stake', 'value_shift',
                'turning_point', 'threads', 'characters', 'on_stage'],
     'briefed': ['id', 'seq', 'title', 'part', 'pov', 'location',
-                'timeline_day', 'time_of_day', 'function', 'scene_type',
+                'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'threads', 'characters', 'on_stage',
                 'goal', 'conflict', 'outcome'],
     'drafted': ['id', 'seq', 'title', 'part', 'pov', 'location',
-                'timeline_day', 'time_of_day', 'function', 'scene_type',
+                'timeline_day', 'time_of_day', 'function', 'action_sequel',
                 'emotional_arc', 'value_at_stake', 'value_shift',
                 'turning_point', 'threads', 'characters', 'on_stage',
                 'goal', 'conflict', 'outcome'],
     'polished': ['id', 'seq', 'title', 'part', 'pov', 'location',
-                 'timeline_day', 'time_of_day', 'function', 'scene_type',
+                 'timeline_day', 'time_of_day', 'function', 'action_sequel',
                  'emotional_arc', 'value_at_stake', 'value_shift',
                  'turning_point', 'threads', 'characters', 'on_stage',
                  'goal', 'conflict', 'outcome'],
@@ -595,17 +595,17 @@ def _validate_pacing(scenes_map, intent_map, checks):
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda sid: int(scenes_map[sid].get('seq', 0)))
 
-    scene_types = []
+    action_sequels = []
     value_shifts = []
     turning_points = []
 
     for sid in sorted_ids:
         intent = intent_map.get(sid, {})
-        st = intent.get('scene_type', '').strip()
+        st = intent.get('action_sequel', '').strip()
         vs = intent.get('value_shift', '').strip()
         tp = intent.get('turning_point', '').strip()
         if st:
-            scene_types.append((sid, st))
+            action_sequels.append((sid, st))
         if vs:
             value_shifts.append((sid, vs))
         if tp:
@@ -640,9 +640,9 @@ def _validate_pacing(scenes_map, intent_map, checks):
     # Scene type rhythm: no 4+ consecutive same type
     type_threshold = 4
     type_found = False
-    if len(scene_types) >= type_threshold:
-        for i in range(len(scene_types) - type_threshold + 1):
-            window = scene_types[i:i + type_threshold]
+    if len(action_sequels) >= type_threshold:
+        for i in range(len(action_sequels) - type_threshold + 1):
+            window = action_sequels[i:i + type_threshold]
             if all(t[1] == window[0][1] for t in window):
                 ids = [t[0] for t in window]
                 checks.append(_check(
@@ -756,7 +756,7 @@ _GAP_GROUPS = {
         'batch_type': 'parallel',
     },
     'intent-fields': {
-        'fields': ['scene_type', 'emotional_arc', 'value_at_stake',
+        'fields': ['action_sequel', 'emotional_arc', 'value_at_stake',
                    'value_shift', 'turning_point'],
         'file': 'scene-intent.csv',
         'batch_type': 'parallel',

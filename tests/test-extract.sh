@@ -67,7 +67,7 @@ RESULT=$(python3 -c "
 ${PY}
 from storyforge.extract import parse_intent_response
 response = '''FUNCTION: Emmett reads the staged crime scene and connects the murder to a disappearance
-SCENE_TYPE: action
+ACTION_SEQUEL: action
 EMOTIONAL_ARC: Professional detachment to resolved determination
 VALUE_AT_STAKE: truth
 VALUE_SHIFT: +/-
@@ -79,7 +79,7 @@ MICE_THREADS: +inquiry:who-killed-orcutt
 CONFIDENCE: high'''
 result = parse_intent_response(response, 'arranged-dead')
 print(result.get('function', ''))
-print(result.get('scene_type', ''))
+print(result.get('action_sequel', ''))
 print(result.get('value_shift', ''))
 print(result.get('threads', ''))
 print(result.get('_confidence', ''))

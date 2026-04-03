@@ -1294,7 +1294,7 @@ findings:
     fix_location: brief|intent|structural|craft
     # Where to fix this finding:
     #   brief — fix in scene-briefs.csv (knowledge, goal/conflict/outcome, key_actions)
-    #   intent — fix in scene-intent.csv (value_shift, threads, scene_type, emotional_arc)
+    #   intent — fix in scene-intent.csv (value_shift, threads, action_sequel, emotional_arc)
     #   structural — fix in scenes.csv (pov, timeline, part structure)
     #   craft — fix in prose only (voice, rhythm, word choice — no upstream changes needed)
 

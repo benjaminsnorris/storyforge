@@ -240,7 +240,7 @@ Central conflict: {profile.get('central_conflict', 'unknown')}"""
 Output each field on its own labeled line. Use semicolons to separate list items.
 
 FUNCTION: [one sentence: why this scene exists — what it accomplishes in the story. Must be specific and testable, not vague like "develops character"]
-SCENE_TYPE: [action or sequel — action scenes have goal/conflict/outcome; sequel scenes have reaction/dilemma/decision]
+ACTION_SEQUEL: [action or sequel — action scenes have goal/conflict/outcome; sequel scenes have reaction/dilemma/decision]
 EMOTIONAL_ARC: [starting emotion giving way to ending emotion, e.g., "controlled competence to buried unease"]
 VALUE_AT_STAKE: [the abstract value being tested: safety, love, justice, truth, freedom, honor, etc.]
 VALUE_SHIFT: [polarity change using +/- notation: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse]
@@ -257,7 +257,7 @@ def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
     result = {'id': scene_id}
     label_map = {
         'FUNCTION': 'function',
-        'SCENE_TYPE': 'scene_type',
+        'ACTION_SEQUEL': 'action_sequel',
         'EMOTIONAL_ARC': 'emotional_arc',
         'VALUE_AT_STAKE': 'value_at_stake',
         'VALUE_SHIFT': 'value_shift',
@@ -291,7 +291,7 @@ def build_brief_parallel_prompt(scene_id: str, scene_text: str,
     context = f"""Title: {skeleton.get('title', scene_id)}
 POV: {skeleton.get('pov', 'unknown')}
 Function: {intent.get('function', 'unknown')}
-Scene type: {intent.get('scene_type', 'unknown')}
+Scene type: {intent.get('action_sequel', 'unknown')}
 Value at stake: {intent.get('value_at_stake', 'unknown')}
 Value shift: {intent.get('value_shift', 'unknown')}
 Emotional arc: {intent.get('emotional_arc', 'unknown')}"""
@@ -499,7 +499,7 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
     for i, sid in enumerate(sorted_ids[:-1]):
         intent = intent_map.get(sid, {})
         next_intent = intent_map.get(sorted_ids[i + 1], {})
-        if intent.get('scene_type') == 'action' and next_intent.get('scene_type') == 'action':
+        if intent.get('action_sequel') == 'action' and next_intent.get('action_sequel') == 'action':
             opportunities.append({
                 'type': 'missing_sequel',
                 'scene_id': sid,

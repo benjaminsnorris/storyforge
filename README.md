@@ -127,7 +127,7 @@ Three pipe-delimited CSV files in `reference/`, joined by scene ID:
 | File | Purpose | Key columns |
 |------|---------|-------------|
 | `scenes.csv` | Structural identity | id, seq, title, part, pov, location, timeline, type, status, word_count |
-| `scene-intent.csv` | Narrative dynamics | function, scene_type (action/sequel), value_shift, turning_point, threads, characters, MICE threads |
+| `scene-intent.csv` | Narrative dynamics | function, action_sequel (action/sequel), value_shift, turning_point, threads, characters, MICE threads |
 | `scene-briefs.csv` | Drafting contracts | goal, conflict, outcome, crisis, decision, knowledge_in/out, key_actions, key_dialogue |
 
 Python helpers provide a unified interface:

@@ -242,7 +242,7 @@ id|seq|title|part|pov|status
 Update the intent CSV with new columns:
 
 ```intent-csv
-id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads
 (all scenes)
 ```
 
@@ -319,7 +319,7 @@ id|seq|title|part|pov|location|timeline_day|time_of_day|duration|status
 ```
 
 ```intent-csv
-id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
 (all scenes)
 ```
 
@@ -519,7 +519,7 @@ _FIELD_INSTRUCTIONS = {
     'part': (
         'Determine which act/part this scene belongs to (integer, e.g., 1, 2, 3).'
     ),
-    'scene_type': (
+    'action_sequel': (
         'Classify as action or sequel using Swain\'s scene/sequel pattern. '
         'Action: character pursues a goal and meets conflict. '
         'Sequel: character reacts, processes, and decides next move.'
