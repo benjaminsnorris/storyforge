@@ -357,3 +357,82 @@ assert_equals "1
 nonexistent-scene" "$RESULT" "scene_ids: catches nonexistent scene in deps"
 
 rm -rf "$DEPS_TMP"
+
+# ============================================================================
+# Knowledge granularity validation
+# ============================================================================
+
+echo "--- knowledge granularity: short names no warnings ---"
+
+KG_TMP="${TMPDIR}/kg-test"
+mkdir -p "${KG_TMP}/reference"
+
+echo "id|name|aliases" > "${KG_TMP}/reference/knowledge.csv"
+echo "fact-one|The map is old|old map" >> "${KG_TMP}/reference/knowledge.csv"
+echo "fact-two|A door opened|door" >> "${KG_TMP}/reference/knowledge.csv"
+
+echo "id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow" > "${KG_TMP}/reference/scene-briefs.csv"
+echo "sc-1||||||fact-one|fact-one;fact-two|||||||" >> "${KG_TMP}/reference/scene-briefs.csv"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import json
+from storyforge.schema import validate_knowledge_granularity
+r = validate_knowledge_granularity('${KG_TMP}/reference')
+long_names = [w for w in r['warnings'] if w['type'] == 'long_name']
+print(len(long_names))
+print(r['total_facts'])
+" 2>/dev/null)
+
+assert_equals "0
+2" "$RESULT" "knowledge granularity: short names produce no long_name warnings"
+
+echo "--- knowledge granularity: long name flagged ---"
+
+echo "id|name|aliases" > "${KG_TMP}/reference/knowledge.csv"
+echo "wordy-fact|This is a very long fact name that contains way too many words and should definitely be flagged by the validator as overly granular|too wordy" >> "${KG_TMP}/reference/knowledge.csv"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import json
+from storyforge.schema import validate_knowledge_granularity
+r = validate_knowledge_granularity('${KG_TMP}/reference')
+long_names = [w for w in r['warnings'] if w['type'] == 'long_name']
+print(len(long_names))
+if long_names:
+    print(long_names[0]['id'])
+    print(long_names[0]['word_count'] > 15)
+" 2>/dev/null)
+
+assert_equals "1
+wordy-fact
+True" "$RESULT" "knowledge granularity: 20-word name produces long_name warning"
+
+echo "--- knowledge granularity: too many new facts ---"
+
+echo "id|name|aliases" > "${KG_TMP}/reference/knowledge.csv"
+echo "f1|Fact one|" >> "${KG_TMP}/reference/knowledge.csv"
+echo "f2|Fact two|" >> "${KG_TMP}/reference/knowledge.csv"
+echo "f3|Fact three|" >> "${KG_TMP}/reference/knowledge.csv"
+echo "f4|Fact four|" >> "${KG_TMP}/reference/knowledge.csv"
+echo "f5|Fact five|" >> "${KG_TMP}/reference/knowledge.csv"
+echo "f6|Fact six|" >> "${KG_TMP}/reference/knowledge.csv"
+
+echo "id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow" > "${KG_TMP}/reference/scene-briefs.csv"
+echo "sc-ok||||||f1|f1;f2;f3|||||||" >> "${KG_TMP}/reference/scene-briefs.csv"
+echo "sc-bad|||||||f1;f2;f3;f4;f5;f6|||||||" >> "${KG_TMP}/reference/scene-briefs.csv"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import json
+from storyforge.schema import validate_knowledge_granularity
+r = validate_knowledge_granularity('${KG_TMP}/reference')
+too_many = [w for w in r['warnings'] if w['type'] == 'too_many_new_facts']
+print(len(too_many))
+if too_many:
+    print(too_many[0]['scene_id'])
+    print(too_many[0]['new_fact_count'])
+" 2>/dev/null)
+
+assert_equals "1
+sc-bad
+6" "$RESULT" "knowledge granularity: scene with 6 new facts flagged, scene with 2 not flagged"
+
+rm -rf "$KG_TMP"
