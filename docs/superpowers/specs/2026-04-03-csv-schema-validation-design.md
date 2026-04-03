@@ -84,13 +84,13 @@ For registry errors, the `allowed` field is replaced with `"registry": "characte
 
 ### Integration
 
-Add `--schema` flag to `storyforge-validate`:
+Schema validation runs by default alongside structural validation. Add `--no-schema` to disable it:
 
 ```
-./storyforge validate --schema          # Schema validation only
-./storyforge validate --schema --json   # JSON output
-./storyforge validate                   # Existing structural validation (unchanged)
-./storyforge validate --all             # Both structural + schema
+./storyforge validate                   # Both structural + schema (default)
+./storyforge validate --no-schema       # Structural only (skip schema checks)
+./storyforge validate --json            # Both, JSON output
+./storyforge validate --quiet           # Both, exit code only
 ```
 
 Human-readable output groups errors by file, then by constraint type:
