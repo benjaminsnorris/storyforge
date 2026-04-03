@@ -189,13 +189,16 @@ id|function
 # Stage 2: Architecture
 # ============================================================================
 
-def build_architecture_prompt(project_dir: str, plugin_dir: str) -> str:
+def build_architecture_prompt(project_dir: str, plugin_dir: str,
+                              registries_text: str = '') -> str:
     """Build the prompt for the architecture stage."""
     context = _project_context(project_dir)
     refs = _existing_refs(project_dir)
     ref_dir = os.path.join(project_dir, 'reference')
     scenes = _read_csv_contents(os.path.join(ref_dir, 'scenes.csv'))
     intent = _read_csv_contents(os.path.join(ref_dir, 'scene-intent.csv'))
+
+    registries_section = f'\n\n{registries_text}\n' if registries_text else ''
 
     return f"""You are building the architecture of a novel — expanding the spine into a full structural plan.
 
@@ -216,7 +219,7 @@ def build_architecture_prompt(project_dir: str, plugin_dir: str) -> str:
 ## Reference Materials
 
 {refs}
-
+{registries_section}
 ## Instructions
 
 Expand the spine (5-10 events) into 15-25 scenes. For each scene:
@@ -271,13 +274,16 @@ If the world needs a bible, output:
 # Stage 3: Scene Map
 # ============================================================================
 
-def build_map_prompt(project_dir: str, plugin_dir: str) -> str:
+def build_map_prompt(project_dir: str, plugin_dir: str,
+                     registries_text: str = '') -> str:
     """Build the prompt for the scene map stage."""
     context = _project_context(project_dir)
     refs = _existing_refs(project_dir)
     ref_dir = os.path.join(project_dir, 'reference')
     scenes = _read_csv_contents(os.path.join(ref_dir, 'scenes.csv'))
     intent = _read_csv_contents(os.path.join(ref_dir, 'scene-intent.csv'))
+
+    registries_section = f'\n\n{registries_text}\n' if registries_text else ''
 
     return f"""You are mapping a novel — expanding the architecture into a complete scene-by-scene plan with locations, timeline, characters, and thread tracking.
 
@@ -298,7 +304,7 @@ def build_map_prompt(project_dir: str, plugin_dir: str) -> str:
 ## Reference Materials
 
 {refs}
-
+{registries_section}
 ## Instructions
 
 Expand the architecture into the full scene count (40-60 scenes). For each scene:
@@ -338,7 +344,8 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 # ============================================================================
 
 def build_briefs_prompt(project_dir: str, plugin_dir: str,
-                        scene_ids: list[str] | None = None) -> str:
+                        scene_ids: list[str] | None = None,
+                        registries_text: str = '') -> str:
     """Build the prompt for the briefs stage.
 
     Args:
@@ -346,6 +353,7 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
         plugin_dir: Path to the Storyforge plugin root.
         scene_ids: If provided, only build briefs for these scenes.
                    If None, builds for all mapped scenes without briefs.
+        registries_text: Optional formatted registry contents for prompt injection.
     """
     context = _project_context(project_dir)
     refs = _existing_refs(project_dir)
@@ -358,6 +366,8 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
     scope_note = ""
     if scene_ids:
         scope_note = f"\n**Scope:** Only write briefs for these scenes: {', '.join(scene_ids)}\n"
+
+    registries_section = f'\n\n{registries_text}\n' if registries_text else ''
 
     return f"""You are writing the drafting contracts for a novel — the scene-level briefs that define exactly what happens in each scene, in enough detail that scenes can be drafted independently and still cohere.
 
@@ -388,7 +398,7 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
 ## Craft Principles
 
 {craft if craft else '(craft engine not available)'}
-
+{registries_section}
 ## Instructions
 
 For each scene that needs a brief, define the complete drafting contract:
@@ -563,6 +573,7 @@ def build_gap_fill_prompt(
     missing_fields: list,
     project_dir: str,
     scenes_dir: str,
+    registries_text: str = '',
 ) -> str:
     """Build a focused prompt to fill specific missing fields for one scene.
 
@@ -602,6 +613,8 @@ def build_gap_fill_prompt(
             if val and key not in ('id',) and key not in missing_fields:
                 existing_data.append(f'- {key}: {val}')
 
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
+
     return f"""You are filling missing metadata for a scene in a novel. Read the prose excerpt and existing data, then provide ONLY the missing fields.
 
 ## Scene: {scene_id}
@@ -611,7 +624,7 @@ def build_gap_fill_prompt(
 
 ### Prose Excerpt
 {prose if prose else '(no prose available)'}
-
+{registries_section}
 ## Missing Fields — Fill These
 
 {chr(10).join(field_instructions)}

@@ -265,8 +265,10 @@ if [[ -z "$PHASE" || "$PHASE" == "1" ]]; then
         PYTHONPATH="$PYTHON_LIB" python3 -c "
 import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import build_skeleton_prompt
+from storyforge.enrich import format_registries_for_prompt
 profile = json.loads('${PROFILE}')
-print(build_skeleton_prompt('${SAMPLE_ID}', '''${SAMPLE_TEXT}''', profile)[:500])
+registries = format_registries_for_prompt('${PROJECT_DIR}')
+print(build_skeleton_prompt('${SAMPLE_ID}', '''${SAMPLE_TEXT}''', profile, registries_text=registries)[:500])
 "
         echo "... (${#SORTED_SCENE_IDS[@]} scenes total)"
         echo "===== END DRY RUN ====="
@@ -283,9 +285,11 @@ print(build_skeleton_prompt('${SAMPLE_ID}', '''${SAMPLE_TEXT}''', profile)[:500]
             PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
 import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import build_skeleton_prompt
+from storyforge.enrich import format_registries_for_prompt
 profile = json.loads(open('${PROFILE_FILE}').read()) if __import__('os').path.isfile('${PROFILE_FILE}') else {}
 scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
-print(build_skeleton_prompt('${SCENE_ID}', scene_text, profile))
+registries = format_registries_for_prompt('${PROJECT_DIR}')
+print(build_skeleton_prompt('${SCENE_ID}', scene_text, profile, registries_text=registries))
 ")
             json_prompt=$(jq -Rs '.' <<< "$PROMPT")
             printf '{"custom_id":"%s","params":{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":%s}]}}\n' \
@@ -384,11 +388,13 @@ if [[ -z "$PHASE" || "$PHASE" == "2" ]]; then
 import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import build_intent_prompt
 from storyforge.elaborate import get_scene
+from storyforge.enrich import format_registries_for_prompt
 
 profile = json.loads(open('${PROFILE_FILE}').read()) if os.path.isfile('${PROFILE_FILE}') else {}
 skeleton = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
 scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
-print(build_intent_prompt('${SCENE_ID}', scene_text, profile, skeleton))
+registries = format_registries_for_prompt('${PROJECT_DIR}')
+print(build_intent_prompt('${SCENE_ID}', scene_text, profile, skeleton, registries_text=registries))
 ")
             json_prompt=$(jq -Rs '.' <<< "$PROMPT")
             printf '{"custom_id":"%s","params":{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":%s}]}}\n' \
@@ -477,13 +483,15 @@ if [[ -z "$PHASE" || "$PHASE" == "3" ]]; then
 import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import build_brief_parallel_prompt
 from storyforge.elaborate import get_scene
+from storyforge.enrich import format_registries_for_prompt
 
 profile = json.loads(open('${PROFILE_FILE}').read()) if os.path.isfile('${PROFILE_FILE}') else {}
 scene_data = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
 skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
 intent = {k: scene_data.get(k, '') for k in ['function', 'action_sequel', 'value_at_stake', 'value_shift', 'emotional_arc']}
 scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
-print(build_brief_parallel_prompt('${SCENE_ID}', scene_text, profile, skeleton, intent))
+registries = format_registries_for_prompt('${PROJECT_DIR}')
+print(build_brief_parallel_prompt('${SCENE_ID}', scene_text, profile, skeleton, intent, registries_text=registries))
 ")
             json_prompt=$(jq -Rs '.' <<< "$PROMPT")
             printf '{"custom_id":"%s","params":{"model":"%s","max_tokens":1024,"messages":[{"role":"user","content":%s}]}}\n' \
@@ -567,6 +575,7 @@ print(f'Updated scene-briefs.csv: {count} scenes (knowledge fields pending)')
 import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import build_knowledge_prompt
 from storyforge.elaborate import get_scene
+from storyforge.enrich import format_registries_for_prompt
 
 scene_data = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
 skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part']}
@@ -578,7 +587,8 @@ with open('${SUMMARIES_FILE}') as f:
     prior_summaries = [s.strip() for s in f.readlines() if s.strip()]
 
 scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
-print(build_knowledge_prompt('${SCENE_ID}', scene_text, skeleton, intent, prior_knowledge, prior_summaries))
+registries = format_registries_for_prompt('${PROJECT_DIR}')
+print(build_knowledge_prompt('${SCENE_ID}', scene_text, skeleton, intent, prior_knowledge, prior_summaries, registries_text=registries))
 ")
 
             _SF_INVOCATION_START=$(date +%s); export _SF_INVOCATION_START

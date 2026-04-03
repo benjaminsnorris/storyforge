@@ -362,6 +362,92 @@ _VALUE_FIELDS = ('value_at_stake',)
 _KNOWLEDGE_FIELDS = ('knowledge_in', 'knowledge_out')
 
 
+def format_registries_for_prompt(project_dir: str) -> str:
+    """Format registry CSV contents as a prompt section.
+
+    Reads all registry files and returns a formatted string showing
+    canonical IDs that Claude should use in its output.  Registries
+    whose files don't exist or contain only a header row are skipped.
+
+    Args:
+        project_dir: Root directory of the novel project.
+
+    Returns:
+        Formatted markdown string, or empty string if no registries exist.
+    """
+    ref_dir = os.path.join(project_dir, 'reference')
+
+    # Registry definitions: (filename, section_title, extra_columns)
+    # extra_columns are additional columns to show alongside id and name
+    registries = [
+        ('characters.csv', 'Characters', []),
+        ('locations.csv', 'Locations', []),
+        ('values.csv', 'Values', []),
+        ('mice-threads.csv', 'MICE Threads', ['type']),
+        ('motif-taxonomy.csv', 'Motifs', []),
+        ('knowledge.csv', 'Knowledge Facts', []),
+    ]
+
+    sections: list[str] = []
+
+    for filename, title, extra_cols in registries:
+        csv_path = os.path.join(ref_dir, filename)
+        if not os.path.isfile(csv_path):
+            continue
+
+        header, rows = _read_csv_header_and_rows(csv_path)
+        if not header or not rows:
+            continue
+
+        try:
+            id_idx = header.index('id')
+        except ValueError:
+            continue
+        try:
+            name_idx = header.index('name')
+        except ValueError:
+            continue
+
+        # Resolve extra column indices
+        extra_idxs: list[tuple[str, int]] = []
+        for col in extra_cols:
+            try:
+                extra_idxs.append((col, header.index(col)))
+            except ValueError:
+                pass
+
+        entries: list[str] = []
+        for row in rows:
+            if len(row) <= max(id_idx, name_idx):
+                continue
+            rid = row[id_idx].strip()
+            rname = row[name_idx].strip()
+            if not rid:
+                continue
+
+            # Build the display line
+            extra_parts = []
+            for col_name, col_idx in extra_idxs:
+                if len(row) > col_idx and row[col_idx].strip():
+                    extra_parts.append(f'[{row[col_idx].strip()}]')
+
+            extra_str = ' '.join(extra_parts)
+            if extra_str:
+                entries.append(f'- {rid} {extra_str} ({rname})')
+            else:
+                entries.append(f'- {rid} ({rname})')
+
+        if entries:
+            sections.append(f'### {title} (reference/{filename})\n' +
+                            '\n'.join(entries))
+
+    if not sections:
+        return ''
+
+    return ('## Canonical Registries — use these IDs in your output\n\n' +
+            '\n\n'.join(sections))
+
+
 def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
     """Load alias maps from all registry CSVs in a project.
 

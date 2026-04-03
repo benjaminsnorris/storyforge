@@ -148,7 +148,8 @@ def parse_characterize_response(response: str) -> dict[str, str]:
 
 def build_skeleton_prompt(scene_id: str, scene_text: str,
                           profile: dict[str, str],
-                          existing_metadata: dict[str, str] | None = None) -> str:
+                          existing_metadata: dict[str, str] | None = None,
+                          registries_text: str = '') -> str:
     """Build prompt for Phase 1: extract scenes.csv fields from a single scene."""
     context = f"""POV characters in this manuscript: {profile.get('pov_characters', 'unknown')}
 Timeline: {profile.get('timeline', 'unknown')}
@@ -161,6 +162,8 @@ Key locations: {profile.get('key_locations', 'unknown')}"""
             existing = "Already known about this scene:\n" + '\n'.join(
                 f"  {k}: {v}" for k, v in known.items())
 
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
+
     return f"""Extract structural metadata from this scene.
 
 ## Manuscript Context
@@ -171,7 +174,7 @@ Key locations: {profile.get('key_locations', 'unknown')}"""
 {scene_text}
 
 {existing}
-
+{registries_section}
 ## Instructions
 
 Output each field on its own labeled line. If a value cannot be determined, output UNKNOWN.
@@ -217,7 +220,8 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
 
 def build_intent_prompt(scene_id: str, scene_text: str,
                         profile: dict[str, str],
-                        skeleton: dict[str, str]) -> str:
+                        skeleton: dict[str, str],
+                        registries_text: str = '') -> str:
     """Build prompt for Phase 2: extract scene-intent.csv fields."""
     context = f"""Title: {skeleton.get('title', scene_id)}
 POV: {skeleton.get('pov', 'unknown')}
@@ -225,6 +229,8 @@ Location: {skeleton.get('location', 'unknown')}
 Part: {skeleton.get('part', 'unknown')}
 Major threads in this manuscript: {profile.get('major_threads', 'unknown')}
 Central conflict: {profile.get('central_conflict', 'unknown')}"""
+
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
 
     return f"""Extract the narrative intent and dynamics from this scene.
 
@@ -234,7 +240,7 @@ Central conflict: {profile.get('central_conflict', 'unknown')}"""
 ## Scene: {scene_id}
 
 {scene_text}
-
+{registries_section}
 ## Instructions
 
 Output each field on its own labeled line. Use semicolons to separate list items.
@@ -283,7 +289,8 @@ def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
 def build_brief_parallel_prompt(scene_id: str, scene_text: str,
                                  profile: dict[str, str],
                                  skeleton: dict[str, str],
-                                 intent: dict[str, str]) -> str:
+                                 intent: dict[str, str],
+                                 registries_text: str = '') -> str:
     """Build prompt for Phase 3a: extract brief fields that don't require
     sequential knowledge tracking."""
     context = f"""Title: {skeleton.get('title', scene_id)}
@@ -294,6 +301,8 @@ Value at stake: {intent.get('value_at_stake', 'unknown')}
 Value shift: {intent.get('value_shift', 'unknown')}
 Emotional arc: {intent.get('emotional_arc', 'unknown')}"""
 
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
+
     return f"""Extract the drafting contract details from this scene — the specific actions, choices, and dialogue that make it work.
 
 ## Context
@@ -302,7 +311,7 @@ Emotional arc: {intent.get('emotional_arc', 'unknown')}"""
 ## Scene: {scene_id}
 
 {scene_text}
-
+{registries_section}
 ## Instructions
 
 Output each field on its own labeled line. Use semicolons to separate list items.
@@ -350,12 +359,15 @@ def build_knowledge_prompt(scene_id: str, scene_text: str,
                            skeleton: dict[str, str],
                            intent: dict[str, str],
                            prior_knowledge: dict[str, str],
-                           prior_scene_summaries: list[str]) -> str:
+                           prior_scene_summaries: list[str],
+                           registries_text: str = '') -> str:
     """Build prompt for Phase 3b: extract knowledge_in, knowledge_out, and
     continuity_deps. Must be called sequentially."""
     pov = skeleton.get('pov', 'unknown')
     prior_context = '\n'.join(prior_scene_summaries[-10:]) if prior_scene_summaries else '(first scene)'
     pov_knowledge = prior_knowledge.get(pov, 'No prior knowledge established')
+
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
 
     return f"""Track the knowledge state of the POV character through this scene.
 
@@ -369,7 +381,7 @@ def build_knowledge_prompt(scene_id: str, scene_text: str,
 
 ## Scene: {scene_id}
 {scene_text}
-
+{registries_section}
 ## Instructions
 
 Output each field on its own labeled line.
