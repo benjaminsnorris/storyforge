@@ -880,6 +880,9 @@ const INTENTS = _DATA.intents;
 const CHARACTERS = _DATA.characters;
 const MOTIF_TAXONOMY = _DATA.motif_taxonomy;
 const LOCATIONS = _DATA.locations;
+const VALUES = _DATA.values || [];
+const MICE_THREADS = _DATA.mice_threads || [];
+const KNOWLEDGE = _DATA.knowledge || [];
 const SCORES = _DATA.scores;
 const WEIGHTS = _DATA.weights;
 const NARRATIVE_SCORES = _DATA.narrative_scores;
@@ -1161,6 +1164,7 @@ function buildAliasMap(entries) {
     const map = {};
     entries.forEach(e => {
         if (!e.name) return;
+        if (e.id) map[e.id.toLowerCase()] = e.name;
         map[e.name.toLowerCase()] = e.name;
         if (e.aliases) {
             e.aliases.split(';').forEach(a => {
@@ -1175,6 +1179,20 @@ function buildAliasMap(entries) {
 const charAliasMap = buildAliasMap(CHARACTERS);
 const motifAliasMap = buildAliasMap(MOTIF_TAXONOMY);
 const locationAliasMap = buildAliasMap(LOCATIONS);
+const valueAliasMap = buildAliasMap(VALUES);
+const miceThreadAliasMap = buildAliasMap(MICE_THREADS);
+const knowledgeAliasMap = buildAliasMap(KNOWLEDGE);
+
+// Combined registry map for general-purpose display name resolution
+const _allRegistryMaps = [charAliasMap, locationAliasMap, motifAliasMap, valueAliasMap, miceThreadAliasMap, knowledgeAliasMap];
+function displayName(id) {
+    if (!id) return id;
+    var key = id.toLowerCase().trim();
+    for (var i = 0; i < _allRegistryMaps.length; i++) {
+        if (_allRegistryMaps[i][key]) return _allRegistryMaps[i][key];
+    }
+    return id;
+}
 
 // Motif tier lookup: {canonical_name: tier}
 const motifTierMap = {};
@@ -1310,13 +1328,13 @@ function attachSceneHandlers(el, sceneId) {
         const s = sceneById[sceneId];
         if (!s) return;
         const wc = getWordCount(s);
-        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${(s.location || '').substring(0, 60)}</div>`);
+        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${displayName(s.pov)} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${displayName(s.location || '').substring(0, 60)}</div>`);
     });
     el.addEventListener('mousemove', (e) => {
         const s = sceneById[sceneId];
         if (!s) return;
         const wc = getWordCount(s);
-        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${(s.location || '').substring(0, 60)}</div>`);
+        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${displayName(s.pov)} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${displayName(s.location || '').substring(0, 60)}</div>`);
     });
     el.addEventListener('mouseleave', hideTooltip);
 }
@@ -1363,8 +1381,8 @@ function updateDetailPanel(sceneId) {
     html += '<button class="minimize-btn" onclick="event.stopPropagation();toggleMinimizePanel()" title="Minimize">&#8595;</button>';
     html += '<button class="close-btn" onclick="event.stopPropagation();selectScene(null)" title="Close">&times;</button>';
     html += '</span></h3>';
-    html += detailRow('POV', s.pov);
-    html += detailRow('Location', s.location);
+    html += detailRow('POV', displayName(s.pov));
+    html += detailRow('Location', displayName(s.location));
     html += detailRow('Part', s.part);
     html += detailRow('Type', s.type);
     html += detailRow('Words', (+getWordCount(s)).toLocaleString());
@@ -1377,7 +1395,7 @@ function updateDetailPanel(sceneId) {
             const stFirst = intent.action_sequel.split(/[\s—–]/)[0].trim();
             intentHtml += detailRow('Scene Type', stFirst.charAt(0).toUpperCase() + stFirst.slice(1));
         }
-        if (intent.value_at_stake) intentHtml += detailRow('Value at Stake', intent.value_at_stake.split(/[\s—–]/)[0].trim());
+        if (intent.value_at_stake) intentHtml += detailRow('Value at Stake', displayName(intent.value_at_stake.split(/[\s—–]/)[0].trim()));
         if (intent.value_shift) {
             const vsMatch = intent.value_shift.match(/^([+\-]+)\s*\/\s*([+\-]+)/);
             if (vsMatch) intentHtml += detailRow('Value Shift', vsMatch[1] + ' → ' + vsMatch[2]);
@@ -1387,9 +1405,14 @@ function updateDetailPanel(sceneId) {
             intentHtml += detailRow('Turning Point', tpFirst.charAt(0).toUpperCase() + tpFirst.slice(1));
         }
         if (intent.emotional_arc) intentHtml += detailRow('Emotion', intent.emotional_arc.substring(0, 80));
-        if (intent.characters) intentHtml += detailRow('Characters', intent.characters.replace(/;/g, ', '));
-        if (intent.mice_threads) intentHtml += detailRow('MICE Threads', intent.mice_threads.replace(/;/g, ', '));
-        if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.replace(/;/g, ', ').substring(0, 100));
+        if (intent.characters) intentHtml += detailRow('Characters', intent.characters.split(';').map(c => displayName(c.trim())).join(', '));
+        if (intent.mice_threads) intentHtml += detailRow('MICE Threads', intent.mice_threads.split(';').map(function(t) {
+            t = t.trim(); var stripped = t.replace(/^[+-]/, ''); var prefix = t.startsWith('+') ? '+' : t.startsWith('-') ? '-' : '';
+            var colonIdx = stripped.indexOf(':'); var threadId = colonIdx >= 0 ? stripped.substring(colonIdx + 1) : stripped;
+            var typePart = colonIdx >= 0 ? stripped.substring(0, colonIdx + 1) : '';
+            return prefix + typePart + displayName(threadId);
+        }).join(', '));
+        if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.split(';').map(m => displayName(m.trim())).join(', ').substring(0, 100));
         if (intentHtml) html += '<div class="detail-section-end">' + intentHtml + '</div>';
     }
 
@@ -1571,7 +1594,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             'font-family': 'var(--font-mono)',
             'font-size': 11, fill: 'var(--text-secondary)'
         });
-        label.textContent = pov;
+        label.textContent = displayName(pov);
         svg.appendChild(label);
 
         // Stats on the right above the bar
@@ -1716,8 +1739,9 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: 'var(--text-dim)'
         });
-        label.textContent = thread.length > GRID_LABEL_TRUNC ? thread.substring(0, GRID_LABEL_TRUNC - 2) + '..' : thread;
-        if (thread.length > GRID_LABEL_TRUNC) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = thread; label.appendChild(t); }
+        var threadName = displayName(thread);
+        label.textContent = threadName.length > GRID_LABEL_TRUNC ? threadName.substring(0, GRID_LABEL_TRUNC - 2) + '..' : threadName;
+        if (threadName.length > GRID_LABEL_TRUNC) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = threadName; label.appendChild(t); }
         svg.appendChild(label);
 
         // Sort scenes for this thread
