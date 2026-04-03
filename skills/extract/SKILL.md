@@ -23,6 +23,19 @@ Store this resolved plugin path for use throughout the session.
 4. `reference/scene-intent.csv` — does intent data exist?
 5. `reference/scene-briefs.csv` — does brief data exist?
 
+## Registry Awareness
+
+Read all registry files in `reference/` to know canonical IDs for normalized fields:
+
+- `reference/characters.csv` — canonical character IDs
+- `reference/locations.csv` — canonical location IDs
+- `reference/values.csv` — canonical value IDs
+- `reference/knowledge.csv` — canonical knowledge fact IDs
+- `reference/motif-taxonomy.csv` — canonical motif IDs
+- `reference/mice-threads.csv` — canonical MICE thread IDs
+
+When extracting data interactively, use canonical IDs from these registries for all registry-backed fields (pov, characters, on_stage, location, value_at_stake, knowledge_in, knowledge_out, motifs, mice_threads). When extraction discovers a new character, location, value, knowledge fact, motif, or MICE thread not already in a registry, add it to the appropriate registry CSV first, then use the new ID.
+
 ## Step 2: Determine What Needs Extraction
 
 Based on project state:

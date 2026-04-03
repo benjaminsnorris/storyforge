@@ -55,6 +55,10 @@ Read evaluation findings and scoring data. Categorize each finding by where the 
 | `brief` | scene-briefs.csv | Knowledge chain, goal/conflict/outcome, key actions |
 | `craft` | Prose directly | Voice, rhythm, dialogue, naturalness |
 
+### Registry-Backed Fields
+
+When fixing CSV fields interactively (upstream passes), all registry-backed fields must use canonical IDs from `reference/` registries (characters.csv, locations.csv, values.csv, knowledge.csv, motif-taxonomy.csv, mice-threads.csv). Read the registries before making CSV edits. If a fix introduces a new entity, add it to the appropriate registry first.
+
 ### Ordering Principles (upstream first)
 
 1. **Structural passes first** — scene additions, removals, reordering
