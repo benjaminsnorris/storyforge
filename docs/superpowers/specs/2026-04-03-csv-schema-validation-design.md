@@ -46,7 +46,6 @@ Every column gets a constraint type:
 | `location` | locations.csv | no (single value) |
 | `characters` | characters.csv | yes (semicolon-separated) |
 | `on_stage` | characters.csv | yes |
-| `threads` | threads.csv | yes |
 | `motifs` | motif-taxonomy.csv | yes |
 
 Registry validation uses `load_alias_map()` — accepts ids, names, or aliases. Skipped gracefully when registry files don't exist (new projects).
