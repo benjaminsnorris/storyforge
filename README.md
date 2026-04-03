@@ -127,7 +127,7 @@ Three pipe-delimited CSV files in `reference/`, joined by scene ID:
 | File | Purpose | Key columns |
 |------|---------|-------------|
 | `scenes.csv` | Structural identity | id, seq, title, part, pov, location, timeline, type, status, word_count |
-| `scene-intent.csv` | Narrative dynamics | function, scene_type (action/sequel), value_shift, turning_point, threads, characters, MICE threads |
+| `scene-intent.csv` | Narrative dynamics | function, action_sequel (action/sequel), value_shift, turning_point, characters, MICE threads |
 | `scene-briefs.csv` | Drafting contracts | goal, conflict, outcome, crisis, decision, knowledge_in/out, key_actions, key_dialogue |
 
 Python helpers provide a unified interface:
@@ -145,7 +145,7 @@ See `references/scene-schema.md` for the full column reference and `references/s
 Multi-page manuscript visualization with three views:
 
 - **Overview** — spine, POV distribution, value shift arc, scene rhythm
-- **Structure** — character presence, thread weave, emotional terrain, location map, motifs, timeline
+- **Structure** — character presence, thread weave, emotional terrain, location map, motifs, timeline, knowledge flow
 - **Scores** — craft heatmap, genre/character/act scores, narrative radar, brief fidelity
 
 Generate with `./storyforge visualize` or `/storyforge:visualize`.
@@ -185,7 +185,7 @@ my-novel/
 │   ├── world-bible.md
 │   ├── story-architecture.md
 │   ├── voice-guide.md
-│   └── characters.csv, locations.csv, threads.csv, motif-taxonomy.csv
+│   └── characters.csv, locations.csv, motif-taxonomy.csv, values.csv, knowledge.csv, mice-threads.csv
 ├── scenes/                  # Scene prose (pure markdown, no frontmatter)
 ├── briefs/                  # Extended briefs for complex scenes (optional)
 ├── manuscript/

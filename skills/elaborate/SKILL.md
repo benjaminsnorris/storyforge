@@ -26,6 +26,30 @@ Read the following files to understand where the project stands:
 5. `reference/story-architecture.md` — does it exist?
 6. `reference/character-bible.md` — does it exist?
 
+## Registry Awareness
+
+Read all registry files in `reference/` to know the canonical IDs for normalized fields:
+
+- `reference/characters.csv` — canonical character IDs
+- `reference/locations.csv` — canonical location IDs
+- `reference/values.csv` — canonical value IDs
+- `reference/knowledge.csv` — canonical knowledge fact IDs
+- `reference/motif-taxonomy.csv` — canonical motif IDs
+- `reference/mice-threads.csv` — canonical MICE thread IDs
+
+**When writing any CSV field value, use canonical IDs from these registries:**
+
+| CSV field(s) | Registry |
+|---|---|
+| `pov`, `characters`, `on_stage` | characters.csv |
+| `location` | locations.csv |
+| `value_at_stake` | values.csv |
+| `knowledge_in`, `knowledge_out` | knowledge.csv |
+| `motifs` | motif-taxonomy.csv |
+| `mice_threads` | mice-threads.csv (format: `+type:id` or `-type:id`) |
+
+**When the author introduces a new character, location, value, knowledge fact, motif, or MICE thread that does not exist in a registry:** add it to the appropriate registry CSV first, then use the new ID in scene data.
+
 ## Step 2: Determine Current Stage
 
 Based on the project state, identify where the author is:
@@ -34,7 +58,7 @@ Based on the project state, identify where the author is:
 |---------------|----------------|--------------|--------|------------|---------------|
 | spine | 0 | — | — | — | Needs spine |
 | spine | 5-10 | function only | — | — | Spine done, ready for architecture |
-| architecture | 15-25 | has value_shift, threads | — | — | Architecture done, ready for map |
+| architecture | 15-25 | has value_shift | — | — | Architecture done, ready for map |
 | scene-map | 40-60 | has characters, on_stage | — | — | Map done, ready for briefs |
 | briefs | 40-60 | full | has goal/conflict/outcome | — | Briefs done, ready for drafting |
 | drafting+ | status=drafted | populated but gaps | populated | failures > 0 | **Gap-fill mode** |
@@ -63,7 +87,7 @@ When the author doesn't specify a mode, detect the current stage from Step 2 and
 |---|---|
 | No scenes.csv (or 0 rows) | Start spine |
 | Spine done (5-10 rows, function only) | Run architecture |
-| Architecture done (has value_shift, threads) | Run scene map |
+| Architecture done (has value_shift) | Run scene map |
 | Map done (has characters, on_stage) | Run briefs |
 | Briefs done, validation passes | Announce ready for drafting, redirect to forge |
 | Drafted with validation failures > 0 | Run gap-fill |
@@ -152,7 +176,8 @@ If they choose Option B, provide the full command and end.
 
 1. Read the spine scenes and story architecture
 2. Expand to 15-25 scenes: add supporting scenes, transitions, subplot introductions
-3. Assign parts, POV, scene types (action/sequel), value shifts, turning points, threads
+3. Assign parts, POV, scene types (action/sequel), value shifts, turning points
+   - **Use canonical IDs from registries** for pov, characters, locations, value_at_stake. Add new registry entries for any new characters/locations/values introduced at this stage.
 4. Deepen character bible with supporting characters
 5. Create world bible if needed
 6. Write updates to all CSV files and reference docs
@@ -163,7 +188,7 @@ If they choose Option B, provide the full command and end.
 
 1. Read architecture scenes and reference materials
 2. Expand to 40-60 scenes: fill gaps, add transitions
-3. Assign locations, timeline, characters, MICE threads
+3. Assign locations, timeline, characters, MICE threads — **all registry-backed fields must use canonical IDs** (characters, locations, values, mice_threads). Add new registry entries for anything introduced at this stage.
 4. Initialize continuity tracker
 5. Write updates
 6. Run validation — MICE nesting, timeline, character references
@@ -173,7 +198,8 @@ If they choose Option B, provide the full command and end.
 
 1. Read full scene map and all reference materials
 2. For each scene, define: goal, conflict, outcome, crisis, decision, knowledge_in, knowledge_out, key_actions, key_dialogue, emotions, motifs, continuity_deps
-3. **Knowledge wording must be exact** — knowledge_out from scene N becomes knowledge_in for later scenes, matched literally
+   - **Use canonical IDs from registries** for knowledge_in, knowledge_out (knowledge.csv), motifs (motif-taxonomy.csv). Add new registry entries for any new knowledge facts or motifs introduced at this stage.
+3. **Knowledge wording must be exact** — knowledge_out from scene N becomes knowledge_in for later scenes, matched literally. Use registry IDs rather than free-text to ensure exact matching.
 4. Maximize scenes with no continuity_deps (these can be drafted in parallel)
 5. Write updates
 6. Run validation — knowledge flow, completeness, DAG check

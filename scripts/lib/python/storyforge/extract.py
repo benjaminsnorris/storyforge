@@ -12,6 +12,7 @@ import os
 import re
 from typing import Any
 
+from .enrich import load_registry_alias_maps, normalize_fields  # noqa: F401
 from .prompts import read_yaml_field
 
 
@@ -147,7 +148,8 @@ def parse_characterize_response(response: str) -> dict[str, str]:
 
 def build_skeleton_prompt(scene_id: str, scene_text: str,
                           profile: dict[str, str],
-                          existing_metadata: dict[str, str] | None = None) -> str:
+                          existing_metadata: dict[str, str] | None = None,
+                          registries_text: str = '') -> str:
     """Build prompt for Phase 1: extract scenes.csv fields from a single scene."""
     context = f"""POV characters in this manuscript: {profile.get('pov_characters', 'unknown')}
 Timeline: {profile.get('timeline', 'unknown')}
@@ -160,6 +162,8 @@ Key locations: {profile.get('key_locations', 'unknown')}"""
             existing = "Already known about this scene:\n" + '\n'.join(
                 f"  {k}: {v}" for k, v in known.items())
 
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
+
     return f"""Extract structural metadata from this scene.
 
 ## Manuscript Context
@@ -170,7 +174,7 @@ Key locations: {profile.get('key_locations', 'unknown')}"""
 {scene_text}
 
 {existing}
-
+{registries_section}
 ## Instructions
 
 Output each field on its own labeled line. If a value cannot be determined, output UNKNOWN.
@@ -216,7 +220,8 @@ def parse_skeleton_response(response: str, scene_id: str) -> dict[str, str]:
 
 def build_intent_prompt(scene_id: str, scene_text: str,
                         profile: dict[str, str],
-                        skeleton: dict[str, str]) -> str:
+                        skeleton: dict[str, str],
+                        registries_text: str = '') -> str:
     """Build prompt for Phase 2: extract scene-intent.csv fields."""
     context = f"""Title: {skeleton.get('title', scene_id)}
 POV: {skeleton.get('pov', 'unknown')}
@@ -224,6 +229,8 @@ Location: {skeleton.get('location', 'unknown')}
 Part: {skeleton.get('part', 'unknown')}
 Major threads in this manuscript: {profile.get('major_threads', 'unknown')}
 Central conflict: {profile.get('central_conflict', 'unknown')}"""
+
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
 
     return f"""Extract the narrative intent and dynamics from this scene.
 
@@ -233,18 +240,17 @@ Central conflict: {profile.get('central_conflict', 'unknown')}"""
 ## Scene: {scene_id}
 
 {scene_text}
-
+{registries_section}
 ## Instructions
 
 Output each field on its own labeled line. Use semicolons to separate list items.
 
 FUNCTION: [one sentence: why this scene exists — what it accomplishes in the story. Must be specific and testable, not vague like "develops character"]
-SCENE_TYPE: [action or sequel — action scenes have goal/conflict/outcome; sequel scenes have reaction/dilemma/decision]
+ACTION_SEQUEL: [action or sequel — action scenes have goal/conflict/outcome; sequel scenes have reaction/dilemma/decision]
 EMOTIONAL_ARC: [starting emotion giving way to ending emotion, e.g., "controlled competence to buried unease"]
 VALUE_AT_STAKE: [the abstract value being tested: safety, love, justice, truth, freedom, honor, etc.]
 VALUE_SHIFT: [polarity change using +/- notation: +/- means positive to negative, -/+ means negative to positive, +/++ means good to better, -/-- means bad to worse]
 TURNING_POINT: [action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation]
-THREADS: [semicolon-separated story threads this scene advances]
 CHARACTERS: [semicolon-separated list of ALL characters present or referenced by name]
 ON_STAGE: [semicolon-separated list of characters physically present in the scene — subset of CHARACTERS]
 MICE_THREADS: [semicolon-separated MICE thread operations — +milieu:location-name to open, -inquiry:question to close, etc. Use + for opening, - for closing. Types: milieu, inquiry, character, event]
@@ -256,12 +262,11 @@ def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
     result = {'id': scene_id}
     label_map = {
         'FUNCTION': 'function',
-        'SCENE_TYPE': 'scene_type',
+        'ACTION_SEQUEL': 'action_sequel',
         'EMOTIONAL_ARC': 'emotional_arc',
         'VALUE_AT_STAKE': 'value_at_stake',
         'VALUE_SHIFT': 'value_shift',
         'TURNING_POINT': 'turning_point',
-        'THREADS': 'threads',
         'CHARACTERS': 'characters',
         'ON_STAGE': 'on_stage',
         'MICE_THREADS': 'mice_threads',
@@ -284,16 +289,19 @@ def parse_intent_response(response: str, scene_id: str) -> dict[str, str]:
 def build_brief_parallel_prompt(scene_id: str, scene_text: str,
                                  profile: dict[str, str],
                                  skeleton: dict[str, str],
-                                 intent: dict[str, str]) -> str:
+                                 intent: dict[str, str],
+                                 registries_text: str = '') -> str:
     """Build prompt for Phase 3a: extract brief fields that don't require
     sequential knowledge tracking."""
     context = f"""Title: {skeleton.get('title', scene_id)}
 POV: {skeleton.get('pov', 'unknown')}
 Function: {intent.get('function', 'unknown')}
-Scene type: {intent.get('scene_type', 'unknown')}
+Scene type: {intent.get('action_sequel', 'unknown')}
 Value at stake: {intent.get('value_at_stake', 'unknown')}
 Value shift: {intent.get('value_shift', 'unknown')}
 Emotional arc: {intent.get('emotional_arc', 'unknown')}"""
+
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
 
     return f"""Extract the drafting contract details from this scene — the specific actions, choices, and dialogue that make it work.
 
@@ -303,7 +311,7 @@ Emotional arc: {intent.get('emotional_arc', 'unknown')}"""
 ## Scene: {scene_id}
 
 {scene_text}
-
+{registries_section}
 ## Instructions
 
 Output each field on its own labeled line. Use semicolons to separate list items.
@@ -351,12 +359,15 @@ def build_knowledge_prompt(scene_id: str, scene_text: str,
                            skeleton: dict[str, str],
                            intent: dict[str, str],
                            prior_knowledge: dict[str, str],
-                           prior_scene_summaries: list[str]) -> str:
+                           prior_scene_summaries: list[str],
+                           registries_text: str = '') -> str:
     """Build prompt for Phase 3b: extract knowledge_in, knowledge_out, and
     continuity_deps. Must be called sequentially."""
     pov = skeleton.get('pov', 'unknown')
     prior_context = '\n'.join(prior_scene_summaries[-10:]) if prior_scene_summaries else '(first scene)'
     pov_knowledge = prior_knowledge.get(pov, 'No prior knowledge established')
+
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
 
     return f"""Track the knowledge state of the POV character through this scene.
 
@@ -370,7 +381,7 @@ def build_knowledge_prompt(scene_id: str, scene_text: str,
 
 ## Scene: {scene_id}
 {scene_text}
-
+{registries_section}
 ## Instructions
 
 Output each field on its own labeled line.
@@ -475,30 +486,11 @@ def analyze_expansion_opportunities(ref_dir: str) -> list[dict]:
         prev_day = day
         prev_id = sid
 
-    # Thin threads: appear in only 1-2 scenes
-    thread_counts: dict[str, list[str]] = {}
-    for sid in sorted_ids:
-        intent = intent_map.get(sid, {})
-        threads = intent.get('threads', '').strip()
-        if threads:
-            for t in threads.split(';'):
-                t = t.strip()
-                if t:
-                    thread_counts.setdefault(t, []).append(sid)
-    for thread, sids in thread_counts.items():
-        if len(sids) <= 2:
-            opportunities.append({
-                'type': 'thin_thread',
-                'scene_id': ';'.join(sids),
-                'description': f"Thread '{thread}' appears in only {len(sids)} scene(s)",
-                'priority': 'medium',
-            })
-
     # Missing sequels: consecutive action scenes
     for i, sid in enumerate(sorted_ids[:-1]):
         intent = intent_map.get(sid, {})
         next_intent = intent_map.get(sorted_ids[i + 1], {})
-        if intent.get('scene_type') == 'action' and next_intent.get('scene_type') == 'action':
+        if intent.get('action_sequel') == 'action' and next_intent.get('action_sequel') == 'action':
             opportunities.append({
                 'type': 'missing_sequel',
                 'scene_id': sid,

@@ -676,7 +676,7 @@ def _build_coach_steps(scene_id: str, scene_title: str,
     lines.append('- Voice considerations: which voice rules apply, '
                  'POV-specific patterns to deploy, emotional register')
     lines.append('- Continuity constraints: locked details that must be '
-                 'honored, character states entering the scene, active threads')
+                 'honored, character states entering the scene, MICE threads')
     lines.append('- Emotional arc targets: where the scene starts emotionally, '
                  'where it must arrive, the turn')
     lines.append('- Craft guidance: pacing recommendations, dialogue density, '
@@ -796,7 +796,7 @@ def _build_full_steps(scene_id: str, scene_title: str,
                      'tracker (provided in reference materials above)')
         lines.append('- Respect all current character states (physical, '
                      'emotional, relational)')
-        lines.append('- Advance active threads as appropriate per the scene '
+        lines.append('- Advance MICE threads as appropriate per the scene '
                      'outline')
         lines.append("- Maintain consistency with the previous scene's ending")
         lines.append('')
@@ -852,7 +852,7 @@ def _build_full_steps(scene_id: str, scene_title: str,
                      'tracker')
         lines.append('- Respect all current character states (physical, '
                      'emotional, relational)')
-        lines.append('- Advance active threads as appropriate per the scene '
+        lines.append('- Advance MICE threads as appropriate per the scene '
                      'outline')
         lines.append("- Maintain consistency with the previous scene's ending")
         lines.append('')
@@ -871,7 +871,7 @@ def _build_full_steps(scene_id: str, scene_title: str,
                      'reference/scenes.csv')
         lines.append('4. Check for:')
         lines.append('   - Contradictions with locked details')
-        lines.append('   - Active threads that should advance but don\'t '
+        lines.append('   - MICE threads that should advance but don\'t '
                      '(or advance incorrectly)')
         lines.append('   - POV voice consistency')
         lines.append('   - Word count vs. target')
@@ -893,7 +893,7 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('- Add a summary for this scene (2-3 sentences)')
         lines.append("- Update character states to reflect this scene's events")
         lines.append('- Add any new locked details established in this scene')
-        lines.append('- Update active threads: advance existing ones, add new '
+        lines.append('- Update MICE threads: advance existing ones, add new '
                      'ones opened, move fully resolved ones to a resolved '
                      'section')
         lines.append('- Update any motif tracking')
@@ -1027,7 +1027,7 @@ Produce an expanded writing guide for scene **{scene_id}** ("{scene.get('title',
 
 Include:
 - Voice notes specific to this scene and POV character
-- Craft reminders relevant to the scene type ({scene.get('scene_type', '')})
+- Craft reminders relevant to the scene type ({scene.get('action_sequel', '')})
 - How to land the value shift ({scene.get('value_shift', '')})
 - Suggested approach for the crisis/decision moment
 - Line-level suggestions for key dialogue

@@ -1,0 +1,452 @@
+#!/bin/bash
+set -eo pipefail
+
+# ============================================================================
+# storyforge-migrate — Upgrade existing projects to normalized registry model
+#
+# One-time migration that:
+#   1. Renames scene_type → action_sequel in scene-intent.csv
+#   2. Removes the threads column from scene-intent.csv
+#   3. Seeds new registry files (values.csv, knowledge.csv, mice-threads.csv)
+#   4. Normalizes all registry-backed fields to canonical IDs
+#   5. Runs schema validation to show remaining issues
+#
+# Idempotent — safe to run multiple times.
+#
+# Usage:
+#   ./storyforge-migrate                  # Full migration + commit
+#   ./storyforge-migrate --dry-run        # Show what would change
+#   ./storyforge-migrate --no-commit      # Make changes but don't commit
+# ============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
+
+detect_project_root
+
+# Parse args
+DRY_RUN=false
+NO_COMMIT=false
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run)    DRY_RUN=true ;;
+        --no-commit)  NO_COMMIT=true ;;
+        -h|--help)
+            echo "Usage: storyforge-migrate [--dry-run] [--no-commit]"
+            echo "  --dry-run    Show what would change without writing"
+            echo "  --no-commit  Make changes but don't git commit"
+            exit 0
+            ;;
+    esac
+done
+
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
+REF_DIR="${PROJECT_DIR}/reference"
+PROJECT_TITLE=$(read_yaml_field "title" 2>/dev/null || echo "unknown")
+
+if [[ ! -f "${REF_DIR}/scenes.csv" ]]; then
+    echo "Error: No scenes.csv found in ${REF_DIR}."
+    exit 1
+fi
+
+log "Migration: ${PROJECT_TITLE}"
+log ""
+
+# ============================================================================
+# Step 1: Rename scene_type → action_sequel
+# ============================================================================
+
+STEP1_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import os
+
+ref_dir = '${REF_DIR}'
+dry_run = '${DRY_RUN}' == 'true'
+intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+
+if not os.path.isfile(intent_path):
+    print('skip:no scene-intent.csv')
+    exit()
+
+with open(intent_path, encoding='utf-8') as f:
+    lines = f.readlines()
+
+if not lines:
+    print('skip:empty file')
+    exit()
+
+header = lines[0]
+if 'scene_type' not in header:
+    print('skip:already renamed')
+    exit()
+
+new_header = header.replace('scene_type', 'action_sequel')
+lines[0] = new_header
+count = len(lines) - 1
+
+if not dry_run:
+    with open(intent_path, 'w', encoding='utf-8') as f:
+        f.writelines(lines)
+
+print(f'done:{count}')
+")
+
+if [[ "$STEP1_RESULT" == skip:* ]]; then
+    log "  [1/5] Rename scene_type → action_sequel: skipped (${STEP1_RESULT#skip:})"
+else
+    log "  [1/5] Rename scene_type → action_sequel: ${STEP1_RESULT/done:/done (} rows)"
+fi
+
+# ============================================================================
+# Step 2: Remove threads column
+# ============================================================================
+
+STEP2_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import os
+
+ref_dir = '${REF_DIR}'
+dry_run = '${DRY_RUN}' == 'true'
+intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+
+if not os.path.isfile(intent_path):
+    print('skip:no scene-intent.csv')
+    exit()
+
+with open(intent_path, encoding='utf-8') as f:
+    lines = f.readlines()
+
+if not lines:
+    print('skip:empty file')
+    exit()
+
+header_fields = lines[0].rstrip('\n').split('|')
+if 'threads' not in header_fields:
+    print('skip:already removed')
+    exit()
+
+threads_idx = header_fields.index('threads')
+new_lines = []
+for line in lines:
+    fields = line.rstrip('\n').split('|')
+    if len(fields) > threads_idx:
+        fields.pop(threads_idx)
+    new_lines.append('|'.join(fields) + '\n')
+
+count = len(new_lines) - 1
+
+if not dry_run:
+    with open(intent_path, 'w', encoding='utf-8') as f:
+        f.writelines(new_lines)
+
+print(f'done:{count}')
+")
+
+if [[ "$STEP2_RESULT" == skip:* ]]; then
+    log "  [2/5] Remove threads column: skipped (${STEP2_RESULT#skip:})"
+else
+    log "  [2/5] Remove threads column: ${STEP2_RESULT/done:/done (} rows)"
+fi
+
+# ============================================================================
+# Step 3: Seed registries
+# ============================================================================
+
+log "  [3/5] Seed registries:"
+
+STEP3_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import os, re
+
+ref_dir = '${REF_DIR}'
+dry_run = '${DRY_RUN}' == 'true'
+
+def read_csv(path):
+    if not os.path.isfile(path):
+        return [], []
+    with open(path, encoding='utf-8') as f:
+        lines = [l.rstrip('\n') for l in f if l.strip()]
+    if not lines:
+        return [], []
+    header = lines[0].split('|')
+    rows = [dict(zip(header, l.split('|'))) for l in lines[1:]]
+    return header, rows
+
+def slugify(text):
+    s = text.strip().lower()
+    s = re.sub(r'[^a-z0-9\s-]', '', s)
+    s = re.sub(r'[\s]+', '-', s)
+    s = re.sub(r'-+', '-', s)
+    return s.strip('-')
+
+def write_registry(path, header_str, rows):
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(header_str + '\n')
+        for row in rows:
+            f.write(row + '\n')
+
+# --- values.csv ---
+values_path = os.path.join(ref_dir, 'values.csv')
+if os.path.isfile(values_path):
+    with open(values_path) as f:
+        existing_lines = [l.strip() for l in f if l.strip()]
+    if len(existing_lines) > 1:
+        print(f'values.csv:skip:already exists ({len(existing_lines)-1} entries)')
+    else:
+        # Header only — seed it
+        _, intent_rows = read_csv(os.path.join(ref_dir, 'scene-intent.csv'))
+        values = set()
+        for r in intent_rows:
+            v = r.get('value_at_stake', '').strip()
+            if v:
+                values.add(v)
+        if values and not dry_run:
+            rows = []
+            for v in sorted(values):
+                sid = slugify(v)
+                rows.append(f'{sid}|{v}|')
+            write_registry(values_path, 'id|name|aliases', rows)
+        print(f'values.csv:done:{len(values)}')
+else:
+    _, intent_rows = read_csv(os.path.join(ref_dir, 'scene-intent.csv'))
+    values = set()
+    for r in intent_rows:
+        v = r.get('value_at_stake', '').strip()
+        if v:
+            values.add(v)
+    if values and not dry_run:
+        rows = []
+        for v in sorted(values):
+            sid = slugify(v)
+            rows.append(f'{sid}|{v}|')
+        write_registry(values_path, 'id|name|aliases', rows)
+    print(f'values.csv:done:{len(values)}')
+
+# --- mice-threads.csv ---
+mice_path = os.path.join(ref_dir, 'mice-threads.csv')
+if os.path.isfile(mice_path):
+    with open(mice_path) as f:
+        existing_lines = [l.strip() for l in f if l.strip()]
+    if len(existing_lines) > 1:
+        print(f'mice-threads.csv:skip:already exists ({len(existing_lines)-1} entries)')
+    else:
+        _, intent_rows = read_csv(os.path.join(ref_dir, 'scene-intent.csv'))
+        threads = {}  # name -> type
+        for r in intent_rows:
+            mice = r.get('mice_threads', '').strip()
+            if not mice:
+                continue
+            for entry in mice.split(';'):
+                entry = entry.strip()
+                if len(entry) > 1 and entry[0] in ('+', '-') and ':' in entry[1:]:
+                    rest = entry[1:]
+                    type_part, _, name_part = rest.partition(':')
+                    type_part = type_part.strip().lower()
+                    name_part = name_part.strip()
+                    if name_part and name_part not in threads:
+                        threads[name_part] = type_part
+        if threads and not dry_run:
+            rows = []
+            for name in sorted(threads.keys()):
+                t = threads[name]
+                rows.append(f'{name}|{name}|{t}|')
+            write_registry(mice_path, 'id|name|type|aliases', rows)
+        print(f'mice-threads.csv:done:{len(threads)}')
+else:
+    _, intent_rows = read_csv(os.path.join(ref_dir, 'scene-intent.csv'))
+    threads = {}
+    for r in intent_rows:
+        mice = r.get('mice_threads', '').strip()
+        if not mice:
+            continue
+        for entry in mice.split(';'):
+            entry = entry.strip()
+            if len(entry) > 1 and entry[0] in ('+', '-') and ':' in entry[1:]:
+                rest = entry[1:]
+                type_part, _, name_part = rest.partition(':')
+                type_part = type_part.strip().lower()
+                name_part = name_part.strip()
+                if name_part and name_part not in threads:
+                    threads[name_part] = type_part
+    if threads and not dry_run:
+        rows = []
+        for name in sorted(threads.keys()):
+            t = threads[name]
+            rows.append(f'{name}|{name}|{t}|')
+        write_registry(mice_path, 'id|name|type|aliases', rows)
+    print(f'mice-threads.csv:done:{len(threads)}')
+
+# --- knowledge.csv ---
+knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
+if os.path.isfile(knowledge_path):
+    with open(knowledge_path) as f:
+        existing_lines = [l.strip() for l in f if l.strip()]
+    if len(existing_lines) > 1:
+        print(f'knowledge.csv:skip:already exists ({len(existing_lines)-1} entries)')
+    else:
+        _, briefs_rows = read_csv(os.path.join(ref_dir, 'scene-briefs.csv'))
+        facts = set()
+        for r in briefs_rows:
+            for field in ('knowledge_in', 'knowledge_out'):
+                v = r.get(field, '').strip()
+                if v:
+                    for fact in v.split(';'):
+                        fact = fact.strip()
+                        if fact:
+                            facts.add(fact)
+        if facts and not dry_run:
+            rows = []
+            for fact in sorted(facts):
+                sid = slugify(fact)
+                if not sid:
+                    continue
+                rows.append(f'{sid}|{fact}|')
+            write_registry(knowledge_path, 'id|name|aliases', rows)
+        print(f'knowledge.csv:done:{len(facts)}')
+else:
+    _, briefs_rows = read_csv(os.path.join(ref_dir, 'scene-briefs.csv'))
+    facts = set()
+    for r in briefs_rows:
+        for field in ('knowledge_in', 'knowledge_out'):
+            v = r.get(field, '').strip()
+            if v:
+                for fact in v.split(';'):
+                    fact = fact.strip()
+                    if fact:
+                        facts.add(fact)
+    if facts and not dry_run:
+        rows = []
+        for fact in sorted(facts):
+            sid = slugify(fact)
+            if not sid:
+                continue
+            rows.append(f'{sid}|{fact}|')
+        write_registry(knowledge_path, 'id|name|aliases', rows)
+    print(f'knowledge.csv:done:{len(facts)}')
+")
+
+while IFS= read -r line; do
+    registry="${line%%:*}"
+    rest="${line#*:}"
+    action="${rest%%:*}"
+    detail="${rest#*:}"
+    if [[ "$action" == "skip" ]]; then
+        log "    ${registry}: skipped (${detail})"
+    else
+        log "    ${registry}: created (${detail} entries)"
+    fi
+done <<< "$STEP3_RESULT"
+
+# ============================================================================
+# Step 4: Normalize all fields
+# ============================================================================
+
+if [[ "$DRY_RUN" == true ]]; then
+    log "  [4/5] Normalize fields: skipped (dry run)"
+else
+    STEP4_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import os
+from storyforge.elaborate import _read_csv, _write_csv, _read_csv_as_map, _FILE_MAP
+from storyforge.enrich import load_registry_alias_maps, normalize_fields
+
+ref_dir = '${REF_DIR}'
+project_dir = '${PROJECT_DIR}'
+
+alias_maps = load_registry_alias_maps(project_dir)
+
+updated = 0
+
+for filename, columns in _FILE_MAP.items():
+    path = os.path.join(ref_dir, filename)
+    if not os.path.isfile(path):
+        continue
+
+    rows = _read_csv(path)
+    changed = False
+
+    for row in rows:
+        original = dict(row)
+        normalize_fields(row, alias_maps)
+        if row != original:
+            changed = True
+            for k in row:
+                if row[k] != original.get(k, ''):
+                    updated += 1
+
+    if changed:
+        _write_csv(path, rows, columns)
+
+print(updated)
+")
+
+    log "  [4/5] Normalize fields: ${STEP4_RESULT} cells updated"
+fi
+
+# ============================================================================
+# Step 5: Validate
+# ============================================================================
+
+STEP5_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import json
+from storyforge.schema import validate_schema
+
+report = validate_schema('${REF_DIR}', '${PROJECT_DIR}')
+passed = report['passed']
+failed = report['failed']
+skipped = report['skipped']
+
+print(f'{passed} passed, {failed} failed, {skipped} skipped')
+
+if report['errors']:
+    by_file = {}
+    for e in report['errors']:
+        by_file.setdefault(e['file'], []).append(e)
+    for fname, errs in sorted(by_file.items()):
+        print(f'  {fname}:')
+        for e in errs:
+            if e['constraint'] == 'enum':
+                allowed = ', '.join(e['allowed'])
+                print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{e[\"value\"]}\" — not in ({allowed})')
+            elif e['constraint'] == 'registry':
+                unresolved = ', '.join(e.get('unresolved', [e['value']]))
+                print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{unresolved}\" — not in {e[\"registry\"]}')
+            elif e['constraint'] == 'integer':
+                print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{e[\"value\"]}\" — expected integer')
+            elif e['constraint'] == 'boolean':
+                print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{e[\"value\"]}\" — expected true/false')
+            elif e['constraint'] == 'mice':
+                for p in e.get('problems', []):
+                    print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{p[\"entry\"]}\" — {p[\"reason\"]}')
+            elif e['constraint'] == 'scene_ids':
+                unresolved = ', '.join(e.get('unresolved', []))
+                print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{unresolved}\" — not in scenes.csv')
+")
+
+log "  [5/5] Schema validation: ${STEP5_RESULT%%$'\n'*}"
+# Print remaining lines (error details)
+REST="${STEP5_RESULT#*$'\n'}"
+if [[ "$REST" != "$STEP5_RESULT" ]]; then
+    while IFS= read -r line; do
+        log "         $line"
+    done <<< "$REST"
+fi
+
+# ============================================================================
+# Commit
+# ============================================================================
+
+if [[ "$DRY_RUN" == true ]]; then
+    log ""
+    log "Dry run complete — no files were modified."
+elif [[ "$NO_COMMIT" == true ]]; then
+    log ""
+    log "Changes written but not committed (--no-commit)."
+else
+    cd "$PROJECT_DIR"
+    git add reference/ 2>/dev/null || true
+    if git diff --cached --quiet 2>/dev/null; then
+        log ""
+        log "No changes to commit."
+    else
+        git commit -m "Migrate: upgrade to normalized registry model" 2>/dev/null || true
+        log ""
+        log "Changes committed."
+    fi
+fi

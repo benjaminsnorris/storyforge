@@ -267,12 +267,12 @@ s04|4|Scene Four|2|Alice|Room|2|afternoon|1 hour|action|briefed|1000|2000
 s05|5|Scene Five|2|Alice|Room|3|morning|1 hour|action|briefed|1000|2000
 CSV
 cat > "${THREAD_DIR}/scene-intent.csv" <<'CSV'
-id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
-s01|test|action|flat|truth|+/-|revelation|a|Alice|Alice|+inquiry:mystery;+milieu:dungeon
-s02|test|action|flat|truth|+/-|revelation|a|Alice|Alice|+event:storm
-s03|test|action|flat|truth|+/-|revelation|a|Alice|Alice|-milieu:dungeon;-event:storm
-s04|test|action|flat|truth|+/-|revelation|a|Alice|Alice|-inquiry:mystery
-s05|test|action|flat|truth|+/-|revelation|a|Alice|Alice|
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|Alice|Alice|+inquiry:mystery;+milieu:dungeon
+s02|test|action|flat|truth|+/-|revelation|Alice|Alice|+event:storm
+s03|test|action|flat|truth|+/-|revelation|Alice|Alice|-milieu:dungeon;-event:storm
+s04|test|action|flat|truth|+/-|revelation|Alice|Alice|-inquiry:mystery
+s05|test|action|flat|truth|+/-|revelation|Alice|Alice|
 CSV
 cat > "${THREAD_DIR}/scene-briefs.csv" <<'CSV'
 id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
@@ -346,7 +346,7 @@ s03|3|Scene Three|1|Lena|Station|12|morning|1 hour|action|briefed|1000|2000
 s04|4|Scene Four|1|Emmett|Town|15|morning|1 hour|action|briefed|1000|2000
 CSV
 cat > "${CROSSCUT_DIR}/scene-intent.csv" <<'CSV'
-id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
 s01|test|action|flat|truth|+/-|revelation|a|Emmett|Emmett|
 s02|test|action|flat|truth|+/-|revelation|a|Emmett|Emmett|
 s03|test|action|flat|truth|+/-|revelation|a|Lena|Lena|
@@ -384,7 +384,7 @@ s01|1|Scene One|1|Alice|Room|3|morning|1 hour|action|briefed|1000|2000
 s02|2|Scene Two|1|Alice|Room|1|morning|1 hour|action|briefed|1000|2000
 CSV
 cat > "${SAMEPOV_DIR}/scene-intent.csv" <<'CSV'
-id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
 s01|test|action|flat|truth|+/-|revelation|a|Alice|Alice|
 s02|test|action|flat|truth|+/-|revelation|a|Alice|Alice|
 CSV
@@ -568,9 +568,9 @@ scene-03|3|Confrontation|1|Bob|Council Room|2||1 hour|action|drafted|2000|2000
 scene-04|4|Escape|2|Alice|The Tunnel|3|night|30 minutes|action|drafted|1800|1800
 GAPCSV
 
-# scene-intent.csv — some missing value_shift and scene_type
+# scene-intent.csv — some missing value_shift and action_sequel
 cat > "${TMP_REF}/scene-intent.csv" <<'GAPCSV'
-id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
 scene-01|Establish the lab|action|calm to focused|truth|+/-|revelation|discovery|Alice;Bob|Alice|+inquiry:anomaly
 scene-02|Find the anomaly||tense to shocked|safety||action|discovery;danger|Alice|Alice|
 scene-03|Confront the council|sequel|resolve to anger|justice|+/-|revelation|politics|Bob;Council|Bob;Council|
@@ -608,7 +608,7 @@ gaps = analyze_gaps('${TMP_REF}')
 print(gaps['total_gaps'])
 ")
 
-assert_equals "4" "$TOTAL" "analyze_gaps: total_gaps count is exact (scene-02: timeline_day+scene_type+value_shift, scene-03: time_of_day)"
+assert_equals "4" "$TOTAL" "analyze_gaps: total_gaps count is exact (scene-02: timeline_day+action_sequel+value_shift, scene-03: time_of_day)"
 
 # Should not flag scenes with no gaps
 assert_not_contains "$RESULT" '"scene-01": {' "analyze_gaps: scene-01 has no completeness gaps"
@@ -648,7 +648,7 @@ scene-03|3|Confrontation|1|Bob|Council Room|2|evening|1 hour||drafted|2000|2000
 GAPCSV
 
 cat > "${TMP_REF}/reference/scene-intent.csv" <<'GAPCSV'
-id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
 scene-03|Confront the council|sequel|resolve to anger|justice|+/-|revelation|politics|Bob;Council|Bob;Council|
 GAPCSV
 
@@ -697,7 +697,7 @@ scene-02|2|Discovery|1|Alice|The Lab|1|afternoon|1 hour|action|drafted|3000|3000
 GAPCSV
 
 cat > "${TMP_REF}/reference/scene-intent.csv" <<'GAPCSV'
-id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
 scene-01|Establish the lab|action|calm to focused|truth|+/-|revelation|discovery|Alice|Alice|
 scene-02|Find the anomaly|action|tense to shocked|safety|-/+|action|discovery|Alice|Alice|
 GAPCSV

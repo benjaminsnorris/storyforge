@@ -330,7 +330,7 @@ from storyforge.enrich import load_alias_map, normalize_aliases
 amap = load_alias_map('${FIXTURE_DIR}/reference/characters.csv')
 print(normalize_aliases(amap, 'Dorren;the Archivist;Pell'))
 " 2>/dev/null)
-assert_equals "Dorren Hayle;Kael Maren;Pell" "$result" "enrich: normalize_aliases resolves character aliases"
+assert_equals "dorren-hayle;kael-maren;pell" "$result" "enrich: normalize_aliases resolves character aliases"
 
 echo "  --- enrich: validate_type ---"
 
@@ -548,8 +548,8 @@ YAML
 echo "id|seq|title|pov|word_count|status|type|location|part" > "${VIS_TMP}/reference/scenes.csv"
 echo "s1|1|Scene One|Alice|1000|draft|character|Home|act-1" >> "${VIS_TMP}/reference/scenes.csv"
 
-echo "id|function|emotional_arc|characters|threads|motifs" > "${VIS_TMP}/reference/scene-intent.csv"
-echo "s1|opener|tension|Alice|main-plot|light" >> "${VIS_TMP}/reference/scene-intent.csv"
+echo "id|function|emotional_arc|characters|motifs" > "${VIS_TMP}/reference/scene-intent.csv"
+echo "s1|opener|tension|Alice|light" >> "${VIS_TMP}/reference/scene-intent.csv"
 
 # Create rationale CSVs
 echo "id|principle_a|principle_b" > "${VIS_TMP}/working/scores/latest/scene-rationale.csv"
