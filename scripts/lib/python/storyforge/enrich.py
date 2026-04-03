@@ -948,19 +948,7 @@ def main():
             sys.exit(1)
 
         project_dir = sys.argv[2]
-        maps = {}
-
-        chars_csv = os.path.join(project_dir, 'reference', 'characters.csv')
-        if os.path.isfile(chars_csv):
-            maps['characters'] = load_alias_map(chars_csv)
-
-        motifs_csv = os.path.join(project_dir, 'reference', 'motif-taxonomy.csv')
-        if os.path.isfile(motifs_csv):
-            maps['motifs'] = load_alias_map(motifs_csv)
-
-        locations_csv = os.path.join(project_dir, 'reference', 'locations.csv')
-        if os.path.isfile(locations_csv):
-            maps['locations'] = load_alias_map(locations_csv)
+        maps = load_registry_alias_maps(project_dir)
 
         json.dump(maps, sys.stdout)
         print()
