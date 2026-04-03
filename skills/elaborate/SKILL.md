@@ -42,18 +42,49 @@ Based on the project state, identify where the author is:
 
 ## Step 3: Determine Mode
 
-Based on the author's request:
+Based on the author's request, determine the mode:
+
+### Specific requests (always honored, bypass auto-advance):
 
 - **"Start a new novel"** / **"Let's begin"** → Start at spine. Ask for the seed (logline, genre, characters, themes, constraints). Whatever they give you is the seed.
-- **"What's next?"** / **"Keep going"** → Advance to the next stage based on current state.
 - **"Work on the spine/architecture/map/briefs"** → Go to that specific stage.
 - **"Develop the voice"** / **"Voice guide"** / **"Style"** → Voice development (see Voice Stage below). Typically happens after architecture and before briefs.
 - **"Deepen characters"** / **"Work on [character name]"** → Character development. During elaboration, this deepens the character bible entries. The spine creates seed entries; this mode enriches them with wound/lie/need structure, voice fingerprints, and relationship dynamics.
 - **"Build the world"** / **"World building"** → World bible development. During elaboration, world building supports the architecture and scene map stages.
 - **"Story architecture"** / **"Theme"** / **"Structure"** → Story architecture refinement. The spine creates the initial architecture; this mode deepens thematic throughlines, conflict structure, and arc planning.
 - **"Validate"** → Run validation on the current state.
-- **Gap-fill state detected** (scenes are drafted, briefs populated, but validation fails) → Gap-fill mode. Analyze gaps and offer to fill them.
 - **Status question** → Report current stage, scene count, validation state.
+
+### Auto-advance (unspecified requests — "elaborate", "what's next", "keep going"):
+
+When the author doesn't specify a mode, detect the current stage from Step 2 and act based on coaching level:
+
+| Detected State | Action |
+|---|---|
+| No scenes.csv (or 0 rows) | Start spine |
+| Spine done (5-10 rows, function only) | Run architecture |
+| Architecture done (has value_shift, threads) | Run scene map |
+| Map done (has characters, on_stage) | Run briefs |
+| Briefs done, validation passes | Announce ready for drafting, redirect to forge |
+| Drafted with validation failures > 0 | Run gap-fill |
+| Everything passes | Redirect to forge |
+
+**Coaching level determines posture:**
+
+**Full mode:** Announce the action and do it immediately.
+- "No spine yet — let's build one. What's your logline or seed idea?"
+- "Your scenes are at architecture stage. I'll expand to the full scene map now."
+- "Post-extraction data has 47 gaps. I'll fill them — starting with the parallel batches."
+
+**Coach mode:** Present the recommendation and wait for approval.
+- "Your scenes are at architecture stage. The next step is expanding to a full scene map — locations, timeline, characters, MICE threads. Ready to go?"
+- "I found 47 structural gaps in your extracted data. Want me to fill them?"
+
+**Strict mode:** Report state data only. Author decides.
+- "Current state: 22 scenes at architecture depth. 0 mapped. Next stage: scene-map. Run `./storyforge elaborate --stage map` or work through it here."
+- "Validation: 47 failures across 5 gap groups. Run `./storyforge elaborate --stage gap-fill` to fill automatically."
+
+After the author approves (or immediately in full mode), proceed to Step 4 to execute the appropriate stage.
 
 ## Step 4: Execute the Stage
 
