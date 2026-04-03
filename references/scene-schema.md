@@ -57,7 +57,7 @@ Projects created before v0.40.0 used a two-file model with fewer columns. Run `.
 | `function` | string | spine | Why this scene exists — must be specific and testable. Not "advance the plot" but "she discovers he kept the letter." |
 | `action_sequel` | string | architecture | Action/sequel pattern (Swain): `action` (goal/conflict/outcome) or `sequel` (reaction/dilemma/decision). |
 | `emotional_arc` | string | architecture | Emotional journey: start → end (e.g., "controlled competence to buried unease"). |
-| `value_at_stake` | string | architecture | The abstract value being tested: safety, love, justice, truth, freedom, etc. (McKee). |
+| `value_at_stake` | string | architecture | The abstract value being tested. Normalized against `reference/values.csv` (McKee). |
 | `value_shift` | string | architecture | Polarity change: `+/-`, `-/+`, `+/++`, `-/--` (Story Grid). A scene that doesn't shift a value is a nonevent. |
 | `turning_point` | string | architecture | `action` or `revelation` — vary these to prevent monotony (Story Grid). |
 | `characters` | array | map | All characters present or referenced. Semicolon-separated. Normalized against `reference/characters.csv`. |

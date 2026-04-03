@@ -69,7 +69,7 @@ COLUMN_SCHEMA = {
     'function':       {'type': 'free_text'},
     'action_sequel':  {'type': 'enum', 'values': VALID_ACTION_SEQUEL},
     'emotional_arc':  {'type': 'free_text'},
-    'value_at_stake': {'type': 'free_text'},
+    'value_at_stake': {'type': 'registry', 'registry': 'values.csv', 'array': False},
     'value_shift':    {'type': 'enum', 'values': VALID_VALUE_SHIFTS},
     'turning_point':  {'type': 'enum', 'values': VALID_TURNING_POINTS},
     'characters':     {'type': 'registry', 'registry': 'characters.csv', 'array': True},

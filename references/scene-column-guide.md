@@ -56,9 +56,9 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to improve:** If you have a run of action scenes, insert a sequel where a character processes what happened. If all sequels, find a scene where a character makes an active choice and hits opposition.
 
 ### value_at_stake — What's Being Tested
-**Why it matters:** Readers stay engaged when something they care about is at risk. Naming the value (safety, love, justice, truth) makes the stakes concrete and checkable.
-**How to check:** Does the value feel right for the scene? Is it the same value for too many consecutive scenes (reader fatigue)?
-**How to improve:** Vary values across sequences. If the whole middle is about "safety," consider shifting some scenes to test "trust" or "loyalty."
+**Why it matters:** Readers stay engaged when something they care about is at risk. Naming the value makes the stakes concrete and checkable. Values are normalized against `reference/values.csv`, enabling arc tracking across the manuscript.
+**How to check:** Does the value feel right for the scene? Is it the same value for too many consecutive scenes (reader fatigue)? Run schema validation to catch unnormalized values.
+**How to improve:** Vary values across sequences. If the whole middle is about "safety," consider shifting some scenes to test "trust" or "loyalty." Add new values to `values.csv` as they emerge.
 
 ### value_shift — Polarity Change
 **Why it matters:** If a value doesn't shift, nothing happened — it's a nonevent (McKee). The shift direction (+/-, -/+, etc.) creates the story's emotional shape.

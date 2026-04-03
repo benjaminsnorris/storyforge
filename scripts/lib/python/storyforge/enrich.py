@@ -233,12 +233,14 @@ _CHAR_FIELDS = ('pov', 'characters', 'on_stage')
 _LOCATION_FIELDS = ('location',)
 # Fields that hold motif references
 _MOTIF_FIELDS = ('motifs',)
+# Fields that hold value references
+_VALUE_FIELDS = ('value_at_stake',)
 
 
 def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
     """Load alias maps from all registry CSVs in a project.
 
-    Returns a dict with keys 'characters', 'locations', 'motifs'
+    Returns a dict with keys 'characters', 'locations', 'motifs', 'values'
     mapping to their respective alias dicts.  Missing registry files produce
     empty dicts.
     """
@@ -247,16 +249,17 @@ def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
         'characters': load_alias_map(os.path.join(ref_dir, 'characters.csv')),
         'locations': load_alias_map(os.path.join(ref_dir, 'locations.csv')),
         'motifs': load_alias_map(os.path.join(ref_dir, 'motif-taxonomy.csv')),
+        'values': load_alias_map(os.path.join(ref_dir, 'values.csv')),
     }
 
 
 def normalize_fields(result: dict[str, str],
                      alias_maps: dict[str, dict[str, str]]) -> dict[str, str]:
-    """Normalize character, location, and motif fields in a result dict.
+    """Normalize character, location, motif, and value fields in a result dict.
 
     Applies alias maps to resolve free-text names to canonical IDs.
     Works with any dict that has scene-CSV field names (pov, characters,
-    on_stage, location, motifs).
+    on_stage, location, motifs, value_at_stake).
 
     Args:
         result: Parsed result dict (from any extraction, enrichment, or
@@ -272,6 +275,7 @@ def normalize_fields(result: dict[str, str],
     char_map = alias_maps.get('characters', {})
     loc_map = alias_maps.get('locations', {})
     motif_map = alias_maps.get('motifs', {})
+    value_map = alias_maps.get('values', {})
 
     for field in _CHAR_FIELDS:
         if field in result and char_map:
@@ -282,6 +286,9 @@ def normalize_fields(result: dict[str, str],
     for field in _MOTIF_FIELDS:
         if field in result and motif_map:
             result[field] = normalize_aliases(motif_map, result[field])
+    for field in _VALUE_FIELDS:
+        if field in result and value_map:
+            result[field] = normalize_aliases(value_map, result[field])
 
     return result
 
