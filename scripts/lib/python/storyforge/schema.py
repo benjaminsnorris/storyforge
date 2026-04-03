@@ -184,12 +184,14 @@ COLUMN_SCHEMA = {
         'description': 'What the character actively chooses in response to the crisis.',
     },
     'knowledge_in': {
-        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Facts the POV character knows entering. Must use exact wording matching prior knowledge_out.',
+        'type': 'registry', 'registry': 'knowledge.csv', 'array': True,
+        'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Fact IDs the POV character knows entering. Normalized against reference/knowledge.csv.',
     },
     'knowledge_out': {
-        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
-        'description': 'Facts the POV character knows leaving. Includes knowledge_in plus anything new learned.',
+        'type': 'registry', 'registry': 'knowledge.csv', 'array': True,
+        'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Fact IDs the POV character knows leaving. Includes knowledge_in plus anything new learned.',
     },
     'key_actions': {
         'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',

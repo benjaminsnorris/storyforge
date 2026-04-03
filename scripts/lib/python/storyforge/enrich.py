@@ -358,14 +358,16 @@ _LOCATION_FIELDS = ('location',)
 _MOTIF_FIELDS = ('motifs',)
 # Fields that hold value references
 _VALUE_FIELDS = ('value_at_stake',)
+# Fields that hold knowledge fact references
+_KNOWLEDGE_FIELDS = ('knowledge_in', 'knowledge_out')
 
 
 def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
     """Load alias maps from all registry CSVs in a project.
 
     Returns a dict with keys 'characters', 'locations', 'motifs', 'values',
-    'mice_threads', and 'mice_types' mapping to their respective dicts.
-    Missing registry files produce empty dicts.
+    'knowledge', 'mice_threads', and 'mice_types' mapping to their respective
+    dicts.  Missing registry files produce empty dicts.
 
     The 'mice_threads' key holds a name→id alias map.  The 'mice_types' key
     holds an id→type map for MICE type correction.
@@ -378,6 +380,7 @@ def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
         'locations': load_alias_map(os.path.join(ref_dir, 'locations.csv')),
         'motifs': load_alias_map(os.path.join(ref_dir, 'motif-taxonomy.csv')),
         'values': load_alias_map(os.path.join(ref_dir, 'values.csv')),
+        'knowledge': load_alias_map(os.path.join(ref_dir, 'knowledge.csv')),
         'mice_threads': mice_alias,
         'mice_types': mice_types,
     }
@@ -406,6 +409,7 @@ def normalize_fields(result: dict[str, str],
     loc_map = alias_maps.get('locations', {})
     motif_map = alias_maps.get('motifs', {})
     value_map = alias_maps.get('values', {})
+    knowledge_map = alias_maps.get('knowledge', {})
     mice_map = alias_maps.get('mice_threads', {})
     mice_types = alias_maps.get('mice_types', {})
 
@@ -421,6 +425,9 @@ def normalize_fields(result: dict[str, str],
     for field in _VALUE_FIELDS:
         if field in result and value_map:
             result[field] = normalize_aliases(value_map, result[field])
+    for field in _KNOWLEDGE_FIELDS:
+        if field in result and knowledge_map:
+            result[field] = normalize_aliases(knowledge_map, result[field])
     if 'mice_threads' in result and mice_map:
         result['mice_threads'] = normalize_mice_threads(
             result['mice_threads'], mice_map, mice_types)
