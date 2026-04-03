@@ -21,7 +21,7 @@ set -eo pipefail
 #   ./storyforge-enrich --interactive          # All scenes, claude -p mode
 #   ./storyforge-enrich --scenes 001,002       # Specific scenes only
 #   ./storyforge-enrich --act 2                # Scenes in act 2 only
-#   ./storyforge-enrich --fields type,threads  # Enrich specific fields only
+#   ./storyforge-enrich --fields type,value_at_stake  # Enrich specific fields only
 #   ./storyforge-enrich --force                # Re-enrich even populated fields
 #   ./storyforge-enrich --dry-run              # Show what would be enriched
 # ============================================================================
@@ -69,7 +69,7 @@ Usage: $(basename "$0") [OPTIONS]
 Enrich scene metadata by analyzing prose with Claude. Runs in two
 phases: free heuristics first (word count, time of day, thread
 recovery), then Claude for remaining gaps (type, location, characters,
-emotional arc, threads, motifs).
+emotional arc, motifs, and more).
 
 Modes (default: batch):
   (default)         Batch API — 50% cost savings, results in 2-10 minutes
@@ -294,7 +294,7 @@ for scene_file in "${SCENES_DIR}"/*.md; do
     done
 
     if [[ "$in_intent" == false ]]; then
-        # intent.csv header: id|function|emotional_arc|characters|threads|motifs|notes
+        # intent.csv header: id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
         append_csv_row "$INTENT_CSV" "${fname}||||||"
         log "  Added intent row for ${fname}"
     fi
@@ -443,7 +443,7 @@ if [[ "$DRY_RUN" == true ]]; then
     log "Max cost: ~\$${ENRICH_COST} (actual will be lower — free heuristics run first)"
     log ""
     log "Phase 1 (free): word_count updates, time_of_day inference from keywords"
-    log "Phase 2 (Claude): only fields that can't be inferred — type, characters, emotional_arc, threads, motifs"
+    log "Phase 2 (Claude): fields that can't be inferred from heuristics"
     log ""
     log "Scenes to enrich:"
     for id in "${SCENE_IDS[@]}"; do
@@ -570,12 +570,12 @@ fi
 
 ALIAS_MAPS_JSON="${ENRICH_DIR}/.alias-maps.json"
 
-# Load all alias maps via Python (characters, motifs, locations, threads)
+# Load all alias maps via Python
 PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.enrich load-alias-maps "$PROJECT_DIR" > "$ALIAS_MAPS_JSON" 2>/dev/null || echo "{}" > "$ALIAS_MAPS_JSON"
 
 # Log which maps were loaded
 if [[ -f "$ALIAS_MAPS_JSON" ]]; then
-    for map_name in characters motifs locations threads; do
+    for map_name in characters motifs locations values knowledge mice_threads; do
         if PYTHONPATH="$PYTHON_LIB" python3 -c "import json,sys; d=json.load(open('$ALIAS_MAPS_JSON')); sys.exit(0 if d.get('$map_name') else 1)" 2>/dev/null; then
             log "Loaded ${map_name} aliases via Python"
         fi
@@ -715,18 +715,8 @@ apply_enrich_result() {
     # Apply each field if it was requested and is currently empty (or force)
     for field in "${FIELDS_ARRAY[@]}"; do
         # Map field name to result file key
-        result_key=""
-        case "$field" in
-            type)           result_key="TYPE" ;;
-            location)       result_key="LOCATION" ;;
-            time_of_day)    result_key="TIME_OF_DAY" ;;
-            characters)     result_key="CHARACTERS" ;;
-            emotional_arc)  result_key="EMOTIONAL_ARC" ;;
-            threads)        result_key="THREADS" ;;
-            motifs)         result_key="MOTIFS" ;;
-        esac
-
-        [[ -z "$result_key" ]] && continue
+        # Convert field name to uppercase result key (e.g., action_sequel → ACTION_SEQUEL)
+        result_key=$(echo "$field" | tr '[:lower:]' '[:upper:]')
 
         new_val=$(grep "^${result_key}|" "$result_file" | cut -d'|' -f2-)
         [[ -z "$new_val" ]] && continue
@@ -1064,10 +1054,12 @@ seed_alias_csv() {
 INTENT_CSV="${PROJECT_DIR}/reference/scene-intent.csv"
 METADATA_CSV="${PROJECT_DIR}/reference/scenes.csv"
 
+BRIEFS_CSV="${PROJECT_DIR}/reference/scene-briefs.csv"
+
 seed_alias_csv "${PROJECT_DIR}/reference/characters.csv" "$INTENT_CSV" "characters" "id|name|aliases|role"
-seed_alias_csv "${PROJECT_DIR}/reference/threads.csv" "$INTENT_CSV" "threads" "id|name|aliases"
-seed_alias_csv "${PROJECT_DIR}/reference/motif-taxonomy.csv" "$INTENT_CSV" "motifs" "id|name|aliases|tier"
+seed_alias_csv "${PROJECT_DIR}/reference/motif-taxonomy.csv" "$BRIEFS_CSV" "motifs" "id|name|aliases|tier"
 seed_alias_csv "${PROJECT_DIR}/reference/locations.csv" "$METADATA_CSV" "location" "id|name|aliases"
+seed_alias_csv "${PROJECT_DIR}/reference/values.csv" "$INTENT_CSV" "value_at_stake" "id|name|aliases"
 
 # ============================================================================
 # Commit and push
@@ -1079,10 +1071,13 @@ log "Committing enrichment results..."
     cd "$PROJECT_DIR"
     git add "reference/scenes.csv" 2>/dev/null || true
     git add "reference/scene-intent.csv" 2>/dev/null || true
+    git add "reference/scene-briefs.csv" 2>/dev/null || true
     git add "reference/characters.csv" 2>/dev/null || true
-    git add "reference/threads.csv" 2>/dev/null || true
     git add "reference/motif-taxonomy.csv" 2>/dev/null || true
     git add "reference/locations.csv" 2>/dev/null || true
+    git add "reference/values.csv" 2>/dev/null || true
+    git add "reference/knowledge.csv" 2>/dev/null || true
+    git add "reference/mice-threads.csv" 2>/dev/null || true
     git add "working/costs/" 2>/dev/null || true
     git add "working/logs/" 2>/dev/null || true
     git add "working/enrich/" 2>/dev/null || true
