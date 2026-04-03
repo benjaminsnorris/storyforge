@@ -310,11 +310,14 @@ print(build_skeleton_prompt('${SCENE_ID}', scene_text, profile))
         PYTHONPATH="$PYTHON_LIB" python3 -c "
 import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import parse_skeleton_response
+from storyforge.enrich import load_registry_alias_maps, normalize_fields
 from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
 
 output_dir = '${LOG_DIR}'
 ref_dir = '${REF_DIR}'
 scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
+
+alias_maps = load_registry_alias_maps('${PROJECT_DIR}')
 
 # Read existing scenes.csv or start fresh
 existing = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
@@ -326,6 +329,7 @@ for i, sid in enumerate(scene_ids):
         continue
     response = open(txt_file, encoding='utf-8').read()
     result = parse_skeleton_response(response, sid)
+    normalize_fields(result, alias_maps)
 
     # Merge with existing or create new
     if sid in existing:
@@ -409,11 +413,14 @@ print(build_intent_prompt('${SCENE_ID}', scene_text, profile, skeleton))
         PYTHONPATH="$PYTHON_LIB" python3 -c "
 import sys, os; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import parse_intent_response
+from storyforge.enrich import load_registry_alias_maps, normalize_fields
 from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
 
 output_dir = '${LOG_DIR}'
 ref_dir = '${REF_DIR}'
 scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
+
+alias_maps = load_registry_alias_maps('${PROJECT_DIR}')
 
 existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
 
@@ -424,6 +431,7 @@ for sid in scene_ids:
         continue
     response = open(txt_file, encoding='utf-8').read()
     result = parse_intent_response(response, sid)
+    normalize_fields(result, alias_maps)
 
     if sid in existing:
         for k, v in result.items():
@@ -500,11 +508,14 @@ print(build_brief_parallel_prompt('${SCENE_ID}', scene_text, profile, skeleton, 
         PYTHONPATH="$PYTHON_LIB" python3 -c "
 import sys, os; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.extract import parse_brief_parallel_response
+from storyforge.enrich import load_registry_alias_maps, normalize_fields
 from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
 
 output_dir = '${LOG_DIR}'
 ref_dir = '${REF_DIR}'
 scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
+
+alias_maps = load_registry_alias_maps('${PROJECT_DIR}')
 
 existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
 
@@ -515,6 +526,7 @@ for sid in scene_ids:
         continue
     response = open(txt_file, encoding='utf-8').read()
     result = parse_brief_parallel_response(response, sid)
+    normalize_fields(result, alias_maps)
 
     if sid in existing:
         for k, v in result.items():
