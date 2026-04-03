@@ -10,7 +10,7 @@ Scene data is split across three CSV files, each with a clear purpose:
 - **`reference/scene-intent.csv`** — narrative dynamics and tracking (function, value shifts, characters, MICE threads)
 - **`reference/scene-briefs.csv`** — drafting contracts (goal, conflict, outcome, knowledge states, key actions/dialogue)
 
-All three files use pipe (`|`) as the field delimiter, semicolon (`;`) for array values within a column, and `id` as the join key. The first row is always the header.
+All three files use pipe (`|`) as the field delimiter, semicolon (`;`) for array values within a column, and `id` as the join key. The first row is always the header. The `id` column in intent and briefs matches scenes.csv.
 
 ### Python Helpers
 
@@ -31,57 +31,85 @@ Projects created before v0.40.0 used a two-file model with fewer columns. Run `.
 
 ## Column Reference
 
+**Source of truth:** `scripts/lib/python/storyforge/schema.py` — the `COLUMN_SCHEMA` dict defines every column's constraint type, allowed values, registry mappings, pipeline stage, and description. The tables below are generated from that schema. To regenerate:
+
+```python
+from storyforge.schema import dump_schema_markdown
+print(dump_schema_markdown())
+```
+
+### Constraint Types
+
+| Type | Validation | Normalization |
+|------|-----------|---------------|
+| `enum` | Value must be in a fixed set | N/A — values are already canonical |
+| `registry` | Each value must exist as id, name, or alias in a registry CSV | Resolved to canonical id via alias map |
+| `mice` | Format `+/-type:name`, valid type, name in registry | Name resolved via alias map, type corrected |
+| `integer` | Must parse as int | N/A |
+| `boolean` | Must be `true`, `false`, or empty | N/A |
+| `free_text` | No constraint | N/A |
+
+### Registry Files
+
+| Registry | Columns | Used by |
+|----------|---------|---------|
+| `characters.csv` | id, name, aliases, role | pov, characters, on_stage |
+| `locations.csv` | id, name, aliases | location |
+| `values.csv` | id, name, aliases | value_at_stake |
+| `motif-taxonomy.csv` | id, name, aliases, tier | motifs |
+| `mice-threads.csv` | id, name, type, aliases | mice_threads |
+
 ### scenes.csv — structural identity
 
-| Column | Type | Populated at | Description |
-|--------|------|-------------|-------------|
-| `id` | string | spine | Unique scene identifier — a descriptive slug (e.g., `hidden-canyon`). Also the filename (`scenes/{id}.md`). |
-| `seq` | integer | spine | Reading order. Scenes are sorted by `seq`. |
-| `title` | string | spine | Scene title — evocative, used for reference. |
+| Column | Constraint | Stage | Description |
+|--------|-----------|-------|-------------|
+| `id` | free_text | spine | Unique scene identifier — a descriptive slug (e.g., hidden-canyon). Also the filename (scenes/{id}.md). |
+| `seq` | integer | spine | Reading order. Scenes are sorted by seq. |
+| `title` | free_text | spine | Scene title — evocative, used for reference. |
 | `part` | integer | architecture | Which act/part this scene belongs to. |
-| `pov` | string | architecture | POV character's full name. Must match the character bible. |
-| `location` | string | map | Physical location — a short, reusable label. Normalized against `reference/locations.csv` if it exists. |
-| `timeline_day` | integer/string | map | Chronological position (day number, date, or relative marker). |
-| `time_of_day` | string | map | One of: `morning`, `afternoon`, `evening`, `night`, `dawn`, `dusk`. |
-| `duration` | string | map | In-story duration (e.g., "2 hours", "30 minutes"). |
-| `type` | string | map | Narrative purpose. One of: `character`, `plot`, `world`, `action`, `transition`, `confrontation`, `dialogue`, `introspection`, `revelation`. |
-| `status` | string | all | Elaboration depth: `spine`, `architecture`, `mapped`, `briefed`, `drafted`, `polished`. |
+| `pov` | registry: characters.csv | architecture | POV character. Normalized against reference/characters.csv. |
+| `location` | registry: locations.csv | map | Physical location. Normalized against reference/locations.csv. |
+| `timeline_day` | integer | map | Chronological position (day number within the story). |
+| `time_of_day` | enum: afternoon, dawn, dusk, evening, morning, night | map | Time of day when the scene takes place. |
+| `duration` | free_text | map | In-story duration (e.g., "2 hours", "30 minutes"). |
+| `type` | enum: action, character, confrontation, dialogue, introspection, plot, revelation, transition, world | map | Narrative purpose of the scene. |
+| `status` | enum: architecture, briefed, drafted, mapped, polished, spine | all | Elaboration depth — tracks how far the scene has progressed through the pipeline. |
 | `word_count` | integer | draft | Actual word count (0 until drafted). |
 | `target_words` | integer | map | Target word count for the scene. |
 
 ### scene-intent.csv — narrative dynamics
 
-| Column | Type | Populated at | Description |
-|--------|------|-------------|-------------|
-| `id` | string | spine | Matches scenes.csv. |
-| `function` | string | spine | Why this scene exists — must be specific and testable. Not "advance the plot" but "she discovers he kept the letter." |
-| `action_sequel` | string | architecture | Action/sequel pattern (Swain): `action` (goal/conflict/outcome) or `sequel` (reaction/dilemma/decision). |
-| `emotional_arc` | string | architecture | Emotional journey: start → end (e.g., "controlled competence to buried unease"). |
-| `value_at_stake` | string | architecture | The abstract value being tested. Normalized against `reference/values.csv` (McKee). |
-| `value_shift` | string | architecture | Polarity change: `+/-`, `-/+`, `+/++`, `-/--` (Story Grid). A scene that doesn't shift a value is a nonevent. |
-| `turning_point` | string | architecture | `action` or `revelation` — vary these to prevent monotony (Story Grid). |
-| `characters` | array | map | All characters present or referenced. Semicolon-separated. Normalized against `reference/characters.csv`. |
-| `on_stage` | array | map | Characters physically present (subset of characters). |
-| `mice_threads` | array | map | MICE thread operations: `+milieu:canyon` (open), `-inquiry:who-killed` (close). FILO nesting order (Kowal). |
+| Column | Constraint | Stage | Description |
+|--------|-----------|-------|-------------|
+| `id` | free_text | spine | Join key — matches scenes.csv. |
+| `function` | free_text | spine | Why this scene exists — must be specific and testable. |
+| `action_sequel` | enum: action, sequel | architecture | Action/sequel pattern (Swain): action = goal/conflict/outcome, sequel = reaction/dilemma/decision. |
+| `emotional_arc` | free_text | architecture | Emotional journey: start to end (e.g., "controlled competence to buried unease"). |
+| `value_at_stake` | registry: values.csv | architecture | The abstract value being tested. Normalized against reference/values.csv (McKee). |
+| `value_shift` | enum: +/+, +/++, +/-, -/+, -/-, -/-- | architecture | Polarity change (Story Grid). A scene that doesn't shift a value is a nonevent. |
+| `turning_point` | enum: action, revelation | architecture | What turns the scene — action (character does something) or revelation (new information). |
+| `characters` | registry: characters.csv (array) | map | All characters present or referenced. Normalized against reference/characters.csv. |
+| `on_stage` | registry: characters.csv (array) | map | Characters physically present (subset of characters). |
+| `mice_threads` | mice: mice-threads.csv | map | MICE thread operations: +type:name (open) or -type:name (close). FILO nesting order (Kowal). |
 
 ### scene-briefs.csv — drafting contracts
 
-| Column | Type | Populated at | Description |
-|--------|------|-------------|-------------|
-| `id` | string | brief | Matches scenes.csv. |
-| `goal` | string | brief | POV character's concrete objective entering the scene (Swain). |
-| `conflict` | string | brief | What specifically opposes the goal. |
-| `outcome` | string | brief | How the scene ends: `yes`, `no`, `yes-but`, `no-and` (Weiland). |
-| `crisis` | string | brief | The dilemma: best bad choice or irreconcilable goods (Story Grid Five Commandments). |
-| `decision` | string | brief | What the character actively chooses. |
-| `knowledge_in` | array | brief | Facts the POV character knows entering. Semicolon-separated. Must use **exact wording** matching prior scenes' `knowledge_out`. |
-| `knowledge_out` | array | brief | Facts the POV character knows leaving. Includes `knowledge_in` plus anything new learned. |
-| `key_actions` | array | brief | Concrete things that happen. Semicolon-separated. |
-| `key_dialogue` | array | brief | Specific lines or exchanges that must appear. |
-| `emotions` | array | brief | Emotional beats in sequence. |
-| `motifs` | array | brief | Recurring images/symbols deployed. |
-| `continuity_deps` | array | brief | Scene IDs this scene depends on (for parallel drafting). |
-| `has_overflow` | boolean | brief | Whether `briefs/{id}.md` exists for extended detail. |
+| Column | Constraint | Stage | Description |
+|--------|-----------|-------|-------------|
+| `id` | free_text | brief | Join key — matches scenes.csv. |
+| `goal` | free_text | brief | POV character's concrete objective entering the scene (Swain). |
+| `conflict` | free_text | brief | What specifically opposes the goal. |
+| `outcome` | enum: no, no-and, yes, yes-but | brief | How the scene ends for the POV character (Weiland). |
+| `crisis` | free_text | brief | The dilemma: best bad choice or irreconcilable goods (Story Grid). |
+| `decision` | free_text | brief | What the character actively chooses in response to the crisis. |
+| `knowledge_in` | free_text | brief | Facts the POV character knows entering. Must use exact wording matching prior knowledge_out. |
+| `knowledge_out` | free_text | brief | Facts the POV character knows leaving. Includes knowledge_in plus anything new learned. |
+| `key_actions` | free_text | brief | Concrete things that happen in this scene. |
+| `key_dialogue` | free_text | brief | Specific lines or exchanges that must appear. |
+| `emotions` | free_text | brief | Emotional beats in sequence as they occur through the scene. |
+| `motifs` | registry: motif-taxonomy.csv (array) | brief | Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv. |
+| `continuity_deps` | free_text | brief | Scene IDs this scene depends on (for parallel drafting). |
+| `has_overflow` | boolean | brief | Whether briefs/{id}.md exists for extended detail. |
 
 ## Elaboration Stages
 
@@ -98,14 +126,23 @@ The `status` field tracks how deeply a scene has been elaborated:
 
 ## Validation
 
-Run `./storyforge validate` to check structural integrity:
+Run `./storyforge validate` to check both structural integrity and schema compliance:
 
+**Structural checks:**
 - **Identity:** Every ID in intent/briefs exists in scenes.csv
 - **Completeness:** Required columns for the scene's status are populated
 - **Timeline:** No backwards jumps without explicit markers
 - **Knowledge flow:** knowledge_in references match prior scenes' knowledge_out
 - **Thread management:** MICE threads nest in valid FILO order
 - **Pacing:** No flat polarity stretches (3+ scenes); action/sequel rhythm varied; turning point types varied
+
+**Schema checks:**
+- **Enum values:** Constrained columns contain only allowed values
+- **Registry references:** Character, location, value, motif, and MICE thread names resolve against their registry CSVs
+- **Integers:** Numeric columns contain valid integers
+- **MICE format:** Thread operations match `+/-type:name` format with valid types
+
+Use `--no-schema` to skip schema validation. Use `--json` for machine-readable output.
 
 ## Scoring
 

@@ -46,51 +46,176 @@ VALID_TURNING_POINTS = frozenset({'action', 'revelation'})
 # Constraint types:
 #   enum      — value must be in a fixed set
 #   registry  — each semicolon-separated value must exist in a registry CSV
+#   mice      — MICE thread format (+/-type:name) with registry validation
 #   integer   — must parse as int
 #   boolean   — must be true, false, or empty
 #   free_text — no value constraint
+#
+# Each entry also carries:
+#   file        — which CSV file owns this column
+#   stage       — elaboration stage that populates it
+#   description — human-readable description
 
 COLUMN_SCHEMA = {
     # scenes.csv
-    'id':           {'type': 'free_text'},
-    'seq':          {'type': 'integer'},
-    'title':        {'type': 'free_text'},
-    'part':         {'type': 'integer'},
-    'pov':          {'type': 'registry', 'registry': 'characters.csv', 'array': False},
-    'location':     {'type': 'registry', 'registry': 'locations.csv', 'array': False},
-    'timeline_day': {'type': 'integer'},
-    'time_of_day':  {'type': 'enum', 'values': VALID_TIMES},
-    'duration':     {'type': 'free_text'},
-    'type':         {'type': 'enum', 'values': VALID_TYPES},
-    'status':       {'type': 'enum', 'values': VALID_STATUSES},
-    'word_count':   {'type': 'integer'},
-    'target_words': {'type': 'integer'},
+    'id': {
+        'type': 'free_text', 'file': 'scenes.csv', 'stage': 'spine',
+        'description': 'Unique scene identifier — a descriptive slug (e.g., hidden-canyon). Also the filename (scenes/{id}.md).',
+    },
+    'seq': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'spine',
+        'description': 'Reading order. Scenes are sorted by seq.',
+    },
+    'title': {
+        'type': 'free_text', 'file': 'scenes.csv', 'stage': 'spine',
+        'description': 'Scene title — evocative, used for reference.',
+    },
+    'part': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'architecture',
+        'description': 'Which act/part this scene belongs to.',
+    },
+    'pov': {
+        'type': 'registry', 'registry': 'characters.csv', 'array': False,
+        'file': 'scenes.csv', 'stage': 'architecture',
+        'description': 'POV character. Normalized against reference/characters.csv.',
+    },
+    'location': {
+        'type': 'registry', 'registry': 'locations.csv', 'array': False,
+        'file': 'scenes.csv', 'stage': 'map',
+        'description': 'Physical location. Normalized against reference/locations.csv.',
+    },
+    'timeline_day': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'map',
+        'description': 'Chronological position (day number within the story).',
+    },
+    'time_of_day': {
+        'type': 'enum', 'values': VALID_TIMES,
+        'file': 'scenes.csv', 'stage': 'map',
+        'description': 'Time of day when the scene takes place.',
+    },
+    'duration': {
+        'type': 'free_text', 'file': 'scenes.csv', 'stage': 'map',
+        'description': 'In-story duration (e.g., "2 hours", "30 minutes").',
+    },
+    'type': {
+        'type': 'enum', 'values': VALID_TYPES,
+        'file': 'scenes.csv', 'stage': 'map',
+        'description': 'Narrative purpose of the scene.',
+    },
+    'status': {
+        'type': 'enum', 'values': VALID_STATUSES,
+        'file': 'scenes.csv', 'stage': 'all',
+        'description': 'Elaboration depth — tracks how far the scene has progressed through the pipeline.',
+    },
+    'word_count': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'draft',
+        'description': 'Actual word count (0 until drafted).',
+    },
+    'target_words': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'map',
+        'description': 'Target word count for the scene.',
+    },
 
     # scene-intent.csv
-    'function':       {'type': 'free_text'},
-    'action_sequel':  {'type': 'enum', 'values': VALID_ACTION_SEQUEL},
-    'emotional_arc':  {'type': 'free_text'},
-    'value_at_stake': {'type': 'registry', 'registry': 'values.csv', 'array': False},
-    'value_shift':    {'type': 'enum', 'values': VALID_VALUE_SHIFTS},
-    'turning_point':  {'type': 'enum', 'values': VALID_TURNING_POINTS},
-    'characters':     {'type': 'registry', 'registry': 'characters.csv', 'array': True},
-    'on_stage':       {'type': 'registry', 'registry': 'characters.csv', 'array': True},
-    'mice_threads':   {'type': 'mice', 'registry': 'mice-threads.csv'},
+    'function': {
+        'type': 'free_text', 'file': 'scene-intent.csv', 'stage': 'spine',
+        'description': 'Why this scene exists — must be specific and testable.',
+    },
+    'action_sequel': {
+        'type': 'enum', 'values': VALID_ACTION_SEQUEL,
+        'file': 'scene-intent.csv', 'stage': 'architecture',
+        'description': 'Action/sequel pattern (Swain): action = goal/conflict/outcome, sequel = reaction/dilemma/decision.',
+    },
+    'emotional_arc': {
+        'type': 'free_text', 'file': 'scene-intent.csv', 'stage': 'architecture',
+        'description': 'Emotional journey: start to end (e.g., "controlled competence to buried unease").',
+    },
+    'value_at_stake': {
+        'type': 'registry', 'registry': 'values.csv', 'array': False,
+        'file': 'scene-intent.csv', 'stage': 'architecture',
+        'description': 'The abstract value being tested. Normalized against reference/values.csv (McKee).',
+    },
+    'value_shift': {
+        'type': 'enum', 'values': VALID_VALUE_SHIFTS,
+        'file': 'scene-intent.csv', 'stage': 'architecture',
+        'description': 'Polarity change (Story Grid). A scene that doesn\'t shift a value is a nonevent.',
+    },
+    'turning_point': {
+        'type': 'enum', 'values': VALID_TURNING_POINTS,
+        'file': 'scene-intent.csv', 'stage': 'architecture',
+        'description': 'What turns the scene — action (character does something) or revelation (new information).',
+    },
+    'characters': {
+        'type': 'registry', 'registry': 'characters.csv', 'array': True,
+        'file': 'scene-intent.csv', 'stage': 'map',
+        'description': 'All characters present or referenced. Normalized against reference/characters.csv.',
+    },
+    'on_stage': {
+        'type': 'registry', 'registry': 'characters.csv', 'array': True,
+        'file': 'scene-intent.csv', 'stage': 'map',
+        'description': 'Characters physically present (subset of characters).',
+    },
+    'mice_threads': {
+        'type': 'mice', 'registry': 'mice-threads.csv',
+        'file': 'scene-intent.csv', 'stage': 'map',
+        'description': 'MICE thread operations: +type:name (open) or -type:name (close). FILO nesting order (Kowal).',
+    },
 
     # scene-briefs.csv
-    'goal':            {'type': 'free_text'},
-    'conflict':        {'type': 'free_text'},
-    'outcome':         {'type': 'enum', 'values': VALID_OUTCOMES},
-    'crisis':          {'type': 'free_text'},
-    'decision':        {'type': 'free_text'},
-    'knowledge_in':    {'type': 'free_text'},
-    'knowledge_out':   {'type': 'free_text'},
-    'key_actions':     {'type': 'free_text'},
-    'key_dialogue':    {'type': 'free_text'},
-    'emotions':        {'type': 'free_text'},
-    'motifs':          {'type': 'registry', 'registry': 'motif-taxonomy.csv', 'array': True},
-    'continuity_deps': {'type': 'free_text'},
-    'has_overflow':    {'type': 'boolean'},
+    'goal': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'POV character\'s concrete objective entering the scene (Swain).',
+    },
+    'conflict': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'What specifically opposes the goal.',
+    },
+    'outcome': {
+        'type': 'enum', 'values': VALID_OUTCOMES,
+        'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'How the scene ends for the POV character (Weiland).',
+    },
+    'crisis': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'The dilemma: best bad choice or irreconcilable goods (Story Grid).',
+    },
+    'decision': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'What the character actively chooses in response to the crisis.',
+    },
+    'knowledge_in': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Facts the POV character knows entering. Must use exact wording matching prior knowledge_out.',
+    },
+    'knowledge_out': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Facts the POV character knows leaving. Includes knowledge_in plus anything new learned.',
+    },
+    'key_actions': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Concrete things that happen in this scene.',
+    },
+    'key_dialogue': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Specific lines or exchanges that must appear.',
+    },
+    'emotions': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Emotional beats in sequence as they occur through the scene.',
+    },
+    'motifs': {
+        'type': 'registry', 'registry': 'motif-taxonomy.csv', 'array': True,
+        'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv.',
+    },
+    'continuity_deps': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Scene IDs this scene depends on (for parallel drafting).',
+    },
+    'has_overflow': {
+        'type': 'boolean', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Whether briefs/{id}.md exists for extended detail.',
+    },
 }
 
 
@@ -317,7 +442,6 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                         passed += 1
                     else:
                         failed += 1
-                        reasons = [p['reason'] for p in problems]
                         errors.append({
                             'file': filename,
                             'row': scene_id,
@@ -333,3 +457,57 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
         'skipped': skipped,
         'errors': errors,
     }
+
+
+# ============================================================================
+# Schema dump — generate human-readable reference
+# ============================================================================
+
+def dump_schema_markdown() -> str:
+    """Generate a Markdown column reference from COLUMN_SCHEMA.
+
+    Groups columns by file and renders each as a table with constraint
+    info and description. This is the canonical reference — scene-schema.md
+    should be generated from this, not maintained by hand.
+    """
+    from .elaborate import _FILE_MAP
+
+    file_labels = {
+        'scenes.csv': 'scenes.csv — structural identity',
+        'scene-intent.csv': 'scene-intent.csv — narrative dynamics',
+        'scene-briefs.csv': 'scene-briefs.csv — drafting contracts',
+    }
+
+    lines: list[str] = []
+
+    for filename, columns in _FILE_MAP.items():
+        label = file_labels.get(filename, filename)
+        lines.append(f'### {label}')
+        lines.append('')
+        lines.append('| Column | Constraint | Stage | Description |')
+        lines.append('|--------|-----------|-------|-------------|')
+
+        for col in columns:
+            schema = COLUMN_SCHEMA.get(col, {})
+            constraint = schema.get('type', '?')
+            stage = schema.get('stage', '?')
+            desc = schema.get('description', '')
+
+            # Build constraint display
+            if constraint == 'enum':
+                values = ', '.join(sorted(schema.get('values', [])))
+                constraint_str = f'enum: {values}'
+            elif constraint == 'registry':
+                reg = schema.get('registry', '?')
+                arr = ' (array)' if schema.get('array') else ''
+                constraint_str = f'registry: {reg}{arr}'
+            elif constraint == 'mice':
+                constraint_str = f'mice: {schema.get("registry", "?")}'
+            else:
+                constraint_str = constraint
+
+            lines.append(f'| `{col}` | {constraint_str} | {stage} | {desc} |')
+
+        lines.append('')
+
+    return '\n'.join(lines)
