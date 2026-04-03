@@ -245,3 +245,67 @@ assert_equals "1
 seq" "$RESULT" "validate_schema: catches non-integer seq"
 
 rm -rf "$SCHEMA_TMP"
+
+# ============================================================================
+# MICE thread validation
+# ============================================================================
+
+echo "--- mice: normalization ---"
+
+MICE_CSV="${FIXTURE_DIR}/reference/mice-threads.csv"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+from storyforge.enrich import load_mice_registry, normalize_mice_threads
+alias_map, type_map = load_mice_registry('${MICE_CSV}')
+# Alias resolves to canonical id
+print(normalize_mice_threads('+inquiry:the map anomaly', alias_map, type_map))
+# Type gets corrected from registry
+print(normalize_mice_threads('+milieu:map-anomaly', alias_map, type_map))
+# Multiple entries
+print(normalize_mice_threads('+inquiry:the map anomaly;-milieu:the reaches', alias_map, type_map))
+# Unknown name passes through
+print(normalize_mice_threads('+event:unknown-thing', alias_map, type_map))
+" 2>/dev/null)
+
+assert_equals "+inquiry:map-anomaly
++inquiry:map-anomaly
++inquiry:map-anomaly;-milieu:uncharted-reaches
++event:unknown-thing" "$RESULT" "mice: normalization resolves aliases and corrects types"
+
+echo "--- mice: schema validation ---"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+from storyforge.schema import _check_mice
+from storyforge.enrich import load_mice_registry
+alias_map, type_map = load_mice_registry('${MICE_CSV}')
+# Valid entry
+print(len(_check_mice('+inquiry:map-anomaly', alias_map, type_map)))
+# Bad format
+print(len(_check_mice('no-prefix:name', alias_map, type_map)))
+# Bad type
+print(len(_check_mice('+quest:map-anomaly', alias_map, type_map)))
+# Unknown name
+print(len(_check_mice('+inquiry:unknown-thread', alias_map, type_map)))
+# Wrong type
+print(len(_check_mice('+milieu:map-anomaly', alias_map, type_map)))
+" 2>/dev/null)
+
+assert_equals "0
+1
+1
+1
+1" "$RESULT" "mice: schema catches format, type, name, and type-mismatch errors"
+
+echo "--- mice: empty and missing registry ---"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+from storyforge.enrich import load_mice_registry, normalize_mice_threads
+# Missing file
+alias_map, type_map = load_mice_registry('/nonexistent/mice-threads.csv')
+print(len(alias_map))
+# Normalization with empty map passes through
+print(normalize_mice_threads('+inquiry:something', alias_map, type_map))
+" 2>/dev/null)
+
+assert_equals "0
++inquiry:something" "$RESULT" "mice: missing registry returns empty, normalization passes through"

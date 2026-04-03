@@ -5,9 +5,10 @@ and provides a fast validation function that checks all non-empty cells.
 """
 
 import os
+import re
 
 from .elaborate import _read_csv, _FILE_MAP
-from .enrich import load_alias_map
+from .enrich import load_alias_map, load_mice_registry, VALID_MICE_TYPES
 
 
 # ============================================================================
@@ -74,7 +75,7 @@ COLUMN_SCHEMA = {
     'turning_point':  {'type': 'enum', 'values': VALID_TURNING_POINTS},
     'characters':     {'type': 'registry', 'registry': 'characters.csv', 'array': True},
     'on_stage':       {'type': 'registry', 'registry': 'characters.csv', 'array': True},
-    'mice_threads':   {'type': 'free_text'},
+    'mice_threads':   {'type': 'mice', 'registry': 'mice-threads.csv'},
 
     # scene-briefs.csv
     'goal':            {'type': 'free_text'},
@@ -116,6 +117,53 @@ def _check_boolean(value: str) -> bool:
     return value.strip().lower() in ('true', 'false', '')
 
 
+def _check_mice(value: str, alias_map: dict, type_map: dict) -> list[dict]:
+    """Check mice_threads entries for format, type, and name validity.
+
+    Returns a list of error dicts, one per bad entry.  Each has keys
+    'entry' (the raw text) and 'reason' (what's wrong).
+    """
+    problems = []
+    for entry in value.split(';'):
+        entry = entry.strip()
+        if not entry:
+            continue
+
+        # Check format: must be +type:name or -type:name
+        if len(entry) < 2 or entry[0] not in ('+', '-') or ':' not in entry[1:]:
+            problems.append({'entry': entry, 'reason': 'invalid format (expected +type:name or -type:name)'})
+            continue
+
+        rest = entry[1:]
+        type_part, _, name_part = rest.partition(':')
+        type_part = type_part.strip().lower()
+        name_part = name_part.strip()
+
+        if not type_part or not name_part:
+            problems.append({'entry': entry, 'reason': 'missing type or name'})
+            continue
+
+        if type_part not in VALID_MICE_TYPES:
+            problems.append({'entry': entry, 'reason': f'invalid type "{type_part}" (expected: milieu, inquiry, character, event)'})
+            continue
+
+        # Check name against registry (if available)
+        if alias_map and name_part.lower() not in alias_map:
+            problems.append({'entry': entry, 'reason': f'thread name "{name_part}" not in mice-threads.csv'})
+            continue
+
+        # Check type matches registry (if available)
+        if alias_map and type_map:
+            canonical = alias_map.get(name_part.lower())
+            if canonical and canonical in type_map:
+                expected_type = type_map[canonical]
+                if type_part != expected_type:
+                    problems.append({'entry': entry, 'reason': f'type "{type_part}" doesn\'t match registered type "{expected_type}"'})
+                    continue
+
+    return problems
+
+
 def _check_registry(value: str, alias_map: dict, is_array: bool) -> list[str]:
     """Check registry values. Returns list of unresolved entries."""
     if not alias_map:
@@ -148,6 +196,8 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
     """
     # Load registry alias maps if project_dir provided
     registries: dict[str, dict] = {}
+    mice_alias: dict[str, str] = {}
+    mice_type_map: dict[str, str] = {}
     if project_dir:
         reg_dir = os.path.join(project_dir, 'reference')
         for col_schema in COLUMN_SCHEMA.values():
@@ -156,6 +206,12 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                 if csv_name not in registries:
                     path = os.path.join(reg_dir, csv_name)
                     registries[csv_name] = load_alias_map(path)
+            elif col_schema['type'] == 'mice':
+                csv_name = col_schema['registry']
+                if csv_name not in registries:
+                    path = os.path.join(reg_dir, csv_name)
+                    mice_alias, mice_type_map = load_mice_registry(path)
+                    registries[csv_name] = mice_alias
 
     passed = 0
     failed = 0
@@ -253,6 +309,22 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                             'constraint': 'registry',
                             'registry': csv_name,
                             'unresolved': bad,
+                        })
+
+                elif constraint == 'mice':
+                    problems = _check_mice(value, mice_alias, mice_type_map)
+                    if not problems:
+                        passed += 1
+                    else:
+                        failed += 1
+                        reasons = [p['reason'] for p in problems]
+                        errors.append({
+                            'file': filename,
+                            'row': scene_id,
+                            'column': col,
+                            'value': value,
+                            'constraint': 'mice',
+                            'problems': problems,
                         })
 
     return {

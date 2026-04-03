@@ -227,6 +227,129 @@ def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
     return ';'.join(result)
 
 
+# ============================================================================
+# MICE Thread Normalization
+# ============================================================================
+
+#: Valid MICE thread types
+VALID_MICE_TYPES = frozenset({'milieu', 'inquiry', 'character', 'event'})
+
+
+def load_mice_registry(csv_file: str) -> tuple[dict[str, str], dict[str, str]]:
+    """Load MICE thread registry from a CSV with id|name|type|aliases columns.
+
+    Returns two dicts:
+      - alias_map: lowercased name/alias → canonical id (like load_alias_map)
+      - type_map: canonical id → registered type (milieu/inquiry/character/event)
+    """
+    if not csv_file or not os.path.isfile(csv_file):
+        return {}, {}
+
+    header, rows = _read_csv_header_and_rows(csv_file)
+    if not header:
+        return {}, {}
+
+    try:
+        name_idx = header.index('name')
+    except ValueError:
+        return {}, {}
+
+    try:
+        id_idx = header.index('id')
+    except ValueError:
+        id_idx = None
+
+    try:
+        type_idx = header.index('type')
+    except ValueError:
+        type_idx = None
+
+    try:
+        alias_idx = header.index('aliases')
+    except ValueError:
+        alias_idx = None
+
+    alias_map: dict[str, str] = {}
+    type_map: dict[str, str] = {}
+
+    for row in rows:
+        if len(row) <= name_idx:
+            continue
+        name = row[name_idx].strip()
+        if not name:
+            continue
+
+        if id_idx is not None and len(row) > id_idx and row[id_idx].strip():
+            canonical = row[id_idx].strip()
+        else:
+            canonical = name
+
+        alias_map[name.lower()] = canonical
+        alias_map[canonical.lower()] = canonical
+
+        if type_idx is not None and len(row) > type_idx:
+            type_map[canonical] = row[type_idx].strip().lower()
+
+        if alias_idx is not None and len(row) > alias_idx and row[alias_idx]:
+            for alias in row[alias_idx].split(';'):
+                alias = alias.strip()
+                if alias:
+                    alias_map[alias.lower()] = canonical
+
+    return alias_map, type_map
+
+
+def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
+                           type_map: dict[str, str] | None = None) -> str:
+    """Normalize a semicolon-separated mice_threads value.
+
+    Each entry should be ``{+|-}{type}:{name}``.  The name portion is
+    resolved against *alias_map*.  If *type_map* is provided and the
+    resolved name has a registered type, the type in the entry is
+    corrected to match.
+
+    Entries that don't match the expected format pass through unchanged.
+
+    Args:
+        mice_string: Raw mice_threads value (semicolon-separated).
+        alias_map: Name/alias → canonical id mapping.
+        type_map: Optional canonical id → registered type mapping.
+
+    Returns:
+        Normalized semicolon-separated string.
+    """
+    if not mice_string or not alias_map:
+        return mice_string or ''
+
+    result = []
+    for entry in mice_string.split(';'):
+        entry = entry.strip()
+        if not entry:
+            continue
+
+        # Parse +type:name or -type:name
+        if len(entry) > 1 and entry[0] in ('+', '-') and ':' in entry[1:]:
+            prefix = entry[0]
+            rest = entry[1:]
+            type_part, _, name_part = rest.partition(':')
+            type_part = type_part.strip().lower()
+            name_part = name_part.strip()
+
+            # Normalize the name
+            canonical = alias_map.get(name_part.lower(), name_part)
+
+            # Correct the type if registry has one
+            if type_map and canonical in type_map:
+                type_part = type_map[canonical]
+
+            result.append(f'{prefix}{type_part}:{canonical}')
+        else:
+            # Doesn't match format — pass through
+            result.append(entry)
+
+    return ';'.join(result)
+
+
 # Fields that hold character references (semicolon-separated or single)
 _CHAR_FIELDS = ('pov', 'characters', 'on_stage')
 # Fields that hold location references
@@ -240,26 +363,33 @@ _VALUE_FIELDS = ('value_at_stake',)
 def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
     """Load alias maps from all registry CSVs in a project.
 
-    Returns a dict with keys 'characters', 'locations', 'motifs', 'values'
-    mapping to their respective alias dicts.  Missing registry files produce
-    empty dicts.
+    Returns a dict with keys 'characters', 'locations', 'motifs', 'values',
+    'mice_threads', and 'mice_types' mapping to their respective dicts.
+    Missing registry files produce empty dicts.
+
+    The 'mice_threads' key holds a name→id alias map.  The 'mice_types' key
+    holds an id→type map for MICE type correction.
     """
     ref_dir = os.path.join(project_dir, 'reference')
+    mice_alias, mice_types = load_mice_registry(
+        os.path.join(ref_dir, 'mice-threads.csv'))
     return {
         'characters': load_alias_map(os.path.join(ref_dir, 'characters.csv')),
         'locations': load_alias_map(os.path.join(ref_dir, 'locations.csv')),
         'motifs': load_alias_map(os.path.join(ref_dir, 'motif-taxonomy.csv')),
         'values': load_alias_map(os.path.join(ref_dir, 'values.csv')),
+        'mice_threads': mice_alias,
+        'mice_types': mice_types,
     }
 
 
 def normalize_fields(result: dict[str, str],
                      alias_maps: dict[str, dict[str, str]]) -> dict[str, str]:
-    """Normalize character, location, motif, and value fields in a result dict.
+    """Normalize all registry-backed fields in a result dict.
 
     Applies alias maps to resolve free-text names to canonical IDs.
     Works with any dict that has scene-CSV field names (pov, characters,
-    on_stage, location, motifs, value_at_stake).
+    on_stage, location, motifs, value_at_stake, mice_threads).
 
     Args:
         result: Parsed result dict (from any extraction, enrichment, or
@@ -276,6 +406,8 @@ def normalize_fields(result: dict[str, str],
     loc_map = alias_maps.get('locations', {})
     motif_map = alias_maps.get('motifs', {})
     value_map = alias_maps.get('values', {})
+    mice_map = alias_maps.get('mice_threads', {})
+    mice_types = alias_maps.get('mice_types', {})
 
     for field in _CHAR_FIELDS:
         if field in result and char_map:
@@ -289,6 +421,9 @@ def normalize_fields(result: dict[str, str],
     for field in _VALUE_FIELDS:
         if field in result and value_map:
             result[field] = normalize_aliases(value_map, result[field])
+    if 'mice_threads' in result and mice_map:
+        result['mice_threads'] = normalize_mice_threads(
+            result['mice_threads'], mice_map, mice_types)
 
     return result
 

@@ -110,6 +110,9 @@ if schema is not None:
                     print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{e[\"value\"]}\" — expected integer')
                 elif e['constraint'] == 'boolean':
                     print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{e[\"value\"]}\" — expected true/false')
+                elif e['constraint'] == 'mice':
+                    for p in e.get('problems', []):
+                        print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{p[\"entry\"]}\" — {p[\"reason\"]}')
 "
 fi
 
