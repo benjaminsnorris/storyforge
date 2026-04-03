@@ -1701,75 +1701,184 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
 (function renderThreadWeave() {
     const container = document.getElementById('thread-weave');
-    const threadFirst = {};
-    const threadScenes = {};
 
-    INTENTS.forEach(intent => {
-        const mice = (intent.mice_threads || '').split(';').map(t => t.trim()).filter(Boolean);
-        const s = sceneById[intent.id];
+    // MICE type color palette
+    const MICE_COLORS = {
+        milieu:    '#2dd4bf', // teal/cyan
+        inquiry:   '#f59e0b', // amber/gold
+        character: '#a78bfa', // purple
+        event:     '#f87171'  // coral/red
+    };
+    function miceColor(type) { return MICE_COLORS[type] || 'var(--text-dim)'; }
+
+    // Parse all MICE thread entries across scenes
+    // Each entry: "+type:name" (open) or "-type:name" (close)
+    var threads = {}; // keyed by thread name
+
+    INTENTS.forEach(function(intent) {
+        var mice = (intent.mice_threads || '').split(';').map(function(t) { return t.trim(); }).filter(Boolean);
+        var s = sceneById[intent.id];
         if (!s) return;
-        const seq = +s.seq;
-        mice.forEach(raw => {
-            // Strip +/- prefix and type prefix (e.g., "+inquiry:who-killed" -> "who-killed")
-            const stripped = raw.replace(/^[+-]/, '');
-            const colonIdx = stripped.indexOf(':');
-            const t = colonIdx >= 0 ? stripped.substring(colonIdx + 1) : stripped;
-            if (!t) return;
-            if (!threadFirst[t]) threadFirst[t] = seq;
-            if (!threadScenes[t]) threadScenes[t] = [];
-            // Avoid duplicate entries for the same scene
-            if (!threadScenes[t].some(sc => sc.id === intent.id)) {
-                threadScenes[t].push({ id: intent.id, seq });
+        var seq = +s.seq;
+
+        mice.forEach(function(raw) {
+            var action = null;
+            var rest = raw;
+            if (raw.charAt(0) === '+') { action = 'open'; rest = raw.substring(1); }
+            else if (raw.charAt(0) === '-') { action = 'close'; rest = raw.substring(1); }
+            else { return; } // skip entries without +/- prefix
+
+            var colonIdx = rest.indexOf(':');
+            var type = '';
+            var name = rest;
+            if (colonIdx >= 0) {
+                type = rest.substring(0, colonIdx).toLowerCase();
+                name = rest.substring(colonIdx + 1);
+            }
+            if (!name) return;
+
+            if (!threads[name]) {
+                threads[name] = { type: type, openSeq: null, openId: null, closeSeq: null, closeId: null };
+            }
+            // Capture type from first occurrence
+            if (type && !threads[name].type) threads[name].type = type;
+
+            if (action === 'open' && threads[name].openSeq === null) {
+                threads[name].openSeq = seq;
+                threads[name].openId = intent.id;
+            }
+            if (action === 'close' && threads[name].closeSeq === null) {
+                threads[name].closeSeq = seq;
+                threads[name].closeId = intent.id;
             }
         });
     });
 
-    const threadList = Object.keys(threadFirst).sort((a, b) => threadFirst[a] - threadFirst[b]);
+    // Build sorted list — by opening sequence number (earliest first)
+    var threadNames = Object.keys(threads);
+    threadNames.sort(function(a, b) {
+        var oa = threads[a].openSeq !== null ? threads[a].openSeq : 9999;
+        var ob = threads[b].openSeq !== null ? threads[b].openSeq : 9999;
+        return oa - ob;
+    });
 
-    const ROW_H = 24;
-    const W = container.clientWidth - 24 || 1100;
-    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
-    const H = threadList.length * ROW_H + 20;
-    const svg = makeSvg(container, W, H);
+    // Determine last scene seq for unclosed threads
+    var lastSeq = 0;
+    sortedScenes.forEach(function(s) { var sq = +s.seq; if (sq > lastSeq) lastSeq = sq; });
 
-    threadList.forEach((thread, ri) => {
-        const y = ri * ROW_H + 12;
-        const label = svgEl('text', {
+    var ROW_H = 28;
+    var LEGEND_H = 30;
+    var W = container.clientWidth - 24 || 1100;
+    var CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
+    var H = threadNames.length * ROW_H + 20 + LEGEND_H;
+    var svg = makeSvg(container, W, H);
+
+    // Draw legend at top
+    var legendTypes = ['milieu', 'inquiry', 'character', 'event'];
+    var legendX = GRID_LABEL_W;
+    legendTypes.forEach(function(lt) {
+        // Color swatch
+        svg.appendChild(svgEl('rect', {
+            x: legendX, y: 4, width: 12, height: 12, rx: 2,
+            fill: MICE_COLORS[lt], opacity: 0.9
+        }));
+        // Label
+        var ltLabel = svgEl('text', {
+            x: legendX + 16, y: 14,
+            'font-family': 'var(--font-mono)', 'font-size': 10,
+            fill: 'var(--text-dim)'
+        });
+        ltLabel.textContent = lt.charAt(0).toUpperCase() + lt.slice(1);
+        svg.appendChild(ltLabel);
+        legendX += lt.length * 7 + 32;
+    });
+
+    // Unclosed indicator in legend
+    svg.appendChild(svgEl('line', {
+        x1: legendX, y1: 10, x2: legendX + 20, y2: 10,
+        stroke: 'var(--text-dim)', 'stroke-width': 1.5,
+        'stroke-dasharray': '4,3'
+    }));
+    var uncLabel = svgEl('text', {
+        x: legendX + 24, y: 14,
+        'font-family': 'var(--font-mono)', 'font-size': 10,
+        fill: 'var(--text-dim)'
+    });
+    uncLabel.textContent = 'Unclosed';
+    svg.appendChild(uncLabel);
+
+    var topOffset = LEGEND_H;
+
+    threadNames.forEach(function(name, ri) {
+        var td = threads[name];
+        var color = miceColor(td.type);
+        var y = topOffset + ri * ROW_H + ROW_H / 2;
+
+        // Thread name label with type prefix
+        var labelText = displayName(name);
+        var typeTag = td.type ? td.type.charAt(0).toUpperCase() + ' ' : '';
+        var fullLabel = typeTag + labelText;
+        var label = svgEl('text', {
             x: GRID_LABEL_W - 8, y: y + 4,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
-            'font-size': 10, fill: 'var(--text-dim)'
+            'font-size': 10, fill: color
         });
-        var threadName = displayName(thread);
-        label.textContent = threadName.length > GRID_LABEL_TRUNC ? threadName.substring(0, GRID_LABEL_TRUNC - 2) + '..' : threadName;
-        if (threadName.length > GRID_LABEL_TRUNC) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = threadName; label.appendChild(t); }
+        var truncLabel = fullLabel.length > GRID_LABEL_TRUNC ? fullLabel.substring(0, GRID_LABEL_TRUNC - 2) + '..' : fullLabel;
+        label.textContent = truncLabel;
+        if (fullLabel.length > GRID_LABEL_TRUNC) {
+            var tt = document.createElementNS(SVG_NS, 'title');
+            tt.textContent = (td.type || 'unknown') + ': ' + labelText;
+            label.appendChild(tt);
+        }
         svg.appendChild(label);
 
-        // Sort scenes for this thread
-        const scenes = (threadScenes[thread] || []).sort((a, b) => a.seq - b.seq);
+        // Compute x positions
+        var openSeq = td.openSeq !== null ? td.openSeq : null;
+        var closeSeq = td.closeSeq !== null ? td.closeSeq : null;
+        var unclosed = (openSeq !== null && closeSeq === null);
 
-        // Draw connecting lines
-        for (let i = 1; i < scenes.length; i++) {
-            const x1 = sceneX(scenes[i-1].seq - 1, CHART_W);
-            const x2 = sceneX(scenes[i].seq - 1, CHART_W);
-            const gap = scenes[i].seq - scenes[i-1].seq;
+        var effectiveCloseSeq = closeSeq !== null ? closeSeq : lastSeq;
+
+        if (openSeq !== null) {
+            var x1 = sceneX(openSeq - 1, CHART_W);
+            var x2 = sceneX(effectiveCloseSeq - 1, CHART_W);
+
+            // Draw the span bar
             svg.appendChild(svgEl('line', {
-                x1, y1: y, x2, y2: y,
-                stroke: 'var(--teal)', 'stroke-width': 1.5,
-                opacity: 0.4,
-                'stroke-dasharray': gap > 2 ? '3,3' : 'none'
+                x1: x1, y1: y, x2: x2, y2: y,
+                stroke: color, 'stroke-width': 3,
+                opacity: 0.5,
+                'stroke-dasharray': unclosed ? '6,4' : 'none'
             }));
-        }
 
-        // Draw dots
-        scenes.forEach(sc => {
-            const cx = sceneX(sc.seq - 1, CHART_W);
-            const dot = svgEl('circle', {
-                cx, cy: y, r: 3.5,
-                fill: 'var(--teal)', opacity: 0.8
+            // Open marker: filled circle
+            var openMarker = svgEl('circle', {
+                cx: x1, cy: y, r: 5,
+                fill: color, opacity: 0.9, stroke: 'var(--bg)', 'stroke-width': 1
             });
-            attachSceneHandlers(dot, sc.id);
-            svg.appendChild(dot);
-        });
+            attachSceneHandlers(openMarker, td.openId);
+            svg.appendChild(openMarker);
+
+            // Close marker: filled square (or dashed-end indicator for unclosed)
+            if (closeSeq !== null) {
+                var closeMarker = svgEl('rect', {
+                    x: x2 - 4, y: y - 4, width: 8, height: 8, rx: 1,
+                    fill: color, opacity: 0.9, stroke: 'var(--bg)', 'stroke-width': 1
+                });
+                attachSceneHandlers(closeMarker, td.closeId);
+                svg.appendChild(closeMarker);
+            } else {
+                // Unclosed: draw an open-ended arrow/chevron
+                svg.appendChild(svgEl('line', {
+                    x1: x2 - 4, y1: y - 4, x2: x2 + 2, y2: y,
+                    stroke: color, 'stroke-width': 2, opacity: 0.7
+                }));
+                svg.appendChild(svgEl('line', {
+                    x1: x2 - 4, y1: y + 4, x2: x2 + 2, y2: y,
+                    stroke: color, 'stroke-width': 2, opacity: 0.7
+                }));
+            }
+        }
     });
 })();
 
