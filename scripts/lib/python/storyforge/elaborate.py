@@ -445,6 +445,22 @@ def _validate_threads(scenes_map, intent_map, checks):
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda sid: int(scenes_map[sid].get('seq', 0)))
 
+    # Pass 1: register all thread openings before checking closures
+    thread_registry = {}  # thread_name -> scene_id where it was opened
+    for sid in sorted_ids:
+        intent = intent_map.get(sid, {})
+        mice = intent.get('mice_threads', '').strip()
+        if not mice:
+            continue
+        for entry in mice.split(';'):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if entry.startswith('+'):
+                thread_name = entry[1:]
+                thread_registry[thread_name] = sid
+
+    # Pass 2: check closures and nesting against the populated registry
     open_threads = []  # stack of (thread_name, scene_id)
     for sid in sorted_ids:
         intent = intent_map.get(sid, {})
@@ -471,10 +487,18 @@ def _validate_threads(scenes_map, intent_map, checks):
                         scene_id=sid,
                     ))
                     open_threads = [(t, s) for t, s in open_threads if t != thread_name]
-                else:
+                elif thread_name not in thread_registry:
                     checks.append(_check(
                         'threads', 'mice-nesting', False,
                         f"Closing MICE thread '{thread_name}' in {sid} but it was never opened",
+                        scene_id=sid,
+                    ))
+                else:
+                    checks.append(_check(
+                        'threads', 'mice-nesting', False,
+                        f"Closing MICE thread '{thread_name}' in {sid} but it was "
+                        f"already closed or not properly tracked on the nesting stack "
+                        f"(opened in {thread_registry[thread_name]})",
                         scene_id=sid,
                     ))
 
@@ -507,11 +531,23 @@ def _validate_timeline(scenes_map, checks):
             continue
 
         if prev_day is not None and day < prev_day:
-            checks.append(_check(
-                'timeline', 'timeline-order', False,
-                f"Scene {sid} (day {day}) comes after {prev_id} (day {prev_day}) — backwards jump",
-                scene_id=sid,
-            ))
+            pov = scenes_map[sid].get('pov', '').strip()
+            prev_pov = scenes_map[prev_id].get('pov', '').strip()
+            if pov and prev_pov and pov != prev_pov:
+                # POV change with backwards jump = deliberate crosscut
+                checks.append(_check(
+                    'timeline', 'timeline-order', False,
+                    f"Scene {sid} (day {day}, POV {pov}) steps back from "
+                    f"{prev_id} (day {prev_day}, POV {prev_pov}) — crosscut",
+                    scene_id=sid,
+                    severity='advisory',
+                ))
+            else:
+                checks.append(_check(
+                    'timeline', 'timeline-order', False,
+                    f"Scene {sid} (day {day}) comes after {prev_id} (day {prev_day}) — backwards jump",
+                    scene_id=sid,
+                ))
 
         prev_day = day
         prev_id = sid
