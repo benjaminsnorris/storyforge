@@ -44,7 +44,7 @@ fi
 RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
 import sys, json, os
 from storyforge.elaborate import validate_structure
-from storyforge.schema import validate_schema
+from storyforge.schema import validate_schema, validate_knowledge_granularity
 
 ref_dir = '${REF_DIR}'
 project_dir = '${PROJECT_DIR}'
@@ -56,7 +56,12 @@ schema = None
 if not skip_schema:
     schema = validate_schema(ref_dir, project_dir)
 
-print(json.dumps({'structural': structural, 'schema': schema}))
+knowledge = None
+knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
+if os.path.isfile(knowledge_path):
+    knowledge = validate_knowledge_granularity(ref_dir, project_dir)
+
+print(json.dumps({'structural': structural, 'schema': schema, 'knowledge': knowledge}))
 ")
 
 if [[ "$JSON_OUTPUT" == true ]]; then
@@ -69,6 +74,7 @@ import sys, json
 combined = json.load(sys.stdin)
 r = combined['structural']
 schema = combined['schema']
+knowledge = combined.get('knowledge')
 
 total = len(r['checks'])
 fail_count = len(r['failures'])
@@ -116,6 +122,29 @@ if schema is not None:
                 elif e['constraint'] == 'scene_ids':
                     unresolved = ', '.join(e.get('unresolved', []))
                     print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{unresolved}\" — not in scenes.csv')
+
+if knowledge is not None:
+    print()
+    print('--- Knowledge granularity ---')
+    tf = knowledge['total_facts']
+    ts = knowledge['total_scenes']
+    fps = knowledge['facts_per_scene']
+    warnings = knowledge['warnings']
+    long_names = [w for w in warnings if w['type'] == 'long_name']
+    too_many = [w for w in warnings if w['type'] == 'too_many_new_facts']
+    health = 'healthy' if not warnings else 'has warnings'
+    print(f'  {tf} facts across {ts} scenes ({fps} facts/scene) — {health}')
+    if warnings:
+        print()
+        print('  Warnings:')
+        if long_names:
+            print('    Long fact names (may be too granular):')
+            for w in long_names:
+                print(f'      {w[\"id\"]} ({w[\"word_count\"]} words)')
+        if too_many:
+            print('    Scenes with 5+ new facts:')
+            for w in too_many:
+                print(f'      {w[\"scene_id\"]}: {w[\"new_fact_count\"]} new facts')
 "
 fi
 

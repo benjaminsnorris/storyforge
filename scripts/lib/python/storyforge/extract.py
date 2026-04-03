@@ -384,10 +384,25 @@ def build_knowledge_prompt(scene_id: str, scene_text: str,
 {registries_section}
 ## Instructions
 
+Extract only **structurally useful** knowledge facts — facts that gate what future scenes can do. Most scenes produce 0-1 new facts; never more than 2.
+
+A fact is structurally useful if it fits one of these categories:
+1. **Identity reveal** — who someone really is
+2. **Motive/intent reveal** — why someone did what they did
+3. **Capability/constraint** — what's possible, world rules established
+4. **State change** — irreversible events (deaths, departures, destructions)
+5. **Stakes/threat** — what's now at risk
+6. **Relationship shift** — alliances formed, betrayals committed
+
+**Litmus test:** Would a character who knows this fact make a *different decision* than one who doesn't? Does a future scene *require* this fact to make sense? If not, it's a detail, not a knowledge fact.
+
+**Too granular (don't do this):** "Maren notices the surveyor's hands are shaking"; "Kael orders ale at the tavern"
+**Right level:** "the mine assay was forged"; "Dara is alive and hiding in the northern pass"
+
 Output each field on its own labeled line.
 
-KNOWLEDGE_IN: [semicolon-separated facts that {pov} knows at the START of this scene — carry forward from prior knowledge above, including only facts relevant to this scene]
-KNOWLEDGE_OUT: [semicolon-separated facts that {pov} knows at the END of this scene — includes knowledge_in plus anything new learned during the scene]
+KNOWLEDGE_IN: [semicolon-separated structurally useful facts that {pov} knows at the START — carry forward only facts from prior knowledge that are relevant to this scene's decisions]
+KNOWLEDGE_OUT: [semicolon-separated structurally useful facts that {pov} knows at the END — knowledge_in plus 0-2 new facts learned during the scene]
 CONTINUITY_DEPS: [semicolon-separated scene IDs that this scene directly depends on — which prior scenes established facts that this scene uses?]
 SCENE_SUMMARY: [one sentence summarizing what happens in this scene — this will be used as context for subsequent scenes]
 

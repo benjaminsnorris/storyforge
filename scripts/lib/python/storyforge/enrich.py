@@ -889,12 +889,18 @@ def _field_instruction(field: str) -> str:
             'to the crisis>'
         ),
         'knowledge_in': (
-            'KNOWLEDGE_IN: <semicolon-separated facts the POV character '
-            'knows entering this scene>'
+            'KNOWLEDGE_IN: <semicolon-separated STRUCTURALLY USEFUL facts '
+            'the POV character knows entering — only facts that gate this '
+            "scene's decisions. Categories: identity reveals, motive/intent "
+            'reveals, capability/constraints, state changes, stakes/threats, '
+            'relationship shifts. Omit ordinary plot details.>'
         ),
         'knowledge_out': (
-            'KNOWLEDGE_OUT: <semicolon-separated facts the POV character '
-            'knows leaving — includes knowledge_in plus anything new learned>'
+            'KNOWLEDGE_OUT: <knowledge_in plus 0-2 NEW structurally useful '
+            'facts learned during this scene. A fact is useful only if a '
+            'character who knows it would make a different decision than one '
+            'who does not, or a future scene requires it. Most scenes add '
+            '0-1 new facts.>'
         ),
         'key_actions': (
             'KEY_ACTIONS: <semicolon-separated concrete things that happen '

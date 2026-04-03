@@ -408,8 +408,8 @@ For each scene that needs a brief, define the complete drafting contract:
 - **outcome**: How the scene ends — yes / no / yes-but / no-and (Weiland)
 - **crisis**: The dilemma — best bad choice or irreconcilable goods (Story Grid)
 - **decision**: What the character actively chooses
-- **knowledge_in**: Semicolon-separated facts the POV character knows entering. Use EXACT wording that matches prior scenes' knowledge_out.
-- **knowledge_out**: Semicolon-separated facts the POV character knows leaving. These become available for later scenes' knowledge_in.
+- **knowledge_in**: Semicolon-separated STRUCTURALLY USEFUL facts the POV character knows entering. Use EXACT wording that matches prior scenes' knowledge_out. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
+- **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
 - **key_actions**: Semicolon-separated concrete things that happen
 - **key_dialogue**: Specific lines or exchanges that must appear in the prose
 - **emotions**: Semicolon-separated emotional beats in sequence
@@ -434,6 +434,7 @@ id|status
 ### Rules
 
 - knowledge_in must use EXACT wording from prior scenes' knowledge_out — validation will check this
+- Target 0-2 new knowledge facts per scene. Most scenes should add 0-1. A full novel should have 50-120 total facts, not 500+
 - continuity_deps should list the minimum set of scenes whose knowledge_out this scene needs
 - Every scene must have goal/conflict/outcome filled
 - Key dialogue should sound like the character, not the author
