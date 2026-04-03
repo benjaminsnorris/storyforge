@@ -761,6 +761,67 @@ print(json.dumps(report))
 fi
 
 # ============================================================================
+# File cleanup (remove intermediates and legacy files)
+# ============================================================================
+
+if [[ "$DRY_RUN" != true ]]; then
+    log ""
+    log "--- Cleaning up ---"
+
+    CLEANED=0
+
+    # Remove intermediate extraction files
+    for f in \
+        "${LOG_DIR}/.knowledge-state.json" \
+        "${LOG_DIR}/.scene-summaries.txt" \
+        "${LOG_DIR}/extract-phase0.log" \
+        "${LOG_DIR}/extract-phase1-batch.jsonl" \
+        "${LOG_DIR}/extract-phase2-batch.jsonl" \
+        "${LOG_DIR}/extract-phase3a-batch.jsonl" \
+    ; do
+        if [[ -f "$f" ]]; then
+            rm -f "$f"
+            CLEANED=$((CLEANED + 1))
+        fi
+    done
+
+    # Remove batch output/log directories from extraction phases
+    for d in \
+        "${LOG_DIR}/phase1-output" \
+        "${LOG_DIR}/phase1-logs" \
+        "${LOG_DIR}/phase2-output" \
+        "${LOG_DIR}/phase2-logs" \
+        "${LOG_DIR}/phase3a-output" \
+        "${LOG_DIR}/phase3a-logs" \
+    ; do
+        if [[ -d "$d" ]]; then
+            rm -rf "$d"
+            CLEANED=$((CLEANED + 1))
+        fi
+    done
+
+    # Remove legacy files (only if three-file model is populated)
+    if [[ -f "${REF_DIR}/scenes.csv" ]]; then
+        for f in \
+            "${REF_DIR}/scene-metadata.csv" \
+            "${REF_DIR}/scenes/intent.csv" \
+            "${PROJECT_DIR}/working/pipeline.yaml" \
+            "${PROJECT_DIR}/working/assemble.py" \
+        ; do
+            if [[ -f "$f" ]]; then
+                log "  Removing legacy file: $(basename "$f")"
+                rm -f "$f"
+                CLEANED=$((CLEANED + 1))
+            fi
+        done
+    fi
+
+    if (( CLEANED > 0 )); then
+        log "  Removed ${CLEANED} intermediate/legacy file(s)"
+    fi
+fi
+
+# ============================================================================
 # Expansion analysis
 # ============================================================================
 
@@ -793,8 +854,13 @@ fi
 log ""
 log "============================================"
 log "Extraction complete."
-log "  scenes.csv, scene-intent.csv, scene-briefs.csv populated"
-log "  Run /storyforge:validate to verify, then review and correct the extracted data"
+if [[ "${VALIDATE_PASSED:-}" == "True" ]]; then
+    log "  All validation checks pass."
+    log "  Next: run /storyforge:elaborate to continue development."
+else
+    log "  ${VALIDATE_FAILURES:-0} validation issue(s) remain."
+    log "  Next: run /storyforge:elaborate to fill structural gaps."
+fi
 log "============================================"
 
 print_cost_summary "extract" 2>/dev/null || true
