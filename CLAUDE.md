@@ -336,6 +336,7 @@ Key principles:
 | `api.py` | Anthropic API helpers |
 | `costs.py` | Cost calculation |
 | `project.py` | Project state management |
+| `schema.py` | Column schema definitions (single source of truth), enum/registry/MICE validation |
 
 ## Commit Message Prefixes
 Use domain-specific prefixes:

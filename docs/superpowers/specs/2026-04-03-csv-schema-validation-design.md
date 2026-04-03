@@ -1,7 +1,7 @@
 # CSV Schema Validation Design
 
 **Date:** 2026-04-03
-**Status:** Approved
+**Status:** Implemented — superseded by `scripts/lib/python/storyforge/schema.py` as the single source of truth. See `references/scene-schema.md` for the current column reference.
 **Issue:** Part of extraction/elaboration CSV normalization work
 
 ## Problem

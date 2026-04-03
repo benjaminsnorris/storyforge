@@ -48,6 +48,7 @@ print(dump_schema_markdown())
 | `integer` | Must parse as int | N/A |
 | `boolean` | Must be `true`, `false`, or empty | N/A |
 | `free_text` | No constraint | N/A |
+| `scene_ids` | Each semicolon-separated value must exist as an id in scenes.csv | N/A |
 
 ### Registry Files
 
@@ -102,13 +103,13 @@ print(dump_schema_markdown())
 | `outcome` | enum: no, no-and, yes, yes-but | brief | How the scene ends for the POV character (Weiland). |
 | `crisis` | free_text | brief | The dilemma: best bad choice or irreconcilable goods (Story Grid). |
 | `decision` | free_text | brief | What the character actively chooses in response to the crisis. |
-| `knowledge_in` | free_text | brief | Facts the POV character knows entering. Must use exact wording matching prior knowledge_out. |
-| `knowledge_out` | free_text | brief | Facts the POV character knows leaving. Includes knowledge_in plus anything new learned. |
+| `knowledge_in` | registry: knowledge.csv (array) | brief | Fact IDs the POV character knows entering. Normalized against reference/knowledge.csv. |
+| `knowledge_out` | registry: knowledge.csv (array) | brief | Fact IDs the POV character knows leaving. Includes knowledge_in plus anything new learned. |
 | `key_actions` | free_text | brief | Concrete things that happen in this scene. |
 | `key_dialogue` | free_text | brief | Specific lines or exchanges that must appear. |
 | `emotions` | free_text | brief | Emotional beats in sequence as they occur through the scene. |
 | `motifs` | registry: motif-taxonomy.csv (array) | brief | Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv. |
-| `continuity_deps` | free_text | brief | Scene IDs this scene depends on (for parallel drafting). |
+| `continuity_deps` | scene_ids | brief | Scene IDs this scene depends on (for parallel drafting). Each entry must exist in scenes.csv. |
 | `has_overflow` | boolean | brief | Whether briefs/{id}.md exists for extended detail. |
 
 ## Elaboration Stages

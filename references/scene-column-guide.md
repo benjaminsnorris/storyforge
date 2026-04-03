@@ -110,9 +110,9 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to improve:** If the decision feels passive, restructure so the character must act — even if the action is choosing not to act.
 
 ### knowledge_in / knowledge_out — Information State
-**Why it matters:** This is the continuity backbone. If a character acts on information they haven't received, or fails to act on information they have, the reader loses trust. Exact wording enables automated validation.
+**Why it matters:** This is the continuity backbone. If a character acts on information they haven't received, or fails to act on information they have, the reader loses trust. Fact IDs from knowledge.csv enable automated validation.
 **How to check:** Run validation — it flags knowledge_in facts that don't match any prior knowledge_out. Check that knowledge_out includes everything the character learned during the scene.
-**How to improve:** Ensure exact wording matches across scenes. If validation flags a mismatch, check whether it's a wording difference (fix the wording) or a genuine continuity error (fix the scene order or add a scene where the character learns the fact).
+**How to improve:** Ensure fact IDs are registered in reference/knowledge.csv. If validation flags a mismatch, check whether the fact IDs match the canonical entries in knowledge.csv or whether it's a genuine continuity error (fix the scene order or add a scene where the character learns the fact).
 
 ### key_actions / key_dialogue — Scene Contract
 **Why it matters:** These are the specific beats that make the scene work. If the brief says a character "examines the body and notes the staged positioning" and the prose skips the examination, the scene hasn't delivered its promise.

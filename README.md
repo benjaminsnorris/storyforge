@@ -145,7 +145,7 @@ See `references/scene-schema.md` for the full column reference and `references/s
 Multi-page manuscript visualization with three views:
 
 - **Overview** — spine, POV distribution, value shift arc, scene rhythm
-- **Structure** — character presence, thread weave, emotional terrain, location map, motifs, timeline
+- **Structure** — character presence, thread weave, emotional terrain, location map, motifs, timeline, knowledge flow
 - **Scores** — craft heatmap, genre/character/act scores, narrative radar, brief fidelity
 
 Generate with `./storyforge visualize` or `/storyforge:visualize`.
@@ -185,7 +185,7 @@ my-novel/
 │   ├── world-bible.md
 │   ├── story-architecture.md
 │   ├── voice-guide.md
-│   └── characters.csv, locations.csv, motif-taxonomy.csv
+│   └── characters.csv, locations.csv, motif-taxonomy.csv, values.csv, knowledge.csv, mice-threads.csv
 ├── scenes/                  # Scene prose (pure markdown, no frontmatter)
 ├── briefs/                  # Extended briefs for complex scenes (optional)
 ├── manuscript/

@@ -530,6 +530,8 @@ def dump_schema_markdown() -> str:
                 constraint_str = f'registry: {reg}{arr}'
             elif constraint == 'mice':
                 constraint_str = f'mice: {schema.get("registry", "?")}'
+            elif constraint == 'scene_ids':
+                constraint_str = 'scene_ids'
             else:
                 constraint_str = constraint
 
