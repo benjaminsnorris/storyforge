@@ -48,7 +48,7 @@ from storyforge.schema import validate_schema, validate_knowledge_granularity
 
 ref_dir = '${REF_DIR}'
 project_dir = '${PROJECT_DIR}'
-skip_schema = ${SKIP_SCHEMA} == True
+skip_schema = '${SKIP_SCHEMA}' == 'true'
 
 structural = validate_structure(ref_dir)
 
