@@ -779,7 +779,7 @@ _GAP_GROUPS = {
         'batch_type': 'parallel',
     },
     'thread-fields': {
-        'fields': ['threads', 'mice_threads'],
+        'fields': ['mice_threads'],
         'file': 'scene-intent.csv',
         'batch_type': 'parallel',
     },
