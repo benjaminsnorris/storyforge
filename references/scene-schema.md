@@ -63,7 +63,7 @@ Projects created before v0.40.0 used a two-file model with fewer columns. Run `.
 | `threads` | array | architecture | Story threads this scene touches. Semicolon-separated. |
 | `characters` | array | map | All characters present or referenced. Semicolon-separated. Normalized against `reference/characters.csv`. |
 | `on_stage` | array | map | Characters physically present (subset of characters). |
-| `mice_threads` | array | map | MICE thread operations: `+milieu:canyon` (open), `-inquiry:who-killed` (close). FILO nesting order (Kowal). |
+| `mice_threads` | array | map | MICE thread operations: `+milieu:canyon` (open), `-inquiry:who-killed` (close). FILO within each type; cross-type threads run in parallel (Kowal). |
 
 ### scene-briefs.csv — drafting contracts
 
@@ -105,7 +105,7 @@ Run `./storyforge validate` to check structural integrity:
 - **Completeness:** Required columns for the scene's status are populated
 - **Timeline:** No backwards jumps without explicit markers
 - **Knowledge flow:** knowledge_in references match prior scenes' knowledge_out
-- **Thread management:** MICE threads nest in valid FILO order; no thread dormant >8 scenes
+- **Thread management:** MICE threads nest in valid FILO order within each type (M/I/C/E independently); no thread dormant >8 scenes
 - **Pacing:** No flat polarity stretches (3+ scenes); action/sequel rhythm varied; turning point types varied
 
 ## Scoring

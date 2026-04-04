@@ -440,8 +440,19 @@ def _check(category: str, check: str, passed: bool, message: str,
     return result
 
 
+def _mice_type(thread_name):
+    """Extract the MICE type prefix from a thread name (e.g., 'inquiry' from 'inquiry:who-killed')."""
+    return thread_name.split(':')[0] if ':' in thread_name else ''
+
+
 def _validate_threads(scenes_map, intent_map, checks):
-    """Check thread management: MICE nesting, dormancy, resolution."""
+    """Check thread management: MICE nesting, dormancy, resolution.
+
+    Uses per-type stacks: FILO nesting is enforced within each MICE type
+    (milieu, inquiry, character, event) independently. Cross-type threads
+    run in parallel — closing an inquiry doesn't require all milieu threads
+    opened after it to close first.
+    """
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda sid: int(scenes_map[sid].get('seq', 0)))
 
@@ -460,8 +471,8 @@ def _validate_threads(scenes_map, intent_map, checks):
                 thread_name = entry[1:]
                 thread_registry[thread_name] = sid
 
-    # Pass 2: check closures and nesting against the populated registry
-    open_threads = []  # stack of (thread_name, scene_id)
+    # Pass 2: check closures and nesting per MICE type
+    type_stacks = {}  # mice_type -> list of (thread_name, scene_id)
     for sid in sorted_ids:
         intent = intent_map.get(sid, {})
         mice = intent.get('mice_threads', '').strip()
@@ -473,20 +484,23 @@ def _validate_threads(scenes_map, intent_map, checks):
                 continue
             if entry.startswith('+'):
                 thread_name = entry[1:]
-                open_threads.append((thread_name, sid))
+                mtype = _mice_type(thread_name)
+                type_stacks.setdefault(mtype, []).append((thread_name, sid))
             elif entry.startswith('-'):
                 thread_name = entry[1:]
-                if open_threads and open_threads[-1][0] == thread_name:
-                    open_threads.pop()
-                elif any(t[0] == thread_name for t in open_threads):
+                mtype = _mice_type(thread_name)
+                stack = type_stacks.get(mtype, [])
+                if stack and stack[-1][0] == thread_name:
+                    stack.pop()
+                elif any(t[0] == thread_name for t in stack):
                     checks.append(_check(
                         'threads', 'mice-nesting', False,
                         f"MICE nesting violation: closing '{thread_name}' in {sid} "
-                        f"but '{open_threads[-1][0]}' (opened in {open_threads[-1][1]}) "
+                        f"but '{stack[-1][0]}' (opened in {stack[-1][1]}) "
                         f"should close first",
                         scene_id=sid,
                     ))
-                    open_threads = [(t, s) for t, s in open_threads if t != thread_name]
+                    type_stacks[mtype] = [(t, s) for t, s in stack if t != thread_name]
                 elif thread_name not in thread_registry:
                     checks.append(_check(
                         'threads', 'mice-nesting', False,
@@ -497,7 +511,7 @@ def _validate_threads(scenes_map, intent_map, checks):
                     checks.append(_check(
                         'threads', 'mice-nesting', False,
                         f"Closing MICE thread '{thread_name}' in {sid} but it was "
-                        f"already closed or not properly tracked on the nesting stack "
+                        f"already closed or not properly tracked on the {mtype} stack "
                         f"(opened in {thread_registry[thread_name]})",
                         scene_id=sid,
                     ))
@@ -505,8 +519,11 @@ def _validate_threads(scenes_map, intent_map, checks):
     if not any(c['check'] == 'mice-nesting' and not c['passed'] for c in checks):
         checks.append(_check('threads', 'mice-nesting', True, 'MICE threads nest correctly'))
 
-    if open_threads:
-        unclosed = [f"{name} (opened in {sid})" for name, sid in open_threads]
+    all_unclosed = []
+    for stack in type_stacks.values():
+        all_unclosed.extend(stack)
+    if all_unclosed:
+        unclosed = [f"{name} (opened in {sid})" for name, sid in all_unclosed]
         checks.append(_check(
             'threads', 'unclosed-mice-threads', False,
             f"Unclosed MICE threads: {unclosed}",

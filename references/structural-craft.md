@@ -176,20 +176,29 @@ Every story thread is one of four types:
 - **Character** — opens with dissatisfaction, closes with acceptance or change. A character who is unhappy with their role in life. The thread resolves when they either change or accept their situation.
 - **Event** — opens with a disruption of the status quo, closes when a new normal is established. A murder disrupts a town. The thread resolves when order is restored (or a new order replaces the old).
 
-### The Nesting Rule (FILO)
+### The Nesting Rule (Per-Type FILO)
 
-MICE threads must close in **reverse order** of opening — First In, Last Out, like nested parentheses:
+MICE threads of the **same type** must close in reverse order of opening — First In, Last Out, like nested parentheses:
 
 ```
-+milieu:dangerous-territory
++inquiry:who-sent-the-letter
   +inquiry:who-killed-the-surveyor
-    +character:protagonist-transformation
-    -character:protagonist-transformation
   -inquiry:who-killed-the-surveyor
--milieu:dangerous-territory
+-inquiry:who-sent-the-letter
 ```
 
-If you open milieu first, then inquiry, you must close inquiry before closing milieu. Opening A, opening B, then closing A before B feels wrong to readers even if they can't articulate why — it's like closing an outer parenthesis before an inner one.
+Threads of **different types** run in parallel — they don't constrain each other's closure order:
+
+```
++character:protagonist-transformation     (opens scene 1)
+  +milieu:dangerous-territory             (opens scene 3)
+    +inquiry:who-killed-the-surveyor      (opens scene 5)
+    -inquiry:who-killed-the-surveyor      (closes scene 12)
+  -milieu:dangerous-territory             (closes scene 15)
+-character:protagonist-transformation     (closes scene 28)
+```
+
+This is valid even though milieu closes before character, because they are independent types. A character arc spanning the whole novel doesn't prevent a milieu thread from opening and closing within it. Same-type nesting still matters: if you open two inquiries, readers expect the inner one resolved first.
 
 ### Why It Matters
 
