@@ -337,10 +337,12 @@ for i, sid in enumerate(scene_ids):
 
     # Merge with existing or create new
     if sid in existing:
+        # Only fill empty fields — don't overwrite prior work
         for k, v in result.items():
-            if v and k != 'id':
+            if v and k != 'id' and not existing[sid].get(k, '').strip():
                 existing[sid][k] = v
-    else:
+    elif not existing:
+        # First extraction: CSV is empty, add all scenes
         row = {c: '' for c in _FILE_MAP['scenes.csv']}
         row.update(result)
         row['seq'] = str(i + 1)
@@ -351,6 +353,9 @@ for i, sid in enumerate(scene_ids):
             wc = len(open(scene_file).read().split())
             row['word_count'] = str(wc)
         existing[sid] = row
+    else:
+        # Re-run: scene not in CSV (was removed), skip it
+        continue
     count += 1
 
 # Write sorted by seq
@@ -440,13 +445,18 @@ for sid in scene_ids:
     normalize_fields(result, alias_maps)
 
     if sid in existing:
+        # Only fill empty fields — don't overwrite prior work
         for k, v in result.items():
-            if v and k != 'id' and not k.startswith('_'):
+            if v and k != 'id' and not k.startswith('_') and not existing[sid].get(k, '').strip():
                 existing[sid][k] = v
-    else:
+    elif not existing:
+        # First extraction: CSV is empty, add all scenes
         row = {c: '' for c in _FILE_MAP['scene-intent.csv']}
         row.update({k: v for k, v in result.items() if not k.startswith('_')})
         existing[sid] = row
+    else:
+        # Re-run: scene not in CSV (was removed), skip it
+        continue
     count += 1
 
 ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
@@ -537,13 +547,18 @@ for sid in scene_ids:
     normalize_fields(result, alias_maps)
 
     if sid in existing:
+        # Only fill empty fields — don't overwrite prior work
         for k, v in result.items():
-            if v and k != 'id':
+            if v and k != 'id' and not existing[sid].get(k, '').strip():
                 existing[sid][k] = v
-    else:
+    elif not existing:
+        # First extraction: CSV is empty, add all scenes
         row = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
         row.update(result)
         existing[sid] = row
+    else:
+        # Re-run: scene not in CSV (was removed), skip it
+        continue
     count += 1
 
 ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
