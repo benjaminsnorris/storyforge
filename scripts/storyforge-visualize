@@ -141,6 +141,11 @@ cat > "$DASHBOARD_FILE" << 'HTMLEOF'
     --type-transition: #8b5cf6;
     --type-confrontation: #ec4899;
 
+    --mice-milieu: #16a34a;
+    --mice-inquiry: #2563eb;
+    --mice-character: #d97706;
+    --mice-event: #dc2626;
+
     --score-low: #18181b;
     --score-mid-low: #dc2626;
     --score-mid: #d97706;
@@ -173,6 +178,11 @@ cat > "$DASHBOARD_FILE" << 'HTMLEOF'
         --type-world: #4ade80;
         --type-action: #fbbf24;
         --type-transition: #a78bfa;
+
+        --mice-milieu: #4ade80;
+        --mice-inquiry: #60a5fa;
+        --mice-character: #fbbf24;
+        --mice-event: #f87171;
         --type-confrontation: #f472b6;
 
         --score-low: #3f3f46;
@@ -719,8 +729,8 @@ body {
 <div class="section">
     <div class="section-header">
         <span class="dot"></span>
-        <h2>Thread Weave</h2>
-        <span class="subtitle">Narrative threads across scenes</span>
+        <h2>MICE Threads</h2>
+        <span class="subtitle">Thread lifespans by type — open to close</span>
     </div>
     <div class="vis-container" id="thread-weave"></div>
 </div>
@@ -1388,7 +1398,7 @@ function updateDetailPanel(sceneId) {
         }
         if (intent.emotional_arc) intentHtml += detailRow('Emotion', intent.emotional_arc.substring(0, 80));
         if (intent.characters) intentHtml += detailRow('Characters', intent.characters.replace(/;/g, ', '));
-        if (intent.threads) intentHtml += detailRow('Threads', intent.threads.replace(/;/g, ', '));
+        if (intent.mice_threads) intentHtml += detailRow('MICE Threads', intent.mice_threads.replace(/;/g, ', '));
         if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.replace(/;/g, ', ').substring(0, 100));
         if (intentHtml) html += '<div class="detail-section-end">' + intentHtml + '</div>';
     }
@@ -1678,66 +1688,150 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
 (function renderThreadWeave() {
     const container = document.getElementById('thread-weave');
-    const threadFirst = {};
-    const threadScenes = {};
+    const MICE_COLORS = {
+        milieu: 'var(--mice-milieu)',
+        inquiry: 'var(--mice-inquiry)',
+        character: 'var(--mice-character)',
+        event: 'var(--mice-event)'
+    };
+
+    // Parse mice_threads: collect open/close scene for each thread
+    const threadOpen = {};   // thread_name -> { seq, sceneId }
+    const threadClose = {};  // thread_name -> { seq, sceneId }
+    const threadType = {};   // thread_name -> mice type
 
     INTENTS.forEach(intent => {
-        const threads = (intent.threads || '').split(';').map(t => t.trim()).filter(Boolean);
+        const mice = (intent.mice_threads || '').split(';').map(t => t.trim()).filter(Boolean);
         const s = sceneById[intent.id];
         if (!s) return;
         const seq = +s.seq;
-        threads.forEach(t => {
-            if (!threadFirst[t]) threadFirst[t] = seq;
-            if (!threadScenes[t]) threadScenes[t] = [];
-            threadScenes[t].push({ id: intent.id, seq });
+        mice.forEach(entry => {
+            if (entry.startsWith('+')) {
+                const name = entry.substring(1);
+                const type = name.split(':')[0] || '';
+                threadOpen[name] = { seq, sceneId: intent.id };
+                threadType[name] = type;
+            } else if (entry.startsWith('-')) {
+                const name = entry.substring(1);
+                const type = name.split(':')[0] || '';
+                threadClose[name] = { seq, sceneId: intent.id };
+                if (!threadType[name]) threadType[name] = type;
+            }
         });
     });
 
-    const threadList = Object.keys(threadFirst).sort((a, b) => threadFirst[a] - threadFirst[b]);
+    // Sort threads: group by type, then by open seq
+    const allThreads = Object.keys(threadOpen);
+    const typeOrder = ['milieu', 'inquiry', 'character', 'event'];
+    allThreads.sort((a, b) => {
+        const ta = typeOrder.indexOf(threadType[a] || '');
+        const tb = typeOrder.indexOf(threadType[b] || '');
+        if (ta !== tb) return (ta === -1 ? 99 : ta) - (tb === -1 ? 99 : tb);
+        return (threadOpen[a] || {}).seq - (threadOpen[b] || {}).seq;
+    });
 
-    const ROW_H = 24;
+    const ROW_H = 22;
     const W = container.clientWidth - 24 || 1100;
     const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
-    const H = threadList.length * ROW_H + 20;
+    // Add space for legend
+    const LEGEND_H = 28;
+    const H = allThreads.length * ROW_H + LEGEND_H + 16;
     const svg = makeSvg(container, W, H);
 
-    threadList.forEach((thread, ri) => {
-        const y = ri * ROW_H + 12;
+    // Legend
+    let legendX = GRID_LABEL_W;
+    typeOrder.forEach(type => {
+        const hasThreads = allThreads.some(t => threadType[t] === type);
+        if (!hasThreads) return;
+        const color = MICE_COLORS[type] || 'var(--text-dim)';
+        svg.appendChild(svgEl('circle', { cx: legendX, cy: 10, r: 4, fill: color, opacity: 0.9 }));
+        const lbl = svgEl('text', {
+            x: legendX + 8, y: 14,
+            'font-family': 'var(--font-mono)', 'font-size': 10, fill: 'var(--text-dim)'
+        });
+        lbl.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+        svg.appendChild(lbl);
+        legendX += type.length * 7 + 24;
+    });
+
+    // Draw type group separators
+    let prevType = null;
+    allThreads.forEach((thread, ri) => {
+        const mtype = threadType[thread];
+        if (prevType !== null && mtype !== prevType) {
+            const sepY = LEGEND_H + ri * ROW_H - 1;
+            svg.appendChild(svgEl('line', {
+                x1: GRID_LABEL_W - 8, y1: sepY, x2: W - GRID_RIGHT_PAD, y2: sepY,
+                stroke: 'var(--border)', 'stroke-width': 0.5
+            }));
+        }
+        prevType = mtype;
+    });
+
+    allThreads.forEach((thread, ri) => {
+        const y = LEGEND_H + ri * ROW_H + 10;
+        const mtype = threadType[thread] || '';
+        const color = MICE_COLORS[mtype] || 'var(--teal)';
+        const displayName = thread.includes(':') ? thread.split(':').slice(1).join(':') : thread;
+
+        // Label
         const label = svgEl('text', {
             x: GRID_LABEL_W - 8, y: y + 4,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
-            'font-size': 10, fill: 'var(--text-dim)'
+            'font-size': 10, fill: color
         });
-        label.textContent = thread.length > GRID_LABEL_TRUNC ? thread.substring(0, GRID_LABEL_TRUNC - 2) + '..' : thread;
-        if (thread.length > GRID_LABEL_TRUNC) { var t = document.createElementNS(SVG_NS, 'title'); t.textContent = thread; label.appendChild(t); }
+        const truncName = displayName.length > GRID_LABEL_TRUNC ? displayName.substring(0, GRID_LABEL_TRUNC - 2) + '..' : displayName;
+        label.textContent = truncName;
+        if (displayName.length > GRID_LABEL_TRUNC) {
+            var tt = document.createElementNS(SVG_NS, 'title');
+            tt.textContent = thread;
+            label.appendChild(tt);
+        }
         svg.appendChild(label);
 
-        // Sort scenes for this thread
-        const scenes = (threadScenes[thread] || []).sort((a, b) => a.seq - b.seq);
+        const open = threadOpen[thread];
+        const close = threadClose[thread];
+        if (!open) return;
 
-        // Draw connecting lines
-        for (let i = 1; i < scenes.length; i++) {
-            const x1 = sceneX(scenes[i-1].seq - 1, CHART_W);
-            const x2 = sceneX(scenes[i].seq - 1, CHART_W);
-            const gap = scenes[i].seq - scenes[i-1].seq;
+        const x1 = sceneX(open.seq - 1, CHART_W);
+
+        if (close) {
+            // Closed thread: solid span from open to close
+            const x2 = sceneX(close.seq - 1, CHART_W);
             svg.appendChild(svgEl('line', {
                 x1, y1: y, x2, y2: y,
-                stroke: 'var(--teal)', 'stroke-width': 1.5,
-                opacity: 0.4,
-                'stroke-dasharray': gap > 2 ? '3,3' : 'none'
+                stroke: color, 'stroke-width': 2.5, opacity: 0.5,
+                'stroke-linecap': 'round'
+            }));
+            // Open marker (circle)
+            const openDot = svgEl('circle', { cx: x1, cy: y, r: 4, fill: color, opacity: 0.9 });
+            attachSceneHandlers(openDot, open.sceneId);
+            svg.appendChild(openDot);
+            // Close marker (square)
+            const closeRect = svgEl('rect', {
+                x: x2 - 3.5, y: y - 3.5, width: 7, height: 7,
+                fill: color, opacity: 0.9, rx: 1
+            });
+            attachSceneHandlers(closeRect, close.sceneId);
+            svg.appendChild(closeRect);
+        } else {
+            // Unclosed thread: dashed line to end, open arrow
+            const xEnd = sceneX(sceneCount - 1, CHART_W);
+            svg.appendChild(svgEl('line', {
+                x1, y1: y, x2: xEnd, y2: y,
+                stroke: color, 'stroke-width': 1.5, opacity: 0.3,
+                'stroke-dasharray': '4,3', 'stroke-linecap': 'round'
+            }));
+            // Open marker
+            const openDot = svgEl('circle', { cx: x1, cy: y, r: 4, fill: color, opacity: 0.9 });
+            attachSceneHandlers(openDot, open.sceneId);
+            svg.appendChild(openDot);
+            // Arrow at end indicating unclosed
+            svg.appendChild(svgEl('polygon', {
+                points: `${xEnd - 5},${y - 4} ${xEnd + 1},${y} ${xEnd - 5},${y + 4}`,
+                fill: color, opacity: 0.4
             }));
         }
-
-        // Draw dots
-        scenes.forEach(sc => {
-            const cx = sceneX(sc.seq - 1, CHART_W);
-            const dot = svgEl('circle', {
-                cx, cy: y, r: 3.5,
-                fill: 'var(--teal)', opacity: 0.8
-            });
-            attachSceneHandlers(dot, sc.id);
-            svg.appendChild(dot);
-        });
     });
 })();
 
