@@ -1028,14 +1028,10 @@ ensure_branch_pushed() {
         return 1
     fi
 
-    # Check if the branch has any commits ahead of its merge base.
+    # Check if the branch has any commits ahead of main.
     # If not, we need an initial commit so gh pr create has a diff.
     local base_branch
-    base_branch=$(git -C "$project_dir" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null \
-               || git -C "$project_dir" config init.defaultBranch 2>/dev/null \
-               || echo "main")
-    # Strip remote prefix (e.g., "origin/main" -> "main")
-    base_branch="${base_branch#origin/}"
+    base_branch=$(git -C "$project_dir" config init.defaultBranch 2>/dev/null || echo "main")
 
     local ahead
     ahead=$(git -C "$project_dir" rev-list --count "${base_branch}..HEAD" 2>/dev/null || echo "0")
