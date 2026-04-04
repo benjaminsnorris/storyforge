@@ -1,8 +1,9 @@
 #!/bin/bash
-# storyforge-validate — Run structural validation on scene CSVs
+# storyforge-validate — Run structural and schema validation on scene CSVs
 #
 # Usage:
-#   ./storyforge validate                  # Validate current project
+#   ./storyforge validate                  # Both structural + schema (default)
+#   ./storyforge validate --no-schema      # Structural only
 #   ./storyforge validate --json           # Output as JSON
 #   ./storyforge validate --quiet          # Exit code only (0=pass, 1=fail)
 set -eo pipefail
@@ -15,14 +16,17 @@ detect_project_root
 # Parse args
 JSON_OUTPUT=false
 QUIET=false
+SKIP_SCHEMA=false
 for arg in "$@"; do
     case "$arg" in
-        --json)   JSON_OUTPUT=true ;;
-        --quiet)  QUIET=true ;;
+        --json)       JSON_OUTPUT=true ;;
+        --quiet)      QUIET=true ;;
+        --no-schema)  SKIP_SCHEMA=true ;;
         -h|--help)
-            echo "Usage: storyforge validate [--json] [--quiet]"
-            echo "  --json   Output results as JSON"
-            echo "  --quiet  Exit code only (0=pass, 1=fail)"
+            echo "Usage: storyforge validate [--no-schema] [--json] [--quiet]"
+            echo "  --no-schema  Skip schema validation (run structural only)"
+            echo "  --json       Output results as JSON"
+            echo "  --quiet      Exit code only (0=pass, 1=fail)"
             exit 0
             ;;
     esac
@@ -36,57 +40,120 @@ if [[ ! -f "${REF_DIR}/scenes.csv" ]]; then
     exit 1
 fi
 
-RESULT=$(python3 -c "
-import sys, json
-sys.path.insert(0, '${PYTHON_LIB}')
+# Run both validations in one Python call for efficiency
+RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json, os
 from storyforge.elaborate import validate_structure
-report = validate_structure('${REF_DIR}')
-print(json.dumps(report, indent=2))
+from storyforge.schema import validate_schema, validate_knowledge_granularity
+
+ref_dir = '${REF_DIR}'
+project_dir = '${PROJECT_DIR}'
+skip_schema = ${SKIP_SCHEMA} == True
+
+structural = validate_structure(ref_dir)
+
+schema = None
+if not skip_schema:
+    schema = validate_schema(ref_dir, project_dir)
+
+knowledge = None
+knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
+if os.path.isfile(knowledge_path):
+    knowledge = validate_knowledge_granularity(ref_dir, project_dir)
+
+print(json.dumps({'structural': structural, 'schema': schema, 'knowledge': knowledge}))
 ")
 
 if [[ "$JSON_OUTPUT" == true ]]; then
     echo "$RESULT"
 elif [[ "$QUIET" != true ]]; then
-    # Human-readable output
-    python3 -c "
+    # Human-readable output via pipe (avoids quoting issues)
+    echo "$RESULT" | PYTHONPATH="$PYTHON_LIB" python3 -c "
 import sys, json
-r = json.loads('''${RESULT}'''.replace(\"'''\", ''))
+
+combined = json.load(sys.stdin)
+r = combined['structural']
+schema = combined['schema']
+knowledge = combined.get('knowledge')
+
 total = len(r['checks'])
 fail_count = len(r['failures'])
+
+print('--- Structural validation ---')
 if r['passed']:
-    print(f'Validation passed ({total} checks, 0 failures)')
+    print(f'  Passed ({total} checks, 0 failures)')
 else:
-    print(f'Validation failed ({total} checks, {fail_count} failure(s)):')
+    print(f'  Failed ({total} checks, {fail_count} failure(s)):')
     for f in r['failures']:
         severity = f.get('severity', 'blocking')
         scene = f.get('scene_id', '')
-        prefix = f'  [{severity}]'
+        prefix = f'    [{severity}]'
         if scene:
             prefix += f' {scene}:'
         print(f\"{prefix} {f['message']}\")
-" 2>/dev/null || {
-        # Fallback if inline python fails (e.g., quotes in JSON)
-        PASSED=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r['passed'])")
-        TOTAL=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(len(r['checks']))")
-        FAIL_COUNT=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(len(r['failures']))")
-        if [[ "$PASSED" == "True" ]]; then
-            log "Validation passed (${TOTAL} checks, 0 failures)"
-        else
-            log "Validation failed (${TOTAL} checks, ${FAIL_COUNT} failure(s)):"
-            echo "$RESULT" | python3 -c "
-import sys, json
-r = json.load(sys.stdin)
-for f in r['failures']:
-    severity = f.get('severity', 'blocking')
-    scene = f.get('scene_id', '')
-    prefix = f'  [{severity}]'
-    if scene:
-        prefix += f' {scene}:'
-    print(f\"{prefix} {f['message']}\")
+
+if schema is not None:
+    print()
+    print('--- Schema validation ---')
+    if schema['failed'] == 0:
+        print(f'  Passed ({schema[\"passed\"]} cells validated, {schema[\"skipped\"]} skipped)')
+    else:
+        print(f'  Failed ({schema[\"passed\"]} passed, {schema[\"failed\"]} failed, {schema[\"skipped\"]} skipped)')
+        # Group errors by file
+        by_file = {}
+        for e in schema['errors']:
+            by_file.setdefault(e['file'], []).append(e)
+        for fname, errs in sorted(by_file.items()):
+            print(f'  {fname}:')
+            for e in errs:
+                if e['constraint'] == 'enum':
+                    allowed = ', '.join(e['allowed'])
+                    print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{e[\"value\"]}\" — not in ({allowed})')
+                elif e['constraint'] == 'registry':
+                    unresolved = ', '.join(e.get('unresolved', [e['value']]))
+                    print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{unresolved}\" — not in {e[\"registry\"]}')
+                elif e['constraint'] == 'integer':
+                    print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{e[\"value\"]}\" — expected integer')
+                elif e['constraint'] == 'boolean':
+                    print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{e[\"value\"]}\" — expected true/false')
+                elif e['constraint'] == 'mice':
+                    for p in e.get('problems', []):
+                        print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{p[\"entry\"]}\" — {p[\"reason\"]}')
+                elif e['constraint'] == 'scene_ids':
+                    unresolved = ', '.join(e.get('unresolved', []))
+                    print(f'    {e[\"row\"]} | {e[\"column\"]}: \"{unresolved}\" — not in scenes.csv')
+
+if knowledge is not None:
+    print()
+    print('--- Knowledge granularity ---')
+    tf = knowledge['total_facts']
+    ts = knowledge['total_scenes']
+    fps = knowledge['facts_per_scene']
+    warnings = knowledge['warnings']
+    long_names = [w for w in warnings if w['type'] == 'long_name']
+    too_many = [w for w in warnings if w['type'] == 'too_many_new_facts']
+    health = 'healthy' if not warnings else 'has warnings'
+    print(f'  {tf} facts across {ts} scenes ({fps} facts/scene) — {health}')
+    if warnings:
+        print()
+        print('  Warnings:')
+        if long_names:
+            print('    Long fact names (may be too granular):')
+            for w in long_names:
+                print(f'      {w[\"id\"]} ({w[\"word_count\"]} words)')
+        if too_many:
+            print('    Scenes with 5+ new facts:')
+            for w in too_many:
+                print(f'      {w[\"scene_id\"]}: {w[\"new_fact_count\"]} new facts')
 "
-        fi
-    }
 fi
 
-# Exit code based on pass/fail
-echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); sys.exit(0 if r['passed'] else 1)"
+# Exit code: fail if either validation failed
+echo "$RESULT" | PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json
+combined = json.load(sys.stdin)
+structural_ok = combined['structural']['passed']
+schema = combined['schema']
+schema_ok = schema is None or schema['failed'] == 0
+sys.exit(0 if structural_ok and schema_ok else 1)
+"

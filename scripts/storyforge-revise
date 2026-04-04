@@ -907,9 +907,11 @@ import sys, os, json
 sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.prompts_elaborate import parse_stage_response, csv_block_to_rows
 from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+from storyforge.enrich import load_registry_alias_maps, normalize_fields
 
 log_file = '${STEP_LOG}'
 ref_dir = '${PROJECT_DIR}/reference'
+alias_maps = load_registry_alias_maps('${PROJECT_DIR}')
 
 # Read response
 response = open(log_file, encoding='utf-8').read()
@@ -945,6 +947,7 @@ for label, content in blocks.items():
     existing = _read_csv_as_map(path)
 
     for row in rows:
+        normalize_fields(row, alias_maps)
         sid = row.get('id', '')
         if not sid:
             continue

@@ -17,6 +17,7 @@ from .prompts import (
     read_csv_field,
     _resolve_scenes_csv,
     _resolve_intent_csv,
+    _resolve_briefs_csv,
 )
 
 
@@ -24,14 +25,26 @@ from .prompts import (
 # Constants
 # ============================================================================
 
-#: Fields stored in scenes.csv
-METADATA_FIELDS = frozenset({'type', 'location', 'time_of_day'})
+#: Fields stored in scenes.csv (enrichable via enrich)
+METADATA_FIELDS = frozenset({
+    'pov', 'location', 'time_of_day', 'duration', 'type',
+})
 
 #: Fields stored in scene-intent.csv
-INTENT_FIELDS = frozenset({'emotional_arc', 'characters', 'threads', 'motifs'})
+INTENT_FIELDS = frozenset({
+    'action_sequel', 'emotional_arc', 'value_at_stake', 'value_shift',
+    'turning_point', 'characters', 'on_stage', 'mice_threads',
+})
+
+#: Fields stored in scene-briefs.csv
+BRIEFS_FIELDS = frozenset({
+    'goal', 'conflict', 'outcome', 'crisis', 'decision',
+    'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
+    'emotions', 'motifs',
+})
 
 #: All enrichable fields
-ALL_FIELDS = METADATA_FIELDS | INTENT_FIELDS
+ALL_FIELDS = METADATA_FIELDS | INTENT_FIELDS | BRIEFS_FIELDS
 
 #: Valid scene type values
 VALID_TYPES = frozenset({
@@ -47,11 +60,28 @@ VALID_TIMES = frozenset({
 #: Maps response label to dict key
 _LABEL_TO_KEY = {
     'TYPE': 'type',
+    'POV': 'pov',
     'LOCATION': 'location',
     'TIME_OF_DAY': 'time_of_day',
-    'CHARACTERS': 'characters',
+    'DURATION': 'duration',
+    'ACTION_SEQUEL': 'action_sequel',
     'EMOTIONAL_ARC': 'emotional_arc',
-    'THREADS': 'threads',
+    'VALUE_AT_STAKE': 'value_at_stake',
+    'VALUE_SHIFT': 'value_shift',
+    'TURNING_POINT': 'turning_point',
+    'CHARACTERS': 'characters',
+    'ON_STAGE': 'on_stage',
+    'MICE_THREADS': 'mice_threads',
+    'GOAL': 'goal',
+    'CONFLICT': 'conflict',
+    'OUTCOME': 'outcome',
+    'CRISIS': 'crisis',
+    'DECISION': 'decision',
+    'KNOWLEDGE_IN': 'knowledge_in',
+    'KNOWLEDGE_OUT': 'knowledge_out',
+    'KEY_ACTIONS': 'key_actions',
+    'KEY_DIALOGUE': 'key_dialogue',
+    'EMOTIONS': 'emotions',
     'MOTIFS': 'motifs',
 }
 
@@ -106,18 +136,19 @@ def parse_enrich_response(response: str, scene_id: str) -> dict:
 # ============================================================================
 
 def load_alias_map(csv_file: str) -> dict[str, str]:
-    """Build a case-insensitive alias lookup from a CSV with name|aliases columns.
+    """Build a case-insensitive alias lookup from a CSV with id|name|aliases columns.
 
-    Reads a pipe-delimited CSV file where the ``name`` column holds the
-    canonical name and the ``aliases`` column holds semicolon-separated
-    alternative names.  Returns a dict mapping each lowercased alias (and
-    the lowercased canonical name itself) to the canonical name.
+    Reads a pipe-delimited CSV file.  When an ``id`` column is present the
+    canonical value is the id (e.g. ``emmett-slade``); otherwise it falls
+    back to the ``name`` column.  The ``aliases`` column holds semicolon-
+    separated alternative names.  Returns a dict mapping each lowercased
+    alias, name, and id to the canonical value.
 
     Args:
         csv_file: Path to the pipe-delimited CSV file.
 
     Returns:
-        Dict mapping lowercase alias strings to canonical names.
+        Dict mapping lowercase alias strings to canonical IDs (or names).
         Empty dict if the file is missing or has no relevant columns.
     """
     if not csv_file or not os.path.isfile(csv_file):
@@ -133,6 +164,11 @@ def load_alias_map(csv_file: str) -> dict[str, str]:
         return {}
 
     try:
+        id_idx = header.index('id')
+    except ValueError:
+        id_idx = None
+
+    try:
         alias_idx = header.index('aliases')
     except ValueError:
         alias_idx = None
@@ -142,11 +178,19 @@ def load_alias_map(csv_file: str) -> dict[str, str]:
     for row in rows:
         if len(row) <= name_idx:
             continue
-        canonical = row[name_idx].strip()
-        if not canonical:
+        name = row[name_idx].strip()
+        if not name:
             continue
 
-        # Self-mapping
+        # Use id as canonical value when available, otherwise name
+        if id_idx is not None and len(row) > id_idx and row[id_idx].strip():
+            canonical = row[id_idx].strip()
+        else:
+            canonical = name
+
+        # Map name → canonical id
+        alias_map[name.lower()] = canonical
+        # Self-mapping for the id itself
         alias_map[canonical.lower()] = canonical
 
         # Alias mappings
@@ -159,16 +203,34 @@ def load_alias_map(csv_file: str) -> dict[str, str]:
     return alias_map
 
 
+def strip_parentheticals(value: str) -> str:
+    """Strip parenthetical qualifiers from a string.
+
+    Removes trailing parenthetical expressions like "(referenced)",
+    "(implied)", "(not named in scene)" that Claude adds to character
+    entries.  The ``on_stage`` column already captures presence vs
+    reference, so these qualifiers just break alias lookup.
+
+    Args:
+        value: A single entry (not semicolon-separated).
+
+    Returns:
+        The value with parenthetical suffixes removed and whitespace trimmed.
+    """
+    return re.sub(r'\s*\([^)]*\)\s*$', '', value).strip()
+
+
 def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
     """Resolve aliases in a semicolon-separated string.
 
-    Each entry is looked up case-insensitively in *alias_map*.  Matches
-    are replaced with the canonical name; unknowns pass through unchanged.
-    The result is deduplicated (first occurrence wins) and returned as a
+    Each entry is looked up case-insensitively in *alias_map*.  Parenthetical
+    qualifiers like "(referenced)" are stripped before lookup.  Matches are
+    replaced with the canonical ID; unknowns pass through unchanged.  The
+    result is deduplicated (first occurrence wins) and returned as a
     semicolon-separated string.
 
     Args:
-        alias_map: Mapping from lowercase alias to canonical name
+        alias_map: Mapping from lowercase alias to canonical ID
             (as returned by :func:`load_alias_map`).
         semicolon_string: Semicolon-separated values to normalize.
 
@@ -182,7 +244,7 @@ def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
     result: list[str] = []
 
     for part in semicolon_string.split(';'):
-        trimmed = part.strip()
+        trimmed = strip_parentheticals(part.strip())
         if not trimmed:
             continue
 
@@ -194,6 +256,300 @@ def normalize_aliases(alias_map: dict[str, str], semicolon_string: str) -> str:
             result.append(canonical)
 
     return ';'.join(result)
+
+
+# ============================================================================
+# MICE Thread Normalization
+# ============================================================================
+
+#: Valid MICE thread types
+VALID_MICE_TYPES = frozenset({'milieu', 'inquiry', 'character', 'event'})
+
+
+def load_mice_registry(csv_file: str) -> tuple[dict[str, str], dict[str, str]]:
+    """Load MICE thread registry from a CSV with id|name|type|aliases columns.
+
+    Returns two dicts:
+      - alias_map: lowercased name/alias → canonical id (like load_alias_map)
+      - type_map: canonical id → registered type (milieu/inquiry/character/event)
+    """
+    if not csv_file or not os.path.isfile(csv_file):
+        return {}, {}
+
+    header, rows = _read_csv_header_and_rows(csv_file)
+    if not header:
+        return {}, {}
+
+    try:
+        name_idx = header.index('name')
+    except ValueError:
+        return {}, {}
+
+    try:
+        id_idx = header.index('id')
+    except ValueError:
+        id_idx = None
+
+    try:
+        type_idx = header.index('type')
+    except ValueError:
+        type_idx = None
+
+    try:
+        alias_idx = header.index('aliases')
+    except ValueError:
+        alias_idx = None
+
+    alias_map: dict[str, str] = {}
+    type_map: dict[str, str] = {}
+
+    for row in rows:
+        if len(row) <= name_idx:
+            continue
+        name = row[name_idx].strip()
+        if not name:
+            continue
+
+        if id_idx is not None and len(row) > id_idx and row[id_idx].strip():
+            canonical = row[id_idx].strip()
+        else:
+            canonical = name
+
+        alias_map[name.lower()] = canonical
+        alias_map[canonical.lower()] = canonical
+
+        if type_idx is not None and len(row) > type_idx:
+            type_map[canonical] = row[type_idx].strip().lower()
+
+        if alias_idx is not None and len(row) > alias_idx and row[alias_idx]:
+            for alias in row[alias_idx].split(';'):
+                alias = alias.strip()
+                if alias:
+                    alias_map[alias.lower()] = canonical
+
+    return alias_map, type_map
+
+
+def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
+                           type_map: dict[str, str] | None = None) -> str:
+    """Normalize a semicolon-separated mice_threads value.
+
+    Each entry should be ``{+|-}{type}:{name}``.  The name portion is
+    resolved against *alias_map*.  If *type_map* is provided and the
+    resolved name has a registered type, the type in the entry is
+    corrected to match.
+
+    Entries that don't match the expected format pass through unchanged.
+
+    Args:
+        mice_string: Raw mice_threads value (semicolon-separated).
+        alias_map: Name/alias → canonical id mapping.
+        type_map: Optional canonical id → registered type mapping.
+
+    Returns:
+        Normalized semicolon-separated string.
+    """
+    if not mice_string or not alias_map:
+        return mice_string or ''
+
+    result = []
+    for entry in mice_string.split(';'):
+        entry = entry.strip()
+        if not entry:
+            continue
+
+        # Parse +type:name or -type:name
+        if len(entry) > 1 and entry[0] in ('+', '-') and ':' in entry[1:]:
+            prefix = entry[0]
+            rest = entry[1:]
+            type_part, _, name_part = rest.partition(':')
+            type_part = type_part.strip().lower()
+            name_part = name_part.strip()
+
+            # Normalize the name
+            canonical = alias_map.get(name_part.lower(), name_part)
+
+            # Correct the type if registry has one
+            if type_map and canonical in type_map:
+                type_part = type_map[canonical]
+
+            result.append(f'{prefix}{type_part}:{canonical}')
+        else:
+            # Doesn't match format — pass through
+            result.append(entry)
+
+    return ';'.join(result)
+
+
+# Fields that hold character references (semicolon-separated or single)
+_CHAR_FIELDS = ('pov', 'characters', 'on_stage')
+# Fields that hold location references
+_LOCATION_FIELDS = ('location',)
+# Fields that hold motif references
+_MOTIF_FIELDS = ('motifs',)
+# Fields that hold value references
+_VALUE_FIELDS = ('value_at_stake',)
+# Fields that hold knowledge fact references
+_KNOWLEDGE_FIELDS = ('knowledge_in', 'knowledge_out')
+
+
+def format_registries_for_prompt(project_dir: str) -> str:
+    """Format registry CSV contents as a prompt section.
+
+    Reads all registry files and returns a formatted string showing
+    canonical IDs that Claude should use in its output.  Registries
+    whose files don't exist or contain only a header row are skipped.
+
+    Args:
+        project_dir: Root directory of the novel project.
+
+    Returns:
+        Formatted markdown string, or empty string if no registries exist.
+    """
+    ref_dir = os.path.join(project_dir, 'reference')
+
+    # Registry definitions: (filename, section_title, extra_columns)
+    # extra_columns are additional columns to show alongside id and name
+    registries = [
+        ('characters.csv', 'Characters', []),
+        ('locations.csv', 'Locations', []),
+        ('values.csv', 'Values', []),
+        ('mice-threads.csv', 'MICE Threads', ['type']),
+        ('motif-taxonomy.csv', 'Motifs', []),
+        ('knowledge.csv', 'Knowledge Facts', []),
+    ]
+
+    sections: list[str] = []
+
+    for filename, title, extra_cols in registries:
+        csv_path = os.path.join(ref_dir, filename)
+        if not os.path.isfile(csv_path):
+            continue
+
+        header, rows = _read_csv_header_and_rows(csv_path)
+        if not header or not rows:
+            continue
+
+        try:
+            id_idx = header.index('id')
+        except ValueError:
+            continue
+        try:
+            name_idx = header.index('name')
+        except ValueError:
+            continue
+
+        # Resolve extra column indices
+        extra_idxs: list[tuple[str, int]] = []
+        for col in extra_cols:
+            try:
+                extra_idxs.append((col, header.index(col)))
+            except ValueError:
+                pass
+
+        entries: list[str] = []
+        for row in rows:
+            if len(row) <= max(id_idx, name_idx):
+                continue
+            rid = row[id_idx].strip()
+            rname = row[name_idx].strip()
+            if not rid:
+                continue
+
+            # Build the display line
+            extra_parts = []
+            for col_name, col_idx in extra_idxs:
+                if len(row) > col_idx and row[col_idx].strip():
+                    extra_parts.append(f'[{row[col_idx].strip()}]')
+
+            extra_str = ' '.join(extra_parts)
+            if extra_str:
+                entries.append(f'- {rid} {extra_str} ({rname})')
+            else:
+                entries.append(f'- {rid} ({rname})')
+
+        if entries:
+            sections.append(f'### {title} (reference/{filename})\n' +
+                            '\n'.join(entries))
+
+    if not sections:
+        return ''
+
+    return ('## Canonical Registries — use these IDs in your output\n\n' +
+            '\n\n'.join(sections))
+
+
+def load_registry_alias_maps(project_dir: str) -> dict[str, dict[str, str]]:
+    """Load alias maps from all registry CSVs in a project.
+
+    Returns a dict with keys 'characters', 'locations', 'motifs', 'values',
+    'knowledge', 'mice_threads', and 'mice_types' mapping to their respective
+    dicts.  Missing registry files produce empty dicts.
+
+    The 'mice_threads' key holds a name→id alias map.  The 'mice_types' key
+    holds an id→type map for MICE type correction.
+    """
+    ref_dir = os.path.join(project_dir, 'reference')
+    mice_alias, mice_types = load_mice_registry(
+        os.path.join(ref_dir, 'mice-threads.csv'))
+    return {
+        'characters': load_alias_map(os.path.join(ref_dir, 'characters.csv')),
+        'locations': load_alias_map(os.path.join(ref_dir, 'locations.csv')),
+        'motifs': load_alias_map(os.path.join(ref_dir, 'motif-taxonomy.csv')),
+        'values': load_alias_map(os.path.join(ref_dir, 'values.csv')),
+        'knowledge': load_alias_map(os.path.join(ref_dir, 'knowledge.csv')),
+        'mice_threads': mice_alias,
+        'mice_types': mice_types,
+    }
+
+
+def normalize_fields(result: dict[str, str],
+                     alias_maps: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Normalize all registry-backed fields in a result dict.
+
+    Applies alias maps to resolve free-text names to canonical IDs.
+    Works with any dict that has scene-CSV field names (pov, characters,
+    on_stage, location, motifs, value_at_stake, mice_threads).
+
+    Args:
+        result: Parsed result dict (from any extraction, enrichment, or
+            elaboration response parser).
+        alias_maps: Registry alias maps (from :func:`load_registry_alias_maps`).
+
+    Returns:
+        The result dict, modified in place and returned for convenience.
+    """
+    if not alias_maps:
+        return result
+
+    char_map = alias_maps.get('characters', {})
+    loc_map = alias_maps.get('locations', {})
+    motif_map = alias_maps.get('motifs', {})
+    value_map = alias_maps.get('values', {})
+    knowledge_map = alias_maps.get('knowledge', {})
+    mice_map = alias_maps.get('mice_threads', {})
+    mice_types = alias_maps.get('mice_types', {})
+
+    for field in _CHAR_FIELDS:
+        if field in result and char_map:
+            result[field] = normalize_aliases(char_map, result[field])
+    for field in _LOCATION_FIELDS:
+        if field in result and loc_map:
+            result[field] = normalize_aliases(loc_map, result[field])
+    for field in _MOTIF_FIELDS:
+        if field in result and motif_map:
+            result[field] = normalize_aliases(motif_map, result[field])
+    for field in _VALUE_FIELDS:
+        if field in result and value_map:
+            result[field] = normalize_aliases(value_map, result[field])
+    for field in _KNOWLEDGE_FIELDS:
+        if field in result and knowledge_map:
+            result[field] = normalize_aliases(knowledge_map, result[field])
+    if 'mice_threads' in result and mice_map:
+        result['mice_threads'] = normalize_mice_threads(
+            result['mice_threads'], mice_map, mice_types)
+
+    return result
 
 
 # ============================================================================
@@ -304,11 +660,12 @@ def update_csv_field(csv_file: str, row_id: str, field: str, value: str,
 
 def apply_enrich_result(scene_id: str, result: dict,
                         metadata_csv: str, intent_csv: str,
-                        force: bool = False) -> int:
+                        force: bool = False,
+                        briefs_csv: str = '') -> int:
     """Write enrichment values to the project CSV files.
 
-    Updates ``metadata_csv`` for type, location, time_of_day.
-    Updates ``intent_csv`` for emotional_arc, characters, threads, motifs.
+    Routes each field to the correct CSV file based on field membership
+    in METADATA_FIELDS, INTENT_FIELDS, or BRIEFS_FIELDS.
 
     Existing non-empty values are skipped unless *force* is True.
 
@@ -319,6 +676,7 @@ def apply_enrich_result(scene_id: str, result: dict,
         metadata_csv: Path to scenes.csv.
         intent_csv: Path to scene-intent.csv.
         force: If True, overwrite existing non-empty values.
+        briefs_csv: Path to scene-briefs.csv.
 
     Returns:
         Number of fields actually updated.
@@ -336,8 +694,12 @@ def apply_enrich_result(scene_id: str, result: dict,
         # Determine which CSV holds this field
         if field in METADATA_FIELDS:
             csv_file = metadata_csv
-        else:
+        elif field in INTENT_FIELDS:
             csv_file = intent_csv
+        elif field in BRIEFS_FIELDS:
+            csv_file = briefs_csv
+        else:
+            continue
 
         if not csv_file or not os.path.isfile(csv_file):
             continue
@@ -398,6 +760,8 @@ def build_enrich_prompt(scene_id: str, project_dir: str,
         pov = read_csv_field(metadata_csv, scene_id, 'pov')
         setting = read_csv_field(metadata_csv, scene_id, 'location')
 
+    briefs_csv = _resolve_briefs_csv(project_dir)
+
     # Build field instructions -- only for fields still needed
     field_instructions = []
     for field in fields:
@@ -407,6 +771,8 @@ def build_enrich_prompt(scene_id: str, project_dir: str,
                 current_val = read_csv_field(metadata_csv, scene_id, field)
             elif field in INTENT_FIELDS and intent_csv:
                 current_val = read_csv_field(intent_csv, scene_id, field)
+            elif field in BRIEFS_FIELDS and briefs_csv:
+                current_val = read_csv_field(briefs_csv, scene_id, field)
             if current_val:
                 continue
 
@@ -417,15 +783,24 @@ def build_enrich_prompt(scene_id: str, project_dir: str,
     if not field_instructions:
         return ''
 
+    # Include registry contents for registry-backed fields
+    registries_text = format_registries_for_prompt(project_dir)
+
     prompt_parts = [
         'Analyze this scene and extract the requested metadata. '
-        'Respond with ONLY the labeled lines below, nothing else.',
+        'Respond with ONLY the labeled lines below, nothing else. '
+        'For registry-backed fields, use the canonical IDs from the '
+        'registries listed below.',
         '',
         f'Title: {title or "Unknown"} | POV: {pov or "Unknown"} '
         f'| Setting: {setting or "Unknown"}',
         '',
         scene_text,
     ]
+
+    if registries_text:
+        prompt_parts.append('')
+        prompt_parts.append(registries_text)
 
     for instruction in field_instructions:
         prompt_parts.append(instruction)
@@ -436,36 +811,112 @@ def build_enrich_prompt(scene_id: str, project_dir: str,
 def _field_instruction(field: str) -> str:
     """Return the prompt instruction line for a given field."""
     instructions = {
-        'type': (
-            'TYPE: <one of: character, plot, world, action, transition, '
-            'confrontation>'
+        'pov': (
+            'POV: <the POV character — use their canonical ID or full name>'
         ),
         'location': (
-            'LOCATION: <the physical location where this scene takes place '
-            '-- use a short, reusable label (the name of the place, not a '
-            'description of the scene). If two scenes happen in the same '
-            'place, use the same location string. Do not include time of '
-            'day, room-level detail, or character actions.>'
+            'LOCATION: <the physical location — use a short, reusable label '
+            '(the name of the place, not a description). If two scenes '
+            'happen in the same place, use the same string.>'
         ),
         'time_of_day': (
             'TIME_OF_DAY: <one of: morning, afternoon, evening, night, '
             'dawn, dusk>'
         ),
-        'characters': (
-            'CHARACTERS: <semicolon-separated list of ALL character names '
-            'who appear or are mentioned by name>'
+        'duration': (
+            'DURATION: <approximate in-story duration, e.g., "2 hours", '
+            '"30 minutes", "an afternoon">'
+        ),
+        'type': (
+            'TYPE: <one of: action, character, confrontation, dialogue, '
+            'introspection, plot, revelation, transition, world>'
+        ),
+        'action_sequel': (
+            'ACTION_SEQUEL: <action or sequel — action scenes have '
+            'goal/conflict/outcome; sequel scenes have '
+            'reaction/dilemma/decision>'
         ),
         'emotional_arc': (
             'EMOTIONAL_ARC: <one sentence: "[starting emotion] giving way '
             'to [ending emotion]">'
         ),
-        'threads': (
-            'THREADS: <semicolon-separated list of story threads, e.g. '
-            '"investigation;family_secret">'
+        'value_at_stake': (
+            'VALUE_AT_STAKE: <the abstract value being tested in this scene '
+            '— e.g., truth, safety, justice, loyalty, freedom>'
+        ),
+        'value_shift': (
+            'VALUE_SHIFT: <polarity change using +/- notation: '
+            '+/- means positive to negative, -/+ means negative to positive, '
+            '+/++ means good to better, -/-- means bad to worse, '
+            '+/+ or -/- means no change (flat)>'
+        ),
+        'turning_point': (
+            'TURNING_POINT: <action or revelation — action means a character '
+            'does something that changes the situation; revelation means new '
+            'information changes the situation>'
+        ),
+        'characters': (
+            'CHARACTERS: <semicolon-separated list of ALL characters present '
+            'or referenced by name>'
+        ),
+        'on_stage': (
+            'ON_STAGE: <semicolon-separated list of characters physically '
+            'present in the scene — subset of CHARACTERS>'
+        ),
+        'mice_threads': (
+            'MICE_THREADS: <semicolon-separated MICE thread operations — '
+            '+milieu:location-name to open, -inquiry:question to close. '
+            'Use + for opening, - for closing. '
+            'Types: milieu, inquiry, character, event>'
+        ),
+        'goal': (
+            'GOAL: <the POV character\'s concrete objective entering this '
+            'scene — what are they trying to do?>'
+        ),
+        'conflict': (
+            'CONFLICT: <what specifically opposes the goal?>'
+        ),
+        'outcome': (
+            'OUTCOME: <how the scene ends for the POV character: '
+            'yes / no / yes-but / no-and>'
+        ),
+        'crisis': (
+            'CRISIS: <the key dilemma — a best bad choice or irreconcilable '
+            'goods that the character faces>'
+        ),
+        'decision': (
+            'DECISION: <what the character actively chooses in response '
+            'to the crisis>'
+        ),
+        'knowledge_in': (
+            'KNOWLEDGE_IN: <semicolon-separated STRUCTURALLY USEFUL facts '
+            'the POV character knows entering — only facts that gate this '
+            "scene's decisions. Categories: identity reveals, motive/intent "
+            'reveals, capability/constraints, state changes, stakes/threats, '
+            'relationship shifts. Omit ordinary plot details.>'
+        ),
+        'knowledge_out': (
+            'KNOWLEDGE_OUT: <knowledge_in plus 0-2 NEW structurally useful '
+            'facts learned during this scene. A fact is useful only if a '
+            'character who knows it would make a different decision than one '
+            'who does not, or a future scene requires it. Most scenes add '
+            '0-1 new facts.>'
+        ),
+        'key_actions': (
+            'KEY_ACTIONS: <semicolon-separated concrete things that happen '
+            'in this scene>'
+        ),
+        'key_dialogue': (
+            'KEY_DIALOGUE: <semicolon-separated specific lines or exchanges '
+            'essential to the scene — quote directly from the text>'
+        ),
+        'emotions': (
+            'EMOTIONS: <semicolon-separated emotional beats in sequence '
+            'as they occur through the scene>'
         ),
         'motifs': (
-            'MOTIFS: <semicolon-separated list of recurring images/symbols, '
-            'e.g. "hands;darkness;water">'
+            'MOTIFS: <semicolon-separated recurring images, symbols, or '
+            'sensory details that carry thematic weight>'
         ),
     }
     return instructions.get(field, '')
@@ -484,7 +935,7 @@ def enrich_and_apply(scene_id: str, response: str, project_dir: str,
         response: Raw text response from Claude.
         project_dir: Root directory of the novel project.
         alias_maps: Optional dict with keys ``'characters'``, ``'motifs'``,
-            ``'locations'``, ``'threads'`` mapping to alias dicts.
+            ``'locations'`` mapping to alias dicts.
         force: If True, overwrite existing non-empty values.
 
     Returns:
@@ -494,20 +945,9 @@ def enrich_and_apply(scene_id: str, response: str, project_dir: str,
     if result.get('_status') != 'ok':
         return result
 
-    # Normalize aliases
+    # Normalize aliases (characters, on_stage, pov, location, motifs)
     if alias_maps:
-        if 'characters' in alias_maps and 'characters' in result:
-            result['characters'] = normalize_aliases(
-                alias_maps['characters'], result['characters'])
-        if 'motifs' in alias_maps and 'motifs' in result:
-            result['motifs'] = normalize_aliases(
-                alias_maps['motifs'], result['motifs'])
-        if 'locations' in alias_maps and 'location' in result:
-            result['location'] = normalize_aliases(
-                alias_maps['locations'], result['location'])
-        if 'threads' in alias_maps and 'threads' in result:
-            result['threads'] = normalize_aliases(
-                alias_maps['threads'], result['threads'])
+        normalize_fields(result, alias_maps)
 
     # Validate constrained fields
     if 'type' in result:
@@ -522,10 +962,11 @@ def enrich_and_apply(scene_id: str, response: str, project_dir: str,
     # Apply to CSVs
     metadata_csv = _resolve_scenes_csv(project_dir)
     intent_csv = _resolve_intent_csv(project_dir)
+    briefs_csv = _resolve_briefs_csv(project_dir)
 
     if metadata_csv and intent_csv:
         apply_enrich_result(scene_id, result, metadata_csv, intent_csv,
-                            force=force)
+                            force=force, briefs_csv=briefs_csv)
 
     return result
 
@@ -690,9 +1131,6 @@ def main():
                 if 'locations' in alias_maps and 'location' in result:
                     result['location'] = normalize_aliases(
                         alias_maps['locations'], result['location'])
-                if 'threads' in alias_maps and 'threads' in result:
-                    result['threads'] = normalize_aliases(
-                        alias_maps['threads'], result['threads'])
             if 'type' in result:
                 result['type'] = validate_type(result['type'])
                 if not result['type']:
@@ -727,23 +1165,7 @@ def main():
             sys.exit(1)
 
         project_dir = sys.argv[2]
-        maps = {}
-
-        chars_csv = os.path.join(project_dir, 'reference', 'characters.csv')
-        if os.path.isfile(chars_csv):
-            maps['characters'] = load_alias_map(chars_csv)
-
-        motifs_csv = os.path.join(project_dir, 'reference', 'motif-taxonomy.csv')
-        if os.path.isfile(motifs_csv):
-            maps['motifs'] = load_alias_map(motifs_csv)
-
-        locations_csv = os.path.join(project_dir, 'reference', 'locations.csv')
-        if os.path.isfile(locations_csv):
-            maps['locations'] = load_alias_map(locations_csv)
-
-        threads_csv = os.path.join(project_dir, 'reference', 'threads.csv')
-        if os.path.isfile(threads_csv):
-            maps['threads'] = load_alias_map(threads_csv)
+        maps = load_registry_alias_maps(project_dir)
 
         json.dump(maps, sys.stdout)
         print()

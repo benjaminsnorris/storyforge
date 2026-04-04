@@ -159,12 +159,12 @@ The CSV files depend on which pipeline the author chose.
 
 **`{project-dir}/reference/scenes.csv`:**
 ```
-id|seq|title|part|pov|location|timeline_day|time_of_day|duration|status|word_count|target_words
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
 ```
 
 **`{project-dir}/reference/scene-intent.csv`:**
 ```
-id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
 ```
 
 **`{project-dir}/reference/scene-briefs.csv`:**
@@ -183,7 +183,7 @@ id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|wor
 
 **`{project-dir}/reference/scene-intent.csv`:**
 ```
-id|function|emotional_arc|characters|threads|motifs|notes
+id|function|emotional_arc|characters|motifs|notes
 ```
 
 ## Step 6: Generate the Project CLAUDE.md

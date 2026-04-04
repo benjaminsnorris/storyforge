@@ -513,7 +513,7 @@ def _claudep_read_instructions() -> str:
         '- `reference/voice-guide.md` — the established voice rules, prose style, and '
         'per-character dialogue fingerprints. Every edit you make must be consistent with this guide.\n'
         '- `reference/continuity-tracker.md` — the living ledger of continuity facts, promises, '
-        'and threads. Consult this before changing any plot-relevant detail.\n'
+        'and MICE threads. Consult this before changing any plot-relevant detail.\n'
         '- `reference/scenes.csv` — the master scene list for structural context.\n\n'
         '### 2. Read All In-Scope Scene Files\n\n'
         'Read every scene file listed above in full before making changes. '

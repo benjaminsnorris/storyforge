@@ -51,14 +51,18 @@ Read evaluation findings and scoring data. Categorize each finding by where the 
 | fix_location | Target file | What it fixes |
 |-------------|-------------|---------------|
 | `structural` | scenes.csv | POV, timeline, part structure, scene additions/removals |
-| `intent` | scene-intent.csv | Value shifts, threads, scene type, character presence |
+| `intent` | scene-intent.csv | Value shifts, scene type, character presence |
 | `brief` | scene-briefs.csv | Knowledge chain, goal/conflict/outcome, key actions |
 | `craft` | Prose directly | Voice, rhythm, dialogue, naturalness |
+
+### Registry-Backed Fields
+
+When fixing CSV fields interactively (upstream passes), all registry-backed fields must use canonical IDs from `reference/` registries (characters.csv, locations.csv, values.csv, knowledge.csv, motif-taxonomy.csv, mice-threads.csv). Read the registries before making CSV edits. If a fix introduces a new entity, add it to the appropriate registry first.
 
 ### Ordering Principles (upstream first)
 
 1. **Structural passes first** — scene additions, removals, reordering
-2. **Intent passes second** — value shift corrections, thread management
+2. **Intent passes second** — value shift corrections, MICE thread management
 3. **Brief passes third** — knowledge chain fixes, goal/conflict/outcome
 4. **Craft passes last** — prose polish (only after all upstream changes settle)
 5. **Validate** after all passes
@@ -72,7 +76,7 @@ Write the plan to `working/plans/revision-plan.csv`:
 ```
 pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location
 1|knowledge-chain-fix|Fix knowledge violations flagged in evaluation|scene-level|scene-a;scene-b|Specific guidance here|voice-quality|F001;F003|pending|sonnet|brief
-2|thread-dormancy|Reactivate dormant threads|full||Add thread references in gaps|all-strengths|F007|pending|sonnet|intent
+2|mice-thread-fix|Fix MICE thread nesting issues|full||Ensure FILO nesting order|all-strengths|F007|pending|sonnet|intent
 3|prose-tightening|Voice consistency and AI pattern cleanup|full||Follow voice guide strictly|scene-30b|F012;F015|pending|opus|craft
 ```
 

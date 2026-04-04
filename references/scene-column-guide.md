@@ -50,15 +50,15 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to check:** Read each function. Can you verify from the prose that this actually happens? Is it specific ("she discovers the letter was forged") or vague ("develops the relationship")?
 **How to improve:** Rewrite vague functions to be testable. If you can't make it specific, the scene may lack a clear purpose.
 
-### scene_type — Swain Structural Pattern
+### action_sequel — Action/Sequel Pattern
 **Why it matters:** The action/sequel rhythm controls pacing. Action scenes (goal → conflict → outcome) create tension. Sequel scenes (reaction → dilemma → decision) process that tension. Too many consecutive action scenes is breathless. Too many sequels is a slog.
 **How to check:** Look at the Scene Rhythm chart. Flag 4+ consecutive same type.
 **How to improve:** If you have a run of action scenes, insert a sequel where a character processes what happened. If all sequels, find a scene where a character makes an active choice and hits opposition.
 
 ### value_at_stake — What's Being Tested
-**Why it matters:** Readers stay engaged when something they care about is at risk. Naming the value (safety, love, justice, truth) makes the stakes concrete and checkable.
-**How to check:** Does the value feel right for the scene? Is it the same value for too many consecutive scenes (reader fatigue)?
-**How to improve:** Vary values across sequences. If the whole middle is about "safety," consider shifting some scenes to test "trust" or "loyalty."
+**Why it matters:** Readers stay engaged when something they care about is at risk. Naming the value makes the stakes concrete and checkable. Values are normalized against `reference/values.csv`, enabling arc tracking across the manuscript.
+**How to check:** Does the value feel right for the scene? Is it the same value for too many consecutive scenes (reader fatigue)? Run schema validation to catch unnormalized values.
+**How to improve:** Vary values across sequences. If the whole middle is about "safety," consider shifting some scenes to test "trust" or "loyalty." Add new values to `values.csv` as they emerge.
 
 ### value_shift — Polarity Change
 **Why it matters:** If a value doesn't shift, nothing happened — it's a nonevent (McKee). The shift direction (+/-, -/+, etc.) creates the story's emotional shape.
@@ -69,11 +69,6 @@ This document explains **why** each column in the scene CSV files matters and **
 **Why it matters:** Varying turning point types prevents reader fatigue. If every scene turns on a revelation (new information), the pattern becomes predictable. Alternating with action turns (a character does something) creates variety.
 **How to check:** Flag 4+ consecutive same type. The Scene Rhythm chart shows this.
 **How to improve:** If too many revelations, look for scenes where a character's action could be the turning point instead of new information arriving.
-
-### threads — Story Threads
-**Why it matters:** Threads are subplots, themes, and ongoing concerns that weave through the manuscript. Dropped threads feel like broken promises. Threads that appear in only 1-2 scenes are underdeveloped.
-**How to check:** Run validation (flags dormant threads). Check the Thread Weave chart. Count scenes per thread.
-**How to improve:** If a thread goes dormant for 8+ scenes, add a reference to it (even a brief character thought) to keep it alive. If a thread appears in only 1-2 scenes, either develop it or remove it.
 
 ### characters / on_stage — Who's Present
 **Why it matters:** Character presence drives the reader's sense of the story's world. Characters who are mentioned but never appear on-stage feel like they exist only in exposition.
@@ -115,9 +110,43 @@ This document explains **why** each column in the scene CSV files matters and **
 **How to improve:** If the decision feels passive, restructure so the character must act — even if the action is choosing not to act.
 
 ### knowledge_in / knowledge_out — Information State
-**Why it matters:** This is the continuity backbone. If a character acts on information they haven't received, or fails to act on information they have, the reader loses trust. Exact wording enables automated validation.
+**Why it matters:** This is the continuity backbone. If a character acts on information they haven't received, or fails to act on information they have, the reader loses trust. Fact IDs from knowledge.csv enable automated validation. Knowledge facts should track things that **change what a scene can do** — not every plot detail.
 **How to check:** Run validation — it flags knowledge_in facts that don't match any prior knowledge_out. Check that knowledge_out includes everything the character learned during the scene.
-**How to improve:** Ensure exact wording matches across scenes. If validation flags a mismatch, check whether it's a wording difference (fix the wording) or a genuine continuity error (fix the scene order or add a scene where the character learns the fact).
+**How to improve:** Ensure fact IDs are registered in reference/knowledge.csv. If validation flags a mismatch, check whether the fact IDs match the canonical entries in knowledge.csv or whether it's a genuine continuity error (fix the scene order or add a scene where the character learns the fact).
+
+See `references/knowledge-guidelines.md` for the full framework on selecting and designing knowledge facts.
+
+#### Six Fact Categories
+Every knowledge fact should fall into one of these categories:
+1. **Identity** — who someone really is, hidden relationships, true names
+2. **Motive/intent** — why someone did what they did, what they actually want
+3. **Capability/constraint** — what someone can/cannot do, world rules, Chekhov's guns
+4. **State changes** — irreversible events (deaths, betrayals, destruction)
+5. **Stakes/threats** — what's at risk, deadlines, antagonist plans
+6. **Relationship shifts** — alliances, betrayals, commitments
+
+#### Three-Part Litmus Test
+A fact must pass **all three** to earn a knowledge ID:
+1. **Action test:** A character who knows this fact would make a different decision than one who doesn't
+2. **Scene-gate test:** At least one future scene requires this fact in knowledge_in to make sense
+3. **Chekhov test:** This fact is either planted for later payoff or pays off something planted earlier
+
+#### Granularity
+- **Target:** 50-120 facts for a 60-100 scene novel
+- **Per scene:** roughly 0.5-1.5 new facts in knowledge_out
+- **Too granular?** If a scene produces 5+ new facts, they need merging
+- **Merge-up rule:** if two facts always travel together, they're one fact
+
+#### Good vs Bad Examples
+Good facts (scene-gating, decision-altering):
+- `marcus-killed-elena` — state change, gates every future scene with Marcus
+- `border-undefended` — capability/constraint, enables invasion scenes
+- `kai-is-informant` — identity reveal, changes every interaction with Kai
+
+Bad facts (too granular, no scene depends on them):
+- `devonte-wont-drink-ones-blue-lids` — atmospheric detail, decorates but doesn't gate
+- `claire-name-written-on-legal-pad` — logistical minutiae
+- `hank-spent-four-hours-inside` — timing detail unless it's an alibi
 
 ### key_actions / key_dialogue — Scene Contract
 **Why it matters:** These are the specific beats that make the scene work. If the brief says a character "examines the body and notes the staged positioning" and the prose skips the examination, the scene hasn't delivered its promise.

@@ -141,11 +141,6 @@ cat > "$DASHBOARD_FILE" << 'HTMLEOF'
     --type-transition: #8b5cf6;
     --type-confrontation: #ec4899;
 
-    --mice-milieu: #16a34a;
-    --mice-inquiry: #2563eb;
-    --mice-character: #d97706;
-    --mice-event: #dc2626;
-
     --score-low: #18181b;
     --score-mid-low: #dc2626;
     --score-mid: #d97706;
@@ -178,11 +173,6 @@ cat > "$DASHBOARD_FILE" << 'HTMLEOF'
         --type-world: #4ade80;
         --type-action: #fbbf24;
         --type-transition: #a78bfa;
-
-        --mice-milieu: #4ade80;
-        --mice-inquiry: #60a5fa;
-        --mice-character: #fbbf24;
-        --mice-event: #f87171;
         --type-confrontation: #f472b6;
 
         --score-low: #3f3f46;
@@ -735,6 +725,16 @@ body {
     <div class="vis-container" id="thread-weave"></div>
 </div>
 
+<!-- 4b. Knowledge Flow -->
+<div class="section" id="knowledge-flow-section" style="display:none;">
+    <div class="section-header">
+        <span class="dot"></span>
+        <h2>Knowledge Flow</h2>
+        <span class="subtitle">How facts propagate between scenes via knowledge_in / knowledge_out</span>
+    </div>
+    <div class="vis-container" id="knowledge-flow"></div>
+</div>
+
 <!-- 5. Emotional Terrain -->
 <div class="section">
     <div class="section-header">
@@ -890,6 +890,9 @@ const INTENTS = _DATA.intents;
 const CHARACTERS = _DATA.characters;
 const MOTIF_TAXONOMY = _DATA.motif_taxonomy;
 const LOCATIONS = _DATA.locations;
+const VALUES = _DATA.values || [];
+const MICE_THREADS = _DATA.mice_threads || [];
+const KNOWLEDGE = _DATA.knowledge || [];
 const SCORES = _DATA.scores;
 const WEIGHTS = _DATA.weights;
 const NARRATIVE_SCORES = _DATA.narrative_scores;
@@ -1171,6 +1174,7 @@ function buildAliasMap(entries) {
     const map = {};
     entries.forEach(e => {
         if (!e.name) return;
+        if (e.id) map[e.id.toLowerCase()] = e.name;
         map[e.name.toLowerCase()] = e.name;
         if (e.aliases) {
             e.aliases.split(';').forEach(a => {
@@ -1185,6 +1189,20 @@ function buildAliasMap(entries) {
 const charAliasMap = buildAliasMap(CHARACTERS);
 const motifAliasMap = buildAliasMap(MOTIF_TAXONOMY);
 const locationAliasMap = buildAliasMap(LOCATIONS);
+const valueAliasMap = buildAliasMap(VALUES);
+const miceThreadAliasMap = buildAliasMap(MICE_THREADS);
+const knowledgeAliasMap = buildAliasMap(KNOWLEDGE);
+
+// Combined registry map for general-purpose display name resolution
+const _allRegistryMaps = [charAliasMap, locationAliasMap, motifAliasMap, valueAliasMap, miceThreadAliasMap, knowledgeAliasMap];
+function displayName(id) {
+    if (!id) return id;
+    var key = id.toLowerCase().trim();
+    for (var i = 0; i < _allRegistryMaps.length; i++) {
+        if (_allRegistryMaps[i][key]) return _allRegistryMaps[i][key];
+    }
+    return id;
+}
 
 // Motif tier lookup: {canonical_name: tier}
 const motifTierMap = {};
@@ -1320,13 +1338,13 @@ function attachSceneHandlers(el, sceneId) {
         const s = sceneById[sceneId];
         if (!s) return;
         const wc = getWordCount(s);
-        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${(s.location || '').substring(0, 60)}</div>`);
+        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${displayName(s.pov)} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${displayName(s.location || '').substring(0, 60)}</div>`);
     });
     el.addEventListener('mousemove', (e) => {
         const s = sceneById[sceneId];
         if (!s) return;
         const wc = getWordCount(s);
-        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${s.pov} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${(s.location || '').substring(0, 60)}</div>`);
+        showTooltip(e, `<div class="tt-title">${s.seq}. ${s.title}</div><div class="tt-meta">POV: ${displayName(s.pov)} &middot; ${wc.toLocaleString()} words &middot; ${s.type || 'untyped'}<br>Location: ${displayName(s.location || '').substring(0, 60)}</div>`);
     });
     el.addEventListener('mouseleave', hideTooltip);
 }
@@ -1373,8 +1391,8 @@ function updateDetailPanel(sceneId) {
     html += '<button class="minimize-btn" onclick="event.stopPropagation();toggleMinimizePanel()" title="Minimize">&#8595;</button>';
     html += '<button class="close-btn" onclick="event.stopPropagation();selectScene(null)" title="Close">&times;</button>';
     html += '</span></h3>';
-    html += detailRow('POV', s.pov);
-    html += detailRow('Location', s.location);
+    html += detailRow('POV', displayName(s.pov));
+    html += detailRow('Location', displayName(s.location));
     html += detailRow('Part', s.part);
     html += detailRow('Type', s.type);
     html += detailRow('Words', (+getWordCount(s)).toLocaleString());
@@ -1383,11 +1401,11 @@ function updateDetailPanel(sceneId) {
     if (intent) {
         let intentHtml = '';
         if (intent.function) intentHtml += detailRow('Function', intent.function.substring(0, 150));
-        if (intent.scene_type) {
-            const stFirst = intent.scene_type.split(/[\s—–]/)[0].trim();
+        if (intent.action_sequel) {
+            const stFirst = intent.action_sequel.split(/[\s—–]/)[0].trim();
             intentHtml += detailRow('Scene Type', stFirst.charAt(0).toUpperCase() + stFirst.slice(1));
         }
-        if (intent.value_at_stake) intentHtml += detailRow('Value at Stake', intent.value_at_stake.split(/[\s—–]/)[0].trim());
+        if (intent.value_at_stake) intentHtml += detailRow('Value at Stake', displayName(intent.value_at_stake.split(/[\s—–]/)[0].trim()));
         if (intent.value_shift) {
             const vsMatch = intent.value_shift.match(/^([+\-]+)\s*\/\s*([+\-]+)/);
             if (vsMatch) intentHtml += detailRow('Value Shift', vsMatch[1] + ' → ' + vsMatch[2]);
@@ -1397,9 +1415,14 @@ function updateDetailPanel(sceneId) {
             intentHtml += detailRow('Turning Point', tpFirst.charAt(0).toUpperCase() + tpFirst.slice(1));
         }
         if (intent.emotional_arc) intentHtml += detailRow('Emotion', intent.emotional_arc.substring(0, 80));
-        if (intent.characters) intentHtml += detailRow('Characters', intent.characters.replace(/;/g, ', '));
-        if (intent.mice_threads) intentHtml += detailRow('MICE Threads', intent.mice_threads.replace(/;/g, ', '));
-        if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.replace(/;/g, ', ').substring(0, 100));
+        if (intent.characters) intentHtml += detailRow('Characters', intent.characters.split(';').map(c => displayName(c.trim())).join(', '));
+        if (intent.mice_threads) intentHtml += detailRow('MICE Threads', intent.mice_threads.split(';').map(function(t) {
+            t = t.trim(); var stripped = t.replace(/^[+-]/, ''); var prefix = t.startsWith('+') ? '+' : t.startsWith('-') ? '-' : '';
+            var colonIdx = stripped.indexOf(':'); var threadId = colonIdx >= 0 ? stripped.substring(colonIdx + 1) : stripped;
+            var typePart = colonIdx >= 0 ? stripped.substring(0, colonIdx + 1) : '';
+            return prefix + typePart + displayName(threadId);
+        }).join(', '));
+        if (intent.motifs) intentHtml += detailRow('Motifs', intent.motifs.split(';').map(m => displayName(m.trim())).join(', ').substring(0, 100));
         if (intentHtml) html += '<div class="detail-section-end">' + intentHtml + '</div>';
     }
 
@@ -1581,7 +1604,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             'font-family': 'var(--font-mono)',
             'font-size': 11, fill: 'var(--text-secondary)'
         });
-        label.textContent = pov;
+        label.textContent = displayName(pov);
         svg.appendChild(label);
 
         // Stats on the right above the bar
@@ -1688,149 +1711,338 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
 (function renderThreadWeave() {
     const container = document.getElementById('thread-weave');
+
+    // MICE type color palette
     const MICE_COLORS = {
-        milieu: 'var(--mice-milieu)',
-        inquiry: 'var(--mice-inquiry)',
-        character: 'var(--mice-character)',
-        event: 'var(--mice-event)'
+        milieu:    '#2dd4bf', // teal/cyan
+        inquiry:   '#f59e0b', // amber/gold
+        character: '#a78bfa', // purple
+        event:     '#f87171'  // coral/red
     };
+    function miceColor(type) { return MICE_COLORS[type] || 'var(--text-dim)'; }
 
-    // Parse mice_threads: collect open/close scene for each thread
-    const threadOpen = {};   // thread_name -> { seq, sceneId }
-    const threadClose = {};  // thread_name -> { seq, sceneId }
-    const threadType = {};   // thread_name -> mice type
+    // Parse all MICE thread entries across scenes
+    // Each entry: "+type:name" (open) or "-type:name" (close)
+    var threads = {}; // keyed by thread name
 
-    INTENTS.forEach(intent => {
-        const mice = (intent.mice_threads || '').split(';').map(t => t.trim()).filter(Boolean);
-        const s = sceneById[intent.id];
+    INTENTS.forEach(function(intent) {
+        var mice = (intent.mice_threads || '').split(';').map(function(t) { return t.trim(); }).filter(Boolean);
+        var s = sceneById[intent.id];
         if (!s) return;
-        const seq = +s.seq;
-        mice.forEach(entry => {
-            if (entry.startsWith('+')) {
-                const name = entry.substring(1);
-                const type = name.split(':')[0] || '';
-                threadOpen[name] = { seq, sceneId: intent.id };
-                threadType[name] = type;
-            } else if (entry.startsWith('-')) {
-                const name = entry.substring(1);
-                const type = name.split(':')[0] || '';
-                threadClose[name] = { seq, sceneId: intent.id };
-                if (!threadType[name]) threadType[name] = type;
+        var seq = +s.seq;
+
+        mice.forEach(function(raw) {
+            var action = null;
+            var rest = raw;
+            if (raw.charAt(0) === '+') { action = 'open'; rest = raw.substring(1); }
+            else if (raw.charAt(0) === '-') { action = 'close'; rest = raw.substring(1); }
+            else { return; } // skip entries without +/- prefix
+
+            var colonIdx = rest.indexOf(':');
+            var type = '';
+            var name = rest;
+            if (colonIdx >= 0) {
+                type = rest.substring(0, colonIdx).toLowerCase();
+                name = rest.substring(colonIdx + 1);
+            }
+            if (!name) return;
+
+            if (!threads[name]) {
+                threads[name] = { type: type, openSeq: null, openId: null, closeSeq: null, closeId: null };
+            }
+            // Capture type from first occurrence
+            if (type && !threads[name].type) threads[name].type = type;
+
+            if (action === 'open' && threads[name].openSeq === null) {
+                threads[name].openSeq = seq;
+                threads[name].openId = intent.id;
+            }
+            if (action === 'close' && threads[name].closeSeq === null) {
+                threads[name].closeSeq = seq;
+                threads[name].closeId = intent.id;
             }
         });
     });
 
-    // Sort threads: group by type, then by open seq
-    const allThreads = Object.keys(threadOpen);
-    const typeOrder = ['milieu', 'inquiry', 'character', 'event'];
-    allThreads.sort((a, b) => {
-        const ta = typeOrder.indexOf(threadType[a] || '');
-        const tb = typeOrder.indexOf(threadType[b] || '');
-        if (ta !== tb) return (ta === -1 ? 99 : ta) - (tb === -1 ? 99 : tb);
-        return (threadOpen[a] || {}).seq - (threadOpen[b] || {}).seq;
+    // Build sorted list — by opening sequence number (earliest first)
+    var threadNames = Object.keys(threads);
+    // Sort: group by MICE type, then by open seq within each type
+    var typeOrder = { milieu: 0, inquiry: 1, character: 2, event: 3 };
+    threadNames.sort(function(a, b) {
+        var ta = typeOrder[threads[a].type] !== undefined ? typeOrder[threads[a].type] : 99;
+        var tb = typeOrder[threads[b].type] !== undefined ? typeOrder[threads[b].type] : 99;
+        if (ta !== tb) return ta - tb;
+        var oa = threads[a].openSeq !== null ? threads[a].openSeq : 9999;
+        var ob = threads[b].openSeq !== null ? threads[b].openSeq : 9999;
+        return oa - ob;
     });
 
-    const ROW_H = 22;
-    const W = container.clientWidth - 24 || 1100;
-    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
-    // Add space for legend
-    const LEGEND_H = 28;
-    const H = allThreads.length * ROW_H + LEGEND_H + 16;
-    const svg = makeSvg(container, W, H);
+    // Determine last scene seq for unclosed threads
+    var lastSeq = 0;
+    sortedScenes.forEach(function(s) { var sq = +s.seq; if (sq > lastSeq) lastSeq = sq; });
 
-    // Legend
-    let legendX = GRID_LABEL_W;
-    typeOrder.forEach(type => {
-        const hasThreads = allThreads.some(t => threadType[t] === type);
-        if (!hasThreads) return;
-        const color = MICE_COLORS[type] || 'var(--text-dim)';
-        svg.appendChild(svgEl('circle', { cx: legendX, cy: 10, r: 4, fill: color, opacity: 0.9 }));
-        const lbl = svgEl('text', {
-            x: legendX + 8, y: 14,
-            'font-family': 'var(--font-mono)', 'font-size': 10, fill: 'var(--text-dim)'
+    var ROW_H = 28;
+    var LEGEND_H = 30;
+    var W = container.clientWidth - 24 || 1100;
+    var CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
+    var H = threadNames.length * ROW_H + 20 + LEGEND_H;
+    var svg = makeSvg(container, W, H);
+
+    // Draw legend at top
+    var legendTypes = ['milieu', 'inquiry', 'character', 'event'];
+    var legendX = GRID_LABEL_W;
+    legendTypes.forEach(function(lt) {
+        // Color swatch
+        svg.appendChild(svgEl('rect', {
+            x: legendX, y: 4, width: 12, height: 12, rx: 2,
+            fill: MICE_COLORS[lt], opacity: 0.9
+        }));
+        // Label
+        var ltLabel = svgEl('text', {
+            x: legendX + 16, y: 14,
+            'font-family': 'var(--font-mono)', 'font-size': 10,
+            fill: 'var(--text-dim)'
         });
-        lbl.textContent = type.charAt(0).toUpperCase() + type.slice(1);
-        svg.appendChild(lbl);
-        legendX += type.length * 7 + 24;
+        ltLabel.textContent = lt.charAt(0).toUpperCase() + lt.slice(1);
+        svg.appendChild(ltLabel);
+        legendX += lt.length * 7 + 32;
     });
+
+    // Unclosed indicator in legend
+    svg.appendChild(svgEl('line', {
+        x1: legendX, y1: 10, x2: legendX + 20, y2: 10,
+        stroke: 'var(--text-dim)', 'stroke-width': 1.5,
+        'stroke-dasharray': '4,3'
+    }));
+    var uncLabel = svgEl('text', {
+        x: legendX + 24, y: 14,
+        'font-family': 'var(--font-mono)', 'font-size': 10,
+        fill: 'var(--text-dim)'
+    });
+    uncLabel.textContent = 'Unclosed';
+    svg.appendChild(uncLabel);
+
+    var topOffset = LEGEND_H;
 
     // Draw type group separators
-    let prevType = null;
-    allThreads.forEach((thread, ri) => {
-        const mtype = threadType[thread];
-        if (prevType !== null && mtype !== prevType) {
-            const sepY = LEGEND_H + ri * ROW_H - 1;
+    var prevGroupType = null;
+    threadNames.forEach(function(name, ri) {
+        var mtype = threads[name].type;
+        if (prevGroupType !== null && mtype !== prevGroupType) {
+            var sepY = topOffset + ri * ROW_H - 2;
             svg.appendChild(svgEl('line', {
                 x1: GRID_LABEL_W - 8, y1: sepY, x2: W - GRID_RIGHT_PAD, y2: sepY,
                 stroke: 'var(--border)', 'stroke-width': 0.5
             }));
         }
-        prevType = mtype;
+        prevGroupType = mtype;
     });
 
-    allThreads.forEach((thread, ri) => {
-        const y = LEGEND_H + ri * ROW_H + 10;
-        const mtype = threadType[thread] || '';
-        const color = MICE_COLORS[mtype] || 'var(--teal)';
-        const displayName = thread.includes(':') ? thread.split(':').slice(1).join(':') : thread;
+    threadNames.forEach(function(name, ri) {
+        var td = threads[name];
+        var color = miceColor(td.type);
+        var y = topOffset + ri * ROW_H + ROW_H / 2;
 
-        // Label
-        const label = svgEl('text', {
+        // Thread name label with type prefix
+        var labelText = displayName(name);
+        var typeTag = td.type ? td.type.charAt(0).toUpperCase() + ' ' : '';
+        var fullLabel = typeTag + labelText;
+        var label = svgEl('text', {
             x: GRID_LABEL_W - 8, y: y + 4,
             'text-anchor': 'end', 'font-family': 'var(--font-mono)',
             'font-size': 10, fill: color
         });
-        const truncName = displayName.length > GRID_LABEL_TRUNC ? displayName.substring(0, GRID_LABEL_TRUNC - 2) + '..' : displayName;
-        label.textContent = truncName;
-        if (displayName.length > GRID_LABEL_TRUNC) {
+        var truncLabel = fullLabel.length > GRID_LABEL_TRUNC ? fullLabel.substring(0, GRID_LABEL_TRUNC - 2) + '..' : fullLabel;
+        label.textContent = truncLabel;
+        if (fullLabel.length > GRID_LABEL_TRUNC) {
             var tt = document.createElementNS(SVG_NS, 'title');
-            tt.textContent = thread;
+            tt.textContent = (td.type || 'unknown') + ': ' + labelText;
             label.appendChild(tt);
         }
         svg.appendChild(label);
 
-        const open = threadOpen[thread];
-        const close = threadClose[thread];
-        if (!open) return;
+        // Compute x positions
+        var openSeq = td.openSeq !== null ? td.openSeq : null;
+        var closeSeq = td.closeSeq !== null ? td.closeSeq : null;
+        var unclosed = (openSeq !== null && closeSeq === null);
 
-        const x1 = sceneX(open.seq - 1, CHART_W);
+        var effectiveCloseSeq = closeSeq !== null ? closeSeq : lastSeq;
 
-        if (close) {
-            // Closed thread: solid span from open to close
-            const x2 = sceneX(close.seq - 1, CHART_W);
+        if (openSeq !== null) {
+            var x1 = sceneX(openSeq - 1, CHART_W);
+            var x2 = sceneX(effectiveCloseSeq - 1, CHART_W);
+
+            // Draw the span bar
             svg.appendChild(svgEl('line', {
-                x1, y1: y, x2, y2: y,
-                stroke: color, 'stroke-width': 2.5, opacity: 0.5,
-                'stroke-linecap': 'round'
+                x1: x1, y1: y, x2: x2, y2: y,
+                stroke: color, 'stroke-width': 3,
+                opacity: 0.5,
+                'stroke-dasharray': unclosed ? '6,4' : 'none'
             }));
-            // Open marker (circle)
-            const openDot = svgEl('circle', { cx: x1, cy: y, r: 4, fill: color, opacity: 0.9 });
-            attachSceneHandlers(openDot, open.sceneId);
-            svg.appendChild(openDot);
-            // Close marker (square)
-            const closeRect = svgEl('rect', {
-                x: x2 - 3.5, y: y - 3.5, width: 7, height: 7,
-                fill: color, opacity: 0.9, rx: 1
+
+            // Open marker: filled circle
+            var openMarker = svgEl('circle', {
+                cx: x1, cy: y, r: 5,
+                fill: color, opacity: 0.9, stroke: 'var(--bg)', 'stroke-width': 1
             });
-            attachSceneHandlers(closeRect, close.sceneId);
-            svg.appendChild(closeRect);
-        } else {
-            // Unclosed thread: dashed line to end, open arrow
-            const xEnd = sceneX(sceneCount - 1, CHART_W);
-            svg.appendChild(svgEl('line', {
-                x1, y1: y, x2: xEnd, y2: y,
-                stroke: color, 'stroke-width': 1.5, opacity: 0.3,
-                'stroke-dasharray': '4,3', 'stroke-linecap': 'round'
-            }));
-            // Open marker
-            const openDot = svgEl('circle', { cx: x1, cy: y, r: 4, fill: color, opacity: 0.9 });
-            attachSceneHandlers(openDot, open.sceneId);
-            svg.appendChild(openDot);
-            // Arrow at end indicating unclosed
-            svg.appendChild(svgEl('polygon', {
-                points: `${xEnd - 5},${y - 4} ${xEnd + 1},${y} ${xEnd - 5},${y + 4}`,
-                fill: color, opacity: 0.4
-            }));
+            attachSceneHandlers(openMarker, td.openId);
+            svg.appendChild(openMarker);
+
+            // Close marker: filled square (or dashed-end indicator for unclosed)
+            if (closeSeq !== null) {
+                var closeMarker = svgEl('rect', {
+                    x: x2 - 4, y: y - 4, width: 8, height: 8, rx: 1,
+                    fill: color, opacity: 0.9, stroke: 'var(--bg)', 'stroke-width': 1
+                });
+                attachSceneHandlers(closeMarker, td.closeId);
+                svg.appendChild(closeMarker);
+            } else {
+                // Unclosed: draw an open-ended arrow/chevron
+                svg.appendChild(svgEl('line', {
+                    x1: x2 - 4, y1: y - 4, x2: x2 + 2, y2: y,
+                    stroke: color, 'stroke-width': 2, opacity: 0.7
+                }));
+                svg.appendChild(svgEl('line', {
+                    x1: x2 - 4, y1: y + 4, x2: x2 + 2, y2: y,
+                    stroke: color, 'stroke-width': 2, opacity: 0.7
+                }));
+            }
+        }
+    });
+})();
+
+// ============================================================================
+// 4b. KNOWLEDGE FLOW
+// ============================================================================
+
+(function renderKnowledgeFlow() {
+    const container = document.getElementById('knowledge-flow');
+    const section = document.getElementById('knowledge-flow-section');
+    if (!container || !BRIEFS.length) return;
+
+    // Build fact data from briefs
+    // For each fact: find origin scene (first knowledge_out) and receiver scenes (knowledge_in)
+    const factOrigin = {};   // factId -> { seq, sceneId }
+    const factReceivers = {}; // factId -> [{ seq, sceneId }, ...]
+    const allFacts = new Set();
+
+    sortedScenes.forEach(s => {
+        const brief = briefById[s.id];
+        if (!brief) return;
+        const seq = +s.seq;
+
+        const kOut = (brief.knowledge_out || '').split(';').map(f => f.trim()).filter(Boolean);
+        const kIn = (brief.knowledge_in || '').split(';').map(f => f.trim()).filter(Boolean);
+
+        kOut.forEach(fact => {
+            allFacts.add(fact);
+            if (!factOrigin[fact] || seq < factOrigin[fact].seq) {
+                factOrigin[fact] = { seq, sceneId: s.id };
+            }
+        });
+
+        kIn.forEach(fact => {
+            allFacts.add(fact);
+            if (!factReceivers[fact]) factReceivers[fact] = [];
+            factReceivers[fact].push({ seq, sceneId: s.id });
+        });
+    });
+
+    // Filter to facts that actually have flow (origin + at least one receiver, or multiple receivers)
+    const factsWithFlow = [...allFacts].filter(f => {
+        const hasOrigin = !!factOrigin[f];
+        const hasReceivers = (factReceivers[f] || []).length > 0;
+        return hasOrigin || hasReceivers;
+    });
+
+    if (factsWithFlow.length === 0) return;
+
+    // Sort by origin sequence (earliest first), facts without origin go last
+    factsWithFlow.sort((a, b) => {
+        const aSeq = factOrigin[a] ? factOrigin[a].seq : 9999;
+        const bSeq = factOrigin[b] ? factOrigin[b].seq : 9999;
+        return aSeq - bSeq;
+    });
+
+    // Show the section
+    if (section) section.style.display = '';
+
+    const ROW_H = 24;
+    const W = container.clientWidth - 24 || 1100;
+    const CHART_W = W - GRID_LABEL_W - GRID_RIGHT_PAD;
+    const H = factsWithFlow.length * ROW_H + 20;
+    const svg = makeSvg(container, W, H);
+
+    factsWithFlow.forEach((fact, ri) => {
+        const y = ri * ROW_H + 12;
+
+        // Row label
+        const factName = displayName(fact);
+        const label = svgEl('text', {
+            x: GRID_LABEL_W - 8, y: y + 4,
+            'text-anchor': 'end', 'font-family': 'var(--font-mono)',
+            'font-size': 10, fill: 'var(--text-dim)'
+        });
+        label.textContent = factName.length > GRID_LABEL_TRUNC ? factName.substring(0, GRID_LABEL_TRUNC - 2) + '..' : factName;
+        if (factName.length > GRID_LABEL_TRUNC) {
+            var t = document.createElementNS(SVG_NS, 'title');
+            t.textContent = factName;
+            label.appendChild(t);
+        }
+        svg.appendChild(label);
+
+        const origin = factOrigin[fact];
+        const receivers = (factReceivers[fact] || []).sort((a, b) => a.seq - b.seq);
+
+        // Draw connection lines from origin to each receiver
+        if (origin) {
+            const originX = sceneX(origin.seq - 1, CHART_W);
+            receivers.forEach(rc => {
+                const rcX = sceneX(rc.seq - 1, CHART_W);
+                const gap = Math.abs(rc.seq - origin.seq);
+                svg.appendChild(svgEl('line', {
+                    x1: originX, y1: y, x2: rcX, y2: y,
+                    stroke: 'var(--teal)', 'stroke-width': 1.5,
+                    opacity: 0.3,
+                    'stroke-dasharray': gap > 2 ? '3,3' : 'none'
+                }));
+            });
+        } else if (receivers.length > 1) {
+            // No origin — connect receivers to each other (pre-existing fact)
+            for (let i = 1; i < receivers.length; i++) {
+                const x1 = sceneX(receivers[i-1].seq - 1, CHART_W);
+                const x2 = sceneX(receivers[i].seq - 1, CHART_W);
+                const gap = receivers[i].seq - receivers[i-1].seq;
+                svg.appendChild(svgEl('line', {
+                    x1, y1: y, x2, y2: y,
+                    stroke: 'var(--text-dim)', 'stroke-width': 1,
+                    opacity: 0.25,
+                    'stroke-dasharray': '2,3'
+                }));
+            }
+        }
+
+        // Draw receiver dots (smaller)
+        receivers.forEach(rc => {
+            const cx = sceneX(rc.seq - 1, CHART_W);
+            const dot = svgEl('circle', {
+                cx, cy: y, r: 3,
+                fill: 'var(--teal)', opacity: 0.6
+            });
+            attachSceneHandlers(dot, rc.sceneId);
+            svg.appendChild(dot);
+        });
+
+        // Draw origin dot (larger, on top)
+        if (origin) {
+            const cx = sceneX(origin.seq - 1, CHART_W);
+            const dot = svgEl('circle', {
+                cx, cy: y, r: 5,
+                fill: 'var(--teal)', opacity: 1.0,
+                stroke: 'var(--surface)', 'stroke-width': 1.5
+            });
+            attachSceneHandlers(dot, origin.sceneId);
+            svg.appendChild(dot);
         }
     });
 })();
@@ -2737,7 +2949,7 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 })();
 
 // ============================================================================
-// VALUE SHIFT ARC — McKee polarity tracking
+// VALUE SHIFT ARC — per-value polarity lines (McKee tracking)
 // ============================================================================
 
 (function renderValueShiftArc() {
@@ -2745,49 +2957,91 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     const section = document.getElementById('value-shift-section');
     if (!container || !INTENTS.length) return;
 
-    // Parse value shifts: "+/- — explanation..." → extract just the +/- part
-    const shifts = [];
-    INTENTS.forEach((intent, i) => {
+    // Convert polarity notation to numeric value
+    function toNum(s) {
+        if (s === '++') return 2;
+        if (s === '+') return 1;
+        if (s === '-') return -1;
+        if (s === '--') return -2;
+        return 0;
+    }
+
+    // Build a global scene-index map from SCENES (ordered by sequence)
+    const sceneIndexMap = {};
+    SCENES.forEach((s, i) => { sceneIndexMap[s.id] = i; });
+    const totalScenes = SCENES.length;
+
+    // Parse value shifts and group by value_at_stake
+    const valueMap = {}; // value_id -> [{sceneIndex, from, to, id}, ...]
+    INTENTS.forEach(intent => {
         const vsRaw = (intent.value_shift || '').trim();
-        if (!vsRaw) return;
-        // Extract the polarity notation before any explanation
+        const value = (intent.value_at_stake || '').trim();
+        if (!vsRaw || !value) return;
         const match = vsRaw.match(/^([+\-]+)\s*\/\s*([+\-]+)/);
         if (!match) return;
-        const fromVal = match[1].trim();
-        const toVal = match[2].trim();
-
-        // Convert to numeric: + = 1, ++ = 2, - = -1, -- = -2
-        function toNum(s) {
-            if (s === '++') return 2;
-            if (s === '+') return 1;
-            if (s === '-') return -1;
-            if (s === '--') return -2;
-            return 0;
-        }
-        shifts.push({
+        const idx = sceneIndexMap[intent.id];
+        if (idx === undefined) return;
+        if (!valueMap[value]) valueMap[value] = [];
+        valueMap[value].push({
             id: intent.id,
-            index: i,
-            from: toNum(fromVal),
-            to: toNum(toVal),
-            raw: fromVal + '/' + toVal,
-            valueAtStake: intent.value_at_stake || ''
+            sceneIndex: idx,
+            from: toNum(match[1].trim()),
+            to: toNum(match[2].trim()),
+            raw: match[1].trim() + '/' + match[2].trim()
         });
     });
 
-    if (shifts.length < 3) return;
+    // Sort each value's points by scene sequence
+    Object.values(valueMap).forEach(pts => pts.sort((a, b) => a.sceneIndex - b.sceneIndex));
+
+    // Determine which values to show: top 8 by frequency, rest grouped as "other"
+    const MAX_VALUES = 8;
+    const valueCounts = Object.entries(valueMap).map(([v, pts]) => ({ value: v, count: pts.length }));
+    valueCounts.sort((a, b) => b.count - a.count);
+
+    var shownValues = valueCounts.slice(0, MAX_VALUES).map(vc => vc.value);
+    const otherValues = valueCounts.slice(MAX_VALUES).map(vc => vc.value);
+
+    // Merge "other" values into a single group if any exist
+    if (otherValues.length > 0) {
+        const otherPts = [];
+        otherValues.forEach(v => valueMap[v].forEach(pt => otherPts.push(pt)));
+        otherPts.sort((a, b) => a.sceneIndex - b.sceneIndex);
+        valueMap['__other__'] = otherPts;
+        shownValues.push('__other__');
+    }
+
+    // Need at least one value with 2+ points to make a useful chart
+    const hasPlottable = shownValues.some(v => (valueMap[v] || []).length >= 2);
+    if (!hasPlottable) return;
     if (section) section.style.display = '';
+
+    // Color palette: 9 distinct colors (8 named values + "other" in gray)
+    const PALETTE = [
+        '#0f766e', // teal
+        '#7c3aed', // violet
+        '#dc2626', // red
+        '#2563eb', // blue
+        '#d97706', // amber
+        '#16a34a', // green
+        '#db2777', // pink
+        '#ea580c', // orange
+        '#6b7280'  // gray (for "other")
+    ];
 
     const mobile = window.innerWidth < 768;
     const W = container.clientWidth - 24 || 1100;
-    const H = 200;
+    const legendH = 36;
+    const chartH = 200;
+    const H = chartH + legendH;
     const labelW = mobile ? 60 : 100;
     const chartW = W - labelW - 20;
-    const midY = H / 2;
+    const midY = chartH / 2;
     const scaleY = 40;
 
     const svg = svgEl('svg', { width: W, height: H, class: 'chart' });
 
-    // Y-axis labels
+    // Y-axis gridlines and labels
     [2, 1, 0, -1, -2].forEach(v => {
         const y = midY - v * scaleY;
         svg.appendChild(svgEl('line', {
@@ -2803,25 +3057,87 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
         svg.appendChild(lbl);
     });
 
-    // Plot value shifts as arrows
-    shifts.forEach((s, i) => {
-        const x = labelW + (i / (shifts.length - 1)) * chartW;
-        const y1 = midY - s.from * scaleY;
-        const y2 = midY - s.to * scaleY;
+    // Helper: scene index to x coordinate on the chart
+    function sceneX(idx) {
+        if (totalScenes <= 1) return labelW + chartW / 2;
+        return labelW + (idx / (totalScenes - 1)) * chartW;
+    }
 
-        // Arrow line
-        const color = s.to > s.from ? 'var(--green, #22c55e)' : s.to < s.from ? 'var(--red, #ef4444)' : 'var(--muted)';
-        svg.appendChild(svgEl('line', {
-            x1: x, y1: y1, x2: x, y2: y2,
-            stroke: color, 'stroke-width': 2
+    // Plot each value as a colored line with dots
+    shownValues.forEach((value, vi) => {
+        const pts = valueMap[value] || [];
+        if (pts.length < 1) return;
+        const color = PALETTE[vi % PALETTE.length];
+
+        // Draw connecting lines between consecutive points (end polarity to start polarity)
+        for (var i = 0; i < pts.length - 1; i++) {
+            const x1 = sceneX(pts[i].sceneIndex);
+            const y1 = midY - pts[i].to * scaleY;
+            const x2 = sceneX(pts[i + 1].sceneIndex);
+            const y2 = midY - pts[i + 1].from * scaleY;
+            svg.appendChild(svgEl('line', {
+                x1: x1, y1: y1, x2: x2, y2: y2,
+                stroke: color, 'stroke-width': 1.5, opacity: 0.5
+            }));
+        }
+
+        // Draw shift arrows and endpoint dots at each scene
+        pts.forEach(p => {
+            const x = sceneX(p.sceneIndex);
+            const yFrom = midY - p.from * scaleY;
+            const yTo = midY - p.to * scaleY;
+
+            // Shift arrow (from to to) when there is movement
+            if (p.from !== p.to) {
+                svg.appendChild(svgEl('line', {
+                    x1: x, y1: yFrom, x2: x, y2: yTo,
+                    stroke: color, 'stroke-width': 2, opacity: 0.8
+                }));
+                // Arrowhead triangle
+                var dir = p.to > p.from ? -1 : 1;
+                var arrowSize = 4;
+                svg.appendChild(svgEl('polygon', {
+                    points: [
+                        (x) + ',' + (yTo),
+                        (x - arrowSize) + ',' + (yTo + dir * arrowSize * 1.5),
+                        (x + arrowSize) + ',' + (yTo + dir * arrowSize * 1.5)
+                    ].join(' '),
+                    fill: color, opacity: 0.8
+                }));
+            }
+
+            // Endpoint dot at "to" value
+            const dot = svgEl('circle', {
+                cx: x, cy: yTo, r: 4, fill: color, opacity: 0.9
+            });
+            attachSceneHandlers(dot, p.id);
+            svg.appendChild(dot);
+        });
+    });
+
+    // Legend below the chart
+    var legendY = chartH + 10;
+    var legendX = labelW;
+    shownValues.forEach((value, vi) => {
+        const color = PALETTE[vi % PALETTE.length];
+        const label = value === '__other__' ? 'Other' : displayName(value);
+
+        // Color swatch
+        svg.appendChild(svgEl('rect', {
+            x: legendX, y: legendY, width: 12, height: 12, rx: 2,
+            fill: color, opacity: 0.9
         }));
 
-        // Endpoint dot
-        const dot = svgEl('circle', {
-            cx: x, cy: y2, r: 3, fill: color
+        // Label text
+        const txt = svgEl('text', {
+            x: legendX + 16, y: legendY + 10,
+            fill: 'var(--text-dim)', 'font-family': 'var(--font-sans, system-ui)', 'font-size': 11
         });
-        attachSceneHandlers(dot, s.id);
-        svg.appendChild(dot);
+        txt.textContent = label;
+        svg.appendChild(txt);
+
+        // Advance cursor (approximate text width: 7px per char + swatch + padding)
+        legendX += 16 + label.length * 7 + 16;
     });
 
     container.appendChild(svg);
@@ -2838,8 +3154,8 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     const types = [];
     INTENTS.forEach(intent => {
-        // scene_type may be "action" or "sequel — explanation..."; extract first word
-        const stRaw = (intent.scene_type || '').trim().toLowerCase();
+        // action_sequel may be "action" or "sequel — explanation..."; extract first word
+        const stRaw = (intent.action_sequel || '').trim().toLowerCase();
         const st = stRaw.split(/[\s—–-]/)[0].trim();
         // turning_point may also have explanation
         const tpRaw = (intent.turning_point || '').trim().toLowerCase();

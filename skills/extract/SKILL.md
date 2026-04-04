@@ -23,6 +23,19 @@ Store this resolved plugin path for use throughout the session.
 4. `reference/scene-intent.csv` — does intent data exist?
 5. `reference/scene-briefs.csv` — does brief data exist?
 
+## Registry Awareness
+
+Read all registry files in `reference/` to know canonical IDs for normalized fields:
+
+- `reference/characters.csv` — canonical character IDs
+- `reference/locations.csv` — canonical location IDs
+- `reference/values.csv` — canonical value IDs
+- `reference/knowledge.csv` — canonical knowledge fact IDs
+- `reference/motif-taxonomy.csv` — canonical motif IDs
+- `reference/mice-threads.csv` — canonical MICE thread IDs
+
+When extracting data interactively, use canonical IDs from these registries for all registry-backed fields (pov, characters, on_stage, location, value_at_stake, knowledge_in, knowledge_out, motifs, mice_threads). When extraction discovers a new character, location, value, knowledge fact, motif, or MICE thread not already in a registry, add it to the appropriate registry CSV first, then use the new ID.
+
 ## Step 2: Determine What Needs Extraction
 
 Based on project state:
@@ -59,11 +72,11 @@ Cleanup runs automatically after full extraction. It normalizes knowledge wordin
 
 Work through each phase in this conversation:
 
-**Phase 0: Characterize.** Read the full manuscript (concatenate scene files) and produce a structural profile — narrative mode, POV characters, timeline, act structure, threads, central conflict, compression points. Present the profile to the author for confirmation.
+**Phase 0: Characterize.** Read the full manuscript (concatenate scene files) and produce a structural profile — narrative mode, POV characters, timeline, act structure, central conflict, compression points. Present the profile to the author for confirmation.
 
 **Phase 1: Skeleton.** For each scene, extract: title, POV, location, timeline day, time of day, duration, part assignment. Write to `reference/scenes.csv`. This can be done in batches — present a batch of 10 scenes at a time for the author to review.
 
-**Phase 2: Intent.** For each scene, extract: function, scene type (action/sequel), emotional arc, value at stake, value shift, turning point, threads, characters, on-stage characters, MICE threads. Write to `reference/scene-intent.csv`.
+**Phase 2: Intent.** For each scene, extract: function, scene type (action/sequel), emotional arc, value at stake, value shift, turning point, characters, on-stage characters, MICE threads. Write to `reference/scene-intent.csv`.
 
 **Phase 3: Briefs.** Two sub-phases:
 - 3a (parallel): goal, conflict, outcome, crisis, decision, key actions, key dialogue, emotions, motifs
@@ -91,7 +104,7 @@ If the author is developing a novella into a novel, or wants to identify structu
    - **Compressed scenes** — major value shifts in very few words
    - **Knowledge jumps** — characters learning 3+ facts in one scene
    - **Timeline gaps** — days missing between scenes
-   - **Thin threads** — subplots appearing in only 1-2 scenes
+   - **Thin MICE threads** — threads appearing in only 1-2 scenes
    - **Missing sequels** — action scenes without reaction beats
 
 Present opportunities ranked by priority and let the author decide which to pursue. Then route to `/storyforge:elaborate` to plan the expansion.

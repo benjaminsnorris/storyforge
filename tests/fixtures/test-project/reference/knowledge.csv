@@ -1,0 +1,6 @@
+id|name|aliases
+map-anomaly-exists|A map anomaly exists in the pressure records|anomaly in records;maps show anomaly
+village-vanished|A village has vanished from the pressure maps|missing village;village disappeared
+archive-erasure|The archive shows signs of systematic erasure|systematic erasure;records altered
+subsidence-not-natural|The eastern subsidence is not natural|unnatural subsidence;subsidence is artificial
+council-dismisses-evidence|The council dismissed the evidence as procedural noise|evidence dismissed;council rejected findings

@@ -133,6 +133,9 @@ def load_dashboard_data(project_dir: str) -> dict:
     characters_csv = os.path.join(project_dir, 'reference/characters.csv')
     motif_csv = os.path.join(project_dir, 'reference/motif-taxonomy.csv')
     locations_csv = os.path.join(project_dir, 'reference/locations.csv')
+    values_csv = os.path.join(project_dir, 'reference/values.csv')
+    mice_threads_csv = os.path.join(project_dir, 'reference/mice-threads.csv')
+    knowledge_csv = os.path.join(project_dir, 'reference/knowledge.csv')
     fidelity_csv = os.path.join(project_dir, 'working/scores/latest/fidelity-scores.csv')
     fidelity_rationale_csv = os.path.join(project_dir, 'working/scores/latest/fidelity-rationale.csv')
     narrative_csv = os.path.join(project_dir, 'working/scores/latest/narrative-scores.csv')
@@ -188,6 +191,9 @@ def load_dashboard_data(project_dir: str) -> dict:
         'characters': csv_to_records(characters_csv),
         'motif_taxonomy': csv_to_records(motif_csv),
         'locations': csv_to_records(locations_csv),
+        'values': csv_to_records(values_csv),
+        'mice_threads': csv_to_records(mice_threads_csv),
+        'knowledge': csv_to_records(knowledge_csv),
         'scores': csv_to_records(scores_csv),
         'weights': csv_to_records(weights_csv),
         'narrative_scores': csv_to_records(narrative_csv),
