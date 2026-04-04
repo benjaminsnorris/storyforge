@@ -33,6 +33,7 @@ DRY_RUN=false
 EXPAND=false
 CLEANUP=false
 CLEANUP_ONLY=false
+FORCE=false
 
 usage() {
     cat <<EOF
@@ -42,6 +43,7 @@ Options:
   --phase N         Run only phase N (0=characterize, 1=skeleton, 2=intent, 3=briefs)
   --cleanup         Run cleanup after extraction (normalize knowledge, fill timeline, fix MICE)
   --cleanup-only    Run cleanup only (skip extraction phases — use on already-extracted data)
+  --force           Overwrite existing field values (default: only fill empty fields)
   --expand          Run expansion analysis after extraction
   --dry-run         Print prompts without invoking Claude
   -h, --help        Show this help
@@ -59,6 +61,7 @@ while [[ $# -gt 0 ]]; do
         --phase)        PHASE="${2:?ERROR: --phase requires a value}"; shift 2 ;;
         --cleanup)      CLEANUP=true; shift ;;
         --cleanup-only) CLEANUP_ONLY=true; CLEANUP=true; shift ;;
+        --force)        FORCE=true; shift ;;
         --expand)       EXPAND=true; shift ;;
         --dry-run)      DRY_RUN=true; shift ;;
         -h|--help)      usage ;;
@@ -322,6 +325,7 @@ ref_dir = '${REF_DIR}'
 scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
 
 alias_maps = load_registry_alias_maps('${PROJECT_DIR}')
+force = '${FORCE}' == 'true'
 
 # Read existing scenes.csv or start fresh
 existing = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
@@ -337,9 +341,8 @@ for i, sid in enumerate(scene_ids):
 
     # Merge with existing or create new
     if sid in existing:
-        # Only fill empty fields — don't overwrite prior work
         for k, v in result.items():
-            if v and k != 'id' and not existing[sid].get(k, '').strip():
+            if v and k != 'id' and (force or not existing[sid].get(k, '').strip()):
                 existing[sid][k] = v
     elif not existing:
         # First extraction: CSV is empty, add all scenes
@@ -432,6 +435,7 @@ ref_dir = '${REF_DIR}'
 scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
 
 alias_maps = load_registry_alias_maps('${PROJECT_DIR}')
+force = '${FORCE}' == 'true'
 
 existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
 
@@ -445,9 +449,8 @@ for sid in scene_ids:
     normalize_fields(result, alias_maps)
 
     if sid in existing:
-        # Only fill empty fields — don't overwrite prior work
         for k, v in result.items():
-            if v and k != 'id' and not k.startswith('_') and not existing[sid].get(k, '').strip():
+            if v and k != 'id' and not k.startswith('_') and (force or not existing[sid].get(k, '').strip()):
                 existing[sid][k] = v
     elif not existing:
         # First extraction: CSV is empty, add all scenes
@@ -534,6 +537,7 @@ ref_dir = '${REF_DIR}'
 scene_ids = '''$(printf '%s\n' "${SORTED_SCENE_IDS[@]}")'''.strip().split('\n')
 
 alias_maps = load_registry_alias_maps('${PROJECT_DIR}')
+force = '${FORCE}' == 'true'
 
 existing = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
 
@@ -547,9 +551,8 @@ for sid in scene_ids:
     normalize_fields(result, alias_maps)
 
     if sid in existing:
-        # Only fill empty fields — don't overwrite prior work
         for k, v in result.items():
-            if v and k != 'id' and not existing[sid].get(k, '').strip():
+            if v and k != 'id' and (force or not existing[sid].get(k, '').strip()):
                 existing[sid][k] = v
     elif not existing:
         # First extraction: CSV is empty, add all scenes
