@@ -719,8 +719,8 @@ body {
 <div class="section">
     <div class="section-header">
         <span class="dot"></span>
-        <h2>Thread Weave</h2>
-        <span class="subtitle">MICE threads across scenes</span>
+        <h2>MICE Threads</h2>
+        <span class="subtitle">Thread lifespans by type — open to close</span>
     </div>
     <div class="vis-container" id="thread-weave"></div>
 </div>
@@ -1766,7 +1766,12 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
 
     // Build sorted list — by opening sequence number (earliest first)
     var threadNames = Object.keys(threads);
+    // Sort: group by MICE type, then by open seq within each type
+    var typeOrder = { milieu: 0, inquiry: 1, character: 2, event: 3 };
     threadNames.sort(function(a, b) {
+        var ta = typeOrder[threads[a].type] !== undefined ? typeOrder[threads[a].type] : 99;
+        var tb = typeOrder[threads[b].type] !== undefined ? typeOrder[threads[b].type] : 99;
+        if (ta !== tb) return ta - tb;
         var oa = threads[a].openSeq !== null ? threads[a].openSeq : 9999;
         var ob = threads[b].openSeq !== null ? threads[b].openSeq : 9999;
         return oa - ob;
@@ -1818,6 +1823,20 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
     svg.appendChild(uncLabel);
 
     var topOffset = LEGEND_H;
+
+    // Draw type group separators
+    var prevGroupType = null;
+    threadNames.forEach(function(name, ri) {
+        var mtype = threads[name].type;
+        if (prevGroupType !== null && mtype !== prevGroupType) {
+            var sepY = topOffset + ri * ROW_H - 2;
+            svg.appendChild(svgEl('line', {
+                x1: GRID_LABEL_W - 8, y1: sepY, x2: W - GRID_RIGHT_PAD, y2: sepY,
+                stroke: 'var(--border)', 'stroke-width': 0.5
+            }));
+        }
+        prevGroupType = mtype;
+    });
 
     threadNames.forEach(function(name, ri) {
         var td = threads[name];

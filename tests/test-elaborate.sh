@@ -295,6 +295,86 @@ for c in thread_checks:
 assert_not_contains "$RESULT" "was never opened" "validate_structure: closures find openings from earlier scenes (issue #67)"
 assert_contains "$RESULT" "mice-nesting" "validate_structure: MICE nesting check present for cross-scene threads"
 
+# Cross-type parallel threads should NOT trigger nesting violations (issue #78)
+# Scenario: character arc spans the whole novel, inquiry and milieu threads
+# open and close independently within it — no FILO violation across types.
+PARALLEL_DIR="${TMPDIR}/parallel-test/reference"
+mkdir -p "$PARALLEL_DIR"
+cat > "${PARALLEL_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|Scene One|1|Alice|Room|1|morning|1 hour|action|briefed|1000|2000
+s02|2|Scene Two|1|Alice|Room|1|afternoon|1 hour|action|briefed|1000|2000
+s03|3|Scene Three|1|Alice|Room|2|morning|1 hour|action|briefed|1000|2000
+s04|4|Scene Four|1|Alice|Room|2|afternoon|1 hour|action|briefed|1000|2000
+s05|5|Scene Five|1|Alice|Room|3|morning|1 hour|action|briefed|1000|2000
+CSV
+cat > "${PARALLEL_DIR}/scene-intent.csv" <<'CSV'
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|a|Alice|Alice|+character:alice-arc
+s02|test|action|flat|truth|+/-|revelation|a|Alice|Alice|+inquiry:who-killed;+milieu:castle
+s03|test|action|flat|truth|+/-|revelation|a|Alice|Alice|-milieu:castle
+s04|test|action|flat|truth|+/-|revelation|a|Alice|Alice|-inquiry:who-killed
+s05|test|action|flat|truth|+/-|revelation|a|Alice|Alice|-character:alice-arc
+CSV
+cat > "${PARALLEL_DIR}/scene-briefs.csv" <<'CSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+s01|g|c|o|cr|d|k|k|a|d|e|m||false
+s02|g|c|o|cr|d|k|k|a|d|e|m||false
+s03|g|c|o|cr|d|k|k|a|d|e|m||false
+s04|g|c|o|cr|d|k|k|a|d|e|m||false
+s05|g|c|o|cr|d|k|k|a|d|e|m||false
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import validate_structure
+report = validate_structure('${PARALLEL_DIR}')
+thread_checks = [c for c in report['checks'] if c['category'] == 'threads']
+for c in thread_checks:
+    print(c['check'], c['passed'], c.get('message', ''))
+")
+
+assert_contains "$RESULT" "mice-nesting True" "validate_structure: cross-type parallel threads pass FILO (issue #78)"
+assert_not_contains "$RESULT" "nesting violation" "validate_structure: no nesting violation for cross-type closures"
+
+rm -rf "${TMPDIR}/parallel-test"
+
+# Same-type nesting violation should still be blocking
+SAMETYPE_DIR="${TMPDIR}/sametype-test/reference"
+mkdir -p "$SAMETYPE_DIR"
+cat > "${SAMETYPE_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|Scene One|1|Alice|Room|1|morning|1 hour|action|briefed|1000|2000
+s02|2|Scene Two|1|Alice|Room|1|afternoon|1 hour|action|briefed|1000|2000
+s03|3|Scene Three|1|Alice|Room|2|morning|1 hour|action|briefed|1000|2000
+CSV
+cat > "${SAMETYPE_DIR}/scene-intent.csv" <<'CSV'
+id|function|scene_type|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|a|Alice|Alice|+inquiry:outer-question
+s02|test|action|flat|truth|+/-|revelation|a|Alice|Alice|+inquiry:inner-question
+s03|test|action|flat|truth|+/-|revelation|a|Alice|Alice|-inquiry:outer-question
+CSV
+cat > "${SAMETYPE_DIR}/scene-briefs.csv" <<'CSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+s01|g|c|o|cr|d|k|k|a|d|e|m||false
+s02|g|c|o|cr|d|k|k|a|d|e|m||false
+s03|g|c|o|cr|d|k|k|a|d|e|m||false
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import validate_structure
+report = validate_structure('${SAMETYPE_DIR}')
+thread_checks = [c for c in report['checks'] if c['category'] == 'threads']
+for c in thread_checks:
+    print(c['check'], c['passed'], c.get('message', ''))
+")
+
+assert_contains "$RESULT" "nesting violation" "validate_structure: same-type FILO violation still caught (issue #78)"
+assert_contains "$RESULT" "inquiry:inner-question" "validate_structure: identifies which same-type thread should close first"
+
+rm -rf "${TMPDIR}/sametype-test"
+
 # ============================================================================
 # validate_structure — timeline
 # ============================================================================

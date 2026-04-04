@@ -869,11 +869,16 @@ def build_mice_cleanup_prompt(ref_dir: str) -> str:
 
 ## MICE Thread Rules
 
-MICE threads follow FILO (first in, last out) nesting — like HTML tags:
+MICE threads use per-type FILO (first in, last out) nesting:
 - +type:name opens a thread
 - -type:name closes a thread
 - Types: milieu (place), inquiry (question), character (transformation), event (disruption)
-- Threads must close in reverse order of opening
+- Threads of the SAME type must close in reverse order of opening (FILO within type)
+- Threads of DIFFERENT types run in parallel — closing an inquiry does NOT require closing a milieu opened after it
+
+Example of valid parallel threading:
+  +character:arc (scene 1) → +inquiry:mystery (scene 3) → -inquiry:mystery (scene 8) → -character:arc (scene 20)
+  This is valid: character and inquiry are different types, so they nest independently.
 
 ## Current Thread Timeline
 
@@ -893,11 +898,12 @@ The new value should be a semicolon-separated list of thread operations (e.g., "
 
 Rules:
 - Every opened thread must eventually close
-- Closes must happen in reverse order of opens (FILO)
+- Same-type closes must happen in reverse order of same-type opens (FILO within each type)
+- Cross-type threads are independent — no nesting constraint between different MICE types
 - If a thread is legitimately unclosed at the end of the manuscript (e.g., the story is incomplete), output: UNCLOSED: thread_name | reason
 - Remove duplicate opens
 - Remove closes for threads that were never opened
-- If reordering closes fixes the nesting, do that rather than removing them
+- If reordering same-type closes fixes the nesting, do that rather than removing them
 - Preserve the narrative intent — don't remove threads that are genuinely part of the story
 
 Output ONLY UPDATE, UNCLOSED, or REMOVE lines. No commentary."""

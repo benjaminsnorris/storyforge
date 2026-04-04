@@ -313,7 +313,7 @@ Expand the architecture into the full scene count (40-60 scenes). For each scene
 2. Fill in gaps: transitions, subplot scenes, breathing room
 3. Assign locations, timeline days, time of day, duration
 4. List all characters present (on_stage) and referenced (characters)
-5. Track MICE thread opens (+) and closes (-) in FILO order
+5. Track MICE thread opens (+) and closes (-) — FILO within each type, parallel across types
 
 ### Output Format
 
@@ -331,7 +331,7 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 
 - Timeline must be consistent: no backward jumps without explicit justification
 - Every character referenced must exist in the character bible
-- MICE threads must nest in FILO order (first opened = last closed)
+- MICE threads: same-type threads nest in FILO order; different types (milieu, inquiry, character, event) run in parallel
 - No thread dormant for more than 8-10 scenes without acknowledgment
 - Every scene must have at least one on-stage character
 - Location names must be consistent (same place = same name)
