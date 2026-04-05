@@ -279,9 +279,9 @@ Run: `./tests/run-tests.sh` (all suites) or `./tests/run-tests.sh tests/test-thi
 | `storyforge-revise` | Execute revision passes from a plan |
 | `storyforge-score` | Craft scoring (25 principles + fidelity scoring against briefs) |
 | `storyforge-elaborate` | Run elaboration stages (spine/architecture/map/briefs) |
-| `storyforge-extract` | Extract structural data from existing prose (reverse elaboration) |
+| `storyforge-extract` | Extract structural data from existing prose (reverse elaboration). `--force` overwrites existing fields. Runs reconciliation after each phase. |
 | `storyforge-polish` | Targeted prose polish on low-scoring scenes |
-| `storyforge-validate` | Structural validation against scene CSVs |
+| `storyforge-validate` | Structural validation against scene CSVs. `--structural` adds story-quality scoring (8 dimensions, deterministic). `--no-schema` skips schema validation. |
 | `storyforge-reconcile` | Build registries (Opus) and normalize CSV fields for cross-scene consistency |
 | `storyforge-enrich` | Metadata enrichment from prose |
 | `storyforge-assemble` | Chapter assembly + epub/PDF/HTML generation |
@@ -331,6 +331,7 @@ Key principles:
 | `prompts_elaborate.py` | Elaboration stage prompt builders |
 | `scoring.py` | Score parsing, diagnosis, proposals, fidelity scoring |
 | `structural.py` | Structural scoring engine — story quality from CSV data (8 dimensions, deterministic) |
+| `reconcile.py` | Post-extraction reconciliation — build registries (Opus) and normalize fields |
 | `visualize.py` | Dashboard data loading |
 | `enrich.py` | Metadata enrichment |
 | `assembly.py` | Chapter assembly |

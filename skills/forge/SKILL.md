@@ -30,6 +30,8 @@ Before doing anything else, orient yourself:
    - `reference/scenes.csv`
    - `working/evaluations/*/findings.csv` (preferred) or `working/evaluations/findings.yaml` (legacy)
    - `working/plans/revision-plan.csv` (preferred) or `working/plans/revision-plan.yaml` (legacy)
+   - `working/scores/structural-latest.csv` (structural scoring results)
+   - `working/scores/structural-proposals.csv` (unaddressed structural proposals)
    - The `scenes/` directory (any `.md` files = drafted scenes)
 4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
 
@@ -91,6 +93,20 @@ Invoke the `produce` skill for non-web formats.
 
 **"Extract" / "Analyze my manuscript":**
 Invoke the `extract` skill.
+
+**"Check my structure" / "Structural score" / "Are my bones right?" / "Validate structure":**
+Run structural scoring — this is a deterministic analysis of the CSV data (no API calls, instant, free). Provide the command:
+```bash
+./storyforge validate --structural
+```
+If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv`. At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
+
+**"Reconcile" / "Normalize my data" / "Build registries" / "Clean up values":**
+Run reconciliation to normalize CSV fields against canonical registries. This uses Opus to build/update registries then deterministically normalizes all fields. Provide the command:
+```bash
+./storyforge reconcile [--domain characters|locations|values|mice-threads|knowledge|outcomes]
+```
+Without `--domain`, runs all 6 domains in order. This is especially valuable after extraction or when structural scoring shows thematic fragmentation.
 
 **"Title" / "Cover" / "Press kit":**
 Invoke the corresponding skill (`title`, `cover`, `press-kit`).
@@ -157,7 +173,11 @@ Determine the single highest-value next action based on project state. Work thro
 
 **1. Elaboration phase:** If phase is `spine`/`architecture`/`scene-map`/`briefs` → "Continue elaboration" → invoke `elaborate`.
 
-**1.5. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns failures > 0 → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state).
+**1.5. Post-extraction reconciliation:** If `scenes.csv` has rows AND registries are missing or incomplete (no `characters.csv`, `values.csv`, etc.) → "Your data needs reconciliation to normalize cross-scene consistency." → Provide `./storyforge reconcile` command.
+
+**1.6. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns failures > 0 → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state).
+
+**1.7. Structural scoring:** If briefs are populated AND no `working/scores/structural-latest.csv` exists (or it's older than the CSVs) → "Check your story structure before drafting." → Provide `./storyforge validate --structural`. Review scores and proposals. Address any below-target dimensions before drafting.
 
 **2. Ready to draft:** If briefs are complete and validated → "Draft your scenes" → provide `./storyforge write` command.
 

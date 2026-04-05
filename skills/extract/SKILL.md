@@ -86,14 +86,23 @@ Write to `reference/scene-briefs.csv`.
 
 After each phase, commit: `git add -A && git commit -m "Extract: Phase N — [description]" && git push`
 
-## Step 4: Review and Validate
+## Step 4: Reconcile and Validate
 
-After extraction completes:
+After extraction completes (reconciliation runs automatically after each phase, but can also be run manually):
 
-1. Run validation: `./storyforge validate`
-2. Present the validation report to the author
-3. Highlight low-confidence extractions (the intent phase includes a confidence field)
-4. Walk through any validation failures and help the author correct them
+1. **Reconcile** (if not already done): `./storyforge reconcile`
+   - Builds/updates registries (characters, locations, values, MICE threads, knowledge) using Opus
+   - Normalizes all CSV fields against canonical IDs
+   - Normalizes outcome fields to enum values (yes/yes-but/no/no-and/no-but)
+2. **Validate structure**: `./storyforge validate`
+3. **Score structure** (optional but recommended): `./storyforge validate --structural`
+   - Scores 8 dimensions of story quality from CSV data (deterministic, free, instant)
+   - Produces diagnostic findings with craft-grounded explanations
+   - Generates proposals in `working/scores/structural-proposals.csv`
+4. Present the validation and scoring reports to the author
+5. Walk through any validation failures and structural findings
+
+Note: Re-running extraction on a branch with existing data only fills empty fields (preserves prior work). Use `--force` to overwrite existing values when a full re-extraction is desired.
 
 ## Step 5: Expansion Analysis (Optional)
 

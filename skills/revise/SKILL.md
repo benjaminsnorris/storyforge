@@ -47,7 +47,18 @@ Based on the author's request and project state:
 
 ## Step 3: Plan the Revision
 
-Read evaluation findings and scoring data. If structural scoring results exist (`working/scores/structural-proposals.csv`), incorporate unaddressed structural proposals into the revision plan. Structural proposals use the same fix_location routing as evaluation findings.
+Read evaluation findings and scoring data. Categorize each finding by where the fix belongs.
+
+### Structural Proposals
+
+If `working/scores/structural-proposals.csv` exists, these are unaddressed structural findings from the last `storyforge validate --structural` run. Each proposal has:
+- **dimension**: which scoring dimension flagged it (arc_completeness, thematic_concentration, pacing_shape, etc.)
+- **fix_location**: where the fix lives (structural/intent/brief/registry) — same routing as evaluation findings
+- **target**: scene ID or 'global'
+- **change**: what to do
+- **rationale**: why (score + data)
+
+Structural fixes should generally precede craft passes, as they affect what the prose needs to deliver. Run `storyforge validate --structural` after structural/intent/brief passes to verify scores improved before starting craft passes.
 
 Categorize each finding by where the fix belongs:
 
