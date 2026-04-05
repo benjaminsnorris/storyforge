@@ -282,6 +282,7 @@ Run: `./tests/run-tests.sh` (all suites) or `./tests/run-tests.sh tests/test-thi
 | `storyforge-extract` | Extract structural data from existing prose (reverse elaboration) |
 | `storyforge-polish` | Targeted prose polish on low-scoring scenes |
 | `storyforge-validate` | Structural validation against scene CSVs |
+| `storyforge-reconcile` | Build registries (Opus) and normalize CSV fields for cross-scene consistency |
 | `storyforge-enrich` | Metadata enrichment from prose |
 | `storyforge-assemble` | Chapter assembly + epub/PDF/HTML generation |
 | `storyforge-visualize` | Multi-page manuscript dashboard |
