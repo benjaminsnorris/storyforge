@@ -22,9 +22,9 @@ from storyforge.enrich import (
 # Outcome normalization (deterministic — no API call)
 # ============================================================================
 
-_OUTCOME_ENUM = {'yes', 'yes-but', 'no', 'no-and'}
+_OUTCOME_ENUM = {'yes', 'yes-but', 'no', 'no-and', 'no-but'}
 _OUTCOME_RE = re.compile(
-    r'^\[?(yes-but|no-and|yes|no)\b',
+    r'^\[?(yes-but|no-and|no-but|yes|no)\b',
     re.IGNORECASE,
 )
 
