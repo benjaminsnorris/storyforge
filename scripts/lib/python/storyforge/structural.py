@@ -98,3 +98,82 @@ def score_completeness(scenes_map, intent_map, briefs_map):
 
     score = populated_weighted / total_weighted if total_weighted > 0 else 0.0
     return {'score': score, 'findings': findings}
+
+
+# ---------------------------------------------------------------------------
+# Thematic Concentration
+# ---------------------------------------------------------------------------
+
+def score_thematic_concentration(intent_map):
+    """Score thematic focus using Herfindahl index on value_at_stake distribution.
+
+    Empirical basis: Archer & Jockers (2016) found bestsellers dedicate ~30%
+    of text to 1-2 dominant topics.
+
+    Args:
+        intent_map: dict from _read_csv_as_map on scene-intent.csv
+
+    Returns:
+        {'score': float 0-1, 'findings': [{'message': str, 'severity': str}]}
+    """
+    findings = []
+
+    # 1. Collect all non-empty value_at_stake values
+    values = []
+    for scene_id, intent in intent_map.items():
+        v = intent.get('value_at_stake', '').strip()
+        if v:
+            values.append(v)
+
+    total = len(values)
+    if total == 0:
+        return {'score': 0.0, 'findings': [{'message': 'No value_at_stake data found', 'severity': 'important'}]}
+
+    # 2. Count frequency of each value
+    freq = {}
+    for v in values:
+        freq[v] = freq.get(v, 0) + 1
+
+    distinct_count = len(freq)
+
+    # 3. Compute Herfindahl index: sum of (count/total)^2
+    hhi = sum((c / total) ** 2 for c in freq.values())
+
+    # 4. Check top-2 dominance: do top 2 values cover >= 30% of scenes?
+    sorted_counts = sorted(freq.values(), reverse=True)
+    top2_share = sum(sorted_counts[:2]) / total if len(sorted_counts) >= 2 else sorted_counts[0] / total
+
+    # 5. Generate findings for fragmentation or narrowness
+    if distinct_count > 20:
+        findings.append({
+            'message': f"Thematic fragmentation: {distinct_count} distinct values at stake across {total} scenes",
+            'severity': 'important',
+        })
+
+    if distinct_count < 4 and total >= 10:
+        findings.append({
+            'message': f"Narrow thematic range: only {distinct_count} distinct values across {total} scenes",
+            'severity': 'minor',
+        })
+
+    # 6. Info-level finding listing top 5 values with counts
+    sorted_values = sorted(freq.items(), key=lambda x: x[1], reverse=True)
+    top5 = sorted_values[:5]
+    top5_str = ', '.join(f"{v} ({c})" for v, c in top5)
+    findings.append({
+        'message': f"Top values at stake: {top5_str}",
+        'severity': 'info',
+    })
+
+    # Scoring
+    hhi_score = min(1.0, hhi / 0.35)
+
+    count_penalty = 0.0
+    if distinct_count > 20:
+        count_penalty = min(0.3, 0.015 * (distinct_count - 20))
+    if distinct_count < 5 and total >= 10:
+        count_penalty = 0.1
+
+    score = max(0.0, min(1.0, hhi_score - count_penalty))
+
+    return {'score': score, 'findings': findings}

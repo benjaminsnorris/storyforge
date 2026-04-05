@@ -131,3 +131,53 @@ print(f'important={len(important_findings)}')
 print('ok')
 ")
 assert_contains "$RESULT" "ok" "score_completeness: fixture data in expected range"
+
+# ============================================================================
+# score_thematic_concentration
+# ============================================================================
+
+THEME_DIR="${TMPDIR}/theme-test/reference"
+mkdir -p "$THEME_DIR"
+cat > "${THEME_DIR}/scene-intent.csv" <<'CSV'
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|A|A|
+s02|test|action|flat|truth|-/+|revelation|A|A|
+s03|test|action|flat|justice|+/-|action|A|A|
+s04|test|action|flat|safety|-/+|revelation|A|A|
+s05|test|action|flat|justice|+/-|action|A|A|
+s06|test|action|flat|truth|-/+|revelation|A|A|
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.structural import score_thematic_concentration
+intent = _read_csv_as_map('${THEME_DIR}/scene-intent.csv')
+result = score_thematic_concentration(intent)
+print(f'score={result[\"score\"]:.2f}')
+assert result['score'] > 0.6, f'Expected > 0.6, got {result[\"score\"]}'
+print('ok')
+")
+assert_contains "$RESULT" "ok" "score_thematic_concentration: focused novel scores high"
+
+cat > "${THEME_DIR}/scene-intent.csv" <<'CSV'
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|A|A|
+s02|test|action|flat|justice|-/+|revelation|A|A|
+s03|test|action|flat|safety|+/-|action|A|A|
+s04|test|action|flat|honor|-/+|revelation|A|A|
+s05|test|action|flat|love|+/-|action|A|A|
+s06|test|action|flat|identity|-/+|revelation|A|A|
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.structural import score_thematic_concentration
+intent = _read_csv_as_map('${THEME_DIR}/scene-intent.csv')
+result = score_thematic_concentration(intent)
+assert result['score'] < 0.5, f'Expected < 0.5, got {result[\"score\"]}'
+print('ok')
+")
+assert_contains "$RESULT" "ok" "score_thematic_concentration: scattered novel scores low"
+rm -rf "${TMPDIR}/theme-test"
