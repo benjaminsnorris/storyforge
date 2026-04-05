@@ -17,16 +17,19 @@ detect_project_root
 JSON_OUTPUT=false
 QUIET=false
 SKIP_SCHEMA=false
+STRUCTURAL=false
 for arg in "$@"; do
     case "$arg" in
         --json)       JSON_OUTPUT=true ;;
         --quiet)      QUIET=true ;;
         --no-schema)  SKIP_SCHEMA=true ;;
+        --structural) STRUCTURAL=true ;;
         -h|--help)
-            echo "Usage: storyforge validate [--no-schema] [--json] [--quiet]"
-            echo "  --no-schema  Skip schema validation (run structural only)"
-            echo "  --json       Output results as JSON"
-            echo "  --quiet      Exit code only (0=pass, 1=fail)"
+            echo "Usage: storyforge validate [--no-schema] [--structural] [--json] [--quiet]"
+            echo "  --no-schema   Skip schema validation (run structural only)"
+            echo "  --structural  Include structural scoring (story-quality dimensions)"
+            echo "  --json        Output results as JSON"
+            echo "  --quiet       Exit code only (0=pass, 1=fail)"
             exit 0
             ;;
     esac
@@ -61,7 +64,12 @@ knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
 if os.path.isfile(knowledge_path):
     knowledge = validate_knowledge_granularity(ref_dir, project_dir)
 
-print(json.dumps({'structural': structural, 'schema': schema, 'knowledge': knowledge}))
+structural_scores = None
+if '${STRUCTURAL}' == 'true':
+    from storyforge.structural import structural_score
+    structural_scores = structural_score(ref_dir)
+
+print(json.dumps({'structural': structural, 'schema': schema, 'knowledge': knowledge, 'scores': structural_scores}))
 ")
 
 if [[ "$JSON_OUTPUT" == true ]]; then
@@ -145,6 +153,23 @@ if knowledge is not None:
             print('    Scenes with 5+ new facts:')
             for w in too_many:
                 print(f'      {w[\"scene_id\"]}: {w[\"new_fact_count\"]} new facts')
+
+scores = combined.get('scores')
+if scores is not None:
+    print()
+    print('--- Structural scoring ---')
+    print(f'  Overall: {scores[\"overall_score\"]:.2f} / 1.00')
+    print()
+    for dim in scores['dimensions']:
+        bar_full = int(dim['score'] * 10)
+        bar = chr(9608) * bar_full + chr(9617) * (10 - bar_full)
+        status = '' if dim['score'] >= dim['target'] else '(below target)'
+        print(f'  {dim[\"label\"]:24s} {dim[\"score\"]:.2f}  {bar}  {status}')
+    if scores['top_findings']:
+        print()
+        print('  Top findings:')
+        for f in scores['top_findings'][:5]:
+            print(f'    {f[\"dimension\"]}: {f[\"message\"]}')
 "
 fi
 
