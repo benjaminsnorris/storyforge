@@ -843,7 +843,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     _fix_location=""
     [[ "$USE_CSV_PLAN" == true ]] && _fix_location=$(read_csv_pass_field "$PASS_NUM" "fix_location" 2>/dev/null || echo "")
 
-    if [[ "$_fix_location" == "brief" || "$_fix_location" == "intent" || "$_fix_location" == "structural" ]]; then
+    if [[ "$_fix_location" == "brief" || "$_fix_location" == "intent" || "$_fix_location" == "structural" || "$_fix_location" == "registry" ]]; then
         # Build upstream revision prompt — operates on CSVs, not prose
         PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
 import sys, os; sys.path.insert(0, '${PYTHON_LIB}')
@@ -871,7 +871,69 @@ for s in scene_data:
             data_block.append(f'  {k}: {v[:120]}')
     data_block.append('')
 
-print(f'''You are performing an upstream revision on scene data for a novel.
+fix_location = '${_fix_location}'
+
+if fix_location == 'registry':
+    # Determine which registry based on dimension
+    dimension = '${PASS_NAME}'.replace('structural-', '').replace('-', '_')
+    registry_map = {
+        'thematic_concentration': ('values.csv', 'value_at_stake'),
+        'mice_health': ('mice-threads.csv', 'mice_threads'),
+    }
+    registry_file, intent_field = registry_map.get(dimension, ('values.csv', 'value_at_stake'))
+    registry_path = os.path.join(ref_dir, registry_file)
+
+    registry_content = ''
+    if os.path.exists(registry_path):
+        registry_content = open(registry_path).read()
+
+    # Load intent data showing current usage of registry values
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    intent_content = ''
+    if os.path.exists(intent_path):
+        intent_content = open(intent_path).read()
+
+    print(f'''You are consolidating a registry for a novel's structural data.
+
+## Pass: ${PASS_NAME}
+## Purpose: ${PASS_PURPOSE}
+## Fix Location: registry
+
+## Guidance
+${_csv_guidance:-No specific guidance provided.}
+
+## Current Registry: {registry_file}
+
+\`\`\`registry-csv
+{registry_content}\`\`\`
+
+## Current Scene Intent (showing {intent_field} usage)
+
+\`\`\`intent-csv
+{intent_content}\`\`\`
+
+## Instructions
+
+1. Consolidate the registry by merging near-duplicate entries. Keep distinct thematic values that serve different narrative purposes. Merge entries that are overly specific variations of the same core value.
+2. For each merged entry, add the old names as aliases (semicolon-separated).
+3. Update all scene-intent rows to use the consolidated canonical IDs in the {intent_field} column.
+4. Output TWO fenced blocks:
+
+\`\`\`registry-csv
+(full consolidated registry — id|name|aliases header, then all rows)
+\`\`\`
+
+\`\`\`intent-csv
+(only rows where {intent_field} changed — full row with all columns)
+\`\`\`
+
+Rules:
+- Preserve all scene IDs and non-{intent_field} columns exactly
+- Use pipe delimiters
+- Every old value must map to exactly one new canonical value
+''')
+else:
+    print(f'''You are performing an upstream revision on scene data for a novel.
 
 ## Pass: ${PASS_NAME}
 ## Purpose: ${PASS_PURPOSE}
@@ -987,7 +1049,7 @@ Rules:
             _fix_location=""
             [[ "$USE_CSV_PLAN" == true ]] && _fix_location=$(read_csv_pass_field "$PASS_NUM" "fix_location" 2>/dev/null || echo "")
 
-            if [[ "$_fix_location" == "brief" || "$_fix_location" == "intent" || "$_fix_location" == "structural" ]]; then
+            if [[ "$_fix_location" == "brief" || "$_fix_location" == "intent" || "$_fix_location" == "structural" || "$_fix_location" == "registry" ]]; then
                 # --- Upstream revision: apply CSV updates, then re-draft affected scenes ---
                 log "  Upstream revision (fix_location: ${_fix_location}) — applying CSV updates..."
 
@@ -1026,10 +1088,13 @@ for label, content in blocks.items():
         'scenes-csv-update': ('scenes.csv', _FILE_MAP['scenes.csv']),
         'intent-csv': ('scene-intent.csv', _FILE_MAP['scene-intent.csv']),
         'briefs-csv': ('scene-briefs.csv', _FILE_MAP['scene-briefs.csv']),
+        'registry-csv': None,  # handled separately below
     }
 
     if label not in file_map:
         continue
+    if file_map[label] is None:
+        continue  # handled below
 
     fname, cols = file_map[label]
     path = os.path.join(ref_dir, fname)
@@ -1054,6 +1119,32 @@ for label, content in blocks.items():
         ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
     _write_csv(path, ordered, cols)
     updated_files.append(fname)
+
+# Handle registry-csv blocks — overwrite the full registry file
+if 'registry-csv' in blocks:
+    reg_rows = csv_block_to_rows(blocks['registry-csv'])
+    if reg_rows:
+        # Determine registry file from dimension
+        dimension = '${PASS_NAME}'.replace('structural-', '').replace('-', '_')
+        reg_map = {
+            'thematic_concentration': 'values.csv',
+            'mice_health': 'mice-threads.csv',
+        }
+        reg_file = reg_map.get(dimension, 'values.csv')
+        reg_path = os.path.join(ref_dir, reg_file)
+
+        # Write registry — preserve original column order
+        if os.path.exists(reg_path):
+            with open(reg_path) as f:
+                header = f.readline().strip().split('|')
+        else:
+            header = list(reg_rows[0].keys())
+
+        with open(reg_path, 'w') as f:
+            f.write('|'.join(header) + '\n')
+            for row in reg_rows:
+                f.write('|'.join(row.get(c, '') for c in header) + '\n')
+        updated_files.append(reg_file)
 
 print(f'Updated: {\", \".join(updated_files) if updated_files else \"no CSV blocks found\"}')
 print(f'Affected scenes: {\", \".join(sorted(affected_scenes)) if affected_scenes else \"none\"}')

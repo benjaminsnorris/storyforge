@@ -174,3 +174,33 @@ PLAN_CONTENT=$(cat "${PROJECT_DIR}/working/plans/revision-plan.csv")
 assert_contains "$PLAN_CONTENT" "intent" "structural: plan has intent fix_location"
 assert_contains "$PLAN_CONTENT" "registry" "structural: plan has registry fix_location"
 assert_contains "$PLAN_CONTENT" "sonnet" "structural: plan uses sonnet model tier"
+
+# ============================================================================
+# --structural: registry fix_location produces registry prompt
+# ============================================================================
+
+# Create proposals with only a registry fix
+cat > "${PROJECT_DIR}/working/scores/structural-proposals.csv" << 'PROPOSALS'
+id|dimension|fix_location|target|change|rationale|status
+sp001|thematic_concentration|registry|global|consolidate values.csv|Thematic fragmentation: 40 distinct values, score 0.30|pending
+PROPOSALS
+
+# Create a values.csv registry for the prompt to reference (save original)
+cp "${PROJECT_DIR}/reference/values.csv" "${PROJECT_DIR}/reference/values.csv.bak" 2>/dev/null || true
+cat > "${PROJECT_DIR}/reference/values.csv" << 'VALUES'
+id|name|aliases
+justice|Justice|
+truth|Truth|
+justice-procedural|Justice — procedural|
+VALUES
+
+RESULT=$(cd "$FIXTURE_DIR" && "${PLUGIN_DIR}/scripts/storyforge-revise" --structural --dry-run 2>&1 || true)
+assert_contains "$RESULT" "registry" "structural-registry: prompt references registry"
+assert_contains "$RESULT" "values.csv" "structural-registry: prompt references values.csv"
+
+# Clean up structural test artifacts so they don't pollute other test runs
+rm -f "${PROJECT_DIR}/working/plans/revision-plan.csv"
+rm -f "${PROJECT_DIR}/working/scores/structural-proposals.csv"
+if [[ -f "${PROJECT_DIR}/reference/values.csv.bak" ]]; then
+    mv "${PROJECT_DIR}/reference/values.csv.bak" "${PROJECT_DIR}/reference/values.csv"
+fi
