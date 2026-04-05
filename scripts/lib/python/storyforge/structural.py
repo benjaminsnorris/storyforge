@@ -17,6 +17,29 @@ from storyforge.elaborate import (
 
 
 # ---------------------------------------------------------------------------
+# POV structure detection
+# ---------------------------------------------------------------------------
+
+def _detect_pov_structure(scenes_map):
+    """Detect the POV structure from scene data.
+
+    Returns:
+        'single' (1 POV character), 'dual' (2), or 'multi' (3+)
+    """
+    povs = set()
+    for scene in scenes_map.values():
+        pov = scene.get('pov', '').strip()
+        if pov:
+            povs.add(pov)
+    if len(povs) <= 1:
+        return 'single'
+    elif len(povs) == 2:
+        return 'dual'
+    else:
+        return 'multi'
+
+
+# ---------------------------------------------------------------------------
 # Field definitions for completeness scoring
 # ---------------------------------------------------------------------------
 
@@ -557,19 +580,24 @@ def score_arcs(scenes_map, intent_map):
         # --- 2. Arc shape + reversals ---
         shape, reversals, is_compound = _classify_arc_shape(shifts)
 
+        # Reversal density: reversals per scene. Ideal is 0.4-0.6 (alternation
+        # every 2-3 scenes). Scale expectations to scene count rather than using
+        # absolute thresholds. Archer & Jockers: regular oscillation is key.
         if scene_count < 4:
             reversal_score = 0.5
         elif reversals == 0:
             reversal_score = 0.2
-        elif reversals == 1:
-            reversal_score = 0.5
-        elif reversals == 2:
-            reversal_score = 0.8
-        elif 3 <= reversals <= 4:
-            reversal_score = 0.9
         else:
-            # Diminishing returns for 5+
-            reversal_score = max(0.5, 0.9 - (reversals - 4) * 0.1)
+            density = reversals / scene_count
+            if 0.3 <= density <= 0.7:
+                reversal_score = 0.9  # Healthy alternation
+            elif density < 0.3:
+                reversal_score = 0.4 + density  # Too few reversals
+            else:
+                reversal_score = max(0.5, 0.9 - (density - 0.7) * 2)  # Too chaotic
+            # Compound bonus
+            if is_compound:
+                reversal_score = min(1.0, reversal_score + 0.05)
 
         # --- 3. Transformation signal ---
         if len(emotional_arcs) >= 2:
@@ -721,9 +749,15 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
         if role == 'antagonist':
             antagonists.add(name)
 
+    # Detect POV structure
+    pov_structure = _detect_pov_structure(scenes_map)
+
     # --- 1. POV balance ---
     pov_score = 1.0
-    if pov_counts:
+    if pov_structure == 'single':
+        # Single-POV: 100% is correct and expected, full score
+        pov_score = 1.0
+    elif pov_counts:
         max_pov = max(pov_counts.values())
         if max_pov / n > 0.70:
             dominant = [k for k, v in pov_counts.items() if v == max_pov][0]
@@ -737,14 +771,16 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
     # --- 2. Antagonist visibility ---
     antag_score = 1.0
     if antagonists:
+        # In single-POV, antagonist can be an offscreen force — lower threshold
+        antag_threshold = 0.05 if pov_structure == 'single' else 0.08
         antag_penalties = 0
         for antag in antagonists:
             antag_onstage_count = len(onstage.get(antag, []))
             ratio = antag_onstage_count / n if n > 0 else 0
-            if ratio < 0.08:
+            if ratio < antag_threshold:
                 antag_penalties += 1
                 findings.append({
-                    'message': f"Antagonist '{antag}' on-stage in only {antag_onstage_count}/{n} scenes ({ratio:.0%}, ideal >= 8%)",
+                    'message': f"Antagonist '{antag}' on-stage in only {antag_onstage_count}/{n} scenes ({ratio:.0%})",
                     'severity': 'minor',
                     'fix_location': 'intent',
                 })
