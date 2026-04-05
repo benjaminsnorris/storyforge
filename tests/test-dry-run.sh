@@ -163,7 +163,7 @@ sp001|arc_completeness|intent|scene-a|vary value_at_stake|scene-a: only 1 value 
 sp002|thematic_concentration|registry|global|consolidate values.csv|Thematic fragmentation: 40 distinct values, score 0.30|pending
 PROPOSALS
 
-RESULT=$("${PLUGIN_DIR}/scripts/storyforge-revise" --structural --dry-run 2>&1 || true)
+RESULT=$(cd "$FIXTURE_DIR" && "${PLUGIN_DIR}/scripts/storyforge-revise" --structural --dry-run 2>&1 || true)
 assert_contains "$RESULT" "Structural mode" "structural: log message confirms structural mode"
 assert_contains "$RESULT" "arc_completeness" "structural: plan includes arc_completeness pass"
 assert_contains "$RESULT" "thematic_concentration" "structural: plan includes thematic_concentration pass"

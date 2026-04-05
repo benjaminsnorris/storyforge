@@ -50,16 +50,6 @@ elif [[ -f "$PLAN_FILE" ]]; then
     log "DEPRECATION: Using YAML revision plan. Migrate to working/plans/revision-plan.csv."
 fi
 
-# --- Polish mode: auto-generate a craft-only plan targeting all drafted scenes ---
-if [[ "$POLISH_MODE" == true ]]; then
-    log "Polish mode — generating craft-only revision plan..."
-    mkdir -p "$(dirname "$CSV_PLAN_FILE")"
-    echo "pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location" > "$CSV_PLAN_FILE"
-    echo "1|prose-polish|Voice consistency, prose naturalness, dialogue authenticity, AI pattern cleanup|full||Follow the voice guide strictly. Focus on: em dash overuse, antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. Enter late, leave early.|voice-quality|polish|pending|opus|craft" >> "$CSV_PLAN_FILE"
-    USE_CSV_PLAN=true
-    log "Generated single-pass polish plan: ${CSV_PLAN_FILE}"
-fi
-
 LOG_DIR="${PROJECT_DIR}/working/logs"
 LOG_FILE="${LOG_DIR}/revision-log.txt"
 export LOG_FILE
@@ -131,6 +121,94 @@ done
 if [[ "$STRUCTURAL_MODE" == true && "$POLISH_MODE" == true ]]; then
     echo "ERROR: --structural and --polish are mutually exclusive." >&2
     exit 1
+fi
+
+# --- Polish mode: auto-generate a craft-only plan targeting all drafted scenes ---
+if [[ "$POLISH_MODE" == true ]]; then
+    log "Polish mode — generating craft-only revision plan..."
+    mkdir -p "$(dirname "$CSV_PLAN_FILE")"
+    echo "pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location" > "$CSV_PLAN_FILE"
+    echo "1|prose-polish|Voice consistency, prose naturalness, dialogue authenticity, AI pattern cleanup|full||Follow the voice guide strictly. Focus on: em dash overuse, antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. Enter late, leave early.|voice-quality|polish|pending|opus|craft" >> "$CSV_PLAN_FILE"
+    USE_CSV_PLAN=true
+    log "Generated single-pass polish plan: ${CSV_PLAN_FILE}"
+fi
+
+# --- Structural mode: auto-generate plan from structural proposals ---
+if [[ "$STRUCTURAL_MODE" == true ]]; then
+    PROPOSALS_FILE="${PROJECT_DIR}/working/scores/structural-proposals.csv"
+    if [[ ! -f "$PROPOSALS_FILE" ]]; then
+        echo "ERROR: No structural proposals found at ${PROPOSALS_FILE}" >&2
+        echo "Run: storyforge-validate --structural" >&2
+        exit 1
+    fi
+
+    # Check for pending proposals
+    PENDING_COUNT=$(grep -c '|pending$' "$PROPOSALS_FILE" 2>/dev/null || echo "0")
+    if (( PENDING_COUNT == 0 )); then
+        echo "ERROR: No pending proposals in ${PROPOSALS_FILE}" >&2
+        echo "All proposals are already completed. Re-run validation to generate new ones." >&2
+        exit 1
+    fi
+
+    # Save pre-revision scores for delta comparison
+    STRUCTURAL_PRE_SCORES="${PROJECT_DIR}/working/scores/structural-latest.csv"
+    if [[ -f "$STRUCTURAL_PRE_SCORES" ]]; then
+        cp "$STRUCTURAL_PRE_SCORES" "${PROJECT_DIR}/working/scores/structural-pre-revision.csv"
+    fi
+
+    log "Structural mode — generating CSV-only revision plan from ${PENDING_COUNT} proposals..."
+    mkdir -p "$(dirname "$CSV_PLAN_FILE")"
+
+    # Generate plan: group proposals by dimension, order by fix_location priority
+    PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, csv, io
+sys.path.insert(0, '${PYTHON_LIB}')
+
+proposals_file = '${PROPOSALS_FILE}'
+
+# Read proposals
+rows = []
+with open(proposals_file) as f:
+    reader = csv.DictReader(f, delimiter='|')
+    for row in reader:
+        if row.get('status', '').strip() == 'pending':
+            rows.append(row)
+
+# Group by dimension
+from collections import OrderedDict
+groups = OrderedDict()
+for row in rows:
+    dim = row['dimension']
+    if dim not in groups:
+        groups[dim] = {'fix_location': row['fix_location'], 'targets': [], 'rationales': []}
+    t = row.get('target', 'global').strip()
+    if t and t != 'global':
+        groups[dim]['targets'].append(t)
+    groups[dim]['rationales'].append(row.get('rationale', row.get('change', '')))
+
+# Order by fix_location priority: structural -> intent -> registry -> brief
+priority = {'structural': 0, 'intent': 1, 'registry': 2, 'brief': 3}
+sorted_dims = sorted(groups.items(), key=lambda x: priority.get(x[1]['fix_location'], 9))
+
+# Write plan
+header = 'pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location'
+lines = [header]
+for i, (dim, info) in enumerate(sorted_dims, 1):
+    name = f'structural-{dim.replace(\"_\", \"-\")}'
+    purpose = '; '.join(info['rationales'])
+    targets = ';'.join(info['targets']) if info['targets'] else ''
+    fix_loc = info['fix_location']
+    lines.append(f'{i}|{name}|{purpose}|full|{targets}||all-strengths||pending|sonnet|{fix_loc}')
+
+with open('${CSV_PLAN_FILE}', 'w') as f:
+    f.write('\n'.join(lines) + '\n')
+
+print(f'Generated {len(sorted_dims)} passes')
+for i, (dim, info) in enumerate(sorted_dims, 1):
+    print(f'  Pass {i}: {dim} (fix_location: {info[\"fix_location\"]})')
+"
+
+    USE_CSV_PLAN=true
 fi
 
 # ============================================================================
