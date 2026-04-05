@@ -342,3 +342,76 @@ Output the registry CSV first, then a blank line, then "UPDATES" on its own line
 
     else:
         raise ValueError(f'Unknown reconciliation domain: {domain}')
+
+
+# ============================================================================
+# Registry response parsing
+# ============================================================================
+
+_REGISTRY_COLUMNS = {
+    'characters': ['id', 'name', 'role', 'aliases'],
+    'locations': ['id', 'name', 'aliases'],
+    'values': ['id', 'name', 'aliases'],
+    'mice-threads': ['id', 'name', 'type', 'aliases'],
+    'knowledge': ['id', 'name', 'aliases', 'category', 'origin'],
+}
+
+
+def parse_registry_response(
+    response: str, domain: str
+) -> tuple[list[dict[str, str]], list[tuple[str, str]]]:
+    """Parse an Opus registry-build response.
+
+    Returns:
+        (registry_rows, updates) where registry_rows is a list of dicts
+        keyed by the domain's columns, and updates is a list of
+        (scene_id, value_string) tuples from UPDATE lines.
+    """
+    if domain not in _REGISTRY_COLUMNS:
+        raise ValueError(f'Unknown reconciliation domain: {domain}')
+
+    columns = _REGISTRY_COLUMNS[domain]
+    rows: list[dict[str, str]] = []
+    updates: list[tuple[str, str]] = []
+    in_updates = False
+    header_seen = False
+
+    for line in response.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+
+        # Check for UPDATES section marker
+        if line.upper() == 'UPDATES':
+            in_updates = True
+            continue
+
+        if in_updates:
+            if not line.startswith('UPDATE:'):
+                continue
+            payload = line[len('UPDATE:'):].strip()
+            parts = payload.split('|', 1)
+            if len(parts) < 2:
+                continue
+            scene_id = parts[0].strip()
+            value = parts[1].strip()
+            if scene_id:
+                updates.append((scene_id, value))
+        else:
+            # Registry CSV parsing
+            fields = [f.strip() for f in line.split('|')]
+            # Skip header row
+            if not header_seen and len(fields) > 0 and fields[0] == 'id':
+                header_seen = True
+                continue
+            # Map fields to column names
+            if len(fields) < len(columns):
+                continue
+            row = {}
+            for i, col in enumerate(columns):
+                row[col] = fields[i] if i < len(fields) else ''
+            if not row.get('id'):
+                continue
+            rows.append(row)
+
+    return rows, updates

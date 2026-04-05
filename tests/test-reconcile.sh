@@ -155,3 +155,54 @@ print('HAS_COLLAPSE' if '8-15' in prompt else 'NO_COLLAPSE')
 assert_contains "$RESULT" "HAS_JUSTICE" "build_registry_prompt: values includes justice"
 assert_contains "$RESULT" "HAS_COLLAPSE" "build_registry_prompt: values mentions 8-15 core values"
 rm -rf "${TMPDIR}/val-prompt-test"
+
+# ============================================================================
+# parse_registry_response — simple characters registry
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY})
+from storyforge.reconcile import parse_registry_response
+
+response = '''id|name|role|aliases
+kael-davreth|Kael Davreth|protagonist|Kael;kael;Kael Davreth;Kael Bren
+sera-vasht|Sera Vasht|protagonist|Sera;sera;Sera Vasht
+bren-tael|Bren Tael|supporting|Bren;bren
+'''
+
+registry_rows, updates = parse_registry_response(response, 'characters')
+print(f'rows={len(registry_rows)}')
+print(f'id0={registry_rows[0][\"id\"]}')
+print(f'updates={len(updates)}')
+")
+assert_contains "$RESULT" "rows=3" "parse_registry_response: parses 3 character rows"
+assert_contains "$RESULT" "id0=kael-davreth" "parse_registry_response: first row ID correct"
+assert_contains "$RESULT" "updates=0" "parse_registry_response: no updates for simple registry"
+
+# ============================================================================
+# parse_registry_response — MICE threads with UPDATES
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY})
+from storyforge.reconcile import parse_registry_response
+
+response = '''id|name|type|aliases
+who-killed-rowan|Who killed Rowan?|inquiry|who-killed-rowan;can-Cora-be-trusted-at-Lenas-table
+cora-transformation|Cora's transformation|character|cora-dunning;Cora-as-pilgrim
+
+UPDATES
+UPDATE: lenas-porch | -character:cora-transformation
+UPDATE: field-book | -character:cora-transformation;+inquiry:who-killed-rowan
+'''
+
+registry_rows, updates = parse_registry_response(response, 'mice-threads')
+print(f'rows={len(registry_rows)}')
+print(f'updates={len(updates)}')
+print(f'u0_scene={updates[0][0]}')
+print(f'type0={registry_rows[0][\"type\"]}')
+")
+assert_contains "$RESULT" "rows=2" "parse_registry_response: mice-threads parses 2 rows"
+assert_contains "$RESULT" "updates=2" "parse_registry_response: mice-threads has 2 updates"
+assert_contains "$RESULT" "u0_scene=lenas-porch" "parse_registry_response: first update scene ID"
+assert_contains "$RESULT" "type0=inquiry" "parse_registry_response: first row type"
