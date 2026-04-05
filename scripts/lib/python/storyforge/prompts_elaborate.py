@@ -55,7 +55,6 @@ def _existing_refs(project_dir: str) -> str:
         ('character-bible.md', 'Character Bible'),
         ('world-bible.md', 'World Bible'),
         ('voice-guide.md', 'Voice Guide'),
-        ('continuity-tracker.md', 'Continuity Tracker'),
         ('key-decisions.md', 'Key Decisions'),
     ]:
         content = _read_file(os.path.join(ref_dir, name))

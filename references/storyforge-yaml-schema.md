@@ -74,7 +74,6 @@ Every artifact entry shares the same three-field structure:
 | `voice_guide` | Prose style reference capturing POV strategy, sentence rhythm, diction registers, and per-character dialogue fingerprints. | `reference/voice-guide.md` |
 | `timeline` | Chronological event log ensuring temporal consistency across scenes, subplots, and character arcs. | `reference/timeline.md` |
 | `scene_index` | The master list of every scene with metadata (POV, location, status, word count, and any scene extensions). Stored as pipe-delimited CSV files: `reference/scenes.csv` (structural identity), `reference/scene-intent.csv` (narrative dynamics), and `reference/scene-briefs.csv` (drafting contracts). | `reference/scenes.csv` |
-| `continuity_tracker` | A living ledger of continuity facts — promises made, details established, threads opened — used during evaluation and revision. | `reference/continuity-tracker.md` |
 | `key_decisions` | A canonical log of author decisions — creative, structural, editorial. All skills consult this before asking questions and append new decisions immediately when the author makes them. If a decision is recorded here, it is settled and must not be re-asked. | `reference/key-decisions.md` |
 | `chapter_map` | Maps scenes to chapters for manuscript assembly as a pipe-delimited CSV. Includes chapter numbers, titles, heading format, and semicolon-separated scene IDs. Production settings (author, copyright, scene break style, genre preset), cover generation settings, and web book settings are stored in `storyforge.yaml` under the `production` key. Created by the `produce` skill or manually. | `reference/chapter-map.csv` |
 | `manuscript` | The assembled manuscript output directory. Contains individual chapter files, front/back matter, assets (CSS, cover), and generated output (epub, PDF, HTML, web). Created by `./storyforge assemble`. Output formats: `epub` (default), `pdf`, `html` (single-file), `web` (multi-page hostable site), `markdown`, `all`. | `manuscript/` |
@@ -253,10 +252,6 @@ artifacts:
   scene_index:
     exists: false
     path: reference/scenes.csv
-    updated: null
-  continuity_tracker:
-    exists: false
-    path: reference/continuity-tracker.md
     updated: null
   key_decisions:
     exists: false
