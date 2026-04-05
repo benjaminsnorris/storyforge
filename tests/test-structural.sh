@@ -726,3 +726,30 @@ assert path is None, f'Expected None when all above target, got {path}'
 print('ok')
 ")
 assert_contains "$RESULT" "ok" "generate_structural_proposals: returns None when all above target"
+
+# ============================================================================
+# print_score_delta: formats before/after comparison
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import print_score_delta
+
+pre = {
+    'arc_completeness': {'score': 0.80, 'target': 0.80},
+    'thematic_concentration': {'score': 0.30, 'target': 0.60},
+    'pacing_shape': {'score': 0.62, 'target': 0.75},
+}
+post = {
+    'arc_completeness': {'score': 0.85, 'target': 0.80},
+    'thematic_concentration': {'score': 0.50, 'target': 0.60},
+    'pacing_shape': {'score': 0.62, 'target': 0.75},
+}
+
+output = print_score_delta(pre, post)
+print(output)
+")
+assert_contains "$RESULT" "arc_completeness" "print_score_delta: includes dimension names"
+assert_contains "$RESULT" "+0.05" "print_score_delta: shows positive delta"
+assert_contains "$RESULT" "+0.20" "print_score_delta: shows thematic improvement"
+assert_contains "$RESULT" "0.00" "print_score_delta: shows no-change"

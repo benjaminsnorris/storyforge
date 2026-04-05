@@ -1336,6 +1336,46 @@ for (( i = 1; i <= TOTAL_PASSES; i++ )); do
 done
 log "Revision session complete. ${COMPLETED}/${TOTAL_PASSES} passes finished."
 
+# --- Structural mode: re-validate and print score delta ---
+if [[ "$STRUCTURAL_MODE" == true && "$DRY_RUN" != true ]]; then
+    log "Re-running structural validation..."
+
+    POST_SCORES=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json
+sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.structural import structural_score, save_structural_scores, load_scores_as_dict, print_score_delta
+
+ref_dir = os.path.join('${PROJECT_DIR}', 'reference')
+report = structural_score(ref_dir)
+save_structural_scores(report, '${PROJECT_DIR}')
+
+# Load pre-revision scores
+pre_path = os.path.join('${PROJECT_DIR}', 'working', 'scores', 'structural-pre-revision.csv')
+post_path = os.path.join('${PROJECT_DIR}', 'working', 'scores', 'structural-latest.csv')
+
+pre = load_scores_as_dict(pre_path)
+post = load_scores_as_dict(post_path)
+
+print(print_score_delta(pre, post))
+
+# Print new overall
+overall = report.get('overall', 0)
+print(f'\nOverall: {overall:.2f}')
+" 2>&1)
+
+    echo ""
+    echo "=== Structural Score Delta ==="
+    echo "$POST_SCORES"
+    echo ""
+
+    # Mark completed proposals
+    PROPOSALS_FILE="${PROJECT_DIR}/working/scores/structural-proposals.csv"
+    if [[ -f "$PROPOSALS_FILE" ]]; then
+        sed -i '' 's/|pending$/|completed/' "$PROPOSALS_FILE"
+        log "Marked all proposals as completed in structural-proposals.csv"
+    fi
+fi
+
 # --- Cost summary ---
 if [[ "$DRY_RUN" != true ]]; then
     print_cost_summary "revise"

@@ -1812,3 +1812,54 @@ def format_diagnosis(report, coaching_level='full'):
         lines.append('All dimensions at or above target. The structural bones are solid.')
 
     return '\n'.join(lines)
+
+
+def print_score_delta(pre_scores, post_scores):
+    """Format a before/after comparison of structural scores.
+
+    Args:
+        pre_scores: dict of {dimension: {'score': float, 'target': float}}
+        post_scores: dict of {dimension: {'score': float, 'target': float}}
+
+    Returns:
+        Formatted string with dimension, before, after, delta columns.
+    """
+    lines = []
+    lines.append(f"{'Dimension':<28} {'Before':>7} {'After':>7} {'Delta':>7}  Status")
+    lines.append('-' * 65)
+
+    all_dims = sorted(set(list(pre_scores.keys()) + list(post_scores.keys())))
+    for dim in all_dims:
+        pre = pre_scores.get(dim, {}).get('score', 0)
+        post = post_scores.get(dim, {}).get('score', 0)
+        target = post_scores.get(dim, {}).get('target', pre_scores.get(dim, {}).get('target', 0))
+        delta = post - pre
+
+        delta_str = f"+{delta:.2f}" if delta > 0 else f"{delta:.2f}"
+        status = "improved" if delta > 0.005 else ("declined" if delta < -0.005 else "unchanged")
+        if post >= target and pre < target:
+            status = "now passing"
+
+        lines.append(f"  {dim:<26} {pre:>6.2f}  {post:>6.2f}  {delta_str:>6}  {status}")
+
+    return '\n'.join(lines)
+
+
+def load_scores_as_dict(csv_path):
+    """Load a structural-latest.csv into a dict for delta comparison.
+
+    Returns:
+        dict of {dimension: {'score': float, 'target': float}}
+    """
+    result = {}
+    if not os.path.exists(csv_path):
+        return result
+    rows = _read_csv(csv_path)
+    for row in rows:
+        dim = row.get('dimension', '').strip()
+        if dim and dim != 'overall':
+            result[dim] = {
+                'score': float(row.get('score', 0)),
+                'target': float(row.get('target', 0)),
+            }
+    return result
