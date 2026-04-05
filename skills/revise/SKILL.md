@@ -19,8 +19,9 @@ Store this resolved plugin path for use throughout the session.
 2. `working/pipeline.csv` — current cycle status
 3. Latest evaluation: `working/evaluations/eval-*/findings.yaml` or `synthesis.md`
 4. Latest scoring: `working/scores/latest/diagnosis.csv`, `fidelity-scores.csv`
-5. Existing revision plan: `working/plans/revision-plan.csv`
-6. Latest review: `working/reviews/` (most recent)
+5. Structural scoring: `working/scores/structural-latest.csv`, `working/scores/structural-proposals.csv`
+6. Existing revision plan: `working/plans/revision-plan.csv`
+7. Latest review: `working/reviews/` (most recent)
 
 ## Step 2: Determine Mode
 
@@ -46,7 +47,9 @@ Based on the author's request and project state:
 
 ## Step 3: Plan the Revision
 
-Read evaluation findings and scoring data. Categorize each finding by where the fix belongs:
+Read evaluation findings and scoring data. If structural scoring results exist (`working/scores/structural-proposals.csv`), incorporate unaddressed structural proposals into the revision plan. Structural proposals use the same fix_location routing as evaluation findings.
+
+Categorize each finding by where the fix belongs:
 
 | fix_location | Target file | What it fixes |
 |-------------|-------------|---------------|

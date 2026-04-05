@@ -624,3 +624,108 @@ print('ok')
 assert_contains "$RESULT" "ok" "format_scorecard: shows deltas with previous scores"
 
 rm -rf "$SAVE_DIR"
+
+# ============================================================================
+# fix_location in findings
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import structural_score
+
+report = structural_score('${FIXTURE_DIR}/reference')
+for dim in report['dimensions']:
+    for f in dim['findings']:
+        assert 'fix_location' in f, f'Missing fix_location in {dim[\"name\"]}: {f[\"message\"]}'
+        assert f['fix_location'] in ('structural', 'intent', 'brief', 'registry'), \
+            f'Bad fix_location \"{f[\"fix_location\"]}\" in {dim[\"name\"]}: {f[\"message\"]}'
+print('ok')
+")
+assert_contains "$RESULT" "ok" "fix_location: all findings have valid fix_location"
+
+# ============================================================================
+# generate_structural_proposals
+# ============================================================================
+
+PROP_DIR="${TMPDIR}/proposal-test"
+mkdir -p "${PROP_DIR}/reference" "${PROP_DIR}/working/scores"
+
+# Create fixtures that will score below target
+cat > "${PROP_DIR}/reference/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|One|1|alice|X|1|morning|1h|action|drafted|2000|2000
+s02|2|Two|1|alice|X|1|afternoon|1h|action|drafted|2000|2000
+s03|3|Three|1|alice|X|2|morning|1h|action|drafted|2000|2000
+s04|4|Four|1|alice|X|2|afternoon|1h|action|drafted|2000|2000
+CSV
+cat > "${PROP_DIR}/reference/scene-intent.csv" <<'CSV'
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|test|action|calm|truth|+/-|revelation|alice|alice|
+s02|test|action|calm|truth|+/-|revelation|alice|alice|
+s03|test|action|calm|truth|+/-|revelation|alice|alice|
+s04|test|action|calm|truth|+/-|revelation|alice|alice|
+CSV
+cat > "${PROP_DIR}/reference/scene-briefs.csv" <<'CSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+s01|g|c|yes-but|cr|d|||a|d|e|m||false
+s02|g|c|yes-but|cr|d|||a|d|e|m||false
+s03|g|c|yes-but|cr|d|||a|d|e|m||false
+s04|g|c|yes-but|cr|d|||a|d|e|m||false
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import structural_score, generate_structural_proposals
+import os
+
+report = structural_score('${PROP_DIR}/reference')
+path = generate_structural_proposals(report, '${PROP_DIR}/working/scores')
+assert path is not None
+assert os.path.isfile(path)
+
+# Read back proposals
+with open(path) as f:
+    lines = [l.strip() for l in f if l.strip()]
+header = lines[0]
+rows = lines[1:]
+print(f'proposals={len(rows)}')
+assert 'id|dimension|fix_location' in header
+assert len(rows) >= 1, f'Expected at least 1 proposal, got {len(rows)}'
+# Check fix_location is populated
+for row in rows:
+    fields = row.split('|')
+    assert fields[2] in ('structural', 'intent', 'brief', 'registry'), f'Bad fix_location: {fields[2]}'
+print('fix_locations_valid=true')
+print('ok')
+")
+assert_contains "$RESULT" "ok" "generate_structural_proposals: creates proposals CSV"
+assert_contains "$RESULT" "fix_locations_valid=true" "generate_structural_proposals: all fix_locations valid"
+rm -rf "${PROP_DIR}"
+
+# ============================================================================
+# generate_structural_proposals: no proposals when all above target
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import generate_structural_proposals
+
+# Fake report where all dimensions are above target
+report = {
+    'overall_score': 0.90,
+    'dimensions': [
+        {'name': 'completeness', 'score': 0.95, 'target': 0.80, 'findings': []},
+        {'name': 'thematic_concentration', 'score': 0.85, 'target': 0.60, 'findings': []},
+        {'name': 'pacing_shape', 'score': 0.80, 'target': 0.75, 'findings': []},
+        {'name': 'arc_completeness', 'score': 0.90, 'target': 0.80, 'findings': []},
+        {'name': 'character_presence', 'score': 0.85, 'target': 0.70, 'findings': []},
+        {'name': 'mice_health', 'score': 0.75, 'target': 0.60, 'findings': []},
+        {'name': 'knowledge_chain', 'score': 0.70, 'target': 0.60, 'findings': []},
+        {'name': 'function_variety', 'score': 0.80, 'target': 0.65, 'findings': []},
+    ],
+}
+path = generate_structural_proposals(report, '${TMPDIR}/no-proposals')
+assert path is None, f'Expected None when all above target, got {path}'
+print('ok')
+")
+assert_contains "$RESULT" "ok" "generate_structural_proposals: returns None when all above target"
