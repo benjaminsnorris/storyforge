@@ -160,15 +160,11 @@ print('ok')
 ")
 assert_contains "$RESULT" "ok" "score_thematic_concentration: focused novel scores high"
 
-cat > "${THEME_DIR}/scene-intent.csv" <<'CSV'
-id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
-s01|test|action|flat|truth|+/-|revelation|A|A|
-s02|test|action|flat|justice|-/+|revelation|A|A|
-s03|test|action|flat|safety|+/-|action|A|A|
-s04|test|action|flat|honor|-/+|revelation|A|A|
-s05|test|action|flat|love|+/-|action|A|A|
-s06|test|action|flat|identity|-/+|revelation|A|A|
-CSV
+# Scattered novel: 20 unique values in 20 scenes, no dominance
+printf 'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n' > "${THEME_DIR}/scene-intent.csv"
+for i in $(seq 1 20); do
+    printf 's%02d|test|action|flat|value-%d|+/-|revelation|A|A|\n' "$i" "$i" >> "${THEME_DIR}/scene-intent.csv"
+done
 
 RESULT=$(python3 -c "
 ${PY}
@@ -176,6 +172,7 @@ from storyforge.elaborate import _read_csv_as_map
 from storyforge.structural import score_thematic_concentration
 intent = _read_csv_as_map('${THEME_DIR}/scene-intent.csv')
 result = score_thematic_concentration(intent)
+# 20 unique values, each appearing once — no concentration at all
 assert result['score'] < 0.5, f'Expected < 0.5, got {result[\"score\"]}'
 print('ok')
 ")

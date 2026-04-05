@@ -171,16 +171,26 @@ def score_thematic_concentration(intent_map):
         'fix_location': 'registry',
     })
 
-    # Scoring
-    hhi_score = min(1.0, hhi / 0.35)
+    # Scoring — combine HHI with top-2 dominance and value count
+    # HHI component: 0.08 (12 even values) to 0.33+ (3 dominant values)
+    hhi_component = min(1.0, hhi / 0.20)
 
-    count_penalty = 0.0
-    if distinct_count > 20:
-        count_penalty = min(0.3, 0.015 * (distinct_count - 20))
-    if distinct_count < 5 and total >= 10:
-        count_penalty = 0.1
+    # Top-2 dominance component (Archer/Jockers: bestsellers ~30% in top 1-2)
+    dominance_component = min(1.0, top2_share / 0.30)
 
-    score = max(0.0, min(1.0, hhi_score - count_penalty))
+    # Value count component: 8-15 is ideal
+    if 8 <= distinct_count <= 15:
+        count_component = 1.0
+    elif 5 <= distinct_count < 8 or 15 < distinct_count <= 20:
+        count_component = 0.7
+    elif distinct_count > 20:
+        count_component = max(0.1, 0.7 - (distinct_count - 20) * 0.02)
+    elif distinct_count < 5 and total >= 10:
+        count_component = 0.4
+    else:
+        count_component = 0.6
+
+    score = (hhi_component * 0.3 + dominance_component * 0.4 + count_component * 0.3)
 
     return {'score': score, 'findings': findings}
 
@@ -278,12 +288,17 @@ def score_pacing(scenes_map, intent_map, briefs_map):
     if n == 0:
         return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
-    # Build tension array
+    # Build tension array with position weighting for climax detection
+    # Later scenes get a slight boost (0-0.05) so ties break toward the end
+    raw_tensions = []
     tensions = []
-    for sid in scene_ids:
+    for i, sid in enumerate(scene_ids):
         intent = intent_map.get(sid, {})
         brief = briefs_map.get(sid, {})
-        tensions.append(_scene_tension(intent, brief))
+        raw = _scene_tension(intent, brief)
+        raw_tensions.append(raw)
+        position_boost = (i / max(n - 1, 1)) * 0.05
+        tensions.append(raw + position_boost)
 
     # --- 1. Act proportions ---
     # Gather word counts per part
@@ -360,7 +375,7 @@ def score_pacing(scenes_map, intent_map, briefs_map):
         midpoint_score = max(0.0, 0.5 - (avg_tension - mid_tension) * 2)
 
     # --- 4. Beat regularity ---
-    regularity = _beat_regularity(tensions)
+    regularity = _beat_regularity(raw_tensions)
     regularity_score = regularity
 
     if regularity < 0.3:
@@ -372,8 +387,8 @@ def score_pacing(scenes_map, intent_map, briefs_map):
 
     # --- 5. Escalation ---
     half = n // 2
-    first_half_mean = sum(tensions[:half]) / half if half > 0 else 0.5
-    second_half_mean = sum(tensions[half:]) / (n - half) if (n - half) > 0 else 0.5
+    first_half_mean = sum(raw_tensions[:half]) / half if half > 0 else 0.5
+    second_half_mean = sum(raw_tensions[half:]) / (n - half) if (n - half) > 0 else 0.5
 
     if second_half_mean > first_half_mean:
         escalation_score = min(1.0, 0.5 + (second_half_mean - first_half_mean) * 3)
