@@ -1140,3 +1140,198 @@ def score_function_variety(intent_map, briefs_map):
     score = max(0.0, min(1.0, score))
 
     return {'score': score, 'findings': findings}
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator constants
+# ---------------------------------------------------------------------------
+
+_DEFAULT_WEIGHTS = {
+    'arc_completeness': 1.0,
+    'thematic_concentration': 0.8,
+    'pacing_shape': 1.0,
+    'character_presence': 0.7,
+    'mice_health': 0.6,
+    'knowledge_chain': 0.5,
+    'function_variety': 0.7,
+    'completeness': 0.3,
+}
+
+_DIMENSION_LABELS = {
+    'arc_completeness': 'Arc Completeness',
+    'thematic_concentration': 'Thematic Concentration',
+    'pacing_shape': 'Pacing Shape',
+    'character_presence': 'Character Presence',
+    'mice_health': 'MICE Thread Health',
+    'knowledge_chain': 'Knowledge Chain',
+    'function_variety': 'Scene Function Variety',
+    'completeness': 'Structural Completeness',
+}
+
+_DIMENSION_TARGETS = {
+    'arc_completeness': 0.80,
+    'thematic_concentration': 0.60,
+    'pacing_shape': 0.75,
+    'character_presence': 0.70,
+    'mice_health': 0.60,
+    'knowledge_chain': 0.60,
+    'function_variety': 0.65,
+    'completeness': 0.80,
+}
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
+def structural_score(ref_dir, weights=None):
+    """Run all 8 structural scoring dimensions and compute weighted average.
+
+    Args:
+        ref_dir: path to reference directory containing scenes.csv,
+                 scene-intent.csv, scene-briefs.csv, and optionally characters.csv
+        weights: optional dict overriding _DEFAULT_WEIGHTS
+
+    Returns:
+        {
+            'overall_score': float,
+            'dimensions': [{'name', 'label', 'score', 'weight', 'target', 'findings'}, ...],
+            'top_findings': [{'dimension', 'dimension_score', 'message'}, ...],
+        }
+    """
+    w = dict(_DEFAULT_WEIGHTS)
+    if weights:
+        w.update(weights)
+
+    # Read CSVs once
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    briefs_map = _read_csv_as_map(briefs_path) if os.path.exists(briefs_path) else {}
+
+    # Call all 8 scoring functions
+    results = {
+        'completeness': score_completeness(scenes_map, intent_map, briefs_map),
+        'thematic_concentration': score_thematic_concentration(intent_map),
+        'pacing_shape': score_pacing(scenes_map, intent_map, briefs_map),
+        'arc_completeness': score_arcs(scenes_map, intent_map),
+        'character_presence': score_character_presence(scenes_map, intent_map, ref_dir),
+        'mice_health': score_mice_health(scenes_map, intent_map),
+        'knowledge_chain': score_knowledge_chain(scenes_map, briefs_map),
+        'function_variety': score_function_variety(intent_map, briefs_map),
+    }
+
+    # Build dimensions list and compute weighted average
+    dimensions = []
+    weighted_sum = 0.0
+    total_weight = 0.0
+    top_findings = []
+
+    for name in _DEFAULT_WEIGHTS:
+        result = results[name]
+        dim_weight = w.get(name, 0.0)
+        dim_score = result['score']
+        dim_findings = result.get('findings', [])
+
+        dimensions.append({
+            'name': name,
+            'label': _DIMENSION_LABELS.get(name, name),
+            'score': dim_score,
+            'weight': dim_weight,
+            'target': _DIMENSION_TARGETS.get(name, 0.70),
+            'findings': dim_findings,
+        })
+
+        weighted_sum += dim_score * dim_weight
+        total_weight += dim_weight
+
+        # Collect important findings
+        for f in dim_findings:
+            if f.get('severity') == 'important':
+                top_findings.append({
+                    'dimension': name,
+                    'dimension_score': dim_score,
+                    'message': f['message'],
+                })
+
+    overall = weighted_sum / total_weight if total_weight > 0 else 0.0
+
+    return {
+        'overall_score': max(0.0, min(1.0, overall)),
+        'dimensions': dimensions,
+        'top_findings': top_findings,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Output formatters
+# ---------------------------------------------------------------------------
+
+def format_scorecard(report):
+    """Format a structural score report as a terminal-printable scorecard.
+
+    Args:
+        report: dict from structural_score()
+
+    Returns:
+        str with bar chart and scores
+    """
+    lines = []
+    lines.append(f"Structural Score: {report['overall_score']:.2f} / 1.00")
+    lines.append('')
+
+    for dim in report['dimensions']:
+        label = dim['label'].ljust(24)
+        score = dim['score']
+        target = dim['target']
+
+        filled = int(round(score * 10))
+        empty = 10 - filled
+        bar = '\u2588' * filled + '\u2591' * empty
+
+        lines.append(f"  {label}  {score:.2f}  {bar}  (target: {target:.2f}+)")
+
+    return '\n'.join(lines)
+
+
+def format_diagnosis(report, coaching_level='full'):
+    """Format structural findings for display, adapted to coaching level.
+
+    Args:
+        report: dict from structural_score()
+        coaching_level: 'full', 'coach', or 'strict'
+
+    Returns:
+        str with formatted findings
+    """
+    lines = []
+
+    if coaching_level == 'strict':
+        lines.append('## Data')
+        lines.append('')
+        for dim in report['dimensions']:
+            if dim['score'] < dim['target']:
+                lines.append(f"- {dim['name']}: {dim['score']:.2f} (target: {dim['target']:.2f})")
+        if not any(dim['score'] < dim['target'] for dim in report['dimensions']):
+            lines.append('All dimensions at or above target.')
+        return '\n'.join(lines)
+
+    findings = report.get('top_findings', [])[:5]
+
+    if coaching_level == 'coach':
+        lines.append('## Questions to Consider')
+        lines.append('')
+        for i, f in enumerate(findings, 1):
+            lines.append(f"{i}. **{_DIMENSION_LABELS.get(f['dimension'], f['dimension'])}** ({f['dimension_score']:.2f}): {f['message']}")
+        if not findings:
+            lines.append('No critical findings to discuss.')
+        return '\n'.join(lines)
+
+    # full
+    lines.append('## Top Findings')
+    lines.append('')
+    for i, f in enumerate(findings, 1):
+        lines.append(f"{i}. **{_DIMENSION_LABELS.get(f['dimension'], f['dimension'])}** ({f['dimension_score']:.2f}): {f['message']}")
+    if not findings:
+        lines.append('No critical findings detected.')
+    return '\n'.join(lines)

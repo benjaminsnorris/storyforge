@@ -446,3 +446,65 @@ assert isinstance(result['findings'], list)
 print('ok')
 ")
 assert_contains "$RESULT" "ok" "score_knowledge_chain: returns valid score on fixtures"
+
+# ============================================================================
+# structural_score (full orchestrator)
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import structural_score
+
+report = structural_score('${FIXTURE_DIR}/reference')
+assert 'overall_score' in report, 'Missing overall_score'
+assert 'dimensions' in report, 'Missing dimensions'
+assert len(report['dimensions']) == 8, f'Expected 8 dimensions, got {len(report[\"dimensions\"])}'
+
+names = [d['name'] for d in report['dimensions']]
+for expected in ['arc_completeness', 'thematic_concentration', 'pacing_shape',
+                 'character_presence', 'mice_health', 'knowledge_chain',
+                 'function_variety', 'completeness']:
+    assert expected in names, f'Missing dimension: {expected}'
+
+print(f'overall={report[\"overall_score\"]:.2f}')
+print(f'dims={len(report[\"dimensions\"])}')
+print('ok')
+")
+assert_contains "$RESULT" "dims=8" "structural_score: returns all 8 dimensions"
+assert_contains "$RESULT" "ok" "structural_score: orchestrator runs on fixtures"
+
+# ============================================================================
+# format_scorecard
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import structural_score, format_scorecard
+
+report = structural_score('${FIXTURE_DIR}/reference')
+card = format_scorecard(report)
+assert 'Structural Score' in card
+assert 'Arc Completeness' in card
+assert 'Pacing Shape' in card
+print('ok')
+")
+assert_contains "$RESULT" "ok" "format_scorecard: produces readable output"
+
+# ============================================================================
+# format_diagnosis
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import structural_score, format_diagnosis
+
+report = structural_score('${FIXTURE_DIR}/reference')
+full = format_diagnosis(report, 'full')
+coach = format_diagnosis(report, 'coach')
+strict = format_diagnosis(report, 'strict')
+assert isinstance(full, str)
+assert isinstance(coach, str)
+assert isinstance(strict, str)
+print('ok')
+")
+assert_contains "$RESULT" "ok" "format_diagnosis: all coaching levels produce output"
