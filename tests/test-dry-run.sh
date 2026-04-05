@@ -150,3 +150,27 @@ assert_contains "$result" "DRY RUN: review" "review dry-run: has dry-run header"
 assert_contains "$result" "END DRY RUN: review" "review dry-run: has dry-run footer"
 assert_contains "$result" "drafting" "review dry-run: shows review type"
 assert_contains "$result" "pipeline review" "review dry-run: prompt mentions pipeline review"
+
+# ============================================================================
+# --structural flag: generates plan from structural proposals
+# ============================================================================
+
+# Set up structural proposals fixture
+mkdir -p "${PROJECT_DIR}/working/scores"
+cat > "${PROJECT_DIR}/working/scores/structural-proposals.csv" << 'PROPOSALS'
+id|dimension|fix_location|target|change|rationale|status
+sp001|arc_completeness|intent|scene-a|vary value_at_stake|scene-a: only 1 value at stake, score 0.80|pending
+sp002|thematic_concentration|registry|global|consolidate values.csv|Thematic fragmentation: 40 distinct values, score 0.30|pending
+PROPOSALS
+
+RESULT=$("${PLUGIN_DIR}/scripts/storyforge-revise" --structural --dry-run 2>&1 || true)
+assert_contains "$RESULT" "Structural mode" "structural: log message confirms structural mode"
+assert_contains "$RESULT" "arc_completeness" "structural: plan includes arc_completeness pass"
+assert_contains "$RESULT" "thematic_concentration" "structural: plan includes thematic_concentration pass"
+
+# Verify revision-plan.csv was generated
+assert_file_exists "${PROJECT_DIR}/working/plans/revision-plan.csv" "structural: revision-plan.csv created"
+PLAN_CONTENT=$(cat "${PROJECT_DIR}/working/plans/revision-plan.csv")
+assert_contains "$PLAN_CONTENT" "intent" "structural: plan has intent fix_location"
+assert_contains "$PLAN_CONTENT" "registry" "structural: plan has registry fix_location"
+assert_contains "$PLAN_CONTENT" "sonnet" "structural: plan uses sonnet model tier"

@@ -71,12 +71,17 @@ DRY_RUN=false
 INTERACTIVE=false
 COACHING_LEVEL=""
 POLISH_MODE=false
+STRUCTURAL_MODE=false
 START_PASS=0  # 0 means "find first pending"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --polish)
             POLISH_MODE=true
+            shift
+            ;;
+        --structural)
+            STRUCTURAL_MODE=true
             shift
             ;;
         --dry-run)
@@ -96,11 +101,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: storyforge-revise [--dry-run] [--interactive] [--coaching LEVEL] [PASS_NUM]"
+            echo "Usage: storyforge-revise [--dry-run] [--interactive] [--structural] [--coaching LEVEL] [PASS_NUM]"
             echo ""
             echo "Options:"
             echo "  --dry-run       Build and print prompts without invoking Claude"
             echo "  --interactive   Supervise each pass — watch, give feedback, redirect"
+            echo "  --structural    Auto-generate plan from structural proposals (CSV-only, no prose)"
             echo "  --coaching LVL  Set coaching level: full, coach, or strict"
             echo "  PASS_NUM        Start from this pass number (1-indexed; default: first pending)"
             echo ""
@@ -121,6 +127,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "$STRUCTURAL_MODE" == true && "$POLISH_MODE" == true ]]; then
+    echo "ERROR: --structural and --polish are mutually exclusive." >&2
+    exit 1
+fi
 
 # ============================================================================
 # Coaching level
