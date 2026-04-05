@@ -703,8 +703,8 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
     if os.path.exists(chars_path):
         rows = _read_csv(chars_path)
         for row in rows:
-            name = row.get('name', '').strip() or row.get('id', '').strip()
-            role = row.get('role', '').strip().lower()
+            name = (row.get('name') or '').strip() or (row.get('id') or '').strip()
+            role = (row.get('role') or '').strip().lower()
             if name:
                 char_roles[name] = role
 
