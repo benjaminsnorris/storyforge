@@ -983,25 +983,47 @@ def build_scene_prompt_from_briefs(
     craft = build_weighted_directive(project_dir)
     craft_block = f"## Craft Principles\n\n{craft}" if craft else ''
 
+    # Target word count
+    target_words = scene.get('target_words', '') or scene.get('word_count', '')
+    word_target_line = ''
+    if target_words and str(target_words).strip() and int(str(target_words).strip() or 0) > 0:
+        word_target_line = f"\n**Target length: ~{target_words} words.** Prefer economy — achieve through implication what would take twice the words in exposition. Do not pad to reach the target; stop when the scene is complete."
+
+    # Key dialogue checklist
+    key_dialogue = scene.get('key_dialogue', '').strip()
+    dialogue_checklist = ''
+    if key_dialogue:
+        lines = [d.strip() for d in key_dialogue.split(';') if d.strip()]
+        if lines:
+            items = '\n'.join(f'  - [ ] {line}' for line in lines)
+            dialogue_checklist = f"\n\n**Key dialogue checklist — every line below MUST appear in the scene (verbatim or close paraphrase). Do not end the scene until all are delivered:**\n{items}"
+
     # Coaching-specific instructions
     if coaching_level == 'full':
         task_block = f"""## Task
 
 Write the complete prose for scene **{scene_id}** ("{scene.get('title', '')}").
+{word_target_line}
 
 The brief is your contract. Deliver:
 - The value shift specified ({scene.get('value_shift', '')})
 - The outcome specified ({scene.get('outcome', '')})
-- The key dialogue lines (or close paraphrases)
 - The emotional arc from {scene.get('emotional_arc', '')}
 - The POV character must know {scene.get('knowledge_out', '')} by scene end
+{dialogue_checklist}
 
-**Prose naturalness rules:**
+**Prose rules:**
 - Em dashes rare (max one per scene)
 - No antithesis framing (negation + affirmation as structural pair)
 - Vary sentence and paragraph length
 - Contractions in interiority and dialogue
 - Enter late, leave early — start mid-action, end on image/action/dialogue
+- **Match the voice guide exactly** — if the voice guide specifies fragments, colons, parenthetical asides, or restraint patterns, use them. Do not default to conventional narrative prose.
+
+**Guardrails:**
+- Do NOT invent character relationships, history, or backstory not present in the brief, knowledge chain, or character bible
+- Do NOT add characters not listed in on_stage
+- Do NOT resolve threads not listed in mice_threads for this scene
 
 Output the scene prose only. No metadata, no frontmatter, no commentary."""
 
