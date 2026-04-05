@@ -68,3 +68,90 @@ assert_contains "$OUTCOME_CHECK" "yes-but" "reconcile_outcomes: s01 normalized t
 assert_contains "$OUTCOME_CHECK" "yes" "reconcile_outcomes: s03 normalized to yes"
 
 rm -rf "${TMPDIR}/outcome-test"
+
+# ============================================================================
+# build_registry_prompt — characters
+# ============================================================================
+
+PROMPT_DIR="${TMPDIR}/prompt-test/reference"
+mkdir -p "$PROMPT_DIR"
+cat > "${PROMPT_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|Scene One|1|Kael|The Hold|1|morning|1 hour|action|drafted|1000|2000
+s02|2|Scene Two|1|kael|Thornwall Hold|1|afternoon|1 hour|action|drafted|1000|2000
+s03|3|Scene Three|1|Sera Vasht|The Fissure|2|morning|1 hour|action|drafted|1000|2000
+CSV
+cat > "${PROMPT_DIR}/scene-intent.csv" <<'CSV'
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|Kael;Sera|Kael|+inquiry:mystery
+s02|test|action|flat|truth|+/-|revelation|kael;Bren|kael|
+s03|test|action|flat|justice|+/-|revelation|Sera Vasht;Kael Davreth|Sera Vasht|-inquiry:mystery
+CSV
+
+RESULT=$(python3 -c "
+${PY})
+from storyforge.reconcile import build_registry_prompt
+prompt = build_registry_prompt('characters', '${PROMPT_DIR}')
+print('HAS_HEADER' if 'character registry' in prompt.lower() else 'NO_HEADER')
+print('HAS_KAEL' if 'Kael' in prompt else 'NO_KAEL')
+print('HAS_SERA' if 'Sera' in prompt else 'NO_SERA')
+print('HAS_BREN' if 'Bren' in prompt else 'NO_BREN')
+print('HAS_FORMAT' if 'id|name' in prompt else 'NO_FORMAT')
+")
+assert_contains "$RESULT" "HAS_HEADER" "build_registry_prompt: characters prompt has header"
+assert_contains "$RESULT" "HAS_KAEL" "build_registry_prompt: characters prompt includes Kael"
+assert_contains "$RESULT" "HAS_SERA" "build_registry_prompt: characters prompt includes Sera"
+assert_contains "$RESULT" "HAS_BREN" "build_registry_prompt: characters prompt includes Bren"
+assert_contains "$RESULT" "HAS_FORMAT" "build_registry_prompt: characters prompt specifies output format"
+
+rm -rf "${TMPDIR}/prompt-test"
+
+# ============================================================================
+# build_registry_prompt — locations
+# ============================================================================
+
+LOC_DIR="${TMPDIR}/loc-prompt-test/reference"
+mkdir -p "$LOC_DIR"
+cat > "${LOC_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|One|1|Alice|The Hold|1|morning|1 hour|action|drafted|1000|2000
+s02|2|Two|1|Alice|Thornwall Hold|1|afternoon|1 hour|action|drafted|1000|2000
+s03|3|Three|1|Alice|the hold|2|morning|1 hour|action|drafted|1000|2000
+CSV
+
+RESULT=$(python3 -c "
+${PY})
+from storyforge.reconcile import build_registry_prompt
+prompt = build_registry_prompt('locations', '${LOC_DIR}')
+print('HAS_HOLD' if 'The Hold' in prompt else 'NO_HOLD')
+print('HAS_THORNWALL' if 'Thornwall Hold' in prompt else 'NO_THORNWALL')
+print('HAS_FORMAT' if 'id|name|aliases' in prompt else 'NO_FORMAT')
+")
+assert_contains "$RESULT" "HAS_HOLD" "build_registry_prompt: locations includes The Hold"
+assert_contains "$RESULT" "HAS_THORNWALL" "build_registry_prompt: locations includes Thornwall Hold"
+assert_contains "$RESULT" "HAS_FORMAT" "build_registry_prompt: locations specifies output format"
+rm -rf "${TMPDIR}/loc-prompt-test"
+
+# ============================================================================
+# build_registry_prompt — values
+# ============================================================================
+
+VAL_DIR="${TMPDIR}/val-prompt-test/reference"
+mkdir -p "$VAL_DIR"
+cat > "${VAL_DIR}/scene-intent.csv" <<'CSV'
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|test|action|flat|justice|+/-|revelation|A|A|
+s02|test|action|flat|justice-specifically-restorative|+/-|revelation|A|A|
+s03|test|action|flat|truth|+/-|revelation|A|A|
+CSV
+
+RESULT=$(python3 -c "
+${PY})
+from storyforge.reconcile import build_registry_prompt
+prompt = build_registry_prompt('values', '${VAL_DIR}')
+print('HAS_JUSTICE' if 'justice' in prompt else 'NO_JUSTICE')
+print('HAS_COLLAPSE' if '8-15' in prompt else 'NO_COLLAPSE')
+")
+assert_contains "$RESULT" "HAS_JUSTICE" "build_registry_prompt: values includes justice"
+assert_contains "$RESULT" "HAS_COLLAPSE" "build_registry_prompt: values mentions 8-15 core values"
+rm -rf "${TMPDIR}/val-prompt-test"
