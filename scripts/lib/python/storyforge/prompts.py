@@ -865,40 +865,25 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('')
         lines.append('Launch an Agent to review the draft. The agent should:')
         lines.append(f'1. Read scenes/{scene_id}.md')
-        lines.append('2. Read the continuity tracker '
-                     '(reference/continuity-tracker.md if it exists)')
-        lines.append('3. Read the scene metadata from '
-                     'reference/scenes.csv')
-        lines.append('4. Check for:')
-        lines.append('   - Contradictions with locked details')
+        lines.append('2. Read the scene metadata from '
+                     'reference/scenes.csv and reference/scene-intent.csv')
+        lines.append('3. Check for:')
         lines.append('   - MICE threads that should advance but don\'t '
                      '(or advance incorrectly)')
         lines.append('   - POV voice consistency')
         lines.append('   - Word count vs. target')
         lines.append('   - Continuity breaks with the previous scene '
                      '(character locations, emotional states, time progression)')
-        lines.append('5. Report any issues found')
+        lines.append('4. Report any issues found')
         lines.append('')
         lines.append('===== STEP 6: REVISE IF NEEDED =====')
         lines.append('')
         lines.append('If the quality review found significant continuity '
-                     'errors, contradicted locked details, or voice breaks, '
+                     'errors or voice breaks, '
                      'fix them in the scene file now. Minor style notes can be '
                      'logged but do not require immediate fixes.')
         lines.append('')
-        lines.append('===== STEP 7: UPDATE CONTINUITY =====')
-        lines.append('')
-        lines.append('If a continuity tracker exists '
-                     '(reference/continuity-tracker.md), update it:')
-        lines.append('- Add a summary for this scene (2-3 sentences)')
-        lines.append("- Update character states to reflect this scene's events")
-        lines.append('- Add any new locked details established in this scene')
-        lines.append('- Update MICE threads: advance existing ones, add new '
-                     'ones opened, move fully resolved ones to a resolved '
-                     'section')
-        lines.append('- Update any motif tracking')
-        lines.append('')
-        lines.append('===== STEP 8: GIT COMMIT =====')
+        lines.append('===== STEP 7: GIT COMMIT =====')
         lines.append('')
         lines.append('Stage and commit using the Bash tool:')
         lines.append('')

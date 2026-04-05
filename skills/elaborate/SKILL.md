@@ -189,10 +189,9 @@ If they choose Option B, provide the full command and end.
 1. Read architecture scenes and reference materials
 2. Expand to 40-60 scenes: fill gaps, add transitions
 3. Assign locations, timeline, characters, MICE threads — **all registry-backed fields must use canonical IDs** (characters, locations, values, mice_threads). Add new registry entries for anything introduced at this stage.
-4. Initialize continuity tracker
-5. Write updates
-6. Run validation — MICE nesting, timeline, character references
-7. Commit: `git add -A && git commit -m "Elaborate: scene map" && git push`
+4. Write updates
+5. Run validation — MICE nesting, timeline, character references
+6. Commit: `git add -A && git commit -m "Elaborate: scene map" && git push`
 
 ### Briefs Stage (Interactive)
 

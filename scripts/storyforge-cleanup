@@ -309,8 +309,6 @@ migrate_storyforge_yaml() {
         "threads:reference/threads.csv"
         "motif_taxonomy:reference/motif-taxonomy.csv"
         "scene_intent:reference/scene-intent.csv"
-        "scene_log:reference/scene-log.md"
-        "resolved_threads:reference/resolved-threads.md"
         "title_development:reference/title-development.md"
     )
     for entry in "${artifact_files[@]}"; do

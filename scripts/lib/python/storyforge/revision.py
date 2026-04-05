@@ -402,7 +402,6 @@ def build_revision_prompt(
     if api_mode:
         ref_files = [
             'reference/voice-guide.md',
-            'reference/continuity-tracker.md',
             'reference/scenes.csv',
         ]
         ref_parts = []
@@ -512,9 +511,9 @@ def _claudep_read_instructions() -> str:
         'voice and continuity state:\n\n'
         '- `reference/voice-guide.md` — the established voice rules, prose style, and '
         'per-character dialogue fingerprints. Every edit you make must be consistent with this guide.\n'
-        '- `reference/continuity-tracker.md` — the living ledger of continuity facts, promises, '
-        'and MICE threads. Consult this before changing any plot-relevant detail.\n'
-        '- `reference/scenes.csv` — the master scene list for structural context.\n\n'
+        '- `reference/scenes.csv` — the master scene list for structural context.\n'
+        '- `reference/scene-intent.csv` — narrative dynamics, MICE threads, and character presence.\n'
+        '- `reference/knowledge.csv` — canonical knowledge facts for continuity checking.\n\n'
         '### 2. Read All In-Scope Scene Files\n\n'
         'Read every scene file listed above in full before making changes. '
         'Understand the narrative arc across these scenes before editing any individual scene.\n'

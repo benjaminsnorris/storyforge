@@ -673,21 +673,10 @@ monitor_progress() {
     local start_time="$3"
 
     local scene_file="${PROJECT_DIR}/scenes/${scene_id}.md"
-    local continuity_file="${PROJECT_DIR}/reference/continuity-tracker.md"
-
     local draft_detected=false
-    local continuity_detected=false
     local commit_detected=false
     local last_word_count=0
     local ticks=0
-
-    # Snapshot continuity tracker mtime (macOS stat syntax, with Linux fallback)
-    local tracker_mtime=0
-    if [[ -f "$continuity_file" ]]; then
-        tracker_mtime=$(stat -f %m "$continuity_file" 2>/dev/null \
-                     || stat -c %Y "$continuity_file" 2>/dev/null \
-                     || echo 0)
-    fi
 
     while true; do
         sleep 30
@@ -706,18 +695,6 @@ monitor_progress() {
                 log "  [${scene_id}] Draft growing: ~${wc} words [${mins}m]"
             fi
             last_word_count=$wc
-        fi
-
-        # Continuity tracker modified?
-        if [[ "$continuity_detected" == false && -f "$continuity_file" ]]; then
-            local tracker_now
-            tracker_now=$(stat -f %m "$continuity_file" 2>/dev/null \
-                       || stat -c %Y "$continuity_file" 2>/dev/null \
-                       || echo 0)
-            if (( tracker_now > tracker_mtime )); then
-                continuity_detected=true
-                log "  [${scene_id}] Continuity tracker updated [${mins}m]"
-            fi
         fi
 
         # Git commit made?
