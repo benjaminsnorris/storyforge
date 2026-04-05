@@ -67,10 +67,11 @@ if os.path.isfile(knowledge_path):
 structural_scores = None
 structural_previous = None
 if '${STRUCTURAL}' == 'true':
-    from storyforge.structural import structural_score, save_structural_scores, load_previous_scores
+    from storyforge.structural import structural_score, save_structural_scores, load_previous_scores, generate_structural_proposals
     structural_previous = load_previous_scores(project_dir)
     structural_scores = structural_score(ref_dir)
     save_structural_scores(structural_scores, project_dir)
+    generate_structural_proposals(structural_scores, os.path.join(project_dir, 'working', 'scores'))
 
 print(json.dumps({'structural': structural, 'schema': schema, 'knowledge': knowledge, 'scores': structural_scores, 'scores_previous': structural_previous}))
 ")

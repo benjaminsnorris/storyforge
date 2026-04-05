@@ -77,6 +77,7 @@ def score_completeness(scenes_map, intent_map, briefs_map):
                 'scene_id': scene_id,
                 'severity': 'important',
                 'fields': missing_required,
+                'fix_location': 'structural',
             })
 
         # Check enrichment fields
@@ -95,6 +96,7 @@ def score_completeness(scenes_map, intent_map, briefs_map):
                 'scene_id': scene_id,
                 'severity': 'minor',
                 'fields': missing_enrichment,
+                'fix_location': 'structural',
             })
 
     score = populated_weighted / total_weighted if total_weighted > 0 else 0.0
@@ -128,7 +130,7 @@ def score_thematic_concentration(intent_map):
 
     total = len(values)
     if total == 0:
-        return {'score': 0.0, 'findings': [{'message': 'No value_at_stake data found', 'severity': 'important'}]}
+        return {'score': 0.0, 'findings': [{'message': 'No value_at_stake data found', 'severity': 'important', 'fix_location': 'registry'}]}
 
     # 2. Count frequency of each value
     freq = {}
@@ -149,12 +151,14 @@ def score_thematic_concentration(intent_map):
         findings.append({
             'message': f"Thematic fragmentation: {distinct_count} distinct values at stake across {total} scenes",
             'severity': 'important',
+            'fix_location': 'registry',
         })
 
     if distinct_count < 4 and total >= 10:
         findings.append({
             'message': f"Narrow thematic range: only {distinct_count} distinct values across {total} scenes",
             'severity': 'minor',
+            'fix_location': 'registry',
         })
 
     # 6. Info-level finding listing top 5 values with counts
@@ -164,6 +168,7 @@ def score_thematic_concentration(intent_map):
     findings.append({
         'message': f"Top values at stake: {top5_str}",
         'severity': 'info',
+        'fix_location': 'registry',
     })
 
     # Scoring
@@ -271,7 +276,7 @@ def score_pacing(scenes_map, intent_map, briefs_map):
     n = len(scene_ids)
 
     if n == 0:
-        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important'}]}
+        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
     # Build tension array
     tensions = []
@@ -314,12 +319,14 @@ def score_pacing(scenes_map, intent_map, briefs_map):
             findings.append({
                 'message': f"First act is {first_ratio:.0%} of total (ideal ~25%)",
                 'severity': 'minor',
+                'fix_location': 'intent',
             })
         if last_dev > 0.10:
             act_score -= min(0.5, (last_dev - 0.10) * 5)
             findings.append({
                 'message': f"Last act is {last_ratio:.0%} of total (ideal ~25%)",
                 'severity': 'minor',
+                'fix_location': 'intent',
             })
         act_score = max(0.0, act_score)
     elif total_words == 0:
@@ -339,6 +346,7 @@ def score_pacing(scenes_map, intent_map, briefs_map):
         findings.append({
             'message': f"Climax at {position:.0%} through — unusually early (ideal 85-90%)",
             'severity': 'minor',
+            'fix_location': 'intent',
         })
 
     # --- 3. Midpoint presence ---
@@ -359,6 +367,7 @@ def score_pacing(scenes_map, intent_map, briefs_map):
         findings.append({
             'message': f"Low beat regularity ({regularity:.2f}) — tension rarely alternates direction",
             'severity': 'minor',
+            'fix_location': 'intent',
         })
 
     # --- 5. Escalation ---
@@ -375,6 +384,7 @@ def score_pacing(scenes_map, intent_map, briefs_map):
         findings.append({
             'message': "Second half tension does not exceed first half — no escalation",
             'severity': 'minor',
+            'fix_location': 'intent',
         })
 
     # Composite
@@ -491,7 +501,7 @@ def score_arcs(scenes_map, intent_map):
         char_scenes[pov].append((sid, scene, intent))
 
     if not char_scenes:
-        return {'score': 0.0, 'findings': [{'message': 'No POV characters found', 'severity': 'important'}], 'character_arcs': []}
+        return {'score': 0.0, 'findings': [{'message': 'No POV characters found', 'severity': 'important', 'fix_location': 'intent'}], 'character_arcs': []}
 
     character_arcs = []
     total_weight = 0
@@ -583,18 +593,21 @@ def score_arcs(scenes_map, intent_map):
                 'message': f"{character}: only 1 value at stake across {scene_count} scenes",
                 'severity': 'important',
                 'character': character,
+                'fix_location': 'intent',
             })
         if reversals == 0 and scene_count >= 4:
             findings.append({
                 'message': f"{character}: no arc reversals ({shape})",
                 'severity': 'minor',
                 'character': character,
+                'fix_location': 'intent',
             })
         if is_compound:
             findings.append({
                 'message': f"{character}: compound arc ({shape}, {reversals} reversals)",
                 'severity': 'info',
                 'character': character,
+                'fix_location': 'intent',
             })
 
         # Weighted by scene count
@@ -639,7 +652,7 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
     n = len(scene_ids)
 
     if n == 0:
-        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important'}]}
+        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
     # Load character roles from characters.csv if it exists
     char_roles = {}  # character_name -> role
@@ -703,6 +716,7 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
             findings.append({
                 'message': f"POV imbalance: {dominant} has {max_pov}/{n} scenes ({max_pov/n:.0%})",
                 'severity': 'minor',
+                'fix_location': 'intent',
             })
 
     # --- 2. Antagonist visibility ---
@@ -717,6 +731,7 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
                 findings.append({
                     'message': f"Antagonist '{antag}' on-stage in only {antag_onstage_count}/{n} scenes ({ratio:.0%}, ideal >= 8%)",
                     'severity': 'minor',
+                    'fix_location': 'intent',
                 })
         if antag_penalties > 0:
             antag_score = max(0.0, 1.0 - antag_penalties * 0.3)
@@ -757,6 +772,7 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
             findings.append({
                 'message': f"'{ch}' absent for {max_gap} consecutive scenes (threshold: {threshold})",
                 'severity': 'minor',
+                'fix_location': 'intent',
             })
 
     if tracked_chars:
@@ -773,6 +789,7 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
             findings.append({
                 'message': f"'{ch}' mentioned in {mention_count} scenes but on-stage in only {onstage_count} (<30%)",
                 'severity': 'minor',
+                'fix_location': 'intent',
             })
 
     total_chars = len(set(list(mentions.keys()) + list(onstage.keys())))
@@ -814,7 +831,7 @@ def score_mice_health(scenes_map, intent_map):
     n = len(scene_ids)
 
     if n == 0:
-        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important'}]}
+        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
     # Parse all mice_threads entries
     # Track per thread: open_idx, close_idx, mention_indices, type
@@ -857,7 +874,7 @@ def score_mice_health(scenes_map, intent_map):
 
     total_threads = len(threads)
     if total_threads == 0:
-        return {'score': 0.5, 'findings': [{'message': 'No MICE threads found', 'severity': 'minor'}]}
+        return {'score': 0.5, 'findings': [{'message': 'No MICE threads found', 'severity': 'minor', 'fix_location': 'intent'}]}
 
     # --- 1. Close ratio ---
     opened = sum(1 for t in threads.values() if t['open'] is not None)
@@ -868,6 +885,7 @@ def score_mice_health(scenes_map, intent_map):
         findings.append({
             'message': f"Only {closed}/{opened} threads closed ({close_ratio:.0%}) — many unresolved threads",
             'severity': 'important',
+            'fix_location': 'intent',
         })
 
     # --- 2. Dormancy ---
@@ -885,6 +903,7 @@ def score_mice_health(scenes_map, intent_map):
                 findings.append({
                     'message': f"Thread '{tag}' dormant for {max_gap} scenes",
                     'severity': 'minor',
+                    'fix_location': 'intent',
                 })
 
     dormancy_score = max(0.0, 1.0 - dormant_count / total_threads * 2)
@@ -903,6 +922,7 @@ def score_mice_health(scenes_map, intent_map):
         findings.append({
             'message': f"All {total_threads} threads are type '{dominant_type}' — no MICE variety",
             'severity': 'minor',
+            'fix_location': 'intent',
         })
 
     # --- 4. Resolution positioning ---
@@ -920,6 +940,7 @@ def score_mice_health(scenes_map, intent_map):
         findings.append({
             'message': f"Only {resolution_score:.0%} of threads close in the final 30% of scenes",
             'severity': 'minor',
+            'fix_location': 'intent',
         })
 
     # Composite
@@ -957,7 +978,7 @@ def score_knowledge_chain(scenes_map, briefs_map):
     n = len(scene_ids)
 
     if n == 0:
-        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important'}]}
+        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'brief'}]}
 
     # --- 1. Coverage ---
     has_kin = 0
@@ -993,6 +1014,7 @@ def score_knowledge_chain(scenes_map, briefs_map):
         findings.append({
             'message': f"Low knowledge coverage: {has_kin}/{n} scenes have knowledge_in, {has_kout}/{n} have knowledge_out",
             'severity': 'important',
+            'fix_location': 'brief',
         })
 
     # --- 2. Fact utilization ---
@@ -1004,6 +1026,7 @@ def score_knowledge_chain(scenes_map, briefs_map):
         findings.append({
             'message': f"Low fact utilization: only {reused_facts}/{total_facts} facts appear in 2+ scenes",
             'severity': 'minor',
+            'fix_location': 'brief',
         })
 
     # --- 3. Backstory check ---
@@ -1017,6 +1040,7 @@ def score_knowledge_chain(scenes_map, briefs_map):
                 findings.append({
                     'message': f"Scene 1 knowledge_in has {len(first_facts)} facts — possible backstory dump",
                     'severity': 'minor',
+                    'fix_location': 'brief',
                 })
 
     # --- 4. Fact density ---
@@ -1049,7 +1073,7 @@ def score_function_variety(intent_map, briefs_map):
     n = len(scene_ids)
 
     if n == 0:
-        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important'}]}
+        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
     # --- 1. Action/sequel balance ---
     action_count = 0
@@ -1070,11 +1094,13 @@ def score_function_variety(intent_map, briefs_map):
             findings.append({
                 'message': f"Action-heavy: {action_count}/{typed_total} scenes are action ({action_ratio:.0%})",
                 'severity': 'minor',
+                'fix_location': 'intent',
             })
         elif action_ratio < 0.2:
             findings.append({
                 'message': f"Sequel-heavy: {sequel_count}/{typed_total} scenes are sequel ({1-action_ratio:.0%})",
                 'severity': 'minor',
+                'fix_location': 'intent',
             })
     else:
         type_balance = 0.5  # No data — neutral
@@ -1105,6 +1131,7 @@ def score_function_variety(intent_map, briefs_map):
             findings.append({
                 'message': f"Dominant outcome '{dominant}' in {max_outcome_count}/{outcome_total} scenes ({dominant_ratio:.0%})",
                 'severity': 'minor',
+                'fix_location': 'intent',
             })
     elif outcome_total > 0:
         outcome_variety = 0.0  # Only one distinct outcome
@@ -1130,6 +1157,7 @@ def score_function_variety(intent_map, briefs_map):
             findings.append({
                 'message': f"Dominant turning point '{dominant_tp}' in {max_tp_count}/{tp_total} scenes ({dominant_tp_ratio:.0%})",
                 'severity': 'minor',
+                'fix_location': 'intent',
             })
     elif tp_total > 0:
         tp_variety = 0.0  # Only one type
@@ -1253,6 +1281,7 @@ def structural_score(ref_dir, weights=None):
                     'dimension': name,
                     'dimension_score': dim_score,
                     'message': f['message'],
+                    'fix_location': f.get('fix_location', ''),
                 })
 
     overall = weighted_sum / total_weight if total_weight > 0 else 0.0
@@ -1336,6 +1365,101 @@ def load_previous_scores(project_dir):
                 result[name] = score
 
     return result if result else None
+
+
+# ---------------------------------------------------------------------------
+# Proposal generation
+# ---------------------------------------------------------------------------
+
+# Default fix_location per dimension (used as fallback when a finding
+# does not carry its own fix_location key).
+_DIMENSION_FIX_LOCATION = {
+    'completeness': 'structural',
+    'thematic_concentration': 'registry',
+    'pacing_shape': 'intent',
+    'arc_completeness': 'intent',
+    'character_presence': 'intent',
+    'mice_health': 'intent',
+    'knowledge_chain': 'brief',
+    'function_variety': 'intent',
+}
+
+
+def generate_structural_proposals(report, output_dir):
+    """Generate proposals CSV from a structural score report.
+
+    Iterates dimensions where score < target, creates one proposal per
+    important finding, and writes a pipe-delimited CSV compatible with
+    the existing proposals format.
+
+    Args:
+        report: dict from structural_score()
+        output_dir: directory to write structural-proposals.csv
+
+    Returns:
+        path to the written file, or None if no proposals generated
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    header = 'id|dimension|fix_location|target|change|rationale|status'
+    rows = []
+    counter = 1
+
+    for dim in report['dimensions']:
+        if dim['score'] >= dim['target']:
+            continue
+
+        dim_name = dim['name']
+        default_fix = _DIMENSION_FIX_LOCATION.get(dim_name, 'structural')
+
+        # Collect important findings for this dimension
+        important = [f for f in dim['findings'] if f.get('severity') == 'important']
+
+        if important:
+            for finding in important:
+                fix_loc = finding.get('fix_location', default_fix)
+                target = finding.get('scene_id') or finding.get('character') or 'global'
+                message = finding['message']
+                rationale = f"{message}, score {dim['score']:.2f}"
+                # Derive a short change description from the dimension
+                change = _proposal_change(dim_name, finding)
+
+                proposal_id = f"sp{counter:03d}"
+                rows.append(f"{proposal_id}|{dim_name}|{fix_loc}|{target}|{change}|{rationale}|pending")
+                counter += 1
+        else:
+            # No important findings but below target — generate a generic proposal
+            fix_loc = default_fix
+            rationale = f"score {dim['score']:.2f} below target {dim['target']:.2f}"
+            change = _proposal_change(dim_name, None)
+            proposal_id = f"sp{counter:03d}"
+            rows.append(f"{proposal_id}|{dim_name}|{fix_loc}|global|{change}|{rationale}|pending")
+            counter += 1
+
+    if not rows:
+        return None
+
+    filepath = os.path.join(output_dir, 'structural-proposals.csv')
+    content = header + '\n' + '\n'.join(rows) + '\n'
+    with open(filepath, 'w') as f:
+        f.write(content)
+
+    return filepath
+
+
+def _proposal_change(dimension, finding):
+    """Generate a short change description for a structural proposal."""
+    changes = {
+        'completeness': 'populate missing fields',
+        'thematic_concentration': 'consolidate values.csv',
+        'pacing_shape': 'adjust value_shift for pacing',
+        'arc_completeness': 'vary value_at_stake',
+        'character_presence': 'add to on_stage/characters',
+        'mice_health': 'fix mice_threads open/close',
+        'knowledge_chain': 'add knowledge_in/knowledge_out',
+        'function_variety': 'vary action_sequel/outcome/turning_point',
+    }
+    return changes.get(dimension, 'address structural finding')
 
 
 # ---------------------------------------------------------------------------
