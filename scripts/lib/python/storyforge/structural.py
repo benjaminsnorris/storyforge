@@ -7,6 +7,7 @@ Each score_* function returns:
     {'score': float (0-1), 'findings': [{'message': str, 'scene_id': str, ...}]}
 """
 
+import datetime
 import math
 import os
 
@@ -1264,20 +1265,106 @@ def structural_score(ref_dir, weights=None):
 
 
 # ---------------------------------------------------------------------------
+# Score persistence
+# ---------------------------------------------------------------------------
+
+def save_structural_scores(report, project_dir):
+    """Save structural scores to a timestamped CSV and update latest.
+
+    Args:
+        report: dict from structural_score()
+        project_dir: path to project root
+
+    Returns:
+        path to the saved timestamped CSV file
+    """
+    scores_dir = os.path.join(project_dir, 'working', 'scores')
+    os.makedirs(scores_dir, exist_ok=True)
+
+    timestamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    filename = f'structural-{timestamp}.csv'
+    filepath = os.path.join(scores_dir, filename)
+
+    lines = ['dimension|score|target|weight']
+    for dim in report['dimensions']:
+        lines.append(f"{dim['name']}|{dim['score']:.4f}|{dim['target']:.2f}|{dim['weight']:.1f}")
+    lines.append(f"overall|{report['overall_score']:.4f}|0.70|1.0")
+
+    content = '\n'.join(lines) + '\n'
+
+    with open(filepath, 'w') as f:
+        f.write(content)
+
+    # Overwrite latest
+    latest_path = os.path.join(scores_dir, 'structural-latest.csv')
+    with open(latest_path, 'w') as f:
+        f.write(content)
+
+    return filepath
+
+
+def load_previous_scores(project_dir):
+    """Load the most recent structural scores.
+
+    Args:
+        project_dir: path to project root
+
+    Returns:
+        dict mapping dimension name to score, or None if no previous scores
+    """
+    latest_path = os.path.join(project_dir, 'working', 'scores', 'structural-latest.csv')
+    if not os.path.isfile(latest_path):
+        return None
+
+    result = {}
+    with open(latest_path, 'r') as f:
+        header = None
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            if header is None:
+                header = line.split('|')
+                continue
+            parts = line.split('|')
+            if len(parts) >= 2:
+                name = parts[0]
+                try:
+                    score = float(parts[1])
+                except ValueError:
+                    continue
+                result[name] = score
+
+    return result if result else None
+
+
+# ---------------------------------------------------------------------------
 # Output formatters
 # ---------------------------------------------------------------------------
 
-def format_scorecard(report):
+def format_scorecard(report, previous=None):
     """Format a structural score report as a terminal-printable scorecard.
 
     Args:
         report: dict from structural_score()
+        previous: optional dict from load_previous_scores() for delta display
 
     Returns:
-        str with bar chart and scores
+        str with bar chart and scores, including deltas when previous is provided
     """
     lines = []
     lines.append(f"Structural Score: {report['overall_score']:.2f} / 1.00")
+
+    # Show overall delta if previous exists
+    if previous is not None and 'overall' in previous:
+        delta = report['overall_score'] - previous['overall']
+        if abs(delta) < 0.005:
+            lines[-1] += '  no change'
+        elif delta > 0:
+            lines[-1] += f'  +{delta:.2f} \u25b2'
+        else:
+            lines[-1] += f'  {delta:.2f} \u25bc'
+
     lines.append('')
 
     for dim in report['dimensions']:
@@ -1289,7 +1376,18 @@ def format_scorecard(report):
         empty = 10 - filled
         bar = '\u2588' * filled + '\u2591' * empty
 
-        lines.append(f"  {label}  {score:.2f}  {bar}  (target: {target:.2f}+)")
+        line = f"  {label}  {score:.2f}  {bar}  (target: {target:.2f}+)"
+
+        if previous is not None and dim['name'] in previous:
+            delta = score - previous[dim['name']]
+            if abs(delta) < 0.005:
+                line += '  no change'
+            elif delta > 0:
+                line += f'  +{delta:.2f} \u25b2'
+            else:
+                line += f'  {delta:.2f} \u25bc'
+
+        lines.append(line)
 
     return '\n'.join(lines)
 

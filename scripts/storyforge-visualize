@@ -872,6 +872,15 @@ body {
     <div class="vis-container" id="fidelity-chart"></div>
 </div>
 
+<div class="section" id="structural-section" style="display:none;" data-target-page="scores">
+    <div class="section-header">
+        <span class="dot"></span>
+        <h2>Structural Score</h2>
+        <span class="subtitle">Story quality from scene architecture (CSV-only, deterministic)</span>
+    </div>
+    <div class="vis-container" id="structural-chart"></div>
+</div>
+
 </div><!-- /page-scores -->
 
 </div><!-- .page -->
@@ -908,6 +917,7 @@ const NARRATIVE_RATIONALES = _DATA.narrative_rationales;
 const BRIEFS = _DATA.briefs || [];
 const FIDELITY_SCORES = _DATA.fidelity_scores || [];
 const FIDELITY_RATIONALES = _DATA.fidelity_rationales || [];
+const STRUCTURAL_SCORES = _DATA.structural_scores || [];
 
 // Merge briefs data into intents for charts that need it (motifs moved to briefs in elaboration model)
 if (BRIEFS.length) {
@@ -3293,6 +3303,108 @@ document.getElementById('meta-date').textContent = PROJECT.generated;
             fill: 'var(--text-dim)', 'font-family': 'var(--font-mono)', 'font-size': 11
         });
         scoreTxt.textContent = avg.toFixed(1);
+        svg.appendChild(scoreTxt);
+    });
+
+    container.appendChild(svg);
+})();
+
+// ============================================================================
+// STRUCTURAL SCORE
+// ============================================================================
+
+(function renderStructural() {
+    const container = document.getElementById('structural-chart');
+    const section = document.getElementById('structural-section');
+    if (!container || !STRUCTURAL_SCORES.length) return;
+    if (section) section.style.display = '';
+
+    const LABELS = {
+        arc_completeness: 'Arc Completeness',
+        thematic_concentration: 'Thematic Concentration',
+        pacing_shape: 'Pacing Shape',
+        character_presence: 'Character Presence',
+        mice_health: 'MICE Thread Health',
+        knowledge_chain: 'Knowledge Chain',
+        function_variety: 'Scene Function Variety',
+        completeness: 'Structural Completeness',
+    };
+
+    // Parse structural scores (rows: dimension|score|target|weight)
+    var dims = STRUCTURAL_SCORES.filter(function(r) { return r.dimension && r.dimension !== 'overall'; });
+    var overallRow = STRUCTURAL_SCORES.filter(function(r) { return r.dimension === 'overall'; })[0];
+
+    var mobile = window.innerWidth < 768;
+    var W = container.clientWidth - 24 || 1100;
+    var labelW = mobile ? 120 : 180;
+    var chartW = W - labelW - 80;
+    var ROW_H = 32;
+    var H = (dims.length + 1) * ROW_H + 20;
+
+    var svg = svgEl('svg', { width: W, height: H, class: 'chart' });
+
+    // Overall score header
+    if (overallRow) {
+        var overallScore = parseFloat(overallRow.score || '0');
+        var hdr = svgEl('text', {
+            x: labelW - 8, y: 18, 'text-anchor': 'end',
+            fill: 'var(--teal)', 'font-family': 'var(--font-mono)', 'font-size': 13, 'font-weight': 'bold'
+        });
+        hdr.textContent = 'Overall: ' + overallScore.toFixed(2);
+        svg.appendChild(hdr);
+
+        var overallBarW = overallScore * chartW;
+        svg.appendChild(svgEl('rect', {
+            x: labelW, y: 4, width: chartW, height: 20,
+            fill: 'var(--border)', opacity: 0.15, rx: 3
+        }));
+        svg.appendChild(svgEl('rect', {
+            x: labelW, y: 4, width: overallBarW, height: 20,
+            fill: 'var(--teal)', opacity: 0.7, rx: 3
+        }));
+    }
+
+    dims.forEach(function(dim, i) {
+        var y = (i + 1) * ROW_H + 8;
+        var score = parseFloat(dim.score || '0');
+        var target = parseFloat(dim.target || '0.7');
+        var label = LABELS[dim.dimension] || dim.dimension;
+
+        // Label
+        var lbl = svgEl('text', {
+            x: labelW - 8, y: y + 14, 'text-anchor': 'end',
+            fill: 'var(--text)', 'font-family': 'var(--font-mono)', 'font-size': 11
+        });
+        lbl.textContent = label;
+        svg.appendChild(lbl);
+
+        // Background bar
+        svg.appendChild(svgEl('rect', {
+            x: labelW, y: y, width: chartW, height: 20,
+            fill: 'var(--border)', opacity: 0.15, rx: 3
+        }));
+
+        // Score bar
+        var barW = score * chartW;
+        var color = score >= target ? 'var(--teal)' : score >= target * 0.75 ? 'var(--orange, #f59e0b)' : 'var(--red, #ef4444)';
+        svg.appendChild(svgEl('rect', {
+            x: labelW, y: y, width: barW, height: 20,
+            fill: color, opacity: 0.7, rx: 3
+        }));
+
+        // Target line
+        var targetX = labelW + target * chartW;
+        svg.appendChild(svgEl('line', {
+            x1: targetX, y1: y - 2, x2: targetX, y2: y + 22,
+            stroke: 'var(--text-dim)', 'stroke-width': 1, 'stroke-dasharray': '3,2'
+        }));
+
+        // Score text
+        var scoreTxt = svgEl('text', {
+            x: labelW + chartW + 6, y: y + 14,
+            fill: 'var(--text-dim)', 'font-family': 'var(--font-mono)', 'font-size': 11
+        });
+        scoreTxt.textContent = score.toFixed(2);
         svg.appendChild(scoreTxt);
     });
 

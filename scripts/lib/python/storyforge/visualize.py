@@ -136,6 +136,7 @@ def load_dashboard_data(project_dir: str) -> dict:
     values_csv = os.path.join(project_dir, 'reference/values.csv')
     mice_threads_csv = os.path.join(project_dir, 'reference/mice-threads.csv')
     knowledge_csv = os.path.join(project_dir, 'reference/knowledge.csv')
+    structural_csv = os.path.join(project_dir, 'working/scores/structural-latest.csv')
     fidelity_csv = os.path.join(project_dir, 'working/scores/latest/fidelity-scores.csv')
     fidelity_rationale_csv = os.path.join(project_dir, 'working/scores/latest/fidelity-rationale.csv')
     narrative_csv = os.path.join(project_dir, 'working/scores/latest/narrative-scores.csv')
@@ -207,6 +208,7 @@ def load_dashboard_data(project_dir: str) -> dict:
         'narrative_rationales': csv_to_records(narrative_rationale_csv),
         'fidelity_scores': csv_to_records(fidelity_csv),
         'fidelity_rationales': csv_to_records(fidelity_rationale_csv),
+        'structural_scores': csv_to_records(structural_csv),
         'project': {
             'title': title,
             'genre': genre,

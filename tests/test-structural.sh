@@ -508,3 +508,57 @@ assert isinstance(strict, str)
 print('ok')
 ")
 assert_contains "$RESULT" "ok" "format_diagnosis: all coaching levels produce output"
+
+# ============================================================================
+# save_structural_scores + load_previous_scores
+# ============================================================================
+
+SAVE_DIR="${TMPDIR}/save-test"
+mkdir -p "$SAVE_DIR"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import structural_score, save_structural_scores, load_previous_scores
+
+# First run — no previous scores
+prev = load_previous_scores('${SAVE_DIR}')
+assert prev is None, 'Expected None for first run'
+
+# Generate scores from fixtures
+report = structural_score('${FIXTURE_DIR}/reference')
+
+# Save
+path = save_structural_scores(report, '${SAVE_DIR}')
+assert path is not None
+
+# Load back
+prev = load_previous_scores('${SAVE_DIR}')
+assert prev is not None
+assert 'arc_completeness' in prev
+assert 'overall' in prev
+assert abs(prev['overall'] - report['overall_score']) < 0.001
+
+print(f'saved={path is not None}')
+print(f'loaded={prev is not None}')
+print(f'dims={len([k for k in prev if k != \"overall\"])}')
+print('ok')
+")
+assert_contains "$RESULT" "ok" "save/load structural scores: roundtrip works"
+assert_contains "$RESULT" "dims=8" "save/load structural scores: all 8 dimensions persisted"
+
+# Second run — should have previous scores
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import structural_score, save_structural_scores, load_previous_scores, format_scorecard
+
+prev = load_previous_scores('${SAVE_DIR}')
+assert prev is not None, 'Expected previous scores'
+
+report = structural_score('${FIXTURE_DIR}/reference')
+card = format_scorecard(report, previous=prev)
+assert 'no change' in card or '▲' in card or '▼' in card, f'Expected deltas in scorecard'
+print('ok')
+")
+assert_contains "$RESULT" "ok" "format_scorecard: shows deltas with previous scores"
+
+rm -rf "$SAVE_DIR"
