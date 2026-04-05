@@ -369,6 +369,12 @@ print(f'Updated scenes.csv: {count} scenes')
 
         (cd "$PROJECT_DIR" && git add reference/scenes.csv working/ && git commit -m "Extract: Phase 1 — skeleton (scenes.csv)" && git push) 2>/dev/null || true
         update_pr_task "Phase 1: Extract skeleton" "$PROJECT_DIR" 2>/dev/null || true
+
+        # Reconcile characters and locations against Phase 1 data
+        log ""
+        log "--- Reconciling Phase 1 registries ---"
+        "${SCRIPT_DIR}/storyforge-reconcile" --phase 1
+
         rm -f "$BATCH_FILE"
         rm -rf "$SKEL_OUTPUT"
     fi
@@ -469,6 +475,12 @@ print(f'Updated scene-intent.csv: {count} scenes')
 
         (cd "$PROJECT_DIR" && git add reference/scene-intent.csv working/ && git commit -m "Extract: Phase 2 — intent (scene-intent.csv)" && git push) 2>/dev/null || true
         update_pr_task "Phase 2: Extract intent" "$PROJECT_DIR" 2>/dev/null || true
+
+        # Reconcile values and MICE threads against Phase 2 data
+        log ""
+        log "--- Reconciling Phase 2 registries ---"
+        "${SCRIPT_DIR}/storyforge-reconcile" --phase 2
+
         rm -f "$BATCH_FILE"
         rm -rf "$INTENT_OUTPUT"
     fi
@@ -686,6 +698,11 @@ print(summary)
 
         (cd "$PROJECT_DIR" && git add reference/scene-briefs.csv working/ && git commit -m "Extract: Phase 3b — knowledge chain" && git push) 2>/dev/null || true
         update_pr_task "Phase 3: Extract briefs" "$PROJECT_DIR" 2>/dev/null || true
+
+        # Reconcile knowledge and outcomes against Phase 3 data
+        log ""
+        log "--- Reconciling Phase 3 registries ---"
+        "${SCRIPT_DIR}/storyforge-reconcile" --phase 3
     fi
 fi
 
