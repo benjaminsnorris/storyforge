@@ -607,3 +607,536 @@ def score_arcs(scenes_map, intent_map):
         'findings': findings,
         'character_arcs': character_arcs,
     }
+
+
+# ---------------------------------------------------------------------------
+# Character Presence
+# ---------------------------------------------------------------------------
+
+def score_character_presence(scenes_map, intent_map, ref_dir):
+    """Score POV balance, antagonist visibility, presence gaps, mention-to-onstage ratio.
+
+    Args:
+        scenes_map: dict from _read_csv_as_map on scenes.csv
+        intent_map: dict from _read_csv_as_map on scene-intent.csv
+        ref_dir: path to reference directory (for characters.csv)
+
+    Returns:
+        {'score': float 0-1, 'findings': [...]}
+    """
+    findings = []
+
+    # Sort scenes by seq
+    def _seq(item):
+        try:
+            return int(item[1].get('seq', 0))
+        except (ValueError, TypeError):
+            return 0
+
+    ordered = sorted(scenes_map.items(), key=_seq)
+    scene_ids = [sid for sid, _ in ordered]
+    n = len(scene_ids)
+
+    if n == 0:
+        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important'}]}
+
+    # Load character roles from characters.csv if it exists
+    char_roles = {}  # character_name -> role
+    chars_path = os.path.join(ref_dir, 'characters.csv')
+    if os.path.exists(chars_path):
+        rows = _read_csv(chars_path)
+        for row in rows:
+            name = row.get('name', '').strip() or row.get('id', '').strip()
+            role = row.get('role', '').strip().lower()
+            if name:
+                char_roles[name] = role
+
+    # Count per character: POV scenes, on_stage, mentions
+    pov_counts = {}   # character -> count of POV scenes
+    onstage = {}      # character -> list of scene indices
+    mentions = {}     # character -> list of scene indices
+
+    for idx, sid in enumerate(scene_ids):
+        scene = scenes_map[sid]
+        intent = intent_map.get(sid, {})
+
+        # POV
+        pov = scene.get('pov', '').strip()
+        if pov:
+            pov_counts[pov] = pov_counts.get(pov, 0) + 1
+
+        # on_stage
+        on_stage_str = intent.get('on_stage', '').strip()
+        if on_stage_str:
+            for ch in on_stage_str.split(';'):
+                ch = ch.strip()
+                if ch:
+                    if ch not in onstage:
+                        onstage[ch] = []
+                    onstage[ch].append(idx)
+
+        # characters (mentions)
+        chars_str = intent.get('characters', '').strip()
+        if chars_str:
+            for ch in chars_str.split(';'):
+                ch = ch.strip()
+                if ch:
+                    if ch not in mentions:
+                        mentions[ch] = []
+                    mentions[ch].append(idx)
+
+    # Identify antagonists and POV characters by role
+    antagonists = set()
+    pov_characters = set(pov_counts.keys())
+    for name, role in char_roles.items():
+        if role == 'antagonist':
+            antagonists.add(name)
+
+    # --- 1. POV balance ---
+    pov_score = 1.0
+    if pov_counts:
+        max_pov = max(pov_counts.values())
+        if max_pov / n > 0.70:
+            dominant = [k for k, v in pov_counts.items() if v == max_pov][0]
+            pov_score = max(0.0, 1.0 - (max_pov / n - 0.70) * 5)
+            findings.append({
+                'message': f"POV imbalance: {dominant} has {max_pov}/{n} scenes ({max_pov/n:.0%})",
+                'severity': 'minor',
+            })
+
+    # --- 2. Antagonist visibility ---
+    antag_score = 1.0
+    if antagonists:
+        antag_penalties = 0
+        for antag in antagonists:
+            antag_onstage_count = len(onstage.get(antag, []))
+            ratio = antag_onstage_count / n if n > 0 else 0
+            if ratio < 0.08:
+                antag_penalties += 1
+                findings.append({
+                    'message': f"Antagonist '{antag}' on-stage in only {antag_onstage_count}/{n} scenes ({ratio:.0%}, ideal >= 8%)",
+                    'severity': 'minor',
+                })
+        if antag_penalties > 0:
+            antag_score = max(0.0, 1.0 - antag_penalties * 0.3)
+    else:
+        antag_score = 0.7  # No antagonist data — neutral
+
+    # --- 3. Presence gaps ---
+    gap_score = 1.0
+    tracked_chars = pov_characters | antagonists
+    gap_penalties = 0
+    threshold = max(1, int(n * 0.20))
+
+    for ch in tracked_chars:
+        # Combine on_stage and POV indices
+        present_indices = set(onstage.get(ch, []))
+        for idx, sid in enumerate(scene_ids):
+            if scenes_map[sid].get('pov', '').strip() == ch:
+                present_indices.add(idx)
+
+        if not present_indices:
+            continue
+
+        sorted_indices = sorted(present_indices)
+        # Check gap before first appearance
+        max_gap = sorted_indices[0]
+        # Check gaps between appearances
+        for i in range(1, len(sorted_indices)):
+            gap = sorted_indices[i] - sorted_indices[i - 1] - 1
+            if gap > max_gap:
+                max_gap = gap
+        # Check gap after last appearance
+        trailing = n - 1 - sorted_indices[-1]
+        if trailing > max_gap:
+            max_gap = trailing
+
+        if max_gap > threshold:
+            gap_penalties += 1
+            findings.append({
+                'message': f"'{ch}' absent for {max_gap} consecutive scenes (threshold: {threshold})",
+                'severity': 'minor',
+            })
+
+    if tracked_chars:
+        gap_score = max(0.0, 1.0 - gap_penalties / len(tracked_chars))
+
+    # --- 4. Mention-to-onstage ratio ---
+    ratio_score = 1.0
+    ratio_flags = 0
+    for ch in set(list(mentions.keys()) + list(onstage.keys())):
+        mention_count = len(mentions.get(ch, []))
+        onstage_count = len(onstage.get(ch, []))
+        if mention_count > 5 and onstage_count < mention_count * 0.30:
+            ratio_flags += 1
+            findings.append({
+                'message': f"'{ch}' mentioned in {mention_count} scenes but on-stage in only {onstage_count} (<30%)",
+                'severity': 'minor',
+            })
+
+    total_chars = len(set(list(mentions.keys()) + list(onstage.keys())))
+    if total_chars > 0 and ratio_flags > 0:
+        ratio_score = max(0.0, 1.0 - ratio_flags / total_chars)
+
+    # Composite
+    score = (pov_score + antag_score + gap_score + ratio_score) / 4.0
+    score = max(0.0, min(1.0, score))
+
+    return {'score': score, 'findings': findings}
+
+
+# ---------------------------------------------------------------------------
+# MICE Health
+# ---------------------------------------------------------------------------
+
+def score_mice_health(scenes_map, intent_map):
+    """Score MICE thread effectiveness — close ratio, dormancy, type balance, resolution positioning.
+
+    Args:
+        scenes_map: dict from _read_csv_as_map on scenes.csv
+        intent_map: dict from _read_csv_as_map on scene-intent.csv
+
+    Returns:
+        {'score': float 0-1, 'findings': [...]}
+    """
+    findings = []
+
+    # Sort scenes by seq
+    def _seq(item):
+        try:
+            return int(item[1].get('seq', 0))
+        except (ValueError, TypeError):
+            return 0
+
+    ordered = sorted(scenes_map.items(), key=_seq)
+    scene_ids = [sid for sid, _ in ordered]
+    n = len(scene_ids)
+
+    if n == 0:
+        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important'}]}
+
+    # Parse all mice_threads entries
+    # Track per thread: open_idx, close_idx, mention_indices, type
+    threads = {}  # thread_name -> {'open': idx|None, 'close': idx|None, 'mentions': [idx], 'type': str}
+
+    for idx, sid in enumerate(scene_ids):
+        intent = intent_map.get(sid, {})
+        mice_str = intent.get('mice_threads', '').strip()
+        if not mice_str:
+            continue
+        for entry in mice_str.split(';'):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if entry.startswith('+'):
+                tag = entry[1:]
+                thread_type = tag.split(':')[0] if ':' in tag else 'unknown'
+                if tag not in threads:
+                    threads[tag] = {'open': idx, 'close': None, 'mentions': [idx], 'type': thread_type}
+                else:
+                    threads[tag]['mentions'].append(idx)
+                    if threads[tag]['open'] is None:
+                        threads[tag]['open'] = idx
+            elif entry.startswith('-'):
+                tag = entry[1:]
+                thread_type = tag.split(':')[0] if ':' in tag else 'unknown'
+                if tag not in threads:
+                    threads[tag] = {'open': None, 'close': idx, 'mentions': [idx], 'type': thread_type}
+                else:
+                    threads[tag]['close'] = idx
+                    threads[tag]['mentions'].append(idx)
+            else:
+                # Plain mention (no +/-)
+                tag = entry
+                thread_type = tag.split(':')[0] if ':' in tag else 'unknown'
+                if tag not in threads:
+                    threads[tag] = {'open': None, 'close': None, 'mentions': [idx], 'type': thread_type}
+                else:
+                    threads[tag]['mentions'].append(idx)
+
+    total_threads = len(threads)
+    if total_threads == 0:
+        return {'score': 0.5, 'findings': [{'message': 'No MICE threads found', 'severity': 'minor'}]}
+
+    # --- 1. Close ratio ---
+    opened = sum(1 for t in threads.values() if t['open'] is not None)
+    closed = sum(1 for t in threads.values() if t['close'] is not None)
+    close_ratio = closed / opened if opened > 0 else 0.0
+
+    if close_ratio < 0.5:
+        findings.append({
+            'message': f"Only {closed}/{opened} threads closed ({close_ratio:.0%}) — many unresolved threads",
+            'severity': 'important',
+        })
+
+    # --- 2. Dormancy ---
+    dormant_count = 0
+    for tag, info in threads.items():
+        mention_list = sorted(set(info['mentions']))
+        if len(mention_list) >= 2:
+            max_gap = 0
+            for i in range(1, len(mention_list)):
+                gap = mention_list[i] - mention_list[i - 1]
+                if gap > max_gap:
+                    max_gap = gap
+            if max_gap > 10:
+                dormant_count += 1
+                findings.append({
+                    'message': f"Thread '{tag}' dormant for {max_gap} scenes",
+                    'severity': 'minor',
+                })
+
+    dormancy_score = max(0.0, 1.0 - dormant_count / total_threads * 2)
+
+    # --- 3. Type balance ---
+    type_counts = {}
+    for info in threads.values():
+        t = info['type']
+        type_counts[t] = type_counts.get(t, 0) + 1
+
+    type_count = len(type_counts)
+    type_balance = min(1.0, type_count / 3)
+
+    if type_count == 1 and total_threads > 5:
+        dominant_type = list(type_counts.keys())[0]
+        findings.append({
+            'message': f"All {total_threads} threads are type '{dominant_type}' — no MICE variety",
+            'severity': 'minor',
+        })
+
+    # --- 4. Resolution positioning ---
+    cutoff = int(n * 0.70)  # final 30% starts here
+    if closed > 0:
+        late_closures = sum(
+            1 for t in threads.values()
+            if t['close'] is not None and t['close'] >= cutoff
+        )
+        resolution_score = late_closures / closed
+    else:
+        resolution_score = 0.0
+
+    if closed > 0 and resolution_score < 0.3:
+        findings.append({
+            'message': f"Only {resolution_score:.0%} of threads close in the final 30% of scenes",
+            'severity': 'minor',
+        })
+
+    # Composite
+    score = close_ratio * 0.35 + dormancy_score * 0.25 + type_balance * 0.20 + resolution_score * 0.20
+    score = max(0.0, min(1.0, score))
+
+    return {'score': score, 'findings': findings}
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Chain
+# ---------------------------------------------------------------------------
+
+def score_knowledge_chain(scenes_map, briefs_map):
+    """Score knowledge flow through scenes — coverage, fact utilization, density.
+
+    Args:
+        scenes_map: dict from _read_csv_as_map on scenes.csv
+        briefs_map: dict from _read_csv_as_map on scene-briefs.csv
+
+    Returns:
+        {'score': float 0-1, 'findings': [...]}
+    """
+    findings = []
+
+    # Sort scenes by seq
+    def _seq(item):
+        try:
+            return int(item[1].get('seq', 0))
+        except (ValueError, TypeError):
+            return 0
+
+    ordered = sorted(scenes_map.items(), key=_seq)
+    scene_ids = [sid for sid, _ in ordered]
+    n = len(scene_ids)
+
+    if n == 0:
+        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important'}]}
+
+    # --- 1. Coverage ---
+    has_kin = 0
+    has_kout = 0
+    all_facts = {}  # fact -> list of scene indices
+
+    for idx, sid in enumerate(scene_ids):
+        brief = briefs_map.get(sid, {})
+        kin = brief.get('knowledge_in', '').strip()
+        kout = brief.get('knowledge_out', '').strip()
+        if kin:
+            has_kin += 1
+            for fact in kin.split(';'):
+                fact = fact.strip()
+                if fact:
+                    if fact not in all_facts:
+                        all_facts[fact] = []
+                    all_facts[fact].append(idx)
+        if kout:
+            has_kout += 1
+            for fact in kout.split(';'):
+                fact = fact.strip()
+                if fact:
+                    if fact not in all_facts:
+                        all_facts[fact] = []
+                    all_facts[fact].append(idx)
+
+    coverage_in = has_kin / n if n > 0 else 0.0
+    coverage_out = has_kout / n if n > 0 else 0.0
+    coverage = (coverage_in + coverage_out) / 2.0
+
+    if coverage < 0.3:
+        findings.append({
+            'message': f"Low knowledge coverage: {has_kin}/{n} scenes have knowledge_in, {has_kout}/{n} have knowledge_out",
+            'severity': 'important',
+        })
+
+    # --- 2. Fact utilization ---
+    total_facts = len(all_facts)
+    reused_facts = sum(1 for indices in all_facts.values() if len(indices) >= 2)
+    utilization = reused_facts / total_facts if total_facts > 0 else 0.0
+
+    if total_facts >= 10 and utilization < 0.3:
+        findings.append({
+            'message': f"Low fact utilization: only {reused_facts}/{total_facts} facts appear in 2+ scenes",
+            'severity': 'minor',
+        })
+
+    # --- 3. Backstory check ---
+    if scene_ids:
+        first_sid = scene_ids[0]
+        first_brief = briefs_map.get(first_sid, {})
+        first_kin = first_brief.get('knowledge_in', '').strip()
+        if first_kin:
+            first_facts = [f.strip() for f in first_kin.split(';') if f.strip()]
+            if len(first_facts) > 5:
+                findings.append({
+                    'message': f"Scene 1 knowledge_in has {len(first_facts)} facts — possible backstory dump",
+                    'severity': 'minor',
+                })
+
+    # --- 4. Fact density ---
+    density = min(1.0, total_facts / (n * 0.5)) if n > 0 else 0.0
+
+    # Composite
+    score = coverage * 0.4 + utilization * 0.35 + density * 0.25
+    score = max(0.0, min(1.0, score))
+
+    return {'score': score, 'findings': findings}
+
+
+# ---------------------------------------------------------------------------
+# Function Variety
+# ---------------------------------------------------------------------------
+
+def score_function_variety(intent_map, briefs_map):
+    """Score variety of scene functions — action/sequel balance, outcome variety, turning point variety.
+
+    Args:
+        intent_map: dict from _read_csv_as_map on scene-intent.csv
+        briefs_map: dict from _read_csv_as_map on scene-briefs.csv
+
+    Returns:
+        {'score': float 0-1, 'findings': [...]}
+    """
+    findings = []
+
+    scene_ids = sorted(intent_map.keys())
+    n = len(scene_ids)
+
+    if n == 0:
+        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important'}]}
+
+    # --- 1. Action/sequel balance ---
+    action_count = 0
+    sequel_count = 0
+    for sid in scene_ids:
+        intent = intent_map[sid]
+        as_type = intent.get('action_sequel', '').strip().lower()
+        if as_type == 'action':
+            action_count += 1
+        elif as_type == 'sequel':
+            sequel_count += 1
+
+    typed_total = action_count + sequel_count
+    if typed_total > 0:
+        action_ratio = action_count / typed_total
+        type_balance = max(0.0, 1.0 - abs(action_ratio - 0.5) * 2)
+        if action_ratio > 0.8:
+            findings.append({
+                'message': f"Action-heavy: {action_count}/{typed_total} scenes are action ({action_ratio:.0%})",
+                'severity': 'minor',
+            })
+        elif action_ratio < 0.2:
+            findings.append({
+                'message': f"Sequel-heavy: {sequel_count}/{typed_total} scenes are sequel ({1-action_ratio:.0%})",
+                'severity': 'minor',
+            })
+    else:
+        type_balance = 0.5  # No data — neutral
+
+    # --- 2. Outcome variety (Shannon entropy) ---
+    outcome_freq = {}
+    for sid in scene_ids:
+        brief = briefs_map.get(sid, {})
+        outcome = brief.get('outcome', '').strip().lower()
+        if outcome:
+            outcome_freq[outcome] = outcome_freq.get(outcome, 0) + 1
+
+    outcome_total = sum(outcome_freq.values())
+    if outcome_total > 0 and len(outcome_freq) > 1:
+        entropy = 0.0
+        for count in outcome_freq.values():
+            p = count / outcome_total
+            if p > 0:
+                entropy -= p * math.log2(p)
+        max_entropy = math.log2(len(outcome_freq))
+        outcome_variety = entropy / max_entropy if max_entropy > 0 else 0.0
+
+        # Check dominant outcome
+        max_outcome_count = max(outcome_freq.values())
+        dominant_ratio = max_outcome_count / outcome_total
+        if dominant_ratio > 0.60:
+            dominant = [k for k, v in outcome_freq.items() if v == max_outcome_count][0]
+            findings.append({
+                'message': f"Dominant outcome '{dominant}' in {max_outcome_count}/{outcome_total} scenes ({dominant_ratio:.0%})",
+                'severity': 'minor',
+            })
+    elif outcome_total > 0:
+        outcome_variety = 0.0  # Only one distinct outcome
+    else:
+        outcome_variety = 0.5  # No data — neutral
+
+    # --- 3. Turning point variety ---
+    tp_freq = {}
+    for sid in scene_ids:
+        intent = intent_map[sid]
+        tp = intent.get('turning_point', '').strip().lower()
+        if tp:
+            tp_freq[tp] = tp_freq.get(tp, 0) + 1
+
+    tp_total = sum(tp_freq.values())
+    if tp_total > 0 and len(tp_freq) > 1:
+        max_tp_count = max(tp_freq.values())
+        dominant_tp_ratio = max_tp_count / tp_total
+        tp_variety = 1.0 - dominant_tp_ratio
+
+        if dominant_tp_ratio > 0.75:
+            dominant_tp = [k for k, v in tp_freq.items() if v == max_tp_count][0]
+            findings.append({
+                'message': f"Dominant turning point '{dominant_tp}' in {max_tp_count}/{tp_total} scenes ({dominant_tp_ratio:.0%})",
+                'severity': 'minor',
+            })
+    elif tp_total > 0:
+        tp_variety = 0.0  # Only one type
+    else:
+        tp_variety = 0.5  # No data — neutral
+
+    # Composite
+    score = type_balance * 0.35 + outcome_variety * 0.35 + tp_variety * 0.30
+    score = max(0.0, min(1.0, score))
+
+    return {'score': score, 'findings': findings}

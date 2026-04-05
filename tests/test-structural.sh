@@ -333,3 +333,116 @@ print('ok')
 assert_contains "$RESULT" "ok" "score_arcs: returns valid result"
 assert_contains "$RESULT" "alice_beats_bob=true" "score_arcs: varied arc beats flat arc"
 rm -rf "${TMPDIR}/arc-test"
+
+# ============================================================================
+# score_character_presence
+# ============================================================================
+
+CHAR_DIR="${TMPDIR}/char-test/reference"
+mkdir -p "$CHAR_DIR"
+cat > "${CHAR_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|One|1|alice|X|1|morning|1h|action|drafted|2000|2000
+s02|2|Two|1|alice|X|1|afternoon|1h|action|drafted|2000|2000
+s03|3|Three|1|alice|X|2|morning|1h|action|drafted|2000|2000
+s04|4|Four|2|alice|X|2|afternoon|1h|action|drafted|2000|2000
+s05|5|Five|2|alice|X|3|morning|1h|action|drafted|2000|2000
+s06|6|Six|3|alice|X|3|afternoon|1h|action|drafted|2000|2000
+CSV
+cat > "${CHAR_DIR}/scene-intent.csv" <<'CSV'
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|test|action|flat|truth|+/-|revelation|alice;bob;villain|alice;bob|
+s02|test|action|flat|truth|+/-|revelation|alice;bob|alice|
+s03|test|action|flat|truth|+/-|revelation|alice;villain|alice;villain|
+s04|test|action|flat|truth|+/-|revelation|alice|alice|
+s05|test|action|flat|truth|+/-|revelation|alice;bob|alice;bob|
+s06|test|action|flat|truth|+/-|revelation|alice;villain|alice;villain|
+CSV
+cat > "${CHAR_DIR}/characters.csv" <<'CSV'
+id|name|role|aliases
+alice|Alice|protagonist|
+bob|Bob|supporting|
+villain|Villain|antagonist|
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.structural import score_character_presence
+scenes = _read_csv_as_map('${CHAR_DIR}/scenes.csv')
+intent = _read_csv_as_map('${CHAR_DIR}/scene-intent.csv')
+result = score_character_presence(scenes, intent, '${CHAR_DIR}')
+assert 0 <= result['score'] <= 1
+print('ok')
+")
+assert_contains "$RESULT" "ok" "score_character_presence: returns valid score"
+rm -rf "${TMPDIR}/char-test"
+
+# ============================================================================
+# score_character_presence: fixture data
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.structural import score_character_presence
+scenes = _read_csv_as_map('${FIXTURE_DIR}/reference/scenes.csv')
+intent = _read_csv_as_map('${FIXTURE_DIR}/reference/scene-intent.csv')
+result = score_character_presence(scenes, intent, '${FIXTURE_DIR}/reference')
+assert 0 <= result['score'] <= 1
+assert isinstance(result['findings'], list)
+print(f'score={result[\"score\"]:.2f}')
+print('ok')
+")
+assert_contains "$RESULT" "ok" "score_character_presence: fixture data returns valid score"
+
+# ============================================================================
+# score_function_variety
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.structural import score_function_variety
+intent = _read_csv_as_map('${FIXTURE_DIR}/reference/scene-intent.csv')
+briefs = _read_csv_as_map('${FIXTURE_DIR}/reference/scene-briefs.csv')
+result = score_function_variety(intent, briefs)
+assert 0 <= result['score'] <= 1
+assert isinstance(result['findings'], list)
+print('ok')
+")
+assert_contains "$RESULT" "ok" "score_function_variety: returns valid score on fixtures"
+
+# ============================================================================
+# score_mice_health
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.structural import score_mice_health
+scenes = _read_csv_as_map('${FIXTURE_DIR}/reference/scenes.csv')
+intent = _read_csv_as_map('${FIXTURE_DIR}/reference/scene-intent.csv')
+result = score_mice_health(scenes, intent)
+assert 0 <= result['score'] <= 1
+print(f'score={result[\"score\"]:.2f}')
+print('ok')
+")
+assert_contains "$RESULT" "ok" "score_mice_health: returns valid score on fixtures"
+
+# ============================================================================
+# score_knowledge_chain
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.structural import score_knowledge_chain
+scenes = _read_csv_as_map('${FIXTURE_DIR}/reference/scenes.csv')
+briefs = _read_csv_as_map('${FIXTURE_DIR}/reference/scene-briefs.csv')
+result = score_knowledge_chain(scenes, briefs)
+assert 0 <= result['score'] <= 1
+assert isinstance(result['findings'], list)
+print('ok')
+")
+assert_contains "$RESULT" "ok" "score_knowledge_chain: returns valid score on fixtures"
