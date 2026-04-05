@@ -181,3 +181,59 @@ print('ok')
 ")
 assert_contains "$RESULT" "ok" "score_thematic_concentration: scattered novel scores low"
 rm -rf "${TMPDIR}/theme-test"
+
+# ============================================================================
+# score_pacing
+# ============================================================================
+
+PACE_DIR="${TMPDIR}/pace-test/reference"
+mkdir -p "$PACE_DIR"
+cat > "${PACE_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|One|1|A|X|1|morning|1h|action|drafted|2000|2000
+s02|2|Two|1|A|X|1|afternoon|1h|character|drafted|2000|2000
+s03|3|Three|1|A|X|2|morning|1h|action|drafted|2000|2000
+s04|4|Four|2|A|X|2|afternoon|1h|character|drafted|2000|2000
+s05|5|Five|2|A|X|3|morning|1h|action|drafted|2000|2000
+s06|6|Six|2|A|X|3|afternoon|1h|confrontation|drafted|2000|2000
+s07|7|Seven|3|A|X|4|morning|1h|action|drafted|2000|2000
+s08|8|Eight|3|A|X|4|afternoon|1h|character|drafted|2000|2000
+CSV
+cat > "${PACE_DIR}/scene-intent.csv" <<'CSV'
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|setup|action|calm to tense|truth|+/-|revelation|A|A|
+s02|process|sequel|tense to calm|truth|-/+|revelation|A|A|
+s03|complicate|action|calm to shock|safety|+/-|action|A|A|
+s04|react|sequel|shock to resolve|safety|-/+|revelation|A|A|
+s05|escalate|action|resolve to dread|justice|-/--|action|A|A|
+s06|crisis|action|dread to despair|justice|-/--|action|A|A|
+s07|climax|action|despair to triumph|truth|-/+|action|A|A|
+s08|resolve|sequel|triumph to peace|truth|+/+|revelation|A|A|
+CSV
+cat > "${PACE_DIR}/scene-briefs.csv" <<'CSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+s01|g|c|no-and|cr|d|k|k|a|d|e|m||false
+s02|g|c|yes|cr|d|k|k|a|d|e|m||false
+s03|g|c|no-and|cr|d|k|k|a|d|e|m||false
+s04|g|c|yes-but|cr|d|k|k|a|d|e|m||false
+s05|g|c|no-and|cr|d|k|k|a|d|e|m||false
+s06|g|c|no|cr|d|k|k|a|d|e|m||false
+s07|g|c|yes|cr|d|k|k|a|d|e|m||false
+s08|g|c|yes|cr|d|k|k|a|d|e|m||false
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.structural import score_pacing
+scenes = _read_csv_as_map('${PACE_DIR}/scenes.csv')
+intent = _read_csv_as_map('${PACE_DIR}/scene-intent.csv')
+briefs = _read_csv_as_map('${PACE_DIR}/scene-briefs.csv')
+result = score_pacing(scenes, intent, briefs)
+print(f'score={result[\"score\"]:.2f}')
+assert result['score'] > 0.4, f'Expected > 0.4, got {result[\"score\"]}'
+assert isinstance(result['findings'], list)
+print('ok')
+")
+assert_contains "$RESULT" "ok" "score_pacing: well-paced novel scores above 0.4"
+rm -rf "${TMPDIR}/pace-test"
