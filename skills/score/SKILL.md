@@ -7,6 +7,8 @@ description: Review scores, calibrate craft weights, and provide author scoring.
 
 You are helping an author review craft scores, calibrate principle weights, and provide their own scoring assessments. Scoring measures how well each scene embodies the craft principles defined in the scoring rubrics.
 
+**Note: Craft scoring vs. structural scoring.** This skill handles **craft scoring** — evaluating prose quality (25 principles) via AI after scenes are drafted. **Structural scoring** (story architecture quality from CSV data, before prose) is handled by `storyforge validate --structural` and reviewed in the revise skill. Both inform the complete manuscript assessment, but they measure different things at different stages.
+
 ## Locating the Storyforge Plugin
 
 The Storyforge plugin root is two levels up from this skill file's directory

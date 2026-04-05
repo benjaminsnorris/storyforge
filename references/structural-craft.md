@@ -273,18 +273,22 @@ Fewer dependencies means more parallelism. Ask: does this scene really need to r
 
 ## 8. Structural Scoring
 
-### Pre-Draft Scoring
+### Pre-Draft Scoring (8 Dimensions)
 
-Before any prose exists, the elaboration data can be scored:
+Run `storyforge validate --structural` to score story quality from CSV data. This is deterministic, free, and instant — no API calls. It measures 8 dimensions:
 
-- Does every scene have a non-flat value shift?
-- Is the goal/conflict/outcome chain complete?
-- Is the crisis a genuine dilemma?
-- Do turning point types vary across sequences?
-- Is the action/sequel rhythm balanced?
-- Do knowledge states connect properly?
+1. **Arc Completeness** — Does each POV character have a complete arc with reversals? Grounded in Reagan's 6 emotional arc shapes (2016): compound arcs outperform simple ones.
+2. **Thematic Concentration** — Are 8-15 core values explored with clear dominance? Grounded in Archer & Jockers (2016): bestsellers dedicate ~30% of content to 1-2 themes.
+3. **Pacing Shape** — Do act proportions follow 25/50/25? Is there a midpoint reversal? Beat regularity? Grounded in Coyne, Brody, Archer & Jockers.
+4. **Character Presence** — Are important characters on stage enough? Antagonist visibility? Presence gaps?
+5. **MICE Thread Health** — Close ratio, dormancy, type balance, resolution positioning.
+6. **Knowledge Chain Integrity** — Coverage, fact utilization, dramatic irony potential, backstory dependency.
+7. **Scene Function Variety** — Action/sequel balance, outcome entropy, turning point variety.
+8. **Structural Completeness** — Are all required fields populated across the three CSVs?
 
-A scene scoring 5/5 on structural scoring has all the bones it needs. A scene scoring 0/5 has no brief data at all. The score doesn't predict prose quality — it predicts whether the scene has the structural foundation to support good prose.
+Each dimension produces a 0-1 score with a target threshold. Scores below target come with craft-grounded diagnosis (why it matters to the reader) and specific CSV-level prescriptions. Output adapts to coaching level (full/coach/strict).
+
+Scores persist to `working/scores/structural-latest.csv` and show deltas on re-run, enabling a tight improvement loop: score → fix CSVs → re-score → see movement.
 
 ### Post-Draft Fidelity Scoring
 

@@ -279,14 +279,24 @@ After any stage completes, run validation:
 cd [project_dir] && [plugin_path]/scripts/storyforge-validate
 ```
 
-Or use the Python helpers directly:
+After briefs are complete (before drafting), also run structural scoring:
 
-```python
-from storyforge.elaborate import validate_structure
-report = validate_structure('reference/')
+```bash
+cd [project_dir] && [plugin_path]/scripts/storyforge-validate --structural
 ```
 
-Report results to the author. Blocking failures must be fixed before advancing. Advisory findings are noted for author judgment.
+This scores 8 dimensions of story quality from CSV data (deterministic, free, instant):
+- Arc completeness, thematic concentration, pacing shape, character presence
+- MICE thread health, knowledge chain integrity, scene function variety, structural completeness
+
+If any dimension is below target, review the diagnosis (which includes craft-grounded explanations and specific CSV changes) and address findings before drafting. Structural fixes are much cheaper than prose rewrites.
+
+If registries are missing or thematic concentration is low, recommend reconciliation:
+```bash
+cd [project_dir] && [plugin_path]/scripts/storyforge-reconcile
+```
+
+Report results to the author. Blocking validation failures must be fixed before advancing. Structural scoring findings are advisory but strongly recommended before drafting.
 
 ## Step 6: Commit After Every Deliverable
 
