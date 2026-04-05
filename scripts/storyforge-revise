@@ -50,16 +50,6 @@ elif [[ -f "$PLAN_FILE" ]]; then
     log "DEPRECATION: Using YAML revision plan. Migrate to working/plans/revision-plan.csv."
 fi
 
-# --- Polish mode: auto-generate a craft-only plan targeting all drafted scenes ---
-if [[ "$POLISH_MODE" == true ]]; then
-    log "Polish mode — generating craft-only revision plan..."
-    mkdir -p "$(dirname "$CSV_PLAN_FILE")"
-    echo "pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location" > "$CSV_PLAN_FILE"
-    echo "1|prose-polish|Voice consistency, prose naturalness, dialogue authenticity, AI pattern cleanup|full||Follow the voice guide strictly. Focus on: em dash overuse, antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. Enter late, leave early.|voice-quality|polish|pending|opus|craft" >> "$CSV_PLAN_FILE"
-    USE_CSV_PLAN=true
-    log "Generated single-pass polish plan: ${CSV_PLAN_FILE}"
-fi
-
 LOG_DIR="${PROJECT_DIR}/working/logs"
 LOG_FILE="${LOG_DIR}/revision-log.txt"
 export LOG_FILE
@@ -71,12 +61,17 @@ DRY_RUN=false
 INTERACTIVE=false
 COACHING_LEVEL=""
 POLISH_MODE=false
+STRUCTURAL_MODE=false
 START_PASS=0  # 0 means "find first pending"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --polish)
             POLISH_MODE=true
+            shift
+            ;;
+        --structural)
+            STRUCTURAL_MODE=true
             shift
             ;;
         --dry-run)
@@ -96,11 +91,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: storyforge-revise [--dry-run] [--interactive] [--coaching LEVEL] [PASS_NUM]"
+            echo "Usage: storyforge-revise [--dry-run] [--interactive] [--structural] [--coaching LEVEL] [PASS_NUM]"
             echo ""
             echo "Options:"
             echo "  --dry-run       Build and print prompts without invoking Claude"
             echo "  --interactive   Supervise each pass — watch, give feedback, redirect"
+            echo "  --structural    Auto-generate plan from structural proposals (CSV-only, no prose)"
             echo "  --coaching LVL  Set coaching level: full, coach, or strict"
             echo "  PASS_NUM        Start from this pass number (1-indexed; default: first pending)"
             echo ""
@@ -121,6 +117,99 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "$STRUCTURAL_MODE" == true && "$POLISH_MODE" == true ]]; then
+    echo "ERROR: --structural and --polish are mutually exclusive." >&2
+    exit 1
+fi
+
+# --- Polish mode: auto-generate a craft-only plan targeting all drafted scenes ---
+if [[ "$POLISH_MODE" == true ]]; then
+    log "Polish mode — generating craft-only revision plan..."
+    mkdir -p "$(dirname "$CSV_PLAN_FILE")"
+    echo "pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location" > "$CSV_PLAN_FILE"
+    echo "1|prose-polish|Voice consistency, prose naturalness, dialogue authenticity, AI pattern cleanup|full||Follow the voice guide strictly. Focus on: em dash overuse, antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. Enter late, leave early.|voice-quality|polish|pending|opus|craft" >> "$CSV_PLAN_FILE"
+    USE_CSV_PLAN=true
+    log "Generated single-pass polish plan: ${CSV_PLAN_FILE}"
+fi
+
+# --- Structural mode: auto-generate plan from structural proposals ---
+if [[ "$STRUCTURAL_MODE" == true ]]; then
+    PROPOSALS_FILE="${PROJECT_DIR}/working/scores/structural-proposals.csv"
+    if [[ ! -f "$PROPOSALS_FILE" ]]; then
+        echo "ERROR: No structural proposals found at ${PROPOSALS_FILE}" >&2
+        echo "Run: storyforge-validate --structural" >&2
+        exit 1
+    fi
+
+    # Check for pending proposals
+    PENDING_COUNT=$(grep -c '|pending$' "$PROPOSALS_FILE" 2>/dev/null || echo "0")
+    if (( PENDING_COUNT == 0 )); then
+        echo "ERROR: No pending proposals in ${PROPOSALS_FILE}" >&2
+        echo "All proposals are already completed. Re-run validation to generate new ones." >&2
+        exit 1
+    fi
+
+    # Save pre-revision scores for delta comparison
+    STRUCTURAL_PRE_SCORES="${PROJECT_DIR}/working/scores/structural-latest.csv"
+    if [[ -f "$STRUCTURAL_PRE_SCORES" ]]; then
+        cp "$STRUCTURAL_PRE_SCORES" "${PROJECT_DIR}/working/scores/structural-pre-revision.csv"
+    fi
+
+    log "Structural mode — generating CSV-only revision plan from ${PENDING_COUNT} proposals..."
+    mkdir -p "$(dirname "$CSV_PLAN_FILE")"
+
+    # Generate plan: group proposals by dimension, order by fix_location priority
+    PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, csv, io
+sys.path.insert(0, '${PYTHON_LIB}')
+
+proposals_file = '${PROPOSALS_FILE}'
+
+# Read proposals
+rows = []
+with open(proposals_file) as f:
+    reader = csv.DictReader(f, delimiter='|')
+    for row in reader:
+        if row.get('status', '').strip() == 'pending':
+            rows.append(row)
+
+# Group by dimension
+from collections import OrderedDict
+groups = OrderedDict()
+for row in rows:
+    dim = row['dimension']
+    if dim not in groups:
+        groups[dim] = {'fix_location': row['fix_location'], 'targets': [], 'rationales': []}
+    t = row.get('target', 'global').strip()
+    if t and t != 'global':
+        groups[dim]['targets'].append(t)
+    groups[dim]['rationales'].append(row.get('rationale', row.get('change', '')))
+
+# Order by fix_location priority: structural -> intent -> registry -> brief
+priority = {'structural': 0, 'intent': 1, 'registry': 2, 'brief': 3}
+sorted_dims = sorted(groups.items(), key=lambda x: priority.get(x[1]['fix_location'], 9))
+
+# Write plan
+header = 'pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location'
+lines = [header]
+for i, (dim, info) in enumerate(sorted_dims, 1):
+    name = f'structural-{dim.replace(\"_\", \"-\")}'
+    purpose = '; '.join(info['rationales'])
+    targets = ';'.join(info['targets']) if info['targets'] else ''
+    fix_loc = info['fix_location']
+    lines.append(f'{i}|{name}|{purpose}|full|{targets}||all-strengths||pending|sonnet|{fix_loc}')
+
+with open('${CSV_PLAN_FILE}', 'w') as f:
+    f.write('\n'.join(lines) + '\n')
+
+print(f'Generated {len(sorted_dims)} passes')
+for i, (dim, info) in enumerate(sorted_dims, 1):
+    print(f'  Pass {i}: {dim} (fix_location: {info[\"fix_location\"]})')
+"
+
+    USE_CSV_PLAN=true
+fi
 
 # ============================================================================
 # Coaching level
@@ -754,7 +843,7 @@ for (( PASS_NUM = START_PASS; PASS_NUM <= TOTAL_PASSES; PASS_NUM++ )); do
     _fix_location=""
     [[ "$USE_CSV_PLAN" == true ]] && _fix_location=$(read_csv_pass_field "$PASS_NUM" "fix_location" 2>/dev/null || echo "")
 
-    if [[ "$_fix_location" == "brief" || "$_fix_location" == "intent" || "$_fix_location" == "structural" ]]; then
+    if [[ "$_fix_location" == "brief" || "$_fix_location" == "intent" || "$_fix_location" == "structural" || "$_fix_location" == "registry" ]]; then
         # Build upstream revision prompt — operates on CSVs, not prose
         PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
 import sys, os; sys.path.insert(0, '${PYTHON_LIB}')
@@ -782,7 +871,69 @@ for s in scene_data:
             data_block.append(f'  {k}: {v[:120]}')
     data_block.append('')
 
-print(f'''You are performing an upstream revision on scene data for a novel.
+fix_location = '${_fix_location}'
+
+if fix_location == 'registry':
+    # Determine which registry based on dimension
+    dimension = '${PASS_NAME}'.replace('structural-', '').replace('-', '_')
+    registry_map = {
+        'thematic_concentration': ('values.csv', 'value_at_stake'),
+        'mice_health': ('mice-threads.csv', 'mice_threads'),
+    }
+    registry_file, intent_field = registry_map.get(dimension, ('values.csv', 'value_at_stake'))
+    registry_path = os.path.join(ref_dir, registry_file)
+
+    registry_content = ''
+    if os.path.exists(registry_path):
+        registry_content = open(registry_path).read()
+
+    # Load intent data showing current usage of registry values
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    intent_content = ''
+    if os.path.exists(intent_path):
+        intent_content = open(intent_path).read()
+
+    print(f'''You are consolidating a registry for a novel's structural data.
+
+## Pass: ${PASS_NAME}
+## Purpose: ${PASS_PURPOSE}
+## Fix Location: registry
+
+## Guidance
+${_csv_guidance:-No specific guidance provided.}
+
+## Current Registry: {registry_file}
+
+\`\`\`registry-csv
+{registry_content}\`\`\`
+
+## Current Scene Intent (showing {intent_field} usage)
+
+\`\`\`intent-csv
+{intent_content}\`\`\`
+
+## Instructions
+
+1. Consolidate the registry by merging near-duplicate entries. Keep distinct thematic values that serve different narrative purposes. Merge entries that are overly specific variations of the same core value.
+2. For each merged entry, add the old names as aliases (semicolon-separated).
+3. Update all scene-intent rows to use the consolidated canonical IDs in the {intent_field} column.
+4. Output TWO fenced blocks:
+
+\`\`\`registry-csv
+(full consolidated registry — id|name|aliases header, then all rows)
+\`\`\`
+
+\`\`\`intent-csv
+(only rows where {intent_field} changed — full row with all columns)
+\`\`\`
+
+Rules:
+- Preserve all scene IDs and non-{intent_field} columns exactly
+- Use pipe delimiters
+- Every old value must map to exactly one new canonical value
+''')
+else:
+    print(f'''You are performing an upstream revision on scene data for a novel.
 
 ## Pass: ${PASS_NAME}
 ## Purpose: ${PASS_PURPOSE}
@@ -898,7 +1049,7 @@ Rules:
             _fix_location=""
             [[ "$USE_CSV_PLAN" == true ]] && _fix_location=$(read_csv_pass_field "$PASS_NUM" "fix_location" 2>/dev/null || echo "")
 
-            if [[ "$_fix_location" == "brief" || "$_fix_location" == "intent" || "$_fix_location" == "structural" ]]; then
+            if [[ "$_fix_location" == "brief" || "$_fix_location" == "intent" || "$_fix_location" == "structural" || "$_fix_location" == "registry" ]]; then
                 # --- Upstream revision: apply CSV updates, then re-draft affected scenes ---
                 log "  Upstream revision (fix_location: ${_fix_location}) — applying CSV updates..."
 
@@ -937,10 +1088,13 @@ for label, content in blocks.items():
         'scenes-csv-update': ('scenes.csv', _FILE_MAP['scenes.csv']),
         'intent-csv': ('scene-intent.csv', _FILE_MAP['scene-intent.csv']),
         'briefs-csv': ('scene-briefs.csv', _FILE_MAP['scene-briefs.csv']),
+        'registry-csv': None,  # handled separately below
     }
 
     if label not in file_map:
         continue
+    if file_map[label] is None:
+        continue  # handled below
 
     fname, cols = file_map[label]
     path = os.path.join(ref_dir, fname)
@@ -966,15 +1120,41 @@ for label, content in blocks.items():
     _write_csv(path, ordered, cols)
     updated_files.append(fname)
 
+# Handle registry-csv blocks — overwrite the full registry file
+if 'registry-csv' in blocks:
+    reg_rows = csv_block_to_rows(blocks['registry-csv'])
+    if reg_rows:
+        # Determine registry file from dimension
+        dimension = '${PASS_NAME}'.replace('structural-', '').replace('-', '_')
+        reg_map = {
+            'thematic_concentration': 'values.csv',
+            'mice_health': 'mice-threads.csv',
+        }
+        reg_file = reg_map.get(dimension, 'values.csv')
+        reg_path = os.path.join(ref_dir, reg_file)
+
+        # Write registry — preserve original column order
+        if os.path.exists(reg_path):
+            with open(reg_path) as f:
+                header = f.readline().strip().split('|')
+        else:
+            header = list(reg_rows[0].keys())
+
+        with open(reg_path, 'w') as f:
+            f.write('|'.join(header) + '\n')
+            for row in reg_rows:
+                f.write('|'.join(row.get(c, '') for c in header) + '\n')
+        updated_files.append(reg_file)
+
 print(f'Updated: {\", \".join(updated_files) if updated_files else \"no CSV blocks found\"}')
 print(f'Affected scenes: {\", \".join(sorted(affected_scenes)) if affected_scenes else \"none\"}')
 " 2>&1)
 
                 echo "$UPSTREAM_RESULT" | while IFS= read -r line; do log "  $line"; done
 
-                # Check if we should re-draft affected scenes
+                # Check if we should re-draft affected scenes (skip in structural mode)
                 AFFECTED=$(echo "$UPSTREAM_RESULT" | grep "Affected scenes:" | sed 's/Affected scenes: //')
-                if [[ -n "$AFFECTED" && "$AFFECTED" != "none" ]]; then
+                if [[ -n "$AFFECTED" && "$AFFECTED" != "none" && "$STRUCTURAL_MODE" != true ]]; then
                     log "  Re-drafting affected scenes..."
                     # Convert comma-separated to array
                     IFS=',' read -ra REDRAFT_IDS <<< "$AFFECTED"
@@ -1012,6 +1192,9 @@ update_scene('${_rid}', '${PROJECT_DIR}/reference', {'word_count': '${_NEW_WC}'}
                             fi
                         fi
                     done
+                fi
+                if [[ -n "$AFFECTED" && "$AFFECTED" != "none" && "$STRUCTURAL_MODE" == true ]]; then
+                    log "  Structural mode — skipping re-draft for ${AFFECTED}"
                 fi
             else
                 # --- Standard prose revision: extract scene content from response ---
@@ -1152,6 +1335,46 @@ for (( i = 1; i <= TOTAL_PASSES; i++ )); do
     fi
 done
 log "Revision session complete. ${COMPLETED}/${TOTAL_PASSES} passes finished."
+
+# --- Structural mode: re-validate and print score delta ---
+if [[ "$STRUCTURAL_MODE" == true && "$DRY_RUN" != true ]]; then
+    log "Re-running structural validation..."
+
+    POST_SCORES=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json
+sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.structural import structural_score, save_structural_scores, load_scores_as_dict, print_score_delta
+
+ref_dir = os.path.join('${PROJECT_DIR}', 'reference')
+report = structural_score(ref_dir)
+save_structural_scores(report, '${PROJECT_DIR}')
+
+# Load pre-revision scores
+pre_path = os.path.join('${PROJECT_DIR}', 'working', 'scores', 'structural-pre-revision.csv')
+post_path = os.path.join('${PROJECT_DIR}', 'working', 'scores', 'structural-latest.csv')
+
+pre = load_scores_as_dict(pre_path)
+post = load_scores_as_dict(post_path)
+
+print(print_score_delta(pre, post))
+
+# Print new overall
+overall = report.get('overall', 0)
+print(f'\nOverall: {overall:.2f}')
+" 2>&1)
+
+    echo ""
+    echo "=== Structural Score Delta ==="
+    echo "$POST_SCORES"
+    echo ""
+
+    # Mark completed proposals
+    PROPOSALS_FILE="${PROJECT_DIR}/working/scores/structural-proposals.csv"
+    if [[ -f "$PROPOSALS_FILE" ]]; then
+        sed -i '' 's/|pending$/|completed/' "$PROPOSALS_FILE"
+        log "Marked all proposals as completed in structural-proposals.csv"
+    fi
+fi
 
 # --- Cost summary ---
 if [[ "$DRY_RUN" != true ]]; then

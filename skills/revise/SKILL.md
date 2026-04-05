@@ -116,6 +116,23 @@ Offer two options:
 > cd [project_dir] && [plugin_path]/scripts/storyforge-revise [flags]
 > ```
 > For craft-only: `./storyforge revise --polish`
+> For structural-only (CSV fixes, no prose): `./storyforge revise --structural`
+
+### Structural Mode
+
+When the author wants to improve structural scores without touching prose, delegate to the script:
+
+> **Option A: Run it here**
+> I'll launch `storyforge-revise --structural` in this conversation.
+>
+> **Option B: Run it yourself**
+> ```bash
+> cd [project_dir] && [plugin_path]/scripts/storyforge-revise --structural
+> ```
+
+This reads `working/scores/structural-proposals.csv` (from `storyforge-validate --structural`), generates a CSV-only revision plan, and executes each pass. No prose files are touched. After all passes, it re-validates and prints a score delta.
+
+Use `--structural --dry-run` to preview the plan and prompts without executing.
 
 If Option A, delegate to the revise script with the plan already saved.
 
