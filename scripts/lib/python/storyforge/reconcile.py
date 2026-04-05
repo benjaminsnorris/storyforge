@@ -13,7 +13,10 @@ import re
 from storyforge.elaborate import (
     _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, DELIMITER,
 )
-from storyforge.enrich import load_alias_map, load_mice_registry
+from storyforge.enrich import (
+    load_alias_map, load_mice_registry, normalize_aliases,
+    normalize_mice_threads,
+)
 
 # ============================================================================
 # Outcome normalization (deterministic — no API call)
@@ -415,3 +418,237 @@ def parse_registry_response(
             rows.append(row)
 
     return rows, updates
+
+
+# ============================================================================
+# Domain-to-file mapping
+# ============================================================================
+
+_DOMAIN_TO_REGISTRY = {
+    'characters': 'characters.csv',
+    'locations': 'locations.csv',
+    'values': 'values.csv',
+    'mice-threads': 'mice-threads.csv',
+    'knowledge': 'knowledge.csv',
+}
+
+# Which CSV columns to normalize per domain
+_DOMAIN_TARGETS = {
+    'characters': [
+        ('scenes.csv', ['pov']),
+        ('scene-intent.csv', ['characters', 'on_stage']),
+    ],
+    'locations': [
+        ('scenes.csv', ['location']),
+    ],
+    'values': [
+        ('scene-intent.csv', ['value_at_stake']),
+    ],
+    'mice-threads': [
+        ('scene-intent.csv', ['mice_threads']),
+    ],
+    'knowledge': [
+        ('scene-briefs.csv', ['knowledge_in', 'knowledge_out']),
+    ],
+}
+
+
+# ============================================================================
+# Registry writing
+# ============================================================================
+
+def write_registry(ref_dir: str, domain: str, rows: list[dict[str, str]]) -> None:
+    """Write registry rows to the domain's CSV file.
+
+    Args:
+        ref_dir: Path to the reference/ directory.
+        domain: One of the keys in _DOMAIN_TO_REGISTRY.
+        rows: List of dicts keyed by the domain's columns.
+    """
+    if domain not in _DOMAIN_TO_REGISTRY:
+        raise ValueError(f'Unknown reconciliation domain: {domain}')
+    filename = _DOMAIN_TO_REGISTRY[domain]
+    columns = _REGISTRY_COLUMNS[domain]
+    path = os.path.join(ref_dir, filename)
+    _write_csv(path, rows, columns)
+
+
+# ============================================================================
+# Update application
+# ============================================================================
+
+def apply_updates(
+    ref_dir: str, domain: str, updates: list[tuple[str, str]]
+) -> int:
+    """Apply UPDATE lines from Opus response to scene CSVs.
+
+    Args:
+        ref_dir: Path to the reference/ directory.
+        domain: The reconciliation domain.
+        updates: List of (scene_id, value_string) tuples.
+
+    Returns:
+        Number of updates successfully applied.
+    """
+    if not updates:
+        return 0
+
+    if domain == 'mice-threads':
+        intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+        rows = _read_csv(intent_path)
+        if not rows:
+            return 0
+        row_map = {r['id']: r for r in rows if 'id' in r}
+        applied = 0
+        for scene_id, value in updates:
+            if scene_id in row_map:
+                row_map[scene_id]['mice_threads'] = value
+                applied += 1
+        if applied:
+            _write_csv(intent_path, rows, _FILE_MAP['scene-intent.csv'])
+        return applied
+
+    elif domain == 'knowledge':
+        briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+        rows = _read_csv(briefs_path)
+        if not rows:
+            return 0
+        row_map = {r['id']: r for r in rows if 'id' in r}
+        applied = 0
+        for scene_id, value in updates:
+            if scene_id not in row_map:
+                continue
+            parts = value.split('|', 1)
+            if len(parts) == 2:
+                row_map[scene_id]['knowledge_in'] = parts[0].strip()
+                row_map[scene_id]['knowledge_out'] = parts[1].strip()
+                applied += 1
+        if applied:
+            _write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+        return applied
+
+    # Other domains have no update lines
+    return 0
+
+
+# ============================================================================
+# Registry normalization
+# ============================================================================
+
+def apply_registry_normalization(
+    domain: str, ref_dir: str
+) -> int:
+    """Load the domain's registry and normalize all target CSV columns.
+
+    Args:
+        domain: The reconciliation domain.
+        ref_dir: Path to the reference/ directory.
+
+    Returns:
+        Total number of individual field values changed.
+    """
+    if domain not in _DOMAIN_TO_REGISTRY:
+        raise ValueError(f'Unknown reconciliation domain: {domain}')
+
+    registry_path = os.path.join(ref_dir, _DOMAIN_TO_REGISTRY[domain])
+
+    # Load alias map (and type map for MICE)
+    if domain == 'mice-threads':
+        alias_map, type_map = load_mice_registry(registry_path)
+    else:
+        alias_map = load_alias_map(registry_path)
+        type_map = None
+
+    if not alias_map:
+        return 0
+
+    targets = _DOMAIN_TARGETS.get(domain, [])
+    total_changed = 0
+
+    for filename, columns in targets:
+        path = os.path.join(ref_dir, filename)
+        rows = _read_csv(path)
+        if not rows:
+            continue
+
+        file_changed = 0
+        for row in rows:
+            for col in columns:
+                old_val = row.get(col, '')
+                if not old_val:
+                    continue
+
+                if domain == 'mice-threads' and col == 'mice_threads':
+                    new_val = normalize_mice_threads(old_val, alias_map, type_map)
+                else:
+                    new_val = normalize_aliases(alias_map, old_val)
+
+                if new_val != old_val:
+                    row[col] = new_val
+                    file_changed += 1
+
+        if file_changed:
+            _write_csv(path, rows, _FILE_MAP[filename])
+            total_changed += file_changed
+
+    return total_changed
+
+
+# ============================================================================
+# Full domain reconciliation
+# ============================================================================
+
+def reconcile_domain(
+    domain: str, ref_dir: str, model: str, log_dir: str,
+    context: str = ''
+) -> dict:
+    """Run full reconciliation for one domain.
+
+    Args:
+        domain: One of 'characters', 'locations', 'values',
+                'mice-threads', 'knowledge', or 'outcomes'.
+        ref_dir: Path to the reference/ directory.
+        model: Anthropic model ID for the API call.
+        log_dir: Directory for API log files.
+        context: Optional extra context for the prompt.
+
+    Returns:
+        Dict with keys: registry_entries, updates_applied, fields_normalized.
+    """
+    # Outcomes are deterministic — no API call needed
+    if domain == 'outcomes':
+        changed = reconcile_outcomes(ref_dir)
+        return {
+            'registry_entries': 0,
+            'updates_applied': 0,
+            'fields_normalized': changed,
+        }
+
+    from storyforge.api import invoke_to_file, extract_text_from_file
+
+    # Build prompt
+    prompt = build_registry_prompt(domain, ref_dir, context=context)
+
+    # Call API
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f'reconcile-{domain}.json')
+    invoke_to_file(prompt, model, log_file, max_tokens=4096)
+
+    # Extract and parse response
+    response = extract_text_from_file(log_file)
+    registry_rows, updates = parse_registry_response(response, domain)
+
+    # Write registry
+    write_registry(ref_dir, domain, registry_rows)
+
+    # Apply updates
+    updates_applied = apply_updates(ref_dir, domain, updates)
+
+    # Normalize fields
+    fields_normalized = apply_registry_normalization(domain, ref_dir)
+
+    return {
+        'registry_entries': len(registry_rows),
+        'updates_applied': updates_applied,
+        'fields_normalized': fields_normalized,
+    }
