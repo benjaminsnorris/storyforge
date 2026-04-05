@@ -509,6 +509,68 @@ print('ok')
 ")
 assert_contains "$RESULT" "ok" "format_diagnosis: all coaching levels produce output"
 
+# format_diagnosis content checks
+DIAG_DIR="${TMPDIR}/diag-test/reference"
+mkdir -p "$DIAG_DIR"
+cat > "${DIAG_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|One|1|alice|X|1|morning|1h|action|drafted|2000|2000
+s02|2|Two|1|alice|X|1|afternoon|1h|action|drafted|2000|2000
+s03|3|Three|1|alice|X|2|morning|1h|action|drafted|2000|2000
+s04|4|Four|1|alice|X|2|afternoon|1h|action|drafted|2000|2000
+s05|5|Five|1|alice|X|3|morning|1h|action|drafted|2000|2000
+s06|6|Six|1|alice|X|3|afternoon|1h|action|drafted|2000|2000
+CSV
+cat > "${DIAG_DIR}/scene-intent.csv" <<'CSV'
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|test|action|calm|truth|+/-|revelation|alice|alice|
+s02|test|action|calm|truth|+/-|revelation|alice|alice|
+s03|test|action|calm|truth|+/-|revelation|alice|alice|
+s04|test|action|calm|truth|+/-|revelation|alice|alice|
+s05|test|action|calm|truth|+/-|revelation|alice|alice|
+s06|test|action|calm|truth|+/-|revelation|alice|alice|
+CSV
+cat > "${DIAG_DIR}/scene-briefs.csv" <<'CSV'
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+s01|g|c|yes-but|cr|d|||a|d|e|m||false
+s02|g|c|yes-but|cr|d|||a|d|e|m||false
+s03|g|c|yes-but|cr|d|||a|d|e|m||false
+s04|g|c|yes-but|cr|d|||a|d|e|m||false
+s05|g|c|yes-but|cr|d|||a|d|e|m||false
+s06|g|c|yes-but|cr|d|||a|d|e|m||false
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import structural_score, format_diagnosis
+report = structural_score('${DIAG_DIR}')
+full = format_diagnosis(report, 'full')
+coach = format_diagnosis(report, 'coach')
+strict = format_diagnosis(report, 'strict')
+
+# Full should have craft explanations and prescriptions
+has_why = 'Why this matters' in full
+has_what = 'What to do' in full
+# Coach should have questions
+has_questions = '?' in coach
+# Strict should have only data
+has_data = 'Structural Data' in strict
+no_explanation_in_strict = 'Why this matters' not in strict
+
+print(f'full_why={has_why}')
+print(f'full_what={has_what}')
+print(f'coach_questions={has_questions}')
+print(f'strict_data={has_data}')
+print(f'strict_no_explain={no_explanation_in_strict}')
+print('ok')
+" 2>&1)
+assert_contains "$RESULT" "full_why=True" "format_diagnosis: full mode has craft explanations"
+assert_contains "$RESULT" "full_what=True" "format_diagnosis: full mode has prescriptions"
+assert_contains "$RESULT" "coach_questions=True" "format_diagnosis: coach mode has questions"
+assert_contains "$RESULT" "strict_data=True" "format_diagnosis: strict mode has data header"
+assert_contains "$RESULT" "strict_no_explain=True" "format_diagnosis: strict mode has no explanations"
+rm -rf "${TMPDIR}/diag-test"
+
 # ============================================================================
 # save_structural_scores + load_previous_scores
 # ============================================================================

@@ -1392,44 +1392,248 @@ def format_scorecard(report, previous=None):
     return '\n'.join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Craft explanations and prescriptions per dimension
+# ---------------------------------------------------------------------------
+
+_CRAFT_EXPLANATIONS = {
+    'arc_completeness': (
+        'Reader impact: Characters without dramatic arcs feel like plot devices. '
+        'Readers invest in characters who want something and change in pursuing it (McKee). '
+        'Compound arcs with multiple reversals are empirically more engaging — '
+        'Reagan et al. (2016) found that stories with rise-fall-rise or fall-rise-fall '
+        'shapes outperform simple trajectories in reader popularity.'
+    ),
+    'thematic_concentration': (
+        'Reader impact: When too many themes compete for attention, the reader '
+        "can't articulate what the novel is about. Archer & Jockers (2016) found "
+        'that bestsellers dedicate ~30% of their content to 1-2 dominant themes. '
+        'Thematic focus gives the reader a through-line to follow — the controlling '
+        'idea that makes everything else cohere (McKee).'
+    ),
+    'pacing_shape': (
+        'Reader impact: Pacing is what keeps pages turning. The 25/50/25 act '
+        'structure (Aristotle through Coyne) ensures the story earns its setup, '
+        'complicates sufficiently, and resolves satisfyingly. Beat regularity — '
+        'a near-sinusoidal alternation of tension highs and lows — is more '
+        'predictive of commercial success than any specific arc shape '
+        '(Archer & Jockers 2016).'
+    ),
+    'character_presence': (
+        'Reader impact: Characters who aren\'t on stage become abstractions. '
+        'The reader needs to see important characters acting, not just hear '
+        'about them. An antagonist mentioned but rarely present feels like a '
+        'plot convenience, not a real threat (Swain, Truby).'
+    ),
+    'mice_health': (
+        'Reader impact: Every opened thread is a promise to the reader. '
+        'Unclosed threads feel like broken promises. Dormant threads — '
+        'unmentioned for 8-10+ scenes — are forgotten by the reader, and '
+        'when they resurface, they feel like discontinuities rather than '
+        'payoffs (Kowal).'
+    ),
+    'knowledge_chain': (
+        'Reader impact: Information flow creates dramatic irony — the engine '
+        'of suspense. When one character knows something another doesn\'t, and '
+        'both are on stage, the reader feels tension (Hitchcock\'s bomb under '
+        'the table). Scenes that don\'t teach the reader anything new are '
+        'structurally inert.'
+    ),
+    'function_variety': (
+        'Reader impact: Pattern predictability kills engagement. If every scene '
+        'ends yes-but, the reader stops feeling surprise. If every turning point '
+        'is a revelation, the story feels interrogative rather than dramatic. '
+        'Alternating action and sequel scenes controls pacing — action creates '
+        'tension, sequel processes it (Swain).'
+    ),
+    'completeness': (
+        'Data quality: Missing fields reduce the reliability of all other '
+        'structural scores. Completeness is a prerequisite — you can\'t assess '
+        'arc shape if value_at_stake is empty, or pacing if outcomes are missing.'
+    ),
+}
+
+_PRESCRIPTIONS_FULL = {
+    'arc_completeness': (
+        'For characters with only 1-2 values: vary their value_at_stake across '
+        'scenes — introduce secondary values (loyalty, identity, trust) in the '
+        'mid-section. For flat arcs with 0 reversals: add a scene where the '
+        'character\'s situation reverses direction. For stasis (same emotional_arc '
+        'start and end): revise the final scene\'s emotional_arc to reflect '
+        'transformation.'
+    ),
+    'thematic_concentration': (
+        'Run `storyforge reconcile --domain values` to consolidate fragmented '
+        'values into 8-15 core themes. Review values.csv and merge over-specified '
+        'entries (e.g., "justice-specifically-restorative-accountability" → "justice"). '
+        'Ensure your top 2 values cover at least 30% of scenes.'
+    ),
+    'pacing_shape': (
+        'Check act proportions: Part 1 should be ~25% of total words, not more. '
+        'If the climax is too early, consider whether later scenes are denouement '
+        'that could be tightened or whether a later scene should carry higher stakes. '
+        'For low beat regularity: look for runs of 4+ scenes with the same '
+        'value_shift direction and break them up with a reversal.'
+    ),
+    'character_presence': (
+        'For absent antagonists: add them to on_stage in 2-3 mid-novel scenes, '
+        'even briefly. For long character gaps: add a brief reference or on-stage '
+        'appearance in the gap. For "told not shown" characters: convert 1-2 '
+        'mention-only scenes to on-stage appearances.'
+    ),
+    'mice_health': (
+        'For low close ratio: review unclosed threads — mark intentionally open '
+        'ones as deliberate (sequel hooks, thematic ambiguity) and add close tags '
+        'for threads that should resolve. For dormant threads: add a brief '
+        'reference in the gap scenes to keep the thread alive. For type imbalance: '
+        'add threads of the missing types.'
+    ),
+    'knowledge_chain': (
+        'For low coverage: add knowledge_out to scenes that currently teach '
+        'nothing — what does the reader learn? For underutilized facts: if a '
+        'fact appears once and is never referenced again, either remove it or '
+        'add it to a later scene\'s knowledge_in where it could create dramatic '
+        'irony. For heavy backstory: move some backstory facts into early scenes\' '
+        'knowledge_out so they feel discovered rather than assumed.'
+    ),
+    'function_variety': (
+        'For dominant outcomes: change 3-5 yes-but outcomes to yes, no, or no-and '
+        'to increase unpredictability. For action/sequel imbalance: insert sequel '
+        'scenes (reaction/dilemma/decision) between action sequences, or add an '
+        'action scene in a run of sequels. For turning point monotony: convert '
+        'some revelations to action turns or vice versa.'
+    ),
+    'completeness': (
+        'Run `storyforge elaborate --stage gap-fill` to populate missing fields. '
+        'Scenes missing required fields (function, value_at_stake, goal, conflict, '
+        'outcome) need attention before other structural scores are reliable.'
+    ),
+}
+
+_QUESTIONS_COACH = {
+    'arc_completeness': [
+        'What does this character want at the beginning? What do they want at the end? If it\'s the same thing, where is the growth?',
+        'Can you point to a specific scene where this character\'s situation reverses? If not, the arc may be too linear.',
+        'What values are being tested in this character\'s scenes? If it\'s the same value every time, what other values could complicate their journey?',
+    ],
+    'thematic_concentration': [
+        'If someone asked "what is this novel about?" in one sentence, what would you say? Does the value_at_stake data reflect that answer?',
+        'Which 3-5 values are truly at the heart of this story? Everything else might be a variant of one of these.',
+    ],
+    'pacing_shape': [
+        'Does the story feel like it earns its opening? If Act 1 is long, what could be cut or compressed?',
+        'Is there a moment near the middle where everything changes? If not, the reader may lose momentum.',
+        'Are there stretches where the tension feels flat? Look for runs of same-direction value shifts.',
+    ],
+    'character_presence': [
+        'Is the antagonist\'s limited presence intentional (looming threat) or a gap (reader forgets they exist)?',
+        'For characters with long absences: does the reader need to remember them? If so, where could they briefly appear?',
+    ],
+    'mice_health': [
+        'Which unclosed threads are deliberate (sequel hooks, thematic ambiguity) and which are simply forgotten?',
+        'Are any threads dormant for so long that the reader has to remember something from 10+ scenes ago?',
+    ],
+    'knowledge_chain': [
+        'Are there scenes where what one character knows (and another doesn\'t) could create tension? Are you using that?',
+        'Does the reader learn something new in most scenes? Scenes without knowledge_out may feel structurally inert.',
+    ],
+    'function_variety': [
+        'Can the reader predict how each scene will end? If yes-but is dominant, consider mixing in clean victories and hard failures.',
+        'Are there long stretches of the same scene type? Where could the rhythm break?',
+    ],
+    'completeness': [
+        'Which scenes are missing data? Are they scenes you haven\'t elaborated yet, or scenes with genuinely unclear structure?',
+    ],
+}
+
+
 def format_diagnosis(report, coaching_level='full'):
-    """Format structural findings for display, adapted to coaching level.
+    """Format structural findings with craft-grounded explanations and prescriptions.
 
     Args:
         report: dict from structural_score()
-        coaching_level: 'full', 'coach', or 'strict'
+        coaching_level: 'full' (explanation + prescription), 'coach' (questions),
+                        or 'strict' (data only)
 
     Returns:
-        str with formatted findings
+        str with formatted diagnosis
     """
     lines = []
 
+    # Collect dimensions below target, sorted by gap (worst first)
+    below_target = [
+        dim for dim in report['dimensions']
+        if dim['score'] < dim['target']
+    ]
+    below_target.sort(key=lambda d: d['score'] - d['target'])
+
     if coaching_level == 'strict':
-        lines.append('## Data')
+        lines.append('## Structural Data')
         lines.append('')
-        for dim in report['dimensions']:
-            if dim['score'] < dim['target']:
-                lines.append(f"- {dim['name']}: {dim['score']:.2f} (target: {dim['target']:.2f})")
-        if not any(dim['score'] < dim['target'] for dim in report['dimensions']):
+        for dim in below_target:
+            important = [f['message'] for f in dim['findings']
+                         if f.get('severity') == 'important']
+            detail = '; '.join(important[:2]) if important else ''
+            lines.append(f"- {dim['label']}: {dim['score']:.2f} "
+                         f"(target: {dim['target']:.2f})"
+                         f"{' — ' + detail if detail else ''}")
+        if not below_target:
             lines.append('All dimensions at or above target.')
         return '\n'.join(lines)
-
-    findings = report.get('top_findings', [])[:5]
 
     if coaching_level == 'coach':
         lines.append('## Questions to Consider')
         lines.append('')
-        for i, f in enumerate(findings, 1):
-            lines.append(f"{i}. **{_DIMENSION_LABELS.get(f['dimension'], f['dimension'])}** ({f['dimension_score']:.2f}): {f['message']}")
-        if not findings:
-            lines.append('No critical findings to discuss.')
+        for i, dim in enumerate(below_target[:5], 1):
+            name = dim['name']
+            label = dim['label']
+            important = [f['message'] for f in dim['findings']
+                         if f.get('severity') == 'important']
+            data_point = important[0] if important else ''
+
+            lines.append(f"### {i}. {label} ({dim['score']:.2f})")
+            if data_point:
+                lines.append(f"*{data_point}*")
+            lines.append('')
+            questions = _QUESTIONS_COACH.get(name, [])
+            for q in questions:
+                lines.append(f"- {q}")
+            lines.append('')
+        if not below_target:
+            lines.append('All dimensions at or above target. No critical questions.')
         return '\n'.join(lines)
 
-    # full
-    lines.append('## Top Findings')
+    # full: craft explanation + data + prescription
+    lines.append('## Structural Diagnosis')
     lines.append('')
-    for i, f in enumerate(findings, 1):
-        lines.append(f"{i}. **{_DIMENSION_LABELS.get(f['dimension'], f['dimension'])}** ({f['dimension_score']:.2f}): {f['message']}")
-    if not findings:
-        lines.append('No critical findings detected.')
+    for i, dim in enumerate(below_target[:5], 1):
+        name = dim['name']
+        label = dim['label']
+        important = [f['message'] for f in dim['findings']
+                     if f.get('severity') == 'important']
+
+        lines.append(f"### {i}. {label}: {dim['score']:.2f} (target: {dim['target']:.2f}+)")
+        lines.append('')
+
+        # Data points
+        if important:
+            for msg in important[:3]:
+                lines.append(f"- {msg}")
+            lines.append('')
+
+        # Craft explanation
+        explanation = _CRAFT_EXPLANATIONS.get(name, '')
+        if explanation:
+            lines.append(f"**Why this matters:** {explanation}")
+            lines.append('')
+
+        # Prescription
+        prescription = _PRESCRIPTIONS_FULL.get(name, '')
+        if prescription:
+            lines.append(f"**What to do:** {prescription}")
+            lines.append('')
+
+    if not below_target:
+        lines.append('All dimensions at or above target. The structural bones are solid.')
+
     return '\n'.join(lines)
