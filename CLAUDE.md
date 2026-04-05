@@ -330,6 +330,7 @@ Key principles:
 | `prompts.py` | Scene drafting prompt builders (legacy + brief-aware) |
 | `prompts_elaborate.py` | Elaboration stage prompt builders |
 | `scoring.py` | Score parsing, diagnosis, proposals, fidelity scoring |
+| `structural.py` | Structural scoring engine — story quality from CSV data (8 dimensions, deterministic) |
 | `visualize.py` | Dashboard data loading |
 | `enrich.py` | Metadata enrichment |
 | `assembly.py` | Chapter assembly |
