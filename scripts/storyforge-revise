@@ -1152,9 +1152,9 @@ print(f'Affected scenes: {\", \".join(sorted(affected_scenes)) if affected_scene
 
                 echo "$UPSTREAM_RESULT" | while IFS= read -r line; do log "  $line"; done
 
-                # Check if we should re-draft affected scenes
+                # Check if we should re-draft affected scenes (skip in structural mode)
                 AFFECTED=$(echo "$UPSTREAM_RESULT" | grep "Affected scenes:" | sed 's/Affected scenes: //')
-                if [[ -n "$AFFECTED" && "$AFFECTED" != "none" ]]; then
+                if [[ -n "$AFFECTED" && "$AFFECTED" != "none" && "$STRUCTURAL_MODE" != true ]]; then
                     log "  Re-drafting affected scenes..."
                     # Convert comma-separated to array
                     IFS=',' read -ra REDRAFT_IDS <<< "$AFFECTED"
@@ -1192,6 +1192,9 @@ update_scene('${_rid}', '${PROJECT_DIR}/reference', {'word_count': '${_NEW_WC}'}
                             fi
                         fi
                     done
+                fi
+                if [[ -n "$AFFECTED" && "$AFFECTED" != "none" && "$STRUCTURAL_MODE" == true ]]; then
+                    log "  Structural mode — skipping re-draft for ${AFFECTED}"
                 fi
             else
                 # --- Standard prose revision: extract scene content from response ---
