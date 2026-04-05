@@ -387,3 +387,223 @@ def score_pacing(scenes_map, intent_map, briefs_map):
     score = max(0.0, min(1.0, score))
 
     return {'score': score, 'findings': findings}
+
+
+# ---------------------------------------------------------------------------
+# Arc Completeness
+# ---------------------------------------------------------------------------
+
+# Valence classification for value_shift tokens
+_POSITIVE_SHIFTS = {'-/+', '+/+', '+/++'}
+_NEGATIVE_SHIFTS = {'+/-', '-/--', '-/-'}
+
+
+def _classify_arc_shape(shifts):
+    """Classify a character's value_shift sequence into a Reagan archetype.
+
+    Maps each shift to positive/negative valence, counts sign reversals,
+    and classifies into one of six shapes.
+
+    Args:
+        shifts: list of value_shift strings (e.g. ['+/-', '-/+', '+/-'])
+
+    Returns:
+        (shape_name, reversal_count, is_compound)
+    """
+    # Map shifts to valence: +1, -1, or 0 (unknown/empty)
+    valences = []
+    for s in shifts:
+        s = s.strip()
+        if s in _POSITIVE_SHIFTS:
+            valences.append(1)
+        elif s in _NEGATIVE_SHIFTS:
+            valences.append(-1)
+        else:
+            valences.append(0)
+
+    # Filter out zero-valence for reversal counting
+    nonzero = [v for v in valences if v != 0]
+
+    if not nonzero:
+        return ('flat', 0, False)
+
+    # Count reversals: consecutive non-zero valences that change sign
+    reversals = 0
+    for i in range(1, len(nonzero)):
+        if nonzero[i] != nonzero[i - 1]:
+            reversals += 1
+
+    # Classify
+    positive_count = sum(1 for v in nonzero if v > 0)
+    negative_count = sum(1 for v in nonzero if v < 0)
+    mostly_positive = positive_count >= negative_count
+    ends_positive = nonzero[-1] > 0
+
+    is_compound = reversals >= 2
+
+    if reversals == 0:
+        shape = 'rags-to-riches' if mostly_positive else 'tragedy'
+    elif reversals == 1:
+        # First half determines shape
+        half = len(nonzero) // 2 or 1
+        first_half_negative = sum(1 for v in nonzero[:half] if v < 0) > sum(1 for v in nonzero[:half] if v > 0)
+        shape = 'man-in-a-hole' if first_half_negative else 'icarus'
+    else:
+        shape = 'cinderella' if ends_positive else 'oedipus'
+
+    return (shape, reversals, is_compound)
+
+
+def score_arcs(scenes_map, intent_map):
+    """Score arc completeness across POV characters.
+
+    Measures value variety, arc shape/reversals, and transformation signal
+    for each POV character, then produces a weighted average.
+
+    Args:
+        scenes_map: dict from _read_csv_as_map on scenes.csv
+        intent_map: dict from _read_csv_as_map on scene-intent.csv
+
+    Returns:
+        {'score': float 0-1, 'findings': [...], 'character_arcs': [...]}
+    """
+    findings = []
+
+    # Sort scenes by seq
+    def _seq(item):
+        try:
+            return int(item[1].get('seq', 0))
+        except (ValueError, TypeError):
+            return 0
+
+    ordered = sorted(scenes_map.items(), key=_seq)
+
+    # Group scenes by POV character
+    char_scenes = {}  # character -> [(scene_id, scene, intent), ...]
+    for sid, scene in ordered:
+        pov = scene.get('pov', '').strip()
+        if not pov:
+            continue
+        intent = intent_map.get(sid, {})
+        if pov not in char_scenes:
+            char_scenes[pov] = []
+        char_scenes[pov].append((sid, scene, intent))
+
+    if not char_scenes:
+        return {'score': 0.0, 'findings': [{'message': 'No POV characters found', 'severity': 'important'}], 'character_arcs': []}
+
+    character_arcs = []
+    total_weight = 0
+    weighted_sum = 0.0
+
+    for character, scene_list in char_scenes.items():
+        scene_count = len(scene_list)
+
+        # Collect values and shifts
+        values = set()
+        shifts = []
+        emotional_arcs = []
+        for sid, scene, intent in scene_list:
+            v = intent.get('value_at_stake', '').strip()
+            if v:
+                values.add(v)
+            shifts.append(intent.get('value_shift', '').strip())
+            ea = intent.get('emotional_arc', '').strip()
+            if ea:
+                emotional_arcs.append(ea)
+
+        value_count = len(values)
+
+        # --- 1. Value variety ---
+        if scene_count < 4:
+            variety_score = 0.7
+        elif value_count == 1:
+            variety_score = 0.1
+        elif value_count == 2:
+            variety_score = 0.4
+        elif 3 <= value_count <= 6:
+            variety_score = 0.9
+        elif 7 <= value_count <= 10:
+            variety_score = 0.7
+        else:
+            variety_score = 0.5
+
+        # --- 2. Arc shape + reversals ---
+        shape, reversals, is_compound = _classify_arc_shape(shifts)
+
+        if scene_count < 4:
+            reversal_score = 0.5
+        elif reversals == 0:
+            reversal_score = 0.2
+        elif reversals == 1:
+            reversal_score = 0.5
+        elif reversals == 2:
+            reversal_score = 0.8
+        elif 3 <= reversals <= 4:
+            reversal_score = 0.9
+        else:
+            # Diminishing returns for 5+
+            reversal_score = max(0.5, 0.9 - (reversals - 4) * 0.1)
+
+        # --- 3. Transformation signal ---
+        if len(emotional_arcs) >= 2:
+            first_words = set(emotional_arcs[0].lower().split()[:4])
+            last_words = set(emotional_arcs[-1].lower().split()[:4])
+            if first_words and last_words:
+                overlap = len(first_words & last_words) / max(len(first_words), len(last_words))
+                if overlap <= 0.25:
+                    transform_score = 0.9
+                elif overlap >= 0.75:
+                    transform_score = 0.2
+                else:
+                    # Linear interpolation between 0.25 and 0.75
+                    transform_score = 0.9 - (overlap - 0.25) * (0.7 / 0.5)
+            else:
+                transform_score = 0.5
+        else:
+            transform_score = 0.5
+
+        # Composite per character
+        arc_score = variety_score * 0.3 + reversal_score * 0.4 + transform_score * 0.3
+
+        character_arcs.append({
+            'character': character,
+            'scene_count': scene_count,
+            'value_count': value_count,
+            'shape': shape,
+            'reversals': reversals,
+            'is_compound': is_compound,
+            'arc_score': arc_score,
+        })
+
+        # Findings
+        if value_count == 1:
+            findings.append({
+                'message': f"{character}: only 1 value at stake across {scene_count} scenes",
+                'severity': 'important',
+                'character': character,
+            })
+        if reversals == 0 and scene_count >= 4:
+            findings.append({
+                'message': f"{character}: no arc reversals ({shape})",
+                'severity': 'minor',
+                'character': character,
+            })
+        if is_compound:
+            findings.append({
+                'message': f"{character}: compound arc ({shape}, {reversals} reversals)",
+                'severity': 'info',
+                'character': character,
+            })
+
+        # Weighted by scene count
+        weighted_sum += arc_score * scene_count
+        total_weight += scene_count
+
+    overall_score = weighted_sum / total_weight if total_weight > 0 else 0.0
+
+    return {
+        'score': max(0.0, min(1.0, overall_score)),
+        'findings': findings,
+        'character_arcs': character_arcs,
+    }

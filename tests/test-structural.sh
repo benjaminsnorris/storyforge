@@ -237,3 +237,99 @@ print('ok')
 ")
 assert_contains "$RESULT" "ok" "score_pacing: well-paced novel scores above 0.4"
 rm -rf "${TMPDIR}/pace-test"
+
+# ============================================================================
+# _classify_arc_shape
+# ============================================================================
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import _classify_arc_shape
+
+# All negative shifts = tragedy, 0 reversals
+shape, rev, comp = _classify_arc_shape(['+/-', '+/-', '+/-'])
+assert shape == 'tragedy', f'Expected tragedy, got {shape}'
+assert rev == 0, f'Expected 0 reversals, got {rev}'
+assert comp == False
+
+# All positive shifts = rags-to-riches
+shape, rev, comp = _classify_arc_shape(['-/+', '-/+', '-/+'])
+assert shape == 'rags-to-riches', f'Expected rags-to-riches, got {shape}'
+assert rev == 0
+
+# One reversal, first half negative = man-in-a-hole
+shape, rev, comp = _classify_arc_shape(['+/-', '+/-', '-/+', '-/+'])
+assert shape == 'man-in-a-hole', f'Expected man-in-a-hole, got {shape}'
+assert rev == 1
+
+# One reversal, first half positive = icarus
+shape, rev, comp = _classify_arc_shape(['-/+', '-/+', '+/-', '+/-'])
+assert shape == 'icarus', f'Expected icarus, got {shape}'
+assert rev == 1
+
+# Two+ reversals ending positive = cinderella
+shape, rev, comp = _classify_arc_shape(['+/-', '-/+', '+/-', '-/+'])
+assert shape == 'cinderella', f'Expected cinderella, got {shape}'
+assert rev == 3
+assert comp == True
+
+# Two+ reversals ending negative = oedipus
+shape, rev, comp = _classify_arc_shape(['-/+', '+/-', '-/+', '+/-'])
+assert shape == 'oedipus', f'Expected oedipus, got {shape}'
+assert rev == 3
+
+# Empty/unknown shifts = flat
+shape, rev, comp = _classify_arc_shape(['', '', ''])
+assert shape == 'flat', f'Expected flat, got {shape}'
+
+print('ok')
+")
+assert_contains "$RESULT" "ok" "_classify_arc_shape: correctly classifies all six archetypes"
+
+# ============================================================================
+# score_arcs
+# ============================================================================
+
+ARC_DIR="${TMPDIR}/arc-test/reference"
+mkdir -p "$ARC_DIR"
+cat > "${ARC_DIR}/scenes.csv" <<'CSV'
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+s01|1|One|1|alice|X|1|morning|1h|action|drafted|2000|2000
+s02|2|Two|1|alice|X|1|afternoon|1h|character|drafted|2000|2000
+s03|3|Three|1|bob|X|2|morning|1h|action|drafted|2000|2000
+s04|4|Four|2|alice|X|2|afternoon|1h|action|drafted|2000|2000
+s05|5|Five|2|bob|X|3|morning|1h|action|drafted|2000|2000
+s06|6|Six|2|alice|X|3|afternoon|1h|action|drafted|2000|2000
+s07|7|Seven|3|bob|X|4|morning|1h|action|drafted|2000|2000
+s08|8|Eight|3|alice|X|4|afternoon|1h|action|drafted|2000|2000
+CSV
+cat > "${ARC_DIR}/scene-intent.csv" <<'CSV'
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+s01|setup|action|calm to tense|truth|+/-|revelation|alice|alice|
+s02|react|sequel|tense to hope|justice|-/+|revelation|alice|alice|
+s03|investigate|action|neutral to neutral|truth|+/-|revelation|bob|bob|
+s04|escalate|action|hope to despair|safety|+/-|action|alice|alice|
+s05|continue|action|neutral to neutral|truth|+/-|revelation|bob|bob|
+s06|reverse|action|despair to resolve|trust|-/+|action|alice|alice|
+s07|continue|action|neutral to neutral|truth|+/-|revelation|bob|bob|
+s08|triumph|action|resolve to peace|truth|-/+|revelation|alice|alice|
+CSV
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.structural import score_arcs
+scenes = _read_csv_as_map('${ARC_DIR}/scenes.csv')
+intent = _read_csv_as_map('${ARC_DIR}/scene-intent.csv')
+result = score_arcs(scenes, intent)
+print(f'score={result[\"score\"]:.2f}')
+alice_arc = [c for c in result.get('character_arcs', []) if c['character'] == 'alice']
+bob_arc = [c for c in result.get('character_arcs', []) if c['character'] == 'bob']
+if alice_arc and bob_arc:
+    assert alice_arc[0]['arc_score'] > bob_arc[0]['arc_score'], 'Alice should score higher than Bob'
+    print('alice_beats_bob=true')
+print('ok')
+")
+assert_contains "$RESULT" "ok" "score_arcs: returns valid result"
+assert_contains "$RESULT" "alice_beats_bob=true" "score_arcs: varied arc beats flat arc"
+rm -rf "${TMPDIR}/arc-test"
