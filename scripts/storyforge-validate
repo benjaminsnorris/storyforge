@@ -65,11 +65,14 @@ if os.path.isfile(knowledge_path):
     knowledge = validate_knowledge_granularity(ref_dir, project_dir)
 
 structural_scores = None
+structural_previous = None
 if '${STRUCTURAL}' == 'true':
-    from storyforge.structural import structural_score
+    from storyforge.structural import structural_score, save_structural_scores, load_previous_scores
+    structural_previous = load_previous_scores(project_dir)
     structural_scores = structural_score(ref_dir)
+    save_structural_scores(structural_scores, project_dir)
 
-print(json.dumps({'structural': structural, 'schema': schema, 'knowledge': knowledge, 'scores': structural_scores}))
+print(json.dumps({'structural': structural, 'schema': schema, 'knowledge': knowledge, 'scores': structural_scores, 'scores_previous': structural_previous}))
 ")
 
 if [[ "$JSON_OUTPUT" == true ]]; then
@@ -156,15 +159,34 @@ if knowledge is not None:
 
 scores = combined.get('scores')
 if scores is not None:
+    prev = combined.get('scores_previous')
     print()
     print('--- Structural scoring ---')
-    print(f'  Overall: {scores[\"overall_score\"]:.2f} / 1.00')
+    overall_line = f'  Overall: {scores[\"overall_score\"]:.2f} / 1.00'
+    if prev is not None and 'overall' in prev:
+        delta = scores['overall_score'] - prev['overall']
+        if abs(delta) < 0.005:
+            overall_line += '  no change'
+        elif delta > 0:
+            overall_line += f'  +{delta:.2f} ▲'
+        else:
+            overall_line += f'  {delta:.2f} ▼'
+    print(overall_line)
     print()
     for dim in scores['dimensions']:
         bar_full = int(dim['score'] * 10)
         bar = chr(9608) * bar_full + chr(9617) * (10 - bar_full)
         status = '' if dim['score'] >= dim['target'] else '(below target)'
-        print(f'  {dim[\"label\"]:24s} {dim[\"score\"]:.2f}  {bar}  {status}')
+        line = f'  {dim[\"label\"]:24s} {dim[\"score\"]:.2f}  {bar}  {status}'
+        if prev is not None and dim['name'] in prev:
+            delta = dim['score'] - prev[dim['name']]
+            if abs(delta) < 0.005:
+                line += '  no change'
+            elif delta > 0:
+                line += f'  +{delta:.2f} ▲'
+            else:
+                line += f'  {delta:.2f} ▼'
+        print(line)
     if scores['top_findings']:
         print()
         print('  Top findings:')
