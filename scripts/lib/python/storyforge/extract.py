@@ -796,6 +796,104 @@ def _similarity(a: str, b: str) -> float:
     return len(intersection) / len(union)
 
 
+def _id_similarity(a: str, b: str) -> float:
+    """Character-level similarity for hyphen-delimited IDs using edit distance ratio.
+
+    Returns 0.0-1.0. Handles single-character typos well.
+    """
+    if a == b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    # Levenshtein distance via dynamic programming
+    m, n = len(a), len(b)
+    dp = list(range(n + 1))
+    for i in range(1, m + 1):
+        prev = dp[0]
+        dp[0] = i
+        for j in range(1, n + 1):
+            temp = dp[j]
+            if a[i - 1] == b[j - 1]:
+                dp[j] = prev
+            else:
+                dp[j] = 1 + min(prev, dp[j], dp[j - 1])
+            prev = temp
+    distance = dp[n]
+    return 1.0 - distance / max(m, n)
+
+
+def cleanup_physical_states(ref_dir: str) -> list[dict]:
+    """Normalize physical state IDs so physical_state_in matches prior physical_state_out.
+
+    Uses fuzzy matching: if a physical_state_in ID is >70% similar to a
+    physical_state_out ID from a prior scene, replace it with the exact ID.
+
+    Returns a list of fixes applied.
+    """
+    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda s: int(scenes_map[s].get('seq', 0)))
+
+    fixes = []
+    state_pool = set()
+
+    for sid in sorted_ids:
+        brief = briefs_map.get(sid, {})
+        state_in = brief.get('physical_state_in', '').strip()
+
+        if state_in and state_pool:
+            states_in = [s.strip() for s in state_in.split(';') if s.strip()]
+            new_states = []
+            changed = False
+
+            for state in states_in:
+                if state in state_pool:
+                    new_states.append(state)
+                    continue
+
+                best_match = None
+                best_score = 0.0
+                state_lower = state.lower()
+                for pool_state in state_pool:
+                    score = _id_similarity(state_lower, pool_state.lower())
+                    if score > best_score:
+                        best_score = score
+                        best_match = pool_state
+
+                if best_match and best_score >= 0.7:
+                    new_states.append(best_match)
+                    changed = True
+                else:
+                    new_states.append(state)
+
+            if changed:
+                old_val = state_in
+                new_val = ';'.join(new_states)
+                briefs_map[sid]['physical_state_in'] = new_val
+                fixes.append({
+                    'scene_id': sid,
+                    'field': 'physical_state_in',
+                    'old_value': old_val[:80] + '...' if len(old_val) > 80 else old_val,
+                    'new_value': new_val[:80] + '...' if len(new_val) > 80 else new_val,
+                })
+
+        state_out = brief.get('physical_state_out', '').strip()
+        if state_out:
+            for state in state_out.split(';'):
+                state = state.strip()
+                if state:
+                    state_pool.add(state)
+
+    if fixes:
+        ordered = sorted(briefs_map.values(), key=lambda r: r.get('id', ''))
+        _write_csv(os.path.join(ref_dir, 'scene-briefs.csv'), ordered, _FILE_MAP['scene-briefs.csv'])
+
+    return fixes
+
+
 def cleanup_mice_threads(ref_dir: str) -> list[dict]:
     """Fix unambiguous MICE thread nesting violations.
 

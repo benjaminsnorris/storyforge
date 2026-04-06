@@ -507,3 +507,47 @@ assert_contains "$RESULT" "rows=1" "reconcile: parses registry rows"
 assert_contains "$RESULT" "updates=2" "reconcile: parses update lines"
 assert_contains "$RESULT" "first_id=broken-arm" "reconcile: registry row has correct id"
 assert_contains "$RESULT" "ok" "reconcile: parse_registry_response works for physical-states"
+
+# ============================================================================
+# Cleanup: physical state fuzzy matching
+# ============================================================================
+
+echo "--- cleanup: normalizes physical state wording ---"
+
+RESULT=$(python3 -c "
+${PY}
+import os, tempfile, shutil
+from storyforge.extract import cleanup_physical_states
+from storyforge.elaborate import _read_csv, _write_csv, _read_csv_as_map, _FILE_MAP
+
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Inject a slightly-wrong state ID in physical_state_in
+briefs_path = os.path.join(ref, 'scene-briefs.csv')
+rows = _read_csv(briefs_path)
+for r in rows:
+    if r['id'] == 'act2-sc03':
+        # 'archive-key-doren' is a typo of 'archive-key-dorren'
+        r['physical_state_in'] = 'archive-key-doren;exhaustion-tessa'
+_write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+fixes = cleanup_physical_states(ref)
+print(f'fixes={len(fixes)}')
+if fixes:
+    print(f'fixed_field={fixes[0][\"field\"]}')
+
+# Verify the fix was written
+briefs = _read_csv_as_map(briefs_path)
+fixed_val = briefs['act2-sc03'].get('physical_state_in', '')
+has_correct = 'archive-key-dorren' in fixed_val
+print('corrected' if has_correct else 'not_corrected')
+print('ok')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "fixes=1" "cleanup: found 1 fix"
+assert_contains "$RESULT" "corrected" "cleanup: wrote corrected value"
+assert_contains "$RESULT" "ok" "cleanup: runs without error"
