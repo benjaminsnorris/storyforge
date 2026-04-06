@@ -38,6 +38,10 @@ VALID_VALUE_SHIFTS = frozenset({
 
 VALID_TURNING_POINTS = frozenset({'action', 'revelation'})
 
+VALID_PHYSICAL_STATE_CATEGORIES = frozenset({
+    'injury', 'equipment', 'ability', 'appearance', 'fatigue',
+})
+
 
 # ============================================================================
 # Column schema — constraint type and config for every column
@@ -217,6 +221,39 @@ COLUMN_SCHEMA = {
     'has_overflow': {
         'type': 'boolean', 'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'Whether briefs/{id}.md exists for extended detail.',
+    },
+    'physical_state_in': {
+        'type': 'registry', 'registry': 'physical-states.csv', 'array': True,
+        'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Physical state IDs active when scene begins. Normalized against reference/physical-states.csv.',
+    },
+    'physical_state_out': {
+        'type': 'registry', 'registry': 'physical-states.csv', 'array': True,
+        'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Physical state IDs active when scene ends. Includes physical_state_in plus new, minus resolved.',
+    },
+    # physical-states.csv registry columns
+    'physical_states_character': {
+        'type': 'registry', 'registry': 'characters.csv', 'array': False,
+        'file': 'physical-states.csv', 'stage': 'brief',
+        'description': 'Character this physical state belongs to.',
+    },
+    'physical_states_category': {
+        'type': 'enum', 'values': VALID_PHYSICAL_STATE_CATEGORIES,
+        'file': 'physical-states.csv', 'stage': 'brief',
+        'description': 'State category: injury, equipment, ability, appearance, fatigue.',
+    },
+    'physical_states_acquired': {
+        'type': 'scene_ids', 'file': 'physical-states.csv', 'stage': 'brief',
+        'description': 'Scene where this state is acquired.',
+    },
+    'physical_states_resolves': {
+        'type': 'free_text', 'file': 'physical-states.csv', 'stage': 'brief',
+        'description': 'Scene ID where resolved, or "never" for permanent.',
+    },
+    'physical_states_action_gating': {
+        'type': 'boolean', 'file': 'physical-states.csv', 'stage': 'brief',
+        'description': 'Whether this state constrains character capability.',
     },
 }
 
