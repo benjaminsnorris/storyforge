@@ -429,6 +429,124 @@ def parse_knowledge_response(response: str, scene_id: str) -> dict[str, str]:
 
 
 # ============================================================================
+# Phase 3c: Physical state chain (sequential)
+# ============================================================================
+
+def build_physical_state_prompt(scene_id: str, scene_text: str,
+                                skeleton: dict[str, str],
+                                prior_states: dict[str, set],
+                                prior_scene_summaries: list[str],
+                                registries_text: str = '') -> str:
+    """Build prompt for Phase 3c: extract physical_state_in, physical_state_out.
+    Must be called sequentially."""
+    on_stage = skeleton.get('on_stage', skeleton.get('pov', 'unknown'))
+    prior_context = '\n'.join(prior_scene_summaries[-10:]) if prior_scene_summaries else '(first scene)'
+
+    # Format prior states per character
+    if prior_states:
+        state_lines = []
+        for char, states in sorted(prior_states.items()):
+            state_lines.append(f"  {char}: {'; '.join(sorted(states))}")
+        prior_states_text = '\n'.join(state_lines)
+    else:
+        prior_states_text = '(no prior physical states established)'
+
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
+
+    return f"""Track the physical state of characters through this scene.
+
+## On-stage characters: {on_stage}
+
+## Active physical states entering this scene:
+{prior_states_text}
+
+## Recent prior scenes (for context):
+{prior_context}
+
+## Scene: {scene_id}
+{scene_text}
+{registries_section}
+## Instructions
+
+Extract physical state changes for on-stage characters. Only track states that affect what characters can do, how they look, or what they have.
+
+Categories: injury, equipment, ability, appearance, fatigue.
+
+Litmus test: Would a drafter who knows about this state write a *different scene* than one who doesn't? If removing the state wouldn't change the prose, don't track it.
+
+Too granular (don't): "Character frowns", "Hair is windblown", "Feels cold"
+Right level: "Left arm broken, splinted", "Carrying the stolen compass", "Exhausted after 36 hours awake"
+
+Output each field on its own labeled line:
+
+PHYSICAL_STATE_IN: [semicolon-separated state IDs active at START — carry forward from prior states for on-stage characters only]
+PHYSICAL_STATE_OUT: [semicolon-separated state IDs active at END — state_in plus new states acquired, minus states resolved]
+NEW_STATES: [one per line if any: id|character|description|category|action_gating — use kebab-case IDs]
+RESOLVED_STATES: [semicolon-separated state IDs that resolve during this scene, or empty if none]
+
+IMPORTANT: Use EXACT state IDs for carry-forward. New states need new IDs in kebab-case (e.g., broken-arm-marcus, has-compass-elena)."""
+
+
+def parse_physical_state_response(response: str, scene_id: str) -> dict:
+    """Parse Phase 3c response.
+
+    Returns:
+        Dict with keys: id, physical_state_in, physical_state_out,
+        _new_states (list of dicts), _resolved (list of IDs).
+    """
+    result = {'id': scene_id, '_new_states': [], '_resolved': []}
+    label_map = {
+        'PHYSICAL_STATE_IN': 'physical_state_in',
+        'PHYSICAL_STATE_OUT': 'physical_state_out',
+    }
+
+    lines = response.split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        match = re.match(r'^([A-Z_]+):\s*(.*)', line)
+        if match:
+            label = match.group(1)
+            value = match.group(2).strip()
+            if label in label_map and value:
+                result[label_map[label]] = value
+            elif label == 'NEW_STATES':
+                # First new state may be on this line
+                if value:
+                    parts = value.split('|')
+                    if len(parts) >= 4:
+                        result['_new_states'].append({
+                            'id': parts[0].strip(),
+                            'character': parts[1].strip(),
+                            'description': parts[2].strip(),
+                            'category': parts[3].strip(),
+                            'action_gating': parts[4].strip() if len(parts) > 4 else 'false',
+                        })
+                # Check subsequent lines for more new states
+                i += 1
+                while i < len(lines):
+                    nline = lines[i].strip()
+                    if not nline or re.match(r'^[A-Z_]+:', nline):
+                        break
+                    nparts = nline.split('|')
+                    if len(nparts) >= 4:
+                        result['_new_states'].append({
+                            'id': nparts[0].strip(),
+                            'character': nparts[1].strip(),
+                            'description': nparts[2].strip(),
+                            'category': nparts[3].strip(),
+                            'action_gating': nparts[4].strip() if len(nparts) > 4 else 'false',
+                        })
+                    i += 1
+                continue
+            elif label == 'RESOLVED_STATES' and value:
+                result['_resolved'] = [s.strip() for s in value.split(';') if s.strip()]
+        i += 1
+
+    return result
+
+
+# ============================================================================
 # Expansion analysis (novella-to-novel)
 # ============================================================================
 

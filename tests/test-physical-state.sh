@@ -390,3 +390,56 @@ print('ok')
 assert_contains "$RESULT" "has_available" "fix prompt: shows available states"
 assert_contains "$RESULT" "has_format" "fix prompt: specifies output format"
 assert_contains "$RESULT" "ok" "fix prompt: builds without error"
+
+# ============================================================================
+# Extraction: Phase 3c physical state
+# ============================================================================
+
+echo "--- extract: build_physical_state_prompt runs ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.extract import build_physical_state_prompt
+
+prompt = build_physical_state_prompt(
+    scene_id='act1-sc01',
+    scene_text='Dorren reviewed the maps carefully.',
+    skeleton={'pov': 'Dorren Hayle', 'on_stage': 'Dorren Hayle;Tessa Merrin'},
+    prior_states={},
+    prior_scene_summaries=[],
+)
+has_instructions = 'PHYSICAL_STATE_IN' in prompt
+has_categories = 'injury' in prompt and 'equipment' in prompt
+print('has_instructions' if has_instructions else 'no_instructions')
+print('has_categories' if has_categories else 'no_categories')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "has_instructions" "extract: prompt has output labels"
+assert_contains "$RESULT" "has_categories" "extract: prompt lists categories"
+assert_contains "$RESULT" "ok" "extract: build_physical_state_prompt runs"
+
+echo "--- extract: parse_physical_state_response ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.extract import parse_physical_state_response
+
+response = '''PHYSICAL_STATE_IN: archive-key-dorren
+PHYSICAL_STATE_OUT: archive-key-dorren;sprained-ankle-tessa
+NEW_STATES: sprained-ankle-tessa|Tessa Merrin|right ankle sprained|injury|true
+RESOLVED_STATES: '''
+
+result = parse_physical_state_response(response, 'act2-sc02')
+print(f\"id={result['id']}\")
+print(f\"psi={result.get('physical_state_in', '')}\")
+print(f\"pso={result.get('physical_state_out', '')}\")
+print(f\"new={len(result.get('_new_states', []))}\")
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "id=act2-sc02" "extract: parse sets scene id"
+assert_contains "$RESULT" "psi=archive-key-dorren" "extract: parse extracts physical_state_in"
+assert_contains "$RESULT" "pso=archive-key-dorren;sprained-ankle-tessa" "extract: parse extracts physical_state_out"
+assert_contains "$RESULT" "new=1" "extract: parse extracts new states"
+assert_contains "$RESULT" "ok" "extract: parse runs without error"
