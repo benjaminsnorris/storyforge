@@ -741,3 +741,67 @@ def reconcile_domain(
         'updates_applied': updates_applied,
         'fields_normalized': fields_normalized,
     }
+
+
+# ============================================================================
+# Briefs domain: abstract language detection
+# ============================================================================
+
+ABSTRACT_INDICATORS = {
+    'realizes', 'recognizes', 'connects', 'crystallizes', 'deepens',
+    'builds', 'grows', 'shifts', 'transforms', 'emerges', 'settles',
+    'dawns', 'unfolds', 'intensifies', 'resolves', 'strengthens',
+    'the realization', 'the parallel', 'the tension', 'the connection',
+    'the weight of', 'the cost of', 'the truth of', 'the meaning of',
+    'beginning to', 'starting to', 'learning to',
+}
+
+CONCRETE_INDICATORS = {
+    'hands', 'eyes', 'door', 'walks', 'picks up', 'sets down',
+    'turns', 'stops', 'reaches', 'holds', 'drops', 'pulls',
+    'sits', 'stands', 'crosses', 'opens', 'closes', 'looks',
+    'says', 'asks', 'watches', 'hears', 'smells', 'tastes',
+    'runs', 'steps', 'grabs', 'pushes', 'carries', 'presses',
+}
+
+_CONCRETIZABLE_FIELDS = ['key_actions', 'crisis', 'decision']
+
+
+def detect_abstract_fields(
+    briefs_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Scan brief fields for abstract/thematic language.
+
+    Args:
+        briefs_map: dict keyed by scene ID, values are brief row dicts.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+
+    Returns:
+        List of dicts: {scene_id, field, value, abstract_count, concrete_count}.
+        Only returns fields where abstract_count >= 2 and abstract_count > concrete_count.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(briefs_map.keys())
+
+    for sid in ids_to_check:
+        brief = briefs_map.get(sid, {})
+        for field in _CONCRETIZABLE_FIELDS:
+            value = brief.get(field, '').strip()
+            if not value:
+                continue
+
+            value_lower = value.lower()
+            abstract_count = sum(1 for ind in ABSTRACT_INDICATORS if ind in value_lower)
+            concrete_count = sum(1 for ind in CONCRETE_INDICATORS if ind in value_lower)
+
+            if abstract_count >= 2 and abstract_count > concrete_count:
+                results.append({
+                    'scene_id': sid,
+                    'field': field,
+                    'value': value,
+                    'abstract_count': abstract_count,
+                    'concrete_count': concrete_count,
+                })
+
+    return results
