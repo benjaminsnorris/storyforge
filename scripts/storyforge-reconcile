@@ -31,8 +31,8 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --domain NAME     Run one domain (characters, locations, values, mice-threads, knowledge, outcomes)
-  --phase N         Run domains for extraction phase (1=characters+locations, 2=values+mice-threads, 3=knowledge+outcomes)
+  --domain NAME     Run one domain (characters, locations, values, mice-threads, knowledge, outcomes, physical-states)
+  --phase N         Run domains for extraction phase (1=characters+locations, 2=values+mice-threads, 3=knowledge+outcomes+physical-states)
   --dry-run         Print prompts without calling API
   -h, --help        Show this help
 EOF
@@ -61,7 +61,7 @@ fi
 
 PHASE1_DOMAINS=(characters locations)
 PHASE2_DOMAINS=(values mice-threads)
-PHASE3_DOMAINS=(knowledge outcomes)
+PHASE3_DOMAINS=(knowledge outcomes physical-states)
 
 DOMAINS=()
 if [[ -n "$DOMAIN" ]]; then
@@ -74,7 +74,7 @@ elif [[ -n "$PHASE" ]]; then
         *) log "ERROR: --phase must be 1, 2, or 3"; exit 1 ;;
     esac
 else
-    DOMAINS=(characters locations values mice-threads knowledge outcomes)
+    DOMAINS=(characters locations values mice-threads knowledge outcomes physical-states)
 fi
 
 # ============================================================================

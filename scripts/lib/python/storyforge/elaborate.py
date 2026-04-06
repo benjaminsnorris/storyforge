@@ -30,6 +30,7 @@ _BRIEFS_COLS = [
     'id', 'goal', 'conflict', 'outcome', 'crisis', 'decision',
     'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
     'emotions', 'motifs', 'continuity_deps', 'has_overflow',
+    'physical_state_in', 'physical_state_out',
 ]
 
 _FILE_MAP = {
@@ -607,6 +608,122 @@ def _validate_knowledge(scenes_map, briefs_map, checks):
                              'Knowledge flow is consistent'))
 
 
+def _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_dir: str = ''):
+    """Check physical state flow: physical_state_in must come from prior scenes' physical_state_out."""
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+
+    available_states = set()
+
+    # Lazy-load the physical-states registry (needed for checks 2 and 3)
+    registry = None  # dict: state_id -> registry row
+
+    def _get_registry():
+        nonlocal registry
+        if registry is None:
+            if ref_dir:
+                registry_path = os.path.join(ref_dir, 'physical-states.csv')
+                registry = _read_csv_as_map(registry_path)
+            else:
+                registry = {}
+        return registry
+
+    for sid in sorted_ids:
+        brief = briefs_map.get(sid, {})
+        state_in_raw = brief.get('physical_state_in', '').strip()
+        state_out_raw = brief.get('physical_state_out', '').strip()
+
+        states_in = {s.strip() for s in state_in_raw.split(';') if s.strip()} if state_in_raw else set()
+        states_out = {s.strip() for s in state_out_raw.split(';') if s.strip()} if state_out_raw else set()
+
+        # Check 1 — state availability
+        if states_in:
+            unknown = states_in - available_states
+            if unknown:
+                checks.append(_check(
+                    'physical_state', 'state-availability', False,
+                    f"Scene {sid} references physical states not established by prior scenes: "
+                    f"{sorted(unknown)}",
+                    scene_id=sid,
+                    severity='advisory',
+                ))
+
+        # Check 2 — state disappearance (advisory)
+        # A state that appears in state_in but not state_out silently vanishes,
+        # unless the registry says it resolves in this scene.
+        for state_id in states_in:
+            if state_id not in states_out:
+                reg = _get_registry()
+                reg_row = reg.get(state_id, {})
+                resolves_here = reg_row.get('resolves', '').strip() == sid
+                if not resolves_here:
+                    checks.append(_check(
+                        'physical_state', 'state-disappearance', False,
+                        f"Scene {sid}: state '{state_id}' is in physical_state_in but not "
+                        f"physical_state_out and registry does not list this scene as its resolution",
+                        scene_id=sid,
+                        severity='advisory',
+                    ))
+
+        # Accumulate available states from this scene's output
+        available_states.update(states_out)
+
+    # Check 3 — on-stage relevance (advisory)
+    # If a character has an active action-gating state and is on-stage in a scene
+    # but that state is not in physical_state_in, flag it.
+    reg = _get_registry()
+    if reg:
+        # Build a map: character -> set of action-gating state IDs
+        action_gating_by_char = {}
+        for state_id, row in reg.items():
+            if row.get('action_gating', '').strip().lower() == 'true':
+                char = row.get('character', '').strip()
+                if char:
+                    action_gating_by_char.setdefault(char, set()).add(state_id)
+
+        if action_gating_by_char:
+            # Walk scenes again, tracking which action-gating states are currently active
+            active_action_gating = set()  # set of state IDs currently active
+            for sid in sorted_ids:
+                brief = briefs_map.get(sid, {})
+                state_in_raw = brief.get('physical_state_in', '').strip()
+                state_out_raw = brief.get('physical_state_out', '').strip()
+
+                states_in = {s.strip() for s in state_in_raw.split(';') if s.strip()} if state_in_raw else set()
+                states_out = {s.strip() for s in state_out_raw.split(';') if s.strip()} if state_out_raw else set()
+
+                intent_row = intent_map.get(sid, {})
+                on_stage_raw = intent_row.get('on_stage', '').strip()
+                on_stage = {c.strip() for c in on_stage_raw.split(';') if c.strip()} if on_stage_raw else set()
+
+                for char, ag_states in action_gating_by_char.items():
+                    active_for_char = ag_states & active_action_gating
+                    if active_for_char and char in on_stage:
+                        # Character is on stage with active action-gating states —
+                        # at least one should appear in physical_state_in
+                        missing_from_in = active_for_char - states_in
+                        if missing_from_in:
+                            checks.append(_check(
+                                'physical_state', 'on-stage-relevance', False,
+                                f"Scene {sid}: '{char}' is on-stage with active action-gating "
+                                f"state(s) {sorted(missing_from_in)} not listed in physical_state_in",
+                                scene_id=sid,
+                                severity='advisory',
+                            ))
+
+                # Update active action-gating states from this scene's output
+                active_action_gating.update(s for s in states_out if s in reg and
+                                            reg[s].get('action_gating', '').strip().lower() == 'true')
+                # Remove states that dropped out of state_out relative to state_in
+                # (a state was in state_in but not state_out means it was resolved)
+                for state_id in states_in - states_out:
+                    active_action_gating.discard(state_id)
+
+    if not any(c['category'] == 'physical_state' and not c['passed'] for c in checks):
+        checks.append(_check('physical_state', 'state-availability', True,
+                             'Physical state flow is consistent'))
+
+
 def _validate_pacing(scenes_map, intent_map, checks):
     """Check pacing: polarity stretches, scene type rhythm, turning point variety."""
     sorted_ids = sorted(scenes_map.keys(),
@@ -756,6 +873,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_timeline(scenes_map, checks)
     _validate_knowledge(scenes_map, briefs_map, checks)
     _validate_pacing(scenes_map, intent_map, checks)
+    _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_dir=ref_dir)
 
     failures = [c for c in checks if not c['passed']]
     return {

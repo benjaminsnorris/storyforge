@@ -38,6 +38,10 @@ VALID_VALUE_SHIFTS = frozenset({
 
 VALID_TURNING_POINTS = frozenset({'action', 'revelation'})
 
+VALID_PHYSICAL_STATE_CATEGORIES = frozenset({
+    'injury', 'equipment', 'ability', 'appearance', 'fatigue',
+})
+
 
 # ============================================================================
 # Column schema — constraint type and config for every column
@@ -217,6 +221,39 @@ COLUMN_SCHEMA = {
     'has_overflow': {
         'type': 'boolean', 'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'Whether briefs/{id}.md exists for extended detail.',
+    },
+    'physical_state_in': {
+        'type': 'registry', 'registry': 'physical-states.csv', 'array': True,
+        'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Physical state IDs active when scene begins. Normalized against reference/physical-states.csv.',
+    },
+    'physical_state_out': {
+        'type': 'registry', 'registry': 'physical-states.csv', 'array': True,
+        'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'Physical state IDs active when scene ends. Includes physical_state_in plus new, minus resolved.',
+    },
+    # physical-states.csv registry columns
+    'physical_states_character': {
+        'type': 'registry', 'registry': 'characters.csv', 'array': False,
+        'file': 'physical-states.csv', 'stage': 'brief',
+        'description': 'Character this physical state belongs to.',
+    },
+    'physical_states_category': {
+        'type': 'enum', 'values': VALID_PHYSICAL_STATE_CATEGORIES,
+        'file': 'physical-states.csv', 'stage': 'brief',
+        'description': 'State category: injury, equipment, ability, appearance, fatigue.',
+    },
+    'physical_states_acquired': {
+        'type': 'scene_ids', 'file': 'physical-states.csv', 'stage': 'brief',
+        'description': 'Scene where this state is acquired.',
+    },
+    'physical_states_resolves': {
+        'type': 'free_text', 'file': 'physical-states.csv', 'stage': 'brief',
+        'description': 'Scene ID where resolved, or "never" for permanent.',
+    },
+    'physical_states_action_gating': {
+        'type': 'boolean', 'file': 'physical-states.csv', 'stage': 'brief',
+        'description': 'Whether this state constrains character capability.',
     },
 }
 
@@ -558,6 +595,76 @@ def validate_knowledge_granularity(ref_dir: str, project_dir: str | None = None)
         'total_facts': total_facts,
         'total_scenes': total_scenes,
         'facts_per_scene': facts_per_scene,
+        'warnings': warnings,
+    }
+
+
+MAX_STATE_DESCRIPTION_WORDS = 20
+MAX_NEW_STATES_PER_SCENE = 3
+
+
+def validate_physical_state_granularity(ref_dir: str, project_dir: str | None = None) -> dict:
+    """Check physical states for over-granularity.
+
+    Registry-level: flag descriptions longer than MAX_STATE_DESCRIPTION_WORDS.
+    Scene-level: flag scenes with more than MAX_NEW_STATES_PER_SCENE new states.
+
+    Returns:
+        Dict with total_states, total_scenes, warnings.
+    """
+    warnings: list[dict] = []
+
+    # --- Registry-level checks ---
+    states_path = os.path.join(ref_dir, 'physical-states.csv')
+    total_states = 0
+    if os.path.isfile(states_path):
+        for row in _read_csv(states_path):
+            total_states += 1
+            desc = row.get('description', '').strip()
+            if not desc:
+                continue
+            word_count = len(desc.split())
+            if word_count > MAX_STATE_DESCRIPTION_WORDS:
+                warnings.append({
+                    'type': 'long_description',
+                    'id': row.get('id', '?'),
+                    'description': desc,
+                    'word_count': word_count,
+                })
+
+    # --- Scene-level checks ---
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    total_scenes = 0
+    if os.path.isfile(briefs_path):
+        for row in _read_csv(briefs_path):
+            total_scenes += 1
+            ps_in_raw = row.get('physical_state_in', '').strip()
+            ps_out_raw = row.get('physical_state_out', '').strip()
+
+            ps_in = {e.strip() for e in ps_in_raw.split(';') if e.strip()} if ps_in_raw else set()
+            ps_out = {e.strip() for e in ps_out_raw.split(';') if e.strip()} if ps_out_raw else set()
+
+            new_states = sorted(ps_out - ps_in)
+
+            if len(new_states) > MAX_NEW_STATES_PER_SCENE:
+                warnings.append({
+                    'type': 'too_many_new_states',
+                    'scene_id': row.get('id', '?'),
+                    'new_state_count': len(new_states),
+                    'states': new_states,
+                })
+
+    if total_scenes > 0 and total_states > total_scenes * 2:
+        warnings.append({
+            'type': 'over_specified_registry',
+            'total_states': total_states,
+            'total_scenes': total_scenes,
+            'ratio': round(total_states / total_scenes, 1),
+        })
+
+    return {
+        'total_states': total_states,
+        'total_scenes': total_scenes,
         'warnings': warnings,
     }
 

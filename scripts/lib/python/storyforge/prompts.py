@@ -956,6 +956,7 @@ def build_scene_prompt_from_briefs(
                     f"**{dep_id}** — {dep.get('function', '')}\n"
                     f"  outcome: {dep.get('outcome', '')}\n"
                     f"  knowledge_out: {dep.get('knowledge_out', '')}\n"
+                    f"  physical_state_out: {dep.get('physical_state_out', '')}\n"
                     f"  emotional_arc: {dep.get('emotional_arc', '')}"
                 )
                 dep_parts.append(dep_summary)
@@ -978,6 +979,35 @@ def build_scene_prompt_from_briefs(
             char_block = f"## Character Bible (on-stage: {on_stage})\n\n"
             with open(char_path) as f:
                 char_block += f.read().strip()
+
+    # Physical state context
+    state_block = ''
+    state_in = scene.get('physical_state_in', '').strip()
+    if state_in:
+        state_ids = [s.strip() for s in state_in.split(';') if s.strip()]
+        # Try to load registry for descriptions
+        states_registry = {}
+        states_path = os.path.join(ref_dir, 'physical-states.csv')
+        if os.path.isfile(states_path):
+            from .elaborate import _read_csv_as_map
+            states_registry = _read_csv_as_map(states_path)
+
+        state_lines = []
+        for sid in state_ids:
+            entry = states_registry.get(sid, {})
+            char = entry.get('character', '')
+            desc = entry.get('description', sid)
+            gating = entry.get('action_gating', 'false').lower() == 'true'
+            line = f"- **{char}**: {desc}" if char else f"- {desc}"
+            if gating:
+                line += " *(action-gating)*"
+            state_lines.append(line)
+
+        state_block = (
+            "## Active Physical States\n\n"
+            "Characters entering this scene carry these states:\n\n"
+            + '\n'.join(state_lines)
+        )
 
     # Craft principles
     craft = build_weighted_directive(project_dir)
@@ -1024,6 +1054,7 @@ The brief is your contract. Deliver:
 - Do NOT invent character relationships, history, or backstory not present in the brief, knowledge chain, or character bible
 - Do NOT add characters not listed in on_stage
 - Do NOT resolve threads not listed in mice_threads for this scene
+- Acknowledge all action-gating physical states — characters cannot use injured limbs, don't have lost equipment
 
 Output the scene prose only. No metadata, no frontmatter, no commentary."""
 
@@ -1057,6 +1088,8 @@ Do NOT add creative interpretation or suggestions."""
 {scene_block}
 
 {dep_block}
+
+{state_block}
 
 {voice_guide}
 

@@ -53,6 +53,7 @@ REQUIRED_FIELDS = [
 ENRICHMENT_FIELDS = [
     'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
     'emotions', 'motifs', 'continuity_deps', 'mice_threads',
+    'physical_state_in', 'physical_state_out',
 ]
 
 REQUIRED_WEIGHT = 1.0
@@ -1105,6 +1106,99 @@ def score_knowledge_chain(scenes_map, briefs_map):
 
 
 # ---------------------------------------------------------------------------
+# Physical State Chain
+# ---------------------------------------------------------------------------
+
+def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
+    """Score physical state tracking — coverage, persistence, density.
+
+    Args:
+        scenes_map: dict from _read_csv_as_map on scenes.csv
+        briefs_map: dict from _read_csv_as_map on scene-briefs.csv
+        ref_dir: path to reference dir (for physical-states.csv registry)
+
+    Returns:
+        {'score': float 0-1, 'findings': [...]}
+    """
+    findings = []
+
+    def _seq(item):
+        try:
+            return int(item[1].get('seq', 0))
+        except (ValueError, TypeError):
+            return 0
+
+    ordered = sorted(scenes_map.items(), key=_seq)
+    scene_ids = [sid for sid, _ in ordered]
+    n = len(scene_ids)
+
+    if n == 0:
+        return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'brief'}]}
+
+    # --- 1. Coverage (40%) ---
+    has_psi = 0
+    has_pso = 0
+    all_states = {}  # state_id -> list of scene indices
+
+    for idx, sid in enumerate(scene_ids):
+        brief = briefs_map.get(sid, {})
+        psi = brief.get('physical_state_in', '').strip()
+        pso = brief.get('physical_state_out', '').strip()
+        if psi:
+            has_psi += 1
+            for state in psi.split(';'):
+                state = state.strip()
+                if state:
+                    all_states.setdefault(state, []).append(idx)
+        if pso:
+            has_pso += 1
+            for state in pso.split(';'):
+                state = state.strip()
+                if state:
+                    all_states.setdefault(state, []).append(idx)
+
+    total_states = len(all_states)
+
+    # If no states at all, score 0 with no findings (it's optional)
+    if total_states == 0:
+        return {'score': 0.0, 'findings': []}
+
+    coverage_in = has_psi / n if n > 0 else 0.0
+    coverage_out = has_pso / n if n > 0 else 0.0
+    coverage = (coverage_in + coverage_out) / 2.0
+
+    if coverage < 0.2:
+        findings.append({
+            'message': f"Low physical state coverage: {has_psi}/{n} scenes have physical_state_in, {has_pso}/{n} have physical_state_out",
+            'severity': 'important',
+            'fix_location': 'brief',
+        })
+
+    # --- 2. Persistence (35%) ---
+    persistent_states = {s: idxs for s, idxs in all_states.items() if len(idxs) >= 2}
+    persistence = 1.0
+    if persistent_states:
+        contiguous_count = 0
+        for state_id, indices in persistent_states.items():
+            min_idx = min(indices)
+            max_idx = max(indices)
+            expected_span = max_idx - min_idx + 1
+            actual_span = len(set(indices))
+            if actual_span >= expected_span * 0.7:
+                contiguous_count += 1
+        persistence = contiguous_count / len(persistent_states) if persistent_states else 1.0
+
+    # --- 3. Density (25%) ---
+    density = min(1.0, total_states / (n * 0.3)) if n > 0 else 0.0
+
+    # Composite
+    score = coverage * 0.4 + persistence * 0.35 + density * 0.25
+    score = max(0.0, min(1.0, score))
+
+    return {'score': score, 'findings': findings}
+
+
+# ---------------------------------------------------------------------------
 # Function Variety
 # ---------------------------------------------------------------------------
 
@@ -1235,6 +1329,7 @@ _DEFAULT_WEIGHTS = {
     'knowledge_chain': 0.5,
     'function_variety': 0.7,
     'completeness': 0.3,
+    'physical_state': 0.3,
 }
 
 _DIMENSION_LABELS = {
@@ -1246,6 +1341,7 @@ _DIMENSION_LABELS = {
     'knowledge_chain': 'Knowledge Chain',
     'function_variety': 'Scene Function Variety',
     'completeness': 'Structural Completeness',
+    'physical_state': 'Physical State Chain',
 }
 
 _DIMENSION_TARGETS = {
@@ -1257,6 +1353,7 @@ _DIMENSION_TARGETS = {
     'knowledge_chain': 0.60,
     'function_variety': 0.65,
     'completeness': 0.80,
+    'physical_state': 0.50,
 }
 
 
@@ -1289,7 +1386,7 @@ def structural_score(ref_dir, weights=None):
     briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
     briefs_map = _read_csv_as_map(briefs_path) if os.path.exists(briefs_path) else {}
 
-    # Call all 8 scoring functions
+    # Call all 9 scoring functions
     results = {
         'completeness': score_completeness(scenes_map, intent_map, briefs_map),
         'thematic_concentration': score_thematic_concentration(intent_map),
@@ -1299,6 +1396,7 @@ def structural_score(ref_dir, weights=None):
         'mice_health': score_mice_health(scenes_map, intent_map),
         'knowledge_chain': score_knowledge_chain(scenes_map, briefs_map),
         'function_variety': score_function_variety(intent_map, briefs_map),
+        'physical_state': score_physical_state_chain(scenes_map, briefs_map, ref_dir),
     }
 
     # Build dimensions list and compute weighted average

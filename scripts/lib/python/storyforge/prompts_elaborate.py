@@ -409,6 +409,8 @@ For each scene that needs a brief, define the complete drafting contract:
 - **decision**: What the character actively chooses
 - **knowledge_in**: Semicolon-separated STRUCTURALLY USEFUL facts the POV character knows entering. Use EXACT wording that matches prior scenes' knowledge_out. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
 - **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
+- **physical_state_in**: Semicolon-separated state IDs that on-stage characters carry INTO this scene. Use EXACT IDs from prior scenes' physical_state_out. Only track states that affect capability, appearance, or equipment — injuries, items gained/lost, abilities changed, visible changes, fatigue. Not temporary emotions or scene-local conditions.
+- **physical_state_out**: physical_state_in plus 0-2 NEW states acquired during this scene, minus any states that resolve during this scene.
 - **key_actions**: Semicolon-separated concrete things that happen
 - **key_dialogue**: Specific lines or exchanges that must appear in the prose
 - **emotions**: Semicolon-separated emotional beats in sequence
@@ -419,7 +421,7 @@ For each scene that needs a brief, define the complete drafting contract:
 ### Output Format
 
 ```briefs-csv
-id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow|physical_state_in|physical_state_out
 (one row per scene being briefed)
 ```
 
@@ -435,6 +437,10 @@ id|status
 - knowledge_in must use EXACT wording from prior scenes' knowledge_out — validation will check this
 - Target 0-2 new knowledge facts per scene. Most scenes should add 0-1. A full novel should have 50-120 total facts, not 500+
 - continuity_deps should list the minimum set of scenes whose knowledge_out this scene needs
+- physical_state_in must reference IDs established in prior scenes' physical_state_out
+- Target 0-2 state changes per scene. A full novel should have 15-40 total state entries.
+- States persist until explicitly resolved — do not silently drop them
+- continuity_deps should also list scenes whose physical_state_out this scene needs
 - Every scene must have goal/conflict/outcome filled
 - Key dialogue should sound like the character, not the author
 - Scenes with no continuity_deps can be drafted in parallel — maximize these
@@ -703,6 +709,75 @@ def build_knowledge_fix_prompt(
 Respond with ONLY a pipe-delimited CSV row. The header is:
 
 id|knowledge_in|knowledge_out|continuity_deps
+
+Provide exactly one data row. Semicolon-separate multiple values within a field.
+No explanation. No markdown fencing. Just the header line and the data line.
+"""
+
+
+def build_physical_state_fix_prompt(
+    scene_id: str,
+    project_dir: str,
+    scenes_dir: str,
+    available_states: set,
+) -> str:
+    """Build a prompt to fix physical_state_in/physical_state_out for one scene.
+
+    Args:
+        scene_id: The scene to fix.
+        project_dir: Path to the book project.
+        scenes_dir: Path to the scenes/ directory with prose files.
+        available_states: Set of exact state IDs from all prior scenes' physical_state_out.
+
+    Returns:
+        Prompt string for Claude.
+    """
+    from .elaborate import get_scene
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    scene_data = get_scene(scene_id, ref_dir)
+
+    # Read prose excerpt
+    prose_path = os.path.join(scenes_dir, f'{scene_id}.md')
+    prose = _read_file(prose_path)
+    if prose:
+        words = prose.split()
+        if len(words) > 500:
+            prose = ' '.join(words[:500]) + '\n[... truncated ...]'
+
+    current_psi = scene_data.get('physical_state_in', '') if scene_data else ''
+    current_pso = scene_data.get('physical_state_out', '') if scene_data else ''
+
+    on_stage = scene_data.get('on_stage', '') if scene_data else ''
+
+    sorted_states = sorted(available_states) if available_states else ['(none yet — no prior physical states established)']
+
+    return f"""You are fixing the physical state chain for a scene in a novel. The physical_state_in field must use EXACT IDs from prior scenes' physical_state_out.
+
+## Scene: {scene_id}
+## On-stage characters: {on_stage}
+
+### Prose Excerpt
+{prose if prose else '(no prose available)'}
+
+### Current Values (may have mismatches)
+- physical_state_in: {current_psi}
+- physical_state_out: {current_pso}
+
+### Available Physical States (exact IDs from all prior scenes' physical_state_out)
+{chr(10).join(f'- {s}' for s in sorted_states)}
+
+## Instructions
+
+1. Rewrite physical_state_in using ONLY state IDs from the available list above that are relevant to on-stage characters in this scene.
+2. Rewrite physical_state_out as: the corrected physical_state_in PLUS any new states acquired during this scene, MINUS any states that resolve during this scene.
+3. Only track states that affect what characters can do, how they look, or what they have.
+
+## Output Format
+
+Respond with ONLY a pipe-delimited CSV row. The header is:
+
+id|physical_state_in|physical_state_out
 
 Provide exactly one data row. Semicolon-separate multiple values within a field.
 No explanation. No markdown fencing. Just the header line and the data line.

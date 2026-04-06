@@ -429,6 +429,124 @@ def parse_knowledge_response(response: str, scene_id: str) -> dict[str, str]:
 
 
 # ============================================================================
+# Phase 3c: Physical state chain (sequential)
+# ============================================================================
+
+def build_physical_state_prompt(scene_id: str, scene_text: str,
+                                skeleton: dict[str, str],
+                                prior_states: dict[str, set],
+                                prior_scene_summaries: list[str],
+                                registries_text: str = '') -> str:
+    """Build prompt for Phase 3c: extract physical_state_in, physical_state_out.
+    Must be called sequentially."""
+    on_stage = skeleton.get('on_stage', skeleton.get('pov', 'unknown'))
+    prior_context = '\n'.join(prior_scene_summaries[-10:]) if prior_scene_summaries else '(first scene)'
+
+    # Format prior states per character
+    if prior_states:
+        state_lines = []
+        for char, states in sorted(prior_states.items()):
+            state_lines.append(f"  {char}: {'; '.join(sorted(states))}")
+        prior_states_text = '\n'.join(state_lines)
+    else:
+        prior_states_text = '(no prior physical states established)'
+
+    registries_section = f'\n{registries_text}\n' if registries_text else ''
+
+    return f"""Track the physical state of characters through this scene.
+
+## On-stage characters: {on_stage}
+
+## Active physical states entering this scene:
+{prior_states_text}
+
+## Recent prior scenes (for context):
+{prior_context}
+
+## Scene: {scene_id}
+{scene_text}
+{registries_section}
+## Instructions
+
+Extract physical state changes for on-stage characters. Only track states that affect what characters can do, how they look, or what they have.
+
+Categories: injury, equipment, ability, appearance, fatigue.
+
+Litmus test: Would a drafter who knows about this state write a *different scene* than one who doesn't? If removing the state wouldn't change the prose, don't track it.
+
+Too granular (don't): "Character frowns", "Hair is windblown", "Feels cold"
+Right level: "Left arm broken, splinted", "Carrying the stolen compass", "Exhausted after 36 hours awake"
+
+Output each field on its own labeled line:
+
+PHYSICAL_STATE_IN: [semicolon-separated state IDs active at START — carry forward from prior states for on-stage characters only]
+PHYSICAL_STATE_OUT: [semicolon-separated state IDs active at END — state_in plus new states acquired, minus states resolved]
+NEW_STATES: [one per line if any: id|character|description|category|action_gating — use kebab-case IDs]
+RESOLVED_STATES: [semicolon-separated state IDs that resolve during this scene, or empty if none]
+
+IMPORTANT: Use EXACT state IDs for carry-forward. New states need new IDs in kebab-case (e.g., broken-arm-marcus, has-compass-elena)."""
+
+
+def parse_physical_state_response(response: str, scene_id: str) -> dict:
+    """Parse Phase 3c response.
+
+    Returns:
+        Dict with keys: id, physical_state_in, physical_state_out,
+        _new_states (list of dicts), _resolved (list of IDs).
+    """
+    result = {'id': scene_id, '_new_states': [], '_resolved': []}
+    label_map = {
+        'PHYSICAL_STATE_IN': 'physical_state_in',
+        'PHYSICAL_STATE_OUT': 'physical_state_out',
+    }
+
+    lines = response.split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        match = re.match(r'^([A-Z_]+):\s*(.*)', line)
+        if match:
+            label = match.group(1)
+            value = match.group(2).strip()
+            if label in label_map and value:
+                result[label_map[label]] = value
+            elif label == 'NEW_STATES':
+                # First new state may be on this line
+                if value:
+                    parts = value.split('|')
+                    if len(parts) >= 4:
+                        result['_new_states'].append({
+                            'id': parts[0].strip(),
+                            'character': parts[1].strip(),
+                            'description': parts[2].strip(),
+                            'category': parts[3].strip(),
+                            'action_gating': parts[4].strip() if len(parts) > 4 else 'false',
+                        })
+                # Check subsequent lines for more new states
+                i += 1
+                while i < len(lines):
+                    nline = lines[i].strip()
+                    if not nline or re.match(r'^[A-Z_]+:', nline):
+                        break
+                    nparts = nline.split('|')
+                    if len(nparts) >= 4:
+                        result['_new_states'].append({
+                            'id': nparts[0].strip(),
+                            'character': nparts[1].strip(),
+                            'description': nparts[2].strip(),
+                            'category': nparts[3].strip(),
+                            'action_gating': nparts[4].strip() if len(nparts) > 4 else 'false',
+                        })
+                    i += 1
+                continue
+            elif label == 'RESOLVED_STATES' and value:
+                result['_resolved'] = [s.strip() for s in value.split(';') if s.strip()]
+        i += 1
+
+    return result
+
+
+# ============================================================================
 # Expansion analysis (novella-to-novel)
 # ============================================================================
 
@@ -676,6 +794,104 @@ def _similarity(a: str, b: str) -> float:
     intersection = words_a & words_b
     union = words_a | words_b
     return len(intersection) / len(union)
+
+
+def _id_similarity(a: str, b: str) -> float:
+    """Character-level similarity for hyphen-delimited IDs using edit distance ratio.
+
+    Returns 0.0-1.0. Handles single-character typos well.
+    """
+    if a == b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    # Levenshtein distance via dynamic programming
+    m, n = len(a), len(b)
+    dp = list(range(n + 1))
+    for i in range(1, m + 1):
+        prev = dp[0]
+        dp[0] = i
+        for j in range(1, n + 1):
+            temp = dp[j]
+            if a[i - 1] == b[j - 1]:
+                dp[j] = prev
+            else:
+                dp[j] = 1 + min(prev, dp[j], dp[j - 1])
+            prev = temp
+    distance = dp[n]
+    return 1.0 - distance / max(m, n)
+
+
+def cleanup_physical_states(ref_dir: str) -> list[dict]:
+    """Normalize physical state IDs so physical_state_in matches prior physical_state_out.
+
+    Uses fuzzy matching: if a physical_state_in ID is >70% similar to a
+    physical_state_out ID from a prior scene, replace it with the exact ID.
+
+    Returns a list of fixes applied.
+    """
+    from .elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda s: int(scenes_map[s].get('seq', 0)))
+
+    fixes = []
+    state_pool = set()
+
+    for sid in sorted_ids:
+        brief = briefs_map.get(sid, {})
+        state_in = brief.get('physical_state_in', '').strip()
+
+        if state_in and state_pool:
+            states_in = [s.strip() for s in state_in.split(';') if s.strip()]
+            new_states = []
+            changed = False
+
+            for state in states_in:
+                if state in state_pool:
+                    new_states.append(state)
+                    continue
+
+                best_match = None
+                best_score = 0.0
+                state_lower = state.lower()
+                for pool_state in state_pool:
+                    score = _id_similarity(state_lower, pool_state.lower())
+                    if score > best_score:
+                        best_score = score
+                        best_match = pool_state
+
+                if best_match and best_score >= 0.7:
+                    new_states.append(best_match)
+                    changed = True
+                else:
+                    new_states.append(state)
+
+            if changed:
+                old_val = state_in
+                new_val = ';'.join(new_states)
+                briefs_map[sid]['physical_state_in'] = new_val
+                fixes.append({
+                    'scene_id': sid,
+                    'field': 'physical_state_in',
+                    'old_value': old_val[:80] + '...' if len(old_val) > 80 else old_val,
+                    'new_value': new_val[:80] + '...' if len(new_val) > 80 else new_val,
+                })
+
+        state_out = brief.get('physical_state_out', '').strip()
+        if state_out:
+            for state in state_out.split(';'):
+                state = state.strip()
+                if state:
+                    state_pool.add(state)
+
+    if fixes:
+        ordered = sorted(briefs_map.values(), key=lambda r: r.get('id', ''))
+        _write_csv(os.path.join(ref_dir, 'scene-briefs.csv'), ordered, _FILE_MAP['scene-briefs.csv'])
+
+    return fixes
 
 
 def cleanup_mice_threads(ref_dir: str) -> list[dict]:
