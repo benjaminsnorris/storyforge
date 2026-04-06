@@ -551,3 +551,125 @@ shutil.rmtree(tmpdir)
 assert_contains "$RESULT" "fixes=1" "cleanup: found 1 fix"
 assert_contains "$RESULT" "corrected" "cleanup: wrote corrected value"
 assert_contains "$RESULT" "ok" "cleanup: runs without error"
+
+# ============================================================================
+# Validation: Check 2 — state disappearance
+# ============================================================================
+
+echo "--- validate: state disappearance flagged ---"
+
+RESULT=$(python3 -c "
+${PY}
+import os, tempfile, shutil
+from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP, validate_structure
+
+# Copy fixtures to temp dir
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Modify act2-sc03: remove exhaustion-tessa from physical_state_out
+# (it is in physical_state_in but the registry resolves it in act2-sc03,
+# so we also clear the registry resolves field to force a disappearance flag)
+briefs_path = os.path.join(ref, 'scene-briefs.csv')
+rows = _read_csv(briefs_path)
+for r in rows:
+    if r['id'] == 'act2-sc03':
+        # keep exhaustion-tessa in state_in but remove from state_out
+        r['physical_state_in'] = 'archive-key-dorren;exhaustion-tessa'
+        r['physical_state_out'] = 'archive-key-dorren'
+_write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+# Clear the registry 'resolves' for exhaustion-tessa so it no longer points here
+states_path = os.path.join(ref, 'physical-states.csv')
+states_rows = _read_csv(states_path)
+for r in states_rows:
+    if r['id'] == 'exhaustion-tessa':
+        r['resolves'] = 'never'
+_write_csv(states_path, states_rows, ['id', 'character', 'description', 'category', 'acquired', 'resolves', 'action_gating'])
+
+result = validate_structure(ref)
+phys_fails = [c for c in result['checks'] if c['category'] == 'physical_state' and not c['passed']]
+found = any(c.get('check') == 'state-disappearance' and 'exhaustion-tessa' in c.get('message', '') for c in phys_fails)
+print('found_disappearance' if found else 'not_found')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_equals "found_disappearance" "$RESULT" "validate: state disappearance without registry resolution is flagged"
+
+# ============================================================================
+# Validation: Check 3 — on-stage relevance
+# ============================================================================
+
+echo "--- validate: on-stage relevance flagged ---"
+
+RESULT=$(python3 -c "
+${PY}
+import os, tempfile, shutil
+from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP, validate_structure
+
+# Copy fixtures to temp dir
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Remove archive-key-dorren from act2-sc03's physical_state_in
+# Dorren is on-stage in act2-sc03, archive-key-dorren is action-gating for Dorren
+# and is active at that point — so omitting it from state_in should trigger the check
+briefs_path = os.path.join(ref, 'scene-briefs.csv')
+rows = _read_csv(briefs_path)
+for r in rows:
+    if r['id'] == 'act2-sc03':
+        r['physical_state_in'] = 'exhaustion-tessa'  # omit archive-key-dorren
+        r['physical_state_out'] = 'archive-key-dorren'
+_write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+result = validate_structure(ref)
+phys_fails = [c for c in result['checks'] if c['category'] == 'physical_state' and not c['passed']]
+found = any(c.get('check') == 'on-stage-relevance' and 'Dorren Hayle' in c.get('message', '') for c in phys_fails)
+print('found_relevance' if found else 'not_found')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_equals "found_relevance" "$RESULT" "validate: on-stage character with active action-gating state not in state_in is flagged"
+
+# ============================================================================
+# Granularity: over-specified registry
+# ============================================================================
+
+echo "--- granularity: over-specified registry flagged ---"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import os, tempfile, shutil
+from storyforge.schema import validate_physical_state_granularity
+from storyforge.elaborate import _read_csv, _write_csv
+
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Add enough states to exceed 2x the scene count (fixture has 6 scenes, need >12 states)
+path = os.path.join(ref, 'physical-states.csv')
+rows = _read_csv(path)
+for i in range(10):
+    rows.append({
+        'id': f'extra-state-{i}',
+        'character': 'Dorren Hayle',
+        'description': f'extra state {i}',
+        'category': 'fatigue',
+        'acquired': 'act1-sc01',
+        'resolves': 'never',
+        'action_gating': 'false',
+    })
+_write_csv(path, rows, ['id', 'character', 'description', 'category', 'acquired', 'resolves', 'action_gating'])
+
+result = validate_physical_state_granularity(ref)
+has_over = any(w['type'] == 'over_specified_registry' for w in result['warnings'])
+print('found_over' if has_over else 'not_found')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_equals "found_over" "$RESULT" "granularity: over-specified registry flagged when states > 2x scenes"

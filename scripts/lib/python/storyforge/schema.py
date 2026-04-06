@@ -654,6 +654,14 @@ def validate_physical_state_granularity(ref_dir: str, project_dir: str | None = 
                     'states': new_states,
                 })
 
+    if total_scenes > 0 and total_states > total_scenes * 2:
+        warnings.append({
+            'type': 'over_specified_registry',
+            'total_states': total_states,
+            'total_scenes': total_scenes,
+            'ratio': round(total_states / total_scenes, 1),
+        })
+
     return {
         'total_states': total_states,
         'total_scenes': total_scenes,
