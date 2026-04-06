@@ -796,6 +796,20 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('- Vary sentence and paragraph length. Symmetry reads '
                      'as artificial.')
         lines.append('- Use contractions in interiority and dialogue.')
+        lines.append('- No metaphor restatement. When you write an image or '
+                     'metaphor, stop. Do not follow it with a clause that '
+                     'explains what the image means. "The silence hung between '
+                     'them like fog" is complete — do not add "thick, obscuring, '
+                     'making it impossible to see." Trust the reader.')
+        lines.append('- No interpretive tagging. When a character performs a '
+                     'gesture or action, do not follow it with narrator commentary '
+                     'explaining the significance. "She set the cup down carefully" '
+                     'needs no "It was a gesture of control" or "as though '
+                     'anchoring herself." The action is the meaning.')
+        lines.append('- Vary scene endings. Do not default to: [small physical '
+                     'action] then [thematic observation] then [short declarative '
+                     'sentence]. This three-beat cadence is a template. End on '
+                     'action, dialogue, image, or mid-motion instead.')
         lines.append('- Start scenes in the middle of something. End on image, '
                      'action, or dialogue — not summary.')
         lines.append('')
@@ -852,6 +866,20 @@ def _build_full_steps(scene_id: str, scene_title: str,
         lines.append('- Vary sentence and paragraph length. Symmetry reads '
                      'as artificial.')
         lines.append('- Use contractions in interiority and dialogue.')
+        lines.append('- No metaphor restatement. When you write an image or '
+                     'metaphor, stop. Do not follow it with a clause that '
+                     'explains what the image means. "The silence hung between '
+                     'them like fog" is complete — do not add "thick, obscuring, '
+                     'making it impossible to see." Trust the reader.')
+        lines.append('- No interpretive tagging. When a character performs a '
+                     'gesture or action, do not follow it with narrator commentary '
+                     'explaining the significance. "She set the cup down carefully" '
+                     'needs no "It was a gesture of control" or "as though '
+                     'anchoring herself." The action is the meaning.')
+        lines.append('- Vary scene endings. Do not default to: [small physical '
+                     'action] then [thematic observation] then [short declarative '
+                     'sentence]. This three-beat cadence is a template. End on '
+                     'action, dialogue, image, or mid-motion instead.')
         lines.append('- Start scenes in the middle of something. End on image, '
                      'action, or dialogue — not summary.')
         lines.append('')
