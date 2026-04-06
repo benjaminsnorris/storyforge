@@ -299,6 +299,7 @@ Run: `./tests/run-tests.sh` (all suites) or `./tests/run-tests.sh tests/test-thi
 | `extract` | Reverse elaboration — extract structural data from existing prose |
 | `revise` | Plan + execute revision (upstream CSV fixes + prose polish). `--polish` for craft-only. |
 | `score` | Craft + fidelity scoring |
+| `hone` | CSV data quality — registries, brief concretization, structural fixes, gap detection |
 | `publish` | Assemble web book + generate dashboard + push to bookshelf |
 | `produce` | Epub, PDF, print formats |
 | `init` | New project initialization |
