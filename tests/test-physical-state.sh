@@ -443,3 +443,67 @@ assert_contains "$RESULT" "psi=archive-key-dorren" "extract: parse extracts phys
 assert_contains "$RESULT" "pso=archive-key-dorren;sprained-ankle-tessa" "extract: parse extracts physical_state_out"
 assert_contains "$RESULT" "new=1" "extract: parse extracts new states"
 assert_contains "$RESULT" "ok" "extract: parse runs without error"
+
+# ============================================================================
+# Reconciliation: physical-states domain
+# ============================================================================
+
+echo "--- reconcile: collect physical state chain ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.reconcile import _collect_physical_state_chain
+
+chain = _collect_physical_state_chain('${FIXTURE_DIR}/reference')
+print(f'entries={len(chain)}')
+for sid, seq, psi, pso in chain:
+    print(f'{sid}: in={psi} out={pso}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "reconcile: _collect_physical_state_chain runs"
+assert_contains "$RESULT" "entries=" "reconcile: returns chain entries"
+
+echo "--- reconcile: build_registry_prompt for physical-states ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.reconcile import build_registry_prompt
+
+prompt = build_registry_prompt('physical-states', '${FIXTURE_DIR}/reference')
+has_chain = 'IN:' in prompt and 'OUT:' in prompt
+has_instructions = 'id|character|description|category' in prompt
+print('has_chain' if has_chain else 'no_chain')
+print('has_instructions' if has_instructions else 'no_instructions')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "has_chain" "reconcile: prompt includes state chain"
+assert_contains "$RESULT" "has_instructions" "reconcile: prompt specifies registry format"
+assert_contains "$RESULT" "ok" "reconcile: build_registry_prompt runs for physical-states"
+
+echo "--- reconcile: parse_registry_response for physical-states ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.reconcile import parse_registry_response
+
+response = '''id|character|description|category|acquired|resolves|action_gating
+broken-arm|Marcus|left arm broken|injury|scene-5|scene-12|true
+
+UPDATES
+UPDATE: scene-5 | |broken-arm
+UPDATE: scene-6 | broken-arm|broken-arm'''
+
+rows, updates = parse_registry_response(response, 'physical-states')
+print(f'rows={len(rows)}')
+print(f'updates={len(updates)}')
+if rows:
+    print(f'first_id={rows[0][\"id\"]}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "rows=1" "reconcile: parses registry rows"
+assert_contains "$RESULT" "updates=2" "reconcile: parses update lines"
+assert_contains "$RESULT" "first_id=broken-arm" "reconcile: registry row has correct id"
+assert_contains "$RESULT" "ok" "reconcile: parse_registry_response works for physical-states"

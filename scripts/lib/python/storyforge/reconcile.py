@@ -151,6 +151,23 @@ def _collect_knowledge_chain(ref_dir: str) -> list[tuple[str, str, str, str]]:
     return chain
 
 
+def _collect_physical_state_chain(ref_dir: str) -> list[tuple[str, str, str, str]]:
+    """Collect physical states in scene order: [(scene_id, seq, state_in, state_out), ...]."""
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+    chain = []
+    for sid in sorted_ids:
+        brief = briefs_map.get(sid, {})
+        ps_in = brief.get('physical_state_in', '').strip()
+        ps_out = brief.get('physical_state_out', '').strip()
+        seq = scenes_map[sid].get('seq', '0')
+        if ps_in or ps_out:
+            chain.append((sid, seq, ps_in, ps_out))
+    return chain
+
+
 def build_registry_prompt(domain: str, ref_dir: str,
                           context: str = '') -> str:
     """Build an Opus prompt to create/update a canonical registry.
@@ -343,6 +360,51 @@ Backstory facts that characters know entering scene 1 should appear in scene 1's
 
 Output the registry CSV first, then a blank line, then "UPDATES" on its own line, then the update lines. No other commentary."""
 
+    elif domain == 'physical-states':
+        existing = _read_existing_registry(ref_dir, 'physical-states.csv')
+        chain = _collect_physical_state_chain(ref_dir)
+        chain_text = '\n'.join(
+            f'  Scene {sid} (seq {seq}):\n'
+            f'    IN:  {ps_in or "(empty)"}\n'
+            f'    OUT: {ps_out or "(empty)"}'
+            for sid, seq, ps_in, ps_out in chain
+        )
+
+        return f"""Build a canonical physical state registry for a novel and normalize the state chain.
+
+## Physical State Chain (in scene order)
+
+{chain_text}
+
+{f"## Existing Registry{chr(10)}{chr(10)}```{chr(10)}{existing}{chr(10)}```" if existing else ""}
+
+## Instructions
+
+### Part 1: Registry
+
+Produce a pipe-delimited CSV with columns: id|character|description|category|acquired|resolves|action_gating
+
+Rules:
+- id: kebab-case slug scoped to character (e.g., broken-arm-marcus, has-compass-elena)
+- character: canonical character name
+- description: concise, prose-usable description (under 20 words)
+- category: injury, equipment, ability, appearance, or fatigue
+- acquired: scene ID where this state first appears in physical_state_out
+- resolves: scene ID where removed from physical_state_out, or "never" for permanent
+- action_gating: true if this state constrains what the character can physically do, false otherwise
+- Merge variants: if the same state is described differently across scenes, they are one entry
+- If an existing registry is provided, preserve its IDs where possible
+
+### Part 2: Normalized Chain
+
+After the registry CSV, output an UPDATES section:
+
+UPDATE: scene_id | physical_state_in | physical_state_out
+
+Use canonical state IDs (semicolon-separated). Only include scenes that need changes.
+
+Output the registry CSV first, then a blank line, then "UPDATES" on its own line, then the update lines. No other commentary."""
+
     else:
         raise ValueError(f'Unknown reconciliation domain: {domain}')
 
@@ -357,6 +419,7 @@ _REGISTRY_COLUMNS = {
     'values': ['id', 'name', 'aliases'],
     'mice-threads': ['id', 'name', 'type', 'aliases'],
     'knowledge': ['id', 'name', 'aliases', 'category', 'origin'],
+    'physical-states': ['id', 'character', 'description', 'category', 'acquired', 'resolves', 'action_gating'],
 }
 
 
@@ -430,6 +493,7 @@ _DOMAIN_TO_REGISTRY = {
     'values': 'values.csv',
     'mice-threads': 'mice-threads.csv',
     'knowledge': 'knowledge.csv',
+    'physical-states': 'physical-states.csv',
 }
 
 # Which CSV columns to normalize per domain
@@ -449,6 +513,9 @@ _DOMAIN_TARGETS = {
     ],
     'knowledge': [
         ('scene-briefs.csv', ['knowledge_in', 'knowledge_out']),
+    ],
+    'physical-states': [
+        ('scene-briefs.csv', ['physical_state_in', 'physical_state_out']),
     ],
 }
 
@@ -522,6 +589,25 @@ def apply_updates(
             if len(parts) == 2:
                 row_map[scene_id]['knowledge_in'] = parts[0].strip()
                 row_map[scene_id]['knowledge_out'] = parts[1].strip()
+                applied += 1
+        if applied:
+            _write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+        return applied
+
+    elif domain == 'physical-states':
+        briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+        rows = _read_csv(briefs_path)
+        if not rows:
+            return 0
+        row_map = {r['id']: r for r in rows if 'id' in r}
+        applied = 0
+        for scene_id, value in updates:
+            if scene_id not in row_map:
+                continue
+            parts = value.split('|', 1)
+            if len(parts) == 2:
+                row_map[scene_id]['physical_state_in'] = parts[0].strip()
+                row_map[scene_id]['physical_state_out'] = parts[1].strip()
                 applied += 1
         if applied:
             _write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
