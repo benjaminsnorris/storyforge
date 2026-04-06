@@ -294,3 +294,51 @@ print('ok')
 " 2>/dev/null)
 
 assert_equals "ok" "$RESULT" "scoring: ENRICHMENT_FIELDS includes physical state columns"
+
+# ============================================================================
+# Drafting prompts: physical state in scene prompt
+# ============================================================================
+
+echo "--- prompts: physical state block appears in drafting prompt ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.prompts import build_scene_prompt_from_briefs
+prompt = build_scene_prompt_from_briefs('act2-sc03', '${FIXTURE_DIR}', '${PLUGIN_DIR}')
+has_header = 'Active Physical States' in prompt
+has_state = 'archive-key-dorren' in prompt or 'archive key' in prompt.lower()
+print('has_header' if has_header else 'no_header')
+print('has_state' if has_state else 'no_state')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "has_header" "prompts: physical state section header present"
+assert_contains "$RESULT" "has_state" "prompts: state ID or description appears in prompt"
+assert_contains "$RESULT" "ok" "prompts: build_scene_prompt_from_briefs runs without error"
+
+echo "--- prompts: no physical state block when no states ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.prompts import build_scene_prompt_from_briefs
+prompt = build_scene_prompt_from_briefs('act1-sc01', '${FIXTURE_DIR}', '${PLUGIN_DIR}')
+has_header = 'Active Physical States' in prompt
+print('has_header' if has_header else 'no_header')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "no_header" "prompts: no physical state section when no states active"
+assert_contains "$RESULT" "ok" "prompts: empty state case runs without error"
+
+echo "--- prompts: dependency scenes show physical_state_out ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.prompts import build_scene_prompt_from_briefs
+prompt = build_scene_prompt_from_briefs('act2-sc03', '${FIXTURE_DIR}', '${PLUGIN_DIR}', dep_scenes=['act1-sc02'])
+has_dep_state = 'physical_state_out' in prompt
+print('has_dep_state' if has_dep_state else 'no_dep_state')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "has_dep_state" "prompts: dependency scenes include physical_state_out"
