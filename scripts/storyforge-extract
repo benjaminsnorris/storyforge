@@ -373,7 +373,7 @@ print(f'Updated scenes.csv: {count} scenes')
         # Reconcile characters and locations against Phase 1 data
         log ""
         log "--- Reconciling Phase 1 registries ---"
-        "${SCRIPT_DIR}/storyforge-reconcile" --phase 1
+        "${SCRIPT_DIR}/storyforge-hone" --phase 1
 
         rm -f "$BATCH_FILE"
         rm -rf "$SKEL_OUTPUT"
@@ -479,7 +479,7 @@ print(f'Updated scene-intent.csv: {count} scenes')
         # Reconcile values and MICE threads against Phase 2 data
         log ""
         log "--- Reconciling Phase 2 registries ---"
-        "${SCRIPT_DIR}/storyforge-reconcile" --phase 2
+        "${SCRIPT_DIR}/storyforge-hone" --phase 2
 
         rm -f "$BATCH_FILE"
         rm -rf "$INTENT_OUTPUT"
@@ -861,7 +861,7 @@ with open(state_file, 'w') as f:
         # Reconcile knowledge, outcomes, and physical-states against Phase 3 data
         log ""
         log "--- Reconciling Phase 3 registries ---"
-        "${SCRIPT_DIR}/storyforge-reconcile" --phase 3
+        "${SCRIPT_DIR}/storyforge-hone" --phase 3
     fi
 fi
 
