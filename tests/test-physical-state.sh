@@ -91,3 +91,57 @@ print('ok')
 " 2>/dev/null)
 
 assert_equals "ok" "$RESULT" "elaborate: _BRIEFS_COLS includes physical state columns"
+
+# ============================================================================
+# Validation: _validate_physical_states
+# ============================================================================
+
+echo "--- validate: physical state flow — consistent ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import validate_structure
+
+result = validate_structure('${FIXTURE_DIR}/reference')
+phys_checks = [c for c in result['checks'] if c['category'] == 'physical_state']
+# Fixture has consistent state flow, so should pass
+for c in phys_checks:
+    print(f\"{c['check']}: {'PASS' if c['passed'] else 'FAIL'}\")
+if not phys_checks:
+    print('no physical_state checks found')
+else:
+    print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "validate: physical state checks run on fixtures"
+assert_not_contains "$RESULT" "FAIL" "validate: fixture physical state flow is consistent"
+
+echo "--- validate: unknown state flagged ---"
+
+RESULT=$(python3 -c "
+${PY}
+import os, tempfile, shutil
+from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP, validate_structure
+
+# Copy fixtures to temp dir
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Inject an unknown state into physical_state_in
+briefs_path = os.path.join(ref, 'scene-briefs.csv')
+rows = _read_csv(briefs_path)
+for r in rows:
+    if r['id'] == 'act1-sc01':
+        r['physical_state_in'] = 'nonexistent-state'
+_write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+result = validate_structure(ref)
+phys_fails = [c for c in result['checks'] if c['category'] == 'physical_state' and not c['passed']]
+found = any('nonexistent-state' in c.get('message', '') for c in phys_fails)
+print('found_unknown' if found else 'not_found')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_equals "found_unknown" "$RESULT" "validate: unknown physical state in physical_state_in is flagged"

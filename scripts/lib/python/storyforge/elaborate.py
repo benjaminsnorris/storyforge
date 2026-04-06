@@ -608,6 +608,41 @@ def _validate_knowledge(scenes_map, briefs_map, checks):
                              'Knowledge flow is consistent'))
 
 
+def _validate_physical_states(scenes_map, briefs_map, checks):
+    """Check physical state flow: physical_state_in must come from prior scenes' physical_state_out."""
+    sorted_ids = sorted(scenes_map.keys(),
+                        key=lambda sid: int(scenes_map[sid].get('seq', 0)))
+
+    available_states = set()
+
+    for sid in sorted_ids:
+        brief = briefs_map.get(sid, {})
+        state_in = brief.get('physical_state_in', '').strip()
+
+        if state_in:
+            states_in = {s.strip() for s in state_in.split(';') if s.strip()}
+            unknown = states_in - available_states
+            if unknown:
+                checks.append(_check(
+                    'physical_state', 'state-availability', False,
+                    f"Scene {sid} references physical states not established by prior scenes: "
+                    f"{sorted(unknown)}",
+                    scene_id=sid,
+                    severity='advisory',
+                ))
+
+        state_out = brief.get('physical_state_out', '').strip()
+        if state_out:
+            for state_id in state_out.split(';'):
+                state_id = state_id.strip()
+                if state_id:
+                    available_states.add(state_id)
+
+    if not any(c['category'] == 'physical_state' and not c['passed'] for c in checks):
+        checks.append(_check('physical_state', 'state-availability', True,
+                             'Physical state flow is consistent'))
+
+
 def _validate_pacing(scenes_map, intent_map, checks):
     """Check pacing: polarity stretches, scene type rhythm, turning point variety."""
     sorted_ids = sorted(scenes_map.keys(),
@@ -757,6 +792,7 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_timeline(scenes_map, checks)
     _validate_knowledge(scenes_map, briefs_map, checks)
     _validate_pacing(scenes_map, intent_map, checks)
+    _validate_physical_states(scenes_map, briefs_map, checks)
 
     failures = [c for c in checks if not c['passed']]
     return {
