@@ -238,6 +238,70 @@ print(json.dumps(result))
             SCENE_FLAG=""
             [[ -n "$SCENE_FILTER" ]] && SCENE_FLAG="scene_ids='${SCENE_FILTER}'.split(',')"
 
+            # Run combined detection (abstract + overspecified + verbose)
+            DIAG=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.hone import detect_brief_issues
+briefs = _read_csv_as_map('${REF_DIR}/scene-briefs.csv')
+scenes = _read_csv_as_map('${REF_DIR}/scenes.csv')
+issues = detect_brief_issues(briefs, scenes, ${SCENE_FLAG:-None})
+by_type = {}
+for i in issues:
+    by_type.setdefault(i['issue'], []).append(i)
+summary = {t: len(v) for t, v in by_type.items()}
+summary['total_issues'] = len(issues)
+summary['scenes_affected'] = len(set(i['scene_id'] for i in issues))
+# For dry-run detail
+details = []
+for i in issues:
+    d = {'scene_id': i['scene_id'], 'field': i['field'], 'issue': i['issue']}
+    if i['issue'] == 'overspecified':
+        d['beat_count'] = i.get('beat_count', 0)
+        d['target_words'] = i.get('target_words', 0)
+    elif i['issue'] == 'verbose':
+        d['char_count'] = i.get('char_count', 0)
+        d['max_chars'] = i.get('max_chars', 0)
+    elif i['issue'] == 'abstract':
+        d['abstract_count'] = i.get('abstract_count', 0)
+        d['concrete_count'] = i.get('concrete_count', 0)
+    details.append(d)
+summary['details'] = details
+print(json.dumps(summary))
+")
+
+            TOTAL=$(echo "$DIAG" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('total_issues', 0))")
+            AFFECTED=$(echo "$DIAG" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('scenes_affected', 0))")
+            N_ABSTRACT=$(echo "$DIAG" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('abstract', 0))")
+            N_OVERSPEC=$(echo "$DIAG" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('overspecified', 0))")
+            N_VERBOSE=$(echo "$DIAG" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('verbose', 0))")
+
+            log "  Issues found: ${TOTAL} across ${AFFECTED} scenes"
+            log "    abstract: ${N_ABSTRACT}  overspecified: ${N_OVERSPEC}  verbose: ${N_VERBOSE}"
+
+            if [[ "$DRY_RUN" == true ]]; then
+                # Print detailed diagnostic
+                echo "$DIAG" | PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+for d in r.get('details', []):
+    issue = d['issue']
+    if issue == 'overspecified':
+        print(f\"  {d['scene_id']}.{d['field']}: {issue} ({d['beat_count']} beats, {d['target_words']} target words)\")
+    elif issue == 'verbose':
+        print(f\"  {d['scene_id']}.{d['field']}: {issue} ({d['char_count']} chars, max {d['max_chars']})\")
+    elif issue == 'abstract':
+        print(f\"  {d['scene_id']}.{d['field']}: {issue} (abstract={d['abstract_count']}, concrete={d['concrete_count']})\")
+"
+                continue
+            fi
+
+            if [[ "$TOTAL" == "0" ]]; then
+                log "  No brief quality issues found"
+                continue
+            fi
+
+            # Run concretization on flagged scenes
             RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
 import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
 from storyforge.hone import hone_briefs
@@ -248,19 +312,17 @@ result = hone_briefs(
     model='${MODEL}',
     log_dir='${LOG_DIR}',
     coaching_level='${COACHING_LEVEL}',
-    dry_run=${DRY_RUN^},
+    dry_run=False,
 )
 print(json.dumps(result))
 ")
 
-            FLAGGED=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('scenes_flagged', 0))")
             REWRITTEN=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('scenes_rewritten', 0))")
             FIELDS=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('fields_rewritten', 0))")
 
-            log "  Flagged: ${FLAGGED} scenes with abstract briefs"
             log "  Rewritten: ${REWRITTEN} scenes, ${FIELDS} fields"
 
-            if [[ "$DRY_RUN" != true && "$REWRITTEN" -gt 0 ]]; then
+            if [[ "$REWRITTEN" -gt 0 ]]; then
                 (cd "$PROJECT_DIR" && git add reference/ working/ && \
                     git commit -m "Hone: briefs — ${REWRITTEN} scenes concretized (${FIELDS} fields)" && \
                     git push) 2>/dev/null || true

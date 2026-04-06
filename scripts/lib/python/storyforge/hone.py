@@ -764,7 +764,7 @@ CONCRETE_INDICATORS = {
     'runs', 'steps', 'grabs', 'pushes', 'carries', 'presses',
 }
 
-_CONCRETIZABLE_FIELDS = ['key_actions', 'crisis', 'decision']
+_CONCRETIZABLE_FIELDS = ['key_actions', 'crisis', 'decision', 'goal', 'conflict', 'emotions']
 
 
 def detect_abstract_fields(
@@ -778,7 +778,7 @@ def detect_abstract_fields(
         scene_ids: Optional list of scene IDs to check. If None, check all.
 
     Returns:
-        List of dicts: {scene_id, field, value, abstract_count, concrete_count}.
+        List of dicts: {scene_id, field, value, abstract_count, concrete_count, issue: 'abstract'}.
         Only returns fields where abstract_count >= 2 and abstract_count > concrete_count.
     """
     results = []
@@ -802,9 +802,210 @@ def detect_abstract_fields(
                     'value': value,
                     'abstract_count': abstract_count,
                     'concrete_count': concrete_count,
+                    'issue': 'abstract',
                 })
 
     return results
+
+
+# ============================================================================
+# Briefs domain: over-specification detection
+# ============================================================================
+
+# Beats per 1000 words — above this threshold the scene is over-specified.
+# 3 beats in 1500 words = 2.0/1k is fine. 5 in 1500 = 3.3/1k is tight.
+# We flag above 2.5/1k, which catches 5+ beats in short scenes.
+_BEATS_PER_1K_THRESHOLD = 2.5
+
+# Absolute beat count threshold — flag regardless of word count.
+_MAX_BEATS_ABSOLUTE = 6
+
+# Max emotional beats before arc feels mechanical.
+_MAX_EMOTION_BEATS = 3
+
+
+def detect_overspecified(
+    briefs_map: dict[str, dict[str, str]],
+    scenes_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Detect scenes where beat counts are too high for the target word count.
+
+    Checks key_actions beat count against target_words, and emotions beat count.
+
+    Args:
+        briefs_map: dict keyed by scene ID, values are brief row dicts.
+        scenes_map: dict keyed by scene ID, values are scene metadata dicts.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+
+    Returns:
+        List of dicts: {scene_id, field, value, beat_count, target_words,
+                        beats_per_1k, issue: 'overspecified'}.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(briefs_map.keys())
+
+    for sid in ids_to_check:
+        brief = briefs_map.get(sid, {})
+        scene = scenes_map.get(sid, {})
+        target_words = int(scene.get('target_words', '0') or '0')
+
+        # Check key_actions
+        ka = brief.get('key_actions', '').strip()
+        if ka:
+            beats = [b.strip() for b in ka.split(';') if b.strip()]
+            beat_count = len(beats)
+            beats_per_1k = (beat_count / target_words * 1000) if target_words else 0
+
+            flagged = False
+            if beat_count >= _MAX_BEATS_ABSOLUTE:
+                flagged = True
+            elif target_words and beats_per_1k > _BEATS_PER_1K_THRESHOLD:
+                flagged = True
+
+            if flagged:
+                results.append({
+                    'scene_id': sid,
+                    'field': 'key_actions',
+                    'value': ka,
+                    'beat_count': beat_count,
+                    'target_words': target_words,
+                    'beats_per_1k': round(beats_per_1k, 2),
+                    'issue': 'overspecified',
+                })
+
+        # Check emotions
+        emotions = brief.get('emotions', '').strip()
+        if emotions:
+            beats = [b.strip() for b in emotions.split(';') if b.strip()]
+            beat_count = len(beats)
+            if beat_count > _MAX_EMOTION_BEATS:
+                results.append({
+                    'scene_id': sid,
+                    'field': 'emotions',
+                    'value': emotions,
+                    'beat_count': beat_count,
+                    'target_words': target_words,
+                    'beats_per_1k': 0,
+                    'issue': 'overspecified',
+                })
+
+    return results
+
+
+# ============================================================================
+# Briefs domain: verbose/prose-like field detection
+# ============================================================================
+
+# Fields that should be terse (beat lists or short phrases).
+_TERSE_FIELDS = {
+    'key_actions': 200,    # max chars — beats should be verb phrases
+    'emotions': 60,        # max chars — short labels
+    'goal': 80,            # max chars — one dramatic question
+    'conflict': 80,        # max chars — one tension statement
+}
+
+# Fields where sentences/paragraphs indicate extraction bloat.
+_PROSE_FIELDS = {
+    'decision': 80,        # max chars — one action choice
+    'crisis': 100,         # max chars — one dilemma
+}
+
+# Prose indicators: patterns that suggest the field became a paragraph.
+_PROSE_PATTERNS = re.compile(
+    r'(?:'
+    r'\. [A-Z]'           # sentence boundary (period + capital)
+    r'|—\s*[a-z]'        # em-dash clause continuation
+    r'|\b(?:she|he|they|her|his|their)\b.*\b(?:she|he|they|her|his|their)\b'
+                          # multiple pronoun references = narrative
+    r')',
+)
+
+
+def detect_verbose_fields(
+    briefs_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Detect fields that are too long or prose-like for their purpose.
+
+    This catches extraction artifacts where fields become paragraph summaries
+    instead of terse beat lists or short phrases.
+
+    Args:
+        briefs_map: dict keyed by scene ID, values are brief row dicts.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+
+    Returns:
+        List of dicts: {scene_id, field, value, char_count, max_chars,
+                        sentence_count, issue: 'verbose'}.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(briefs_map.keys())
+
+    all_fields = dict(_TERSE_FIELDS)
+    all_fields.update(_PROSE_FIELDS)
+
+    for sid in ids_to_check:
+        brief = briefs_map.get(sid, {})
+        for field, max_chars in all_fields.items():
+            value = brief.get(field, '').strip()
+            if not value:
+                continue
+
+            char_count = len(value)
+            # Count sentences: period-space-capital or end-of-string after period
+            sentence_count = len(re.findall(r'\. [A-Z]', value)) + 1
+            has_prose = bool(_PROSE_PATTERNS.search(value))
+
+            flagged = False
+            if char_count > max_chars:
+                flagged = True
+            elif has_prose and sentence_count >= 3:
+                # Multiple sentences with prose patterns even if under length
+                flagged = True
+
+            if flagged:
+                results.append({
+                    'scene_id': sid,
+                    'field': field,
+                    'value': value,
+                    'char_count': char_count,
+                    'max_chars': max_chars,
+                    'sentence_count': sentence_count,
+                    'issue': 'verbose',
+                })
+
+    return results
+
+
+# ============================================================================
+# Briefs domain: combined detection
+# ============================================================================
+
+def detect_brief_issues(
+    briefs_map: dict[str, dict[str, str]],
+    scenes_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Run all brief quality detectors and return combined results.
+
+    Each result dict includes an 'issue' key: 'abstract', 'overspecified',
+    or 'verbose'.
+
+    Args:
+        briefs_map: dict keyed by scene ID.
+        scenes_map: dict keyed by scene ID (needed for target_words).
+        scene_ids: Optional scope.
+
+    Returns:
+        Combined list of all issue dicts, sorted by scene_id then field.
+    """
+    issues = []
+    issues.extend(detect_abstract_fields(briefs_map, scene_ids))
+    issues.extend(detect_overspecified(briefs_map, scenes_map, scene_ids))
+    issues.extend(detect_verbose_fields(briefs_map, scene_ids))
+    issues.sort(key=lambda d: (d['scene_id'], d['field'], d['issue']))
+    return issues
 
 
 # ============================================================================

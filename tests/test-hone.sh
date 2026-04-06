@@ -287,3 +287,219 @@ print('ok')
 
 assert_contains "$RESULT" "gaps=0" "gaps: skips spine-status scenes"
 assert_contains "$RESULT" "ok" "gaps: spine skip runs"
+
+# ============================================================================
+# Briefs domain: over-specification detection
+# ============================================================================
+
+echo "--- overspecified: flags too many beats for word count ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_overspecified
+
+briefs = {
+    's1': {'id': 's1', 'key_actions': 'a; b; c; d; e; f; g', 'emotions': 'x;y'},
+}
+scenes = {
+    's1': {'id': 's1', 'target_words': '1500'},
+}
+results = detect_overspecified(briefs, scenes)
+fields = [(r['field'], r['beat_count']) for r in results]
+assert ('key_actions', 7) in fields, f'key_actions not flagged: {fields}'
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "overspecified: flags 7 beats in 1500 words"
+assert_contains "$RESULT" "ok" "overspecified: detection runs"
+
+echo "--- overspecified: does not flag reasonable beat count ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_overspecified
+
+briefs = {
+    's1': {'id': 's1', 'key_actions': 'Enters room; Finds letter; Leaves', 'emotions': 'tension;calm'},
+}
+scenes = {
+    's1': {'id': 's1', 'target_words': '2500'},
+}
+results = detect_overspecified(briefs, scenes)
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=0" "overspecified: 3 beats in 2500 words is fine"
+assert_contains "$RESULT" "ok" "overspecified: clean scene runs"
+
+echo "--- overspecified: flags excessive emotion beats ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_overspecified
+
+briefs = {
+    's1': {'id': 's1', 'key_actions': 'Does thing', 'emotions': 'competence;unease;self-doubt;resolve'},
+}
+scenes = {
+    's1': {'id': 's1', 'target_words': '2500'},
+}
+results = detect_overspecified(briefs, scenes)
+fields = [r['field'] for r in results]
+assert 'emotions' in fields, f'emotions not flagged: {fields}'
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "overspecified: flags 4-beat emotions"
+assert_contains "$RESULT" "ok" "overspecified: emotion detection runs"
+
+echo "--- overspecified: absolute threshold catches high beats even with high word count ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_overspecified
+
+briefs = {
+    's1': {'id': 's1', 'key_actions': 'a; b; c; d; e; f; g; h', 'emotions': 'x;y'},
+}
+scenes = {
+    's1': {'id': 's1', 'target_words': '8000'},
+}
+results = detect_overspecified(briefs, scenes)
+fields = [r['field'] for r in results]
+assert 'key_actions' in fields, f'key_actions not flagged: {fields}'
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "overspecified: 8 beats flagged even at 8000 words"
+assert_contains "$RESULT" "ok" "overspecified: absolute threshold runs"
+
+# ============================================================================
+# Briefs domain: verbose/prose-like field detection
+# ============================================================================
+
+echo "--- verbose: flags paragraph-style decision ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_verbose_fields
+
+briefs = {
+    's1': {
+        'id': 's1',
+        'decision': 'They hold. Naji breaks her deal and stands with the community. The Hunter kills her — not erasure but death. She dies while every mind holds her name.',
+    },
+}
+results = detect_verbose_fields(briefs)
+fields = [r['field'] for r in results]
+assert 'decision' in fields, f'decision not flagged: {fields}'
+print(f'issues={len(results)}')
+print(f'chars={results[0][\"char_count\"]}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "verbose: flags paragraph decision"
+assert_contains "$RESULT" "ok" "verbose: detection runs"
+
+echo "--- verbose: does not flag terse fields ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_verbose_fields
+
+briefs = {
+    's1': {
+        'id': 's1',
+        'decision': 'She goes through the door',
+        'goal': 'Find the map',
+        'conflict': 'Guards block the entrance',
+        'crisis': 'Now or never',
+        'key_actions': 'Opens door; Runs; Grabs map',
+        'emotions': 'fear;relief',
+    },
+}
+results = detect_verbose_fields(briefs)
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=0" "verbose: terse fields pass"
+assert_contains "$RESULT" "ok" "verbose: terse detection runs"
+
+echo "--- verbose: flags extracted key_actions with prose clauses ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_verbose_fields
+
+briefs = {
+    's1': {
+        'id': 's1',
+        'key_actions': 'Chopping onions; crying; Tarek working beside her silently; Suki arriving and sitting at the counter without speaking; the rhythm of the knife; the truth assembling — the isolated vanish, and Suki came here instead of being alone',
+    },
+}
+results = detect_verbose_fields(briefs)
+fields = [r['field'] for r in results]
+assert 'key_actions' in fields, f'key_actions not flagged: {fields}'
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "verbose: flags extracted prose key_actions"
+assert_contains "$RESULT" "ok" "verbose: extracted data detection runs"
+
+# ============================================================================
+# Combined detection: detect_brief_issues
+# ============================================================================
+
+echo "--- combined: detect_brief_issues finds all issue types ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_brief_issues
+
+briefs = {
+    's1': {
+        'id': 's1',
+        'key_actions': 'The realization dawns; connecting deeper; the parallel emerging; crystallizing; the truth building; she transforms',
+        'decision': 'They hold. Naji breaks her deal and stands with the community. The Hunter kills her — not erasure but death. She dies while every mind holds her name.',
+        'emotions': 'hope;dread;resolve;calm',
+        'crisis': 'Stay or go',
+        'goal': 'Find truth',
+        'conflict': 'Opposition',
+    },
+}
+scenes = {
+    's1': {'id': 's1', 'target_words': '1500'},
+}
+issues = detect_brief_issues(briefs, scenes)
+types = set(i['issue'] for i in issues)
+assert 'abstract' in types, f'abstract not found: {types}'
+assert 'overspecified' in types, f'overspecified not found: {types}'
+assert 'verbose' in types, f'verbose not found: {types}'
+print(f'total={len(issues)}')
+print(f'types={sorted(types)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "combined: detect_brief_issues runs"
+assert_contains "$RESULT" "abstract" "combined: finds abstract issues"
+assert_contains "$RESULT" "overspecified" "combined: finds overspecified issues"
+assert_contains "$RESULT" "verbose" "combined: finds verbose issues"
+
+echo "--- combined: broadened fields include goal and conflict ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import _CONCRETIZABLE_FIELDS
+assert 'goal' in _CONCRETIZABLE_FIELDS, f'goal missing: {_CONCRETIZABLE_FIELDS}'
+assert 'conflict' in _CONCRETIZABLE_FIELDS, f'conflict missing: {_CONCRETIZABLE_FIELDS}'
+assert 'emotions' in _CONCRETIZABLE_FIELDS, f'emotions missing: {_CONCRETIZABLE_FIELDS}'
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "combined: _CONCRETIZABLE_FIELDS includes goal, conflict, emotions"
