@@ -510,8 +510,8 @@ if [[ "$WRITE_MODE" == "batch" && "$DRY_RUN" != true ]]; then
         SCENE_ID="${PENDING_IDS[$i]}"
         SCENE_FILE="${SCENES_DIR}/${SCENE_ID}.md"
 
-        # Skip scenes that already have substantial content
-        if [[ -f "$SCENE_FILE" && "$FILTER_MODE" != "single" ]]; then
+        # Skip scenes that already have substantial content (unless --force)
+        if [[ "$FORCE" != true && -f "$SCENE_FILE" && "$FILTER_MODE" != "single" ]]; then
             existing_wc=$(wc -w < "$SCENE_FILE" 2>/dev/null | tr -d ' ')
             if (( existing_wc > 200 )); then
                 log "Scene ${SCENE_ID} already has ${existing_wc} words, skipping"
@@ -603,8 +603,8 @@ else
 
         log "--- Scene ${SCENE_ID} (${SCENE_NUM}/${#PENDING_IDS[@]}) ---"
 
-        # --- Check if scene file already has substantial content (defensive) ---
-        if [[ -f "$SCENE_FILE" && "$FILTER_MODE" != "single" ]]; then
+        # --- Check if scene file already has substantial content (unless --force) ---
+        if [[ "$FORCE" != true && -f "$SCENE_FILE" && "$FILTER_MODE" != "single" ]]; then
             existing_wc=$(wc -w < "$SCENE_FILE" 2>/dev/null | tr -d ' ')
             if (( existing_wc > 200 )); then
                 log "Scene file already has ${existing_wc} words, skipping"
