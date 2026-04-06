@@ -1027,3 +1027,63 @@ def hone_briefs(
         'scenes_rewritten': scenes_rewritten,
         'fields_rewritten': fields_rewritten,
     }
+
+
+# ============================================================================
+# Gaps domain: detect missing fields
+# ============================================================================
+
+_GAPS_REQUIRED = {
+    'briefed': [
+        'function', 'value_at_stake', 'value_shift', 'emotional_arc',
+        'goal', 'conflict', 'outcome', 'crisis', 'decision',
+    ],
+    'drafted': [
+        'function', 'value_at_stake', 'value_shift', 'emotional_arc',
+        'goal', 'conflict', 'outcome', 'crisis', 'decision',
+    ],
+}
+
+
+def detect_gaps(
+    scenes_map: dict[str, dict],
+    intent_map: dict[str, dict],
+    briefs_map: dict[str, dict],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Scan for empty required fields given each scene's status.
+
+    Returns:
+        List of dicts: {scene_id, field, status, file}.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(scenes_map.keys())
+
+    for sid in ids_to_check:
+        scene = scenes_map.get(sid, {})
+        status = scene.get('status', 'spine')
+        required = _GAPS_REQUIRED.get(status, [])
+        if not required:
+            continue
+
+        # Merge all data for this scene
+        merged = dict(scene)
+        if sid in intent_map:
+            merged.update({k: v for k, v in intent_map[sid].items() if k != 'id'})
+        if sid in briefs_map:
+            merged.update({k: v for k, v in briefs_map[sid].items() if k != 'id'})
+
+        for field in required:
+            if not merged.get(field, '').strip():
+                # Determine which file owns this field
+                file = 'scene-briefs.csv'
+                if field in ('function', 'value_at_stake', 'value_shift', 'emotional_arc'):
+                    file = 'scene-intent.csv'
+                results.append({
+                    'scene_id': sid,
+                    'field': field,
+                    'status': status,
+                    'file': file,
+                })
+
+    return results

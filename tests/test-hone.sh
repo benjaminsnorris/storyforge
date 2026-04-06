@@ -208,3 +208,82 @@ shutil.rmtree(tmpdir)
 assert_contains "$RESULT" "analysis_exists=True" "briefs: strict saves analysis file"
 assert_contains "$RESULT" "rewritten=0" "briefs: strict does not rewrite"
 assert_contains "$RESULT" "ok" "briefs: strict coaching runs"
+
+# ============================================================================
+# Gaps domain: detect missing fields
+# ============================================================================
+
+echo "--- gaps: detects missing required fields ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_gaps
+
+scenes_map = {
+    's1': {'id': 's1', 'status': 'briefed', 'seq': '1'},
+}
+briefs_map = {
+    's1': {'id': 's1', 'goal': 'Do the thing', 'conflict': '', 'outcome': 'yes',
+            'crisis': '', 'decision': 'decides'},
+}
+intent_map = {
+    's1': {'id': 's1', 'function': 'Hook', 'value_at_stake': '', 'value_shift': '+/-',
+            'emotional_arc': 'calm to tense'},
+}
+
+results = detect_gaps(scenes_map, intent_map, briefs_map)
+fields = [r['field'] for r in results if r['scene_id'] == 's1']
+assert 'conflict' in fields, f'conflict not flagged: {fields}'
+assert 'crisis' in fields, f'crisis not flagged: {fields}'
+print(f'gaps={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "gaps: detect_gaps runs"
+assert_contains "$RESULT" "gaps=" "gaps: returns gap list"
+
+echo "--- gaps: no gaps for complete scene ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_gaps
+
+scenes_map = {
+    's1': {'id': 's1', 'status': 'briefed', 'seq': '1'},
+}
+briefs_map = {
+    's1': {'id': 's1', 'goal': 'Do it', 'conflict': 'Obstacle', 'outcome': 'yes',
+            'crisis': 'Now or never', 'decision': 'Now'},
+}
+intent_map = {
+    's1': {'id': 's1', 'function': 'Hook', 'value_at_stake': 'truth',
+            'value_shift': '+/-', 'emotional_arc': 'calm to tense'},
+}
+
+results = detect_gaps(scenes_map, intent_map, briefs_map)
+print(f'gaps={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "gaps=0" "gaps: no gaps for complete scene"
+assert_contains "$RESULT" "ok" "gaps: complete scene runs"
+
+echo "--- gaps: skips spine-status scenes ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_gaps
+
+scenes_map = {
+    's1': {'id': 's1', 'status': 'spine', 'seq': '1'},
+}
+briefs_map = {'s1': {'id': 's1'}}
+intent_map = {'s1': {'id': 's1'}}
+
+results = detect_gaps(scenes_map, intent_map, briefs_map)
+print(f'gaps={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "gaps=0" "gaps: skips spine-status scenes"
+assert_contains "$RESULT" "ok" "gaps: spine skip runs"
