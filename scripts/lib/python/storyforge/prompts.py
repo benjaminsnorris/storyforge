@@ -406,6 +406,14 @@ def build_weighted_directive(project_dir: str) -> str:
     parts.append('')
     parts.append('Follow all craft principles, but weight your attention '
                  'toward the priorities listed above.')
+    parts.append('')
+    parts.append('### Prohibition Priorities (always enforced)')
+    parts.append('')
+    parts.append('- **no antithesis framing** — zero "Not X. It\'s Y." per scene')
+    parts.append('- **no tricolon default** — lists of three only when necessary')
+    parts.append('- **no summary closers** — end on action, image, or dialogue')
+    parts.append('- **no doubled emotions** — state once at the right pitch')
+    parts.append('- **motif scarcity** — recurring thematic words max once per scene')
 
     return '\n'.join(parts)
 
@@ -905,6 +913,127 @@ def _build_full_steps(scene_id: str, scene_title: str,
 
 
 # ============================================================================
+# Prose prohibition block — front-loaded to exploit primacy bias
+# ============================================================================
+
+_PROHIBITION_BLOCK = """## CRITICAL PROSE RULES — Read These First
+
+These rules override everything else in this prompt. Violations are the single most common failure mode.
+
+### Absolute Prohibitions
+
+1. **NO antithesis framing.** Never write "Not X. It's Y." or "It wasn't X — it was Y." or "This isn't about X. It's about Y." If you need contrast, let it emerge from content, not rhetorical formula. ZERO instances per scene.
+
+2. **NO tricolon by default.** Do not list three things when two or one will do. Three-part structures must feel necessary, not habitual. Before writing any list of three, ask: would two items make the point? If yes, stop at two.
+
+3. **NO scene-ending summary or philosophical pivot.** Do not end scenes with a sentence that restates the scene's theme, meaning, or emotional content. End on action, image, or dialogue. The scene already said what it means.
+
+4. **NO doubled emotional statements.** Do not describe an emotion, then describe it again with greater intensity in the same paragraph. State it once, at the right pitch. "She went still" does not need "— a stillness born of..." One statement. Move on.
+
+5. **NO silence annotation.** Do not describe a silence and then explain what kind of silence it was. Show what happens in the silence instead.
+
+6. **NO hedging stacks.** Do not pile "perhaps," "almost as if," "a kind of," "something like." Commit to the observation.
+
+7. **NO performative noticing.** Never write "He noticed that..." or "She became aware that..." Just render what they perceive.
+
+### Motif Discipline
+
+Recurring thematic language (signature phrases, recurring images, thematic keywords) may appear AT MOST ONCE per scene, and only if it earns its place. These words gain power through scarcity.
+
+Functional vocabulary — names of instruments, equipment, locations, and procedures — is exempt from the motif cap. Use them as the action requires, but vary phrasing where natural.
+
+### Scene Endings
+
+End every scene with ONE of these and nothing else:
+- A physical action (someone moves, picks something up, turns away)
+- A line of dialogue (the last word spoken)
+- A concrete image (what the POV character sees, not what they think about it)
+
+Do NOT end with: a reflection on what just happened, a thematic restatement, a landscape-as-metaphor sentence, or a philosophical observation. The scene is over. Stop.
+
+### Technical Detail Is Not Ornamentation
+
+Technical and procedural detail — how instruments work, how schemes are executed, how professional skills are applied — is load-bearing content, not decoration. Preserve it. Cut lyrical excess, not specificity."""
+
+
+def _get_pov_restraint_level(pov: str, ref_dir: str) -> str:
+    """Determine prose restraint level based on POV character's role.
+
+    Returns 'maximum', 'medium', or 'permitted' to guide interior elaboration.
+    """
+    chars_path = os.path.join(ref_dir, 'characters.csv')
+    if not os.path.isfile(chars_path):
+        return 'maximum'
+
+    from .elaborate import _read_csv_as_map
+    chars = _read_csv_as_map(chars_path)
+
+    # Try exact match, then normalize
+    role = ''
+    if pov in chars:
+        role = chars[pov].get('role', '').strip().lower()
+    else:
+        # Try matching by name
+        pov_lower = pov.lower()
+        for cid, cdata in chars.items():
+            name = cdata.get('name', '').lower()
+            if name == pov_lower or pov_lower in name:
+                role = cdata.get('role', '').strip().lower()
+                break
+
+    if role == 'antagonist':
+        return 'permitted'
+    elif role in ('supporting', 'minor'):
+        return 'medium'
+    else:  # protagonist or unknown
+        return 'maximum'
+
+
+def _build_pov_restraint_block(pov: str, ref_dir: str) -> str:
+    """Build POV-aware restraint guidance."""
+    level = _get_pov_restraint_level(pov, ref_dir)
+
+    if level == 'permitted':
+        return """### POV Restraint Level: PERMITTED (Antagonist/Architect)
+
+This POV character's mind IS the scene — their systematic thinking, classifications, and self-justification are characterization. Interior elaboration is permitted at length. The absolute prohibitions (no antithesis, no tricolon defaults, no doubled emotions) still apply, but this scene can sustain longer interior passages because the character's obsessive control is the point."""
+
+    elif level == 'medium':
+        return """### POV Restraint Level: MEDIUM (Supporting/Outsider)
+
+This POV character's interiority is grounded in the physical world. Reflective passages are permitted when rooted in specific sensory memory, not abstract philosophy. Keep interior elaboration moderate — show more through action and observation than through named emotions."""
+
+    else:  # maximum
+        return """### POV Restraint Level: MAXIMUM (Protagonist)
+
+This POV character withholds. Their interiority is sparse, physical, professional. Emotions are shown through action and observation, rarely named. Do not editorialize their feelings. Let the reader infer from what the character does and what they notice."""
+
+
+def _load_prose_exemplars(project_dir: str) -> str:
+    """Load prose exemplar text if available.
+
+    Checks for reference/prose-exemplars.md in the project.
+    This file should contain 2-3 short excerpts of the manuscript's
+    target voice, labeled with what makes them exemplary.
+    """
+    path = os.path.join(project_dir, 'reference', 'prose-exemplars.md')
+    if not os.path.isfile(path):
+        return ''
+    with open(path, encoding='utf-8') as f:
+        content = f.read().strip()
+    if not content:
+        return ''
+    return (
+        "## Voice Calibration — Write Like This\n\n"
+        "These passages represent the manuscript's target voice. "
+        "Study their rhythm, restraint, and specificity. "
+        "Notice what they do NOT do: they don't summarize, don't explain emotions, "
+        "don't end with philosophical reflections.\n\n"
+        + content
+    )
+
+
+# ============================================================================
 # Brief-aware prompt builder (elaboration pipeline)
 # ============================================================================
 
@@ -1044,11 +1173,16 @@ The brief is your contract. Deliver:
 
 **Prose rules:**
 - Em dashes rare (max one per scene)
-- No antithesis framing (negation + affirmation as structural pair)
-- Vary sentence and paragraph length
+- Vary sentence and paragraph length — follow thought patterns, not templates
 - Contractions in interiority and dialogue
-- Enter late, leave early — start mid-action, end on image/action/dialogue
-- **Match the voice guide exactly** — if the voice guide specifies fragments, colons, parenthetical asides, or restraint patterns, use them. Do not default to conventional narrative prose.
+- Enter late, leave early
+- Match the voice guide exactly
+
+**Scene ending — choose ONE, then stop:**
+- A physical action
+- A line of dialogue
+- A concrete image
+Do NOT follow it with a reflection, a thematic echo, or a landscape-as-metaphor sentence.
 
 **Guardrails:**
 - Do NOT invent character relationships, history, or backstory not present in the brief, knowledge chain, or character bible
@@ -1081,7 +1215,23 @@ Format the brief data for scene **{scene_id}** ("{scene.get('title', '')}") as a
 Include all structural data, knowledge states, and continuity constraints.
 Do NOT add creative interpretation or suggestions."""
 
+    # Prose prohibition block (front-loaded for primacy)
+    prohibition_block = _PROHIBITION_BLOCK if coaching_level == 'full' else ''
+
+    # POV-aware restraint level
+    pov = scene.get('pov', '')
+    pov_restraint = _build_pov_restraint_block(pov, ref_dir) if coaching_level == 'full' else ''
+
+    # Prose exemplars (optional, project-specific)
+    exemplar_block = _load_prose_exemplars(project_dir) if coaching_level == 'full' else ''
+
     return f"""You are drafting a scene for "{title}" ({genre}).
+
+{prohibition_block}
+
+{pov_restraint}
+
+{exemplar_block}
 
 ## Scene Brief: {scene_id}
 
