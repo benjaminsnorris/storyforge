@@ -13,7 +13,7 @@ In any Claude Code session:
 /plugin install storyforge@storyforge-marketplace
 ```
 
-Skills are available as `/storyforge:forge`, `/storyforge:elaborate`, `/storyforge:extract`, `/storyforge:develop`, `/storyforge:voice`, `/storyforge:scenes`, and more. Updates are automatic.
+Skills are available as `/storyforge:forge`, `/storyforge:elaborate`, `/storyforge:extract`, `/storyforge:hone`, `/storyforge:score`, `/storyforge:revise`, and more. Updates are automatic.
 
 ### For development
 
@@ -81,6 +81,7 @@ Seed → Spine → Architecture → Scene Map → Briefs → Draft → Evaluate 
 | `/storyforge:extract` | Reverse elaboration — extract structure from existing prose |
 | `/storyforge:revise` | Plan + execute revision (upstream CSV fixes + prose polish). Absorbs planning, execution, and review. `--polish` for craft-only. |
 | `/storyforge:score` | Craft + fidelity scoring |
+| `/storyforge:hone` | CSV data quality — diagnose issues, concretize briefs, fill gaps, normalize registries. `--diagnose` for read-only assessment. |
 | `/storyforge:publish` | Assemble web book + generate dashboard + push to bookshelf |
 | `/storyforge:produce` | Epub, PDF, print formats |
 | `/storyforge:init` | Initialize a new project |
@@ -146,7 +147,7 @@ Multi-page manuscript visualization with three views:
 
 - **Overview** — spine, POV distribution, value shift arc, scene rhythm
 - **Structure** — character presence, thread weave, emotional terrain, location map, motifs, timeline, knowledge flow
-- **Scores** — craft heatmap, genre/character/act scores, narrative radar, brief fidelity
+- **Scores** — craft heatmap, genre/character/act scores, narrative radar, brief fidelity, brief quality grid, structural scores
 
 Generate with `./storyforge visualize` or `/storyforge:visualize`.
 

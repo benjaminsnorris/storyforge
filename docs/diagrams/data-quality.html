@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storyforge — Data Quality &amp; Diagnostics</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root { --font-body:'DM Sans',system-ui,sans-serif; --font-mono:'Fira Code','SF Mono',monospace; --bg:#f7f8fa; --surface:#fff; --surface2:#eef0f4; --border:rgba(0,0,0,0.07); --text:#1a1d24; --text-dim:#6b7280; --text-light:#9ca3af; --teal:#0891b2; --teal-dim:rgba(8,145,178,0.06); --emerald:#059669; --emerald-dim:rgba(5,150,105,0.06); --orange:#f97316; --orange-dim:rgba(249,115,22,0.06); --red:#ef4444; --yellow:#eab308; }
+@media(prefers-color-scheme:dark){ :root{ --bg:#0f1117; --surface:#1a1d26; --surface2:#242833; --border:rgba(255,255,255,0.06); --text:#e5e7eb; --text-dim:#9ca3af; --text-light:#6b7280; --teal:#22d3ee; --teal-dim:rgba(34,211,238,0.08); --emerald:#34d399; --emerald-dim:rgba(52,211,153,0.08); --orange:#fb923c; --orange-dim:rgba(251,146,60,0.08); --red:#f87171; --yellow:#facc15; } }
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:var(--font-body);background:var(--bg);color:var(--text);line-height:1.6}.page{max-width:800px;margin:0 auto;padding:60px 24px 80px}
+.hero{text-align:center;margin-bottom:48px}.hero h1{font-size:34px;font-weight:700;margin-bottom:8px}.hero h1 span{color:var(--teal)}.hero .lead{font-size:16px;color:var(--text-dim);max-width:540px;margin:0 auto}.mono{font-family:var(--font-mono);font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--text-light)}
+.sec-title{font-size:22px;font-weight:700;margin:40px 0 8px}.sec-sub{font-size:14px;color:var(--text-dim);margin-bottom:20px}
+.paths{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:24px 0}.path{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px}.path h3{font-size:17px;font-weight:600;margin-bottom:4px}.path .cmd{font-family:var(--font-mono);font-size:12px;color:var(--teal);margin-bottom:10px}.path p{font-size:13px;color:var(--text-dim);margin-bottom:8px}.path ul{list-style:none;margin:0}.path li{font-size:12px;color:var(--text-dim);padding:2px 0;font-family:var(--font-mono)}
+.steps{display:flex;flex-direction:column;gap:12px;margin:24px 0}.step{display:grid;grid-template-columns:28px 1fr;gap:12px}.step-num{width:24px;height:24px;border-radius:50%;background:var(--teal);color:white;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:11px;font-weight:600;margin-top:2px}.step h4{font-size:14px;font-weight:600;margin-bottom:2px}.step p{font-size:13px;color:var(--text-dim)}
+.issues{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:24px 0}.issue{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;border-left:3px solid}.issue h4{font-size:14px;font-weight:600;margin-bottom:4px}.issue p{font-size:12px;color:var(--text-dim)}.issue .example{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);background:var(--surface2);border-radius:4px;padding:6px 8px;margin-top:8px}
+.dims{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:24px 0}.dim{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px}.dim h4{font-size:13px;font-weight:600;margin-bottom:2px}.dim p{font-size:11px;color:var(--text-dim)}
+.footer{text-align:center;margin-top:48px;color:var(--text-light);font-family:var(--font-mono);font-size:11px}
+@media(max-width:640px){.paths,.issues,.dims{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="hero"><div class="mono">Storyforge</div><h1>Data Quality <span>&amp;</span> Diagnostics</h1><p class="lead">Fix problems as data edits before they become prose rewrites. One command to diagnose, targeted domains to fix.</p></div>
+
+<div class="paths">
+<div class="path" style="border-top:3px solid var(--teal)">
+<h3>Diagnose</h3>
+<div class="cmd">./storyforge hone --diagnose</div>
+<p>Read-only assessment. Runs structural scoring, brief quality detection, and gap analysis in one pass. No API calls, no files modified.</p>
+<ul>
+<li>8 structural dimensions (0-1 scores)</li>
+<li>Brief quality issues (per field)</li>
+<li>Gap detection (missing required fields)</li>
+<li>Clean scene count</li>
+</ul>
+</div>
+<div class="path" style="border-top:3px solid var(--emerald)">
+<h3>Hone</h3>
+<div class="cmd">./storyforge hone --domain briefs</div>
+<p>Fix what diagnose found. Four domains target different categories of data quality problems. Run one domain at a time or all at once.</p>
+<ul>
+<li>registries &mdash; normalize field values</li>
+<li>briefs &mdash; concretize abstract language</li>
+<li>gaps &mdash; fill missing required fields</li>
+<li>structural &mdash; apply evaluation fixes</li>
+</ul>
+</div>
+</div>
+
+<h2 class="sec-title">Brief Quality Issues</h2>
+<p class="sec-sub">The briefs domain detects four categories of field-level problems that hurt drafting quality.</p>
+
+<div class="issues">
+<div class="issue" style="border-left-color:var(--red)">
+<h4>Abstract Language</h4>
+<p>Thematic or narrator-voice descriptions instead of physical action. The drafter can't translate "the realization building" into concrete prose without inventing the scene.</p>
+<div class="example">
+<strong>Abstract:</strong> "the parallel crystallizing; the tension deepening"<br>
+<strong>Concrete:</strong> "her hands stop on the map; the room goes quiet"
+</div>
+</div>
+<div class="issue" style="border-left-color:var(--orange)">
+<h4>Over-Specified Beats</h4>
+<p>Too many key_actions for the scene's word count. Five beats in 1,500 words means one mandatory event every 300 words &mdash; no room for atmosphere or interiority.</p>
+<div class="example">
+<strong>Flagged:</strong> 7 beats in 1,200 target words (171 words/beat)<br>
+<strong>Target:</strong> 2-3 beats per 2,500 words
+</div>
+</div>
+<div class="issue" style="border-left-color:var(--yellow)">
+<h4>Verbose Fields</h4>
+<p>Fields that became paragraph summaries instead of terse beat lists. Common after extraction, where Claude reverse-engineers structure from prose and writes field values that read like summaries.</p>
+<div class="example">
+<strong>Verbose decision (225 chars):</strong> "They hold. Naji breaks her deal and stands with the community. The Hunter kills her..."<br>
+<strong>Terse decision (27 chars):</strong> "She goes through the door"
+</div>
+</div>
+<div class="issue" style="border-left-color:#94a3b8">
+<h4>Gaps</h4>
+<p>Empty required fields for the scene's pipeline status. A scene at "briefed" status without a goal, conflict, or crisis can't be drafted coherently.</p>
+<div class="example">
+<strong>Detected:</strong> scene at "briefed" status missing: conflict, crisis, decision
+</div>
+</div>
+</div>
+
+<h2 class="sec-title">Structural Scoring</h2>
+<p class="sec-sub">Eight dimensions scored deterministically from CSV data alone &mdash; no API calls, pure pattern matching.</p>
+
+<div class="dims">
+<div class="dim"><h4>Arc Completeness</h4><p>Do protagonist arcs show meaningful value reversals across the full manuscript?</p></div>
+<div class="dim"><h4>Thematic Concentration</h4><p>Are values at stake focused on a core set, or scattered across dozens of one-off themes?</p></div>
+<div class="dim"><h4>Pacing Shape</h4><p>Does tension escalate through the manuscript? Is the climax positioned correctly?</p></div>
+<div class="dim"><h4>Character Presence</h4><p>Are major characters on-stage consistently, or do they vanish for long stretches?</p></div>
+<div class="dim"><h4>MICE Thread Health</h4><p>Are threads opened and closed in proper nesting order? Are any dormant too long?</p></div>
+<div class="dim"><h4>Knowledge Chain</h4><p>Does information flow logically from scene to scene? Are there knowledge violations?</p></div>
+<div class="dim"><h4>Function Variety</h4><p>Is there a healthy mix of scene types, or does one outcome dominate?</p></div>
+<div class="dim"><h4>Structural Completeness</h4><p>Are required fields populated? Are enrichment fields filled for scenes that need them?</p></div>
+</div>
+
+<h2 class="sec-title">The Workflow</h2>
+<div class="steps">
+<div class="step"><div class="step-num">1</div><div><h4>Diagnose</h4><p>Run <code>./storyforge hone --diagnose</code> to see the full picture: structural scores, brief quality issues, gaps. No changes, just a report.</p></div></div>
+<div class="step"><div class="step-num">2</div><div><h4>Prioritize</h4><p>Gaps first (scenes can't be drafted without briefs), then brief quality (overspecified beats, verbose fields), then registries (normalization).</p></div></div>
+<div class="step"><div class="step-num">3</div><div><h4>Fix</h4><p>Run hone on specific domains: <code>--domain briefs</code> to concretize, <code>--domain gaps</code> to fill, <code>--domain registries</code> to normalize. Scope with <code>--act 2</code> or <code>--scenes id,id</code>.</p></div></div>
+<div class="step"><div class="step-num">4</div><div><h4>Verify</h4><p>Re-run diagnose to confirm improvements. The dashboard also shows brief quality on the spine (colored underlines) and in a dedicated grid on the Scores page.</p></div></div>
+</div>
+
+<div class="footer">Storyforge — A novel-writing toolkit for authors, powered by Claude Code</div>
+</div>
+</body>
+</html>
