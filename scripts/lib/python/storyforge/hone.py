@@ -805,3 +805,87 @@ def detect_abstract_fields(
                 })
 
     return results
+
+
+# ============================================================================
+# Briefs domain: concretization prompt builder and parser
+# ============================================================================
+
+def build_concretize_prompt(
+    scene_id: str,
+    fields: list[str],
+    current_values: dict[str, str],
+    voice_guide: str = '',
+    character_entry: str = '',
+) -> str:
+    """Build prompt to rewrite abstract brief fields as concrete physical beats.
+
+    Args:
+        scene_id: The scene being concretized.
+        fields: List of field names to rewrite.
+        current_values: Dict of field_name -> current value.
+        voice_guide: Excerpt from the voice guide (POV character's sensory palette).
+        character_entry: Character bible entry for the POV character.
+
+    Returns:
+        Prompt string for Claude.
+    """
+    field_block = '\n'.join(
+        f"**{field}:** {current_values.get(field, '')}"
+        for field in fields
+    )
+
+    field_output = '\n'.join(f'{field}: [rewritten value]' for field in fields)
+
+    return f"""Rewrite these scene brief fields so every item is something the POV character physically does or perceives.
+
+## Scene: {scene_id}
+
+## Current Values (abstract — need rewriting)
+{field_block}
+
+## Voice Guide (POV character)
+{voice_guide if voice_guide else '(not available)'}
+
+## Character
+{character_entry if character_entry else '(not available)'}
+
+## Rules
+
+1. Every action must be something the POV character physically does or perceives through their senses. No thematic descriptions, no narrator interpretations, no emotion names as events.
+2. Replace "the realization building" with what the character DOES when they realize something (hands stop, breath catches, they set something down).
+3. Replace "tension deepening" with what the character SEES or FEELS (someone's jaw tightening, the room going quiet, a hand moving to a weapon).
+4. Replace "connecting X to Y" with the physical moment: what does the character look at, touch, or say when the connection happens?
+5. Keep the same number of beats (semicolon-separated items). Don't add or remove story events — just rewrite HOW they're described.
+6. Use the character's sensory palette from the voice guide. If they think in food metaphors, their observations should reflect that.
+
+## Output Format
+
+Return each field on its own labeled line, exactly like the input but rewritten:
+
+{field_output}
+
+No explanation. No markdown. Just the labeled lines."""
+
+
+def parse_concretize_response(
+    response: str, scene_id: str, fields: list[str]
+) -> dict[str, str]:
+    """Parse concretization response into field values.
+
+    Returns:
+        Dict mapping field_name -> rewritten value.
+    """
+    result = {}
+    for line in response.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        for field in fields:
+            prefix = f'{field}:'
+            if line.lower().startswith(prefix.lower()):
+                value = line[len(prefix):].strip()
+                if value:
+                    result[field] = value
+                break
+    return result

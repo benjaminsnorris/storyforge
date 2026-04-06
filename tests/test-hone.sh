@@ -95,3 +95,47 @@ print('ok')
 
 assert_contains "$RESULT" "flagged=0" "briefs: concrete actions not flagged"
 assert_contains "$RESULT" "ok" "briefs: concrete detection runs"
+
+# ============================================================================
+# Briefs domain: concretize prompt and parser
+# ============================================================================
+
+echo "--- briefs: build_concretize_prompt runs ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import build_concretize_prompt
+
+prompt = build_concretize_prompt(
+    scene_id='mirror',
+    fields=['key_actions'],
+    current_values={'key_actions': 'The realization building; the parallel crystallizing'},
+    voice_guide='Zara thinks in food metaphors. Sensory-first.',
+    character_entry='Zara: 19, line cook, synesthete. Notices temperature, sound, exits, hands.',
+)
+has_rule = 'physically does or perceives' in prompt
+has_current = 'realization building' in prompt
+print('has_rule' if has_rule else 'no_rule')
+print('has_current' if has_current else 'no_current')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "has_rule" "briefs: prompt includes concretization rule"
+assert_contains "$RESULT" "has_current" "briefs: prompt includes current values"
+assert_contains "$RESULT" "ok" "briefs: build_concretize_prompt runs"
+
+echo "--- briefs: parse_concretize_response ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import parse_concretize_response
+
+response = '''key_actions: Zara in the bathroom; light buzzing at copper-penny frequency; she looks at her own face and sees the careful blankness; her hands stop on the porcelain; she washes her hands and goes back to the kitchen'''
+
+result = parse_concretize_response(response, 'mirror', ['key_actions'])
+print(f\"key_actions={result.get('key_actions', 'MISSING')[:40]}\")
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "key_actions=Zara in the bathroom" "briefs: parse extracts rewritten field"
+assert_contains "$RESULT" "ok" "briefs: parse runs"
