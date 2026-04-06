@@ -364,3 +364,29 @@ print('ok')
 assert_contains "$RESULT" "has_instructions" "elaborate: briefs prompt has physical state field instructions"
 assert_contains "$RESULT" "has_header" "elaborate: briefs CSV header includes physical state columns"
 assert_contains "$RESULT" "ok" "elaborate: build_briefs_prompt runs without error"
+
+# ============================================================================
+# Fix prompt: physical state
+# ============================================================================
+
+echo "--- fix prompt: builds without error ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.prompts_elaborate import build_physical_state_fix_prompt
+prompt = build_physical_state_fix_prompt(
+    'act2-sc03',
+    '${FIXTURE_DIR}',
+    '${FIXTURE_DIR}/scenes',
+    {'archive-key-dorren', 'exhaustion-tessa', 'sprained-ankle-tessa'},
+)
+has_available = 'archive-key-dorren' in prompt
+has_format = 'physical_state_in|physical_state_out' in prompt
+print('has_available' if has_available else 'no_available')
+print('has_format' if has_format else 'no_format')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "has_available" "fix prompt: shows available states"
+assert_contains "$RESULT" "has_format" "fix prompt: specifies output format"
+assert_contains "$RESULT" "ok" "fix prompt: builds without error"

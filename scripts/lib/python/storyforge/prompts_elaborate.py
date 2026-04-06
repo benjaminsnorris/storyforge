@@ -713,3 +713,72 @@ id|knowledge_in|knowledge_out|continuity_deps
 Provide exactly one data row. Semicolon-separate multiple values within a field.
 No explanation. No markdown fencing. Just the header line and the data line.
 """
+
+
+def build_physical_state_fix_prompt(
+    scene_id: str,
+    project_dir: str,
+    scenes_dir: str,
+    available_states: set,
+) -> str:
+    """Build a prompt to fix physical_state_in/physical_state_out for one scene.
+
+    Args:
+        scene_id: The scene to fix.
+        project_dir: Path to the book project.
+        scenes_dir: Path to the scenes/ directory with prose files.
+        available_states: Set of exact state IDs from all prior scenes' physical_state_out.
+
+    Returns:
+        Prompt string for Claude.
+    """
+    from .elaborate import get_scene
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    scene_data = get_scene(scene_id, ref_dir)
+
+    # Read prose excerpt
+    prose_path = os.path.join(scenes_dir, f'{scene_id}.md')
+    prose = _read_file(prose_path)
+    if prose:
+        words = prose.split()
+        if len(words) > 500:
+            prose = ' '.join(words[:500]) + '\n[... truncated ...]'
+
+    current_psi = scene_data.get('physical_state_in', '') if scene_data else ''
+    current_pso = scene_data.get('physical_state_out', '') if scene_data else ''
+
+    on_stage = scene_data.get('on_stage', '') if scene_data else ''
+
+    sorted_states = sorted(available_states) if available_states else ['(none yet — no prior physical states established)']
+
+    return f"""You are fixing the physical state chain for a scene in a novel. The physical_state_in field must use EXACT IDs from prior scenes' physical_state_out.
+
+## Scene: {scene_id}
+## On-stage characters: {on_stage}
+
+### Prose Excerpt
+{prose if prose else '(no prose available)'}
+
+### Current Values (may have mismatches)
+- physical_state_in: {current_psi}
+- physical_state_out: {current_pso}
+
+### Available Physical States (exact IDs from all prior scenes' physical_state_out)
+{chr(10).join(f'- {s}' for s in sorted_states)}
+
+## Instructions
+
+1. Rewrite physical_state_in using ONLY state IDs from the available list above that are relevant to on-stage characters in this scene.
+2. Rewrite physical_state_out as: the corrected physical_state_in PLUS any new states acquired during this scene, MINUS any states that resolve during this scene.
+3. Only track states that affect what characters can do, how they look, or what they have.
+
+## Output Format
+
+Respond with ONLY a pipe-delimited CSV row. The header is:
+
+id|physical_state_in|physical_state_out
+
+Provide exactly one data row. Semicolon-separate multiple values within a field.
+No explanation. No markdown fencing. Just the header line and the data line.
+"""
