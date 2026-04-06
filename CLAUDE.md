@@ -282,7 +282,7 @@ Run: `./tests/run-tests.sh` (all suites) or `./tests/run-tests.sh tests/test-thi
 | `storyforge-extract` | Extract structural data from existing prose (reverse elaboration). `--force` overwrites existing fields. Runs reconciliation after each phase. |
 | `storyforge-polish` | Targeted prose polish on low-scoring scenes |
 | `storyforge-validate` | Structural validation against scene CSVs. `--structural` adds story-quality scoring (8 dimensions, deterministic). `--no-schema` skips schema validation. |
-| `storyforge-hone` | CSV data quality tool — registries, briefs concretization, structural fixes, gap detection |
+| `storyforge-hone` | CSV data quality tool — registries, briefs concretization, structural fixes, gap detection. `--diagnose` runs structural scoring + brief quality + gaps in one read-only pass. Brief quality checks: abstract language, overspecified beats, verbose/prose-like fields. |
 | `storyforge-reconcile` | Backwards-compatible wrapper for `storyforge-hone --domain registries` |
 | `storyforge-enrich` | Metadata enrichment from prose |
 | `storyforge-assemble` | Chapter assembly + epub/PDF/HTML generation |
@@ -299,7 +299,7 @@ Run: `./tests/run-tests.sh` (all suites) or `./tests/run-tests.sh tests/test-thi
 | `extract` | Reverse elaboration — extract structural data from existing prose |
 | `revise` | Plan + execute revision (upstream CSV fixes + prose polish). `--polish` for craft-only. |
 | `score` | Craft + fidelity scoring |
-| `hone` | CSV data quality — registries, brief concretization, structural fixes, gap detection |
+| `hone` | CSV data quality — registries, brief concretization, structural fixes, gap detection. `--diagnose` for read-only assessment. |
 | `publish` | Assemble web book + generate dashboard + push to bookshelf |
 | `produce` | Epub, PDF, print formats |
 | `init` | New project initialization |
@@ -312,7 +312,7 @@ Run: `./tests/run-tests.sh` (all suites) or `./tests/run-tests.sh tests/test-thi
 New projects use the elaboration pipeline: progressive structural development before drafting.
 
 ```
-Seed → Spine → Architecture → Scene Map → Briefs → Validate → Draft → Evaluate → Polish → Produce
+Seed → Spine → Architecture → Scene Map → Briefs → Validate/Diagnose → Draft → Evaluate → Polish → Produce
 ```
 
 Each stage populates columns in the three-file CSV model. Validation gates between stages catch structural issues before they become prose problems. Evaluation findings route back to the appropriate CSV (brief/intent/structural) for upstream fixes rather than prose revision.
@@ -333,7 +333,8 @@ Key principles:
 | `prompts_elaborate.py` | Elaboration stage prompt builders |
 | `scoring.py` | Score parsing, diagnosis, proposals, fidelity scoring |
 | `structural.py` | Structural scoring engine — story quality from CSV data (8 dimensions, deterministic) |
-| `reconcile.py` | Post-extraction reconciliation — build registries (Opus) and normalize fields |
+| `hone.py` | CSV data quality: registry builds, abstract/overspecified/verbose detection, concretization prompts, gap detection |
+| `reconcile.py` | Backwards-compatible re-exports from hone.py |
 | `visualize.py` | Dashboard data loading |
 | `enrich.py` | Metadata enrichment |
 | `assembly.py` | Chapter assembly |

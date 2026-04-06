@@ -1,6 +1,6 @@
 ---
 name: hone
-description: Improve CSV data quality — concretize abstract briefs, fix over-specified beats, fill gaps, normalize registries, apply structural fixes. Use when the author wants to improve brief quality, fix abstract language, fill missing fields, normalize data, or when scoring reveals brief/structural issues.
+description: CSV data quality — diagnose and fix brief issues (abstract language, overspecified beats, verbose fields), fill gaps, normalize registries, apply structural fixes. Use when the author wants to check data quality, improve briefs, fill missing fields, normalize data, run diagnostics, or when scoring reveals brief/structural issues.
 ---
 
 # Storyforge Hone
@@ -55,12 +55,12 @@ Based on the author's request and project state:
 **"Hone everything" / "Full data quality pass":**
 → All domains in order: registries → gaps → structural → briefs.
 
-**If invoked without direction**, assess the project state:
-1. Check if scoring data exists — if `prose_naturalness` scores are low, recommend briefs domain
-2. Check for structural proposals — if they exist with brief/intent/structural fix_locations, recommend structural domain
-3. Check for empty required fields — if gaps found, recommend gaps domain
-4. If registries haven't been built recently, recommend registries domain
-5. Present findings and ask what the author wants to focus on
+**"How's my data?" / "What needs work?" / no specific direction:**
+→ Run `--diagnose` to get the full picture first. This runs structural scoring (8 dimensions), brief quality detection (abstract/overspecified/verbose), and gap detection in one read-only pass. Then present findings and recommend which domain to tackle based on what's worst:
+1. If gaps are found (missing required fields), recommend gaps domain first
+2. If structural scores are low, recommend the relevant domain
+3. If brief quality issues dominate, recommend briefs domain
+4. If registries are missing or stale, recommend registries domain
 
 ## Step 4: Assess Domain Needs
 
@@ -132,6 +132,7 @@ Map the author's request to the right flags:
 | "these scenes" / specific IDs | `--scenes ID,ID` |
 | "coaching mode" / "coach" | `--coaching coach` |
 | "just show me" / "dry run" | `--dry-run` |
+| "what's the data quality?" / "diagnose" | `--diagnose` |
 | "briefs" / "concretize" | `--domain briefs` |
 | "registries" / "reconcile" | `--domain registries` |
 | "gaps" / "missing fields" | `--domain gaps` |
@@ -179,6 +180,12 @@ Wait for the author's choice. If Option B, provide the full command and end.
 
 # Combined: act 2 briefs in coaching mode
 ./storyforge hone --domain briefs --act 2 --coaching coach
+
+# Diagnose — read-only assessment (structural scores + brief quality + gaps)
+./storyforge hone --diagnose
+
+# Diagnose scoped to an act
+./storyforge hone --diagnose --act 2
 ```
 
 ## Step 6: Review Results
