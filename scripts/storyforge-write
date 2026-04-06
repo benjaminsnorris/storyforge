@@ -68,6 +68,7 @@ _extract_scene_from_response() {
 
 DRY_RUN=false
 INTERACTIVE=false
+FORCE=false
 COACHING_LEVEL=""
 WRITE_MODE="batch"      # batch (default) | direct | interactive
 FILTER_MODE="all"       # all | single | range | act | from_seq | scenes
@@ -93,6 +94,7 @@ Scope:
   --from-seq N-M              Draft scenes in sequence range N through M
 
 Options:
+  --force                     Re-draft scenes even if already drafted
   --direct                    Use direct API calls (one at a time, not batch)
   --coaching LEVEL            Set coaching level: full, coach, or strict
   --interactive               Draft with supervision — watch, give feedback, redirect
@@ -124,6 +126,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --force)
+            FORCE=true
             shift
             ;;
         --coaching)
@@ -252,7 +258,7 @@ case "$FILTER_MODE" in
 esac
 
 # ============================================================================
-# Filter out already-drafted scenes (unless explicitly targeting a single scene)
+# Filter out already-drafted scenes (unless --force or explicitly targeting a single scene)
 # ============================================================================
 
 PENDING_IDS=()
@@ -262,10 +268,11 @@ for id in "${FILTERED_IDS[@]}"; do
     status=$(PYTHONPATH="$PYTHON_LIB" python3 -m storyforge.prompts scene-status "$id" "$PROJECT_DIR")
     case "$status" in
         drafted|revised|final)
-            if [[ "$FILTER_MODE" == "single" ]]; then
-                # User explicitly requested this scene — include it
+            if [[ "$FORCE" == true || "$FILTER_MODE" == "single" ]]; then
+                # --force or user explicitly requested this scene — include it
                 PENDING_IDS+=("$id")
-                log "NOTE: Scene ${id} has status '${status}' but was explicitly requested"
+                [[ "$FORCE" == true ]] && log "NOTE: Scene ${id} has status '${status}' — re-drafting (--force)"
+                [[ "$FILTER_MODE" == "single" ]] && log "NOTE: Scene ${id} has status '${status}' but was explicitly requested"
             else
                 SKIPPED=$((SKIPPED + 1))
             fi
