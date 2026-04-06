@@ -1,0 +1,309 @@
+#!/bin/bash
+# storyforge-hone — CSV data quality tool
+#
+# Domains:
+#   registries   Build canonical registries, normalize field values
+#   briefs       Concretize abstract brief language as concrete physical beats
+#   structural   Fix CSV fields from evaluation findings
+#   gaps         Fill empty required fields from context
+#
+# Usage:
+#   ./storyforge hone                              # Run all domains
+#   ./storyforge hone --domain briefs              # Run one domain
+#   ./storyforge hone --domain registries --phase 1  # Registry sub-domains for extraction phase
+#   ./storyforge hone --scenes ID,ID               # Scope to specific scenes
+#   ./storyforge hone --dry-run                    # Show what would change
+set -eo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/lib"
+PYTHON_LIB="${SCRIPT_DIR}/lib/python"
+
+source "${LIB_DIR}/common.sh"
+detect_project_root
+
+LOG_DIR="${PROJECT_DIR}/working/logs"
+mkdir -p "$LOG_DIR"
+
+# ============================================================================
+# Arguments
+# ============================================================================
+
+DOMAINS_ARG=""
+PHASE=""
+SCENES_ARG=""
+ACT_ARG=""
+THRESHOLD="3.5"
+DRY_RUN=false
+COACHING_LEVEL=""
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+CSV data quality tool — improve scene CSV data across four domains.
+
+Domains:
+  registries    Build canonical registries, normalize field values
+  briefs        Concretize abstract brief language as concrete physical beats
+  structural    Fix CSV fields from evaluation findings
+  gaps          Fill empty required fields from context
+
+Options:
+  --domain NAME[,NAME]  Run specific domains (comma-separated)
+  --phase N             Run registry sub-domains for extraction phase (1/2/3)
+  --scenes ID,ID        Scope to specific scenes
+  --act N               Scope to scenes in part/act N
+  --threshold N         prose_naturalness threshold for briefs domain (default: 3.5)
+  --coaching LEVEL      Override coaching level (full/coach/strict)
+  --dry-run             Show what would change without modifying files
+  -h, --help            Show this help
+EOF
+    exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --domain)     DOMAINS_ARG="${2:?ERROR: --domain requires a value}"; shift 2 ;;
+        --phase)      PHASE="${2:?ERROR: --phase requires a value}"; shift 2 ;;
+        --scenes)     SCENES_ARG="${2:?ERROR: --scenes requires comma-separated IDs}"; shift 2 ;;
+        --act|--part) ACT_ARG="${2:?ERROR: $1 requires a value}"; shift 2 ;;
+        --threshold)  THRESHOLD="${2:?ERROR: --threshold requires a value}"; shift 2 ;;
+        --coaching)   COACHING_LEVEL="${2:?ERROR: --coaching requires full/coach/strict}"; shift 2 ;;
+        --dry-run)    DRY_RUN=true; shift ;;
+        -h|--help)    usage ;;
+        -*)           echo "ERROR: Unknown option: $1" >&2; usage ;;
+        *)            shift ;;
+    esac
+done
+
+# Resolve coaching level
+if [[ -z "$COACHING_LEVEL" ]]; then
+    COACHING_LEVEL=$(get_coaching_level)
+fi
+
+# ============================================================================
+# Build domain list
+# ============================================================================
+
+ALL_DOMAINS=(registries gaps structural briefs)
+PHASE1_REGISTRY_DOMAINS=(characters locations)
+PHASE2_REGISTRY_DOMAINS=(values mice-threads)
+PHASE3_REGISTRY_DOMAINS=(knowledge outcomes physical-states)
+
+DOMAINS=()
+if [[ -n "$DOMAINS_ARG" ]]; then
+    IFS=',' read -ra DOMAINS <<< "$DOMAINS_ARG"
+elif [[ -n "$PHASE" ]]; then
+    # Phase mode is registry-only (backwards compat with storyforge-reconcile --phase)
+    case "$PHASE" in
+        1) DOMAINS=("${PHASE1_REGISTRY_DOMAINS[@]}") ;;
+        2) DOMAINS=("${PHASE2_REGISTRY_DOMAINS[@]}") ;;
+        3) DOMAINS=("${PHASE3_REGISTRY_DOMAINS[@]}") ;;
+        *) log "ERROR: --phase must be 1, 2, or 3"; exit 1 ;;
+    esac
+else
+    DOMAINS=("${ALL_DOMAINS[@]}")
+fi
+
+if [[ "$DRY_RUN" != true && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+    # Check if any domain needs API (registries/briefs/gaps do, not outcomes)
+    needs_api=false
+    for d in "${DOMAINS[@]}"; do
+        case "$d" in
+            outcomes) ;;
+            *) needs_api=true ;;
+        esac
+    done
+    if [[ "$needs_api" == true && "$COACHING_LEVEL" != "strict" ]]; then
+        log "ERROR: ANTHROPIC_API_KEY not set. Required for hone domains."
+        exit 1
+    fi
+fi
+
+# ============================================================================
+# Project info
+# ============================================================================
+
+PROJECT_TITLE=$(read_yaml_field "project.title" 2>/dev/null || echo "Untitled")
+REF_DIR="${PROJECT_DIR}/reference"
+MODEL=$(select_model "synthesis")
+
+log "============================================"
+log "Storyforge Hone"
+log "Project: ${PROJECT_TITLE}"
+log "Domains: ${DOMAINS[*]}"
+log "Coaching: ${COACHING_LEVEL}"
+[[ -n "$SCENES_ARG" ]] && log "Scenes: ${SCENES_ARG}"
+log "Model: ${MODEL}"
+log "============================================"
+
+# ============================================================================
+# Scene filter (if --scenes or --act provided)
+# ============================================================================
+
+SCENE_FILTER=""
+if [[ -n "$SCENES_ARG" ]]; then
+    SCENE_FILTER="$SCENES_ARG"
+elif [[ -n "$ACT_ARG" ]]; then
+    SCENE_FILTER=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import _read_csv
+rows = _read_csv('${REF_DIR}/scenes.csv')
+ids = [r['id'] for r in rows if r.get('part', '') == '${ACT_ARG}']
+print(','.join(ids))
+")
+fi
+
+# ============================================================================
+# Run domains
+# ============================================================================
+
+CHAR_BIBLE="${PROJECT_DIR}/reference/character-bible.md"
+
+for CURRENT_DOMAIN in "${DOMAINS[@]}"; do
+    log ""
+    log "--- Hone: ${CURRENT_DOMAIN} ---"
+
+    # Registry sub-domains go through the existing reconcile_domain path
+    case "$CURRENT_DOMAIN" in
+        characters|locations|values|mice-threads|knowledge|outcomes|physical-states)
+            # This is a registry domain — use existing reconcile logic
+            if [[ "$DRY_RUN" == true ]]; then
+                if [[ "$CURRENT_DOMAIN" == "outcomes" ]]; then
+                    log "  (deterministic — no API call needed)"
+                else
+                    PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.hone import build_registry_prompt
+context = ''
+if '${CURRENT_DOMAIN}' == 'characters' and os.path.isfile('${CHAR_BIBLE}'):
+    context = open('${CHAR_BIBLE}', encoding='utf-8').read()
+prompt = build_registry_prompt('${CURRENT_DOMAIN}', '${REF_DIR}', context=context)
+print(f'Prompt for ${CURRENT_DOMAIN} ({len(prompt)} chars)')
+"
+                fi
+                continue
+            fi
+
+            RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json, os; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.hone import reconcile_domain
+context = ''
+if '${CURRENT_DOMAIN}' == 'characters' and os.path.isfile('${CHAR_BIBLE}'):
+    context = open('${CHAR_BIBLE}', encoding='utf-8').read()
+result = reconcile_domain('${CURRENT_DOMAIN}', '${REF_DIR}', '${MODEL}', '${LOG_DIR}', context=context)
+print(json.dumps(result))
+")
+
+            ENTRIES=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('registry_entries', 0))")
+            NORMALIZED=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('fields_normalized', 0))")
+            log "  Registry: ${ENTRIES} entries, ${NORMALIZED} normalizations"
+
+            (cd "$PROJECT_DIR" && git add reference/ working/logs/ && \
+                git commit -m "Hone: registries/${CURRENT_DOMAIN} — ${ENTRIES} entries, ${NORMALIZED} normalizations" && \
+                git push) 2>/dev/null || true
+            ;;
+
+        registries)
+            # Meta-domain: run all registry sub-domains
+            for sub in characters locations values mice-threads knowledge outcomes physical-states; do
+                log "  --- registries/${sub} ---"
+                if [[ "$DRY_RUN" == true ]]; then
+                    log "    (dry-run)"
+                    continue
+                fi
+
+                RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json, os; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.hone import reconcile_domain
+context = ''
+if '${sub}' == 'characters' and os.path.isfile('${CHAR_BIBLE}'):
+    context = open('${CHAR_BIBLE}', encoding='utf-8').read()
+result = reconcile_domain('${sub}', '${REF_DIR}', '${MODEL}', '${LOG_DIR}', context=context)
+print(json.dumps(result))
+")
+
+                ENTRIES=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('registry_entries', 0))")
+                NORMALIZED=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('fields_normalized', 0))")
+                log "    ${ENTRIES} entries, ${NORMALIZED} normalizations"
+
+                (cd "$PROJECT_DIR" && git add reference/ working/logs/ && \
+                    git commit -m "Hone: registries/${sub} — ${ENTRIES} entries, ${NORMALIZED} normalizations" && \
+                    git push) 2>/dev/null || true
+            done
+            ;;
+
+        briefs)
+            SCENE_FLAG=""
+            [[ -n "$SCENE_FILTER" ]] && SCENE_FLAG="scene_ids='${SCENE_FILTER}'.split(',')"
+
+            RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.hone import hone_briefs
+result = hone_briefs(
+    '${REF_DIR}', '${PROJECT_DIR}',
+    scene_ids=${SCENE_FLAG:-None},
+    threshold=${THRESHOLD},
+    model='${MODEL}',
+    log_dir='${LOG_DIR}',
+    coaching_level='${COACHING_LEVEL}',
+    dry_run=${DRY_RUN^},
+)
+print(json.dumps(result))
+")
+
+            FLAGGED=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('scenes_flagged', 0))")
+            REWRITTEN=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('scenes_rewritten', 0))")
+            FIELDS=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('fields_rewritten', 0))")
+
+            log "  Flagged: ${FLAGGED} scenes with abstract briefs"
+            log "  Rewritten: ${REWRITTEN} scenes, ${FIELDS} fields"
+
+            if [[ "$DRY_RUN" != true && "$REWRITTEN" -gt 0 ]]; then
+                (cd "$PROJECT_DIR" && git add reference/ working/ && \
+                    git commit -m "Hone: briefs — ${REWRITTEN} scenes concretized (${FIELDS} fields)" && \
+                    git push) 2>/dev/null || true
+            fi
+            ;;
+
+        gaps)
+            SCENE_FLAG=""
+            [[ -n "$SCENE_FILTER" ]] && SCENE_FLAG="scene_ids='${SCENE_FILTER}'.split(',')"
+
+            RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.hone import detect_gaps
+scenes = _read_csv_as_map('${REF_DIR}/scenes.csv')
+intent = _read_csv_as_map('${REF_DIR}/scene-intent.csv')
+briefs = _read_csv_as_map('${REF_DIR}/scene-briefs.csv')
+gaps = detect_gaps(scenes, intent, briefs, ${SCENE_FLAG:-None})
+print(json.dumps({'gaps': len(gaps), 'scenes': len(set(g['scene_id'] for g in gaps))}))
+")
+
+            GAPS=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('gaps', 0))")
+            SCENES=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('scenes', 0))")
+            log "  Gaps found: ${GAPS} empty fields across ${SCENES} scenes"
+
+            if [[ "$DRY_RUN" == true || "$GAPS" == "0" ]]; then
+                continue
+            fi
+
+            log "  (gap filling requires storyforge-elaborate --gap-fill — run manually)"
+            ;;
+
+        structural)
+            log "  (structural CSV fixes route through evaluation findings — run after storyforge-evaluate)"
+            ;;
+
+        *)
+            log "WARNING: Unknown domain: ${CURRENT_DOMAIN}"
+            ;;
+    esac
+done
+
+log ""
+log "============================================"
+log "Hone complete"
+log "============================================"
