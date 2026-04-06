@@ -139,3 +139,72 @@ print('ok')
 
 assert_contains "$RESULT" "key_actions=Zara in the bathroom" "briefs: parse extracts rewritten field"
 assert_contains "$RESULT" "ok" "briefs: parse runs"
+
+# ============================================================================
+# Briefs domain: hone_briefs integration
+# ============================================================================
+
+echo "--- briefs: hone_briefs detects and reports abstract scenes ---"
+
+RESULT=$(python3 -c "
+${PY}
+import os, tempfile, shutil
+from storyforge.hone import hone_briefs
+from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+
+# Create temp project with abstract briefs
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Inject abstract key_actions into a scene
+briefs_path = os.path.join(ref, 'scene-briefs.csv')
+rows = _read_csv(briefs_path)
+for r in rows:
+    if r['id'] == 'act1-sc01':
+        r['key_actions'] = 'The realization dawns; she connects to the deeper pattern; the parallel emerges'
+_write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+# Run detection only (dry_run=True)
+result = hone_briefs(ref, tmpdir, dry_run=True)
+print(f'flagged={result[\"scenes_flagged\"]}')
+print('ok')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "flagged=1" "briefs: detects 1 abstract scene"
+assert_contains "$RESULT" "ok" "briefs: hone_briefs runs in dry-run mode"
+
+echo "--- briefs: strict coaching saves analysis ---"
+
+RESULT=$(python3 -c "
+${PY}
+import os, tempfile, shutil
+from storyforge.hone import hone_briefs
+from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+briefs_path = os.path.join(ref, 'scene-briefs.csv')
+rows = _read_csv(briefs_path)
+for r in rows:
+    if r['id'] == 'act1-sc01':
+        r['key_actions'] = 'The realization dawns; she connects to the deeper pattern; the parallel emerges'
+_write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+result = hone_briefs(ref, tmpdir, coaching_level='strict')
+analysis_path = os.path.join(tmpdir, 'working', 'hone', 'briefs-analysis-act1-sc01.md')
+exists = os.path.isfile(analysis_path)
+print(f'analysis_exists={exists}')
+print(f'rewritten={result[\"scenes_rewritten\"]}')
+print('ok')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "analysis_exists=True" "briefs: strict saves analysis file"
+assert_contains "$RESULT" "rewritten=0" "briefs: strict does not rewrite"
+assert_contains "$RESULT" "ok" "briefs: strict coaching runs"

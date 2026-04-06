@@ -889,3 +889,141 @@ def parse_concretize_response(
                     result[field] = value
                 break
     return result
+
+
+# ============================================================================
+# Briefs domain: hone_briefs
+# ============================================================================
+
+def hone_briefs(
+    ref_dir: str,
+    project_dir: str,
+    scene_ids: list[str] | None = None,
+    threshold: float = 3.5,
+    model: str = '',
+    log_dir: str = '',
+    coaching_level: str = 'full',
+    dry_run: bool = False,
+) -> dict:
+    """Concretize abstract brief fields as concrete physical beats.
+
+    Args:
+        ref_dir: Path to reference/ directory.
+        project_dir: Path to project root.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+        threshold: prose_naturalness score threshold (scenes below this are flagged).
+        model: Anthropic model ID for API calls.
+        log_dir: Directory for API log files.
+        coaching_level: full/coach/strict.
+        dry_run: If True, detect but don't rewrite.
+
+    Returns:
+        Dict with scenes_flagged, scenes_rewritten, fields_rewritten.
+    """
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+
+    # Detect abstract fields
+    flagged = detect_abstract_fields(briefs_map, scene_ids)
+
+    if dry_run or not flagged:
+        return {
+            'scenes_flagged': len(set(f['scene_id'] for f in flagged)),
+            'scenes_rewritten': 0,
+            'fields_rewritten': 0,
+        }
+
+    if coaching_level == 'strict':
+        # Save analysis only
+        hone_dir = os.path.join(project_dir, 'working', 'hone')
+        os.makedirs(hone_dir, exist_ok=True)
+        for f in flagged:
+            path = os.path.join(hone_dir, f'briefs-analysis-{f["scene_id"]}.md')
+            with open(path, 'w') as fh:
+                fh.write(f"# Brief Analysis: {f['scene_id']}\n\n")
+                fh.write(f"**Field:** {f['field']}\n")
+                fh.write(f"**Current:** {f['value']}\n")
+                fh.write(f"**Abstract indicators:** {f['abstract_count']}\n")
+                fh.write(f"**Concrete indicators:** {f['concrete_count']}\n")
+        return {
+            'scenes_flagged': len(set(f['scene_id'] for f in flagged)),
+            'scenes_rewritten': 0,
+            'fields_rewritten': 0,
+        }
+
+    # Load voice guide and character bible for prompt building
+    voice_guide = ''
+    voice_path = os.path.join(ref_dir, 'voice-guide.md')
+    if os.path.isfile(voice_path):
+        with open(voice_path, encoding='utf-8') as fh:
+            voice_guide = fh.read()
+
+    char_bible = ''
+    char_path = os.path.join(ref_dir, 'character-bible.md')
+    if os.path.isfile(char_path):
+        with open(char_path, encoding='utf-8') as fh:
+            char_bible = fh.read()
+
+    from storyforge.api import invoke_to_file, extract_text_from_file
+
+    # Group flagged fields by scene
+    by_scene: dict[str, list[str]] = {}
+    for f in flagged:
+        by_scene.setdefault(f['scene_id'], []).append(f['field'])
+
+    scenes_rewritten = 0
+    fields_rewritten = 0
+
+    for sid, fields in by_scene.items():
+        current_values = {field: briefs_map[sid].get(field, '') for field in fields}
+
+        prompt = build_concretize_prompt(
+            scene_id=sid,
+            fields=fields,
+            current_values=current_values,
+            voice_guide=voice_guide[:3000],
+            character_entry=char_bible[:2000],
+        )
+
+        if coaching_level == 'coach':
+            # Save proposal for author review
+            hone_dir = os.path.join(project_dir, 'working', 'hone')
+            os.makedirs(hone_dir, exist_ok=True)
+            proposal_path = os.path.join(hone_dir, f'briefs-{sid}.md')
+            with open(proposal_path, 'w') as fh:
+                fh.write(f"# Brief Concretization Proposal: {sid}\n\n")
+                fh.write(f"## Current\n")
+                for field in fields:
+                    fh.write(f"**{field}:** {current_values[field]}\n\n")
+                fh.write(f"## Prompt\n\n{prompt}\n")
+            continue
+
+        # full coaching: call API and apply
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f'hone-briefs-{sid}.json')
+        invoke_to_file(prompt, model, log_file, max_tokens=2048)
+        response = extract_text_from_file(log_file)
+
+        rewrites = parse_concretize_response(response, sid, fields)
+        for field, new_value in rewrites.items():
+            if new_value and new_value != current_values.get(field):
+                briefs_map[sid][field] = new_value
+                fields_rewritten += 1
+
+        if rewrites:
+            scenes_rewritten += 1
+
+    # Write back if any changes were made
+    if fields_rewritten > 0:
+        briefs_rows = list(briefs_map.values())
+        briefs_rows.sort(key=lambda r: r.get('id', ''))
+        _write_csv(
+            os.path.join(ref_dir, 'scene-briefs.csv'),
+            briefs_rows,
+            _FILE_MAP['scene-briefs.csv'],
+        )
+
+    return {
+        'scenes_flagged': len(by_scene),
+        'scenes_rewritten': scenes_rewritten,
+        'fields_rewritten': fields_rewritten,
+    }
