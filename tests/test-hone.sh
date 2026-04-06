@@ -1,0 +1,505 @@
+#!/bin/bash
+# test-hone.sh — Tests for storyforge-hone CSV data quality tool
+
+PYTHON_DIR="${PLUGIN_DIR}/scripts/lib/python"
+PY="import sys; sys.path.insert(0, '${PLUGIN_DIR}/scripts/lib/python')"
+
+# ============================================================================
+# Module: hone.py exports all reconcile functions
+# ============================================================================
+
+echo "--- hone: exports reconcile functions ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import (
+    build_registry_prompt,
+    parse_registry_response,
+    write_registry,
+    apply_updates,
+    apply_registry_normalization,
+    reconcile_domain,
+    reconcile_outcomes,
+    normalize_outcomes,
+    _collect_knowledge_chain,
+    _collect_physical_state_chain,
+)
+print('ok')
+" 2>/dev/null)
+
+assert_equals "ok" "$RESULT" "hone: exports all reconcile functions"
+
+echo "--- reconcile: backwards-compatible re-exports ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.reconcile import (
+    build_registry_prompt,
+    parse_registry_response,
+    write_registry,
+    apply_updates,
+    reconcile_domain,
+)
+print('ok')
+" 2>/dev/null)
+
+assert_equals "ok" "$RESULT" "reconcile: backwards-compatible re-exports"
+
+# ============================================================================
+# Briefs domain: abstract language detection
+# ============================================================================
+
+echo "--- briefs: detects abstract key_actions ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_abstract_fields
+
+# Abstract: thematic verbs, narrator language
+abstract_row = {
+    'id': 'test-scene',
+    'key_actions': 'The realization building; connecting her hiding to the creatures hiding; the parallel crystallizing',
+    'crisis': 'She could keep hiding or face the truth',
+    'decision': 'She faces it',
+    'knowledge_in': '',
+    'knowledge_out': 'k01',
+}
+results = detect_abstract_fields({'test-scene': abstract_row})
+fields = [r['field'] for r in results]
+assert 'key_actions' in fields, f'key_actions not flagged: {fields}'
+print(f'flagged={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "briefs: detects abstract key_actions"
+assert_contains "$RESULT" "flagged=" "briefs: returns flagged fields"
+
+echo "--- briefs: concrete key_actions not flagged ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_abstract_fields
+
+concrete_row = {
+    'id': 'test-scene',
+    'key_actions': 'Naji leads her down a stairwell; the door at the bottom is painted gray; she holds the bowl and her hands shake',
+    'crisis': 'Go through the door or walk away',
+    'decision': 'She goes through the door',
+    'knowledge_in': '',
+    'knowledge_out': 'k01',
+}
+results = detect_abstract_fields({'test-scene': concrete_row})
+print(f'flagged={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "flagged=0" "briefs: concrete actions not flagged"
+assert_contains "$RESULT" "ok" "briefs: concrete detection runs"
+
+# ============================================================================
+# Briefs domain: concretize prompt and parser
+# ============================================================================
+
+echo "--- briefs: build_concretize_prompt runs ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import build_concretize_prompt
+
+prompt = build_concretize_prompt(
+    scene_id='mirror',
+    fields=['key_actions'],
+    current_values={'key_actions': 'The realization building; the parallel crystallizing'},
+    voice_guide='Zara thinks in food metaphors. Sensory-first.',
+    character_entry='Zara: 19, line cook, synesthete. Notices temperature, sound, exits, hands.',
+)
+has_rule = 'physically does or perceives' in prompt
+has_current = 'realization building' in prompt
+print('has_rule' if has_rule else 'no_rule')
+print('has_current' if has_current else 'no_current')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "has_rule" "briefs: prompt includes concretization rule"
+assert_contains "$RESULT" "has_current" "briefs: prompt includes current values"
+assert_contains "$RESULT" "ok" "briefs: build_concretize_prompt runs"
+
+echo "--- briefs: parse_concretize_response ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import parse_concretize_response
+
+response = '''key_actions: Zara in the bathroom; light buzzing at copper-penny frequency; she looks at her own face and sees the careful blankness; her hands stop on the porcelain; she washes her hands and goes back to the kitchen'''
+
+result = parse_concretize_response(response, 'mirror', ['key_actions'])
+print(f\"key_actions={result.get('key_actions', 'MISSING')[:40]}\")
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "key_actions=Zara in the bathroom" "briefs: parse extracts rewritten field"
+assert_contains "$RESULT" "ok" "briefs: parse runs"
+
+# ============================================================================
+# Briefs domain: hone_briefs integration
+# ============================================================================
+
+echo "--- briefs: hone_briefs detects and reports abstract scenes ---"
+
+RESULT=$(python3 -c "
+${PY}
+import os, tempfile, shutil
+from storyforge.hone import hone_briefs
+from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+
+# Create temp project with abstract briefs
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Inject abstract key_actions into a scene
+briefs_path = os.path.join(ref, 'scene-briefs.csv')
+rows = _read_csv(briefs_path)
+for r in rows:
+    if r['id'] == 'act1-sc01':
+        r['key_actions'] = 'The realization dawns; she connects to the deeper pattern; the parallel emerges'
+_write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+# Run detection only (dry_run=True)
+result = hone_briefs(ref, tmpdir, dry_run=True)
+print(f'flagged={result[\"scenes_flagged\"]}')
+print('ok')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "flagged=1" "briefs: detects 1 abstract scene"
+assert_contains "$RESULT" "ok" "briefs: hone_briefs runs in dry-run mode"
+
+echo "--- briefs: strict coaching saves analysis ---"
+
+RESULT=$(python3 -c "
+${PY}
+import os, tempfile, shutil
+from storyforge.hone import hone_briefs
+from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+briefs_path = os.path.join(ref, 'scene-briefs.csv')
+rows = _read_csv(briefs_path)
+for r in rows:
+    if r['id'] == 'act1-sc01':
+        r['key_actions'] = 'The realization dawns; she connects to the deeper pattern; the parallel emerges'
+_write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+result = hone_briefs(ref, tmpdir, coaching_level='strict')
+analysis_path = os.path.join(tmpdir, 'working', 'hone', 'briefs-analysis-act1-sc01.md')
+exists = os.path.isfile(analysis_path)
+print(f'analysis_exists={exists}')
+print(f'rewritten={result[\"scenes_rewritten\"]}')
+print('ok')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "analysis_exists=True" "briefs: strict saves analysis file"
+assert_contains "$RESULT" "rewritten=0" "briefs: strict does not rewrite"
+assert_contains "$RESULT" "ok" "briefs: strict coaching runs"
+
+# ============================================================================
+# Gaps domain: detect missing fields
+# ============================================================================
+
+echo "--- gaps: detects missing required fields ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_gaps
+
+scenes_map = {
+    's1': {'id': 's1', 'status': 'briefed', 'seq': '1'},
+}
+briefs_map = {
+    's1': {'id': 's1', 'goal': 'Do the thing', 'conflict': '', 'outcome': 'yes',
+            'crisis': '', 'decision': 'decides'},
+}
+intent_map = {
+    's1': {'id': 's1', 'function': 'Hook', 'value_at_stake': '', 'value_shift': '+/-',
+            'emotional_arc': 'calm to tense'},
+}
+
+results = detect_gaps(scenes_map, intent_map, briefs_map)
+fields = [r['field'] for r in results if r['scene_id'] == 's1']
+assert 'conflict' in fields, f'conflict not flagged: {fields}'
+assert 'crisis' in fields, f'crisis not flagged: {fields}'
+print(f'gaps={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "gaps: detect_gaps runs"
+assert_contains "$RESULT" "gaps=" "gaps: returns gap list"
+
+echo "--- gaps: no gaps for complete scene ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_gaps
+
+scenes_map = {
+    's1': {'id': 's1', 'status': 'briefed', 'seq': '1'},
+}
+briefs_map = {
+    's1': {'id': 's1', 'goal': 'Do it', 'conflict': 'Obstacle', 'outcome': 'yes',
+            'crisis': 'Now or never', 'decision': 'Now'},
+}
+intent_map = {
+    's1': {'id': 's1', 'function': 'Hook', 'value_at_stake': 'truth',
+            'value_shift': '+/-', 'emotional_arc': 'calm to tense'},
+}
+
+results = detect_gaps(scenes_map, intent_map, briefs_map)
+print(f'gaps={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "gaps=0" "gaps: no gaps for complete scene"
+assert_contains "$RESULT" "ok" "gaps: complete scene runs"
+
+echo "--- gaps: skips spine-status scenes ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_gaps
+
+scenes_map = {
+    's1': {'id': 's1', 'status': 'spine', 'seq': '1'},
+}
+briefs_map = {'s1': {'id': 's1'}}
+intent_map = {'s1': {'id': 's1'}}
+
+results = detect_gaps(scenes_map, intent_map, briefs_map)
+print(f'gaps={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "gaps=0" "gaps: skips spine-status scenes"
+assert_contains "$RESULT" "ok" "gaps: spine skip runs"
+
+# ============================================================================
+# Briefs domain: over-specification detection
+# ============================================================================
+
+echo "--- overspecified: flags too many beats for word count ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_overspecified
+
+briefs = {
+    's1': {'id': 's1', 'key_actions': 'a; b; c; d; e; f; g', 'emotions': 'x;y'},
+}
+scenes = {
+    's1': {'id': 's1', 'target_words': '1500'},
+}
+results = detect_overspecified(briefs, scenes)
+fields = [(r['field'], r['beat_count']) for r in results]
+assert ('key_actions', 7) in fields, f'key_actions not flagged: {fields}'
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "overspecified: flags 7 beats in 1500 words"
+assert_contains "$RESULT" "ok" "overspecified: detection runs"
+
+echo "--- overspecified: does not flag reasonable beat count ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_overspecified
+
+briefs = {
+    's1': {'id': 's1', 'key_actions': 'Enters room; Finds letter; Leaves', 'emotions': 'tension;calm'},
+}
+scenes = {
+    's1': {'id': 's1', 'target_words': '2500'},
+}
+results = detect_overspecified(briefs, scenes)
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=0" "overspecified: 3 beats in 2500 words is fine"
+assert_contains "$RESULT" "ok" "overspecified: clean scene runs"
+
+echo "--- overspecified: flags excessive emotion beats ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_overspecified
+
+briefs = {
+    's1': {'id': 's1', 'key_actions': 'Does thing', 'emotions': 'competence;unease;self-doubt;resolve'},
+}
+scenes = {
+    's1': {'id': 's1', 'target_words': '2500'},
+}
+results = detect_overspecified(briefs, scenes)
+fields = [r['field'] for r in results]
+assert 'emotions' in fields, f'emotions not flagged: {fields}'
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "overspecified: flags 4-beat emotions"
+assert_contains "$RESULT" "ok" "overspecified: emotion detection runs"
+
+echo "--- overspecified: absolute threshold catches high beats even with high word count ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_overspecified
+
+briefs = {
+    's1': {'id': 's1', 'key_actions': 'a; b; c; d; e; f; g; h', 'emotions': 'x;y'},
+}
+scenes = {
+    's1': {'id': 's1', 'target_words': '8000'},
+}
+results = detect_overspecified(briefs, scenes)
+fields = [r['field'] for r in results]
+assert 'key_actions' in fields, f'key_actions not flagged: {fields}'
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "overspecified: 8 beats flagged even at 8000 words"
+assert_contains "$RESULT" "ok" "overspecified: absolute threshold runs"
+
+# ============================================================================
+# Briefs domain: verbose/prose-like field detection
+# ============================================================================
+
+echo "--- verbose: flags paragraph-style decision ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_verbose_fields
+
+briefs = {
+    's1': {
+        'id': 's1',
+        'decision': 'They hold. Naji breaks her deal and stands with the community. The Hunter kills her — not erasure but death. She dies while every mind holds her name.',
+    },
+}
+results = detect_verbose_fields(briefs)
+fields = [r['field'] for r in results]
+assert 'decision' in fields, f'decision not flagged: {fields}'
+print(f'issues={len(results)}')
+print(f'chars={results[0][\"char_count\"]}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "verbose: flags paragraph decision"
+assert_contains "$RESULT" "ok" "verbose: detection runs"
+
+echo "--- verbose: does not flag terse fields ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_verbose_fields
+
+briefs = {
+    's1': {
+        'id': 's1',
+        'decision': 'She goes through the door',
+        'goal': 'Find the map',
+        'conflict': 'Guards block the entrance',
+        'crisis': 'Now or never',
+        'key_actions': 'Opens door; Runs; Grabs map',
+        'emotions': 'fear;relief',
+    },
+}
+results = detect_verbose_fields(briefs)
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=0" "verbose: terse fields pass"
+assert_contains "$RESULT" "ok" "verbose: terse detection runs"
+
+echo "--- verbose: flags extracted key_actions with prose clauses ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_verbose_fields
+
+briefs = {
+    's1': {
+        'id': 's1',
+        'key_actions': 'Chopping onions; crying; Tarek working beside her silently; Suki arriving and sitting at the counter without speaking; the rhythm of the knife; the truth assembling — the isolated vanish, and Suki came here instead of being alone',
+    },
+}
+results = detect_verbose_fields(briefs)
+fields = [r['field'] for r in results]
+assert 'key_actions' in fields, f'key_actions not flagged: {fields}'
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "verbose: flags extracted prose key_actions"
+assert_contains "$RESULT" "ok" "verbose: extracted data detection runs"
+
+# ============================================================================
+# Combined detection: detect_brief_issues
+# ============================================================================
+
+echo "--- combined: detect_brief_issues finds all issue types ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_brief_issues
+
+briefs = {
+    's1': {
+        'id': 's1',
+        'key_actions': 'The realization dawns; connecting deeper; the parallel emerging; crystallizing; the truth building; she transforms',
+        'decision': 'They hold. Naji breaks her deal and stands with the community. The Hunter kills her — not erasure but death. She dies while every mind holds her name.',
+        'emotions': 'hope;dread;resolve;calm',
+        'crisis': 'Stay or go',
+        'goal': 'Find truth',
+        'conflict': 'Opposition',
+    },
+}
+scenes = {
+    's1': {'id': 's1', 'target_words': '1500'},
+}
+issues = detect_brief_issues(briefs, scenes)
+types = set(i['issue'] for i in issues)
+assert 'abstract' in types, f'abstract not found: {types}'
+assert 'overspecified' in types, f'overspecified not found: {types}'
+assert 'verbose' in types, f'verbose not found: {types}'
+print(f'total={len(issues)}')
+print(f'types={sorted(types)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "combined: detect_brief_issues runs"
+assert_contains "$RESULT" "abstract" "combined: finds abstract issues"
+assert_contains "$RESULT" "overspecified" "combined: finds overspecified issues"
+assert_contains "$RESULT" "verbose" "combined: finds verbose issues"
+
+echo "--- combined: broadened fields include goal and conflict ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import _CONCRETIZABLE_FIELDS
+assert 'goal' in _CONCRETIZABLE_FIELDS, f'goal missing: {_CONCRETIZABLE_FIELDS}'
+assert 'conflict' in _CONCRETIZABLE_FIELDS, f'conflict missing: {_CONCRETIZABLE_FIELDS}'
+assert 'emotions' in _CONCRETIZABLE_FIELDS, f'emotions missing: {_CONCRETIZABLE_FIELDS}'
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "combined: _CONCRETIZABLE_FIELDS includes goal, conflict, emotions"

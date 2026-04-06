@@ -113,6 +113,65 @@ def _read_yaml_field(project_dir: str, field: str) -> str:
     return ''
 
 
+def _compute_brief_quality(project_dir: str) -> list[dict]:
+    """Run brief quality detection and return JSON-safe results.
+
+    Returns a list of issue dicts, each with: scene_id, field, issue,
+    plus type-specific metrics (beat_count, char_count, etc.).
+    Returns [] if detection fails or data is missing.
+    """
+    try:
+        from storyforge.elaborate import _read_csv_as_map
+        from storyforge.hone import detect_brief_issues, detect_gaps
+    except ImportError:
+        return []
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+
+    if not os.path.isfile(scenes_path) or not os.path.isfile(briefs_path):
+        return []
+
+    try:
+        scenes_map = _read_csv_as_map(scenes_path)
+        briefs_map = _read_csv_as_map(briefs_path)
+        intent_map = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else {}
+
+        issues = detect_brief_issues(briefs_map, scenes_map)
+        gaps = detect_gaps(scenes_map, intent_map, briefs_map)
+
+        results = []
+        for i in issues:
+            entry = {
+                'scene_id': i['scene_id'],
+                'field': i['field'],
+                'issue': i['issue'],
+            }
+            if i['issue'] == 'overspecified':
+                entry['beat_count'] = i.get('beat_count', 0)
+                entry['target_words'] = i.get('target_words', 0)
+            elif i['issue'] == 'verbose':
+                entry['char_count'] = i.get('char_count', 0)
+                entry['max_chars'] = i.get('max_chars', 0)
+            elif i['issue'] == 'abstract':
+                entry['abstract_count'] = i.get('abstract_count', 0)
+                entry['concrete_count'] = i.get('concrete_count', 0)
+            results.append(entry)
+
+        for g in gaps:
+            results.append({
+                'scene_id': g['scene_id'],
+                'field': g['field'],
+                'issue': 'gap',
+            })
+
+        return results
+    except Exception:
+        return []
+
+
 def load_dashboard_data(project_dir: str) -> dict:
     """Load all CSV data needed for the manuscript dashboard.
 
@@ -185,6 +244,9 @@ def load_dashboard_data(project_dir: str) -> dict:
     briefs = csv_to_records(briefs_csv)
     briefs.sort(key=lambda r: seq_by_id.get(r.get('id', ''), 999))
 
+    # Brief quality detection (lightweight, no API calls)
+    brief_quality = _compute_brief_quality(project_dir)
+
     return {
         'scenes': scenes,
         'intents': intents,
@@ -209,6 +271,7 @@ def load_dashboard_data(project_dir: str) -> dict:
         'fidelity_scores': csv_to_records(fidelity_csv),
         'fidelity_rationales': csv_to_records(fidelity_rationale_csv),
         'structural_scores': csv_to_records(structural_csv),
+        'brief_quality': brief_quality,
         'project': {
             'title': title,
             'genre': genre,

@@ -101,12 +101,8 @@ Run structural scoring — this is a deterministic analysis of the CSV data (no 
 ```
 If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv`. At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
 
-**"Reconcile" / "Normalize my data" / "Build registries" / "Clean up values":**
-Run reconciliation to normalize CSV fields against canonical registries. This uses Opus to build/update registries then deterministically normalizes all fields. Provide the command:
-```bash
-./storyforge reconcile [--domain characters|locations|values|mice-threads|knowledge|outcomes]
-```
-Without `--domain`, runs all 6 domains in order. This is especially valuable after extraction or when structural scoring shows thematic fragmentation.
+**"Reconcile" / "Normalize my data" / "Build registries" / "Clean up values" / "Hone" / "Improve my briefs" / "Fix abstract language" / "Fill gaps":**
+Invoke the `hone` skill. Hone consolidates all CSV data quality work: registry normalization, brief concretization (rewriting abstract language as concrete physical beats), structural CSV fixes from evaluation findings, and gap filling. It replaces the standalone reconcile command.
 
 **"Title" / "Cover" / "Press kit":**
 Invoke the corresponding skill (`title`, `cover`, `press-kit`).
