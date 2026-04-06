@@ -46,10 +46,12 @@ full_intent = {
 full_briefs = {
     's1': {'id': 's1', 'goal': 'G', 'conflict': 'C', 'outcome': 'O', 'crisis': 'Cr', 'decision': 'D',
             'knowledge_in': 'ki', 'knowledge_out': 'ko', 'key_actions': 'ka', 'key_dialogue': 'kd',
-            'emotions': 'e', 'motifs': 'm', 'continuity_deps': 'cd'},
+            'emotions': 'e', 'motifs': 'm', 'continuity_deps': 'cd',
+            'physical_state_in': 'psi', 'physical_state_out': 'pso'},
     's2': {'id': 's2', 'goal': 'G', 'conflict': 'C', 'outcome': 'O', 'crisis': 'Cr', 'decision': 'D',
             'knowledge_in': 'ki', 'knowledge_out': 'ko', 'key_actions': 'ka', 'key_dialogue': 'kd',
-            'emotions': 'e', 'motifs': 'm', 'continuity_deps': 'cd'},
+            'emotions': 'e', 'motifs': 'm', 'continuity_deps': 'cd',
+            'physical_state_in': 'psi', 'physical_state_out': 'pso'},
 }
 result = score_completeness(full_scenes, full_intent, full_briefs)
 print(f'score={result[\"score\"]:.2f}')
@@ -455,19 +457,19 @@ from storyforge.structural import structural_score
 report = structural_score('${FIXTURE_DIR}/reference')
 assert 'overall_score' in report, 'Missing overall_score'
 assert 'dimensions' in report, 'Missing dimensions'
-assert len(report['dimensions']) == 8, f'Expected 8 dimensions, got {len(report[\"dimensions\"])}'
+assert len(report['dimensions']) == 9, f'Expected 9 dimensions, got {len(report[\"dimensions\"])}'
 
 names = [d['name'] for d in report['dimensions']]
 for expected in ['arc_completeness', 'thematic_concentration', 'pacing_shape',
                  'character_presence', 'mice_health', 'knowledge_chain',
-                 'function_variety', 'completeness']:
+                 'function_variety', 'completeness', 'physical_state']:
     assert expected in names, f'Missing dimension: {expected}'
 
 print(f'overall={report[\"overall_score\"]:.2f}')
 print(f'dims={len(report[\"dimensions\"])}')
 print('ok')
 ")
-assert_contains "$RESULT" "dims=8" "structural_score: returns all 8 dimensions"
+assert_contains "$RESULT" "dims=9" "structural_score: returns all 9 dimensions"
 assert_contains "$RESULT" "ok" "structural_score: orchestrator runs on fixtures"
 
 # ============================================================================
@@ -603,7 +605,7 @@ print(f'dims={len([k for k in prev if k != \"overall\"])}')
 print('ok')
 ")
 assert_contains "$RESULT" "ok" "save/load structural scores: roundtrip works"
-assert_contains "$RESULT" "dims=8" "save/load structural scores: all 8 dimensions persisted"
+assert_contains "$RESULT" "dims=9" "save/load structural scores: all 9 dimensions persisted"
 
 # Second run — should have previous scores
 RESULT=$(python3 -c "

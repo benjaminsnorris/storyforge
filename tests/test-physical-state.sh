@@ -225,3 +225,72 @@ shutil.rmtree(tmpdir)
 " 2>/dev/null)
 
 assert_equals "found_many" "$RESULT" "granularity: too many new states in one scene flagged"
+
+# ============================================================================
+# Structural scoring: score_physical_state_chain
+# ============================================================================
+
+echo "--- scoring: returns valid score on fixtures ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.structural import score_physical_state_chain
+
+scenes = _read_csv_as_map('${FIXTURE_DIR}/reference/scenes.csv')
+briefs = _read_csv_as_map('${FIXTURE_DIR}/reference/scene-briefs.csv')
+
+result = score_physical_state_chain(scenes, briefs, '${FIXTURE_DIR}/reference')
+score = result['score']
+findings = result['findings']
+
+assert 0 <= score <= 1, f'Score out of range: {score}'
+assert isinstance(findings, list)
+print(f'score={score:.2f}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "scoring: score_physical_state_chain returns valid score"
+
+echo "--- scoring: empty states returns zero ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import score_physical_state_chain
+
+scenes = {'s1': {'id': 's1', 'seq': '1'}, 's2': {'id': 's2', 'seq': '2'}}
+briefs = {'s1': {'id': 's1'}, 's2': {'id': 's2'}}
+
+result = score_physical_state_chain(scenes, briefs, '/nonexistent')
+print(f'score={result[\"score\"]:.2f}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "score=0.00" "scoring: no states returns 0.0"
+assert_contains "$RESULT" "ok" "scoring: empty case runs without error"
+
+echo "--- scoring: included in structural_score ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import structural_score
+
+result = structural_score('${FIXTURE_DIR}/reference')
+dims = {d['name'] for d in result['dimensions']}
+assert 'physical_state' in dims, f'physical_state not in dimensions: {dims}'
+print('ok')
+" 2>/dev/null)
+
+assert_equals "ok" "$RESULT" "scoring: physical_state dimension in structural_score"
+
+echo "--- scoring: ENRICHMENT_FIELDS includes physical state ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.structural import ENRICHMENT_FIELDS
+assert 'physical_state_in' in ENRICHMENT_FIELDS
+assert 'physical_state_out' in ENRICHMENT_FIELDS
+print('ok')
+" 2>/dev/null)
+
+assert_equals "ok" "$RESULT" "scoring: ENRICHMENT_FIELDS includes physical state columns"
