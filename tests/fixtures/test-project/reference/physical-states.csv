@@ -1,5 +1,5 @@
 id|character|description|category|acquired|resolves|action_gating
 sprained-ankle-tessa|Tessa Merrin|right ankle sprained during ridge collapse|injury|act2-sc02|never|true
 archive-key-dorren|Dorren Hayle|holds the restricted archive key|equipment|act1-sc02|never|true
-exhaustion-tessa|Tessa Merrin|physically exhausted from 4-hour eastern trek|fatigue|act2-sc01|act2-sc03|false
-scar-left-hand-kael|Kael Maren|old scar across left palm from archive incident|appearance|new-x1|never|false
+exhaustion-tessa|Tessa Merrin|physically exhausted from 4-hour eastern trek|fatigue|act1-sc02|act2-sc03|false
+scar-left-hand-kael|Kael Maren|old scar across left palm from archive incident|appearance|act1-sc01|never|false
