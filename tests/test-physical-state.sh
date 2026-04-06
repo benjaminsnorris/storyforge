@@ -342,3 +342,25 @@ print('ok')
 " 2>/dev/null)
 
 assert_contains "$RESULT" "has_dep_state" "prompts: dependency scenes include physical_state_out"
+
+# ============================================================================
+# Elaboration: briefs prompt includes physical state instructions
+# ============================================================================
+
+echo "--- elaborate: briefs prompt includes physical state instructions ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.prompts_elaborate import build_briefs_prompt
+prompt = build_briefs_prompt('${FIXTURE_DIR}', '${PLUGIN_DIR}')
+has_psi = 'physical_state_in' in prompt
+has_pso = 'physical_state_out' in prompt
+has_header = 'physical_state_in|physical_state_out' in prompt
+print('has_instructions' if (has_psi and has_pso) else 'missing_instructions')
+print('has_header' if has_header else 'missing_header')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "has_instructions" "elaborate: briefs prompt has physical state field instructions"
+assert_contains "$RESULT" "has_header" "elaborate: briefs CSV header includes physical state columns"
+assert_contains "$RESULT" "ok" "elaborate: build_briefs_prompt runs without error"

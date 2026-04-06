@@ -409,6 +409,8 @@ For each scene that needs a brief, define the complete drafting contract:
 - **decision**: What the character actively chooses
 - **knowledge_in**: Semicolon-separated STRUCTURALLY USEFUL facts the POV character knows entering. Use EXACT wording that matches prior scenes' knowledge_out. Only include facts that gate this scene's decisions — identity reveals, motive/intent reveals, capability/constraints, state changes, stakes/threats, relationship shifts. Omit ordinary plot details.
 - **knowledge_out**: knowledge_in plus 0-2 NEW structurally useful facts learned during this scene. A fact is useful only if a character who knows it would make a different decision than one who doesn't, or a future scene requires it. Most scenes add 0-1 new facts.
+- **physical_state_in**: Semicolon-separated state IDs that on-stage characters carry INTO this scene. Use EXACT IDs from prior scenes' physical_state_out. Only track states that affect capability, appearance, or equipment — injuries, items gained/lost, abilities changed, visible changes, fatigue. Not temporary emotions or scene-local conditions.
+- **physical_state_out**: physical_state_in plus 0-2 NEW states acquired during this scene, minus any states that resolve during this scene.
 - **key_actions**: Semicolon-separated concrete things that happen
 - **key_dialogue**: Specific lines or exchanges that must appear in the prose
 - **emotions**: Semicolon-separated emotional beats in sequence
@@ -419,7 +421,7 @@ For each scene that needs a brief, define the complete drafting contract:
 ### Output Format
 
 ```briefs-csv
-id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow|physical_state_in|physical_state_out
 (one row per scene being briefed)
 ```
 
@@ -435,6 +437,10 @@ id|status
 - knowledge_in must use EXACT wording from prior scenes' knowledge_out — validation will check this
 - Target 0-2 new knowledge facts per scene. Most scenes should add 0-1. A full novel should have 50-120 total facts, not 500+
 - continuity_deps should list the minimum set of scenes whose knowledge_out this scene needs
+- physical_state_in must reference IDs established in prior scenes' physical_state_out
+- Target 0-2 state changes per scene. A full novel should have 15-40 total state entries.
+- States persist until explicitly resolved — do not silently drop them
+- continuity_deps should also list scenes whose physical_state_out this scene needs
 - Every scene must have goal/conflict/outcome filled
 - Key dialogue should sound like the character, not the author
 - Scenes with no continuity_deps can be drafted in parallel — maximize these
