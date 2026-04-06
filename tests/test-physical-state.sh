@@ -145,3 +145,83 @@ shutil.rmtree(tmpdir)
 " 2>/dev/null)
 
 assert_equals "found_unknown" "$RESULT" "validate: unknown physical state in physical_state_in is flagged"
+
+# ============================================================================
+# Granularity validation
+# ============================================================================
+
+echo "--- granularity: clean fixture passes ---"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+from storyforge.schema import validate_physical_state_granularity
+result = validate_physical_state_granularity('${FIXTURE_DIR}/reference')
+print(f\"total_states={result['total_states']}\")
+print(f\"warnings={len(result['warnings'])}\")
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "granularity: fixture passes"
+assert_contains "$RESULT" "total_states=4" "granularity: counts 4 states in fixture"
+assert_contains "$RESULT" "warnings=0" "granularity: no warnings on clean fixture"
+
+echo "--- granularity: long description flagged ---"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import os, tempfile, shutil
+from storyforge.schema import validate_physical_state_granularity
+from storyforge.elaborate import _read_csv, _write_csv
+
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Add a state with a very long description (>20 words)
+path = os.path.join(ref, 'physical-states.csv')
+rows = _read_csv(path)
+rows.append({
+    'id': 'verbose-state',
+    'character': 'Dorren Hayle',
+    'description': 'a really quite extraordinarily long and overly detailed description of a minor bruise on the left side of the upper right forearm near the elbow joint area',
+    'category': 'injury',
+    'acquired': 'act1-sc01',
+    'resolves': 'never',
+    'action_gating': 'false',
+})
+_write_csv(path, rows, ['id', 'character', 'description', 'category', 'acquired', 'resolves', 'action_gating'])
+
+result = validate_physical_state_granularity(ref)
+has_long = any(w['type'] == 'long_description' for w in result['warnings'])
+print('found_long' if has_long else 'not_found')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_equals "found_long" "$RESULT" "granularity: long description flagged"
+
+echo "--- granularity: too many new states flagged ---"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+import os, tempfile, shutil
+from storyforge.schema import validate_physical_state_granularity
+from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Give act1-sc01 4+ new states in physical_state_out (0 in state_in)
+briefs_path = os.path.join(ref, 'scene-briefs.csv')
+rows = _read_csv(briefs_path)
+for r in rows:
+    if r['id'] == 'act1-sc01':
+        r['physical_state_out'] = 'a;b;c;d'
+_write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+result = validate_physical_state_granularity(ref)
+has_many = any(w['type'] == 'too_many_new_states' for w in result['warnings'])
+print('found_many' if has_many else 'not_found')
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_equals "found_many" "$RESULT" "granularity: too many new states in one scene flagged"

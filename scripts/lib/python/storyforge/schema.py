@@ -599,6 +599,68 @@ def validate_knowledge_granularity(ref_dir: str, project_dir: str | None = None)
     }
 
 
+MAX_STATE_DESCRIPTION_WORDS = 20
+MAX_NEW_STATES_PER_SCENE = 3
+
+
+def validate_physical_state_granularity(ref_dir: str, project_dir: str | None = None) -> dict:
+    """Check physical states for over-granularity.
+
+    Registry-level: flag descriptions longer than MAX_STATE_DESCRIPTION_WORDS.
+    Scene-level: flag scenes with more than MAX_NEW_STATES_PER_SCENE new states.
+
+    Returns:
+        Dict with total_states, total_scenes, warnings.
+    """
+    warnings: list[dict] = []
+
+    # --- Registry-level checks ---
+    states_path = os.path.join(ref_dir, 'physical-states.csv')
+    total_states = 0
+    if os.path.isfile(states_path):
+        for row in _read_csv(states_path):
+            total_states += 1
+            desc = row.get('description', '').strip()
+            if not desc:
+                continue
+            word_count = len(desc.split())
+            if word_count > MAX_STATE_DESCRIPTION_WORDS:
+                warnings.append({
+                    'type': 'long_description',
+                    'id': row.get('id', '?'),
+                    'description': desc,
+                    'word_count': word_count,
+                })
+
+    # --- Scene-level checks ---
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    total_scenes = 0
+    if os.path.isfile(briefs_path):
+        for row in _read_csv(briefs_path):
+            total_scenes += 1
+            ps_in_raw = row.get('physical_state_in', '').strip()
+            ps_out_raw = row.get('physical_state_out', '').strip()
+
+            ps_in = {e.strip() for e in ps_in_raw.split(';') if e.strip()} if ps_in_raw else set()
+            ps_out = {e.strip() for e in ps_out_raw.split(';') if e.strip()} if ps_out_raw else set()
+
+            new_states = sorted(ps_out - ps_in)
+
+            if len(new_states) > MAX_NEW_STATES_PER_SCENE:
+                warnings.append({
+                    'type': 'too_many_new_states',
+                    'scene_id': row.get('id', '?'),
+                    'new_state_count': len(new_states),
+                    'states': new_states,
+                })
+
+    return {
+        'total_states': total_states,
+        'total_scenes': total_scenes,
+        'warnings': warnings,
+    }
+
+
 # ============================================================================
 # Schema dump — generate human-readable reference
 # ============================================================================
