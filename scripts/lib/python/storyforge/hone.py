@@ -960,8 +960,10 @@ def detect_verbose_fields(
             flagged = False
             if char_count > max_chars:
                 flagged = True
-            elif has_prose and sentence_count >= 3:
-                # Multiple sentences with prose patterns even if under length
+            elif has_prose and sentence_count >= 3 and char_count > max_chars * 0.6:
+                # Multiple sentences with prose patterns, but only if
+                # approaching the length limit — short punchy sentences
+                # like "She stops. Names them. Go." are fine.
                 flagged = True
 
             if flagged:

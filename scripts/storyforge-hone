@@ -35,6 +35,7 @@ SCENES_ARG=""
 ACT_ARG=""
 THRESHOLD="3.5"
 DRY_RUN=false
+DIAGNOSE=false
 COACHING_LEVEL=""
 
 usage() {
@@ -56,6 +57,7 @@ Options:
   --act N               Scope to scenes in part/act N
   --threshold N         prose_naturalness threshold for briefs domain (default: 3.5)
   --coaching LEVEL      Override coaching level (full/coach/strict)
+  --diagnose            Run structural scoring + brief quality detection (read-only)
   --dry-run             Show what would change without modifying files
   -h, --help            Show this help
 EOF
@@ -70,6 +72,7 @@ while [[ $# -gt 0 ]]; do
         --act|--part) ACT_ARG="${2:?ERROR: $1 requires a value}"; shift 2 ;;
         --threshold)  THRESHOLD="${2:?ERROR: --threshold requires a value}"; shift 2 ;;
         --coaching)   COACHING_LEVEL="${2:?ERROR: --coaching requires full/coach/strict}"; shift 2 ;;
+        --diagnose)   DIAGNOSE=true; shift ;;
         --dry-run)    DRY_RUN=true; shift ;;
         -h|--help)    usage ;;
         -*)           echo "ERROR: Unknown option: $1" >&2; usage ;;
@@ -132,11 +135,118 @@ MODEL=$(select_model "synthesis")
 log "============================================"
 log "Storyforge Hone"
 log "Project: ${PROJECT_TITLE}"
-log "Domains: ${DOMAINS[*]}"
+if [[ "$DIAGNOSE" == true ]]; then
+    log "Mode: diagnose (read-only)"
+else
+    log "Domains: ${DOMAINS[*]}"
+fi
 log "Coaching: ${COACHING_LEVEL}"
 [[ -n "$SCENES_ARG" ]] && log "Scenes: ${SCENES_ARG}"
-log "Model: ${MODEL}"
+[[ "$DIAGNOSE" != true ]] && log "Model: ${MODEL}"
 log "============================================"
+
+# ============================================================================
+# Diagnose mode: structural scoring + brief quality detection, then exit
+# ============================================================================
+
+if [[ "$DIAGNOSE" == true ]]; then
+    SCENE_FLAG=""
+    if [[ -n "$SCENES_ARG" ]]; then
+        SCENE_FLAG="scene_ids='${SCENES_ARG}'.split(',')"
+    elif [[ -n "$ACT_ARG" ]]; then
+        SCENE_FLAG="scene_ids=[r['id'] for r in __import__('storyforge.elaborate', fromlist=['_read_csv'])._read_csv('${REF_DIR}/scenes.csv') if r.get('part','')=='${ACT_ARG}']"
+    fi
+
+    PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json, os; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.elaborate import _read_csv_as_map
+from storyforge.hone import detect_brief_issues, detect_gaps
+from storyforge.structural import structural_score
+
+ref_dir = '${REF_DIR}'
+project_dir = '${PROJECT_DIR}'
+scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+
+# Scene filter
+filter_ids = ${SCENE_FLAG:-None}
+
+# --- Part 1: Structural scores (8 dimensions) ---
+print()
+print('=== Structural Scores ===')
+print()
+scores = structural_score(ref_dir)
+dims = scores.get('dimensions', [])
+for dim in dims:
+    name = dim.get('label', dim.get('name', '?'))
+    score = dim.get('score', 0)
+    bar = '#' * int(score * 20) + '.' * (20 - int(score * 20))
+    print(f'  {name:30s} [{bar}] {score:.2f}')
+    for f in dim.get('findings', [])[:3]:
+        msg = f.get('message', '') if isinstance(f, dict) else str(f)
+        print(f'    - {msg}')
+overall = scores.get('overall_score', scores.get('overall', 0))
+print()
+print(f'  Overall structural score: {overall:.2f}')
+
+# --- Part 2: Brief quality issues ---
+print()
+print('=== Brief Quality Issues ===')
+print()
+issues = detect_brief_issues(briefs, scenes, filter_ids)
+by_type = {}
+for i in issues:
+    by_type.setdefault(i['issue'], []).append(i)
+
+if not issues:
+    print('  No brief quality issues found.')
+else:
+    for issue_type in ['abstract', 'overspecified', 'verbose']:
+        items = by_type.get(issue_type, [])
+        if not items:
+            continue
+        print(f'  {issue_type} ({len(items)} issues):')
+        for item in items:
+            if issue_type == 'overspecified':
+                print(f'    {item[\"scene_id\"]}.{item[\"field\"]}: {item[\"beat_count\"]} beats, {item.get(\"target_words\", 0)} target words')
+            elif issue_type == 'verbose':
+                print(f'    {item[\"scene_id\"]}.{item[\"field\"]}: {item[\"char_count\"]} chars (max {item[\"max_chars\"]})')
+            elif issue_type == 'abstract':
+                print(f'    {item[\"scene_id\"]}.{item[\"field\"]}: abstract={item[\"abstract_count\"]}, concrete={item[\"concrete_count\"]}')
+        print()
+
+# --- Part 3: Gaps ---
+print('=== Gaps ===')
+print()
+gaps = detect_gaps(scenes, intent, briefs, filter_ids)
+if not gaps:
+    print('  No missing required fields.')
+else:
+    by_scene = {}
+    for g in gaps:
+        by_scene.setdefault(g['scene_id'], []).append(g['field'])
+    for sid, fields in sorted(by_scene.items()):
+        print(f'  {sid}: missing {', '.join(fields)}')
+
+# --- Summary ---
+print()
+print('=== Summary ===')
+print()
+overall_score = scores.get('overall_score', scores.get('overall', 0))
+print(f'  Structural score:    {overall_score:.2f}')
+print(f'  Brief issues:        {len(issues)} across {len(set(i[\"scene_id\"] for i in issues))} scenes')
+print(f'  Gaps:                {len(gaps)} empty fields across {len(set(g[\"scene_id\"] for g in gaps))} scenes')
+clean = len(set(scenes.keys()) - set(i['scene_id'] for i in issues) - set(g['scene_id'] for g in gaps))
+print(f'  Clean scenes:        {clean} / {len(scenes)}')
+"
+
+    log ""
+    log "============================================"
+    log "Diagnose complete (read-only, no files changed)"
+    log "============================================"
+    exit 0
+fi
 
 # ============================================================================
 # Scene filter (if --scenes or --act provided)
