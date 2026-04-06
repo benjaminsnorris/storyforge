@@ -697,9 +697,168 @@ print(summary)
         done
 
         (cd "$PROJECT_DIR" && git add reference/scene-briefs.csv working/ && git commit -m "Extract: Phase 3b — knowledge chain" && git push) 2>/dev/null || true
+
+        # --- Phase 3c: Physical state chain (sequential) ---
+        log ""
+        log "--- Phase 3c: Extract physical state chain (sequential) ---"
+
+        PHYS_MODEL=$(select_model "evaluation")
+        PHYS_STATE_FILE="${LOG_DIR}/.physical-state.json"
+        PHYS_SUMMARIES_FILE="${LOG_DIR}/.physical-summaries.txt"
+        echo '{}' > "$PHYS_STATE_FILE"
+        echo '' > "$PHYS_SUMMARIES_FILE"
+
+        for SCENE_ID in "${SORTED_SCENE_IDS[@]}"; do
+            SCENE_TEXT=$(cat "${SCENES_DIR}/${SCENE_ID}.md" 2>/dev/null || echo "")
+            [[ -z "$SCENE_TEXT" ]] && continue
+
+            PHYS_LOG="${LOG_DIR}/extract-physical-${SCENE_ID}.log"
+
+            PROMPT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import build_physical_state_prompt
+from storyforge.elaborate import get_scene
+from storyforge.enrich import format_registries_for_prompt
+
+scene_data = get_scene('${SCENE_ID}', '${REF_DIR}') or {}
+skeleton = {k: scene_data.get(k, '') for k in ['title', 'pov', 'location', 'part', 'on_stage']}
+
+with open('${PHYS_STATE_FILE}') as f:
+    prior_raw = json.load(f)
+
+# Rebuild prior_states as dict[str, set] from serialized dict[str, list]
+prior_states = {char: set(states) for char, states in prior_raw.items()}
+
+with open('${PHYS_SUMMARIES_FILE}') as f:
+    prior_summaries = [s.strip() for s in f.readlines() if s.strip()]
+
+scene_text = open('${SCENES_DIR}/${SCENE_ID}.md', encoding='utf-8').read()
+registries = format_registries_for_prompt('${PROJECT_DIR}')
+print(build_physical_state_prompt('${SCENE_ID}', scene_text, skeleton, prior_states, prior_summaries, registries_text=registries))
+")
+
+            _SF_INVOCATION_START=$(date +%s); export _SF_INVOCATION_START
+            invoke_anthropic_api "$PROMPT" "$PHYS_MODEL" "$PHYS_LOG" 1024 || {
+                log "  WARNING: Physical state extraction failed for ${SCENE_ID}"
+                continue
+            }
+
+            RESPONSE=$(extract_api_response "$PHYS_LOG" 2>/dev/null)
+            log_api_usage "$PHYS_LOG" "extract-physical" "$SCENE_ID" "$PHYS_MODEL" 2>/dev/null || true
+
+            # Parse and apply
+            PARSED=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, os, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.extract import parse_physical_state_response
+from storyforge.elaborate import update_scene, _read_csv_as_map, _write_csv, _FILE_MAP
+
+response = open('${PHYS_LOG}', encoding='utf-8').read()
+try:
+    data = json.loads(response)
+    text = ''.join(item.get('text', '') for item in data.get('content', []) if item.get('type') == 'text')
+    if text: response = text
+except (json.JSONDecodeError, KeyError):
+    pass
+
+result = parse_physical_state_response(response, '${SCENE_ID}')
+
+# Update briefs CSV with physical_state_in / physical_state_out
+updates = {}
+for k in ['physical_state_in', 'physical_state_out']:
+    if k in result and result[k]:
+        updates[k] = result[k]
+if updates:
+    update_scene('${SCENE_ID}', '${REF_DIR}', updates)
+
+# Append new registry entries to physical-states.csv
+new_states = result.get('_new_states', [])
+if new_states:
+    import os
+    phys_csv = os.path.join('${REF_DIR}', 'physical-states.csv')
+    columns = ['id', 'character', 'description', 'category', 'acquired', 'resolves', 'action_gating']
+    existing = _read_csv_as_map(phys_csv)
+    for ns in new_states:
+        sid_key = ns.get('id', '').strip()
+        if not sid_key or sid_key in existing:
+            continue
+        row = {c: '' for c in columns}
+        row['id'] = sid_key
+        row['character'] = ns.get('character', '')
+        row['description'] = ns.get('description', '')
+        row['category'] = ns.get('category', '')
+        row['acquired'] = '${SCENE_ID}'
+        row['resolves'] = 'never'
+        row['action_gating'] = ns.get('action_gating', 'false')
+        existing[sid_key] = row
+    _write_csv(phys_csv, list(existing.values()), columns)
+
+# Output accumulated state for next iteration
+resolved = result.get('_resolved', [])
+
+# Build summary: what changed
+acquired_ids = [ns['id'] for ns in new_states]
+summary_parts = []
+if acquired_ids:
+    summary_parts.append('acquired: ' + ', '.join(acquired_ids))
+if resolved:
+    summary_parts.append('resolved: ' + ', '.join(resolved))
+summary = '; '.join(summary_parts) if summary_parts else 'no state changes'
+
+print(json.dumps({'new_states': new_states, 'resolved': resolved, 'summary': summary}))
+")
+
+            # Update accumulated physical states for next scene.
+            # State file is dict[str, list[str]]: character → list of active state IDs.
+            python3 -c "
+import sys, json
+
+parsed = json.loads(sys.stdin.read())
+state_file = '${PHYS_STATE_FILE}'
+
+with open(state_file) as f:
+    state = json.load(f)
+
+new_states = parsed.get('new_states', [])
+resolved = parsed.get('resolved', [])
+
+# Build a reverse map: state_id → character from newly acquired states
+id_to_char = {}
+for ns in new_states:
+    sid_key = ns.get('id', '').strip()
+    char = ns.get('character', '').strip()
+    if sid_key and char:
+        id_to_char[sid_key] = char
+
+# Add new states to per-character lists
+for ns in new_states:
+    sid_key = ns.get('id', '').strip()
+    char = ns.get('character', '').strip()
+    if not sid_key or not char:
+        continue
+    state.setdefault(char, [])
+    if sid_key not in state[char]:
+        state[char].append(sid_key)
+
+# Remove resolved states from all character lists
+for r in [s.strip() for s in resolved if s.strip()]:
+    for char in state:
+        if isinstance(state[char], list) and r in state[char]:
+            state[char].remove(r)
+
+with open(state_file, 'w') as f:
+    json.dump(state, f)
+" <<< "$PARSED"
+
+            SCENE_SUMMARY=$(python3 -c "import sys, json; print(json.loads(sys.stdin.read()).get('summary', ''))" <<< "$PARSED")
+            [[ -n "$SCENE_SUMMARY" ]] && echo "${SCENE_ID}: ${SCENE_SUMMARY}" >> "$PHYS_SUMMARIES_FILE"
+
+            log "  ${SCENE_ID}: physical states extracted"
+        done
+
+        (cd "$PROJECT_DIR" && git add reference/scene-briefs.csv reference/physical-states.csv working/ && git commit -m "Extract: Phase 3c — physical state chain" && git push) 2>/dev/null || true
         update_pr_task "Phase 3: Extract briefs" "$PROJECT_DIR" 2>/dev/null || true
 
-        # Reconcile knowledge and outcomes against Phase 3 data
+        # Reconcile knowledge, outcomes, and physical-states against Phase 3 data
         log ""
         log "--- Reconciling Phase 3 registries ---"
         "${SCRIPT_DIR}/storyforge-reconcile" --phase 3
@@ -831,6 +990,8 @@ if [[ "$DRY_RUN" != true ]]; then
     for f in \
         "${LOG_DIR}/.knowledge-state.json" \
         "${LOG_DIR}/.scene-summaries.txt" \
+        "${LOG_DIR}/.physical-state.json" \
+        "${LOG_DIR}/.physical-summaries.txt" \
         "${LOG_DIR}/extract-phase0.log" \
         "${LOG_DIR}/extract-phase1-batch.jsonl" \
         "${LOG_DIR}/extract-phase2-batch.jsonl" \
