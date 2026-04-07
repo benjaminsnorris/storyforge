@@ -275,6 +275,67 @@ def _power_mean(values: list[float], p: float = 0.5) -> float:
     return (pow_sum / n) ** (1.0 / p)
 
 
+def _infer_project_dir(scores_dir: str) -> str:
+    """Infer project root from scores dir (typically project_dir/working/scores/cycle-N)."""
+    path = os.path.normpath(scores_dir)
+    parts = path.split(os.sep)
+    for i, part in enumerate(parts):
+        if part == 'working' and i > 0:
+            return os.sep.join(parts[:i])
+    return ''
+
+
+def _attribute_root_causes(diag_rows, diag_header, project_dir):
+    """Update root_cause column based on stall history and brief quality. Modifies in place."""
+    root_cause_idx = diag_header.index('root_cause')
+    worst_items_idx = diag_header.index('worst_items')
+    principle_idx = diag_header.index('principle')
+    priority_idx = diag_header.index('priority')
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    brief_issue_scenes = None
+
+    for row in diag_rows:
+        priority = row[priority_idx]
+        if priority not in ('high', 'medium'):
+            continue
+
+        principle = row[principle_idx]
+        worst = row[worst_items_idx]
+        if not worst:
+            continue
+
+        scene_ids = [s.strip() for s in worst.split(';') if s.strip()]
+
+        # Check brief quality (lazy load)
+        if brief_issue_scenes is None:
+            try:
+                from storyforge.elaborate import _read_csv_as_map
+                from storyforge.hone import detect_brief_issues
+                briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+                scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+                intent = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+                issues = detect_brief_issues(briefs, scenes, intent_map=intent)
+                brief_issue_scenes = {i['scene_id'] for i in issues}
+            except Exception:
+                brief_issue_scenes = set()
+
+        # Check stall history (lazy load per principle)
+        stalled_scenes = set()
+        try:
+            from storyforge.history import detect_stalls
+            stalls = detect_stalls(project_dir, principle)
+            stalled_scenes = {s['scene_id'] for s in stalls}
+        except Exception:
+            pass
+
+        # Attribution: any worst-item scene with brief issues or stalls → brief
+        for sid in scene_ids:
+            if sid in brief_issue_scenes or sid in stalled_scenes:
+                row[root_cause_idx] = 'brief'
+                break
+
+
 def generate_diagnosis(scores_dir: str, prev_dir: str, weights_file: str):
     """Analyze score CSVs, compute averages, identify worst items, write diagnosis.csv.
 
@@ -288,7 +349,7 @@ def generate_diagnosis(scores_dir: str, prev_dir: str, weights_file: str):
         weights_file: Path to craft-weights.csv.
     """
     diagnosis_file = os.path.join(scores_dir, 'diagnosis.csv')
-    diag_header = ['principle', 'scale', 'avg_score', 'worst_items', 'delta_from_last', 'priority']
+    diag_header = ['principle', 'scale', 'avg_score', 'worst_items', 'delta_from_last', 'priority', 'root_cause']
     diag_rows: list[list[str]] = []
 
     for csv_name, scale in SCORE_FILES:
@@ -387,8 +448,12 @@ def generate_diagnosis(scores_dir: str, prev_dir: str, weights_file: str):
                     priority = 'high'
 
             diag_rows.append([
-                principle, scale, f'{avg_score:.1f}', worst_items, delta, priority,
+                principle, scale, f'{avg_score:.1f}', worst_items, delta, priority, 'craft',
             ])
+
+    project_dir = _infer_project_dir(scores_dir)
+    if project_dir:
+        _attribute_root_causes(diag_rows, diag_header, project_dir)
 
     _write_csv(diagnosis_file, diag_header, diag_rows)
 
