@@ -231,8 +231,8 @@ def main(argv=None):
     # Commit and push
     commit_and_push(
         project_dir,
-        ['working/dashboard.html'],
         'Visualize: generate manuscript dashboard',
+        ['working/dashboard.html'],
     )
 
     # Open in browser

@@ -1260,13 +1260,13 @@ def main(argv=None):
     log('Committing evaluation files...')
     commit_and_push(
         project_dir,
+        f'Evaluation: {scope_description} ({len(succeeded)}/{all_evaluator_count} evaluators)',
         [
             f'working/evaluations/eval-{eval_timestamp}/',
             'working/logs/',
             'working/costs/',
             'working/pipeline.csv',
         ],
-        f'Evaluation: {scope_description} ({len(succeeded)}/{all_evaluator_count} evaluators)',
     )
 
     # ---- SESSION SUMMARY ----

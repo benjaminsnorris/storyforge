@@ -812,11 +812,11 @@ Rules:
             if effective_coaching in ('coach', 'strict'):
                 commit_and_push(
                     project_dir,
-                    ['working/coaching/', 'working/logs/', 'working/costs/', 'working/pipeline.csv'],
                     f'{effective_coaching.capitalize()}: {pass_name}',
+                    ['working/coaching/', 'working/logs/', 'working/costs/', 'working/pipeline.csv'],
                 )
             else:
-                commit_and_push(project_dir, ['.'], f'Revision: {pass_name}')
+                commit_and_push(project_dir, f'Revision: {pass_name}', ['.'])
 
         # Push
         _git(project_dir, 'push', check=False)
@@ -886,8 +886,8 @@ Rules:
         os.makedirs(os.path.join(project_dir, 'working', 'reviews'), exist_ok=True)
         commit_and_push(
             project_dir,
-            ['storyforge.yaml', 'working/pipeline.csv'],
             'Revision complete: advance phase to review',
+            ['storyforge.yaml', 'working/pipeline.csv'],
         )
         log('')
         log('Next step: run /storyforge:review to assess revision results')
