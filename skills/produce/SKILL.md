@@ -128,16 +128,15 @@ Update `storyforge.yaml` under the `production` key with all production settings
 
 **After all settings are configured**, execute these steps **in this exact order**. Do not write any files before step 2 is complete.
 
-**1. Create the feature branch.** This must happen first, before any file is written or modified:
-```bash
-git checkout -b "storyforge/assemble-$(date '+%Y%m%d-%H%M')"
-```
-
-**2. Verify you are on the new branch** before proceeding:
+**1. Ensure you are on a feature branch.** Check the current branch before any file is written or modified:
 ```bash
 git rev-parse --abbrev-ref HEAD
 ```
-The output must start with `storyforge/assemble-`. If it does not, stop and fix the branch before writing any files.
+- If the output is `main` or `master`: create a new branch and switch to it:
+  ```bash
+  git checkout -b "storyforge/assemble-$(date '+%Y%m%d-%H%M')"
+  ```
+- If already on any other branch: stay on it — do not create a new branch.
 
 **3. Write the chapter map** to `reference/chapter-map.csv` and production settings to `storyforge.yaml` under the `production` key.
 

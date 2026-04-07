@@ -23,7 +23,7 @@ import sys
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, get_plugin_dir,
 )
-from storyforge.git import commit_and_push
+from storyforge.git import commit_and_push, ensure_on_branch
 
 
 # ============================================================================
@@ -172,6 +172,7 @@ def main(argv=None):
     args = parse_args(argv or [])
 
     project_dir = detect_project_root()
+    ensure_on_branch('visualize', project_dir)
 
     metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
     intent_csv = os.path.join(project_dir, 'reference', 'scene-intent.csv')

@@ -20,7 +20,7 @@ import sys
 import tempfile
 
 from storyforge.common import detect_project_root, log, read_yaml_field
-from storyforge.git import commit_and_push
+from storyforge.git import commit_and_push, ensure_on_branch
 
 
 # ============================================================================
@@ -551,6 +551,8 @@ def main(argv=None):
 
     if args.dry_run:
         log('=== DRY RUN — no changes will be made ===')
+    else:
+        ensure_on_branch('cleanup', project_dir)
 
     # Step 1: Gitignore
     log('Checking .gitignore...')

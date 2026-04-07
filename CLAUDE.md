@@ -1,6 +1,9 @@
 # Storyforge Plugin Development
 
 ## Git Rules — MANDATORY
+- **NEVER commit to main.** All changes must be on a feature branch.
+  - If on `main`: create a `storyforge/{command}-{timestamp}` branch first.
+  - If on any non-main branch: stay on it — do not create a new branch.
 - **ALWAYS commit and push after every change.** No exceptions.
 - Never tell the user something is "done" without having committed and pushed.
 - If you make multiple related changes, commit them in logical groups — but do it immediately, not at the end of the conversation.

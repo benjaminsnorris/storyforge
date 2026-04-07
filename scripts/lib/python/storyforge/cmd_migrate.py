@@ -21,7 +21,7 @@ import re
 import sys
 
 from storyforge.common import detect_project_root, log, read_yaml_field
-from storyforge.git import commit_and_push
+from storyforge.git import commit_and_push, ensure_on_branch
 
 
 # ============================================================================
@@ -337,6 +337,9 @@ def main(argv=None):
     if not os.path.isfile(os.path.join(ref_dir, 'scenes.csv')):
         print(f'Error: No scenes.csv found in {ref_dir}.')
         sys.exit(1)
+
+    if not args.dry_run and not args.no_commit:
+        ensure_on_branch('migrate', project_dir)
 
     log(f'Migration: {project_title}')
     log('')

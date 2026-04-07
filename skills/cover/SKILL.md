@@ -352,6 +352,18 @@ Claude handles technical execution only. The author provides all creative direct
 
 Save a requirements checklist to `working/coaching/cover-checklist.md`. Execute exactly what the author specifies. No proposals, no alternatives, no opinions.
 
+## Ensure Feature Branch
+
+Before making any changes, check the current branch:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+- If on `main` or `master`: create a feature branch first:
+  ```bash
+  git checkout -b "storyforge/cover-$(date '+%Y%m%d-%H%M')"
+  ```
+- If on any other branch: stay on it — do not create a new branch.
+
 ## Commit After Every Deliverable
 
 Every artifact gets its own commit:

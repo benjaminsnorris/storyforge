@@ -108,6 +108,18 @@ Report what was published:
 - Whether the cover was copied (if applicable)
 - The bookshelf commit (if one was made)
 
+## Ensure Feature Branch
+
+Before making any changes, check the current branch:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+- If on `main` or `master`: create a feature branch first:
+  ```bash
+  git checkout -b "storyforge/publish-$(date '+%Y%m%d-%H%M')"
+  ```
+- If on any other branch: stay on it — do not create a new branch.
+
 ## Commit After Every Deliverable
 
 After all steps complete, if any files changed in the **book project** (unlikely in normal flow, but possible if the visualize skill was invoked), commit and push those changes too.

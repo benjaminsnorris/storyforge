@@ -124,6 +124,18 @@ Present opportunities ranked by priority and let the author decide which to purs
 - **Coach:** Run extraction, walk through each phase's results with the author, discuss concerns and ambiguities, help them decide what to correct.
 - **Strict:** Run extraction, present raw data tables for the author to review and correct independently. Flag validation failures but don't interpret them.
 
+## Ensure Feature Branch
+
+Before making any changes, check the current branch:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+- If on `main` or `master`: create a feature branch first:
+  ```bash
+  git checkout -b "storyforge/extract-$(date '+%Y%m%d-%H%M')"
+  ```
+- If on any other branch: stay on it — do not create a new branch.
+
 ## Commit After Every Deliverable
 
 Each phase's output gets committed immediately:

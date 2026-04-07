@@ -279,23 +279,23 @@ Commit and push the key decisions file after every new entry, along with whateve
 
 ## Branch + PR Workflow
 
-Autonomous scripts (`write`, `evaluate`, `revise`, `assemble`) work on feature branches, not main. The workflow:
+**All changes happen on feature branches, never on main.** This applies to both skills and scripts.
 
-1. **Skills create branches** when saving plans or artifacts:
-   - `scenes` creates `storyforge/write-{timestamp}` when scene design is complete
-   - `plan-revision` creates `storyforge/revise-{timestamp}` before saving the revision plan
-   - `produce` creates `storyforge/assemble-{timestamp}` before saving the chapter map
-   - `evaluate` has no preceding skill — the `storyforge-evaluate` script creates `storyforge/evaluate-{timestamp}` itself
+**Branch rule:**
+- If on `main`: create a `storyforge/{command}-{timestamp}` branch before making any changes.
+- If already on any non-main branch: stay on it — do not create a new branch or PR.
 
-2. **Scripts create draft PRs** when they start. The PR includes a task list with one checkbox per phase (scene, evaluator, revision pass, etc.) plus a "Review" task. The PR is labeled `in-progress`.
+**The workflow:**
+
+1. **Skills and scripts ensure they are on a feature branch** before writing any files. If on main, they create a `storyforge/*` branch. If already on one, they resume.
+
+2. **Scripts create draft PRs** when they start on a new branch. The PR includes a task list with one checkbox per phase (scene, evaluator, revision pass, etc.) plus a "Review" task. The PR is labeled `in-progress`.
 
 3. **As work progresses**, tasks are checked off in the PR description. The author can follow along by watching the PR.
 
 4. **Review runs automatically** at the end. The review phase removes `in-progress`, adds `reviewing`, converts the draft PR to ready-for-review, runs a Claude-powered quality assessment, posts the review as a PR comment, then marks the PR `ready-to-merge`.
 
 5. **The author merges.** `ready-to-merge` is a recommendation. The author reviews the PR diff and comment, then merges or requests changes.
-
-If the author runs a script directly without going through a skill (no branch exists), the script creates the branch itself.
 
 The standalone `./storyforge review` command can also run the review phase on the current branch at any time.
 
@@ -306,6 +306,18 @@ Storyforge works on scenes, not assembled chapters. Evaluation, revision, and al
 Do not suggest assembling the manuscript until the author explicitly asks for it or signals they are done with scene-level revision. The scene is the unit of work.
 
 When the author is ready, the `produce` skill guides them through creating `reference/chapter-map.csv` (mapping scenes to chapters) and configuring production settings in `storyforge.yaml`. Then `./storyforge assemble` runs the assembly pipeline to generate epub, PDF, or HTML output.
+
+## Ensure Feature Branch
+
+Before making any changes, check the current branch:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+- If on `main` or `master`: create a feature branch first:
+  ```bash
+  git checkout -b "storyforge/forge-$(date '+%Y%m%d-%H%M')"
+  ```
+- If on any other branch: stay on it — do not create a new branch.
 
 ## The Repo Is the Source of Truth
 

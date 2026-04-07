@@ -348,7 +348,19 @@ cd [project_dir] && [plugin_path]/scripts/storyforge-reconcile
 
 Report results to the author. Blocking validation failures must be fixed before advancing. Structural scoring findings are advisory but strongly recommended before drafting.
 
-## Step 6: Commit After Every Deliverable
+## Step 6: Ensure Feature Branch
+
+Before making any changes, check the current branch:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+- If on `main` or `master`: create a feature branch first:
+  ```bash
+  git checkout -b "storyforge/elaborate-$(date '+%Y%m%d-%H%M')"
+  ```
+- If on any other branch: stay on it — do not create a new branch.
+
+## Step 7: Commit After Every Deliverable
 
 Every stage output gets committed immediately:
 

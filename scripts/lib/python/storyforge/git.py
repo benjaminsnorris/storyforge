@@ -38,13 +38,18 @@ def current_branch(project_dir: str) -> str:
     return r.stdout.strip() if r.returncode == 0 else ''
 
 
+def _is_main_branch(branch: str) -> bool:
+    """Check if a branch name is a main/default branch."""
+    return branch in ('main', 'master')
+
+
 def create_branch(command_name: str, project_dir: str) -> str:
     """Create a storyforge feature branch. Returns branch name.
 
-    If already on a storyforge/* branch, treats as resume.
+    If already on any non-main branch, treats as resume.
     """
     branch = current_branch(project_dir)
-    if branch.startswith('storyforge/'):
+    if branch and not _is_main_branch(branch):
         log(f'Resuming on branch: {branch}')
         return branch
 
@@ -57,6 +62,18 @@ def create_branch(command_name: str, project_dir: str) -> str:
 
     log(f'Created branch: {new_branch}')
     return new_branch
+
+
+def ensure_on_branch(command_name: str, project_dir: str) -> str:
+    """Ensure we are not on main before making changes.
+
+    If on main, creates a new storyforge feature branch.
+    If on any other branch, returns it unchanged.
+    """
+    branch = current_branch(project_dir)
+    if branch and not _is_main_branch(branch):
+        return branch
+    return create_branch(command_name, project_dir)
 
 
 def ensure_branch_pushed(project_dir: str, branch: str | None = None) -> bool:

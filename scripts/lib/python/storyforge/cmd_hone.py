@@ -24,7 +24,7 @@ from storyforge.common import (
     detect_project_root, log, read_yaml_field, select_model,
     get_coaching_level, install_signal_handlers,
 )
-from storyforge.git import commit_and_push
+from storyforge.git import commit_and_push, ensure_on_branch
 
 
 ALL_DOMAINS = ['registries', 'gaps', 'structural', 'briefs']
@@ -115,6 +115,10 @@ def main(argv=None):
     if not args.diagnose:
         log(f'Model: {model}')
     log('============================================')
+
+    # Ensure we're on a feature branch before making changes
+    if not args.dry_run and not args.diagnose:
+        ensure_on_branch('hone', project_dir)
 
     # Scene filter
     scene_filter = _resolve_scene_filter(args, ref_dir)

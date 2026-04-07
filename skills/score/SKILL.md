@@ -222,7 +222,19 @@ After scoring completes, switch to Review mode to present results.
 
 ---
 
-## Step 4: Commit After Every Deliverable
+## Step 4: Ensure Feature Branch
+
+Before making any changes, check the current branch:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+- If on `main` or `master`: create a feature branch first:
+  ```bash
+  git checkout -b "storyforge/score-$(date '+%Y%m%d-%H%M')"
+  ```
+- If on any other branch: stay on it — do not create a new branch.
+
+## Step 5: Commit After Every Deliverable
 
 **This step happens repeatedly throughout the session, not once at the end.**
 

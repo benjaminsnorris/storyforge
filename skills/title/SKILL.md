@@ -114,6 +114,18 @@ The author picks a title, iterates further, or keeps their current one. When the
    **Rationale:** {Why this title — what it captures, how it serves the story and market}
    ```
 
+## Ensure Feature Branch
+
+Before making any changes, check the current branch:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+- If on `main` or `master`: create a feature branch first:
+  ```bash
+  git checkout -b "storyforge/title-$(date '+%Y%m%d-%H%M')"
+  ```
+- If on any other branch: stay on it — do not create a new branch.
+
 ## Commit After Every Deliverable
 
 Every artifact change gets its own commit before moving on:

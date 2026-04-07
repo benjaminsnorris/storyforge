@@ -175,7 +175,19 @@ Present:
 - **What remains:** Outstanding issues, new issues introduced
 - **Recommendation:** Ready to merge, needs another cycle, or needs author attention
 
-## Step 6: Commit
+## Step 6: Ensure Feature Branch
+
+Before making any changes, check the current branch:
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+- If on `main` or `master`: create a feature branch first:
+  ```bash
+  git checkout -b "storyforge/revise-$(date '+%Y%m%d-%H%M')"
+  ```
+- If on any other branch: stay on it — do not create a new branch.
+
+## Step 7: Commit
 
 After every deliverable:
 ```bash
