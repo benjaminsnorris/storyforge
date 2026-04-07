@@ -16,6 +16,11 @@ from storyforge.elaborate import (
 )
 
 
+def _s(val) -> str:
+    """Safely coerce a CSV field value to str (handles None from empty cells)."""
+    return val if isinstance(val, str) else ''
+
+
 # ---------------------------------------------------------------------------
 # POV structure detection
 # ---------------------------------------------------------------------------
@@ -28,7 +33,7 @@ def _detect_pov_structure(scenes_map):
     """
     povs = set()
     for scene in scenes_map.values():
-        pov = scene.get('pov', '').strip()
+        pov = _s(scene.get('pov')).strip()
         if pov:
             povs.add(pov)
     if len(povs) <= 1:
@@ -148,7 +153,7 @@ def score_thematic_concentration(intent_map):
     # 1. Collect all non-empty value_at_stake values
     values = []
     for scene_id, intent in intent_map.items():
-        v = intent.get('value_at_stake', '').strip()
+        v = _s(intent.get('value_at_stake')).strip()
         if v:
             values.append(v)
 
@@ -243,13 +248,13 @@ def _scene_tension(intent, brief):
     Combines value_shift (50%), outcome (30%), and scene type (20%).
     Defaults to 0.5 for any missing or unknown values.
     """
-    shift = intent.get('value_shift', '').strip()
+    shift = _s(intent.get('value_shift')).strip()
     shift_t = _SHIFT_TENSION.get(shift, 0.5)
 
-    outcome = brief.get('outcome', '').strip()
+    outcome = _s(brief.get('outcome')).strip()
     outcome_t = _OUTCOME_TENSION.get(outcome, 0.5)
 
-    scene_type = intent.get('action_sequel', '').strip().lower()
+    scene_type = _s(intent.get('action_sequel')).strip().lower()
     type_t = _TYPE_TENSION.get(scene_type, 0.5)
 
     return (shift_t * 0.5) + (outcome_t * 0.3) + (type_t * 0.2)
@@ -329,7 +334,7 @@ def score_pacing(scenes_map, intent_map, briefs_map):
     part_words = {}
     total_words = 0
     for sid, scene in ordered:
-        part = scene.get('part', '').strip() or '1'
+        part = _s(scene.get('part')).strip() or '1'
         wc = 0
         for field in ('target_words', 'word_count'):
             try:
@@ -531,7 +536,7 @@ def score_arcs(scenes_map, intent_map):
     # Group scenes by POV character
     char_scenes = {}  # character -> [(scene_id, scene, intent), ...]
     for sid, scene in ordered:
-        pov = scene.get('pov', '').strip()
+        pov = _s(scene.get('pov')).strip()
         if not pov:
             continue
         intent = intent_map.get(sid) or {}
@@ -554,11 +559,11 @@ def score_arcs(scenes_map, intent_map):
         shifts = []
         emotional_arcs = []
         for sid, scene, intent in scene_list:
-            v = intent.get('value_at_stake', '').strip()
+            v = _s(intent.get('value_at_stake')).strip()
             if v:
                 values.add(v)
-            shifts.append(intent.get('value_shift', '').strip())
-            ea = intent.get('emotional_arc', '').strip()
+            shifts.append(_s(intent.get('value_shift')).strip())
+            ea = _s(intent.get('emotional_arc')).strip()
             if ea:
                 emotional_arcs.append(ea)
 
@@ -719,12 +724,12 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
         intent = intent_map.get(sid) or {}
 
         # POV
-        pov = scene.get('pov', '').strip()
+        pov = _s(scene.get('pov')).strip()
         if pov:
             pov_counts[pov] = pov_counts.get(pov, 0) + 1
 
         # on_stage
-        on_stage_str = intent.get('on_stage', '').strip()
+        on_stage_str = _s(intent.get('on_stage')).strip()
         if on_stage_str:
             for ch in on_stage_str.split(';'):
                 ch = ch.strip()
@@ -734,7 +739,7 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
                     onstage[ch].append(idx)
 
         # characters (mentions)
-        chars_str = intent.get('characters', '').strip()
+        chars_str = _s(intent.get('characters')).strip()
         if chars_str:
             for ch in chars_str.split(';'):
                 ch = ch.strip()
@@ -892,7 +897,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
     if reg_path and os.path.isfile(reg_path):
         reg_rows = _read_csv(reg_path)
         for row in reg_rows:
-            rid = row.get('id', '').strip()
+            rid = _s(row.get('id')).strip()
             rtype = (row.get('type') or '').strip()
             if rid and rtype:
                 registry_types[rid] = rtype
@@ -910,7 +915,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
 
     for idx, sid in enumerate(scene_ids):
         intent = intent_map.get(sid) or {}
-        mice_str = intent.get('mice_threads', '').strip()
+        mice_str = _s(intent.get('mice_threads')).strip()
         if not mice_str:
             continue
         for entry in mice_str.split(';'):
@@ -1058,8 +1063,8 @@ def score_knowledge_chain(scenes_map, briefs_map):
 
     for idx, sid in enumerate(scene_ids):
         brief = briefs_map.get(sid) or {}
-        kin = brief.get('knowledge_in', '').strip()
-        kout = brief.get('knowledge_out', '').strip()
+        kin = _s(brief.get('knowledge_in')).strip()
+        kout = _s(brief.get('knowledge_out')).strip()
         if kin:
             has_kin += 1
             for fact in kin.split(';'):
@@ -1104,7 +1109,7 @@ def score_knowledge_chain(scenes_map, briefs_map):
     if scene_ids:
         first_sid = scene_ids[0]
         first_brief = briefs_map.get(first_sid) or {}
-        first_kin = first_brief.get('knowledge_in', '').strip()
+        first_kin = _s(first_brief.get('knowledge_in')).strip()
         if first_kin:
             first_facts = [f.strip() for f in first_kin.split(';') if f.strip()]
             if len(first_facts) > 5:
@@ -1165,8 +1170,8 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
 
     for idx, sid in enumerate(scene_ids):
         brief = briefs_map.get(sid) or {}
-        psi = brief.get('physical_state_in', '').strip()
-        pso = brief.get('physical_state_out', '').strip()
+        psi = _s(brief.get('physical_state_in')).strip()
+        pso = _s(brief.get('physical_state_out')).strip()
         if psi:
             has_psi += 1
             if idx < first_state_idx:
@@ -1200,10 +1205,10 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
     if registry_path and os.path.isfile(registry_path):
         reg = _read_csv(registry_path)
         for entry in reg:
-            sid = entry.get('id', '').strip()
-            char = entry.get('character', '').strip().lower()
-            acq = entry.get('acquired', '').strip()
-            res = entry.get('resolves', '').strip()
+            sid = _s(entry.get('id')).strip()
+            char = _s(entry.get('character')).strip().lower()
+            acq = _s(entry.get('acquired')).strip()
+            res = _s(entry.get('resolves')).strip()
             if not sid or not acq:
                 continue
             # Find seq indices
@@ -1226,14 +1231,14 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
             continue
         # Get on-stage characters
         scene = scenes_map.get(sid) or {}
-        pov = scene.get('pov', '').strip().lower()
+        pov = _s(scene.get('pov')).strip().lower()
         # Try to get intent data for on_stage
         intent_map = {}
         intent_path = os.path.join(ref_dir, 'scene-intent.csv') if ref_dir else ''
         if intent_path and os.path.isfile(intent_path):
             intent_map = _read_csv_as_map(intent_path)
         intent = intent_map.get(sid) or {}
-        on_stage_raw = intent.get('on_stage', '') or intent.get('characters', '')
+        on_stage_raw = _s(intent.get('on_stage')) or _s(intent.get('characters'))
         on_stage = {c.strip().lower() for c in on_stage_raw.split(';') if c.strip()}
         on_stage.add(pov)
 
@@ -1311,7 +1316,7 @@ def score_function_variety(intent_map, briefs_map):
     sequel_count = 0
     for sid in scene_ids:
         intent = intent_map[sid]
-        as_type = intent.get('action_sequel', '').strip().lower()
+        as_type = _s(intent.get('action_sequel')).strip().lower()
         if as_type == 'action':
             action_count += 1
         elif as_type == 'sequel':
@@ -1340,7 +1345,7 @@ def score_function_variety(intent_map, briefs_map):
     outcome_freq = {}
     for sid in scene_ids:
         brief = briefs_map.get(sid) or {}
-        outcome = brief.get('outcome', '').strip().lower()
+        outcome = _s(brief.get('outcome')).strip().lower()
         if outcome:
             outcome_freq[outcome] = outcome_freq.get(outcome, 0) + 1
 
@@ -1373,7 +1378,7 @@ def score_function_variety(intent_map, briefs_map):
     tp_freq = {}
     for sid in scene_ids:
         intent = intent_map[sid]
-        tp = intent.get('turning_point', '').strip().lower()
+        tp = _s(intent.get('turning_point')).strip().lower()
         if tp:
             tp_freq[tp] = tp_freq.get(tp, 0) + 1
 
@@ -1516,7 +1521,7 @@ def structural_score(ref_dir, weights=None):
                     'dimension': name,
                     'dimension_score': dim_score,
                     'message': f['message'],
-                    'fix_location': f.get('fix_location', ''),
+                    'fix_location': _s(f.get('fix_location')),
                 })
 
     overall = weighted_sum / total_weight if total_weight > 0 else 0.0
@@ -2040,7 +2045,7 @@ def load_scores_as_dict(csv_path):
         return result
     rows = _read_csv(csv_path)
     for row in rows:
-        dim = row.get('dimension', '').strip()
+        dim = _s(row.get('dimension')).strip()
         if dim and dim != 'overall':
             result[dim] = {
                 'score': float(row.get('score', 0)),
