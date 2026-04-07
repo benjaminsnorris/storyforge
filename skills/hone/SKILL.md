@@ -56,11 +56,12 @@ Based on the author's request and project state:
 → All domains in order: registries → gaps → structural → briefs.
 
 **"How's my data?" / "What needs work?" / no specific direction:**
-→ Run `--diagnose` to get the full picture first. This runs structural scoring (8 dimensions), brief quality detection (abstract/overspecified/verbose), and gap detection in one read-only pass. Then present findings and recommend which domain to tackle based on what's worst:
-1. If gaps are found (missing required fields), recommend gaps domain first
-2. If structural scores are low, recommend the relevant domain
-3. If brief quality issues dominate, recommend briefs domain
+→ Run `--diagnose` to get the full picture first. This runs structural scoring (8 dimensions), brief quality detection (abstract/overspecified/verbose), and gap detection in one read-only pass. **Read the actual output before recommending anything.** Only recommend domains that have real issues:
+1. If gaps count > 0, recommend gaps domain
+2. If brief quality issues count > 0, recommend briefs domain
+3. If structural scores are low AND the low dimension maps to a hone domain, recommend it
 4. If registries are missing or stale, recommend registries domain
+5. **If a domain shows zero issues, say so explicitly** — "briefs look clean, no action needed" is a valid finding. Do not recommend running hone on a domain that has no detected issues.
 
 ## Step 4: Assess Domain Needs
 
@@ -196,11 +197,12 @@ After hone completes (any domain):
 2. If briefs were concretized, show before/after for 2-3 representative scenes
 3. If registries were built, note how many entries and normalizations
 4. If gaps were found, list the most critical ones
-5. Recommend next steps:
-   - After briefs: "Re-draft affected scenes to pick up the new concrete briefs"
-   - After registries: "Run validation to check consistency"
-   - After gaps: "Run elaborate --gap-fill to fill missing fields"
-   - After structural: "Re-validate to check score improvement"
+5. Recommend next steps based on what actually changed:
+   - After briefs (if fields were rewritten): "Re-draft affected scenes to pick up the new concrete briefs"
+   - After registries (if normalizations applied): "Run validation to check consistency"
+   - After gaps (if gaps were found): "Run elaborate --gap-fill to fill missing fields"
+   - After structural (if fixes applied): "Re-validate to check score improvement"
+   - If nothing changed: say so clearly — "No issues found, data is clean"
 
 ## Step 7: Commit After Every Deliverable
 
