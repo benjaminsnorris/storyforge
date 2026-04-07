@@ -339,6 +339,40 @@ class TestMiceDormancy:
         assert gaps[0]['thread_id'] == 'test-thread'
         assert gaps[0]['gap_size'] == 19
 
+    def test_bare_mention_breaks_gap(self, tmp_path):
+        """Issue #133: bare mentions (no +/- prefix) should reset dormancy."""
+        from storyforge.hone import detect_mice_dormancy
+
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            for i in range(1, 21):
+                f.write(f's{i:02d}|{i}|Scene {i}|1|zara|loc|1|morning|1hr|action|drafted|1000|1500\n')
+
+        with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+            f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+            for i in range(1, 21):
+                mice = ''
+                if i == 1:
+                    mice = '+test-thread'
+                elif i == 10:
+                    mice = 'test-thread'  # bare mention
+                elif i == 20:
+                    mice = '-test-thread'
+                f.write(f's{i:02d}|func|action|flat|truth|+/-|revelation|zara|zara|{mice}\n')
+
+        with open(os.path.join(ref, 'mice-threads.csv'), 'w') as f:
+            f.write('id|name|type|aliases\n')
+            f.write('test-thread|Test Thread|inquiry|\n')
+
+        gaps = detect_mice_dormancy(ref)
+        # With bare mention at s10, max gap is 9 (not 19), below threshold of 8+
+        # So we get two sub-gaps of 9, each just above threshold
+        for g in gaps:
+            assert g['gap_size'] < 19, "Bare mention should split the 19-scene gap"
+
     def test_fill_prompt(self):
         from storyforge.hone import build_mice_fill_prompt
         prompt = build_mice_fill_prompt(
