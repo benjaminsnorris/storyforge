@@ -778,6 +778,22 @@ CONCRETE_INDICATORS = {
 
 _CONCRETIZABLE_FIELDS = ['key_actions', 'crisis', 'decision', 'goal', 'conflict', 'emotions']
 
+OBSERVATION_INDICATORS = {
+    'notices', 'observes', 'discovers', 'reflects', 'grapples with',
+    'contemplates', 'realizes', 'wonders', 'considers', 'processes',
+    'absorbs', 'witnesses', 'watches', 'senses', 'recognizes',
+    'comes to understand', 'begins to see', 'takes in',
+}
+
+OPPOSITION_INDICATORS = {
+    'refuses', 'blocks', 'demands', 'threatens', 'confronts', 'denies',
+    'challenges', 'prevents', 'forbids', 'attacks', 'rejects', 'opposes',
+    'locks', 'traps', 'forces', 'resists', 'fights', 'argues',
+    'interrupts', 'undermines', 'betrays', 'withholds', 'hides',
+}
+
+_FLAT_SHIFTS = {'+/+', '-/-', '0/0', ''}
+
 
 def detect_abstract_fields(
     briefs_map: dict[str, dict[str, str]],

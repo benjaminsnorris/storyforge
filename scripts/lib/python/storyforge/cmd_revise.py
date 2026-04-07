@@ -144,16 +144,29 @@ def _generate_polish_plan(plan_file):
 
 
 def _generate_naturalness_plan(plan_file):
-    """Generate 3-pass plan for AI prose pattern removal."""
+    """Generate 3-pass plan for AI prose pattern removal.
+
+    Targets the patterns most frequently penalized in scoring rationales:
+    tricolon/parallelism, em-dash/antithesis, and AI vocabulary/hedging.
+    """
     rows = [
         {
             'pass': '1',
-            'name': 'metaphor-restatement',
-            'purpose': 'Remove metaphor restatement -- where an image or metaphor is immediately followed by a clause explaining what it means',
+            'name': 'tricolon-parallelism',
+            'purpose': 'Break compulsive three-item structures — triple-sensation chains, three-beat lists, three-clause parallel constructions',
             'scope': 'full',
             'targets': '',
-            'guidance': 'Find every metaphor, simile, or image that is followed by an explanatory clause and delete the explanation. The image should stand alone. BEFORE: "The silence hung between them like fog -- thick, obscuring, making it impossible to see the other person clearly." AFTER: "The silence hung between them like fog." Also remove: "Which meant..." clauses after images; "The kind of..." restatements; em-dash elaborations that translate a metaphor into literal meaning. Do NOT remove metaphors themselves -- only remove the explanatory clause that follows them.',
-            'protection': 'Do not change any plot events, dialogue content, or character actions. Only modify how images are delivered.',
+            'guidance': (
+                'Find every instance of three-item parallelism and vary the count or structure. '
+                'PATTERNS TO FIX: '
+                '(a) Three-adjective chains: "gold deepening to persimmon deepening to red" — vary to 2 or 4, or restructure. '
+                '(b) Three-clause parallelism: "too short for the counter, too narrow for the bowls, too wide for the space" — collapse to 1-2 clauses or vary rhythm. '
+                '(c) Triple-sensation stacking: "Color. Taste. Sight interpretation." repeated as a template — break the template, vary which senses appear and in what order. '
+                '(d) Three-item lists in narration: "the noodle shop level, the market corridor, the junction" — sometimes 2 is enough. '
+                'NOT EVERY THREE-ITEM LIST IS WRONG. Only fix the ones that feel mechanical or templated. '
+                'Organic tricolon in dialogue or emphatic prose is fine. The test: could a reader predict the third item? If yes, fix it.'
+            ),
+            'protection': 'Do not change dialogue content, plot events, or character actions. Only modify prose rhythm and structure.',
             'findings': 'naturalness',
             'status': 'pending',
             'model_tier': 'opus',
@@ -161,12 +174,21 @@ def _generate_naturalness_plan(plan_file):
         },
         {
             'pass': '2',
-            'name': 'interpretive-tagging',
-            'purpose': 'Remove interpretive tagging -- where narrator commentary explains the significance of an action or gesture just shown',
+            'name': 'em-dash-antithesis',
+            'purpose': 'Reduce em-dash frequency and eliminate "Not X but Y" antithesis framing',
             'scope': 'full',
             'targets': '',
-            'guidance': 'Find action or gesture lines followed by narrator interpretation and remove the interpretation. BEFORE: "She set the cup down carefully. It was a gesture of control, her way of anchoring herself when everything else felt unmoored." AFTER: "She set the cup down carefully." Also remove: "It was her way of..." or "It was a gesture of..."; "as though..." or "as if to say..." after action lines.',
-            'protection': 'Do not change any dialogue, plot events, or factual observations. Only remove narrator interpretation of actions already shown.',
+            'guidance': (
+                'Two patterns to fix: '
+                '(a) EM-DASH OVERUSE: Count em dashes in each scene. Target: max 3-4 per 1000 words. '
+                'Replace with: periods (for parenthetical asides), commas (for appositives), '
+                'colons (for elaboration), or restructure the sentence. Keep em dashes only for genuine interruptions or abrupt shifts. '
+                '(b) ANTITHESIS FRAMING: Find "Not X. Y." / "Not X but Y" / "Not X — Y" constructions. '
+                'BEFORE: "Not reflecting-the-sky black, just black." '
+                'AFTER: Describe what it IS without first saying what it ISN\'T. Negation-then-correction is a Claude tic. '
+                'Also fix: "Not literally X but..." and "Less X than Y" when used as the primary description.'
+            ),
+            'protection': 'Do not change dialogue, plot, or character actions. Preserve em dashes in dialogue for speech interruptions.',
             'findings': 'naturalness',
             'status': 'pending',
             'model_tier': 'opus',
@@ -174,12 +196,24 @@ def _generate_naturalness_plan(plan_file):
         },
         {
             'pass': '3',
-            'name': 'ending-template',
-            'purpose': 'Vary scene endings that follow the formulaic pattern: small physical action, then thematic observation, then short declarative',
+            'name': 'ai-vocabulary-hedging',
+            'purpose': 'Remove AI-tell vocabulary, hedging stacks, sweeping openers, and summary closers',
             'scope': 'full',
             'targets': '',
-            'guidance': 'Check the last 3-5 sentences of each scene. If they follow the pattern [small physical action] + [thematic/metaphorical observation] + [short declarative sentence of 8 words or fewer], rewrite the ending to break the template. Alternatives: end on dialogue; end mid-action; end on a sensory detail; end on a question; cut the last sentence entirely.',
-            'protection': 'Do not change any scene content except the final 1-3 sentences. The rest of the scene must remain exactly as-is.',
+            'guidance': (
+                'Four patterns to fix: '
+                '(a) AI-TELL VOCABULARY: Remove or replace these words that signal AI-generated prose: '
+                'nuanced, multifaceted, tapestry, palpable, pivotal, intricate, profound, myriad, '
+                'juxtaposition, dichotomy, paradigm, visceral (when not literal). Replace with concrete, specific words. '
+                '(b) HEDGING STACKS: "something like", "something between", "almost as if", "perhaps", '
+                '"a kind of", "the particular" — remove or commit to the statement. '
+                'BEFORE: "Something that tasted the way silence feels." AFTER: Name the taste. '
+                '(c) SWEEPING OPENERS: Remove scene-opening sentences that set a thematic frame before anything happens. '
+                '"The thing about memory is..." / "There are moments when..." — cut to the first concrete action or image. '
+                '(d) SUMMARY CLOSERS: Remove paragraph-ending sentences that interpret what was just shown. '
+                '"And that was the thing about X." / "It was, she realized, exactly what she needed." — let the scene end on action or image.'
+            ),
+            'protection': 'Do not change dialogue, plot events, or character interiority that reveals new information.',
             'findings': 'naturalness',
             'status': 'pending',
             'model_tier': 'opus',
