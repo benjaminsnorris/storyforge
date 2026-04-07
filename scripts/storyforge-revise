@@ -61,6 +61,7 @@ DRY_RUN=false
 INTERACTIVE=false
 COACHING_LEVEL=""
 POLISH_MODE=false
+NATURALNESS_MODE=false
 STRUCTURAL_MODE=false
 START_PASS=0  # 0 means "find first pending"
 
@@ -68,6 +69,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --polish)
             POLISH_MODE=true
+            shift
+            ;;
+        --naturalness)
+            NATURALNESS_MODE=true
             shift
             ;;
         --structural)
@@ -91,12 +96,13 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: storyforge-revise [--dry-run] [--interactive] [--structural] [--coaching LEVEL] [PASS_NUM]"
+            echo "Usage: storyforge-revise [--dry-run] [--interactive] [--structural] [--naturalness] [--coaching LEVEL] [PASS_NUM]"
             echo ""
             echo "Options:"
             echo "  --dry-run       Build and print prompts without invoking Claude"
             echo "  --interactive   Supervise each pass — watch, give feedback, redirect"
             echo "  --structural    Auto-generate plan from structural proposals (CSV-only, no prose)"
+            echo "  --naturalness   Auto-generate 3-pass plan targeting AI prose patterns"
             echo "  --coaching LVL  Set coaching level: full, coach, or strict"
             echo "  PASS_NUM        Start from this pass number (1-indexed; default: first pending)"
             echo ""
@@ -118,8 +124,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "$STRUCTURAL_MODE" == true && "$POLISH_MODE" == true ]]; then
-    echo "ERROR: --structural and --polish are mutually exclusive." >&2
+MODE_COUNT=0
+[[ "$STRUCTURAL_MODE" == true ]] && ((MODE_COUNT++))
+[[ "$POLISH_MODE" == true ]] && ((MODE_COUNT++))
+[[ "$NATURALNESS_MODE" == true ]] && ((MODE_COUNT++))
+if (( MODE_COUNT > 1 )); then
+    echo "ERROR: --structural, --polish, and --naturalness are mutually exclusive." >&2
     exit 1
 fi
 
@@ -131,6 +141,25 @@ if [[ "$POLISH_MODE" == true ]]; then
     echo "1|prose-polish|Voice consistency, prose naturalness, dialogue authenticity, AI pattern cleanup|full||Follow the voice guide strictly. Focus on: em dash overuse, antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. Enter late, leave early.|voice-quality|polish|pending|opus|craft" >> "$CSV_PLAN_FILE"
     USE_CSV_PLAN=true
     log "Generated single-pass polish plan: ${CSV_PLAN_FILE}"
+fi
+
+# --- Naturalness mode: 3 targeted passes for AI prose patterns ---
+if [[ "$NATURALNESS_MODE" == true ]]; then
+    log "Naturalness mode — generating 3-pass plan for AI pattern removal..."
+    mkdir -p "$(dirname "$CSV_PLAN_FILE")"
+    echo "pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location" > "$CSV_PLAN_FILE"
+
+    # Pass 1: Metaphor restatement
+    echo "1|metaphor-restatement|Remove metaphor restatement — where an image or metaphor is immediately followed by a clause explaining what it means|full||Find every metaphor, simile, or image that is followed by an explanatory clause and delete the explanation. The image should stand alone. BEFORE: \"The silence hung between them like fog — thick, obscuring, making it impossible to see the other person clearly.\" AFTER: \"The silence hung between them like fog.\" Also remove: \"Which meant...\" clauses after images; \"The kind of...\" restatements; em-dash elaborations that translate a metaphor into literal meaning. Do NOT remove metaphors themselves — only remove the explanatory clause that follows them. If deleting the explanation leaves a sentence fragment, restructure minimally.|Do not change any plot events, dialogue content, or character actions. Only modify how images are delivered.|naturalness|pending|opus|craft" >> "$CSV_PLAN_FILE"
+
+    # Pass 2: Interpretive tagging
+    echo "2|interpretive-tagging|Remove interpretive tagging — where narrator commentary explains the significance of an action or gesture just shown|full||Find action or gesture lines followed by narrator interpretation and remove the interpretation. The action is the meaning. BEFORE: \"She set the cup down carefully. It was a gesture of control, her way of anchoring herself when everything else felt unmoored.\" AFTER: \"She set the cup down carefully.\" Also remove: \"It was her way of...\" or \"It was a gesture of...\"; \"as though...\" or \"as if to say...\" after action lines; appositive interpretations like \"She set the cup down — a small act of control\"; \"the kind of [noun] someone [verb]s when...\" constructions. In first person, the narrator naturally notices behavior — that is fine. What to cut is the second sentence that explains what the noticed behavior means.|Do not change any dialogue, plot events, or factual observations. Only remove narrator interpretation of actions already shown.|naturalness|pending|opus|craft" >> "$CSV_PLAN_FILE"
+
+    # Pass 3: Ending template
+    echo "3|ending-template|Vary scene endings that follow the formulaic pattern: small physical action, then thematic observation, then short declarative|full||Check the last 3-5 sentences of each scene. If they follow the pattern [small physical action] + [thematic/metaphorical observation] + [short declarative sentence of 8 words or fewer], rewrite the ending to break the template. Alternatives: end on dialogue; end mid-action; end on a sensory detail; end on a question; cut the last sentence entirely. BEFORE: \"She closed the door. The hallway stretched ahead, empty as a promise. She walked.\" AFTER: \"She closed the door and kept walking.\" Not every scene ending needs to change — only the ones that match this specific three-beat cadence. Some short declarative endings are earned (after emotional scenes). Change only the formulaic ones.|Do not change any scene content except the final 1-3 sentences. The rest of the scene must remain exactly as-is.|naturalness|pending|opus|craft" >> "$CSV_PLAN_FILE"
+
+    USE_CSV_PLAN=true
+    log "Generated 3-pass naturalness plan: ${CSV_PLAN_FILE}"
 fi
 
 # --- Structural mode: auto-generate plan from structural proposals ---
