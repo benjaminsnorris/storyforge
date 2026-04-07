@@ -718,16 +718,27 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
     if n == 0:
         return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
-    # Load character roles from characters.csv if it exists
+    # Load character roles and death info from characters.csv if it exists
     char_roles = {}  # character_id -> role
+    dead_characters = set()  # characters with a death_scene (by id, name, and aliases)
     chars_path = os.path.join(ref_dir, 'characters.csv')
     if os.path.exists(chars_path):
         rows = _read_csv(chars_path)
         for row in rows:
             char_id = (row.get('id') or '').strip()
             role = (row.get('role') or '').strip().lower()
+            death_scene = (row.get('death_scene') or '').strip()
             if char_id:
                 char_roles[char_id] = role
+                if death_scene:
+                    dead_characters.add(char_id)
+                    name = (row.get('name') or '').strip()
+                    if name:
+                        dead_characters.add(name)
+                    for alias in (row.get('aliases') or '').split(';'):
+                        alias = alias.strip()
+                        if alias:
+                            dead_characters.add(alias)
 
     # Count per character: POV scenes, on_stage, mentions
     pov_counts = {}   # character -> count of POV scenes
@@ -854,6 +865,9 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
     ratio_score = 1.0
     ratio_flags = 0
     for ch in set(list(mentions.keys()) + list(onstage.keys())):
+        # Dead characters cannot be on-stage — skip ratio check
+        if ch in dead_characters:
+            continue
         mention_count = len(mentions.get(ch, []))
         onstage_count = len(onstage.get(ch, []))
         if mention_count > 5 and onstage_count < mention_count * 0.30:
@@ -928,6 +942,12 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
     # Track per thread: open_idx, close_idx, mention_indices, type
     threads = {}  # thread_name -> {'open': idx|None, 'close': idx|None, 'mentions': [idx], 'type': str}
 
+    def _normalize_tag(raw_tag):
+        """Strip type: prefix so 'inquiry:foo' and 'foo' map to the same thread."""
+        thread_type = _resolve_type(raw_tag)
+        bare = raw_tag.split(':', 1)[1] if ':' in raw_tag else raw_tag
+        return bare, thread_type
+
     for idx, sid in enumerate(scene_ids):
         intent = intent_map.get(sid) or {}
         mice_str = _s(intent.get('mice_threads')).strip()
@@ -938,8 +958,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
             if not entry:
                 continue
             if entry.startswith('+'):
-                tag = entry[1:]
-                thread_type = _resolve_type(tag)
+                tag, thread_type = _normalize_tag(entry[1:])
                 if tag not in threads:
                     threads[tag] = {'open': idx, 'close': None, 'mentions': [idx], 'type': thread_type}
                 else:
@@ -947,8 +966,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
                     if threads[tag]['open'] is None:
                         threads[tag]['open'] = idx
             elif entry.startswith('-'):
-                tag = entry[1:]
-                thread_type = _resolve_type(tag)
+                tag, thread_type = _normalize_tag(entry[1:])
                 if tag not in threads:
                     threads[tag] = {'open': None, 'close': idx, 'mentions': [idx], 'type': thread_type}
                 else:
@@ -956,8 +974,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
                     threads[tag]['mentions'].append(idx)
             else:
                 # Plain mention (no +/-)
-                tag = entry
-                thread_type = _resolve_type(tag)
+                tag, thread_type = _normalize_tag(entry)
                 if tag not in threads:
                     threads[tag] = {'open': None, 'close': None, 'mentions': [idx], 'type': thread_type}
                 else:

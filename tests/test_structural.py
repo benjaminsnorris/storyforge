@@ -389,3 +389,126 @@ class TestPacingEscalation:
         result = score_pacing(scenes, intent, briefs)
         # Flat tension = climax peak equals first quarter mean, should get neutral or low score
         assert result['score'] < 0.85
+
+
+class TestMiceDormancyBareNormalization:
+    """Issue #133: bare thread mentions should count toward dormancy reduction."""
+
+    def test_bare_mention_reduces_dormancy(self, tmp_path):
+        """A bare mention between +open and -close should break the dormancy gap."""
+        from storyforge.structural import score_mice_health
+        from storyforge.elaborate import _read_csv_as_map
+
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+
+        # 20 scenes
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            for i in range(1, 21):
+                f.write(f's{i:02d}|{i}|Scene {i}|1|zara|loc|1|morning|1hr|action|drafted|1000|1500\n')
+
+        # Thread opened at s01 with type prefix, bare mention at s10, closed at s20
+        with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+            f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+            for i in range(1, 21):
+                mice = ''
+                if i == 1:
+                    mice = '+inquiry:test-thread'
+                elif i == 10:
+                    mice = 'test-thread'  # bare mention — no prefix
+                elif i == 20:
+                    mice = '-inquiry:test-thread'
+                f.write(f's{i:02d}|func|action|flat|truth|+/-|revelation|zara|zara|{mice}\n')
+
+        with open(os.path.join(ref, 'mice-threads.csv'), 'w') as f:
+            f.write('id|name|type|aliases\n')
+            f.write('inquiry:test-thread|Test Thread|inquiry|\n')
+
+        scenes = _read_csv_as_map(os.path.join(ref, 'scenes.csv'))
+        intent = _read_csv_as_map(os.path.join(ref, 'scene-intent.csv'))
+        result = score_mice_health(scenes, intent, ref_dir=ref)
+
+        # With bare mention at s10, max gap should be ~9 scenes (s01→s10 or s10→s20)
+        # Without the fix, the gap would be 19 (s01→s20) because bare mention
+        # creates a separate thread key
+        dormancy_findings = [f for f in result['findings'] if 'dormant' in f['message'].lower()]
+        assert len(dormancy_findings) == 0, (
+            f"Bare mention should prevent dormancy flag, but got: {dormancy_findings}"
+        )
+
+
+class TestDeadCharacterOnStageRatio:
+    """Issue #134: dead characters should not be flagged for low on-stage ratio."""
+
+    def test_dead_character_excluded_from_ratio(self, tmp_path):
+        from storyforge.structural import score_character_presence
+        from storyforge.elaborate import _read_csv_as_map
+
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+
+        # 20 scenes, character killed in scene 2 but referenced throughout
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            for i in range(1, 21):
+                f.write(f's{i:02d}|{i}|Scene {i}|1|zara|loc|1|morning|1hr|action|drafted|1000|1500\n')
+
+        with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+            f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+            for i in range(1, 21):
+                # dead-char is in characters (referenced) for all scenes but on_stage only in s01
+                chars = 'zara;dead-char'
+                on_stage = 'zara;dead-char' if i == 1 else 'zara'
+                f.write(f's{i:02d}|func|action|flat|truth|+/-|revelation|{chars}|{on_stage}|\n')
+
+        # characters.csv with death_scene
+        with open(os.path.join(ref, 'characters.csv'), 'w') as f:
+            f.write('id|name|aliases|role|death_scene\n')
+            f.write('zara|Zara||protagonist|\n')
+            f.write('dead-char|Dead Char||supporting|s02\n')
+
+        scenes = _read_csv_as_map(os.path.join(ref, 'scenes.csv'))
+        intent = _read_csv_as_map(os.path.join(ref, 'scene-intent.csv'))
+        result = score_character_presence(scenes, intent, ref)
+
+        # dead-char should NOT be flagged for low on-stage ratio
+        ratio_findings = [f for f in result['findings'] if 'dead-char' in f['message'] and 'on-stage' in f['message']]
+        assert len(ratio_findings) == 0, (
+            f"Dead character should not be flagged for on-stage ratio, but got: {ratio_findings}"
+        )
+
+    def test_alive_character_still_flagged(self, tmp_path):
+        """Characters without death_scene should still be flagged normally."""
+        from storyforge.structural import score_character_presence
+        from storyforge.elaborate import _read_csv_as_map
+
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            for i in range(1, 21):
+                f.write(f's{i:02d}|{i}|Scene {i}|1|zara|loc|1|morning|1hr|action|drafted|1000|1500\n')
+
+        with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+            f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+            for i in range(1, 21):
+                chars = 'zara;ghost-char'
+                on_stage = 'zara;ghost-char' if i == 1 else 'zara'
+                f.write(f's{i:02d}|func|action|flat|truth|+/-|revelation|{chars}|{on_stage}|\n')
+
+        # No death_scene — character is alive
+        with open(os.path.join(ref, 'characters.csv'), 'w') as f:
+            f.write('id|name|aliases|role|death_scene\n')
+            f.write('zara|Zara||protagonist|\n')
+            f.write('ghost-char|Ghost Char||supporting|\n')
+
+        scenes = _read_csv_as_map(os.path.join(ref, 'scenes.csv'))
+        intent = _read_csv_as_map(os.path.join(ref, 'scene-intent.csv'))
+        result = score_character_presence(scenes, intent, ref)
+
+        ratio_findings = [f for f in result['findings'] if 'ghost-char' in f['message'] and 'on-stage' in f['message']]
+        assert len(ratio_findings) == 1, (
+            f"Alive character with low ratio should be flagged, got: {ratio_findings}"
+        )
