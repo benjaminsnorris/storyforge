@@ -18,6 +18,8 @@ from storyforge.costs import PRICING, calculate_cost, log_operation
 API_BASE = 'https://api.anthropic.com/v1'
 API_VERSION = '2023-06-01'
 HEARTBEAT_INTERVAL = 120  # seconds between status messages during API calls
+API_TIMEOUT = 600  # seconds before giving up on an API call (10 min)
+API_RETRIES = 2  # retry transient failures (timeouts, 5xx)
 
 
 class _Heartbeat:
@@ -66,12 +68,28 @@ def _api_request(path: str, body: dict | None = None, method: str = 'GET') -> di
     data = json.dumps(body).encode() if body else None
     req = Request(url, data=data, headers=headers, method=method)
 
-    try:
-        with urlopen(req) as resp:
-            return json.loads(resp.read().decode())
-    except HTTPError as e:
-        error_body = e.read().decode() if e.fp else ''
-        raise RuntimeError(f'API returned HTTP {e.code}: {error_body[:500]}') from e
+    last_err = None
+    for attempt in range(1, API_RETRIES + 1):
+        try:
+            with urlopen(req, timeout=API_TIMEOUT) as resp:
+                return json.loads(resp.read().decode())
+        except HTTPError as e:
+            error_body = e.read().decode() if e.fp else ''
+            if e.code >= 500 and attempt < API_RETRIES:
+                from storyforge.common import log
+                log(f'  API returned {e.code}, retrying ({attempt}/{API_RETRIES})...')
+                time.sleep(2 ** attempt)
+                last_err = e
+                continue
+            raise RuntimeError(f'API returned HTTP {e.code}: {error_body[:500]}') from e
+        except (URLError, TimeoutError, OSError) as e:
+            if attempt < API_RETRIES:
+                from storyforge.common import log
+                log(f'  API connection error: {e}, retrying ({attempt}/{API_RETRIES})...')
+                time.sleep(2 ** attempt)
+                last_err = e
+                continue
+            raise RuntimeError(f'API request failed after {API_RETRIES} attempts: {e}') from last_err
 
 
 def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '') -> dict:
@@ -249,7 +267,7 @@ def download_batch_results(results_url: str, output_dir: str, log_dir: str) -> l
 
     succeeded = []
 
-    with urlopen(req) as resp:
+    with urlopen(req, timeout=API_TIMEOUT) as resp:
         for line in resp.read().decode().splitlines():
             if not line.strip():
                 continue
