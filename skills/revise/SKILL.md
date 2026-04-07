@@ -39,6 +39,16 @@ Based on the author's request and project state:
 ### "Fix AI patterns" / "Naturalness" / "Remove AI artifacts" / "Sounds like a machine"
 → Targeted 3-pass revision for specific AI prose patterns: metaphor restatement, interpretive tagging, ending template. Equivalent to `./storyforge revise --naturalness`. Use when scoring shows low `prose_naturalness` but high structural/fidelity scores — the sign that the brief is solid but the prose has AI artifacts.
 
+### Upstream Fix Routing (automatic in --polish --loop)
+
+When `--polish --loop` detects that a scene's naturalness is stalled because of a conflict-free or abstract brief, it automatically:
+
+1. **Rewrites the brief** — conflict, goal, crisis, and decision fields get genuine dramatic opposition
+2. **Re-drafts the scene** — fresh draft using the new brief
+3. **Then polishes** — normal craft polish on the re-drafted scene
+
+The `--naturalness` mode also checks for upstream causes before running its 3-pass craft plan.
+
 ### "How did the revision go?" / "Review results"
 → Assessment mode: read the most recent revision results, compare before/after, identify remaining issues, recommend next steps.
 

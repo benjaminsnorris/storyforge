@@ -82,6 +82,12 @@ Before writing new code, check if a shared function already exists.
 - `update_field(file, id, field, value, key_column)` — update one cell
 - `append_row(file, row)` — append a row
 
+**history.py:**
+- `append_cycle(scores_dir, cycle, project_dir)` — append scene scores to history
+- `get_scene_history(project_dir, scene_id, principle)` — returns [(cycle, score)]
+- `detect_stalls(project_dir, principle, min_cycles, max_score)` — scenes stuck on a principle
+- `detect_regressions(project_dir, principle, threshold)` — scenes where score dropped
+
 ### Command Module Pattern
 ```python
 def parse_args(argv):
@@ -179,6 +185,7 @@ All structured data uses pipe-delimited CSV:
 - `working/craft-weights.csv` — craft principle weights (keyed by `principle` column, not `id`)
 - `working/costs/ledger.csv` — per-invocation cost tracking
 - `reference/chapter-map.csv` — chapter-to-scene mapping
+- `working/scores/score-history.csv` — per-scene, per-principle scores across cycles (cycle, scene_id, principle, score)
 
 ### Scene Files
 - Pure prose markdown. **No YAML frontmatter.**

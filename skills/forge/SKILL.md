@@ -82,6 +82,8 @@ Check that scene files exist in `scenes/`. If ready, provide the command:
 Invoke the `revise` skill. This handles the full cycle: analyze findings, plan upstream + craft passes, execute, review results.
 For polish-only: `./storyforge revise --polish`
 
+**When naturalness is stalled:** If score history shows naturalness stuck for 2+ cycles, do NOT recommend another `--polish` or `--naturalness` pass. Instead explain: "These scenes have been polished multiple times without improvement. The problem is upstream — the briefs lack real dramatic conflict. Running `--polish --loop` will now detect this automatically and fix the briefs before polishing."
+
 **"Score" / "Score my scenes":**
 Invoke the `score` skill.
 

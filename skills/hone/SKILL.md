@@ -115,7 +115,19 @@ flagged = detect_abstract_fields(briefs_map)
 
 **Emotional arc granularity** — 4+ beat emotional arcs (e.g., "competence;unease;self-doubt;resolve") force artificial escalation-and-recovery. 2-beat arcs (start state → end state) let the drafter find the middle ground organically. Flag scenes where `len(emotions.split(';')) > 3`.
 
+**Conflict-free scenes** — the conflict field describes observation or contemplation rather than genuine opposition:
+- "observes how the landscape has shifted" instead of "the locked door blocks the only exit"
+- Detected by keyword analysis (observation vs. opposition words) and structural cross-reference (outcome=yes with flat value_shift)
+
 Present all findings together — abstract detection is one signal among several.
+
+### Score Trends
+
+**Score trends (when history data exists):**
+
+9. **Naturalness stalls detected** → Scenes stuck at low naturalness for 2+ cycles need upstream fixes (brief rewrite), not more prose revision. The `--polish --loop` command now auto-detects this and fixes briefs first.
+
+10. **Regressions detected** → A scene's naturalness score dropped after revision. The brief needs to change so re-draft produces fundamentally different prose.
 
 ### Gaps Domain
 
