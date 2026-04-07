@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+import threading
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
@@ -16,6 +17,34 @@ from storyforge.costs import PRICING, calculate_cost, log_operation
 
 API_BASE = 'https://api.anthropic.com/v1'
 API_VERSION = '2023-06-01'
+HEARTBEAT_INTERVAL = 120  # seconds between status messages during API calls
+
+
+class _Heartbeat:
+    """Background thread that prints elapsed time during long API calls."""
+
+    def __init__(self, label: str = 'API call'):
+        self._label = label
+        self._stop = threading.Event()
+        self._thread = None
+        self._start = 0.0
+
+    def start(self):
+        self._start = time.time()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1)
+
+    def _run(self):
+        from storyforge.common import log
+        while not self._stop.wait(HEARTBEAT_INTERVAL):
+            elapsed = int(time.time() - self._start)
+            mins, secs = divmod(elapsed, 60)
+            log(f'  Still waiting on {self._label}... ({mins}m{secs}s elapsed)')
 
 
 def get_api_key() -> str:
@@ -45,13 +74,14 @@ def _api_request(path: str, body: dict | None = None, method: str = 'GET') -> di
         raise RuntimeError(f'API returned HTTP {e.code}: {error_body[:500]}') from e
 
 
-def invoke(prompt: str, model: str, max_tokens: int = 4096) -> dict:
+def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '') -> dict:
     """Call the Anthropic Messages API.
 
     Args:
         prompt: The user message text.
         model: Model ID (e.g., 'claude-opus-4-6').
         max_tokens: Maximum output tokens.
+        label: Optional label for heartbeat messages (e.g., 'revision pass 3').
 
     Returns:
         Full API response dict.
@@ -61,10 +91,15 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096) -> dict:
         'max_tokens': max_tokens,
         'messages': [{'role': 'user', 'content': prompt}],
     }
-    return _api_request('messages', body, method='POST')
+    heartbeat = _Heartbeat(label or model)
+    heartbeat.start()
+    try:
+        return _api_request('messages', body, method='POST')
+    finally:
+        heartbeat.stop()
 
 
-def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096) -> dict:
+def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096, label: str = '') -> dict:
     """Call the API and write the response to a JSON file.
 
     Args:
@@ -72,25 +107,26 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
         model: Model ID.
         log_file: Path to write the JSON response.
         max_tokens: Maximum output tokens.
+        label: Optional label for heartbeat messages.
 
     Returns:
         Full API response dict.
     """
-    response = invoke(prompt, model, max_tokens)
+    response = invoke(prompt, model, max_tokens, label=label)
     os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
     with open(log_file, 'w') as f:
         json.dump(response, f)
     return response
 
 
-def invoke_api(prompt: str, model: str, max_tokens: int = 4096) -> str:
+def invoke_api(prompt: str, model: str, max_tokens: int = 4096, label: str = '') -> str:
     """High-level convenience: invoke API and return text response.
 
     Returns empty string on failure (logs warning but doesn't raise).
     Used by git.py review phase, runner.py healing zones, and command modules.
     """
     try:
-        response = invoke(prompt, model, max_tokens)
+        response = invoke(prompt, model, max_tokens, label=label)
         return extract_text(response)
     except Exception as e:
         from storyforge.common import log

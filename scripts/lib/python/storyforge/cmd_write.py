@@ -558,7 +558,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             # Direct API mode
             try:
                 max_tokens = 16384 if write_mode != 'direct' else 8192
-                invoke_to_file(prompt, model, scene_log, max_tokens)
+                invoke_to_file(prompt, model, scene_log, max_tokens,
+                               label=f'drafting {scene_id}')
                 _extract_scene_from_response(scene_log, scene_file)
                 _log_api_usage(scene_log, 'draft', scene_id, model, project_dir)
                 exit_code = 0

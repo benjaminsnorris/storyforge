@@ -1,12 +1,10 @@
 """Parallel execution and batch orchestration — replaces bash background job patterns.
 
-Provides ProcessPoolExecutor-based parallel execution, progress monitoring,
-and healing zone (retry with diagnosis) support.
+Provides ProcessPoolExecutor-based parallel execution and
+healing zone (retry with diagnosis) support.
 """
 
 import os
-import time
-import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Callable, Any
 
@@ -86,51 +84,6 @@ def run_batched(
                     merge_fn(item, batch_results[item])
 
     return results
-
-
-# ============================================================================
-# Progress monitoring
-# ============================================================================
-
-def monitor_progress(
-    scene_id: str,
-    project_dir: str,
-    scene_file: str | None = None,
-    interval: int = 30,
-) -> None:
-    """Poll filesystem during a Claude invocation and log milestones.
-
-    Designed to run in a background thread. Returns when the scene file
-    stabilizes or after a reasonable timeout.
-    """
-    if scene_file is None:
-        scene_file = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
-
-    start_time = time.time()
-    draft_detected = False
-    last_word_count = 0
-    ticks = 0
-
-    while not is_shutting_down():
-        time.sleep(interval)
-        ticks += 1
-        elapsed = int(time.time() - start_time)
-        mins = elapsed // 60
-
-        if os.path.isfile(scene_file):
-            with open(scene_file) as f:
-                wc = len(f.read().split())
-
-            if not draft_detected:
-                draft_detected = True
-                log(f'  [{scene_id}] Scene file created (~{wc} words) [{mins}m]')
-            elif wc > last_word_count + 300:
-                log(f'  [{scene_id}] Draft growing: ~{wc} words [{mins}m]')
-            last_word_count = wc
-
-        # Heartbeat every 2 minutes
-        if ticks % 4 == 0:
-            log(f'  [{scene_id}] {mins}m elapsed...')
 
 
 # ============================================================================

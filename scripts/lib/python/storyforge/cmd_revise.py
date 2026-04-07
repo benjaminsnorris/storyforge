@@ -697,7 +697,8 @@ Rules:
             # Direct API mode
             log(f'  Invoking API for revision (model: {pass_model})...')
             try:
-                response = invoke_to_file(prompt, pass_model, step_log, max_tokens=32768)
+                response = invoke_to_file(prompt, pass_model, step_log, max_tokens=32768,
+                                         label=f'pass {pass_num}/{total_passes} ({pass_name})')
                 exit_code = 0
             except Exception as e:
                 log(f'  API call failed: {e}')
