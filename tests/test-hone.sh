@@ -828,3 +828,111 @@ assert_contains "$RESULT" "per_pov=loaded" "exemplars: per-POV file loaded"
 assert_contains "$RESULT" "fallback=loaded" "exemplars: falls back to flat file"
 assert_contains "$RESULT" "no_pov=loaded" "exemplars: loads flat when no POV"
 assert_contains "$RESULT" "ok" "exemplars: per-POV loading works"
+
+# ============================================================================
+# MICE dormancy detection
+# ============================================================================
+
+echo "--- mice dormancy: detects gaps > 8 scenes ---"
+
+RESULT=$(python3 -c "
+${PY}
+import tempfile, os, shutil
+from storyforge.elaborate import _read_csv_as_map, _read_csv, _write_csv, _FILE_MAP
+
+# Create a minimal project with a dormant thread
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+os.makedirs(ref)
+
+# 20 scenes
+with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+    f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+    for i in range(1, 21):
+        f.write(f's{i:02d}|{i}|Scene {i}|1|zara|loc|1|morning|1hr|action|drafted|1000|1500\n')
+
+# Thread opens at s01, closes at s20, mentioned only at s01 and s20
+with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+    f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+    for i in range(1, 21):
+        mice = ''
+        if i == 1: mice = '+test-thread'
+        elif i == 20: mice = '-test-thread'
+        f.write(f's{i:02d}|func|action|flat|truth|+/-|revelation|zara|zara|{mice}\n')
+
+with open(os.path.join(ref, 'mice-threads.csv'), 'w') as f:
+    f.write('id|name|type|aliases\n')
+    f.write('test-thread|Test Thread|inquiry|\n')
+
+from storyforge.hone import detect_mice_dormancy
+gaps = detect_mice_dormancy(ref)
+print(f'threads={len(gaps)}')
+if gaps:
+    g = gaps[0]
+    print(f'thread={g[\"thread_id\"]}')
+    print(f'gap_size={g[\"gap_size\"]}')
+    print(f'gap_scenes={len(g[\"gap_scenes\"])}')
+print('ok')
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "threads=1" "mice dormancy: finds 1 dormant thread"
+assert_contains "$RESULT" "thread=test-thread" "mice dormancy: correct thread id"
+assert_contains "$RESULT" "gap_size=19" "mice dormancy: correct gap size"
+assert_contains "$RESULT" "gap_scenes=18" "mice dormancy: correct gap scene count"
+assert_contains "$RESULT" "ok" "mice dormancy: detection runs"
+
+echo "--- mice fill: prompt includes thread and scene data ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import build_mice_fill_prompt
+
+prompt = build_mice_fill_prompt(
+    thread_id='family-secret',
+    thread_name='The Family Secret',
+    thread_type='inquiry',
+    gap_scenes=[
+        {'id': 's05', 'title': 'The Mirror', 'goal': 'Recognize parallels', 'function': 'Self-reflection'},
+        {'id': 's06', 'title': 'Alone', 'goal': 'Find clarity', 'function': 'Processing grief'},
+    ],
+    before_scene='s04',
+    after_scene='s07',
+)
+has_thread = 'family-secret' in prompt
+has_scene = 'The Mirror' in prompt
+has_instruction = 'mention' in prompt.lower() or 'reference' in prompt.lower()
+print(f'has_thread={has_thread}')
+print(f'has_scene={has_scene}')
+print(f'has_instruction={has_instruction}')
+print(f'length={len(prompt)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "has_thread=True" "mice fill: prompt includes thread name"
+assert_contains "$RESULT" "has_scene=True" "mice fill: prompt includes scene data"
+assert_contains "$RESULT" "has_instruction=True" "mice fill: prompt includes instructions"
+assert_contains "$RESULT" "ok" "mice fill: prompt builds"
+
+echo "--- mice fill: parse response extracts scene IDs ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import parse_mice_fill_response
+
+# Normal response
+result = parse_mice_fill_response('MENTION: s05\nMENTION: s08\n')
+print(f'count={len(result)}')
+print(f'ids={sorted(result)}')
+
+# NONE response
+result2 = parse_mice_fill_response('NONE\n')
+print(f'none={len(result2)}')
+
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "count=2" "mice fill: parses 2 mentions"
+assert_contains "$RESULT" "ids=" "mice fill: returns scene IDs"
+assert_contains "$RESULT" "none=0" "mice fill: NONE returns empty"
+assert_contains "$RESULT" "ok" "mice fill: parse runs"
