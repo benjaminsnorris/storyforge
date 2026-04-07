@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the loop between scoring and revision so naturalness problems route to brief rewrites when the root cause is upstream, not to endless prose polish.
+**Goal:** Fix the naturalness revision pipeline end-to-end: repair the broken prompt pipeline, target the right prose patterns, feed rationale data to revision, and route upstream causes to brief rewrites instead of endless polish.
 
-**Architecture:** New `history.py` module tracks scores across cycles. Extended `detect_brief_issues()` catches conflict-free scenes. `generate_diagnosis()` adds `root_cause` attribution. `--polish --loop` reads root causes and inserts upstream fix passes before craft polish.
+**Architecture:** Fix argument passing so guidance reaches revision prompts. Rewrite naturalness targets to match what the scorer actually penalizes. New `history.py` module tracks scores across cycles. Extended `detect_brief_issues()` catches conflict-free scenes. `generate_diagnosis()` adds `root_cause` attribution. `--polish --loop` reads root causes, rationale data, and inserts upstream fix passes before craft polish.
 
 **Tech Stack:** Python, pipe-delimited CSV, pytest, existing Storyforge modules.
 
@@ -26,7 +26,8 @@
 | `tests/test_scoring_rootcause.py` | Create | Tests for root cause attribution |
 | `scripts/lib/python/storyforge/cmd_score.py` | Modify | Call `append_cycle()` after scoring |
 | `scripts/lib/python/storyforge/cmd_hone.py` | Modify | Add score trends section to `_run_diagnose()` |
-| `scripts/lib/python/storyforge/cmd_revise.py` | Modify | Upstream pass in `_run_polish_loop()` and naturalness |
+| `scripts/lib/python/storyforge/cmd_revise.py` | Modify | Fix argument passing, rewrite naturalness targets, rationale flow, upstream pass |
+| `tests/test_revise_args.py` | Create | Tests for argument passing fix |
 | `CLAUDE.md` | Modify | Document new module, file, issue type |
 | `skills/hone/SKILL.md` | Modify | Update diagnose flow |
 | `skills/revise/SKILL.md` | Modify | Document upstream routing |
@@ -1104,7 +1105,379 @@ git push
 
 ---
 
-### Task 7: Upstream Pass in Polish Loop
+### Task 7: Fix Revision Prompt Argument Passing (Critical Bug)
+
+**Files:**
+- Modify: `scripts/lib/python/storyforge/cmd_revise.py:560-586` (_execute_single_pass)
+- Create: `tests/test_revise_args.py`
+- Reference: `scripts/lib/python/storyforge/revision.py:810-850` (CLI parser)
+
+**Bug:** `_execute_single_pass` passes `--guidance`, `--protection`, `--findings`, `--targets` as named flags, but `revision.py` expects positional args (`build-prompt <pass_name> <purpose> <scope> <project_dir>`) and only accepts `--config`, `--coaching`, `--api-mode`. All guidance data is silently dropped.
+
+- [ ] **Step 1: Write test verifying the argument format**
+
+Create `tests/test_revise_args.py`:
+
+```python
+"""Tests for revision prompt argument passing."""
+
+import yaml
+
+from storyforge.cmd_revise import _build_revision_config
+
+
+def test_build_config_yaml():
+    """Config YAML includes guidance, protection, findings, and targets."""
+    plan_row = {
+        'name': 'tricolon-parallelism',
+        'purpose': 'Break three-item lists and triple-sensation chains',
+        'guidance': 'Find every three-item list and vary the count',
+        'protection': 'Do not change dialogue',
+        'findings': 'naturalness',
+        'targets': 'scene-a;scene-b',
+    }
+    config = _build_revision_config(plan_row)
+    parsed = yaml.safe_load(config)
+    assert parsed['guidance'] == plan_row['guidance']
+    assert parsed['protection'] == plan_row['protection']
+    assert parsed['findings'] == plan_row['findings']
+    assert parsed['targets'] == plan_row['targets']
+
+
+def test_build_config_empty_fields():
+    """Empty fields should be omitted from config."""
+    plan_row = {
+        'name': 'polish',
+        'purpose': 'General polish',
+        'guidance': 'Tighten prose',
+        'protection': '',
+        'findings': '',
+        'targets': '',
+    }
+    config = _build_revision_config(plan_row)
+    parsed = yaml.safe_load(config)
+    assert 'protection' not in parsed or parsed['protection'] == ''
+    assert 'guidance' in parsed
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `python3 -m pytest tests/test_revise_args.py -v`
+Expected: FAIL with `ImportError: cannot import name '_build_revision_config'`
+
+- [ ] **Step 3: Implement `_build_revision_config` and fix `_execute_single_pass`**
+
+Add to `cmd_revise.py`:
+
+```python
+def _build_revision_config(plan_row: dict) -> str:
+    """Build a YAML config block from a plan row for revision.py --config.
+
+    The revision.py CLI accepts --config with a YAML block that becomes
+    the 'Pass Configuration' section in the prompt. This function converts
+    the plan CSV row's guidance, protection, findings, and targets fields
+    into that YAML format.
+    """
+    config = {}
+    for key in ('guidance', 'protection', 'findings', 'targets'):
+        val = plan_row.get(key, '').strip()
+        if val:
+            config[key] = val
+    if not config:
+        return ''
+    import yaml
+    return yaml.dump(config, default_flow_style=False, allow_unicode=True)
+```
+
+Then modify `_execute_single_pass` (line 564-581). Replace the subprocess command construction:
+
+```python
+    # Build config YAML from plan row fields
+    config_yaml = _build_revision_config(plan_rows[0])
+
+    cmd = [
+        sys.executable, revision_module, 'build-prompt',
+        pass_name, pass_purpose, pass_scope, project_dir,
+        '--api-mode',
+    ]
+    if config_yaml:
+        cmd.extend(['--config', config_yaml])
+```
+
+This changes from named flags to positional args matching `revision.py`'s actual CLI.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `python3 -m pytest tests/test_revise_args.py -v`
+Expected: 2 passed
+
+- [ ] **Step 5: Run full test suite**
+
+Run: `python3 -m pytest tests/ -x -q`
+Expected: All pass
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/lib/python/storyforge/cmd_revise.py tests/test_revise_args.py
+git commit -m "Fix revision prompt argument passing — guidance was silently dropped"
+git push
+```
+
+---
+
+### Task 8: Rewrite Naturalness Pass Targets
+
+**Files:**
+- Modify: `scripts/lib/python/storyforge/cmd_revise.py:146-191` (_generate_naturalness_plan)
+
+**Problem:** The 3 passes target metaphor-restatement, interpretive-tagging, and ending-template. Scoring rationales consistently penalize tricolon/parallelism, em-dash overuse, and antithesis framing — none of which are targeted.
+
+- [ ] **Step 1: Rewrite `_generate_naturalness_plan`**
+
+Replace the function body (lines 148-188) with passes targeting the actual top-penalized patterns:
+
+```python
+def _generate_naturalness_plan(plan_file):
+    """Generate 3-pass plan for AI prose pattern removal.
+
+    Targets the patterns most frequently penalized in scoring rationales:
+    tricolon/parallelism, em-dash/antithesis, and AI vocabulary/hedging.
+    """
+    rows = [
+        {
+            'pass': '1',
+            'name': 'tricolon-parallelism',
+            'purpose': 'Break compulsive three-item structures — triple-sensation chains, three-beat lists, three-clause parallel constructions',
+            'scope': 'full',
+            'targets': '',
+            'guidance': (
+                'Find every instance of three-item parallelism and vary the count or structure. '
+                'PATTERNS TO FIX: '
+                '(a) Three-adjective chains: "gold deepening to persimmon deepening to red" → vary to 2 or 4, or restructure. '
+                '(b) Three-clause parallelism: "too short for the counter, too narrow for the bowls, too wide for the space" → collapse to 1-2 clauses or vary rhythm. '
+                '(c) Triple-sensation stacking: "Color. Taste. Sight interpretation." repeated as a template → break the template, vary which senses appear and in what order. '
+                '(d) Three-item lists in narration: "the noodle shop level, the market corridor, the junction" → sometimes 2 is enough. '
+                'NOT EVERY THREE-ITEM LIST IS WRONG. Only fix the ones that feel mechanical or templated. '
+                'Organic tricolon in dialogue or emphatic prose is fine. The test: could a reader predict the third item? If yes, fix it.'
+            ),
+            'protection': 'Do not change dialogue content, plot events, or character actions. Only modify prose rhythm and structure.',
+            'findings': 'naturalness',
+            'status': 'pending',
+            'model_tier': 'opus',
+            'fix_location': 'craft',
+        },
+        {
+            'pass': '2',
+            'name': 'em-dash-antithesis',
+            'purpose': 'Reduce em-dash frequency and eliminate "Not X but Y" antithesis framing',
+            'scope': 'full',
+            'targets': '',
+            'guidance': (
+                'Two patterns to fix: '
+                '(a) EM-DASH OVERUSE: Count em dashes in each scene. Target: max 3-4 per 1000 words. '
+                'Replace with: periods (for parenthetical asides), commas (for appositives), '
+                'colons (for elaboration), or restructure the sentence. Keep em dashes only for genuine interruptions or abrupt shifts. '
+                '(b) ANTITHESIS FRAMING: Find "Not X. Y." / "Not X but Y" / "Not X — Y" constructions. '
+                'BEFORE: "Not reflecting-the-sky black, just black." '
+                'AFTER: Describe what it IS without first saying what it ISN\'T. Negation-then-correction is a Claude tic. '
+                'Also fix: "Not literally X but..." and "Less X than Y" when used as the primary description.'
+            ),
+            'protection': 'Do not change dialogue, plot, or character actions. Preserve em dashes in dialogue for speech interruptions.',
+            'findings': 'naturalness',
+            'status': 'pending',
+            'model_tier': 'opus',
+            'fix_location': 'craft',
+        },
+        {
+            'pass': '3',
+            'name': 'ai-vocabulary-hedging',
+            'purpose': 'Remove AI-tell vocabulary, hedging stacks, sweeping openers, and summary closers',
+            'scope': 'full',
+            'targets': '',
+            'guidance': (
+                'Four patterns to fix: '
+                '(a) AI-TELL VOCABULARY: Remove or replace these words that signal AI-generated prose: '
+                'nuanced, multifaceted, tapestry, palpable, pivotal, intricate, profound, myriad, '
+                'juxtaposition, dichotomy, paradigm, visceral (when not literal). Replace with concrete, specific words. '
+                '(b) HEDGING STACKS: "something like", "something between", "almost as if", "perhaps", '
+                '"a kind of", "the particular" — remove or commit to the statement. '
+                'BEFORE: "Something that tasted the way silence feels." AFTER: Name the taste. '
+                '(c) SWEEPING OPENERS: Remove scene-opening sentences that set a thematic frame before anything happens. '
+                '"The thing about memory is..." / "There are moments when..." — cut to the first concrete action or image. '
+                '(d) SUMMARY CLOSERS: Remove paragraph-ending sentences that interpret what was just shown. '
+                '"And that was the thing about X." / "It was, she realized, exactly what she needed." — let the scene end on action or image.'
+            ),
+            'protection': 'Do not change dialogue, plot events, or character interiority that reveals new information.',
+            'findings': 'naturalness',
+            'status': 'pending',
+            'model_tier': 'opus',
+            'fix_location': 'craft',
+        },
+    ]
+    _write_csv_plan(plan_file, rows)
+    log(f'Generated 3-pass naturalness plan: {plan_file}')
+    return rows
+```
+
+- [ ] **Step 2: Run full test suite**
+
+Run: `python3 -m pytest tests/ -x -q`
+Expected: All pass
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add scripts/lib/python/storyforge/cmd_revise.py
+git commit -m "Rewrite naturalness passes to target tricolon, em-dash, antithesis, AI vocabulary"
+git push
+```
+
+---
+
+### Task 9: Feed Rationale Data into Revision Prompts
+
+**Files:**
+- Modify: `scripts/lib/python/storyforge/cmd_revise.py` (_execute_single_pass, _generate_targeted_polish_plan)
+
+**Problem:** The scorer writes per-scene `{principle}_rationale` columns with specific findings. No revision pass reads these. Claude revises blind.
+
+- [ ] **Step 1: Add rationale extraction function**
+
+Add to `cmd_revise.py`:
+
+```python
+def _extract_scene_rationales(project_dir: str, scene_ids: list[str],
+                              principles: list[str] | None = None) -> dict[str, dict[str, str]]:
+    """Extract scoring rationales for specific scenes from the latest scoring cycle.
+
+    Args:
+        project_dir: Project root.
+        scene_ids: Scenes to extract rationales for.
+        principles: Principles to include (default: all *_rationale columns).
+
+    Returns:
+        {scene_id: {principle: rationale_text}}
+    """
+    from storyforge.elaborate import _read_csv_as_map
+
+    latest_dir = os.path.join(project_dir, 'working', 'scores', 'latest')
+    scores_file = os.path.join(latest_dir, 'scene-scores.csv')
+    if not os.path.isfile(scores_file):
+        return {}
+
+    scores_map = _read_csv_as_map(scores_file)
+    result = {}
+
+    for sid in scene_ids:
+        row = scores_map.get(sid)
+        if not row:
+            continue
+        rationales = {}
+        for col, val in row.items():
+            if not col.endswith('_rationale') or not val:
+                continue
+            principle = col[:-len('_rationale')]
+            if principles and principle not in principles:
+                continue
+            rationales[principle] = val
+        if rationales:
+            result[sid] = rationales
+
+    return result
+```
+
+- [ ] **Step 2: Integrate rationales into the config YAML**
+
+Modify `_build_revision_config` to accept an optional rationales dict:
+
+```python
+def _build_revision_config(plan_row: dict,
+                           rationales: dict[str, dict[str, str]] | None = None) -> str:
+    """Build a YAML config block from a plan row for revision.py --config.
+
+    Args:
+        plan_row: Row from the revision plan CSV.
+        rationales: Optional {scene_id: {principle: rationale_text}} to include
+                    as per-scene findings in the config.
+    """
+    config = {}
+    for key in ('guidance', 'protection', 'findings', 'targets'):
+        val = plan_row.get(key, '').strip()
+        if val:
+            config[key] = val
+
+    if rationales:
+        scene_findings = []
+        for sid, rats in rationales.items():
+            for principle, text in rats.items():
+                scene_findings.append(f'Scene {sid} ({principle}): {text[:500]}')
+        if scene_findings:
+            config['per_scene_findings'] = '\n'.join(scene_findings)
+
+    if not config:
+        return ''
+    import yaml
+    return yaml.dump(config, default_flow_style=False, allow_unicode=True)
+```
+
+- [ ] **Step 3: Pass rationales in `_execute_single_pass`**
+
+In `_execute_single_pass`, after building the config YAML (from Task 7's fix), add rationale extraction:
+
+```python
+    # Extract per-scene rationales for targeted revision
+    rationales = None
+    targets = plan_rows[0].get('targets', '')
+    if targets:
+        target_ids = [s.strip() for s in targets.split(';') if s.strip()]
+        rationales = _extract_scene_rationales(project_dir, target_ids)
+    elif plan_rows[0].get('findings') == 'naturalness':
+        # For naturalness passes, get rationales for all scenes
+        from storyforge.scene_filter import build_scene_list
+        metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        all_ids = build_scene_list(metadata_csv)
+        rationales = _extract_scene_rationales(project_dir, all_ids,
+                                                principles=['prose_naturalness'])
+
+    config_yaml = _build_revision_config(plan_rows[0], rationales=rationales)
+```
+
+- [ ] **Step 4: Update `_generate_targeted_polish_plan` to include worst scenes as targets**
+
+In `_generate_targeted_polish_plan` (line ~305), when building the plan row, populate the `targets` field with the worst scene IDs from diagnosis:
+
+```python
+    # Collect worst scene IDs across all flagged principles
+    worst_scenes = set()
+    for row in diag_rows:
+        if row.get('priority') in ('high', 'medium') and row.get('scale') == 'scene':
+            worst = row.get('worst_items', '')
+            for sid in worst.split(';'):
+                sid = sid.strip()
+                if sid:
+                    worst_scenes.add(sid)
+
+    # Include in plan row so rationales can be extracted
+    plan_row['targets'] = ';'.join(sorted(worst_scenes))
+```
+
+- [ ] **Step 5: Run full test suite**
+
+Run: `python3 -m pytest tests/ -x -q`
+Expected: All pass
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/lib/python/storyforge/cmd_revise.py
+git commit -m "Feed per-scene scoring rationales into revision prompts"
+git push
+```
+
+---
+
+### Task 10: Upstream Pass in Polish Loop
 
 **Files:**
 - Modify: `scripts/lib/python/storyforge/cmd_revise.py:442-538` (_run_polish_loop)
@@ -1332,7 +1705,7 @@ git push
 
 ---
 
-### Task 8: Documentation Updates
+### Task 11: Documentation Updates
 
 **Files:**
 - Modify: `CLAUDE.md`
@@ -1428,7 +1801,7 @@ git push
 
 ---
 
-### Task 9: Version Bump and Final Verification
+### Task 12: Version Bump and Final Verification
 
 **Files:**
 - Modify: `.claude-plugin/plugin.json`

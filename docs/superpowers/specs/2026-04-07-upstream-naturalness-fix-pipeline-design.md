@@ -205,6 +205,59 @@ This gives the author visibility into why certain scenes aren't improving.
 - Update routing: when naturalness is stalled, explain the upstream fix rather than recommending another polish pass
 - Add to the recommendation engine: check score history before suggesting revision approaches
 
+## 7. Fix Revision Prompt Pipeline (Critical Bug)
+
+### Bug: Argument mismatch between cmd_revise and revision.py
+
+`_execute_single_pass` (cmd_revise.py:565-574) passes flags like `--guidance`, `--protection`, `--findings`, `--targets` to `revision.py`. But `revision.py`'s CLI (line 810-838) expects positional args (`build-prompt <pass_name> <purpose> <scope> <project_dir>`) and only accepts `--config`, `--coaching`, `--api-mode` as optional flags. Unknown flags cause exit code 1 with "Unknown option" error.
+
+The only way to get guidance into the prompt is via `--config` as a YAML block, which becomes the "Pass Configuration" section. The subprocess call never builds this YAML block.
+
+**Result:** All guidance, protection, findings, and target data from the revision plan CSV is silently dropped. Every revision pass runs with generic/empty instructions. This is why naturalness passes don't fix specific patterns — Claude never receives the pattern-specific guidance.
+
+### Fix
+
+Change `_execute_single_pass` to:
+1. Build a YAML config block from the plan row's `guidance`, `protection`, `findings`, and `targets` fields
+2. Pass it via `--config` to `revision.py`
+3. Use positional args for `pass_name`, `purpose`, `scope`, `project_dir`
+
+## 8. Fix Naturalness Pass Targets
+
+### Problem: Wrong patterns targeted
+
+The 3-pass naturalness plan targets metaphor-restatement, interpretive-tagging, and ending-template. But scoring rationales consistently penalize:
+
+1. **Tricolon/parallelism** — flagged in ALL low-scoring scenes, EVERY cycle
+2. **Em-dash overuse** — 15+ per scene in worst cases
+3. **Antithesis framing** ("Not X but Y") — 4/5 scenes, every cycle
+4. **Hedging stacks** ("something like", "something between")
+5. **AI-tell vocabulary** ("nuanced", "tapestry", "palpable")
+
+The plan's passes (metaphor-restatement, interpretive-tagging, ending-template) address patterns that are secondary or not flagged at all in actual rationales.
+
+### Fix
+
+Rewrite `_generate_naturalness_plan` with passes that target the top-penalized patterns:
+1. **tricolon-parallelism** — Break three-item lists, triple-sensation chains, three-beat structures
+2. **em-dash-antithesis** — Reduce em-dash frequency, replace "Not X but Y" constructions
+3. **ai-vocabulary-hedging** — Remove AI-tell words, hedging stacks, sweeping openers
+
+## 9. Feed Rationale Data into Revision Prompts
+
+### Problem: Revision is blind to specific findings
+
+The scorer writes per-scene `{principle}_rationale` columns explaining exactly what's wrong ("paragraph 3 has tricolon, line 47 has antithesis"). No revision pass reads these. Claude revises with generic instructions instead of scene-specific ones.
+
+### Fix
+
+When building revision prompts for targeted polish or naturalness:
+1. Read the latest scene-scores.csv for targeted scenes
+2. Extract `{principle}_rationale` columns for the principles being revised
+3. Include per-scene rationale text in the prompt config so Claude knows exactly what to fix in each specific scene
+
+This means the prompt changes from "remove tricolon patterns" to "in scene X, the scorer found tricolon at 'gold deepening to persimmon deepening to red' and antithesis at 'Not reflecting-the-sky black, just black' — fix these specific instances."
+
 ## File Changes Summary
 
 | File | Change |
@@ -214,7 +267,8 @@ This gives the author visibility into why certain scenes aren't improving.
 | `scripts/lib/python/storyforge/cmd_hone.py` | Add score trends section to `_run_diagnose()` |
 | `scripts/lib/python/storyforge/scoring.py` | Add `root_cause` column to `generate_diagnosis()` |
 | `scripts/lib/python/storyforge/cmd_score.py` | Call `append_cycle()` after scoring |
-| `scripts/lib/python/storyforge/cmd_revise.py` | Upstream pass in `--polish --loop` and `--naturalness` |
+| `scripts/lib/python/storyforge/cmd_revise.py` | Fix argument passing, upstream pass, naturalness targets, rationale flow |
+| `scripts/lib/python/storyforge/revision.py` | No changes needed (CLI is correct, caller was wrong) |
 | `CLAUDE.md` | Document new module, file, issue type, column |
 | `skills/hone/SKILL.md` | Update diagnose flow |
 | `skills/revise/SKILL.md` | Document upstream routing |
