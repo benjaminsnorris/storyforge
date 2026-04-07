@@ -40,7 +40,7 @@ INTENT_FIELDS = frozenset({
 BRIEFS_FIELDS = frozenset({
     'goal', 'conflict', 'outcome', 'crisis', 'decision',
     'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
-    'emotions', 'motifs',
+    'emotions', 'motifs', 'physical_state_in', 'physical_state_out',
 })
 
 #: All enrichable fields
@@ -83,6 +83,8 @@ _LABEL_TO_KEY = {
     'KEY_DIALOGUE': 'key_dialogue',
     'EMOTIONS': 'emotions',
     'MOTIFS': 'motifs',
+    'PHYSICAL_STATE_IN': 'physical_state_in',
+    'PHYSICAL_STATE_OUT': 'physical_state_out',
 }
 
 
@@ -920,6 +922,19 @@ def _field_instruction(field: str) -> str:
         'motifs': (
             'MOTIFS: <semicolon-separated recurring images, symbols, or '
             'sensory details that carry thematic weight>'
+        ),
+        'physical_state_in': (
+            'PHYSICAL_STATE_IN: <semicolon-separated physical conditions '
+            'the POV character carries INTO this scene — injuries, fatigue, '
+            'hunger, gear status, weather exposure. Use concise labels '
+            '(e.g., "bruised ribs; soaked clothing; no sleep 36h"). '
+            'Empty if the character enters in baseline condition.>'
+        ),
+        'physical_state_out': (
+            'PHYSICAL_STATE_OUT: <physical_state_in plus any changes from '
+            'this scene — new injuries, exhaustion, lost/gained equipment. '
+            'Remove conditions that resolved. Use the same concise label '
+            'format.>'
         ),
     }
     return instructions.get(field, '')

@@ -48,7 +48,8 @@ ALL_FIELDS = (
     'action_sequel,emotional_arc,value_at_stake,value_shift,turning_point,'
     'characters,on_stage,mice_threads,'
     'goal,conflict,outcome,crisis,decision,'
-    'knowledge_in,knowledge_out,key_actions,key_dialogue,emotions,motifs'
+    'knowledge_in,knowledge_out,key_actions,key_dialogue,emotions,motifs,'
+    'physical_state_in,physical_state_out'
 )
 
 METADATA_FIELDS = {'pov', 'location', 'time_of_day', 'duration', 'type'}
@@ -59,7 +60,7 @@ INTENT_FIELDS = {
 BRIEFS_FIELDS = {
     'goal', 'conflict', 'outcome', 'crisis', 'decision',
     'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
-    'emotions', 'motifs',
+    'emotions', 'motifs', 'physical_state_in', 'physical_state_out',
 }
 
 MIN_WORDS = 50
