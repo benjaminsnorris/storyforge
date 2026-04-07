@@ -480,6 +480,13 @@ def read_matter_file(project_dir: str, section: str, name: str) -> str:
 # Epub metadata
 # ============================================================================
 
+def _unquote(s: str) -> str:
+    """Strip surrounding quotes from a string."""
+    if s and len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
+        return s[1:-1]
+    return s
+
+
 def generate_epub_metadata(project_dir: str) -> str:
     """Generate pandoc metadata YAML for epub production."""
     title = _yaml_field(project_dir, 'project.title', 'title') or 'Untitled'
@@ -493,30 +500,30 @@ def generate_epub_metadata(project_dir: str) -> str:
 
     lines = [
         '---',
-        f'title: "{title}"',
-        f'author: "{author}"',
+        f"title: '{_unquote(title)}'",
+        f"author: '{_unquote(author)}'",
         f'lang: {language}',
         f'date: {copyright_year}',
     ]
 
     if genre:
-        lines.append(f'subject: "{genre}"')
+        lines.append(f"subject: '{_unquote(genre)}'")
     if isbn:
-        lines.append(f'identifier: "{isbn}"')
+        lines.append(f"identifier: '{_unquote(isbn)}'")
     if cover_image:
         full_path = os.path.join(project_dir, cover_image)
         if os.path.isfile(full_path):
-            lines.append(f'cover-image: "{full_path}"')
+            lines.append(f"cover-image: '{full_path}'")
 
     # Series metadata
     series_name = _yaml_field(project_dir, 'project.series_name')
     series_position = _yaml_field(project_dir, 'project.series_position')
     if series_name:
-        lines.append(f'belongs-to-collection: "{series_name}"')
+        lines.append(f"belongs-to-collection: '{_unquote(series_name)}'")
         if series_position:
-            lines.append(f'group-position: "{series_position}"')
+            lines.append(f"group-position: '{_unquote(series_position)}'")
 
-    lines.append(f'rights: "Copyright \u00a9 {copyright_year} {author}"')
+    lines.append(f"rights: 'Copyright \u00a9 {copyright_year} {_unquote(author)}'")
     lines.append('---')
 
     return '\n'.join(lines)
