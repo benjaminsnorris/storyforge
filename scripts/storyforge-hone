@@ -229,6 +229,44 @@ else:
     for sid, fields in sorted(by_scene.items()):
         print(f'  {sid}: missing {', '.join(fields)}')
 
+# --- Part 4: Exemplar quality ---
+print()
+print('=== Prose Exemplars ===')
+print()
+try:
+    import storyforge.exemplars as _ex_mod
+    ex = _ex_mod.validate_project_exemplars(project_dir)
+    if not ex['has_any']:
+        print('  No exemplars found. Add reference/prose-exemplars.md or reference/exemplars/{pov}.md')
+        print('  Exemplars are the single most effective technique for prose naturalness.')
+    else:
+        for f in ex['files']:
+            pov_label = f['pov']
+            v = f['validation']
+            status = 'PASS' if v['valid'] else 'ISSUES'
+            wc = v['word_count']
+            print(f'  {pov_label}: {wc} words [{status}]')
+            if v['stats']:
+                s = v['stats']
+                b = s['buckets']
+                sm = s['mean_sentence_words']
+                sd = s['stddev_sentence_words']
+                smin = s['min_sentence_words']
+                smax = s['max_sentence_words']
+                print(f'    Rhythm: mean {sm}w, stddev {sd}, range {smin}-{smax}')
+                bshort = b['short']
+                bmed = b['medium']
+                bstd = b['standard']
+                blong = b['long'] + b['very_long']
+                print(f'    Distribution: {bshort}% short, {bmed}% medium, {bstd}% standard, {blong}% long')
+            for issue in v['issues']:
+                print(f'    - {issue}')
+    if ex['missing_povs']:
+        missing = ', '.join(ex['missing_povs'])
+        print(f'  Missing per-POV exemplars: {missing}')
+except Exception as e:
+    print(f'  (exemplar validation unavailable: {e})')
+
 # --- Summary ---
 print()
 print('=== Summary ===')

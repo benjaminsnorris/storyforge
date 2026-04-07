@@ -651,3 +651,180 @@ shutil.rmtree(tmpdir)
 " 2>/dev/null)
 
 assert_contains "$RESULT" "ok" "subtext: CSV round-trip preserves subtext"
+
+# ============================================================================
+# Prose exemplar validation and rhythm signatures
+# ============================================================================
+
+echo "--- exemplars: split_sentences handles prose ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.exemplars import split_sentences
+
+text = 'The car horn hit me in the chest. Violet. Deep, wet violet, the color of a bruise two days old. I blinked and it was gone. The prep station was just a prep station.'
+sents = split_sentences(text)
+assert len(sents) >= 3, f'expected >=3, got {len(sents)}: {sents}'
+print(f'count={len(sents)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "count=" "exemplars: splits sentences"
+assert_contains "$RESULT" "ok" "exemplars: split_sentences runs"
+
+echo "--- exemplars: compute_rhythm_signature returns metrics ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.exemplars import compute_rhythm_signature
+
+text = '''The car horn hit me in the chest before I heard it.
+Violet. Deep, wet violet, the color of a bruise two days old, blooming across the stainless steel counter.
+I blinked and it was gone.
+The prep station was just a prep station again: cutting boards, mise en place, the half-sliced pile of Roma tomatoes.
+Outside, the horn blared again. Lighter this time.
+I went back to the tomatoes. Knife work was good for this. You could not think about colors when you had eight inches of carbon steel moving through flesh at speed.'''
+
+sig = compute_rhythm_signature(text)
+assert sig is not None, 'signature should not be None'
+assert 'mean_sentence_words' in sig, f'missing key: {list(sig.keys())}'
+assert 'buckets' in sig, 'missing buckets'
+assert sig['sentence_count'] >= 5, f'too few sentences: {sig[\"sentence_count\"]}'
+assert sig['stddev_sentence_words'] > 0, 'stddev should be positive'
+print(f'sentences={sig[\"sentence_count\"]}')
+print(f'mean={sig[\"mean_sentence_words\"]}')
+print(f'stddev={sig[\"stddev_sentence_words\"]}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "exemplars: rhythm signature computed"
+assert_contains "$RESULT" "mean=" "exemplars: has mean"
+assert_contains "$RESULT" "stddev=" "exemplars: has stddev"
+
+echo "--- exemplars: format_rhythm_for_prompt produces text ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.exemplars import compute_rhythm_signature, format_rhythm_for_prompt
+
+text = 'Short. This is a medium sentence with some words. This is a much longer sentence that goes on and on and really extends the rhythm significantly beyond what you might expect from normal prose. Done.'
+sig = compute_rhythm_signature(text)
+if sig:
+    block = format_rhythm_for_prompt(sig)
+    assert 'Rhythm Target' in block, f'missing header: {block[:50]}'
+    assert '%' in block, 'missing percentages'
+    print('ok')
+else:
+    print('no_sig')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "exemplars: rhythm prompt formatted"
+
+echo "--- exemplars: validate_exemplars flags short text ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.exemplars import validate_exemplars
+
+result = validate_exemplars('Too short.')
+assert not result['valid'], 'should fail'
+assert any('Too short' in i for i in result['issues']), f'missing length issue: {result[\"issues\"]}'
+print(f'issues={len(result[\"issues\"])}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "exemplars: validates short text"
+
+echo "--- exemplars: validate_exemplars passes good text ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.exemplars import validate_exemplars
+
+# Good exemplar with varied rhythm
+text = '''The car horn hit me in the chest before I heard it.
+
+Violet. Deep, wet violet, the color of a bruise two days old, blooming across the stainless steel counter and dripping down the ticket rail like someone had upended a paint can. I blinked and it was gone. The prep station was just a prep station again: cutting boards, mise en place, the half-sliced pile of Roma tomatoes I had been working through for the past twenty minutes.
+
+Outside, the horn blared again. Lighter this time. Lilac around the edges.
+
+I went back to the tomatoes. Knife work was good for this. You could not think about colors that were not there when you had eight inches of carbon steel moving through flesh at speed.
+
+For twenty minutes we worked in parallel. I got the chicken into its marinade. The lentils went on to simmer. I started the onions for the soup, and the first sizzle of butter and diced yellow onion in the pan released a smell so correct, so exactly what this kitchen was supposed to smell like, that something in my chest unlocked a quarter-turn.
+
+I could do this. I was doing this.
+
+I was on the ground. My knees had hit first, I could feel the ache of impact, and my hands were flat on the tunnel floor, the stone gritty and damp under my palms. Warmth running down my upper lip. I touched my face and my fingers came away red.
+
+My hands were shaking. My whole body was shaking.'''
+
+result = validate_exemplars(text)
+print(f'valid={result[\"valid\"]}')
+print(f'issues={len(result[\"issues\"])}')
+if result['issues']:
+    for i in result['issues']:
+        print(f'  issue: {i}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "exemplars: validation runs on good text"
+
+echo "--- exemplars: validate_project_exemplars finds flat file ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.exemplars import validate_project_exemplars
+
+result = validate_project_exemplars('${FIXTURE_DIR}')
+print(f'has_any={result[\"has_any\"]}')
+print(f'files={len(result[\"files\"])}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "exemplars: project validation runs"
+
+echo "--- exemplars: per-POV loading prefers POV file ---"
+
+RESULT=$(python3 -c "
+${PY}
+import os, tempfile, shutil
+
+# Create temp project with per-POV exemplar
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Create per-POV exemplar directory and file
+exemplars_dir = os.path.join(ref, 'exemplars')
+os.makedirs(exemplars_dir, exist_ok=True)
+with open(os.path.join(exemplars_dir, 'dorren-hayle.md'), 'w') as f:
+    f.write('Per-POV content for Dorren.')
+
+# Also ensure flat file exists
+with open(os.path.join(ref, 'prose-exemplars.md'), 'w') as f:
+    f.write('Flat file content.')
+
+# Test loading with POV
+from storyforge.prompts import _load_prose_exemplars
+result = _load_prose_exemplars(tmpdir, 'Dorren Hayle')
+assert 'Per-POV content' in result, f'should load per-POV: {result[:80]}'
+print('per_pov=loaded')
+
+# Test fallback without matching POV
+result2 = _load_prose_exemplars(tmpdir, 'Unknown Character')
+assert 'Flat file content' in result2, f'should fall back to flat: {result2[:80]}'
+print('fallback=loaded')
+
+# Test no POV at all
+result3 = _load_prose_exemplars(tmpdir)
+assert 'Flat file content' in result3, f'should load flat: {result3[:80]}'
+print('no_pov=loaded')
+
+print('ok')
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "per_pov=loaded" "exemplars: per-POV file loaded"
+assert_contains "$RESULT" "fallback=loaded" "exemplars: falls back to flat file"
+assert_contains "$RESULT" "no_pov=loaded" "exemplars: loads flat when no POV"
+assert_contains "$RESULT" "ok" "exemplars: per-POV loading works"

@@ -1037,20 +1037,45 @@ This POV character's interiority is grounded in the physical world. Reflective p
 This POV character withholds. Their interiority is sparse, physical, professional. Emotions are shown through action and observation, rarely named. Do not editorialize their feelings. Let the reader infer from what the character does and what they notice."""
 
 
-def _load_prose_exemplars(project_dir: str) -> str:
-    """Load prose exemplar text if available.
+def _load_prose_exemplars(project_dir: str, pov: str = '') -> str:
+    """Load prose exemplar text, preferring per-POV files.
 
-    Checks for reference/prose-exemplars.md in the project.
-    This file should contain 2-3 short excerpts of the manuscript's
-    target voice, labeled with what makes them exemplary.
+    Loading order:
+    1. reference/exemplars/{pov-slug}.md (per-POV, if pov is provided)
+    2. reference/prose-exemplars.md (flat file fallback)
+
+    Returns formatted prompt block, or empty string if no exemplars found.
     """
-    path = os.path.join(project_dir, 'reference', 'prose-exemplars.md')
-    if not os.path.isfile(path):
-        return ''
-    with open(path, encoding='utf-8') as f:
-        content = f.read().strip()
+    content = ''
+
+    # Try per-POV file first
+    if pov:
+        pov_slug = pov.lower().replace(' ', '-')
+        pov_path = os.path.join(project_dir, 'reference', 'exemplars', f'{pov_slug}.md')
+        if os.path.isfile(pov_path):
+            with open(pov_path, encoding='utf-8') as f:
+                content = f.read().strip()
+
+    # Fall back to flat file
+    if not content:
+        flat_path = os.path.join(project_dir, 'reference', 'prose-exemplars.md')
+        if os.path.isfile(flat_path):
+            with open(flat_path, encoding='utf-8') as f:
+                content = f.read().strip()
+
     if not content:
         return ''
+
+    # Extract rhythm signature if possible
+    rhythm_block = ''
+    try:
+        from .exemplars import compute_rhythm_signature, format_rhythm_for_prompt
+        sig = compute_rhythm_signature(content)
+        if sig:
+            rhythm_block = '\n\n' + format_rhythm_for_prompt(sig)
+    except (ImportError, Exception):
+        pass
+
     return (
         "## Voice Calibration — Write Like This\n\n"
         "These passages represent the manuscript's target voice. "
@@ -1058,6 +1083,7 @@ def _load_prose_exemplars(project_dir: str) -> str:
         "Notice what they do NOT do: they don't summarize, don't explain emotions, "
         "don't end with philosophical reflections.\n\n"
         + content
+        + rhythm_block
     )
 
 
@@ -1260,8 +1286,8 @@ Do NOT add creative interpretation or suggestions."""
     pov = scene.get('pov', '')
     pov_restraint = _build_pov_restraint_block(pov, ref_dir) if coaching_level == 'full' else ''
 
-    # Prose exemplars (optional, project-specific)
-    exemplar_block = _load_prose_exemplars(project_dir) if coaching_level == 'full' else ''
+    # Prose exemplars (optional, per-POV preferred)
+    exemplar_block = _load_prose_exemplars(project_dir, pov) if coaching_level == 'full' else ''
 
     return f"""You are drafting a scene for "{title}" ({genre}).
 
