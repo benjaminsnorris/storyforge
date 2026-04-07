@@ -144,6 +144,25 @@ class TestOverspecification:
         fields = [r['field'] for r in results]
         assert 'key_actions' in fields
 
+    def test_two_beats_short_scene_not_flagged(self):
+        """Issue #130: 2 beats is the functional minimum — never flag by density."""
+        from storyforge.hone import detect_overspecified
+        briefs = {'s1': {'id': 's1', 'key_actions': 'Enters room; Finds letter',
+                         'emotions': 'tension'}}
+        scenes = {'s1': {'id': 's1', 'target_words': '450'}}
+        results = detect_overspecified(briefs, scenes)
+        ka_results = [r for r in results if r['field'] == 'key_actions']
+        assert len(ka_results) == 0
+
+    def test_three_beats_short_scene_flagged(self):
+        """3 beats in a short scene exceeds density — should still flag."""
+        from storyforge.hone import detect_overspecified
+        briefs = {'s1': {'id': 's1', 'key_actions': 'a; b; c', 'emotions': 'x'}}
+        scenes = {'s1': {'id': 's1', 'target_words': '450'}}
+        results = detect_overspecified(briefs, scenes)
+        ka_results = [r for r in results if r['field'] == 'key_actions']
+        assert len(ka_results) == 1
+
 
 class TestVerboseFields:
     def test_flags_paragraph_decision(self):

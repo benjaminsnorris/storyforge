@@ -872,7 +872,7 @@ def detect_overspecified(
             flagged = False
             if beat_count >= _MAX_BEATS_ABSOLUTE:
                 flagged = True
-            elif target_words and beats_per_1k > _BEATS_PER_1K_THRESHOLD:
+            elif target_words and beat_count > 2 and beats_per_1k > _BEATS_PER_1K_THRESHOLD:
                 flagged = True
 
             if flagged:
