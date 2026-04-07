@@ -538,6 +538,42 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     commit_and_push(project_dir, 'Polish: loop complete', ['working/'])
 
 
+def _build_revision_config(plan_row: dict, extra: dict | None = None) -> str:
+    """Build a YAML config string from plan row fields for passing to revision.py.
+
+    Only includes non-empty values for the known config fields: guidance,
+    protection, findings, targets.  Additional optional data (e.g. rationale
+    from Task 9) can be supplied via *extra*.
+
+    Args:
+        plan_row: A single plan CSV row dict.
+        extra: Optional dict of additional key→value pairs to append.
+
+    Returns:
+        A YAML string, or empty string if no config fields are present.
+    """
+    config_fields = ['guidance', 'protection', 'findings', 'targets']
+    lines = []
+    for field in config_fields:
+        value = plan_row.get(field, '')
+        if value:
+            # Indent multi-line values as a YAML block scalar
+            if '\n' in value:
+                indented = value.replace('\n', '\n  ')
+                lines.append(f'{field}: |-\n  {indented}')
+            else:
+                lines.append(f'{field}: {value}')
+    if extra:
+        for key, value in extra.items():
+            if value:
+                if '\n' in str(value):
+                    indented = str(value).replace('\n', '\n  ')
+                    lines.append(f'{key}: |-\n  {indented}')
+                else:
+                    lines.append(f'{key}: {value}')
+    return '\n'.join(lines)
+
+
 def _execute_single_pass(project_dir: str, csv_plan_file: str,
                          plan_rows: list[dict], iteration: int) -> None:
     """Execute a single revision pass from a plan. Subset of main pass loop."""
@@ -562,20 +598,14 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     revision_module = os.path.join(plugin_dir, 'scripts', 'lib', 'python', 'storyforge', 'revision.py')
 
     import subprocess
+    config_yaml = _build_revision_config(plan_rows[0])
     cmd = [
         sys.executable, revision_module, 'build-prompt',
-        '--project-dir', project_dir,
-        '--pass-name', pass_name,
-        '--pass-purpose', pass_purpose,
-        '--scope', pass_scope,
-        '--guidance', guidance,
-        '--protection', plan_rows[0].get('protection', ''),
-        '--findings', plan_rows[0].get('findings', ''),
+        pass_name, pass_purpose, pass_scope, project_dir,
+        '--api-mode',
     ]
-
-    targets = plan_rows[0].get('targets', '')
-    if targets:
-        cmd.extend(['--targets', targets])
+    if config_yaml:
+        cmd.extend(['--config', config_yaml])
 
     log(f'  Building revision prompt...')
     result = subprocess.run(cmd, capture_output=True, text=True)
