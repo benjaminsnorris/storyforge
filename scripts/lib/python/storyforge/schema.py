@@ -214,6 +214,10 @@ COLUMN_SCHEMA = {
         'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'Recurring images/symbols deployed. Normalized against reference/motif-taxonomy.csv.',
     },
+    'subtext': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'brief',
+        'description': 'What is happening beneath the surface — phrased as a drafting instruction. "Character says X but means Y; do not state Y directly."',
+    },
     'continuity_deps': {
         'type': 'scene_ids', 'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'Scene IDs this scene depends on (for parallel drafting). Each entry must exist in scenes.csv.',

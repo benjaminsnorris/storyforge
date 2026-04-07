@@ -1098,9 +1098,19 @@ def build_scene_prompt_from_briefs(
     if not scene:
         return f"ERROR: Scene {scene_id} not found in scenes.csv"
 
-    # Build scene data block
+    # Build scene data block (exclude subtext — it gets special framing below)
     scene_block = '\n'.join(f"**{k}:** {v}" for k, v in scene.items()
-                            if v and k != 'id')
+                            if v and k not in ('id', 'subtext'))
+
+    # Subtext gets its own section so the drafter treats it as a constraint
+    subtext_value = scene.get('subtext', '').strip()
+    if subtext_value:
+        scene_block += (
+            f'\n\n**SUBTEXT (show, never tell):** {subtext_value}\n'
+            'This is what is happening beneath the surface. The reader should '
+            'feel it through action, dialogue, and detail — never through '
+            'narrator explanation.'
+        )
 
     # Build dependency context
     dep_block = ''

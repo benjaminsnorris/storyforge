@@ -503,3 +503,151 @@ print('ok')
 " 2>/dev/null)
 
 assert_contains "$RESULT" "ok" "combined: _CONCRETIZABLE_FIELDS includes goal, conflict, emotions"
+
+# ============================================================================
+# Subtext field support
+# ============================================================================
+
+echo "--- subtext: included in _BRIEFS_COLS ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import _BRIEFS_COLS
+assert 'subtext' in _BRIEFS_COLS, f'subtext missing: {_BRIEFS_COLS}'
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "subtext: present in _BRIEFS_COLS"
+
+echo "--- subtext: defined in schema ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.schema import COLUMN_SCHEMA
+assert 'subtext' in COLUMN_SCHEMA, f'subtext missing from schema'
+s = COLUMN_SCHEMA['subtext']
+assert s['file'] == 'scene-briefs.csv', f'wrong file: {s[\"file\"]}'
+assert s['type'] == 'free_text', f'wrong type: {s[\"type\"]}'
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "subtext: defined in COLUMN_SCHEMA"
+
+echo "--- subtext: verbose detection flags long subtext ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_verbose_fields
+
+briefs = {
+    's1': {
+        'id': 's1',
+        'subtext': 'Zara says she is fine but her synesthesia is worsening and she knows it and everyone around her knows it too but nobody is willing to say it out loud because they are all afraid of what it means for the community and for her specifically.',
+    },
+}
+results = detect_verbose_fields(briefs)
+fields = [r['field'] for r in results]
+assert 'subtext' in fields, f'subtext not flagged: {fields}'
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=1" "subtext: verbose detection flags long subtext"
+assert_contains "$RESULT" "ok" "subtext: verbose detection runs"
+
+echo "--- subtext: terse subtext not flagged ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.hone import detect_verbose_fields
+
+briefs = {
+    's1': {
+        'id': 's1',
+        'subtext': 'Zara says she is fine but means the opposite; show through her hands shaking',
+    },
+}
+results = detect_verbose_fields(briefs)
+fields = [r['field'] for r in results]
+assert 'subtext' not in fields, f'subtext wrongly flagged: {fields}'
+print(f'issues={len(results)}')
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "issues=0" "subtext: terse subtext passes"
+assert_contains "$RESULT" "ok" "subtext: terse check runs"
+
+echo "--- subtext: extract parser handles SUBTEXT label ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.extract import parse_brief_parallel_response
+
+response = '''GOAL: Find the map
+CONFLICT: Guards block the way
+OUTCOME: yes-but
+CRISIS: Fight or sneak
+DECISION: Sneaks past
+KEY_ACTIONS: Opens door; Grabs map
+KEY_DIALOGUE: Where is it?
+EMOTIONS: tension;relief
+MOTIFS: maps;darkness
+SUBTEXT: She tells the guard she is lost but she knows exactly where she is; show through confident body language that contradicts her words'''
+
+result = parse_brief_parallel_response(response, 'test-scene')
+assert 'subtext' in result, f'subtext missing: {list(result.keys())}'
+assert 'confident body language' in result['subtext'], f'wrong value: {result[\"subtext\"]}'
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "subtext: extract parser handles SUBTEXT label"
+
+echo "--- subtext: extract parser filters NONE ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.extract import parse_brief_parallel_response
+
+response = '''GOAL: Find the map
+SUBTEXT: NONE'''
+
+result = parse_brief_parallel_response(response, 'test-scene')
+assert 'subtext' not in result, f'NONE should be filtered: {list(result.keys())}'
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "subtext: NONE value filtered in extract"
+
+echo "--- subtext: drafting prompt includes subtext framing ---"
+
+RESULT=$(python3 -c "
+${PY}
+import os, tempfile, shutil
+from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+
+# Create temp project with subtext
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Add subtext to act1-sc01
+briefs_path = os.path.join(ref, 'scene-briefs.csv')
+rows = _read_csv(briefs_path)
+for r in rows:
+    if r['id'] == 'act1-sc01':
+        r['subtext'] = 'Dorren files as error but knows she is lying to the institution; show through the private note, not inner monologue'
+_write_csv(briefs_path, rows, _FILE_MAP['scene-briefs.csv'])
+
+# Verify column is written and readable
+rows2 = _read_csv(briefs_path)
+for r in rows2:
+    if r['id'] == 'act1-sc01':
+        assert 'subtext' in r, f'subtext column missing after write: {list(r.keys())}'
+        assert 'lying to the institution' in r['subtext'], f'wrong value: {r[\"subtext\"]}'
+        print('ok')
+        break
+
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "subtext: CSV round-trip preserves subtext"

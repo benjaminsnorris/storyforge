@@ -324,7 +324,8 @@ DECISION: [what the character actively chooses in response to the crisis]
 KEY_ACTIONS: [semicolon-separated concrete things that happen in this scene]
 KEY_DIALOGUE: [semicolon-separated specific lines or exchanges that are essential to the scene — quote directly from the text]
 EMOTIONS: [semicolon-separated emotional beats in sequence as they occur through the scene]
-MOTIFS: [semicolon-separated recurring images, symbols, or sensory details that carry thematic weight]"""
+MOTIFS: [semicolon-separated recurring images, symbols, or sensory details that carry thematic weight]
+SUBTEXT: [what is happening beneath the surface — the gap between what characters say/do and what they mean. Phrase as a drafting instruction: "Character says X but means Y; do not state Y directly." If no meaningful subtext, write NONE]"""
 
 
 def parse_brief_parallel_response(response: str, scene_id: str) -> dict[str, str]:
@@ -340,13 +341,14 @@ def parse_brief_parallel_response(response: str, scene_id: str) -> dict[str, str
         'KEY_DIALOGUE': 'key_dialogue',
         'EMOTIONS': 'emotions',
         'MOTIFS': 'motifs',
+        'SUBTEXT': 'subtext',
     }
     for line in response.split('\n'):
         match = re.match(r'^([A-Z_]+):\s*(.*)', line.strip())
         if match:
             label = match.group(1)
             value = match.group(2).strip()
-            if label in label_map and value and value.upper() != 'UNKNOWN':
+            if label in label_map and value and value.upper() not in ('UNKNOWN', 'NONE'):
                 result[label_map[label]] = value
     return result
 
