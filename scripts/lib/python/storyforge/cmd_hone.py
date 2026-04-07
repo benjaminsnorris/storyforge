@@ -518,7 +518,7 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
                 dormant.append(msg)
     if dormant:
         recs.append(f'MICE dormancy: {len(dormant)} threads need intermediate mentions')
-        recs.append('Run: storyforge elaborate --mice-fill')
+        recs.append('Run: storyforge elaborate --stage mice-fill')
     if recs:
         print('\n  Recommendations:')
         for r in recs:
