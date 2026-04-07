@@ -34,7 +34,7 @@ from storyforge.git import (
     update_pr_task, commit_and_push, _git, has_gh, current_branch,
 )
 from storyforge.api import (
-    invoke_to_file, extract_text, extract_text_from_file,
+    invoke_api, invoke_to_file, extract_text, extract_text_from_file,
     extract_usage, calculate_cost_from_usage, get_api_key,
 )
 from storyforge.cli import apply_coaching_override
@@ -473,6 +473,170 @@ def _run_lightweight_score(project_dir: str, scene_ids: list[str],
     return cycle_dir, diag_rows
 
 
+def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str]:
+    """Identify scenes needing upstream fixes based on diagnosis root_cause.
+
+    Returns sorted list of scene IDs where root_cause is 'brief' and score is low.
+    Scene IDs are drawn from the worst_items field of matching diagnosis rows.
+    """
+    upstream = set()
+    for row in diag_rows:
+        if row.get('root_cause') != 'brief':
+            continue
+        worst = row.get('worst_items', '')
+        if not worst:
+            continue
+        for sid in worst.split(';'):
+            sid = sid.strip()
+            if sid:
+                upstream.add(sid)
+    return sorted(upstream)
+
+
+def _fix_upstream_briefs(project_dir: str, scene_ids: list[str]) -> int:
+    """Rewrite conflict/goal/crisis/decision for scenes with upstream issues.
+
+    Uses API to generate briefs with genuine dramatic opposition.
+    Returns number of fields rewritten.
+    """
+    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, _read_csv
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+
+    briefs_map = _read_csv_as_map(briefs_path)
+    scenes_map = _read_csv_as_map(scenes_path)
+    intent_map = _read_csv_as_map(intent_path)
+
+    total_rewrites = 0
+
+    for scene_id in scene_ids:
+        brief = briefs_map.get(scene_id, {})
+        scene = scenes_map.get(scene_id, {})
+        intent = intent_map.get(scene_id, {})
+
+        title = scene.get('title', scene_id)
+        pov = scene.get('pov', '')
+        outcome = brief.get('outcome', '')
+        value_at_stake = intent.get('value_at_stake', '')
+        emotional_arc = intent.get('emotional_arc', '')
+        current_goal = brief.get('goal', '')
+        current_conflict = brief.get('conflict', '')
+        current_crisis = brief.get('crisis', '')
+        current_decision = brief.get('decision', '')
+
+        prompt = f"""You are a story editor rewriting scene briefs to introduce genuine dramatic opposition.
+
+Scene: {title}
+POV: {pov}
+Outcome: {outcome}
+Value at stake: {value_at_stake}
+Emotional arc: {emotional_arc}
+
+Current brief:
+GOAL: {current_goal}
+CONFLICT: {current_conflict}
+CRISIS: {current_crisis}
+DECISION: {current_decision}
+
+The current brief lacks genuine opposition — the conflict is abstract or the goal/crisis/decision don't create real dramatic tension.
+
+Rewrite all four fields to introduce genuine opposition while:
+- Preserving the existing emotional arc and value at stake
+- Making the conflict a concrete, specific obstacle with a clear opposing force
+- Making the goal something the POV character actively wants and must fight for
+- Making the crisis a specific moment where the worst happens or the hardest choice appears
+- Making the decision a concrete choice with real cost on both sides
+
+Respond ONLY with the four fields in this exact format (no preamble, no explanation):
+GOAL: [rewritten goal]
+CONFLICT: [rewritten conflict]
+CRISIS: [rewritten crisis]
+DECISION: [rewritten decision]"""
+
+        model = select_model('creative')
+        log(f'  Fixing upstream brief: {scene_id}')
+        response = invoke_api(prompt, model, max_tokens=1024)
+
+        if not response:
+            log(f'  WARNING: No response for {scene_id} upstream fix — skipping')
+            continue
+
+        # Parse response lines
+        fields = {}
+        for line in response.splitlines():
+            for key in ('GOAL', 'CONFLICT', 'CRISIS', 'DECISION'):
+                prefix = f'{key}: '
+                if line.startswith(prefix):
+                    fields[key.lower()] = line[len(prefix):].strip()
+
+        if not fields:
+            log(f'  WARNING: Could not parse upstream fix response for {scene_id}')
+            continue
+
+        updated = False
+        for field_name, new_value in fields.items():
+            if new_value:
+                briefs_map.setdefault(scene_id, {'id': scene_id})
+                briefs_map[scene_id][field_name] = new_value
+                total_rewrites += 1
+                updated = True
+
+        if updated:
+            log(f'  Updated {len(fields)} fields for {scene_id}')
+
+    # Write back updated briefs
+    if total_rewrites > 0:
+        all_briefs = list(briefs_map.values())
+        _write_csv(briefs_path, all_briefs, _FILE_MAP['scene-briefs.csv'])
+
+    return total_rewrites
+
+
+def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
+    """Re-draft scenes after brief rewrites using brief-aware drafting.
+
+    Only re-drafts scenes that already have a scene file.
+    Returns number of scenes re-drafted.
+    """
+    from storyforge.prompts import build_scene_prompt
+    from storyforge.common import get_coaching_level
+
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    coaching_level = get_coaching_level(project_dir)
+    model = select_model('creative')
+    count = 0
+
+    for scene_id in scene_ids:
+        scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
+        if not os.path.isfile(scene_file):
+            log(f'  Skipping re-draft of {scene_id} (not yet drafted)')
+            continue
+
+        log(f'  Re-drafting scene: {scene_id}')
+        try:
+            prompt = build_scene_prompt(scene_id, project_dir,
+                                        coaching_level=coaching_level, api_mode=True)
+        except Exception as e:
+            log(f'  WARNING: Could not build prompt for {scene_id}: {e} — skipping')
+            continue
+
+        response = invoke_api(prompt, model, max_tokens=16384)
+        if not response:
+            log(f'  WARNING: No response for {scene_id} re-draft — skipping')
+            continue
+
+        with open(scene_file, 'w', encoding='utf-8') as f:
+            f.write(response)
+
+        count += 1
+        log(f'  Re-drafted {scene_id}')
+
+    return count
+
+
 def _run_polish_loop(project_dir: str, max_loops: int,
                      coaching_override: str | None) -> None:
     """Score → polish → re-score convergence loop."""
@@ -536,6 +700,16 @@ def _run_polish_loop(project_dir: str, max_loops: int,
             break
 
         prev_avg = summary['overall_avg']
+
+        # Check for upstream causes before craft polish
+        upstream_scenes = _detect_upstream_scenes(project_dir, diag_rows)
+        if upstream_scenes:
+            log(f'  Upstream issues in {len(upstream_scenes)} scenes — fixing briefs first')
+            _fix_upstream_briefs(project_dir, upstream_scenes)
+            _redraft_scenes(project_dir, upstream_scenes)
+            commit_and_push(project_dir,
+                            f'Polish: upstream brief fixes for {len(upstream_scenes)} scenes',
+                            ['reference/', 'scenes/', 'working/'])
 
         # Generate targeted plan from diagnosis
         log(f'\n=== Iteration {iteration}/{max_loops}: Polish ===')
@@ -939,6 +1113,18 @@ def main(argv=None):
         plan_rows = _generate_polish_plan(csv_plan_file)
     elif args.naturalness:
         log('Naturalness mode -- generating 3-pass plan for AI pattern removal...')
+        # Check for upstream causes first (load latest diagnosis if available)
+        _naturalness_diag_rows = []
+        _latest_diag = os.path.join(project_dir, 'working', 'scores', 'latest', 'diagnosis.csv')
+        if os.path.isfile(_latest_diag):
+            _naturalness_diag_rows = _read_diagnosis(os.path.dirname(_latest_diag))
+        upstream_scenes = _detect_upstream_scenes(project_dir, _naturalness_diag_rows) if _naturalness_diag_rows else []
+        if upstream_scenes:
+            log(f'Upstream issues in {len(upstream_scenes)} scenes — fixing briefs')
+            _fix_upstream_briefs(project_dir, upstream_scenes)
+            _redraft_scenes(project_dir, upstream_scenes)
+            commit_and_push(project_dir, 'Naturalness: upstream brief fixes',
+                            ['reference/', 'scenes/', 'working/'])
         plan_rows = _generate_naturalness_plan(csv_plan_file)
     elif args.structural:
         plan_rows = _generate_structural_plan(project_dir, csv_plan_file)
