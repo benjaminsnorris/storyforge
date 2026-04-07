@@ -277,6 +277,30 @@ print(f'  Brief issues:        {len(issues)} across {len(set(i[\"scene_id\"] for
 print(f'  Gaps:                {len(gaps)} empty fields across {len(set(g[\"scene_id\"] for g in gaps))} scenes')
 clean = len(set(scenes.keys()) - set(i['scene_id'] for i in issues) - set(g['scene_id'] for g in gaps))
 print(f'  Clean scenes:        {clean} / {len(scenes)}')
+
+# Actionable recommendations
+recs = []
+if issues:
+    recs.append('Run: storyforge hone --domain briefs')
+if gaps:
+    recs.append('Run: storyforge hone --domain gaps')
+
+# Check for MICE dormancy in structural findings
+dormant_threads = []
+for dim in dims:
+    for f in dim.get('findings', []):
+        msg = f.get('message', '') if isinstance(f, dict) else str(f)
+        if 'dormant' in msg.lower():
+            dormant_threads.append(msg)
+if dormant_threads:
+    recs.append(f'MICE dormancy: {len(dormant_threads)} threads need intermediate mentions')
+    recs.append('Run: storyforge elaborate --mice-fill')
+
+if recs:
+    print()
+    print('  Recommendations:')
+    for r in recs:
+        print(f'    -> {r}')
 "
 
     log ""

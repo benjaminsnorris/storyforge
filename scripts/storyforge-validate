@@ -193,6 +193,25 @@ if scores is not None:
         print('  Top findings:')
         for f in scores['top_findings'][:5]:
             print(f'    {f[\"dimension\"]}: {f[\"message\"]}')
+
+    # Actionable recommendations based on dimension findings
+    dormant = []
+    for dim in scores['dimensions']:
+        for f in dim.get('findings', []):
+            msg = f.get('message', '') if isinstance(f, dict) else str(f)
+            if 'dormant' in msg.lower():
+                dormant.append(msg)
+    if dormant:
+        print()
+        print(f'  MICE dormancy: {len(dormant)} threads need intermediate mentions.')
+        print(f'  Run: storyforge elaborate --mice-fill')
+    low_dims = [d for d in scores['dimensions'] if d['score'] < d['target']]
+    brief_dims = [d for d in low_dims if d['name'] not in ('mice_health', 'pacing_shape', 'function_variety')]
+    if brief_dims:
+        names = ', '.join(d['label'] for d in brief_dims)
+        print()
+        print(f'  Below target: {names}')
+        print(f'  Run: storyforge hone --diagnose (for detailed field-level issues)')
 "
 fi
 
