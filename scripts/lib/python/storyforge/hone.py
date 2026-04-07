@@ -1558,6 +1558,13 @@ def detect_mice_dormancy(ref_dir: str) -> list[dict]:
         key=lambda sid: int(scenes_map[sid].get('seq', 0) or 0)
     )
 
+    # Build lookup: bare name -> registry ID (handles type:name registry keys)
+    bare_to_id = {}
+    for rid in registry:
+        bare_to_id[rid] = rid  # exact match
+        if ':' in rid:
+            bare_to_id[rid.split(':', 1)[1]] = rid  # bare name -> full ID
+
     # Build per-thread mention indices
     thread_mentions = {}  # thread_id -> [scene_index]
     for idx, sid in enumerate(ordered_ids):
@@ -1568,12 +1575,14 @@ def detect_mice_dormancy(ref_dir: str) -> list[dict]:
             entry = entry.strip()
             if not entry:
                 continue
-            # Strip +/- prefix and type: prefix to get bare name
+            # Strip +/- prefix
             name = entry.lstrip('+-')
-            if ':' in name:
-                name = name.split(':', 1)[1]
-            if name in registry:
-                thread_mentions.setdefault(name, []).append(idx)
+            # Try exact match first, then bare name (without type: prefix)
+            reg_id = bare_to_id.get(name)
+            if not reg_id and ':' in name:
+                reg_id = bare_to_id.get(name.split(':', 1)[1])
+            if reg_id:
+                thread_mentions.setdefault(reg_id, []).append(idx)
 
     # Find gaps
     results = []
