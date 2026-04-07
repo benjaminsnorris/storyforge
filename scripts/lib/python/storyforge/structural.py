@@ -82,8 +82,8 @@ def score_completeness(scenes_map, intent_map, briefs_map):
     scene_ids = sorted(scenes_map.keys())
 
     for scene_id in scene_ids:
-        intent = intent_map.get(scene_id, {})
-        brief = briefs_map.get(scene_id, {})
+        intent = intent_map.get(scene_id) or {}
+        brief = briefs_map.get(scene_id) or {}
 
         # Check required fields
         missing_required = []
@@ -317,8 +317,8 @@ def score_pacing(scenes_map, intent_map, briefs_map):
     raw_tensions = []
     tensions = []
     for i, sid in enumerate(scene_ids):
-        intent = intent_map.get(sid, {})
-        brief = briefs_map.get(sid, {})
+        intent = intent_map.get(sid) or {}
+        brief = briefs_map.get(sid) or {}
         raw = _scene_tension(intent, brief)
         raw_tensions.append(raw)
         position_boost = (i / max(n - 1, 1)) * 0.05
@@ -534,7 +534,7 @@ def score_arcs(scenes_map, intent_map):
         pov = scene.get('pov', '').strip()
         if not pov:
             continue
-        intent = intent_map.get(sid, {})
+        intent = intent_map.get(sid) or {}
         if pov not in char_scenes:
             char_scenes[pov] = []
         char_scenes[pov].append((sid, scene, intent))
@@ -716,7 +716,7 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
 
     for idx, sid in enumerate(scene_ids):
         scene = scenes_map[sid]
-        intent = intent_map.get(sid, {})
+        intent = intent_map.get(sid) or {}
 
         # POV
         pov = scene.get('pov', '').strip()
@@ -909,7 +909,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
     threads = {}  # thread_name -> {'open': idx|None, 'close': idx|None, 'mentions': [idx], 'type': str}
 
     for idx, sid in enumerate(scene_ids):
-        intent = intent_map.get(sid, {})
+        intent = intent_map.get(sid) or {}
         mice_str = intent.get('mice_threads', '').strip()
         if not mice_str:
             continue
@@ -1057,7 +1057,7 @@ def score_knowledge_chain(scenes_map, briefs_map):
     all_facts = {}  # fact -> list of scene indices
 
     for idx, sid in enumerate(scene_ids):
-        brief = briefs_map.get(sid, {})
+        brief = briefs_map.get(sid) or {}
         kin = brief.get('knowledge_in', '').strip()
         kout = brief.get('knowledge_out', '').strip()
         if kin:
@@ -1103,7 +1103,7 @@ def score_knowledge_chain(scenes_map, briefs_map):
     # --- 3. Backstory check ---
     if scene_ids:
         first_sid = scene_ids[0]
-        first_brief = briefs_map.get(first_sid, {})
+        first_brief = briefs_map.get(first_sid) or {}
         first_kin = first_brief.get('knowledge_in', '').strip()
         if first_kin:
             first_facts = [f.strip() for f in first_kin.split(';') if f.strip()]
@@ -1164,7 +1164,7 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
     first_state_idx = n  # default: no states at all
 
     for idx, sid in enumerate(scene_ids):
-        brief = briefs_map.get(sid, {})
+        brief = briefs_map.get(sid) or {}
         psi = brief.get('physical_state_in', '').strip()
         pso = brief.get('physical_state_out', '').strip()
         if psi:
@@ -1225,14 +1225,14 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
         if idx < first_state_idx:
             continue
         # Get on-stage characters
-        scene = scenes_map.get(sid, {})
+        scene = scenes_map.get(sid) or {}
         pov = scene.get('pov', '').strip().lower()
         # Try to get intent data for on_stage
         intent_map = {}
         intent_path = os.path.join(ref_dir, 'scene-intent.csv') if ref_dir else ''
         if intent_path and os.path.isfile(intent_path):
             intent_map = _read_csv_as_map(intent_path)
-        intent = intent_map.get(sid, {})
+        intent = intent_map.get(sid) or {}
         on_stage_raw = intent.get('on_stage', '') or intent.get('characters', '')
         on_stage = {c.strip().lower() for c in on_stage_raw.split(';') if c.strip()}
         on_stage.add(pov)
@@ -1339,7 +1339,7 @@ def score_function_variety(intent_map, briefs_map):
     # --- 2. Outcome variety (Shannon entropy) ---
     outcome_freq = {}
     for sid in scene_ids:
-        brief = briefs_map.get(sid, {})
+        brief = briefs_map.get(sid) or {}
         outcome = brief.get('outcome', '').strip().lower()
         if outcome:
             outcome_freq[outcome] = outcome_freq.get(outcome, 0) + 1

@@ -1102,7 +1102,7 @@ def _apply_proposals(proposals_file, weights_file, intent_csv, project_dir):
             m = re.search(r'→\s*(\d+)', change)
             if m:
                 update_field(weights_file, principle, 'weight', m.group(1),
-                             key_column='principle')
+                             key_col='principle')
                 applied += 1
                 update_field(proposals_file, pid, 'status', 'applied')
         elif lever in ('scene_intent', 'voice_guide', 'override'):
