@@ -1,0 +1,32 @@
+{
+  "eval_id": 1,
+  "eval_name": "post-extraction-assessment",
+  "configuration": "with_skill",
+  "expectations": [
+    {
+      "text": "Reads or references all three core CSVs (scenes.csv, scene-briefs.csv, scene-intent.csv)",
+      "passed": true,
+      "evidence": "References all three CSVs explicitly — scenes.csv for statuses, scene-briefs.csv for gap analysis, scene-intent.csv for mice_threads gap"
+    },
+    {
+      "text": "Checks or mentions multiple hone domains (at least 2 of: registries, gaps, briefs, structural)",
+      "passed": true,
+      "evidence": "Covers all 4 domains with numbered sections: 1. Gaps, 2. Registries, 3. Structural issues, 4. Brief quality"
+    },
+    {
+      "text": "Identifies new-x1 (or scenes with empty fields) as having data gaps",
+      "passed": true,
+      "evidence": "Identifies new-x1 as 'almost entirely empty' and act2-sc01/act2-sc02 as having no rows at all"
+    },
+    {
+      "text": "Presents findings in a prioritized or structured way",
+      "passed": true,
+      "evidence": "4-item numbered priority list in Recommendation section: gaps → registries → chapter map → scoring"
+    },
+    {
+      "text": "Recommends which domain to tackle first based on the project state",
+      "passed": true,
+      "evidence": "Explicitly recommends 'Fill gaps first' as priority 1, with reasoning about why everything downstream depends on it"
+    }
+  ]
+}

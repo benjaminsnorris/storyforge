@@ -1,0 +1,85 @@
+{
+  "metadata": {
+    "skill_name": "hone",
+    "skill_path": "/Users/cadencedev/Developer/storyforge/skills/hone/SKILL.md",
+    "executor_model": "claude-opus-4-6",
+    "analyzer_model": "claude-opus-4-6",
+    "timestamp": "2026-04-06T22:40:00Z",
+    "evals_run": ["low-scores-briefs", "post-extraction-assessment", "act2-coach-briefs"],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "configuration": "with_skill",
+      "pass_rate": {
+        "mean": 0.80,
+        "stddev": 0.20,
+        "per_eval": {
+          "low-scores-briefs": 1.0,
+          "post-extraction-assessment": 1.0,
+          "act2-coach-briefs": 0.4
+        }
+      },
+      "time_seconds": {
+        "mean": 98.1,
+        "stddev": 19.6,
+        "per_eval": {
+          "low-scores-briefs": 123.4,
+          "post-extraction-assessment": 92.5,
+          "act2-coach-briefs": 78.4
+        }
+      },
+      "tokens": {
+        "mean": 29091,
+        "stddev": 2929,
+        "per_eval": {
+          "low-scores-briefs": 32942,
+          "post-extraction-assessment": 28512,
+          "act2-coach-briefs": 25819
+        }
+      }
+    },
+    {
+      "configuration": "without_skill",
+      "pass_rate": {
+        "mean": 0.47,
+        "stddev": 0.12,
+        "per_eval": {
+          "low-scores-briefs": 0.4,
+          "post-extraction-assessment": 1.0,
+          "act2-coach-briefs": 0.4
+        }
+      },
+      "time_seconds": {
+        "mean": 107.8,
+        "stddev": 13.3,
+        "per_eval": {
+          "low-scores-briefs": 120.6,
+          "post-extraction-assessment": 90.0,
+          "act2-coach-briefs": 112.7
+        }
+      },
+      "tokens": {
+        "mean": 28690,
+        "stddev": 2127,
+        "per_eval": {
+          "low-scores-briefs": 29542,
+          "post-extraction-assessment": 25926,
+          "act2-coach-briefs": 30603
+        }
+      }
+    }
+  ],
+  "run_summary": {
+    "delta": {
+      "pass_rate": "+0.33",
+      "time_seconds": "-9.7",
+      "tokens": "+401"
+    }
+  },
+  "notes": [
+    "Eval 0 (low-scores-briefs): Skill adds structured abstract detection framework and Option A/B delegation. Baseline gave arguably deeper prose-craft advice but missed the skill's domain vocabulary.",
+    "Eval 1 (post-extraction-assessment): Both with and without skill scored 100%. The baseline was equally thorough — this eval is non-discriminating. The skill's main advantage was domain-structured presentation.",
+    "Eval 2 (act2-coach-briefs): Both scored 2/5 — neither mentioned working/hone/ or offered interactive walkthrough. The skill's coach-mode instructions are not being picked up. The --act flag was also missed in favor of --scenes."
+  ]
+}

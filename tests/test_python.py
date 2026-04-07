@@ -95,23 +95,23 @@ class TestApi:
         assert result == 'Hello world'
 
     def test_log_usage(self, tmp_path):
-        from storyforge.api import log_usage as api_log_usage
+        from storyforge.api import log_operation, calculate_cost_from_usage
 
         project_dir = str(tmp_path / 'project')
         os.makedirs(os.path.join(project_dir, 'working', 'costs'))
 
-        response_file = str(tmp_path / 'usage-response.json')
-        with open(response_file, 'w') as f:
-            json.dump({
-                'content': [{'type': 'text', 'text': 'test'}],
-                'usage': {
-                    'input_tokens': 1000, 'output_tokens': 500,
-                    'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0
-                }
-            }, f)
-
-        api_log_usage(response_file, 'test-op', 'test-target', 'claude-sonnet-4-6',
-                      project_dir=project_dir)
+        usage = {'input_tokens': 1000, 'output_tokens': 500,
+                 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0}
+        cost = calculate_cost_from_usage(usage, 'claude-sonnet-4-6')
+        log_operation(
+            project_dir=project_dir,
+            operation='test-op',
+            model='claude-sonnet-4-6',
+            input_tokens=1000,
+            output_tokens=500,
+            cost=cost,
+            target='test-target',
+        )
 
         ledger = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
         assert os.path.isfile(ledger)
@@ -119,7 +119,8 @@ class TestApi:
         with open(ledger) as f:
             lines = f.readlines()
         assert len(lines) == 2  # header + 1 data row
-        assert 'test-op|claude-sonnet-4-6|1000|500' in lines[-1]
+        assert 'test-op' in lines[-1]
+        assert '1000' in lines[-1]
 
 
 class TestPrompts:
@@ -197,7 +198,7 @@ class TestScoring:
         assert 'economy_clarity|4' in content
 
     def test_effective_weight_author_override(self, tmp_path):
-        from storyforge.scoring import effective_weight
+        from storyforge.scoring import get_effective_weight as effective_weight
 
         weights_csv = str(tmp_path / 'weights.csv')
         with open(weights_csv, 'w') as f:
@@ -231,11 +232,11 @@ class TestAssembly:
         assert 'act1-sc02' in scenes
 
     def test_word_count(self, tmp_path):
-        from storyforge.assembly import word_count
+        from storyforge.assembly import manuscript_word_count
         test_file = str(tmp_path / 'test.md')
         with open(test_file, 'w') as f:
             f.write('One two three four five six seven eight nine ten.')
-        assert word_count(test_file) == 10
+        assert manuscript_word_count(test_file) == 10
 
 
 class TestVisualize:

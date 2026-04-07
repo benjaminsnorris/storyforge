@@ -1,0 +1,32 @@
+{
+  "eval_id": 0,
+  "eval_name": "low-scores-briefs",
+  "configuration": "with_skill",
+  "expectations": [
+    {
+      "text": "Reads or references scene-briefs.csv as the primary data source",
+      "passed": true,
+      "evidence": "Explicitly analyzes key_actions, crisis, decision fields from scene-briefs.csv for act1-sc01, act1-sc02, act2-sc03"
+    },
+    {
+      "text": "Mentions abstract language, abstract indicators, or thematic vs concrete language",
+      "passed": true,
+      "evidence": "References 'concretizable fields (key_actions, crisis, decision)', 'abstract language flags', 'abstract state transitions', and the distinction between thematic narration vs physical behavior"
+    },
+    {
+      "text": "Names at least one specific scene ID from the project data",
+      "passed": true,
+      "evidence": "Names all 6 scenes: act1-sc01, act1-sc02, new-x1, act2-sc01, act2-sc02, act2-sc03"
+    },
+    {
+      "text": "Recommends the briefs domain or concretization as the action",
+      "passed": true,
+      "evidence": "Recommends gap-filling first, then 'Concretize after filling' as step 2. Correctly identifies that gaps are the higher-priority blocker."
+    },
+    {
+      "text": "Offers script delegation with Option A (run here) and Option B (run yourself) pattern",
+      "passed": true,
+      "evidence": "Provides explicit 'Option A: Run it here' and 'Option B: Run it yourself' blocks with full bash commands"
+    }
+  ]
+}

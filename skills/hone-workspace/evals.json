@@ -1,0 +1,47 @@
+{
+  "skill_name": "hone",
+  "evals": [
+    {
+      "id": 0,
+      "name": "low-scores-briefs",
+      "prompt": "My prose naturalness scores are low on a bunch of scenes. Can you help me figure out what's going on with my briefs?",
+      "expected_output": "Should read scoring data, detect abstract fields in briefs, present findings with specific scenes and field names, recommend briefs domain concretization",
+      "files": [],
+      "assertions": [
+        {"id": "reads-briefs-csv", "text": "Reads or references scene-briefs.csv as the primary data source"},
+        {"id": "abstract-detection", "text": "Mentions abstract language, abstract indicators, or thematic vs concrete language"},
+        {"id": "names-scenes", "text": "Names at least one specific scene ID from the project data"},
+        {"id": "recommends-briefs-domain", "text": "Recommends the briefs domain or concretization as the action"},
+        {"id": "script-delegation", "text": "Offers script delegation with Option A (run here) and Option B (run yourself) pattern"}
+      ]
+    },
+    {
+      "id": 1,
+      "name": "post-extraction-assessment",
+      "prompt": "I just finished extracting my manuscript. What's the data quality looking like?",
+      "expected_output": "Should scan all domains (registries, gaps, structural, briefs), present prioritized findings, recommend which domain to tackle first",
+      "files": [],
+      "assertions": [
+        {"id": "reads-all-csvs", "text": "Reads or references all three core CSVs (scenes.csv, scene-briefs.csv, scene-intent.csv)"},
+        {"id": "multi-domain-check", "text": "Checks or mentions multiple hone domains (at least 2 of: registries, gaps, briefs, structural)"},
+        {"id": "identifies-new-x1-gaps", "text": "Identifies new-x1 (or scenes with empty fields) as having data gaps"},
+        {"id": "prioritized-findings", "text": "Presents findings in a prioritized or structured way"},
+        {"id": "recommends-starting-domain", "text": "Recommends which domain to tackle first based on the project state"}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "act2-coach-briefs",
+      "prompt": "Run hone on my briefs for act 2 scenes, coaching mode",
+      "expected_output": "Should scope to act/part 2 scenes only, use coach coaching level, detect abstract fields, save proposals to working/hone/, offer to walk through interactively",
+      "files": [],
+      "assertions": [
+        {"id": "scopes-to-act2", "text": "Scopes analysis to part/act 2 scenes only — does not analyze act 1 scenes"},
+        {"id": "coach-behavior", "text": "Uses coach coaching level behavior — proposes rather than directly applying changes"},
+        {"id": "working-hone-dir", "text": "Mentions saving proposals to working/hone/ directory"},
+        {"id": "interactive-walkthrough", "text": "Offers to walk through proposals interactively with the author"},
+        {"id": "correct-script-command", "text": "Provides a script command that includes --domain briefs, --act 2 (or --part 2), and --coaching coach"}
+      ]
+    }
+  ]
+}

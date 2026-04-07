@@ -1,0 +1,12 @@
+{
+  "eval_id": 1,
+  "eval_name": "post-extraction-assessment",
+  "configuration": "with_skill",
+  "expectations": [
+    {"text": "Reads or references all three core CSVs (scenes.csv, scene-briefs.csv, scene-intent.csv)", "passed": true, "evidence": "References all three CSVs with specific field-level analysis"},
+    {"text": "Checks or mentions multiple hone domains (at least 2 of: registries, gaps, briefs, structural)", "passed": true, "evidence": "Covers all 4 domains in numbered sections: 1. Gaps, 2. Brief Quality Issues, 3. Registries, 4. Structural Issues"},
+    {"text": "Identifies new-x1 (or scenes with empty fields) as having data gaps", "passed": true, "evidence": "Identifies new-x1 as 'almost entirely empty in scene-briefs.csv' and act2-sc01/act2-sc02 as 'entirely missing'"},
+    {"text": "Presents findings in a prioritized or structured way", "passed": true, "evidence": "Numbered priority list in Recommendations: 1. Fill gaps, 2. Concretize existing briefs, 3. Registry normalization"},
+    {"text": "Recommends which domain to tackle first based on the project state", "passed": true, "evidence": "Recommends gaps first with clear reasoning: '3 scenes without briefs are the critical blocker'"}
+  ]
+}

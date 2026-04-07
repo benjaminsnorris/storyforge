@@ -1,0 +1,12 @@
+{
+  "eval_id": 0,
+  "eval_name": "low-scores-briefs",
+  "configuration": "without_skill",
+  "expectations": [
+    {"text": "Reads or references scene-briefs.csv as the primary data source", "passed": true, "evidence": "Detailed per-scene analysis of scene-briefs.csv fields including key_actions, key_dialogue, emotions"},
+    {"text": "Mentions abstract language, abstract indicators, or thematic vs concrete language", "passed": false, "evidence": "Discusses over-specification, prescriptive dialogue, and emotional arc issues but does not use abstract/concrete language detection framework. Frames as 'checklists' and 'mechanical prose' instead."},
+    {"text": "Names at least one specific scene ID from the project data", "passed": true, "evidence": "Names all 6 scenes with detailed per-scene analysis"},
+    {"text": "Recommends the briefs domain or concretization as the action", "passed": false, "evidence": "Recommends CSV-level edits but does not use 'briefs domain' or 'concretization' vocabulary. No reference to hone as a tool."},
+    {"text": "Offers script delegation with Option A (run here) and Option B (run yourself) pattern", "passed": false, "evidence": "Does not provide Option A/B delegation or any script commands. Ends with 'These are all CSV-level fixes.'"}
+  ]
+}

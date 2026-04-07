@@ -1,0 +1,12 @@
+{
+  "eval_id": 0,
+  "eval_name": "low-scores-briefs",
+  "configuration": "with_skill",
+  "expectations": [
+    {"text": "Reads or references scene-briefs.csv as the primary data source", "passed": true, "evidence": "Explicitly analyzes key_actions, key_dialogue, emotions fields from scene-briefs.csv with specific values quoted"},
+    {"text": "Mentions abstract language, abstract indicators, or thematic vs concrete language", "passed": true, "evidence": "References abstract language plus 4 additional quality dimensions: over-specified beats, prescriptive dialogue, procedural goals, emotional arc granularity"},
+    {"text": "Names at least one specific scene ID from the project data", "passed": true, "evidence": "Names act1-sc01, act1-sc02, act2-sc03, new-x1, act2-sc01, act2-sc02 with per-scene analysis"},
+    {"text": "Recommends the briefs domain or concretization as the action", "passed": true, "evidence": "Explicitly: 'The briefs domain of hone is exactly what you need. It will concretize abstract language, trim over-specified beats, convert prescriptive dialogue to direction, and simplify emotional arcs.'"},
+    {"text": "Offers script delegation with Option A (run here) and Option B (run yourself) pattern", "passed": true, "evidence": "Provides explicit Option A / Option B blocks with full bash commands including --domain briefs and --scenes variants"}
+  ]
+}

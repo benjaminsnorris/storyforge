@@ -3,7 +3,7 @@
 import os
 import shutil
 
-from storyforge.csv_cli import get_csv_field, update_csv_field
+from storyforge.csv_cli import get_field as get_csv_field, update_field as update_csv_field
 
 
 class TestTimelineCsvOperations:

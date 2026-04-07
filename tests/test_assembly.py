@@ -11,7 +11,7 @@ from storyforge.assembly import (
     read_chapter_field,
     get_chapter_scenes,
     extract_scene_prose,
-    word_count,
+    manuscript_word_count,
 )
 
 
@@ -61,4 +61,4 @@ class TestWordCount:
         test_file = str(tmp_path / 'test.md')
         with open(test_file, 'w') as f:
             f.write('One two three four five six seven eight nine ten.')
-        assert word_count(test_file) == 10
+        assert manuscript_word_count(test_file) == 10

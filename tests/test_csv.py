@@ -1,112 +1,120 @@
-"""Tests for CSV functions (migrated from test-csv.sh)."""
+"""Tests for CSV functions (migrated from test-csv.sh).
 
+The csv_cli functions print to stdout (they are CLI functions).
+We use a helper to capture their output.
+"""
+
+import io
 import os
 import shutil
-import tempfile
+import sys
 
-from storyforge.csv_cli import (
-    get_field as get_csv_field,
-    get_row as get_csv_row,
-    get_column as get_csv_column,
-    list_ids as list_csv_ids,
-    update_field as update_csv_field,
-    append_row as append_csv_row,
-    renumber_seq as renumber_scenes,
-)
+import storyforge.csv_cli as csv_cli
+
+
+def _capture(fn, *args, **kwargs):
+    """Call a csv_cli function and return its stdout output, stripped."""
+    old = sys.stdout
+    sys.stdout = buf = io.StringIO()
+    try:
+        fn(*args, **kwargs)
+    finally:
+        sys.stdout = old
+    return buf.getvalue().rstrip('\n')
 
 
 class TestGetCsvField:
     def test_title(self, meta_csv):
-        assert get_csv_field(meta_csv, 'act1-sc01', 'title') == 'The Finest Cartographer'
+        assert _capture(csv_cli.get_field, meta_csv, 'act1-sc01', 'title') == 'The Finest Cartographer'
 
     def test_word_count(self, meta_csv):
-        assert get_csv_field(meta_csv, 'act1-sc01', 'word_count') == '0'
+        assert _capture(csv_cli.get_field, meta_csv, 'act1-sc01', 'word_count') == '0'
 
     def test_status(self, meta_csv):
-        assert get_csv_field(meta_csv, 'act2-sc01', 'status') == 'architecture'
+        assert _capture(csv_cli.get_field, meta_csv, 'act2-sc01', 'status') == 'architecture'
 
     def test_pov(self, meta_csv):
-        assert get_csv_field(meta_csv, 'act1-sc02', 'pov') == 'Dorren Hayle'
+        assert _capture(csv_cli.get_field, meta_csv, 'act1-sc02', 'pov') == 'Dorren Hayle'
 
     def test_type(self, meta_csv):
-        assert get_csv_field(meta_csv, 'new-x1', 'type') == 'revelation'
+        assert _capture(csv_cli.get_field, meta_csv, 'new-x1', 'type') == 'revelation'
 
     def test_nonexistent_id(self, meta_csv):
-        assert get_csv_field(meta_csv, 'no-such-id', 'title') == ''
+        assert _capture(csv_cli.get_field, meta_csv, 'no-such-id', 'title') == ''
 
     def test_nonexistent_field(self, meta_csv):
-        assert get_csv_field(meta_csv, 'act1-sc01', 'nonexistent') == ''
+        assert _capture(csv_cli.get_field, meta_csv, 'act1-sc01', 'nonexistent') == ''
 
     def test_missing_file(self):
-        assert get_csv_field('/tmp/nonexistent-csv-12345', 'act1-sc01', 'title') == ''
+        assert _capture(csv_cli.get_field, '/tmp/nonexistent-csv-12345', 'act1-sc01', 'title') == ''
 
 
 class TestGetCsvRow:
     def test_contains_id(self, meta_csv):
-        row = get_csv_row(meta_csv, 'act1-sc01')
+        row = _capture(csv_cli.get_row, meta_csv, 'act1-sc01')
         assert 'act1-sc01' in row
 
     def test_contains_title(self, meta_csv):
-        row = get_csv_row(meta_csv, 'act1-sc01')
+        row = _capture(csv_cli.get_row, meta_csv, 'act1-sc01')
         assert 'The Finest Cartographer' in row
 
     def test_contains_target_words(self, meta_csv):
-        row = get_csv_row(meta_csv, 'act1-sc01')
+        row = _capture(csv_cli.get_row, meta_csv, 'act1-sc01')
         assert '2500' in row
 
     def test_act2_pov(self, meta_csv):
-        row = get_csv_row(meta_csv, 'act2-sc01')
+        row = _capture(csv_cli.get_row, meta_csv, 'act2-sc01')
         assert 'Tessa Merrin' in row
 
     def test_nonexistent_id(self, meta_csv):
-        assert get_csv_row(meta_csv, 'no-such-id') == ''
+        assert _capture(csv_cli.get_row, meta_csv, 'no-such-id') == ''
 
     def test_missing_file(self):
-        assert get_csv_row('/tmp/nonexistent-csv-12345', 'act1-sc01') == ''
+        assert _capture(csv_cli.get_row, '/tmp/nonexistent-csv-12345', 'act1-sc01') == ''
 
 
 class TestGetCsvColumn:
     def test_id_column(self, meta_csv):
-        col = get_csv_column(meta_csv, 'id')
+        col = _capture(csv_cli.get_column, meta_csv, 'id')
         assert 'act1-sc01' in col
         assert 'act2-sc01' in col
 
     def test_status_column(self, meta_csv):
-        col = get_csv_column(meta_csv, 'status')
+        col = _capture(csv_cli.get_column, meta_csv, 'status')
         assert 'briefed' in col
         assert 'architecture' in col
 
     def test_title_column_count(self, meta_csv):
-        col = get_csv_column(meta_csv, 'title')
+        col = _capture(csv_cli.get_column, meta_csv, 'title')
         lines = [l for l in col.strip().split('\n') if l.strip()]
         assert len(lines) == 6
 
     def test_nonexistent_column(self, meta_csv):
-        assert get_csv_column(meta_csv, 'nonexistent') == ''
+        assert _capture(csv_cli.get_column, meta_csv, 'nonexistent') == ''
 
     def test_missing_file(self):
-        assert get_csv_column('/tmp/nonexistent-csv-12345', 'title') == ''
+        assert _capture(csv_cli.get_column, '/tmp/nonexistent-csv-12345', 'title') == ''
 
 
 class TestListCsvIds:
     def test_contains_ids(self, meta_csv):
-        result = list_csv_ids(meta_csv)
+        result = _capture(csv_cli.list_ids, meta_csv)
         assert 'act1-sc01' in result
         assert 'new-x1' in result
         assert 'act2-sc01' in result
 
     def test_count(self, meta_csv):
-        result = list_csv_ids(meta_csv)
+        result = _capture(csv_cli.list_ids, meta_csv)
         lines = [l for l in result.strip().split('\n') if l.strip()]
         assert len(lines) == 6
 
     def test_first_id(self, meta_csv):
-        result = list_csv_ids(meta_csv)
+        result = _capture(csv_cli.list_ids, meta_csv)
         first = result.strip().split('\n')[0].strip()
         assert first == 'act1-sc01'
 
     def test_missing_file(self):
-        assert list_csv_ids('/tmp/nonexistent-csv-12345') == ''
+        assert _capture(csv_cli.list_ids, '/tmp/nonexistent-csv-12345') == ''
 
 
 class TestUpdateCsvField:
@@ -114,35 +122,35 @@ class TestUpdateCsvField:
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        update_csv_field(tmp_csv, 'act1-sc02', 'word_count', '2800')
-        assert get_csv_field(tmp_csv, 'act1-sc02', 'word_count') == '2800'
+        csv_cli.update_field(tmp_csv, 'act1-sc02', 'word_count', '2800')
+        assert _capture(csv_cli.get_field, tmp_csv, 'act1-sc02', 'word_count') == '2800'
 
     def test_other_rows_untouched(self, meta_csv, tmp_path):
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        update_csv_field(tmp_csv, 'act1-sc02', 'word_count', '2800')
-        assert get_csv_field(tmp_csv, 'act1-sc01', 'word_count') == '0'
+        csv_cli.update_field(tmp_csv, 'act1-sc02', 'word_count', '2800')
+        assert _capture(csv_cli.get_field, tmp_csv, 'act1-sc01', 'word_count') == '0'
 
     def test_update_status(self, meta_csv, tmp_path):
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        update_csv_field(tmp_csv, 'act2-sc01', 'status', 'drafted')
-        assert get_csv_field(tmp_csv, 'act2-sc01', 'status') == 'drafted'
+        csv_cli.update_field(tmp_csv, 'act2-sc01', 'status', 'drafted')
+        assert _capture(csv_cli.get_field, tmp_csv, 'act2-sc01', 'status') == 'drafted'
 
     def test_header_preserved(self, meta_csv, tmp_path):
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        update_csv_field(tmp_csv, 'act2-sc01', 'status', 'drafted')
+        csv_cli.update_field(tmp_csv, 'act2-sc01', 'status', 'drafted')
         with open(tmp_csv) as f:
             header = f.readline()
         assert 'id|seq|title' in header
 
     def test_missing_file_noop(self):
         # Should not raise
-        update_csv_field('/tmp/nonexistent-csv-12345', 'act1-sc01', 'word_count', '999')
+        csv_cli.update_field('/tmp/nonexistent-csv-12345', 'act1-sc01', 'word_count', '999')
 
 
 class TestAppendCsvRow:
@@ -150,16 +158,16 @@ class TestAppendCsvRow:
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        append_csv_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
-        assert get_csv_field(tmp_csv, 'act3-sc01', 'title') == 'The Final Descent'
-        assert get_csv_field(tmp_csv, 'act3-sc01', 'status') == 'planned'
+        csv_cli.append_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
+        assert _capture(csv_cli.get_field, tmp_csv, 'act3-sc01', 'title') == 'The Final Descent'
+        assert _capture(csv_cli.get_field, tmp_csv, 'act3-sc01', 'status') == 'planned'
 
     def test_id_count_increased(self, meta_csv, tmp_path):
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        append_csv_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
-        ids = list_csv_ids(tmp_csv)
+        csv_cli.append_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
+        ids = _capture(csv_cli.list_ids, tmp_csv)
         lines = [l for l in ids.strip().split('\n') if l.strip()]
         assert len(lines) == 7
 
@@ -167,24 +175,24 @@ class TestAppendCsvRow:
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        append_csv_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
-        assert get_csv_field(tmp_csv, 'act1-sc01', 'title') == 'The Finest Cartographer'
+        csv_cli.append_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
+        assert _capture(csv_cli.get_field, tmp_csv, 'act1-sc01', 'title') == 'The Finest Cartographer'
 
     def test_missing_file_noop(self):
-        append_csv_row('/tmp/nonexistent-csv-12345', 'test|row')
+        csv_cli.append_row('/tmp/nonexistent-csv-12345', 'test|row')
 
 
 class TestCrossFileIntent:
     def test_function_field(self, intent_csv):
-        result = get_csv_field(intent_csv, 'act1-sc01', 'function')
+        result = _capture(csv_cli.get_field, intent_csv, 'act1-sc01', 'function')
         assert 'Establishes Dorren as institutional gatekeeper' in result
 
     def test_emotional_arc(self, intent_csv):
-        result = get_csv_field(intent_csv, 'new-x1', 'emotional_arc')
+        result = _capture(csv_cli.get_field, intent_csv, 'new-x1', 'emotional_arc')
         assert result == 'Scholarly calm to urgent alarm'
 
     def test_id_count(self, intent_csv):
-        ids = list_csv_ids(intent_csv)
+        ids = _capture(csv_cli.list_ids, intent_csv)
         lines = [l for l in ids.strip().split('\n') if l.strip()]
         assert len(lines) == 6
 
@@ -198,10 +206,10 @@ class TestRenumberScenes:
             f.write('scene-b|10|Scene B|Bob\n')
             f.write('scene-c|2|Scene C|Carol\n')
 
-        renumber_scenes(csv_path)
+        csv_cli.renumber_seq(csv_path)
 
-        assert get_csv_field(csv_path, 'scene-c', 'seq') == '1'
-        assert get_csv_field(csv_path, 'scene-a', 'seq') == '2'
-        assert get_csv_field(csv_path, 'scene-b', 'seq') == '3'
+        assert _capture(csv_cli.get_field, csv_path, 'scene-c', 'seq') == '1'
+        assert _capture(csv_cli.get_field, csv_path, 'scene-a', 'seq') == '2'
+        assert _capture(csv_cli.get_field, csv_path, 'scene-b', 'seq') == '3'
         # Other columns preserved
-        assert get_csv_field(csv_path, 'scene-a', 'title') == 'Scene A'
+        assert _capture(csv_cli.get_field, csv_path, 'scene-a', 'title') == 'Scene A'

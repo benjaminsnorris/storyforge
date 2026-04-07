@@ -1,0 +1,32 @@
+{
+  "eval_id": 2,
+  "eval_name": "act2-coach-briefs",
+  "configuration": "with_skill",
+  "expectations": [
+    {
+      "text": "Scopes analysis to part/act 2 scenes only — does not analyze act 1 scenes",
+      "passed": true,
+      "evidence": "Only analyzes act2-sc01, act2-sc02, act2-sc03. No mention of act1 scenes."
+    },
+    {
+      "text": "Uses coach coaching level behavior — proposes rather than directly applying changes",
+      "passed": true,
+      "evidence": "Presents analysis and recommendations, asks 'What would you like to do?' at the end. Does not modify any files."
+    },
+    {
+      "text": "Mentions saving proposals to working/hone/ directory",
+      "passed": false,
+      "evidence": "Does not mention working/hone/ directory at all. The skill says coach mode should save proposals there, but this was not surfaced in the response."
+    },
+    {
+      "text": "Offers to walk through proposals interactively with the author",
+      "passed": false,
+      "evidence": "Offers to 'look more closely at any specific field' but does not explicitly offer the interactive walkthrough described in Step 4 of the skill ('Walk through each flagged field with the author')"
+    },
+    {
+      "text": "Provides a script command that includes --domain briefs, --act 2 (or --part 2), and --coaching coach",
+      "passed": false,
+      "evidence": "Provides --domain briefs --scenes act2-sc03 --coaching coach (correct flags but uses --scenes instead of --act 2). Also suggests elaborate command instead of hone for the missing-briefs scenes."
+    }
+  ]
+}

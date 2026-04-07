@@ -1,0 +1,86 @@
+{
+  "metadata": {
+    "skill_name": "hone",
+    "skill_path": "/Users/cadencedev/Developer/storyforge/skills/hone/SKILL.md",
+    "executor_model": "claude-opus-4-6",
+    "analyzer_model": "claude-opus-4-6",
+    "timestamp": "2026-04-06T23:10:00Z",
+    "evals_run": ["low-scores-briefs", "post-extraction-assessment", "act2-coach-briefs"],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "configuration": "with_skill",
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "per_eval": {
+          "low-scores-briefs": 1.0,
+          "post-extraction-assessment": 1.0,
+          "act2-coach-briefs": 1.0
+        }
+      },
+      "time_seconds": {
+        "mean": 88.4,
+        "stddev": 6.2,
+        "per_eval": {
+          "low-scores-briefs": 82.3,
+          "post-extraction-assessment": 96.9,
+          "act2-coach-briefs": 85.9
+        }
+      },
+      "tokens": {
+        "mean": 27691,
+        "stddev": 1267,
+        "per_eval": {
+          "low-scores-briefs": 26723,
+          "post-extraction-assessment": 29555,
+          "act2-coach-briefs": 26795
+        }
+      }
+    },
+    {
+      "configuration": "without_skill",
+      "pass_rate": {
+        "mean": 0.73,
+        "stddev": 0.31,
+        "per_eval": {
+          "low-scores-briefs": 0.4,
+          "post-extraction-assessment": 1.0,
+          "act2-coach-briefs": 1.0
+        }
+      },
+      "time_seconds": {
+        "mean": 106.4,
+        "stddev": 7.0,
+        "per_eval": {
+          "low-scores-briefs": 109.8,
+          "post-extraction-assessment": 96.5,
+          "act2-coach-briefs": 112.8
+        }
+      },
+      "tokens": {
+        "mean": 31588,
+        "stddev": 5270,
+        "per_eval": {
+          "low-scores-briefs": 28349,
+          "post-extraction-assessment": 27038,
+          "act2-coach-briefs": 39378
+        }
+      }
+    }
+  ],
+  "run_summary": {
+    "delta": {
+      "pass_rate": "+0.27",
+      "time_seconds": "-18.0",
+      "tokens": "-3897"
+    }
+  },
+  "notes": [
+    "Eval 0 (low-scores-briefs): Skill now catches all 5 brief quality dimensions (abstract, over-specified, prescriptive dialogue, procedural goals, emotional arc). Baseline caught similar issues but missed domain vocabulary and script delegation.",
+    "Eval 1 (post-extraction-assessment): Both scored 5/5 again. Still non-discriminating for pass rate, but with-skill now adds broader brief quality analysis that iteration 1 missed.",
+    "Eval 2 (act2-coach-briefs): MAJOR IMPROVEMENT — skill went from 2/5 to 5/5. Coach mode now works: mentions working/hone/, offers interactive walkthrough with accept/modify/skip, builds correct --act 2 --coaching coach command. Baseline also scored 5/5 — it may have learned from CLAUDE.md.",
+    "ANALYST NOTE: The baseline on eval 2 scored 5/5 (up from 2/5 in iteration 1). This may be variance or the baseline agent reading CLAUDE.md/project docs. The skill's advantage on eval 2 is qualitative: it provides structured proposals with current/suggested/reasoning format, which is much more actionable than the baseline's question-based format."
+  ]
+}

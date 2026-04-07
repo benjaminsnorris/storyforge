@@ -13,157 +13,112 @@
 
 ## Script Standards
 
-All autonomous scripts live in `scripts/` and follow these conventions:
+All autonomous scripts are Python modules in `scripts/lib/python/storyforge/cmd_*.py`.
+The `./storyforge` runner dispatches to these modules via `storyforge.__main__`.
 
-### Shell Basics
-- `set -eo pipefail` at the top of every script. **NOT `-u`** (breaks compat).
-- Source `scripts/lib/common.sh` first — it provides all shared libraries.
-- BSD sed compatibility required: `sed -i ''` (not `sed -i`).
-- **No `declare -A`** — bash 3 doesn't support associative arrays. Use `case` statements or functions instead.
-- **No `local` outside functions** — `local` is only valid inside functions. Top-level code in case branches or script body must use plain variable assignment.
-- Make scripts executable: `chmod +x scripts/storyforge-*`
+### Python Conventions
+- Each command module has `parse_args(argv)` and `main(argv=None)`
+- Import shared utilities from `storyforge.common`, `storyforge.git`, `storyforge.cli`, `storyforge.runner`
+- Use `argparse` for CLI flags (matching the original interface)
+- Use `concurrent.futures.ProcessPoolExecutor` for parallel execution via `storyforge.runner`
+- Use `storyforge.api` for all Claude API calls
 
-### Shared Functions — USE THEM
-Before writing new code, check if a shared function already exists. Duplicating logic causes bugs (see: `extract_claude_response` parsing bug).
+### Shared Modules — USE THEM
+Before writing new code, check if a shared function already exists.
 
-**common.sh:**
-- `detect_project_root` — sets `$PROJECT_DIR`
-- `extract_claude_response(log_file)` — **THE** way to extract text from Claude stream-json logs. Never write your own parsing.
-- `select_model(task_type)` — returns the right model for the task (opus for creative, sonnet for analytical)
-- `get_coaching_level` — returns full/coach/strict
-- `log(message)` — timestamped logging
-- `read_yaml_field(field)` — read from storyforge.yaml
-- `create_branch(type, project_dir)` — creates a `storyforge/{type}-*` branch
+**common.py:**
+- `detect_project_root()` — returns project directory path
+- `log(msg)` — timestamped logging to stdout + optional log file
+- `read_yaml_field(field, project_dir)` — read from storyforge.yaml
+- `select_model(task_type)` — returns the right model (opus for creative, sonnet for analytical)
+- `select_revision_model(pass_name, purpose)` — model for revision passes
+- `get_coaching_level(project_dir)` — returns full/coach/strict
+- `get_plugin_dir()` — returns plugin root directory
+- `extract_craft_sections(*section_nums)` — extract from craft engine
+- `install_signal_handlers()` — SIGINT/SIGTERM handling
+- Pipeline manifest: `get_current_cycle()`, `start_new_cycle()`, `update_cycle_field()`
+
+**git.py:**
+- `create_branch(command_name, project_dir)` — creates `storyforge/{type}-*` branch
 - `ensure_branch_pushed(project_dir)` — push branch to remote
-- `create_draft_pr(title, body, project_dir, label)` — create a draft PR with task checklist
-- `update_pr_task(label, project_dir)` — check off a task in the PR
-- `register_child_pid($!)` / `unregister_child_pid($pid)` — track background processes for interrupt handling
-- `begin_healing_zone(desc)` / `end_healing_zone` — error recovery around Claude invocations
+- `create_draft_pr(title, body, project_dir, label)` — create draft PR
+- `update_pr_task(task_text, project_dir, pr_number)` — check off a task
+- `commit_and_push(project_dir, message, paths)` — stage, commit, push
+- `run_review_phase(review_type, project_dir, pr_number)` — full review workflow
 
-**CSV functions** (Python-backed via `storyforge.csv_cli`, wrappers in common.sh):
-- `get_csv_field(file, id, field, [key_column])` — read one cell
-- `get_csv_row(file, id, [key_column])` — read one row
-- `get_csv_column(file, field)` — read one column
-- `list_csv_ids(file)` — list all IDs in order
-- `update_csv_field(file, id, field, value, [key_column])` — update one cell (atomic write)
-- `append_csv_row(file, row)` — append a row
+**cli.py:**
+- `base_parser(prog, description)` — argparse with common flags (--dry-run, --parallel, etc.)
+- `add_scene_filter_args(parser)` — adds --scenes, --act, --from-seq
+- `resolve_filter_args(args)` — returns (mode, value, value2) tuple
 
-**scene-filter.sh:**
-- `build_scene_list(metadata_csv)` — populate ALL_SCENE_IDS sorted by seq, excluding cut
-- `apply_scene_filter(metadata_csv, mode, [value], [value2])` — filter into FILTERED_IDS
-  - Modes: `all`, `scenes` (comma-separated), `single`, `act` (CSV part column), `from_seq` (N or N-M range), `range` (start_id, end_id)
+**runner.py:**
+- `run_parallel(items, worker_fn, max_workers, label)` — ProcessPoolExecutor parallel execution
+- `run_batched(items, worker_fn, merge_fn, batch_size)` — batched with merge step
+- `HealingZone(description, project_dir)` — retry with Claude diagnosis on failure
 
-**aliases.sh:**
-- `load_alias_map(csv_file)` — build alias lookup temp file from any CSV with name|aliases columns, returns path (caller must cleanup)
-- `normalize_aliases(map_file, semicolon_string)` — resolve aliases in semicolon-separated string, case-insensitive, deduplicates
-- `load_character_aliases` / `normalize_characters` — backwards-compatible wrappers for the generic functions
+**api.py:**
+- `invoke_api(prompt, model, max_tokens)` — high-level: returns text or empty string on failure
+- `invoke(prompt, model, max_tokens)` — returns full API response dict
+- `invoke_to_file(prompt, model, log_file, max_tokens)` — writes JSON response to file
+- `extract_text(response)` — extract text from API response dict
+- `submit_batch(batch_file)` / `poll_batch(batch_id)` / `download_batch_results(results_url, ...)` — Batch API
 
-**costs.sh:**
-- `log_usage(log_file, operation, target, model, [ledger])` — parse stream-json for usage, calculate cost, append to ledger
-- `estimate_cost(operation, count, avg_words, model)` — forecast cost
-- `check_cost_threshold(estimated)` — prompt if over threshold
-- `print_cost_summary(operation, [ledger])` — print end-of-operation totals
+**costs.py:**
+- `calculate_cost(model, input_tokens, output_tokens, ...)` — USD from token counts
+- `estimate_cost(operation, scope_count, avg_words, model)` — forecast cost
+- `check_threshold(estimated_cost)` — check against threshold
+- `log_operation(project_dir, operation, model, ...)` — append to ledger
+- `print_summary(project_dir, operation)` — print totals
 
-**scoring.sh:**
-- `init_craft_weights(project_dir, plugin_dir)` — ensure weights file exists
-- `get_effective_weight(weights_file, principle)` — author_weight if set, else weight
-- `parse_score_output(log_file, score_target, rationale_target)` — extract score CSVs
-- `merge_score_files(target, source)` — merge CSV files (append rows or join columns)
-- `generate_diagnosis(scores_dir, prev_dir, weights_file)` — analyze scores
-- `generate_proposals(scores_dir, weights_file)` — propose improvements
+**scene_filter.py:**
+- `build_scene_list(metadata_csv)` — ordered scene IDs, excluding cut/merged
+- `apply_scene_filter(metadata_csv, all_ids, mode, value, value2)` — filter by mode
 
-### Script Structure Pattern
-Every autonomous script should:
-1. Parse arguments (`--dry-run`, `--scenes`, `--act`, `--parallel`, `-h`)
-2. `detect_project_root`
-3. Read project info (`PROJECT_TITLE` from storyforge.yaml)
-4. Create branch: `create_branch "type" "$PROJECT_DIR"`
-5. Commit any changed files, then `ensure_branch_pushed`
-6. Cost forecast: `estimate_cost` + `check_cost_threshold`
-7. Create draft PR: `create_draft_pr` with task checklist
-8. Main work loop (parallel batches if applicable)
-9. Update PR tasks as phases complete
-10. Cost summary: `print_cost_summary`
-11. Commit and push results
+**csv_cli.py:**
+- `get_field(file, id, field, key_column)` — read one cell
+- `get_row(file, id, key_column)` — read one row
+- `get_column(file, field)` — read one column
+- `list_ids(file)` — list all IDs
+- `update_field(file, id, field, value, key_column)` — update one cell
+- `append_row(file, row)` — append a row
+
+### Command Module Pattern
+```python
+def parse_args(argv):
+    parser = argparse.ArgumentParser(prog='storyforge <name>')
+    # ... flags matching the CLI interface
+    return parser.parse_args(argv)
+
+def main(argv=None):
+    args = parse_args(argv or [])
+    install_signal_handlers()
+    project_dir = detect_project_root()
+    # ... orchestration logic
+```
 
 ### Parallel Execution Pattern
-```bash
-PARALLEL=${STORYFORGE_THING_PARALLEL:-6}
-batch_start=0
-while (( batch_start < TOTAL )); do
-    batch_pids=()
-    batch_ids=()
-    batch_end=$(( batch_start + PARALLEL ))
-    (( batch_end > TOTAL )) && batch_end=$TOTAL
+```python
+from storyforge.runner import run_parallel, run_batched
 
-    for (( i=batch_start; i<batch_end; i++ )); do
-        id="${IDS[$i]}"
-        batch_ids+=("$id")
-        (
-            # Worker subshell — writes results to temp files
-            # Use extract_claude_response for parsing
-            # Write status to ${DIR}/.status-${id}
-        ) &
-        batch_pids+=($!)
-        register_child_pid $!
-    done
-
-    for pid in "${batch_pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
-        unregister_child_pid "$pid" 2>/dev/null || true
-    done
-
-    # Merge results from batch (sequential, no concurrent writes)
-    for id in "${batch_ids[@]}"; do
-        # Read temp files, update CSVs
-    done
-    batch_start=$batch_end
-done
+results = run_parallel(scene_ids, process_scene, max_workers=6, label='scene')
+# or with merge step:
+results = run_batched(scene_ids, process_scene, merge_fn=merge_results, batch_size=6)
 ```
 
-### Claude Invocation — Autonomous (Direct API)
-```bash
-_SF_INVOCATION_START=$(date +%s)
-export _SF_INVOCATION_START
+### Claude API Invocation
+```python
+from storyforge.api import invoke_api, invoke_to_file, submit_batch, poll_batch
 
-begin_healing_zone "description"
+# Simple: get text response
+text = invoke_api(prompt, model, max_tokens=4096)
 
-invoke_anthropic_api "$prompt" "$MODEL" "$log_file" 4096
+# With file logging
+response = invoke_to_file(prompt, model, log_file, max_tokens=4096)
 
-end_healing_zone
-
-response=$(extract_api_response "$log_file")
-log_api_usage "$log_file" "operation" "$target" "$MODEL"
-```
-
-### Claude Invocation — Autonomous (Batch API)
-```bash
-# Build JSONL — one request per line
-for id in "${IDS[@]}"; do
-    prompt=$(build_prompt "$id")
-    jq -nc --arg id "$id" --arg model "$MODEL" --arg prompt "$prompt" '{
-        custom_id: $id,
-        params: { model: $model, max_tokens: 4096, messages: [{role: "user", content: $prompt}] }
-    }' >> "$BATCH_FILE"
-done
-
-BATCH_ID=$(submit_batch "$BATCH_FILE")
-poll_batch "$BATCH_ID"
-download_batch_results "$BATCH_ID" "$OUTPUT_DIR" "$LOG_DIR"
-
-# Process results: ${id}.txt (text), ${id}.json (usage), .status-${id} (ok/fail)
-```
-
-### Claude Invocation — Interactive (Claude Code)
-```bash
-claude -p "$prompt" \
-    --model "$MODEL" \
-    --dangerously-skip-permissions \
-    --output-format stream-json \
-    --verbose \
-    > "$log_file" 2>&1
-response=$(extract_claude_response "$log_file")
-log_usage "$log_file" "operation" "$target" "$MODEL"
+# Batch API
+batch_id = submit_batch(batch_file)
+results_url = poll_batch(batch_id, log_fn=log)
+succeeded = download_batch_results(results_url, output_dir, log_dir)
 ```
 
 ## Skill Standards
@@ -189,12 +144,12 @@ description: One-line description. Used by Claude Code to decide when to invoke.
 When a skill delegates to an autonomous script, always offer two options:
 
 > **Option A: Run it here**
-> I'll launch the script in this conversation. [If the script invokes Claude: "This requires unsetting CLAUDECODE."]
+> I'll launch the command in this conversation. [If the command invokes Claude: "This requires unsetting CLAUDECODE."]
 >
 > **Option B: Run it yourself**
 > Copy this command and run it in a separate terminal:
 > ```bash
-> cd [project_dir] && [plugin_path]/scripts/storyforge-thing [flags]
+> cd [project_dir] && [plugin_path]/storyforge thing [flags]
 > ```
 
 Wait for the author's choice. If Option B, provide the full command and end.
@@ -232,63 +187,65 @@ All structured data uses pipe-delimited CSV:
 
 ## Testing
 
-Tests live in `tests/test-*.sh`. Auto-discovered by `tests/run-tests.sh`.
+Tests use pytest. Files live in `tests/test_*.py`. Shared fixtures in `tests/conftest.py`.
 
-### Assertion Functions
-- `assert_equals "expected" "actual" "label"`
-- `assert_contains "$string" "substring" "label"`
-- `assert_not_contains "$string" "substring" "label"`
-- `assert_empty "$var" "label"`
-- `assert_not_empty "$var" "label"`
-- `assert_file_exists "/path" "label"`
-- `assert_matches "$string" "regex" "label"`
-- `assert_exit_code "0" "$?" "label"`
+### Fixtures (conftest.py)
+- `fixture_dir` — path to `tests/fixtures/test-project` (read-only)
+- `project_dir` — fresh copy of fixture in tmp_path (for write tests)
+- `plugin_dir` — path to the Storyforge plugin root
+- `ref_dir`, `meta_csv`, `intent_csv`, `briefs_csv` — convenience paths
 
 ### Test Pattern
-```bash
-#!/bin/bash
-# test-thing.sh — Tests for thing
+```python
+# test_thing.py
+import os
+from storyforge.common import read_yaml_field, detect_project_root
 
-# Tests use $FIXTURE_DIR, $PROJECT_DIR, $PLUGIN_DIR, $TMPDIR
-# Libraries are already sourced by run-tests.sh
+def test_yaml_field(fixture_dir):
+    result = read_yaml_field('project.title', fixture_dir)
+    assert result == "The Cartographer's Silence"
 
-RESULT=$(some_function "input")
-assert_equals "expected" "$RESULT" "function: does the thing"
+def test_detect_root(fixture_dir):
+    root = detect_project_root(os.path.join(fixture_dir, 'scenes'))
+    assert root == fixture_dir
 ```
 
-Run: `./tests/run-tests.sh` (all suites) or `./tests/run-tests.sh tests/test-thing.sh` (one suite).
+Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_thing.py`.
 
 ## Architecture Quick Reference
 
-- **Scripts** (`scripts/storyforge-*`) — autonomous execution. Invoke Claude, create branches/PRs, commit.
-- **Skills** (`skills/*/SKILL.md`) — interactive Claude Code sessions. Guide the author, delegate to scripts.
-- **Libraries** (`scripts/lib/*.sh`) — shared bash functions. Sourced by common.sh.
-- **Python modules** (`scripts/lib/python/storyforge/`) — scene data helpers, extraction, scoring, prompts, visualization.
+- **Commands** (`scripts/lib/python/storyforge/cmd_*.py`) — autonomous execution. Invoke Claude, create branches/PRs, commit.
+- **Skills** (`skills/*/SKILL.md`) — interactive Claude Code sessions. Guide the author, delegate to commands.
+- **Core modules** (`scripts/lib/python/storyforge/common.py`, `git.py`, `cli.py`, `runner.py`, `api.py`, `costs.py`, `scene_filter.py`) — shared infrastructure.
+- **Domain modules** (`scripts/lib/python/storyforge/`) — scene data helpers, extraction, scoring, prompts, visualization.
 - **Prompts** (`scripts/prompts/`) — prompt templates for evaluators and scoring.
 - **References** (`references/`) — craft engine, scoring rubrics, schemas, default weights.
 - **Templates** (`templates/`) — project scaffolding for init.
-- **Tests** (`tests/`) — assertion-based bash tests.
+- **Tests** (`tests/`) — pytest test suite.
 - **Docs** (`docs/`) — GitHub Pages site with visualization pages.
 
-### Scripts
+### Commands
 
-| Script | Purpose |
-|--------|---------|
-| `storyforge-write` | Draft scenes (reads briefs if available, supports parallel wave drafting) |
-| `storyforge-evaluate` | Multi-agent evaluation panel (6 evaluators + synthesis) |
-| `storyforge-revise` | Execute revision passes from a plan. `--polish` for craft-only. `--naturalness` for targeted AI pattern removal (3 passes: metaphor restatement, interpretive tagging, ending template). |
-| `storyforge-score` | Craft scoring (25 principles + fidelity scoring against briefs) |
-| `storyforge-elaborate` | Run elaboration stages (spine/architecture/map/briefs) |
-| `storyforge-extract` | Extract structural data from existing prose (reverse elaboration). `--force` overwrites existing fields. Runs reconciliation after each phase. |
-| `storyforge-polish` | Targeted prose polish on low-scoring scenes |
-| `storyforge-validate` | Structural validation against scene CSVs. `--structural` adds story-quality scoring (8 dimensions, deterministic). `--no-schema` skips schema validation. |
-| `storyforge-hone` | CSV data quality tool — registries, briefs concretization, structural fixes, gap detection. `--diagnose` runs structural scoring + brief quality + gaps in one read-only pass. Brief quality checks: abstract language, overspecified beats, verbose/prose-like fields. |
-| `storyforge-reconcile` | Backwards-compatible wrapper for `storyforge-hone --domain registries` |
-| `storyforge-enrich` | Metadata enrichment from prose |
-| `storyforge-assemble` | Chapter assembly + epub/PDF/HTML generation |
-| `storyforge-visualize` | Multi-page manuscript dashboard |
-| `storyforge-timeline` | Timeline construction |
-| `storyforge-cleanup` | Project structure cleanup |
+| Command | Module | Purpose |
+|---------|--------|---------|
+| `storyforge write` | `cmd_write.py` | Draft scenes (brief-aware, parallel wave drafting) |
+| `storyforge evaluate` | `cmd_evaluate.py` | Multi-agent evaluation panel (6 evaluators + synthesis) |
+| `storyforge revise` | `cmd_revise.py` | Execute revision passes. `--polish` for craft-only. `--naturalness` for AI pattern removal. |
+| `storyforge score` | `cmd_score.py` | Craft scoring (25 principles + fidelity scoring against briefs) |
+| `storyforge elaborate` | `cmd_elaborate.py` | Run elaboration stages (spine/architecture/map/briefs) |
+| `storyforge extract` | `cmd_extract.py` | Extract structural data from prose. `--force` overwrites. |
+| `storyforge validate` | `cmd_validate.py` | Structural + schema validation. `--structural` for scoring. |
+| `storyforge hone` | `cmd_hone.py` | CSV data quality — registries, briefs, gaps. `--diagnose` for read-only. |
+| `storyforge reconcile` | `cmd_reconcile.py` | Backwards-compatible wrapper for hone |
+| `storyforge enrich` | `cmd_enrich.py` | Metadata enrichment from prose |
+| `storyforge assemble` | `cmd_assemble.py` | Chapter assembly + epub/PDF/HTML generation |
+| `storyforge visualize` | `cmd_visualize.py` | Multi-page manuscript dashboard |
+| `storyforge timeline` | `cmd_timeline.py` | Timeline construction |
+| `storyforge cleanup` | `cmd_cleanup.py` | Project structure cleanup |
+| `storyforge cover` | `cmd_cover.py` | Cover design |
+| `storyforge scenes-setup` | `cmd_scenes_setup.py` | Scene file and metadata setup |
+| `storyforge review` | `cmd_review.py` | Pipeline review |
+| `storyforge migrate` | `cmd_migrate.py` | Project migration |
 
 ### Skills
 
@@ -325,24 +282,43 @@ Key principles:
 
 ### Python Modules
 
+**Infrastructure (new in v1.0):**
+
 | Module | Purpose |
 |--------|---------|
-| `elaborate.py` | Scene data helpers (get/set/query), validation engine, wave planner, structural scoring |
-| `extract.py` | Extraction prompt builders, response parsers, cleanup, expansion analysis |
-| `prompts.py` | Scene drafting prompt builders (legacy + brief-aware) |
+| `__main__.py` | CLI dispatcher — `storyforge <command>` routing |
+| `common.py` | Logging, YAML reading, model selection, coaching, signal handling, pipeline manifest |
+| `git.py` | Branch/PR workflow, commit helpers, review phase |
+| `cli.py` | Shared argparse helpers, common flags |
+| `runner.py` | Parallel execution (ProcessPoolExecutor), healing zones |
+| `scene_filter.py` | Scene list building and filtering |
+
+**Domain modules:**
+
+| Module | Purpose |
+|--------|---------|
+| `api.py` | Anthropic API (Messages + Batch), response parsing, cost calculation |
+| `costs.py` | Cost tracking, estimation, threshold checking, ledger |
+| `csv_cli.py` | Pipe-delimited CSV operations (get/set/list/append) |
+| `schema.py` | Column schema definitions, enum/registry/MICE validation |
+| `elaborate.py` | Scene data helpers, validation engine, wave planner |
+| `extract.py` | Extraction prompt builders, response parsers |
+| `prompts.py` | Scene drafting prompt builders |
 | `prompts_elaborate.py` | Elaboration stage prompt builders |
 | `scoring.py` | Score parsing, diagnosis, proposals, fidelity scoring |
-| `structural.py` | Structural scoring engine — story quality from CSV data (8 dimensions, deterministic) |
-| `hone.py` | CSV data quality: registry builds, abstract/overspecified/verbose detection, concretization prompts, gap detection |
+| `structural.py` | Structural scoring engine (8 dimensions, deterministic) |
+| `hone.py` | CSV data quality: registries, abstract/overspecified/verbose detection, gaps |
 | `reconcile.py` | Backwards-compatible re-exports from hone.py |
 | `visualize.py` | Dashboard data loading |
 | `enrich.py` | Metadata enrichment |
 | `assembly.py` | Chapter assembly |
 | `parsing.py` | Scene content extraction |
-| `api.py` | Anthropic API helpers |
-| `costs.py` | Cost calculation |
 | `project.py` | Project state management |
-| `schema.py` | Column schema definitions (single source of truth), enum/registry/MICE validation |
+| `revision.py` | Revision prompt builders |
+| `timeline.py` | Timeline construction |
+| `cover.py` | Cover generation |
+| `scenes.py` | Scene file management |
+| `exemplars.py` | Prose exemplar validation |
 
 ## Commit Message Prefixes
 Use domain-specific prefixes:
