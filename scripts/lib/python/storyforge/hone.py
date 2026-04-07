@@ -539,6 +539,15 @@ def write_registry(ref_dir: str, domain: str, rows: list[dict[str, str]]) -> Non
     """
     if domain not in _DOMAIN_TO_REGISTRY:
         raise ValueError(f'Unknown reconciliation domain: {domain}')
+
+    # Strip type: prefix from IDs when the type is already a separate column
+    # (e.g., mice-threads: "character:angela-chen" → "angela-chen")
+    if domain in ('mice-threads',):
+        for row in rows:
+            rid = row.get('id', '')
+            if ':' in rid and row.get('type', ''):
+                row['id'] = rid.split(':', 1)[1]
+
     filename = _DOMAIN_TO_REGISTRY[domain]
     columns = _REGISTRY_COLUMNS[domain]
     path = os.path.join(ref_dir, filename)
