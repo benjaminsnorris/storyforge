@@ -415,13 +415,14 @@ For each scene that needs a brief, define the complete drafting contract:
 - **key_dialogue**: Specific lines or exchanges that must appear in the prose
 - **emotions**: Semicolon-separated emotional beats in sequence
 - **motifs**: Semicolon-separated recurring images/symbols deployed
+- **subtext**: What is happening beneath the surface of the scene — phrased as a drafting instruction. This is the gap between what characters say/do and what they mean. Write it as: "Character says/does X but means Y; do not state Y directly" or "The tension is Z; show it through [specific physical behavior], never name it." One to two sentences. If the scene has no meaningful subtext (pure action, pure exposition), leave empty.
 - **continuity_deps**: Semicolon-separated scene IDs this scene depends on (for parallel drafting)
 - **has_overflow**: false (unless you indicate a scene needs extended brief)
 
 ### Output Format
 
 ```briefs-csv
-id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow|physical_state_in|physical_state_out
+id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|subtext|continuity_deps|has_overflow|physical_state_in|physical_state_out
 (one row per scene being briefed)
 ```
 

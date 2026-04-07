@@ -909,6 +909,7 @@ _TERSE_FIELDS = {
 _PROSE_FIELDS = {
     'decision': 80,        # max chars — one action choice
     'crisis': 100,         # max chars — one dilemma
+    'subtext': 150,        # max chars — directive, not a paragraph
 }
 
 # Prose indicators: patterns that suggest the field became a paragraph.

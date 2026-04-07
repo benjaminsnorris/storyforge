@@ -29,7 +29,7 @@ _INTENT_COLS = [
 _BRIEFS_COLS = [
     'id', 'goal', 'conflict', 'outcome', 'crisis', 'decision',
     'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
-    'emotions', 'motifs', 'continuity_deps', 'has_overflow',
+    'emotions', 'motifs', 'subtext', 'continuity_deps', 'has_overflow',
     'physical_state_in', 'physical_state_out',
 ]
 
