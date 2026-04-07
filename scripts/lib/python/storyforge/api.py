@@ -19,7 +19,7 @@ API_BASE = 'https://api.anthropic.com/v1'
 API_VERSION = '2023-06-01'
 HEARTBEAT_INTERVAL = 120  # seconds between status messages during API calls
 API_TIMEOUT = 600  # seconds before giving up on an API call (10 min)
-REVISION_TIMEOUT = 1800  # seconds for large revision calls (30 min)
+REVISION_TIMEOUT = 3600  # seconds for large revision calls (60 min)
 API_RETRIES = 2  # retry transient failures (timeouts, 5xx)
 
 
