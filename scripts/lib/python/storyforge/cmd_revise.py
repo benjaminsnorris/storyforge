@@ -34,7 +34,7 @@ from storyforge.git import (
     update_pr_task, commit_and_push, _git, has_gh, current_branch,
 )
 from storyforge.api import (
-    invoke_to_file, extract_text, extract_text_from_file,
+    invoke_api, invoke_to_file, extract_text, extract_text_from_file,
     extract_usage, calculate_cost_from_usage, get_api_key,
 )
 from storyforge.cli import apply_coaching_override
@@ -144,16 +144,29 @@ def _generate_polish_plan(plan_file):
 
 
 def _generate_naturalness_plan(plan_file):
-    """Generate 3-pass plan for AI prose pattern removal."""
+    """Generate 3-pass plan for AI prose pattern removal.
+
+    Targets the patterns most frequently penalized in scoring rationales:
+    tricolon/parallelism, em-dash/antithesis, and AI vocabulary/hedging.
+    """
     rows = [
         {
             'pass': '1',
-            'name': 'metaphor-restatement',
-            'purpose': 'Remove metaphor restatement -- where an image or metaphor is immediately followed by a clause explaining what it means',
+            'name': 'tricolon-parallelism',
+            'purpose': 'Break compulsive three-item structures — triple-sensation chains, three-beat lists, three-clause parallel constructions',
             'scope': 'full',
             'targets': '',
-            'guidance': 'Find every metaphor, simile, or image that is followed by an explanatory clause and delete the explanation. The image should stand alone. BEFORE: "The silence hung between them like fog -- thick, obscuring, making it impossible to see the other person clearly." AFTER: "The silence hung between them like fog." Also remove: "Which meant..." clauses after images; "The kind of..." restatements; em-dash elaborations that translate a metaphor into literal meaning. Do NOT remove metaphors themselves -- only remove the explanatory clause that follows them.',
-            'protection': 'Do not change any plot events, dialogue content, or character actions. Only modify how images are delivered.',
+            'guidance': (
+                'Find every instance of three-item parallelism and vary the count or structure. '
+                'PATTERNS TO FIX: '
+                '(a) Three-adjective chains: "gold deepening to persimmon deepening to red" — vary to 2 or 4, or restructure. '
+                '(b) Three-clause parallelism: "too short for the counter, too narrow for the bowls, too wide for the space" — collapse to 1-2 clauses or vary rhythm. '
+                '(c) Triple-sensation stacking: "Color. Taste. Sight interpretation." repeated as a template — break the template, vary which senses appear and in what order. '
+                '(d) Three-item lists in narration: "the noodle shop level, the market corridor, the junction" — sometimes 2 is enough. '
+                'NOT EVERY THREE-ITEM LIST IS WRONG. Only fix the ones that feel mechanical or templated. '
+                'Organic tricolon in dialogue or emphatic prose is fine. The test: could a reader predict the third item? If yes, fix it.'
+            ),
+            'protection': 'Do not change dialogue content, plot events, or character actions. Only modify prose rhythm and structure.',
             'findings': 'naturalness',
             'status': 'pending',
             'model_tier': 'opus',
@@ -161,12 +174,21 @@ def _generate_naturalness_plan(plan_file):
         },
         {
             'pass': '2',
-            'name': 'interpretive-tagging',
-            'purpose': 'Remove interpretive tagging -- where narrator commentary explains the significance of an action or gesture just shown',
+            'name': 'em-dash-antithesis',
+            'purpose': 'Reduce em-dash frequency and eliminate "Not X but Y" antithesis framing',
             'scope': 'full',
             'targets': '',
-            'guidance': 'Find action or gesture lines followed by narrator interpretation and remove the interpretation. BEFORE: "She set the cup down carefully. It was a gesture of control, her way of anchoring herself when everything else felt unmoored." AFTER: "She set the cup down carefully." Also remove: "It was her way of..." or "It was a gesture of..."; "as though..." or "as if to say..." after action lines.',
-            'protection': 'Do not change any dialogue, plot events, or factual observations. Only remove narrator interpretation of actions already shown.',
+            'guidance': (
+                'Two patterns to fix: '
+                '(a) EM-DASH OVERUSE: Count em dashes in each scene. Target: max 3-4 per 1000 words. '
+                'Replace with: periods (for parenthetical asides), commas (for appositives), '
+                'colons (for elaboration), or restructure the sentence. Keep em dashes only for genuine interruptions or abrupt shifts. '
+                '(b) ANTITHESIS FRAMING: Find "Not X. Y." / "Not X but Y" / "Not X — Y" constructions. '
+                'BEFORE: "Not reflecting-the-sky black, just black." '
+                'AFTER: Describe what it IS without first saying what it ISN\'T. Negation-then-correction is a Claude tic. '
+                'Also fix: "Not literally X but..." and "Less X than Y" when used as the primary description.'
+            ),
+            'protection': 'Do not change dialogue, plot, or character actions. Preserve em dashes in dialogue for speech interruptions.',
             'findings': 'naturalness',
             'status': 'pending',
             'model_tier': 'opus',
@@ -174,12 +196,24 @@ def _generate_naturalness_plan(plan_file):
         },
         {
             'pass': '3',
-            'name': 'ending-template',
-            'purpose': 'Vary scene endings that follow the formulaic pattern: small physical action, then thematic observation, then short declarative',
+            'name': 'ai-vocabulary-hedging',
+            'purpose': 'Remove AI-tell vocabulary, hedging stacks, sweeping openers, and summary closers',
             'scope': 'full',
             'targets': '',
-            'guidance': 'Check the last 3-5 sentences of each scene. If they follow the pattern [small physical action] + [thematic/metaphorical observation] + [short declarative sentence of 8 words or fewer], rewrite the ending to break the template. Alternatives: end on dialogue; end mid-action; end on a sensory detail; end on a question; cut the last sentence entirely.',
-            'protection': 'Do not change any scene content except the final 1-3 sentences. The rest of the scene must remain exactly as-is.',
+            'guidance': (
+                'Four patterns to fix: '
+                '(a) AI-TELL VOCABULARY: Remove or replace these words that signal AI-generated prose: '
+                'nuanced, multifaceted, tapestry, palpable, pivotal, intricate, profound, myriad, '
+                'juxtaposition, dichotomy, paradigm, visceral (when not literal). Replace with concrete, specific words. '
+                '(b) HEDGING STACKS: "something like", "something between", "almost as if", "perhaps", '
+                '"a kind of", "the particular" — remove or commit to the statement. '
+                'BEFORE: "Something that tasted the way silence feels." AFTER: Name the taste. '
+                '(c) SWEEPING OPENERS: Remove scene-opening sentences that set a thematic frame before anything happens. '
+                '"The thing about memory is..." / "There are moments when..." — cut to the first concrete action or image. '
+                '(d) SUMMARY CLOSERS: Remove paragraph-ending sentences that interpret what was just shown. '
+                '"And that was the thing about X." / "It was, she realized, exactly what she needed." — let the scene end on action or image.'
+            ),
+            'protection': 'Do not change dialogue, plot events, or character interiority that reveals new information.',
             'findings': 'naturalness',
             'status': 'pending',
             'model_tier': 'opus',
@@ -439,6 +473,170 @@ def _run_lightweight_score(project_dir: str, scene_ids: list[str],
     return cycle_dir, diag_rows
 
 
+def _detect_upstream_scenes(project_dir: str, diag_rows: list[dict]) -> list[str]:
+    """Identify scenes needing upstream fixes based on diagnosis root_cause.
+
+    Returns sorted list of scene IDs where root_cause is 'brief' and score is low.
+    Scene IDs are drawn from the worst_items field of matching diagnosis rows.
+    """
+    upstream = set()
+    for row in diag_rows:
+        if row.get('root_cause') != 'brief':
+            continue
+        worst = row.get('worst_items', '')
+        if not worst:
+            continue
+        for sid in worst.split(';'):
+            sid = sid.strip()
+            if sid:
+                upstream.add(sid)
+    return sorted(upstream)
+
+
+def _fix_upstream_briefs(project_dir: str, scene_ids: list[str]) -> int:
+    """Rewrite conflict/goal/crisis/decision for scenes with upstream issues.
+
+    Uses API to generate briefs with genuine dramatic opposition.
+    Returns number of fields rewritten.
+    """
+    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, _read_csv
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+
+    briefs_map = _read_csv_as_map(briefs_path)
+    scenes_map = _read_csv_as_map(scenes_path)
+    intent_map = _read_csv_as_map(intent_path)
+
+    total_rewrites = 0
+
+    for scene_id in scene_ids:
+        brief = briefs_map.get(scene_id, {})
+        scene = scenes_map.get(scene_id, {})
+        intent = intent_map.get(scene_id, {})
+
+        title = scene.get('title', scene_id)
+        pov = scene.get('pov', '')
+        outcome = brief.get('outcome', '')
+        value_at_stake = intent.get('value_at_stake', '')
+        emotional_arc = intent.get('emotional_arc', '')
+        current_goal = brief.get('goal', '')
+        current_conflict = brief.get('conflict', '')
+        current_crisis = brief.get('crisis', '')
+        current_decision = brief.get('decision', '')
+
+        prompt = f"""You are a story editor rewriting scene briefs to introduce genuine dramatic opposition.
+
+Scene: {title}
+POV: {pov}
+Outcome: {outcome}
+Value at stake: {value_at_stake}
+Emotional arc: {emotional_arc}
+
+Current brief:
+GOAL: {current_goal}
+CONFLICT: {current_conflict}
+CRISIS: {current_crisis}
+DECISION: {current_decision}
+
+The current brief lacks genuine opposition — the conflict is abstract or the goal/crisis/decision don't create real dramatic tension.
+
+Rewrite all four fields to introduce genuine opposition while:
+- Preserving the existing emotional arc and value at stake
+- Making the conflict a concrete, specific obstacle with a clear opposing force
+- Making the goal something the POV character actively wants and must fight for
+- Making the crisis a specific moment where the worst happens or the hardest choice appears
+- Making the decision a concrete choice with real cost on both sides
+
+Respond ONLY with the four fields in this exact format (no preamble, no explanation):
+GOAL: [rewritten goal]
+CONFLICT: [rewritten conflict]
+CRISIS: [rewritten crisis]
+DECISION: [rewritten decision]"""
+
+        model = select_model('creative')
+        log(f'  Fixing upstream brief: {scene_id}')
+        response = invoke_api(prompt, model, max_tokens=1024)
+
+        if not response:
+            log(f'  WARNING: No response for {scene_id} upstream fix — skipping')
+            continue
+
+        # Parse response lines
+        fields = {}
+        for line in response.splitlines():
+            for key in ('GOAL', 'CONFLICT', 'CRISIS', 'DECISION'):
+                prefix = f'{key}: '
+                if line.startswith(prefix):
+                    fields[key.lower()] = line[len(prefix):].strip()
+
+        if not fields:
+            log(f'  WARNING: Could not parse upstream fix response for {scene_id}')
+            continue
+
+        updated = False
+        for field_name, new_value in fields.items():
+            if new_value:
+                briefs_map.setdefault(scene_id, {'id': scene_id})
+                briefs_map[scene_id][field_name] = new_value
+                total_rewrites += 1
+                updated = True
+
+        if updated:
+            log(f'  Updated {len(fields)} fields for {scene_id}')
+
+    # Write back updated briefs
+    if total_rewrites > 0:
+        all_briefs = list(briefs_map.values())
+        _write_csv(briefs_path, all_briefs, _FILE_MAP['scene-briefs.csv'])
+
+    return total_rewrites
+
+
+def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
+    """Re-draft scenes after brief rewrites using brief-aware drafting.
+
+    Only re-drafts scenes that already have a scene file.
+    Returns number of scenes re-drafted.
+    """
+    from storyforge.prompts import build_scene_prompt
+    from storyforge.common import get_coaching_level
+
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    coaching_level = get_coaching_level(project_dir)
+    model = select_model('creative')
+    count = 0
+
+    for scene_id in scene_ids:
+        scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
+        if not os.path.isfile(scene_file):
+            log(f'  Skipping re-draft of {scene_id} (not yet drafted)')
+            continue
+
+        log(f'  Re-drafting scene: {scene_id}')
+        try:
+            prompt = build_scene_prompt(scene_id, project_dir,
+                                        coaching_level=coaching_level, api_mode=True)
+        except Exception as e:
+            log(f'  WARNING: Could not build prompt for {scene_id}: {e} — skipping')
+            continue
+
+        response = invoke_api(prompt, model, max_tokens=16384)
+        if not response:
+            log(f'  WARNING: No response for {scene_id} re-draft — skipping')
+            continue
+
+        with open(scene_file, 'w', encoding='utf-8') as f:
+            f.write(response)
+
+        count += 1
+        log(f'  Re-drafted {scene_id}')
+
+    return count
+
+
 def _run_polish_loop(project_dir: str, max_loops: int,
                      coaching_override: str | None) -> None:
     """Score → polish → re-score convergence loop."""
@@ -503,6 +701,16 @@ def _run_polish_loop(project_dir: str, max_loops: int,
 
         prev_avg = summary['overall_avg']
 
+        # Check for upstream causes before craft polish
+        upstream_scenes = _detect_upstream_scenes(project_dir, diag_rows)
+        if upstream_scenes:
+            log(f'  Upstream issues in {len(upstream_scenes)} scenes — fixing briefs first')
+            _fix_upstream_briefs(project_dir, upstream_scenes)
+            _redraft_scenes(project_dir, upstream_scenes)
+            commit_and_push(project_dir,
+                            f'Polish: upstream brief fixes for {len(upstream_scenes)} scenes',
+                            ['reference/', 'scenes/', 'working/'])
+
         # Generate targeted plan from diagnosis
         log(f'\n=== Iteration {iteration}/{max_loops}: Polish ===')
         plan_rows = _generate_targeted_polish_plan(csv_plan_file, diag_rows)
@@ -538,6 +746,82 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     commit_and_push(project_dir, 'Polish: loop complete', ['working/'])
 
 
+def _extract_scene_rationales(project_dir: str, scene_ids: list,
+                              principles: list = None) -> dict:
+    """Extract scoring rationales for specific scenes from the latest scoring cycle.
+
+    Args:
+        project_dir: Project root.
+        scene_ids: Scenes to extract rationales for.
+        principles: Principles to include (default: all *_rationale columns).
+
+    Returns:
+        {scene_id: {principle: rationale_text}}
+    """
+    from storyforge.elaborate import _read_csv_as_map
+
+    latest_dir = os.path.join(project_dir, 'working', 'scores', 'latest')
+    scores_file = os.path.join(latest_dir, 'scene-scores.csv')
+    if not os.path.isfile(scores_file):
+        return {}
+
+    scores_map = _read_csv_as_map(scores_file)
+    result = {}
+
+    for sid in scene_ids:
+        row = scores_map.get(sid)
+        if not row:
+            continue
+        rationales = {}
+        for col, val in row.items():
+            if not col.endswith('_rationale') or not val:
+                continue
+            principle = col[:-len('_rationale')]
+            if principles and principle not in principles:
+                continue
+            rationales[principle] = val
+        if rationales:
+            result[sid] = rationales
+
+    return result
+
+
+def _build_revision_config(plan_row: dict, extra: dict | None = None) -> str:
+    """Build a YAML config string from plan row fields for passing to revision.py.
+
+    Only includes non-empty values for the known config fields: guidance,
+    protection, findings, targets.  Additional optional data (e.g. rationale
+    from Task 9) can be supplied via *extra*.
+
+    Args:
+        plan_row: A single plan CSV row dict.
+        extra: Optional dict of additional key→value pairs to append.
+
+    Returns:
+        A YAML string, or empty string if no config fields are present.
+    """
+    config_fields = ['guidance', 'protection', 'findings', 'targets']
+    lines = []
+    for field in config_fields:
+        value = plan_row.get(field, '')
+        if value:
+            # Indent multi-line values as a YAML block scalar
+            if '\n' in value:
+                indented = value.replace('\n', '\n  ')
+                lines.append(f'{field}: |-\n  {indented}')
+            else:
+                lines.append(f'{field}: {value}')
+    if extra:
+        for key, value in extra.items():
+            if value:
+                if '\n' in str(value):
+                    indented = str(value).replace('\n', '\n  ')
+                    lines.append(f'{key}: |-\n  {indented}')
+                else:
+                    lines.append(f'{key}: {value}')
+    return '\n'.join(lines)
+
+
 def _execute_single_pass(project_dir: str, csv_plan_file: str,
                          plan_rows: list[dict], iteration: int) -> None:
     """Execute a single revision pass from a plan. Subset of main pass loop."""
@@ -562,20 +846,39 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     revision_module = os.path.join(plugin_dir, 'scripts', 'lib', 'python', 'storyforge', 'revision.py')
 
     import subprocess
+    # Extract per-scene rationales for targeted revision
+    rationales = None
+    targets_field = plan_rows[0].get('targets', '')
+    if targets_field:
+        target_ids = [s.strip() for s in targets_field.split(';') if s.strip()]
+        rationales = _extract_scene_rationales(project_dir, target_ids)
+    elif plan_rows[0].get('findings') == 'naturalness':
+        # For naturalness passes, get rationales for all scenes
+        from storyforge.scene_filter import build_scene_list
+        metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        all_ids = build_scene_list(metadata_csv)
+        rationales = _extract_scene_rationales(project_dir, all_ids,
+                                                principles=['prose_naturalness'])
+
+    # Build config with rationales as extra data
+    extra = {}
+    if rationales:
+        scene_findings = []
+        for sid, rats in rationales.items():
+            for principle, text in rats.items():
+                # Truncate long rationales to keep prompt manageable
+                scene_findings.append(f'Scene {sid} ({principle}): {text[:500]}')
+        if scene_findings:
+            extra['per_scene_findings'] = '\n'.join(scene_findings)
+
+    config_yaml = _build_revision_config(plan_rows[0], extra=extra)
     cmd = [
         sys.executable, revision_module, 'build-prompt',
-        '--project-dir', project_dir,
-        '--pass-name', pass_name,
-        '--pass-purpose', pass_purpose,
-        '--scope', pass_scope,
-        '--guidance', guidance,
-        '--protection', plan_rows[0].get('protection', ''),
-        '--findings', plan_rows[0].get('findings', ''),
+        pass_name, pass_purpose, pass_scope, project_dir,
+        '--api-mode',
     ]
-
-    targets = plan_rows[0].get('targets', '')
-    if targets:
-        cmd.extend(['--targets', targets])
+    if config_yaml:
+        cmd.extend(['--config', config_yaml])
 
     log(f'  Building revision prompt...')
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -810,6 +1113,18 @@ def main(argv=None):
         plan_rows = _generate_polish_plan(csv_plan_file)
     elif args.naturalness:
         log('Naturalness mode -- generating 3-pass plan for AI pattern removal...')
+        # Check for upstream causes first (load latest diagnosis if available)
+        _naturalness_diag_rows = []
+        _latest_diag = os.path.join(project_dir, 'working', 'scores', 'latest', 'diagnosis.csv')
+        if os.path.isfile(_latest_diag):
+            _naturalness_diag_rows = _read_diagnosis(os.path.dirname(_latest_diag))
+        upstream_scenes = _detect_upstream_scenes(project_dir, _naturalness_diag_rows) if _naturalness_diag_rows else []
+        if upstream_scenes:
+            log(f'Upstream issues in {len(upstream_scenes)} scenes — fixing briefs')
+            _fix_upstream_briefs(project_dir, upstream_scenes)
+            _redraft_scenes(project_dir, upstream_scenes)
+            commit_and_push(project_dir, 'Naturalness: upstream brief fixes',
+                            ['reference/', 'scenes/', 'working/'])
         plan_rows = _generate_naturalness_plan(csv_plan_file)
     elif args.structural:
         plan_rows = _generate_structural_plan(project_dir, csv_plan_file)

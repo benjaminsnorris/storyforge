@@ -228,7 +228,9 @@ def _run_briefs_domain(ref_dir: str, project_dir: str, log_dir: str,
 
     briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
-    issues = detect_brief_issues(briefs, scenes, scene_filter)
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    intent = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else None
+    issues = detect_brief_issues(briefs, scenes, scene_filter, intent_map=intent)
 
     by_type: dict[str, list] = {}
     for i in issues:
@@ -317,7 +319,9 @@ def _count_brief_issues(ref_dir: str, scene_filter: list[str] | None) -> dict:
 
     briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
-    issues = detect_brief_issues(briefs, scenes, scene_filter)
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    intent = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else None
+    issues = detect_brief_issues(briefs, scenes, scene_filter, intent_map=intent)
 
     by_type: dict[str, int] = {}
     for i in issues:
@@ -329,14 +333,18 @@ def _count_brief_issues(ref_dir: str, scene_filter: list[str] | None) -> dict:
         'abstract': by_type.get('abstract', 0),
         'overspecified': by_type.get('overspecified', 0),
         'verbose': by_type.get('verbose', 0),
+        'conflict_free': by_type.get('conflict_free', 0),
     }
 
 
 def _log_brief_counts(counts: dict, prefix: str = '') -> None:
     """Log brief issue counts in a consistent format."""
-    log(f'{prefix}{counts["total"]} brief issues across {counts["scenes"]} scenes '
-        f'(abstract: {counts["abstract"]}, overspecified: {counts["overspecified"]}, '
-        f'verbose: {counts["verbose"]})')
+    parts = []
+    for key in ('abstract', 'overspecified', 'verbose', 'conflict_free'):
+        if counts.get(key, 0) > 0:
+            parts.append(f'{key}: {counts[key]}')
+    detail = ', '.join(parts) if parts else 'none'
+    log(f'{prefix}{counts["total"]} brief issues across {counts["scenes"]} scenes ({detail})')
 
 
 def _run_loop(ref_dir: str, project_dir: str, log_dir: str, model: str,
@@ -443,7 +451,7 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
 
     # Part 2: Brief quality
     print('\n=== Brief Quality Issues ===\n')
-    issues = detect_brief_issues(briefs, scenes, scene_filter)
+    issues = detect_brief_issues(briefs, scenes, scene_filter, intent_map=intent)
     by_type: dict[str, list] = {}
     for i in issues:
         by_type.setdefault(i['issue'], []).append(i)
@@ -451,7 +459,7 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
     if not issues:
         print('  No brief quality issues found.')
     else:
-        for issue_type in ['abstract', 'overspecified', 'verbose']:
+        for issue_type in ['abstract', 'overspecified', 'verbose', 'conflict_free']:
             items = by_type.get(issue_type, [])
             if not items:
                 continue
@@ -463,6 +471,8 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
                     print(f'    {item["scene_id"]}.{item["field"]}: {item["char_count"]} chars (max {item["max_chars"]})')
                 elif issue_type == 'abstract':
                     print(f'    {item["scene_id"]}.{item["field"]}: abstract={item["abstract_count"]}, concrete={item["concrete_count"]}')
+                elif issue_type == 'conflict_free':
+                    print(f'    {item["scene_id"]}.{item["field"]}: {issue_type} ({item.get("reason", "unknown")})')
             print()
 
     # Part 3: Gaps
@@ -495,6 +505,33 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
                 print(f'  Missing per-POV exemplars: {", ".join(ex["missing_povs"])}')
     except Exception as e:
         print(f'  (exemplar validation unavailable: {e})')
+
+    # Part 5: Score Trends (if history available)
+    print('\n=== Score Trends ===\n')
+    try:
+        from storyforge.history import detect_stalls, detect_regressions
+        nat_stalls = detect_stalls(project_dir, 'prose_naturalness')
+        nat_regs = detect_regressions(project_dir, 'prose_naturalness')
+
+        if nat_stalls:
+            print(f'  Stalled on naturalness ({len(nat_stalls)} scenes):')
+            for s in nat_stalls[:10]:
+                scores_str = ', '.join(f'cycle {c}={int(v)}' for c, v in s['scores'][-3:])
+                print(f'    {s["scene_id"]}: stuck for {s["cycles_stalled"]} cycles ({scores_str})')
+        else:
+            print('  No naturalness stalls detected.')
+
+        if nat_regs:
+            print(f'\n  Regressions ({len(nat_regs)}):')
+            for r in nat_regs[:5]:
+                print(f'    {r["scene_id"]}: {r["from_score"]:.0f} -> {r["to_score"]:.0f} '
+                      f'(cycle {r["from_cycle"]} -> {r["to_cycle"]})')
+
+        if nat_stalls:
+            print(f'\n  These scenes need upstream fixes (brief rewrite), not more prose revision.')
+            print(f'  Run: storyforge revise --polish --loop')
+    except Exception:
+        print('  (no score history yet — run storyforge score first)')
 
     # Summary
     print('\n=== Summary ===\n')

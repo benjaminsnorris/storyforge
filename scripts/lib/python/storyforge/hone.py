@@ -778,6 +778,22 @@ CONCRETE_INDICATORS = {
 
 _CONCRETIZABLE_FIELDS = ['key_actions', 'crisis', 'decision', 'goal', 'conflict', 'emotions']
 
+OBSERVATION_INDICATORS = {
+    'notices', 'observes', 'discovers', 'reflects', 'grapples with',
+    'contemplates', 'realizes', 'wonders', 'considers', 'processes',
+    'absorbs', 'witnesses', 'watches', 'senses', 'recognizes',
+    'comes to understand', 'begins to see', 'takes in',
+}
+
+OPPOSITION_INDICATORS = {
+    'refuses', 'blocks', 'demands', 'threatens', 'confronts', 'denies',
+    'challenges', 'prevents', 'forbids', 'attacks', 'rejects', 'opposes',
+    'locks', 'traps', 'forces', 'resists', 'fights', 'argues',
+    'interrupts', 'undermines', 'betrays', 'withholds', 'hides',
+}
+
+_FLAT_SHIFTS = {'+/+', '-/-', '0/0', ''}
+
 
 def detect_abstract_fields(
     briefs_map: dict[str, dict[str, str]],
@@ -994,6 +1010,88 @@ def detect_verbose_fields(
 
 
 # ============================================================================
+# Briefs domain: conflict-free detection
+# ============================================================================
+
+def detect_conflict_free(
+    briefs_map: dict[str, dict[str, str]],
+    intent_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Detect scenes whose conflict field lacks actual opposition.
+
+    Two checks are applied:
+    - **Keyword**: the conflict text contains observation words (notices, realizes…)
+      but zero opposition words (refuses, blocks…) → reason='keyword'.
+    - **Structural**: the scene's outcome=='yes' AND value_shift is flat (+/+, -/-, 0/0,
+      or empty) → reason='structural'.
+    - When both checks trigger → reason='both'.
+
+    Empty conflict fields are skipped (that's a gap, not a conflict-free issue).
+
+    Args:
+        briefs_map: dict keyed by scene ID, values are brief row dicts.
+        intent_map: dict keyed by scene ID, values are scene-intent row dicts.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+
+    Returns:
+        List of dicts:
+          {scene_id, field: 'conflict', value, issue: 'conflict_free',
+           reason: 'keyword'|'structural'|'both',
+           observation_count, opposition_count}
+        plus 'outcome' and 'value_shift' when the structural check contributed.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(briefs_map.keys())
+
+    for sid in ids_to_check:
+        brief = briefs_map.get(sid, {})
+        conflict = brief.get('conflict', '').strip()
+        if not conflict:
+            continue
+
+        conflict_lower = conflict.lower()
+
+        # Keyword check
+        observation_count = sum(1 for ind in OBSERVATION_INDICATORS if ind in conflict_lower)
+        opposition_count = sum(1 for ind in OPPOSITION_INDICATORS if ind in conflict_lower)
+        keyword_flagged = observation_count > 0 and opposition_count == 0
+
+        # Structural check
+        intent_row = intent_map.get(sid, {})
+        outcome = brief.get('outcome', '').strip().lower()
+        value_shift = intent_row.get('value_shift', '').strip()
+        structural_flagged = outcome == 'yes' and value_shift in _FLAT_SHIFTS
+
+        if not keyword_flagged and not structural_flagged:
+            continue
+
+        if keyword_flagged and structural_flagged:
+            reason = 'both'
+        elif keyword_flagged:
+            reason = 'keyword'
+        else:
+            reason = 'structural'
+
+        entry: dict = {
+            'scene_id': sid,
+            'field': 'conflict',
+            'value': conflict,
+            'issue': 'conflict_free',
+            'reason': reason,
+            'observation_count': observation_count,
+            'opposition_count': opposition_count,
+        }
+        if structural_flagged or reason == 'both':
+            entry['outcome'] = outcome
+            entry['value_shift'] = value_shift
+
+        results.append(entry)
+
+    return results
+
+
+# ============================================================================
 # Briefs domain: combined detection
 # ============================================================================
 
@@ -1001,16 +1099,19 @@ def detect_brief_issues(
     briefs_map: dict[str, dict[str, str]],
     scenes_map: dict[str, dict[str, str]],
     scene_ids: list[str] | None = None,
+    intent_map: dict[str, dict[str, str]] | None = None,
 ) -> list[dict]:
     """Run all brief quality detectors and return combined results.
 
     Each result dict includes an 'issue' key: 'abstract', 'overspecified',
-    or 'verbose'.
+    'verbose', or 'conflict_free'.
 
     Args:
         briefs_map: dict keyed by scene ID.
         scenes_map: dict keyed by scene ID (needed for target_words).
         scene_ids: Optional scope.
+        intent_map: Optional dict keyed by scene ID (scene-intent rows). When
+            provided, also runs conflict-free detection.
 
     Returns:
         Combined list of all issue dicts, sorted by scene_id then field.
@@ -1019,6 +1120,8 @@ def detect_brief_issues(
     issues.extend(detect_abstract_fields(briefs_map, scene_ids))
     issues.extend(detect_overspecified(briefs_map, scenes_map, scene_ids))
     issues.extend(detect_verbose_fields(briefs_map, scene_ids))
+    if intent_map is not None:
+        issues.extend(detect_conflict_free(briefs_map, intent_map, scene_ids))
     issues.sort(key=lambda d: (d['scene_id'], d['field'], d['issue']))
     return issues
 
@@ -1213,9 +1316,11 @@ def hone_briefs(
     """
     briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    intent_map = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else None
 
     # Detect all issue types
-    all_issues = detect_brief_issues(briefs_map, scenes_map, scene_ids)
+    all_issues = detect_brief_issues(briefs_map, scenes_map, scene_ids, intent_map=intent_map)
 
     if dry_run or not all_issues:
         return {

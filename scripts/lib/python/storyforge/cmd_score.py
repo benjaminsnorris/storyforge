@@ -313,6 +313,12 @@ def main(argv=None):
     print('')
     print_summary(project_dir, 'score')
 
+    # Append to score history for cross-cycle tracking
+    from storyforge.history import append_cycle
+    history_count = append_cycle(cycle_dir, cycle, project_dir)
+    if history_count:
+        log(f'Score history: appended {history_count} entries (cycle {cycle})')
+
     # =========================================================================
     # Improvement cycle
     # =========================================================================
