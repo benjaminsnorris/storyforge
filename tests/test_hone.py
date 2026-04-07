@@ -341,3 +341,65 @@ class TestMiceDormancy:
         result = parse_mice_fill_response('MENTION: s05\nMENTION: s08\n')
         assert len(result) == 2
         assert parse_mice_fill_response('NONE\n') == []
+
+
+class TestLoopFlag:
+    def test_parse_loop_flag(self):
+        from storyforge.cmd_hone import parse_args
+        args = parse_args(['--loop'])
+        assert args.loop is True
+        assert args.max_loops == 5
+
+    def test_parse_max_loops(self):
+        from storyforge.cmd_hone import parse_args
+        args = parse_args(['--loop', '--max-loops', '3'])
+        assert args.max_loops == 3
+
+    def test_loop_default_false(self):
+        from storyforge.cmd_hone import parse_args
+        args = parse_args([])
+        assert args.loop is False
+
+
+class TestCountBriefIssues:
+    def test_counts_by_type(self, tmp_path):
+        from storyforge.cmd_hone import _count_brief_issues
+
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            f.write('s1|1|Scene 1|1|zara|loc|1|morning|1hr|action|briefed|1000|1500\n')
+
+        with open(os.path.join(ref, 'scene-briefs.csv'), 'w') as f:
+            f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow|subtext\n')
+            f.write('s1|Find truth|Opposition|yes|Stay or go|Decides|k01|k02|'
+                    'The realization dawns; connecting deeper; the parallel emerging; '
+                    'crystallizing; the truth building; she transforms|dialog|hope;dread;resolve;calm|m1||no|\n')
+
+        counts = _count_brief_issues(ref, None)
+        assert counts['total'] > 0
+        assert 'abstract' in counts
+        assert 'overspecified' in counts
+        assert 'verbose' in counts
+        assert counts['scenes'] == 1
+
+    def test_zero_issues(self, tmp_path):
+        from storyforge.cmd_hone import _count_brief_issues
+
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            f.write('s1|1|Scene 1|1|zara|loc|1|morning|1hr|action|briefed|1000|2500\n')
+
+        with open(os.path.join(ref, 'scene-briefs.csv'), 'w') as f:
+            f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow|subtext\n')
+            f.write('s1|Find the map|Guards block entrance|yes|Now or never|Goes through|k01|k02|'
+                    'Opens door; Grabs map; Runs|Where is it?|tension;relief|m1||no|\n')
+
+        counts = _count_brief_issues(ref, None)
+        assert counts['total'] == 0
+        assert counts['scenes'] == 0

@@ -145,6 +145,7 @@ Map the author's request to the right flags:
 | "coaching mode" / "coach" | `--coaching coach` |
 | "just show me" / "dry run" | `--dry-run` |
 | "what's the data quality?" / "diagnose" | `--diagnose` |
+| "fix everything" / "keep going until clean" | `--loop` |
 | "briefs" / "concretize" | `--domain briefs` |
 | "registries" / "reconcile" | `--domain registries` |
 | "gaps" / "missing fields" | `--domain gaps` |
@@ -198,6 +199,15 @@ Wait for the author's choice. If Option B, provide the full command and end.
 
 # Diagnose scoped to an act
 ./storyforge hone --diagnose --act 2
+
+# Autonomous loop — registries once, briefs until stable, gaps once
+./storyforge hone --loop
+
+# Loop with max 3 iterations
+./storyforge hone --loop --max-loops 3
+
+# Loop scoped to an act
+./storyforge hone --loop --act 2
 ```
 
 ## Step 6: Review Results

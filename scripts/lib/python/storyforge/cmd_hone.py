@@ -54,6 +54,10 @@ def parse_args(argv):
                         help='Read-only assessment (structural scoring + brief quality + gaps)')
     parser.add_argument('--dry-run', action='store_true',
                         help='Show what would change without modifying files')
+    parser.add_argument('--loop', action='store_true',
+                        help='Autonomous convergence loop: registries once, briefs until stable, gaps once')
+    parser.add_argument('--max-loops', type=int, default=5,
+                        help='Maximum brief iterations in --loop mode (default: 5)')
     return parser.parse_args(argv)
 
 
@@ -71,6 +75,18 @@ def main(argv=None):
         os.environ['STORYFORGE_COACHING'] = args.coaching
     coaching = args.coaching or get_coaching_level(project_dir)
 
+    # Validate --loop incompatibilities
+    if args.loop:
+        if args.diagnose:
+            log('ERROR: --loop and --diagnose are incompatible')
+            sys.exit(1)
+        if args.dry_run:
+            log('ERROR: --loop and --dry-run are incompatible')
+            sys.exit(1)
+        if args.domain:
+            log('ERROR: --loop and --domain are incompatible (loop controls sequencing)')
+            sys.exit(1)
+
     # Build domain list
     domains = _resolve_domains(args)
 
@@ -87,7 +103,9 @@ def main(argv=None):
     log('============================================')
     log('Storyforge Hone')
     log(f'Project: {title}')
-    if args.diagnose:
+    if args.loop:
+        log(f'Mode: loop (max {args.max_loops} iterations)')
+    elif args.diagnose:
         log('Mode: diagnose (read-only)')
     else:
         log(f'Domains: {" ".join(domains)}')
@@ -100,6 +118,11 @@ def main(argv=None):
 
     # Scene filter
     scene_filter = _resolve_scene_filter(args, ref_dir)
+
+    if args.loop:
+        _run_loop(ref_dir, project_dir, log_dir, model, coaching,
+                  scene_filter, args.threshold, args.max_loops)
+        return
 
     if args.diagnose:
         _run_diagnose(ref_dir, project_dir, scene_filter)
@@ -285,6 +308,113 @@ def _run_gaps_domain(ref_dir: str, project_dir: str,
 
     if gap_count > 0:
         log(f'  ({gap_count} remaining gaps require storyforge-elaborate --gap-fill)')
+
+
+def _count_brief_issues(ref_dir: str, scene_filter: list[str] | None) -> dict:
+    """Count brief issues by type. Returns {'total': N, 'abstract': N, ...}."""
+    from storyforge.elaborate import _read_csv_as_map
+    from storyforge.hone import detect_brief_issues
+
+    briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    issues = detect_brief_issues(briefs, scenes, scene_filter)
+
+    by_type: dict[str, int] = {}
+    for i in issues:
+        by_type[i['issue']] = by_type.get(i['issue'], 0) + 1
+
+    return {
+        'total': len(issues),
+        'scenes': len(set(i['scene_id'] for i in issues)),
+        'abstract': by_type.get('abstract', 0),
+        'overspecified': by_type.get('overspecified', 0),
+        'verbose': by_type.get('verbose', 0),
+    }
+
+
+def _log_brief_counts(counts: dict, prefix: str = '') -> None:
+    """Log brief issue counts in a consistent format."""
+    log(f'{prefix}{counts["total"]} brief issues across {counts["scenes"]} scenes '
+        f'(abstract: {counts["abstract"]}, overspecified: {counts["overspecified"]}, '
+        f'verbose: {counts["verbose"]})')
+
+
+def _run_loop(ref_dir: str, project_dir: str, log_dir: str, model: str,
+              coaching: str, scene_filter: list[str] | None,
+              threshold: float, max_loops: int) -> None:
+    """Intelligent convergence loop: registries once, briefs until stable, gaps once."""
+    from storyforge.hone import hone_briefs
+
+    # Step 1: Baseline
+    log('\n=== Baseline ===')
+    baseline = _count_brief_issues(ref_dir, scene_filter)
+    _log_brief_counts(baseline, '  ')
+
+    # Step 2: Registries (once)
+    log('\n=== Registries (one pass) ===')
+    _run_domain('registries', ref_dir, project_dir, log_dir, model, coaching,
+                scene_filter, threshold, dry_run=False)
+
+    # Step 3: Briefs loop
+    log('\n=== Briefs (convergence loop) ===')
+    prev_total = baseline['total']
+
+    for iteration in range(1, max_loops + 1):
+        counts = _count_brief_issues(ref_dir, scene_filter)
+        log(f'\n--- Iteration {iteration}/{max_loops} ---')
+        _log_brief_counts(counts, '  ')
+
+        if counts['total'] == 0:
+            log('  No issues remaining — done')
+            break
+
+        if counts['total'] >= prev_total and iteration > 1:
+            log(f'  Issue count did not decrease ({counts["total"]} >= {prev_total}) — converged')
+            break
+
+        prev_total = counts['total']
+
+        result = hone_briefs(
+            ref_dir, project_dir,
+            scene_ids=scene_filter,
+            threshold=threshold,
+            model=model,
+            log_dir=log_dir,
+            coaching_level=coaching,
+            dry_run=False,
+        )
+
+        rewritten = result.get('scenes_rewritten', 0)
+        fields = result.get('fields_rewritten', 0)
+        log(f'  Rewritten: {rewritten} scenes, {fields} fields')
+
+        if rewritten > 0:
+            commit_and_push(project_dir,
+                            f'Hone: briefs loop {iteration} — {rewritten} scenes concretized ({fields} fields)',
+                            ['reference/', 'working/'])
+
+        if rewritten == 0:
+            log('  Nothing rewritten — converged')
+            break
+    else:
+        log(f'\n  Reached max iterations ({max_loops})')
+
+    # Step 4: Gaps (once)
+    log('\n=== Gaps (one pass) ===')
+    _run_domain('gaps', ref_dir, project_dir, log_dir, model, coaching,
+                scene_filter, threshold, dry_run=False)
+
+    # Step 5: Final summary
+    final = _count_brief_issues(ref_dir, scene_filter)
+    log('\n============================================')
+    log('Hone loop complete')
+    log(f'  Before: {baseline["total"]} brief issues')
+    log(f'  After:  {final["total"]} brief issues')
+    improved = baseline['total'] - final['total']
+    if baseline['total'] > 0:
+        pct = int(improved / baseline['total'] * 100)
+        log(f'  Improved: {improved} issues resolved ({pct}%)')
+    log('============================================')
 
 
 def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None) -> None:

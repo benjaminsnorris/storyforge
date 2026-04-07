@@ -8,6 +8,7 @@ Usage:
     storyforge revise                 # Start from first pending pass
     storyforge revise 3               # Start from pass number 3 (1-indexed)
     storyforge revise --polish        # Craft-only polish plan
+    storyforge revise --polish --loop # Score → polish → re-score until stable
     storyforge revise --naturalness   # 3-pass AI pattern removal
     storyforge revise --structural    # CSV-only from structural proposals
     storyforge revise --dry-run       # Print prompts only
@@ -25,7 +26,7 @@ import time
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field,
     select_model, select_revision_model, get_coaching_level,
-    install_signal_handlers,
+    install_signal_handlers, get_plugin_dir,
 )
 from storyforge.costs import estimate_cost, log_operation, print_summary
 from storyforge.git import (
@@ -60,6 +61,10 @@ def parse_args(argv):
                         help='Auto-generate craft-only polish plan')
     parser.add_argument('--coaching', choices=['full', 'coach', 'strict'],
                         help='Override coaching level')
+    parser.add_argument('--loop', action='store_true',
+                        help='Autonomous convergence loop: score → polish → re-score until stable (requires --polish)')
+    parser.add_argument('--max-loops', type=int, default=5,
+                        help='Maximum iterations in --loop mode (default: 5)')
     parser.add_argument('pass_num', nargs='?', type=int, default=0,
                         help='Start from this pass number (1-indexed; default: first pending)')
     return parser.parse_args(argv)
@@ -255,6 +260,386 @@ def _generate_structural_plan(project_dir, plan_file):
 
 
 # ============================================================================
+# Polish convergence loop
+# ============================================================================
+
+def _read_diagnosis(cycle_dir: str) -> list[dict]:
+    """Read diagnosis.csv from a scoring cycle dir. Returns list of row dicts."""
+    diag_file = os.path.join(cycle_dir, 'diagnosis.csv')
+    if not os.path.isfile(diag_file):
+        return []
+    rows = []
+    with open(diag_file) as f:
+        reader = csv.DictReader(f, delimiter='|')
+        for row in reader:
+            rows.append(row)
+    return rows
+
+
+def _summarize_diagnosis(diag_rows: list[dict]) -> dict:
+    """Summarize diagnosis into counts and key metrics."""
+    high = [r for r in diag_rows if r.get('priority') == 'high' and r.get('scale') == 'scene']
+    medium = [r for r in diag_rows if r.get('priority') == 'medium' and r.get('scale') == 'scene']
+    scene_rows = [r for r in diag_rows if r.get('scale') == 'scene']
+
+    avg_scores = []
+    for r in scene_rows:
+        try:
+            avg_scores.append(float(r.get('avg_score', '0')))
+        except ValueError:
+            pass
+
+    overall_avg = sum(avg_scores) / len(avg_scores) if avg_scores else 0.0
+
+    return {
+        'high_count': len(high),
+        'medium_count': len(medium),
+        'high_principles': [r['principle'] for r in high],
+        'medium_principles': [r['principle'] for r in medium],
+        'overall_avg': overall_avg,
+        'scene_principle_count': len(scene_rows),
+    }
+
+
+def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> list[dict]:
+    """Generate a polish plan targeted at high/medium priority principles from diagnosis."""
+    high = [r for r in diag_rows if r.get('priority') == 'high' and r.get('scale') == 'scene']
+    medium = [r for r in diag_rows if r.get('priority') == 'medium' and r.get('scale') == 'scene']
+
+    targets = high + medium
+    if not targets:
+        # Nothing specific to target — fall back to general polish
+        return _generate_polish_plan(plan_file)
+
+    # Build guidance from diagnosis findings
+    guidance_parts = []
+    for row in targets:
+        principle = row['principle'].replace('_', ' ')
+        avg = row.get('avg_score', '?')
+        worst = row.get('worst_items', '')
+        prio = row.get('priority', 'medium')
+        part = f'{principle} (avg {avg}, {prio})'
+        if worst:
+            scenes = worst.split(';')[:3]
+            part += f' — weakest in: {", ".join(scenes)}'
+        guidance_parts.append(part)
+
+    guidance = (
+        'Diagnosis-driven polish. Priority principles to improve:\n'
+        + '\n'.join(f'  - {g}' for g in guidance_parts)
+        + '\nFollow the voice guide strictly. Preserve all plot, character, and continuity.'
+    )
+
+    worst_scenes = set()
+    for row in targets:
+        for sid in row.get('worst_items', '').split(';'):
+            if sid.strip():
+                worst_scenes.add(sid.strip())
+
+    rows = [{
+        'pass': '1',
+        'name': 'targeted-polish',
+        'purpose': f'Address {len(high)} high and {len(medium)} medium priority craft principles',
+        'scope': 'full',
+        'targets': ';'.join(sorted(worst_scenes)) if worst_scenes else '',
+        'guidance': guidance,
+        'protection': 'voice-quality',
+        'findings': 'polish',
+        'status': 'pending',
+        'model_tier': 'opus',
+        'fix_location': 'craft',
+    }]
+    _write_csv_plan(plan_file, rows)
+    return rows
+
+
+def _run_lightweight_score(project_dir: str, scene_ids: list[str],
+                           parallel: int = 6) -> tuple[str, list[dict]]:
+    """Run scene-level scoring only (no branch/PR) and return (cycle_dir, diagnosis_rows).
+
+    This is a lightweight path for the polish loop — scores scenes, generates
+    diagnosis, but skips branch creation, PR, act/character/genre scoring.
+    """
+    from storyforge.scoring import (
+        build_evaluation_criteria, build_weighted_text,
+        init_craft_weights, generate_diagnosis, merge_score_files,
+    )
+
+    plugin_dir = get_plugin_dir()
+    scores_base = os.path.join(project_dir, 'working', 'scores')
+    log_dir = os.path.join(project_dir, 'working', 'logs')
+
+    # Determine cycle
+    highest = 0
+    if os.path.isdir(scores_base):
+        for name in os.listdir(scores_base):
+            if name.startswith('cycle-'):
+                try:
+                    highest = max(highest, int(name.removeprefix('cycle-')))
+                except ValueError:
+                    pass
+    cycle = highest + 1
+    cycle_dir = os.path.join(scores_base, f'cycle-{cycle}')
+    os.makedirs(cycle_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+
+    # Initialize weights
+    init_craft_weights(project_dir, plugin_dir)
+    weights_file = os.path.join(project_dir, 'working', 'craft-weights.csv')
+
+    # Load scoring templates
+    prompts_dir = os.path.join(plugin_dir, 'scripts', 'prompts', 'scoring')
+    diagnostics_csv = os.path.join(plugin_dir, 'references', 'diagnostics.csv')
+    guide_file = os.path.join(plugin_dir, 'references', 'principle-guide.md')
+    eval_template_file = os.path.join(prompts_dir, 'scene-evaluation.md')
+
+    with open(eval_template_file) as f:
+        eval_template = f.read()
+
+    evaluation_criteria = build_evaluation_criteria(diagnostics_csv, guide_file)
+    weighted_text_str = build_weighted_text(weights_file, exclude_section='narrative')
+
+    # Use sonnet for speed in loop scoring
+    eval_model = select_model('evaluation')
+
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    intent_csv = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+
+    log(f'  Scoring {len(scene_ids)} scenes (cycle {cycle}, model: {eval_model})...')
+
+    # Import scoring internals
+    from storyforge.cmd_score import _score_direct, _build_scene_prompt, _parse_scene_evaluation
+
+    import time as _time
+    scored, failed = _score_direct(
+        scene_ids, eval_model, eval_template, evaluation_criteria,
+        weighted_text_str, metadata_csv, intent_csv, scenes_dir,
+        cycle_dir, log_dir, diagnostics_csv, plugin_dir,
+        parallel, _time.time(),
+    )
+
+    log(f'  Scored: {scored}, failed: {failed}')
+
+    # Generate diagnosis
+    prev_dir = ''
+    if highest > 0:
+        prev_dir = os.path.join(scores_base, f'cycle-{highest}')
+
+    generate_diagnosis(cycle_dir, prev_dir or '-', weights_file)
+
+    # Update latest symlink
+    latest_link = os.path.join(scores_base, 'latest')
+    if os.path.islink(latest_link):
+        os.remove(latest_link)
+    os.symlink(f'cycle-{cycle}', latest_link)
+
+    diag_rows = _read_diagnosis(cycle_dir)
+    return cycle_dir, diag_rows
+
+
+def _run_polish_loop(project_dir: str, max_loops: int,
+                     coaching_override: str | None) -> None:
+    """Score → polish → re-score convergence loop."""
+    from storyforge.common import get_coaching_level, read_yaml_field
+    from storyforge.git import create_branch, ensure_branch_pushed, commit_and_push
+    from storyforge.scene_filter import build_scene_list
+
+    if coaching_override:
+        os.environ['STORYFORGE_COACHING'] = coaching_override
+
+    title = read_yaml_field('project.title', project_dir) or '(untitled)'
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+
+    # Build scene list (only drafted scenes)
+    all_ids = build_scene_list(metadata_csv)
+    scene_ids = [sid for sid in all_ids
+                 if os.path.isfile(os.path.join(scenes_dir, f'{sid}.md'))]
+
+    if not scene_ids:
+        log('ERROR: No drafted scenes found.')
+        sys.exit(1)
+
+    # Create branch once for the whole loop
+    create_branch('revise', project_dir)
+    ensure_branch_pushed(project_dir)
+
+    log('============================================')
+    log(f'Storyforge Polish Loop — {title}')
+    log(f'Scenes: {len(scene_ids)}')
+    log(f'Max iterations: {max_loops}')
+    log('============================================')
+
+    csv_plan_file = os.path.join(project_dir, 'working', 'plans', 'revision-plan.csv')
+    prev_avg = 0.0
+    baseline_summary = None
+
+    for iteration in range(1, max_loops + 1):
+        log(f'\n=== Iteration {iteration}/{max_loops}: Score ===')
+
+        cycle_dir, diag_rows = _run_lightweight_score(project_dir, scene_ids)
+        summary = _summarize_diagnosis(diag_rows)
+
+        if iteration == 1:
+            baseline_summary = summary
+
+        log(f'  Overall avg: {summary["overall_avg"]:.2f}')
+        log(f'  High priority: {summary["high_count"]} principles')
+        log(f'  Medium priority: {summary["medium_count"]} principles')
+        if summary['high_principles']:
+            log(f'    High: {", ".join(p.replace("_", " ") for p in summary["high_principles"])}')
+
+        # Convergence check: no actionable issues
+        if summary['high_count'] == 0 and summary['medium_count'] == 0:
+            log('  No high or medium priority issues — converged')
+            break
+
+        # Convergence check: scores stopped improving
+        if iteration > 1 and summary['overall_avg'] <= prev_avg:
+            log(f'  Overall avg did not improve ({summary["overall_avg"]:.2f} <= {prev_avg:.2f}) — converged')
+            break
+
+        prev_avg = summary['overall_avg']
+
+        # Generate targeted plan from diagnosis
+        log(f'\n=== Iteration {iteration}/{max_loops}: Polish ===')
+        plan_rows = _generate_targeted_polish_plan(csv_plan_file, diag_rows)
+
+        # Execute the single polish pass
+        # Reset status to pending
+        plan_rows[0]['status'] = 'pending'
+        _write_csv_plan(csv_plan_file, plan_rows)
+
+        # Run the pass through the standard execution path
+        _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration)
+
+    else:
+        log(f'\n  Reached max iterations ({max_loops})')
+
+    # Final score for summary
+    log(f'\n=== Final Score ===')
+    _, final_diag = _run_lightweight_score(project_dir, scene_ids)
+    final_summary = _summarize_diagnosis(final_diag)
+
+    log('\n============================================')
+    log('Polish loop complete')
+    if baseline_summary:
+        log(f'  Before: avg {baseline_summary["overall_avg"]:.2f}, '
+            f'{baseline_summary["high_count"]} high / {baseline_summary["medium_count"]} medium priority')
+    log(f'  After:  avg {final_summary["overall_avg"]:.2f}, '
+        f'{final_summary["high_count"]} high / {final_summary["medium_count"]} medium priority')
+    if baseline_summary and baseline_summary['overall_avg'] > 0:
+        delta = final_summary['overall_avg'] - baseline_summary['overall_avg']
+        log(f'  Improvement: {delta:+.2f} avg score')
+    log('============================================')
+
+    commit_and_push(project_dir, 'Polish: loop complete', ['working/'])
+
+
+def _execute_single_pass(project_dir: str, csv_plan_file: str,
+                         plan_rows: list[dict], iteration: int) -> None:
+    """Execute a single revision pass from a plan. Subset of main pass loop."""
+    from storyforge.common import select_revision_model, get_coaching_level
+    from storyforge.git import commit_and_push
+    from storyforge.api import invoke_to_file, extract_text
+
+    pass_name = plan_rows[0].get('name', 'polish')
+    pass_purpose = plan_rows[0].get('purpose', '')
+    pass_scope = plan_rows[0].get('scope', 'full')
+    guidance = plan_rows[0].get('guidance', '')
+    fix_location = plan_rows[0].get('fix_location', 'craft')
+
+    log(f'  Pass: {pass_name}')
+    log(f'  Purpose: {pass_purpose[:120]}...' if len(pass_purpose) > 120 else f'  Purpose: {pass_purpose}')
+
+    # Mark in_progress
+    _update_pass_field(plan_rows, 1, 'status', 'in_progress', csv_plan_file)
+
+    # Build prompt via the revision module (subprocess)
+    plugin_dir = get_plugin_dir()
+    revision_module = os.path.join(plugin_dir, 'scripts', 'lib', 'python', 'storyforge', 'revision.py')
+
+    import subprocess
+    cmd = [
+        sys.executable, revision_module, 'build-prompt',
+        '--project-dir', project_dir,
+        '--pass-name', pass_name,
+        '--pass-purpose', pass_purpose,
+        '--scope', pass_scope,
+        '--guidance', guidance,
+        '--protection', plan_rows[0].get('protection', ''),
+        '--findings', plan_rows[0].get('findings', ''),
+    ]
+
+    targets = plan_rows[0].get('targets', '')
+    if targets:
+        cmd.extend(['--targets', targets])
+
+    log(f'  Building revision prompt...')
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        log(f'  ERROR building prompt: {result.stderr[:500]}')
+        return
+
+    prompt = result.stdout
+
+    # Select model and invoke API
+    pass_model = select_revision_model(pass_name, pass_purpose)
+    log_dir = os.path.join(project_dir, 'working', 'logs')
+    step_log = os.path.join(log_dir, f'loop-{iteration}-{pass_name}.json')
+
+    log(f'  Invoking API (model: {pass_model})...')
+    try:
+        invoke_to_file(prompt, pass_model, step_log, max_tokens=32768,
+                       label=f'polish loop {iteration} ({pass_name})')
+    except Exception as e:
+        log(f'  API call failed: {e}')
+        return
+
+    # Extract scenes from response
+    log(f'  Extracting revised scenes...')
+    parsing_module = os.path.join(plugin_dir, 'scripts', 'lib', 'python', 'storyforge', 'parsing.py')
+    subprocess.run(
+        [sys.executable, parsing_module, 'extract-scenes',
+         '--project-dir', project_dir, '--log-file', step_log],
+        capture_output=True, text=True,
+    )
+
+    # Update word counts
+    _update_word_counts_from_dir(project_dir)
+
+    # Mark completed
+    _update_pass_field(plan_rows, 1, 'status', 'completed', csv_plan_file)
+
+    # Commit
+    import time as _time
+    elapsed = 0  # We don't track per-pass time in loop mode
+    commit_and_push(
+        project_dir,
+        f'Polish: loop iteration {iteration} — {pass_name}',
+        ['scenes/', 'reference/', 'working/'],
+    )
+
+
+def _update_word_counts_from_dir(project_dir: str) -> None:
+    """Update word counts in scenes.csv from scene files."""
+    from storyforge.elaborate import _read_csv, _write_csv, _FILE_MAP
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+
+    rows = _read_csv(metadata_csv)
+    for row in rows:
+        scene_file = os.path.join(scenes_dir, f'{row["id"]}.md')
+        if os.path.isfile(scene_file):
+            with open(scene_file) as f:
+                wc = len(f.read().split())
+            row['word_count'] = str(wc)
+
+    _write_csv(metadata_csv, rows, _FILE_MAP['scenes.csv'])
+
+
+# ============================================================================
 # Usage logging helper
 # ============================================================================
 
@@ -400,6 +785,23 @@ def main(argv=None):
     if mode_count > 1:
         print('ERROR: --structural, --polish, and --naturalness are mutually exclusive.', file=sys.stderr)
         sys.exit(1)
+
+    # Validate --loop
+    if args.loop:
+        if not args.polish:
+            print('ERROR: --loop requires --polish', file=sys.stderr)
+            sys.exit(1)
+        if args.dry_run:
+            print('ERROR: --loop and --dry-run are incompatible', file=sys.stderr)
+            sys.exit(1)
+        if args.interactive:
+            print('ERROR: --loop and --interactive are incompatible', file=sys.stderr)
+            sys.exit(1)
+
+    # Loop mode — takes over execution entirely
+    if args.loop:
+        _run_polish_loop(project_dir, args.max_loops, args.coaching)
+        return
 
     # Auto-generate plans
     if args.polish:
