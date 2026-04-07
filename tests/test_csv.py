@@ -45,8 +45,8 @@ class TestGetCsvField:
     def test_nonexistent_field(self, meta_csv):
         assert _capture(csv_cli.get_field, meta_csv, 'act1-sc01', 'nonexistent') == ''
 
-    def test_missing_file(self):
-        assert _capture(csv_cli.get_field, '/tmp/nonexistent-csv-12345', 'act1-sc01', 'title') == ''
+    def test_missing_file(self, tmp_path):
+        assert _capture(csv_cli.get_field, str(tmp_path / 'nonexistent.csv'), 'act1-sc01', 'title') == ''
 
 
 class TestGetCsvRow:
@@ -69,8 +69,8 @@ class TestGetCsvRow:
     def test_nonexistent_id(self, meta_csv):
         assert _capture(csv_cli.get_row, meta_csv, 'no-such-id') == ''
 
-    def test_missing_file(self):
-        assert _capture(csv_cli.get_row, '/tmp/nonexistent-csv-12345', 'act1-sc01') == ''
+    def test_missing_file(self, tmp_path):
+        assert _capture(csv_cli.get_row, str(tmp_path / 'nonexistent.csv'), 'act1-sc01') == ''
 
 
 class TestGetCsvColumn:
@@ -92,8 +92,8 @@ class TestGetCsvColumn:
     def test_nonexistent_column(self, meta_csv):
         assert _capture(csv_cli.get_column, meta_csv, 'nonexistent') == ''
 
-    def test_missing_file(self):
-        assert _capture(csv_cli.get_column, '/tmp/nonexistent-csv-12345', 'title') == ''
+    def test_missing_file(self, tmp_path):
+        assert _capture(csv_cli.get_column, str(tmp_path / 'nonexistent.csv'), 'title') == ''
 
 
 class TestListCsvIds:
@@ -113,8 +113,8 @@ class TestListCsvIds:
         first = result.strip().split('\n')[0].strip()
         assert first == 'act1-sc01'
 
-    def test_missing_file(self):
-        assert _capture(csv_cli.list_ids, '/tmp/nonexistent-csv-12345') == ''
+    def test_missing_file(self, tmp_path):
+        assert _capture(csv_cli.list_ids, str(tmp_path / 'nonexistent.csv')) == ''
 
 
 class TestUpdateCsvField:
@@ -148,9 +148,9 @@ class TestUpdateCsvField:
             header = f.readline()
         assert 'id|seq|title' in header
 
-    def test_missing_file_noop(self):
+    def test_missing_file_noop(self, tmp_path):
         # Should not raise
-        csv_cli.update_field('/tmp/nonexistent-csv-12345', 'act1-sc01', 'word_count', '999')
+        csv_cli.update_field(str(tmp_path / 'nonexistent.csv'), 'act1-sc01', 'word_count', '999')
 
 
 class TestAppendCsvRow:
@@ -178,8 +178,8 @@ class TestAppendCsvRow:
         csv_cli.append_row(tmp_csv, 'act3-sc01|5|The Final Descent|3|Dorren Hayle|The Chasm|5|night||plot|planned|0|3000')
         assert _capture(csv_cli.get_field, tmp_csv, 'act1-sc01', 'title') == 'The Finest Cartographer'
 
-    def test_missing_file_noop(self):
-        csv_cli.append_row('/tmp/nonexistent-csv-12345', 'test|row')
+    def test_missing_file_noop(self, tmp_path):
+        csv_cli.append_row(str(tmp_path / 'nonexistent.csv'), 'test|row')
 
 
 class TestCrossFileIntent:

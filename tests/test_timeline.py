@@ -1,28 +1,41 @@
 """Tests for timeline functions (migrated from test-timeline.sh)."""
 
+import io
 import os
 import shutil
+import sys
 
-from storyforge.csv_cli import get_field as get_csv_field, update_field as update_csv_field
+import storyforge.csv_cli as csv_cli
+
+
+def _capture(fn, *args, **kwargs):
+    """Call a csv_cli function and return its stdout output, stripped."""
+    old = sys.stdout
+    sys.stdout = buf = io.StringIO()
+    try:
+        fn(*args, **kwargs)
+    finally:
+        sys.stdout = old
+    return buf.getvalue().rstrip('\n')
 
 
 class TestTimelineCsvOperations:
     def test_read_existing_timeline_day(self, meta_csv):
-        assert get_csv_field(meta_csv, 'act1-sc01', 'timeline_day') == '1'
+        assert _capture(csv_cli.get_field, meta_csv, 'act1-sc01', 'timeline_day') == '1'
 
     def test_update_timeline_day(self, meta_csv, tmp_path):
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        update_csv_field(tmp_csv, 'act2-sc01', 'timeline_day', '5')
-        assert get_csv_field(tmp_csv, 'act2-sc01', 'timeline_day') == '5'
+        csv_cli.update_field(tmp_csv, 'act2-sc01', 'timeline_day', '5')
+        assert _capture(csv_cli.get_field, tmp_csv, 'act2-sc01', 'timeline_day') == '5'
 
     def test_overwrite_existing(self, meta_csv, tmp_path):
         tmp_csv = str(tmp_path / 'scenes.csv')
         shutil.copy(meta_csv, tmp_csv)
 
-        update_csv_field(tmp_csv, 'act1-sc01', 'timeline_day', '99')
-        assert get_csv_field(tmp_csv, 'act1-sc01', 'timeline_day') == '99'
+        csv_cli.update_field(tmp_csv, 'act1-sc01', 'timeline_day', '99')
+        assert _capture(csv_cli.get_field, tmp_csv, 'act1-sc01', 'timeline_day') == '99'
 
 
 class TestTimelineParsing:

@@ -25,10 +25,9 @@ def test_read_yaml_field_project_target_words(fixture_dir):
 
 def test_read_yaml_field_phase(fixture_dir):
     """Top-level phase field."""
-    import yaml
-    with open(os.path.join(fixture_dir, 'storyforge.yaml')) as f:
-        data = yaml.safe_load(f)
-    assert data.get('phase') == 'drafting'
+    from storyforge.project import read_yaml_field
+    result = read_yaml_field(os.path.join(fixture_dir, 'storyforge.yaml'), 'phase')
+    assert result == 'drafting'
 
 
 def test_check_file_exists_present(fixture_dir):
