@@ -2,7 +2,7 @@
 # costs.sh — Token usage tracking and cost calculation for Storyforge
 #
 # Tracks Claude API token usage, calculates costs, forecasts upcoming
-# operations, and prints summaries.  Depends on csv.sh for append_csv_row.
+# operations, and prints summaries.  Uses append_csv_row from common.sh.
 #
 # Source this file from your script; do not execute it directly.
 

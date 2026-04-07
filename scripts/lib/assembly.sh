@@ -2,7 +2,7 @@
 # assembly.sh — Library functions for chapter assembly and book production
 #
 # Source this file from storyforge-assemble; do not execute directly.
-# Requires common.sh to be sourced first (for csv.sh, read_yaml_field).
+# Requires common.sh to be sourced first (for CSV functions, read_yaml_field).
 
 # ============================================================================
 # Chapter map parsing (reads reference/chapter-map.csv)

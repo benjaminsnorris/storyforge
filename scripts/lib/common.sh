@@ -599,7 +599,15 @@ get_plugin_dir() {
 
 # Source companion libraries that live alongside common.sh
 _sf_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-[[ -f "${_sf_lib_dir}/csv.sh" ]] && source "${_sf_lib_dir}/csv.sh"
+# CSV functions — thin wrappers around Python csv_cli module
+_sf_csv_py="${_sf_lib_dir}/python"
+get_csv_field() { PYTHONPATH="$_sf_csv_py" python3 -m storyforge.csv_cli get-field "$@"; }
+get_csv_row() { PYTHONPATH="$_sf_csv_py" python3 -m storyforge.csv_cli get-row "$@"; }
+get_csv_column() { PYTHONPATH="$_sf_csv_py" python3 -m storyforge.csv_cli get-column "$@"; }
+list_csv_ids() { PYTHONPATH="$_sf_csv_py" python3 -m storyforge.csv_cli list-ids "$@"; }
+update_csv_field() { PYTHONPATH="$_sf_csv_py" python3 -m storyforge.csv_cli update-field "$@"; }
+append_csv_row() { PYTHONPATH="$_sf_csv_py" python3 -m storyforge.csv_cli append-row "$@"; }
+renumber_scenes() { PYTHONPATH="$_sf_csv_py" python3 -m storyforge.csv_cli renumber-seq "$@"; }
 [[ -f "${_sf_lib_dir}/costs.sh" ]] && source "${_sf_lib_dir}/costs.sh"
 [[ -f "${_sf_lib_dir}/api.sh" ]] && source "${_sf_lib_dir}/api.sh"
 [[ -f "${_sf_lib_dir}/scene-filter.sh" ]] && source "${_sf_lib_dir}/scene-filter.sh"

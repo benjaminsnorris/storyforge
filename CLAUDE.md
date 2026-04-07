@@ -40,7 +40,7 @@ Before writing new code, check if a shared function already exists. Duplicating 
 - `register_child_pid($!)` / `unregister_child_pid($pid)` — track background processes for interrupt handling
 - `begin_healing_zone(desc)` / `end_healing_zone` — error recovery around Claude invocations
 
-**csv.sh:**
+**CSV functions** (Python-backed via `storyforge.csv_cli`, wrappers in common.sh):
 - `get_csv_field(file, id, field, [key_column])` — read one cell
 - `get_csv_row(file, id, [key_column])` — read one row
 - `get_csv_column(file, field)` — read one column

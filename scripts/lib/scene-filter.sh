@@ -6,7 +6,7 @@
 #   2. Filtering by --scenes, --act, --from-seq (with range support)
 #
 # Source this file via common.sh; do not execute it directly.
-# Requires csv.sh to be loaded first (for get_csv_field, list_csv_ids).
+# Requires common.sh to be loaded first (for get_csv_field, list_csv_ids).
 
 # ============================================================================
 # build_scene_list — populate ALL_SCENE_IDS from metadata.csv

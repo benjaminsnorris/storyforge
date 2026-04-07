@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-csv.sh — Tests for CSV library functions (scripts/lib/csv.sh)
+# test-csv.sh — Tests for CSV functions (Python-backed via storyforge.csv_cli)
 #
 # Run via: ./tests/run-tests.sh
 # Depends on: FIXTURE_DIR, PROJECT_DIR, assertion functions (from run-tests.sh)

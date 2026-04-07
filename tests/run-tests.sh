@@ -231,7 +231,6 @@ echo "Fixture: ${FIXTURE_DIR}"
 # Source the libraries under test
 source "${PLUGIN_DIR}/scripts/lib/common.sh"
 source "${PLUGIN_DIR}/scripts/lib/assembly.sh"
-source "${PLUGIN_DIR}/scripts/lib/csv.sh"
 source "${PLUGIN_DIR}/scripts/lib/costs.sh"
 
 # Set PROJECT_DIR to the fixture
