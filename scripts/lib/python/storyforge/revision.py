@@ -114,7 +114,7 @@ def resolve_scope(scope: str, project_dir: str) -> list[str]:
     rows = _read_pipe_csv(csv_path)
 
     # Filter out cut scenes and sort by seq
-    active_rows = [r for r in rows if r.get('type', '').strip() != 'cut']
+    active_rows = [r for r in rows if (r.get('type') or '').strip() != 'cut']
     active_rows.sort(key=lambda r: int(r.get('seq', '0').strip() or '0'))
 
     # Normalize inline list syntax: [30, 31] -> 30,31

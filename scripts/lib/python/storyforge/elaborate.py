@@ -471,7 +471,7 @@ def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
         if os.path.isfile(reg_path):
             for row in _read_csv(reg_path):
                 rid = row.get('id', '').strip()
-                rtype = row.get('type', '').strip()
+                rtype = (row.get('type') or '').strip()
                 if rid and rtype:
                     registry_types[rid] = rtype
     sorted_ids = sorted(scenes_map.keys(),
