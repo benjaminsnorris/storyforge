@@ -36,6 +36,7 @@ from storyforge.git import (
 from storyforge.api import (
     invoke_api, invoke_to_file, extract_text, extract_text_from_file,
     extract_usage, calculate_cost_from_usage, get_api_key,
+    REVISION_TIMEOUT,
 )
 from storyforge.cli import apply_coaching_override
 
@@ -896,7 +897,8 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     log(f'  Invoking API (model: {pass_model})...')
     try:
         invoke_to_file(prompt, pass_model, step_log, max_tokens=32768,
-                       label=f'polish loop {iteration} ({pass_name})')
+                       label=f'polish loop {iteration} ({pass_name})',
+                       timeout=REVISION_TIMEOUT)
     except Exception as e:
         log(f'  API call failed: {e}')
         return
@@ -1416,7 +1418,8 @@ Rules:
             log(f'  Invoking API for revision (model: {pass_model})...')
             try:
                 response = invoke_to_file(prompt, pass_model, step_log, max_tokens=32768,
-                                         label=f'pass {pass_num}/{total_passes} ({pass_name})')
+                                         label=f'pass {pass_num}/{total_passes} ({pass_name})',
+                                         timeout=REVISION_TIMEOUT)
                 exit_code = 0
             except Exception as e:
                 log(f'  API call failed: {e}')

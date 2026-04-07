@@ -19,6 +19,7 @@ API_BASE = 'https://api.anthropic.com/v1'
 API_VERSION = '2023-06-01'
 HEARTBEAT_INTERVAL = 120  # seconds between status messages during API calls
 API_TIMEOUT = 600  # seconds before giving up on an API call (10 min)
+REVISION_TIMEOUT = 1800  # seconds for large revision calls (30 min)
 API_RETRIES = 2  # retry transient failures (timeouts, 5xx)
 
 
@@ -56,7 +57,8 @@ def get_api_key() -> str:
     return key
 
 
-def _api_request(path: str, body: dict | None = None, method: str = 'GET') -> dict:
+def _api_request(path: str, body: dict | None = None, method: str = 'GET',
+                 timeout: int = API_TIMEOUT) -> dict:
     """Make an authenticated API request."""
     url = f'{API_BASE}/{path}'
     headers = {
@@ -71,7 +73,7 @@ def _api_request(path: str, body: dict | None = None, method: str = 'GET') -> di
     last_err = None
     for attempt in range(1, API_RETRIES + 1):
         try:
-            with urlopen(req, timeout=API_TIMEOUT) as resp:
+            with urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode())
         except HTTPError as e:
             error_body = e.read().decode() if e.fp else ''
@@ -92,7 +94,8 @@ def _api_request(path: str, body: dict | None = None, method: str = 'GET') -> di
             raise RuntimeError(f'API request failed after {API_RETRIES} attempts: {e}') from last_err
 
 
-def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '') -> dict:
+def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
+           timeout: int = API_TIMEOUT) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
@@ -100,6 +103,7 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '') -> 
         model: Model ID (e.g., 'claude-opus-4-6').
         max_tokens: Maximum output tokens.
         label: Optional label for heartbeat messages (e.g., 'revision pass 3').
+        timeout: Socket timeout in seconds (default API_TIMEOUT).
 
     Returns:
         Full API response dict.
@@ -112,12 +116,13 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '') -> 
     heartbeat = _Heartbeat(label or model)
     heartbeat.start()
     try:
-        return _api_request('messages', body, method='POST')
+        return _api_request('messages', body, method='POST', timeout=timeout)
     finally:
         heartbeat.stop()
 
 
-def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096, label: str = '') -> dict:
+def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096, label: str = '',
+                   timeout: int = API_TIMEOUT) -> dict:
     """Call the API and write the response to a JSON file.
 
     Args:
@@ -126,25 +131,27 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
         log_file: Path to write the JSON response.
         max_tokens: Maximum output tokens.
         label: Optional label for heartbeat messages.
+        timeout: Socket timeout in seconds (default API_TIMEOUT).
 
     Returns:
         Full API response dict.
     """
-    response = invoke(prompt, model, max_tokens, label=label)
+    response = invoke(prompt, model, max_tokens, label=label, timeout=timeout)
     os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
     with open(log_file, 'w') as f:
         json.dump(response, f)
     return response
 
 
-def invoke_api(prompt: str, model: str, max_tokens: int = 4096, label: str = '') -> str:
+def invoke_api(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
+               timeout: int = API_TIMEOUT) -> str:
     """High-level convenience: invoke API and return text response.
 
     Returns empty string on failure (logs warning but doesn't raise).
     Used by git.py review phase, runner.py healing zones, and command modules.
     """
     try:
-        response = invoke(prompt, model, max_tokens, label=label)
+        response = invoke(prompt, model, max_tokens, label=label, timeout=timeout)
         return extract_text(response)
     except Exception as e:
         from storyforge.common import log
