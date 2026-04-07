@@ -45,12 +45,17 @@ _FILE_MAP = {
 # ============================================================================
 
 def _read_csv(path: str) -> list[dict[str, str]]:
-    """Read a pipe-delimited CSV into a list of dicts."""
+    """Read a pipe-delimited CSV into a list of dicts.
+
+    Coerces None values to '' so callers can safely call .strip() etc.
+    (csv.DictReader stores None when rows have fewer fields than headers.)
+    """
     if not os.path.exists(path):
         return []
     with open(path, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f, delimiter=DELIMITER)
-        return list(reader)
+        return [{k: (v if v is not None else '') for k, v in row.items()}
+                for row in reader]
 
 
 def _read_csv_as_map(path: str) -> dict[str, dict[str, str]]:

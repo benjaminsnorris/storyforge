@@ -86,7 +86,7 @@ def _read_csv_plan(plan_file):
     with open(plan_file) as f:
         reader = csv.DictReader(f, delimiter='|')
         for row in reader:
-            rows.append(row)
+            rows.append({k: (v if v is not None else '') for k, v in row.items()})
     return rows
 
 
@@ -204,6 +204,7 @@ def _generate_structural_plan(project_dir, plan_file):
     with open(proposals_file) as f:
         reader = csv.DictReader(f, delimiter='|')
         for row in reader:
+            row = {k: (v if v is not None else '') for k, v in row.items()}
             if row.get('status', '').strip() == 'pending':
                 proposals.append(row)
 
@@ -272,7 +273,7 @@ def _read_diagnosis(cycle_dir: str) -> list[dict]:
     with open(diag_file) as f:
         reader = csv.DictReader(f, delimiter='|')
         for row in reader:
-            rows.append(row)
+            rows.append({k: (v if v is not None else '') for k, v in row.items()})
     return rows
 
 

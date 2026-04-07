@@ -71,7 +71,7 @@ def _read_pipe_csv(csv_path: str) -> list[dict]:
     with open(csv_path) as f:
         reader = csv.DictReader(f, delimiter='|')
         for row in reader:
-            rows.append(row)
+            rows.append({k: (v if v is not None else '') for k, v in row.items()})
     return rows
 
 
