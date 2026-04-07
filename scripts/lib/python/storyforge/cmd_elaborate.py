@@ -54,8 +54,12 @@ def parse_args(argv):
         prog='storyforge elaborate',
         description='Run an elaboration stage.',
     )
-    parser.add_argument('--stage', type=str, required=True,
+    parser.add_argument('--stage', type=str, default=None,
                         help='Which elaboration stage to run (spine|architecture|map|briefs|gap-fill|mice-fill)')
+    # Accept stages as direct flags (e.g. --mice-fill, --gap-fill, --briefs)
+    for stage in sorted(VALID_STAGES):
+        parser.add_argument(f'--{stage}', action='store_true', dest=f'stage_{stage.replace("-", "_")}',
+                            help=argparse.SUPPRESS)
     parser.add_argument('--seed', type=str, default='',
                         help='Seed text for spine stage (overrides logline)')
     parser.add_argument('--dry-run', action='store_true',
@@ -65,7 +69,18 @@ def parse_args(argv):
     parser.add_argument('--coaching', type=str, default=None,
                         choices=['full', 'coach', 'strict'],
                         help='Override coaching level')
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+
+    # Resolve stage from direct flags if --stage not given
+    if not args.stage:
+        for stage in VALID_STAGES:
+            if getattr(args, f'stage_{stage.replace("-", "_")}', False):
+                args.stage = stage
+                break
+    if not args.stage:
+        parser.error('a stage is required: --stage STAGE or --STAGE (e.g. --mice-fill)')
+
+    return args
 
 
 # ============================================================================
