@@ -1512,3 +1512,162 @@ def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
         'scenes_updated': scenes_updated,
         'changes': changes,
     }
+
+
+# ============================================================================
+# MICE thread dormancy detection
+# ============================================================================
+
+_DORMANCY_THRESHOLD = 8  # scenes
+
+
+def detect_mice_dormancy(ref_dir: str) -> list[dict]:
+    """Detect MICE thread dormancy gaps.
+
+    For each thread in the registry, finds gaps > _DORMANCY_THRESHOLD
+    scenes between consecutive mentions.
+
+    Args:
+        ref_dir: Path to the reference/ directory.
+
+    Returns:
+        List of dicts: {thread_id, thread_name, thread_type, gap_size,
+                        before_scene, after_scene, gap_scenes: [scene_ids]}.
+    """
+    registry_path = os.path.join(ref_dir, 'mice-threads.csv')
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+
+    if not os.path.isfile(registry_path):
+        return []
+
+    registry = {r['id']: r for r in _read_csv(registry_path)}
+    scenes_map = _read_csv_as_map(scenes_path)
+    intent_map = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else {}
+
+    ordered_ids = sorted(
+        scenes_map.keys(),
+        key=lambda sid: int(scenes_map[sid].get('seq', 0) or 0)
+    )
+
+    # Build per-thread mention indices
+    thread_mentions = {}  # thread_id -> [scene_index]
+    for idx, sid in enumerate(ordered_ids):
+        mice = intent_map.get(sid, {}).get('mice_threads', '').strip()
+        if not mice:
+            continue
+        for entry in mice.split(';'):
+            entry = entry.strip()
+            if not entry:
+                continue
+            # Strip +/- prefix and type: prefix to get bare name
+            name = entry.lstrip('+-')
+            if ':' in name:
+                name = name.split(':', 1)[1]
+            if name in registry:
+                thread_mentions.setdefault(name, []).append(idx)
+
+    # Find gaps
+    results = []
+    for thread_id, indices in thread_mentions.items():
+        indices = sorted(set(indices))
+        if len(indices) < 2:
+            continue
+        for i in range(len(indices) - 1):
+            gap = indices[i + 1] - indices[i]
+            if gap > _DORMANCY_THRESHOLD:
+                gap_scene_ids = ordered_ids[indices[i] + 1:indices[i + 1]]
+                reg = registry.get(thread_id, {})
+                results.append({
+                    'thread_id': thread_id,
+                    'thread_name': reg.get('name', thread_id),
+                    'thread_type': reg.get('type', 'unknown'),
+                    'gap_size': gap,
+                    'before_scene': ordered_ids[indices[i]],
+                    'after_scene': ordered_ids[indices[i + 1]],
+                    'gap_scenes': gap_scene_ids,
+                })
+
+    return results
+
+
+def build_mice_fill_prompt(
+    thread_id: str,
+    thread_name: str,
+    thread_type: str,
+    gap_scenes: list[dict],
+    before_scene: str,
+    after_scene: str,
+) -> str:
+    """Build prompt for Claude to identify which gap scenes should mention a thread.
+
+    Args:
+        thread_id: Canonical thread ID (e.g., 'family-secret').
+        thread_name: Display name (e.g., 'The Family Secret').
+        thread_type: MICE type (milieu, inquiry, character, event).
+        gap_scenes: List of dicts with id, title, goal, function for each scene in the gap.
+        before_scene: Scene ID where thread was last mentioned.
+        after_scene: Scene ID where thread is next mentioned.
+
+    Returns:
+        Prompt string for Claude.
+    """
+    scene_block = '\n'.join(
+        f"- **{s['id']}** ({s.get('title', '')}): goal: {s.get('goal', 'unknown')}; function: {s.get('function', 'unknown')}"
+        for s in gap_scenes
+    )
+
+    return f"""A MICE thread has gone dormant — too many scenes without a reference. Your job is to identify which scenes in the gap should mention this thread to keep it alive in the reader's awareness.
+
+## Thread
+
+- **ID:** {thread_id}
+- **Name:** {thread_name}
+- **Type:** {thread_type}
+- **Last mentioned:** scene {before_scene}
+- **Next mentioned:** scene {after_scene}
+- **Gap:** {len(gap_scenes)} scenes without a reference
+
+## Scenes in the Gap
+
+{scene_block}
+
+## Instructions
+
+Pick 1-3 scenes from the gap where this thread could be naturally referenced — where the scene's goal or function connects to the thread's concerns. A thread reference doesn't mean the thread advances or resolves. It means the thread is present in the scene: a passing thought, a detail in the environment, a line of dialogue that touches the thread without resolving it.
+
+For an **inquiry** thread, a mention might be a character wondering about the question, or noticing evidence.
+For a **character** thread, a mention might be the character exhibiting the trait or tension the thread tracks.
+For a **milieu** thread, a mention might be awareness of the space — its sounds, its boundaries, its effect on the characters.
+For an **event** thread, a mention might be the characters feeling the disruption's ongoing effects.
+
+Do NOT add mentions to scenes where the thread doesn't fit. Fewer mentions in the right places is better than more mentions forced into wrong scenes. If no scene in the gap naturally connects, say NONE.
+
+## Output Format
+
+One line per recommended scene:
+
+MENTION: scene_id
+
+Or if no scenes fit:
+
+NONE
+
+No explanation. Just the scene IDs."""
+
+
+def parse_mice_fill_response(response: str) -> list[str]:
+    """Parse Claude's response to a mice-fill prompt.
+
+    Returns list of scene IDs that should get thread mentions.
+    """
+    results = []
+    for line in response.split('\n'):
+        line = line.strip()
+        if line.upper() == 'NONE':
+            return []
+        if line.startswith('MENTION:'):
+            scene_id = line[len('MENTION:'):].strip()
+            if scene_id:
+                results.append(scene_id)
+    return results
