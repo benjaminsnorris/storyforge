@@ -87,42 +87,30 @@ def parse_args(argv):
 # MICE dormancy fill
 # ============================================================================
 
-def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool) -> None:
-    """Detect MICE thread dormancy gaps and add thread mentions."""
+def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool,
+                   max_passes: int = 5) -> None:
+    """Detect MICE thread dormancy gaps and add thread mentions.
+
+    Runs iteratively until gaps converge (large gaps split into smaller
+    sub-gaps that need subsequent passes to fill).
+    """
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
-
-    log('Detecting MICE thread dormancy gaps...')
 
     from storyforge.hone import detect_mice_dormancy, build_mice_fill_prompt, parse_mice_fill_response
     from storyforge.elaborate import _read_csv_as_map, _read_csv, _write_csv, _FILE_MAP, get_scene
     from storyforge.api import invoke_to_file, extract_text_from_file
 
+    # Initial detection
     gaps = detect_mice_dormancy(ref_dir)
-
-    # Enrich gap scenes with intent/brief data
-    for g in gaps:
-        enriched = []
-        for sid in g['gap_scenes']:
-            scene = get_scene(sid, ref_dir) or {}
-            enriched.append({
-                'id': sid,
-                'title': scene.get('title', sid),
-                'goal': scene.get('goal', ''),
-                'function': scene.get('function', ''),
-            })
-        g['gap_scenes'] = enriched
-
-    gap_count = len(gaps)
-    if gap_count == 0:
+    if not gaps:
         log('No MICE dormancy gaps found.')
         return
 
-    log(f'Found {gap_count} dormancy gaps.')
-    for g in gaps:
-        log(f'  {g["thread_id"]}: {g["gap_size"]} scenes between {g["before_scene"]} and {g["after_scene"]}')
-
     if dry_run:
+        log(f'Found {len(gaps)} dormancy gaps.')
+        for g in gaps:
+            log(f'  {g["thread_id"]}: {g["gap_size"]} scenes between {g["before_scene"]} and {g["after_scene"]}')
         log('DRY RUN — would fill these dormancy gaps')
         return
 
@@ -130,60 +118,96 @@ def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool) -> None:
     ensure_branch_pushed(project_dir)
 
     mice_model = select_model('evaluation')
-    intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+    grand_total = 0
+    baseline_gaps = len(gaps)
 
-    total_mentions = 0
+    for pass_num in range(1, max_passes + 1):
+        gaps = detect_mice_dormancy(ref_dir)
+        gap_count = len(gaps)
 
-    for gap in gaps:
-        prompt = build_mice_fill_prompt(
-            thread_id=gap['thread_id'],
-            thread_name=gap['thread_name'],
-            thread_type=gap['thread_type'],
-            gap_scenes=gap['gap_scenes'],
-            before_scene=gap['before_scene'],
-            after_scene=gap['after_scene'],
-        )
+        if gap_count == 0:
+            log(f'  No gaps remaining — converged after {pass_num - 1} passes')
+            break
 
-        log_file = os.path.join(log_dir, f'mice-fill-{gap["thread_id"]}.json')
-        invoke_to_file(prompt, mice_model, log_file, max_tokens=512)
-        response = extract_text_from_file(log_file)
+        log(f'\n--- Pass {pass_num}/{max_passes} ({gap_count} gaps) ---')
 
-        scene_ids = parse_mice_fill_response(response)
-        if not scene_ids:
-            log(f'  {gap["thread_id"]}: no scenes recommended')
-            continue
+        # Enrich gap scenes
+        for g in gaps:
+            enriched = []
+            for sid in g['gap_scenes']:
+                scene = get_scene(sid, ref_dir) or {}
+                enriched.append({
+                    'id': sid,
+                    'title': scene.get('title', sid),
+                    'goal': scene.get('goal', ''),
+                    'function': scene.get('function', ''),
+                })
+            g['gap_scenes'] = enriched
 
-        # Use bare thread name (without type: prefix) to match existing intent format
-        bare_id = gap['thread_id']
-        if ':' in bare_id:
-            bare_id = bare_id.split(':', 1)[1]
+        intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+        pass_mentions = 0
 
-        for sid in scene_ids:
-            if sid not in intent_map:
+        for gap in gaps:
+            prompt = build_mice_fill_prompt(
+                thread_id=gap['thread_id'],
+                thread_name=gap['thread_name'],
+                thread_type=gap['thread_type'],
+                gap_scenes=gap['gap_scenes'],
+                before_scene=gap['before_scene'],
+                after_scene=gap['after_scene'],
+            )
+
+            log_file = os.path.join(log_dir, f'mice-fill-{gap["thread_id"]}.json')
+            invoke_to_file(prompt, mice_model, log_file, max_tokens=512,
+                           label=f'mice-fill {gap["thread_id"]}')
+            response = extract_text_from_file(log_file)
+
+            scene_ids = parse_mice_fill_response(response)
+            if not scene_ids:
+                log(f'  {gap["thread_id"]}: no scenes recommended')
                 continue
-            current = intent_map[sid].get('mice_threads', '').strip()
-            entries = [e.strip() for e in current.split(';') if e.strip()] if current else []
-            if bare_id not in entries:
-                entries.append(bare_id)
-                intent_map[sid]['mice_threads'] = ';'.join(entries)
-                total_mentions += 1
 
-        log(f'  {gap["thread_id"]}: added mentions in {len(scene_ids)} scenes ({", ".join(scene_ids)})')
+            # Use bare thread name (without type: prefix) to match existing intent format
+            bare_id = gap['thread_id']
+            if ':' in bare_id:
+                bare_id = bare_id.split(':', 1)[1]
 
-    # Write back
-    if total_mentions > 0:
-        rows = list(intent_map.values())
-        rows.sort(key=lambda r: r.get('id', ''))
-        _write_csv(os.path.join(ref_dir, 'scene-intent.csv'), rows, _FILE_MAP['scene-intent.csv'])
+            for sid in scene_ids:
+                if sid not in intent_map:
+                    continue
+                current = intent_map[sid].get('mice_threads', '').strip()
+                entries = [e.strip() for e in current.split(';') if e.strip()] if current else []
+                if bare_id not in entries:
+                    entries.append(bare_id)
+                    intent_map[sid]['mice_threads'] = ';'.join(entries)
+                    pass_mentions += 1
 
-    log(f'Total: {total_mentions} thread mentions added')
+            log(f'  {gap["thread_id"]}: added mentions in {len(scene_ids)} scenes ({", ".join(scene_ids)})')
 
-    commit_and_push(project_dir,
-                    'Elaborate: MICE dormancy fill — thread mentions added',
-                    ['reference/', 'working/'])
+        # Write back and commit this pass
+        if pass_mentions > 0:
+            rows = list(intent_map.values())
+            rows.sort(key=lambda r: r.get('id', ''))
+            _write_csv(os.path.join(ref_dir, 'scene-intent.csv'), rows, _FILE_MAP['scene-intent.csv'])
+            commit_and_push(project_dir,
+                            f'Elaborate: MICE dormancy fill pass {pass_num} — {pass_mentions} mentions added',
+                            ['reference/', 'working/'])
 
-    log('')
-    log('MICE dormancy fill complete.')
+        grand_total += pass_mentions
+        log(f'  Pass {pass_num}: {pass_mentions} mentions added')
+
+        if pass_mentions == 0:
+            log('  Nothing added — converged')
+            break
+    else:
+        log(f'\n  Reached max passes ({max_passes})')
+
+    # Final summary
+    final_gaps = len(detect_mice_dormancy(ref_dir))
+    log(f'\nMICE dormancy fill complete.')
+    log(f'  Before: {baseline_gaps} gaps')
+    log(f'  After:  {final_gaps} gaps')
+    log(f'  Total mentions added: {grand_total} across {pass_num} passes')
 
 
 # ============================================================================
