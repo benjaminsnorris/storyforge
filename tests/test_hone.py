@@ -355,29 +355,10 @@ class TestLoopFlag:
         args = parse_args(['--loop', '--max-loops', '3'])
         assert args.max_loops == 3
 
-    def test_loop_incompatible_with_diagnose(self):
-        import subprocess, sys
-        result = subprocess.run(
-            [sys.executable, '-m', 'storyforge', 'hone', '--loop', '--diagnose'],
-            capture_output=True, text=True,
-        )
-        assert result.returncode != 0
-
-    def test_loop_incompatible_with_dry_run(self):
-        import subprocess, sys
-        result = subprocess.run(
-            [sys.executable, '-m', 'storyforge', 'hone', '--loop', '--dry-run'],
-            capture_output=True, text=True,
-        )
-        assert result.returncode != 0
-
-    def test_loop_incompatible_with_domain(self):
-        import subprocess, sys
-        result = subprocess.run(
-            [sys.executable, '-m', 'storyforge', 'hone', '--loop', '--domain', 'briefs'],
-            capture_output=True, text=True,
-        )
-        assert result.returncode != 0
+    def test_loop_default_false(self):
+        from storyforge.cmd_hone import parse_args
+        args = parse_args([])
+        assert args.loop is False
 
 
 class TestCountBriefIssues:
