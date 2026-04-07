@@ -16,6 +16,7 @@ get_csv_field() {
     local file="$1" id="$2" field="$3" key_col="${4:-id}"
     [[ -f "$file" ]] || return 0
     awk -F'|' -v id="$id" -v field="$field" -v key_col="$key_col" '
+        { gsub(/\r/, "") }
         NR == 1 {
             for (i = 1; i <= NF; i++) {
                 if ($i == field) { fcol = i }
@@ -33,6 +34,7 @@ get_csv_row() {
     local file="$1" id="$2" key_col="${3:-id}"
     [[ -f "$file" ]] || return 0
     awk -F'|' -v id="$id" -v key_col="$key_col" '
+        { gsub(/\r/, "") }
         NR == 1 {
             for (i = 1; i <= NF; i++) {
                 if ($i == key_col) { kcol = i; break }
@@ -49,6 +51,7 @@ get_csv_column() {
     local file="$1" field="$2"
     [[ -f "$file" ]] || return 0
     awk -F'|' -v field="$field" '
+        { gsub(/\r/, "") }
         NR == 1 {
             for (i = 1; i <= NF; i++) {
                 if ($i == field) { col = i; break }
@@ -64,7 +67,7 @@ get_csv_column() {
 list_csv_ids() {
     local file="$1"
     [[ -f "$file" ]] || return 0
-    awk -F'|' 'NR > 1 { print $1 }' "$file"
+    awk -F'|' '{ gsub(/\r/, "") } NR > 1 { print $1 }' "$file"
 }
 
 # ============================================================================
@@ -79,6 +82,7 @@ update_csv_field() {
     [[ -f "$file" ]] || return 0
     local tmp="${file}.tmp.$$"
     awk -F'|' -v OFS='|' -v id="$id" -v field="$field" -v val="$value" -v key_col="$key_col" '
+        { gsub(/\r/, "") }
         NR == 1 {
             for (i = 1; i <= NF; i++) {
                 if ($i == field) { fcol = i }
