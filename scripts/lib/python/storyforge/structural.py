@@ -859,12 +859,13 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
 # MICE Health
 # ---------------------------------------------------------------------------
 
-def score_mice_health(scenes_map, intent_map):
+def score_mice_health(scenes_map, intent_map, ref_dir=''):
     """Score MICE thread effectiveness — close ratio, dormancy, type balance, resolution positioning.
 
     Args:
         scenes_map: dict from _read_csv_as_map on scenes.csv
         intent_map: dict from _read_csv_as_map on scene-intent.csv
+        ref_dir: path to reference dir (for mice-threads.csv registry type lookup)
 
     Returns:
         {'score': float 0-1, 'findings': [...]}
@@ -885,6 +886,24 @@ def score_mice_health(scenes_map, intent_map):
     if n == 0:
         return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
+    # Load MICE thread registry for type resolution
+    registry_types = {}  # canonical_id -> type
+    reg_path = os.path.join(ref_dir, 'mice-threads.csv') if ref_dir else ''
+    if reg_path and os.path.isfile(reg_path):
+        reg_rows = _read_csv(reg_path)
+        for row in reg_rows:
+            rid = row.get('id', '').strip()
+            rtype = row.get('type', '').strip()
+            if rid and rtype:
+                registry_types[rid] = rtype
+
+    def _resolve_type(tag):
+        """Extract thread type from tag, falling back to registry."""
+        if ':' in tag:
+            return tag.split(':')[0]
+        # Bare name — look up in registry
+        return registry_types.get(tag, 'unknown')
+
     # Parse all mice_threads entries
     # Track per thread: open_idx, close_idx, mention_indices, type
     threads = {}  # thread_name -> {'open': idx|None, 'close': idx|None, 'mentions': [idx], 'type': str}
@@ -900,7 +919,7 @@ def score_mice_health(scenes_map, intent_map):
                 continue
             if entry.startswith('+'):
                 tag = entry[1:]
-                thread_type = tag.split(':')[0] if ':' in tag else 'unknown'
+                thread_type = _resolve_type(tag)
                 if tag not in threads:
                     threads[tag] = {'open': idx, 'close': None, 'mentions': [idx], 'type': thread_type}
                 else:
@@ -909,7 +928,7 @@ def score_mice_health(scenes_map, intent_map):
                         threads[tag]['open'] = idx
             elif entry.startswith('-'):
                 tag = entry[1:]
-                thread_type = tag.split(':')[0] if ':' in tag else 'unknown'
+                thread_type = _resolve_type(tag)
                 if tag not in threads:
                     threads[tag] = {'open': None, 'close': idx, 'mentions': [idx], 'type': thread_type}
                 else:
@@ -918,7 +937,7 @@ def score_mice_health(scenes_map, intent_map):
             else:
                 # Plain mention (no +/-)
                 tag = entry
-                thread_type = tag.split(':')[0] if ':' in tag else 'unknown'
+                thread_type = _resolve_type(tag)
                 if tag not in threads:
                     threads[tag] = {'open': None, 'close': None, 'mentions': [idx], 'type': thread_type}
                 else:
@@ -1460,7 +1479,7 @@ def structural_score(ref_dir, weights=None):
         'pacing_shape': score_pacing(scenes_map, intent_map, briefs_map),
         'arc_completeness': score_arcs(scenes_map, intent_map),
         'character_presence': score_character_presence(scenes_map, intent_map, ref_dir),
-        'mice_health': score_mice_health(scenes_map, intent_map),
+        'mice_health': score_mice_health(scenes_map, intent_map, ref_dir=ref_dir),
         'knowledge_chain': score_knowledge_chain(scenes_map, briefs_map),
         'function_variety': score_function_variety(intent_map, briefs_map),
         'physical_state': score_physical_state_chain(scenes_map, briefs_map, ref_dir),

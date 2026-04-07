@@ -253,7 +253,7 @@ VALUE_SHIFT: [polarity change using +/- notation: +/- means positive to negative
 TURNING_POINT: [action or revelation — action means a character does something that changes the situation; revelation means new information changes the situation]
 CHARACTERS: [semicolon-separated list of ALL characters present or referenced by name]
 ON_STAGE: [semicolon-separated list of characters physically present in the scene — subset of CHARACTERS]
-MICE_THREADS: [semicolon-separated MICE thread operations — +milieu:location-name to open, -inquiry:question to close, etc. Use + for opening, - for closing. Types: milieu, inquiry, character, event]
+MICE_THREADS: [semicolon-separated MICE thread operations — +thread-name to open, -thread-name to close. Use + for opening, - for closing. Use the thread's canonical name from the registry, not the type prefix.]
 CONFIDENCE: [high / medium / low — your overall confidence in these extractions]"""
 
 
@@ -1088,14 +1088,14 @@ def build_mice_cleanup_prompt(ref_dir: str) -> str:
 ## MICE Thread Rules
 
 MICE threads use per-type FILO (first in, last out) nesting:
-- +type:name opens a thread
+- +name opens a thread
 - -type:name closes a thread
 - Types: milieu (place), inquiry (question), character (transformation), event (disruption)
 - Threads of the SAME type must close in reverse order of opening (FILO within type)
 - Threads of DIFFERENT types run in parallel — closing an inquiry does NOT require closing a milieu opened after it
 
 Example of valid parallel threading:
-  +character:arc (scene 1) → +inquiry:mystery (scene 3) → -inquiry:mystery (scene 8) → -character:arc (scene 20)
+  +arc (scene 1) → +mystery (scene 3) → -mystery (scene 8) → -arc (scene 20)
   This is valid: character and inquiry are different types, so they nest independently.
 
 ## Current Thread Timeline
@@ -1112,7 +1112,7 @@ Fix the MICE thread nesting. For each scene that needs changes, output:
 
 UPDATE: scene_id | new_mice_threads_value
 
-The new value should be a semicolon-separated list of thread operations (e.g., "+inquiry:question;-milieu:place").
+The new value should be a semicolon-separated list of thread operations (e.g., "+question;-place").
 
 Rules:
 - Every opened thread must eventually close

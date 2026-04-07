@@ -162,7 +162,7 @@ COLUMN_SCHEMA = {
     'mice_threads': {
         'type': 'mice', 'registry': 'mice-threads.csv',
         'file': 'scene-intent.csv', 'stage': 'map',
-        'description': 'MICE thread operations: +type:name (open) or -type:name (close). FILO nesting order (Kowal).',
+        'description': 'MICE thread operations: +name (open) or -name (close). Type resolved from registry. FILO nesting order (Kowal).',
     },
 
     # scene-briefs.csv
@@ -297,22 +297,33 @@ def _check_mice(value: str, alias_map: dict, type_map: dict) -> list[dict]:
         if not entry:
             continue
 
-        # Check format: must be +type:name or -type:name
-        if len(entry) < 2 or entry[0] not in ('+', '-') or ':' not in entry[1:]:
-            problems.append({'entry': entry, 'reason': 'invalid format (expected +type:name or -type:name)'})
+        # Check format: must be +name, -name, +type:name, or -type:name
+        if len(entry) < 2 or entry[0] not in ('+', '-'):
+            problems.append({'entry': entry, 'reason': 'invalid format (expected +name or +type:name)'})
             continue
 
         rest = entry[1:]
-        type_part, _, name_part = rest.partition(':')
-        type_part = type_part.strip().lower()
-        name_part = name_part.strip()
 
-        if not type_part or not name_part:
-            problems.append({'entry': entry, 'reason': 'missing type or name'})
-            continue
+        if ':' in rest:
+            # Typed format: +type:name
+            type_part, _, name_part = rest.partition(':')
+            type_part = type_part.strip().lower()
+            name_part = name_part.strip()
 
-        if type_part not in VALID_MICE_TYPES:
-            problems.append({'entry': entry, 'reason': f'invalid type "{type_part}" (expected: milieu, inquiry, character, event)'})
+            if not type_part or not name_part:
+                problems.append({'entry': entry, 'reason': 'missing type or name'})
+                continue
+
+            if type_part not in VALID_MICE_TYPES:
+                problems.append({'entry': entry, 'reason': f'invalid type "{type_part}" (expected: milieu, inquiry, character, event)'})
+                continue
+        else:
+            # Bare format: +name — type resolved from registry
+            name_part = rest.strip()
+            type_part = ''
+
+        if not name_part:
+            problems.append({'entry': entry, 'reason': 'empty thread name'})
             continue
 
         # Check name against registry (if available)
@@ -320,8 +331,8 @@ def _check_mice(value: str, alias_map: dict, type_map: dict) -> list[dict]:
             problems.append({'entry': entry, 'reason': f'thread name "{name_part}" not in mice-threads.csv'})
             continue
 
-        # Check type matches registry (if available)
-        if alias_map and type_map:
+        # Check type matches registry (if available and type was specified)
+        if type_part and alias_map and type_map:
             canonical = alias_map.get(name_part.lower())
             if canonical and canonical in type_map:
                 expected_type = type_map[canonical]

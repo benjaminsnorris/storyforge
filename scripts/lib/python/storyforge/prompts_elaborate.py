@@ -559,7 +559,7 @@ _FIELD_INSTRUCTIONS = {
         'or revelation (character learns something new).'
     ),
     'mice_threads': (
-        'List MICE thread operations: +type:name to open, -type:name to close. '
+        'List MICE thread operations: +name to open, -name to close (type is resolved from registry). '
         'Types: milieu, inquiry, character, event. '
         'Semicolon-separated (e.g., "+inquiry:who-killed-X;-milieu:the-castle").'
     ),

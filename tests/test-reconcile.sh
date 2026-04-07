@@ -388,3 +388,104 @@ assert_contains "$RESULT" "loc1=the-hold" "apply_registry_normalization: The Hol
 assert_contains "$RESULT" "loc2=the-hold" "apply_registry_normalization: the hold → the-hold"
 assert_contains "$RESULT" "loc3=thornwall-market" "apply_registry_normalization: Thornwall Market → thornwall-market"
 rm -rf "${TMPDIR}/lnorm-test"
+
+# ============================================================================
+# MICE thread normalization: bare +name format with type injection
+# ============================================================================
+
+echo "--- mice: normalize bare +name using registry type ---"
+
+RESULT=$(python3 -c "
+${PY})
+from storyforge.enrich import normalize_mice_threads, load_mice_registry
+
+# Build a mock registry in a temp file
+import tempfile, os
+tmpdir = tempfile.mkdtemp()
+reg_path = os.path.join(tmpdir, 'mice-threads.csv')
+with open(reg_path, 'w') as f:
+    f.write('id|name|type|aliases\n')
+    f.write('understory|The Understory|milieu|hidden world\n')
+    f.write('vanishings|The Vanishings|inquiry|disappearances\n')
+    f.write('zara-identity|Zara Identity|character|\n')
+
+alias_map, type_map = load_mice_registry(reg_path)
+
+# Bare +name should get type injected
+result = normalize_mice_threads('+understory', alias_map, type_map)
+print(f'bare_open={result}')
+
+# Bare -name should get type injected
+result = normalize_mice_threads('-vanishings', alias_map, type_map)
+print(f'bare_close={result}')
+
+# Bare name without +/- should get type injected
+result = normalize_mice_threads('zara-identity', alias_map, type_map)
+print(f'bare_mention={result}')
+
+# Multiple bare entries
+result = normalize_mice_threads('+understory;-vanishings;zara-identity', alias_map, type_map)
+print(f'multi={result}')
+
+import shutil; shutil.rmtree(tmpdir)
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "bare_open=+milieu:understory" "mice: bare +name gets type prefix"
+assert_contains "$RESULT" "bare_close=-inquiry:vanishings" "mice: bare -name gets type prefix"
+assert_contains "$RESULT" "bare_mention=character:zara-identity" "mice: bare mention gets type prefix"
+assert_contains "$RESULT" "multi=+milieu:understory;-inquiry:vanishings;character:zara-identity" "mice: multiple bare entries normalized"
+assert_contains "$RESULT" "ok" "mice: bare normalization runs"
+
+echo "--- mice: existing +type:name preserved ---"
+
+RESULT=$(python3 -c "
+${PY})
+from storyforge.enrich import normalize_mice_threads, load_mice_registry
+import tempfile, os
+tmpdir = tempfile.mkdtemp()
+reg_path = os.path.join(tmpdir, 'mice-threads.csv')
+with open(reg_path, 'w') as f:
+    f.write('id|name|type|aliases\n')
+    f.write('understory|The Understory|milieu|\n')
+alias_map, type_map = load_mice_registry(reg_path)
+
+# Already has type — should be preserved
+result = normalize_mice_threads('+milieu:understory', alias_map, type_map)
+print(f'typed={result}')
+
+# Wrong type — should be corrected from registry
+result = normalize_mice_threads('+inquiry:understory', alias_map, type_map)
+print(f'corrected={result}')
+
+import shutil; shutil.rmtree(tmpdir)
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "typed=+milieu:understory" "mice: correct type preserved"
+assert_contains "$RESULT" "corrected=+milieu:understory" "mice: wrong type corrected"
+assert_contains "$RESULT" "ok" "mice: typed normalization runs"
+
+echo "--- mice: alias resolution works with bare names ---"
+
+RESULT=$(python3 -c "
+${PY})
+from storyforge.enrich import normalize_mice_threads, load_mice_registry
+import tempfile, os
+tmpdir = tempfile.mkdtemp()
+reg_path = os.path.join(tmpdir, 'mice-threads.csv')
+with open(reg_path, 'w') as f:
+    f.write('id|name|type|aliases\n')
+    f.write('understory|The Understory|milieu|hidden world;the magical chicago\n')
+alias_map, type_map = load_mice_registry(reg_path)
+
+# Alias should resolve to canonical id with type
+result = normalize_mice_threads('+hidden world', alias_map, type_map)
+print(f'alias={result}')
+
+import shutil; shutil.rmtree(tmpdir)
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "alias=+milieu:understory" "mice: alias resolves with type injection"
+assert_contains "$RESULT" "ok" "mice: alias resolution runs"

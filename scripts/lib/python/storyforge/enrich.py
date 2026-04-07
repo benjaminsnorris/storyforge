@@ -358,25 +358,35 @@ def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
         if not entry:
             continue
 
-        # Parse +type:name or -type:name
-        if len(entry) > 1 and entry[0] in ('+', '-') and ':' in entry[1:]:
+        # Determine prefix (+/-/none) and the rest
+        prefix = ''
+        rest = entry
+        if len(entry) > 1 and entry[0] in ('+', '-'):
             prefix = entry[0]
             rest = entry[1:]
+
+        # Split type:name if colon present
+        if ':' in rest:
             type_part, _, name_part = rest.partition(':')
             type_part = type_part.strip().lower()
             name_part = name_part.strip()
+        else:
+            # Bare name — no type prefix
+            type_part = ''
+            name_part = rest.strip()
 
-            # Normalize the name
-            canonical = alias_map.get(name_part.lower(), name_part)
+        # Normalize the name via alias map
+        canonical = alias_map.get(name_part.lower(), name_part)
 
-            # Correct the type if registry has one
-            if type_map and canonical in type_map:
-                type_part = type_map[canonical]
+        # Resolve type from registry if missing or wrong
+        if type_map and canonical in type_map:
+            type_part = type_map[canonical]
 
+        if type_part:
             result.append(f'{prefix}{type_part}:{canonical}')
         else:
-            # Doesn't match format — pass through
-            result.append(entry)
+            # No type available — keep as-is
+            result.append(f'{prefix}{canonical}')
 
     return ';'.join(result)
 

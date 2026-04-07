@@ -436,3 +436,42 @@ sc-bad
 6" "$RESULT" "knowledge granularity: scene with 6 new facts flagged, scene with 2 not flagged"
 
 rm -rf "$KG_TMP"
+
+# ============================================================================
+# MICE thread validation: bare names accepted
+# ============================================================================
+
+echo "--- schema: mice validates bare +name format ---"
+
+RESULT=$(PYTHONPATH="$PYTHON_DIR" python3 -c "
+from storyforge.schema import _check_mice
+from storyforge.enrich import load_mice_registry
+import tempfile, os
+
+tmpdir = tempfile.mkdtemp()
+reg_path = os.path.join(tmpdir, 'mice-threads.csv')
+with open(reg_path, 'w') as f:
+    f.write('id|name|type|aliases\n')
+    f.write('map-anomaly|Map Anomaly|inquiry|\n')
+
+alias_map, type_map = load_mice_registry(reg_path)
+
+# Bare +name should be valid when registry has the thread
+problems = _check_mice('+map-anomaly', alias_map, type_map)
+print(f'bare_valid={len(problems)}')
+
+# Typed +type:name should still be valid
+problems = _check_mice('+inquiry:map-anomaly', alias_map, type_map)
+print(f'typed_valid={len(problems)}')
+
+# Unknown bare name should fail
+problems = _check_mice('+nonexistent', alias_map, type_map)
+print(f'unknown={len(problems)}')
+
+import shutil; shutil.rmtree(tmpdir)
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "bare_valid=0" "schema: bare +name accepted when in registry"
+assert_contains "$RESULT" "typed_valid=0" "schema: typed +type:name still accepted"
+assert_contains "$RESULT" "ok" "schema: mice bare validation runs"

@@ -755,3 +755,54 @@ assert_contains "$RESULT" "arc_completeness" "print_score_delta: includes dimens
 assert_contains "$RESULT" "+0.05" "print_score_delta: shows positive delta"
 assert_contains "$RESULT" "+0.20" "print_score_delta: shows thematic improvement"
 assert_contains "$RESULT" "0.00" "print_score_delta: shows no-change"
+
+# ============================================================================
+# MICE thread scoring: bare thread names resolved from registry
+# ============================================================================
+
+echo "--- structural: mice scoring resolves bare thread types from registry ---"
+
+RESULT=$(python3 -c "
+${PY}
+import tempfile, os, shutil
+from storyforge.structural import score_mice_health
+from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+# Create temp project with bare thread names and a registry
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+shutil.copytree('${FIXTURE_DIR}/reference', ref)
+
+# Write a simple mice-threads registry
+with open(os.path.join(ref, 'mice-threads.csv'), 'w') as f:
+    f.write('id|name|type|aliases\n')
+    f.write('map-anomaly|Map Anomaly|inquiry|\n')
+    f.write('archive-erasure|Archive Erasure|inquiry|\n')
+
+# Update scene-intent to use bare names (no type prefix)
+intent_path = os.path.join(ref, 'scene-intent.csv')
+from storyforge.elaborate import _read_csv
+rows = _read_csv(intent_path)
+for r in rows:
+    if r['id'] == 'act1-sc01':
+        r['mice_threads'] = '+map-anomaly'
+    elif r['id'] == 'act1-sc02':
+        r['mice_threads'] = '+archive-erasure'
+    elif r['id'] == 'act2-sc03':
+        r['mice_threads'] = '-map-anomaly;-archive-erasure'
+_write_csv(intent_path, rows, _FILE_MAP['scene-intent.csv'])
+
+scenes_map = _read_csv_as_map(os.path.join(ref, 'scenes.csv'))
+intent_map = _read_csv_as_map(intent_path)
+result = score_mice_health(scenes_map, intent_map, ref_dir=ref)
+
+# Check that thread types are resolved — type_balance should
+# count 'inquiry' not 'unknown'
+score = result['score']
+# All threads are inquiry type, so type_count should be 1 (not 0 from 'unknown')
+print(f'score={score:.2f}')
+print('ok')
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "ok" "structural: mice scoring resolves bare thread types from registry"
