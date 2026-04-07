@@ -384,7 +384,7 @@ print(json.dumps(result))
 
         briefs)
             SCENE_FLAG=""
-            [[ -n "$SCENE_FILTER" ]] && SCENE_FLAG="scene_ids='${SCENE_FILTER}'.split(',')"
+            [[ -n "$SCENE_FILTER" ]] && SCENE_FLAG="'${SCENE_FILTER}'.split(',')"
 
             # Run combined detection (abstract + overspecified + verbose)
             DIAG=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
