@@ -441,12 +441,22 @@ def _check(category: str, check: str, passed: bool, message: str,
     return result
 
 
-def _mice_type(thread_name):
-    """Extract the MICE type prefix from a thread name (e.g., 'inquiry' from 'inquiry:who-killed')."""
-    return thread_name.split(':')[0] if ':' in thread_name else ''
+def _mice_type(thread_name, registry_types=None):
+    """Extract the MICE type from a thread name, falling back to registry.
+
+    Args:
+        thread_name: e.g., 'inquiry:who-killed' or bare 'dex-secret'
+        registry_types: optional dict of thread_id -> type from mice-threads.csv
+    """
+    if ':' in thread_name:
+        return thread_name.split(':')[0]
+    # Bare name — resolve from registry
+    if registry_types and thread_name in registry_types:
+        return registry_types[thread_name]
+    return 'unknown'
 
 
-def _validate_threads(scenes_map, intent_map, checks):
+def _validate_threads(scenes_map, intent_map, checks, ref_dir=''):
     """Check thread management: MICE nesting, dormancy, resolution.
 
     Uses per-type stacks: FILO nesting is enforced within each MICE type
@@ -454,6 +464,16 @@ def _validate_threads(scenes_map, intent_map, checks):
     run in parallel — closing an inquiry doesn't require all milieu threads
     opened after it to close first.
     """
+    # Load MICE thread registry for type resolution
+    registry_types = {}
+    if ref_dir:
+        reg_path = os.path.join(ref_dir, 'mice-threads.csv')
+        if os.path.isfile(reg_path):
+            for row in _read_csv(reg_path):
+                rid = row.get('id', '').strip()
+                rtype = row.get('type', '').strip()
+                if rid and rtype:
+                    registry_types[rid] = rtype
     sorted_ids = sorted(scenes_map.keys(),
                         key=lambda sid: int(scenes_map[sid].get('seq', 0)))
 
@@ -485,11 +505,11 @@ def _validate_threads(scenes_map, intent_map, checks):
                 continue
             if entry.startswith('+'):
                 thread_name = entry[1:]
-                mtype = _mice_type(thread_name)
+                mtype = _mice_type(thread_name, registry_types)
                 type_stacks.setdefault(mtype, []).append((thread_name, sid))
             elif entry.startswith('-'):
                 thread_name = entry[1:]
-                mtype = _mice_type(thread_name)
+                mtype = _mice_type(thread_name, registry_types)
                 stack = type_stacks.get(mtype, [])
                 if stack and stack[-1][0] == thread_name:
                     stack.pop()
@@ -869,7 +889,7 @@ def validate_structure(ref_dir: str) -> dict:
         ))
 
     # --- Thread, timeline, knowledge, pacing ---
-    _validate_threads(scenes_map, intent_map, checks)
+    _validate_threads(scenes_map, intent_map, checks, ref_dir=ref_dir)
     _validate_timeline(scenes_map, checks)
     _validate_knowledge(scenes_map, briefs_map, checks)
     _validate_pacing(scenes_map, intent_map, checks)

@@ -807,3 +807,98 @@ assert_contains "$RESULT" "Lab equipment is faulty" "build_knowledge_fix_prompt:
 assert_contains "$RESULT" "knowledge_in" "build_knowledge_fix_prompt: asks for knowledge_in"
 
 rm -rf "$TMP_REF"
+
+# ============================================================================
+# MICE nesting: bare mentions should not cause violations
+# ============================================================================
+
+echo "--- mice nesting: bare mentions ignored ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import validate_structure
+
+import tempfile, os, shutil
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+os.makedirs(ref)
+
+with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+    f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+    f.write('s01|1|S1|1|a|loc|1|morning|1hr|action|drafted|1000|1500\n')
+    f.write('s02|2|S2|1|a|loc|1|morning|1hr|action|drafted|1000|1500\n')
+    f.write('s03|3|S3|1|a|loc|1|morning|1hr|action|drafted|1000|1500\n')
+
+# s01 opens thread, s02 has bare mention, s03 closes thread
+with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+    f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+    f.write('s01|func|action|flat|truth|+/-|revelation|a|a|+test-thread\n')
+    f.write('s02|func|action|flat|truth|+/-|revelation|a|a|test-thread\n')
+    f.write('s03|func|action|flat|truth|+/-|revelation|a|a|-test-thread\n')
+
+with open(os.path.join(ref, 'mice-threads.csv'), 'w') as f:
+    f.write('id|name|type|aliases\n')
+    f.write('test-thread|Test|inquiry|\n')
+
+with open(os.path.join(ref, 'scene-briefs.csv'), 'w') as f:
+    f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|subtext|continuity_deps|has_overflow|physical_state_in|physical_state_out\n')
+    f.write('s01|g|c|yes|cr|d|||a|d|e|m|||false||\n')
+    f.write('s02|g|c|yes|cr|d|||a|d|e|m|||false||\n')
+    f.write('s03|g|c|yes|cr|d|||a|d|e|m|||false||\n')
+
+result = validate_structure(ref)
+nesting = [c for c in result['checks'] if 'nesting' in c.get('check', '') and not c['passed']]
+print(f'violations={len(nesting)}')
+for n in nesting:
+    print(f'  {n[\"message\"]}')
+print('ok')
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "violations=0" "mice nesting: bare mentions don't cause violations"
+assert_contains "$RESULT" "ok" "mice nesting: bare mention test runs"
+
+echo "--- mice nesting: cross-type threads don't violate FILO ---"
+
+RESULT=$(python3 -c "
+${PY}
+from storyforge.elaborate import validate_structure
+import tempfile, os, shutil
+tmpdir = tempfile.mkdtemp()
+ref = os.path.join(tmpdir, 'reference')
+os.makedirs(ref)
+
+with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+    f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+    for i in range(1, 5):
+        f.write(f's{i:02d}|{i}|S{i}|1|a|loc|1|morning|1hr|action|drafted|1000|1500\n')
+
+# Open character thread, then event thread, close character first (cross-type = OK)
+with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+    f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+    f.write('s01|func|action|flat|truth|+/-|revelation|a|a|+char-thread\n')
+    f.write('s02|func|action|flat|truth|+/-|revelation|a|a|+event-thread\n')
+    f.write('s03|func|action|flat|truth|+/-|revelation|a|a|-char-thread\n')
+    f.write('s04|func|action|flat|truth|+/-|revelation|a|a|-event-thread\n')
+
+with open(os.path.join(ref, 'mice-threads.csv'), 'w') as f:
+    f.write('id|name|type|aliases\n')
+    f.write('char-thread|Character Thread|character|\n')
+    f.write('event-thread|Event Thread|event|\n')
+
+with open(os.path.join(ref, 'scene-briefs.csv'), 'w') as f:
+    f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|subtext|continuity_deps|has_overflow|physical_state_in|physical_state_out\n')
+    for i in range(1, 5):
+        f.write(f's{i:02d}|g|c|yes|cr|d|||a|d|e|m|||false||\n')
+
+result = validate_structure(ref)
+nesting = [c for c in result['checks'] if 'nesting' in c.get('check', '') and not c['passed']]
+print(f'violations={len(nesting)}')
+for n in nesting:
+    print(f'  {n[\"message\"]}')
+print('ok')
+shutil.rmtree(tmpdir)
+" 2>/dev/null)
+
+assert_contains "$RESULT" "violations=0" "mice nesting: cross-type close order is valid"
+assert_contains "$RESULT" "ok" "mice nesting: cross-type test runs"
