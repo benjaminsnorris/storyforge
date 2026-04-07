@@ -1136,9 +1136,13 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
         return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'brief'}]}
 
     # --- 1. Coverage (40%) ---
+    # Only count scenes from the first state acquisition onward.
+    # Scenes before any character acquires a physical state are legitimately
+    # empty and should not penalize coverage.
     has_psi = 0
     has_pso = 0
     all_states = {}  # state_id -> list of scene indices
+    first_state_idx = n  # default: no states at all
 
     for idx, sid in enumerate(scene_ids):
         brief = briefs_map.get(sid, {})
@@ -1146,12 +1150,16 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
         pso = brief.get('physical_state_out', '').strip()
         if psi:
             has_psi += 1
+            if idx < first_state_idx:
+                first_state_idx = idx
             for state in psi.split(';'):
                 state = state.strip()
                 if state:
                     all_states.setdefault(state, []).append(idx)
         if pso:
             has_pso += 1
+            if idx < first_state_idx:
+                first_state_idx = idx
             for state in pso.split(';'):
                 state = state.strip()
                 if state:
@@ -1163,13 +1171,72 @@ def score_physical_state_chain(scenes_map, briefs_map, ref_dir=''):
     if total_states == 0:
         return {'score': 0.0, 'findings': []}
 
-    coverage_in = has_psi / n if n > 0 else 0.0
-    coverage_out = has_pso / n if n > 0 else 0.0
+    # Coverage denominator: only scenes where at least one on-stage character
+    # has an active state. Scenes before any state is acquired, and scenes
+    # where no on-stage character has a state, are legitimately empty.
+
+    # Build active state ranges per character from the registry
+    active_ranges = {}  # state_id -> (start_idx, end_idx, character)
+    registry_path = os.path.join(ref_dir, 'physical-states.csv') if ref_dir else ''
+    if registry_path and os.path.isfile(registry_path):
+        reg = _read_csv(registry_path)
+        for entry in reg:
+            sid = entry.get('id', '').strip()
+            char = entry.get('character', '').strip().lower()
+            acq = entry.get('acquired', '').strip()
+            res = entry.get('resolves', '').strip()
+            if not sid or not acq:
+                continue
+            # Find seq indices
+            acq_idx = None
+            res_idx = None
+            for i, scene_id in enumerate(scene_ids):
+                if scene_id == acq:
+                    acq_idx = i
+                if scene_id == res:
+                    res_idx = i
+            if acq_idx is not None:
+                if res_idx is None or res == 'never':
+                    res_idx = n - 1
+                active_ranges[sid] = (acq_idx, res_idx, char)
+
+    # For each scene, check if any on-stage character has an active state
+    eligible_count = 0
+    for idx, sid in enumerate(scene_ids):
+        if idx < first_state_idx:
+            continue
+        # Get on-stage characters
+        scene = scenes_map.get(sid, {})
+        pov = scene.get('pov', '').strip().lower()
+        # Try to get intent data for on_stage
+        intent_map = {}
+        intent_path = os.path.join(ref_dir, 'scene-intent.csv') if ref_dir else ''
+        if intent_path and os.path.isfile(intent_path):
+            intent_map = _read_csv_as_map(intent_path)
+        intent = intent_map.get(sid, {})
+        on_stage_raw = intent.get('on_stage', '') or intent.get('characters', '')
+        on_stage = {c.strip().lower() for c in on_stage_raw.split(';') if c.strip()}
+        on_stage.add(pov)
+
+        # Check if any active state applies to an on-stage character
+        has_active = False
+        for state_id, (acq_idx, res_idx, char) in active_ranges.items():
+            if acq_idx <= idx <= res_idx and char in on_stage:
+                has_active = True
+                break
+        if has_active:
+            eligible_count += 1
+
+    if eligible_count <= 0:
+        eligible_count = 1
+
+    coverage_in = has_psi / eligible_count
+    coverage_out = has_pso / eligible_count
     coverage = (coverage_in + coverage_out) / 2.0
 
-    if coverage < 0.2:
+    if coverage < 0.5:
         findings.append({
-            'message': f"Low physical state coverage: {has_psi}/{n} scenes have physical_state_in, {has_pso}/{n} have physical_state_out",
+            'message': f"Low physical state coverage: {has_psi}/{eligible_count} eligible scenes have physical_state_in, {has_pso}/{eligible_count} have physical_state_out",
             'severity': 'important',
             'fix_location': 'brief',
         })

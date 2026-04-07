@@ -1395,3 +1395,120 @@ def detect_gaps(
                 })
 
     return results
+
+
+# ============================================================================
+# Physical state chain propagation
+# ============================================================================
+
+def propagate_physical_states(ref_dir: str, dry_run: bool = False) -> dict:
+    """Fill gaps in physical_state_in/out by propagating states through scenes.
+
+    For each state in the registry, every scene between its acquired scene
+    and its resolved scene should carry it — unless the character is not
+    on-stage in that scene.
+
+    Deterministic — no API calls.
+
+    Args:
+        ref_dir: Path to the reference/ directory.
+        dry_run: If True, report what would change without writing.
+
+    Returns:
+        Dict with states_propagated, scenes_updated, changes.
+    """
+    registry_path = os.path.join(ref_dir, 'physical-states.csv')
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+
+    if not os.path.isfile(registry_path):
+        return {'states_propagated': 0, 'scenes_updated': 0, 'changes': []}
+
+    registry = _read_csv(registry_path)
+    scenes_map = _read_csv_as_map(scenes_path)
+    intent_map = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else {}
+    briefs_map = _read_csv_as_map(briefs_path)
+
+    # Build ordered scene list
+    ordered_ids = sorted(
+        scenes_map.keys(),
+        key=lambda sid: int(scenes_map[sid].get('seq', 0) or 0)
+    )
+    seq_index = {sid: idx for idx, sid in enumerate(ordered_ids)}
+
+    changes = []
+    states_propagated = set()
+
+    for state in registry:
+        state_id = state.get('id', '').strip()
+        character = state.get('character', '').strip()
+        acquired = state.get('acquired', '').strip()
+        resolves = state.get('resolves', '').strip()
+
+        if not state_id or not acquired or acquired not in seq_index:
+            continue
+
+        start_idx = seq_index[acquired]
+        if resolves and resolves != 'never' and resolves in seq_index:
+            end_idx = seq_index[resolves]
+        else:
+            end_idx = len(ordered_ids) - 1
+
+        for idx in range(start_idx, end_idx + 1):
+            sid = ordered_ids[idx]
+            brief = briefs_map.get(sid, {})
+
+            # Check if character is on-stage (or is POV)
+            scene = scenes_map.get(sid, {})
+            intent = intent_map.get(sid, {})
+            pov = scene.get('pov', '').strip()
+            on_stage_raw = intent.get('on_stage', '') or intent.get('characters', '')
+            on_stage = {c.strip().lower() for c in on_stage_raw.split(';') if c.strip()}
+            on_stage.add(pov.lower())
+
+            if character and character.lower() not in on_stage:
+                continue
+
+            # physical_state_in: all scenes after acquired
+            if idx > start_idx:
+                current_in = brief.get('physical_state_in', '').strip()
+                current_in_set = {s.strip() for s in current_in.split(';') if s.strip()}
+                if state_id not in current_in_set:
+                    current_in_set.add(state_id)
+                    new_val = ';'.join(sorted(current_in_set))
+                    changes.append({
+                        'scene_id': sid, 'field': 'physical_state_in',
+                        'added_states': [state_id],
+                    })
+                    if not dry_run:
+                        briefs_map[sid]['physical_state_in'] = new_val
+                    states_propagated.add(state_id)
+
+            # physical_state_out: acquired through end, except the resolve scene
+            is_resolve_scene = (resolves and resolves != 'never' and sid == resolves)
+            if not is_resolve_scene:
+                current_out = brief.get('physical_state_out', '').strip()
+                current_out_set = {s.strip() for s in current_out.split(';') if s.strip()}
+                if state_id not in current_out_set:
+                    current_out_set.add(state_id)
+                    new_val = ';'.join(sorted(current_out_set))
+                    changes.append({
+                        'scene_id': sid, 'field': 'physical_state_out',
+                        'added_states': [state_id],
+                    })
+                    if not dry_run:
+                        briefs_map[sid]['physical_state_out'] = new_val
+                    states_propagated.add(state_id)
+
+    scenes_updated = len(set(c['scene_id'] for c in changes))
+    if not dry_run and changes:
+        briefs_rows = list(briefs_map.values())
+        briefs_rows.sort(key=lambda r: r.get('id', ''))
+        _write_csv(briefs_path, briefs_rows, _FILE_MAP['scene-briefs.csv'])
+
+    return {
+        'states_propagated': len(states_propagated),
+        'scenes_updated': scenes_updated,
+        'changes': changes,
+    }

@@ -496,11 +496,33 @@ print(json.dumps({'gaps': len(gaps), 'scenes': len(set(g['scene_id'] for g in ga
             SCENES=$(echo "$RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('scenes', 0))")
             log "  Gaps found: ${GAPS} empty fields across ${SCENES} scenes"
 
-            if [[ "$DRY_RUN" == true || "$GAPS" == "0" ]]; then
+            # Physical state chain propagation (deterministic, no API)
+            PY_DRY_RUN="False"
+            [[ "$DRY_RUN" == true ]] && PY_DRY_RUN="True"
+            PROP_RESULT=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
+import sys, json; sys.path.insert(0, '${PYTHON_LIB}')
+from storyforge.hone import propagate_physical_states
+result = propagate_physical_states('${REF_DIR}', dry_run=${PY_DRY_RUN})
+print(json.dumps({'states': result['states_propagated'], 'scenes': result['scenes_updated'], 'changes': len(result['changes'])}))
+")
+            PROP_STATES=$(echo "$PROP_RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('states', 0))")
+            PROP_SCENES=$(echo "$PROP_RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('scenes', 0))")
+            PROP_CHANGES=$(echo "$PROP_RESULT" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('changes', 0))")
+            log "  Physical state propagation: ${PROP_STATES} states across ${PROP_SCENES} scenes (${PROP_CHANGES} field updates)"
+
+            if [[ "$DRY_RUN" == true ]]; then
                 continue
             fi
 
-            log "  (gap filling requires storyforge-elaborate --gap-fill — run manually)"
+            if [[ "$PROP_CHANGES" -gt 0 ]]; then
+                (cd "$PROJECT_DIR" && git add reference/ && \
+                    git commit -m "Hone: gaps — propagate ${PROP_STATES} physical states across ${PROP_SCENES} scenes" && \
+                    git push) 2>/dev/null || true
+            fi
+
+            if [[ "$GAPS" != "0" ]]; then
+                log "  (${GAPS} remaining gaps require storyforge-elaborate --gap-fill)"
+            fi
             ;;
 
         structural)
