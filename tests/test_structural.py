@@ -288,3 +288,51 @@ class TestMiceScoringBareNames:
         intent_map = _read_csv_as_map(intent_path)
         result = score_mice_health(scenes_map, intent_map, ref_dir=ref)
         assert 0 <= result['score'] <= 1
+
+
+class TestCharacterPresenceUsesIds:
+    """Regression test for #128: char_roles must be keyed by ID, not display name."""
+
+    def test_antagonist_detected_with_kebab_ids(self, tmp_path):
+        """on_stage uses kebab-case IDs; characters.csv has display names.
+        char_roles must use the id column so antagonist lookup succeeds."""
+        from storyforge.structural import score_character_presence
+        from storyforge.elaborate import _read_csv_as_map
+
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+
+        # characters.csv — display name differs from id
+        with open(os.path.join(ref, 'characters.csv'), 'w') as f:
+            f.write('id|name|aliases|role\n')
+            f.write('garrett-steen|Garrett Steen||antagonist\n')
+            f.write('elena-voss|Elena Voss||protagonist\n')
+
+        # scenes.csv — pov uses kebab-case ids
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            for i in range(1, 9):
+                pov = 'elena-voss'
+                f.write(f's{i:02d}|{i}|Scene {i}|1|{pov}|X|{i}|morning|1h|action|drafted|2000|2000\n')
+
+        # scene-intent.csv — on_stage uses kebab-case ids
+        with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+            f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+            for i in range(1, 9):
+                on_stage = 'elena-voss;garrett-steen' if i % 2 == 0 else 'elena-voss'
+                f.write(f's{i:02d}|test|action|flat|truth|+/-|revelation|elena-voss;garrett-steen|{on_stage}|\n')
+
+        scenes = _read_csv_as_map(os.path.join(ref, 'scenes.csv'))
+        intent = _read_csv_as_map(os.path.join(ref, 'scene-intent.csv'))
+        result = score_character_presence(scenes, intent, ref)
+
+        # The antagonist garrett-steen is on-stage in 4/8 scenes (50%).
+        # Before the fix, char_roles was keyed by "Garrett Steen" which never
+        # matched on_stage "garrett-steen", so antagonist visibility was 0%.
+        assert result['score'] > 0.5
+
+        # Verify no finding about antagonist having 0 scenes on-stage
+        antag_findings = [f for f in result['findings']
+                          if 'antagonist' in f.get('message', '').lower()
+                          and '0/' in f.get('message', '')]
+        assert len(antag_findings) == 0, f"Antagonist should not show 0 on-stage: {antag_findings}"

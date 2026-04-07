@@ -704,15 +704,15 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
         return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
     # Load character roles from characters.csv if it exists
-    char_roles = {}  # character_name -> role
+    char_roles = {}  # character_id -> role
     chars_path = os.path.join(ref_dir, 'characters.csv')
     if os.path.exists(chars_path):
         rows = _read_csv(chars_path)
         for row in rows:
-            name = (row.get('name') or '').strip() or (row.get('id') or '').strip()
+            char_id = (row.get('id') or '').strip()
             role = (row.get('role') or '').strip().lower()
-            if name:
-                char_roles[name] = role
+            if char_id:
+                char_roles[char_id] = role
 
     # Count per character: POV scenes, on_stage, mentions
     pov_counts = {}   # character -> count of POV scenes
