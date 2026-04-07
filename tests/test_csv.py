@@ -5,13 +5,13 @@ import shutil
 import tempfile
 
 from storyforge.csv_cli import (
-    get_csv_field,
-    get_csv_row,
-    get_csv_column,
-    list_csv_ids,
-    update_csv_field,
-    append_csv_row,
-    renumber_scenes,
+    get_field as get_csv_field,
+    get_row as get_csv_row,
+    get_column as get_csv_column,
+    list_ids as list_csv_ids,
+    update_field as update_csv_field,
+    append_row as append_csv_row,
+    renumber_seq as renumber_scenes,
 )
 
 

@@ -1,0 +1,895 @@
+"""storyforge revise -- Execute revision passes from a revision plan.
+
+Reads working/plans/revision-plan.csv (or legacy .yaml) and executes each
+pass in order. Supports --polish for craft-only, --naturalness for targeted
+AI pattern removal (3 passes), and --structural for CSV-only revision.
+
+Usage:
+    storyforge revise                 # Start from first pending pass
+    storyforge revise 3               # Start from pass number 3 (1-indexed)
+    storyforge revise --polish        # Craft-only polish plan
+    storyforge revise --naturalness   # 3-pass AI pattern removal
+    storyforge revise --structural    # CSV-only from structural proposals
+    storyforge revise --dry-run       # Print prompts only
+"""
+
+import argparse
+import csv
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+from storyforge.common import (
+    detect_project_root, log, set_log_file, read_yaml_field,
+    select_model, select_revision_model, get_coaching_level,
+    install_signal_handlers,
+)
+from storyforge.costs import estimate_cost, log_operation, print_summary
+from storyforge.git import (
+    create_branch, ensure_branch_pushed, create_draft_pr,
+    update_pr_task, commit_and_push, _git, has_gh, current_branch,
+)
+from storyforge.api import (
+    invoke_to_file, extract_text, extract_text_from_file,
+    extract_usage, calculate_cost_from_usage, get_api_key,
+)
+from storyforge.cli import apply_coaching_override
+
+
+# ============================================================================
+# Argument parsing
+# ============================================================================
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(
+        prog='storyforge revise',
+        description='Execute revision passes from a revision plan.',
+    )
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Build and print prompts without invoking Claude')
+    parser.add_argument('--interactive', '-i', action='store_true',
+                        help='Supervise each pass interactively')
+    parser.add_argument('--structural', action='store_true',
+                        help='Auto-generate plan from structural proposals (CSV-only)')
+    parser.add_argument('--naturalness', action='store_true',
+                        help='Auto-generate 3-pass plan targeting AI prose patterns')
+    parser.add_argument('--polish', action='store_true',
+                        help='Auto-generate craft-only polish plan')
+    parser.add_argument('--coaching', choices=['full', 'coach', 'strict'],
+                        help='Override coaching level')
+    parser.add_argument('pass_num', nargs='?', type=int, default=0,
+                        help='Start from this pass number (1-indexed; default: first pending)')
+    return parser.parse_args(argv)
+
+
+# ============================================================================
+# CSV plan helpers
+# ============================================================================
+
+CSV_PLAN_FIELDS = ['pass', 'name', 'purpose', 'scope', 'targets', 'guidance',
+                   'protection', 'findings', 'status', 'model_tier', 'fix_location']
+
+
+def _read_csv_plan(plan_file):
+    """Read the CSV revision plan. Returns list of row dicts."""
+    if not os.path.isfile(plan_file):
+        return []
+    rows = []
+    with open(plan_file) as f:
+        reader = csv.DictReader(f, delimiter='|')
+        for row in reader:
+            rows.append(row)
+    return rows
+
+
+def _write_csv_plan(plan_file, rows):
+    """Write the CSV revision plan."""
+    os.makedirs(os.path.dirname(plan_file), exist_ok=True)
+    with open(plan_file, 'w') as f:
+        f.write('|'.join(CSV_PLAN_FIELDS) + '\n')
+        for row in rows:
+            f.write('|'.join(row.get(field, '') for field in CSV_PLAN_FIELDS) + '\n')
+
+
+def _count_passes(rows):
+    return len(rows)
+
+
+def _read_pass_field(rows, pass_num, field):
+    """Read a field from a pass (1-indexed)."""
+    idx = pass_num - 1
+    if 0 <= idx < len(rows):
+        return rows[idx].get(field, '')
+    return ''
+
+
+def _update_pass_field(rows, pass_num, field, value, plan_file):
+    """Update a field for a pass and write back."""
+    idx = pass_num - 1
+    if 0 <= idx < len(rows):
+        rows[idx][field] = value
+        _write_csv_plan(plan_file, rows)
+
+
+# ============================================================================
+# Auto-generated plans
+# ============================================================================
+
+def _generate_polish_plan(plan_file):
+    """Generate a single-pass craft-only polish plan."""
+    rows = [{
+        'pass': '1',
+        'name': 'prose-polish',
+        'purpose': 'Voice consistency, prose naturalness, dialogue authenticity, AI pattern cleanup',
+        'scope': 'full',
+        'targets': '',
+        'guidance': 'Follow the voice guide strictly. Focus on: em dash overuse, antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. Enter late, leave early.',
+        'protection': 'voice-quality',
+        'findings': 'polish',
+        'status': 'pending',
+        'model_tier': 'opus',
+        'fix_location': 'craft',
+    }]
+    _write_csv_plan(plan_file, rows)
+    log(f'Generated single-pass polish plan: {plan_file}')
+    return rows
+
+
+def _generate_naturalness_plan(plan_file):
+    """Generate 3-pass plan for AI prose pattern removal."""
+    rows = [
+        {
+            'pass': '1',
+            'name': 'metaphor-restatement',
+            'purpose': 'Remove metaphor restatement -- where an image or metaphor is immediately followed by a clause explaining what it means',
+            'scope': 'full',
+            'targets': '',
+            'guidance': 'Find every metaphor, simile, or image that is followed by an explanatory clause and delete the explanation. The image should stand alone. BEFORE: "The silence hung between them like fog -- thick, obscuring, making it impossible to see the other person clearly." AFTER: "The silence hung between them like fog." Also remove: "Which meant..." clauses after images; "The kind of..." restatements; em-dash elaborations that translate a metaphor into literal meaning. Do NOT remove metaphors themselves -- only remove the explanatory clause that follows them.',
+            'protection': 'Do not change any plot events, dialogue content, or character actions. Only modify how images are delivered.',
+            'findings': 'naturalness',
+            'status': 'pending',
+            'model_tier': 'opus',
+            'fix_location': 'craft',
+        },
+        {
+            'pass': '2',
+            'name': 'interpretive-tagging',
+            'purpose': 'Remove interpretive tagging -- where narrator commentary explains the significance of an action or gesture just shown',
+            'scope': 'full',
+            'targets': '',
+            'guidance': 'Find action or gesture lines followed by narrator interpretation and remove the interpretation. BEFORE: "She set the cup down carefully. It was a gesture of control, her way of anchoring herself when everything else felt unmoored." AFTER: "She set the cup down carefully." Also remove: "It was her way of..." or "It was a gesture of..."; "as though..." or "as if to say..." after action lines.',
+            'protection': 'Do not change any dialogue, plot events, or factual observations. Only remove narrator interpretation of actions already shown.',
+            'findings': 'naturalness',
+            'status': 'pending',
+            'model_tier': 'opus',
+            'fix_location': 'craft',
+        },
+        {
+            'pass': '3',
+            'name': 'ending-template',
+            'purpose': 'Vary scene endings that follow the formulaic pattern: small physical action, then thematic observation, then short declarative',
+            'scope': 'full',
+            'targets': '',
+            'guidance': 'Check the last 3-5 sentences of each scene. If they follow the pattern [small physical action] + [thematic/metaphorical observation] + [short declarative sentence of 8 words or fewer], rewrite the ending to break the template. Alternatives: end on dialogue; end mid-action; end on a sensory detail; end on a question; cut the last sentence entirely.',
+            'protection': 'Do not change any scene content except the final 1-3 sentences. The rest of the scene must remain exactly as-is.',
+            'findings': 'naturalness',
+            'status': 'pending',
+            'model_tier': 'opus',
+            'fix_location': 'craft',
+        },
+    ]
+    _write_csv_plan(plan_file, rows)
+    log(f'Generated 3-pass naturalness plan: {plan_file}')
+    return rows
+
+
+def _generate_structural_plan(project_dir, plan_file):
+    """Generate CSV-only plan from structural proposals."""
+    proposals_file = os.path.join(project_dir, 'working', 'scores', 'structural-proposals.csv')
+    if not os.path.isfile(proposals_file):
+        log(f'ERROR: No structural proposals found at {proposals_file}')
+        log('Run: storyforge-validate --structural')
+        sys.exit(1)
+
+    # Read proposals
+    proposals = []
+    with open(proposals_file) as f:
+        reader = csv.DictReader(f, delimiter='|')
+        for row in reader:
+            if row.get('status', '').strip() == 'pending':
+                proposals.append(row)
+
+    if not proposals:
+        log(f'ERROR: No pending proposals in {proposals_file}')
+        sys.exit(1)
+
+    # Save pre-revision scores
+    pre_scores = os.path.join(project_dir, 'working', 'scores', 'structural-latest.csv')
+    if os.path.isfile(pre_scores):
+        import shutil
+        shutil.copy2(pre_scores, os.path.join(project_dir, 'working', 'scores', 'structural-pre-revision.csv'))
+
+    log(f'Structural mode -- generating plan from {len(proposals)} proposals...')
+
+    # Group by dimension
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for row in proposals:
+        dim = row['dimension']
+        if dim not in groups:
+            groups[dim] = {'fix_location': row['fix_location'], 'targets': [], 'rationales': []}
+        target = row.get('target', 'global').strip()
+        if target and target != 'global':
+            groups[dim]['targets'].append(target)
+        groups[dim]['rationales'].append(row.get('rationale', row.get('change', '')))
+
+    # Sort by fix_location priority
+    priority = {'structural': 0, 'intent': 1, 'registry': 2, 'brief': 3}
+    sorted_dims = sorted(groups.items(), key=lambda x: priority.get(x[1]['fix_location'], 9))
+
+    rows = []
+    for i, (dim, info) in enumerate(sorted_dims, 1):
+        rows.append({
+            'pass': str(i),
+            'name': f'structural-{dim.replace("_", "-")}',
+            'purpose': '; '.join(info['rationales']),
+            'scope': 'full',
+            'targets': ';'.join(info['targets']) if info['targets'] else '',
+            'guidance': '',
+            'protection': 'all-strengths',
+            'findings': '',
+            'status': 'pending',
+            'model_tier': 'sonnet',
+            'fix_location': info['fix_location'],
+        })
+
+    _write_csv_plan(plan_file, rows)
+
+    for i, (dim, info) in enumerate(sorted_dims, 1):
+        log(f'  Pass {i}: {dim} (fix_location: {info["fix_location"]})')
+
+    return rows
+
+
+# ============================================================================
+# Usage logging helper
+# ============================================================================
+
+def _log_usage(project_dir, log_file, operation, target, model, duration_s=0):
+    """Log API usage from a response file."""
+    if not os.path.isfile(log_file):
+        return
+    try:
+        with open(log_file) as f:
+            response = json.load(f)
+        usage = extract_usage(response)
+        cost = calculate_cost_from_usage(usage, model)
+        log_operation(
+            project_dir, operation, model,
+            usage['input_tokens'], usage['output_tokens'], cost,
+            duration_s=duration_s, target=target,
+            cache_read=usage.get('cache_read', 0),
+            cache_create=usage.get('cache_create', 0),
+        )
+    except (json.JSONDecodeError, FileNotFoundError, KeyError):
+        pass
+
+
+# ============================================================================
+# Word count estimation
+# ============================================================================
+
+def _estimate_avg_words(project_dir):
+    """Estimate average scene word count."""
+    metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if os.path.isfile(metadata_csv):
+        from storyforge.csv_cli import get_column
+        wc_col = get_column(metadata_csv, 'word_count')
+        total = sum(int(w) for w in wc_col if w and w != '0')
+        count = sum(1 for w in wc_col if w and w != '0')
+        if count > 0:
+            return total // count, count
+
+    # Fall back to scene files
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    total = 0
+    count = 0
+    if os.path.isdir(scenes_dir):
+        for f in os.listdir(scenes_dir):
+            if f.endswith('.md'):
+                wc = len(open(os.path.join(scenes_dir, f)).read().split())
+                total += wc
+                count += 1
+
+    if count > 0:
+        return total // count, count
+    return 3000, 1
+
+
+# ============================================================================
+# Scene registration for new scenes created during revision
+# ============================================================================
+
+def _register_new_scenes(project_dir, targets, pass_name):
+    """Register new scenes (NEW: prefix in targets) in metadata CSVs."""
+    meta_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    intent_csv = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+
+    new_ids = []
+    for t in targets.split(';'):
+        t = t.strip()
+        if t.startswith('NEW:'):
+            new_ids.append(t[4:])
+
+    if not new_ids:
+        return
+
+    # Find max seq
+    max_seq = 0
+    if os.path.isfile(meta_csv):
+        with open(meta_csv) as f:
+            for line in f:
+                parts = line.strip().split('|')
+                if len(parts) >= 2:
+                    try:
+                        seq = int(parts[1])
+                        if seq > max_seq:
+                            max_seq = seq
+                    except ValueError:
+                        pass
+
+    registered = 0
+    for sid in new_ids:
+        scene_file = os.path.join(project_dir, 'scenes', f'{sid}.md')
+        if not os.path.isfile(scene_file):
+            continue
+
+        # Check if already registered
+        if os.path.isfile(meta_csv):
+            with open(meta_csv) as f:
+                if any(line.startswith(f'{sid}|') for line in f):
+                    continue
+
+        max_seq += 1
+        wc = len(open(scene_file).read().split())
+
+        # Generate title from slug
+        title = ' '.join(w.capitalize() for w in sid.split('-'))
+
+        if os.path.isfile(meta_csv):
+            from storyforge.csv_cli import append_row
+            append_row(meta_csv, f'{sid}|{max_seq}|{title}|||||||drafted|{wc}|')
+            log(f'  Registered new scene in metadata: {sid} (seq {max_seq})')
+
+        if os.path.isfile(intent_csv):
+            from storyforge.csv_cli import append_row
+            append_row(intent_csv, f'{sid}|Created by revision pass: {pass_name}|||||')
+            log(f'  Registered new scene in intent: {sid}')
+
+        registered += 1
+
+    if registered > 0:
+        log(f'  Registered {registered} new scene(s) in metadata and intent CSVs')
+
+
+# ============================================================================
+# Main
+# ============================================================================
+
+def main(argv=None):
+    args = parse_args(argv or [])
+    install_signal_handlers()
+
+    project_dir = detect_project_root()
+
+    log_dir = os.path.join(project_dir, 'working', 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    set_log_file(os.path.join(log_dir, 'revision-log.txt'))
+
+    python_lib = os.path.join(os.path.dirname(os.path.dirname(__file__)))
+
+    # Resolve plan file
+    csv_plan_file = os.path.join(project_dir, 'working', 'plans', 'revision-plan.csv')
+    yaml_plan_file = os.path.join(project_dir, 'working', 'plans', 'revision-plan.yaml')
+
+    # Check mutually exclusive modes
+    mode_count = sum([args.structural, args.polish, args.naturalness])
+    if mode_count > 1:
+        print('ERROR: --structural, --polish, and --naturalness are mutually exclusive.', file=sys.stderr)
+        sys.exit(1)
+
+    # Auto-generate plans
+    if args.polish:
+        log('Polish mode -- generating craft-only revision plan...')
+        plan_rows = _generate_polish_plan(csv_plan_file)
+    elif args.naturalness:
+        log('Naturalness mode -- generating 3-pass plan for AI pattern removal...')
+        plan_rows = _generate_naturalness_plan(csv_plan_file)
+    elif args.structural:
+        plan_rows = _generate_structural_plan(project_dir, csv_plan_file)
+    elif os.path.isfile(csv_plan_file):
+        log(f'Using CSV revision plan: {csv_plan_file}')
+        plan_rows = _read_csv_plan(csv_plan_file)
+    elif os.path.isfile(yaml_plan_file):
+        log('DEPRECATION: Using YAML revision plan. Migrate to working/plans/revision-plan.csv.')
+        # For YAML fallback, we just read it via the original bash approach.
+        # The Python migration handles CSV-first plans.
+        log('ERROR: YAML plan support not available in Python migration. Convert to CSV.')
+        sys.exit(1)
+    else:
+        log(f'ERROR: Revision plan not found at {csv_plan_file}')
+        log("Run the storyforge-plan-revision skill first to create a revision plan.")
+        sys.exit(1)
+
+    total_passes = _count_passes(plan_rows)
+    if total_passes == 0:
+        log('ERROR: No passes found in revision plan')
+        sys.exit(1)
+
+    # Coaching level
+    if args.coaching:
+        apply_coaching_override(args)
+    effective_coaching = get_coaching_level(project_dir)
+
+    # API key check
+    if not args.dry_run and not args.interactive:
+        try:
+            get_api_key()
+        except RuntimeError:
+            log('ERROR: ANTHROPIC_API_KEY not set. Required for direct API mode.')
+            log('  Set it with: export ANTHROPIC_API_KEY=your-key')
+            log('  Or use --interactive to run via claude -p instead.')
+            sys.exit(1)
+
+    os.makedirs(os.path.join(project_dir, 'working', 'coaching'), exist_ok=True)
+
+    # Determine start point
+    start_pass = args.pass_num
+    if start_pass == 0:
+        for i in range(1, total_passes + 1):
+            status = _read_pass_field(plan_rows, i, 'status')
+            if status == 'planned':
+                log(f"WARNING: Pass {i} has status 'planned' -- normalizing to 'pending'")
+                _update_pass_field(plan_rows, i, 'status', 'pending', csv_plan_file)
+                status = 'pending'
+            if status in ('pending', 'in_progress'):
+                start_pass = i
+                break
+        if start_pass == 0:
+            log('All passes are already completed. Nothing to do.')
+            return
+
+    if start_pass < 1 or start_pass > total_passes:
+        log(f'ERROR: Pass number {start_pass} is out of range (1-{total_passes})')
+        sys.exit(1)
+
+    # Project title
+    project_title = read_yaml_field('project.title', project_dir) or '(untitled project)'
+
+    # Pipeline manifest
+    manifest = os.path.join(project_dir, 'working', 'pipeline.csv')
+    cycle_id = '0'
+    if os.path.isfile(manifest):
+        with open(manifest) as f:
+            lines = f.readlines()
+        if len(lines) > 1:
+            cycle_id = lines[-1].strip().split('|')[0]
+
+    # Branch + PR setup
+    if not args.dry_run:
+        create_branch('revise', project_dir)
+        ensure_branch_pushed(project_dir)
+
+        task_lines = ['### Progress']
+        for i in range(1, total_passes + 1):
+            pname = _read_pass_field(plan_rows, i, 'name')
+            task_lines.append(f'- [ ] Pass: {pname}')
+        task_lines.append('- [ ] Review')
+
+        pr_body = (
+            f'## Revision\n\n'
+            f'**Project:** {project_title}\n'
+            f'**Passes:** {total_passes}\n\n'
+            + '\n'.join(task_lines)
+        )
+
+        create_draft_pr(f'Revise: {project_title}', pr_body, project_dir, 'revision')
+
+    if not args.dry_run and cycle_id != '0':
+        # Update pipeline cycle
+        if os.path.isfile(manifest):
+            with open(manifest) as f:
+                lines = f.readlines()
+            header = lines[0].strip().split('|')
+            if 'status' in header:
+                idx = header.index('status')
+                for i in range(1, len(lines)):
+                    parts = lines[i].strip().split('|')
+                    if parts[0] == cycle_id:
+                        while len(parts) <= idx:
+                            parts.append('')
+                        parts[idx] = 'revising'
+                        lines[i] = '|'.join(parts) + '\n'
+                with open(manifest, 'w') as f:
+                    f.writelines(lines)
+
+    log('============================================')
+    log(f'Storyforge Revision -- {project_title}')
+    log(f'Plan: {csv_plan_file}')
+    log(f'Cycle: {cycle_id}')
+    log(f'Coaching level: {effective_coaching}')
+    log(f'Starting from pass: {start_pass} of {total_passes}')
+    log('============================================')
+
+    # Cost forecast
+    if not args.dry_run:
+        pending = sum(
+            1 for i in range(start_pass, total_passes + 1)
+            if _read_pass_field(plan_rows, i, 'status') != 'completed'
+        )
+        avg_words, scene_count = _estimate_avg_words(project_dir)
+        revise_model = select_revision_model('prose', 'prose revision')
+        per_pass = estimate_cost('revise', scene_count, avg_words, revise_model)
+        total_forecast = per_pass * pending
+        log(f'Cost forecast: ~${total_forecast:.2f} ({pending} passes @ ~${per_pass:.2f})')
+
+    # ---- MAIN PASS LOOP ----
+    for pass_num in range(start_pass, total_passes + 1):
+        pass_name = _read_pass_field(plan_rows, pass_num, 'name')
+        pass_scope = _read_pass_field(plan_rows, pass_num, 'scope')
+        pass_purpose = _read_pass_field(plan_rows, pass_num, 'purpose')
+        pass_status = _read_pass_field(plan_rows, pass_num, 'status')
+
+        if pass_status == 'planned':
+            _update_pass_field(plan_rows, pass_num, 'status', 'pending', csv_plan_file)
+            pass_status = 'pending'
+
+        if pass_status == 'completed':
+            log(f'Pass {pass_num}/{total_passes}: {pass_name} -- already completed, skipping.')
+            continue
+
+        log(f'--- Pass {pass_num}/{total_passes}: {pass_name} ---')
+        log(f'  Purpose: {pass_purpose}')
+        log(f'  Scope: {pass_scope}')
+
+        # Build CSV config block for prompt
+        targets = _read_pass_field(plan_rows, pass_num, 'targets')
+        guidance = _read_pass_field(plan_rows, pass_num, 'guidance')
+        protection = _read_pass_field(plan_rows, pass_num, 'protection')
+        findings = _read_pass_field(plan_rows, pass_num, 'findings')
+        fix_location = _read_pass_field(plan_rows, pass_num, 'fix_location')
+
+        # Resolve effective scope
+        effective_scope = pass_scope
+        if pass_scope in ('scene-level', 'targeted') and targets:
+            effective_scope = targets.replace(';', ',')
+        elif pass_scope in ('scene-level', 'targeted'):
+            effective_scope = 'full'
+
+        # Build config block for prompt builder
+        pass_block = f'- name: {pass_name}\n    purpose: {pass_purpose}\n    scope: {pass_scope}'
+        if targets:
+            pass_block += f'\n    targets: {targets}'
+        if guidance:
+            pass_block += f'\n    guidance: {guidance}'
+        if protection:
+            pass_block += f'\n    protection: {protection}'
+        if findings:
+            pass_block += f'\n    findings: {findings}'
+
+        # Determine API mode flags
+        api_flag = ''
+        if not args.dry_run and not args.interactive and os.environ.get('ANTHROPIC_API_KEY'):
+            api_flag = '--api-mode'
+
+        # Build prompt
+        log('  Building revision prompt...')
+        if fix_location in ('brief', 'intent', 'structural', 'registry'):
+            # Upstream revision prompt -- built inline via Python
+            from storyforge.elaborate import get_scenes
+            ref_dir = os.path.join(project_dir, 'reference')
+            scenes = get_scenes(ref_dir)
+
+            target_ids = [t.strip() for t in targets.split(';') if t.strip()] if targets else [s['id'] for s in scenes]
+            scene_data = [s for s in scenes if s['id'] in target_ids]
+
+            data_block = []
+            for s in scene_data:
+                data_block.append(f"Scene: {s.get('id', '')} (seq {s.get('seq', '')}, POV: {s.get('pov', '')})")
+                for k, v in s.items():
+                    if k not in ('id', 'seq', 'pov') and v:
+                        data_block.append(f'  {k}: {str(v)[:120]}')
+                data_block.append('')
+
+            file_map = {
+                'brief': 'scene-briefs.csv',
+                'intent': 'scene-intent.csv',
+                'structural': 'scenes.csv',
+            }
+            csv_type_map = {
+                'brief': 'briefs-csv',
+                'intent': 'intent-csv',
+                'structural': 'scenes-csv',
+            }
+
+            prompt = f'''You are performing an upstream revision on scene data for a novel.
+
+## Pass: {pass_name}
+## Purpose: {pass_purpose}
+## Fix Location: {fix_location}
+
+## Guidance
+{guidance or 'No specific guidance provided.'}
+
+## Protection
+{protection or 'No protection constraints.'}
+
+## Current Scene Data
+
+{chr(10).join(data_block)}
+
+## Instructions
+
+Revise the {file_map.get(fix_location, 'scenes.csv')} data to address the purpose above.
+
+Output your changes as pipe-delimited CSV rows in a fenced block:
+
+```{csv_type_map.get(fix_location, 'scenes-csv')}
+(header row)
+(one row per scene that needs changes)
+```
+
+Rules:
+- Only modify scenes listed in the targets
+- Preserve all values you are not changing
+- Output the full row for each modified scene
+'''
+        else:
+            # Standard prose revision -- use revision module
+            try:
+                result = subprocess.run(
+                    [sys.executable, '-m', 'storyforge.revision', 'build-prompt',
+                     pass_name, pass_purpose, effective_scope or pass_scope, project_dir,
+                     '--config', pass_block, '--coaching', effective_coaching]
+                    + ([api_flag] if api_flag else []),
+                    capture_output=True, text=True, check=True,
+                    env={**os.environ, 'PYTHONPATH': python_lib},
+                )
+                prompt = result.stdout
+            except subprocess.CalledProcessError as e:
+                log(f'ERROR: Failed to build prompt for pass \'{pass_name}\'')
+                log(f'  {e.stderr}')
+                sys.exit(1)
+
+        # Dry-run: print and continue
+        if args.dry_run:
+            print(f'===== DRY RUN: {pass_name} (pass {pass_num}/{total_passes}) =====')
+            print(prompt)
+            print(f'===== END DRY RUN: {pass_name} =====')
+            print()
+            continue
+
+        # Mark as in_progress
+        _update_pass_field(plan_rows, pass_num, 'status', 'in_progress', csv_plan_file)
+
+        # Record git HEAD before invocation
+        head_before = _git(project_dir, 'rev-parse', 'HEAD', check=False).stdout.strip()
+
+        step_log = os.path.join(log_dir, f'revision-pass-{pass_num}-{pass_name}.log')
+        start_time = time.time()
+
+        # Select model
+        pass_model = select_revision_model(pass_name, pass_purpose)
+
+        if args.interactive:
+            # Interactive mode
+            subprocess.run(
+                ['claude', prompt,
+                 '--model', pass_model,
+                 '--dangerously-skip-permissions'],
+                cwd=project_dir,
+            )
+            exit_code = 0
+        else:
+            # Direct API mode
+            log(f'  Invoking API for revision (model: {pass_model})...')
+            try:
+                response = invoke_to_file(prompt, pass_model, step_log, max_tokens=32768)
+                exit_code = 0
+            except Exception as e:
+                log(f'  API call failed: {e}')
+                exit_code = 1
+
+            # Process response
+            if exit_code == 0:
+                if fix_location in ('brief', 'intent', 'structural', 'registry'):
+                    # Upstream revision -- apply CSV updates
+                    log(f'  Upstream revision (fix_location: {fix_location}) -- applying CSV updates...')
+                    try:
+                        from storyforge.prompts_elaborate import parse_stage_response, csv_block_to_rows
+                        from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+
+                        response_text = extract_text(response)
+
+                        blocks = parse_stage_response(response_text)
+                        updated_files = []
+                        affected_scenes = set()
+
+                        csv_file_map = {
+                            'scenes-csv': ('scenes.csv', _FILE_MAP['scenes.csv']),
+                            'scenes-csv-update': ('scenes.csv', _FILE_MAP['scenes.csv']),
+                            'intent-csv': ('scene-intent.csv', _FILE_MAP['scene-intent.csv']),
+                            'briefs-csv': ('scene-briefs.csv', _FILE_MAP['scene-briefs.csv']),
+                        }
+
+                        ref_dir = os.path.join(project_dir, 'reference')
+                        for label, content in blocks.items():
+                            if label not in csv_file_map:
+                                continue
+                            rows = csv_block_to_rows(content)
+                            if not rows:
+                                continue
+
+                            fname, cols = csv_file_map[label]
+                            path = os.path.join(ref_dir, fname)
+                            existing = _read_csv_as_map(path)
+
+                            for row in rows:
+                                sid = row.get('id', '')
+                                if not sid:
+                                    continue
+                                affected_scenes.add(sid)
+                                if sid in existing:
+                                    existing[sid].update({k: v for k, v in row.items() if v and k != 'id'})
+                                else:
+                                    new = {c: '' for c in cols}
+                                    new.update(row)
+                                    existing[sid] = new
+
+                            if label.startswith('scenes-csv'):
+                                ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)))
+                            else:
+                                ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
+                            _write_csv(path, ordered, cols)
+                            updated_files.append(fname)
+
+                        log(f'  Updated: {", ".join(updated_files) if updated_files else "no CSV blocks found"}')
+                        log(f'  Affected scenes: {", ".join(sorted(affected_scenes)) if affected_scenes else "none"}')
+                    except Exception as e:
+                        log(f'  WARNING: Failed to apply upstream changes: {e}')
+                else:
+                    # Standard prose revision -- extract scenes from response
+                    try:
+                        result = subprocess.run(
+                            [sys.executable, '-m', 'storyforge.parsing', 'extract-scenes',
+                             step_log, os.path.join(project_dir, 'scenes')],
+                            capture_output=True, text=True,
+                            env={**os.environ, 'PYTHONPATH': python_lib},
+                        )
+                        if result.stdout.strip():
+                            for line in result.stdout.strip().splitlines():
+                                log(f'  {line}')
+                        else:
+                            log('  API response received (analytical pass, no scene markers)')
+                    except Exception:
+                        log('  API response received (could not parse scene content)')
+
+                    # Register new scenes
+                    if targets:
+                        _register_new_scenes(project_dir, targets, pass_name)
+
+        end_time = time.time()
+        duration = int(end_time - start_time)
+        minutes = duration // 60
+        secs = duration % 60
+
+        # Log usage
+        _log_usage(project_dir, step_log, 'revise', pass_name, pass_model, duration)
+
+        if exit_code != 0:
+            log(f'ERROR: API call failed for pass \'{pass_name}\' after {minutes}m{secs}s')
+            log(f'See full output: {step_log}')
+            log(f'Fix the issue and re-run: storyforge revise {pass_num}')
+            sys.exit(1)
+
+        # Update word counts
+        metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        if os.path.isfile(metadata_csv) and effective_coaching == 'full':
+            from storyforge.csv_cli import list_ids, update_field
+            for scene_id in list_ids(metadata_csv):
+                scene_file = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+                if os.path.isfile(scene_file):
+                    new_wc = str(len(open(scene_file).read().split()))
+                    update_field(metadata_csv, scene_id, 'word_count', new_wc)
+
+        # Git commit if Claude didn't
+        head_after = _git(project_dir, 'rev-parse', 'HEAD', check=False).stdout.strip()
+        if head_before == head_after:
+            log('  No commit from Claude. Creating manual commit...')
+            if effective_coaching in ('coach', 'strict'):
+                commit_and_push(
+                    project_dir,
+                    ['working/coaching/', 'working/logs/', 'working/costs/', 'working/pipeline.csv'],
+                    f'{effective_coaching.capitalize()}: {pass_name}',
+                )
+            else:
+                commit_and_push(project_dir, ['.'], f'Revision: {pass_name}')
+
+        # Push
+        _git(project_dir, 'push', check=False)
+
+        # Mark completed
+        _update_pass_field(plan_rows, pass_num, 'status', 'completed', csv_plan_file)
+
+        commit_short = _git(project_dir, 'rev-parse', '--short', 'HEAD', check=False).stdout.strip()
+        log(f'SUCCESS: Pass {pass_num}/{total_passes} ({pass_name}) -- {minutes}m{secs}s, commit {commit_short}')
+        update_pr_task(f'Pass: {pass_name}', project_dir)
+
+        # Pause between passes (headless only)
+        if pass_num < total_passes and not args.interactive:
+            next_status = _read_pass_field(plan_rows, pass_num + 1, 'status')
+            if next_status != 'completed':
+                log('Pausing 10s before next pass...')
+                time.sleep(10)
+
+    # ---- SESSION SUMMARY ----
+    completed = sum(
+        1 for i in range(1, total_passes + 1)
+        if _read_pass_field(plan_rows, i, 'status') == 'completed'
+    )
+
+    log('')
+    log('============================================')
+    log(f'Revision session complete. {completed}/{total_passes} passes finished.')
+
+    # Structural mode: re-validate
+    if args.structural and not args.dry_run:
+        log('Re-running structural validation...')
+        try:
+            from storyforge.structural import (
+                structural_score, save_structural_scores,
+                load_scores_as_dict, print_score_delta,
+            )
+            ref_dir = os.path.join(project_dir, 'reference')
+            report = structural_score(ref_dir)
+            save_structural_scores(report, project_dir)
+
+            pre_path = os.path.join(project_dir, 'working', 'scores', 'structural-pre-revision.csv')
+            post_path = os.path.join(project_dir, 'working', 'scores', 'structural-latest.csv')
+            pre = load_scores_as_dict(pre_path)
+            post = load_scores_as_dict(post_path)
+
+            print('\n=== Structural Score Delta ===')
+            print(print_score_delta(pre, post))
+            print(f'\nOverall: {report.get("overall", 0):.2f}')
+
+            # Mark proposals as completed
+            proposals_file = os.path.join(project_dir, 'working', 'scores', 'structural-proposals.csv')
+            if os.path.isfile(proposals_file):
+                content = open(proposals_file).read()
+                content = content.replace('|pending', '|completed')
+                with open(proposals_file, 'w') as f:
+                    f.write(content)
+                log('Marked all proposals as completed')
+        except Exception as e:
+            log(f'WARNING: Structural re-validation failed: {e}')
+
+    # Cost summary
+    if not args.dry_run:
+        print_summary(project_dir, 'revise')
+
+    if completed == total_passes:
+        log('All revision passes are done!')
+        os.makedirs(os.path.join(project_dir, 'working', 'reviews'), exist_ok=True)
+        commit_and_push(
+            project_dir,
+            ['storyforge.yaml', 'working/pipeline.csv'],
+            'Revision complete: advance phase to review',
+        )
+        log('')
+        log('Next step: run /storyforge:review to assess revision results')
+
+    log('============================================')

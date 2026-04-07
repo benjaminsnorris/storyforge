@@ -8,7 +8,7 @@ import os
 import shutil
 
 from storyforge.elaborate import get_scenes, _read_csv_as_map
-from storyforge.csv_cli import get_csv_field
+from storyforge.csv_cli import get_field as get_csv_field
 
 
 def _get_sorted_ids(ref_dir):
