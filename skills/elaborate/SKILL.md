@@ -76,6 +76,8 @@ Based on the author's request, determine the mode:
 - **"Deepen characters"** / **"Work on [character name]"** → Character development. During elaboration, this deepens the character bible entries. The spine creates seed entries; this mode enriches them with wound/lie/need structure, voice fingerprints, and relationship dynamics.
 - **"Build the world"** / **"World building"** → World bible development. During elaboration, world building supports the architecture and scene map stages.
 - **"Story architecture"** / **"Theme"** / **"Structure"** → Story architecture refinement. The spine creates the initial architecture; this mode deepens thematic throughlines, conflict structure, and arc planning.
+- **"Fix pacing"** / **"Pacing shape"** / **"Second half doesn't escalate"** → Pacing review (see Pacing Review below).
+- **"Fix outcomes"** / **"Scene function variety"** / **"Too many yes-but"** → Outcome review (see Outcome Review below).
 - **"Validate"** → Run validation on the current state.
 - **Status question** → Report current stage, scene count, validation state.
 
@@ -270,6 +272,54 @@ World building supports the architecture and scene map stages. Build what the st
 Focus on: what creates pressure on characters? What constrains their choices? What makes the setting specific rather than generic?
 
 Update `reference/world-bible.md` (and `reference/systems-bible.md` if the world has a formal system like magic or technology).
+
+### Pacing Review (Interactive)
+
+This mode activates when structural scoring shows Pacing Shape below target — typically "second half tension does not exceed first half." This is a creative decision, not a data fix.
+
+1. **Show the data.** Read `reference/scene-intent.csv` and present the value_shift distribution by act/part:
+   - Count shifts by type per part: `++`, `+/-`, `-/-`, `-/--`, etc.
+   - Show which part has the most negative/dramatic shifts
+   - Highlight where the second half has fewer negative shifts than the first
+
+2. **Explain what it means.** Pacing shape measures whether tension escalates through the novel. A novel where the first half has harder shifts than the second feels like it peaks early and coasts. The target is for the second half to have more tension than the first — not necessarily monotonic escalation, but the overall pressure should increase.
+
+3. **Ask the author.** Present 2-3 specific scenes in the second half that currently have mild shifts (`+/+`, `+/-`) and ask: "Should any of these scenes hit harder? A `+/-` could become `-/-` if the victory comes with a real cost. A `+/+` could become `+/-` if the win isn't as clean as it seems."
+
+4. **Apply changes.** For each scene the author wants to change, update `value_shift` in scene-intent.csv. Also update `outcome` in scene-briefs.csv if the shift change implies a different outcome (e.g., `yes` → `yes-but`).
+
+5. **Verify.** Re-run `storyforge validate --structural` to see if the pacing score improved.
+
+**Coaching level adaptation:**
+- **Full:** Propose specific shift changes with reasoning. "Scene 38 (betrayal) is `+/-` — the betrayal is discovered but Zara still has her crew. If this became `-/--` — she loses Naji AND the crew fractures — the second half gets harder."
+- **Coach:** Show the distribution, ask the author which scenes feel too easy. Don't propose specific changes.
+- **Strict:** Show the raw shift counts per part. No interpretation.
+
+### Outcome Review (Interactive)
+
+This mode activates when Scene Function Variety is below target — typically one outcome type dominates (often `yes-but`).
+
+1. **Show the data.** Count outcomes across all scenes:
+   - `yes`: X scenes
+   - `yes-but`: Y scenes
+   - `no`: Z scenes
+   - `no-and`: W scenes
+   - Show the percentage and whether any type is >40% of total
+
+2. **Explain what it means.** Outcome variety creates emotional rhythm. A novel where 45% of scenes end `yes-but` feels like the same emotional beat repeating — the character wins but it costs something, over and over. Readers stop feeling the cost. Mixing in more `no` (flat failure) and `no-and` (failure that makes things worse) creates contrast that makes the `yes-but` scenes land harder.
+
+3. **Ask the author.** Show scenes where the dominant outcome could change. Focus on scenes where the current outcome feels like the easiest choice:
+   - "This scene's goal is 'convince the council.' The outcome is `yes-but`. What if it were `no` — the council refuses, full stop? That forces a harder decision in the next scene."
+   - "This scene ends `yes-but` — what's the 'but'? If the cost is mild, maybe this should be a clean `yes` (rare, earned) or a `no` (harder stakes)."
+
+4. **Apply changes.** Update `outcome` in scene-briefs.csv. If the outcome changes, the brief's crisis/decision may also need adjustment — offer to update those too.
+
+5. **Verify.** Re-run scoring to confirm improvement.
+
+**Coaching level adaptation:**
+- **Full:** Propose 3-5 specific outcome changes with dramatic reasoning.
+- **Coach:** Show the distribution, ask which scenes feel emotionally repetitive.
+- **Strict:** Show counts and percentages only.
 
 ## Step 5: Validate and Report
 

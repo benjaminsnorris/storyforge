@@ -56,12 +56,23 @@ Based on the author's request and project state:
 → All domains in order: registries → gaps → structural → briefs.
 
 **"How's my data?" / "What needs work?" / no specific direction:**
-→ Run `--diagnose` to get the full picture first. This runs structural scoring (8 dimensions), brief quality detection (abstract/overspecified/verbose), and gap detection in one read-only pass. **Read the actual output before recommending anything.** Only recommend domains that have real issues:
-1. If gaps count > 0, recommend gaps domain
-2. If brief quality issues count > 0, recommend briefs domain
-3. If structural scores are low AND the low dimension maps to a hone domain, recommend it
-4. If registries are missing or stale, recommend registries domain
-5. **If a domain shows zero issues, say so explicitly** — "briefs look clean, no action needed" is a valid finding. Do not recommend running hone on a domain that has no detected issues.
+→ Run `--diagnose` to get the full picture first. This runs structural scoring (8 dimensions), brief quality detection (abstract/overspecified/verbose), and gap detection in one read-only pass. **Read the actual output before recommending anything.** Only recommend actions for real issues:
+
+1. If gaps count > 0 → `storyforge hone --domain gaps`
+2. If brief quality issues count > 0 → `storyforge hone --domain briefs`
+3. If MICE dormancy detected → `storyforge elaborate --stage mice-fill`
+4. If registries are missing or stale → `storyforge hone --domain registries`
+5. **If a domain shows zero issues, say so explicitly** — "briefs look clean, no action needed"
+
+For **creative/architectural dimensions** that are below target but not data quality issues, recommend interactive work with the author:
+
+6. **Pacing Shape below target** → The second half tension doesn't exceed the first. Show the author the value_shift distribution across acts. Ask: "Is this intentional sustained pressure, or should the back half escalate?" If they want to escalate, walk through scenes in the second half and discuss which `value_shift` entries could change — typically shifting from `+/-` or `-/-` to `-/--` or `+/--`. This is an interactive `elaborate` conversation, not an autonomous fix.
+
+7. **Scene Function Variety below target** → Outcome distribution is dominated by one type (usually `yes-but`). Show the author the outcome counts. Ask: "Are there scenes where the outcome should be harder — a flat `no` instead of `yes-but`?" Walk through candidate scenes. This is also an interactive conversation — the author decides which scenes change because it affects the story's emotional shape.
+
+8. **Character Presence below target** → A character is absent too long. Show the gap. Ask if they should appear in a gap scene, or if the absence is intentional.
+
+For all creative dimensions: **present the data, explain what the score means, and let the author decide.** Do not autonomously rewrite story architecture.
 
 ## Step 4: Assess Domain Needs
 
