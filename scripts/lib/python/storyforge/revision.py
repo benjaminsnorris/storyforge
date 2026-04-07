@@ -383,6 +383,42 @@ def build_revision_prompt(
     file_block = '\n'.join(file_lines)
     file_count = len(existing_paths) + len(new_scene_ids)
 
+    # Intent-beat protection: load intent for in-scope scenes
+    intent_section = ''
+    intent_path = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+    briefs_path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    if os.path.isfile(intent_path) or os.path.isfile(briefs_path):
+        intent_lines = [
+            '\n## Intent-Beat Protection\n',
+            '**CRITICAL:** Before cutting or rewriting the final 30% of any scene, verify that '
+            'all intent beats survive. Each scene has structural beats specified below that MUST '
+            'be present in the revised scene. If a pattern rule (e.g., "cut summary closers") '
+            'conflicts with an intent beat, preserve the intent beat and find another way to '
+            'address the pattern.\n',
+        ]
+        # Get scene IDs from existing paths
+        scope_ids = [os.path.splitext(os.path.basename(p))[0] for p in existing_paths]
+
+        # Load intent and briefs data
+        from storyforge.csv_cli import get_field
+        for sid in scope_ids:
+            beat_parts = []
+            if os.path.isfile(briefs_path):
+                for field in ('key_actions', 'key_dialogue', 'outcome'):
+                    val = get_field(briefs_path, sid, field).strip()
+                    if val:
+                        beat_parts.append(f'  - **{field}:** {val}')
+            if os.path.isfile(intent_path):
+                tp = get_field(intent_path, sid, 'turning_point').strip()
+                if tp:
+                    beat_parts.append(f'  - **turning_point:** {tp}')
+            if beat_parts:
+                intent_lines.append(f'\n**{sid}:**')
+                intent_lines.extend(beat_parts)
+
+        if len(intent_lines) > 2:  # More than just header
+            intent_section = '\n'.join(intent_lines)
+
     # New scene creation instructions
     new_scenes_section = ''
     if new_scene_ids:
@@ -452,6 +488,7 @@ def build_revision_prompt(
         f'## Purpose\n\n{purpose}\n',
         f'## Scope\n\nThis pass covers {file_count} scene file(s):\n\n{file_block}',
         config_section,
+        intent_section,
         new_scenes_section,
         overrides_section,
         craft_section,
@@ -571,6 +608,7 @@ def _coach_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
         'report current state and what needs to change\n'
         '- **Priority edits:** Which changes would have the most impact, in order\n'
         '- **Voice risks:** Where the revision is most likely to damage voice if not careful\n'
+        '- **Intent-beat verification:** Confirm all intent beats from the protection list are present in revised scenes\n'
         '- **Issues discovered:** Anything that may need a separate pass'
     )
 
@@ -662,6 +700,7 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
             '- **Target progress:** For each target in the pass configuration, '
             'report how close you came\n'
             '- **Protected passages:** Confirm all protected passages were left untouched\n'
+            '- **Intent-beat verification:** Confirm all intent beats from the protection list are present in revised scenes\n'
             '- **Net word count change:** Approximate words added or removed\n'
             '- **Issues discovered:** Anything that may need a separate pass'
         )
@@ -706,6 +745,7 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
             '- **Target progress:** For each target in the pass configuration, '
             'report how close you came (e.g., "architecture metaphor: reduced from ~85 to ~32 instances")\n'
             '- **Protected passages:** Confirm all protected passages were left untouched\n'
+            '- **Intent-beat verification:** Confirm all intent beats from the protection list are present in revised scenes\n'
             '- **Continuity updates:** Any changes to the continuity tracker\n'
             '- **Net word count change:** Approximate words added or removed '
             '(e.g., "+1,200" or "-800")\n'

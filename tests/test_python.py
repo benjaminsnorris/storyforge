@@ -155,6 +155,79 @@ class TestRevision:
         assert 'act1-sc01' in joined
         assert 'NEW:the-rupture' in joined
 
+    def test_build_revision_prompt_includes_intent_protection(self, fixture_dir):
+        from storyforge.revision import build_revision_prompt
+        prompt = build_revision_prompt(
+            pass_name='prose-tightening',
+            purpose='Tighten prose and cut filler.',
+            scope='act1-sc01',
+            project_dir=fixture_dir,
+            api_mode=True,
+        )
+        assert 'Intent-Beat Protection' in prompt
+        assert 'act1-sc01' in prompt
+        # Should include brief fields for the scene
+        assert 'key_actions' in prompt or 'turning_point' in prompt
+
+    def test_build_revision_prompt_intent_has_turning_point(self, fixture_dir):
+        from storyforge.revision import build_revision_prompt
+        prompt = build_revision_prompt(
+            pass_name='prose-tightening',
+            purpose='Tighten prose.',
+            scope='act1-sc01',
+            project_dir=fixture_dir,
+            api_mode=True,
+        )
+        # act1-sc01 has turning_point='revelation' in the fixture
+        assert 'turning_point' in prompt
+        assert 'revelation' in prompt
+
+    def test_build_revision_prompt_intent_beat_verification_in_summary(self, fixture_dir):
+        from storyforge.revision import build_revision_prompt
+        prompt = build_revision_prompt(
+            pass_name='prose-tightening',
+            purpose='Tighten prose.',
+            scope='act1-sc01',
+            project_dir=fixture_dir,
+            api_mode=True,
+        )
+        assert 'Intent-beat verification' in prompt
+
+    def test_build_revision_prompt_intent_beat_verification_non_api(self, fixture_dir):
+        from storyforge.revision import build_revision_prompt
+        prompt = build_revision_prompt(
+            pass_name='prose-tightening',
+            purpose='Tighten prose.',
+            scope='act1-sc01',
+            project_dir=fixture_dir,
+            api_mode=False,
+        )
+        assert 'Intent-beat verification' in prompt
+
+    def test_build_revision_prompt_no_intent_section_without_csv(self, tmp_path):
+        """When no intent/briefs CSVs exist, no intent section is added."""
+        import os
+        from storyforge.revision import build_revision_prompt
+        # Create minimal project structure
+        scenes_dir = tmp_path / 'scenes'
+        scenes_dir.mkdir()
+        (scenes_dir / 'test-scene.md').write_text('Some prose.')
+        ref_dir = tmp_path / 'reference'
+        ref_dir.mkdir()
+        (ref_dir / 'scenes.csv').write_text(
+            'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n'
+            'test-scene|1|Test|1|Someone|Here|1|morning|30|scene|draft|10|1000\n'
+        )
+        (tmp_path / 'storyforge.yaml').write_text('project:\n  title: Test\n')
+        prompt = build_revision_prompt(
+            pass_name='test-pass',
+            purpose='Test purpose.',
+            scope='test-scene',
+            project_dir=str(tmp_path),
+            api_mode=True,
+        )
+        assert 'Intent-Beat Protection' not in prompt
+
 
 class TestScoring:
     def test_parse_score_output(self, tmp_path):
