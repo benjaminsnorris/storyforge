@@ -336,3 +336,56 @@ class TestCharacterPresenceUsesIds:
                           if 'antagonist' in f.get('message', '').lower()
                           and '0/' in f.get('message', '')]
         assert len(antag_findings) == 0, f"Antagonist should not show 0 on-stage: {antag_findings}"
+
+
+class TestPacingEscalation:
+    """Regression tests for #131: escalation sub-metric should not assume a single narrative shape."""
+
+    def _make_pacing_data(self, n, tension_fn):
+        """Build scenes_map, intent_map, briefs_map with controlled tension values."""
+        scenes_map = {}
+        intent_map = {}
+        briefs_map = {}
+        for i in range(n):
+            sid = f's{i:02d}'
+            scenes_map[sid] = {'seq': str(i + 1), 'part': '1', 'target_words': '2000'}
+            shift, outcome, action = tension_fn(i, n)
+            intent_map[sid] = {'value_shift': shift, 'action_sequel': action}
+            briefs_map[sid] = {'outcome': outcome}
+        return scenes_map, intent_map, briefs_map
+
+    def test_crisis_resolution_not_penalized(self):
+        """A novel that peaks at ~80% then resolves should score well, not be penalized."""
+        from storyforge.structural import score_pacing
+
+        # Build tension that rises to climax zone then gently resolves
+        def tension_fn(i, n):
+            pct = i / (n - 1)
+            if pct < 0.65:
+                # Rising action: alternate high/low tension
+                if i % 2 == 0:
+                    return '+/-', 'no-and', 'action'
+                else:
+                    return '-/+', 'yes-but', 'sequel'
+            elif pct < 0.90:
+                # Climax zone: high tension
+                return '+/-', 'no-and', 'action'
+            else:
+                # Resolution: lower tension
+                return '-/+', 'yes', 'sequel'
+        scenes, intent, briefs = self._make_pacing_data(20, tension_fn)
+        result = score_pacing(scenes, intent, briefs)
+        # Should not contain "no escalation" finding
+        esc_findings = [f for f in result['findings'] if 'escalation' in f.get('message', '').lower()]
+        assert len(esc_findings) == 0, f"Crisis-resolution shape should not trigger escalation warning: {esc_findings}"
+
+    def test_flat_tension_penalized(self):
+        """A novel with truly flat tension throughout should still be flagged."""
+        from storyforge.structural import score_pacing
+
+        def tension_fn(i, n):
+            return '-/+', 'yes', 'sequel'  # all low tension
+        scenes, intent, briefs = self._make_pacing_data(20, tension_fn)
+        result = score_pacing(scenes, intent, briefs)
+        # Flat tension = climax peak equals first quarter mean, should get neutral or low score
+        assert result['score'] < 0.85
