@@ -414,19 +414,34 @@ def score_pacing(scenes_map, intent_map, briefs_map):
             'fix_location': 'intent',
         })
 
-    # --- 5. Escalation ---
-    half = n // 2
-    first_half_mean = sum(raw_tensions[:half]) / half if half > 0 else 0.5
-    second_half_mean = sum(raw_tensions[half:]) / (n - half) if (n - half) > 0 else 0.5
+    # --- 5. Escalation (climax-zone peak) ---
+    # Instead of comparing half-vs-half (which penalizes crisis-resolution
+    # structures), check that tension peaks in the climax zone (65-90%) and
+    # that the build toward climax shows escalation.
+    escalation_score = 1.0
 
-    if second_half_mean > first_half_mean:
-        escalation_score = min(1.0, 0.5 + (second_half_mean - first_half_mean) * 3)
+    # Find the climax zone (65-90% of the way through)
+    climax_start = int(n * 0.65)
+    climax_end = int(n * 0.90)
+    if climax_end <= climax_start:
+        climax_end = min(climax_start + 1, n)
+
+    climax_zone = raw_tensions[climax_start:climax_end]
+    first_quarter = raw_tensions[:max(n // 4, 1)]
+    climax_peak = max(climax_zone) if climax_zone else 0.5
+    first_quarter_mean = sum(first_quarter) / len(first_quarter)
+
+    # The build from first quarter to climax peak should show escalation
+    build_delta = climax_peak - first_quarter_mean
+    if build_delta > 0.05:
+        escalation_score = min(1.0, 0.6 + build_delta * 2)
+    elif build_delta > -0.05:
+        # Small delta — within threshold, neutral score
+        escalation_score = 0.5
     else:
-        escalation_score = max(0.0, 0.5 - (first_half_mean - second_half_mean) * 3)
-
-    if second_half_mean <= first_half_mean:
+        escalation_score = max(0.0, 0.5 + build_delta * 3)
         findings.append({
-            'message': "Second half tension does not exceed first half — no escalation",
+            'message': f"Climax zone peak ({climax_peak:.2f}) does not exceed first-quarter mean ({first_quarter_mean:.2f}) — weak escalation",
             'severity': 'minor',
             'fix_location': 'intent',
         })
@@ -704,15 +719,15 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
         return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
     # Load character roles from characters.csv if it exists
-    char_roles = {}  # character_name -> role
+    char_roles = {}  # character_id -> role
     chars_path = os.path.join(ref_dir, 'characters.csv')
     if os.path.exists(chars_path):
         rows = _read_csv(chars_path)
         for row in rows:
-            name = (row.get('name') or '').strip() or (row.get('id') or '').strip()
+            char_id = (row.get('id') or '').strip()
             role = (row.get('role') or '').strip().lower()
-            if name:
-                char_roles[name] = role
+            if char_id:
+                char_roles[char_id] = role
 
     # Count per character: POV scenes, on_stage, mentions
     pov_counts = {}   # character -> count of POV scenes
