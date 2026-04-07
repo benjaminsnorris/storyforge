@@ -33,6 +33,9 @@ Based on the author's request and project state:
 ### "Polish" / "Clean up the prose" / "Polish pass"
 → Craft-only revision: skip planning, target scenes with low craft scores. Equivalent to `./storyforge revise --polish`.
 
+### "Polish until it's good" / "Keep polishing" / "Autonomous polish"
+→ Convergence loop: scores scenes, identifies weak principles, generates targeted polish plan, executes, re-scores, repeats until scores stabilize or no high/medium priority issues remain. Equivalent to `./storyforge revise --polish --loop`. Use `--max-loops N` to cap iterations (default 5).
+
 ### "Fix AI patterns" / "Naturalness" / "Remove AI artifacts" / "Sounds like a machine"
 → Targeted 3-pass revision for specific AI prose patterns: metaphor restatement, interpretive tagging, ending template. Equivalent to `./storyforge revise --naturalness`. Use when scoring shows low `prose_naturalness` but high structural/fidelity scores — the sign that the brief is solid but the prose has AI artifacts.
 
@@ -119,6 +122,7 @@ Offer two options:
 > cd [project_dir] && [plugin_path]/scripts/storyforge-revise [flags]
 > ```
 > For craft-only: `./storyforge revise --polish`
+> For autonomous polish loop (score→polish→re-score until stable): `./storyforge revise --polish --loop`
 > For AI pattern removal: `./storyforge revise --naturalness`
 > For structural-only (CSV fixes, no prose): `./storyforge revise --structural`
 
