@@ -1072,10 +1072,85 @@ Return each field on its own labeled line, exactly like the input but rewritten:
 No explanation. No markdown. Just the labeled lines."""
 
 
+def build_trim_prompt(
+    scene_id: str,
+    issues: list[dict],
+    current_values: dict[str, str],
+    target_words: int = 0,
+) -> str:
+    """Build prompt to trim overspecified/verbose brief fields.
+
+    Handles both overspecified (too many beats) and verbose (too long)
+    fields in a single prompt per scene.
+    """
+    field_blocks = []
+    for issue in issues:
+        field = issue['field']
+        value = current_values.get(field, '')
+        if not value:
+            continue
+        if issue['issue'] == 'overspecified':
+            beats = len([b for b in value.split(';') if b.strip()])
+            if field == 'emotions':
+                field_blocks.append(
+                    f"**{field}** (overspecified: {beats} beats, max 3):\n"
+                    f"{value}\n"
+                    f"→ Reduce to 2 beats: start state and end state. "
+                    f"The drafter finds the middle ground."
+                )
+            else:
+                max_beats = max(2, int(target_words / 800)) if target_words else 3
+                field_blocks.append(
+                    f"**{field}** (overspecified: {beats} beats, target {max_beats} for {target_words}w scene):\n"
+                    f"{value}\n"
+                    f"→ Reduce to {max_beats} beats. Keep only the structurally essential "
+                    f"events. Cut beats that the drafter can infer from context."
+                )
+        elif issue['issue'] == 'verbose':
+            max_chars = issue.get('max_chars', 80)
+            field_blocks.append(
+                f"**{field}** (verbose: {len(value)} chars, max {max_chars}):\n"
+                f"{value}\n"
+                f"→ Condense to under {max_chars} characters. One phrase, not a paragraph. "
+                f"Cut prose-style elaboration — keep only the core action or choice."
+            )
+
+    if not field_blocks:
+        return ''
+
+    field_output = '\n'.join(
+        f'{issue["field"]}: [trimmed value]' for issue in issues
+        if current_values.get(issue['field'])
+    )
+
+    return f"""Trim these scene brief fields to be terse and directive.
+
+## Scene: {scene_id}
+
+## Fields to Trim
+
+{chr(10).join(field_blocks)}
+
+## Rules
+
+1. For key_actions: keep only beats where story events CHANGE — entrances, decisions, revelations. Cut transitions, reactions, and beats the drafter will naturally produce from context.
+2. For emotions: use 2 beats maximum (start → end). "resolve;bitter-defiance" not "resolve;frustration;bitter-resignation;quiet-defiance".
+3. For decision/crisis/goal/conflict: one clause. No sentences, no em-dashes, no elaboration.
+4. Preserve the MEANING — just say it in fewer words.
+
+## Output Format
+
+Return each field on its own labeled line:
+
+{field_output}
+
+No explanation. No markdown. Just the labeled lines."""
+
+
 def parse_concretize_response(
     response: str, scene_id: str, fields: list[str]
 ) -> dict[str, str]:
-    """Parse concretization response into field values.
+    """Parse concretization/trim response into field values.
 
     Returns:
         Dict mapping field_name -> rewritten value.
@@ -1125,13 +1200,14 @@ def hone_briefs(
         Dict with scenes_flagged, scenes_rewritten, fields_rewritten.
     """
     briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
 
-    # Detect abstract fields
-    flagged = detect_abstract_fields(briefs_map, scene_ids)
+    # Detect all issue types
+    all_issues = detect_brief_issues(briefs_map, scenes_map, scene_ids)
 
-    if dry_run or not flagged:
+    if dry_run or not all_issues:
         return {
-            'scenes_flagged': len(set(f['scene_id'] for f in flagged)),
+            'scenes_flagged': len(set(f['scene_id'] for f in all_issues)),
             'scenes_rewritten': 0,
             'fields_rewritten': 0,
         }
@@ -1140,16 +1216,14 @@ def hone_briefs(
         # Save analysis only
         hone_dir = os.path.join(project_dir, 'working', 'hone')
         os.makedirs(hone_dir, exist_ok=True)
-        for f in flagged:
+        for f in all_issues:
             path = os.path.join(hone_dir, f'briefs-analysis-{f["scene_id"]}.md')
-            with open(path, 'w') as fh:
-                fh.write(f"# Brief Analysis: {f['scene_id']}\n\n")
-                fh.write(f"**Field:** {f['field']}\n")
-                fh.write(f"**Current:** {f['value']}\n")
-                fh.write(f"**Abstract indicators:** {f['abstract_count']}\n")
-                fh.write(f"**Concrete indicators:** {f['concrete_count']}\n")
+            with open(path, 'a') as fh:
+                fh.write(f"**{f['field']}:** {f['issue']}\n")
+                if 'value' in f:
+                    fh.write(f"  Current: {f['value'][:200]}\n")
         return {
-            'scenes_flagged': len(set(f['scene_id'] for f in flagged)),
+            'scenes_flagged': len(set(f['scene_id'] for f in all_issues)),
             'scenes_rewritten': 0,
             'fields_rewritten': 0,
         }
@@ -1169,51 +1243,81 @@ def hone_briefs(
 
     from storyforge.api import invoke_to_file, extract_text_from_file
 
-    # Group flagged fields by scene
-    by_scene: dict[str, list[str]] = {}
-    for f in flagged:
-        by_scene.setdefault(f['scene_id'], []).append(f['field'])
+    # Group issues by scene and separate by type
+    by_scene: dict[str, list[dict]] = {}
+    for issue in all_issues:
+        by_scene.setdefault(issue['scene_id'], []).append(issue)
 
     scenes_rewritten = 0
     fields_rewritten = 0
 
-    for sid, fields in by_scene.items():
-        current_values = {field: briefs_map[sid].get(field, '') for field in fields}
+    for sid, issues in by_scene.items():
+        abstract_issues = [i for i in issues if i['issue'] == 'abstract']
+        trim_issues = [i for i in issues if i['issue'] in ('overspecified', 'verbose')]
 
-        prompt = build_concretize_prompt(
-            scene_id=sid,
-            fields=fields,
-            current_values=current_values,
-            voice_guide=voice_guide[:3000],
-            character_entry=char_bible[:2000],
-        )
+        # Handle abstract issues with concretization prompt
+        if abstract_issues and coaching_level == 'full':
+            abstract_fields = list(set(i['field'] for i in abstract_issues))
+            current_values = {f: briefs_map[sid].get(f, '') for f in abstract_fields}
 
+            prompt = build_concretize_prompt(
+                scene_id=sid,
+                fields=abstract_fields,
+                current_values=current_values,
+                voice_guide=voice_guide[:3000],
+                character_entry=char_bible[:2000],
+            )
+
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, f'hone-abstract-{sid}.json')
+            invoke_to_file(prompt, model, log_file, max_tokens=2048)
+            response = extract_text_from_file(log_file)
+
+            rewrites = parse_concretize_response(response, sid, abstract_fields)
+            for field, new_value in rewrites.items():
+                if new_value and new_value != current_values.get(field):
+                    briefs_map[sid][field] = new_value
+                    fields_rewritten += 1
+
+        # Handle overspecified/verbose issues with trim prompt
+        if trim_issues and coaching_level == 'full':
+            trim_fields = list(set(i['field'] for i in trim_issues))
+            current_values = {f: briefs_map[sid].get(f, '') for f in trim_fields}
+            target_words = int(scenes_map.get(sid, {}).get('target_words', '0') or '0')
+
+            prompt = build_trim_prompt(
+                scene_id=sid,
+                issues=trim_issues,
+                current_values=current_values,
+                target_words=target_words,
+            )
+
+            if prompt:
+                os.makedirs(log_dir, exist_ok=True)
+                log_file = os.path.join(log_dir, f'hone-trim-{sid}.json')
+                invoke_to_file(prompt, model, log_file, max_tokens=2048)
+                response = extract_text_from_file(log_file)
+
+                rewrites = parse_concretize_response(response, sid, trim_fields)
+                for field, new_value in rewrites.items():
+                    if new_value and new_value != current_values.get(field):
+                        briefs_map[sid][field] = new_value
+                        fields_rewritten += 1
+
+        # Coach mode: save proposals for all issue types
         if coaching_level == 'coach':
-            # Save proposal for author review
             hone_dir = os.path.join(project_dir, 'working', 'hone')
             os.makedirs(hone_dir, exist_ok=True)
             proposal_path = os.path.join(hone_dir, f'briefs-{sid}.md')
             with open(proposal_path, 'w') as fh:
-                fh.write(f"# Brief Concretization Proposal: {sid}\n\n")
-                fh.write(f"## Current\n")
-                for field in fields:
-                    fh.write(f"**{field}:** {current_values[field]}\n\n")
-                fh.write(f"## Prompt\n\n{prompt}\n")
+                fh.write(f"# Brief Quality Proposals: {sid}\n\n")
+                for issue in issues:
+                    fh.write(f"## {issue['field']} — {issue['issue']}\n")
+                    if 'value' in issue:
+                        fh.write(f"**Current:** {issue['value'][:300]}\n\n")
             continue
 
-        # full coaching: call API and apply
-        os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f'hone-briefs-{sid}.json')
-        invoke_to_file(prompt, model, log_file, max_tokens=2048)
-        response = extract_text_from_file(log_file)
-
-        rewrites = parse_concretize_response(response, sid, fields)
-        for field, new_value in rewrites.items():
-            if new_value and new_value != current_values.get(field):
-                briefs_map[sid][field] = new_value
-                fields_rewritten += 1
-
-        if rewrites:
+        if abstract_issues or trim_issues:
             scenes_rewritten += 1
 
     # Write back if any changes were made

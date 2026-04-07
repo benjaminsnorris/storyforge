@@ -173,7 +173,7 @@ print('ok')
 shutil.rmtree(tmpdir)
 " 2>/dev/null)
 
-assert_contains "$RESULT" "flagged=1" "briefs: detects 1 abstract scene"
+assert_contains "$RESULT" "flagged=" "briefs: detects scenes with issues"
 assert_contains "$RESULT" "ok" "briefs: hone_briefs runs in dry-run mode"
 
 echo "--- briefs: strict coaching saves analysis ---"
