@@ -153,13 +153,18 @@ def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool) -> None:
             log(f'  {gap["thread_id"]}: no scenes recommended')
             continue
 
+        # Use bare thread name (without type: prefix) to match existing intent format
+        bare_id = gap['thread_id']
+        if ':' in bare_id:
+            bare_id = bare_id.split(':', 1)[1]
+
         for sid in scene_ids:
             if sid not in intent_map:
                 continue
             current = intent_map[sid].get('mice_threads', '').strip()
             entries = [e.strip() for e in current.split(';') if e.strip()] if current else []
-            if gap['thread_id'] not in entries:
-                entries.append(gap['thread_id'])
+            if bare_id not in entries:
+                entries.append(bare_id)
                 intent_map[sid]['mice_threads'] = ';'.join(entries)
                 total_mentions += 1
 
