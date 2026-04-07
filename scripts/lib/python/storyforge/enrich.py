@@ -378,15 +378,8 @@ def normalize_mice_threads(mice_string: str, alias_map: dict[str, str],
         # Normalize the name via alias map
         canonical = alias_map.get(name_part.lower(), name_part)
 
-        # Resolve type from registry if missing or wrong
-        if type_map and canonical in type_map:
-            type_part = type_map[canonical]
-
-        if type_part:
-            result.append(f'{prefix}{type_part}:{canonical}')
-        else:
-            # No type available — keep as-is
-            result.append(f'{prefix}{canonical}')
+        # Output bare canonical name — type lives in registry, not in references
+        result.append(f'{prefix}{canonical}')
 
     return ';'.join(result)
 

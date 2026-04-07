@@ -431,10 +431,10 @@ import shutil; shutil.rmtree(tmpdir)
 print('ok')
 " 2>/dev/null)
 
-assert_contains "$RESULT" "bare_open=+milieu:understory" "mice: bare +name gets type prefix"
-assert_contains "$RESULT" "bare_close=-inquiry:vanishings" "mice: bare -name gets type prefix"
-assert_contains "$RESULT" "bare_mention=character:zara-identity" "mice: bare mention gets type prefix"
-assert_contains "$RESULT" "multi=+milieu:understory;-inquiry:vanishings;character:zara-identity" "mice: multiple bare entries normalized"
+assert_contains "$RESULT" "bare_open=+understory" "mice: bare +name stays bare"
+assert_contains "$RESULT" "bare_close=-vanishings" "mice: bare -name stays bare"
+assert_contains "$RESULT" "bare_mention=zara-identity" "mice: bare mention stays bare"
+assert_contains "$RESULT" "multi=+understory;-vanishings;zara-identity" "mice: multiple bare entries normalized"
 assert_contains "$RESULT" "ok" "mice: bare normalization runs"
 
 echo "--- mice: existing +type:name preserved ---"
@@ -462,8 +462,8 @@ import shutil; shutil.rmtree(tmpdir)
 print('ok')
 " 2>/dev/null)
 
-assert_contains "$RESULT" "typed=+milieu:understory" "mice: correct type preserved"
-assert_contains "$RESULT" "corrected=+milieu:understory" "mice: wrong type corrected"
+assert_contains "$RESULT" "typed=+understory" "mice: typed input normalized to bare"
+assert_contains "$RESULT" "corrected=+understory" "mice: wrong type stripped to bare"
 assert_contains "$RESULT" "ok" "mice: typed normalization runs"
 
 echo "--- mice: alias resolution works with bare names ---"
@@ -487,5 +487,34 @@ import shutil; shutil.rmtree(tmpdir)
 print('ok')
 " 2>/dev/null)
 
-assert_contains "$RESULT" "alias=+milieu:understory" "mice: alias resolves with type injection"
+assert_contains "$RESULT" "alias=+understory" "mice: alias resolves to bare canonical name"
 assert_contains "$RESULT" "ok" "mice: alias resolution runs"
+
+echo "--- mice: normalizer outputs bare +name format ---"
+
+RESULT=$(python3 -c "
+${PY})
+from storyforge.enrich import normalize_mice_threads, load_mice_registry
+import tempfile, os
+tmpdir = tempfile.mkdtemp()
+reg_path = os.path.join(tmpdir, 'mice-threads.csv')
+with open(reg_path, 'w') as f:
+    f.write('id|name|type|aliases\n')
+    f.write('understory|The Understory|milieu|\n')
+alias_map, type_map = load_mice_registry(reg_path)
+
+# Typed input should output bare
+result = normalize_mice_threads('+milieu:understory', alias_map, type_map)
+print(f'stripped={result}')
+
+# Bare input should stay bare
+result = normalize_mice_threads('+understory', alias_map, type_map)
+print(f'bare={result}')
+
+import shutil; shutil.rmtree(tmpdir)
+print('ok')
+" 2>/dev/null)
+
+assert_contains "$RESULT" "stripped=+understory" "mice: normalizer strips type prefix"
+assert_contains "$RESULT" "bare=+understory" "mice: normalizer keeps bare format"
+assert_contains "$RESULT" "ok" "mice: bare output runs"

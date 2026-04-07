@@ -267,10 +267,10 @@ print(normalize_mice_threads('+inquiry:the map anomaly;-milieu:the reaches', ali
 print(normalize_mice_threads('+event:unknown-thing', alias_map, type_map))
 " 2>/dev/null)
 
-assert_equals "+inquiry:map-anomaly
-+inquiry:map-anomaly
-+inquiry:map-anomaly;-milieu:uncharted-reaches
-+event:unknown-thing" "$RESULT" "mice: normalization resolves aliases and corrects types"
+assert_equals "+map-anomaly
++map-anomaly
++map-anomaly;-uncharted-reaches
++unknown-thing" "$RESULT" "mice: normalization resolves aliases, outputs bare names"
 
 echo "--- mice: schema validation ---"
 
@@ -308,7 +308,7 @@ print(normalize_mice_threads('+inquiry:something', alias_map, type_map))
 " 2>/dev/null)
 
 assert_equals "0
-+inquiry:something" "$RESULT" "mice: missing registry returns empty, normalization passes through"
++inquiry:something" "$RESULT" "mice: missing registry returns empty, normalization passes through unchanged"
 
 # ============================================================================
 # continuity_deps validation (scene ID cross-reference)
