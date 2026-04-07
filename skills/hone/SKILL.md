@@ -56,23 +56,35 @@ Based on the author's request and project state:
 → All domains in order: registries → gaps → structural → briefs.
 
 **"How's my data?" / "What needs work?" / no specific direction:**
-→ Run `--diagnose` to get the full picture first. This runs structural scoring (8 dimensions), brief quality detection (abstract/overspecified/verbose), and gap detection in one read-only pass. **Read the actual output before recommending anything.** Only recommend actions for real issues:
+→ Run `--diagnose` to get the full picture first. This runs structural scoring (8 dimensions), brief quality detection (abstract/overspecified/verbose), and gap detection in one read-only pass. **Read the actual output before recommending anything.**
 
-1. If gaps count > 0 → `storyforge hone --domain gaps`
-2. If brief quality issues count > 0 → `storyforge hone --domain briefs`
-3. If MICE dormancy detected → `storyforge elaborate --stage mice-fill`
-4. If registries are missing or stale → `storyforge hone --domain registries`
-5. **If a domain shows zero issues, say so explicitly** — "briefs look clean, no action needed"
+### Full coaching mode: Act, don't ask
 
-For **creative/architectural dimensions** that are below target but not data quality issues, recommend interactive work with the author:
+In full coaching mode, you are a **proactive creative partner**. That means:
 
-6. **Pacing Shape below target** → The second half tension doesn't exceed the first. Show the author the value_shift distribution across acts. Ask: "Is this intentional sustained pressure, or should the back half escalate?" If they want to escalate, walk through scenes in the second half and discuss which `value_shift` entries could change — typically shifting from `+/-` or `-/-` to `-/--` or `+/--`. This is an interactive `elaborate` conversation, not an autonomous fix.
+- **Data quality issues → fix them immediately.** Don't present a menu and ask "What would you like to tackle?" — that's coach mode behavior. Instead, tell the author what you're about to fix and why, then do it. "You have 27 overspecified briefs — I'm going to trim those now" not "Want me to run the briefs domain?"
+- **Run fixes in sequence, not as a menu.** If diagnose reveals gaps + brief issues + stale registries, run them all: registries first, then gaps, then briefs. Report results as you go.
+- **If a domain is clean, say so in one line** and move on. Don't pad with praise.
 
-7. **Scene Function Variety below target** → Outcome distribution is dominated by one type (usually `yes-but`). Show the author the outcome counts. Ask: "Are there scenes where the outcome should be harder — a flat `no` instead of `yes-but`?" Walk through candidate scenes. This is also an interactive conversation — the author decides which scenes change because it affects the story's emotional shape.
+Execution order when multiple issues exist:
+1. If registries are missing or stale → run `storyforge hone --domain registries` (normalization first)
+2. If gaps count > 0 → run `storyforge hone --domain gaps`
+3. If brief quality issues count > 0 → run `storyforge hone --domain briefs`
+4. If MICE dormancy detected → run `storyforge elaborate --stage mice-fill`
 
-8. **Character Presence below target** → A character is absent too long. Show the gap. Ask if they should appear in a gap scene, or if the absence is intentional.
+### Creative/architectural dimensions: opinionated partner, not passive reporter
 
-For all creative dimensions: **present the data, explain what the score means, and let the author decide.** Do not autonomously rewrite story architecture.
+For dimensions below target (pacing, function variety, character presence, MICE health), don't just show data and ask "is this intentional?" — **read the data yourself, form an opinion, and present it with your reasoning.** The author can disagree, but they need a creative partner who has a point of view, not a dashboard that asks questions.
+
+**Pacing Shape below target** → Read the `value_shift` distribution across acts. Look at the second half specifically. Form an opinion: "Acts 4-5 have mostly `+/-` and `-/+` shifts — the tension oscillates but never deepens. I'd look at [specific scenes] as candidates for `-/--` shifts to create genuine escalation. Here's what I see..." Then walk through the specific scenes with the author.
+
+**Scene Function Variety below target** → Read outcome distribution. Don't just say "yes-but dominates at 68%." Say which specific scenes feel like they're `yes-but` when the story would be stronger with a harder `no` or a clean `yes`. "Scene X reads as a genuine defeat — should that be `no` instead of `yes-but`? And scene Y is actually a win — `yes` would let the reader breathe before the next reversal."
+
+**Character Presence below target** → Check whether it's a data issue (character is POV but not listed in `on_stage`) or a real gap. If it's a data issue, fix it. If it's a real absence, identify where in the gap the character could naturally appear and suggest specific scenes.
+
+**MICE Thread Health** → Don't just report "44% closed." Look at which threads are still open and form an opinion about which ones are genuinely unresolved vs. which might be data artifacts or threads that resolved implicitly. "Thread X has been dormant 30 scenes — that's too long for a subplot. Either it needs a mention in act 3 or it should be marked as closed."
+
+For all creative dimensions: **bring analysis and a point of view.** The author decides, but they need a partner who thinks, not a tool that reports.
 
 ## Step 4: Assess Domain Needs
 
@@ -151,18 +163,22 @@ Map the author's request to the right flags:
 | "gaps" / "missing fields" | `--domain gaps` |
 | "everything" | (no --domain flag = all) |
 
-Offer the standard two options for script delegation:
+### Script delegation (coaching-level aware)
 
-> **Option A: Run it here**
-> I'll launch the hone script in this conversation. This invokes Claude API calls for registry builds and brief concretization, so I need to unset the CLAUDECODE variable. Estimated cost: ~$X.
+**Full mode:** Tell the author what you're about to run and why, then offer the two options. Don't present it as a question — present it as a plan with a choice of execution method:
+
+> "I'm going to fix the 27 overspecified briefs. This needs Claude API calls, so it runs as a separate process."
 >
-> **Option B: Run it yourself**
-> Copy this command and run it in a separate terminal:
+> **Run it here** — I'll launch it in this conversation (requires unsetting CLAUDECODE). Estimated cost: ~$X.
+>
+> **Run it yourself:**
 > ```bash
-> cd [project_dir] && [plugin_path]/scripts/storyforge-hone [flags]
+> cd [project_dir] && [plugin_path]/storyforge hone --domain briefs
 > ```
 
-Wait for the author's choice. If Option B, provide the full command and end.
+**Coach/strict mode:** Offer the two options as described in the Coach/Strict Flow section.
+
+For all modes: wait for the author's choice. If they choose to run it themselves, provide the full command and end.
 
 ### Example Commands
 
