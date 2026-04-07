@@ -109,8 +109,8 @@ def main(argv=None):
     log(f'Mode: {score_mode}, Model: {eval_model}')
 
     # Initialize craft weights
-    from storyforge.scoring import init_weights
-    init_weights(project_dir, plugin_dir)
+    from storyforge.scoring import init_craft_weights
+    init_craft_weights(project_dir, plugin_dir)
     weights_file = os.path.join(project_dir, 'working', 'craft-weights.csv')
 
     # Build scene list
@@ -217,9 +217,9 @@ def main(argv=None):
     with open(eval_template_file) as f:
         eval_template = f.read()
 
-    from storyforge.scoring import build_evaluation_criteria, weighted_text
+    from storyforge.scoring import build_evaluation_criteria, build_weighted_text
     evaluation_criteria = build_evaluation_criteria(diagnostics_csv, guide_file)
-    weighted_text_str = weighted_text(weights_file, exclude_section='narrative')
+    weighted_text_str = build_weighted_text(weights_file, exclude_section='narrative')
 
     log(f'Evaluation model: {eval_model} (mode: {score_mode})')
 
@@ -450,10 +450,17 @@ def _parse_scene_evaluation(text_content: str, output_scores: str,
                             output_rationale: str, scene_id: str,
                             diagnostics_csv: str) -> bool:
     """Parse scene evaluation text into score/rationale CSVs."""
-    from storyforge.scoring import parse_evaluation
+    from storyforge.scoring import parse_scene_evaluation
     try:
-        return parse_evaluation(text_content, output_scores, output_rationale,
-                                scene_id, diagnostics_csv)
+        scores_csv, rationale_csv = parse_scene_evaluation(
+            text_content, scene_id, diagnostics_csv)
+        if scores_csv:
+            with open(output_scores, 'w') as f:
+                f.write(scores_csv)
+        if rationale_csv:
+            with open(output_rationale, 'w') as f:
+                f.write(rationale_csv)
+        return bool(scores_csv)
     except Exception as e:
         log(f'WARNING: Parse failed for {scene_id}: {e}')
         return False
@@ -746,7 +753,7 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
     acts = list(dict.fromkeys(v for v in act_values if v))  # unique, ordered
 
     from storyforge.scoring import (
-        extract_rubric_section, weighted_text, parse_output, merge_score_files,
+        extract_rubric_section, build_weighted_text, parse_score_output, merge_score_files,
     )
 
     for act_label in acts:
@@ -772,7 +779,7 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
 
         narrative_rubric = extract_rubric_section('Narrative Frameworks', plugin_dir)
         character_rubric = extract_rubric_section('Character Craft', plugin_dir)
-        wt = weighted_text(weights_file)
+        wt = build_weighted_text(weights_file)
 
         prompt = act_template
         prompt = prompt.replace('{{NARRATIVE_FRAMEWORKS_RUBRIC}}', narrative_rubric)
@@ -799,16 +806,17 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
             tmp_scores = os.path.join(cycle_dir, f'.tmp-act-scores-{act_label}.csv')
             tmp_rationale = os.path.join(cycle_dir, f'.tmp-act-rationale-{act_label}.csv')
 
-            # Write text for parse_output compatibility
-            text_file = os.path.join(log_dir, f'score-{act_id}.log')
-            with open(text_file, 'w') as f:
-                f.write(text)
-
-            parse_output(text_file, tmp_scores, tmp_rationale)
-            merge_score_files(os.path.join(cycle_dir, 'act-scores.csv'), tmp_scores)
-            merge_score_files(os.path.join(cycle_dir, 'act-rationale.csv'), tmp_rationale)
-            _safe_remove(tmp_scores)
-            _safe_remove(tmp_rationale)
+            scores_csv, rationale_csv = parse_score_output(text)
+            if scores_csv:
+                with open(tmp_scores, 'w') as f:
+                    f.write(scores_csv)
+                merge_score_files(os.path.join(cycle_dir, 'act-scores.csv'), tmp_scores)
+                _safe_remove(tmp_scores)
+            if rationale_csv:
+                with open(tmp_rationale, 'w') as f:
+                    f.write(rationale_csv)
+                merge_score_files(os.path.join(cycle_dir, 'act-rationale.csv'), tmp_rationale)
+                _safe_remove(tmp_rationale)
             log(f'  Act {act_label} scored')
         except Exception as e:
             log(f'  WARNING: Failed to score act {act_label}: {e}')
@@ -848,11 +856,11 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
     story_architecture = _read_reference(project_dir, ['reference/story-architecture.md',
                                                         'references/story-architecture.md'])
 
-    from storyforge.scoring import extract_rubric_section, weighted_text, parse_output
+    from storyforge.scoring import extract_rubric_section, build_weighted_text, parse_score_output
 
     char_rubric = extract_rubric_section('Character Craft', plugin_dir)
     genre_rubric = extract_rubric_section('Tropes and Genre', plugin_dir)
-    wt = weighted_text(weights_file)
+    wt = build_weighted_text(weights_file)
 
     prompt = novel_template
     prompt = prompt.replace('{{CHARACTER_CRAFT_NOVEL_RUBRIC}}', char_rubric)
@@ -880,19 +888,17 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
 
         # Parse character scores
         for section, marker_prefix in [('character', 'CHARACTER'), ('genre', 'GENRE')]:
-            tmp_scores = os.path.join(cycle_dir, f'.tmp-{section}-scores.csv')
-            tmp_rationale = os.path.join(cycle_dir, f'.tmp-{section}-rationale.csv')
-            parse_output(text_log, tmp_scores, tmp_rationale,
-                         score_marker=f'{marker_prefix}_SCORES',
-                         rationale_marker=f'{marker_prefix}_RATIONALE')
-            if os.path.isfile(tmp_scores):
-                import shutil
-                shutil.copy2(tmp_scores, os.path.join(cycle_dir, f'{section}-scores.csv'))
-                _safe_remove(tmp_scores)
-            if os.path.isfile(tmp_rationale):
-                import shutil
-                shutil.copy2(tmp_rationale, os.path.join(cycle_dir, f'{section}-rationale.csv'))
-                _safe_remove(tmp_rationale)
+            scores_csv, rationale_csv = parse_score_output(
+                text,
+                score_marker=f'{marker_prefix}_SCORES',
+                rationale_marker=f'{marker_prefix}_RATIONALE',
+            )
+            if scores_csv:
+                with open(os.path.join(cycle_dir, f'{section}-scores.csv'), 'w') as f:
+                    f.write(scores_csv)
+            if rationale_csv:
+                with open(os.path.join(cycle_dir, f'{section}-rationale.csv'), 'w') as f:
+                    f.write(rationale_csv)
 
         log('  Novel-level scoring complete')
     except Exception as e:
@@ -925,9 +931,9 @@ def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
         with open(chapter_map_file) as f:
             chapter_map = f.read()
 
-    from storyforge.scoring import weighted_text, parse_output
+    from storyforge.scoring import build_weighted_text, parse_score_output
 
-    wt = weighted_text(weights_file)
+    wt = build_weighted_text(weights_file)
 
     prompt = narrative_template
     prompt = prompt.replace('{{PROJECT_TITLE}}', title)
@@ -955,7 +961,13 @@ def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
         with open(text_log, 'w') as f:
             f.write(text)
 
-        parse_output(text_log, narr_scores, narr_rationale)
+        scores_csv, rationale_csv = parse_score_output(text)
+        if scores_csv:
+            with open(narr_scores, 'w') as f:
+                f.write(scores_csv)
+        if rationale_csv:
+            with open(narr_rationale, 'w') as f:
+                f.write(rationale_csv)
         if os.path.isfile(narr_scores):
             log(f'  Narrative scores saved to {os.path.basename(narr_scores)}')
         else:
@@ -1017,15 +1029,19 @@ def _run_improvement_cycle(cycle, cycle_dir, project_dir, weights_file,
 
     # Collect exemplars
     from storyforge.scoring import collect_exemplars
-    collect_exemplars(cycle_dir, project_dir, cycle)
+    collect_exemplars(cycle_dir, project_dir, str(cycle))
 
     # Check for validated patterns
     from storyforge.scoring import check_validated_patterns
     validated = check_validated_patterns(project_dir)
     if validated:
         log('Validated tuning patterns found:')
-        for vp, vl, vi in validated:
-            log(f'  {vp} ({vl}): avg improvement {vi}')
+        for line in validated.strip().split('\n'):
+            if not line.strip():
+                continue
+            parts = line.split('|')
+            if len(parts) >= 3:
+                log(f'  {parts[0]} ({parts[1]}): avg improvement {parts[2]}')
 
 
 def _approve_all_proposals(proposals_file: str) -> None:
@@ -1121,13 +1137,14 @@ def _generate_report_and_comment(cycle, cycle_dir, project_dir, score_mode,
                     except (ValueError, IndexError):
                         pass
 
-    from storyforge.scoring import generate_report, pr_comment
-    generate_report(cycle_dir, project_dir, cycle, score_mode, scene_count,
-                    total_cost)
+    from storyforge.scoring import generate_score_report, build_score_pr_comment
+    generate_score_report(cycle_dir, project_dir, str(cycle), score_mode,
+                          scene_count, f'{total_cost:.2f}')
 
     if has_gh():
-        comment = pr_comment(cycle_dir, project_dir, cycle, score_mode,
-                             scene_count, total_cost)
+        comment = build_score_pr_comment(cycle_dir, project_dir, str(cycle),
+                                          score_mode, scene_count,
+                                          f'{total_cost:.2f}')
         if comment:
             r = subprocess.run(
                 ['gh', 'pr', 'view', '--json', 'number', '-q', '.number'],

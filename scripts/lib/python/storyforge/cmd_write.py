@@ -311,12 +311,13 @@ def _build_prompt(scene_id: str, project_dir: str, coaching: str,
     plugin_dir = get_plugin_dir()
 
     if use_briefs:
-        from storyforge.prompts import build_from_briefs_prompt
+        from storyforge.prompts import build_scene_prompt_from_briefs
         from storyforge.elaborate import get_scene
         scene = get_scene(scene_id, os.path.join(project_dir, 'reference'))
         deps = scene.get('continuity_deps', '') if scene else ''
-        return build_from_briefs_prompt(scene_id, project_dir, plugin_dir,
-                                        coaching, deps=deps)
+        dep_scenes = [d.strip() for d in deps.split(';') if d.strip()] if deps else None
+        return build_scene_prompt_from_briefs(scene_id, project_dir, plugin_dir,
+                                              coaching, dep_scenes=dep_scenes)
     else:
         from storyforge.prompts import build_scene_prompt
         return build_scene_prompt(scene_id, project_dir, coaching,
