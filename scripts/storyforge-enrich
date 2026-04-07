@@ -611,7 +611,8 @@ if [[ "$ENRICH_MODE" == "batch" ]]; then
     ENRICH_COST=$(awk "BEGIN { printf \"%.2f\", $ENRICH_COST * 0.5 }")
     log "Cost forecast: ~\$${ENRICH_COST} (${CLAUDE_COUNT} calls via Batch API, 50% off, avg ${AVG_WORDS} words/scene)"
 else
-    log "Cost forecast: ~\$${ENRICH_COST} (${CLAUDE_COUNT} ${MODEL} calls via ${ENRICH_MODE^} API, avg ${AVG_WORDS} words/scene)"
+    MODE_LABEL=$(echo "$ENRICH_MODE" | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')
+    log "Cost forecast: ~\$${ENRICH_COST} (${CLAUDE_COUNT} ${MODEL} calls via ${MODE_LABEL} API, avg ${AVG_WORDS} words/scene)"
 fi
 
 check_cost_threshold "$ENRICH_COST" || { log "Cost threshold check declined. Aborting."; exit 1; }
