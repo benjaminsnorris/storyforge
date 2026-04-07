@@ -277,7 +277,7 @@ def _power_mean(values: list[float], p: float = 0.5) -> float:
 
 def _infer_project_dir(scores_dir: str) -> str:
     """Infer project root from scores dir (typically project_dir/working/scores/cycle-N)."""
-    path = os.path.normpath(scores_dir)
+    path = os.path.normpath(os.path.abspath(scores_dir))
     parts = path.split(os.sep)
     for i, part in enumerate(parts):
         if part == 'working' and i > 0:

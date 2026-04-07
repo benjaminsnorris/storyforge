@@ -32,7 +32,7 @@ def _is_principle_column(col: str) -> bool:
 
     Excludes 'id' and columns ending in '_rationale'.
     """
-    if col == 'id':
+    if not col or col == 'id':
         return False
     if col.endswith('_rationale'):
         return False
