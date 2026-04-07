@@ -572,6 +572,46 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     commit_and_push(project_dir, 'Polish: loop complete', ['working/'])
 
 
+def _extract_scene_rationales(project_dir: str, scene_ids: list,
+                              principles: list = None) -> dict:
+    """Extract scoring rationales for specific scenes from the latest scoring cycle.
+
+    Args:
+        project_dir: Project root.
+        scene_ids: Scenes to extract rationales for.
+        principles: Principles to include (default: all *_rationale columns).
+
+    Returns:
+        {scene_id: {principle: rationale_text}}
+    """
+    from storyforge.elaborate import _read_csv_as_map
+
+    latest_dir = os.path.join(project_dir, 'working', 'scores', 'latest')
+    scores_file = os.path.join(latest_dir, 'scene-scores.csv')
+    if not os.path.isfile(scores_file):
+        return {}
+
+    scores_map = _read_csv_as_map(scores_file)
+    result = {}
+
+    for sid in scene_ids:
+        row = scores_map.get(sid)
+        if not row:
+            continue
+        rationales = {}
+        for col, val in row.items():
+            if not col.endswith('_rationale') or not val:
+                continue
+            principle = col[:-len('_rationale')]
+            if principles and principle not in principles:
+                continue
+            rationales[principle] = val
+        if rationales:
+            result[sid] = rationales
+
+    return result
+
+
 def _build_revision_config(plan_row: dict, extra: dict | None = None) -> str:
     """Build a YAML config string from plan row fields for passing to revision.py.
 
@@ -632,7 +672,32 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     revision_module = os.path.join(plugin_dir, 'scripts', 'lib', 'python', 'storyforge', 'revision.py')
 
     import subprocess
-    config_yaml = _build_revision_config(plan_rows[0])
+    # Extract per-scene rationales for targeted revision
+    rationales = None
+    targets_field = plan_rows[0].get('targets', '')
+    if targets_field:
+        target_ids = [s.strip() for s in targets_field.split(';') if s.strip()]
+        rationales = _extract_scene_rationales(project_dir, target_ids)
+    elif plan_rows[0].get('findings') == 'naturalness':
+        # For naturalness passes, get rationales for all scenes
+        from storyforge.scene_filter import build_scene_list
+        metadata_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        all_ids = build_scene_list(metadata_csv)
+        rationales = _extract_scene_rationales(project_dir, all_ids,
+                                                principles=['prose_naturalness'])
+
+    # Build config with rationales as extra data
+    extra = {}
+    if rationales:
+        scene_findings = []
+        for sid, rats in rationales.items():
+            for principle, text in rats.items():
+                # Truncate long rationales to keep prompt manageable
+                scene_findings.append(f'Scene {sid} ({principle}): {text[:500]}')
+        if scene_findings:
+            extra['per_scene_findings'] = '\n'.join(scene_findings)
+
+    config_yaml = _build_revision_config(plan_rows[0], extra=extra)
     cmd = [
         sys.executable, revision_module, 'build-prompt',
         pass_name, pass_purpose, pass_scope, project_dir,
