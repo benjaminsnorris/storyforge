@@ -414,19 +414,34 @@ def score_pacing(scenes_map, intent_map, briefs_map):
             'fix_location': 'intent',
         })
 
-    # --- 5. Escalation ---
-    half = n // 2
-    first_half_mean = sum(raw_tensions[:half]) / half if half > 0 else 0.5
-    second_half_mean = sum(raw_tensions[half:]) / (n - half) if (n - half) > 0 else 0.5
+    # --- 5. Escalation (climax-zone peak) ---
+    # Instead of comparing half-vs-half (which penalizes crisis-resolution
+    # structures), check that tension peaks in the climax zone (65-90%) and
+    # that the build toward climax shows escalation.
+    escalation_score = 1.0
 
-    if second_half_mean > first_half_mean:
-        escalation_score = min(1.0, 0.5 + (second_half_mean - first_half_mean) * 3)
+    # Find the climax zone (65-90% of the way through)
+    climax_start = int(n * 0.65)
+    climax_end = int(n * 0.90)
+    if climax_end <= climax_start:
+        climax_end = min(climax_start + 1, n)
+
+    climax_zone = raw_tensions[climax_start:climax_end]
+    first_quarter = raw_tensions[:max(n // 4, 1)]
+    climax_peak = max(climax_zone) if climax_zone else 0.5
+    first_quarter_mean = sum(first_quarter) / len(first_quarter)
+
+    # The build from first quarter to climax peak should show escalation
+    build_delta = climax_peak - first_quarter_mean
+    if build_delta > 0.05:
+        escalation_score = min(1.0, 0.6 + build_delta * 2)
+    elif build_delta > -0.05:
+        # Small delta — within threshold, neutral score
+        escalation_score = 0.5
     else:
-        escalation_score = max(0.0, 0.5 - (first_half_mean - second_half_mean) * 3)
-
-    if second_half_mean <= first_half_mean:
+        escalation_score = max(0.0, 0.5 + build_delta * 3)
         findings.append({
-            'message': "Second half tension does not exceed first half — no escalation",
+            'message': f"Climax zone peak ({climax_peak:.2f}) does not exceed first-quarter mean ({first_quarter_mean:.2f}) — weak escalation",
             'severity': 'minor',
             'fix_location': 'intent',
         })
@@ -703,16 +718,27 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
     if n == 0:
         return {'score': 0.0, 'findings': [{'message': 'No scenes found', 'severity': 'important', 'fix_location': 'intent'}]}
 
-    # Load character roles from characters.csv if it exists
-    char_roles = {}  # character_name -> role
+    # Load character roles and death info from characters.csv if it exists
+    char_roles = {}  # character_id -> role
+    dead_characters = set()  # characters with a death_scene (by id, name, and aliases)
     chars_path = os.path.join(ref_dir, 'characters.csv')
     if os.path.exists(chars_path):
         rows = _read_csv(chars_path)
         for row in rows:
-            name = (row.get('name') or '').strip() or (row.get('id') or '').strip()
+            char_id = (row.get('id') or '').strip()
             role = (row.get('role') or '').strip().lower()
-            if name:
-                char_roles[name] = role
+            death_scene = (row.get('death_scene') or '').strip()
+            if char_id:
+                char_roles[char_id] = role
+                if death_scene:
+                    dead_characters.add(char_id)
+                    name = (row.get('name') or '').strip()
+                    if name:
+                        dead_characters.add(name)
+                    for alias in (row.get('aliases') or '').split(';'):
+                        alias = alias.strip()
+                        if alias:
+                            dead_characters.add(alias)
 
     # Count per character: POV scenes, on_stage, mentions
     pov_counts = {}   # character -> count of POV scenes
@@ -839,6 +865,9 @@ def score_character_presence(scenes_map, intent_map, ref_dir):
     ratio_score = 1.0
     ratio_flags = 0
     for ch in set(list(mentions.keys()) + list(onstage.keys())):
+        # Dead characters cannot be on-stage — skip ratio check
+        if ch in dead_characters:
+            continue
         mention_count = len(mentions.get(ch, []))
         onstage_count = len(onstage.get(ch, []))
         if mention_count > 5 and onstage_count < mention_count * 0.30:
@@ -913,6 +942,12 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
     # Track per thread: open_idx, close_idx, mention_indices, type
     threads = {}  # thread_name -> {'open': idx|None, 'close': idx|None, 'mentions': [idx], 'type': str}
 
+    def _normalize_tag(raw_tag):
+        """Strip type: prefix so 'inquiry:foo' and 'foo' map to the same thread."""
+        thread_type = _resolve_type(raw_tag)
+        bare = raw_tag.split(':', 1)[1] if ':' in raw_tag else raw_tag
+        return bare, thread_type
+
     for idx, sid in enumerate(scene_ids):
         intent = intent_map.get(sid) or {}
         mice_str = _s(intent.get('mice_threads')).strip()
@@ -923,8 +958,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
             if not entry:
                 continue
             if entry.startswith('+'):
-                tag = entry[1:]
-                thread_type = _resolve_type(tag)
+                tag, thread_type = _normalize_tag(entry[1:])
                 if tag not in threads:
                     threads[tag] = {'open': idx, 'close': None, 'mentions': [idx], 'type': thread_type}
                 else:
@@ -932,8 +966,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
                     if threads[tag]['open'] is None:
                         threads[tag]['open'] = idx
             elif entry.startswith('-'):
-                tag = entry[1:]
-                thread_type = _resolve_type(tag)
+                tag, thread_type = _normalize_tag(entry[1:])
                 if tag not in threads:
                     threads[tag] = {'open': None, 'close': idx, 'mentions': [idx], 'type': thread_type}
                 else:
@@ -941,8 +974,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
                     threads[tag]['mentions'].append(idx)
             else:
                 # Plain mention (no +/-)
-                tag = entry
-                thread_type = _resolve_type(tag)
+                tag, thread_type = _normalize_tag(entry)
                 if tag not in threads:
                     threads[tag] = {'open': None, 'close': None, 'mentions': [idx], 'type': thread_type}
                 else:

@@ -11,7 +11,9 @@ from storyforge.assembly import (
     read_chapter_field,
     get_chapter_scenes,
     extract_scene_prose,
+    generate_epub_metadata,
     manuscript_word_count,
+    _unquote,
 )
 
 
@@ -54,6 +56,65 @@ class TestExtractSceneProse:
         result = extract_scene_prose(os.path.join(project_dir, 'scenes', 'act1-sc01.md'))
         first_line = result.strip().split('\n')[0]
         assert first_line != ''
+
+
+class TestUnquote:
+    def test_double_quoted(self):
+        assert _unquote('"hello"') == 'hello'
+
+    def test_single_quoted(self):
+        assert _unquote("'hello'") == 'hello'
+
+    def test_unquoted(self):
+        assert _unquote('hello') == 'hello'
+
+    def test_empty(self):
+        assert _unquote('') == ''
+
+    def test_mismatched_quotes(self):
+        assert _unquote('"hello\'') == '"hello\''
+
+    def test_single_char(self):
+        assert _unquote('"') == '"'
+
+    def test_nested_double_quotes(self):
+        # Outer layer of quotes is stripped, leaving inner quotes
+        assert _unquote('""Unicorn Tail""') == '"Unicorn Tail"'
+
+
+class TestGenerateEpubMetadata:
+    def test_no_nested_quotes(self, project_dir):
+        """Values with existing quotes should not produce nested quotes."""
+        # Write a storyforge.yaml with a quoted title
+        yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+        with open(yaml_path, 'r') as f:
+            content = f.read()
+        content = content.replace(
+            "The Cartographer's Silence",
+            '"Unicorn Tail"',
+        )
+        with open(yaml_path, 'w') as f:
+            f.write(content)
+        result = generate_epub_metadata(project_dir)
+        # Should NOT contain nested quotes like ''Unicorn Tail''
+        assert "'\"Unicorn Tail\"'" not in result
+        assert "title: 'Unicorn Tail'" in result
+
+    def test_basic_structure(self, project_dir):
+        result = generate_epub_metadata(project_dir)
+        assert result.startswith('---')
+        assert result.endswith('---')
+        assert 'title:' in result
+        assert 'author:' in result
+        assert 'rights:' in result
+
+    def test_single_quotes_used(self, project_dir):
+        result = generate_epub_metadata(project_dir)
+        lines = result.split('\n')
+        title_line = [l for l in lines if l.startswith('title:')][0]
+        # Values should be wrapped in single quotes, not double
+        assert title_line.startswith("title: '")
+        assert title_line.endswith("'")
 
 
 class TestWordCount:
