@@ -415,7 +415,7 @@ For each scene that needs a brief, define the complete drafting contract:
 - **key_dialogue**: Specific lines or exchanges that must appear in the prose
 - **emotions**: Semicolon-separated emotional beats in sequence
 - **motifs**: Semicolon-separated recurring images/symbols deployed
-- **subtext**: What is happening beneath the surface of the scene — phrased as a drafting instruction. This is the gap between what characters say/do and what they mean. Write it as: "Character says/does X but means Y; do not state Y directly" or "The tension is Z; show it through [specific physical behavior], never name it." One to two sentences. If the scene has no meaningful subtext (pure action, pure exposition), leave empty.
+- **subtext**: ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says A but means B; don't state B" or "The tension is Z; show through [behavior], never name it." NOT a paragraph. NOT multiple clauses chained with semicolons. If no meaningful subtext, leave empty.
 - **continuity_deps**: Semicolon-separated scene IDs this scene depends on (for parallel drafting)
 - **has_overflow**: false (unless you indicate a scene needs extended brief)
 

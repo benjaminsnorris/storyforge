@@ -325,7 +325,7 @@ KEY_ACTIONS: [semicolon-separated concrete things that happen in this scene]
 KEY_DIALOGUE: [semicolon-separated specific lines or exchanges that are essential to the scene — quote directly from the text]
 EMOTIONS: [semicolon-separated emotional beats in sequence as they occur through the scene]
 MOTIFS: [semicolon-separated recurring images, symbols, or sensory details that carry thematic weight]
-SUBTEXT: [what is happening beneath the surface — the gap between what characters say/do and what they mean. Phrase as a drafting instruction: "Character says X but means Y; do not state Y directly." If no meaningful subtext, write NONE]"""
+SUBTEXT: [ONE sentence, max 150 characters. The gap between what a character says/does and what they mean. Format: "X says/does A but means B; don't state B." If no subtext, write NONE. Do NOT write multiple clauses or a paragraph.]"""
 
 
 def parse_brief_parallel_response(response: str, scene_id: str) -> dict[str, str]:
