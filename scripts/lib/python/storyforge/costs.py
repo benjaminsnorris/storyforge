@@ -22,7 +22,7 @@ PRICING = {
     'haiku':  {'input': 0.80,  'output': 4.00,  'cache_read': 0.08, 'cache_create': 1.00},
 }
 
-LEDGER_HEADER = 'timestamp|operation|model|input_tokens|output_tokens|cost_usd|duration_s'
+LEDGER_HEADER = 'timestamp|operation|target|model|input_tokens|output_tokens|cache_read|cache_create|cost_usd|duration_s'
 
 # Output tokens per scope item, by operation type (for estimates)
 _OUTPUT_PER_ITEM = {
@@ -76,10 +76,11 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int,
 
 def log_operation(project_dir: str, operation: str, model: str,
                   input_tokens: int, output_tokens: int, cost: float,
-                  duration_s: int = 0) -> None:
+                  duration_s: int = 0, target: str = '',
+                  cache_read: int = 0, cache_create: int = 0) -> None:
     """Append one row to the ledger CSV.
 
-    One row per operation (e.g. one scoring run), not per API call.
+    Full format matching bash costs.sh: includes target, cache_read, cache_create.
     """
     ledger_file = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
     os.makedirs(os.path.dirname(ledger_file), exist_ok=True)
@@ -89,7 +90,7 @@ def log_operation(project_dir: str, operation: str, model: str,
             f.write(LEDGER_HEADER + '\n')
 
     timestamp = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-    row = f"{timestamp}|{operation}|{model}|{input_tokens}|{output_tokens}|{cost:.6f}|{duration_s}"
+    row = f"{timestamp}|{operation}|{target}|{model}|{input_tokens}|{output_tokens}|{cache_read}|{cache_create}|{cost:.6f}|{duration_s}"
 
     with open(ledger_file, 'a') as f:
         f.write(row + '\n')
@@ -124,6 +125,8 @@ def print_summary(project_dir: str, operation: str | None = None) -> None:
     count = 0
     total_input = 0
     total_output = 0
+    total_cache_r = 0
+    total_cache_c = 0
     total_cost = 0.0
     total_dur = 0
 
@@ -134,7 +137,17 @@ def print_summary(project_dir: str, operation: str | None = None) -> None:
             if not line:
                 continue
             parts = line.split('|')
-            if len(parts) < 7:
+            if len(parts) < 10:
+                # Old format (7 cols) — handle gracefully
+                if len(parts) >= 7:
+                    row_op = parts[1]
+                    if operation and row_op != operation:
+                        continue
+                    count += 1
+                    total_input += int(parts[3])
+                    total_output += int(parts[4])
+                    total_cost += float(parts[5])
+                    total_dur += int(parts[6])
                 continue
 
             row_op = parts[1]
@@ -142,10 +155,12 @@ def print_summary(project_dir: str, operation: str | None = None) -> None:
                 continue
 
             count += 1
-            total_input += int(parts[3])
-            total_output += int(parts[4])
-            total_cost += float(parts[5])
-            total_dur += int(parts[6])
+            total_input += int(parts[4])
+            total_output += int(parts[5])
+            total_cache_r += int(parts[6])
+            total_cache_c += int(parts[7])
+            total_cost += float(parts[8])
+            total_dur += int(parts[9])
 
     if count == 0:
         label = f' for operation: {operation}' if operation else ''
@@ -154,9 +169,11 @@ def print_summary(project_dir: str, operation: str | None = None) -> None:
 
     label = operation or 'all operations'
     print(f'--- Cost Summary: {label} ---')
-    print(f'Operations:    {count}')
+    print(f'Invocations:   {count}')
     print(f'Input tokens:  {total_input}')
     print(f'Output tokens: {total_output}')
+    print(f'Cache read:    {total_cache_r}')
+    print(f'Cache create:  {total_cache_c}')
     print(f'Total cost:    ${total_cost:.4f}')
     print(f'Total time:    {total_dur}s')
 
