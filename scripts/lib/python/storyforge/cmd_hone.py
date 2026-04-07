@@ -228,7 +228,9 @@ def _run_briefs_domain(ref_dir: str, project_dir: str, log_dir: str,
 
     briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
-    issues = detect_brief_issues(briefs, scenes, scene_filter)
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    intent = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else None
+    issues = detect_brief_issues(briefs, scenes, scene_filter, intent_map=intent)
 
     by_type: dict[str, list] = {}
     for i in issues:
@@ -317,7 +319,9 @@ def _count_brief_issues(ref_dir: str, scene_filter: list[str] | None) -> dict:
 
     briefs = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
     scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
-    issues = detect_brief_issues(briefs, scenes, scene_filter)
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    intent = _read_csv_as_map(intent_path) if os.path.isfile(intent_path) else None
+    issues = detect_brief_issues(briefs, scenes, scene_filter, intent_map=intent)
 
     by_type: dict[str, int] = {}
     for i in issues:
@@ -329,6 +333,7 @@ def _count_brief_issues(ref_dir: str, scene_filter: list[str] | None) -> dict:
         'abstract': by_type.get('abstract', 0),
         'overspecified': by_type.get('overspecified', 0),
         'verbose': by_type.get('verbose', 0),
+        'conflict_free': by_type.get('conflict_free', 0),
     }
 
 
@@ -443,7 +448,7 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
 
     # Part 2: Brief quality
     print('\n=== Brief Quality Issues ===\n')
-    issues = detect_brief_issues(briefs, scenes, scene_filter)
+    issues = detect_brief_issues(briefs, scenes, scene_filter, intent_map=intent)
     by_type: dict[str, list] = {}
     for i in issues:
         by_type.setdefault(i['issue'], []).append(i)
