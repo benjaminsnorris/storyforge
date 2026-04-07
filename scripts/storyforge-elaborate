@@ -113,6 +113,7 @@ if [[ "$STAGE" == "mice-fill" ]]; then
     # MICE dormancy fill — identify and add thread mentions in gap scenes
     # ============================================================================
 
+    REF_DIR="${PROJECT_DIR}/reference"
     log "Detecting MICE thread dormancy gaps..."
 
     DORMANCY=$(PYTHONPATH="$PYTHON_LIB" python3 -c "
