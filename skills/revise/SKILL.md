@@ -33,6 +33,9 @@ Based on the author's request and project state:
 ### "Polish" / "Clean up the prose" / "Polish pass"
 → Craft-only revision: skip planning, target scenes with low craft scores. Equivalent to `./storyforge revise --polish`.
 
+### "Fix AI patterns" / "Naturalness" / "Remove AI artifacts" / "Sounds like a machine"
+→ Targeted 3-pass revision for specific AI prose patterns: metaphor restatement, interpretive tagging, ending template. Equivalent to `./storyforge revise --naturalness`. Use when scoring shows low `prose_naturalness` but high structural/fidelity scores — the sign that the brief is solid but the prose has AI artifacts.
+
 ### "How did the revision go?" / "Review results"
 → Assessment mode: read the most recent revision results, compare before/after, identify remaining issues, recommend next steps.
 
@@ -116,6 +119,7 @@ Offer two options:
 > cd [project_dir] && [plugin_path]/scripts/storyforge-revise [flags]
 > ```
 > For craft-only: `./storyforge revise --polish`
+> For AI pattern removal: `./storyforge revise --naturalness`
 > For structural-only (CSV fixes, no prose): `./storyforge revise --structural`
 
 ### Structural Mode

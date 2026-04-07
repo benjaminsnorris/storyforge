@@ -276,7 +276,7 @@ Run: `./tests/run-tests.sh` (all suites) or `./tests/run-tests.sh tests/test-thi
 |--------|---------|
 | `storyforge-write` | Draft scenes (reads briefs if available, supports parallel wave drafting) |
 | `storyforge-evaluate` | Multi-agent evaluation panel (6 evaluators + synthesis) |
-| `storyforge-revise` | Execute revision passes from a plan |
+| `storyforge-revise` | Execute revision passes from a plan. `--polish` for craft-only. `--naturalness` for targeted AI pattern removal (3 passes: metaphor restatement, interpretive tagging, ending template). |
 | `storyforge-score` | Craft scoring (25 principles + fidelity scoring against briefs) |
 | `storyforge-elaborate` | Run elaboration stages (spine/architecture/map/briefs) |
 | `storyforge-extract` | Extract structural data from existing prose (reverse elaboration). `--force` overwrites existing fields. Runs reconciliation after each phase. |
