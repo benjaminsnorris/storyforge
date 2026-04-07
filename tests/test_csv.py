@@ -1,26 +1,26 @@
 """Tests for CSV functions (migrated from test-csv.sh).
 
-The csv_cli functions print to stdout (they are CLI functions).
-We use a helper to capture their output.
+csv_cli functions now return values directly (strings or lists).
 """
 
-import io
 import os
 import shutil
-import sys
 
 import storyforge.csv_cli as csv_cli
 
 
 def _capture(fn, *args, **kwargs):
-    """Call a csv_cli function and return its stdout output, stripped."""
-    old = sys.stdout
-    sys.stdout = buf = io.StringIO()
-    try:
-        fn(*args, **kwargs)
-    finally:
-        sys.stdout = old
-    return buf.getvalue().rstrip('\n')
+    """Call a csv_cli function and return its result as a string.
+
+    For functions returning lists (get_column, list_ids), joins with newlines.
+    For functions returning strings, returns as-is.
+    """
+    result = fn(*args, **kwargs)
+    if result is None:
+        return ''
+    if isinstance(result, list):
+        return '\n'.join(result)
+    return str(result)
 
 
 class TestGetCsvField:

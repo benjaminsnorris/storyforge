@@ -1,7 +1,7 @@
-"""CLI for pipe-delimited CSV operations.
+"""Pipe-delimited CSV operations.
 
-Replaces the awk-based csv.sh with robust Python parsing.
-Called from bash scripts via: python3 -m storyforge.csv_cli <command> [args]
+Provides both programmatic API (functions return values) and CLI interface
+(python3 -m storyforge.csv_cli <command>).
 
 Commands:
     get-field <file> <id> <field> [key_column]
@@ -35,72 +35,77 @@ def _write_lines(path, lines):
 
 
 def get_field(path, row_id, field, key_col='id'):
-    """Print a single field value for a given ID."""
+    """Return a single field value for a given ID. Returns '' if not found."""
     if not os.path.isfile(path):
-        return
+        return ''
     lines = _read_lines(path)
     if not lines:
-        return
+        return ''
     headers = lines[0].split(DELIMITER)
     try:
         fcol = headers.index(field)
         kcol = headers.index(key_col)
     except ValueError:
-        return
+        return ''
     for line in lines[1:]:
         fields = line.split(DELIMITER)
         if kcol < len(fields) and fields[kcol] == row_id:
             if fcol < len(fields):
-                print(fields[fcol])
-            return
+                return fields[fcol]
+            return ''
+    return ''
 
 
 def get_row(path, row_id, key_col='id'):
-    """Print all fields for a given ID as a pipe-delimited string."""
+    """Return all fields for a given ID as a pipe-delimited string. Returns '' if not found."""
     if not os.path.isfile(path):
-        return
+        return ''
     lines = _read_lines(path)
     if not lines:
-        return
+        return ''
     headers = lines[0].split(DELIMITER)
     try:
         kcol = headers.index(key_col)
     except ValueError:
-        return
+        return ''
     for line in lines[1:]:
         fields = line.split(DELIMITER)
         if kcol < len(fields) and fields[kcol] == row_id:
-            print(line)
-            return
+            return line
+    return ''
 
 
 def get_column(path, field):
-    """Print all values for a given column, one per line."""
+    """Return all values for a given column as a list. Returns [] if not found."""
     if not os.path.isfile(path):
-        return
+        return []
     lines = _read_lines(path)
     if not lines:
-        return
+        return []
     headers = lines[0].split(DELIMITER)
     try:
         col = headers.index(field)
     except ValueError:
-        return
+        return []
+    result = []
     for line in lines[1:]:
         fields = line.split(DELIMITER)
         if col < len(fields):
-            print(fields[col])
+            result.append(fields[col])
+    return result
 
 
 def list_ids(path):
-    """Print all IDs (first column), one per line."""
+    """Return all IDs (first column) as a list. Returns [] if not found."""
     if not os.path.isfile(path):
-        return
+        return []
     lines = _read_lines(path)
+    result = []
     for line in lines[1:]:
         fields = line.split(DELIMITER)
         if fields:
-            print(fields[0])
+            result.append(fields[0])
+    return result
 
 
 def update_field(path, row_id, field, value, key_col='id'):
@@ -180,26 +185,32 @@ def main():
                   file=sys.stderr)
             sys.exit(1)
         key_col = sys.argv[5] if len(sys.argv) > 5 else 'id'
-        get_field(sys.argv[2], sys.argv[3], sys.argv[4], key_col)
+        result = get_field(sys.argv[2], sys.argv[3], sys.argv[4], key_col)
+        if result:
+            print(result)
 
     elif cmd == 'get-row':
         if len(sys.argv) < 4:
             print('Usage: get-row <file> <id> [key_column]', file=sys.stderr)
             sys.exit(1)
         key_col = sys.argv[4] if len(sys.argv) > 4 else 'id'
-        get_row(sys.argv[2], sys.argv[3], key_col)
+        result = get_row(sys.argv[2], sys.argv[3], key_col)
+        if result:
+            print(result)
 
     elif cmd == 'get-column':
         if len(sys.argv) < 4:
             print('Usage: get-column <file> <field>', file=sys.stderr)
             sys.exit(1)
-        get_column(sys.argv[2], sys.argv[3])
+        for val in get_column(sys.argv[2], sys.argv[3]):
+            print(val)
 
     elif cmd == 'list-ids':
         if len(sys.argv) < 3:
             print('Usage: list-ids <file>', file=sys.stderr)
             sys.exit(1)
-        list_ids(sys.argv[2])
+        for val in list_ids(sys.argv[2]):
+            print(val)
 
     elif cmd == 'update-field':
         if len(sys.argv) < 6:

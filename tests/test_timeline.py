@@ -1,22 +1,19 @@
 """Tests for timeline functions (migrated from test-timeline.sh)."""
 
-import io
 import os
 import shutil
-import sys
 
 import storyforge.csv_cli as csv_cli
 
 
 def _capture(fn, *args, **kwargs):
-    """Call a csv_cli function and return its stdout output, stripped."""
-    old = sys.stdout
-    sys.stdout = buf = io.StringIO()
-    try:
-        fn(*args, **kwargs)
-    finally:
-        sys.stdout = old
-    return buf.getvalue().rstrip('\n')
+    """Call a csv_cli function and return its result as a string."""
+    result = fn(*args, **kwargs)
+    if result is None:
+        return ''
+    if isinstance(result, list):
+        return '\n'.join(result)
+    return str(result)
 
 
 class TestTimelineCsvOperations:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Storyforge — delegates to installed plugin scripts
+# Storyforge — delegates to installed plugin
 # Created by /storyforge:init. Do not edit.
 set -euo pipefail
 
@@ -32,7 +32,12 @@ find_plugin() {
 }
 
 PLUGIN_ROOT="$(find_plugin)"
-COMMAND="${1:?Usage: ./storyforge <command> [options] — commands: write, evaluate, revise, score, assemble, cover, review, cleanup, enrich, timeline, visualize, test}"
+
+if [[ $# -eq 0 ]]; then
+  exec python3 -c "import sys; sys.path.insert(0, '${PLUGIN_ROOT}/scripts/lib/python'); from storyforge.__main__ import main; main()"
+fi
+
+COMMAND="$1"
 shift
 
 case "$COMMAND" in
@@ -40,11 +45,6 @@ case "$COMMAND" in
     exec bash "${PLUGIN_ROOT}/tests/run-tests.sh" "$@"
     ;;
   *)
-    SCRIPT="$PLUGIN_ROOT/scripts/storyforge-$COMMAND"
-    if [[ ! -x "$SCRIPT" ]]; then
-      echo "Error: Unknown command '$COMMAND'. Run './storyforge' with no args for usage." >&2
-      exit 1
-    fi
-    exec "$SCRIPT" "$@"
+    PYTHONPATH="${PLUGIN_ROOT}/scripts/lib/python" exec python3 -m storyforge "$COMMAND" "$@"
     ;;
 esac
