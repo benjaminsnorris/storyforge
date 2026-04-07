@@ -13,6 +13,8 @@ import csv
 import os
 import re
 
+from storyforge.common import log
+
 from storyforge.elaborate import (
     _read_csv, _read_csv_as_map, _write_csv, _FILE_MAP, DELIMITER,
 )
@@ -721,7 +723,8 @@ def reconcile_domain(
     # Call API
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f'reconcile-{domain}.json')
-    invoke_to_file(prompt, model, log_file, max_tokens=4096)
+    invoke_to_file(prompt, model, log_file, max_tokens=4096,
+                   label=f'hone registries/{domain}')
 
     # Extract and parse response
     response = extract_text_from_file(log_file)
@@ -1250,10 +1253,13 @@ def hone_briefs(
 
     scenes_rewritten = 0
     fields_rewritten = 0
+    total_scenes = len(by_scene)
 
-    for sid, issues in by_scene.items():
+    for idx, (sid, issues) in enumerate(by_scene.items(), 1):
         abstract_issues = [i for i in issues if i['issue'] == 'abstract']
         trim_issues = [i for i in issues if i['issue'] in ('overspecified', 'verbose')]
+        issue_types = sorted(set(i['issue'] for i in issues))
+        log(f'  [{idx}/{total_scenes}] {sid} ({", ".join(issue_types)})')
 
         # Handle abstract issues with concretization prompt
         if abstract_issues and coaching_level == 'full':
@@ -1270,7 +1276,8 @@ def hone_briefs(
 
             os.makedirs(log_dir, exist_ok=True)
             log_file = os.path.join(log_dir, f'hone-abstract-{sid}.json')
-            invoke_to_file(prompt, model, log_file, max_tokens=2048)
+            invoke_to_file(prompt, model, log_file, max_tokens=2048,
+                           label=f'hone abstract {idx}/{total_scenes} ({sid})')
             response = extract_text_from_file(log_file)
 
             rewrites = parse_concretize_response(response, sid, abstract_fields)
@@ -1295,7 +1302,8 @@ def hone_briefs(
             if prompt:
                 os.makedirs(log_dir, exist_ok=True)
                 log_file = os.path.join(log_dir, f'hone-trim-{sid}.json')
-                invoke_to_file(prompt, model, log_file, max_tokens=2048)
+                invoke_to_file(prompt, model, log_file, max_tokens=2048,
+                               label=f'hone trim {idx}/{total_scenes} ({sid})')
                 response = extract_text_from_file(log_file)
 
                 rewrites = parse_concretize_response(response, sid, trim_fields)
