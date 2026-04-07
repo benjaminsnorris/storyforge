@@ -893,7 +893,7 @@ def score_mice_health(scenes_map, intent_map, ref_dir=''):
         reg_rows = _read_csv(reg_path)
         for row in reg_rows:
             rid = row.get('id', '').strip()
-            rtype = row.get('type', '').strip()
+            rtype = (row.get('type') or '').strip()
             if rid and rtype:
                 registry_types[rid] = rtype
 

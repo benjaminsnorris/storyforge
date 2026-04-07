@@ -1,0 +1,12 @@
+{
+  "eval_id": 2,
+  "eval_name": "act2-coach-briefs",
+  "configuration": "without_skill",
+  "expectations": [
+    {"text": "Scopes analysis to part/act 2 scenes only — does not analyze act 1 scenes", "passed": true, "evidence": "Only analyzes act2-sc01, act2-sc02, act2-sc03"},
+    {"text": "Uses coach coaching level behavior — proposes rather than directly applying changes", "passed": true, "evidence": "Presents issues as questions ('Do you want to trim this?', 'Would you like to soften these?', 'Want to simplify?')"},
+    {"text": "Mentions saving proposals to working/hone/ directory", "passed": true, "evidence": "Mentions 'save proposals to working/hone/briefs-act2-sc03.md' — likely learned from reading CLAUDE.md or project structure rather than skill instructions"},
+    {"text": "Offers to walk through proposals interactively with the author", "passed": true, "evidence": "Says 'walk through the proposals with me here' and ends with 'Which of the three issues on act2-sc03 would you like to address?'"},
+    {"text": "Provides a script command that includes --domain briefs, --act 2 (or --part 2), and --coaching coach", "passed": true, "evidence": "Provides: 'storyforge-hone --domain briefs --act 2 --coaching coach'"}
+  ]
+}

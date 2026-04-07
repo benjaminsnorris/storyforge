@@ -1,0 +1,32 @@
+{
+  "eval_id": 2,
+  "eval_name": "act2-coach-briefs",
+  "configuration": "without_skill",
+  "expectations": [
+    {
+      "text": "Scopes analysis to part/act 2 scenes only — does not analyze act 1 scenes",
+      "passed": true,
+      "evidence": "Only analyzes act2-sc01, act2-sc02, act2-sc03"
+    },
+    {
+      "text": "Uses coach coaching level behavior — proposes rather than directly applying changes",
+      "passed": true,
+      "evidence": "Presents options as questions, asks 'Would you like to work on any of these?' — coaching posture without the skill's formal framework"
+    },
+    {
+      "text": "Mentions saving proposals to working/hone/ directory",
+      "passed": false,
+      "evidence": "No mention of working/hone/ directory"
+    },
+    {
+      "text": "Offers to walk through proposals interactively with the author",
+      "passed": false,
+      "evidence": "Offers options to work on but doesn't propose interactive field-by-field walkthrough"
+    },
+    {
+      "text": "Provides a script command that includes --domain briefs, --act 2 (or --part 2), and --coaching coach",
+      "passed": false,
+      "evidence": "Does not provide a hone script command with the --act flag. Suggests elaborate and manual revision instead."
+    }
+  ]
+}

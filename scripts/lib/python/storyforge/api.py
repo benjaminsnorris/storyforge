@@ -83,6 +83,26 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
     return response
 
 
+def invoke_api(prompt: str, model: str, max_tokens: int = 4096) -> str:
+    """High-level convenience: invoke API and return text response.
+
+    Returns empty string on failure (logs warning but doesn't raise).
+    Used by git.py review phase, runner.py healing zones, and command modules.
+    """
+    try:
+        response = invoke(prompt, model, max_tokens)
+        return extract_text(response)
+    except Exception as e:
+        from storyforge.common import log
+        log(f'WARNING: API call failed: {e}')
+        return ''
+
+
+def extract_response(log_file: str) -> str:
+    """Extract text from a JSON response file. Alias for extract_text_from_file."""
+    return extract_text_from_file(log_file)
+
+
 def extract_text(response: dict) -> str:
     """Extract text content from an API response dict."""
     texts = []

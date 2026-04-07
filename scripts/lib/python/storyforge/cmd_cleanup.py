@@ -1,0 +1,722 @@
+"""storyforge cleanup — Project structure cleanup and migration.
+
+Fixes structural drift in Storyforge novel projects: updates gitignore,
+creates missing directories, migrates storyforge.yaml, adds CSV columns,
+removes junk files, deletes legacy artifacts, and reports integrity issues.
+
+Usage:
+    storyforge cleanup                  # Apply all fixes and commit
+    storyforge cleanup --dry-run        # Report what would change
+    storyforge cleanup --verbose        # Detailed output
+"""
+
+import argparse
+import glob
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+from storyforge.common import detect_project_root, log, read_yaml_field
+from storyforge.git import commit_and_push
+
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+GITIGNORE_REQUIRED = [
+    'working/logs/',
+    'working/scores/**/.batch-requests.jsonl',
+    'working/evaluations/**/.status-*',
+    'working/scores/**/.markers-*',
+    '.DS_Store',
+    'working/.autopilot',
+    'working/.interactive',
+]
+
+EXPECTED_DIRS = [
+    'manuscript/press-kit',
+    'working/logs',
+    'working/evaluations',
+    'working/plans',
+    'working/recommendations',
+]
+
+PIPELINE_EXPECTED = 'cycle|started|status|evaluation|scoring|plan|review|recommendations|summary'
+
+EXPECTED_TOP_DIRS = set('scenes reference working manuscript storyforge .git'.split())
+EXPECTED_TOP_FILES = set('storyforge.yaml CLAUDE.md .gitignore .DS_Store storyforge'.split())
+EXPECTED_WORKING_DIRS = set(
+    'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
+)
+EXPECTED_WORKING_FILES = set(
+    'pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html'.split()
+)
+
+
+# ============================================================================
+# Gitignore
+# ============================================================================
+
+def update_gitignore(project_dir: str) -> None:
+    """Ensure .gitignore contains all required entries."""
+    gitignore = os.path.join(project_dir, '.gitignore')
+
+    if not os.path.isfile(gitignore):
+        with open(gitignore, 'w') as f:
+            f.write('# Storyforge — Novel Project .gitignore\n\n# macOS\n.DS_Store\n\n')
+
+    with open(gitignore) as f:
+        content = f.read()
+
+    new_content = content
+    if not new_content.endswith('\n'):
+        new_content += '\n'
+
+    added = False
+
+    if 'working/logs/' not in content:
+        new_content += '\n# Logs (debugging output, value extracted at write time)\nworking/logs/\n'
+        added = True
+
+    if 'working/scores/**/.batch-requests.jsonl' not in content:
+        new_content += '\n# Batch API payloads (keep only latest for debugging)\nworking/scores/**/.batch-requests.jsonl\n'
+        added = True
+
+    if 'working/evaluations/**/.status-*' not in content:
+        new_content += '\n# Intermediate scoring/eval state\nworking/evaluations/**/.status-*\n'
+        added = True
+
+    if 'working/scores/**/.markers-*' not in content:
+        new_content += 'working/scores/**/.markers-*\n'
+        added = True
+
+    if 'working/.interactive' not in content:
+        if 'working/.autopilot' in new_content:
+            new_content = new_content.replace('working/.autopilot\n',
+                                              'working/.autopilot\nworking/.interactive\n')
+        else:
+            new_content += '\n# Temporary flag files (cleaned up by scripts)\nworking/.autopilot\nworking/.interactive\n'
+        added = True
+
+    if added:
+        with open(gitignore, 'w') as f:
+            f.write(new_content)
+
+
+# ============================================================================
+# Missing directories
+# ============================================================================
+
+def create_missing_dirs(project_dir: str) -> list[str]:
+    """Create expected directories that are missing. Returns list of created dirs."""
+    created = []
+    for d in EXPECTED_DIRS:
+        path = os.path.join(project_dir, d)
+        if not os.path.isdir(path):
+            os.makedirs(path, exist_ok=True)
+            gitkeep = os.path.join(path, '.gitkeep')
+            with open(gitkeep, 'w') as f:
+                pass
+            created.append(d)
+    return created
+
+
+# ============================================================================
+# Junk file cleanup
+# ============================================================================
+
+def clean_junk_files(project_dir: str) -> None:
+    """Remove transient files that should not be committed."""
+    patterns = [
+        (os.path.join(project_dir, 'working', 'evaluations'), '.status-*'),
+        (os.path.join(project_dir, 'working', 'scores'), '.markers-*'),
+    ]
+    for base, pattern in patterns:
+        if os.path.isdir(base):
+            for root, _dirs, files in os.walk(base):
+                for f in files:
+                    if _matches_glob(f, pattern):
+                        os.remove(os.path.join(root, f))
+
+    # Remove non-latest batch request files
+    scores_dir = os.path.join(project_dir, 'working', 'scores')
+    if os.path.isdir(scores_dir):
+        for root, _dirs, files in os.walk(scores_dir):
+            if 'latest' in root:
+                continue
+            for f in files:
+                if f == '.batch-requests.jsonl':
+                    os.remove(os.path.join(root, f))
+
+    # Remove log files
+    logs_dir = os.path.join(project_dir, 'working', 'logs')
+    if os.path.isdir(logs_dir):
+        for f in os.listdir(logs_dir):
+            fp = os.path.join(logs_dir, f)
+            if os.path.isfile(fp):
+                os.remove(fp)
+
+    # Remove empty dirs
+    for d in ('enrich', 'coaching', 'backups', 'scenes-setup'):
+        target = os.path.join(project_dir, 'working', d)
+        if os.path.isdir(target) and not os.listdir(target):
+            os.rmdir(target)
+
+
+def _matches_glob(filename: str, pattern: str) -> bool:
+    """Simple glob match for filename patterns like '.status-*'."""
+    import fnmatch
+    return fnmatch.fnmatch(filename, pattern)
+
+
+# ============================================================================
+# Legacy files and reorganization
+# ============================================================================
+
+def delete_legacy_files(project_dir: str) -> None:
+    for f in ('working/pipeline.yaml', 'working/assemble.py'):
+        path = os.path.join(project_dir, f)
+        if os.path.isfile(path):
+            os.remove(path)
+
+
+def reorganize_loose_files(project_dir: str) -> None:
+    recs_dir = os.path.join(project_dir, 'working', 'recommendations')
+    os.makedirs(recs_dir, exist_ok=True)
+    pattern = os.path.join(project_dir, 'working', 'recommendations*.md')
+    for f in glob.glob(pattern):
+        if os.path.isfile(f):
+            dest = os.path.join(recs_dir, os.path.basename(f))
+            if not os.path.exists(dest):
+                shutil.move(f, dest)
+
+
+# ============================================================================
+# Pipeline CSV migration
+# ============================================================================
+
+def migrate_pipeline_csv(project_dir: str) -> None:
+    csv_path = os.path.join(project_dir, 'working', 'pipeline.csv')
+    if not os.path.isfile(csv_path):
+        return
+
+    with open(csv_path) as f:
+        lines = f.readlines()
+
+    if not lines:
+        return
+
+    header = lines[0].strip()
+    if header == PIPELINE_EXPECTED:
+        return
+
+    old_cols = header.split('|')
+    exp_cols = PIPELINE_EXPECTED.split('|')
+    old_pos = {col: i for i, col in enumerate(old_cols)}
+
+    new_lines = [PIPELINE_EXPECTED + '\n']
+    for line in lines[1:]:
+        vals = line.strip().split('|')
+        new_vals = []
+        for col in exp_cols:
+            if col in old_pos and old_pos[col] < len(vals):
+                new_vals.append(vals[old_pos[col]])
+            else:
+                new_vals.append('')
+        new_lines.append('|'.join(new_vals) + '\n')
+
+    with open(csv_path, 'w') as f:
+        f.writelines(new_lines)
+
+
+# ============================================================================
+# Pipeline review deduplication
+# ============================================================================
+
+def dedup_pipeline_reviews(project_dir: str) -> None:
+    reviews_dir = os.path.join(project_dir, 'working', 'reviews')
+    if not os.path.isdir(reviews_dir):
+        return
+
+    files = sorted(glob.glob(os.path.join(reviews_dir, 'pipeline-review-*.md')), reverse=True)
+    prev_date = ''
+    for f in files:
+        basename = os.path.basename(f)
+        m = re.match(r'pipeline-review-(\d+)-', basename)
+        if not m:
+            continue
+        date = m.group(1)
+        if date == prev_date:
+            os.remove(f)
+        else:
+            prev_date = date
+
+
+# ============================================================================
+# storyforge.yaml migration
+# ============================================================================
+
+def migrate_storyforge_yaml(project_dir: str) -> None:
+    yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+    if not os.path.isfile(yaml_path):
+        return
+
+    with open(yaml_path) as f:
+        content = f.read()
+
+    modified = False
+
+    # Move misplaced chapter_map to under artifacts
+    if re.search(r'^chapter_map:', content, re.MULTILINE):
+        # Extract values
+        block_match = re.search(
+            r'^chapter_map:\n((?:  .+\n)*)', content, re.MULTILINE
+        )
+        if block_match:
+            block_text = block_match.group(1)
+            cm_exists = ''
+            cm_path = ''
+            cm_updated = ''
+            for line in block_text.splitlines():
+                m = re.match(r'\s+exists:\s*(.*)', line)
+                if m:
+                    cm_exists = m.group(1).strip()
+                m = re.match(r'\s+path:\s*(.*)', line)
+                if m:
+                    cm_path = m.group(1).strip()
+                m = re.match(r'\s+updated:\s*(.*)', line)
+                if m:
+                    cm_updated = m.group(1).strip()
+
+            # Remove top-level chapter_map block
+            content = re.sub(r'^chapter_map:\n(?:  .+\n)*', '', content, flags=re.MULTILINE)
+            # Remove consecutive blank lines
+            content = re.sub(r'\n{3,}', '\n\n', content)
+
+            # Insert under artifacts
+            insert_block = (
+                f'  chapter_map:\n'
+                f'    exists: {cm_exists}\n'
+                f'    path: {cm_path}\n'
+                f'    updated: {cm_updated}\n'
+            )
+            content = re.sub(
+                r'(^artifacts:\n)',
+                r'\1' + insert_block,
+                content,
+                flags=re.MULTILINE,
+            )
+            modified = True
+
+    # Add missing sections
+    if not re.search(r'^scene_extensions:', content, re.MULTILINE):
+        content += '\nscene_extensions: []\n'
+        modified = True
+
+    if not re.search(r'^evaluation:', content, re.MULTILINE):
+        content += '\nevaluation:\n  custom_evaluators: []\n'
+        modified = True
+
+    if not re.search(r'^production:', content, re.MULTILINE) and not re.search(r'^# production:', content, re.MULTILINE):
+        content += '\n# production:\n#   author: ""\n#   language: en\n#   scene_break: ornamental\n#   default_heading: numbered-titled\n'
+        modified = True
+
+    if not re.search(r'^parts:', content, re.MULTILINE) and not re.search(r'^# parts:', content, re.MULTILINE):
+        content += '\n# parts:\n#   - number: 1\n#     title: "Part One"\n'
+        modified = True
+
+    # Add missing artifact entries for files on disk
+    artifact_files = [
+        ('characters', 'reference/characters.csv'),
+        ('locations', 'reference/locations.csv'),
+        ('threads', 'reference/threads.csv'),
+        ('motif_taxonomy', 'reference/motif-taxonomy.csv'),
+        ('scene_intent', 'reference/scene-intent.csv'),
+        ('title_development', 'reference/title-development.md'),
+    ]
+    for aid, apath in artifact_files:
+        if os.path.isfile(os.path.join(project_dir, apath)):
+            if f'  {aid}:' not in content:
+                insert = (
+                    f'  {aid}:\n'
+                    f'    exists: true\n'
+                    f'    path: {apath}\n'
+                    f'    updated:\n'
+                )
+                content = re.sub(
+                    r'(^artifacts:\n)',
+                    r'\1' + insert,
+                    content,
+                    flags=re.MULTILINE,
+                )
+                modified = True
+
+    # Fix exists flags based on disk
+    def _fix_exists(match):
+        block = match.group(0)
+        path_match = re.search(r'path:\s*(.+)', block)
+        if not path_match:
+            return block
+        apath = path_match.group(1).strip().strip('"')
+        disk_exists = os.path.exists(os.path.join(project_dir, apath))
+        if disk_exists:
+            block = re.sub(r'exists: false', 'exists: true', block)
+        else:
+            block = re.sub(r'exists: true', 'exists: false', block)
+        return block
+
+    content = re.sub(
+        r'^  [a-z_]+:\n(?:    (?:exists|path|updated):.*\n)+',
+        _fix_exists,
+        content,
+        flags=re.MULTILINE,
+    )
+    modified = True
+
+    if modified:
+        with open(yaml_path, 'w') as f:
+            f.write(content)
+
+
+# ============================================================================
+# CSV Integrity Report
+# ============================================================================
+
+def report_csv_integrity(project_dir: str) -> list[str]:
+    """Check CSV integrity. Returns list of issue strings."""
+    issues = []
+    meta_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    intent_csv = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+    chapter_csv = os.path.join(project_dir, 'reference', 'chapter-map.csv')
+    chars_csv = os.path.join(project_dir, 'reference', 'characters.csv')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+
+    def _read_ids(csv_path):
+        if not os.path.isfile(csv_path):
+            return set()
+        with open(csv_path) as f:
+            lines = f.readlines()
+        return {line.split('|')[0].strip() for line in lines[1:] if line.strip()}
+
+    # Scene files vs metadata
+    if os.path.isfile(meta_csv) and os.path.isdir(scenes_dir):
+        meta_ids = _read_ids(meta_csv)
+        file_ids = set()
+        for f in os.listdir(scenes_dir):
+            if f.endswith('.md'):
+                file_ids.add(f[:-3])
+        for fid in sorted(file_ids - meta_ids):
+            issues.append(f'ORPHAN_FILE:{fid}')
+        for mid in sorted(meta_ids - file_ids):
+            issues.append(f'ORPHAN_META:{mid}')
+
+    # Metadata vs intent
+    if os.path.isfile(meta_csv) and os.path.isfile(intent_csv):
+        meta_ids = _read_ids(meta_csv)
+        intent_ids = _read_ids(intent_csv)
+        for mid in sorted(meta_ids - intent_ids):
+            issues.append(f'MISSING_INTENT:{mid}')
+        for iid in sorted(intent_ids - meta_ids):
+            issues.append(f'EXTRA_INTENT:{iid}')
+
+    # Chapter map references
+    if os.path.isfile(chapter_csv) and os.path.isfile(meta_csv):
+        meta_ids = _read_ids(meta_csv)
+        with open(chapter_csv) as f:
+            lines = f.readlines()
+        for line in lines[1:]:
+            parts = line.strip().split('|')
+            if len(parts) > 4:
+                for sid in parts[4].split(';'):
+                    sid = sid.strip()
+                    if sid and sid not in meta_ids:
+                        issues.append(f'BAD_CHAPTER_REF:{sid}')
+
+    # Sequence gaps
+    if os.path.isfile(meta_csv):
+        with open(meta_csv) as f:
+            lines = f.readlines()
+        seqs = []
+        for line in lines[1:]:
+            parts = line.strip().split('|')
+            if len(parts) > 1 and parts[1].strip():
+                seqs.append(parts[1].strip())
+        needs_renumber = False
+        prev = 0
+        for s in sorted(seqs, key=lambda x: float(x) if re.match(r'^[\d.]+$', x) else 0):
+            if '.' in s:
+                needs_renumber = True
+            elif s.isdigit():
+                val = int(s)
+                if val > prev + 1:
+                    needs_renumber = True
+                prev = val
+        if needs_renumber:
+            issues.append('SEQ_NEEDS_RENUMBER:gaps or non-integer seq values found')
+
+    # Unknown characters
+    if os.path.isfile(intent_csv) and os.path.isfile(chars_csv):
+        with open(chars_csv) as f:
+            clines = f.readlines()
+        known = set()
+        for line in clines[1:]:
+            parts = line.strip().split('|')
+            for i in (1, 2):
+                if i < len(parts):
+                    for name in parts[i].split(';'):
+                        name = name.strip()
+                        if name:
+                            known.add(name)
+
+        with open(intent_csv) as f:
+            ilines = f.readlines()
+        header = ilines[0].strip().split('|') if ilines else []
+        char_idx = header.index('characters') if 'characters' in header else -1
+        used = set()
+        if char_idx >= 0:
+            for line in ilines[1:]:
+                parts = line.strip().split('|')
+                if char_idx < len(parts):
+                    for name in parts[char_idx].split(';'):
+                        name = name.strip()
+                        if name:
+                            used.add(name)
+        for name in sorted(used - known):
+            issues.append(f'UNKNOWN_CHARACTER:{name}')
+
+    return issues
+
+
+# ============================================================================
+# Unexpected Files Report
+# ============================================================================
+
+def report_unexpected_files(project_dir: str) -> list[str]:
+    """Report unexpected files and directories. Returns list of issue strings."""
+    issues = []
+
+    # Top-level dirs
+    for entry in sorted(os.listdir(project_dir)):
+        path = os.path.join(project_dir, entry)
+        if os.path.isdir(path) and entry not in EXPECTED_TOP_DIRS:
+            issues.append(f'UNEXPECTED_DIR:{entry}')
+        elif os.path.isfile(path) and entry not in EXPECTED_TOP_FILES:
+            issues.append(f'UNEXPECTED_FILE:{entry}')
+
+    # Working subdirs
+    working = os.path.join(project_dir, 'working')
+    if os.path.isdir(working):
+        for entry in sorted(os.listdir(working)):
+            path = os.path.join(working, entry)
+            if os.path.isdir(path) and entry not in EXPECTED_WORKING_DIRS:
+                issues.append(f'UNEXPECTED_DIR:working/{entry}')
+            elif os.path.isfile(path) and entry not in EXPECTED_WORKING_FILES:
+                issues.append(f'UNEXPECTED_FILE:working/{entry}')
+
+    return issues
+
+
+# ============================================================================
+# Argument parsing
+# ============================================================================
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(
+        prog='storyforge cleanup',
+        description='Clean up and migrate a Storyforge novel project.',
+    )
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Report what would change without modifying anything')
+    parser.add_argument('--verbose', action='store_true',
+                        help='Detailed output for each step')
+    return parser.parse_args(argv)
+
+
+# ============================================================================
+# Main
+# ============================================================================
+
+def main(argv=None):
+    args = parse_args(argv or [])
+    project_dir = detect_project_root()
+    log(f'Project root: {project_dir}')
+
+    def vlog(msg):
+        if args.verbose:
+            log(msg)
+
+    if args.dry_run:
+        log('=== DRY RUN — no changes will be made ===')
+
+    # Step 1: Gitignore
+    log('Checking .gitignore...')
+    if args.dry_run:
+        tmp_dir = tempfile.mkdtemp()
+        src = os.path.join(project_dir, '.gitignore')
+        dst = os.path.join(tmp_dir, '.gitignore')
+        if os.path.isfile(src):
+            shutil.copy2(src, dst)
+        else:
+            with open(dst, 'w') as f:
+                pass
+        update_gitignore(tmp_dir)
+        import filecmp
+        if not os.path.isfile(src) or not filecmp.cmp(src, dst):
+            log('  Would update .gitignore with missing entries')
+        shutil.rmtree(tmp_dir)
+    else:
+        update_gitignore(project_dir)
+        git_dir = os.path.join(project_dir, '.git')
+        if shutil.which('git') and os.path.isdir(git_dir):
+            r = subprocess.run(
+                ['git', '-C', project_dir, 'ls-files', '-i', '--exclude-standard'],
+                capture_output=True, text=True,
+            )
+            tracked = r.stdout.strip()
+            if tracked:
+                count = len(tracked.splitlines())
+                log(f'  Untracking {count} newly-gitignored files')
+                for f in tracked.splitlines():
+                    subprocess.run(
+                        ['git', '-C', project_dir, 'rm', '--cached', '-q', f],
+                        capture_output=True,
+                    )
+
+    # Step 2: Missing directories
+    log('Checking directories...')
+    if args.dry_run:
+        for d in EXPECTED_DIRS:
+            if not os.path.isdir(os.path.join(project_dir, d)):
+                log(f'  Would create {d}/')
+    else:
+        created = create_missing_dirs(project_dir)
+        for d in created:
+            vlog(f'  Created {d}/')
+
+    # Step 3: storyforge.yaml migration
+    log('Checking storyforge.yaml...')
+    if args.dry_run:
+        tmp_dir = tempfile.mkdtemp()
+        yaml_src = os.path.join(project_dir, 'storyforge.yaml')
+        if os.path.isfile(yaml_src):
+            shutil.copy2(yaml_src, os.path.join(tmp_dir, 'storyforge.yaml'))
+            ref_src = os.path.join(project_dir, 'reference')
+            ref_dst = os.path.join(tmp_dir, 'reference')
+            if os.path.isdir(ref_src):
+                shutil.copytree(ref_src, ref_dst)
+            migrate_storyforge_yaml(tmp_dir)
+            import filecmp
+            if not filecmp.cmp(yaml_src, os.path.join(tmp_dir, 'storyforge.yaml')):
+                log('  Would migrate storyforge.yaml (missing sections, artifact flags)')
+        shutil.rmtree(tmp_dir)
+    else:
+        migrate_storyforge_yaml(project_dir)
+
+    # Step 4: Pipeline CSV
+    log('Checking pipeline.csv...')
+    if args.dry_run:
+        csv_path = os.path.join(project_dir, 'working', 'pipeline.csv')
+        if os.path.isfile(csv_path):
+            with open(csv_path) as f:
+                header = f.readline().strip()
+            if header != PIPELINE_EXPECTED:
+                log('  Would add missing columns to pipeline.csv')
+    else:
+        migrate_pipeline_csv(project_dir)
+
+    # Step 5: Junk files
+    log('Cleaning junk files...')
+    if args.dry_run:
+        for base, pattern in [
+            ('working/evaluations', '.status-*'),
+            ('working/scores', '.markers-*'),
+        ]:
+            base_path = os.path.join(project_dir, base)
+            if os.path.isdir(base_path):
+                count = 0
+                for root, _dirs, files in os.walk(base_path):
+                    count += sum(1 for f in files if _matches_glob(f, pattern))
+                if count > 0:
+                    log(f'  Would remove {count} {pattern} files')
+
+        scores_dir = os.path.join(project_dir, 'working', 'scores')
+        if os.path.isdir(scores_dir):
+            count = 0
+            for root, _dirs, files in os.walk(scores_dir):
+                if 'latest' not in root:
+                    count += sum(1 for f in files if f == '.batch-requests.jsonl')
+            if count > 0:
+                log(f'  Would remove {count} .batch-requests.jsonl files')
+
+        logs_dir = os.path.join(project_dir, 'working', 'logs')
+        if os.path.isdir(logs_dir):
+            count = sum(1 for f in os.listdir(logs_dir) if os.path.isfile(os.path.join(logs_dir, f)))
+            if count > 0:
+                log(f'  Would remove {count} log files')
+    else:
+        clean_junk_files(project_dir)
+
+    # Step 6: Legacy files
+    log('Checking legacy files...')
+    if args.dry_run:
+        for f in ('working/pipeline.yaml', 'working/assemble.py'):
+            if os.path.isfile(os.path.join(project_dir, f)):
+                log(f'  Would delete {f}')
+    else:
+        delete_legacy_files(project_dir)
+
+    # Step 7: Reorganize loose files
+    log('Reorganizing loose files...')
+    if args.dry_run:
+        pattern = os.path.join(project_dir, 'working', 'recommendations*.md')
+        count = len(glob.glob(pattern))
+        if count > 0:
+            log(f'  Would move {count} recommendation files to working/recommendations/')
+    else:
+        reorganize_loose_files(project_dir)
+
+    # Step 8: Pipeline review dedup
+    log('Deduplicating pipeline reviews...')
+    if args.dry_run:
+        log('  Would deduplicate pipeline reviews (keep latest per day)')
+    else:
+        dedup_pipeline_reviews(project_dir)
+
+    # Step 9: CSV integrity report
+    log('')
+    log('=== CSV Integrity Report ===')
+    for issue in report_csv_integrity(project_dir):
+        log(issue)
+
+    # Step 10: Unexpected files report
+    log('')
+    log('=== Unexpected Files Report ===')
+    for issue in report_unexpected_files(project_dir):
+        log(issue)
+
+    # Step 11: Commit (unless dry-run)
+    if not args.dry_run:
+        git_dir = os.path.join(project_dir, '.git')
+        if shutil.which('git') and os.path.isdir(git_dir):
+            r = subprocess.run(
+                ['git', '-C', project_dir, 'status', '--porcelain'],
+                capture_output=True, text=True,
+            )
+            if r.stdout.strip():
+                log('')
+                log('Committing changes...')
+                committed = commit_and_push(
+                    project_dir,
+                    'Cleanup: project structure and working files',
+                )
+                if not committed:
+                    log('WARNING: git commit or push may have failed')
+            else:
+                log('No changes to commit.')
+
+    log('')
+    log('Cleanup complete.')

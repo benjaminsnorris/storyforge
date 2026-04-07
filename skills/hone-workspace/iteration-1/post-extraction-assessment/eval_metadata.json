@@ -1,0 +1,32 @@
+{
+  "eval_id": 1,
+  "eval_name": "post-extraction-assessment",
+  "prompt": "I just finished extracting my manuscript. What's the data quality looking like?",
+  "assertions": [
+    {
+      "id": "reads-all-csvs",
+      "text": "Reads or references all three core CSVs (scenes.csv, scene-briefs.csv, scene-intent.csv)",
+      "type": "manual"
+    },
+    {
+      "id": "multi-domain-check",
+      "text": "Checks or mentions multiple hone domains (at least 2 of: registries, gaps, briefs, structural)",
+      "type": "manual"
+    },
+    {
+      "id": "identifies-new-x1-gaps",
+      "text": "Identifies new-x1 (or scenes with empty fields) as having data gaps",
+      "type": "manual"
+    },
+    {
+      "id": "prioritized-findings",
+      "text": "Presents findings in a prioritized or structured way (not just a dump)",
+      "type": "manual"
+    },
+    {
+      "id": "recommends-starting-domain",
+      "text": "Recommends which domain to tackle first based on the project state",
+      "type": "manual"
+    }
+  ]
+}

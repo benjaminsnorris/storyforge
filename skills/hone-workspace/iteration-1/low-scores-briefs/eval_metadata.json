@@ -1,0 +1,32 @@
+{
+  "eval_id": 0,
+  "eval_name": "low-scores-briefs",
+  "prompt": "My prose naturalness scores are low on a bunch of scenes. Can you help me figure out what's going on with my briefs?",
+  "assertions": [
+    {
+      "id": "reads-briefs-csv",
+      "text": "Reads or references scene-briefs.csv as the primary data source",
+      "type": "manual"
+    },
+    {
+      "id": "abstract-detection",
+      "text": "Mentions abstract language, abstract indicators, or thematic vs concrete language",
+      "type": "manual"
+    },
+    {
+      "id": "names-scenes",
+      "text": "Names at least one specific scene ID from the project data",
+      "type": "manual"
+    },
+    {
+      "id": "recommends-briefs-domain",
+      "text": "Recommends the briefs domain or concretization as the action",
+      "type": "manual"
+    },
+    {
+      "id": "script-delegation",
+      "text": "Offers script delegation with Option A (run here) and Option B (run yourself) pattern",
+      "type": "manual"
+    }
+  ]
+}

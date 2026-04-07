@@ -1,0 +1,32 @@
+{
+  "eval_id": 1,
+  "eval_name": "post-extraction-assessment",
+  "configuration": "without_skill",
+  "expectations": [
+    {
+      "text": "Reads or references all three core CSVs (scenes.csv, scene-briefs.csv, scene-intent.csv)",
+      "passed": true,
+      "evidence": "References all three CSVs plus all registry CSVs, voice guide, prose files, and evaluation findings"
+    },
+    {
+      "text": "Checks or mentions multiple hone domains (at least 2 of: registries, gaps, briefs, structural)",
+      "passed": true,
+      "evidence": "Covers gaps (missing briefs, empty new-x1), registries (unregistered locations/characters), structural (chapter map, status inconsistency), physical state issues"
+    },
+    {
+      "text": "Identifies new-x1 (or scenes with empty fields) as having data gaps",
+      "passed": true,
+      "evidence": "Identifies new-x1's empty brief, act2-sc01/act2-sc02 missing briefs, unregistered locations, and more"
+    },
+    {
+      "text": "Presents findings in a prioritized or structured way",
+      "passed": true,
+      "evidence": "Structured numbered summary with 7 key issues, followed by prioritized recommendation"
+    },
+    {
+      "text": "Recommends which domain to tackle first based on the project state",
+      "passed": true,
+      "evidence": "Recommends storyforge-hone for registries/structural first, then elaboration for missing briefs"
+    }
+  ]
+}

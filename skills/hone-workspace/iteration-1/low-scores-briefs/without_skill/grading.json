@@ -1,0 +1,32 @@
+{
+  "eval_id": 0,
+  "eval_name": "low-scores-briefs",
+  "configuration": "without_skill",
+  "expectations": [
+    {
+      "text": "Reads or references scene-briefs.csv as the primary data source",
+      "passed": true,
+      "evidence": "Analyzes scene-briefs.csv in detail, quoting key_actions, key_dialogue, emotional arcs"
+    },
+    {
+      "text": "Mentions abstract language, abstract indicators, or thematic vs concrete language",
+      "passed": false,
+      "evidence": "Does not use hone's abstract/concrete detection framework. Discusses 'over-specification' and 'prescriptive' briefs instead — a different (and arguably insightful) framing, but not the hone concept"
+    },
+    {
+      "text": "Names at least one specific scene ID from the project data",
+      "passed": true,
+      "evidence": "Names all scenes with detailed per-scene analysis"
+    },
+    {
+      "text": "Recommends the briefs domain or concretization as the action",
+      "passed": false,
+      "evidence": "Recommends manual revision of briefs as Option A, mentions storyforge-hone as Option B but frames it as secondary. Does not use 'briefs domain' or 'concretization' terminology"
+    },
+    {
+      "text": "Offers script delegation with Option A (run here) and Option B (run yourself) pattern",
+      "passed": false,
+      "evidence": "Provides a script command but not the formal Option A/B delegation pattern from the skill. Frames it as 'two paths' with manual revision as the primary option"
+    }
+  ]
+}
