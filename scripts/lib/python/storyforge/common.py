@@ -278,7 +278,7 @@ def read_cycle_field(project_dir: str, cycle_id: int, field: str) -> str:
     pf = get_pipeline_file(project_dir)
     if not os.path.isfile(pf):
         return ''
-    return get_field(pf, str(cycle_id), field, key_column='cycle')
+    return get_field(pf, str(cycle_id), field, key_col='cycle')
 
 
 def start_new_cycle(project_dir: str) -> int:
@@ -296,7 +296,7 @@ def update_cycle_field(project_dir: str, cycle_id: int, field: str, value: str) 
     from storyforge.csv_cli import update_field
     pf = get_pipeline_file(project_dir)
     if os.path.isfile(pf):
-        update_field(pf, str(cycle_id), field, value, key_column='cycle')
+        update_field(pf, str(cycle_id), field, value, key_col='cycle')
 
 
 def get_cycle_plan_file(project_dir: str, cycle: int | None = None) -> str:
