@@ -1286,6 +1286,119 @@ def parse_concretize_response(
 
 
 # ============================================================================
+# External findings loader
+# ============================================================================
+
+def load_external_findings(findings_file: str) -> list[dict]:
+    """Load external evaluation findings from a pipe-delimited CSV file.
+
+    Expected columns: scene_id|target_file|fields|guidance
+
+    When ``fields`` contains semicolon-separated values (e.g. "goal;conflict"),
+    one issue dict is created per field.  When ``fields`` is empty, a single
+    issue dict with ``field=''`` is created.
+
+    Args:
+        findings_file: Path to the findings CSV file.
+
+    Returns:
+        List of dicts: {scene_id, field, target_file, guidance, issue: 'evaluation'}.
+        Returns [] if the file does not exist.
+    """
+    if not os.path.isfile(findings_file):
+        return []
+    results = []
+    with open(findings_file) as f:
+        reader = csv.DictReader(f, delimiter='|')
+        for row in reader:
+            sid = row.get('scene_id', '').strip()
+            target_file = row.get('target_file', '').strip()
+            fields_raw = row.get('fields', '').strip()
+            guidance = row.get('guidance', '').strip()
+            if not sid:
+                continue
+            if fields_raw:
+                for field in fields_raw.split(';'):
+                    field = field.strip()
+                    if field:
+                        results.append({
+                            'scene_id': sid, 'field': field,
+                            'target_file': target_file,
+                            'guidance': guidance, 'issue': 'evaluation',
+                        })
+            else:
+                results.append({
+                    'scene_id': sid, 'field': '',
+                    'target_file': target_file,
+                    'guidance': guidance, 'issue': 'evaluation',
+                })
+    return results
+
+
+def build_evaluation_fix_prompt(
+    scene_id: str,
+    fields: list[str],
+    current_values: dict[str, str],
+    guidance: str,
+    voice_guide: str = '',
+    character_entry: str = '',
+) -> str:
+    """Build prompt to rewrite brief fields based on evaluation findings.
+
+    The output format matches ``build_concretize_prompt`` so it is parseable
+    by the existing ``parse_concretize_response()``.
+
+    Args:
+        scene_id: The scene being fixed.
+        fields: List of field names to rewrite.
+        current_values: Dict of field_name -> current value.
+        guidance: Evaluation guidance text describing what to fix.
+        voice_guide: Excerpt from the voice guide (truncated externally to 3000 chars).
+        character_entry: Character bible entry (truncated externally to 2000 chars).
+
+    Returns:
+        Prompt string for Claude.
+    """
+    field_block = '\n'.join(
+        f"**{field}:** {current_values.get(field, '')}"
+        for field in fields
+    ) if fields else '(no specific fields flagged)'
+
+    field_output = '\n'.join(f'{field}: [rewritten value]' for field in fields)
+
+    return f"""Rewrite these scene brief fields to address the evaluation findings below.
+
+## Scene: {scene_id}
+
+## Evaluation Findings
+{guidance}
+
+## Current Field Values
+{field_block}
+
+## Voice Guide (POV character)
+{voice_guide if voice_guide else '(not available)'}
+
+## Character
+{character_entry if character_entry else '(not available)'}
+
+## Rules
+
+1. Address the evaluation guidance directly — fix the specific problems identified.
+2. Every action must be something the POV character physically does or perceives. No thematic descriptions, no narrator interpretations.
+3. Do not invent characters, locations, or events not implied by the existing fields.
+4. Keep each field concise — brief contract language, not prose.
+
+## Output Format
+
+Return each field on its own labeled line:
+
+{field_output}
+
+No explanation. No markdown. Just the labeled lines."""
+
+
+# ============================================================================
 # Briefs domain: hone_briefs
 # ============================================================================
 
@@ -1298,6 +1411,7 @@ def hone_briefs(
     log_dir: str = '',
     coaching_level: str = 'full',
     dry_run: bool = False,
+    findings_file: str | None = None,
 ) -> dict:
     """Concretize abstract brief fields as concrete physical beats.
 
@@ -1310,6 +1424,9 @@ def hone_briefs(
         log_dir: Directory for API log files.
         coaching_level: full/coach/strict.
         dry_run: If True, detect but don't rewrite.
+        findings_file: Optional path to a pipe-delimited CSV of external evaluation
+            findings (scene_id|target_file|fields|guidance).  Findings targeting
+            scene-briefs.csv are merged into all_issues before processing.
 
     Returns:
         Dict with scenes_flagged, scenes_rewritten, fields_rewritten.
@@ -1321,6 +1438,22 @@ def hone_briefs(
 
     # Detect all issue types
     all_issues = detect_brief_issues(briefs_map, scenes_map, scene_ids, intent_map=intent_map)
+
+    # Merge external findings if provided
+    if findings_file:
+        external = load_external_findings(findings_file)
+        external_briefs = [e for e in external if e.get('target_file', '') == 'scene-briefs.csv']
+        existing_keys = {(i['scene_id'], i['field']) for i in all_issues}
+        for ext in external_briefs:
+            if ext['field'] and (ext['scene_id'], ext['field']) not in existing_keys:
+                all_issues.append(ext)
+            elif ext['field']:
+                # Replace detected issue with external (has guidance)
+                all_issues = [i for i in all_issues
+                              if not (i['scene_id'] == ext['scene_id'] and i['field'] == ext['field'])]
+                all_issues.append(ext)
+            elif not ext['field']:
+                all_issues.append(ext)
 
     if dry_run or not all_issues:
         return {
@@ -1426,6 +1559,36 @@ def hone_briefs(
                         briefs_map[sid][field] = new_value
                         fields_rewritten += 1
 
+        # Handle evaluation issues (from external findings)
+        eval_issues = [i for i in issues if i['issue'] == 'evaluation']
+        if eval_issues and coaching_level == 'full':
+            eval_fields = list(set(i['field'] for i in eval_issues if i['field']))
+            if not eval_fields:
+                eval_fields = [f for f in briefs_map[sid].keys() if f != 'id' and briefs_map[sid].get(f, '')]
+            current_values = {f: briefs_map[sid].get(f, '') for f in eval_fields}
+            guidance = '; '.join(i.get('guidance', '') for i in eval_issues if i.get('guidance'))
+
+            prompt = build_evaluation_fix_prompt(
+                scene_id=sid,
+                fields=eval_fields,
+                current_values=current_values,
+                guidance=guidance,
+                voice_guide=voice_guide[:3000],
+                character_entry=char_bible[:2000],
+            )
+
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, f'hone-eval-{sid}.json')
+            invoke_to_file(prompt, model, log_file, max_tokens=2048,
+                           label=f'hone eval {idx}/{total_scenes} ({sid})')
+            response = extract_text_from_file(log_file)
+
+            rewrites = parse_concretize_response(response, sid, eval_fields)
+            for field, new_value in rewrites.items():
+                if new_value and new_value != current_values.get(field):
+                    briefs_map[sid][field] = new_value
+                    fields_rewritten += 1
+
         # Coach mode: save proposals for all issue types
         if coaching_level == 'coach':
             hone_dir = os.path.join(project_dir, 'working', 'hone')
@@ -1439,7 +1602,7 @@ def hone_briefs(
                         fh.write(f"**Current:** {issue['value'][:300]}\n\n")
             continue
 
-        if abstract_issues or trim_issues:
+        if abstract_issues or trim_issues or eval_issues:
             scenes_rewritten += 1
 
     # Write back if any changes were made
