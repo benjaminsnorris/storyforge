@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.coverage.run]
+source = ["scripts/lib/python/storyforge"]
+
+[tool.coverage.report]
+fail_under = 26
+show_missing = false
+skip_empty = true

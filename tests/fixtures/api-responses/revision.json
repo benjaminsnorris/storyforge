@@ -1,0 +1,4 @@
+{
+  "content": [{"type": "text", "text": "=== SCENE: test-scene ===\nThe morning light crept through half-drawn curtains. She sat at the desk with her pen hovering over the page, not writing.\n=== END SCENE: test-scene ==="}],
+  "usage": {"input_tokens": 5000, "output_tokens": 1000}
+}

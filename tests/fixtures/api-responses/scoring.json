@@ -1,0 +1,4 @@
+{
+  "content": [{"type": "text", "text": "principle|score|rationale\nprose_naturalness|7|Good variety in sentence structure\nvoice_consistency|8|Strong POV voice maintained\ndialogue_craft|6|Some lines feel generic"}],
+  "usage": {"input_tokens": 3000, "output_tokens": 200}
+}
