@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import re
@@ -136,6 +137,29 @@ def _create_versioned_plan(plan_file, rows):
         os.remove(plan_file)
     os.symlink(numbered_name, plan_file)
     return numbered_file
+
+
+# ============================================================================
+# Upstream delegation helpers
+# ============================================================================
+
+def _file_hash(path):
+    """SHA-256 of file contents, or empty string if file doesn't exist."""
+    if not os.path.isfile(path):
+        return ''
+    with open(path, 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def _write_hone_findings(path, fix_location, targets, guidance):
+    """Write a findings file for hone from revision plan pass data."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    target_file = 'scene-briefs.csv' if fix_location == 'brief' else 'scene-intent.csv'
+    scene_ids = [t.strip() for t in targets.split(';') if t.strip()] if targets else []
+    with open(path, 'w') as f:
+        f.write('scene_id|target_file|fields|guidance\n')
+        for sid in scene_ids:
+            f.write(f'{sid}|{target_file}||{guidance}\n')
 
 
 def _count_passes(rows):
