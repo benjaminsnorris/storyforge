@@ -9,7 +9,7 @@ import subprocess
 import sys
 from datetime import datetime
 
-from storyforge.common import log, read_yaml_field, get_coaching_level, select_model
+from storyforge.common import log, read_yaml_field, get_coaching_level, select_model, get_pipeline_file
 
 
 # ============================================================================
