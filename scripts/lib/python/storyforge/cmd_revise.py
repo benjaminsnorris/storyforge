@@ -162,6 +162,32 @@ def _write_hone_findings(path, fix_location, targets, guidance):
             f.write(f'{sid}|{target_file}||{guidance}\n')
 
 
+def _redraft_from_briefs(project_dir, scene_ids, model, log_dir):
+    """Re-draft scenes from their updated briefs."""
+    from storyforge.cmd_write import _build_prompt, _extract_scene_from_response
+    from storyforge.api import invoke_to_file as _invoke_to_file
+
+    log(f'  Redrafting {len(scene_ids)} scenes from updated briefs...')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+
+    for i, sid in enumerate(scene_ids, 1):
+        log(f'    [{i}/{len(scene_ids)}] Redrafting: {sid}')
+        prompt = _build_prompt(sid, project_dir, 'full', use_briefs=True)
+        if not prompt:
+            log(f'    WARNING: Could not build prompt for {sid}, skipping')
+            continue
+        log_file = os.path.join(log_dir, f'redraft-{sid}.json')
+        _invoke_to_file(prompt, model, log_file, max_tokens=16384,
+                        label=f'redraft {sid}')
+        scene_file = os.path.join(scenes_dir, f'{sid}.md')
+        _extract_scene_from_response(log_file, scene_file)
+
+    commit_and_push(
+        project_dir,
+        f'Revision: redraft {len(scene_ids)} scenes from corrected briefs',
+        ['scenes/', 'reference/', 'working/'])
+
+
 def _count_passes(rows):
     return len(rows)
 
@@ -1389,8 +1415,84 @@ def main(argv=None):
 
         # Build prompt
         log('  Building revision prompt...')
-        if fix_location in ('brief', 'intent', 'structural', 'registry'):
-            # Upstream revision prompt -- built inline via Python
+
+        if fix_location in ('brief', 'intent'):
+            # ---- DELEGATE TO HONE ----
+            # Mark as in_progress
+            _update_pass_field(plan_rows, pass_num, 'status', 'in_progress', csv_plan_file)
+            start_time = time.time()
+            pass_model = select_revision_model(pass_name, pass_purpose)
+
+            findings_path = os.path.join(
+                project_dir, 'working', 'plans',
+                f'hone-findings-{pass_name}.csv')
+            _write_hone_findings(findings_path, fix_location, targets, guidance)
+
+            target_csv = os.path.join(
+                project_dir, 'reference',
+                'scene-briefs.csv' if fix_location == 'brief' else 'scene-intent.csv')
+            old_hash = _file_hash(target_csv)
+
+            ref_dir = os.path.join(project_dir, 'reference')
+            target_scenes = [t.strip() for t in targets.split(';') if t.strip()] if targets else None
+
+            log(f'  Delegating to hone ({fix_location}) for {len(target_scenes) if target_scenes else "all"} scenes...')
+
+            from storyforge.hone import hone_briefs, hone_intent
+            hone_fn = hone_briefs if fix_location == 'brief' else hone_intent
+            hone_result = hone_fn(
+                ref_dir=ref_dir,
+                project_dir=project_dir,
+                scene_ids=target_scenes,
+                model=pass_model,
+                log_dir=log_dir,
+                coaching_level=effective_coaching,
+                findings_file=findings_path,
+            )
+
+            new_hash = _file_hash(target_csv)
+            end_time = time.time()
+            duration = int(end_time - start_time)
+            minutes, secs = duration // 60, duration % 60
+
+            if old_hash == new_hash:
+                log(f'  FAILED: Pass "{pass_name}" produced no changes to {os.path.basename(target_csv)}')
+                log(f'  Time: {minutes}m{secs}s')
+                _update_pass_field(plan_rows, pass_num, 'status', 'failed', csv_plan_file)
+                continue
+
+            fields_changed = hone_result.get('fields_rewritten', 0)
+            scenes_changed = hone_result.get('scenes_rewritten', 0)
+            log(f'  Upstream: {scenes_changed} scenes, {fields_changed} fields rewritten')
+
+            # Redraft affected scenes in full coaching mode
+            if effective_coaching == 'full' and targets:
+                affected = [t.strip() for t in targets.split(';') if t.strip()]
+                _redraft_from_briefs(project_dir, affected, pass_model, log_dir)
+
+            # Log usage (hone handles its own API logging; pass empty string)
+            _log_usage(project_dir, '', 'revise', pass_name, pass_model, duration)
+
+            # Git commit if needed
+            commit_and_push(project_dir, f'Revision: {pass_name}', ['.'])
+            _git(project_dir, 'push', check=False)
+
+            # Mark completed
+            _update_pass_field(plan_rows, pass_num, 'status', 'completed', csv_plan_file)
+            log(f'SUCCESS: Pass {pass_num}/{total_passes} ({pass_name}) -- {minutes}m{secs}s')
+            update_pr_task(f'Pass: {pass_name}', project_dir)
+
+            # Pause between passes
+            if pass_num < total_passes and not args.interactive:
+                next_status = _read_pass_field(plan_rows, pass_num + 1, 'status')
+                if next_status != 'completed':
+                    log('Pausing 10s before next pass...')
+                    time.sleep(10)
+            continue
+            # ---- END HONE DELEGATION ----
+
+        elif fix_location in ('structural', 'registry'):
+            # Inline prompt for structural/registry
             from storyforge.elaborate import get_scenes
             ref_dir = os.path.join(project_dir, 'reference')
             scenes = get_scenes(ref_dir)
@@ -1405,17 +1507,6 @@ def main(argv=None):
                     if k not in ('id', 'seq', 'pov') and v:
                         data_block.append(f'  {k}: {str(v)[:120]}')
                 data_block.append('')
-
-            file_map = {
-                'brief': 'scene-briefs.csv',
-                'intent': 'scene-intent.csv',
-                'structural': 'scenes.csv',
-            }
-            csv_type_map = {
-                'brief': 'briefs-csv',
-                'intent': 'intent-csv',
-                'structural': 'scenes-csv',
-            }
 
             prompt = f'''You are performing an upstream revision on scene data for a novel.
 
@@ -1435,16 +1526,17 @@ def main(argv=None):
 
 ## Instructions
 
-Revise the {file_map.get(fix_location, 'scenes.csv')} data to address the purpose above.
+Revise the scenes.csv data to address the purpose above.
 
 Output your changes as pipe-delimited CSV rows in a fenced block:
 
-```{csv_type_map.get(fix_location, 'scenes-csv')}
-(header row)
+```scenes-csv
+(header row — first column MUST be 'id', not 'scene_id')
 (one row per scene that needs changes)
 ```
 
 Rules:
+- The first column must be named 'id' (not 'scene_id')
 - Only modify scenes listed in the targets
 - Preserve all values you are not changing
 - Output the full row for each modified scene
@@ -1517,7 +1609,7 @@ Rules:
 
             # Process response
             if exit_code == 0:
-                if fix_location in ('brief', 'intent', 'structural', 'registry'):
+                if fix_location in ('structural', 'registry'):
                     # Upstream revision -- apply CSV updates
                     log(f'  Upstream revision (fix_location: {fix_location}) -- applying CSV updates...')
                     try:
