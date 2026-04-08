@@ -2124,6 +2124,237 @@ No explanation. No markdown. Just the labeled lines."""
 
 
 # ============================================================================
+# Intent domain: hone_intent
+# ============================================================================
+
+def hone_intent(
+    ref_dir: str,
+    project_dir: str,
+    scene_ids: list[str] | None = None,
+    model: str = '',
+    log_dir: str = '',
+    coaching_level: str = 'full',
+    dry_run: bool = False,
+    findings_file: str | None = None,
+) -> dict:
+    """Fix scene-intent.csv quality issues.
+
+    Detects and repairs vague function fields, overlong function fields,
+    flat or abstract emotional arcs, on_stage subset violations, and
+    value_shift/outcome mismatches.
+
+    Args:
+        ref_dir: Path to reference/ directory.
+        project_dir: Path to project root.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+        model: Anthropic model ID for API calls.
+        log_dir: Directory for API log files.
+        coaching_level: full/coach/strict.
+        dry_run: If True, detect but don't rewrite.
+        findings_file: Optional path to a pipe-delimited CSV of external evaluation
+            findings (scene_id|target_file|fields|guidance).  Findings targeting
+            scene-intent.csv are merged into all_issues before processing.
+
+    Returns:
+        Dict with scenes_flagged, scenes_rewritten, fields_rewritten.
+    """
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    if not os.path.isfile(intent_path):
+        return {'scenes_flagged': 0, 'scenes_rewritten': 0, 'fields_rewritten': 0}
+
+    intent_map = _read_csv_as_map(intent_path)
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    briefs_map = _read_csv_as_map(briefs_path) if os.path.isfile(briefs_path) else {}
+
+    # Detect all issue types
+    all_issues = detect_intent_issues(intent_map, scenes_map, briefs_map, scene_ids)
+
+    # Merge external findings if provided
+    if findings_file:
+        external = load_external_findings(findings_file)
+        external_intent = [e for e in external if e.get('target_file', '') == 'scene-intent.csv']
+        existing_keys = {(i['scene_id'], i['field']) for i in all_issues}
+        for ext in external_intent:
+            if ext['field'] and (ext['scene_id'], ext['field']) not in existing_keys:
+                all_issues.append(ext)
+            elif ext['field']:
+                # External takes priority — replace detected issue
+                all_issues = [i for i in all_issues
+                              if not (i['scene_id'] == ext['scene_id'] and i['field'] == ext['field'])]
+                all_issues.append(ext)
+            elif not ext['field']:
+                all_issues.append(ext)
+
+    if dry_run or not all_issues:
+        return {
+            'scenes_flagged': len(set(f['scene_id'] for f in all_issues)),
+            'scenes_rewritten': 0,
+            'fields_rewritten': 0,
+        }
+
+    # --- Deterministic fix: not_subset (no API required) ---
+    det_fields_rewritten = 0
+    not_subset_issues = [i for i in all_issues if i['issue'] == 'not_subset']
+    for issue in not_subset_issues:
+        sid = issue['scene_id']
+        if sid not in intent_map:
+            continue
+        chars_raw = intent_map[sid].get('characters', '')
+        valid_chars = {c.strip().lower() for c in chars_raw.split(';') if c.strip()}
+        on_stage_raw = intent_map[sid].get('on_stage', '')
+        on_stage_entries = [c.strip() for c in on_stage_raw.split(';') if c.strip()]
+        filtered = [c for c in on_stage_entries if c.lower() in valid_chars]
+        new_on_stage = ';'.join(filtered)
+        if new_on_stage != on_stage_raw:
+            intent_map[sid]['on_stage'] = new_on_stage
+            det_fields_rewritten += 1
+
+    # Write deterministic fixes immediately if any
+    if det_fields_rewritten > 0:
+        intent_rows = list(intent_map.values())
+        intent_rows.sort(key=lambda r: r.get('id', ''))
+        _write_csv(intent_path, intent_rows, _FILE_MAP['scene-intent.csv'])
+
+    # Strict mode: save analysis and return (after deterministic fixes)
+    if coaching_level == 'strict':
+        hone_dir = os.path.join(project_dir, 'working', 'hone')
+        os.makedirs(hone_dir, exist_ok=True)
+        for f in all_issues:
+            if f['issue'] == 'not_subset':
+                continue  # already fixed
+            path = os.path.join(hone_dir, f'intent-analysis-{f["scene_id"]}.md')
+            with open(path, 'a') as fh:
+                fh.write(f"**{f['field']}:** {f['issue']}\n")
+                if 'value' in f:
+                    fh.write(f"  Current: {f['value'][:200]}\n")
+        det_scenes = len(set(i['scene_id'] for i in not_subset_issues)) if det_fields_rewritten > 0 else 0
+        return {
+            'scenes_flagged': len(set(f['scene_id'] for f in all_issues)),
+            'scenes_rewritten': det_scenes,
+            'fields_rewritten': det_fields_rewritten,
+        }
+
+    # Load voice guide
+    voice_guide = ''
+    voice_path = os.path.join(ref_dir, 'voice-guide.md')
+    if os.path.isfile(voice_path):
+        with open(voice_path, encoding='utf-8') as fh:
+            voice_guide = fh.read()
+
+    from storyforge.api import invoke_to_file, extract_text_from_file
+
+    # Group remaining API-fixable issues by scene (excluding already-fixed not_subset)
+    api_fixable_issues = [i for i in all_issues if i['issue'] != 'not_subset']
+    by_scene: dict[str, list[dict]] = {}
+    for issue in api_fixable_issues:
+        by_scene.setdefault(issue['scene_id'], []).append(issue)
+
+    scenes_rewritten = (len(set(i['scene_id'] for i in not_subset_issues))
+                        if det_fields_rewritten > 0 else 0)
+    api_fields_rewritten = 0
+    total_scenes = len(by_scene)
+
+    for idx, (sid, issues) in enumerate(by_scene.items(), 1):
+        if sid not in intent_map:
+            continue
+
+        eval_issues = [i for i in issues if i['issue'] == 'evaluation']
+        detected_issues = [i for i in issues if i['issue'] != 'evaluation']
+
+        issue_types = sorted(set(i['issue'] for i in issues))
+        log(f'  [{idx}/{total_scenes}] {sid} ({", ".join(issue_types)})')
+
+        scene_fields_rewritten = 0
+
+        # Handle detected quality issues (vague, overlong, flat, abstract_arc)
+        if detected_issues and coaching_level == 'full':
+            detected_fields = list(dict.fromkeys(i['field'] for i in detected_issues))
+            current_values = {f: intent_map[sid].get(f, '') for f in detected_fields}
+
+            prompt = build_intent_fix_prompt(
+                scene_id=sid,
+                fields=detected_fields,
+                current_values=current_values,
+                issues=detected_issues,
+                voice_guide=voice_guide[:3000],
+            )
+
+            eff_log_dir = log_dir or os.path.join(project_dir, 'working', 'logs')
+            os.makedirs(eff_log_dir, exist_ok=True)
+            log_file = os.path.join(eff_log_dir, f'hone-intent-{sid}.json')
+            invoke_to_file(prompt, model, log_file, max_tokens=2048,
+                           label=f'hone intent {idx}/{total_scenes} ({sid})')
+            response = extract_text_from_file(log_file)
+
+            rewrites = parse_concretize_response(response, sid, detected_fields)
+            for field, new_value in rewrites.items():
+                if new_value and new_value != current_values.get(field):
+                    intent_map[sid][field] = new_value
+                    api_fields_rewritten += 1
+                    scene_fields_rewritten += 1
+
+        # Handle evaluation issues (from external findings)
+        if eval_issues and coaching_level == 'full':
+            eval_fields = list(dict.fromkeys(i['field'] for i in eval_issues if i['field']))
+            if not eval_fields:
+                eval_fields = [f for f in intent_map[sid].keys()
+                               if f != 'id' and intent_map[sid].get(f, '')]
+            current_values = {f: intent_map[sid].get(f, '') for f in eval_fields}
+            guidance = '; '.join(i.get('guidance', '') for i in eval_issues if i.get('guidance'))
+
+            prompt = build_evaluation_fix_prompt(
+                scene_id=sid,
+                fields=eval_fields,
+                current_values=current_values,
+                guidance=guidance,
+                voice_guide=voice_guide[:3000],
+            )
+
+            eff_log_dir = log_dir or os.path.join(project_dir, 'working', 'logs')
+            os.makedirs(eff_log_dir, exist_ok=True)
+            log_file = os.path.join(eff_log_dir, f'hone-intent-eval-{sid}.json')
+            invoke_to_file(prompt, model, log_file, max_tokens=2048,
+                           label=f'hone intent eval {idx}/{total_scenes} ({sid})')
+            response = extract_text_from_file(log_file)
+
+            rewrites = parse_concretize_response(response, sid, eval_fields)
+            for field, new_value in rewrites.items():
+                if new_value and new_value != current_values.get(field):
+                    intent_map[sid][field] = new_value
+                    api_fields_rewritten += 1
+                    scene_fields_rewritten += 1
+
+        # Coach mode: save proposals instead of applying
+        if coaching_level == 'coach':
+            hone_dir = os.path.join(project_dir, 'working', 'hone')
+            os.makedirs(hone_dir, exist_ok=True)
+            proposal_path = os.path.join(hone_dir, f'intent-{sid}.md')
+            with open(proposal_path, 'w') as fh:
+                fh.write(f"# Intent Quality Proposals: {sid}\n\n")
+                for issue in issues:
+                    fh.write(f"## {issue['field']} — {issue['issue']}\n")
+                    if 'value' in issue:
+                        fh.write(f"**Current:** {issue['value'][:300]}\n\n")
+            continue
+
+        if scene_fields_rewritten > 0:
+            scenes_rewritten += 1
+
+    # Write back if any API-driven changes were made (deterministic writes already happened above)
+    if api_fields_rewritten > 0:
+        intent_rows = list(intent_map.values())
+        intent_rows.sort(key=lambda r: r.get('id', ''))
+        _write_csv(intent_path, intent_rows, _FILE_MAP['scene-intent.csv'])
+
+    return {
+        'scenes_flagged': len(set(f['scene_id'] for f in all_issues)),
+        'scenes_rewritten': scenes_rewritten,
+        'fields_rewritten': det_fields_rewritten + api_fields_rewritten,
+    }
+
+
+# ============================================================================
 # Physical state chain propagation
 # ============================================================================
 

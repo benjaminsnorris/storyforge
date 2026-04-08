@@ -695,3 +695,82 @@ class TestBuildIntentFixPrompt:
             issues=[{'field': 'function', 'issue': 'vague'}],
         )
         assert 'not available' in prompt
+
+
+# ============================================================================
+# hone_intent()
+# ============================================================================
+
+import os
+import inspect
+
+
+class TestHoneIntentSignature:
+    def test_accepts_expected_params(self):
+        from storyforge.hone import hone_intent
+        sig = inspect.signature(hone_intent)
+        params = list(sig.parameters.keys())
+        assert 'ref_dir' in params
+        assert 'project_dir' in params
+        assert 'scene_ids' in params
+        assert 'findings_file' in params
+        assert 'model' in params
+        assert 'log_dir' in params
+        assert 'coaching_level' in params
+        assert 'dry_run' in params
+
+    def test_returns_result_dict_dry_run(self, tmp_path):
+        """Dry run with no data should return zeroed stats."""
+        from storyforge.hone import hone_intent
+        # Create minimal intent CSV
+        ref_dir = tmp_path / 'reference'
+        ref_dir.mkdir()
+        (ref_dir / 'scene-intent.csv').write_text(
+            'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n'
+            'scene-a|She realizes and connects and transforms|action|tension|truth|+/-|action|kael|kael|\n'
+        )
+        (ref_dir / 'scenes.csv').write_text('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\nscene-a|1|Test|1|kael|here|1|morning|short|action|drafted|1000|1500\n')
+        result = hone_intent(
+            ref_dir=str(ref_dir),
+            project_dir=str(tmp_path),
+            dry_run=True,
+        )
+        assert 'scenes_flagged' in result
+        assert 'scenes_rewritten' in result
+        assert 'fields_rewritten' in result
+        assert result['scenes_flagged'] >= 1  # should detect vague function
+        assert result['scenes_rewritten'] == 0  # dry run
+
+    def test_missing_intent_file(self, tmp_path):
+        from storyforge.hone import hone_intent
+        result = hone_intent(
+            ref_dir=str(tmp_path),
+            project_dir=str(tmp_path),
+        )
+        assert result == {'scenes_flagged': 0, 'scenes_rewritten': 0, 'fields_rewritten': 0}
+
+    def test_deterministic_subset_fix(self, tmp_path):
+        """Not-subset violations should be fixed without API calls."""
+        from storyforge.hone import hone_intent
+        from storyforge.elaborate import _read_csv_as_map
+        ref_dir = tmp_path / 'reference'
+        ref_dir.mkdir()
+        (ref_dir / 'scene-intent.csv').write_text(
+            'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n'
+            'scene-a|Kael reads the letter and refuses|action|dread giving way to resolve|truth|-/+|action|kael;sera|kael;sera;bren|\n'
+        )
+        (ref_dir / 'scenes.csv').write_text('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\nscene-a|1|Test|1|kael|here|1|morning|short|action|drafted|1000|1500\n')
+        os.makedirs(str(tmp_path / 'working' / 'logs'), exist_ok=True)
+        result = hone_intent(
+            ref_dir=str(ref_dir),
+            project_dir=str(tmp_path),
+            log_dir=str(tmp_path / 'working' / 'logs'),
+            coaching_level='strict',  # strict = no API calls, but deterministic fixes still apply
+        )
+        assert result['fields_rewritten'] >= 1
+        # Verify the fix was written
+        updated = _read_csv_as_map(str(ref_dir / 'scene-intent.csv'))
+        on_stage = updated['scene-a']['on_stage']
+        assert 'bren' not in on_stage.lower()
+        assert 'kael' in on_stage.lower()
+        assert 'sera' in on_stage.lower()
