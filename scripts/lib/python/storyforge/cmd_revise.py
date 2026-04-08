@@ -94,12 +94,48 @@ def _read_csv_plan(plan_file):
 
 
 def _write_csv_plan(plan_file, rows):
-    """Write the CSV revision plan."""
+    """Write the CSV revision plan (in-place update to an existing file)."""
     os.makedirs(os.path.dirname(plan_file), exist_ok=True)
     with open(plan_file, 'w') as f:
         f.write('|'.join(CSV_PLAN_FIELDS) + '\n')
         for row in rows:
             f.write('|'.join(row.get(field, '') for field in CSV_PLAN_FIELDS) + '\n')
+
+
+def _next_plan_number(plans_dir):
+    """Find the next revision plan number by scanning existing numbered files."""
+    highest = 0
+    if os.path.isdir(plans_dir):
+        for name in os.listdir(plans_dir):
+            if name.startswith('revision-plan-') and name.endswith('.csv'):
+                try:
+                    n = int(name[len('revision-plan-'):-len('.csv')])
+                    highest = max(highest, n)
+                except ValueError:
+                    pass
+    return highest + 1
+
+
+def _create_versioned_plan(plan_file, rows):
+    """Write a new versioned revision plan and update the symlink.
+
+    plan_file is the canonical symlink path (working/plans/revision-plan.csv).
+    Creates revision-plan-N.csv and points the symlink at it.
+    """
+    plans_dir = os.path.dirname(plan_file)
+    os.makedirs(plans_dir, exist_ok=True)
+    num = _next_plan_number(plans_dir)
+    numbered_name = f'revision-plan-{num}.csv'
+    numbered_file = os.path.join(plans_dir, numbered_name)
+    _write_csv_plan(numbered_file, rows)
+
+    # Update symlink (handle existing symlink, regular file, or nothing)
+    if os.path.islink(plan_file):
+        os.remove(plan_file)
+    elif os.path.exists(plan_file):
+        os.remove(plan_file)
+    os.symlink(numbered_name, plan_file)
+    return numbered_file
 
 
 def _count_passes(rows):
@@ -141,8 +177,8 @@ def _generate_polish_plan(plan_file):
         'model_tier': 'opus',
         'fix_location': 'craft',
     }]
-    _write_csv_plan(plan_file, rows)
-    log(f'Generated single-pass polish plan: {plan_file}')
+    numbered = _create_versioned_plan(plan_file, rows)
+    log(f'Generated single-pass polish plan: {numbered}')
     return rows
 
 
@@ -223,8 +259,8 @@ def _generate_naturalness_plan(plan_file):
             'fix_location': 'craft',
         },
     ]
-    _write_csv_plan(plan_file, rows)
-    log(f'Generated 3-pass naturalness plan: {plan_file}')
+    numbered = _create_versioned_plan(plan_file, rows)
+    log(f'Generated 3-pass naturalness plan: {numbered}')
     return rows
 
 
@@ -289,7 +325,7 @@ def _generate_structural_plan(project_dir, plan_file):
             'fix_location': info['fix_location'],
         })
 
-    _write_csv_plan(plan_file, rows)
+    _create_versioned_plan(plan_file, rows)
 
     for i, (dim, info) in enumerate(sorted_dims, 1):
         log(f'  Pass {i}: {dim} (fix_location: {info["fix_location"]})')
@@ -387,7 +423,7 @@ def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> lis
         'model_tier': 'opus',
         'fix_location': 'craft',
     }]
-    _write_csv_plan(plan_file, rows)
+    _create_versioned_plan(plan_file, rows)
     return rows
 
 
