@@ -1286,6 +1286,119 @@ def parse_concretize_response(
 
 
 # ============================================================================
+# External findings loader
+# ============================================================================
+
+def load_external_findings(findings_file: str) -> list[dict]:
+    """Load external evaluation findings from a pipe-delimited CSV file.
+
+    Expected columns: scene_id|target_file|fields|guidance
+
+    When ``fields`` contains semicolon-separated values (e.g. "goal;conflict"),
+    one issue dict is created per field.  When ``fields`` is empty, a single
+    issue dict with ``field=''`` is created.
+
+    Args:
+        findings_file: Path to the findings CSV file.
+
+    Returns:
+        List of dicts: {scene_id, field, target_file, guidance, issue: 'evaluation'}.
+        Returns [] if the file does not exist.
+    """
+    if not os.path.isfile(findings_file):
+        return []
+    results = []
+    with open(findings_file) as f:
+        reader = csv.DictReader(f, delimiter='|')
+        for row in reader:
+            sid = row.get('scene_id', '').strip()
+            target_file = row.get('target_file', '').strip()
+            fields_raw = row.get('fields', '').strip()
+            guidance = row.get('guidance', '').strip()
+            if not sid:
+                continue
+            if fields_raw:
+                for field in fields_raw.split(';'):
+                    field = field.strip()
+                    if field:
+                        results.append({
+                            'scene_id': sid, 'field': field,
+                            'target_file': target_file,
+                            'guidance': guidance, 'issue': 'evaluation',
+                        })
+            else:
+                results.append({
+                    'scene_id': sid, 'field': '',
+                    'target_file': target_file,
+                    'guidance': guidance, 'issue': 'evaluation',
+                })
+    return results
+
+
+def build_evaluation_fix_prompt(
+    scene_id: str,
+    fields: list[str],
+    current_values: dict[str, str],
+    guidance: str,
+    voice_guide: str = '',
+    character_entry: str = '',
+) -> str:
+    """Build prompt to rewrite brief fields based on evaluation findings.
+
+    The output format matches ``build_concretize_prompt`` so it is parseable
+    by the existing ``parse_concretize_response()``.
+
+    Args:
+        scene_id: The scene being fixed.
+        fields: List of field names to rewrite.
+        current_values: Dict of field_name -> current value.
+        guidance: Evaluation guidance text describing what to fix.
+        voice_guide: Excerpt from the voice guide (truncated externally to 3000 chars).
+        character_entry: Character bible entry (truncated externally to 2000 chars).
+
+    Returns:
+        Prompt string for Claude.
+    """
+    field_block = '\n'.join(
+        f"**{field}:** {current_values.get(field, '')}"
+        for field in fields
+    ) if fields else '(no specific fields flagged)'
+
+    field_output = '\n'.join(f'{field}: [rewritten value]' for field in fields)
+
+    return f"""Rewrite these scene brief fields to address the evaluation findings below.
+
+## Scene: {scene_id}
+
+## Evaluation Findings
+{guidance}
+
+## Current Field Values
+{field_block}
+
+## Voice Guide (POV character)
+{voice_guide if voice_guide else '(not available)'}
+
+## Character
+{character_entry if character_entry else '(not available)'}
+
+## Rules
+
+1. Address the evaluation guidance directly — fix the specific problems identified.
+2. Every action must be something the POV character physically does or perceives. No thematic descriptions, no narrator interpretations.
+3. Do not invent characters, locations, or events not implied by the existing fields.
+4. Keep each field concise — brief contract language, not prose.
+
+## Output Format
+
+Return each field on its own labeled line:
+
+{field_output}
+
+No explanation. No markdown. Just the labeled lines."""
+
+
+# ============================================================================
 # Briefs domain: hone_briefs
 # ============================================================================
 
@@ -1298,6 +1411,7 @@ def hone_briefs(
     log_dir: str = '',
     coaching_level: str = 'full',
     dry_run: bool = False,
+    findings_file: str | None = None,
 ) -> dict:
     """Concretize abstract brief fields as concrete physical beats.
 
@@ -1310,6 +1424,9 @@ def hone_briefs(
         log_dir: Directory for API log files.
         coaching_level: full/coach/strict.
         dry_run: If True, detect but don't rewrite.
+        findings_file: Optional path to a pipe-delimited CSV of external evaluation
+            findings (scene_id|target_file|fields|guidance).  Findings targeting
+            scene-briefs.csv are merged into all_issues before processing.
 
     Returns:
         Dict with scenes_flagged, scenes_rewritten, fields_rewritten.
@@ -1321,6 +1438,22 @@ def hone_briefs(
 
     # Detect all issue types
     all_issues = detect_brief_issues(briefs_map, scenes_map, scene_ids, intent_map=intent_map)
+
+    # Merge external findings if provided
+    if findings_file:
+        external = load_external_findings(findings_file)
+        external_briefs = [e for e in external if e.get('target_file', '') == 'scene-briefs.csv']
+        existing_keys = {(i['scene_id'], i['field']) for i in all_issues}
+        for ext in external_briefs:
+            if ext['field'] and (ext['scene_id'], ext['field']) not in existing_keys:
+                all_issues.append(ext)
+            elif ext['field']:
+                # Replace detected issue with external (has guidance)
+                all_issues = [i for i in all_issues
+                              if not (i['scene_id'] == ext['scene_id'] and i['field'] == ext['field'])]
+                all_issues.append(ext)
+            elif not ext['field']:
+                all_issues.append(ext)
 
     if dry_run or not all_issues:
         return {
@@ -1426,6 +1559,36 @@ def hone_briefs(
                         briefs_map[sid][field] = new_value
                         fields_rewritten += 1
 
+        # Handle evaluation issues (from external findings)
+        eval_issues = [i for i in issues if i['issue'] == 'evaluation']
+        if eval_issues and coaching_level == 'full':
+            eval_fields = list(set(i['field'] for i in eval_issues if i['field']))
+            if not eval_fields:
+                eval_fields = [f for f in briefs_map[sid].keys() if f != 'id' and briefs_map[sid].get(f, '')]
+            current_values = {f: briefs_map[sid].get(f, '') for f in eval_fields}
+            guidance = '; '.join(i.get('guidance', '') for i in eval_issues if i.get('guidance'))
+
+            prompt = build_evaluation_fix_prompt(
+                scene_id=sid,
+                fields=eval_fields,
+                current_values=current_values,
+                guidance=guidance,
+                voice_guide=voice_guide[:3000],
+                character_entry=char_bible[:2000],
+            )
+
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, f'hone-eval-{sid}.json')
+            invoke_to_file(prompt, model, log_file, max_tokens=2048,
+                           label=f'hone eval {idx}/{total_scenes} ({sid})')
+            response = extract_text_from_file(log_file)
+
+            rewrites = parse_concretize_response(response, sid, eval_fields)
+            for field, new_value in rewrites.items():
+                if new_value and new_value != current_values.get(field):
+                    briefs_map[sid][field] = new_value
+                    fields_rewritten += 1
+
         # Coach mode: save proposals for all issue types
         if coaching_level == 'coach':
             hone_dir = os.path.join(project_dir, 'working', 'hone')
@@ -1439,7 +1602,7 @@ def hone_briefs(
                         fh.write(f"**Current:** {issue['value'][:300]}\n\n")
             continue
 
-        if abstract_issues or trim_issues:
+        if abstract_issues or trim_issues or eval_issues:
             scenes_rewritten += 1
 
     # Write back if any changes were made
@@ -1517,6 +1680,678 @@ def detect_gaps(
                 })
 
     return results
+
+
+# ============================================================================
+# Intent domain: quality detectors
+# ============================================================================
+
+# Function field: abstract verbs (internal, unobservable)
+INTENT_ABSTRACT_INDICATORS = frozenset({
+    'realizes', 'connects', 'deepens', 'transforms', 'grows', 'learns',
+    'bonds', 'evolves', 'processes', 'reflects', 'grapples', 'emerges',
+    'shifts', 'develops feelings', 'comes to understand', 'works through',
+    'beginning to',
+})
+
+# Function field: concrete action verbs (externally observable)
+INTENT_CONCRETE_INDICATORS = frozenset({
+    'says', 'asks', 'discovers', 'decides', 'refuses', 'confesses',
+    'chooses', 'confronts', 'reveals', 'finds', 'witnesses', 'reads',
+    'writes', 'signs', 'opens', 'closes', 'walks', 'runs', 'stops',
+    'picks up', 'sets down', 'hands', 'pulls', 'pushes', 'reaches',
+})
+
+# Emotional arc: rich transition phrases
+_ARC_RICH_RE = re.compile(
+    r'giving way to|shifting to|breaking into|dissolving into|'
+    r'transforming into|turning to|hardening into|softening into|'
+    r'replaced by|becoming',
+    re.IGNORECASE,
+)
+
+# Emotional arc: simple "X to Y" pattern
+_ARC_SIMPLE_RE = re.compile(r'\b\w+\s+to\s+\w+', re.IGNORECASE)
+
+# Emotional arc: abstract emotion nouns (ungrounded)
+EMOTIONAL_ARC_ABSTRACT = frozenset({
+    'tension', 'emotion', 'feeling', 'turmoil', 'struggle', 'growth',
+    'shift', 'realization', 'understanding', 'complexity', 'process',
+    'resolution', 'development', 'transformation', 'change',
+})
+
+# Emotional arc: grounded/specific emotion words
+EMOTIONAL_ARC_GROUNDED = frozenset({
+    'grief', 'joy', 'fear', 'anger', 'shame', 'relief', 'longing',
+    'tenderness', 'dread', 'exhilaration', 'guilt', 'warmth', 'pride',
+    'regret', 'hope', 'despair', 'horror', 'calm', 'rage', 'sorrow',
+    'awe', 'disgust', 'jealousy', 'contempt', 'resignation', 'resolve',
+    'unease', 'alarm', 'shock', 'determination',
+})
+
+# Value shift polarity indicators
+_POSITIVE_SHIFT_RE = re.compile(r'/\+{1,2}$')
+_NEGATIVE_SHIFT_RE = re.compile(r'/-{1,2}$')
+
+
+def detect_vague_function(
+    intent_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Detect function fields dominated by abstract internal-state language.
+
+    Flags when abstract_count >= 2 AND abstract_count > concrete_count.
+
+    Args:
+        intent_map: dict keyed by scene ID, values are scene-intent row dicts.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+
+    Returns:
+        List of dicts: {scene_id, field='function', value, abstract_count,
+                        concrete_count, issue='vague'}.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(intent_map.keys())
+
+    for sid in ids_to_check:
+        row = intent_map.get(sid, {})
+        value = row.get('function', '').strip()
+        if not value:
+            continue
+
+        value_lower = value.lower()
+        abstract_count = sum(1 for ind in INTENT_ABSTRACT_INDICATORS if ind in value_lower)
+        concrete_count = sum(1 for ind in INTENT_CONCRETE_INDICATORS if ind in value_lower)
+
+        if abstract_count >= 2 and abstract_count > concrete_count:
+            results.append({
+                'scene_id': sid,
+                'field': 'function',
+                'value': value,
+                'abstract_count': abstract_count,
+                'concrete_count': concrete_count,
+                'issue': 'vague',
+            })
+
+    return results
+
+
+def detect_overlong_function(
+    intent_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Detect function fields that exceed the 400-character limit.
+
+    Args:
+        intent_map: dict keyed by scene ID, values are scene-intent row dicts.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+
+    Returns:
+        List of dicts: {scene_id, field='function', value, char_count,
+                        issue='overlong'}.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(intent_map.keys())
+
+    for sid in ids_to_check:
+        row = intent_map.get(sid, {})
+        value = row.get('function', '').strip()
+        if not value:
+            continue
+
+        char_count = len(value)
+        if char_count > 400:
+            results.append({
+                'scene_id': sid,
+                'field': 'function',
+                'value': value,
+                'char_count': char_count,
+                'issue': 'overlong',
+            })
+
+    return results
+
+
+def detect_flat_emotional_arc(
+    intent_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Detect emotional_arc fields that lack any transition phrase.
+
+    An arc should show movement: either a rich transition phrase ("giving way to",
+    "breaking into") or a simple "X to Y" pattern. Fields that match neither
+    are flagged as flat.
+
+    Args:
+        intent_map: dict keyed by scene ID, values are scene-intent row dicts.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+
+    Returns:
+        List of dicts: {scene_id, field='emotional_arc', value, issue='flat'}.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(intent_map.keys())
+
+    for sid in ids_to_check:
+        row = intent_map.get(sid, {})
+        value = row.get('emotional_arc', '').strip()
+        if not value:
+            continue
+
+        has_transition = _ARC_RICH_RE.search(value) or _ARC_SIMPLE_RE.search(value)
+        if not has_transition:
+            results.append({
+                'scene_id': sid,
+                'field': 'emotional_arc',
+                'value': value,
+                'issue': 'flat',
+            })
+
+    return results
+
+
+def detect_abstract_emotional_arc(
+    intent_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Detect emotional_arc fields that rely on abstract emotion nouns.
+
+    Flags when abstract_count >= 2 AND abstract_count > concrete_count.
+
+    Args:
+        intent_map: dict keyed by scene ID, values are scene-intent row dicts.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+
+    Returns:
+        List of dicts: {scene_id, field='emotional_arc', value, abstract_count,
+                        concrete_count, issue='abstract_arc'}.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(intent_map.keys())
+
+    for sid in ids_to_check:
+        row = intent_map.get(sid, {})
+        value = row.get('emotional_arc', '').strip()
+        if not value:
+            continue
+
+        value_lower = value.lower()
+        abstract_count = sum(1 for word in EMOTIONAL_ARC_ABSTRACT if word in value_lower)
+        concrete_count = sum(1 for word in EMOTIONAL_ARC_GROUNDED if word in value_lower)
+
+        if abstract_count >= 2 and abstract_count > concrete_count:
+            results.append({
+                'scene_id': sid,
+                'field': 'emotional_arc',
+                'value': value,
+                'abstract_count': abstract_count,
+                'concrete_count': concrete_count,
+                'issue': 'abstract_arc',
+            })
+
+    return results
+
+
+def detect_onstage_subset_violation(
+    intent_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Detect scenes where on_stage characters are not in the characters field.
+
+    on_stage must be a subset of characters (both semicolon-separated).
+
+    Args:
+        intent_map: dict keyed by scene ID, values are scene-intent row dicts.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+
+    Returns:
+        List of dicts: {scene_id, field='on_stage', value, violating,
+                        issue='not_subset'}.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(intent_map.keys())
+
+    for sid in ids_to_check:
+        row = intent_map.get(sid, {})
+        on_stage_raw = row.get('on_stage', '').strip()
+        if not on_stage_raw:
+            continue
+
+        characters_raw = row.get('characters', '').strip()
+        characters_set = {
+            c.strip().lower()
+            for c in characters_raw.split(';')
+            if c.strip()
+        }
+        on_stage_set = {
+            c.strip().lower()
+            for c in on_stage_raw.split(';')
+            if c.strip()
+        }
+
+        violating = sorted(on_stage_set - characters_set)
+        if violating:
+            results.append({
+                'scene_id': sid,
+                'field': 'on_stage',
+                'value': on_stage_raw,
+                'violating': violating,
+                'issue': 'not_subset',
+            })
+
+    return results
+
+
+def detect_value_shift_outcome_mismatch(
+    intent_map: dict[str, dict[str, str]],
+    briefs_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Detect scenes where value_shift polarity contradicts the outcome.
+
+    Rules:
+    - outcome='yes' → shift should end /+ or /++ → mismatch if /- or /--
+    - outcome='no'  → shift should end /- or /-- → mismatch if /+ or /++
+    - outcome='yes-but' or 'no-and' → skip (mixed results, any shift plausible)
+
+    Args:
+        intent_map: dict keyed by scene ID, values are scene-intent row dicts.
+        briefs_map: dict keyed by scene ID, values are scene-briefs row dicts.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+
+    Returns:
+        List of dicts: {scene_id, field='value_shift', value, value_shift,
+                        outcome, issue='outcome_mismatch'}.
+    """
+    results = []
+    ids_to_check = scene_ids if scene_ids else list(intent_map.keys())
+
+    for sid in ids_to_check:
+        intent_row = intent_map.get(sid, {})
+        brief_row = briefs_map.get(sid, {})
+
+        value_shift = intent_row.get('value_shift', '').strip()
+        outcome = brief_row.get('outcome', '').strip().lower()
+
+        if not value_shift or not outcome:
+            continue
+
+        # Skip mixed-result outcomes
+        if outcome in ('yes-but', 'no-and'):
+            continue
+
+        mismatch = False
+        if outcome == 'yes' and _NEGATIVE_SHIFT_RE.search(value_shift):
+            mismatch = True
+        elif outcome == 'no' and _POSITIVE_SHIFT_RE.search(value_shift):
+            mismatch = True
+
+        if mismatch:
+            results.append({
+                'scene_id': sid,
+                'field': 'value_shift',
+                'value': value_shift,
+                'value_shift': value_shift,
+                'outcome': outcome,
+                'issue': 'outcome_mismatch',
+            })
+
+    return results
+
+
+def detect_intent_issues(
+    intent_map: dict[str, dict[str, str]],
+    scenes_map: dict[str, dict[str, str]],
+    briefs_map: dict[str, dict[str, str]],
+    scene_ids: list[str] | None = None,
+) -> list[dict]:
+    """Run all intent quality detectors and return combined results.
+
+    Each result dict includes an 'issue' key: 'vague', 'overlong',
+    'flat', 'abstract_arc', 'not_subset', or 'outcome_mismatch'.
+
+    Args:
+        intent_map: dict keyed by scene ID (scene-intent rows).
+        scenes_map: dict keyed by scene ID (scenes.csv rows).
+        briefs_map: dict keyed by scene ID (scene-briefs rows).
+        scene_ids: Optional scope.
+
+    Returns:
+        Combined list of all issue dicts, sorted by (scene_id, field, issue).
+    """
+    issues: list[dict] = []
+    issues.extend(detect_vague_function(intent_map, scene_ids))
+    issues.extend(detect_overlong_function(intent_map, scene_ids))
+    issues.extend(detect_flat_emotional_arc(intent_map, scene_ids))
+    issues.extend(detect_abstract_emotional_arc(intent_map, scene_ids))
+    issues.extend(detect_onstage_subset_violation(intent_map, scene_ids))
+    issues.extend(detect_value_shift_outcome_mismatch(intent_map, briefs_map, scene_ids))
+    issues.sort(key=lambda d: (d['scene_id'], d['field'], d['issue']))
+    return issues
+
+
+# ============================================================================
+# Intent domain: fix prompt builder
+# ============================================================================
+
+def build_intent_fix_prompt(
+    scene_id: str,
+    fields: list[str],
+    current_values: dict[str, str],
+    issues: list[dict],
+    voice_guide: str = '',
+) -> str:
+    """Build a prompt to fix intent quality issues.
+
+    Handles vague, overlong, flat, abstract_arc issues. Produces labeled
+    output parsed by parse_concretize_response().
+
+    Args:
+        scene_id: The scene being fixed.
+        fields: List of field names to rewrite.
+        current_values: Dict of field_name -> current value.
+        issues: List of issue dicts for this scene.
+        voice_guide: Optional voice guide excerpt.
+
+    Returns:
+        Prompt string for Claude.
+    """
+    # Build per-field instructions based on issues
+    issue_types_by_field: dict[str, list[str]] = {}
+    for issue in issues:
+        field = issue.get('field', '')
+        issue_type = issue.get('issue', '')
+        if field and issue_type:
+            issue_types_by_field.setdefault(field, []).append(issue_type)
+
+    field_blocks = []
+    for field in fields:
+        value = current_values.get(field, '')
+        if not value:
+            continue
+        field_issues = issue_types_by_field.get(field, [])
+
+        instructions = []
+        if 'vague' in field_issues:
+            instructions.append(
+                'Rewrite as testable actions: what does the POV character say, ask, '
+                'decide, refuse, confess, reveal, or physically do? No internal-state verbs '
+                '(realizes, connects, grapples, grows).'
+            )
+        if 'overlong' in field_issues:
+            instructions.append(
+                'Compress to 1-3 sentences. State the scene\'s dramatic purpose '
+                'concisely — cut elaboration and nested clauses.'
+            )
+        if 'flat' in field_issues:
+            instructions.append(
+                'Add a transition phrase showing emotional movement: '
+                '"X giving way to Y", "X shifting to Y", "X breaking into Y", etc. '
+                'The arc needs a clear before and after.'
+            )
+        if 'abstract_arc' in field_issues:
+            instructions.append(
+                'Replace abstract emotion nouns (tension, turmoil, growth, shift) '
+                'with grounded, specific feelings: grief, dread, relief, shame, longing, '
+                'resolve, unease, joy, etc.'
+            )
+
+        instruction_text = '\n'.join(f'  - {i}' for i in instructions) if instructions else '  - Rewrite to be more concrete and specific.'
+        field_blocks.append(
+            f"**{field}** (current):\n{value}\n\nFix instructions:\n{instruction_text}"
+        )
+
+    field_output = '\n'.join(f'{field}: [rewritten value]' for field in fields)
+
+    return f"""Rewrite these scene intent fields to fix quality issues.
+
+## Scene: {scene_id}
+
+## Fields to Fix
+
+{chr(10).join(field_blocks)}
+
+## Voice Guide (POV character)
+{voice_guide if voice_guide else '(not available)'}
+
+## Output Format
+
+Return each field on its own labeled line:
+
+{field_output}
+
+No explanation. No markdown. Just the labeled lines."""
+
+
+# ============================================================================
+# Intent domain: hone_intent
+# ============================================================================
+
+def hone_intent(
+    ref_dir: str,
+    project_dir: str,
+    scene_ids: list[str] | None = None,
+    model: str = '',
+    log_dir: str = '',
+    coaching_level: str = 'full',
+    dry_run: bool = False,
+    findings_file: str | None = None,
+) -> dict:
+    """Fix scene-intent.csv quality issues.
+
+    Detects and repairs vague function fields, overlong function fields,
+    flat or abstract emotional arcs, on_stage subset violations, and
+    value_shift/outcome mismatches.
+
+    Args:
+        ref_dir: Path to reference/ directory.
+        project_dir: Path to project root.
+        scene_ids: Optional list of scene IDs to check. If None, check all.
+        model: Anthropic model ID for API calls.
+        log_dir: Directory for API log files.
+        coaching_level: full/coach/strict.
+        dry_run: If True, detect but don't rewrite.
+        findings_file: Optional path to a pipe-delimited CSV of external evaluation
+            findings (scene_id|target_file|fields|guidance).  Findings targeting
+            scene-intent.csv are merged into all_issues before processing.
+
+    Returns:
+        Dict with scenes_flagged, scenes_rewritten, fields_rewritten.
+    """
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    if not os.path.isfile(intent_path):
+        return {'scenes_flagged': 0, 'scenes_rewritten': 0, 'fields_rewritten': 0}
+
+    intent_map = _read_csv_as_map(intent_path)
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    briefs_map = _read_csv_as_map(briefs_path) if os.path.isfile(briefs_path) else {}
+
+    # Detect all issue types
+    all_issues = detect_intent_issues(intent_map, scenes_map, briefs_map, scene_ids)
+
+    # Merge external findings if provided
+    if findings_file:
+        external = load_external_findings(findings_file)
+        external_intent = [e for e in external if e.get('target_file', '') == 'scene-intent.csv']
+        existing_keys = {(i['scene_id'], i['field']) for i in all_issues}
+        for ext in external_intent:
+            if ext['field'] and (ext['scene_id'], ext['field']) not in existing_keys:
+                all_issues.append(ext)
+            elif ext['field']:
+                # External takes priority — replace detected issue
+                all_issues = [i for i in all_issues
+                              if not (i['scene_id'] == ext['scene_id'] and i['field'] == ext['field'])]
+                all_issues.append(ext)
+            elif not ext['field']:
+                all_issues.append(ext)
+
+    if dry_run or not all_issues:
+        return {
+            'scenes_flagged': len(set(f['scene_id'] for f in all_issues)),
+            'scenes_rewritten': 0,
+            'fields_rewritten': 0,
+        }
+
+    # --- Deterministic fix: not_subset (no API required) ---
+    det_fields_rewritten = 0
+    not_subset_issues = [i for i in all_issues if i['issue'] == 'not_subset']
+    for issue in not_subset_issues:
+        sid = issue['scene_id']
+        if sid not in intent_map:
+            continue
+        chars_raw = intent_map[sid].get('characters', '')
+        valid_chars = {c.strip().lower() for c in chars_raw.split(';') if c.strip()}
+        on_stage_raw = intent_map[sid].get('on_stage', '')
+        on_stage_entries = [c.strip() for c in on_stage_raw.split(';') if c.strip()]
+        filtered = [c for c in on_stage_entries if c.lower() in valid_chars]
+        new_on_stage = ';'.join(filtered)
+        if new_on_stage != on_stage_raw:
+            intent_map[sid]['on_stage'] = new_on_stage
+            det_fields_rewritten += 1
+
+    # Write deterministic fixes immediately if any
+    if det_fields_rewritten > 0:
+        intent_rows = list(intent_map.values())
+        intent_rows.sort(key=lambda r: r.get('id', ''))
+        _write_csv(intent_path, intent_rows, _FILE_MAP['scene-intent.csv'])
+
+    # Strict mode: save analysis and return (after deterministic fixes)
+    if coaching_level == 'strict':
+        hone_dir = os.path.join(project_dir, 'working', 'hone')
+        os.makedirs(hone_dir, exist_ok=True)
+        for f in all_issues:
+            if f['issue'] == 'not_subset':
+                continue  # already fixed
+            path = os.path.join(hone_dir, f'intent-analysis-{f["scene_id"]}.md')
+            with open(path, 'a') as fh:
+                fh.write(f"**{f['field']}:** {f['issue']}\n")
+                if 'value' in f:
+                    fh.write(f"  Current: {f['value'][:200]}\n")
+        det_scenes = len(set(i['scene_id'] for i in not_subset_issues)) if det_fields_rewritten > 0 else 0
+        return {
+            'scenes_flagged': len(set(f['scene_id'] for f in all_issues)),
+            'scenes_rewritten': det_scenes,
+            'fields_rewritten': det_fields_rewritten,
+        }
+
+    # Load voice guide
+    voice_guide = ''
+    voice_path = os.path.join(ref_dir, 'voice-guide.md')
+    if os.path.isfile(voice_path):
+        with open(voice_path, encoding='utf-8') as fh:
+            voice_guide = fh.read()
+
+    from storyforge.api import invoke_to_file, extract_text_from_file
+
+    # Group remaining API-fixable issues by scene (excluding already-fixed not_subset)
+    api_fixable_issues = [i for i in all_issues if i['issue'] != 'not_subset']
+    by_scene: dict[str, list[dict]] = {}
+    for issue in api_fixable_issues:
+        by_scene.setdefault(issue['scene_id'], []).append(issue)
+
+    scenes_rewritten = (len(set(i['scene_id'] for i in not_subset_issues))
+                        if det_fields_rewritten > 0 else 0)
+    api_fields_rewritten = 0
+    total_scenes = len(by_scene)
+
+    for idx, (sid, issues) in enumerate(by_scene.items(), 1):
+        if sid not in intent_map:
+            continue
+
+        eval_issues = [i for i in issues if i['issue'] == 'evaluation']
+        detected_issues = [i for i in issues if i['issue'] != 'evaluation']
+
+        issue_types = sorted(set(i['issue'] for i in issues))
+        log(f'  [{idx}/{total_scenes}] {sid} ({", ".join(issue_types)})')
+
+        scene_fields_rewritten = 0
+
+        # Handle detected quality issues (vague, overlong, flat, abstract_arc)
+        if detected_issues and coaching_level == 'full':
+            detected_fields = list(dict.fromkeys(i['field'] for i in detected_issues))
+            current_values = {f: intent_map[sid].get(f, '') for f in detected_fields}
+
+            prompt = build_intent_fix_prompt(
+                scene_id=sid,
+                fields=detected_fields,
+                current_values=current_values,
+                issues=detected_issues,
+                voice_guide=voice_guide[:3000],
+            )
+
+            eff_log_dir = log_dir or os.path.join(project_dir, 'working', 'logs')
+            os.makedirs(eff_log_dir, exist_ok=True)
+            log_file = os.path.join(eff_log_dir, f'hone-intent-{sid}.json')
+            invoke_to_file(prompt, model, log_file, max_tokens=2048,
+                           label=f'hone intent {idx}/{total_scenes} ({sid})')
+            response = extract_text_from_file(log_file)
+
+            rewrites = parse_concretize_response(response, sid, detected_fields)
+            for field, new_value in rewrites.items():
+                if new_value and new_value != current_values.get(field):
+                    intent_map[sid][field] = new_value
+                    api_fields_rewritten += 1
+                    scene_fields_rewritten += 1
+
+        # Handle evaluation issues (from external findings)
+        if eval_issues and coaching_level == 'full':
+            eval_fields = list(dict.fromkeys(i['field'] for i in eval_issues if i['field']))
+            if not eval_fields:
+                eval_fields = [f for f in intent_map[sid].keys()
+                               if f != 'id' and intent_map[sid].get(f, '')]
+            current_values = {f: intent_map[sid].get(f, '') for f in eval_fields}
+            guidance = '; '.join(i.get('guidance', '') for i in eval_issues if i.get('guidance'))
+
+            prompt = build_evaluation_fix_prompt(
+                scene_id=sid,
+                fields=eval_fields,
+                current_values=current_values,
+                guidance=guidance,
+                voice_guide=voice_guide[:3000],
+            )
+
+            eff_log_dir = log_dir or os.path.join(project_dir, 'working', 'logs')
+            os.makedirs(eff_log_dir, exist_ok=True)
+            log_file = os.path.join(eff_log_dir, f'hone-intent-eval-{sid}.json')
+            invoke_to_file(prompt, model, log_file, max_tokens=2048,
+                           label=f'hone intent eval {idx}/{total_scenes} ({sid})')
+            response = extract_text_from_file(log_file)
+
+            rewrites = parse_concretize_response(response, sid, eval_fields)
+            for field, new_value in rewrites.items():
+                if new_value and new_value != current_values.get(field):
+                    intent_map[sid][field] = new_value
+                    api_fields_rewritten += 1
+                    scene_fields_rewritten += 1
+
+        # Coach mode: save proposals instead of applying
+        if coaching_level == 'coach':
+            hone_dir = os.path.join(project_dir, 'working', 'hone')
+            os.makedirs(hone_dir, exist_ok=True)
+            proposal_path = os.path.join(hone_dir, f'intent-{sid}.md')
+            with open(proposal_path, 'w') as fh:
+                fh.write(f"# Intent Quality Proposals: {sid}\n\n")
+                for issue in issues:
+                    fh.write(f"## {issue['field']} — {issue['issue']}\n")
+                    if 'value' in issue:
+                        fh.write(f"**Current:** {issue['value'][:300]}\n\n")
+            continue
+
+        if scene_fields_rewritten > 0:
+            scenes_rewritten += 1
+
+    # Write back if any API-driven changes were made (deterministic writes already happened above)
+    if api_fields_rewritten > 0:
+        intent_rows = list(intent_map.values())
+        intent_rows.sort(key=lambda r: r.get('id', ''))
+        _write_csv(intent_path, intent_rows, _FILE_MAP['scene-intent.csv'])
+
+    return {
+        'scenes_flagged': len(set(f['scene_id'] for f in all_issues)),
+        'scenes_rewritten': scenes_rewritten,
+        'fields_rewritten': det_fields_rewritten + api_fields_rewritten,
+    }
 
 
 # ============================================================================

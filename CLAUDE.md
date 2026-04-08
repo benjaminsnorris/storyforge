@@ -245,7 +245,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge elaborate` | `cmd_elaborate.py` | Run elaboration stages (spine/architecture/map/briefs) |
 | `storyforge extract` | `cmd_extract.py` | Extract structural data from prose. `--force` overwrites. |
 | `storyforge validate` | `cmd_validate.py` | Structural + schema validation. `--structural` for scoring. |
-| `storyforge hone` | `cmd_hone.py` | CSV data quality — registries, briefs, gaps. `--diagnose` for read-only. `--loop` for autonomous convergence. |
+| `storyforge hone` | `cmd_hone.py` | CSV data quality — registries, briefs, intent, gaps. `--diagnose` for read-only. `--loop` for autonomous convergence. `--findings FILE` for evaluation-driven fixes. |
 | `storyforge reconcile` | `cmd_reconcile.py` | Backwards-compatible wrapper for hone |
 | `storyforge enrich` | `cmd_enrich.py` | Metadata enrichment from prose |
 | `storyforge assemble` | `cmd_assemble.py` | Chapter assembly + epub/PDF/HTML generation |
@@ -266,7 +266,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `extract` | Reverse elaboration — extract structural data from existing prose |
 | `revise` | Plan + execute revision (upstream CSV fixes + prose polish). `--polish` for craft-only. |
 | `score` | Craft + fidelity scoring |
-| `hone` | CSV data quality — registries, brief concretization, structural fixes, gap detection. `--diagnose` for read-only assessment. |
+| `hone` | CSV data quality — registries, brief concretization, intent quality, evaluation-driven fixes, gap detection. `--diagnose` for read-only assessment. |
 | `publish` | Assemble web book + generate dashboard + push to bookshelf |
 | `produce` | Epub, PDF, print formats |
 | `init` | New project initialization |
@@ -317,7 +317,7 @@ Key principles:
 | `prompts_elaborate.py` | Elaboration stage prompt builders |
 | `scoring.py` | Score parsing, diagnosis, proposals, fidelity scoring |
 | `structural.py` | Structural scoring engine (8 dimensions, deterministic) |
-| `hone.py` | CSV data quality: registries, abstract/overspecified/verbose detection, gaps |
+| `hone.py` | CSV data quality: registries, brief detection (abstract/overspecified/verbose), intent detection (vague/overlong/flat/abstract arc/subset/mismatch), evaluation findings, gaps |
 | `reconcile.py` | Backwards-compatible re-exports from hone.py |
 | `visualize.py` | Dashboard data loading |
 | `enrich.py` | Metadata enrichment |
