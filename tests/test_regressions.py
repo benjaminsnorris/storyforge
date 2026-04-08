@@ -263,12 +263,42 @@ class TestExtractSingleScene:
 # v1.4.5 — get_pipeline_file import in git.py
 # ============================================================================
 
-class TestGitImports:
-    """git.py must import all names it uses from common.py.
+class TestRunnerUsesThreads:
+    """runner.py must use ThreadPoolExecutor, not ProcessPoolExecutor.
 
-    Bug: git.py used get_pipeline_file in _run_recommend_step but didn't
-    import it, causing NameError at the end of the review phase.
+    Bug: ProcessPoolExecutor pickles worker functions to send to child
+    processes. Nested/local functions (like score_one inside _score_direct)
+    can't be pickled, causing "Can't pickle local object" errors.
+    All parallel work is I/O-bound (API calls), so threads are correct.
     """
+
+    def test_uses_thread_pool(self):
+        from storyforge.runner import run_parallel
+        source = inspect.getsource(run_parallel)
+        assert 'ThreadPoolExecutor' in source
+        assert 'ProcessPoolExecutor' not in source
+
+    def test_nested_function_works(self):
+        """A nested function must work as a worker."""
+        from storyforge.runner import run_parallel
+
+        def outer():
+            results = []
+            def worker(item):
+                return item.upper()
+            return run_parallel(['a', 'b'], worker, max_workers=2, label='test')
+
+        results = outer()
+        assert results['a'] == 'A'
+        assert results['b'] == 'B'
+
+
+# ============================================================================
+# v1.4.5 — get_pipeline_file import in git.py
+# ============================================================================
+
+class TestGitImports:
+    """git.py must import all names it uses from common.py."""
 
     def test_get_pipeline_file_importable_from_git(self):
         """get_pipeline_file must be available in git module's namespace."""

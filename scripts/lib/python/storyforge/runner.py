@@ -1,11 +1,14 @@
 """Parallel execution and batch orchestration — replaces bash background job patterns.
 
-Provides ProcessPoolExecutor-based parallel execution and
+Provides ThreadPoolExecutor-based parallel execution and
 healing zone (retry with diagnosis) support.
+
+Uses threads (not processes) because all parallel work is I/O-bound
+(API calls). This avoids pickle constraints on worker functions.
 """
 
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Any
 
 from storyforge.common import log, is_shutting_down
@@ -34,7 +37,7 @@ def run_parallel(
 
     log(f'Processing {total} {label}(s) with {max_workers} parallel workers...')
 
-    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(worker_fn, item): item for item in items}
 
         for future in as_completed(futures):
