@@ -1,0 +1,1 @@
+# Wiring tests need no fixtures — they use only introspection.
