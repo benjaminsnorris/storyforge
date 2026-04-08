@@ -22,6 +22,20 @@ API_TIMEOUT = 600  # seconds before giving up on an API call (10 min)
 REVISION_TIMEOUT = 3600  # seconds for large revision calls (60 min)
 API_RETRIES = 2  # retry transient failures (timeouts, 5xx)
 
+# Model output token limits — the API returns HTTP 400 if max_tokens exceeds these.
+# You only pay for tokens actually generated, so requesting the max is safe cost-wise.
+MODEL_MAX_OUTPUT = {
+    'claude-opus-4-6': 128000,
+    'claude-sonnet-4-6': 64000,
+    'claude-haiku-4-5-20251001': 16384,
+}
+_DEFAULT_MAX_OUTPUT = 32768
+
+
+def max_output_tokens(model: str) -> int:
+    """Return the maximum output tokens supported by a model."""
+    return MODEL_MAX_OUTPUT.get(model, _DEFAULT_MAX_OUTPUT)
+
 
 class _Heartbeat:
     """Background thread that prints elapsed time during long API calls."""
