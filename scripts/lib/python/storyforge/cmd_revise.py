@@ -645,7 +645,10 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                      skip_initial_score: bool = False) -> None:
     """Score → polish → re-score convergence loop."""
     from storyforge.common import get_coaching_level, read_yaml_field
-    from storyforge.git import create_branch, ensure_branch_pushed, commit_and_push
+    from storyforge.git import (
+        create_branch, ensure_branch_pushed, commit_and_push,
+        create_draft_pr, update_pr_task,
+    )
     from storyforge.scene_filter import build_scene_list
 
     if coaching_override:
@@ -667,6 +670,25 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     # Create branch once for the whole loop
     create_branch('revise', project_dir)
     ensure_branch_pushed(project_dir)
+
+    # Create draft PR for progress tracking
+    task_lines = ['### Progress']
+    for i in range(1, max_loops + 1):
+        task_lines.append(f'- [ ] Iteration {i}')
+    task_lines.append('- [ ] Review')
+
+    pr_body = (
+        f'## Polish: craft convergence loop\n\n'
+        f'**Project:** {title}\n'
+        f'**Scenes:** {len(scene_ids)}\n'
+        f'**Max iterations:** {max_loops}\n\n'
+        + '\n'.join(task_lines)
+    )
+
+    pr_number = create_draft_pr(
+        f'Polish: craft convergence loop — {title}',
+        pr_body, project_dir, 'polish',
+    )
 
     log('============================================')
     log(f'Storyforge Polish Loop — {title}')
@@ -708,11 +730,13 @@ def _run_polish_loop(project_dir: str, max_loops: int,
         # Convergence check: no actionable issues
         if summary['high_count'] == 0 and summary['medium_count'] == 0:
             log('  No high or medium priority issues — converged')
+            update_pr_task(f'Iteration {iteration}', project_dir, pr_number)
             break
 
         # Convergence check: scores stopped improving
         if iteration > 1 and summary['overall_avg'] <= prev_avg:
             log(f'  Overall avg did not improve ({summary["overall_avg"]:.2f} <= {prev_avg:.2f}) — converged')
+            update_pr_task(f'Iteration {iteration}', project_dir, pr_number)
             break
 
         prev_avg = summary['overall_avg']
@@ -738,6 +762,8 @@ def _run_polish_loop(project_dir: str, max_loops: int,
 
         # Run the pass through the standard execution path
         _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration)
+
+        update_pr_task(f'Iteration {iteration}', project_dir, pr_number)
 
     else:
         log(f'\n  Reached max iterations ({max_loops})')

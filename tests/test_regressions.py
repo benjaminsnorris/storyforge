@@ -416,3 +416,48 @@ class TestSkipInitialScoreFlag:
             __import__('storyforge.cmd_revise', fromlist=['_run_polish_loop'])._run_polish_loop
         )
         assert 'skip_initial_score' in sig.parameters
+
+
+# ============================================================================
+# v1.4.11 — Polish loop draft PR creation
+# ============================================================================
+
+class TestPolishLoopDraftPR:
+    """_run_polish_loop must create a draft PR for progress tracking.
+
+    Bug: The polish loop created a branch and pushed it, but never created
+    a draft PR. The user had no way to track progress from the GitHub UI.
+    Now it creates a PR right after ensure_branch_pushed with iteration
+    tasks in the body.
+    """
+
+    def test_polish_loop_imports_create_draft_pr(self):
+        """_run_polish_loop must import create_draft_pr from git."""
+        from storyforge.cmd_revise import _run_polish_loop
+        source = inspect.getsource(_run_polish_loop)
+        assert 'create_draft_pr' in source
+
+    def test_polish_loop_imports_update_pr_task(self):
+        """_run_polish_loop must import update_pr_task from git."""
+        from storyforge.cmd_revise import _run_polish_loop
+        source = inspect.getsource(_run_polish_loop)
+        assert 'update_pr_task' in source
+
+    def test_polish_loop_calls_create_draft_pr(self):
+        """_run_polish_loop must call create_draft_pr after branch push."""
+        from storyforge.cmd_revise import _run_polish_loop
+        source = inspect.getsource(_run_polish_loop)
+        # Must call create_draft_pr (not just import it)
+        assert 'pr_number = create_draft_pr(' in source
+
+    def test_polish_loop_pr_uses_polish_label(self):
+        """Draft PR must use 'polish' as the work_type label."""
+        from storyforge.cmd_revise import _run_polish_loop
+        source = inspect.getsource(_run_polish_loop)
+        assert "'polish'" in source
+
+    def test_polish_loop_updates_pr_tasks(self):
+        """_run_polish_loop must call update_pr_task with iteration info."""
+        from storyforge.cmd_revise import _run_polish_loop
+        source = inspect.getsource(_run_polish_loop)
+        assert "update_pr_task(f'Iteration {iteration}'" in source
