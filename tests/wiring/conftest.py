@@ -1,1 +1,1 @@
-# Wiring-tier conftest — inherits fixtures from tests/conftest.py.
+# Wiring tests need no fixtures — they use only introspection.
