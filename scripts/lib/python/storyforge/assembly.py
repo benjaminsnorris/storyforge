@@ -648,6 +648,267 @@ def get_genre_css(plugin_dir: str, genre: str) -> str:
 
 
 # ============================================================================
+# Web book generation
+# ============================================================================
+
+HEAD_SCRIPT = (
+    "(function(){var t=localStorage.getItem('storyforge-theme');"
+    "if(t)document.documentElement.dataset.theme=t;"
+    "else if(window.matchMedia('(prefers-color-scheme:dark)').matches)"
+    "document.documentElement.dataset.theme='dark'})();"
+)
+
+
+def _read_template(plugin_dir: str, filename: str) -> str:
+    """Read a web-book template file."""
+    path = os.path.join(plugin_dir, 'templates', 'production',
+                        'web-book', filename)
+    with open(path) as f:
+        return f.read()
+
+
+def _md_to_html(markdown_text: str) -> str:
+    """Convert markdown to HTML using pandoc."""
+    import subprocess
+    r = subprocess.run(
+        ['pandoc', '-f', 'markdown', '-t', 'html', '--no-highlight'],
+        input=markdown_text, capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f'pandoc failed: {r.stderr[:300]}')
+    return r.stdout
+
+
+def generate_web_book(project_dir: str, plugin_dir: str,
+                      annotate: bool = False) -> str:
+    """Generate a multi-page web book from chapter map.
+
+    Creates:
+        output/web/index.html       — landing page
+        output/web/contents.html    — table of contents
+        output/web/chapters/chapter-N.html — one per chapter
+        output/web/chapters/part-N.html    — part interstitials (if parts)
+        output/web/fonts/            — embedded fonts
+
+    Args:
+        project_dir: Root directory of the project.
+        plugin_dir: Path to the storyforge plugin directory.
+        annotate: Whether to include annotation overlay.
+
+    Returns:
+        Path to the generated web book directory.
+    """
+    import json
+    import shutil
+
+    title = _yaml_field(project_dir, 'project.title', 'title') or 'Untitled'
+    author = read_production_field(project_dir, 'author') or ''
+    lang = read_production_field(project_dir, 'language') or 'en'
+    genre = _yaml_field(project_dir, 'project.genre', 'genre') or 'default'
+    description = _yaml_field(project_dir, 'project.logline', 'logline') or ''
+    title_slug = re.sub(r'[^a-z0-9-]', '', title.lower().replace(' ', '-'))
+    total_chapters = count_chapters(project_dir)
+    break_style = read_production_field(project_dir, 'scene_break') or 'blank'
+    total_parts = count_parts(project_dir)
+
+    if total_chapters == 0:
+        print('ERROR: No chapters in chapter-map.csv', file=sys.stderr)
+        return ''
+
+    # Output directory
+    web_dir = os.path.join(project_dir, 'output', 'web')
+    chapters_dir = os.path.join(web_dir, 'chapters')
+    os.makedirs(chapters_dir, exist_ok=True)
+
+    # Load templates
+    index_tpl = _read_template(plugin_dir, 'index.html')
+    toc_tpl = _read_template(plugin_dir, 'toc.html')
+    chapter_tpl = _read_template(plugin_dir, 'chapter.html')
+    part_tpl = _read_template(plugin_dir, 'part.html')
+    css = _read_template(plugin_dir, 'reading.css')
+    js = _read_template(plugin_dir, 'reading.js')
+
+    if annotate:
+        css += '\n' + _read_template(plugin_dir, 'annotations.css')
+        js += '\n' + _read_template(plugin_dir, 'annotations.js')
+
+    # Copy fonts
+    fonts_src = os.path.join(plugin_dir, 'templates', 'production',
+                             'web-book', 'fonts')
+    fonts_dst = os.path.join(web_dir, 'fonts')
+    if os.path.isdir(fonts_src):
+        if os.path.isdir(fonts_dst):
+            shutil.rmtree(fonts_dst)
+        shutil.copytree(fonts_src, fonts_dst)
+
+    # Cover image
+    cover_img = ''
+    for ext in ('jpg', 'jpeg', 'png', 'webp', 'svg'):
+        candidate = os.path.join(project_dir, 'production', f'cover.{ext}')
+        if os.path.isfile(candidate):
+            dst = os.path.join(web_dir, f'cover.{ext}')
+            shutil.copy2(candidate, dst)
+            cover_img = (f'<img src="cover.{ext}" alt="{title}" '
+                         f'class="cover-image">')
+            break
+
+    # Build chapter map for resume feature and TOC
+    chapter_map = {}
+    toc_entries = []
+    # Track which chapters start a new part
+    chapter_parts = {}
+    if total_parts > 0:
+        for ch in range(1, total_chapters + 1):
+            part_title = get_chapter_part_title(ch, project_dir)
+            if part_title:
+                chapter_parts[ch] = part_title
+
+    # Navigation pages to generate (chapters + part interstitials)
+    pages = []  # list of (slug, type, chapter_num_or_part_num)
+
+    seen_parts = set()
+    for ch in range(1, total_chapters + 1):
+        if ch in chapter_parts and chapter_parts[ch] not in seen_parts:
+            part_title = chapter_parts[ch]
+            seen_parts.add(part_title)
+            part_num = len(seen_parts)
+            pages.append((f'part-{part_num}', 'part', part_num))
+        pages.append((f'chapter-{ch}', 'chapter', ch))
+
+    # Generate each page
+    for idx, (slug, page_type, num) in enumerate(pages):
+        prev_link = ''
+        next_link = ''
+        if idx > 0:
+            prev_slug = pages[idx - 1][0]
+            prev_link = (f'<a href="{prev_slug}.html" '
+                         f'class="nav-link nav-prev">&larr; Previous</a>')
+        if idx < len(pages) - 1:
+            next_slug = pages[idx + 1][0]
+            next_link = (f'<a href="{next_slug}.html" '
+                         f'class="nav-link nav-next">Next &rarr;</a>')
+
+        if page_type == 'part':
+            part_title = read_part_field(num, project_dir, 'title') or f'Part {num}'
+            html = part_tpl
+            html = html.replace('{{PART_NUMBER}}', str(num))
+            html = html.replace('{{PART_TITLE}}', part_title)
+            html = html.replace('{{BOOK_TITLE}}', title)
+            html = html.replace('{{AUTHOR}}', author)
+            html = html.replace('{{LANG}}', lang)
+            html = html.replace('{{CANONICAL}}', '')
+            html = html.replace('{{TITLE_FONT_LINK}}', '')
+            html = html.replace('{{HEAD_SCRIPT}}', HEAD_SCRIPT)
+            html = html.replace('{{CSS}}', css)
+            html = html.replace('{{JS}}', js)
+            html = html.replace('{{PREV_LINK}}', prev_link)
+            html = html.replace('{{NEXT_LINK}}', next_link)
+            with open(os.path.join(chapters_dir, f'{slug}.html'), 'w') as f:
+                f.write(html)
+        else:
+            ch_num = num
+            ch_title = read_chapter_field(ch_num, project_dir, 'title')
+            ch_slug = f'chapter-{ch_num}'
+            chapter_map[ch_slug] = ch_title or f'Chapter {ch_num}'
+
+            # Build heading
+            heading_format = read_chapter_field(ch_num, project_dir, 'heading')
+            if heading_format == 'numbered':
+                display_title = f'Chapter {ch_num}'
+            elif heading_format == 'titled':
+                display_title = ch_title or f'Chapter {ch_num}'
+            elif heading_format == 'none':
+                display_title = ''
+            else:
+                display_title = f'Chapter {ch_num}: {ch_title}' if ch_title else f'Chapter {ch_num}'
+
+            # Assemble chapter markdown and convert to HTML
+            chapter_md = assemble_chapter(ch_num, project_dir, break_style)
+            chapter_html = _md_to_html(chapter_md)
+
+            # Part label if this chapter starts a new part
+            part_label = ''
+            if ch_num in chapter_parts:
+                part_label = (f'<div class="chapter-part-label">'
+                              f'{chapter_parts[ch_num]}</div>')
+
+            # TOC entry
+            toc_entries.append(
+                f'    <a href="chapters/{ch_slug}.html" '
+                f'class="toc-entry">{display_title or ch_title}</a>')
+
+            html = chapter_tpl
+            html = html.replace('{{CHAPTER_TITLE}}', display_title or ch_title or f'Chapter {ch_num}')
+            html = html.replace('{{CHAPTER_SLUG}}', ch_slug)
+            html = html.replace('{{CHAPTER_NUM}}', str(ch_num))
+            html = html.replace('{{TOTAL_CHAPTERS}}', str(total_chapters))
+            html = html.replace('{{CHAPTER_CONTENT}}', chapter_html)
+            html = html.replace('{{PART_LABEL}}', part_label)
+            html = html.replace('{{BOOK_TITLE}}', title)
+            html = html.replace('{{AUTHOR}}', author)
+            html = html.replace('{{LANG}}', lang)
+            html = html.replace('{{CANONICAL}}', '')
+            html = html.replace('{{TITLE_FONT_LINK}}', '')
+            html = html.replace('{{HEAD_SCRIPT}}', HEAD_SCRIPT)
+            html = html.replace('{{CSS}}', css)
+            html = html.replace('{{JS}}', js)
+            html = html.replace('{{PREV_LINK}}', prev_link)
+            html = html.replace('{{NEXT_LINK}}', next_link)
+            html = html.replace('{{TOC_ENTRIES}}', '\n'.join(toc_entries))
+            with open(os.path.join(chapters_dir, f'{ch_slug}.html'), 'w') as f:
+                f.write(html)
+
+    # Generate TOC page
+    toc_html = toc_tpl
+    toc_html = toc_html.replace('{{BOOK_TITLE}}', title)
+    toc_html = toc_html.replace('{{BOOK_SLUG}}', title_slug)
+    toc_html = toc_html.replace('{{AUTHOR}}', author)
+    toc_html = toc_html.replace('{{LANG}}', lang)
+    toc_html = toc_html.replace('{{CANONICAL}}', '')
+    toc_html = toc_html.replace('{{TITLE_FONT_LINK}}', '')
+    toc_html = toc_html.replace('{{HEAD_SCRIPT}}', HEAD_SCRIPT)
+    toc_html = toc_html.replace('{{CSS}}', css)
+    toc_html = toc_html.replace('{{JS}}', js)
+    toc_html = toc_html.replace('{{TOC_ENTRIES}}', '\n'.join(toc_entries))
+    toc_html = toc_html.replace('{{BACK_MATTER_LINKS}}', '')
+    with open(os.path.join(web_dir, 'contents.html'), 'w') as f:
+        f.write(toc_html)
+
+    # Generate index/landing page
+    first_page = pages[0][0]
+    logline_html = f'<p class="book-logline">{description}</p>' if description else ''
+    series_name = _yaml_field(project_dir, 'project.series_name')
+    series_html = (f'<p class="book-series">{series_name}</p>'
+                   if series_name else '')
+    copyright_year = (read_production_nested(project_dir, 'copyright', 'year')
+                      or str(datetime.now().year))
+    copyright_html = (f'<p class="book-copyright">&copy; {copyright_year} '
+                      f'{author}</p>')
+
+    index_html = index_tpl
+    index_html = index_html.replace('{{BOOK_TITLE}}', title)
+    index_html = index_html.replace('{{AUTHOR}}', author)
+    index_html = index_html.replace('{{DESCRIPTION}}', description)
+    index_html = index_html.replace('{{LANG}}', lang)
+    index_html = index_html.replace('{{CANONICAL}}', '')
+    index_html = index_html.replace('{{TITLE_FONT_LINK}}', '')
+    index_html = index_html.replace('{{HEAD_SCRIPT}}', HEAD_SCRIPT)
+    index_html = index_html.replace('{{CSS}}', css)
+    index_html = index_html.replace('{{JS}}', js)
+    index_html = index_html.replace('{{COVER_IMG}}', cover_img)
+    index_html = index_html.replace('{{LOGLINE}}', logline_html)
+    index_html = index_html.replace('{{SERIES}}', series_html)
+    index_html = index_html.replace('{{COPYRIGHT}}', copyright_html)
+    index_html = index_html.replace('{{FIRST_PAGE}}', f'{first_page}.html')
+    index_html = index_html.replace('{{CHAPTER_MAP_JSON}}',
+                                    json.dumps(chapter_map))
+    with open(os.path.join(web_dir, 'index.html'), 'w') as f:
+        f.write(index_html)
+
+    return web_dir
+
+
+# ============================================================================
 # CLI interface
 # ============================================================================
 
@@ -744,6 +1005,14 @@ def main():
                   file=sys.stderr)
             sys.exit(1)
         print(read_chapter_field(int(sys.argv[2]), sys.argv[3], sys.argv[4]))
+
+    elif command == 'chapter-scenes':
+        if len(sys.argv) < 4:
+            print('Usage: chapter-scenes <chapter_num> <project_dir>',
+                  file=sys.stderr)
+            sys.exit(1)
+        for scene_id in get_chapter_scenes(int(sys.argv[2]), sys.argv[3]):
+            print(scene_id)
 
     else:
         print(f'Unknown command: {command}', file=sys.stderr)
