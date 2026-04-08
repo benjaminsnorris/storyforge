@@ -28,6 +28,9 @@ def run_parallel(
 
     Returns dict mapping item -> result (or Exception on failure).
     """
+    if not items:
+        return {}
+
     default_parallel = int(os.environ.get('STORYFORGE_PARALLEL', str(max_workers)))
     max_workers = min(default_parallel, len(items))
 
