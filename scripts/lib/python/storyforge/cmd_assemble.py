@@ -128,7 +128,7 @@ def _resolve_formats(args) -> list[str]:
         formats.extend(f.split(','))
 
     if not formats:
-        formats = ['epub', 'web']
+        formats = ['markdown']
 
     for fmt in formats:
         if fmt not in VALID_FORMATS:
