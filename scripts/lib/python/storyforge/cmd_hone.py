@@ -27,7 +27,7 @@ from storyforge.common import (
 from storyforge.git import commit_and_push, ensure_on_branch
 
 
-ALL_DOMAINS = ['registries', 'gaps', 'structural', 'briefs']
+ALL_DOMAINS = ['registries', 'gaps', 'structural', 'briefs', 'intent']
 PHASE1_REGISTRY = ['characters', 'locations']
 PHASE2_REGISTRY = ['values', 'mice-threads']
 PHASE3_REGISTRY = ['knowledge', 'outcomes', 'physical-states']
@@ -58,6 +58,8 @@ def parse_args(argv):
                         help='Autonomous convergence loop: registries once, briefs until stable, gaps once')
     parser.add_argument('--max-loops', type=int, default=5,
                         help='Maximum brief iterations in --loop mode (default: 5)')
+    parser.add_argument('--findings', metavar='FILE', default=None,
+                        help='External findings file (from evaluation/revision)')
     return parser.parse_args(argv)
 
 
@@ -140,7 +142,8 @@ def main(argv=None):
     for domain in domains:
         log(f'\n--- Hone: {domain} ---')
         _run_domain(domain, ref_dir, project_dir, log_dir, model, coaching,
-                    scene_filter, args.threshold, args.dry_run)
+                    scene_filter, args.threshold, args.dry_run,
+                    findings_file=args.findings)
 
     log('\n============================================')
     log('Hone complete')
@@ -167,7 +170,8 @@ def _resolve_scene_filter(args, ref_dir: str) -> list[str] | None:
 
 def _run_domain(domain: str, ref_dir: str, project_dir: str, log_dir: str,
                 model: str, coaching: str, scene_filter: list[str] | None,
-                threshold: float, dry_run: bool) -> None:
+                threshold: float, dry_run: bool,
+                findings_file: str | None = None) -> None:
     char_bible = os.path.join(project_dir, 'reference', 'character-bible.md')
 
     if domain in ALL_REGISTRY_SUBS:
@@ -183,11 +187,14 @@ def _run_domain(domain: str, ref_dir: str, project_dir: str, log_dir: str,
                                  char_bible, dry_run)
     elif domain == 'briefs':
         _run_briefs_domain(ref_dir, project_dir, log_dir, model, coaching,
-                           scene_filter, threshold, dry_run)
+                           scene_filter, threshold, dry_run, findings_file)
     elif domain == 'gaps':
         _run_gaps_domain(ref_dir, project_dir, scene_filter, dry_run)
     elif domain == 'structural':
         log('  (structural CSV fixes route through evaluation findings — run after storyforge-evaluate)')
+    elif domain == 'intent':
+        _run_intent_domain(ref_dir, project_dir, log_dir, model, coaching,
+                           scene_filter, dry_run, findings_file)
     else:
         log(f'WARNING: Unknown domain: {domain}')
 
@@ -226,7 +233,8 @@ def _run_registry_domain(domain: str, ref_dir: str, project_dir: str,
 
 def _run_briefs_domain(ref_dir: str, project_dir: str, log_dir: str,
                        model: str, coaching: str, scene_filter: list[str] | None,
-                       threshold: float, dry_run: bool) -> None:
+                       threshold: float, dry_run: bool,
+                       findings_file: str | None = None) -> None:
     from storyforge.elaborate import _read_csv_as_map
     from storyforge.hone import detect_brief_issues, hone_briefs
 
@@ -272,6 +280,7 @@ def _run_briefs_domain(ref_dir: str, project_dir: str, log_dir: str,
         log_dir=log_dir,
         coaching_level=coaching,
         dry_run=False,
+        findings_file=findings_file,
     )
 
     rewritten = result.get('scenes_rewritten', 0)
@@ -281,6 +290,63 @@ def _run_briefs_domain(ref_dir: str, project_dir: str, log_dir: str,
     if rewritten > 0:
         commit_and_push(project_dir,
                         f'Hone: briefs — {rewritten} scenes concretized ({fields} fields)',
+                        ['reference/', 'working/'])
+
+
+def _run_intent_domain(ref_dir: str, project_dir: str, log_dir: str,
+                       model: str, coaching: str, scene_filter: list[str] | None,
+                       dry_run: bool, findings_file: str | None = None) -> None:
+    from storyforge.elaborate import _read_csv_as_map
+    from storyforge.hone import detect_intent_issues, hone_intent
+
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    if not os.path.isfile(intent_path):
+        log('  No scene-intent.csv found — skipping')
+        return
+
+    intent = _read_csv_as_map(intent_path)
+    scenes = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    briefs = _read_csv_as_map(briefs_path) if os.path.isfile(briefs_path) else {}
+
+    issues = detect_intent_issues(intent, scenes, briefs, scene_filter)
+
+    by_type: dict[str, list] = {}
+    for i in issues:
+        by_type.setdefault(i['issue'], []).append(i)
+
+    total = len(issues)
+    affected = len(set(i['scene_id'] for i in issues))
+    log(f'  Issues found: {total} across {affected} scenes')
+    for issue_type, items in sorted(by_type.items()):
+        log(f'    {issue_type}: {len(items)}')
+
+    if dry_run:
+        for i in issues:
+            log(f"  {i['scene_id']}.{i.get('field', '?')}: {i['issue']}")
+        return
+
+    if total == 0 and not findings_file:
+        log('  No intent quality issues found')
+        return
+
+    result = hone_intent(
+        ref_dir, project_dir,
+        scene_ids=scene_filter,
+        model=model,
+        log_dir=log_dir,
+        coaching_level=coaching,
+        dry_run=False,
+        findings_file=findings_file,
+    )
+
+    rewritten = result.get('scenes_rewritten', 0)
+    fields = result.get('fields_rewritten', 0)
+    log(f'  Rewritten: {rewritten} scenes, {fields} fields')
+
+    if rewritten > 0 or fields > 0:
+        commit_and_push(project_dir,
+                        f'Hone: intent — {rewritten} scenes fixed ({fields} fields)',
                         ['reference/', 'working/'])
 
 
