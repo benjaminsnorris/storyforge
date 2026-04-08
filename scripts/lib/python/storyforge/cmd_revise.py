@@ -775,7 +775,7 @@ def _extract_scene_rationales(project_dir: str, scene_ids: list,
             continue
         rationales = {}
         for col, val in row.items():
-            if not col.endswith('_rationale') or not val:
+            if not col or not col.endswith('_rationale') or not val:
                 continue
             principle = col[:-len('_rationale')]
             if principles and principle not in principles:
