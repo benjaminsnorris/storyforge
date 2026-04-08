@@ -36,7 +36,7 @@ from storyforge.git import (
 from storyforge.api import (
     invoke_api, invoke_to_file, extract_text, extract_text_from_file,
     extract_usage, calculate_cost_from_usage, get_api_key,
-    REVISION_TIMEOUT,
+    REVISION_TIMEOUT, max_output_tokens,
 )
 from storyforge.cli import apply_coaching_override
 
@@ -911,7 +911,8 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
 
     log(f'  Invoking API (model: {pass_model})...')
     try:
-        invoke_to_file(prompt, pass_model, step_log, max_tokens=32768,
+        invoke_to_file(prompt, pass_model, step_log,
+                       max_tokens=max_output_tokens(pass_model),
                        label=f'polish loop {iteration} ({pass_name})',
                        timeout=REVISION_TIMEOUT)
     except Exception as e:
@@ -1438,13 +1439,21 @@ Rules:
             # Direct API mode
             log(f'  Invoking API for revision (model: {pass_model})...')
             try:
-                response = invoke_to_file(prompt, pass_model, step_log, max_tokens=32768,
+                response = invoke_to_file(prompt, pass_model, step_log,
+                                         max_tokens=max_output_tokens(pass_model),
                                          label=f'pass {pass_num}/{total_passes} ({pass_name})',
                                          timeout=REVISION_TIMEOUT)
                 exit_code = 0
             except Exception as e:
                 log(f'  API call failed: {e}')
                 exit_code = 1
+
+            # Check for truncation
+            if exit_code == 0:
+                stop = response.get('stop_reason', 'end_turn')
+                if stop == 'max_tokens':
+                    log(f'  WARNING: Pass "{pass_name}" was truncated (hit max_tokens). '
+                        f'The last scene in the output will be discarded to prevent data loss.')
 
             # Process response
             if exit_code == 0:

@@ -243,6 +243,145 @@ def extract_craft_sections(*section_nums: int) -> str:
     return '\n\n---\n\n'.join(parts)
 
 
+# ============================================================================
+# Scoring rubric + exemplar loading
+# ============================================================================
+
+# Map common principle target names to rubric headings.  Rubric headings use
+# title case with full names; pass targets use snake_case shorthand.  This
+# map bridges the two so we can look up a rubric section from a pass target.
+_PRINCIPLE_HEADING_MAP = {
+    'enter_late_leave_early': 'Enter Late, Leave Early',
+    'every_scene_must_turn': 'Every Scene Must Turn',
+    'scene_emotion_vs_character': 'Scene Emotion vs. Character Emotion',
+    'psychic_distance_scene': 'Psychic Distance at Scene Level',
+    'show_vs_tell_scenes': 'Show vs. Tell Scenes',
+    'thread_management': 'Thread Management',
+    'pacing_variety': 'Pacing Through Scene Variety',
+    'economy_clarity': 'Economy and Clarity',
+    'sentence_as_thought': 'Sentence as Unit of Thought',
+    'writers_toolbox': "Writer's Toolbox",
+    'precision_language': 'Precision in Language',
+    'persuasive_structure': 'Persuasive Structure',
+    'fictive_dream': 'The Fictive Dream',
+    'scene_vs_summary': 'Scene vs. Summary, Showing vs. Telling',
+    'sound_rhythm_pov': 'Sound, Rhythm, and Point of View',
+    'permission_honesty': 'Permission and Emotional Honesty',
+    'prose_naturalness': 'Prose Naturalness',
+    'show_dont_tell': 'Show, Don\'t Tell',
+    'avoid_adverbs': 'Avoid Adverbs',
+    'avoid_passive': 'Avoid Passive Voice',
+    'no_weather_dreams': 'Never Open with Weather or Dreams',
+    'said_bookisms': 'Avoid Said-Bookisms',
+    'kill_darlings': 'Kill Your Darlings',
+    'want_need': 'Want vs. Need',
+    'wound_lie': 'Wound and Lie',
+    'voice_as_character': 'Voice as Character',
+    'egri_premise': "Egri's Premise",
+    'character_as_theme': 'Character as Theme',
+    'flaws_as_strengths': 'Flaws as Strengths',
+    'archetype_vs_cliche': 'Archetype vs. Cliché',
+}
+
+
+def _load_rubric_sections(principles: list[str]) -> str:
+    """Load scoring rubric sections for the given principle names.
+
+    Parses references/scoring-rubrics.md and extracts the full rubric
+    (all 5 score levels with exemplars) for each requested principle.
+
+    Returns the concatenated rubric text, ready to inject into a prompt.
+    """
+    from storyforge.common import get_plugin_dir
+
+    rubric_path = os.path.join(get_plugin_dir(), 'references', 'scoring-rubrics.md')
+    if not os.path.isfile(rubric_path):
+        return ''
+
+    with open(rubric_path) as f:
+        content = f.read()
+
+    # Build set of headings we're looking for
+    target_headings = set()
+    for p in principles:
+        heading = _PRINCIPLE_HEADING_MAP.get(p)
+        if heading:
+            target_headings.add(heading)
+        else:
+            # Fall back to title-casing the snake_case name
+            target_headings.add(p.replace('_', ' ').title())
+
+    if not target_headings:
+        return ''
+
+    # Parse: split on ### headings, capture heading + body
+    sections = re.split(r'^### ', content, flags=re.MULTILINE)
+    results = []
+
+    for section in sections:
+        if not section.strip():
+            continue
+        # First line is the heading
+        first_newline = section.find('\n')
+        if first_newline == -1:
+            continue
+        heading = section[:first_newline].strip()
+
+        if heading in target_headings:
+            # Include the full section (heading + all score levels + exemplars)
+            body = section[first_newline:].strip()
+            results.append(f'### {heading}\n\n{body}')
+
+    return '\n\n---\n\n'.join(results)
+
+
+def _load_author_exemplars(project_dir: str, principles: list[str]) -> str:
+    """Load author exemplar passages for the given principles.
+
+    Reads working/exemplars.csv (if it exists) and returns exemplar
+    excerpts for the targeted principles.  These are the author's own
+    high-scoring passages, collected during prior scoring cycles.
+    """
+    exemplars_path = os.path.join(project_dir, 'working', 'exemplars.csv')
+    if not os.path.isfile(exemplars_path):
+        return ''
+
+    target_set = set(principles)
+    entries = []
+
+    with open(exemplars_path) as f:
+        reader = csv.DictReader(f, delimiter='|')
+        for row in reader:
+            principle = (row.get('principle') or '').strip()
+            if principle not in target_set:
+                continue
+            excerpt = (row.get('excerpt') or '').strip()
+            scene_id = (row.get('scene_id') or '').strip()
+            score = (row.get('score') or '').strip()
+            if excerpt:
+                entries.append(
+                    f'**{principle}** (score {score}, scene `{scene_id}`):\n'
+                    f'> {excerpt}'
+                )
+
+    return '\n\n'.join(entries)
+
+
+def _extract_pass_principles(pass_config: str, purpose: str) -> list[str]:
+    """Extract principle names targeted by this pass.
+
+    Looks for principle names in the pass config targets, guidance, and
+    purpose text.  Returns a list of snake_case principle identifiers.
+    """
+    text = f'{pass_config}\n{purpose}'.lower()
+    found = []
+    for key in _PRINCIPLE_HEADING_MAP:
+        # Match the snake_case key or its space-separated form
+        if key in text or key.replace('_', ' ') in text or key.replace('_', '-') in text:
+            found.append(key)
+    return found
+
+
 def _select_craft_sections(pass_name: str, purpose: str) -> str:
     """Pick relevant craft engine sections based on the pass name and purpose."""
     key = f'{pass_name} {purpose}'.lower()
@@ -482,6 +621,37 @@ def build_revision_prompt(
             + craft_text
         )
 
+    # Scoring rubrics for targeted principles — shows what each score level
+    # looks like with literary exemplars, so the reviser knows what to aim for
+    targeted_principles = _extract_pass_principles(pass_config, purpose)
+    rubric_section = ''
+    if targeted_principles:
+        rubric_text = _load_rubric_sections(targeted_principles)
+        if rubric_text:
+            rubric_section = (
+                '\n## Scoring Rubrics for Targeted Principles\n\n'
+                'These rubrics define what each score level looks like for the '
+                'principles this pass is targeting. Use them to understand what '
+                '"good" means — aim for level 4-5 qualities, eliminate level 1-2 '
+                'patterns. The literary exemplars show the standard.\n\n'
+                + rubric_text
+            )
+
+    # Author exemplars — the author's own high-scoring passages from this
+    # manuscript, showing what the target quality looks like in their voice
+    exemplar_section = ''
+    if targeted_principles:
+        exemplar_text = _load_author_exemplars(project_dir, targeted_principles)
+        if exemplar_text:
+            exemplar_section = (
+                '\n## Author Exemplars\n\n'
+                'These are passages from THIS manuscript that scored highly on '
+                'the targeted principles. They show what the target quality looks '
+                'like in this author\'s voice. Use them as a reference point — '
+                'revised prose should feel like it belongs alongside these passages.\n\n'
+                + exemplar_text
+            )
+
     # --- Assemble the prompt ---
     parts = [
         f'# Revision Pass: {pass_name}\n',
@@ -492,6 +662,8 @@ def build_revision_prompt(
         new_scenes_section,
         overrides_section,
         craft_section,
+        rubric_section,
+        exemplar_section,
     ]
 
     # Mode-specific instructions
@@ -666,11 +838,34 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
             'If a pass configuration was provided above, follow its targets, guidance, '
             'and protection lists precisely. These represent the author\'s intent — '
             'execute on them, do not second-guess them.\n\n'
-            '### Preserve Voice\n\n'
+            '### Preserve Voice and Discriminate Cuts\n\n'
             'Every edit must be consistent with the voice guide provided in the reference context '
-            'above. Do not flatten distinctive character voices. Do not introduce vocabulary, '
-            'rhythms, or registers that violate the established style. When in doubt, preserve '
-            'the original phrasing.\n\n'
+            'above. The voice guide defines each POV character\'s sentence patterns, metaphor '
+            'domains, and emotional registers. Before cutting or rewriting any passage, identify '
+            'which character\'s voice is active and what the voice guide says about that voice.\n\n'
+            '**What "kill darlings" means — and what it does not:**\n\n'
+            'CUT these (they serve the writer, not the story):\n'
+            '- Restated metaphors: a second sentence that says the same thing in different imagery\n'
+            '- Interpretive tags after shown emotion: "She felt the weight of it" when the weight '
+            'was already dramatized through action or physical sensation\n'
+            '- Throat-clearing: "And then," "After a moment," "She realized that," '
+            '"It was clear that," "began to"\n'
+            '- Ornamental elaboration that delays the scene without advancing character or theme\n'
+            '- Passages where cutting loses no meaning — the surrounding prose already conveys it\n\n'
+            'DO NOT CUT these (they serve the story):\n'
+            '- The sentence that delivers the scene\'s value shift or thematic thesis\n'
+            '- Character-specific diction that the voice guide identifies as that character\'s '
+            'pattern (e.g., engineering metaphors for an engineer, food metaphors for a cook, '
+            'polysyndetic chains in a voice that builds through accumulation)\n'
+            '- Physical sensation markers that externalize internal state — these are showing, '
+            'not telling\n'
+            '- Closing images that are the scene\'s earned payoff (a concrete image is not a '
+            '"summary closer" — only cut closers that restate the scene\'s meaning abstractly)\n'
+            '- Lyrical extensions at emotional peaks when the voice guide says this voice earns '
+            'lyricism through contrast with its default spare register\n\n'
+            '**Test before cutting:** If a sentence is doing voice work (matching a pattern the '
+            'voice guide explicitly calls for) AND advancing the scene\'s emotional or thematic '
+            'arc, it is not a darling. Improve it if the phrasing is weak, but do not delete it.\n\n'
             '### Prose Naturalness\n\n'
             'Em dashes are rare — use at most one per scene. Default to commas, parentheses, or '
             'sentence breaks. No antithesis framing — do not structure observations as contrasting '
@@ -713,10 +908,34 @@ def _full_instructions(pass_name: str, purpose: str, api_mode: bool) -> str:
             'and protection lists precisely. These represent the author\'s intent — '
             'execute on them, do not second-guess them.\n\n'
             'Work through each file methodically. Make edits directly to the scene files.\n\n'
-            '### 4. Preserve Voice\n\n'
-            'Every edit must be consistent with the voice guide. Do not flatten distinctive '
-            'character voices. Do not introduce vocabulary, rhythms, or registers that violate '
-            'the established style. When in doubt, preserve the original phrasing.\n\n'
+            '### 4. Preserve Voice and Discriminate Cuts\n\n'
+            'Every edit must be consistent with the voice guide. The voice guide defines each '
+            'POV character\'s sentence patterns, metaphor domains, and emotional registers. '
+            'Before cutting or rewriting any passage, identify which character\'s voice is active '
+            'and what the voice guide says about that voice.\n\n'
+            '**What "kill darlings" means — and what it does not:**\n\n'
+            'CUT these (they serve the writer, not the story):\n'
+            '- Restated metaphors: a second sentence that says the same thing in different imagery\n'
+            '- Interpretive tags after shown emotion: "She felt the weight of it" when the weight '
+            'was already dramatized through action or physical sensation\n'
+            '- Throat-clearing: "And then," "After a moment," "She realized that," '
+            '"It was clear that," "began to"\n'
+            '- Ornamental elaboration that delays the scene without advancing character or theme\n'
+            '- Passages where cutting loses no meaning — the surrounding prose already conveys it\n\n'
+            'DO NOT CUT these (they serve the story):\n'
+            '- The sentence that delivers the scene\'s value shift or thematic thesis\n'
+            '- Character-specific diction that the voice guide identifies as that character\'s '
+            'pattern (e.g., engineering metaphors for an engineer, food metaphors for a cook, '
+            'polysyndetic chains in a voice that builds through accumulation)\n'
+            '- Physical sensation markers that externalize internal state — these are showing, '
+            'not telling\n'
+            '- Closing images that are the scene\'s earned payoff (a concrete image is not a '
+            '"summary closer" — only cut closers that restate the scene\'s meaning abstractly)\n'
+            '- Lyrical extensions at emotional peaks when the voice guide says this voice earns '
+            'lyricism through contrast with its default spare register\n\n'
+            '**Test before cutting:** If a sentence is doing voice work (matching a pattern the '
+            'voice guide explicitly calls for) AND advancing the scene\'s emotional or thematic '
+            'arc, it is not a darling. Improve it if the phrasing is weak, but do not delete it.\n\n'
             '### 5. Prose Naturalness\n\n'
             'Em dashes are rare — use at most one per scene. Default to commas, parentheses, or '
             'sentence breaks. No antithesis framing — do not structure observations as contrasting '

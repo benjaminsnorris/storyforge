@@ -11,12 +11,20 @@ import sys
 import json
 
 
-def extract_scenes_from_response(response: str, scene_dir: str) -> list[str]:
+def _log(msg: str) -> None:
+    """Log to stderr (avoids mixing with stdout scene-ID output)."""
+    print(msg, file=sys.stderr)
+
+
+def extract_scenes_from_response(response: str, scene_dir: str,
+                                  stop_reason: str = 'end_turn') -> list[str]:
     """Extract scene blocks from a Claude response and write them to files.
 
     Args:
         response: The text content from Claude's API response.
         scene_dir: Path to the scenes/ directory where files are written.
+        stop_reason: The API stop_reason. When 'max_tokens', the last scene
+            without an end marker is discarded as likely truncated.
 
     Returns:
         List of scene IDs that were written.
@@ -59,7 +67,11 @@ def extract_scenes_from_response(response: str, scene_dir: str) -> list[str]:
 
     # Write last scene if no end marker
     if current_id and current_lines:
-        _write_scene(current_id, current_lines, scene_dir, scenes_written)
+        if stop_reason == 'max_tokens':
+            _log(f'WARNING: Discarding truncated scene "{current_id}" '
+                 f'(API response hit max_tokens limit)')
+        else:
+            _write_scene(current_id, current_lines, scene_dir, scenes_written)
 
     return scenes_written
 
@@ -123,13 +135,36 @@ def extract_api_response(log_file: str) -> str:
         return ''
 
 
+_SENTENCE_ENDINGS = frozenset('.!?\u2019\u201d\u2014)\'"')
+_WORD_COUNT_COLLAPSE_THRESHOLD = 0.6  # reject if new < 60% of original
+
+
 def _write_scene(scene_id: str, lines: list[str], scene_dir: str, written: list[str]):
-    """Write a scene's content to its file."""
+    """Write a scene's content to its file, with pre-write safety checks."""
     content = _trim_blank_lines('\n'.join(lines))
     if not content:
         return
 
     path = os.path.join(scene_dir, f'{scene_id}.md')
+
+    # Safety: reject if content appears to end mid-sentence
+    last_char = content.rstrip()[-1] if content.rstrip() else ''
+    if last_char and last_char not in _SENTENCE_ENDINGS:
+        _log(f'WARNING: Skipping "{scene_id}" -- appears to end mid-sentence '
+             f'(last char: {last_char!r})')
+        return
+
+    # Safety: reject if word count collapsed >40% vs existing file
+    if os.path.isfile(path):
+        with open(path) as f:
+            old_wc = len(f.read().split())
+        new_wc = len(content.split())
+        if old_wc > 100 and new_wc < old_wc * _WORD_COUNT_COLLAPSE_THRESHOLD:
+            _log(f'WARNING: Skipping "{scene_id}" -- word count collapsed '
+                 f'{old_wc} -> {new_wc} ({new_wc / old_wc:.0%}). '
+                 f'Threshold is {_WORD_COUNT_COLLAPSE_THRESHOLD:.0%}.')
+            return
+
     with open(path, 'w') as f:
         f.write(content)
         f.write('\n')
@@ -170,12 +205,22 @@ def main():
         log_file = sys.argv[2]
         scene_dir = sys.argv[3]
 
+        # Read stop_reason from the JSON response
+        stop_reason = 'end_turn'
+        try:
+            with open(log_file) as f:
+                data = json.load(f)
+            stop_reason = data.get('stop_reason', 'end_turn')
+        except (json.JSONDecodeError, FileNotFoundError):
+            pass
+
         response = extract_api_response(log_file)
         if not response:
             print('No response content found', file=sys.stderr)
             sys.exit(1)
 
-        written = extract_scenes_from_response(response, scene_dir)
+        written = extract_scenes_from_response(response, scene_dir,
+                                                stop_reason=stop_reason)
         for sid in written:
             print(f'Wrote: {sid}')
         print(f'Total: {len(written)} scene(s)')
