@@ -648,6 +648,120 @@ def get_genre_css(plugin_dir: str, genre: str) -> str:
 
 
 # ============================================================================
+# Format generation (epub, html, pdf)
+# ============================================================================
+
+def generate_cover_if_missing(project_dir: str, plugin_dir: str) -> None:
+    """Generate a placeholder SVG cover if no cover image exists."""
+    production_dir = os.path.join(project_dir, 'production')
+    for ext in ('jpg', 'jpeg', 'png', 'webp', 'svg'):
+        if os.path.isfile(os.path.join(production_dir, f'cover.{ext}')):
+            return
+
+    title = _yaml_field(project_dir, 'project.title', 'title') or 'Untitled'
+    author = read_production_field(project_dir, 'author') or ''
+
+    os.makedirs(production_dir, exist_ok=True)
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="2400" '
+        f'viewBox="0 0 1600 2400">\n'
+        f'  <rect width="1600" height="2400" fill="#2c3e50"/>\n'
+        f'  <text x="800" y="1000" text-anchor="middle" '
+        f'font-family="Georgia, serif" font-size="80" fill="#ecf0f1">'
+        f'{title}</text>\n'
+        f'  <text x="800" y="1150" text-anchor="middle" '
+        f'font-family="Georgia, serif" font-size="48" fill="#bdc3c7">'
+        f'{author}</text>\n'
+        f'</svg>\n'
+    )
+    with open(os.path.join(production_dir, 'cover.svg'), 'w') as f:
+        f.write(svg)
+
+
+def generate_epub(project_dir: str, manuscript_file: str,
+                  epub_file: str, plugin_dir: str) -> None:
+    """Generate an epub file from an assembled manuscript via pandoc."""
+    import subprocess
+
+    genre = _yaml_field(project_dir, 'project.genre', 'genre') or 'default'
+    css_file = get_genre_css(plugin_dir, genre)
+
+    # Write metadata YAML to a temp file
+    metadata = generate_epub_metadata(project_dir)
+    meta_file = os.path.join(project_dir, 'working', 'epub-metadata.yaml')
+    os.makedirs(os.path.dirname(meta_file), exist_ok=True)
+    with open(meta_file, 'w') as f:
+        f.write(metadata)
+
+    cmd = [
+        'pandoc', manuscript_file,
+        '-o', epub_file,
+        '--metadata-file', meta_file,
+        '--css', css_file,
+        '--toc', '--toc-depth=1',
+        '--epub-chapter-level=1',
+    ]
+
+    # Add cover image if available
+    cover_image = read_production_field(project_dir, 'cover_image')
+    if cover_image:
+        full_path = os.path.join(project_dir, cover_image)
+        if os.path.isfile(full_path):
+            cmd.extend(['--epub-cover-image', full_path])
+
+    subprocess.run(cmd, check=True)
+
+
+def generate_html(project_dir: str, manuscript_file: str,
+                  html_file: str, plugin_dir: str) -> None:
+    """Generate a standalone HTML file from an assembled manuscript via pandoc."""
+    import subprocess
+
+    genre = _yaml_field(project_dir, 'project.genre', 'genre') or 'default'
+    css_file = get_genre_css(plugin_dir, genre)
+    title = _yaml_field(project_dir, 'project.title', 'title') or 'Untitled'
+
+    cmd = [
+        'pandoc', manuscript_file,
+        '-o', html_file,
+        '--standalone',
+        '--css', css_file,
+        '--toc', '--toc-depth=1',
+        f'--metadata=title:{title}',
+    ]
+    subprocess.run(cmd, check=True)
+
+
+def generate_pdf(project_dir: str, manuscript_file: str,
+                 pdf_file: str, plugin_dir: str) -> None:
+    """Generate a PDF from an assembled manuscript via pandoc + weasyprint."""
+    import subprocess
+
+    genre = _yaml_field(project_dir, 'project.genre', 'genre') or 'default'
+    css_file = get_genre_css(plugin_dir, genre)
+    title = _yaml_field(project_dir, 'project.title', 'title') or 'Untitled'
+
+    # Try weasyprint first (better typography), fall back to default engine
+    cmd = [
+        'pandoc', manuscript_file,
+        '-o', pdf_file,
+        '--pdf-engine=weasyprint',
+        '--css', css_file,
+        f'--metadata=title:{title}',
+    ]
+    r = subprocess.run(cmd, capture_output=True)
+    if r.returncode != 0:
+        # Fall back to default pdf engine (pdflatex/xelatex)
+        cmd = [
+            'pandoc', manuscript_file,
+            '-o', pdf_file,
+            f'--metadata=title:{title}',
+            '-V', 'geometry:margin=1in',
+        ]
+        subprocess.run(cmd, check=True)
+
+
+# ============================================================================
 # Web book generation
 # ============================================================================
 
