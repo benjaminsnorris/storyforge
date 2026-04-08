@@ -323,3 +323,55 @@ class TestGitImports:
             name for name in dir(git_mod)
             if not name.startswith('_')
         ]
+
+
+# ============================================================================
+# v1.4.8 — None column names in _extract_scene_rationales
+# ============================================================================
+
+class TestExtractSceneRationalesNoneColumns:
+    """_extract_scene_rationales must handle None column names.
+
+    Bug: CSV files with trailing delimiters or empty headers produce None
+    column names. Iterating row.items() yields (None, value) pairs, and
+    calling None.endswith('_rationale') raises AttributeError.
+    """
+
+    def test_none_column_skipped(self, tmp_path):
+        """Rows with None column names must not crash."""
+        from storyforge.cmd_revise import _extract_scene_rationales
+
+        # Create a minimal scores directory structure
+        scores_dir = tmp_path / 'working' / 'scores' / 'latest'
+        scores_dir.mkdir(parents=True)
+        scores_file = scores_dir / 'scene-scores.csv'
+        # Write a CSV with a trailing delimiter that produces a None column
+        scores_file.write_text(
+            'id|voice_rationale||\n'
+            'scene-01|Good voice work.||\n'
+        )
+
+        result = _extract_scene_rationales(
+            str(tmp_path), ['scene-01'],
+        )
+        assert 'scene-01' in result
+        assert result['scene-01'] == {'voice': 'Good voice work.'}
+
+    def test_all_none_columns_returns_empty(self, tmp_path):
+        """A CSV where the only non-id columns are None should return empty."""
+        from storyforge.cmd_revise import _extract_scene_rationales
+
+        scores_dir = tmp_path / 'working' / 'scores' / 'latest'
+        scores_dir.mkdir(parents=True)
+        scores_file = scores_dir / 'scene-scores.csv'
+        # Only trailing delimiters, no real rationale columns
+        scores_file.write_text(
+            'id||\n'
+            'scene-01||\n'
+        )
+
+        result = _extract_scene_rationales(
+            str(tmp_path), ['scene-01'],
+        )
+        # scene-01 has no rationales, so it shouldn't appear
+        assert 'scene-01' not in result
