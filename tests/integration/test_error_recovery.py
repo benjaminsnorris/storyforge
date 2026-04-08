@@ -113,12 +113,10 @@ class TestRunParallelResilience:
         assert isinstance(results['a'], RuntimeError)
         assert isinstance(results['b'], RuntimeError)
 
-    def test_empty_items_raises(self):
-        # NOTE: run_parallel with empty items hits max_workers=0 which
-        # raises ValueError from ThreadPoolExecutor. This is a known
-        # edge case — callers should check for empty items first.
-        with pytest.raises(ValueError, match='max_workers must be greater than 0'):
-            run_parallel([], lambda x: x, max_workers=1)
+    def test_empty_items_returns_empty(self):
+        # Fixed in v1.4.12: returns {} for empty items instead of crashing.
+        result = run_parallel([], lambda x: x, max_workers=1)
+        assert result == {}
 
 
 # ---------------------------------------------------------------------------

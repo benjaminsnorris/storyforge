@@ -15,13 +15,13 @@
 This project uses [Storyforge](https://github.com/benjaminsnorris/storyforge). Available skills:
 
 - `/storyforge:forge` — Hub: status, routing, routes to other skills
-- `/storyforge:develop` — World, character, story, timeline development
-- `/storyforge:voice` — Voice and style refinement
-- `/storyforge:scenes` — Scene index management
-- `/storyforge:plan-revision` — Plan revision passes from evaluation results
-- `/storyforge:review` — Review revision results, map findings to changes, assess gaps
-- `/storyforge:recommend` — Assess project state, recommend the highest-value next action
+- `/storyforge:elaborate` — Progressive elaboration: spine, architecture, scene map, briefs, voice, character, world
+- `/storyforge:extract` — Extract structural data from existing prose into the CSV model
+- `/storyforge:hone` — CSV data quality: diagnose and fix briefs, gaps, registries
+- `/storyforge:revise` — Plan and execute revision passes, review results
+- `/storyforge:score` — Craft scoring, weight calibration, author assessment
 - `/storyforge:produce` — Book production: chapter mapping, epub/PDF generation, formatting
+- `/storyforge:publish` — Publish to Bookshelf: web book, dashboard, Supabase
 - `/storyforge:title` — Title and subtitle development, refinement, assessment
 - `/storyforge:press-kit` — Blurbs, jacket copy, author bio, social media, marketing materials
 - `/storyforge:cover` — Cover design: Claude-designed SVG artwork or AI-generated illustrations

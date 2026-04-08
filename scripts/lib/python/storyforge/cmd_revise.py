@@ -1633,6 +1633,6 @@ Rules:
             ['storyforge.yaml', 'working/pipeline.csv'],
         )
         log('')
-        log('Next step: run /storyforge:review to assess revision results')
+        log('Next step: run /storyforge:revise to review results, or /storyforge:score to measure improvement')
 
     log('============================================')
