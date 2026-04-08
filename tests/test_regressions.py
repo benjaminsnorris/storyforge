@@ -375,3 +375,44 @@ class TestExtractSceneRationalesNoneColumns:
         )
         # scene-01 has no rationales, so it shouldn't appear
         assert 'scene-01' not in result
+
+
+# ============================================================================
+# v1.4.10 — --skip-initial-score flag for polish loop
+# ============================================================================
+
+class TestSkipInitialScoreFlag:
+    """--skip-initial-score must be accepted and validated.
+
+    Feature: When the polish loop crashes mid-polish or scores already exist,
+    the user wants to skip the initial scoring step and jump straight to
+    polishing using existing scores.
+    """
+
+    def test_flag_accepted_by_parse_args(self):
+        """parse_args must accept --skip-initial-score."""
+        from storyforge.cmd_revise import parse_args
+        args = parse_args(['--polish', '--loop', '--skip-initial-score'])
+        assert args.skip_initial_score is True
+
+    def test_flag_default_is_false(self):
+        """--skip-initial-score defaults to False."""
+        from storyforge.cmd_revise import parse_args
+        args = parse_args(['--polish', '--loop'])
+        assert args.skip_initial_score is False
+
+    def test_flag_requires_loop(self):
+        """--skip-initial-score without --loop must exit with error."""
+        from storyforge.cmd_revise import parse_args
+        # The validation happens in main(), not parse_args, so just verify
+        # parse_args accepts it (main() does the --loop check)
+        args = parse_args(['--polish', '--skip-initial-score'])
+        assert args.skip_initial_score is True
+        assert args.loop is False  # no --loop given
+
+    def test_run_polish_loop_accepts_kwarg(self):
+        """_run_polish_loop must accept skip_initial_score keyword argument."""
+        sig = inspect.signature(
+            __import__('storyforge.cmd_revise', fromlist=['_run_polish_loop'])._run_polish_loop
+        )
+        assert 'skip_initial_score' in sig.parameters

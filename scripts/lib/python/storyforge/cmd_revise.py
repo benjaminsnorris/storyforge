@@ -66,6 +66,8 @@ def parse_args(argv):
                         help='Autonomous convergence loop: score → polish → re-score until stable (requires --polish)')
     parser.add_argument('--max-loops', type=int, default=5,
                         help='Maximum iterations in --loop mode (default: 5)')
+    parser.add_argument('--skip-initial-score', action='store_true',
+                        help='Skip initial scoring in --polish --loop (use existing scores)')
     parser.add_argument('pass_num', nargs='?', type=int, default=0,
                         help='Start from this pass number (1-indexed; default: first pending)')
     return parser.parse_args(argv)
@@ -639,7 +641,8 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
 
 
 def _run_polish_loop(project_dir: str, max_loops: int,
-                     coaching_override: str | None) -> None:
+                     coaching_override: str | None, *,
+                     skip_initial_score: bool = False) -> None:
     """Score → polish → re-score convergence loop."""
     from storyforge.common import get_coaching_level, read_yaml_field
     from storyforge.git import create_branch, ensure_branch_pushed, commit_and_push
@@ -678,8 +681,20 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     for iteration in range(1, max_loops + 1):
         log(f'\n=== Iteration {iteration}/{max_loops}: Score ===')
 
-        cycle_dir, diag_rows = _run_lightweight_score(project_dir, scene_ids)
-        summary = _summarize_diagnosis(diag_rows)
+        if iteration == 1 and skip_initial_score:
+            # Load existing scores instead of running a new scoring cycle
+            latest_dir = os.path.join(project_dir, 'working', 'scores', 'latest')
+            if not os.path.isdir(latest_dir):
+                log('ERROR: --skip-initial-score but no existing scores in working/scores/latest')
+                sys.exit(1)
+            diag_rows = _read_diagnosis(latest_dir)
+            if not diag_rows:
+                log('WARNING: No diagnosis found in existing scores — generating empty baseline')
+            log('  Skipped initial scoring (--skip-initial-score) — using existing scores')
+            summary = _summarize_diagnosis(diag_rows)
+        else:
+            cycle_dir, diag_rows = _run_lightweight_score(project_dir, scene_ids)
+            summary = _summarize_diagnosis(diag_rows)
 
         if iteration == 1:
             baseline_summary = summary
@@ -1104,9 +1119,15 @@ def main(argv=None):
             print('ERROR: --loop and --interactive are incompatible', file=sys.stderr)
             sys.exit(1)
 
+    # Validate --skip-initial-score
+    if args.skip_initial_score and not args.loop:
+        print('ERROR: --skip-initial-score requires --loop', file=sys.stderr)
+        sys.exit(1)
+
     # Loop mode — takes over execution entirely
     if args.loop:
-        _run_polish_loop(project_dir, args.max_loops, args.coaching)
+        _run_polish_loop(project_dir, args.max_loops, args.coaching,
+                         skip_initial_score=args.skip_initial_score)
         return
 
     # Auto-generate plans
