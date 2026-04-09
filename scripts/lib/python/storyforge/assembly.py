@@ -1133,5 +1133,95 @@ def main():
         sys.exit(1)
 
 
+def generate_publish_manifest(project_dir: str, cover_path: str | None = None) -> str:
+    """Generate a JSON publish manifest from scene files and chapter map.
+
+    Converts each scene's markdown to HTML, groups by chapter from
+    chapter-map.csv, and writes working/publish-manifest.json.
+
+    Args:
+        project_dir: Root directory of the project.
+        cover_path: Optional path to cover image (relative to project_dir).
+
+    Returns:
+        Path to the generated manifest file.
+
+    Raises:
+        ValueError: If the chapter map is stale.
+    """
+    import json
+    from storyforge.common import (check_chapter_map_freshness,
+                                   read_yaml_field as _common_read_yaml_field)
+
+    # Check freshness
+    is_fresh, missing, extra = check_chapter_map_freshness(project_dir)
+    if not is_fresh:
+        parts = []
+        if missing:
+            parts.append(f'scenes not in chapter map: {", ".join(missing)}')
+        if extra:
+            parts.append(f'chapter map references removed scenes: {", ".join(extra)}')
+        raise ValueError(f'Chapter map is stale — {"; ".join(parts)}')
+
+    title = _common_read_yaml_field('project.title', project_dir) or 'Untitled'
+    author = _common_read_yaml_field('project.author', project_dir) or 'Unknown'
+    slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
+
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    total_chapters = count_chapters(project_dir)
+
+    chapters = []
+    for ch_num in range(1, total_chapters + 1):
+        ch_title = read_chapter_field(ch_num, project_dir, 'title')
+        scene_ids = get_chapter_scenes(ch_num, project_dir)
+
+        scenes = []
+        for sort_idx, scene_id in enumerate(scene_ids, 1):
+            scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
+            if not os.path.isfile(scene_file):
+                continue
+
+            with open(scene_file) as f:
+                md = f.read()
+
+            # Strip YAML frontmatter if present
+            if md.startswith('---'):
+                end = md.find('---', 3)
+                if end != -1:
+                    md = md[end + 3:].strip()
+
+            html = _md_to_html(md)
+            word_count = len(md.split())
+
+            scenes.append({
+                'slug': scene_id,
+                'content_html': html.strip(),
+                'word_count': word_count,
+                'sort_order': sort_idx,
+            })
+
+        chapters.append({
+            'number': ch_num,
+            'title': ch_title,
+            'scenes': scenes,
+        })
+
+    manifest = {
+        'title': title,
+        'author': author,
+        'slug': slug,
+        'cover_path': cover_path or '',
+        'generated_at': datetime.utcnow().isoformat() + 'Z',
+        'chapters': chapters,
+    }
+
+    output_path = os.path.join(project_dir, 'working', 'publish-manifest.json')
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'w') as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+    return output_path
+
+
 if __name__ == '__main__':
     main()

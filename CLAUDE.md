@@ -36,6 +36,7 @@ Before writing new code, check if a shared function already exists.
 - `select_model(task_type)` — returns the right model (opus for creative, sonnet for analytical)
 - `select_revision_model(pass_name, purpose)` — model for revision passes
 - `get_coaching_level(project_dir)` — returns full/coach/strict
+- `check_chapter_map_freshness(project_dir)` — returns (is_fresh, missing_from_map, extra_in_map)
 - `get_plugin_dir()` — returns plugin root directory
 - `extract_craft_sections(*section_nums)` — extract from craft engine
 - `install_signal_handlers()` — SIGINT/SIGTERM handling
@@ -321,7 +322,7 @@ Key principles:
 | `reconcile.py` | Backwards-compatible re-exports from hone.py |
 | `visualize.py` | Dashboard data loading |
 | `enrich.py` | Metadata enrichment |
-| `assembly.py` | Chapter assembly |
+| `assembly.py` | Chapter assembly, publish manifest generation |
 | `parsing.py` | Scene content extraction |
 | `project.py` | Project state management |
 | `revision.py` | Revision prompt builders |

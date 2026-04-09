@@ -318,6 +318,53 @@ def get_cycle_eval_dir(project_dir: str, cycle: int | None = None) -> str:
 
 
 # ============================================================================
+# Chapter map freshness
+# ============================================================================
+
+def check_chapter_map_freshness(project_dir: str) -> tuple[bool, list[str], list[str]]:
+    """Compare scene IDs in scenes.csv against chapter-map.csv.
+
+    Scenes with status in ('cut', 'merged', 'archived') are excluded.
+
+    Returns:
+        (is_fresh, missing_from_map, extra_in_map)
+        - is_fresh: True if all active scenes are in the map and vice versa
+        - missing_from_map: scene IDs in scenes.csv but not in chapter-map.csv
+        - extra_in_map: scene IDs in chapter-map.csv but not in scenes.csv (active)
+    """
+    from storyforge.csv_cli import get_column
+
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    chapter_map_csv = os.path.join(project_dir, 'reference', 'chapter-map.csv')
+
+    # Get active scene IDs from scenes.csv
+    active_ids = set()
+    excluded_statuses = {'cut', 'merged', 'archived'}
+    if os.path.isfile(scenes_csv):
+        all_ids = get_column(scenes_csv, 'id')
+        all_statuses = get_column(scenes_csv, 'status')
+        for sid, status in zip(all_ids, all_statuses):
+            if sid and status.strip().lower() not in excluded_statuses:
+                active_ids.add(sid.strip())
+
+    # Get scene IDs from chapter-map.csv
+    map_ids = set()
+    if os.path.isfile(chapter_map_csv):
+        scenes_col = get_column(chapter_map_csv, 'scenes')
+        for cell in scenes_col:
+            for sid in cell.split(';'):
+                sid = sid.strip()
+                if sid:
+                    map_ids.add(sid)
+
+    missing_from_map = sorted(active_ids - map_ids)
+    extra_in_map = sorted(map_ids - active_ids)
+    is_fresh = len(missing_from_map) == 0 and len(extra_in_map) == 0
+
+    return is_fresh, missing_from_map, extra_in_map
+
+
+# ============================================================================
 # Signal handling
 # ============================================================================
 
