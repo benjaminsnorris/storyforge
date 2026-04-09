@@ -150,6 +150,16 @@ def main(argv=None):
     project_dir = detect_project_root()
     log(f'Project root: {project_dir}')
 
+    from storyforge.common import check_chapter_map_freshness
+    is_fresh, missing, extra = check_chapter_map_freshness(project_dir)
+    if not is_fresh:
+        log('WARNING: Chapter map may be out of date')
+        if missing:
+            log(f'  Scenes not in chapter map: {", ".join(missing)}')
+        if extra:
+            log(f'  Chapter map references removed/cut scenes: {", ".join(extra)}')
+        log('  Run the produce skill to update the chapter map before assembling.')
+
     plugin_dir = get_plugin_dir()
     python_lib = _python_lib()
 

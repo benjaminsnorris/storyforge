@@ -207,6 +207,19 @@ def _build_file_list(project_dir, filter_mode, filter_value, range_start,
     chapters_dir = os.path.join(project_dir, 'manuscript', 'chapters')
 
     if filter_mode in ('manuscript', 'chapter'):
+        # Check chapter map freshness for manuscript evaluation
+        from storyforge.common import check_chapter_map_freshness
+        is_fresh, missing, extra = check_chapter_map_freshness(project_dir)
+        if not is_fresh:
+            parts = []
+            if missing:
+                parts.append(f'scenes not in chapter map: {", ".join(missing[:5])}')
+            if extra:
+                parts.append(f'chapter map references removed scenes: {", ".join(extra[:5])}')
+            log(f'ERROR: Chapter map is stale — {"; ".join(parts)}')
+            log('Update the chapter map before evaluating the manuscript.')
+            sys.exit(1)
+
         # Manuscript mode
         if not os.path.isdir(chapters_dir):
             log("ERROR: No assembled chapters found at manuscript/chapters/")
