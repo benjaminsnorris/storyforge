@@ -73,19 +73,7 @@ Show the script's output to the author. It will report chapter count, scene coun
 
 If the script fails, show the error and stop. Do not proceed to dashboard copy or commit.
 
-## Step 6: Copy Dashboard
-
-If a dashboard is available (pre-existing or just generated):
-
-1. **Derive the slug** from the project title in `storyforge.yaml`. Use the same logic as `publish-book.ts`:
-   - Lowercase
-   - Replace `[^a-z0-9]+` with `-`
-   - Trim leading/trailing hyphens
-2. **Copy** `working/dashboard.html` to `<bookshelf_path>/public/dashboards/<slug>.html`.
-
-If no dashboard is available, skip this step.
-
-## Step 7: Cover
+## Step 6: Cover
 
 The cover is only published when the author asks for it (e.g. "publish the cover too", "include the cover", "update the cover").
 
@@ -99,22 +87,22 @@ The script handles everything: copies `manuscript/assets/cover.png` (or `.jpg`) 
 
 If the author doesn't mention the cover, run the publish command without `--cover`.
 
-## Step 8: Commit and Push in Bookshelf
+## Step 7: Commit and Push in Bookshelf
 
-If any files were copied to the bookshelf repo (dashboard, cover):
+If any files were copied to the bookshelf repo (cover with `--cover` flag):
 
 1. Stage the new/changed files.
-2. Commit with message: `Publish <book-title>` (include what was copied, e.g. "dashboard", "dashboard and cover").
+2. Commit with message: `Publish <book-title> cover`.
 3. Push to remote.
 
-Skip this step only if the author explicitly asks not to commit, or if no files were copied.
+Skip this step if no `--cover` flag was used (all content including dashboards goes to Supabase, no filesystem changes).
 
-## Step 9: Summary
+## Step 8: Summary
 
 Report what was published:
 
 - Chapters and scenes published (from script output)
-- Whether the dashboard was copied
+- Whether the dashboard was published (from publish script output)
 - Whether the cover was copied (if applicable)
 - The bookshelf commit (if one was made)
 
