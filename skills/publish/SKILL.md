@@ -31,15 +31,25 @@ Check for the publish script at `~/Developer/bookshelf/scripts/publish-book.ts`.
 - If found, store the bookshelf path (`~/Developer/bookshelf`) and continue.
 - If not found, tell the author: "I couldn't find the Bookshelf project at `~/Developer/bookshelf`. Where is your bookshelf project?" Wait for the path, then verify `scripts/publish-book.ts` exists there.
 
-## Step 3: Assemble Web Book
+## Step 3: Generate Publish Manifest
 
-Check if `manuscript/output/web/chapters/` contains chapter files. If not (or if the author wants a fresh build), assemble:
+Generate the publish manifest. This converts each scene's markdown to HTML, groups by chapter map, and writes `working/publish-manifest.json`:
 
-```bash
-cd <project_dir> && ./storyforge assemble --format web
+```python
+# Run from project directory
+from storyforge.assembly import generate_publish_manifest
+path = generate_publish_manifest('<project_dir>')
 ```
 
-If the runner script doesn't exist, offer to create one. If `reference/chapter-map.csv` doesn't exist, help the author create it first (invoke `produce` skill for chapter mapping).
+Or offer to run it as a shell command:
+
+```bash
+cd <project_dir> && PYTHONPATH=<plugin_path>/scripts/lib/python python3 -c "from storyforge.assembly import generate_publish_manifest; print(generate_publish_manifest('.'))"
+```
+
+If this fails with a **"Chapter map is stale"** error, the chapter map is out of sync with scenes.csv. Help the author update the chapter map first (invoke `produce` skill for chapter mapping). The error will list which scenes are missing from the map or which map entries reference removed scenes.
+
+If `reference/chapter-map.csv` doesn't exist, help the author create it first (invoke `produce` skill).
 
 ## Step 4: Generate Dashboard
 
@@ -53,10 +63,10 @@ This creates `working/dashboard.html` with the multi-page visualization (overvie
 
 ## Step 5: Publish Content
 
-Run the bookshelf publish script. The book repo path is the current project directory (where `storyforge.yaml` lives).
+Run the bookshelf publish script with the manifest. The `--manifest` flag tells it to read the JSON directly instead of parsing assembled HTML.
 
 ```bash
-cd <bookshelf_path> && npx tsx scripts/publish-book.ts <book_repo_path>
+cd <bookshelf_path> && npx tsx scripts/publish-book.ts <book_repo_path> --manifest <project_dir>/working/publish-manifest.json
 ```
 
 Show the script's output to the author. It will report chapter count, scene count, and word count.
@@ -82,7 +92,7 @@ The cover is only published when the author asks for it (e.g. "publish the cover
 When requested, add `--cover` to the publish command in Step 5:
 
 ```bash
-cd <bookshelf_path> && npx tsx scripts/publish-book.ts <book_repo_path> --cover
+cd <bookshelf_path> && npx tsx scripts/publish-book.ts <book_repo_path> --manifest <project_dir>/working/publish-manifest.json --cover
 ```
 
 The script handles everything: copies `manuscript/assets/cover.png` (or `.jpg`) to `public/covers/<slug>.png` and sets `cover_image_url` in the database.
