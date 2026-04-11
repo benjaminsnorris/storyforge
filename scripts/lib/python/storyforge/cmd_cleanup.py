@@ -21,6 +21,7 @@ import tempfile
 
 from storyforge.common import detect_project_root, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
+from storyforge.parsing import clean_scene_content, extract_single_scene
 
 
 # ============================================================================
@@ -521,6 +522,50 @@ def report_unexpected_files(project_dir: str) -> list[str]:
 
 
 # ============================================================================
+# Scene file cleanup
+# ============================================================================
+
+def clean_scene_files(project_dir: str, dry_run: bool = False,
+                      verbose: bool = False) -> int:
+    """Strip writing-agent artifacts from scene files.
+
+    Removes scene markers (=== SCENE: id ===), leading H1/H2 title headers,
+    and trailing Continuity Tracker Update blocks from all scene files.
+
+    Returns the number of files that were (or would be) modified.
+    """
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    if not os.path.isdir(scenes_dir):
+        return 0
+
+    changed = 0
+    for filename in sorted(os.listdir(scenes_dir)):
+        if not filename.endswith('.md'):
+            continue
+        filepath = os.path.join(scenes_dir, filename)
+        with open(filepath, encoding='utf-8') as f:
+            original = f.read()
+
+        cleaned = original
+        # Strip === SCENE: id === / === END SCENE: id === markers
+        extracted = extract_single_scene(cleaned)
+        if extracted is not None:
+            cleaned = extracted
+        # Strip title headers and continuity tracker blocks
+        cleaned = clean_scene_content(cleaned)
+
+        if cleaned != original:
+            changed += 1
+            if verbose or dry_run:
+                log(f'  {"Would clean" if dry_run else "Cleaned"}: {filename}')
+            if not dry_run:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(cleaned)
+
+    return changed
+
+
+# ============================================================================
 # Argument parsing
 # ============================================================================
 
@@ -533,6 +578,9 @@ def parse_args(argv):
                         help='Report what would change without modifying anything')
     parser.add_argument('--verbose', action='store_true',
                         help='Detailed output for each step')
+    parser.add_argument('--scenes', action='store_true',
+                        help='Strip writing-agent artifacts (title headers, '
+                             'continuity blocks, scene markers) from scene files')
     return parser.parse_args(argv)
 
 
@@ -688,19 +736,29 @@ def main(argv=None):
     else:
         dedup_pipeline_reviews(project_dir)
 
-    # Step 9: CSV integrity report
+    # Step 9: Scene file cleanup (only with --scenes)
+    if args.scenes:
+        log('Cleaning scene files...')
+        cleaned = clean_scene_files(project_dir, dry_run=args.dry_run,
+                                    verbose=args.verbose)
+        if cleaned:
+            log(f'  {"Would clean" if args.dry_run else "Cleaned"} {cleaned} scene file(s)')
+        else:
+            log('  All scene files are clean.')
+
+    # Step 10: CSV integrity report
     log('')
     log('=== CSV Integrity Report ===')
     for issue in report_csv_integrity(project_dir):
         log(issue)
 
-    # Step 10: Unexpected files report
+    # Step 11: Unexpected files report
     log('')
     log('=== Unexpected Files Report ===')
     for issue in report_unexpected_files(project_dir):
         log(issue)
 
-    # Step 11: Commit (unless dry-run)
+    # Step 12: Commit (unless dry-run)
     if not args.dry_run:
         git_dir = os.path.join(project_dir, '.git')
         if shutil.which('git') and os.path.isdir(git_dir):
