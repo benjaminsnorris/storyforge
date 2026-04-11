@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import glob
+import json
 import os
 import re
 import shutil
@@ -108,7 +109,7 @@ EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
 )
 EXPECTED_WORKING_FILES = set(
-    'pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html'.split()
+    'pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html cleanup-report.json'.split()
 )
 
 
@@ -685,72 +686,164 @@ def parse_args(argv):
 # Main
 # ============================================================================
 
-def _action_for_issue(issue: str, rename_pairs: dict[str, list[tuple[str, str]]]) -> str:
-    """Return an actionable description for a raw issue string."""
+def _classify_issue(issue: str, rename_pairs: dict[str, list[tuple[str, str]]]) -> dict | None:
+    """Convert a raw issue string into a structured finding dict.
+
+    Returns None for issues that should be suppressed (e.g. the EXTRA_COLUMN
+    side of a rename pair).
+
+    Each dict has: type, file, detail, action, command (optional), severity.
+    - severity: 'error' (breaks pipeline), 'warning' (should fix),
+                'info' (informational only)
+    """
     if issue.startswith('MISSING_CSV:'):
         path = issue.split(':', 1)[1]
         if path.startswith('working/'):
-            return f'{path} — will be created automatically on first use'
-        return f'{path} — run: storyforge elaborate (or copy from templates/)'
+            return {
+                'type': 'missing_csv', 'file': path,
+                'detail': f'{path} does not exist',
+                'action': 'Will be created automatically on first use',
+                'severity': 'info',
+            }
+        return {
+            'type': 'missing_csv', 'file': path,
+            'detail': f'{path} does not exist',
+            'action': f'Copy from templates/ or run storyforge elaborate',
+            'command': f'cp templates/{path.removeprefix("reference/")} {path}',
+            'severity': 'warning',
+        }
 
     if issue.startswith('EMPTY_CSV:'):
         path = issue.split(':', 1)[1]
-        return f'{path} is empty — check if file was truncated; restore header from templates/'
+        return {
+            'type': 'empty_csv', 'file': path,
+            'detail': f'{path} is empty (no header row)',
+            'action': 'Restore header from templates/',
+            'severity': 'error',
+        }
 
     if issue.startswith('MISSING_COLUMN:'):
         _, path, col = issue.split(':', 2)
-        # Check if this is part of a rename pair
         pairs = rename_pairs.get(path, [])
         for missing, extra in pairs:
             if col == missing:
-                return f'{path}: rename column "{extra}" → "{missing}"'
-        return f'{path}: add column "{col}" to header (and empty values to existing rows)'
+                return {
+                    'type': 'rename_column', 'file': path,
+                    'detail': f'Column "{extra}" should be "{missing}"',
+                    'action': f'Rename column "{extra}" to "{missing}" in header',
+                    'rename_from': extra, 'rename_to': missing,
+                    'severity': 'warning',
+                }
+        return {
+            'type': 'missing_column', 'file': path, 'column': col,
+            'detail': f'{path} is missing column "{col}"',
+            'action': f'Add "{col}" to header and empty values to existing rows',
+            'severity': 'warning',
+        }
 
     if issue.startswith('EXTRA_COLUMN:'):
         _, path, col = issue.split(':', 2)
-        # Suppress if already covered by a rename suggestion
         pairs = rename_pairs.get(path, [])
         for missing, extra in pairs:
             if col == extra:
-                return ''  # Already reported as a rename under MISSING_COLUMN
-        return f'{path}: unexpected column "{col}" — verify if it should be removed or added to schema'
+                return None  # Covered by the rename_column finding
+        return {
+            'type': 'extra_column', 'file': path, 'column': col,
+            'detail': f'{path} has unexpected column "{col}"',
+            'action': f'Verify if "{col}" should be removed or added to schema',
+            'severity': 'info',
+        }
 
     if issue.startswith('ORPHAN_FILE:'):
         sid = issue.split(':', 1)[1]
-        return f'scenes/{sid}.md has no metadata row — run: storyforge extract --scenes {sid}'
+        return {
+            'type': 'orphan_file', 'file': f'scenes/{sid}.md', 'scene_id': sid,
+            'detail': f'scenes/{sid}.md has no metadata row',
+            'action': 'Extract metadata or remove scene file',
+            'command': f'storyforge extract --scenes {sid}',
+            'severity': 'warning',
+        }
 
     if issue.startswith('ORPHAN_META:'):
         sid = issue.split(':', 1)[1]
-        return f'{sid} has metadata but no scene file — remove from CSVs or create scenes/{sid}.md'
+        return {
+            'type': 'orphan_meta', 'file': 'reference/scenes.csv',
+            'scene_id': sid,
+            'detail': f'"{sid}" has metadata but no scene file',
+            'action': f'Remove rows for "{sid}" from CSVs or create scenes/{sid}.md',
+            'severity': 'warning',
+        }
 
     if issue.startswith('MISSING_INTENT:'):
         sid = issue.split(':', 1)[1]
-        return f'{sid} is in scenes.csv but not scene-intent.csv — run: storyforge hone --domain gaps'
+        return {
+            'type': 'missing_intent', 'file': 'reference/scene-intent.csv',
+            'scene_id': sid,
+            'detail': f'"{sid}" is in scenes.csv but not scene-intent.csv',
+            'action': 'Fill intent gaps',
+            'command': 'storyforge hone --domain gaps',
+            'severity': 'warning',
+        }
 
     if issue.startswith('EXTRA_INTENT:'):
         sid = issue.split(':', 1)[1]
-        return f'{sid} is in scene-intent.csv but not scenes.csv — remove the row or add to scenes.csv'
+        return {
+            'type': 'extra_intent', 'file': 'reference/scene-intent.csv',
+            'scene_id': sid,
+            'detail': f'"{sid}" is in scene-intent.csv but not scenes.csv',
+            'action': f'Remove the row from scene-intent.csv or add "{sid}" to scenes.csv',
+            'severity': 'warning',
+        }
 
     if issue.startswith('BAD_CHAPTER_REF:'):
         sid = issue.split(':', 1)[1]
-        return f'chapter-map.csv references "{sid}" which doesn\'t exist — update the chapter map'
+        return {
+            'type': 'bad_chapter_ref', 'file': 'reference/chapter-map.csv',
+            'scene_id': sid,
+            'detail': f'chapter-map.csv references "{sid}" which doesn\'t exist',
+            'action': 'Update the chapter map to remove or replace the reference',
+            'severity': 'error',
+        }
 
     if issue.startswith('SEQ_NEEDS_RENUMBER:'):
-        return 'scenes.csv has sequence gaps or non-integer values — run: storyforge scenes-setup --renumber'
+        return {
+            'type': 'seq_needs_renumber', 'file': 'reference/scenes.csv',
+            'detail': 'Sequence has gaps or non-integer values',
+            'action': 'Renumber scene sequences',
+            'command': 'storyforge scenes-setup --renumber',
+            'severity': 'warning',
+        }
 
     if issue.startswith('UNKNOWN_CHARACTER:'):
         name = issue.split(':', 1)[1]
-        return f'"{name}" appears in scene-intent.csv but not characters.csv — run: storyforge hone --domain registries'
+        return {
+            'type': 'unknown_character', 'file': 'reference/characters.csv',
+            'character': name,
+            'detail': f'"{name}" appears in scene-intent.csv but not characters.csv',
+            'action': 'Normalize character registries',
+            'command': 'storyforge hone --domain registries',
+            'severity': 'warning',
+        }
 
     if issue.startswith('UNEXPECTED_DIR:'):
         path = issue.split(':', 1)[1]
-        return f'{path}/ — review manually; may be leftover from an old version'
+        return {
+            'type': 'unexpected_dir', 'file': path,
+            'detail': f'{path}/ is not expected',
+            'action': 'Review manually; may be leftover from an old version',
+            'severity': 'info',
+        }
 
     if issue.startswith('UNEXPECTED_FILE:'):
         path = issue.split(':', 1)[1]
-        return f'{path} — review manually; may be leftover from an old version'
+        return {
+            'type': 'unexpected_file', 'file': path,
+            'detail': f'{path} is not expected',
+            'action': 'Review manually; may be leftover from an old version',
+            'severity': 'info',
+        }
 
-    return issue
+    return {'type': 'unknown', 'detail': issue, 'action': issue, 'severity': 'info'}
 
 
 def _detect_rename_pairs(issues: list[str]) -> dict[str, list[tuple[str, str]]]:
@@ -779,59 +872,212 @@ def _detect_rename_pairs(issues: list[str]) -> dict[str, list[tuple[str, str]]]:
     return pairs
 
 
-def _run_csv_reports(project_dir: str) -> None:
-    """Run all CSV reports with actionable output and a summary."""
-    all_actions: list[str] = []
+def _check_scene_artifacts(project_dir: str) -> list[dict]:
+    """Check scene files for writing-agent artifacts without modifying them.
 
-    # --- Schema ---
-    log('=== CSV Schema Report ===')
+    Returns a list of finding dicts for scenes that need cleaning.
+    """
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    if not os.path.isdir(scenes_dir):
+        return []
+
+    findings: list[dict] = []
+    dirty_count = 0
+    for filename in sorted(os.listdir(scenes_dir)):
+        if not filename.endswith('.md'):
+            continue
+        filepath = os.path.join(scenes_dir, filename)
+        with open(filepath, encoding='utf-8') as f:
+            original = f.read()
+
+        cleaned = original
+        extracted = extract_single_scene(cleaned)
+        if extracted is not None:
+            cleaned = extracted
+        cleaned = clean_scene_content(cleaned)
+
+        if cleaned != original:
+            dirty_count += 1
+
+    if dirty_count > 0:
+        findings.append({
+            'type': 'scene_artifacts', 'file': 'scenes/',
+            'category': 'scenes',
+            'detail': f'{dirty_count} scene file(s) contain writing-agent artifacts '
+                      f'(title headers, continuity blocks, or scene markers)',
+            'action': 'Strip artifacts from scene files',
+            'command': 'storyforge cleanup --scenes',
+            'severity': 'warning',
+        })
+    return findings
+
+
+def _check_crlf(project_dir: str) -> list[dict]:
+    """Check CSV files for CRLF line endings."""
+    findings: list[dict] = []
+    dirty_files: list[str] = []
+    for rel_path in EXPECTED_CSV_SCHEMAS:
+        csv_path = os.path.join(project_dir, rel_path)
+        if not os.path.isfile(csv_path):
+            continue
+        with open(csv_path, 'rb') as f:
+            if b'\r\n' in f.read():
+                dirty_files.append(rel_path)
+
+    if dirty_files:
+        findings.append({
+            'type': 'crlf_line_endings', 'file': '; '.join(dirty_files),
+            'category': 'structure',
+            'detail': f'{len(dirty_files)} CSV file(s) have CRLF line endings: '
+                      f'{", ".join(dirty_files[:5])}'
+                      f'{"..." if len(dirty_files) > 5 else ""}',
+            'action': 'Normalize line endings to LF',
+            'command': "find reference working -name '*.csv' -exec sed -i '' $'s/\\r$//' {} +",
+            'severity': 'warning',
+        })
+    return findings
+
+
+def build_cleanup_report(project_dir: str) -> dict:
+    """Build a full structured cleanup report covering all checks.
+
+    Returns a dict with:
+        findings: list of finding dicts (type, file, detail, action, severity, category, ...)
+        action_items: list of actionable finding dicts (severity != 'info')
+        summary: dict with counts by severity and category
+    """
+    all_findings: list[dict] = []
+
+    # --- Structure checks ---
+    # Missing directories
+    for d in EXPECTED_DIRS:
+        if not os.path.isdir(os.path.join(project_dir, d)):
+            all_findings.append({
+                'type': 'missing_dir', 'file': d,
+                'category': 'structure',
+                'detail': f'{d}/ does not exist',
+                'action': f'Created by storyforge cleanup',
+                'severity': 'info',
+            })
+
+    # storyforge.yaml
+    yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+    if not os.path.isfile(yaml_path):
+        all_findings.append({
+            'type': 'missing_yaml', 'file': 'storyforge.yaml',
+            'category': 'structure',
+            'detail': 'storyforge.yaml not found',
+            'action': 'Initialize with storyforge init or create manually',
+            'command': 'storyforge init',
+            'severity': 'error',
+        })
+
+    # CRLF check
+    all_findings.extend(_check_crlf(project_dir))
+
+    # --- Scene artifacts ---
+    all_findings.extend(_check_scene_artifacts(project_dir))
+
+    # --- CSV schema ---
     schema_issues = report_csv_schema(project_dir)
     rename_pairs = _detect_rename_pairs(schema_issues)
-    if schema_issues:
-        for issue in schema_issues:
-            action = _action_for_issue(issue, rename_pairs)
-            if action:
-                log(f'  {action}')
-                # Collect non-informational actions for summary
-                if 'will be created automatically' not in action:
-                    all_actions.append(action)
-    else:
-        log('  All CSV files present with expected columns.')
+    for issue in schema_issues:
+        finding = _classify_issue(issue, rename_pairs)
+        if finding:
+            finding['category'] = 'schema'
+            all_findings.append(finding)
 
-    # --- Row integrity ---
-    log('')
-    log('=== CSV Integrity Report ===')
-    integrity_issues = report_csv_integrity(project_dir)
-    if integrity_issues:
-        for issue in integrity_issues:
-            action = _action_for_issue(issue, {})
-            if action:
-                log(f'  {action}')
-                all_actions.append(action)
-    else:
-        log('  No integrity issues found.')
+    # --- CSV row integrity ---
+    for issue in report_csv_integrity(project_dir):
+        finding = _classify_issue(issue, {})
+        if finding:
+            finding['category'] = 'integrity'
+            all_findings.append(finding)
 
     # --- Unexpected files ---
-    log('')
-    log('=== Unexpected Files Report ===')
-    unexpected_issues = report_unexpected_files(project_dir)
-    if unexpected_issues:
-        for issue in unexpected_issues:
-            action = _action_for_issue(issue, {})
-            if action:
-                log(f'  {action}')
-    else:
-        log('  No unexpected files found.')
+    for issue in report_unexpected_files(project_dir):
+        finding = _classify_issue(issue, {})
+        if finding:
+            finding['category'] = 'unexpected'
+            all_findings.append(finding)
 
-    # --- Summary ---
-    if all_actions:
+    action_items = [f for f in all_findings if f['severity'] != 'info']
+
+    return {
+        'findings': all_findings,
+        'action_items': action_items,
+        'summary': {
+            'total': len(all_findings),
+            'errors': sum(1 for f in all_findings if f['severity'] == 'error'),
+            'warnings': sum(1 for f in all_findings if f['severity'] == 'warning'),
+            'info': sum(1 for f in all_findings if f['severity'] == 'info'),
+        },
+    }
+
+
+def _print_report(report: dict) -> None:
+    """Print a human-readable report to stdout via log()."""
+    findings = report['findings']
+    action_items = report['action_items']
+    summary = report['summary']
+
+    # Group by category for display
+    categories = [
+        ('structure', 'Project Structure'),
+        ('scenes', 'Scene Files'),
+        ('schema', 'CSV Schema'),
+        ('integrity', 'CSV Integrity'),
+        ('unexpected', 'Unexpected Files'),
+    ]
+    for category, heading in categories:
+        group = [f for f in findings if f.get('category') == category]
+        if not group:
+            continue
+        log(f'=== {heading} ===')
+        for f in group:
+            severity_tag = f'[{f["severity"].upper()}]'
+            log(f'  {severity_tag} {f["detail"]}')
+            log(f'         → {f["action"]}')
+            if 'command' in f:
+                log(f'           $ {f["command"]}')
         log('')
-        log(f'=== Action Items ({len(all_actions)}) ===')
-        for i, action in enumerate(all_actions, 1):
-            log(f'  {i}. {action}')
+
+    # Action items summary
+    if action_items:
+        log(f'=== Action Items ({len(action_items)}) ===')
+        for i, item in enumerate(action_items, 1):
+            if 'command' in item:
+                log(f'  {i}. {item["action"]}  →  {item["command"]}')
+            else:
+                log(f'  {i}. {item["detail"]}: {item["action"]}')
     else:
-        log('')
-        log('=== No action items — project CSVs are clean ===')
+        log('=== No action items — project is clean ===')
+
+    log('')
+    log(f'Summary: {summary["errors"]} error(s), '
+        f'{summary["warnings"]} warning(s), {summary["info"]} info')
+
+
+def _write_report(report: dict, project_dir: str) -> str:
+    """Write the report as JSON to working/cleanup-report.json.
+
+    Returns the path to the written file.
+    """
+    working_dir = os.path.join(project_dir, 'working')
+    os.makedirs(working_dir, exist_ok=True)
+    report_path = os.path.join(working_dir, 'cleanup-report.json')
+    with open(report_path, 'w') as f:
+        json.dump(report, f, indent=2)
+        f.write('\n')
+    return report_path
+
+
+def _run_and_write_report(project_dir: str) -> None:
+    """Build the full cleanup report, print it, and write JSON."""
+    report = build_cleanup_report(project_dir)
+    _print_report(report)
+    report_path = _write_report(report, project_dir)
+    log(f'Report written to {report_path}')
 
 
 def main(argv=None):
@@ -839,11 +1085,11 @@ def main(argv=None):
     project_dir = detect_project_root()
     log(f'Project root: {project_dir}')
 
-    # --csv: run only the CSV reports and exit
+    # --csv: run only the report and exit (no modifications)
     if args.csv:
-        _run_csv_reports(project_dir)
+        _run_and_write_report(project_dir)
         log('')
-        log('CSV check complete.')
+        log('Check complete.')
         return
 
     def vlog(msg):
@@ -999,9 +1245,9 @@ def main(argv=None):
         else:
             log('  All scene files are clean.')
 
-    # Steps 10-12: CSV reports
+    # Steps 10-12: Full report
     log('')
-    _run_csv_reports(project_dir)
+    _run_and_write_report(project_dir)
 
     # Step 13: Commit (unless dry-run)
     if not args.dry_run:
