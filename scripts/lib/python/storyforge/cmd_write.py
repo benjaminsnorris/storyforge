@@ -326,15 +326,20 @@ def _build_prompt(scene_id: str, project_dir: str, coaching: str,
 
 def _extract_scene_from_response(log_file: str, scene_file: str) -> None:
     """Extract scene prose from API response."""
-    from storyforge.parsing import extract_single_scene
+    from storyforge.parsing import extract_single_scene, clean_scene_content
     text = extract_text_from_file(log_file)
     if not text:
         log(f'WARNING: Empty API response for {scene_file}')
         return
 
     extracted = extract_single_scene(text)
+    content = extracted if extracted else text
+
+    # Strip writing-agent artifacts (scene title headers, continuity blocks)
+    content = clean_scene_content(content)
+
     with open(scene_file, 'w') as f:
-        f.write(extracted if extracted else text)
+        f.write(content)
 
 
 def _verify_and_commit_scene(scene_id: str, project_dir: str, scenes_dir: str,
