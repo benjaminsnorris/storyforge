@@ -437,17 +437,19 @@ def _build_overrides_section(project_dir: str, pass_config: str) -> str:
     lines = []
     if target_ids:
         for row in rows:
-            scene_id = row.get('id', row.get(list(row.keys())[0], '')).strip()
-            if scene_id in target_ids:
-                # Columns: id, principle, directive (or similar)
-                cols = list(row.values())
-                if len(cols) >= 3:
-                    lines.append(f"- [{cols[0].strip()}] {cols[1].strip()}: {cols[2].strip()}")
+            rid = row.get('id', '').strip()
+            if rid in target_ids:
+                principle = row.get('principle', '').strip()
+                directive = row.get('directive', '').strip()
+                if rid and principle and directive:
+                    lines.append(f"- [{rid}] {principle}: {directive}")
     else:
         for row in rows:
-            cols = list(row.values())
-            if len(cols) >= 3:
-                lines.append(f"- [{cols[0].strip()}] {cols[1].strip()}: {cols[2].strip()}")
+            rid = row.get('id', '').strip()
+            principle = row.get('principle', '').strip()
+            directive = row.get('directive', '').strip()
+            if rid and principle and directive:
+                lines.append(f"- [{rid}] {principle}: {directive}")
 
     if not lines:
         return ''

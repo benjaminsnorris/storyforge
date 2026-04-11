@@ -481,6 +481,30 @@ def report_csv_schema(project_dir: str) -> list[str]:
 # CSV Integrity Report
 # ============================================================================
 
+def _read_csv_column(csv_path: str, column: str) -> list[str]:
+    """Read a single column from a pipe-delimited CSV by name.
+
+    Returns a list of non-empty stripped values. Returns [] if the file
+    doesn't exist or the column isn't found.
+    """
+    if not os.path.isfile(csv_path):
+        return []
+    with open(csv_path) as f:
+        lines = f.readlines()
+    if not lines:
+        return []
+    header = [h.strip() for h in lines[0].strip().split('|')]
+    if column not in header:
+        return []
+    idx = header.index(column)
+    values = []
+    for line in lines[1:]:
+        parts = line.strip().split('|')
+        if idx < len(parts) and parts[idx].strip():
+            values.append(parts[idx].strip())
+    return values
+
+
 def report_csv_integrity(project_dir: str) -> list[str]:
     """Check CSV integrity. Returns list of issue strings."""
     issues = []
@@ -490,16 +514,9 @@ def report_csv_integrity(project_dir: str) -> list[str]:
     chars_csv = os.path.join(project_dir, 'reference', 'characters.csv')
     scenes_dir = os.path.join(project_dir, 'scenes')
 
-    def _read_ids(csv_path):
-        if not os.path.isfile(csv_path):
-            return set()
-        with open(csv_path) as f:
-            lines = f.readlines()
-        return {line.split('|')[0].strip() for line in lines[1:] if line.strip()}
-
     # Scene files vs metadata
     if os.path.isfile(meta_csv) and os.path.isdir(scenes_dir):
-        meta_ids = _read_ids(meta_csv)
+        meta_ids = set(_read_csv_column(meta_csv, 'id'))
         file_ids = set()
         for f in os.listdir(scenes_dir):
             if f.endswith('.md'):
@@ -511,8 +528,8 @@ def report_csv_integrity(project_dir: str) -> list[str]:
 
     # Metadata vs intent
     if os.path.isfile(meta_csv) and os.path.isfile(intent_csv):
-        meta_ids = _read_ids(meta_csv)
-        intent_ids = _read_ids(intent_csv)
+        meta_ids = set(_read_csv_column(meta_csv, 'id'))
+        intent_ids = set(_read_csv_column(intent_csv, 'id'))
         for mid in sorted(meta_ids - intent_ids):
             issues.append(f'MISSING_INTENT:{mid}')
         for iid in sorted(intent_ids - meta_ids):
@@ -520,26 +537,16 @@ def report_csv_integrity(project_dir: str) -> list[str]:
 
     # Chapter map references
     if os.path.isfile(chapter_csv) and os.path.isfile(meta_csv):
-        meta_ids = _read_ids(meta_csv)
-        with open(chapter_csv) as f:
-            lines = f.readlines()
-        for line in lines[1:]:
-            parts = line.strip().split('|')
-            if len(parts) > 4:
-                for sid in parts[4].split(';'):
-                    sid = sid.strip()
-                    if sid and sid not in meta_ids:
-                        issues.append(f'BAD_CHAPTER_REF:{sid}')
+        meta_ids = set(_read_csv_column(meta_csv, 'id'))
+        for scenes_cell in _read_csv_column(chapter_csv, 'scenes'):
+            for sid in scenes_cell.split(';'):
+                sid = sid.strip()
+                if sid and sid not in meta_ids:
+                    issues.append(f'BAD_CHAPTER_REF:{sid}')
 
     # Sequence gaps
     if os.path.isfile(meta_csv):
-        with open(meta_csv) as f:
-            lines = f.readlines()
-        seqs = []
-        for line in lines[1:]:
-            parts = line.strip().split('|')
-            if len(parts) > 1 and parts[1].strip():
-                seqs.append(parts[1].strip())
+        seqs = _read_csv_column(meta_csv, 'seq')
         needs_renumber = False
         prev = 0
         for s in sorted(seqs, key=lambda x: float(x) if re.match(r'^[\d.]+$', x) else 0):
@@ -553,33 +560,22 @@ def report_csv_integrity(project_dir: str) -> list[str]:
         if needs_renumber:
             issues.append('SEQ_NEEDS_RENUMBER:gaps or non-integer seq values found')
 
-    # Unknown characters
+    # Unknown characters — build known set from id + aliases columns
     if os.path.isfile(intent_csv) and os.path.isfile(chars_csv):
-        with open(chars_csv) as f:
-            clines = f.readlines()
         known = set()
-        for line in clines[1:]:
-            parts = line.strip().split('|')
-            for i in (1, 2):
-                if i < len(parts):
-                    for name in parts[i].split(';'):
-                        name = name.strip()
-                        if name:
-                            known.add(name)
+        for col in ('id', 'aliases'):
+            for val in _read_csv_column(chars_csv, col):
+                for name in val.split(';'):
+                    name = name.strip()
+                    if name:
+                        known.add(name)
 
-        with open(intent_csv) as f:
-            ilines = f.readlines()
-        header = ilines[0].strip().split('|') if ilines else []
-        char_idx = header.index('characters') if 'characters' in header else -1
         used = set()
-        if char_idx >= 0:
-            for line in ilines[1:]:
-                parts = line.strip().split('|')
-                if char_idx < len(parts):
-                    for name in parts[char_idx].split(';'):
-                        name = name.strip()
-                        if name:
-                            used.add(name)
+        for val in _read_csv_column(intent_csv, 'characters'):
+            for name in val.split(';'):
+                name = name.strip()
+                if name:
+                    used.add(name)
         for name in sorted(used - known):
             issues.append(f'UNKNOWN_CHARACTER:{name}')
 
