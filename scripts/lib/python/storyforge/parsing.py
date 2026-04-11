@@ -172,6 +172,64 @@ def _write_scene(scene_id: str, lines: list[str], scene_dir: str, written: list[
     written.append(scene_id)
 
 
+def clean_scene_content(text: str) -> str:
+    """Strip writing-agent artifacts from scene content.
+
+    Removes two common artifacts that the writing agent sometimes produces:
+    1. Leading H1/H2 scene title headers (and any blank lines after them)
+    2. Trailing ``---`` separator followed by a Continuity Tracker Update block
+
+    The result is trimmed of leading/trailing whitespace and given a single
+    trailing newline.
+
+    Args:
+        text: Raw scene content (prose with possible artifacts).
+
+    Returns:
+        Cleaned scene content.
+    """
+    if not text or not text.strip():
+        return text
+
+    lines = text.splitlines()
+
+    # --- Strip leading H1/H2 title headers ---
+    # Skip any leading blank lines first, then check for a header.
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if lines and re.match(r'^#{1,2}\s+\S', lines[0]):
+        lines.pop(0)
+        # Strip blank lines immediately after the removed header
+        while lines and not lines[0].strip():
+            lines.pop(0)
+
+    # --- Strip trailing Continuity Tracker Update block ---
+    # Look for a ``---`` separator followed by a ``# Continuity Tracker``
+    # header (any heading level). Everything from the separator onward is
+    # removed.
+    separator_idx = None
+    for i in range(len(lines) - 1, -1, -1):
+        stripped = lines[i].strip()
+        if re.match(r'^#{1,3}\s+[Cc]ontinuity\s+[Tt]racker', stripped):
+            # Walk backwards to find the preceding ``---`` separator
+            j = i - 1
+            while j >= 0 and not lines[j].strip():
+                j -= 1
+            if j >= 0 and lines[j].strip() == '---':
+                separator_idx = j
+            else:
+                # No separator — still strip from the header onward
+                separator_idx = i
+            break
+
+    if separator_idx is not None:
+        lines = lines[:separator_idx]
+
+    # Final trim
+    content = '\n'.join(lines).strip()
+    return content + '\n' if content else ''
+
+
 def _trim_blank_lines(text: str) -> str:
     """Remove leading and trailing blank lines."""
     lines = text.splitlines()
