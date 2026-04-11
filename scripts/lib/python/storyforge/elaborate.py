@@ -49,13 +49,18 @@ def _read_csv(path: str) -> list[dict[str, str]]:
 
     Coerces None values to '' so callers can safely call .strip() etc.
     (csv.DictReader stores None when rows have fewer fields than headers.)
+
+    Strips ``\\r`` from all field values and header names so that CRLF line
+    endings (and stray ``\\r`` characters embedded by awk-based CSV edits)
+    never propagate into downstream code.
     """
     if not os.path.exists(path):
         return []
     with open(path, newline='', encoding='utf-8') as f:
-        reader = csv.DictReader(f, delimiter=DELIMITER)
-        return [{k: (v if v is not None else '') for k, v in row.items()}
-                for row in reader]
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    reader = csv.DictReader(raw.splitlines(), delimiter=DELIMITER)
+    return [{k: (v if v is not None else '') for k, v in row.items()}
+            for row in reader]
 
 
 def _read_csv_as_map(path: str) -> dict[str, dict[str, str]]:

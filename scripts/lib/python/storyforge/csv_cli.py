@@ -20,9 +20,14 @@ DELIMITER = '|'
 
 
 def _read_lines(path):
-    """Read file lines, stripping \\r and trailing whitespace."""
-    with open(path, encoding='utf-8') as f:
-        return [line.rstrip('\r\n') for line in f]
+    """Read file lines, stripping \\r and trailing whitespace.
+
+    Reads the entire file and normalises all line endings (CRLF and stray
+    ``\\r`` characters embedded by awk-based CSV edits) before splitting.
+    """
+    with open(path, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    return raw.splitlines()
 
 
 def _write_lines(path, lines):

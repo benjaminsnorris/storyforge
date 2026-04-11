@@ -32,9 +32,14 @@ SCORE_FILES = [
 # ============================================================================
 
 def _read_csv(path: str) -> tuple[list[str], list[list[str]]]:
-    """Read a pipe-delimited CSV. Returns (header_fields, data_rows)."""
-    with open(path) as f:
-        lines = [line.rstrip('\n') for line in f if line.strip()]
+    """Read a pipe-delimited CSV. Returns (header_fields, data_rows).
+
+    Strips ``\\r`` so CRLF line endings and stray carriage returns embedded
+    by awk-based CSV edits never propagate into field values.
+    """
+    with open(path, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    lines = [line for line in raw.splitlines() if line.strip()]
     if not lines:
         return [], []
     header = lines[0].split('|')

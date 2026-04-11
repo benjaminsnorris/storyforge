@@ -70,9 +70,14 @@ def _strip_yaml_value(raw: str) -> str:
 # ============================================================================
 
 def _read_csv_header_and_rows(csv_file: str) -> tuple[list[str], list[list[str]]]:
-    """Read a pipe-delimited CSV, returning (header_fields, data_rows)."""
-    with open(csv_file) as f:
-        lines = [l.rstrip('\n') for l in f if l.strip()]
+    """Read a pipe-delimited CSV, returning (header_fields, data_rows).
+
+    Strips ``\\r`` so CRLF line endings and stray carriage returns embedded
+    by awk-based CSV edits never propagate into field values.
+    """
+    with open(csv_file, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    lines = [l for l in raw.splitlines() if l.strip()]
 
     if not lines:
         return [], []

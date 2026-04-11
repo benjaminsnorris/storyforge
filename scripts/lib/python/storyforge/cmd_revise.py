@@ -83,14 +83,18 @@ CSV_PLAN_FIELDS = ['pass', 'name', 'purpose', 'scope', 'targets', 'guidance',
 
 
 def _read_csv_plan(plan_file):
-    """Read the CSV revision plan. Returns list of row dicts."""
+    """Read the CSV revision plan. Returns list of row dicts.
+
+    Strips ``\\r`` so CRLF line endings never propagate into field values.
+    """
     if not os.path.isfile(plan_file):
         return []
+    with open(plan_file, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
     rows = []
-    with open(plan_file) as f:
-        reader = csv.DictReader(f, delimiter='|')
-        for row in reader:
-            rows.append({k: (v if v is not None else '') for k, v in row.items()})
+    reader = csv.DictReader(raw.splitlines(), delimiter='|')
+    for row in reader:
+        rows.append({k: (v if v is not None else '') for k, v in row.items()})
     return rows
 
 
@@ -322,14 +326,15 @@ def _generate_structural_plan(project_dir, plan_file):
         log('Run: storyforge-validate --structural')
         sys.exit(1)
 
-    # Read proposals
+    # Read proposals (strip \r for CRLF safety)
     proposals = []
-    with open(proposals_file) as f:
-        reader = csv.DictReader(f, delimiter='|')
-        for row in reader:
-            row = {k: (v if v is not None else '') for k, v in row.items()}
-            if row.get('status', '').strip() == 'pending':
-                proposals.append(row)
+    with open(proposals_file, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    reader = csv.DictReader(raw.splitlines(), delimiter='|')
+    for row in reader:
+        row = {k: (v if v is not None else '') for k, v in row.items()}
+        if row.get('status', '').strip() == 'pending':
+            proposals.append(row)
 
     if not proposals:
         log(f'ERROR: No pending proposals in {proposals_file}')
@@ -392,11 +397,12 @@ def _read_diagnosis(cycle_dir: str) -> list[dict]:
     diag_file = os.path.join(cycle_dir, 'diagnosis.csv')
     if not os.path.isfile(diag_file):
         return []
+    with open(diag_file, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
     rows = []
-    with open(diag_file) as f:
-        reader = csv.DictReader(f, delimiter='|')
-        for row in reader:
-            rows.append({k: (v if v is not None else '') for k, v in row.items()})
+    reader = csv.DictReader(raw.splitlines(), delimiter='|')
+    for row in reader:
+        rows.append({k: (v if v is not None else '') for k, v in row.items()})
     return rows
 
 

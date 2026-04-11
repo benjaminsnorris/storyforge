@@ -66,12 +66,17 @@ def resolve_scene_file(scene_dir: str, scene_id: str) -> str | None:
 # ============================================================================
 
 def _read_pipe_csv(csv_path: str) -> list[dict]:
-    """Read a pipe-delimited CSV file into a list of dicts."""
+    """Read a pipe-delimited CSV file into a list of dicts.
+
+    Strips ``\\r`` so CRLF line endings and stray carriage returns embedded
+    by awk-based CSV edits never propagate into field values.
+    """
+    with open(csv_path, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
     rows = []
-    with open(csv_path) as f:
-        reader = csv.DictReader(f, delimiter='|')
-        for row in reader:
-            rows.append({k: (v if v is not None else '') for k, v in row.items()})
+    reader = csv.DictReader(raw.splitlines(), delimiter='|')
+    for row in reader:
+        rows.append({k: (v if v is not None else '') for k, v in row.items()})
     return rows
 
 
@@ -349,20 +354,21 @@ def _load_author_exemplars(project_dir: str, principles: list[str]) -> str:
     target_set = set(principles)
     entries = []
 
-    with open(exemplars_path) as f:
-        reader = csv.DictReader(f, delimiter='|')
-        for row in reader:
-            principle = (row.get('principle') or '').strip()
-            if principle not in target_set:
-                continue
-            excerpt = (row.get('excerpt') or '').strip()
-            scene_id = (row.get('scene_id') or '').strip()
-            score = (row.get('score') or '').strip()
-            if excerpt:
-                entries.append(
-                    f'**{principle}** (score {score}, scene `{scene_id}`):\n'
-                    f'> {excerpt}'
-                )
+    with open(exemplars_path, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    reader = csv.DictReader(raw.splitlines(), delimiter='|')
+    for row in reader:
+        principle = (row.get('principle') or '').strip()
+        if principle not in target_set:
+            continue
+        excerpt = (row.get('excerpt') or '').strip()
+        scene_id = (row.get('scene_id') or '').strip()
+        score = (row.get('score') or '').strip()
+        if excerpt:
+            entries.append(
+                f'**{principle}** (score {score}, scene `{scene_id}`):\n'
+                f'> {excerpt}'
+            )
 
     return '\n\n'.join(entries)
 

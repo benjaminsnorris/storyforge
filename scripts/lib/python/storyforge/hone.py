@@ -1307,31 +1307,33 @@ def load_external_findings(findings_file: str) -> list[dict]:
     """
     if not os.path.isfile(findings_file):
         return []
+    # Strip \r for CRLF safety
+    with open(findings_file, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
     results = []
-    with open(findings_file) as f:
-        reader = csv.DictReader(f, delimiter='|')
-        for row in reader:
-            sid = row.get('scene_id', '').strip()
-            target_file = row.get('target_file', '').strip()
-            fields_raw = row.get('fields', '').strip()
-            guidance = row.get('guidance', '').strip()
-            if not sid:
-                continue
-            if fields_raw:
-                for field in fields_raw.split(';'):
-                    field = field.strip()
-                    if field:
-                        results.append({
-                            'scene_id': sid, 'field': field,
-                            'target_file': target_file,
-                            'guidance': guidance, 'issue': 'evaluation',
-                        })
-            else:
-                results.append({
-                    'scene_id': sid, 'field': '',
-                    'target_file': target_file,
-                    'guidance': guidance, 'issue': 'evaluation',
-                })
+    reader = csv.DictReader(raw.splitlines(), delimiter='|')
+    for row in reader:
+        sid = row.get('scene_id', '').strip()
+        target_file = row.get('target_file', '').strip()
+        fields_raw = row.get('fields', '').strip()
+        guidance = row.get('guidance', '').strip()
+        if not sid:
+            continue
+        if fields_raw:
+            for field in fields_raw.split(';'):
+                field = field.strip()
+                if field:
+                    results.append({
+                        'scene_id': sid, 'field': field,
+                        'target_file': target_file,
+                        'guidance': guidance, 'issue': 'evaluation',
+                    })
+        else:
+            results.append({
+                'scene_id': sid, 'field': '',
+                'target_file': target_file,
+                'guidance': guidance, 'issue': 'evaluation',
+            })
     return results
 
 

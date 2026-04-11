@@ -26,8 +26,9 @@ def csv_to_records(csv_file: str) -> list[dict]:
         return []
 
     try:
-        with open(csv_file, encoding='utf-8') as f:
-            lines = f.read().splitlines()
+        with open(csv_file, newline='', encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+        lines = raw.splitlines()
     except (OSError, UnicodeDecodeError):
         return []
 
