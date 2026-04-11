@@ -100,16 +100,24 @@ def get_column(path, field):
     return result
 
 
-def list_ids(path):
-    """Return all IDs (first column) as a list. Returns [] if not found."""
+def list_ids(path, key_col='id'):
+    """Return all IDs (key column) as a list. Returns [] if not found."""
     if not os.path.isfile(path):
         return []
     lines = _read_lines(path)
+    if not lines:
+        return []
+    headers = lines[0].split(DELIMITER)
+    try:
+        kcol = headers.index(key_col)
+    except ValueError:
+        # Fallback: use the first column if key_col not found
+        kcol = 0
     result = []
     for line in lines[1:]:
         fields = line.split(DELIMITER)
-        if fields:
-            result.append(fields[0])
+        if kcol < len(fields):
+            result.append(fields[kcol])
     return result
 
 

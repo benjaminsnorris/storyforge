@@ -131,36 +131,56 @@ def print_summary(project_dir: str, operation: str | None = None) -> None:
     total_dur = 0
 
     with open(ledger_file) as f:
-        header = f.readline()  # skip header
+        header_line = f.readline().strip()
+        if not header_line:
+            print('No cost data available.')
+            return
+        headers = header_line.split('|')
+        col_map = {name: idx for idx, name in enumerate(headers)}
+
+        # Require at least the operation column to function
+        if 'operation' not in col_map:
+            print('No cost data available.')
+            return
+
         for line in f:
             line = line.strip()
             if not line:
                 continue
             parts = line.split('|')
-            if len(parts) < 10:
-                # Old format (7 cols) — handle gracefully
-                if len(parts) >= 7:
-                    row_op = parts[1]
-                    if operation and row_op != operation:
-                        continue
-                    count += 1
-                    total_input += int(parts[3])
-                    total_output += int(parts[4])
-                    total_cost += float(parts[5])
-                    total_dur += int(parts[6])
-                continue
 
-            row_op = parts[1]
+            op_idx = col_map['operation']
+            if op_idx >= len(parts):
+                continue
+            row_op = parts[op_idx]
             if operation and row_op != operation:
                 continue
 
             count += 1
-            total_input += int(parts[4])
-            total_output += int(parts[5])
-            total_cache_r += int(parts[6])
-            total_cache_c += int(parts[7])
-            total_cost += float(parts[8])
-            total_dur += int(parts[9])
+            for col_name, accumulate in [
+                ('input_tokens', lambda v: v),
+                ('output_tokens', lambda v: v),
+                ('cache_read', lambda v: v),
+                ('cache_create', lambda v: v),
+                ('duration_s', lambda v: v),
+            ]:
+                if col_name in col_map and col_map[col_name] < len(parts):
+                    val = parts[col_map[col_name]]
+                    if val:
+                        if col_name == 'input_tokens':
+                            total_input += int(val)
+                        elif col_name == 'output_tokens':
+                            total_output += int(val)
+                        elif col_name == 'cache_read':
+                            total_cache_r += int(val)
+                        elif col_name == 'cache_create':
+                            total_cache_c += int(val)
+                        elif col_name == 'duration_s':
+                            total_dur += int(val)
+            if 'cost_usd' in col_map and col_map['cost_usd'] < len(parts):
+                val = parts[col_map['cost_usd']]
+                if val:
+                    total_cost += float(val)
 
     if count == 0:
         label = f' for operation: {operation}' if operation else ''
