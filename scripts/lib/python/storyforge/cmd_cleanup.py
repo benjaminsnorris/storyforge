@@ -14,7 +14,6 @@ Usage:
 
 import argparse
 import glob
-import json
 import os
 import re
 import shutil
@@ -109,7 +108,7 @@ EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
 )
 EXPECTED_WORKING_FILES = set(
-    'pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html cleanup-report.json'.split()
+    'pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html cleanup-report.csv'.split()
 )
 
 
@@ -1058,17 +1057,22 @@ def _print_report(report: dict) -> None:
         f'{summary["warnings"]} warning(s), {summary["info"]} info')
 
 
+REPORT_COLUMNS = ['category', 'type', 'severity', 'file', 'detail', 'action', 'command']
+
+
 def _write_report(report: dict, project_dir: str) -> str:
-    """Write the report as JSON to working/cleanup-report.json.
+    """Write the report as pipe-delimited CSV to working/cleanup-report.csv.
 
     Returns the path to the written file.
     """
     working_dir = os.path.join(project_dir, 'working')
     os.makedirs(working_dir, exist_ok=True)
-    report_path = os.path.join(working_dir, 'cleanup-report.json')
+    report_path = os.path.join(working_dir, 'cleanup-report.csv')
     with open(report_path, 'w') as f:
-        json.dump(report, f, indent=2)
-        f.write('\n')
+        f.write('|'.join(REPORT_COLUMNS) + '\n')
+        for finding in report['findings']:
+            row = [finding.get(col, '') for col in REPORT_COLUMNS]
+            f.write('|'.join(row) + '\n')
     return report_path
 
 

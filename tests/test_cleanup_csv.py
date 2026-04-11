@@ -1,10 +1,10 @@
 """Tests for storyforge cleanup --csv schema validation and action formatting."""
 
-import json
 import os
 
 from storyforge.cmd_cleanup import (
     EXPECTED_CSV_SCHEMAS,
+    REPORT_COLUMNS,
     report_csv_schema,
     build_cleanup_report,
     _classify_issue,
@@ -218,9 +218,35 @@ class TestBuildCsvReport:
 
 
 class TestWriteReport:
-    """Tests for JSON report file output."""
+    """Tests for CSV report file output."""
 
-    def test_writes_valid_json(self, tmp_path):
+    def test_writes_valid_csv(self, tmp_path):
+        report = {
+            'findings': [{'type': 'test', 'detail': 'x', 'action': 'y',
+                         'severity': 'info', 'category': 'schema',
+                         'file': 'ref.csv', 'command': ''}],
+            'action_items': [],
+            'summary': {'total': 1, 'errors': 0, 'warnings': 0, 'info': 1},
+        }
+        path = _write_report(report, str(tmp_path))
+        assert os.path.isfile(path)
+        with open(path) as f:
+            lines = f.readlines()
+        assert lines[0].strip() == '|'.join(REPORT_COLUMNS)
+        assert len(lines) == 2  # header + 1 finding
+        cols = lines[1].strip().split('|')
+        assert len(cols) == len(REPORT_COLUMNS)
+        assert cols[0] == 'schema'  # category
+        assert cols[1] == 'test'    # type
+
+    def test_report_path(self, tmp_path):
+        report = {'findings': [], 'action_items': [],
+                  'summary': {'total': 0, 'errors': 0, 'warnings': 0, 'info': 0}}
+        path = _write_report(report, str(tmp_path))
+        assert path.endswith('working/cleanup-report.csv')
+
+    def test_missing_fields_default_empty(self, tmp_path):
+        """Findings without optional fields get empty strings."""
         report = {
             'findings': [{'type': 'test', 'detail': 'x', 'action': 'y',
                          'severity': 'info', 'category': 'schema'}],
@@ -228,13 +254,11 @@ class TestWriteReport:
             'summary': {'total': 1, 'errors': 0, 'warnings': 0, 'info': 1},
         }
         path = _write_report(report, str(tmp_path))
-        assert os.path.isfile(path)
         with open(path) as f:
-            loaded = json.load(f)
-        assert loaded['summary']['total'] == 1
-
-    def test_report_path(self, tmp_path):
-        report = {'findings': [], 'action_items': [],
-                  'summary': {'total': 0, 'errors': 0, 'warnings': 0, 'info': 0}}
-        path = _write_report(report, str(tmp_path))
-        assert path.endswith('working/cleanup-report.json')
+            lines = f.readlines()
+        cols = lines[1].strip().split('|')
+        # 'file' and 'command' should be empty
+        file_idx = REPORT_COLUMNS.index('file')
+        cmd_idx = REPORT_COLUMNS.index('command')
+        assert cols[file_idx] == ''
+        assert cols[cmd_idx] == ''
