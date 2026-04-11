@@ -32,6 +32,7 @@ Before doing anything else, orient yourself:
    - `working/plans/revision-plan.csv` (preferred) or `working/plans/revision-plan.yaml` (legacy)
    - `working/scores/structural-latest.csv` (structural scoring results)
    - `working/scores/structural-proposals.csv` (unaddressed structural proposals)
+   - `working/cleanup-report.csv` (pending cleanup action items from a previous session)
    - The `scenes/` directory (any `.md` files = drafted scenes)
 4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
 
@@ -171,6 +172,8 @@ If the project doesn't have a `./storyforge` runner script, offer to create one 
 The author said "surprise me," "what should I work on?", or gave no specific direction.
 
 Determine the single highest-value next action based on project state. Work through these priorities in order — stop at the first one that applies:
+
+**0. Pending cleanup:** If `working/cleanup-report.csv` exists with `status=pending` items → "You have unfinished cleanup items from a previous session." → invoke `cleanup` to resume.
 
 **1. Elaboration phase:** If phase is `spine`/`architecture`/`scene-map`/`briefs` → "Continue elaboration" → invoke `elaborate`.
 
