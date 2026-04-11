@@ -1132,11 +1132,15 @@ def _register_new_scenes(project_dir, targets, pass_name):
     max_seq = 0
     if os.path.isfile(meta_csv):
         with open(meta_csv) as f:
-            for line in f:
+            lines = f.readlines()
+        if lines:
+            m_header = lines[0].strip().split('|')
+            seq_idx = m_header.index('seq') if 'seq' in m_header else 1
+            for line in lines[1:]:
                 parts = line.strip().split('|')
-                if len(parts) >= 2:
+                if len(parts) > seq_idx:
                     try:
-                        seq = int(parts[1])
+                        seq = int(parts[seq_idx])
                         if seq > max_seq:
                             max_seq = seq
                     except ValueError:
@@ -1312,7 +1316,10 @@ def main(argv=None):
         with open(manifest) as f:
             lines = f.readlines()
         if len(lines) > 1:
-            cycle_id = lines[-1].strip().split('|')[0]
+            p_header = lines[0].strip().split('|')
+            cycle_col = p_header.index('cycle') if 'cycle' in p_header else 0
+            last_parts = lines[-1].strip().split('|')
+            cycle_id = last_parts[cycle_col] if len(last_parts) > cycle_col else '0'
 
     # Branch + PR setup
     if not args.dry_run:
@@ -1340,14 +1347,15 @@ def main(argv=None):
             with open(manifest) as f:
                 lines = f.readlines()
             header = lines[0].strip().split('|')
-            if 'status' in header:
-                idx = header.index('status')
+            if 'status' in header and 'cycle' in header:
+                status_idx = header.index('status')
+                cycle_idx = header.index('cycle')
                 for i in range(1, len(lines)):
                     parts = lines[i].strip().split('|')
-                    if parts[0] == cycle_id:
-                        while len(parts) <= idx:
+                    if len(parts) > cycle_idx and parts[cycle_idx] == cycle_id:
+                        while len(parts) <= status_idx:
                             parts.append('')
-                        parts[idx] = 'revising'
+                        parts[status_idx] = 'revising'
                         lines[i] = '|'.join(parts) + '\n'
                 with open(manifest, 'w') as f:
                     f.writelines(lines)
