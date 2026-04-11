@@ -8,6 +8,8 @@ Usage:
     storyforge cleanup                  # Apply all fixes and commit
     storyforge cleanup --dry-run        # Report what would change
     storyforge cleanup --verbose        # Detailed output
+    storyforge cleanup --scenes         # Also strip writing-agent artifacts
+    storyforge cleanup --csv            # Run only the CSV integrity report
 """
 
 import argparse
@@ -21,6 +23,7 @@ import tempfile
 
 from storyforge.common import detect_project_root, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
+from storyforge.parsing import clean_scene_content, extract_single_scene
 
 
 # ============================================================================
@@ -49,6 +52,58 @@ PIPELINE_EXPECTED = 'cycle|started|status|evaluation|scoring|plan|review|recomme
 
 EXPECTED_TOP_DIRS = set('scenes reference working manuscript storyforge .git'.split())
 EXPECTED_TOP_FILES = set('storyforge.yaml CLAUDE.md .gitignore .DS_Store storyforge'.split())
+
+# Expected CSV schemas — canonical column lists for all known CSV files.
+# Keys are paths relative to project root.
+EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
+    # Core scene data (reference/)
+    'reference/scenes.csv': [
+        'id', 'seq', 'title', 'part', 'pov', 'location',
+        'timeline_day', 'time_of_day', 'duration', 'type', 'status',
+        'word_count', 'target_words',
+    ],
+    'reference/scene-intent.csv': [
+        'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
+        'value_shift', 'turning_point', 'characters', 'on_stage',
+        'mice_threads',
+    ],
+    'reference/scene-briefs.csv': [
+        'id', 'goal', 'conflict', 'outcome', 'crisis', 'decision',
+        'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
+        'emotions', 'motifs', 'subtext', 'continuity_deps', 'has_overflow',
+        'physical_state_in', 'physical_state_out',
+    ],
+    # Registry CSVs (reference/)
+    'reference/characters.csv': ['id', 'name', 'aliases', 'role', 'death_scene'],
+    'reference/locations.csv': ['id', 'name', 'aliases'],
+    'reference/values.csv': ['id', 'name', 'aliases'],
+    'reference/knowledge.csv': ['id', 'name', 'aliases', 'category', 'origin'],
+    'reference/mice-threads.csv': ['id', 'name', 'type', 'aliases'],
+    'reference/motif-taxonomy.csv': ['id', 'name', 'aliases', 'tier'],
+    'reference/physical-states.csv': [
+        'id', 'character', 'description', 'category', 'acquired',
+        'resolves', 'action_gating',
+    ],
+    'reference/chapter-map.csv': [
+        'chapter', 'title', 'heading', 'part', 'scenes',
+    ],
+    # Working CSVs
+    'working/craft-weights.csv': [
+        'section', 'principle', 'weight', 'author_weight', 'notes',
+    ],
+    'working/pipeline.csv': [
+        'cycle', 'started', 'status', 'evaluation', 'scoring',
+        'plan', 'review', 'recommendations', 'summary',
+    ],
+    'working/costs/ledger.csv': [
+        'timestamp', 'operation', 'target', 'model', 'input_tokens',
+        'output_tokens', 'cache_read', 'cache_create', 'cost_usd',
+        'duration_s',
+    ],
+    'working/scores/score-history.csv': [
+        'cycle', 'scene_id', 'principle', 'score',
+    ],
+}
 EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
 )
@@ -383,6 +438,46 @@ def migrate_storyforge_yaml(project_dir: str) -> None:
 
 
 # ============================================================================
+# CSV Schema Report
+# ============================================================================
+
+def report_csv_schema(project_dir: str) -> list[str]:
+    """Check all expected CSV files for existence and column completeness.
+
+    Returns a list of issue strings (MISSING_CSV, MISSING_COLUMN, EXTRA_COLUMN).
+    """
+    issues = []
+
+    for rel_path, expected_cols in EXPECTED_CSV_SCHEMAS.items():
+        csv_path = os.path.join(project_dir, rel_path)
+
+        if not os.path.isfile(csv_path):
+            issues.append(f'MISSING_CSV:{rel_path}')
+            continue
+
+        with open(csv_path) as f:
+            first_line = f.readline().strip()
+
+        if not first_line:
+            issues.append(f'EMPTY_CSV:{rel_path}')
+            continue
+
+        actual_cols = [c.strip() for c in first_line.split('|')]
+        expected_set = set(expected_cols)
+        actual_set = set(actual_cols)
+
+        for col in expected_cols:
+            if col not in actual_set:
+                issues.append(f'MISSING_COLUMN:{rel_path}:{col}')
+
+        for col in actual_cols:
+            if col not in expected_set:
+                issues.append(f'EXTRA_COLUMN:{rel_path}:{col}')
+
+    return issues
+
+
+# ============================================================================
 # CSV Integrity Report
 # ============================================================================
 
@@ -521,6 +616,50 @@ def report_unexpected_files(project_dir: str) -> list[str]:
 
 
 # ============================================================================
+# Scene file cleanup
+# ============================================================================
+
+def clean_scene_files(project_dir: str, dry_run: bool = False,
+                      verbose: bool = False) -> int:
+    """Strip writing-agent artifacts from scene files.
+
+    Removes scene markers (=== SCENE: id ===), leading H1/H2 title headers,
+    and trailing Continuity Tracker Update blocks from all scene files.
+
+    Returns the number of files that were (or would be) modified.
+    """
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    if not os.path.isdir(scenes_dir):
+        return 0
+
+    changed = 0
+    for filename in sorted(os.listdir(scenes_dir)):
+        if not filename.endswith('.md'):
+            continue
+        filepath = os.path.join(scenes_dir, filename)
+        with open(filepath, encoding='utf-8') as f:
+            original = f.read()
+
+        cleaned = original
+        # Strip === SCENE: id === / === END SCENE: id === markers
+        extracted = extract_single_scene(cleaned)
+        if extracted is not None:
+            cleaned = extracted
+        # Strip title headers and continuity tracker blocks
+        cleaned = clean_scene_content(cleaned)
+
+        if cleaned != original:
+            changed += 1
+            if verbose or dry_run:
+                log(f'  {"Would clean" if dry_run else "Cleaned"}: {filename}')
+            if not dry_run:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(cleaned)
+
+    return changed
+
+
+# ============================================================================
 # Argument parsing
 # ============================================================================
 
@@ -533,6 +672,12 @@ def parse_args(argv):
                         help='Report what would change without modifying anything')
     parser.add_argument('--verbose', action='store_true',
                         help='Detailed output for each step')
+    parser.add_argument('--scenes', action='store_true',
+                        help='Strip writing-agent artifacts (title headers, '
+                             'continuity blocks, scene markers) from scene files')
+    parser.add_argument('--csv', action='store_true',
+                        help='Run only the CSV integrity report (schema '
+                             'validation, row checks, unexpected files)')
     return parser.parse_args(argv)
 
 
@@ -540,10 +685,46 @@ def parse_args(argv):
 # Main
 # ============================================================================
 
+def _run_csv_reports(project_dir: str) -> None:
+    """Run all CSV reports: schema validation, row integrity, unexpected files."""
+    log('=== CSV Schema Report ===')
+    schema_issues = report_csv_schema(project_dir)
+    if schema_issues:
+        for issue in schema_issues:
+            log(f'  {issue}')
+    else:
+        log('  All CSV files present with expected columns.')
+
+    log('')
+    log('=== CSV Integrity Report ===')
+    integrity_issues = report_csv_integrity(project_dir)
+    if integrity_issues:
+        for issue in integrity_issues:
+            log(f'  {issue}')
+    else:
+        log('  No integrity issues found.')
+
+    log('')
+    log('=== Unexpected Files Report ===')
+    unexpected_issues = report_unexpected_files(project_dir)
+    if unexpected_issues:
+        for issue in unexpected_issues:
+            log(f'  {issue}')
+    else:
+        log('  No unexpected files found.')
+
+
 def main(argv=None):
     args = parse_args(argv or [])
     project_dir = detect_project_root()
     log(f'Project root: {project_dir}')
+
+    # --csv: run only the CSV reports and exit
+    if args.csv:
+        _run_csv_reports(project_dir)
+        log('')
+        log('CSV check complete.')
+        return
 
     def vlog(msg):
         if args.verbose:
@@ -688,19 +869,21 @@ def main(argv=None):
     else:
         dedup_pipeline_reviews(project_dir)
 
-    # Step 9: CSV integrity report
-    log('')
-    log('=== CSV Integrity Report ===')
-    for issue in report_csv_integrity(project_dir):
-        log(issue)
+    # Step 9: Scene file cleanup (only with --scenes)
+    if args.scenes:
+        log('Cleaning scene files...')
+        cleaned = clean_scene_files(project_dir, dry_run=args.dry_run,
+                                    verbose=args.verbose)
+        if cleaned:
+            log(f'  {"Would clean" if args.dry_run else "Cleaned"} {cleaned} scene file(s)')
+        else:
+            log('  All scene files are clean.')
 
-    # Step 10: Unexpected files report
+    # Steps 10-12: CSV reports
     log('')
-    log('=== Unexpected Files Report ===')
-    for issue in report_unexpected_files(project_dir):
-        log(issue)
+    _run_csv_reports(project_dir)
 
-    # Step 11: Commit (unless dry-run)
+    # Step 13: Commit (unless dry-run)
     if not args.dry_run:
         git_dir = os.path.join(project_dir, '.git')
         if shutil.which('git') and os.path.isdir(git_dir):

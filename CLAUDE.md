@@ -252,7 +252,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge assemble` | `cmd_assemble.py` | Chapter assembly + epub/PDF/HTML generation |
 | `storyforge visualize` | `cmd_visualize.py` | Multi-page manuscript dashboard |
 | `storyforge timeline` | `cmd_timeline.py` | Timeline construction |
-| `storyforge cleanup` | `cmd_cleanup.py` | Project structure cleanup |
+| `storyforge cleanup` | `cmd_cleanup.py` | Project structure cleanup. `--scenes` strips writing-agent artifacts from scene files. `--csv` runs only the CSV integrity report (schema + row checks). |
 | `storyforge cover` | `cmd_cover.py` | Cover design |
 | `storyforge scenes-setup` | `cmd_scenes_setup.py` | Scene file and metadata setup |
 | `storyforge review` | `cmd_review.py` | Pipeline review |
