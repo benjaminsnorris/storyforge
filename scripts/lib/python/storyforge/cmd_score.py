@@ -642,11 +642,16 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
     # Count scenes with brief data
     brief_count = 0
     with open(briefs_csv) as f:
+        header = None
+        goal_idx = 1  # fallback
         for i, line in enumerate(f):
             if i == 0:
+                header = line.strip().split('|')
+                if 'goal' in header:
+                    goal_idx = header.index('goal')
                 continue
             fields = line.strip().split('|')
-            if len(fields) > 1 and fields[1].strip():
+            if len(fields) > goal_idx and fields[goal_idx].strip():
                 brief_count += 1
 
     if brief_count == 0:
@@ -1054,14 +1059,16 @@ def _approve_all_proposals(proposals_file: str) -> None:
     """Set all pending proposals to approved."""
     with open(proposals_file) as f:
         lines = f.readlines()
+    header = lines[0].strip().split('|') if lines else []
+    status_idx = header.index('status') if 'status' in header else 6
     with open(proposals_file, 'w') as f:
         for i, line in enumerate(lines):
             if i == 0:
                 f.write(line)
                 continue
             fields = line.rstrip('\n').split('|')
-            if len(fields) >= 7:
-                fields[6] = 'approved'
+            if len(fields) > status_idx:
+                fields[status_idx] = 'approved'
             f.write('|'.join(fields) + '\n')
 
 
@@ -1070,21 +1077,32 @@ def _print_strict_report(diagnosis_file: str, proposals_file: str) -> None:
     print('\n=== Diagnosis Summary ===')
     if os.path.isfile(diagnosis_file):
         with open(diagnosis_file) as f:
-            for i, line in enumerate(f):
-                if i == 0:
-                    continue
+            lines = f.readlines()
+        if lines:
+            d_header = lines[0].strip().split('|')
+            d_col = {name: i for i, name in enumerate(d_header)}
+            for line in lines[1:]:
                 fields = line.strip().split('|')
-                if len(fields) >= 6 and fields[5] in ('high', 'medium'):
-                    print(f'  {fields[0]} ({fields[1]}): avg {fields[2]}, priority {fields[5]}')
+                priority = fields[d_col['priority']] if 'priority' in d_col and d_col['priority'] < len(fields) else ''
+                if priority in ('high', 'medium'):
+                    principle = fields[d_col.get('principle', 0)] if d_col.get('principle', 0) < len(fields) else ''
+                    scale = fields[d_col.get('scale', 1)] if d_col.get('scale', 1) < len(fields) else ''
+                    avg_score = fields[d_col.get('avg_score', 2)] if d_col.get('avg_score', 2) < len(fields) else ''
+                    print(f'  {principle} ({scale}): avg {avg_score}, priority {priority}')
     print('\n=== Proposals (not applied in strict mode) ===')
     if os.path.isfile(proposals_file):
         with open(proposals_file) as f:
-            for i, line in enumerate(f):
-                if i == 0:
-                    continue
+            lines = f.readlines()
+        if lines:
+            p_header = lines[0].strip().split('|')
+            p_col = {name: i for i, name in enumerate(p_header)}
+            for line in lines[1:]:
                 fields = line.strip().split('|')
-                if len(fields) >= 6:
-                    print(f'  {fields[0]}: {fields[1]} — {fields[4]} ({fields[5]})')
+                pid = fields[p_col.get('id', 0)] if p_col.get('id', 0) < len(fields) else ''
+                principle = fields[p_col.get('principle', 1)] if p_col.get('principle', 1) < len(fields) else ''
+                change = fields[p_col.get('change', 4)] if p_col.get('change', 4) < len(fields) else ''
+                rationale = fields[p_col.get('rationale', 5)] if p_col.get('rationale', 5) < len(fields) else ''
+                print(f'  {pid}: {principle} — {change} ({rationale})')
     print()
 
 
@@ -1095,11 +1113,22 @@ def _apply_proposals(proposals_file, weights_file, intent_csv, project_dir):
     with open(proposals_file) as f:
         lines = f.readlines()
 
+    if not lines:
+        return applied
+    header = lines[0].strip().split('|')
+    col = {name: i for i, name in enumerate(header)}
+
     for line in lines[1:]:
         fields = line.strip().split('|')
-        if len(fields) < 7:
+        if len(fields) < len(header):
             continue
-        pid, principle, lever, target, change, rationale, status = fields[:7]
+        pid = fields[col.get('id', 0)]
+        principle = fields[col.get('principle', 1)]
+        lever = fields[col.get('lever', 2)]
+        target = fields[col.get('target', 3)]
+        change = fields[col.get('change', 4)]
+        rationale = fields[col.get('rationale', 5)]
+        status = fields[col.get('status', 6)]
         if status != 'approved':
             continue
 
@@ -1135,11 +1164,17 @@ def _generate_report_and_comment(cycle, cycle_dir, project_dir, score_mode,
     total_cost = 0.0
     if os.path.isfile(ledger):
         with open(ledger) as f:
-            for line in f:
+            lines = f.readlines()
+        if lines:
+            l_header = lines[0].strip().split('|')
+            l_col = {name: i for i, name in enumerate(l_header)}
+            op_idx = l_col.get('operation', 1)
+            cost_idx = l_col.get('cost_usd', 8)
+            for line in lines[1:]:
                 parts = line.strip().split('|')
-                if len(parts) >= 10 and parts[1] == 'score':
+                if len(parts) > max(op_idx, cost_idx) and parts[op_idx] == 'score':
                     try:
-                        total_cost += float(parts[8])
+                        total_cost += float(parts[cost_idx])
                     except (ValueError, IndexError):
                         pass
 
