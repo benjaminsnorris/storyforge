@@ -692,6 +692,7 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     """
     from storyforge.prompts import build_scene_prompt
     from storyforge.common import get_coaching_level
+    from storyforge.parsing import extract_single_scene
 
     scenes_dir = os.path.join(project_dir, 'scenes')
     coaching_level = get_coaching_level(project_dir)
@@ -717,8 +718,9 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
             log(f'  WARNING: No response for {scene_id} re-draft — skipping')
             continue
 
+        extracted = extract_single_scene(response)
         with open(scene_file, 'w', encoding='utf-8') as f:
-            f.write(response)
+            f.write(extracted if extracted else response)
 
         count += 1
         log(f'  Re-drafted {scene_id}')
