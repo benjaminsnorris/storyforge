@@ -685,33 +685,153 @@ def parse_args(argv):
 # Main
 # ============================================================================
 
+def _action_for_issue(issue: str, rename_pairs: dict[str, list[tuple[str, str]]]) -> str:
+    """Return an actionable description for a raw issue string."""
+    if issue.startswith('MISSING_CSV:'):
+        path = issue.split(':', 1)[1]
+        if path.startswith('working/'):
+            return f'{path} — will be created automatically on first use'
+        return f'{path} — run: storyforge elaborate (or copy from templates/)'
+
+    if issue.startswith('EMPTY_CSV:'):
+        path = issue.split(':', 1)[1]
+        return f'{path} is empty — check if file was truncated; restore header from templates/'
+
+    if issue.startswith('MISSING_COLUMN:'):
+        _, path, col = issue.split(':', 2)
+        # Check if this is part of a rename pair
+        pairs = rename_pairs.get(path, [])
+        for missing, extra in pairs:
+            if col == missing:
+                return f'{path}: rename column "{extra}" → "{missing}"'
+        return f'{path}: add column "{col}" to header (and empty values to existing rows)'
+
+    if issue.startswith('EXTRA_COLUMN:'):
+        _, path, col = issue.split(':', 2)
+        # Suppress if already covered by a rename suggestion
+        pairs = rename_pairs.get(path, [])
+        for missing, extra in pairs:
+            if col == extra:
+                return ''  # Already reported as a rename under MISSING_COLUMN
+        return f'{path}: unexpected column "{col}" — verify if it should be removed or added to schema'
+
+    if issue.startswith('ORPHAN_FILE:'):
+        sid = issue.split(':', 1)[1]
+        return f'scenes/{sid}.md has no metadata row — run: storyforge extract --scenes {sid}'
+
+    if issue.startswith('ORPHAN_META:'):
+        sid = issue.split(':', 1)[1]
+        return f'{sid} has metadata but no scene file — remove from CSVs or create scenes/{sid}.md'
+
+    if issue.startswith('MISSING_INTENT:'):
+        sid = issue.split(':', 1)[1]
+        return f'{sid} is in scenes.csv but not scene-intent.csv — run: storyforge hone --domain gaps'
+
+    if issue.startswith('EXTRA_INTENT:'):
+        sid = issue.split(':', 1)[1]
+        return f'{sid} is in scene-intent.csv but not scenes.csv — remove the row or add to scenes.csv'
+
+    if issue.startswith('BAD_CHAPTER_REF:'):
+        sid = issue.split(':', 1)[1]
+        return f'chapter-map.csv references "{sid}" which doesn\'t exist — update the chapter map'
+
+    if issue.startswith('SEQ_NEEDS_RENUMBER:'):
+        return 'scenes.csv has sequence gaps or non-integer values — run: storyforge scenes-setup --renumber'
+
+    if issue.startswith('UNKNOWN_CHARACTER:'):
+        name = issue.split(':', 1)[1]
+        return f'"{name}" appears in scene-intent.csv but not characters.csv — run: storyforge hone --domain registries'
+
+    if issue.startswith('UNEXPECTED_DIR:'):
+        path = issue.split(':', 1)[1]
+        return f'{path}/ — review manually; may be leftover from an old version'
+
+    if issue.startswith('UNEXPECTED_FILE:'):
+        path = issue.split(':', 1)[1]
+        return f'{path} — review manually; may be leftover from an old version'
+
+    return issue
+
+
+def _detect_rename_pairs(issues: list[str]) -> dict[str, list[tuple[str, str]]]:
+    """Detect MISSING_COLUMN + EXTRA_COLUMN on the same file as rename candidates.
+
+    Returns {path: [(missing_col, extra_col), ...]} for files where the count
+    of missing and extra columns match (suggesting renames rather than
+    additions/deletions).
+    """
+    from collections import defaultdict
+    missing: dict[str, list[str]] = defaultdict(list)
+    extra: dict[str, list[str]] = defaultdict(list)
+
+    for issue in issues:
+        if issue.startswith('MISSING_COLUMN:'):
+            _, path, col = issue.split(':', 2)
+            missing[path].append(col)
+        elif issue.startswith('EXTRA_COLUMN:'):
+            _, path, col = issue.split(':', 2)
+            extra[path].append(col)
+
+    pairs: dict[str, list[tuple[str, str]]] = {}
+    for path in missing:
+        if path in extra and len(missing[path]) == len(extra[path]):
+            pairs[path] = list(zip(missing[path], extra[path]))
+    return pairs
+
+
 def _run_csv_reports(project_dir: str) -> None:
-    """Run all CSV reports: schema validation, row integrity, unexpected files."""
+    """Run all CSV reports with actionable output and a summary."""
+    all_actions: list[str] = []
+
+    # --- Schema ---
     log('=== CSV Schema Report ===')
     schema_issues = report_csv_schema(project_dir)
+    rename_pairs = _detect_rename_pairs(schema_issues)
     if schema_issues:
         for issue in schema_issues:
-            log(f'  {issue}')
+            action = _action_for_issue(issue, rename_pairs)
+            if action:
+                log(f'  {action}')
+                # Collect non-informational actions for summary
+                if 'will be created automatically' not in action:
+                    all_actions.append(action)
     else:
         log('  All CSV files present with expected columns.')
 
+    # --- Row integrity ---
     log('')
     log('=== CSV Integrity Report ===')
     integrity_issues = report_csv_integrity(project_dir)
     if integrity_issues:
         for issue in integrity_issues:
-            log(f'  {issue}')
+            action = _action_for_issue(issue, {})
+            if action:
+                log(f'  {action}')
+                all_actions.append(action)
     else:
         log('  No integrity issues found.')
 
+    # --- Unexpected files ---
     log('')
     log('=== Unexpected Files Report ===')
     unexpected_issues = report_unexpected_files(project_dir)
     if unexpected_issues:
         for issue in unexpected_issues:
-            log(f'  {issue}')
+            action = _action_for_issue(issue, {})
+            if action:
+                log(f'  {action}')
     else:
         log('  No unexpected files found.')
+
+    # --- Summary ---
+    if all_actions:
+        log('')
+        log(f'=== Action Items ({len(all_actions)}) ===')
+        for i, action in enumerate(all_actions, 1):
+            log(f'  {i}. {action}')
+    else:
+        log('')
+        log('=== No action items — project CSVs are clean ===')
 
 
 def main(argv=None):

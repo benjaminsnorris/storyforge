@@ -1,10 +1,12 @@
-"""Tests for storyforge cleanup --csv schema validation."""
+"""Tests for storyforge cleanup --csv schema validation and action formatting."""
 
 import os
 
 from storyforge.cmd_cleanup import (
     EXPECTED_CSV_SCHEMAS,
     report_csv_schema,
+    _action_for_issue,
+    _detect_rename_pairs,
 )
 
 
@@ -88,3 +90,80 @@ class TestReportCsvSchema:
         ref_issues = [i for i in issues
                       if not i.startswith('MISSING_CSV:working/')]
         assert ref_issues == [], f'Fixture schema issues: {ref_issues}'
+
+
+class TestDetectRenamePairs:
+    """Tests for rename pair detection."""
+
+    def test_detects_rename(self):
+        issues = [
+            'MISSING_COLUMN:reference/chapter-map.csv:chapter',
+            'EXTRA_COLUMN:reference/chapter-map.csv:seq',
+        ]
+        pairs = _detect_rename_pairs(issues)
+        assert 'reference/chapter-map.csv' in pairs
+        assert pairs['reference/chapter-map.csv'] == [('chapter', 'seq')]
+
+    def test_no_rename_when_counts_differ(self):
+        issues = [
+            'MISSING_COLUMN:reference/scenes.csv:col_a',
+            'MISSING_COLUMN:reference/scenes.csv:col_b',
+            'EXTRA_COLUMN:reference/scenes.csv:col_x',
+        ]
+        pairs = _detect_rename_pairs(issues)
+        assert 'reference/scenes.csv' not in pairs
+
+    def test_empty_issues(self):
+        assert _detect_rename_pairs([]) == {}
+
+
+class TestActionForIssue:
+    """Tests for actionable issue descriptions."""
+
+    def test_missing_reference_csv(self):
+        action = _action_for_issue('MISSING_CSV:reference/motif-taxonomy.csv', {})
+        assert 'storyforge elaborate' in action or 'templates/' in action
+
+    def test_missing_working_csv(self):
+        action = _action_for_issue('MISSING_CSV:working/pipeline.csv', {})
+        assert 'automatically' in action
+
+    def test_missing_column_plain(self):
+        action = _action_for_issue(
+            'MISSING_COLUMN:reference/characters.csv:death_scene', {})
+        assert 'add column' in action
+        assert 'death_scene' in action
+
+    def test_missing_column_as_rename(self):
+        pairs = {'reference/chapter-map.csv': [('chapter', 'seq')]}
+        action = _action_for_issue(
+            'MISSING_COLUMN:reference/chapter-map.csv:chapter', pairs)
+        assert 'rename' in action
+        assert '"seq"' in action
+        assert '"chapter"' in action
+
+    def test_extra_column_suppressed_by_rename(self):
+        pairs = {'reference/chapter-map.csv': [('chapter', 'seq')]}
+        action = _action_for_issue(
+            'EXTRA_COLUMN:reference/chapter-map.csv:seq', pairs)
+        assert action == ''
+
+    def test_orphan_file(self):
+        action = _action_for_issue('ORPHAN_FILE:lost-scene', {})
+        assert 'storyforge extract' in action
+
+    def test_orphan_meta(self):
+        action = _action_for_issue('ORPHAN_META:ghost-row', {})
+        assert 'remove from CSVs' in action
+
+    def test_unknown_character(self):
+        action = _action_for_issue('UNKNOWN_CHARACTER:Bob', {})
+        assert 'storyforge hone' in action
+
+    def test_seq_renumber(self):
+        action = _action_for_issue('SEQ_NEEDS_RENUMBER:gaps found', {})
+        assert 'storyforge scenes-setup' in action
+
+    def test_bad_chapter_ref(self):
+        action = _action_for_issue('BAD_CHAPTER_REF:deleted-scene', {})
+        assert 'chapter map' in action
