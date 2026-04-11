@@ -472,10 +472,18 @@ def _get_scene_overrides(scene_id: str, project_dir: str) -> str:
     if not header:
         return ''
 
+    # Build dicts so we access columns by name, not position
+    col_map = {name.strip(): i for i, name in enumerate(header)}
+    id_idx = col_map.get('id')
+    directive_idx = col_map.get('directive')
+    if id_idx is None or directive_idx is None:
+        return ''
+
     lines = []
     for row in rows:
-        if row and row[0] == scene_id and len(row) > 2:
-            lines.append(f'- {row[2]}')
+        if row and len(row) > max(id_idx, directive_idx) \
+                and row[id_idx].strip() == scene_id:
+            lines.append(f'- {row[directive_idx].strip()}')
 
     return '\n'.join(lines)
 
