@@ -29,11 +29,16 @@ from storyforge.git import commit_and_push, ensure_on_branch
 # ============================================================================
 
 def _read_csv(path: str) -> tuple[list[str], list[dict]]:
-    """Read a pipe-delimited CSV. Returns (header_fields, rows_as_dicts)."""
+    """Read a pipe-delimited CSV. Returns (header_fields, rows_as_dicts).
+
+    Strips ``\\r`` so CRLF line endings and stray carriage returns embedded
+    by awk-based CSV edits never propagate into field values.
+    """
     if not os.path.isfile(path):
         return [], []
-    with open(path, encoding='utf-8') as f:
-        lines = [l.rstrip('\n') for l in f if l.strip()]
+    with open(path, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    lines = [l for l in raw.splitlines() if l.strip()]
     if not lines:
         return [], []
     header = lines[0].split('|')

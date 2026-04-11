@@ -15,11 +15,16 @@ MIN_SCENE_WORDS = int(os.environ.get('STORYFORGE_MIN_SCENE_WORDS', '50'))
 
 
 def _read_csv_rows(csv_path: str) -> list[dict[str, str]]:
-    """Read a pipe-delimited CSV into a list of dicts."""
+    """Read a pipe-delimited CSV into a list of dicts.
+
+    Strips ``\\r`` so CRLF line endings and stray carriage returns embedded
+    by awk-based CSV edits never propagate into field values.
+    """
     if not os.path.isfile(csv_path):
         return []
-    with open(csv_path) as f:
-        lines = [l.strip() for l in f if l.strip()]
+    with open(csv_path, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    lines = [l for l in raw.splitlines() if l.strip()]
     if not lines:
         return []
     headers = lines[0].split(DELIMITER)

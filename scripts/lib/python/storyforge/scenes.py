@@ -311,9 +311,10 @@ def generate_rename_plan(scenes_dir: str,
     if not os.path.isfile(metadata_csv):
         return []
 
-    # Read the CSV
-    with open(metadata_csv) as f:
-        csv_lines = [l.rstrip('\n') for l in f if l.strip()]
+    # Read the CSV (strip \r for CRLF safety)
+    with open(metadata_csv, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    csv_lines = [l for l in raw.splitlines() if l.strip()]
 
     if not csv_lines:
         return []

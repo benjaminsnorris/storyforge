@@ -44,14 +44,16 @@ def _read_history(project_dir: str) -> list[dict[str, str]]:
 
     Returns [] if the file does not exist.
     Coerces None → '' (csv.DictReader returns None for short rows).
+    Strips ``\\r`` so CRLF line endings never propagate into field values.
     """
     path = _history_path(project_dir)
     if not os.path.exists(path):
         return []
     with open(path, newline='', encoding='utf-8') as f:
-        reader = csv.DictReader(f, delimiter=DELIMITER)
-        return [{k: (v if v is not None else '') for k, v in row.items()}
-                for row in reader]
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    reader = csv.DictReader(raw.splitlines(), delimiter=DELIMITER)
+    return [{k: (v if v is not None else '') for k, v in row.items()}
+            for row in reader]
 
 
 # ============================================================================
@@ -71,11 +73,12 @@ def append_cycle(scores_dir: str, cycle: int, project_dir: str) -> int:
     if not os.path.exists(scores_path):
         return 0
 
-    # Read the scene-scores CSV
+    # Read the scene-scores CSV (strip \r for CRLF safety)
     with open(scores_path, newline='', encoding='utf-8') as f:
-        reader = csv.DictReader(f, delimiter=DELIMITER)
-        score_rows = [{k: (v if v is not None else '') for k, v in row.items()}
-                      for row in reader]
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    reader = csv.DictReader(raw.splitlines(), delimiter=DELIMITER)
+    score_rows = [{k: (v if v is not None else '') for k, v in row.items()}
+                  for row in reader]
 
     if not score_rows:
         return 0
