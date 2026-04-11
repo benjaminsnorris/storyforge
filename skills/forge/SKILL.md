@@ -103,6 +103,9 @@ Run structural scoring — this is a deterministic analysis of the CSV data (no 
 ```
 If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv`. At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
 
+**"Clean up" / "Health check" / "Check my project" / "Fix CSV issues" / "Project cleanup":**
+Invoke the `cleanup` skill. This runs the project health report (CSV schema validation, scene artifact detection, structural checks), then works through action items — fixing what it can directly and delegating to other skills/scripts as needed.
+
 **"Reconcile" / "Normalize my data" / "Build registries" / "Clean up values" / "Hone" / "Improve my briefs" / "Fix abstract language" / "Fill gaps":**
 Invoke the `hone` skill. Hone consolidates all CSV data quality work: registry normalization, brief concretization (rewriting abstract language as concrete physical beats), structural CSV fixes from evaluation findings, and gap filling. It replaces the standalone reconcile command.
 

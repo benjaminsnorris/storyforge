@@ -1000,6 +1000,11 @@ def build_cleanup_report(project_dir: str) -> dict:
             finding['category'] = 'unexpected'
             all_findings.append(finding)
 
+    # Set default status on all findings
+    for f in all_findings:
+        if 'status' not in f:
+            f['status'] = 'pending' if f['severity'] != 'info' else ''
+
     action_items = [f for f in all_findings if f['severity'] != 'info']
 
     return {
@@ -1057,7 +1062,7 @@ def _print_report(report: dict) -> None:
         f'{summary["warnings"]} warning(s), {summary["info"]} info')
 
 
-REPORT_COLUMNS = ['category', 'type', 'severity', 'file', 'detail', 'action', 'command']
+REPORT_COLUMNS = ['category', 'type', 'severity', 'file', 'detail', 'action', 'command', 'status']
 
 
 def _write_report(report: dict, project_dir: str) -> str:
