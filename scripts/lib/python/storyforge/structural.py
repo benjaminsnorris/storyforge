@@ -1620,18 +1620,22 @@ def load_previous_scores(project_dir):
     result = {}
     with open(latest_path, 'r') as f:
         header = None
+        col_idx = {}
         for line in f:
             line = line.strip()
             if not line:
                 continue
             if header is None:
                 header = line.split('|')
+                col_idx = {name: i for i, name in enumerate(header)}
                 continue
             parts = line.split('|')
-            if len(parts) >= 2:
-                name = parts[0]
+            dim_idx = col_idx.get('dimension', 0)
+            score_idx = col_idx.get('score')
+            if dim_idx < len(parts) and score_idx is not None and score_idx < len(parts):
+                name = parts[dim_idx]
                 try:
-                    score = float(parts[1])
+                    score = float(parts[score_idx])
                 except ValueError:
                     continue
                 result[name] = score
