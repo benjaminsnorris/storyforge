@@ -4,9 +4,12 @@ import os
 
 from storyforge.cmd_cleanup import (
     EXPECTED_CSV_SCHEMAS,
+    REPORT_COLUMNS,
     report_csv_schema,
-    _action_for_issue,
+    build_cleanup_report,
+    _classify_issue,
     _detect_rename_pairs,
+    _write_report,
 )
 
 
@@ -117,53 +120,145 @@ class TestDetectRenamePairs:
         assert _detect_rename_pairs([]) == {}
 
 
-class TestActionForIssue:
-    """Tests for actionable issue descriptions."""
+class TestClassifyIssue:
+    """Tests for structured issue classification."""
 
     def test_missing_reference_csv(self):
-        action = _action_for_issue('MISSING_CSV:reference/motif-taxonomy.csv', {})
-        assert 'storyforge elaborate' in action or 'templates/' in action
+        finding = _classify_issue('MISSING_CSV:reference/motif-taxonomy.csv', {})
+        assert finding['type'] == 'missing_csv'
+        assert finding['severity'] == 'warning'
+        assert 'command' in finding
 
     def test_missing_working_csv(self):
-        action = _action_for_issue('MISSING_CSV:working/pipeline.csv', {})
-        assert 'automatically' in action
+        finding = _classify_issue('MISSING_CSV:working/pipeline.csv', {})
+        assert finding['type'] == 'missing_csv'
+        assert finding['severity'] == 'info'
 
     def test_missing_column_plain(self):
-        action = _action_for_issue(
+        finding = _classify_issue(
             'MISSING_COLUMN:reference/characters.csv:death_scene', {})
-        assert 'add column' in action
-        assert 'death_scene' in action
+        assert finding['type'] == 'missing_column'
+        assert finding['column'] == 'death_scene'
+        assert 'death_scene' in finding['action']
 
     def test_missing_column_as_rename(self):
         pairs = {'reference/chapter-map.csv': [('chapter', 'seq')]}
-        action = _action_for_issue(
+        finding = _classify_issue(
             'MISSING_COLUMN:reference/chapter-map.csv:chapter', pairs)
-        assert 'rename' in action
-        assert '"seq"' in action
-        assert '"chapter"' in action
+        assert finding['type'] == 'rename_column'
+        assert finding['rename_from'] == 'seq'
+        assert finding['rename_to'] == 'chapter'
 
     def test_extra_column_suppressed_by_rename(self):
         pairs = {'reference/chapter-map.csv': [('chapter', 'seq')]}
-        action = _action_for_issue(
+        finding = _classify_issue(
             'EXTRA_COLUMN:reference/chapter-map.csv:seq', pairs)
-        assert action == ''
+        assert finding is None
 
     def test_orphan_file(self):
-        action = _action_for_issue('ORPHAN_FILE:lost-scene', {})
-        assert 'storyforge extract' in action
+        finding = _classify_issue('ORPHAN_FILE:lost-scene', {})
+        assert finding['type'] == 'orphan_file'
+        assert finding['scene_id'] == 'lost-scene'
+        assert 'storyforge extract' in finding['command']
 
     def test_orphan_meta(self):
-        action = _action_for_issue('ORPHAN_META:ghost-row', {})
-        assert 'remove from CSVs' in action
+        finding = _classify_issue('ORPHAN_META:ghost-row', {})
+        assert finding['type'] == 'orphan_meta'
+        assert 'remove' in finding['action'].lower() or 'create' in finding['action'].lower()
 
     def test_unknown_character(self):
-        action = _action_for_issue('UNKNOWN_CHARACTER:Bob', {})
-        assert 'storyforge hone' in action
+        finding = _classify_issue('UNKNOWN_CHARACTER:Bob', {})
+        assert finding['type'] == 'unknown_character'
+        assert finding['character'] == 'Bob'
+        assert 'storyforge hone' in finding['command']
 
     def test_seq_renumber(self):
-        action = _action_for_issue('SEQ_NEEDS_RENUMBER:gaps found', {})
-        assert 'storyforge scenes-setup' in action
+        finding = _classify_issue('SEQ_NEEDS_RENUMBER:gaps found', {})
+        assert finding['type'] == 'seq_needs_renumber'
+        assert 'storyforge scenes-setup' in finding['command']
 
     def test_bad_chapter_ref(self):
-        action = _action_for_issue('BAD_CHAPTER_REF:deleted-scene', {})
-        assert 'chapter map' in action
+        finding = _classify_issue('BAD_CHAPTER_REF:deleted-scene', {})
+        assert finding['type'] == 'bad_chapter_ref'
+        assert finding['severity'] == 'error'
+
+
+class TestBuildCsvReport:
+    """Tests for the full report builder."""
+
+    def test_clean_project_no_actions(self, tmp_path):
+        """A project with all correct CSVs has no action items."""
+        for rel_path, cols in EXPECTED_CSV_SCHEMAS.items():
+            _write_csv(str(tmp_path), rel_path, '|'.join(cols))
+        # Need scenes dir for unexpected files check
+        (tmp_path / 'scenes').mkdir()
+        (tmp_path / 'reference').mkdir(exist_ok=True)
+        (tmp_path / 'working').mkdir(exist_ok=True)
+        (tmp_path / 'manuscript').mkdir()
+        (tmp_path / 'storyforge.yaml').touch()
+        (tmp_path / '.gitignore').touch()
+
+        report = build_cleanup_report(str(tmp_path))
+        assert report['summary']['errors'] == 0
+        assert report['summary']['warnings'] == 0
+        assert len(report['action_items']) == 0
+
+    def test_report_has_action_items(self, tmp_path):
+        """Missing columns show up as action items."""
+        _write_csv(str(tmp_path), 'reference/scenes.csv', 'id|seq|title')
+
+        report = build_cleanup_report(str(tmp_path))
+        assert report['summary']['warnings'] > 0
+        assert len(report['action_items']) > 0
+        # Each action item should have required fields
+        for item in report['action_items']:
+            assert 'type' in item
+            assert 'action' in item
+            assert 'severity' in item
+
+
+class TestWriteReport:
+    """Tests for CSV report file output."""
+
+    def test_writes_valid_csv(self, tmp_path):
+        report = {
+            'findings': [{'type': 'test', 'detail': 'x', 'action': 'y',
+                         'severity': 'info', 'category': 'schema',
+                         'file': 'ref.csv', 'command': ''}],
+            'action_items': [],
+            'summary': {'total': 1, 'errors': 0, 'warnings': 0, 'info': 1},
+        }
+        path = _write_report(report, str(tmp_path))
+        assert os.path.isfile(path)
+        with open(path) as f:
+            lines = f.readlines()
+        assert lines[0].strip() == '|'.join(REPORT_COLUMNS)
+        assert len(lines) == 2  # header + 1 finding
+        cols = lines[1].strip().split('|')
+        assert len(cols) == len(REPORT_COLUMNS)
+        assert cols[0] == 'schema'  # category
+        assert cols[1] == 'test'    # type
+
+    def test_report_path(self, tmp_path):
+        report = {'findings': [], 'action_items': [],
+                  'summary': {'total': 0, 'errors': 0, 'warnings': 0, 'info': 0}}
+        path = _write_report(report, str(tmp_path))
+        assert path.endswith('working/cleanup-report.csv')
+
+    def test_missing_fields_default_empty(self, tmp_path):
+        """Findings without optional fields get empty strings."""
+        report = {
+            'findings': [{'type': 'test', 'detail': 'x', 'action': 'y',
+                         'severity': 'info', 'category': 'schema'}],
+            'action_items': [],
+            'summary': {'total': 1, 'errors': 0, 'warnings': 0, 'info': 1},
+        }
+        path = _write_report(report, str(tmp_path))
+        with open(path) as f:
+            lines = f.readlines()
+        cols = lines[1].strip().split('|')
+        # 'file' and 'command' should be empty
+        file_idx = REPORT_COLUMNS.index('file')
+        cmd_idx = REPORT_COLUMNS.index('command')
+        assert cols[file_idx] == ''
+        assert cols[cmd_idx] == ''

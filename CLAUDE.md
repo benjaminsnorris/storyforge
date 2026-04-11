@@ -268,6 +268,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `revise` | Plan + execute revision (upstream CSV fixes + prose polish). `--polish` for craft-only. |
 | `score` | Craft + fidelity scoring |
 | `hone` | CSV data quality — registries, brief concretization, intent quality, evaluation-driven fixes, gap detection. `--diagnose` for read-only assessment. |
+| `cleanup` | Project health check — CSV schema validation, scene artifact cleanup, structural drift fixes. Generates report, works through action items. |
 | `publish` | Assemble web book + generate dashboard + push to bookshelf |
 | `produce` | Epub, PDF, print formats |
 | `init` | New project initialization |

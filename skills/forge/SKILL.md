@@ -32,6 +32,7 @@ Before doing anything else, orient yourself:
    - `working/plans/revision-plan.csv` (preferred) or `working/plans/revision-plan.yaml` (legacy)
    - `working/scores/structural-latest.csv` (structural scoring results)
    - `working/scores/structural-proposals.csv` (unaddressed structural proposals)
+   - `working/cleanup-report.csv` (pending cleanup action items from a previous session)
    - The `scenes/` directory (any `.md` files = drafted scenes)
 4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
 
@@ -103,6 +104,9 @@ Run structural scoring — this is a deterministic analysis of the CSV data (no 
 ```
 If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv`. At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
 
+**"Clean up" / "Health check" / "Check my project" / "Fix CSV issues" / "Project cleanup":**
+Invoke the `cleanup` skill. This runs the project health report (CSV schema validation, scene artifact detection, structural checks), then works through action items — fixing what it can directly and delegating to other skills/scripts as needed.
+
 **"Reconcile" / "Normalize my data" / "Build registries" / "Clean up values" / "Hone" / "Improve my briefs" / "Fix abstract language" / "Fill gaps":**
 Invoke the `hone` skill. Hone consolidates all CSV data quality work: registry normalization, brief concretization (rewriting abstract language as concrete physical beats), structural CSV fixes from evaluation findings, and gap filling. It replaces the standalone reconcile command.
 
@@ -168,6 +172,8 @@ If the project doesn't have a `./storyforge` runner script, offer to create one 
 The author said "surprise me," "what should I work on?", or gave no specific direction.
 
 Determine the single highest-value next action based on project state. Work through these priorities in order — stop at the first one that applies:
+
+**0. Pending cleanup:** If `working/cleanup-report.csv` exists with `status=pending` items → "You have unfinished cleanup items from a previous session." → invoke `cleanup` to resume.
 
 **1. Elaboration phase:** If phase is `spine`/`architecture`/`scene-map`/`briefs` → "Continue elaboration" → invoke `elaborate`.
 
