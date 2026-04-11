@@ -148,21 +148,26 @@ def merge_score_files(target_path: str, source_path: str):
                 f.write('|'.join(row) + '\n')
         return
 
-    # Different headers: join on id column (column 0)
+    # Different headers: join on id column
+    t_col_idx = {name: i for i, name in enumerate(t_header)}
+    s_col_idx = {name: i for i, name in enumerate(s_header)}
+    t_id_col = t_col_idx.get('id', 0)
+    s_id_col = s_col_idx.get('id', 0)
+
     # Build lookup of target rows by id, preserving order
     t_index: dict[str, list[str]] = {}
     t_order: list[str] = []
     for row in t_rows:
-        rid = row[0] if row else ''
+        rid = row[t_id_col] if t_id_col < len(row) else ''
         t_index[rid] = row
         t_order.append(rid)
 
     # Source columns beyond id
-    s_extra_cols = s_header[1:]
+    s_extra_cols = [c for i, c in enumerate(s_header) if i != s_id_col]
     s_index: dict[str, list[str]] = {}
     for row in s_rows:
-        rid = row[0] if row else ''
-        s_index[rid] = row[1:] if len(row) > 1 else []
+        rid = row[s_id_col] if s_id_col < len(row) else ''
+        s_index[rid] = [row[i] for i in range(len(row)) if i != s_id_col]
         # Track new IDs not in target
         if rid not in t_index:
             t_order.append(rid)
@@ -211,10 +216,10 @@ def build_weighted_text(weights_file: str, exclude_section: str = '') -> str:
 
     high_priority = []
     for row in rows:
-        section = row[col_idx.get('section', 0)] if 'section' in col_idx else ''
-        principle = row[col_idx.get('principle', 1)] if 'principle' in col_idx else ''
-        weight = row[col_idx.get('weight', 2)] if 'weight' in col_idx else ''
-        author_weight = row[col_idx.get('author_weight', 3)] if 'author_weight' in col_idx else ''
+        section = row[col_idx['section']] if 'section' in col_idx and col_idx['section'] < len(row) else ''
+        principle = row[col_idx['principle']] if 'principle' in col_idx and col_idx['principle'] < len(row) else ''
+        weight = row[col_idx['weight']] if 'weight' in col_idx and col_idx['weight'] < len(row) else ''
+        author_weight = row[col_idx['author_weight']] if 'author_weight' in col_idx and col_idx['author_weight'] < len(row) else ''
 
         if exclude_section and section == exclude_section:
             continue
@@ -247,14 +252,16 @@ def get_effective_weight(weights_file: str, principle: str) -> int:
     """
     header, rows = _read_csv(weights_file)
     col_idx = {name: i for i, name in enumerate(header)}
-    p_col = col_idx.get('principle', 1)
-    w_col = col_idx.get('weight', 2)
-    aw_col = col_idx.get('author_weight', 3)
+    if 'principle' not in col_idx:
+        return 5
+    p_col = col_idx['principle']
+    w_col = col_idx.get('weight')
+    aw_col = col_idx.get('author_weight')
 
     for row in rows:
         if len(row) > p_col and row[p_col] == principle:
-            author_w = row[aw_col] if len(row) > aw_col else ''
-            weight = row[w_col] if len(row) > w_col else ''
+            author_w = row[aw_col] if aw_col is not None and len(row) > aw_col else ''
+            weight = row[w_col] if w_col is not None and len(row) > w_col else ''
             val = author_w if author_w else weight
             try:
                 return int(val)
@@ -366,6 +373,9 @@ def generate_diagnosis(scores_dir: str, prev_dir: str, weights_file: str):
         if not header or not rows:
             continue
 
+        h_idx = {name: i for i, name in enumerate(header)}
+        id_col = h_idx.get('id', 0)
+
         prev_header: list[str] = []
         prev_rows: list[list[str]] = []
         if prev_dir:
@@ -373,10 +383,10 @@ def generate_diagnosis(scores_dir: str, prev_dir: str, weights_file: str):
             if os.path.isfile(prev_file):
                 prev_header, prev_rows = _read_csv(prev_file)
 
-        # Process each principle column (skip column 0 which is id)
-        for col_idx in range(1, len(header)):
+        # Process each principle column (skip the id column)
+        for col_idx in range(len(header)):
             principle = header[col_idx]
-            if not principle:
+            if not principle or principle == 'id':
                 continue
 
             # Skip narrative principles in scene-level scores
@@ -391,7 +401,8 @@ def generate_diagnosis(scores_dir: str, prev_dir: str, weights_file: str):
                         val = float(row[col_idx])
                     except (ValueError, TypeError):
                         continue
-                    id_scores.append((row[0], val))
+                    row_id = row[id_col] if id_col < len(row) else ''
+                    id_scores.append((row_id, val))
 
             if not id_scores:
                 continue
@@ -495,16 +506,26 @@ def generate_proposals(scores_dir: str, weights_file: str):
     scene_scores_file = os.path.join(scores_dir, 'scene-scores.csv')
     scene_header: list[str] = []
     scene_rows: list[list[str]] = []
+    scene_id_col = 0
     if os.path.isfile(scene_scores_file):
         scene_header, scene_rows = _read_csv(scene_scores_file)
+        scene_h_idx = {name: i for i, name in enumerate(scene_header)}
+        scene_id_col = scene_h_idx.get('id', 0)
+
+    def _dcol(row, name):
+        """Safely get a diagnosis column value by name."""
+        idx = col.get(name)
+        if idx is not None and idx < len(row):
+            return row[idx]
+        return ''
 
     for drow in d_rows:
-        principle = drow[col.get('principle', 0)]
-        scale = drow[col.get('scale', 1)]
-        avg_score = drow[col.get('avg_score', 2)]
-        worst_items = drow[col.get('worst_items', 3)]
-        delta = drow[col.get('delta_from_last', 4)]
-        priority = drow[col.get('priority', 5)]
+        principle = _dcol(drow, 'principle')
+        scale = _dcol(drow, 'scale')
+        avg_score = _dcol(drow, 'avg_score')
+        worst_items = _dcol(drow, 'worst_items')
+        delta = _dcol(drow, 'delta_from_last')
+        priority = _dcol(drow, 'priority')
 
         if priority not in ('high', 'medium'):
             continue
@@ -514,15 +535,16 @@ def generate_proposals(scores_dir: str, weights_file: str):
         if os.path.isfile(weights_file):
             header, rows = _read_csv(weights_file)
             w_col_idx = {name: i for i, name in enumerate(header)}
-            p_idx = w_col_idx.get('principle', 1)
-            wt_idx = w_col_idx.get('weight', 2)
-            for row in rows:
-                if len(row) > p_idx and row[p_idx] == principle:
-                    try:
-                        current_weight = int(row[wt_idx]) if len(row) > wt_idx and row[wt_idx] else 5
-                    except ValueError:
-                        current_weight = 5
-                    break
+            p_idx = w_col_idx.get('principle')
+            wt_idx = w_col_idx.get('weight')
+            if p_idx is not None:
+                for row in rows:
+                    if len(row) > p_idx and row[p_idx] == principle:
+                        try:
+                            current_weight = int(row[wt_idx]) if wt_idx is not None and len(row) > wt_idx and row[wt_idx] else 5
+                        except ValueError:
+                            current_weight = 5
+                        break
 
         increase = 2 if priority == 'high' else 1
         new_weight = min(current_weight + increase, 10)
@@ -555,7 +577,7 @@ def generate_proposals(scores_dir: str, weights_file: str):
                     # Find this scene's score
                     scene_val = None
                     for srow in scene_rows:
-                        if srow and srow[0] == scene_id and scene_col < len(srow):
+                        if srow and scene_id_col < len(srow) and srow[scene_id_col] == scene_id and scene_col < len(srow):
                             try:
                                 scene_val = int(srow[scene_col])
                             except (ValueError, TypeError):
@@ -682,10 +704,10 @@ def parse_scene_evaluation(
             try:
                 p_idx = header.index('principle')
             except ValueError:
-                p_idx = 1  # fallback to second column
+                p_idx = None
             seen: set[str] = set()
             for row in rows:
-                if len(row) > p_idx:
+                if p_idx is not None and len(row) > p_idx:
                     p = row[p_idx]
                     if p and p not in seen:
                         seen.add(p)
@@ -824,15 +846,17 @@ def build_evaluation_criteria(diagnostics_csv: str, guide_file: str) -> str:
 
     # Locate columns by name
     col = {name: i for i, name in enumerate(header)}
-    principle_idx = col.get('principle', 1)
-    question_idx = col.get('question', 3)
+    if 'principle' not in col:
+        return ''
+    principle_idx = col['principle']
+    question_idx = col.get('question')
 
     # Group questions by principle, preserving order
     from collections import OrderedDict
     principles: OrderedDict[str, list[str]] = OrderedDict()
     for row in rows:
         principle = row[principle_idx] if len(row) > principle_idx else ''
-        question = row[question_idx] if len(row) > question_idx else ''
+        question = row[question_idx] if question_idx is not None and len(row) > question_idx else ''
         if not principle:
             continue
         if principle not in principles:
@@ -879,15 +903,28 @@ def collect_exemplars(scores_dir: str, project_dir: str, cycle: str):
 
     # Read existing exemplars to avoid duplicates
     existing = set()
+    ex_header_line = None
     with open(exemplars_file) as f:
         for line in f:
-            if line.startswith('principle|'):
+            line = line.strip()
+            if not line:
                 continue
-            parts = line.strip().split('|')
-            if len(parts) >= 2:
-                existing.add((parts[0], parts[1]))
+            if ex_header_line is None:
+                ex_header_line = line.split('|')
+                continue
+            parts = line.split('|')
+            ex_col = {name: i for i, name in enumerate(ex_header_line)}
+            ex_p_idx = ex_col.get('principle', 0)
+            ex_s_idx = ex_col.get('scene_id', 1)
+            p_val = parts[ex_p_idx] if ex_p_idx < len(parts) else ''
+            s_val = parts[ex_s_idx] if ex_s_idx < len(parts) else ''
+            if p_val and s_val:
+                existing.add((p_val, s_val))
 
     header, rows = _read_csv(scores_file)
+    h_idx = {name: i for i, name in enumerate(header)}
+    sc_id_col = h_idx.get('id', 0)
+
     rationale_file = os.path.join(scores_dir, 'scene-rationale.csv')
     rat_header, rat_rows = ([], [])
     if os.path.isfile(rationale_file):
@@ -896,19 +933,21 @@ def collect_exemplars(scores_dir: str, project_dir: str, cycle: str):
     # Build rationale lookup: {(scene_id, principle): text}
     rat_lookup = {}
     if rat_header and rat_rows:
+        rat_h_idx = {name: i for i, name in enumerate(rat_header)}
+        rat_id_col = rat_h_idx.get('id', 0)
         for row in rat_rows:
-            scene_id = row[0] if row else ''
+            scene_id = row[rat_id_col] if rat_id_col < len(row) else ''
             for ci, col in enumerate(rat_header):
-                if ci == 0:
+                if col == 'id':
                     continue
                 if ci < len(row) and row[ci]:
                     rat_lookup[(scene_id, col)] = row[ci]
 
     new_rows = []
     for row in rows:
-        scene_id = row[0] if row else ''
+        scene_id = row[sc_id_col] if sc_id_col < len(row) else ''
         for ci, principle in enumerate(header):
-            if ci == 0:
+            if principle == 'id':
                 continue
             if ci >= len(row) or not row[ci]:
                 continue
@@ -941,16 +980,35 @@ def check_validated_patterns(project_dir: str) -> str:
     improvements: dict[str, float] = {}
 
     with open(tuning_file) as f:
+        header_line = None
         for line in f:
-            if line.startswith('cycle') or line.startswith('#'):
+            line = line.strip()
+            if not line or line.startswith('#'):
                 continue
-            parts = line.strip().split('|')
-            if len(parts) < 8 or parts[7] != 'true':
+            if header_line is None:
+                header_line = line.split('|')
                 continue
-            key = f'{parts[2]}|{parts[3]}'
+            parts = line.split('|')
+            t_col = {name: i for i, name in enumerate(header_line)}
+            validated_idx = t_col.get('validated')
+            principle_idx = t_col.get('principle')
+            lever_idx = t_col.get('lever')
+            score_after_idx = t_col.get('score_after')
+            score_before_idx = t_col.get('score_before')
+
+            validated = parts[validated_idx] if validated_idx is not None and validated_idx < len(parts) else ''
+            if validated != 'true':
+                continue
+            principle = parts[principle_idx] if principle_idx is not None and principle_idx < len(parts) else ''
+            lever = parts[lever_idx] if lever_idx is not None and lever_idx < len(parts) else ''
+            if not principle or not lever:
+                continue
+            key = f'{principle}|{lever}'
             counts[key] = counts.get(key, 0) + 1
             try:
-                improvements[key] = improvements.get(key, 0.0) + (float(parts[6]) - float(parts[5]))
+                after = float(parts[score_after_idx]) if score_after_idx is not None and score_after_idx < len(parts) else 0.0
+                before = float(parts[score_before_idx]) if score_before_idx is not None and score_before_idx < len(parts) else 0.0
+                improvements[key] = improvements.get(key, 0.0) + (after - before)
             except (ValueError, IndexError):
                 pass
 
@@ -986,6 +1044,14 @@ def _sc_class(val: str) -> str:
     return ''
 
 
+def _col_val(row: list[str], col_map: dict[str, int], name: str, default: str = '') -> str:
+    """Safely retrieve a column value from a CSV row by column name."""
+    idx = col_map.get(name)
+    if idx is not None and idx < len(row):
+        return row[idx]
+    return default
+
+
 def generate_score_report(cycle_dir: str, project_dir: str, cycle: str,
                           mode: str, scene_count: int, cost: str):
     """Generate an HTML scoring report."""
@@ -1008,26 +1074,41 @@ def generate_score_report(cycle_dir: str, project_dir: str, cycle: str,
     char_file = os.path.join(cycle_dir, 'character-scores.csv')
     if os.path.isfile(char_file):
         header, rows = _read_csv(char_file)
+        ch_col = {name: i for i, name in enumerate(header)}
+        ch_id_col_name = 'character' if 'character' in ch_col else 'id'
+        # Score columns are all non-id columns
+        ch_score_cols = [name for name in header if name != ch_id_col_name]
         for row in rows:
-            if not row or row[0] == 'character':
+            ch_id = _col_val(row, ch_col, ch_id_col_name)
+            if not ch_id or ch_id == ch_id_col_name:
                 continue
-            vals = [(float(row[i]) if i < len(row) and row[i] else 0) for i in range(1, 5)]
+            vals = []
+            cells = ''
+            for col_name in ch_score_cols:
+                v_str = _col_val(row, ch_col, col_name)
+                try:
+                    vals.append(float(v_str) if v_str else 0)
+                except ValueError:
+                    vals.append(0)
+                cells += f'<td class="{_sc_class(v_str)}">{v_str}</td>'
             avg = sum(vals) / max(len(vals), 1)
-            cells = ''.join(f'<td class="{_sc_class(row[i] if i < len(row) else "")}">{row[i] if i < len(row) else ""}</td>'
-                           for i in range(1, 5))
-            char_rows += f'<tr><td>{row[0]}</td>{cells}<td><strong>{avg:.1f}</strong></td></tr>\n'
+            char_rows += f'<tr><td>{ch_id}</td>{cells}<td><strong>{avg:.1f}</strong></td></tr>\n'
 
     # Act structure table
     act_rows = ''
     act_file = os.path.join(cycle_dir, 'act-scores.csv')
     if os.path.isfile(act_file):
         header, rows = _read_csv(act_file)
+        act_col = {name: i for i, name in enumerate(header)}
+        act_id_col = 'id' if 'id' in act_col else header[0]
+        act_score_cols = [name for name in header if name != act_id_col]
         for row in rows:
-            if not row or row[0] == 'id':
+            row_id = _col_val(row, act_col, act_id_col)
+            if not row_id or row_id == 'id':
                 continue
-            label = row[0].replace('act-', 'Part ')
-            cells = ''.join(f'<td class="{_sc_class(row[i] if i < len(row) else "")}">{row[i] if i < len(row) else ""}</td>'
-                           for i in range(1, len(header)))
+            label = row_id.replace('act-', 'Part ')
+            cells = ''.join(f'<td class="{_sc_class(_col_val(row, act_col, c))}">{_col_val(row, act_col, c)}</td>'
+                           for c in act_score_cols)
             act_rows += f'<tr><td>{label}</td>{cells}</tr>\n'
 
     # Genre row
@@ -1035,10 +1116,11 @@ def generate_score_report(cycle_dir: str, project_dir: str, cycle: str,
     genre_file = os.path.join(cycle_dir, 'genre-scores.csv')
     if os.path.isfile(genre_file):
         header, rows = _read_csv(genre_file)
+        genre_col = {name: i for i, name in enumerate(header)}
         if rows:
             row = rows[0]
-            genre_row = ''.join(f'<td class="{_sc_class(row[i] if i < len(row) else "")}">{row[i] if i < len(row) else ""}</td>'
-                               for i in range(len(row)))
+            genre_row = ''.join(f'<td class="{_sc_class(_col_val(row, genre_col, c))}">{_col_val(row, genre_col, c)}</td>'
+                               for c in header)
 
     # Strengths / weaknesses from diagnosis
     strengths = ''
@@ -1046,15 +1128,17 @@ def generate_score_report(cycle_dir: str, project_dir: str, cycle: str,
     diag_file = os.path.join(cycle_dir, 'diagnosis.csv')
     if os.path.isfile(diag_file):
         header, rows = _read_csv(diag_file)
+        dg_col = {name: i for i, name in enumerate(header)}
         scored = []
         for row in rows:
-            if len(row) >= 4:
-                try:
-                    avg = float(row[2]) if row[2] else 0
-                except ValueError:
-                    avg = 0
-                if avg > 0:
-                    scored.append((avg, row[0].replace('_', ' '), row[3] if len(row) > 3 else ''))
+            try:
+                avg = float(_col_val(row, dg_col, 'avg_score')) if _col_val(row, dg_col, 'avg_score') else 0
+            except ValueError:
+                avg = 0
+            if avg > 0:
+                prin = _col_val(row, dg_col, 'principle').replace('_', ' ')
+                scenes = _col_val(row, dg_col, 'worst_items')
+                scored.append((avg, prin, scenes))
         scored.sort(key=lambda x: x[0], reverse=True)
         for avg, prin, scenes in scored[:5]:
             strengths += f'<tr><td>{prin}</td><td>{avg}</td><td>{scenes}</td></tr>\n'
@@ -1067,14 +1151,16 @@ def generate_score_report(cycle_dir: str, project_dir: str, cycle: str,
     proposals_file = os.path.join(cycle_dir, 'proposals.csv')
     if os.path.isfile(proposals_file):
         header, rows = _read_csv(proposals_file)
+        pr_col = {name: i for i, name in enumerate(header)}
         for row in rows:
-            if not row or row[0] == 'id':
+            row_id = _col_val(row, pr_col, 'id')
+            if not row_id or row_id == 'id':
                 continue
-            prin = row[1].replace('_', ' ') if len(row) > 1 else ''
-            lever = row[2].replace('_', ' ') if len(row) > 2 else ''
-            change = row[4] if len(row) > 4 else ''
-            rationale = row[5] if len(row) > 5 else ''
-            status = row[6] if len(row) > 6 else 'pending'
+            prin = _col_val(row, pr_col, 'principle').replace('_', ' ')
+            lever = _col_val(row, pr_col, 'lever').replace('_', ' ')
+            change = _col_val(row, pr_col, 'change')
+            rationale = _col_val(row, pr_col, 'rationale')
+            status = _col_val(row, pr_col, 'status') or 'pending'
             badge_cls = {'applied': 'badge-applied', 'approved': 'badge-approved',
                         'rejected': 'badge-rejected'}.get(status, 'badge-pending')
             proposal_rows += (f'<tr><td>{prin}</td><td>{lever}</td><td>{change}</td>'
@@ -1085,19 +1171,23 @@ def generate_score_report(cycle_dir: str, project_dir: str, cycle: str,
     scene_file = os.path.join(cycle_dir, 'scene-scores.csv')
     if os.path.isfile(scene_file):
         header, rows = _read_csv(scene_file)
+        sc_col = {name: i for i, name in enumerate(header)}
+        sc_id_name = 'id' if 'id' in sc_col else header[0]
+        sc_score_cols = [name for name in header if name != sc_id_name]
         for row in rows:
-            if not row or row[0] == 'id':
+            row_id = _col_val(row, sc_col, sc_id_name)
+            if not row_id or row_id == 'id':
                 continue
             vals = []
-            for i in range(1, len(row)):
+            for c in sc_score_cols:
                 try:
-                    v = float(row[i])
+                    v = float(_col_val(row, sc_col, c))
                     if v > 0:
                         vals.append(v)
                 except (ValueError, IndexError):
                     pass
             avg = _power_mean(vals) if vals else 0
-            scene_heatmap += f'<tr><td>{row[0]}</td><td class="{_sc_class(str(round(avg)))}">{avg:.1f}</td></tr>\n'
+            scene_heatmap += f'<tr><td>{row_id}</td><td class="{_sc_class(str(round(avg)))}">{avg:.1f}</td></tr>\n'
 
     from datetime import datetime
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -1228,37 +1318,45 @@ def build_score_pr_comment(cycle_dir: str, project_dir: str, cycle: str,
     char_file = os.path.join(cycle_dir, 'character-scores.csv')
     if os.path.isfile(char_file):
         header, rows = _read_csv(char_file)
+        ch_col = {name: i for i, name in enumerate(header)}
+        ch_id_name = 'character' if 'character' in ch_col else 'id'
+        ch_score_cols = [name for name in header if name != ch_id_name]
         parts.append('### Character Arcs')
         parts.append('| Character | Want/Need | Wound/Lie | Flaws | Voice | Avg |')
         parts.append('|-----------|-----------|-----------|-------|-------|-----|')
         for row in rows:
-            if not row or row[0] == 'character':
+            ch_id = _col_val(row, ch_col, ch_id_name)
+            if not ch_id or ch_id == ch_id_name:
                 continue
             vals = []
             cells = []
-            for i in range(1, 5):
-                v = row[i] if i < len(row) and row[i] else '0'
+            for c in ch_score_cols:
+                v = _col_val(row, ch_col, c) or '0'
                 try:
                     vals.append(float(v))
                 except ValueError:
                     vals.append(0)
                 cells.append(f'{_score_icon(int(float(v)))} {v}')
             avg = sum(vals) / max(len(vals), 1)
-            parts.append(f'| {row[0]} | {" | ".join(cells)} | **{avg:.1f}** |')
+            parts.append(f'| {ch_id} | {" | ".join(cells)} | **{avg:.1f}** |')
         parts.append('')
 
     # Act structure
     act_file = os.path.join(cycle_dir, 'act-scores.csv')
     if os.path.isfile(act_file):
         header, rows = _read_csv(act_file)
+        act_col = {name: i for i, name in enumerate(header)}
+        act_id_name = 'id' if 'id' in act_col else header[0]
+        act_score_cols = [name for name in header if name != act_id_name]
         parts.append('### Act Structure')
         parts.append('| Act | Campbell | 3-Act | Save Cat | Truby | Harmon | Kishoten. | Freytag | Char Web | Theme |')
         parts.append('|-----|----------|-------|----------|-------|--------|-----------|---------|----------|-------|')
         for row in rows:
-            if not row or row[0] == 'id':
+            row_id = _col_val(row, act_col, act_id_name)
+            if not row_id or row_id == 'id':
                 continue
-            label = row[0].replace('act-', 'Part ')
-            cells = ' | '.join(row[i] if i < len(row) else '' for i in range(1, len(header)))
+            label = row_id.replace('act-', 'Part ')
+            cells = ' | '.join(_col_val(row, act_col, c) for c in act_score_cols)
             parts.append(f'| {label} | {cells} |')
         parts.append('')
 
@@ -1266,12 +1364,13 @@ def build_score_pr_comment(cycle_dir: str, project_dir: str, cycle: str,
     genre_file = os.path.join(cycle_dir, 'genre-scores.csv')
     if os.path.isfile(genre_file):
         header, rows = _read_csv(genre_file)
+        genre_col = {name: i for i, name in enumerate(header)}
         if rows:
             row = rows[0]
             parts.append('### Genre Contract')
             parts.append('| Trope Awareness | Archetype vs Cliche | Genre Contract | Subversion |')
             parts.append('|-----------------|---------------------|----------------|------------|')
-            cells = ' | '.join(row[i] if i < len(row) else '' for i in range(len(row)))
+            cells = ' | '.join(_col_val(row, genre_col, c) for c in header)
             parts.append(f'| {cells} |')
             parts.append('')
 
@@ -1279,15 +1378,17 @@ def build_score_pr_comment(cycle_dir: str, project_dir: str, cycle: str,
     diag_file = os.path.join(cycle_dir, 'diagnosis.csv')
     if os.path.isfile(diag_file):
         header, rows = _read_csv(diag_file)
+        dg_col = {name: i for i, name in enumerate(header)}
         scored = []
         for row in rows:
-            if len(row) >= 4:
-                try:
-                    avg = float(row[2]) if row[2] else 0
-                except ValueError:
-                    avg = 0
-                if avg > 0:
-                    scored.append((avg, row[0].replace('_', ' '), row[3] if len(row) > 3 else ''))
+            try:
+                avg = float(_col_val(row, dg_col, 'avg_score')) if _col_val(row, dg_col, 'avg_score') else 0
+            except ValueError:
+                avg = 0
+            if avg > 0:
+                prin = _col_val(row, dg_col, 'principle').replace('_', ' ')
+                scenes = _col_val(row, dg_col, 'worst_items')
+                scored.append((avg, prin, scenes))
 
         scored_asc = sorted(scored, key=lambda x: x[0])
         scored_desc = sorted(scored, key=lambda x: x[0], reverse=True)
@@ -1310,16 +1411,17 @@ def build_score_pr_comment(cycle_dir: str, project_dir: str, cycle: str,
     proposals_file = os.path.join(cycle_dir, 'proposals.csv')
     if os.path.isfile(proposals_file):
         header, rows = _read_csv(proposals_file)
-        data_rows = [r for r in rows if r and r[0] != 'id']
+        pr_col = {name: i for i, name in enumerate(header)}
+        data_rows = [r for r in rows if _col_val(r, pr_col, 'id') and _col_val(r, pr_col, 'id') != 'id']
         if data_rows:
             parts.append(f'### Improvement Proposals ({len(data_rows)})')
             parts.append('| Principle | Lever | Change | Status |')
             parts.append('|-----------|-------|--------|--------|')
             for row in data_rows:
-                prin = row[1].replace('_', ' ') if len(row) > 1 else ''
-                lever = row[2].replace('_', ' ') if len(row) > 2 else ''
-                change = row[4] if len(row) > 4 else ''
-                status = row[6] if len(row) > 6 else 'pending'
+                prin = _col_val(row, pr_col, 'principle').replace('_', ' ')
+                lever = _col_val(row, pr_col, 'lever').replace('_', ' ')
+                change = _col_val(row, pr_col, 'change')
+                status = _col_val(row, pr_col, 'status') or 'pending'
                 parts.append(f'| {prin} | {lever} | {change} | {status} |')
             parts.append('')
 
