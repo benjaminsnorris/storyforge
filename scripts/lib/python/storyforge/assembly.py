@@ -1133,15 +1133,24 @@ def main():
         sys.exit(1)
 
 
-def generate_publish_manifest(project_dir: str, cover_path: str | None = None) -> str:
+def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
+                              include_dashboard: bool = False,
+                              include_cover: bool = False) -> str:
     """Generate a JSON publish manifest from scene files and chapter map.
 
     Converts each scene's markdown to HTML, groups by chapter from
     chapter-map.csv, and writes working/publish-manifest.json.
 
+    The manifest is compatible with the Bookshelf PUT /api/books/<slug>
+    endpoint and optionally includes dashboard_html and cover_base64.
+
     Args:
         project_dir: Root directory of the project.
-        cover_path: Optional path to cover image (relative to project_dir).
+        cover_path: Optional path to cover image (absolute or relative to
+            project_dir). When include_cover is True and cover_path is None,
+            auto-detects from production/cover.* or manuscript/assets/cover.*.
+        include_dashboard: If True, read working/dashboard.html and embed it.
+        include_cover: If True, base64-encode the cover image and embed it.
 
     Returns:
         Path to the generated manifest file.
@@ -1149,6 +1158,7 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None) -
     Raises:
         ValueError: If the chapter map is stale.
     """
+    import base64
     import json
     from storyforge.common import (check_chapter_map_freshness,
                                    read_yaml_field as _common_read_yaml_field)
@@ -1206,14 +1216,37 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None) -
             'scenes': scenes,
         })
 
+    # Read optional metadata from storyforge.yaml
+    genre = _common_read_yaml_field('project.genre', project_dir) or ''
+    language = _common_read_yaml_field('project.language', project_dir) or 'en'
+    metadata = {}
+    if genre:
+        metadata['genre'] = genre
+    if language:
+        metadata['language'] = language
+
     manifest = {
         'title': title,
         'author': author,
         'slug': slug,
-        'cover_path': cover_path or '',
-        'generated_at': datetime.utcnow().isoformat() + 'Z',
+        'metadata': metadata,
         'chapters': chapters,
     }
+
+    # Embed dashboard HTML if requested
+    if include_dashboard:
+        dashboard_path = os.path.join(project_dir, 'working', 'dashboard.html')
+        if os.path.isfile(dashboard_path):
+            with open(dashboard_path) as f:
+                manifest['dashboard_html'] = f.read()
+
+    # Embed cover as base64 if requested
+    if include_cover:
+        resolved = _resolve_cover_path(project_dir, cover_path)
+        if resolved and os.path.isfile(resolved):
+            with open(resolved, 'rb') as f:
+                manifest['cover_base64'] = base64.b64encode(f.read()).decode('ascii')
+            manifest['cover_extension'] = os.path.splitext(resolved)[1]
 
     output_path = os.path.join(project_dir, 'working', 'publish-manifest.json')
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -1221,6 +1254,22 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None) -
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     return output_path
+
+
+def _resolve_cover_path(project_dir: str, cover_path: str | None) -> str | None:
+    """Resolve a cover image path, auto-detecting if not provided."""
+    if cover_path:
+        if os.path.isabs(cover_path):
+            return cover_path
+        return os.path.join(project_dir, cover_path)
+
+    # Auto-detect from standard locations
+    for directory in ('production', 'manuscript/assets'):
+        for ext in ('png', 'jpg', 'jpeg', 'svg'):
+            candidate = os.path.join(project_dir, directory, f'cover.{ext}')
+            if os.path.isfile(candidate):
+                return candidate
+    return None
 
 
 if __name__ == '__main__':

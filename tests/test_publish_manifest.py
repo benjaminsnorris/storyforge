@@ -42,7 +42,7 @@ class TestGeneratePublishManifest:
         assert manifest['title'] == 'Test Book'
         assert manifest['author'] == 'Test Author'
         assert manifest['slug'] == 'test-book'
-        assert 'generated_at' in manifest
+        assert 'metadata' in manifest
         assert len(manifest['chapters']) == 2
 
     def test_chapters_match_chapter_map(self, tmp_path):
