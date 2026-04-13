@@ -5,26 +5,6 @@ import os
 from storyforge.csv_cli import get_field
 
 
-# ============================================================================
-# Column definitions (must match cmd_scenes_export.py)
-# ============================================================================
-
-STRUCTURAL_FIELDS = [
-    'seq', 'title', 'part', 'pov', 'location', 'timeline_day',
-    'time_of_day', 'duration', 'type', 'status', 'word_count', 'target_words',
-]
-INTENT_FIELDS = [
-    'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
-    'value_shift', 'turning_point', 'characters', 'on_stage', 'mice_threads',
-]
-BRIEF_FIELDS = [
-    'goal', 'conflict', 'outcome', 'crisis', 'decision', 'knowledge_in',
-    'knowledge_out', 'key_actions', 'key_dialogue', 'emotions', 'motifs',
-    'subtext', 'continuity_deps', 'has_overflow', 'physical_state_in',
-    'physical_state_out',
-]
-
-
 class TestExport:
     def test_export_creates_file(self, project_dir):
         from storyforge.cmd_scenes_export import export_scenes

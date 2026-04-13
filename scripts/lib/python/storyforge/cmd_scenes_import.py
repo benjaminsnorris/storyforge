@@ -13,37 +13,12 @@ import argparse
 import os
 import re
 
+from storyforge.cmd_scenes_export import SECTIONS
 from storyforge.common import detect_project_root, install_signal_handlers, log
 from storyforge.csv_cli import get_field, list_ids, update_field
 
-
-# ============================================================================
-# Column definitions (must match cmd_scenes_export.py)
-# ============================================================================
-
-STRUCTURAL_FIELDS = [
-    'seq', 'title', 'part', 'pov', 'location', 'timeline_day',
-    'time_of_day', 'duration', 'type', 'status', 'word_count', 'target_words',
-]
-
-INTENT_FIELDS = [
-    'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
-    'value_shift', 'turning_point', 'characters', 'on_stage', 'mice_threads',
-]
-
-BRIEF_FIELDS = [
-    'goal', 'conflict', 'outcome', 'crisis', 'decision', 'knowledge_in',
-    'knowledge_out', 'key_actions', 'key_dialogue', 'emotions', 'motifs',
-    'subtext', 'continuity_deps', 'has_overflow', 'physical_state_in',
-    'physical_state_out',
-]
-
 # Section name -> (csv relative path, known field names)
-SECTION_MAP = {
-    'Structural': ('reference/scenes.csv', set(STRUCTURAL_FIELDS)),
-    'Intent': ('reference/scene-intent.csv', set(INTENT_FIELDS)),
-    'Brief': ('reference/scene-briefs.csv', set(BRIEF_FIELDS)),
-}
+SECTION_MAP = {name: (csv_rel, set(fields)) for name, csv_rel, fields in SECTIONS}
 
 
 # ============================================================================
@@ -151,7 +126,7 @@ def parse_args(argv):
         prog='storyforge scenes-import',
         description='Import edited markdown back into scene CSVs.',
     )
-    parser.add_argument('--input', '-i', type=str, default=None,
+    parser.add_argument('--input', type=str, default=None,
                         help='Input path (default: working/scenes-review.md)')
     parser.add_argument('--dry-run', action='store_true',
                         help='Show changes without writing')
