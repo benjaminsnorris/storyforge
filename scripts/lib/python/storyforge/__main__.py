@@ -25,6 +25,8 @@ COMMANDS = {
     'cover': 'storyforge.cmd_cover',
     'migrate': 'storyforge.cmd_migrate',
     'scenes-setup': 'storyforge.cmd_scenes_setup',
+    'scenes-export': 'storyforge.cmd_scenes_export',
+    'scenes-import': 'storyforge.cmd_scenes_import',
 }
 
 # Aliases
