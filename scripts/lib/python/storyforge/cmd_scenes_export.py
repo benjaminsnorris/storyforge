@@ -13,10 +13,9 @@ Usage:
 
 import argparse
 import os
-import sys
 
 from storyforge.cli import add_scene_filter_args, resolve_filter_args
-from storyforge.common import detect_project_root, log
+from storyforge.common import detect_project_root, install_signal_handlers, log
 from storyforge.csv_cli import get_field
 from storyforge.scene_filter import apply_scene_filter, build_scene_list
 
@@ -105,6 +104,7 @@ def parse_args(argv):
 
 def main(argv=None):
     args = parse_args(argv or [])
+    install_signal_handlers()
     project_dir = detect_project_root()
 
     output = args.output or os.path.join(project_dir, 'working', 'scenes-review.md')
