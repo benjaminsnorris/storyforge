@@ -170,6 +170,7 @@ When the author says "run scoring" or "score my scenes":
 1. Confirm the mode and scope:
    - **Mode:** default (Haiku screen + Sonnet deep dive for deficits), `--quick` (Haiku screen only, fast), or `--deep` (Haiku screen + Sonnet deep dive for all principles)
    - **Scope:** all scenes (default), `--scenes ID,ID` for specific scenes, `--act N` for a specific act
+   - **Principles:** `--principles NAMES` for targeted scoring of specific craft principles (comma-separated). For deterministic principles like `prose_repetition`, this skips the LLM pipeline entirely — no API calls, no cost, instant results.
 
 2. Present the author with two options:
 
