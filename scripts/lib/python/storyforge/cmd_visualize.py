@@ -109,6 +109,7 @@ const BRIEFS = _DATA.briefs || [];
 const FIDELITY_SCORES = _DATA.fidelity_scores || [];
 const FIDELITY_RATIONALES = _DATA.fidelity_rationales || [];
 const STRUCTURAL_SCORES = _DATA.structural_scores || [];
+const REPETITION_SCORES = _DATA.repetition_scores || [];
 const BRIEF_QUALITY = _DATA.brief_quality || [];
 
 // Build brief quality lookup: scene_id -> Set of issue types
