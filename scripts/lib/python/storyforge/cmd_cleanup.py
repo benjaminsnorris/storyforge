@@ -87,6 +87,10 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     'reference/chapter-map.csv': [
         'chapter', 'title', 'heading', 'part', 'scenes',
     ],
+    'reference/voice-profile.csv': [
+        'character', 'preferred_words', 'banned_words', 'metaphor_families',
+        'rhythm_preference', 'register', 'dialogue_style',
+    ],
     # Working CSVs
     'working/craft-weights.csv': [
         'section', 'principle', 'weight', 'author_weight', 'notes',
