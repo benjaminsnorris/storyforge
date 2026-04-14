@@ -729,6 +729,51 @@ def build_scene_prompt(scene_id: str, project_dir: str,
     ai_tell_words = load_ai_tell_words(plugin_dir)
     ai_tell_block = build_ai_tell_constraint(ai_tell_words)
 
+    # --- Voice profile ---
+    voice_profile_project, voice_profile_chars = load_voice_profile(project_dir)
+    pov_char = ''
+    if csv_file:
+        pov_char = read_csv_field(csv_file, scene_id, 'pov')
+
+    # Merge banned words: project profile + universal AI-tell list
+    if voice_profile_project or ai_tell_words:
+        merged_banned = merge_banned_words(voice_profile_project, ai_tell_words)
+        if merged_banned:
+            banned_str = ', '.join(merged_banned)
+            ai_tell_block = (
+                'VOCABULARY CONSTRAINT: Do not use these words or phrases — they '
+                'are banned for this project:\n'
+                f'{banned_str}\n'
+                'Replace with concrete, specific words grounded in the scene and character.'
+            )
+
+    # Character-specific constraints
+    char_voice_block = ''
+    if pov_char:
+        # Normalize POV name to slug form for matching (e.g. "Dorren Hayle" -> "dorren-hayle")
+        pov_slug = pov_char.lower().replace(' ', '-')
+        char_key = pov_char if pov_char in voice_profile_chars else (
+            pov_slug if pov_slug in voice_profile_chars else '')
+        if char_key:
+            char_data = voice_profile_chars[char_key]
+            parts = []
+            if char_data.get('preferred_words'):
+                parts.append(f'Favor these words (they define this character\'s voice): '
+                            f'{char_data["preferred_words"].replace(";", ", ")}')
+            if char_data.get('metaphor_families'):
+                parts.append(f'Source metaphors from: '
+                            f'{char_data["metaphor_families"].replace(";", ", ")}')
+            if char_data.get('rhythm_preference'):
+                parts.append(f'Sentence rhythm: '
+                            f'{char_data["rhythm_preference"].replace(";", ", ")}')
+            if char_data.get('dialogue_style'):
+                parts.append(f'Dialogue style: '
+                            f'{char_data["dialogue_style"].replace(";", ", ")}')
+            if parts:
+                char_voice_block = (
+                    f'CHARACTER VOICE ({pov_char}):\n' + '\n'.join(f'- {p}' for p in parts)
+                )
+
     # --- Title line ---
     title_part = f'"{title}"' if title else '"Untitled"'
     scene_label = f'scene {scene_id}'
@@ -780,6 +825,16 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         lines.append('===== VOCABULARY CONSTRAINTS =====')
         lines.append('')
         lines.append(ai_tell_block)
+
+    if char_voice_block:
+        lines.append('')
+        lines.append('===== CHARACTER VOICE =====')
+        lines.append('')
+        lines.append(char_voice_block)
+
+    if voice_profile_project.get('register'):
+        lines.append('')
+        lines.append(f'PROSE REGISTER: {voice_profile_project["register"].replace(";", ", ")}')
 
     # ===== STEP 2: PREVIOUS SCENE =====
     lines.append('')

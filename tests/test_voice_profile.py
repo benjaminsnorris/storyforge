@@ -130,3 +130,39 @@ def test_merge_banned_words(fixture_dir, plugin_dir):
     # From universal AI-tell list (high severity)
     assert 'delve' in merged
     assert 'facilitate' in merged
+
+
+def test_drafting_prompt_includes_voice_profile(project_dir, plugin_dir):
+    """build_scene_prompt includes character voice constraints when profile exists."""
+    from storyforge.prompts import build_scene_prompt
+    prompt = build_scene_prompt('act1-sc01', project_dir, api_mode=True)
+    # The prompt should contain the project-level banned words merged with universal list
+    assert 'journey' in prompt or 'VOCABULARY CONSTRAINT' in prompt
+
+
+def test_drafting_prompt_includes_character_voice(project_dir, plugin_dir):
+    """build_scene_prompt includes character-specific voice constraints."""
+    from storyforge.prompts import build_scene_prompt
+    prompt = build_scene_prompt('act1-sc01', project_dir, api_mode=True)
+    # act1-sc01 has POV "Dorren Hayle" -> voice profile key "dorren-hayle"
+    assert 'CHARACTER VOICE' in prompt
+    assert 'calibrated' in prompt  # dorren-hayle preferred word
+    assert 'cartography' in prompt  # dorren-hayle metaphor family
+
+
+def test_drafting_prompt_includes_register(project_dir, plugin_dir):
+    """build_scene_prompt includes project register from voice profile."""
+    from storyforge.prompts import build_scene_prompt
+    prompt = build_scene_prompt('act1-sc01', project_dir, api_mode=True)
+    assert 'PROSE REGISTER' in prompt
+    assert 'literary' in prompt
+
+
+def test_drafting_prompt_merged_banned_words(project_dir, plugin_dir):
+    """build_scene_prompt merges project banned words with AI-tell list."""
+    from storyforge.prompts import build_scene_prompt
+    prompt = build_scene_prompt('act1-sc01', project_dir, api_mode=True)
+    # Project banned word
+    assert 'journey' in prompt
+    # AI-tell word (high severity)
+    assert 'delve' in prompt
