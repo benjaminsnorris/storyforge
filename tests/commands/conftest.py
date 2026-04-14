@@ -35,6 +35,8 @@ API_RESPONSES_DIR = os.path.join(TESTS_DIR, 'fixtures', 'api-responses')
 # ---------------------------------------------------------------------------
 
 _CMD_MODULES = [
+    'storyforge.cmd_annotations',
+    'storyforge.cmd_validate',
     'storyforge.cmd_write',
     'storyforge.cmd_score',
     'storyforge.cmd_extract',
