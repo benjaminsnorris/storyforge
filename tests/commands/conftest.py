@@ -86,6 +86,29 @@ def load_api_response_text(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Prevent signal handler and log file leaks from main() calls
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _isolate_global_state(monkeypatch):
+    """Prevent command main() calls from leaking global state.
+
+    - install_signal_handlers: no-op to prevent SIGINT/SIGTERM handler changes
+    - _log_file: reset after each test so log output doesn't go to stale paths
+    """
+    noop = lambda: None
+    monkeypatch.setattr('storyforge.common.install_signal_handlers', noop)
+    # Also patch where cmd modules import it at top level
+    for mod_name in _CMD_MODULES:
+        mod = importlib.import_module(mod_name)
+        if hasattr(mod, 'install_signal_handlers'):
+            monkeypatch.setattr(f'{mod_name}.install_signal_handlers', noop)
+    yield
+    import storyforge.common
+    storyforge.common._log_file = None
+
+
+# ---------------------------------------------------------------------------
 # project_dir fixture
 # ---------------------------------------------------------------------------
 
