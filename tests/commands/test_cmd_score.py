@@ -404,6 +404,190 @@ class TestMainTargetedPrinciples:
 
 
 # ============================================================================
+# Wave 1 deterministic scorers — integration
+# ============================================================================
+
+
+class TestDeterministicPrinciplesExpanded:
+    """Test that all 6 deterministic principles are registered and run."""
+
+    def test_all_six_principles_registered(self):
+        expected = {
+            'prose_repetition', 'avoid_passive', 'avoid_adverbs',
+            'no_weather_dreams', 'sentence_as_thought', 'economy_clarity',
+        }
+        assert DETERMINISTIC_PRINCIPLES == expected
+
+    def test_deterministic_runs_all_six(self, mock_api, mock_git, mock_costs,
+                                        project_dir, monkeypatch):
+        """--deterministic runs all 6 principles and writes scores."""
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        main(['--deterministic', '--scenes', 'act1-sc01'])
+
+        # Check output files
+        scores_dir = os.path.join(project_dir, 'working', 'scores')
+        cycle_dirs = [d for d in os.listdir(scores_dir)
+                      if d.startswith('cycle-') and
+                      os.path.isdir(os.path.join(scores_dir, d))]
+        assert cycle_dirs
+        cycle_dir = os.path.join(scores_dir, cycle_dirs[0])
+
+        # Each principle should have its -latest.csv
+        expected_files = [
+            'repetition-latest.csv',
+            'avoid_passive-latest.csv',
+            'avoid_adverbs-latest.csv',
+            'no_weather_dreams-latest.csv',
+            'sentence_as_thought-latest.csv',
+            'economy_clarity-latest.csv',
+        ]
+        for fn in expected_files:
+            path = os.path.join(cycle_dir, fn)
+            assert os.path.isfile(path), f'{fn} not created'
+
+    def test_deterministic_csv_format(self, mock_api, mock_git, mock_costs,
+                                      project_dir, monkeypatch):
+        """Each deterministic scorer writes correct CSV header."""
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        main(['--deterministic', '--scenes', 'act1-sc01'])
+
+        scores_dir = os.path.join(project_dir, 'working', 'scores')
+        cycle_dirs = [d for d in os.listdir(scores_dir)
+                      if d.startswith('cycle-')]
+        cycle_dir = os.path.join(scores_dir, cycle_dirs[0])
+
+        # Check header and score format for avoid_passive
+        passive_path = os.path.join(cycle_dir, 'avoid_passive-latest.csv')
+        with open(passive_path) as f:
+            lines = f.readlines()
+        assert lines[0].strip() == 'id|avoid_passive'
+        # Data lines should be scene_id|score
+        for line in lines[1:]:
+            parts = line.strip().split('|')
+            assert len(parts) == 2
+            assert 1 <= int(parts[1]) <= 5
+
+    def test_single_new_principle_deterministic(self, mock_api, mock_git,
+                                                 mock_costs, project_dir,
+                                                 monkeypatch):
+        """--principles avoid_passive should use deterministic fast path."""
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        main(['--principles', 'avoid_passive', '--scenes', 'act1-sc01'])
+
+        # No API calls
+        api_calls = mock_api.calls_for('invoke_to_file')
+        assert len(api_calls) == 0
+        batch_calls = mock_api.calls_for('submit_batch')
+        assert len(batch_calls) == 0
+
+    def test_two_deterministic_principles(self, mock_api, mock_git,
+                                           mock_costs, project_dir,
+                                           monkeypatch):
+        """Two deterministic principles still uses fast path."""
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        main(['--principles', 'avoid_passive,no_weather_dreams',
+              '--scenes', 'act1-sc01'])
+
+        api_calls = mock_api.calls_for('invoke_to_file')
+        assert len(api_calls) == 0
+
+    def test_merged_scene_scores_csv(self, mock_api, mock_git, mock_costs,
+                                      project_dir, monkeypatch):
+        """Deterministic scoring merges all results into scene-scores.csv."""
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        main(['--deterministic', '--scenes', 'act1-sc01'])
+
+        scores_dir = os.path.join(project_dir, 'working', 'scores')
+        cycle_dirs = [d for d in os.listdir(scores_dir)
+                      if d.startswith('cycle-')]
+        cycle_dir = os.path.join(scores_dir, cycle_dirs[0])
+
+        scene_scores = os.path.join(cycle_dir, 'scene-scores.csv')
+        assert os.path.isfile(scene_scores)
+
+    def test_latest_symlink_updated(self, mock_api, mock_git, mock_costs,
+                                     project_dir, monkeypatch):
+        """Deterministic scoring updates the latest symlink."""
+        monkeypatch.setattr('storyforge.cmd_score.detect_project_root',
+                            lambda: project_dir)
+        main(['--deterministic', '--scenes', 'act1-sc01'])
+
+        latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+        assert os.path.islink(latest)
+
+
+class TestLoadSceneTexts:
+    """Test the _load_scene_texts helper."""
+
+    def test_loads_existing_scenes(self, project_dir):
+        from storyforge.cmd_score import _load_scene_texts
+        texts = _load_scene_texts(['act1-sc01'], project_dir)
+        assert 'act1-sc01' in texts
+        assert len(texts['act1-sc01']) > 0
+
+    def test_missing_scene_excluded(self, project_dir):
+        from storyforge.cmd_score import _load_scene_texts
+        texts = _load_scene_texts(['act1-sc01', 'nonexistent-scene'],
+                                  project_dir)
+        assert 'act1-sc01' in texts
+        assert 'nonexistent-scene' not in texts
+
+    def test_empty_scene_list(self, project_dir):
+        from storyforge.cmd_score import _load_scene_texts
+        texts = _load_scene_texts([], project_dir)
+        assert texts == {}
+
+
+class TestScoreSinglePrinciple:
+    """Test the generic _score_single_principle helper."""
+
+    def test_writes_csv_with_correct_header(self, project_dir):
+        from storyforge.cmd_score import _score_single_principle
+
+        cycle_dir = os.path.join(project_dir, 'working', 'scores', 'cycle-test')
+        os.makedirs(cycle_dir, exist_ok=True)
+
+        def mock_scorer(text):
+            return {'score': 4, 'markers': {}, 'details': 'test'}
+
+        path = _score_single_principle(
+            ['act1-sc01'], project_dir, cycle_dir,
+            'test_principle', mock_scorer)
+
+        assert os.path.isfile(path)
+        with open(path) as f:
+            lines = f.readlines()
+        assert lines[0].strip() == 'id|test_principle'
+
+    def test_scores_all_scenes(self, project_dir):
+        from storyforge.cmd_score import _score_single_principle
+        from storyforge.scene_filter import build_scene_list
+
+        cycle_dir = os.path.join(project_dir, 'working', 'scores', 'cycle-test2')
+        os.makedirs(cycle_dir, exist_ok=True)
+
+        meta = os.path.join(project_dir, 'reference', 'scenes.csv')
+        scene_ids = build_scene_list(meta)
+
+        def mock_scorer(text):
+            return {'score': 3, 'markers': {}, 'details': ''}
+
+        path = _score_single_principle(
+            scene_ids, project_dir, cycle_dir,
+            'test_p', mock_scorer)
+
+        with open(path) as f:
+            lines = f.readlines()
+        # Header + one line per scene
+        assert len(lines) == 1 + len(scene_ids)
+
+
+# ============================================================================
 # main — direct mode
 # ============================================================================
 

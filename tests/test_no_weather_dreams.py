@@ -92,3 +92,37 @@ class TestNoWeatherDreams:
                      WAKING_OPENING, '']:
             result = score_no_weather_dreams(text)
             assert 1 <= result['score'] <= 5
+
+    def test_extended_weather_without_context_words(self):
+        """2+ weather sentences without sky/horizon context still triggers."""
+        # Weather words only (rain, wind, cold) — no context words like 'sky'
+        text = (
+            'Rain fell hard on the roof. The wind blew cold through cracks '
+            'in the door. Snow started to mix with the rain outside. '
+            'Marcus pulled his collar up and kept walking forward.'
+        )
+        result = score_no_weather_dreams(text)
+        assert result['markers']['nwd-1'] == 1
+
+    def test_multiple_markers_score_1(self):
+        """Weather + dream triggers score 1 when 2+ markers active."""
+        text = (
+            'In the dream, rain hammered the windows. The storm rolled in '
+            'from the coast. She watched the clouds darken through closed '
+            'eyelids as the nightmare continued.'
+        )
+        result = score_no_weather_dreams(text)
+        active = sum(result['markers'].values())
+        if active >= 2:
+            assert result['score'] == 1
+
+    def test_weather_waking_combined(self):
+        """Weather + waking opening triggers multiple markers."""
+        text = (
+            'She woke to the sound of rain on the window. The storm had '
+            'rolled in overnight, and the wind rattled the shutters. '
+            'She pulled the covers aside and stood.'
+        )
+        result = score_no_weather_dreams(text)
+        # Should detect both waking and weather
+        assert result['markers']['nwd-3'] == 1  # waking

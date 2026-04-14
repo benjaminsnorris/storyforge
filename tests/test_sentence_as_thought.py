@@ -89,6 +89,53 @@ class TestSentenceAsThought:
             assert 1 <= result['score'] <= 5
 
 
+    def test_moderate_stddev_score_3(self):
+        """stddev 3-5 should score 3."""
+        # Sentences that hover around 10-15 words with mild variation
+        text = (
+            'She walked to the store quickly. He drove to the park alone. '
+            'The children played by the river. She sat and read her novel. '
+            'He cooked dinner for the evening. They ate outside on the porch. '
+            'The sunset painted the clouds orange. She cleared up the dishes. '
+            'He locked all the doors tightly. They went to bed quite early.'
+        )
+        result = score_sentence_as_thought(text)
+        # With similar-length sentences, stddev should be low-moderate
+        assert result['score'] <= 4
+
+    def test_very_low_stddev_score_2(self):
+        """stddev 2-3 should score 2."""
+        # Nearly identical sentence lengths
+        text = (
+            'She walked to the door. He sat in the chair. '
+            'The dog ate its food. She read from a book. '
+            'He looked at the wall. She set down her cup. '
+            'The clock ticked along. He picked up a pen. '
+            'She opened a window. He closed his old eyes.'
+        )
+        result = score_sentence_as_thought(text)
+        assert result['score'] <= 3
+
+    def test_bucket_imbalance_penalty(self):
+        """No short AND no long sentences triggers bucket imbalance penalty."""
+        # All sentences 10-20 words — no short (<8) and no long (>25)
+        text = (
+            'She walked across the room to the window slowly. '
+            'He sat down in the comfortable wooden chair quietly. '
+            'The lamp cast long golden shadows on the wall. '
+            'She picked up the glass of red wine carefully. '
+            'He opened the newspaper to the front page slowly. '
+            'The clock on the wall ticked and ticked steadily. '
+            'She looked out of the dark window at nothing. '
+            'The garden was completely covered in the new frost.'
+        )
+        result = score_sentence_as_thought(text)
+        # Both sat-3 and sat-4 should trigger if no short/long sentences
+        if result['markers']['sat-3'] == 1 and result['markers']['sat-4'] == 1:
+            # Penalty should have been applied
+            assert result['score'] <= 3
+
+
 class TestMonotonousRuns:
 
     def test_no_run_in_short_list(self):

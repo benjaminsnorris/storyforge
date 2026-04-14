@@ -125,3 +125,57 @@ class TestEconomyClarity:
         for text in [CLEAN_PROSE, BLOATED_PROSE, MODERATE_PROSE, '']:
             result = score_economy_clarity(text, ai_tell_words=[])
             assert 1 <= result['score'] <= 5
+
+    def test_passive_density_marker(self):
+        """High passive density triggers ec-3 marker."""
+        # Dense passive text with low other signals
+        text = (
+            'The door was opened by the butler. The coat was taken and '
+            'was hung in the closet. The guest was led to the drawing room. '
+            'The fire was lit and the tea was poured. The biscuits were '
+            'arranged on the silver tray. The curtains were drawn against '
+            'the evening chill. The lamp was adjusted to a softer glow. '
+            'The guest was seated in the best armchair. The newspaper was '
+            'offered but was declined politely by the visitor.'
+        )
+        result = score_economy_clarity(text, ai_tell_words=[])
+        assert result['markers']['ec-3'] == 1
+
+    def test_default_ai_tell_loading(self, monkeypatch, plugin_dir):
+        """When ai_tell_words=None, the scorer loads from plugin dir."""
+        # Reset the module-level cache
+        import storyforge.scoring_economy as mod
+        monkeypatch.setattr(mod, '_ai_tell_cache', None)
+        monkeypatch.setattr(mod, 'get_plugin_dir', lambda: plugin_dir)
+
+        text = (
+            'We must delve deeper into this vibrant tapestry of life. '
+            'The unprecedented interplay of forces fosters something new. '
+        ) + ' '.join(['She walked to the door.'] * 20)
+
+        # Call without ai_tell_words — should use default loading
+        result = score_economy_clarity(text)
+        # Should detect AI-tell hits from the loaded vocabulary
+        assert result['markers']['ec-2'] == 1
+
+    def test_ai_tell_cache_exception_fallback(self, monkeypatch):
+        """When get_plugin_dir() raises, fallback to empty string."""
+        import storyforge.scoring_economy as mod
+        monkeypatch.setattr(mod, '_ai_tell_cache', None)
+        monkeypatch.setattr(mod, 'get_plugin_dir',
+                            lambda: (_ for _ in ()).throw(RuntimeError('no dir')))
+
+        text = ' '.join(['She walked to the door.'] * 20)
+        # Should not crash — falls back to empty word list
+        result = score_economy_clarity(text)
+        assert 1 <= result['score'] <= 5
+
+    def test_sub_score_returns_4(self):
+        """_sub_score returns 4 for values between t5 and t4."""
+        from storyforge.scoring_economy import _sub_score
+        assert _sub_score(2.0, 1, 3, 6, 10) == 4
+
+    def test_sub_score_returns_2(self):
+        """_sub_score returns 2 for values between t3 and t2."""
+        from storyforge.scoring_economy import _sub_score
+        assert _sub_score(8.0, 1, 3, 6, 10) == 2

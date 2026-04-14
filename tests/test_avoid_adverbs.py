@@ -65,3 +65,35 @@ class TestAvoidAdverbs:
         for text in [CLEAN_PROSE, ADVERB_HEAVY, '', 'A word.']:
             result = score_avoid_adverbs(text)
             assert 1 <= result['score'] <= 5
+
+    def test_score_4_moderate_adverbs(self):
+        """2-3 adverbs per 1000 words -> score 4."""
+        # ~200 words with 1 adverb hit -> ~5/1000 is too high;
+        # need ~500 words with 1 hit -> ~2/1000
+        filler = ' '.join(['The quick brown fox jumps over the lazy dog.'] * 50)
+        text = f'"Watch out," he said softly. {filler}'
+        result = score_avoid_adverbs(text)
+        assert result['score'] == 4
+
+    def test_score_3_several_adverbs(self):
+        """4-6 adverbs per 1000 words -> score 3."""
+        # ~200 words with 1 hit = ~5/1000 -> score 3
+        filler = ' '.join(['She opened the door and stepped through it.'] * 24)
+        text = (
+            '"Go," she said softly. ' + filler
+        )
+        result = score_avoid_adverbs(text)
+        assert result['score'] == 3
+
+    def test_score_2_many_adverbs(self):
+        """7-10 adverbs per 1000 words -> score 2."""
+        # Short text (~100 words) with ~1 adverb hit -> 10/1000
+        base = (
+            '"Go," she said softly. He walked slowly to the door. '
+            '"Stop," he said quietly. She walked slowly back. '
+            '"No," he said angrily. She looked quickly at him. '
+            'He walked slowly away. "Wait," she said sadly.'
+        )
+        # ~80 words, several hits -> high per-1000 rate
+        result = score_avoid_adverbs(base)
+        assert result['score'] <= 2
