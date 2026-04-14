@@ -294,3 +294,23 @@ def test_promote_exemplars_skips_no_note():
     }
     promoted = promote_exemplars('/tmp/fake', annotations, coaching_level='full')
     assert promoted == []
+
+
+def test_load_annotation_findings_for_revise(tmp_path):
+    """Annotations CSV with new entries produces revision findings."""
+    from storyforge.annotations import (
+        load_annotations_csv, save_annotations_csv, generate_revision_findings,
+    )
+    annotations = {
+        'a1': {'id': 'a1', 'scene_id': 'arrival', 'chapter': '1',
+               'color': 'pink', 'color_label': 'Needs Revision',
+               'text': 'the wagon lurched', 'note': 'pacing issue',
+               'reader': 'Alice', 'created_at': '2026-04-10',
+               'status': 'new', 'fix_location': 'craft', 'fetched_at': '2026-04-14'},
+    }
+    save_annotations_csv(str(tmp_path), annotations)
+
+    loaded = load_annotations_csv(str(tmp_path))
+    craft, structural, protection = generate_revision_findings(loaded)
+    assert len(craft) == 1
+    assert craft[0]['scene_id'] == 'arrival'
