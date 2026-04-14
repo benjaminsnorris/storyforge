@@ -56,3 +56,119 @@ def test_route_annotation_yellow_with_note():
     status, fix_loc = route_annotation(ann)
     assert status == 'new'
     assert fix_loc == 'craft'
+
+
+def test_load_annotations_csv_empty(tmp_path):
+    """load_annotations_csv returns empty dict when file missing."""
+    from storyforge.annotations import load_annotations_csv
+    result = load_annotations_csv(str(tmp_path))
+    assert result == {}
+
+
+def test_load_annotations_csv_with_data(tmp_path):
+    """load_annotations_csv returns dict keyed by annotation ID."""
+    from storyforge.annotations import load_annotations_csv, ANNOTATIONS_HEADER
+    csv_path = tmp_path / 'working' / 'annotations.csv'
+    csv_path.parent.mkdir(parents=True)
+    csv_path.write_text(
+        '|'.join(ANNOTATIONS_HEADER) + '\n'
+        'abc-123|arrival|1|pink|Needs Revision|the wagon lurched|pacing drags|Alice|2026-04-10|new|craft|2026-04-14\n'
+    )
+    result = load_annotations_csv(str(tmp_path))
+    assert 'abc-123' in result
+    assert result['abc-123']['scene_id'] == 'arrival'
+    assert result['abc-123']['status'] == 'new'
+
+
+def test_save_annotations_csv(tmp_path):
+    """save_annotations_csv writes valid pipe-delimited CSV."""
+    from storyforge.annotations import save_annotations_csv, load_annotations_csv
+    rows = {
+        'abc-123': {
+            'id': 'abc-123', 'scene_id': 'arrival', 'chapter': '1',
+            'color': 'pink', 'color_label': 'Needs Revision',
+            'text': 'the wagon lurched', 'note': 'pacing drags',
+            'reader': 'Alice', 'created_at': '2026-04-10',
+            'status': 'new', 'fix_location': 'craft',
+            'fetched_at': '2026-04-14',
+        }
+    }
+    save_annotations_csv(str(tmp_path), rows)
+    loaded = load_annotations_csv(str(tmp_path))
+    assert 'abc-123' in loaded
+    assert loaded['abc-123']['note'] == 'pacing drags'
+
+
+def test_reconcile_new_annotation():
+    """reconcile adds new annotations with status 'new'."""
+    from storyforge.annotations import reconcile
+    existing = {}
+    api_annotations = [
+        {
+            'id': 'new-1',
+            'scene': {'slug': 'arrival', 'scene_number': 1},
+            'chapter': {'number': 1, 'title': 'Chapter 1'},
+            'text': 'the dust rose',
+            'note': 'too generic',
+            'color': 'pink',
+            'color_label': 'Needs Revision',
+            'user': {'display_name': 'Alice'},
+            'created_at': '2026-04-10T00:00:00Z',
+        }
+    ]
+    result, summary = reconcile(existing, api_annotations)
+    assert 'new-1' in result
+    assert result['new-1']['status'] == 'new'
+    assert result['new-1']['fix_location'] == 'craft'
+    assert summary['new'] == 1
+
+
+def test_reconcile_preserves_existing_status():
+    """reconcile preserves status of already-tracked annotations."""
+    from storyforge.annotations import reconcile
+    existing = {
+        'old-1': {
+            'id': 'old-1', 'scene_id': 'arrival', 'chapter': '1',
+            'color': 'pink', 'color_label': 'Needs Revision',
+            'text': 'the dust rose', 'note': 'fixed this',
+            'reader': 'Alice', 'created_at': '2026-04-10',
+            'status': 'addressed', 'fix_location': 'craft',
+            'fetched_at': '2026-04-13',
+        }
+    }
+    api_annotations = [
+        {
+            'id': 'old-1',
+            'scene': {'slug': 'arrival', 'scene_number': 1},
+            'chapter': {'number': 1, 'title': 'Chapter 1'},
+            'text': 'the dust rose',
+            'note': 'fixed this',
+            'color': 'pink',
+            'color_label': 'Needs Revision',
+            'user': {'display_name': 'Alice'},
+            'created_at': '2026-04-10T00:00:00Z',
+        }
+    ]
+    result, summary = reconcile(existing, api_annotations)
+    assert result['old-1']['status'] == 'addressed'
+    assert summary['new'] == 0
+    assert summary['existing'] == 1
+
+
+def test_reconcile_marks_removed():
+    """reconcile marks annotations not in API as 'removed'."""
+    from storyforge.annotations import reconcile
+    existing = {
+        'gone-1': {
+            'id': 'gone-1', 'scene_id': 'arrival', 'chapter': '1',
+            'color': 'pink', 'color_label': 'Needs Revision',
+            'text': 'deleted text', 'note': '',
+            'reader': 'Alice', 'created_at': '2026-04-10',
+            'status': 'new', 'fix_location': 'craft',
+            'fetched_at': '2026-04-13',
+        }
+    }
+    api_annotations = []
+    result, summary = reconcile(existing, api_annotations)
+    assert result['gone-1']['status'] == 'removed'
+    assert summary['removed'] == 1
