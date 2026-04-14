@@ -70,8 +70,6 @@ Based on the author's request, determine the mode:
 
 ### Specific requests (always honored, bypass auto-advance):
 
-**Never question the author's creative direction.** If they say "I want more scenes," "make them shorter," "split this," or "change the structure" — do it immediately. Do not ask for motivation, suggest they reconsider, or explain trade-offs unless they ask. The author's instruction is the requirement.
-
 - **"Start a new novel"** / **"Let's begin"** → Start at spine. Ask for the seed (logline, genre, characters, themes, constraints). Whatever they give you is the seed.
 - **"Work on the spine/architecture/map/briefs"** → Go to that specific stage.
 - **"Develop the voice"** / **"Voice guide"** / **"Style"** → Voice development (see Voice Stage below). Typically happens after architecture and before briefs.
@@ -197,8 +195,6 @@ If they choose Option B, provide the full command and end.
 5. Write updates
 6. Run validation — MICE nesting, timeline, character references
 7. Commit: `git add -A && git commit -m "Elaborate: scene map" && git push`
-
-**If the author requests a different scene count, honor it immediately.** Scene count is an authorial choice — do not question it, ask for motivation, or suggest alternatives. Adjust the map to match their target.
 
 ### Briefs Stage (Interactive)
 
