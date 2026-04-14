@@ -195,7 +195,8 @@ def merge_score_files(target_path: str, source_path: str):
 # build_weighted_text
 # ============================================================================
 
-def build_weighted_text(weights_file: str, exclude_section: str = '') -> str:
+def build_weighted_text(weights_file: str, exclude_section: str = '',
+                        principles: list[str] | None = None) -> str:
     """Build markdown text listing high-priority craft principles.
 
     Reads craft-weights.csv, filters to effective weight >= 7, optionally
@@ -204,6 +205,7 @@ def build_weighted_text(weights_file: str, exclude_section: str = '') -> str:
     Args:
         weights_file: Path to craft-weights.csv.
         exclude_section: Section name to exclude (e.g. 'narrative').
+        principles: If set, only include these principles. None means all.
 
     Returns:
         Formatted markdown string.
@@ -215,6 +217,7 @@ def build_weighted_text(weights_file: str, exclude_section: str = '') -> str:
     # Expect columns: section|principle|weight|author_weight|notes
     col_idx = {name: i for i, name in enumerate(header)}
 
+    principle_filter = frozenset(principles) if principles is not None else None
     high_priority = []
     for row in rows:
         section = row[col_idx['section']] if 'section' in col_idx and col_idx['section'] < len(row) else ''
@@ -223,6 +226,8 @@ def build_weighted_text(weights_file: str, exclude_section: str = '') -> str:
         author_weight = row[col_idx['author_weight']] if 'author_weight' in col_idx and col_idx['author_weight'] < len(row) else ''
 
         if exclude_section and section == exclude_section:
+            continue
+        if principle_filter is not None and principle not in principle_filter:
             continue
 
         eff_w = author_weight if author_weight else weight
@@ -824,7 +829,8 @@ def _build_principle_guide(principle_name: str, guide_file: str) -> str:
 # build_evaluation_criteria
 # ============================================================================
 
-def build_evaluation_criteria(diagnostics_csv: str, guide_file: str) -> str:
+def build_evaluation_criteria(diagnostics_csv: str, guide_file: str,
+                              principles: list[str] | None = None) -> str:
     """Build combined evaluation criteria from diagnostics CSV and principle guide.
 
     For each principle found in the diagnostics CSV, produces a section with:
@@ -834,6 +840,7 @@ def build_evaluation_criteria(diagnostics_csv: str, guide_file: str) -> str:
     Args:
         diagnostics_csv: Path to the diagnostics CSV file (pipe-delimited).
         guide_file: Path to the principle-guide.md file.
+        principles: If set, only include these principles. None means all.
 
     Returns:
         Formatted markdown text with evaluation criteria per principle.
@@ -854,20 +861,23 @@ def build_evaluation_criteria(diagnostics_csv: str, guide_file: str) -> str:
 
     # Group questions by principle, preserving order
     from collections import OrderedDict
-    principles: OrderedDict[str, list[str]] = OrderedDict()
+    principle_filter = frozenset(principles) if principles is not None else None
+    principle_questions: OrderedDict[str, list[str]] = OrderedDict()
     for row in rows:
         principle = row[principle_idx] if len(row) > principle_idx else ''
         question = row[question_idx] if question_idx is not None and len(row) > question_idx else ''
         if not principle:
             continue
-        if principle not in principles:
-            principles[principle] = []
+        if principle_filter is not None and principle not in principle_filter:
+            continue
+        if principle not in principle_questions:
+            principle_questions[principle] = []
         if question:
-            principles[principle].append(question)
+            principle_questions[principle].append(question)
 
     # Build output
     parts = []
-    for principle, questions in principles.items():
+    for principle, questions in principle_questions.items():
         parts.append('---')
         parts.append('')
         parts.append(f'### {principle}')
