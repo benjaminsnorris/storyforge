@@ -73,7 +73,14 @@ def parse_args(argv):
 
 
 # Principles that can be scored without any API calls.
-DETERMINISTIC_PRINCIPLES = frozenset(['prose_repetition'])
+DETERMINISTIC_PRINCIPLES = frozenset([
+    'prose_repetition',
+    'avoid_passive',
+    'avoid_adverbs',
+    'no_weather_dreams',
+    'sentence_as_thought',
+    'economy_clarity',
+])
 
 
 def _load_known_principles(plugin_dir: str) -> set[str]:
@@ -412,16 +419,28 @@ def main(argv=None):
         log(f'Score history: appended {history_count} entries (cycle {cycle})')
 
     # =========================================================================
-    # Repetition scoring (deterministic, no API calls)
+    # Deterministic scoring (no API calls)
     # =========================================================================
 
-    # Run repetition when: no --principles filter, or prose_repetition is in
-    # the requested set.
-    run_repetition = (not targeted_principles
-                      or 'prose_repetition' in targeted_principles)
-
-    if run_repetition:
-        _score_repetition(scene_ids, project_dir, cycle_dir)
+    # Run each deterministic scorer when: no --principles filter, or the
+    # principle is in the requested set.
+    for det_principle in sorted(DETERMINISTIC_PRINCIPLES):
+        should_run = (not targeted_principles
+                      or det_principle in targeted_principles)
+        if not should_run:
+            continue
+        if det_principle == 'prose_repetition':
+            _score_repetition(scene_ids, project_dir, cycle_dir)
+        elif det_principle == 'avoid_passive':
+            _score_passive(scene_ids, project_dir, cycle_dir)
+        elif det_principle == 'avoid_adverbs':
+            _score_adverbs(scene_ids, project_dir, cycle_dir)
+        elif det_principle == 'no_weather_dreams':
+            _score_weather(scene_ids, project_dir, cycle_dir)
+        elif det_principle == 'sentence_as_thought':
+            _score_rhythm(scene_ids, project_dir, cycle_dir)
+        elif det_principle == 'economy_clarity':
+            _score_economy(scene_ids, project_dir, cycle_dir)
 
     # =========================================================================
     # Improvement cycle
@@ -493,6 +512,95 @@ def _score_repetition(scene_ids, project_dir, cycle_dir):
     return rep_scores_path
 
 
+def _load_scene_texts(scene_ids, project_dir):
+    """Load scene prose texts from disk. Returns dict of scene_id -> text."""
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    texts = {}
+    for sid in scene_ids:
+        path = os.path.join(scenes_dir, f'{sid}.md')
+        if os.path.isfile(path):
+            with open(path, encoding='utf-8') as f:
+                texts[sid] = f.read()
+    return texts
+
+
+def _score_single_principle(scene_ids, project_dir, cycle_dir,
+                            principle, scorer_fn):
+    """Generic scorer for single-scene deterministic principles.
+
+    scorer_fn(text) -> {'score': int, 'markers': dict, 'details': str}
+    Returns path to the scores CSV.
+    """
+    scene_texts = _load_scene_texts(scene_ids, project_dir)
+
+    log(f'Running {principle} scorer...')
+    scores_path = os.path.join(cycle_dir, f'{principle}-latest.csv')
+    with open(scores_path, 'w', encoding='utf-8') as f:
+        f.write(f'id|{principle}\n')
+        for sid in scene_ids:
+            text = scene_texts.get(sid, '')
+            result = scorer_fn(text)
+            f.write(f'{sid}|{result["score"]}\n')
+
+    log(f'{principle} scores: {scores_path}')
+    return scores_path
+
+
+def _score_passive(scene_ids, project_dir, cycle_dir):
+    """Run deterministic passive voice scoring."""
+    from storyforge.scoring_passive import score_avoid_passive
+    return _score_single_principle(
+        scene_ids, project_dir, cycle_dir, 'avoid_passive', score_avoid_passive)
+
+
+def _score_adverbs(scene_ids, project_dir, cycle_dir):
+    """Run deterministic adverb scoring."""
+    from storyforge.scoring_adverbs import score_avoid_adverbs
+    return _score_single_principle(
+        scene_ids, project_dir, cycle_dir, 'avoid_adverbs', score_avoid_adverbs)
+
+
+def _score_weather(scene_ids, project_dir, cycle_dir):
+    """Run deterministic weather/dream opening scoring."""
+    from storyforge.scoring_weather import score_no_weather_dreams
+    return _score_single_principle(
+        scene_ids, project_dir, cycle_dir, 'no_weather_dreams',
+        score_no_weather_dreams)
+
+
+def _score_rhythm(scene_ids, project_dir, cycle_dir):
+    """Run deterministic sentence rhythm scoring."""
+    from storyforge.scoring_rhythm import score_sentence_as_thought
+    return _score_single_principle(
+        scene_ids, project_dir, cycle_dir, 'sentence_as_thought',
+        score_sentence_as_thought)
+
+
+def _score_economy(scene_ids, project_dir, cycle_dir):
+    """Run deterministic economy/clarity scoring."""
+    from storyforge.scoring_economy import score_economy_clarity
+    # Pre-load AI-tell words once for all scenes
+    from storyforge.prose_analysis import load_ai_tell_words
+    ai_words = load_ai_tell_words(get_plugin_dir())
+
+    def scorer(text):
+        return score_economy_clarity(text, ai_tell_words=ai_words)
+
+    return _score_single_principle(
+        scene_ids, project_dir, cycle_dir, 'economy_clarity', scorer)
+
+
+# Dispatch table for deterministic scorers
+_DETERMINISTIC_SCORERS = {
+    'prose_repetition': '_score_repetition',  # special case — uses manuscript scan
+    'avoid_passive': '_score_passive',
+    'avoid_adverbs': '_score_adverbs',
+    'no_weather_dreams': '_score_weather',
+    'sentence_as_thought': '_score_rhythm',
+    'economy_clarity': '_score_economy',
+}
+
+
 def _resolve_filter(args):
     if args.scenes:
         return ('scenes', args.scenes, None)
@@ -511,14 +619,26 @@ def _run_deterministic_only(principles, scene_ids, project_dir, cycle,
     log('Deterministic Scoring (no API calls)')
     log('============================================')
 
+    from storyforge.scoring import merge_score_files
+    scores_path = os.path.join(cycle_dir, 'scene-scores.csv')
+
     for principle in principles:
         if principle == 'prose_repetition':
-            rep_scores_path = _score_repetition(scene_ids, project_dir,
-                                                cycle_dir)
-            # Merge into scene-scores.csv for diagnosis compatibility
-            scores_path = os.path.join(cycle_dir, 'scene-scores.csv')
-            from storyforge.scoring import merge_score_files
-            merge_score_files(scores_path, rep_scores_path)
+            path = _score_repetition(scene_ids, project_dir, cycle_dir)
+        elif principle == 'avoid_passive':
+            path = _score_passive(scene_ids, project_dir, cycle_dir)
+        elif principle == 'avoid_adverbs':
+            path = _score_adverbs(scene_ids, project_dir, cycle_dir)
+        elif principle == 'no_weather_dreams':
+            path = _score_weather(scene_ids, project_dir, cycle_dir)
+        elif principle == 'sentence_as_thought':
+            path = _score_rhythm(scene_ids, project_dir, cycle_dir)
+        elif principle == 'economy_clarity':
+            path = _score_economy(scene_ids, project_dir, cycle_dir)
+        else:
+            log(f'WARNING: No deterministic scorer for {principle}')
+            continue
+        merge_score_files(scores_path, path)
 
     # Update latest symlink
     latest_link = os.path.join(project_dir, 'working', 'scores', 'latest')
