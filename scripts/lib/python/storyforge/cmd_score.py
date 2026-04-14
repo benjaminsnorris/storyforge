@@ -141,6 +141,9 @@ def main(argv=None):
     # Parse --principles / --deterministic filter
     targeted_principles = None
     deterministic_only = False
+    if args.deterministic and args.principles:
+        log('WARNING: --deterministic and --principles both set; '
+            'using --deterministic (ignoring --principles)')
     if args.deterministic:
         targeted_principles = sorted(DETERMINISTIC_PRINCIPLES)
         deterministic_only = True
@@ -418,23 +421,7 @@ def main(argv=None):
                       or 'prose_repetition' in targeted_principles)
 
     if run_repetition:
-        from storyforge.repetition import scan_manuscript, score_scene_repetition
-
-        log('Running repetition scan...')
-        rep_findings = scan_manuscript(project_dir, scene_ids=scene_ids)
-        rep_high = sum(1 for f in rep_findings if f['severity'] == 'high')
-        log(f'Repetition scan: {len(rep_findings)} findings ({rep_high} high-severity)')
-
-        rep_scores_path = os.path.join(cycle_dir, 'repetition-latest.csv')
-        with open(rep_scores_path, 'w', encoding='utf-8') as f:
-            f.write('id|prose_repetition\n')
-            for sid in scene_ids:
-                markers = score_scene_repetition(sid, rep_findings)
-                active = sum(markers[k] for k in ('pr-1', 'pr-2', 'pr-3', 'pr-4'))
-                prose_rep_score = max(1, 5 - active)
-                f.write(f'{sid}|{prose_rep_score}\n')
-
-        log(f'Repetition scores: {rep_scores_path}')
+        _score_repetition(scene_ids, project_dir, cycle_dir)
 
     # =========================================================================
     # Improvement cycle
@@ -484,6 +471,28 @@ def main(argv=None):
 # Internal helpers
 # ============================================================================
 
+def _score_repetition(scene_ids, project_dir, cycle_dir):
+    """Run deterministic repetition scoring. Returns path to scores CSV."""
+    from storyforge.repetition import scan_manuscript, score_scene_repetition
+
+    log('Running repetition scan...')
+    rep_findings = scan_manuscript(project_dir, scene_ids=scene_ids)
+    rep_high = sum(1 for f in rep_findings if f['severity'] == 'high')
+    log(f'Repetition scan: {len(rep_findings)} findings ({rep_high} high-severity)')
+
+    rep_scores_path = os.path.join(cycle_dir, 'repetition-latest.csv')
+    with open(rep_scores_path, 'w', encoding='utf-8') as f:
+        f.write('id|prose_repetition\n')
+        for sid in scene_ids:
+            markers = score_scene_repetition(sid, rep_findings)
+            active = sum(markers[k] for k in ('pr-1', 'pr-2', 'pr-3', 'pr-4'))
+            prose_rep_score = max(1, 5 - active)
+            f.write(f'{sid}|{prose_rep_score}\n')
+
+    log(f'Repetition scores: {rep_scores_path}')
+    return rep_scores_path
+
+
 def _resolve_filter(args):
     if args.scenes:
         return ('scenes', args.scenes, None)
@@ -504,26 +513,8 @@ def _run_deterministic_only(principles, scene_ids, project_dir, cycle,
 
     for principle in principles:
         if principle == 'prose_repetition':
-            from storyforge.repetition import scan_manuscript, score_scene_repetition
-
-            log('Running repetition scan...')
-            rep_findings = scan_manuscript(project_dir, scene_ids=scene_ids)
-            rep_high = sum(1 for f in rep_findings if f['severity'] == 'high')
-            log(f'Repetition scan: {len(rep_findings)} findings '
-                f'({rep_high} high-severity)')
-
-            rep_scores_path = os.path.join(cycle_dir, 'repetition-latest.csv')
-            with open(rep_scores_path, 'w', encoding='utf-8') as f:
-                f.write('id|prose_repetition\n')
-                for sid in scene_ids:
-                    markers = score_scene_repetition(sid, rep_findings)
-                    active = sum(markers[k]
-                                 for k in ('pr-1', 'pr-2', 'pr-3', 'pr-4'))
-                    prose_rep_score = max(1, 5 - active)
-                    f.write(f'{sid}|{prose_rep_score}\n')
-
-            log(f'Repetition scores written: {rep_scores_path}')
-
+            rep_scores_path = _score_repetition(scene_ids, project_dir,
+                                                cycle_dir)
             # Merge into scene-scores.csv for diagnosis compatibility
             scores_path = os.path.join(cycle_dir, 'scene-scores.csv')
             from storyforge.scoring import merge_score_files
@@ -649,6 +640,11 @@ def _build_scene_prompt(scene_id: str, eval_template: str,
     # Number lines
     numbered = '\n'.join(f'{i+1}: {line}' for i, line in enumerate(scene_text.splitlines()))
 
+    # Count principles from the evaluation criteria (each gets a ### heading)
+    principle_count = evaluation_criteria.count('\n### ')
+    if not principle_count:
+        principle_count = 25  # fallback for the default full set
+
     prompt = eval_template
     prompt = prompt.replace('{{SCENE_TITLE}}', scene_title)
     prompt = prompt.replace('{{SCENE_POV}}', scene_pov)
@@ -656,6 +652,7 @@ def _build_scene_prompt(scene_id: str, eval_template: str,
     prompt = prompt.replace('{{SCENE_EMOTIONAL_ARC}}', scene_emotional_arc or 'Not specified')
     prompt = prompt.replace('{{EVALUATION_CRITERIA}}', evaluation_criteria)
     prompt = prompt.replace('{{WEIGHTED_PRINCIPLES}}', weighted_text_str)
+    prompt = prompt.replace('{{PRINCIPLE_COUNT}}', str(principle_count))
     prompt = prompt.replace('{{SCENE_TEXT}}', numbered)
     return prompt
 

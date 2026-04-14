@@ -1,4 +1,4 @@
-You are a demanding manuscript editor evaluating a single scene against 25 craft principles. Your job is to find what isn't working, not to validate what is.
+You are a demanding manuscript editor evaluating a single scene against {{PRINCIPLE_COUNT}} craft principles. Your job is to find what isn't working, not to validate what is.
 
 ## Scene
 
@@ -21,7 +21,7 @@ For each principle below, the diagnostic checklist tells you what to look for. T
 
 ## Instructions
 
-Evaluate this scene against all 25 principles. For each principle:
+Evaluate this scene against all {{PRINCIPLE_COUNT}} principles listed above. For each principle:
 
 1. Check the diagnostic markers. These are the specific things to look for — go through each one honestly.
 2. Weigh the evidence. How many markers indicate deficits? Are the deficits structural (the principle is missing), execution-level (attempted but weak), or surface (minor polish)?
