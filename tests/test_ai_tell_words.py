@@ -69,3 +69,16 @@ def test_drafting_prompt_includes_ai_tell_words(project_dir, plugin_dir):
     from storyforge.prompts import build_scene_prompt
     prompt = build_scene_prompt('act1-sc01', project_dir, api_mode=True)
     assert 'delve' in prompt
+
+
+def test_naturalness_plan_loads_word_list(tmp_path, plugin_dir):
+    """The naturalness plan Pass 3 guidance should include words from CSV."""
+    from storyforge.prompts import load_ai_tell_words
+    words = load_ai_tell_words(plugin_dir)
+    vocab_words = [w['word'] for w in words if w['category'] == 'vocabulary']
+    assert 'nuanced' in vocab_words
+    assert 'multifaceted' in vocab_words
+    assert 'tapestry' in vocab_words
+    assert 'palpable' in vocab_words
+    assert 'delve' in vocab_words
+    assert 'beacon' in vocab_words

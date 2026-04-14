@@ -236,6 +236,42 @@ def _generate_polish_plan(plan_file):
     return rows
 
 
+def _build_naturalness_pass3_guidance() -> str:
+    """Build Pass 3 guidance, loading vocabulary from ai-tell-words.csv."""
+    from storyforge.prompts import load_ai_tell_words
+
+    plugin_dir = get_plugin_dir()
+    words = load_ai_tell_words(plugin_dir)
+
+    vocab_words = [w['word'] for w in words if w['category'] == 'vocabulary']
+    hedging_words = [w['word'] for w in words if w['category'] == 'hedging']
+
+    if vocab_words:
+        vocab_str = ', '.join(vocab_words)
+    else:
+        vocab_str = ('nuanced, multifaceted, tapestry, palpable, pivotal, intricate, '
+                     'profound, myriad, juxtaposition, dichotomy, paradigm, visceral')
+
+    if hedging_words:
+        hedging_str = ', '.join(hedging_words)
+    else:
+        hedging_str = ('"something like", "something between", "almost as if", "perhaps", '
+                       '"a kind of", "the particular"')
+
+    return (
+        'Four patterns to fix: '
+        f'(a) AI-TELL VOCABULARY: Remove or replace these words that signal AI-generated prose: '
+        f'{vocab_str}. Replace with concrete, specific words. '
+        f'(b) HEDGING STACKS: {hedging_str} — remove or commit to the statement. '
+        'BEFORE: "Something that tasted the way silence feels." AFTER: Name the taste. '
+        '(c) SWEEPING OPENERS: Remove scene-opening sentences that set a thematic frame before anything happens. '
+        '"The thing about memory is..." / "There are moments when..." — cut to the first concrete action or image. '
+        '(d) SUMMARY CLOSERS: Remove paragraph-ending sentences that interpret what was just shown. '
+        '"And that was the thing about X." / "It was, she realized, exactly what she needed." '
+        '— let the scene end on action or image.'
+    )
+
+
 def _generate_naturalness_plan(plan_file):
     """Generate 3-pass plan for AI prose pattern removal.
 
@@ -293,19 +329,7 @@ def _generate_naturalness_plan(plan_file):
             'purpose': 'Remove AI-tell vocabulary, hedging stacks, sweeping openers, and summary closers',
             'scope': 'full',
             'targets': '',
-            'guidance': (
-                'Four patterns to fix: '
-                '(a) AI-TELL VOCABULARY: Remove or replace these words that signal AI-generated prose: '
-                'nuanced, multifaceted, tapestry, palpable, pivotal, intricate, profound, myriad, '
-                'juxtaposition, dichotomy, paradigm, visceral (when not literal). Replace with concrete, specific words. '
-                '(b) HEDGING STACKS: "something like", "something between", "almost as if", "perhaps", '
-                '"a kind of", "the particular" — remove or commit to the statement. '
-                'BEFORE: "Something that tasted the way silence feels." AFTER: Name the taste. '
-                '(c) SWEEPING OPENERS: Remove scene-opening sentences that set a thematic frame before anything happens. '
-                '"The thing about memory is..." / "There are moments when..." — cut to the first concrete action or image. '
-                '(d) SUMMARY CLOSERS: Remove paragraph-ending sentences that interpret what was just shown. '
-                '"And that was the thing about X." / "It was, she realized, exactly what she needed." — let the scene end on action or image.'
-            ),
+            'guidance': _build_naturalness_pass3_guidance(),
             'protection': 'Do not change dialogue, plot events, or character interiority that reveals new information.',
             'findings': 'naturalness',
             'status': 'pending',
