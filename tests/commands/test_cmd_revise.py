@@ -538,7 +538,6 @@ class TestMainPassExecution:
 
         # Mock the revision module subprocess call
         import subprocess as sp
-        original_run = sp.run
 
         def mock_subprocess_run(cmd, **kwargs):
             cmd_str = ' '.join(str(c) for c in cmd)
@@ -550,7 +549,7 @@ class TestMainPassExecution:
                 )
             if 'storyforge.parsing' in cmd_str and 'extract-scenes' in cmd_str:
                 return sp.CompletedProcess(cmd, 0, stdout='Extracted 2 scenes', stderr='')
-            return original_run(cmd, **kwargs)
+            return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
 
         monkeypatch.setattr('subprocess.run', mock_subprocess_run)
 
@@ -584,7 +583,6 @@ class TestMainPassExecution:
         _ensure_scene_files(project_dir)
 
         import subprocess as sp
-        original_run = sp.run
 
         def mock_subprocess_run(cmd, **kwargs):
             cmd_str = ' '.join(str(c) for c in cmd)
@@ -592,7 +590,7 @@ class TestMainPassExecution:
                 return sp.CompletedProcess(cmd, 0, stdout='Prompt text', stderr='')
             if 'storyforge.parsing' in cmd_str:
                 return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
-            return original_run(cmd, **kwargs)
+            return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
 
         monkeypatch.setattr('subprocess.run', mock_subprocess_run)
         mock_api.set_response('Revised content')
@@ -627,7 +625,6 @@ class TestMainPolishMode:
         _ensure_scene_files(project_dir)
 
         import subprocess as sp
-        original_run = sp.run
 
         def mock_subprocess_run(cmd, **kwargs):
             cmd_str = ' '.join(str(c) for c in cmd)
@@ -635,7 +632,7 @@ class TestMainPolishMode:
                 return sp.CompletedProcess(cmd, 0, stdout='Polish prompt', stderr='')
             if 'storyforge.parsing' in cmd_str:
                 return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
-            return original_run(cmd, **kwargs)
+            return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
 
         monkeypatch.setattr('subprocess.run', mock_subprocess_run)
         mock_api.set_response('Polished prose')
@@ -720,7 +717,6 @@ class TestMainCostEstimation:
         _ensure_scene_files(project_dir)
 
         import subprocess as sp
-        original_run = sp.run
 
         def mock_subprocess_run(cmd, **kwargs):
             cmd_str = ' '.join(str(c) for c in cmd)
@@ -728,7 +724,7 @@ class TestMainCostEstimation:
                 return sp.CompletedProcess(cmd, 0, stdout='Prompt', stderr='')
             if 'storyforge.parsing' in cmd_str:
                 return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
-            return original_run(cmd, **kwargs)
+            return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
 
         monkeypatch.setattr('subprocess.run', mock_subprocess_run)
         mock_api.set_response('Result')
@@ -762,7 +758,6 @@ class TestMainGitWorkflow:
         _ensure_scene_files(project_dir)
 
         import subprocess as sp
-        original_run = sp.run
 
         def mock_subprocess_run(cmd, **kwargs):
             cmd_str = ' '.join(str(c) for c in cmd)
@@ -770,7 +765,7 @@ class TestMainGitWorkflow:
                 return sp.CompletedProcess(cmd, 0, stdout='Prompt', stderr='')
             if 'storyforge.parsing' in cmd_str:
                 return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
-            return original_run(cmd, **kwargs)
+            return sp.CompletedProcess(cmd, 0, stdout='', stderr='')
 
         monkeypatch.setattr('subprocess.run', mock_subprocess_run)
         mock_api.set_response('Result')

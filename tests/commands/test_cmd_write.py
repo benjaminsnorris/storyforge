@@ -436,18 +436,21 @@ class TestScopeFiltering:
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr('storyforge.cmd_write.detect_project_root',
                             lambda: project_dir)
+
+        # Write a marker to act-1 scene file so we can verify it wasn't touched
+        act1_scene = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        os.makedirs(os.path.dirname(act1_scene), exist_ok=True)
+        with open(act1_scene, 'w') as f:
+            f.write('ORIGINAL_ACT1_CONTENT')
+
         prose = ' '.join(['word'] * 200)
         mock_api.set_response(prose)
 
         main(['--direct', '--act', '2'])
 
-        # The prompts should only be for act-2 scenes, not act-1
-        for call in mock_api.calls_for('invoke_to_file'):
-            prompt = call['prompt']
-            # We cannot easily inspect which scene the prompt is for,
-            # but at minimum the API should have been called
-        # Verify act-1 scene files were not overwritten with new content
-        # (act1-sc01 has status 'briefed' in fixture but was not in scope)
+        # Verify act-1 scene file was not overwritten
+        with open(act1_scene) as f:
+            assert f.read() == 'ORIGINAL_ACT1_CONTENT'
 
     def test_scenes_filter_limits_scope(self, mock_api, mock_git, mock_costs,
                                         project_dir, monkeypatch):
@@ -486,14 +489,12 @@ class TestSkipDrafted:
         # Draft only act1-sc01 (all mode would include other scenes)
         main(['--direct', '--scenes', 'act1-sc01'])
 
-        # Single-scene mode explicitly requested -> should still draft it
-        # (filter_mode == 'scenes', not 'single' from positional)
-        # For 'scenes' filter, already-drafted is skipped.
-        # Verify original content is preserved
+        # 'scenes' filter skips already-drafted scenes.
+        # Verify original content is preserved (scene was not re-drafted)
         with open(scene_file) as f:
             content = f.read()
-        # The 'scenes' filter does NOT set filter_mode to 'single',
-        # so the scene should be skipped since it's already drafted
+        assert 'word' in content, "Original content should be preserved"
+        assert 'new' not in content, "Scene should not have been re-drafted"
 
     def test_force_redrafts_scene(self, mock_api, mock_git, mock_costs,
                                   project_dir, monkeypatch):

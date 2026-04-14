@@ -430,14 +430,16 @@ class TestDomainExecution:
         assert mock_api.call_count == 0
 
     def test_unknown_domain_warns(self, mock_api, mock_git, mock_costs,
-                                   project_dir, monkeypatch):
+                                   project_dir, monkeypatch, capsys):
         """Unknown domain should log warning and continue."""
         monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
         monkeypatch.setattr(
             'storyforge.cmd_hone.detect_project_root', lambda: project_dir)
 
-        # Should not crash
         main(['--domain', 'nonexistent', '--dry-run'])
+
+        # Should not have made any API calls for an unknown domain
+        assert mock_api.call_count == 0
 
     def test_gaps_domain_dry_run(self, mock_api, mock_git, mock_costs,
                                   project_dir, monkeypatch):

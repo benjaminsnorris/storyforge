@@ -403,7 +403,7 @@ class TestMainAssembly:
 
         # Track subprocess calls
         calls = []
-        original_run = subprocess.run
+
 
         def mock_assembly_cmd(*args):
             args_str = ' '.join(str(a) for a in args)
@@ -432,7 +432,7 @@ class TestMainAssembly:
                     stdout='Chapter content here with some words in it.',
                     stderr='',
                 )
-            return original_run(cmd, **kwargs)
+            return subprocess.CompletedProcess(cmd, 0, stdout='', stderr='')
 
         monkeypatch.setattr('subprocess.run', mock_subprocess_run)
 
