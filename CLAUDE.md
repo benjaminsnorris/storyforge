@@ -187,6 +187,7 @@ All structured data uses pipe-delimited CSV:
 - `reference/voice-profile.csv` — structured voice constraints (_project row for banned words/register, per-character rows for preferred words/metaphor families/rhythm/dialogue style)
 
 **Shared:**
+- `working/annotations.csv` — reader annotations from Bookshelf (id, scene_id, chapter, color, color_label, text, note, reader, created_at, status, fix_location, fetched_at)
 - `working/craft-weights.csv` — craft principle weights (keyed by `principle` column, not `id`)
 - `working/costs/ledger.csv` — per-invocation cost tracking
 - `reference/chapter-map.csv` — chapter-to-scene mapping
@@ -241,6 +242,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 
 | Command | Module | Purpose |
 |---------|--------|---------|
+| `storyforge annotations` | `cmd_annotations.py` | Fetch reader annotations from Bookshelf, reconcile, route by color intent. |
 | `storyforge write` | `cmd_write.py` | Draft scenes (brief-aware, parallel wave drafting) |
 | `storyforge evaluate` | `cmd_evaluate.py` | Multi-agent evaluation panel (6 evaluators + synthesis) |
 | `storyforge revise` | `cmd_revise.py` | Execute revision passes. `--polish` for craft-only. `--polish --loop` for score→polish convergence. `--naturalness` for AI pattern removal. |
@@ -258,6 +260,8 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge cleanup` | `cmd_cleanup.py` | Project structure cleanup. `--scenes` strips writing-agent artifacts from scene files. `--csv` runs only the CSV integrity report (schema + row checks). |
 | `storyforge cover` | `cmd_cover.py` | Cover design |
 | `storyforge scenes-setup` | `cmd_scenes_setup.py` | Scene file and metadata setup |
+| `storyforge scenes-export` | `cmd_scenes_export.py` | Export scenes to markdown with metadata headers |
+| `storyforge scenes-import` | `cmd_scenes_import.py` | Import scenes from markdown with metadata headers |
 | `storyforge review` | `cmd_review.py` | Pipeline review |
 | `storyforge migrate` | `cmd_migrate.py` | Project migration |
 
@@ -312,7 +316,9 @@ Key principles:
 
 | Module | Purpose |
 |--------|---------|
+| `annotations.py` | Reader annotation processing: fetch, reconcile, route, exemplar promotion |
 | `api.py` | Anthropic API (Messages + Batch), response parsing, cost calculation |
+| `bookshelf.py` | Bookshelf API client: Supabase auth, publishing, annotation fetching |
 | `costs.py` | Cost tracking, estimation, threshold checking, ledger |
 | `csv_cli.py` | Pipe-delimited CSV operations (get/set/list/append) |
 | `schema.py` | Column schema definitions, enum/registry/MICE validation |

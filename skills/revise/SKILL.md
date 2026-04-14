@@ -61,6 +61,10 @@ The `--naturalness` mode also checks for upstream causes before running its 3-pa
 ### All passes completed
 → Start at review. Assess what changed.
 
+### Reader Annotations
+
+The revision pipeline checks for `working/annotations.csv` and incorporates unaddressed reader annotations into the revision plan. Pink annotations (Needs Revision) and yellow annotations with notes (Important) become craft findings. Orange annotations (Cut / Reconsider) become structural findings. Green annotations (Strong Passage) become protection constraints that shield those passages from rewrite during polish. Blue annotations (Research Needed) are informational and not included in revision plans. Use `--no-annotations` to exclude annotations from a specific run.
+
 ## Step 3: Plan the Revision
 
 Read evaluation findings and scoring data. Categorize each finding by where the fix belongs.

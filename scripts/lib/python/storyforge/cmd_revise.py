@@ -69,6 +69,8 @@ def parse_args(argv):
                         help='Maximum iterations in --loop mode (default: 5)')
     parser.add_argument('--skip-initial-score', action='store_true',
                         help='Skip initial scoring in --polish --loop (use existing scores)')
+    parser.add_argument('--no-annotations', action='store_true',
+                        help='Exclude reader annotations from revision plan')
     parser.add_argument('pass_num', nargs='?', type=int, default=0,
                         help='Start from this pass number (1-indexed; default: first pending)')
     return parser.parse_args(argv)
@@ -1413,6 +1415,21 @@ def main(argv=None):
                 with open(manifest, 'w') as f:
                     f.writelines(lines)
 
+    # ---- Load reader annotations if available ----
+    annotations_csv = os.path.join(project_dir, 'working', 'annotations.csv')
+    annotation_findings = []
+    annotation_protection = []
+    if os.path.isfile(annotations_csv) and not args.no_annotations:
+        from storyforge.annotations import load_annotations_csv, generate_revision_findings
+        ann_data = load_annotations_csv(project_dir)
+        craft_findings, struct_findings, prot_passages = generate_revision_findings(ann_data)
+        annotation_findings = craft_findings + struct_findings
+        annotation_protection = prot_passages
+        if annotation_findings:
+            log(f'Reader annotations: {len(annotation_findings)} finding(s) from unaddressed annotations')
+        if annotation_protection:
+            log(f'Reader annotations: {len(annotation_protection)} passage(s) to protect')
+
     log('============================================')
     log(f'Storyforge Revision -- {project_title}')
     log(f'Plan: {csv_plan_file}')
@@ -1458,6 +1475,24 @@ def main(argv=None):
         protection = _read_pass_field(plan_rows, pass_num, 'protection')
         findings = _read_pass_field(plan_rows, pass_num, 'findings')
         fix_location = _read_pass_field(plan_rows, pass_num, 'fix_location')
+
+        # Inject reader annotation findings for this pass
+        if annotation_findings:
+            relevant = [f for f in annotation_findings]
+            if relevant:
+                guidance += '\n\n## Reader Annotations\n'
+                guidance += 'The following passages were flagged by readers:\n\n'
+                for finding in relevant:
+                    guidance += finding['guidance'] + '\n\n'
+
+        # Inject reader protection constraints
+        if annotation_protection:
+            prot_texts = [p['text'][:80] for p in annotation_protection]
+            prot_block = 'Reader-validated passages (do not rewrite): ' + '; '.join(f'"{t}"' for t in prot_texts)
+            if protection:
+                protection += '\n' + prot_block
+            else:
+                protection = prot_block
 
         # Resolve effective scope
         effective_scope = pass_scope
@@ -1777,6 +1812,31 @@ Rules:
                 if os.path.isfile(scene_file):
                     new_wc = str(len(open(scene_file).read().split()))
                     update_field(metadata_csv, scene_id, 'word_count', new_wc)
+
+        # Update annotation status for revised scenes
+        if annotation_findings and os.path.isfile(annotations_csv):
+            from storyforge.annotations import load_annotations_csv as _load_ann, save_annotations_csv as _save_ann
+            ann_data = _load_ann(project_dir)
+            pass_targets_raw = _read_pass_field(plan_rows, pass_num, 'targets')
+            revised_scenes = set()
+            if pass_scope == 'full':
+                scenes_dir_path = os.path.join(project_dir, 'scenes')
+                if os.path.isdir(scenes_dir_path):
+                    revised_scenes = {f[:-3] for f in os.listdir(scenes_dir_path) if f.endswith('.md')}
+            elif pass_targets_raw:
+                revised_scenes = set(t.strip() for t in pass_targets_raw.split(';') if t.strip())
+
+            updated_count = 0
+            for ann_id, ann in ann_data.items():
+                if (ann.get('status') == 'new'
+                        and ann.get('scene_id') in revised_scenes
+                        and ann.get('fix_location') in ('craft', 'structural')):
+                    ann['status'] = 'addressed'
+                    updated_count += 1
+
+            if updated_count:
+                _save_ann(project_dir, ann_data)
+                log(f'  Updated {updated_count} annotation(s) to "addressed"')
 
         # Git commit if Claude didn't
         head_after = _git(project_dir, 'rev-parse', 'HEAD', check=False).stdout.strip()

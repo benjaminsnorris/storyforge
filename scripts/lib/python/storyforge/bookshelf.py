@@ -32,6 +32,16 @@ _ENV_VARS = (
     'BOOKSHELF_SUPABASE_ANON_KEY',
 )
 
+# Color labels — used when API does not return color_label field.
+# Will be removed when benjaminsnorris/bookshelf#5 lands.
+COLOR_LABELS = {
+    'pink': 'Needs Revision',
+    'orange': 'Cut / Reconsider',
+    'blue': 'Research Needed',
+    'green': 'Strong Passage',
+    'yellow': 'Important',
+}
+
 
 def check_env() -> dict[str, str]:
     """Validate that all required environment variables are set.

@@ -34,6 +34,7 @@ Before doing anything else, orient yourself:
    - `working/scores/structural-proposals.csv` (unaddressed structural proposals)
    - `reference/voice-profile.csv` (voice profile with per-character banned words)
    - `working/cleanup-report.csv` (pending cleanup action items from a previous session)
+   - `working/annotations.csv` (reader annotations from Bookshelf, if present)
    - The `scenes/` directory (any `.md` files = drafted scenes)
 4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
 
@@ -112,6 +113,12 @@ Invoke the `cleanup` skill. This runs the project health report (CSV schema vali
 Provide the `storyforge repetition` command. This runs a deterministic n-gram scanner across scenes to detect repeated similes, blocking tics, structural phrases, and signature phrases. No API calls required.
 ```bash
 ./storyforge repetition [options]
+```
+
+**"Annotations" / "Reader feedback" / "What did my readers say" / "Reader highlights" / "Bookshelf feedback":**
+Provide the `storyforge annotations` command. This fetches reader annotations from Bookshelf, reconciles them against `working/annotations.csv`, and routes each by color intent — pink (Needs Revision) as craft findings, orange (Cut / Reconsider) as structural findings, green (Strong Passage) as protection constraints.
+```bash
+./storyforge annotations [options]
 ```
 
 **"Reconcile" / "Normalize my data" / "Build registries" / "Clean up values" / "Hone" / "Improve my briefs" / "Fix abstract language" / "Fill gaps":**
