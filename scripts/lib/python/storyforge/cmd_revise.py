@@ -236,17 +236,27 @@ def _generate_polish_plan(plan_file):
     return rows
 
 
-def _build_naturalness_pass3_guidance() -> str:
-    """Build Pass 3 guidance, loading vocabulary from ai-tell-words.csv."""
-    from storyforge.prompts import load_ai_tell_words
+def _build_naturalness_pass3_guidance(project_dir: str = '') -> str:
+    """Build Pass 3 guidance, loading vocabulary from ai-tell-words.csv
+    and project voice profile."""
+    from storyforge.prompts import load_ai_tell_words, load_voice_profile, merge_banned_words
 
     plugin_dir = get_plugin_dir()
-    words = load_ai_tell_words(plugin_dir)
+    ai_words = load_ai_tell_words(plugin_dir)
 
-    vocab_words = [w['word'] for w in words if w['category'] == 'vocabulary']
-    hedging_words = [w['word'] for w in words if w['category'] == 'hedging']
+    # Merge with project-level banned words if available
+    if project_dir:
+        project_profile, _ = load_voice_profile(project_dir)
+        all_banned = merge_banned_words(project_profile, ai_words)
+    else:
+        all_banned = [w['word'] for w in ai_words if w.get('severity') == 'high']
 
-    if vocab_words:
+    vocab_words = [w['word'] for w in ai_words if w['category'] == 'vocabulary']
+    hedging_words = [w['word'] for w in ai_words if w['category'] == 'hedging']
+
+    if all_banned:
+        vocab_str = ', '.join(all_banned)
+    elif vocab_words:
         vocab_str = ', '.join(vocab_words)
     else:
         vocab_str = ('nuanced, multifaceted, tapestry, palpable, pivotal, intricate, '
@@ -272,7 +282,7 @@ def _build_naturalness_pass3_guidance() -> str:
     )
 
 
-def _generate_naturalness_plan(plan_file):
+def _generate_naturalness_plan(plan_file, project_dir=''):
     """Generate 3-pass plan for AI prose pattern removal.
 
     Targets the patterns most frequently penalized in scoring rationales:
@@ -329,7 +339,7 @@ def _generate_naturalness_plan(plan_file):
             'purpose': 'Remove AI-tell vocabulary, hedging stacks, sweeping openers, and summary closers',
             'scope': 'full',
             'targets': '',
-            'guidance': _build_naturalness_pass3_guidance(),
+            'guidance': _build_naturalness_pass3_guidance(project_dir),
             'protection': 'Do not change dialogue, plot events, or character interiority that reveals new information.',
             'findings': 'naturalness',
             'status': 'pending',
@@ -1271,7 +1281,7 @@ def main(argv=None):
             _redraft_scenes(project_dir, upstream_scenes)
             commit_and_push(project_dir, 'Naturalness: upstream brief fixes',
                             ['reference/', 'scenes/', 'working/'])
-        plan_rows = _generate_naturalness_plan(csv_plan_file)
+        plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir)
     elif args.structural:
         plan_rows = _generate_structural_plan(project_dir, csv_plan_file)
     elif os.path.isfile(csv_plan_file):

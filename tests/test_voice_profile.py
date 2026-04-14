@@ -166,3 +166,21 @@ def test_drafting_prompt_merged_banned_words(project_dir, plugin_dir):
     assert 'journey' in prompt
     # AI-tell word (high severity)
     assert 'delve' in prompt
+
+
+def test_naturalness_pass3_uses_project_banned_words(project_dir, plugin_dir):
+    """Pass 3 guidance merges project banned words with universal list."""
+    import os
+    profile_path = os.path.join(project_dir, 'reference', 'voice-profile.csv')
+    with open(profile_path, 'w') as f:
+        f.write('character|preferred_words|banned_words|metaphor_families|rhythm_preference|register|dialogue_style\n')
+        f.write('_project||realm;visceral|||gritty;noir|\n')
+
+    from storyforge.prompts import load_voice_profile, load_ai_tell_words, merge_banned_words
+    project, _ = load_voice_profile(project_dir)
+    ai_words = load_ai_tell_words(plugin_dir)
+    merged = merge_banned_words(project, ai_words)
+
+    assert 'realm' in merged
+    assert 'visceral' in merged
+    assert 'delve' in merged
