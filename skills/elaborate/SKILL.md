@@ -59,8 +59,8 @@ Based on the project state, identify where the author is:
 | spine | 0 | — | — | — | Needs spine |
 | spine | 5-10 | function only | — | — | Spine done, ready for architecture |
 | architecture | 15-25 | has value_shift | — | — | Architecture done, ready for map |
-| scene-map | 40-60 | has characters, on_stage | — | — | Map done, ready for briefs |
-| briefs | 40-60 | full | has goal/conflict/outcome | — | Briefs done, ready for drafting |
+| scene-map | target_words/2000 to target_words/1500 | has characters, on_stage | — | — | Map done, ready for briefs |
+| briefs | same as map | full | has goal/conflict/outcome | — | Briefs done, ready for drafting |
 | drafting+ | status=drafted | populated but gaps | populated | failures > 0 | **Gap-fill mode** |
 | drafting+ | — | — | — | passes | Past elaboration — redirect to forge |
 
@@ -69,6 +69,8 @@ Based on the project state, identify where the author is:
 Based on the author's request, determine the mode:
 
 ### Specific requests (always honored, bypass auto-advance):
+
+**Never question the author's creative direction.** If they say "I want more scenes," "make them shorter," "split this," or "change the structure" — do it immediately. Do not ask for motivation, suggest they reconsider, or explain trade-offs unless they ask. The author's instruction is the requirement.
 
 - **"Start a new novel"** / **"Let's begin"** → Start at spine. Ask for the seed (logline, genre, characters, themes, constraints). Whatever they give you is the seed.
 - **"Work on the spine/architecture/map/briefs"** → Go to that specific stage.
@@ -189,11 +191,14 @@ If they choose Option B, provide the full command and end.
 ### Scene Map Stage (Interactive)
 
 1. Read architecture scenes and reference materials
-2. Expand to 40-60 scenes: fill gaps, add transitions
-3. Assign locations, timeline, characters, MICE threads — **all registry-backed fields must use canonical IDs** (characters, locations, values, mice_threads). Add new registry entries for anything introduced at this stage.
-4. Write updates
-5. Run validation — MICE nesting, timeline, character references
-6. Commit: `git add -A && git commit -m "Elaborate: scene map" && git push`
+2. Compute target scene count from `project.target_words`: `target_words / 2000` (lower) to `target_words / 1500` (upper), minimum 40. For an 80k novel this is 40-53; for 100k it's 50-67. **Prefer more, shorter scenes** (1500-2000 words each) — Claude follows brief constraints more reliably in focused scenes, and scoring/revision are more precise on smaller units.
+3. Expand to that range: fill gaps, add transitions, subplot scenes, breathing room
+4. Assign locations, timeline, characters, MICE threads — **all registry-backed fields must use canonical IDs** (characters, locations, values, mice_threads). Add new registry entries for anything introduced at this stage.
+5. Write updates
+6. Run validation — MICE nesting, timeline, character references
+7. Commit: `git add -A && git commit -m "Elaborate: scene map" && git push`
+
+**If the author requests a different scene count, honor it immediately.** Scene count is an authorial choice — do not question it, ask for motivation, or suggest alternatives. Adjust the map to match their target.
 
 ### Briefs Stage (Interactive)
 

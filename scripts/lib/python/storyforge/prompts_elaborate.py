@@ -273,6 +273,27 @@ If the world needs a bible, output:
 # Stage 3: Scene Map
 # ============================================================================
 
+def _scene_count_range(project_dir: str) -> tuple[int, int]:
+    """Compute the target scene count range from manuscript target_words.
+
+    Scenes should average 1500-2000 words for optimal pipeline behavior:
+    - Under 1200 words: too short to establish, turn, and resolve
+    - Over 3000 words: Claude loses grip on brief constraints in later paragraphs
+    - 1500-2000 is the sweet spot for brief adherence, scoring precision, and revision
+    """
+    yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+    raw = read_yaml_field(yaml_path, 'project.target_words')
+    try:
+        target = int(raw)
+    except (TypeError, ValueError):
+        target = 80000  # default
+
+    # Compute range: target / 2000 (lower) to target / 1500 (upper), floor 40
+    lo = max(40, target // 2000)
+    hi = max(lo + 10, target // 1500)
+    return lo, hi
+
+
 def build_map_prompt(project_dir: str, plugin_dir: str,
                      registries_text: str = '') -> str:
     """Build the prompt for the scene map stage."""
@@ -283,6 +304,8 @@ def build_map_prompt(project_dir: str, plugin_dir: str,
     intent = _read_csv_contents(os.path.join(ref_dir, 'scene-intent.csv'))
 
     registries_section = f'\n\n{registries_text}\n' if registries_text else ''
+
+    lo, hi = _scene_count_range(project_dir)
 
     return f"""You are mapping a novel — expanding the architecture into a complete scene-by-scene plan with locations, timeline, characters, and thread tracking.
 
@@ -306,7 +329,9 @@ def build_map_prompt(project_dir: str, plugin_dir: str,
 {registries_section}
 ## Instructions
 
-Expand the architecture into the full scene count (40-60 scenes). For each scene:
+Expand the architecture into {lo}-{hi} scenes. Prefer **more, shorter scenes** (1500-2000 words each) over fewer, longer ones. This is important for drafting quality — Claude follows brief constraints more reliably in focused scenes under 2500 words, and scoring/revision are more precise on smaller units.
+
+For each scene:
 
 1. Keep all existing scenes (adjust as needed)
 2. Fill in gaps: transitions, subplot scenes, breathing room
