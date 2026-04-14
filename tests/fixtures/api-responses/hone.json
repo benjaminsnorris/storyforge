@@ -1,4 +1,10 @@
 {
+  "id": "msg_test_hone_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-6-20250514",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
   "content": [{"type": "text", "text": "## Diagnosis Report\n\n### Brief Quality\n- act1-sc01: goal field uses abstract language (\"establish\" — prefer concrete visible action)\n- act1-sc02: conflict field is overspecified (3 beats crammed into one field)\n\n### Intent Quality\n- act1-sc01: emotional_arc uses vague descriptor (\"grows\" — specify start and end states)\n- act2-sc01: value_shift is missing\n\n### Registry Gaps\n- characters.csv: missing entry for \"Minister Hale\" (referenced in act2-sc01 on_stage)\n\n### Recommended Fixes\n1. act1-sc01 goal: \"Maren reviews the commission letter and decides to accept despite the impossible deadline\" \n2. act1-sc01 emotional_arc: \"anxiety → reluctant determination\"\n3. act1-sc02 conflict: keep only the primary conflict, move secondary to key_actions\n4. Add Minister Hale to characters.csv with basic fields"}],
   "usage": {"input_tokens": 5000, "output_tokens": 600}
 }

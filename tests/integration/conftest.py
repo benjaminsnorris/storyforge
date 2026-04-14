@@ -8,6 +8,7 @@ git operations, but still mock the API boundary to avoid costs and
 network dependencies.
 """
 
+import importlib
 import json
 import os
 import re
@@ -18,6 +19,29 @@ import pytest
 TESTS_DIR = os.path.dirname(os.path.dirname(__file__))
 FIXTURE_DIR = os.path.join(TESTS_DIR, 'fixtures', 'test-project')
 API_RESPONSES_DIR = os.path.join(TESTS_DIR, 'fixtures', 'api-responses')
+
+
+# ---------------------------------------------------------------------------
+# Command modules — same list as commands/conftest.py
+# ---------------------------------------------------------------------------
+
+_CMD_MODULES = [
+    'storyforge.cmd_write',
+    'storyforge.cmd_score',
+    'storyforge.cmd_extract',
+    'storyforge.cmd_elaborate',
+    'storyforge.cmd_evaluate',
+    'storyforge.cmd_revise',
+    'storyforge.cmd_hone',
+    'storyforge.cmd_enrich',
+    'storyforge.cmd_review',
+    'storyforge.cmd_cleanup',
+    'storyforge.cmd_assemble',
+    'storyforge.cmd_timeline',
+    'storyforge.cmd_scenes_setup',
+    'storyforge.cmd_migrate',
+    'storyforge.cmd_visualize',
+]
 
 
 # ---------------------------------------------------------------------------
@@ -32,12 +56,16 @@ def load_api_response(name: str) -> dict:
 
 
 def load_api_response_text(name: str) -> str:
-    """Load just the text content from a canned API response."""
+    """Load just the text content from a canned API response.
+
+    Joins all text blocks with newlines, matching production extract_text behavior.
+    """
     response = load_api_response(name)
+    texts = []
     for block in response.get('content', []):
         if block.get('type') == 'text':
-            return block.get('text', '')
-    return ''
+            texts.append(block.get('text', ''))
+    return '\n'.join(texts)
 
 
 # ---------------------------------------------------------------------------
@@ -59,10 +87,10 @@ def git_project(tmp_path):
     dest = tmp_path / 'test-project'
     shutil.copytree(FIXTURE_DIR, dest)
 
-    # Ensure working directories
+    # Ensure working directories (matches commands/conftest.py)
     for subdir in [
         'working/logs', 'working/scores', 'working/costs',
-        'working/evaluations', 'working/reviews',
+        'working/evaluations', 'working/reviews', 'working/coaching',
     ]:
         os.makedirs(os.path.join(str(dest), subdir), exist_ok=True)
 
@@ -73,11 +101,11 @@ def git_project(tmp_path):
         'GIT_COMMITTER_NAME': 'Test',
         'GIT_COMMITTER_EMAIL': 'test@test.com',
     }
-    subprocess.run(['git', 'init', '-b', 'main'], cwd=dest, capture_output=True, env=env)
-    subprocess.run(['git', 'add', '-A'], cwd=dest, capture_output=True, env=env)
+    subprocess.run(['git', 'init', '-b', 'main'], cwd=dest, capture_output=True, env=env, check=True)
+    subprocess.run(['git', 'add', '-A'], cwd=dest, capture_output=True, env=env, check=True)
     subprocess.run(
         ['git', 'commit', '-m', 'Initial test fixture'],
-        cwd=dest, capture_output=True, env=env,
+        cwd=dest, capture_output=True, env=env, check=True,
     )
     return str(dest)
 
@@ -91,10 +119,10 @@ def project_dir(tmp_path):
     dest = tmp_path / 'test-project'
     shutil.copytree(FIXTURE_DIR, dest)
 
-    # Ensure working directories
+    # Ensure working directories (matches commands/conftest.py)
     for subdir in [
         'working/logs', 'working/scores', 'working/costs',
-        'working/evaluations', 'working/reviews',
+        'working/evaluations', 'working/reviews', 'working/coaching',
     ]:
         os.makedirs(os.path.join(str(dest), subdir), exist_ok=True)
 
@@ -110,8 +138,9 @@ def mock_api(monkeypatch):
     """Patch all API functions to return canned responses.
 
     Returns a controller to configure per-call responses.
-    Identical to commands/conftest mock_api but also patches
-    extract_text_from_file and batch API functions.
+    Simpler variant of commands/conftest mock_api — supports set_response
+    and set_response_fn but not set_response_dict, set_responses, or
+    call introspection helpers (call_count, calls_for, last_prompt).
     """
 
     class ApiMock:
@@ -177,10 +206,12 @@ def mock_api(monkeypatch):
                 return ''
             with open(path) as f:
                 data = json.load(f)
+            # Join all text blocks — matches production extract_text behavior
+            texts = []
             for item in data.get('content', []):
                 if item.get('type') == 'text':
-                    return item.get('text', '')
-            return ''
+                    texts.append(item.get('text', ''))
+            return '\n'.join(texts)
 
         def _submit_batch(self, batch_file):
             self.calls.append({'fn': 'submit_batch', 'batch_file': batch_file})
@@ -204,32 +235,20 @@ def mock_api(monkeypatch):
     monkeypatch.setattr('storyforge.api.download_batch_results', mock._download_batch_results)
 
     # Also patch where modules import these at top level
-    for mod in [
-        'storyforge.cmd_write',
-        'storyforge.cmd_score',
-        'storyforge.cmd_extract',
-        'storyforge.cmd_elaborate',
-        'storyforge.cmd_evaluate',
-        'storyforge.cmd_revise',
-        'storyforge.cmd_hone',
-        'storyforge.cmd_enrich',
-        'storyforge.cmd_review',
-        'storyforge.cmd_cleanup',
-        'storyforge.cmd_assemble',
-    ]:
-        for attr, fn in [
-            ('invoke', mock._invoke),
-            ('invoke_to_file', mock._invoke_to_file),
-            ('invoke_api', mock._invoke_api),
-            ('extract_text_from_file', mock._extract_text_from_file),
-            ('submit_batch', mock._submit_batch),
-            ('poll_batch', mock._poll_batch),
-            ('download_batch_results', mock._download_batch_results),
-        ]:
-            try:
-                monkeypatch.setattr(f'{mod}.{attr}', fn)
-            except AttributeError:
-                pass
+    _api_attrs = [
+        ('invoke', mock._invoke),
+        ('invoke_to_file', mock._invoke_to_file),
+        ('invoke_api', mock._invoke_api),
+        ('extract_text_from_file', mock._extract_text_from_file),
+        ('submit_batch', mock._submit_batch),
+        ('poll_batch', mock._poll_batch),
+        ('download_batch_results', mock._download_batch_results),
+    ]
+    for mod_name in _CMD_MODULES:
+        mod = importlib.import_module(mod_name)
+        for attr, fn in _api_attrs:
+            if hasattr(mod, attr):
+                monkeypatch.setattr(f'{mod_name}.{attr}', fn)
 
     return mock
 
@@ -259,8 +278,10 @@ def mock_api_rich(monkeypatch):
     class RichApiMock:
         def __init__(self):
             self.calls = []
+            self.unmatched_calls = []
             self._patterns = []  # list of (compiled_regex, response_text)
             self.default = 'mock response'
+            self.strict = False  # Set True to fail on unmatched patterns
 
         def register(self, pattern: str, response_text: str, flags=re.IGNORECASE):
             """Register a regex pattern -> response mapping.
@@ -286,6 +307,14 @@ def mock_api_rich(monkeypatch):
             for regex, text in self._patterns:
                 if regex.search(prompt):
                     return text
+            self.unmatched_calls.append(prompt[:200])
+            if self.strict:
+                registered = [p.pattern for p, _ in self._patterns]
+                raise ValueError(
+                    f'mock_api_rich: no pattern matched prompt '
+                    f'(first 200 chars): {prompt[:200]!r}\n'
+                    f'Registered patterns: {registered}'
+                )
             return self.default
 
         def _invoke(self, prompt, model, max_tokens=4096, label='', timeout=600):
@@ -305,7 +334,12 @@ def mock_api_rich(monkeypatch):
                 'fn': 'invoke_to_file', 'prompt': prompt, 'model': model,
                 'log_file': log_file, 'max_tokens': max_tokens,
             })
-            response = self._invoke(prompt, model, max_tokens)
+            # Resolve directly — don't call _invoke to avoid double-counting
+            text = self._resolve(prompt)
+            response = {
+                'content': [{'type': 'text', 'text': text}],
+                'usage': {'input_tokens': 100, 'output_tokens': 50},
+            }
             os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
             with open(log_file, 'w') as f:
                 json.dump(response, f)
@@ -323,10 +357,12 @@ def mock_api_rich(monkeypatch):
                 return ''
             with open(path) as f:
                 data = json.load(f)
+            # Join all text blocks — matches production extract_text behavior
+            texts = []
             for item in data.get('content', []):
                 if item.get('type') == 'text':
-                    return item.get('text', '')
-            return ''
+                    texts.append(item.get('text', ''))
+            return '\n'.join(texts)
 
         def _submit_batch(self, batch_file):
             self.calls.append({'fn': 'submit_batch', 'batch_file': batch_file})
@@ -357,27 +393,20 @@ def mock_api_rich(monkeypatch):
     monkeypatch.setattr('storyforge.api.download_batch_results', mock._download_batch_results)
 
     # Also patch command module imports
-    for mod in [
-        'storyforge.cmd_write', 'storyforge.cmd_score',
-        'storyforge.cmd_extract', 'storyforge.cmd_elaborate',
-        'storyforge.cmd_evaluate', 'storyforge.cmd_revise',
-        'storyforge.cmd_hone', 'storyforge.cmd_enrich',
-        'storyforge.cmd_review', 'storyforge.cmd_cleanup',
-        'storyforge.cmd_assemble',
-    ]:
-        for attr, fn in [
-            ('invoke', mock._invoke),
-            ('invoke_to_file', mock._invoke_to_file),
-            ('invoke_api', mock._invoke_api),
-            ('extract_text_from_file', mock._extract_text_from_file),
-            ('submit_batch', mock._submit_batch),
-            ('poll_batch', mock._poll_batch),
-            ('download_batch_results', mock._download_batch_results),
-        ]:
-            try:
-                monkeypatch.setattr(f'{mod}.{attr}', fn)
-            except AttributeError:
-                pass
+    _api_attrs = [
+        ('invoke', mock._invoke),
+        ('invoke_to_file', mock._invoke_to_file),
+        ('invoke_api', mock._invoke_api),
+        ('extract_text_from_file', mock._extract_text_from_file),
+        ('submit_batch', mock._submit_batch),
+        ('poll_batch', mock._poll_batch),
+        ('download_batch_results', mock._download_batch_results),
+    ]
+    for mod_name in _CMD_MODULES:
+        mod = importlib.import_module(mod_name)
+        for attr, fn in _api_attrs:
+            if hasattr(mod, attr):
+                monkeypatch.setattr(f'{mod_name}.{attr}', fn)
 
     return mock
 
@@ -456,30 +485,23 @@ def mock_git(monkeypatch):
     monkeypatch.setattr('storyforge.git.commit_partial_work', mock._commit_partial_work)
 
     # Patch command module imports
-    for mod in [
-        'storyforge.cmd_write', 'storyforge.cmd_score',
-        'storyforge.cmd_extract', 'storyforge.cmd_elaborate',
-        'storyforge.cmd_evaluate', 'storyforge.cmd_assemble',
-        'storyforge.cmd_hone', 'storyforge.cmd_revise',
-        'storyforge.cmd_enrich', 'storyforge.cmd_review',
-        'storyforge.cmd_cleanup',
-    ]:
-        for fn_name, fn in [
-            ('create_branch', mock._create_branch),
-            ('ensure_branch_pushed', mock._ensure_branch_pushed),
-            ('ensure_on_branch', mock._ensure_on_branch),
-            ('create_draft_pr', mock._create_draft_pr),
-            ('commit_and_push', mock._commit_and_push),
-            ('update_pr_task', mock._update_pr_task),
-            ('run_review_phase', mock._run_review_phase),
-            ('commit_partial_work', mock._commit_partial_work),
-            ('_git', mock._git),
-            ('has_gh', mock._has_gh),
-            ('current_branch', mock._current_branch),
-        ]:
-            try:
-                monkeypatch.setattr(f'{mod}.{fn_name}', fn)
-            except AttributeError:
-                pass
+    _git_attrs = [
+        ('create_branch', mock._create_branch),
+        ('ensure_branch_pushed', mock._ensure_branch_pushed),
+        ('ensure_on_branch', mock._ensure_on_branch),
+        ('create_draft_pr', mock._create_draft_pr),
+        ('commit_and_push', mock._commit_and_push),
+        ('update_pr_task', mock._update_pr_task),
+        ('run_review_phase', mock._run_review_phase),
+        ('commit_partial_work', mock._commit_partial_work),
+        ('_git', mock._git),
+        ('has_gh', mock._has_gh),
+        ('current_branch', mock._current_branch),
+    ]
+    for mod_name in _CMD_MODULES:
+        mod = importlib.import_module(mod_name)
+        for attr, fn in _git_attrs:
+            if hasattr(mod, attr):
+                monkeypatch.setattr(f'{mod_name}.{attr}', fn)
 
     return mock

@@ -1,4 +1,10 @@
 {
+  "id": "msg_test_extraction_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-6-20250514",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
   "content": [{"type": "text", "text": "id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\nact1-sc01|1|The Commission|1|Maren|Cartography workshop|1|morning|2 hours|scene|drafted|2400|2500\nact1-sc02|2|The First Line|1|Maren|Cartography workshop|1|afternoon|1 hour|scene|drafted|1800|2000"}],
   "usage": {"input_tokens": 4000, "output_tokens": 300}
 }

@@ -1,4 +1,10 @@
 {
+  "id": "msg_test_drafting_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-6-20250514",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
   "content": [{"type": "text", "text": "The morning light filtered through the curtains. She sat at the desk, pen in hand, staring at the blank page."}],
   "usage": {"input_tokens": 2000, "output_tokens": 500}
 }

@@ -11,6 +11,7 @@ Fixtures are composable -- a test can use mock_api without mock_git
 or vice versa.
 """
 
+import importlib
 import json
 import os
 import shutil
@@ -26,6 +27,30 @@ import pytest
 TESTS_DIR = os.path.dirname(os.path.dirname(__file__))
 FIXTURE_DIR = os.path.join(TESTS_DIR, 'fixtures', 'test-project')
 API_RESPONSES_DIR = os.path.join(TESTS_DIR, 'fixtures', 'api-responses')
+
+
+# ---------------------------------------------------------------------------
+# Command modules that import api/git/costs at top level.
+# Defined once so all mock fixtures patch the same set.
+# ---------------------------------------------------------------------------
+
+_CMD_MODULES = [
+    'storyforge.cmd_write',
+    'storyforge.cmd_score',
+    'storyforge.cmd_extract',
+    'storyforge.cmd_elaborate',
+    'storyforge.cmd_evaluate',
+    'storyforge.cmd_revise',
+    'storyforge.cmd_hone',
+    'storyforge.cmd_enrich',
+    'storyforge.cmd_review',
+    'storyforge.cmd_cleanup',
+    'storyforge.cmd_assemble',
+    'storyforge.cmd_timeline',
+    'storyforge.cmd_scenes_setup',
+    'storyforge.cmd_migrate',
+    'storyforge.cmd_visualize',
+]
 
 
 # ---------------------------------------------------------------------------
@@ -50,13 +75,14 @@ def load_api_response(name: str) -> dict:
 def load_api_response_text(name: str) -> str:
     """Load just the text content from a canned API response.
 
-    Convenience wrapper that extracts the text from the first text block.
+    Joins all text blocks with newlines, matching production extract_text behavior.
     """
     response = load_api_response(name)
+    texts = []
     for block in response.get('content', []):
         if block.get('type') == 'text':
-            return block.get('text', '')
-    return ''
+            texts.append(block.get('text', ''))
+    return '\n'.join(texts)
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +145,7 @@ def mock_api(monkeypatch):
             self._response_dict = None
             self._response_fn = None
             self._responses_queue = []
+            self._batch_results = []
 
         def set_response(self, text: str):
             """Set a static text response for all API calls."""
@@ -206,10 +233,12 @@ def mock_api(monkeypatch):
                 return ''
             with open(path) as f:
                 data = json.load(f)
+            # Join all text blocks — matches production extract_text behavior
+            texts = []
             for item in data.get('content', []):
                 if item.get('type') == 'text':
-                    return item.get('text', '')
-            return ''
+                    texts.append(item.get('text', ''))
+            return '\n'.join(texts)
 
         def _submit_batch(self, batch_file):
             self.calls.append({'fn': 'submit_batch', 'batch_file': batch_file})
@@ -226,7 +255,7 @@ def mock_api(monkeypatch):
                 'output_dir': output_dir,
                 'log_dir': log_dir,
             })
-            return []
+            return self._batch_results
 
         @property
         def call_count(self) -> int:
@@ -252,34 +281,23 @@ def mock_api(monkeypatch):
     monkeypatch.setattr('storyforge.api.poll_batch', mock._poll_batch)
     monkeypatch.setattr('storyforge.api.download_batch_results', mock._download_batch_results)
 
-    # Also patch where command modules import these at top level
-    _CMD_MODULES = [
-        'storyforge.cmd_write',
-        'storyforge.cmd_score',
-        'storyforge.cmd_extract',
-        'storyforge.cmd_elaborate',
-        'storyforge.cmd_evaluate',
-        'storyforge.cmd_revise',
-        'storyforge.cmd_hone',
-        'storyforge.cmd_enrich',
-        'storyforge.cmd_review',
-        'storyforge.cmd_cleanup',
-        'storyforge.cmd_assemble',
+    # Also patch where command modules import these at top level.
+    # Use importlib+hasattr so typos and broken modules fail loudly
+    # while genuinely absent imports are skipped silently.
+    _api_attrs = [
+        ('invoke', mock._invoke),
+        ('invoke_to_file', mock._invoke_to_file),
+        ('invoke_api', mock._invoke_api),
+        ('extract_text_from_file', mock._extract_text_from_file),
+        ('submit_batch', mock._submit_batch),
+        ('poll_batch', mock._poll_batch),
+        ('download_batch_results', mock._download_batch_results),
     ]
-    for mod in _CMD_MODULES:
-        for attr, fn in [
-            ('invoke', mock._invoke),
-            ('invoke_to_file', mock._invoke_to_file),
-            ('invoke_api', mock._invoke_api),
-            ('extract_text_from_file', mock._extract_text_from_file),
-            ('submit_batch', mock._submit_batch),
-            ('poll_batch', mock._poll_batch),
-            ('download_batch_results', mock._download_batch_results),
-        ]:
-            try:
-                monkeypatch.setattr(f'{mod}.{attr}', fn)
-            except AttributeError:
-                pass
+    for mod_name in _CMD_MODULES:
+        mod = importlib.import_module(mod_name)
+        for attr, fn in _api_attrs:
+            if hasattr(mod, attr):
+                monkeypatch.setattr(f'{mod_name}.{attr}', fn)
 
     return mock
 
@@ -376,38 +394,25 @@ def mock_git(monkeypatch):
     monkeypatch.setattr('storyforge.git.run_review_phase', mock._run_review_phase)
     monkeypatch.setattr('storyforge.git.commit_partial_work', mock._commit_partial_work)
 
-    # Also patch where command modules import git functions at top level
-    _CMD_MODULES = [
-        'storyforge.cmd_write',
-        'storyforge.cmd_score',
-        'storyforge.cmd_extract',
-        'storyforge.cmd_elaborate',
-        'storyforge.cmd_evaluate',
-        'storyforge.cmd_assemble',
-        'storyforge.cmd_hone',
-        'storyforge.cmd_revise',
-        'storyforge.cmd_enrich',
-        'storyforge.cmd_review',
-        'storyforge.cmd_cleanup',
+    # Also patch where command modules import git functions at top level.
+    _git_attrs = [
+        ('create_branch', mock._create_branch),
+        ('ensure_branch_pushed', mock._ensure_branch_pushed),
+        ('ensure_on_branch', mock._ensure_on_branch),
+        ('create_draft_pr', mock._create_draft_pr),
+        ('commit_and_push', mock._commit_and_push),
+        ('update_pr_task', mock._update_pr_task),
+        ('run_review_phase', mock._run_review_phase),
+        ('commit_partial_work', mock._commit_partial_work),
+        ('_git', mock._git),
+        ('has_gh', mock._has_gh),
+        ('current_branch', mock._current_branch),
     ]
-    for mod in _CMD_MODULES:
-        for fn_name, fn in [
-            ('create_branch', mock._create_branch),
-            ('ensure_branch_pushed', mock._ensure_branch_pushed),
-            ('ensure_on_branch', mock._ensure_on_branch),
-            ('create_draft_pr', mock._create_draft_pr),
-            ('commit_and_push', mock._commit_and_push),
-            ('update_pr_task', mock._update_pr_task),
-            ('run_review_phase', mock._run_review_phase),
-            ('commit_partial_work', mock._commit_partial_work),
-            ('_git', mock._git),
-            ('has_gh', mock._has_gh),
-            ('current_branch', mock._current_branch),
-        ]:
-            try:
-                monkeypatch.setattr(f'{mod}.{fn_name}', fn)
-            except AttributeError:
-                pass
+    for mod_name in _CMD_MODULES:
+        mod = importlib.import_module(mod_name)
+        for attr, fn in _git_attrs:
+            if hasattr(mod, attr):
+                monkeypatch.setattr(f'{mod_name}.{attr}', fn)
 
     return mock
 
@@ -427,26 +432,33 @@ def mock_costs(monkeypatch):
         def __init__(self):
             self.operations = []
             self.estimates = []
+            self.threshold_ok = True
 
         def _log_operation(self, project_dir, operation, model,
-                          input_tokens, output_tokens, cost, duration=0):
+                          input_tokens, output_tokens, cost,
+                          duration_s=0, target='',
+                          cache_read=0, cache_create=0):
             self.operations.append({
                 'operation': operation, 'model': model,
                 'input_tokens': input_tokens, 'output_tokens': output_tokens,
-                'cost': cost, 'duration': duration,
+                'cost': cost, 'duration_s': duration_s, 'target': target,
+                'cache_read': cache_read, 'cache_create': cache_create,
             })
 
-        def _estimate_cost(self, operation, scope_count, avg_words=0, model=''):
+        def _estimate_cost(self, operation, scope_count, avg_words, model):
             self.estimates.append({
                 'operation': operation, 'scope_count': scope_count,
+                'avg_words': avg_words, 'model': model,
             })
             return 0.10  # Nominal cost
 
         def _check_threshold(self, estimated_cost):
-            return True  # Always under threshold
+            return self.threshold_ok
 
-        def _print_summary(self, project_dir, operation):
-            pass
+        def _print_summary(self, project_dir, operation=None):
+            self.operations.append({
+                'fn': 'print_summary', 'operation': operation,
+            })
 
     mock = CostsMock()
     monkeypatch.setattr('storyforge.costs.log_operation', mock._log_operation)
@@ -455,21 +467,16 @@ def mock_costs(monkeypatch):
     monkeypatch.setattr('storyforge.costs.print_summary', mock._print_summary)
 
     # Patch in command modules
-    for mod in [
-        'storyforge.cmd_write', 'storyforge.cmd_score',
-        'storyforge.cmd_evaluate', 'storyforge.cmd_revise',
-        'storyforge.cmd_elaborate', 'storyforge.cmd_extract',
-        'storyforge.cmd_enrich', 'storyforge.cmd_hone',
-    ]:
-        for attr, fn in [
-            ('log_operation', mock._log_operation),
-            ('estimate_cost', mock._estimate_cost),
-            ('check_threshold', mock._check_threshold),
-            ('print_summary', mock._print_summary),
-        ]:
-            try:
-                monkeypatch.setattr(f'{mod}.{attr}', fn)
-            except AttributeError:
-                pass
+    _cost_attrs = [
+        ('log_operation', mock._log_operation),
+        ('estimate_cost', mock._estimate_cost),
+        ('check_threshold', mock._check_threshold),
+        ('print_summary', mock._print_summary),
+    ]
+    for mod_name in _CMD_MODULES:
+        mod = importlib.import_module(mod_name)
+        for attr, fn in _cost_attrs:
+            if hasattr(mod, attr):
+                monkeypatch.setattr(f'{mod_name}.{attr}', fn)
 
     return mock
