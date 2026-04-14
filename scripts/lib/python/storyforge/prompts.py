@@ -1428,6 +1428,64 @@ def build_scene_prompt_from_briefs(
     craft = build_weighted_directive(project_dir)
     craft_block = f"## Craft Principles\n\n{craft}" if craft else ''
 
+    # --- AI-tell vocabulary constraint ---
+    ai_tell_words = load_ai_tell_words(plugin_dir)
+    ai_tell_block = build_ai_tell_constraint(ai_tell_words)
+
+    # --- Voice profile ---
+    voice_profile_project, voice_profile_chars = load_voice_profile(project_dir)
+    pov_char = scene.get('pov', '')
+
+    # Merge banned words: project profile + universal AI-tell list
+    if voice_profile_project or ai_tell_words:
+        merged_banned = merge_banned_words(voice_profile_project, ai_tell_words)
+        if merged_banned:
+            banned_str = ', '.join(merged_banned)
+            ai_tell_block = (
+                'VOCABULARY CONSTRAINT: Do not use these words or phrases — they '
+                'are banned for this project:\n'
+                f'{banned_str}\n'
+                'Replace with concrete, specific words grounded in the scene and character.'
+            )
+
+    # Character-specific voice constraints
+    char_voice_block = ''
+    if pov_char:
+        pov_slug = pov_char.lower().replace(' ', '-')
+        char_key = pov_char if pov_char in voice_profile_chars else (
+            pov_slug if pov_slug in voice_profile_chars else '')
+        if char_key:
+            char_data = voice_profile_chars[char_key]
+            parts = []
+            if char_data.get('preferred_words'):
+                parts.append(f'Favor these words (they define this character\'s voice): '
+                            f'{char_data["preferred_words"].replace(";", ", ")}')
+            if char_data.get('metaphor_families'):
+                parts.append(f'Source metaphors from: '
+                            f'{char_data["metaphor_families"].replace(";", ", ")}')
+            if char_data.get('rhythm_preference'):
+                parts.append(f'Sentence rhythm: '
+                            f'{char_data["rhythm_preference"].replace(";", ", ")}')
+            if char_data.get('dialogue_style'):
+                parts.append(f'Dialogue style: '
+                            f'{char_data["dialogue_style"].replace(";", ", ")}')
+            if parts:
+                char_voice_block = (
+                    f'CHARACTER VOICE ({pov_char}):\n' + '\n'.join(f'- {p}' for p in parts)
+                )
+
+    vocab_block = ''
+    if ai_tell_block:
+        vocab_block = f"## Vocabulary Constraints\n\n{ai_tell_block}"
+
+    char_voice_section = ''
+    if char_voice_block:
+        char_voice_section = f"## Character Voice\n\n{char_voice_block}"
+
+    register_line = ''
+    if voice_profile_project.get('register'):
+        register_line = f"PROSE REGISTER: {voice_profile_project['register'].replace(';', ', ')}"
+
     # Target word count
     target_words = scene.get('target_words', '') or scene.get('word_count', '')
     word_target_line = ''
@@ -1532,6 +1590,12 @@ Do NOT add creative interpretation or suggestions."""
 {char_block}
 
 {craft_block}
+
+{vocab_block}
+
+{char_voice_section}
+
+{register_line}
 
 {task_block}
 """

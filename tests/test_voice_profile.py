@@ -168,6 +168,30 @@ def test_drafting_prompt_merged_banned_words(project_dir, plugin_dir):
     assert 'delve' in prompt
 
 
+def test_briefs_prompt_includes_voice_profile(project_dir, plugin_dir):
+    """build_scene_prompt_from_briefs includes merged banned words."""
+    from storyforge.prompts import build_scene_prompt_from_briefs
+    prompt = build_scene_prompt_from_briefs('act1-sc01', project_dir, plugin_dir)
+    assert 'journey' in prompt or 'VOCABULARY CONSTRAINT' in prompt
+
+
+def test_briefs_prompt_includes_character_voice(project_dir, plugin_dir):
+    """build_scene_prompt_from_briefs includes character voice constraints."""
+    from storyforge.prompts import build_scene_prompt_from_briefs
+    prompt = build_scene_prompt_from_briefs('act1-sc01', project_dir, plugin_dir)
+    # act1-sc01 has POV "Dorren Hayle" -> voice profile key "dorren-hayle"
+    assert 'CHARACTER VOICE' in prompt
+    assert 'calibrated' in prompt  # dorren-hayle preferred word
+
+
+def test_briefs_prompt_includes_register(project_dir, plugin_dir):
+    """build_scene_prompt_from_briefs includes project register."""
+    from storyforge.prompts import build_scene_prompt_from_briefs
+    prompt = build_scene_prompt_from_briefs('act1-sc01', project_dir, plugin_dir)
+    assert 'PROSE REGISTER' in prompt
+    assert 'literary' in prompt
+
+
 def test_naturalness_pass3_uses_project_banned_words(project_dir, plugin_dir):
     """Pass 3 guidance merges project banned words with universal list."""
     import os

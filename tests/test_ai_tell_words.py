@@ -71,6 +71,14 @@ def test_drafting_prompt_includes_ai_tell_words(project_dir, plugin_dir):
     assert 'delve' in prompt
 
 
+def test_briefs_prompt_includes_ai_tell_words(project_dir, plugin_dir):
+    """build_scene_prompt_from_briefs includes AI-tell constraint."""
+    from storyforge.prompts import build_scene_prompt_from_briefs
+    prompt = build_scene_prompt_from_briefs('act1-sc01', project_dir, plugin_dir)
+    # Should contain vocabulary constraints
+    assert 'VOCABULARY CONSTRAINT' in prompt or 'delve' in prompt
+
+
 def test_naturalness_plan_loads_word_list(tmp_path, plugin_dir):
     """The naturalness plan Pass 3 guidance should include words from CSV."""
     from storyforge.prompts import load_ai_tell_words
