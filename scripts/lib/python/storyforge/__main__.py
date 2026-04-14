@@ -7,6 +7,7 @@ import importlib
 import sys
 
 COMMANDS = {
+    'annotations': 'storyforge.cmd_annotations',
     'validate': 'storyforge.cmd_validate',
     'hone': 'storyforge.cmd_hone',
     'reconcile': 'storyforge.cmd_reconcile',
