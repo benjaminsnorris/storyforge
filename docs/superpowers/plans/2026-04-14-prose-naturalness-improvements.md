@@ -648,11 +648,196 @@ def test_merge_banned_words(fixture_dir, plugin_dir):
 Run: `pytest tests/test_voice_profile.py -v`
 Expected: FAIL — `load_voice_profile` does not exist
 
-- [ ] **Step 4: Commit the fixture and tests**
+- [ ] **Step 4: Write schema.py validation test**
+
+Add to `tests/test_voice_profile.py`:
+
+```python
+def test_validate_voice_profile_valid(fixture_dir):
+    """validate_voice_profile passes on a well-formed file."""
+    from storyforge.schema import validate_voice_profile
+    result = validate_voice_profile(fixture_dir)
+    assert result['errors'] == []
+    assert result['has_project_row'] is True
+    assert result['character_count'] >= 2
+
+
+def test_validate_voice_profile_missing_project_row(tmp_path):
+    """validate_voice_profile flags missing _project row."""
+    import os
+    ref_dir = tmp_path / 'reference'
+    ref_dir.mkdir()
+    vp = ref_dir / 'voice-profile.csv'
+    vp.write_text(
+        'character|preferred_words|banned_words|metaphor_families|rhythm_preference|register|dialogue_style\n'
+        'some-char|word1;word2||metaphor1|||casual\n'
+    )
+    result = validate_voice_profile(str(tmp_path))
+    assert result['has_project_row'] is False
+    assert any('_project' in e['message'] for e in result['errors'])
+
+
+def test_validate_voice_profile_bad_header(tmp_path):
+    """validate_voice_profile flags wrong columns."""
+    import os
+    ref_dir = tmp_path / 'reference'
+    ref_dir.mkdir()
+    vp = ref_dir / 'voice-profile.csv'
+    vp.write_text('character|wrong_col\n_project|\n')
+    result = validate_voice_profile(str(tmp_path))
+    assert any('column' in e['message'].lower() for e in result['errors'])
+
+
+def test_validate_voice_profile_duplicate_character(tmp_path):
+    """validate_voice_profile flags duplicate character rows."""
+    import os
+    ref_dir = tmp_path / 'reference'
+    ref_dir.mkdir()
+    vp = ref_dir / 'voice-profile.csv'
+    vp.write_text(
+        'character|preferred_words|banned_words|metaphor_families|rhythm_preference|register|dialogue_style\n'
+        '_project||banned1|||literary|\n'
+        'char-a|word1||meta1|||casual\n'
+        'char-a|word2||meta2|||formal\n'
+    )
+    result = validate_voice_profile(str(tmp_path))
+    assert any('duplicate' in e['message'].lower() for e in result['errors'])
+
+
+def test_validate_voice_profile_missing_file(tmp_path):
+    """validate_voice_profile returns gracefully when file missing."""
+    result = validate_voice_profile(str(tmp_path))
+    assert result['errors'] == []
+    assert result['has_project_row'] is False
+    assert result['character_count'] == 0
+```
+
+- [ ] **Step 5: Run tests to verify they fail**
+
+Run: `pytest tests/test_voice_profile.py::test_validate_voice_profile_valid -v`
+Expected: FAIL — `validate_voice_profile` does not exist
+
+- [ ] **Step 6: Implement validate_voice_profile in schema.py**
+
+Add to `scripts/lib/python/storyforge/schema.py`, after `validate_physical_state_granularity`:
+
+```python
+# ============================================================================
+# Voice profile validation
+# ============================================================================
+
+VOICE_PROFILE_COLUMNS = [
+    'character', 'preferred_words', 'banned_words', 'metaphor_families',
+    'rhythm_preference', 'register', 'dialogue_style',
+]
+
+
+def validate_voice_profile(project_dir: str) -> dict:
+    """Validate reference/voice-profile.csv structure and content.
+
+    Checks:
+    - File has correct columns
+    - A _project row exists
+    - No duplicate character rows
+    - Character IDs exist in characters.csv (if available)
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        Dict with has_project_row, character_count, errors (list of dicts
+        with 'row' and 'message' keys).
+    """
+    path = os.path.join(project_dir, 'reference', 'voice-profile.csv')
+    errors: list[dict] = []
+
+    if not os.path.isfile(path):
+        return {'has_project_row': False, 'character_count': 0, 'errors': []}
+
+    with open(path, encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if not lines:
+        return {'has_project_row': False, 'character_count': 0, 'errors': []}
+
+    # Check header
+    header = lines[0].split('|')
+    if header != VOICE_PROFILE_COLUMNS:
+        missing = [c for c in VOICE_PROFILE_COLUMNS if c not in header]
+        extra = [c for c in header if c not in VOICE_PROFILE_COLUMNS]
+        msg = 'Voice profile has wrong columns.'
+        if missing:
+            msg += f' Missing: {", ".join(missing)}.'
+        if extra:
+            msg += f' Unexpected: {", ".join(extra)}.'
+        errors.append({'row': 'header', 'message': msg})
+        return {'has_project_row': False, 'character_count': 0, 'errors': errors}
+
+    # Parse rows
+    has_project = False
+    seen_characters: set[str] = set()
+    character_count = 0
+
+    # Load characters.csv for cross-reference if available
+    chars_path = os.path.join(project_dir, 'reference', 'characters.csv')
+    known_characters: set[str] = set()
+    if os.path.isfile(chars_path):
+        for row in _read_csv(chars_path):
+            cid = row.get('id', '').strip()
+            if cid:
+                known_characters.add(cid)
+
+    for i, line in enumerate(lines[1:], start=2):
+        fields = line.split('|')
+        char_id = fields[0].strip() if fields else ''
+
+        if char_id == '_project':
+            has_project = True
+        elif char_id:
+            character_count += 1
+
+            if char_id in seen_characters:
+                errors.append({
+                    'row': char_id,
+                    'message': f'Duplicate character row: "{char_id}"',
+                })
+            seen_characters.add(char_id)
+
+            if known_characters and char_id not in known_characters:
+                errors.append({
+                    'row': char_id,
+                    'message': f'Character "{char_id}" not found in characters.csv',
+                })
+        else:
+            errors.append({
+                'row': f'line {i}',
+                'message': 'Empty character field',
+            })
+
+    if not has_project:
+        errors.append({
+            'row': '(missing)',
+            'message': 'No _project row found — project-level fields (banned_words, register) have nowhere to live',
+        })
+
+    return {
+        'has_project_row': has_project,
+        'character_count': character_count,
+        'errors': errors,
+    }
+```
+
+- [ ] **Step 7: Run all voice profile tests**
+
+Run: `pytest tests/test_voice_profile.py -v`
+Expected: PASS (all tests including schema validation)
+
+- [ ] **Step 8: Commit the fixture, tests, and schema validation**
 
 ```bash
-git add tests/fixtures/test-project/reference/voice-profile.csv tests/test_voice_profile.py
-git commit -m "Add voice profile test fixture and failing tests"
+git add tests/fixtures/test-project/reference/voice-profile.csv tests/test_voice_profile.py scripts/lib/python/storyforge/schema.py
+git commit -m "Add voice profile test fixture, schema validation, and failing loading tests"
 git push
 ```
 
