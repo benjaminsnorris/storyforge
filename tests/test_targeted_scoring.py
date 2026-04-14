@@ -35,6 +35,13 @@ def test_no_principles_flag_defaults_to_none():
     assert args.principles is None
 
 
+def test_parse_deterministic_flag():
+    from storyforge.cmd_score import parse_args
+    args = parse_args(['--deterministic'])
+    assert args.deterministic is True
+    assert args.principles is None  # --principles not set
+
+
 # ---------------------------------------------------------------------------
 # Principle validation
 # ---------------------------------------------------------------------------
@@ -243,3 +250,26 @@ def test_deterministic_scoring_writes_results(project_dir, plugin_dir, monkeypat
     # latest symlink should exist
     latest = os.path.join(scores_dir, 'latest')
     assert os.path.islink(latest)
+
+
+def test_deterministic_flag_dry_run(project_dir, plugin_dir, monkeypatch):
+    """--deterministic --dry-run should behave like --principles prose_repetition."""
+    from storyforge.cmd_score import main
+
+    monkeypatch.setenv('STORYFORGE_PLUGIN_DIR', plugin_dir)
+    monkeypatch.chdir(project_dir)
+
+    output_lines = []
+
+    def capture_log(msg):
+        output_lines.append(msg)
+
+    monkeypatch.setattr('storyforge.common.log', capture_log)
+    monkeypatch.setattr('storyforge.cmd_score.log', capture_log)
+
+    main(['--deterministic', '--dry-run'])
+
+    combined = '\n'.join(output_lines)
+    assert 'Deterministic' in combined
+    assert '$0.00' in combined
+    assert 'prose_repetition' in combined

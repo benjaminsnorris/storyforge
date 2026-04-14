@@ -64,6 +64,8 @@ def parse_args(argv):
     parser.add_argument('--principles', type=str, default=None,
                         help='Comma-separated craft principles to score '
                              '(e.g. prose_repetition,prose_naturalness)')
+    parser.add_argument('--deterministic', action='store_true',
+                        help='Score only deterministic principles (no API calls)')
     parser.add_argument('--parallel', type=int,
                         default=int(os.environ.get('STORYFORGE_SCORE_PARALLEL', '6')),
                         help='Parallel workers for direct mode (default: 6)')
@@ -136,12 +138,16 @@ def main(argv=None):
     scripts_dir = os.path.join(plugin_dir, 'scripts')
     prompts_dir = os.path.join(scripts_dir, 'prompts', 'scoring')
 
-    # Parse --principles filter
+    # Parse --principles / --deterministic filter
     targeted_principles = None
     deterministic_only = False
-    if args.principles:
+    if args.deterministic:
+        targeted_principles = sorted(DETERMINISTIC_PRINCIPLES)
+        deterministic_only = True
+    elif args.principles:
         targeted_principles = _parse_principles(args.principles, plugin_dir)
         deterministic_only = all(p in DETERMINISTIC_PRINCIPLES for p in targeted_principles)
+    if targeted_principles:
         log(f'Targeted principles: {", ".join(targeted_principles)}')
         if deterministic_only:
             log('All requested principles are deterministic — skipping LLM pipeline')
