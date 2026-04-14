@@ -1,0 +1,10 @@
+{
+  "id": "msg_test_elaboration_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-4-6-20250514",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "content": [{"type": "text", "text": "id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow\nact1-sc01|Establish protagonist's world and routine|External pressure from deadline vs internal desire for perfection|Protagonist commits to the project despite doubts|Discovery that the map must be finished by week's end|Choose speed over precision for the first time|None|Protagonist knows the deadline|Reviews old maps; receives the commission letter|\"The king's cartographer does not make mistakes.\"|Anxiety; determination; quiet pride|Maps; precision; ink stains|none|no"}],
+  "usage": {"input_tokens": 6000, "output_tokens": 400}
+}

@@ -1,4 +1,10 @@
 {
+  "id": "msg_test_evaluation_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-6-20250514",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
   "content": [{"type": "text", "text": "## Structure\nThe scene achieves its stated goal. The turning point is effective.\n\n## Recommendations\n- Strengthen the opening hook\n- Tighten dialogue in the middle section"}],
   "usage": {"input_tokens": 4000, "output_tokens": 800}
 }

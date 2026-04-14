@@ -1,0 +1,10 @@
+{
+  "id": "msg_test_review_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-6-20250514",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "content": [{"type": "text", "text": "## Summary\nRevision pass completed successfully. Three scenes revised with focus on prose tightening and dialogue naturalization.\n\n## Quality Signals\n- Word count reductions achieved (avg 8% per scene)\n- Voice consistency maintained across all revised scenes\n- Dialogue tags simplified effectively\n\n## Concerns\n- act1-sc02: One continuity reference to \"the letter\" may need checking against act1-sc01 changes\n- act2-sc01: Metaphor in paragraph 3 may clash with established motif taxonomy\n\n## Recommendation\nReady to merge. Minor continuity check recommended but not blocking.\n\n## Fixable Items\n- [ ] reference/scenes.csv: update word_count for act1-sc01 (was 2400, now ~2200)\n- [ ] reference/scenes.csv: update word_count for act1-sc02 (was 1800, now ~1650)"}],
+  "usage": {"input_tokens": 6000, "output_tokens": 500}
+}
