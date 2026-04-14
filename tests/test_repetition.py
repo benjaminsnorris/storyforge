@@ -91,6 +91,32 @@ def test_categorize_character_tell():
     assert cat == 'character_tell'
 
 
+def test_repetition_scores_for_scene(tmp_path):
+    """score_scene_repetition produces per-scene marker scores."""
+    from storyforge.repetition import score_scene_repetition
+
+    findings = [
+        {'phrase': 'eyes like broken glass', 'category': 'simile',
+         'severity': 'high', 'count': 4, 'scene_ids': ['s1', 's2', 's3', 's4']},
+        {'phrase': 'turned to look at', 'category': 'blocking_tic',
+         'severity': 'high', 'count': 5, 'scene_ids': ['s1', 's2', 's3', 's4', 's5']},
+        {'phrase': 'for the first time', 'category': 'structural',
+         'severity': 'high', 'count': 6, 'scene_ids': ['s1', 's2', 's3', 's4', 's5', 's6']},
+    ]
+
+    scores = score_scene_repetition('s1', findings)
+    assert scores['pr-1'] == 1  # simile hit
+    assert scores['pr-2'] == 1  # blocking tic hit
+    assert scores['pr-3'] == 1  # structural hit
+    assert scores['pr-4'] == 0  # no signature phrase hit
+
+    scores2 = score_scene_repetition('s99', findings)
+    assert scores2['pr-1'] == 0
+    assert scores2['pr-2'] == 0
+    assert scores2['pr-3'] == 0
+    assert scores2['pr-4'] == 0
+
+
 def test_full_scan_with_fixtures(project_dir):
     """Full scan runs on fixture scenes and returns findings."""
     from storyforge.repetition import scan_manuscript

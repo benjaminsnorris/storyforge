@@ -249,3 +249,38 @@ def scan_manuscript(project_dir: str,
                 scene_texts[sid] = f.read()
 
     return scan_scenes(scene_texts)
+
+
+# ============================================================================
+# Scoring integration
+# ============================================================================
+
+_CATEGORY_TO_MARKER = {
+    'simile': 'pr-1',
+    'character_tell': 'pr-2',
+    'blocking_tic': 'pr-2',
+    'structural': 'pr-3',
+    'sensory': 'pr-4',
+    'signature_phrase': 'pr-4',
+}
+
+
+def score_scene_repetition(scene_id: str,
+                           findings: list[dict]) -> dict[str, int]:
+    """Score a single scene's repetition markers.
+
+    Args:
+        scene_id: The scene to score.
+        findings: Output of scan_manuscript() or scan_scenes().
+
+    Returns:
+        Dict mapping marker ID (pr-1 through pr-4) to 0 or 1.
+    """
+    scores = {'pr-1': 0, 'pr-2': 0, 'pr-3': 0, 'pr-4': 0}
+
+    for finding in findings:
+        if scene_id in finding.get('scene_ids', []):
+            marker = _CATEGORY_TO_MARKER.get(finding['category'], 'pr-4')
+            scores[marker] = 1
+
+    return scores
