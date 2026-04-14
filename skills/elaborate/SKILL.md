@@ -220,6 +220,35 @@ Voice work in coach mode: ask questions about what the author hears in their hea
 
 Voice work in strict mode: collect the author's voice preferences, format into the voice guide structure, provide the template.
 
+### Voice Profile (Second Artifact)
+
+After writing the voice guide, also produce `reference/voice-profile.csv` — a structured companion with machine-parseable voice constraints. This file is used by drafting and revision prompts to enforce vocabulary and style rules.
+
+Format (pipe-delimited CSV):
+
+| Column | Description |
+|--------|-------------|
+| `character` | Character ID from characters.csv, or `_project` for project-level fields |
+| `preferred_words` | Semicolon-delimited words central to this voice (character rows only) |
+| `banned_words` | Words that break this book's voice (project row only; merged with universal AI-tell list at draft time) |
+| `metaphor_families` | Domains to source metaphors from (character rows only) |
+| `rhythm_preference` | Sentence rhythm description (character rows only) |
+| `register` | Prose register, e.g. "literary;restrained;precise" (project row only) |
+| `dialogue_style` | How this character speaks (character rows only) |
+
+Rules:
+- The `_project` row holds book-wide constraints: `banned_words` and `register`. Leave character-specific fields empty.
+- Each POV character gets one row with: `preferred_words` (10-20 words), `metaphor_families`, `rhythm_preference`, `dialogue_style`. Leave project-level fields empty.
+- Character IDs must match the `id` column in `reference/characters.csv`.
+
+Example:
+```
+character|preferred_words|banned_words|metaphor_families|rhythm_preference|register|dialogue_style
+_project||journey;beacon;resonate;embrace|||literary;restrained;precise|
+dorren-hayle|calibrated;systematic;categorical|...|cartography;measurement|short declarative for realization||clipped;formal
+tessa-merrin|gritty;rough;worn;cracked|...|textile decay;weather|longer sensory runs||casual;irreverent
+```
+
 ### Gap-Fill Stage (Interactive)
 
 This mode activates when post-extraction data has validation gaps. Run `analyze_gaps()` from `elaborate.py` to categorize failures.
