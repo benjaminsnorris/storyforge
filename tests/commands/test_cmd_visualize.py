@@ -158,9 +158,8 @@ class TestMainDryRun:
         if os.path.isfile(dashboard_file):
             os.remove(dashboard_file)
         main(['--dry-run'])
-        # A new dashboard should NOT be written
-        # (the fixture may or may not have had one; the point is dry-run doesn't generate)
-        # We check that no new write occurred by verifying the call flow, not the file
+        # Dry-run should not write the dashboard file
+        assert not os.path.isfile(dashboard_file)
 
     def test_dry_run_exits_missing_metadata(self, mock_api, mock_git, mock_costs, tmp_path, monkeypatch):
         """dry-run exits with error if reference/scenes.csv is missing."""

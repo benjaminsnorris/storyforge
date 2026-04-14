@@ -388,10 +388,11 @@ class TestErrorHandling:
         try:
             main(['-i', '--force', '--scenes', 'act1-sc01',
                   '--skip-timeline', '--skip-dashboard'])
-        except SystemExit:
-            # If it exits due to a non-API-key reason that's acceptable;
-            # the point is the API key check is skipped for interactive.
-            pass
+        except SystemExit as e:
+            # If it exits, it must NOT be the API key error (code 1 with 'api' reason)
+            # Other exits (e.g., no enrichment needed) are acceptable
+            assert e.code != 1 or mock_api.call_count > 0, \
+                "Interactive mode should not exit due to missing ANTHROPIC_API_KEY"
 
         # No batch API calls should have been made (wrong mode)
         batch_calls = mock_api.calls_for('submit_batch')

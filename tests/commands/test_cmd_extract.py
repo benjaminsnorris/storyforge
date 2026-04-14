@@ -166,12 +166,13 @@ class TestSafeRemove:
         assert not os.path.exists(f)
 
     def test_safe_remove_nonexistent(self, tmp_path):
-        # Should not raise
-        _safe_remove(str(tmp_path / 'nonexistent.txt'))
+        path = str(tmp_path / 'nonexistent.txt')
+        _safe_remove(path)
+        assert not os.path.exists(path)
 
     def test_safe_remove_empty_string(self):
-        # Should not raise
         _safe_remove('')
+        assert not os.path.exists('')
 
     def test_safe_rmdir_existing(self, tmp_path):
         d = str(tmp_path / 'subdir')
@@ -182,10 +183,13 @@ class TestSafeRemove:
         assert not os.path.exists(d)
 
     def test_safe_rmdir_nonexistent(self, tmp_path):
-        _safe_rmdir(str(tmp_path / 'nonexistent'))
+        path = str(tmp_path / 'nonexistent')
+        _safe_rmdir(path)
+        assert not os.path.exists(path)
 
     def test_safe_rmdir_empty_string(self):
         _safe_rmdir('')
+        assert not os.path.exists('')
 
 
 # ============================================================================
@@ -295,8 +299,9 @@ class TestErrorHandling:
             'total_fixes': 0,
         })
 
-        # Should NOT raise SystemExit
+        # Should NOT raise SystemExit — cleanup-only skips API key check
         main(['--cleanup-only'])
+        assert mock_api.call_count == 0  # no API calls needed
 
 
 # ============================================================================

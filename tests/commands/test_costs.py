@@ -15,6 +15,25 @@ from storyforge.costs import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Clear env vars that affect pricing/thresholds so tests use defaults
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _clean_cost_env(monkeypatch):
+    """Ensure pricing and threshold env vars don't leak from developer shell."""
+    for var in [
+        'STORYFORGE_COST_THRESHOLD',
+        'PRICING_OPUS_INPUT', 'PRICING_OPUS_OUTPUT',
+        'PRICING_OPUS_CACHE_READ', 'PRICING_OPUS_CACHE_CREATE',
+        'PRICING_SONNET_INPUT', 'PRICING_SONNET_OUTPUT',
+        'PRICING_SONNET_CACHE_READ', 'PRICING_SONNET_CACHE_CREATE',
+        'PRICING_HAIKU_INPUT', 'PRICING_HAIKU_OUTPUT',
+        'PRICING_HAIKU_CACHE_READ', 'PRICING_HAIKU_CACHE_CREATE',
+    ]:
+        monkeypatch.delenv(var, raising=False)
+
+
 # ============================================================================
 # _detect_tier
 # ============================================================================

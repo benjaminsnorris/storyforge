@@ -421,8 +421,8 @@ class TestMainErrors:
         main(['--no-commit'])
         # Second run (should not raise)
         main(['--no-commit'])
-        # Both runs complete successfully (no assertion needed beyond no-raise)
-        assert True
+        # Both runs complete successfully — idempotent
+        assert mock_api.call_count == 0
 
 
 # ============================================================================

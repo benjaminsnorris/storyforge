@@ -242,6 +242,7 @@ class TestCleanJunkFiles:
     def test_handles_missing_directories(self, tmp_path):
         # Should not raise even if no working directories exist
         clean_junk_files(str(tmp_path))
+        assert tmp_path.exists()  # directory itself is untouched
 
 
 # ============================================================================
@@ -271,6 +272,7 @@ class TestDeleteLegacyFiles:
     def test_handles_missing_files(self, tmp_path):
         # Should not raise even if files don't exist
         delete_legacy_files(str(tmp_path))
+        assert tmp_path.exists()  # directory itself is untouched
 
 
 # ============================================================================
@@ -314,8 +316,9 @@ class TestMigratePipelineCsv:
         assert csv_path.read_text() == content
 
     def test_handles_missing_file(self, tmp_path):
-        # Should not raise
+        # Should not raise, and should not create a file
         migrate_pipeline_csv(str(tmp_path))
+        assert not (tmp_path / 'working' / 'pipeline.csv').exists()
 
 
 # ============================================================================
@@ -428,9 +431,11 @@ class TestReportCsvIntegrity:
         # (act2-sc02, act2-sc03 may not have scene files in fixture)
         critical = [i for i in issues
                     if not i.startswith('ORPHAN_META:')
-                    and not i.startswith('ORPHAN_FILE:')]
-        # Some issues may exist (unknown chars, etc.) but no massive breakage
-        assert isinstance(critical, list)
+                    and not i.startswith('ORPHAN_FILE:')
+                    and not i.startswith('UNKNOWN_CHARACTER:')]
+        # Fixture project should have no critical integrity issues
+        # (orphan metadata and unknown characters are expected in the test fixture)
+        assert critical == []
 
 
 # ============================================================================
@@ -703,8 +708,9 @@ class TestDedupPipelineReviews:
         assert len(remaining) == 2
 
     def test_handles_missing_reviews_dir(self, tmp_path):
-        # Should not raise
+        # Should not raise, and should not create the dir
         dedup_pipeline_reviews(str(tmp_path))
+        assert not (tmp_path / 'working' / 'reviews').exists()
 
 
 # ============================================================================
