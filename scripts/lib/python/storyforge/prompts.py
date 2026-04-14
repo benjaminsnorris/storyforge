@@ -66,6 +66,73 @@ def _strip_yaml_value(raw: str) -> str:
 
 
 # ============================================================================
+# AI-tell word list
+# ============================================================================
+
+def load_ai_tell_words(plugin_dir: str) -> list[dict[str, str]]:
+    """Load the AI-tell word list from references/ai-tell-words.csv.
+
+    Args:
+        plugin_dir: Path to the Storyforge plugin root.
+
+    Returns:
+        List of dicts with keys: word, category, severity, replacement_hint.
+        Empty list if file not found.
+    """
+    path = os.path.join(plugin_dir, 'references', 'ai-tell-words.csv')
+    if not os.path.isfile(path):
+        return []
+
+    with open(path, encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return []
+
+    header = lines[0].split('|')
+    result = []
+    for line in lines[1:]:
+        fields = line.split('|')
+        entry = {header[i]: (fields[i] if i < len(fields) else '')
+                 for i in range(len(header))}
+        result.append(entry)
+    return result
+
+
+def build_ai_tell_constraint(words: list[dict[str, str]],
+                              severity: str = 'high') -> str:
+    """Build a constraint block listing words to avoid.
+
+    Args:
+        words: Output of load_ai_tell_words().
+        severity: Minimum severity to include ('high' = high only,
+                  'medium' = both high and medium).
+
+    Returns:
+        Formatted constraint text for prompt injection.
+    """
+    if not words:
+        return ''
+
+    include = {'high'}
+    if severity == 'medium':
+        include.add('medium')
+
+    filtered = [w['word'] for w in words if w.get('severity') in include]
+    if not filtered:
+        return ''
+
+    word_list = ', '.join(filtered)
+    return (
+        'VOCABULARY CONSTRAINT: Do not use these words or phrases — they signal '
+        'AI-generated prose and must be avoided entirely:\n'
+        f'{word_list}\n'
+        'Replace with concrete, specific words grounded in the scene and character.'
+    )
+
+
+# ============================================================================
 # CSV helpers (pipe-delimited)
 # ============================================================================
 
@@ -568,18 +635,24 @@ def build_scene_prompt(scene_id: str, project_dir: str,
             with open(prev_file) as f:
                 prev_scene_content = f.read()
 
+    # --- Plugin root (used for craft engine fallback and word list) ---
+    # __file__ is scripts/lib/python/storyforge/prompts.py — 5 levels to repo root
+    plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+
     # --- Craft principles ---
     craft_sections = build_weighted_directive(project_dir)
     if not craft_sections:
         # Fallback: extract from craft engine
-        # __file__ is scripts/lib/python/storyforge/prompts.py — 5 levels to repo root
-        plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
         craft_sections = extract_craft_sections(plugin_dir, 2, 3, 4, 5)
 
     overrides = _get_scene_overrides(scene_id, project_dir)
     if overrides:
         craft_sections += f'\n\n## Scene-Specific Notes\n{overrides}'
+
+    # --- AI-tell vocabulary constraint ---
+    ai_tell_words = load_ai_tell_words(plugin_dir)
+    ai_tell_block = build_ai_tell_constraint(ai_tell_words)
 
     # --- Title line ---
     title_part = f'"{title}"' if title else '"Untitled"'
@@ -626,6 +699,12 @@ def build_scene_prompt(scene_id: str, project_dir: str,
                      'in the prose.')
         lines.append('')
         lines.append(craft_sections)
+
+    if ai_tell_block:
+        lines.append('')
+        lines.append('===== VOCABULARY CONSTRAINTS =====')
+        lines.append('')
+        lines.append(ai_tell_block)
 
     # ===== STEP 2: PREVIOUS SCENE =====
     lines.append('')

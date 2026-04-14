@@ -40,3 +40,32 @@ def test_ai_tell_words_minimum_count(plugin_dir):
         raw = f.read().replace('\r\n', '\n').replace('\r', '')
     lines = [l for l in raw.splitlines() if l.strip()]
     assert len(lines) - 1 >= 50, f'Expected 50+ entries, got {len(lines) - 1}'
+
+
+def test_load_ai_tell_words(plugin_dir):
+    """load_ai_tell_words returns parsed list from CSV."""
+    from storyforge.prompts import load_ai_tell_words
+    words = load_ai_tell_words(plugin_dir)
+    assert len(words) >= 50
+    entry = words[0]
+    assert 'word' in entry
+    assert 'category' in entry
+    assert 'severity' in entry
+    assert 'replacement_hint' in entry
+
+
+def test_ai_tell_constraint_block(plugin_dir):
+    """build_ai_tell_constraint returns formatted block of high-severity words."""
+    from storyforge.prompts import load_ai_tell_words, build_ai_tell_constraint
+    words = load_ai_tell_words(plugin_dir)
+    block = build_ai_tell_constraint(words)
+    assert 'delve' in block
+    assert 'tapestry' in block
+    assert 'facilitate' in block
+
+
+def test_drafting_prompt_includes_ai_tell_words(project_dir, plugin_dir):
+    """build_scene_prompt includes AI-tell constraint when word list exists."""
+    from storyforge.prompts import build_scene_prompt
+    prompt = build_scene_prompt('act1-sc01', project_dir, api_mode=True)
+    assert 'delve' in prompt
