@@ -1,6 +1,6 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--tb=short --cov=scripts/lib/python/storyforge --cov-report=term-missing:skip-covered --cov-fail-under=26"
+addopts = "--tb=short --cov=scripts/lib/python/storyforge --cov-report=term-missing:skip-covered --cov-fail-under=54"
 
 [tool.coverage.run]
 source = ["scripts/lib/python/storyforge"]
@@ -9,7 +9,7 @@ omit = [
 ]
 
 [tool.coverage.report]
-fail_under = 26
+fail_under = 54
 show_missing = true
 skip_covered = true
 skip_empty = true
