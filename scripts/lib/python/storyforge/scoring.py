@@ -24,6 +24,7 @@ SCORE_FILES = [
     ('character-scores.csv', 'character'),
     ('genre-scores.csv', 'genre'),
     ('fidelity-scores.csv', 'fidelity'),
+    ('repetition-latest.csv', 'scene'),
 ]
 
 
