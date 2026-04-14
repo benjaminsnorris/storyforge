@@ -129,6 +129,10 @@ Present all findings together — abstract detection is one signal among several
 
 10. **Regressions detected** → A scene's naturalness score dropped after revision. The brief needs to change so re-draft produces fundamentally different prose.
 
+### Reader Annotations
+
+When `working/annotations.csv` exists with unaddressed craft annotations (pink/yellow), hone surfaces them alongside auto-detected quality issues. Reader notes that suggest brief-level problems (unclear conflict, missing goal) are converted to the standard findings format and routed to the same fix locations as evaluation-driven findings (brief, intent, structural).
+
 ### Gaps Domain
 
 Run gap detection:
