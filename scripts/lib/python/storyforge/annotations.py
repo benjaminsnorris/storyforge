@@ -253,3 +253,103 @@ def generate_revision_findings(
         structural_findings.append({'scene_id': scene_id, 'guidance': guidance})
 
     return craft_findings, structural_findings, protection_list
+
+
+# ============================================================================
+# Exemplar promotion
+# ============================================================================
+
+def _get_exemplar_candidates(annotations: dict[str, dict[str, str]]) -> list[dict]:
+    """Get green annotations with notes — these are exemplar candidates."""
+    return [
+        a for a in annotations.values()
+        if a.get('color') == 'green'
+        and a.get('status') == 'new'
+        and (a.get('note', '') or '').strip()
+    ]
+
+
+def promote_exemplars(project_dir: str,
+                      annotations: dict[str, dict[str, str]],
+                      coaching_level: str = 'full') -> list[str]:
+    """Promote reader-validated strong passages based on coaching level.
+
+    Full: adds to working/exemplars.csv, returns list of promoted IDs.
+    Coach: writes working/coaching/exemplar-candidates.md, returns [].
+    Strict: returns [] (candidates listed in summary output only).
+
+    Args:
+        project_dir: Path to book project root.
+        annotations: Dict of annotations keyed by ID.
+        coaching_level: One of 'full', 'coach', 'strict'.
+
+    Returns:
+        List of annotation IDs that were promoted to exemplar status.
+    """
+    candidates = _get_exemplar_candidates(annotations)
+    if not candidates:
+        return []
+
+    if coaching_level == 'full':
+        return _promote_full(project_dir, candidates)
+    elif coaching_level == 'coach':
+        _promote_coach(project_dir, candidates)
+        return []
+    else:
+        return []
+
+
+def _promote_full(project_dir: str, candidates: list[dict]) -> list[str]:
+    """Full mode: add to exemplars.csv."""
+    exemplars_path = os.path.join(project_dir, 'working', 'exemplars.csv')
+    os.makedirs(os.path.dirname(exemplars_path), exist_ok=True)
+
+    if not os.path.isfile(exemplars_path):
+        with open(exemplars_path, 'w') as f:
+            f.write('principle|scene_id|score|excerpt|cycle\n')
+
+    existing = set()
+    with open(exemplars_path) as f:
+        for line in f:
+            parts = line.strip().split('|')
+            if len(parts) >= 2 and parts[0] != 'principle':
+                existing.add((parts[0], parts[1]))
+
+    promoted = []
+    with open(exemplars_path, 'a') as f:
+        for ann in candidates:
+            scene_id = ann.get('scene_id', '')
+            key = ('reader-validated', scene_id)
+            if key in existing:
+                continue
+            excerpt = ann.get('text', '')[:200].replace('|', '-')
+            note = ann.get('note', '').replace('|', '-')
+            f.write(f'reader-validated|{scene_id}|5|{excerpt} (reader: {note})|reader\n')
+            promoted.append(ann['id'])
+
+    return promoted
+
+
+def _promote_coach(project_dir: str, candidates: list[dict]) -> None:
+    """Coach mode: write exemplar-candidates.md."""
+    coaching_dir = os.path.join(project_dir, 'working', 'coaching')
+    os.makedirs(coaching_dir, exist_ok=True)
+    path = os.path.join(coaching_dir, 'exemplar-candidates.md')
+
+    lines = ['# Exemplar Candidates (Reader-Validated)\n\n']
+    lines.append('These passages were highlighted as "Strong Passage" by readers ')
+    lines.append('and include notes explaining why. Consider adding them to your ')
+    lines.append('exemplar file for use in drafting prompts.\n\n')
+
+    for ann in candidates:
+        scene_id = ann.get('scene_id', '')
+        text = ann.get('text', '')
+        note = ann.get('note', '')
+        reader = ann.get('reader', 'Anonymous')
+        lines.append(f'## Scene: {scene_id}\n\n')
+        lines.append(f'> {text}\n\n')
+        lines.append(f'**Reader ({reader}):** {note}\n\n')
+        lines.append('---\n\n')
+
+    with open(path, 'w') as f:
+        f.writelines(lines)

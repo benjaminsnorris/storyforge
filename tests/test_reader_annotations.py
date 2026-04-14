@@ -225,3 +225,72 @@ def test_generate_revision_findings_excludes_skipped():
     assert craft == []
     assert structural == []
     assert protection == []
+
+
+def test_promote_exemplars_full(tmp_path):
+    """In full mode, exemplar candidates are added to exemplars.csv."""
+    from storyforge.annotations import promote_exemplars
+    os.makedirs(tmp_path / 'working', exist_ok=True)
+    os.makedirs(tmp_path / 'scenes', exist_ok=True)
+    (tmp_path / 'scenes' / 'arrival.md').write_text(
+        'The wagon lurched forward. Beautiful prose here that readers loved.'
+    )
+    annotations = {
+        'g1': {'id': 'g1', 'scene_id': 'arrival', 'color': 'green',
+               'color_label': 'Strong Passage',
+               'text': 'Beautiful prose here that readers loved',
+               'note': 'this is stunning', 'status': 'new',
+               'fix_location': 'protection'},
+    }
+    promoted = promote_exemplars(str(tmp_path), annotations, coaching_level='full')
+    assert len(promoted) == 1
+    assert promoted[0] == 'g1'
+    ex_path = tmp_path / 'working' / 'exemplars.csv'
+    assert ex_path.exists()
+    content = ex_path.read_text()
+    assert 'arrival' in content
+    assert 'reader-validated' in content
+
+
+def test_promote_exemplars_coach(tmp_path):
+    """In coach mode, exemplar candidates are written to coaching brief."""
+    from storyforge.annotations import promote_exemplars
+    os.makedirs(tmp_path / 'working' / 'coaching', exist_ok=True)
+    annotations = {
+        'g1': {'id': 'g1', 'scene_id': 'arrival', 'color': 'green',
+               'color_label': 'Strong Passage',
+               'text': 'Beautiful prose',
+               'note': 'love this', 'status': 'new',
+               'fix_location': 'protection'},
+    }
+    promoted = promote_exemplars(str(tmp_path), annotations, coaching_level='coach')
+    assert promoted == []
+    brief_path = tmp_path / 'working' / 'coaching' / 'exemplar-candidates.md'
+    assert brief_path.exists()
+    content = brief_path.read_text()
+    assert 'arrival' in content
+    assert 'Beautiful prose' in content
+
+
+def test_promote_exemplars_strict(tmp_path):
+    """In strict mode, nothing is written — candidates are returned for display."""
+    from storyforge.annotations import promote_exemplars
+    annotations = {
+        'g1': {'id': 'g1', 'scene_id': 'arrival', 'color': 'green',
+               'text': 'text', 'note': 'nice', 'status': 'new',
+               'fix_location': 'protection'},
+    }
+    promoted = promote_exemplars(str(tmp_path), annotations, coaching_level='strict')
+    assert promoted == []
+
+
+def test_promote_exemplars_skips_no_note():
+    """Green annotations without notes are not exemplar candidates."""
+    from storyforge.annotations import promote_exemplars
+    annotations = {
+        'g1': {'id': 'g1', 'scene_id': 'arrival', 'color': 'green',
+               'text': 'text', 'note': '', 'status': 'new',
+               'fix_location': 'protection'},
+    }
+    promoted = promote_exemplars('/tmp/fake', annotations, coaching_level='full')
+    assert promoted == []
