@@ -246,7 +246,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge write` | `cmd_write.py` | Draft scenes (brief-aware, parallel wave drafting) |
 | `storyforge evaluate` | `cmd_evaluate.py` | Multi-agent evaluation panel (6 evaluators + synthesis) |
 | `storyforge revise` | `cmd_revise.py` | Execute revision passes. `--polish` for craft-only. `--polish --loop` for score→polish convergence. `--naturalness` for AI pattern removal. |
-| `storyforge score` | `cmd_score.py` | Craft scoring (25 principles + fidelity scoring against briefs) |
+| `storyforge score` | `cmd_score.py` | Craft scoring (25 principles + fidelity scoring against briefs). `--principles P1,P2` for targeted scoring; deterministic principles (e.g. `prose_repetition`) skip the LLM pipeline entirely. |
 | `storyforge elaborate` | `cmd_elaborate.py` | Run elaboration stages (spine/architecture/map/briefs) |
 | `storyforge extract` | `cmd_extract.py` | Extract structural data from prose. `--force` overwrites. |
 | `storyforge validate` | `cmd_validate.py` | Structural + schema validation. `--structural` for scoring. |

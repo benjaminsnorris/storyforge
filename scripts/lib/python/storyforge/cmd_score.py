@@ -61,10 +61,53 @@ def parse_args(argv):
                         help='Score scenes in act/part N')
     parser.add_argument('--from-seq', type=str, default=None,
                         help='Start from sequence number (N or N-M range)')
+    parser.add_argument('--principles', type=str, default=None,
+                        help='Comma-separated craft principles to score '
+                             '(e.g. prose_repetition,prose_naturalness)')
+    parser.add_argument('--deterministic', action='store_true',
+                        help='Score only deterministic principles (no API calls)')
     parser.add_argument('--parallel', type=int,
                         default=int(os.environ.get('STORYFORGE_SCORE_PARALLEL', '6')),
                         help='Parallel workers for direct mode (default: 6)')
     return parser.parse_args(argv)
+
+
+# Principles that can be scored without any API calls.
+DETERMINISTIC_PRINCIPLES = frozenset(['prose_repetition'])
+
+
+def _load_known_principles(plugin_dir: str) -> set[str]:
+    """Load all known principle names from default-craft-weights.csv."""
+    weights_path = os.path.join(plugin_dir, 'references', 'default-craft-weights.csv')
+    if not os.path.isfile(weights_path):
+        return set()
+    principles = set()
+    with open(weights_path) as f:
+        header = f.readline().strip().split('|')
+        p_idx = header.index('principle') if 'principle' in header else 1
+        for line in f:
+            fields = line.strip().split('|')
+            if len(fields) > p_idx and fields[p_idx]:
+                principles.add(fields[p_idx])
+    return principles
+
+
+def _parse_principles(raw: str, plugin_dir: str) -> list[str]:
+    """Parse and validate the --principles flag value.
+
+    Returns a list of validated principle names.
+    Exits with an error message if any principle name is unrecognised.
+    """
+    requested = [p.strip() for p in raw.split(',') if p.strip()]
+    known = _load_known_principles(plugin_dir)
+    if not known:
+        return requested  # graceful fallback when weights file missing
+    unknown = [p for p in requested if p not in known]
+    if unknown:
+        log(f'ERROR: Unknown principle(s): {", ".join(unknown)}')
+        log(f'Known principles: {", ".join(sorted(known))}')
+        sys.exit(1)
+    return requested
 
 
 def main(argv=None):
@@ -94,6 +137,23 @@ def main(argv=None):
     plugin_dir = get_plugin_dir()
     scripts_dir = os.path.join(plugin_dir, 'scripts')
     prompts_dir = os.path.join(scripts_dir, 'prompts', 'scoring')
+
+    # Parse --principles / --deterministic filter
+    targeted_principles = None
+    deterministic_only = False
+    if args.deterministic and args.principles:
+        log('WARNING: --deterministic and --principles both set; '
+            'using --deterministic (ignoring --principles)')
+    if args.deterministic:
+        targeted_principles = sorted(DETERMINISTIC_PRINCIPLES)
+        deterministic_only = True
+    elif args.principles:
+        targeted_principles = _parse_principles(args.principles, plugin_dir)
+        deterministic_only = all(p in DETERMINISTIC_PRINCIPLES for p in targeted_principles)
+    if targeted_principles:
+        log(f'Targeted principles: {", ".join(targeted_principles)}')
+        if deterministic_only:
+            log('All requested principles are deterministic — skipping LLM pipeline')
 
     # Model selection
     sonnet_model = select_model('evaluation')
@@ -156,6 +216,27 @@ def main(argv=None):
 
     log(f'Cycle: {cycle} -> {cycle_dir}')
 
+    # =========================================================================
+    # Deterministic-only fast path
+    # =========================================================================
+    # When --principles requests only deterministic principles (e.g.
+    # prose_repetition), skip the entire LLM pipeline: no API key needed, no
+    # cost, no batch requests, no PR.  Just run the deterministic scorers,
+    # write results, generate diagnosis, commit and exit.
+
+    if deterministic_only:
+        if args.dry_run:
+            _print_dry_run_deterministic(
+                targeted_principles, scene_count, cycle, scene_ids,
+                metadata_csv, cycle_dir,
+            )
+            return
+        _run_deterministic_only(
+            targeted_principles, scene_ids, project_dir, cycle, cycle_dir,
+            plugin_dir, weights_file, title,
+        )
+        return
+
     # Cost forecast
     avg_words = _avg_word_count(metadata_csv, scene_ids, scenes_dir)
     scene_cost = estimate_cost('score', scene_count, avg_words, eval_model)
@@ -200,7 +281,7 @@ def main(argv=None):
     if args.dry_run:
         _print_dry_run(score_mode, scene_count, args.parallel, cycle,
                        eval_model, scene_cost, scene_ids, metadata_csv,
-                       cycle_dir)
+                       cycle_dir, targeted_principles)
         return
 
     # Load evaluation template and criteria
@@ -218,8 +299,16 @@ def main(argv=None):
         eval_template = f.read()
 
     from storyforge.scoring import build_evaluation_criteria, build_weighted_text
-    evaluation_criteria = build_evaluation_criteria(diagnostics_csv, guide_file)
-    weighted_text_str = build_weighted_text(weights_file, exclude_section='narrative')
+    # Filter to only the requested LLM-scored principles (excluding
+    # deterministic ones which are handled separately).
+    llm_principles = None
+    if targeted_principles:
+        llm_principles = [p for p in targeted_principles
+                          if p not in DETERMINISTIC_PRINCIPLES]
+    evaluation_criteria = build_evaluation_criteria(
+        diagnostics_csv, guide_file, principles=llm_principles)
+    weighted_text_str = build_weighted_text(
+        weights_file, exclude_section='narrative', principles=llm_principles)
 
     log(f'Evaluation model: {eval_model} (mode: {score_mode})')
 
@@ -255,51 +344,54 @@ def main(argv=None):
     update_pr_task(f'Scene-level scoring ({scene_count} scenes)', project_dir)
 
     # =========================================================================
-    # Brief fidelity scoring
+    # Brief fidelity scoring (skip when targeting specific principles)
     # =========================================================================
 
-    if has_briefs:
+    if has_briefs and not targeted_principles:
         _run_fidelity_scoring(
             filtered_ids, project_dir, scenes_dir, log_dir, cycle_dir,
             briefs_csv, score_mode, sonnet_model, plugin_dir,
         )
 
     # =========================================================================
-    # Act-level scoring
+    # Act-level scoring (skip when targeting specific principles)
     # =========================================================================
 
-    log('Running act-level scoring...')
-    _run_act_scoring(
-        scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
-        prompts_dir, weights_file, sonnet_model, plugin_dir, args.dry_run,
-    )
-    update_pr_task('Act-level scoring', project_dir)
+    if not targeted_principles:
+        log('Running act-level scoring...')
+        _run_act_scoring(
+            scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
+            prompts_dir, weights_file, sonnet_model, plugin_dir, args.dry_run,
+        )
+        update_pr_task('Act-level scoring', project_dir)
 
     # =========================================================================
-    # Novel-level scoring
+    # Novel-level scoring (skip when targeting specific principles)
     # =========================================================================
 
-    log('Running novel-level scoring...')
-    _run_novel_scoring(
-        scene_count, metadata_csv, intent_csv, project_dir, cycle_dir,
-        log_dir, prompts_dir, weights_file, sonnet_model, plugin_dir,
-        args.dry_run,
-    )
-    update_pr_task('Novel-level scoring', project_dir)
+    if not targeted_principles:
+        log('Running novel-level scoring...')
+        _run_novel_scoring(
+            scene_count, metadata_csv, intent_csv, project_dir, cycle_dir,
+            log_dir, prompts_dir, weights_file, sonnet_model, plugin_dir,
+            args.dry_run,
+        )
+        update_pr_task('Novel-level scoring', project_dir)
 
     # =========================================================================
-    # Narrative framework scoring
+    # Narrative framework scoring (skip when targeting specific principles)
     # =========================================================================
 
-    log('')
-    log('============================================')
-    log('Narrative Framework Scoring')
-    log('============================================')
+    if not targeted_principles:
+        log('')
+        log('============================================')
+        log('Narrative Framework Scoring')
+        log('============================================')
 
-    _run_narrative_scoring(
-        title, metadata_csv, project_dir, cycle_dir, log_dir, prompts_dir,
-        weights_file, args.dry_run,
-    )
+        _run_narrative_scoring(
+            title, metadata_csv, project_dir, cycle_dir, log_dir, prompts_dir,
+            weights_file, args.dry_run,
+        )
 
     # Update latest symlink
     latest_link = os.path.join(project_dir, 'working', 'scores', 'latest')
@@ -323,25 +415,13 @@ def main(argv=None):
     # Repetition scoring (deterministic, no API calls)
     # =========================================================================
 
-    from storyforge.repetition import scan_manuscript, score_scene_repetition
+    # Run repetition when: no --principles filter, or prose_repetition is in
+    # the requested set.
+    run_repetition = (not targeted_principles
+                      or 'prose_repetition' in targeted_principles)
 
-    log('Running repetition scan...')
-    rep_findings = scan_manuscript(project_dir, scene_ids=scene_ids)
-    rep_high = sum(1 for f in rep_findings if f['severity'] == 'high')
-    log(f'Repetition scan: {len(rep_findings)} findings ({rep_high} high-severity)')
-
-    rep_scores_path = os.path.join(cycle_dir, 'repetition-latest.csv')
-    with open(rep_scores_path, 'w', encoding='utf-8') as f:
-        f.write('id|prose_repetition\n')
-        for sid in scene_ids:
-            markers = score_scene_repetition(sid, rep_findings)
-            # Aggregate pr-1..pr-4 flags into a single 1-5 score.
-            # Each active marker reduces the score by 1 (0 flags → 5, 4 flags → 1).
-            active = sum(markers[k] for k in ('pr-1', 'pr-2', 'pr-3', 'pr-4'))
-            prose_rep_score = max(1, 5 - active)
-            f.write(f'{sid}|{prose_rep_score}\n')
-
-    log(f'Repetition scores: {rep_scores_path}')
+    if run_repetition:
+        _score_repetition(scene_ids, project_dir, cycle_dir)
 
     # =========================================================================
     # Improvement cycle
@@ -391,6 +471,28 @@ def main(argv=None):
 # Internal helpers
 # ============================================================================
 
+def _score_repetition(scene_ids, project_dir, cycle_dir):
+    """Run deterministic repetition scoring. Returns path to scores CSV."""
+    from storyforge.repetition import scan_manuscript, score_scene_repetition
+
+    log('Running repetition scan...')
+    rep_findings = scan_manuscript(project_dir, scene_ids=scene_ids)
+    rep_high = sum(1 for f in rep_findings if f['severity'] == 'high')
+    log(f'Repetition scan: {len(rep_findings)} findings ({rep_high} high-severity)')
+
+    rep_scores_path = os.path.join(cycle_dir, 'repetition-latest.csv')
+    with open(rep_scores_path, 'w', encoding='utf-8') as f:
+        f.write('id|prose_repetition\n')
+        for sid in scene_ids:
+            markers = score_scene_repetition(sid, rep_findings)
+            active = sum(markers[k] for k in ('pr-1', 'pr-2', 'pr-3', 'pr-4'))
+            prose_rep_score = max(1, 5 - active)
+            f.write(f'{sid}|{prose_rep_score}\n')
+
+    log(f'Repetition scores: {rep_scores_path}')
+    return rep_scores_path
+
+
 def _resolve_filter(args):
     if args.scenes:
         return ('scenes', args.scenes, None)
@@ -399,6 +501,79 @@ def _resolve_filter(args):
     if hasattr(args, 'from_seq') and args.from_seq:
         return ('from_seq', args.from_seq, None)
     return ('all', None, None)
+
+
+def _run_deterministic_only(principles, scene_ids, project_dir, cycle,
+                            cycle_dir, plugin_dir, weights_file, title):
+    """Fast path for scoring only deterministic principles (no API calls)."""
+    log('')
+    log('============================================')
+    log('Deterministic Scoring (no API calls)')
+    log('============================================')
+
+    for principle in principles:
+        if principle == 'prose_repetition':
+            rep_scores_path = _score_repetition(scene_ids, project_dir,
+                                                cycle_dir)
+            # Merge into scene-scores.csv for diagnosis compatibility
+            scores_path = os.path.join(cycle_dir, 'scene-scores.csv')
+            from storyforge.scoring import merge_score_files
+            merge_score_files(scores_path, rep_scores_path)
+
+    # Update latest symlink
+    latest_link = os.path.join(project_dir, 'working', 'scores', 'latest')
+    target = f'cycle-{cycle}'
+    if os.path.islink(latest_link):
+        os.remove(latest_link)
+    os.symlink(target, latest_link)
+    log(f'Updated latest symlink -> {target}')
+
+    # Append to score history
+    from storyforge.history import append_cycle
+    history_count = append_cycle(cycle_dir, cycle, project_dir)
+    if history_count:
+        log(f'Score history: appended {history_count} entries (cycle {cycle})')
+
+    # Diagnosis (only for scored principles)
+    from storyforge.scoring import generate_diagnosis
+    prev_cycle = cycle - 1
+    prev_dir = os.path.join(project_dir, 'working', 'scores',
+                            f'cycle-{prev_cycle}')
+    if not os.path.isdir(prev_dir):
+        prev_dir = '-'
+    generate_diagnosis(cycle_dir, prev_dir, weights_file)
+
+    # Commit results
+    commit_and_push(project_dir,
+                    f'Score: {", ".join(principles)} cycle {cycle}, '
+                    f'{len(scene_ids)} scenes (deterministic)',
+                    ['working/scores/', 'working/costs/', 'working/logs/'])
+
+    log('')
+    log('============================================')
+    log(f'Deterministic scoring complete — cycle {cycle}')
+    log(f'Results: {cycle_dir}')
+    log('============================================')
+
+
+def _print_dry_run_deterministic(principles, scene_count, cycle, scene_ids,
+                                 metadata_csv, cycle_dir):
+    """Print dry-run summary for deterministic-only scoring."""
+    log('============================================')
+    log('DRY RUN — Deterministic Scoring (no API calls)')
+    log('============================================')
+    log(f'Principles: {", ".join(principles)}')
+    log(f'Scenes:     {scene_count}')
+    log(f'Cycle:      {cycle}')
+    log(f'Cost:       $0.00 (deterministic)')
+    log('')
+    log('Scenes to score:')
+    for sid in scene_ids:
+        title = get_field(metadata_csv, sid, 'title') or 'untitled'
+        log(f'  - {sid} ({title})')
+    log('')
+    log(f'Output directory: {cycle_dir}')
+    log('============================================')
 
 
 def _determine_cycle(project_dir: str) -> int:
@@ -465,6 +640,11 @@ def _build_scene_prompt(scene_id: str, eval_template: str,
     # Number lines
     numbered = '\n'.join(f'{i+1}: {line}' for i, line in enumerate(scene_text.splitlines()))
 
+    # Count principles from the evaluation criteria (each gets a ### heading)
+    principle_count = evaluation_criteria.count('\n### ')
+    if not principle_count:
+        principle_count = 25  # fallback for the default full set
+
     prompt = eval_template
     prompt = prompt.replace('{{SCENE_TITLE}}', scene_title)
     prompt = prompt.replace('{{SCENE_POV}}', scene_pov)
@@ -472,6 +652,7 @@ def _build_scene_prompt(scene_id: str, eval_template: str,
     prompt = prompt.replace('{{SCENE_EMOTIONAL_ARC}}', scene_emotional_arc or 'Not specified')
     prompt = prompt.replace('{{EVALUATION_CRITERIA}}', evaluation_criteria)
     prompt = prompt.replace('{{WEIGHTED_PRINCIPLES}}', weighted_text_str)
+    prompt = prompt.replace('{{PRINCIPLE_COUNT}}', str(principle_count))
     prompt = prompt.replace('{{SCENE_TEXT}}', numbered)
     return prompt
 
@@ -1235,12 +1416,15 @@ def _read_reference(project_dir: str, candidates: list) -> str:
 
 
 def _print_dry_run(score_mode, scene_count, parallel, cycle, eval_model,
-                   scene_cost, scene_ids, metadata_csv, cycle_dir):
+                   scene_cost, scene_ids, metadata_csv, cycle_dir,
+                   targeted_principles=None):
     """Print dry-run summary."""
     log('============================================')
     log('DRY RUN — Scoring Plan')
     log('============================================')
     log(f'Mode:     {score_mode}')
+    if targeted_principles:
+        log(f'Principles: {", ".join(targeted_principles)}')
     log(f'Scenes:   {scene_count}')
     log(f'Parallel: {parallel}')
     log(f'Cycle:    {cycle}')
@@ -1260,10 +1444,13 @@ def _print_dry_run(score_mode, scene_count, parallel, cycle, eval_model,
     else:
         log(f'Direct+deep mode: {scene_count} Opus calls, real-time, {parallel} parallel')
     log('')
-    log('After scene scoring:')
-    log('  - Act-level scoring')
-    log('  - Novel-level character + genre scoring (1 invocation)')
-    log('  - Novel-level narrative framework scoring (1 invocation)')
+    if targeted_principles:
+        log('Targeted scoring — skipping act/novel/narrative phases')
+    else:
+        log('After scene scoring:')
+        log('  - Act-level scoring')
+        log('  - Novel-level character + genre scoring (1 invocation)')
+        log('  - Novel-level narrative framework scoring (1 invocation)')
     log('')
     log(f'Output directory: {cycle_dir}')
     log('============================================')
