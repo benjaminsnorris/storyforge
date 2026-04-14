@@ -89,3 +89,44 @@ def test_validate_voice_profile_missing_file(tmp_path):
     assert result['errors'] == []
     assert result['has_project_row'] is False
     assert result['character_count'] == 0
+
+
+def test_load_voice_profile(fixture_dir):
+    """load_voice_profile returns project and character data."""
+    from storyforge.prompts import load_voice_profile
+    project, characters = load_voice_profile(fixture_dir)
+
+    # Project-level data
+    assert 'banned_words' in project
+    assert 'journey' in project['banned_words']
+    assert 'register' in project
+    assert 'literary' in project['register']
+
+    # Character data
+    assert 'dorren-hayle' in characters
+    assert 'tessa-merrin' in characters
+    assert 'calibrated' in characters['dorren-hayle']['preferred_words']
+    assert 'gritty' in characters['tessa-merrin']['preferred_words']
+
+
+def test_load_voice_profile_missing_file(tmp_path):
+    """load_voice_profile returns empty dicts when file missing."""
+    from storyforge.prompts import load_voice_profile
+    project, characters = load_voice_profile(str(tmp_path))
+    assert project == {}
+    assert characters == {}
+
+
+def test_merge_banned_words(fixture_dir, plugin_dir):
+    """Merged banned words include project + universal AI-tell list."""
+    from storyforge.prompts import load_voice_profile, load_ai_tell_words, merge_banned_words
+    project, _ = load_voice_profile(fixture_dir)
+    ai_words = load_ai_tell_words(plugin_dir)
+    merged = merge_banned_words(project, ai_words)
+
+    # From project voice profile
+    assert 'journey' in merged
+    assert 'beacon' in merged
+    # From universal AI-tell list (high severity)
+    assert 'delve' in merged
+    assert 'facilitate' in merged

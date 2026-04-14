@@ -133,6 +133,81 @@ def build_ai_tell_constraint(words: list[dict[str, str]],
 
 
 # ============================================================================
+# Voice profile
+# ============================================================================
+
+def load_voice_profile(project_dir: str) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """Load the voice profile from reference/voice-profile.csv.
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        Tuple of (project_data, character_data).
+        project_data: dict of field -> value for the _project row.
+        character_data: dict of character_id -> {field: value}.
+        Both empty dicts if file not found.
+    """
+    path = os.path.join(project_dir, 'reference', 'voice-profile.csv')
+    if not os.path.isfile(path):
+        return {}, {}
+
+    with open(path, encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return {}, {}
+
+    header = lines[0].split('|')
+    project_data = {}
+    character_data = {}
+
+    for line in lines[1:]:
+        fields = line.split('|')
+        row = {header[i]: (fields[i] if i < len(fields) else '')
+               for i in range(len(header))}
+
+        char_id = row.get('character', '').strip()
+        if char_id == '_project':
+            project_data = {k: v for k, v in row.items() if k != 'character' and v.strip()}
+        elif char_id:
+            character_data[char_id] = {k: v for k, v in row.items()
+                                        if k != 'character' and v.strip()}
+
+    return project_data, character_data
+
+
+def merge_banned_words(project_profile: dict[str, str],
+                       ai_tell_words: list[dict[str, str]]) -> list[str]:
+    """Merge project-level banned words with universal AI-tell high-severity words.
+
+    Args:
+        project_profile: Project-level voice profile data (from load_voice_profile).
+        ai_tell_words: Output of load_ai_tell_words().
+
+    Returns:
+        Deduplicated sorted list of banned words.
+    """
+    banned = set()
+
+    # Project-level banned words
+    project_banned = project_profile.get('banned_words', '')
+    if project_banned:
+        for w in project_banned.split(';'):
+            w = w.strip()
+            if w:
+                banned.add(w)
+
+    # Universal high-severity AI-tell words
+    for entry in ai_tell_words:
+        if entry.get('severity') == 'high':
+            banned.add(entry['word'])
+
+    return sorted(banned)
+
+
+# ============================================================================
 # CSV helpers (pipe-delimited)
 # ============================================================================
 
