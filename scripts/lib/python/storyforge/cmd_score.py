@@ -320,6 +320,30 @@ def main(argv=None):
         log(f'Score history: appended {history_count} entries (cycle {cycle})')
 
     # =========================================================================
+    # Repetition scoring (deterministic, no API calls)
+    # =========================================================================
+
+    from storyforge.repetition import scan_manuscript, score_scene_repetition
+
+    log('Running repetition scan...')
+    rep_findings = scan_manuscript(project_dir, scene_ids=scene_ids)
+    rep_high = sum(1 for f in rep_findings if f['severity'] == 'high')
+    log(f'Repetition scan: {len(rep_findings)} findings ({rep_high} high-severity)')
+
+    rep_scores_path = os.path.join(cycle_dir, 'repetition-latest.csv')
+    with open(rep_scores_path, 'w', encoding='utf-8') as f:
+        f.write('id|prose_repetition\n')
+        for sid in scene_ids:
+            markers = score_scene_repetition(sid, rep_findings)
+            # Aggregate pr-1..pr-4 flags into a single 1-5 score.
+            # Each active marker reduces the score by 1 (0 flags → 5, 4 flags → 1).
+            active = sum(markers[k] for k in ('pr-1', 'pr-2', 'pr-3', 'pr-4'))
+            prose_rep_score = max(1, 5 - active)
+            f.write(f'{sid}|{prose_rep_score}\n')
+
+    log(f'Repetition scores: {rep_scores_path}')
+
+    # =========================================================================
     # Improvement cycle
     # =========================================================================
 

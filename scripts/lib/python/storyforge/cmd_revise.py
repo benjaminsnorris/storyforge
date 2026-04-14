@@ -216,15 +216,34 @@ def _update_pass_field(rows, pass_num, field, value, plan_file):
 # Auto-generated plans
 # ============================================================================
 
-def _generate_polish_plan(plan_file):
+def _generate_polish_plan(plan_file, project_dir=''):
     """Generate a single-pass craft-only polish plan."""
+    # Load AI-tell vocabulary for inclusion in guidance
+    from storyforge.prompts import load_ai_tell_words, load_voice_profile, merge_banned_words
+    plugin_dir = get_plugin_dir()
+    ai_words = load_ai_tell_words(plugin_dir)
+
+    if project_dir:
+        profile, _ = load_voice_profile(project_dir)
+        banned = merge_banned_words(profile, ai_words)
+    else:
+        banned = [w['word'] for w in ai_words if w.get('severity') == 'high']
+
+    banned_str = ', '.join(banned) if banned else ''
+
+    guidance = ('Follow the voice guide strictly. Focus on: em dash overuse, '
+                'antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. '
+                'Enter late, leave early.')
+    if banned_str:
+        guidance += f' Banned vocabulary (remove or replace): {banned_str}.'
+
     rows = [{
         'pass': '1',
         'name': 'prose-polish',
         'purpose': 'Voice consistency, prose naturalness, dialogue authenticity, AI pattern cleanup',
         'scope': 'full',
         'targets': '',
-        'guidance': 'Follow the voice guide strictly. Focus on: em dash overuse, antithesis framing, tricolon, hedge-stacking, sentence rhythm variety. Enter late, leave early.',
+        'guidance': guidance,
         'protection': 'voice-quality',
         'findings': 'polish',
         'status': 'pending',
@@ -236,7 +255,53 @@ def _generate_polish_plan(plan_file):
     return rows
 
 
-def _generate_naturalness_plan(plan_file):
+def _build_naturalness_pass3_guidance(project_dir: str = '') -> str:
+    """Build Pass 3 guidance, loading vocabulary from ai-tell-words.csv
+    and project voice profile."""
+    from storyforge.prompts import load_ai_tell_words, load_voice_profile, merge_banned_words
+
+    plugin_dir = get_plugin_dir()
+    ai_words = load_ai_tell_words(plugin_dir)
+
+    # Merge with project-level banned words if available
+    if project_dir:
+        project_profile, _ = load_voice_profile(project_dir)
+        all_banned = merge_banned_words(project_profile, ai_words)
+    else:
+        all_banned = [w['word'] for w in ai_words if w.get('severity') == 'high']
+
+    vocab_words = [w['word'] for w in ai_words if w['category'] == 'vocabulary']
+    hedging_words = [w['word'] for w in ai_words if w['category'] == 'hedging']
+
+    if all_banned:
+        vocab_str = ', '.join(all_banned)
+    elif vocab_words:
+        vocab_str = ', '.join(vocab_words)
+    else:
+        vocab_str = ('nuanced, multifaceted, tapestry, palpable, pivotal, intricate, '
+                     'profound, myriad, juxtaposition, dichotomy, paradigm, visceral')
+
+    if hedging_words:
+        hedging_str = ', '.join(hedging_words)
+    else:
+        hedging_str = ('"something like", "something between", "almost as if", "perhaps", '
+                       '"a kind of", "the particular"')
+
+    return (
+        'Four patterns to fix: '
+        f'(a) AI-TELL VOCABULARY: Remove or replace these words that signal AI-generated prose: '
+        f'{vocab_str}. Replace with concrete, specific words. '
+        f'(b) HEDGING STACKS: {hedging_str} — remove or commit to the statement. '
+        'BEFORE: "Something that tasted the way silence feels." AFTER: Name the taste. '
+        '(c) SWEEPING OPENERS: Remove scene-opening sentences that set a thematic frame before anything happens. '
+        '"The thing about memory is..." / "There are moments when..." — cut to the first concrete action or image. '
+        '(d) SUMMARY CLOSERS: Remove paragraph-ending sentences that interpret what was just shown. '
+        '"And that was the thing about X." / "It was, she realized, exactly what she needed." '
+        '— let the scene end on action or image.'
+    )
+
+
+def _generate_naturalness_plan(plan_file, project_dir=''):
     """Generate 3-pass plan for AI prose pattern removal.
 
     Targets the patterns most frequently penalized in scoring rationales:
@@ -293,19 +358,7 @@ def _generate_naturalness_plan(plan_file):
             'purpose': 'Remove AI-tell vocabulary, hedging stacks, sweeping openers, and summary closers',
             'scope': 'full',
             'targets': '',
-            'guidance': (
-                'Four patterns to fix: '
-                '(a) AI-TELL VOCABULARY: Remove or replace these words that signal AI-generated prose: '
-                'nuanced, multifaceted, tapestry, palpable, pivotal, intricate, profound, myriad, '
-                'juxtaposition, dichotomy, paradigm, visceral (when not literal). Replace with concrete, specific words. '
-                '(b) HEDGING STACKS: "something like", "something between", "almost as if", "perhaps", '
-                '"a kind of", "the particular" — remove or commit to the statement. '
-                'BEFORE: "Something that tasted the way silence feels." AFTER: Name the taste. '
-                '(c) SWEEPING OPENERS: Remove scene-opening sentences that set a thematic frame before anything happens. '
-                '"The thing about memory is..." / "There are moments when..." — cut to the first concrete action or image. '
-                '(d) SUMMARY CLOSERS: Remove paragraph-ending sentences that interpret what was just shown. '
-                '"And that was the thing about X." / "It was, she realized, exactly what she needed." — let the scene end on action or image.'
-            ),
+            'guidance': _build_naturalness_pass3_guidance(project_dir),
             'protection': 'Do not change dialogue, plot events, or character interiority that reveals new information.',
             'findings': 'naturalness',
             'status': 'pending',
@@ -1232,7 +1285,7 @@ def main(argv=None):
     # Auto-generate plans
     if args.polish:
         log('Polish mode -- generating craft-only revision plan...')
-        plan_rows = _generate_polish_plan(csv_plan_file)
+        plan_rows = _generate_polish_plan(csv_plan_file, project_dir)
     elif args.naturalness:
         log('Naturalness mode -- generating 3-pass plan for AI pattern removal...')
         # Check for upstream causes first (load latest diagnosis if available)
@@ -1247,7 +1300,7 @@ def main(argv=None):
             _redraft_scenes(project_dir, upstream_scenes)
             commit_and_push(project_dir, 'Naturalness: upstream brief fixes',
                             ['reference/', 'scenes/', 'working/'])
-        plan_rows = _generate_naturalness_plan(csv_plan_file)
+        plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir)
     elif args.structural:
         plan_rows = _generate_structural_plan(project_dir, csv_plan_file)
     elif os.path.isfile(csv_plan_file):

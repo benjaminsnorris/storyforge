@@ -12,7 +12,7 @@ import json
 import os
 import sys
 
-from storyforge.common import detect_project_root
+from storyforge.common import detect_project_root, log
 
 
 def parse_args(argv):
@@ -47,6 +47,15 @@ def main(argv=None):
     knowledge_path = os.path.join(ref_dir, 'knowledge.csv')
     if os.path.isfile(knowledge_path):
         knowledge = validate_knowledge_granularity(ref_dir, project_dir)
+
+    from storyforge.schema import validate_voice_profile
+    vp_result = validate_voice_profile(project_dir)
+    if vp_result['errors']:
+        log(f'Voice profile: {len(vp_result["errors"])} issues')
+        for err in vp_result['errors']:
+            log(f'  {err["row"]}: {err["message"]}')
+    elif vp_result['has_project_row']:
+        log(f'Voice profile: valid ({vp_result["character_count"]} characters)')
 
     structural_scores = None
     scores_previous = None

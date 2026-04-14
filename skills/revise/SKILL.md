@@ -37,7 +37,7 @@ Based on the author's request and project state:
 → Convergence loop: scores scenes, identifies weak principles, generates targeted polish plan, executes, re-scores, repeats until scores stabilize or no high/medium priority issues remain. Equivalent to `./storyforge revise --polish --loop`. Use `--max-loops N` to cap iterations (default 5).
 
 ### "Fix AI patterns" / "Naturalness" / "Remove AI artifacts" / "Sounds like a machine"
-→ Targeted 3-pass revision for specific AI prose patterns: metaphor restatement, interpretive tagging, ending template. Equivalent to `./storyforge revise --naturalness`. Use when scoring shows low `prose_naturalness` but high structural/fidelity scores — the sign that the brief is solid but the prose has AI artifacts.
+→ Targeted 3-pass revision for specific AI prose patterns: metaphor restatement, interpretive tagging, ending template. Equivalent to `./storyforge revise --naturalness`. Use when scoring shows low `prose_naturalness` but high structural/fidelity scores — the sign that the brief is solid but the prose has AI artifacts. The `--naturalness` and `--polish` passes dynamically load vocabulary from `references/ai-tell-words.csv` (the universal AI-tell word list). When a project has `reference/voice-profile.csv`, its `banned_words` field is merged with the universal list, creating a project-specific vocabulary constraint for revision prompts.
 
 ### Upstream Fix Routing (automatic in --polish --loop)
 

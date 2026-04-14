@@ -346,6 +346,14 @@ These nine principles are scored per-scene.
 
 ---
 
+### prose_repetition (Prose Craft)
+
+**When it works:** Each image, gesture, and phrase pattern feels fresh across the manuscript. Similes are not recycled. Characters have varied physical responses. No structural tic reveals the writing was produced in isolation, chapter by chapter. The manuscript reads as a unified whole.
+
+**When it fails:** The same simile appears in multiple chapters. Characters repeatedly perform the same blocking action (turned to look, glanced at, stared at the ceiling). Structural phrases recur mechanically across scenes ("for the first time" appears 15 times). The manuscript reads as a collection of independently written chapters rather than a single voice sustained across the narrative.
+
+---
+
 ## Character Craft
 
 Character craft principles are scored at different scales: some per-scene, some per-act, some per-novel.

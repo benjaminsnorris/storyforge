@@ -738,3 +738,109 @@ def dump_schema_markdown() -> str:
         lines.append('')
 
     return '\n'.join(lines)
+
+
+# ============================================================================
+# Voice profile validation
+# ============================================================================
+
+VOICE_PROFILE_COLUMNS = [
+    'character', 'preferred_words', 'banned_words', 'metaphor_families',
+    'rhythm_preference', 'register', 'dialogue_style',
+]
+
+
+def validate_voice_profile(project_dir: str) -> dict:
+    """Validate reference/voice-profile.csv structure and content.
+
+    Checks:
+    - File has correct columns
+    - A _project row exists
+    - No duplicate character rows
+    - Character IDs exist in characters.csv (if available)
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        Dict with has_project_row, character_count, errors (list of dicts
+        with 'row' and 'message' keys).
+    """
+    path = os.path.join(project_dir, 'reference', 'voice-profile.csv')
+    errors: list[dict] = []
+
+    if not os.path.isfile(path):
+        return {'has_project_row': False, 'character_count': 0, 'errors': []}
+
+    with open(path, encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if not lines:
+        return {'has_project_row': False, 'character_count': 0, 'errors': []}
+
+    # Check header
+    header = lines[0].split('|')
+    if header != VOICE_PROFILE_COLUMNS:
+        missing = [c for c in VOICE_PROFILE_COLUMNS if c not in header]
+        extra = [c for c in header if c not in VOICE_PROFILE_COLUMNS]
+        msg = 'Voice profile has wrong columns.'
+        if missing:
+            msg += f' Missing: {", ".join(missing)}.'
+        if extra:
+            msg += f' Unexpected: {", ".join(extra)}.'
+        errors.append({'row': 'header', 'message': msg})
+        return {'has_project_row': False, 'character_count': 0, 'errors': errors}
+
+    # Parse rows
+    has_project = False
+    seen_characters: set[str] = set()
+    character_count = 0
+
+    # Load characters.csv for cross-reference if available
+    chars_path = os.path.join(project_dir, 'reference', 'characters.csv')
+    known_characters: set[str] = set()
+    if os.path.isfile(chars_path):
+        for row in _read_csv(chars_path):
+            cid = row.get('id', '').strip()
+            if cid:
+                known_characters.add(cid)
+
+    for i, line in enumerate(lines[1:], start=2):
+        fields = line.split('|')
+        char_id = fields[0].strip() if fields else ''
+
+        if char_id == '_project':
+            has_project = True
+        elif char_id:
+            character_count += 1
+
+            if char_id in seen_characters:
+                errors.append({
+                    'row': char_id,
+                    'message': f'Duplicate character row: "{char_id}"',
+                })
+            seen_characters.add(char_id)
+
+            if known_characters and char_id not in known_characters:
+                errors.append({
+                    'row': char_id,
+                    'message': f'Character "{char_id}" not found in characters.csv',
+                })
+        else:
+            errors.append({
+                'row': f'line {i}',
+                'message': 'Empty character field',
+            })
+
+    if not has_project:
+        errors.append({
+            'row': '(missing)',
+            'message': 'No _project row found — project-level fields (banned_words, register) have nowhere to live',
+        })
+
+    return {
+        'has_project_row': has_project,
+        'character_count': character_count,
+        'errors': errors,
+    }

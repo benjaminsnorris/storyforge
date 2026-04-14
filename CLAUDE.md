@@ -184,12 +184,14 @@ All structured data uses pipe-delimited CSV:
 - `reference/scenes.csv` — structural identity (id, seq, title, part, pov, location, timeline_day, time_of_day, duration, type, status, word_count, target_words)
 - `reference/scene-intent.csv` — narrative dynamics (id, function, action_sequel, emotional_arc, value_at_stake, value_shift, turning_point, characters, on_stage, mice_threads)
 - `reference/scene-briefs.csv` — drafting contracts (id, goal, conflict, outcome, crisis, decision, knowledge_in, knowledge_out, key_actions, key_dialogue, emotions, motifs, continuity_deps, has_overflow)
+- `reference/voice-profile.csv` — structured voice constraints (_project row for banned words/register, per-character rows for preferred words/metaphor families/rhythm/dialogue style)
 
 **Shared:**
 - `working/craft-weights.csv` — craft principle weights (keyed by `principle` column, not `id`)
 - `working/costs/ledger.csv` — per-invocation cost tracking
 - `reference/chapter-map.csv` — chapter-to-scene mapping
 - `working/scores/score-history.csv` — per-scene, per-principle scores across cycles (cycle, scene_id, principle, score)
+- `references/ai-tell-words.csv` — universal AI-tell vocabulary (word, category, severity, replacement_hint)
 
 ### Scene Files
 - Pure prose markdown. **No YAML frontmatter.**
@@ -248,6 +250,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge validate` | `cmd_validate.py` | Structural + schema validation. `--structural` for scoring. |
 | `storyforge hone` | `cmd_hone.py` | CSV data quality — registries, briefs, intent, gaps. `--diagnose` for read-only. `--loop` for autonomous convergence. `--findings FILE` for evaluation-driven fixes. |
 | `storyforge reconcile` | `cmd_reconcile.py` | Backwards-compatible wrapper for hone |
+| `storyforge repetition` | `cmd_repetition.py` | Cross-chapter repeated phrase detection. Standalone or via scoring. |
 | `storyforge enrich` | `cmd_enrich.py` | Metadata enrichment from prose |
 | `storyforge assemble` | `cmd_assemble.py` | Chapter assembly + epub/PDF/HTML generation |
 | `storyforge visualize` | `cmd_visualize.py` | Multi-page manuscript dashboard |
@@ -321,6 +324,7 @@ Key principles:
 | `structural.py` | Structural scoring engine (8 dimensions, deterministic) |
 | `hone.py` | CSV data quality: registries, brief detection (abstract/overspecified/verbose), intent detection (vague/overlong/flat/abstract arc/subset/mismatch), evaluation findings, gaps |
 | `reconcile.py` | Backwards-compatible re-exports from hone.py |
+| `repetition.py` | Cross-chapter n-gram repetition detection, scoring integration |
 | `visualize.py` | Dashboard data loading |
 | `enrich.py` | Metadata enrichment |
 | `assembly.py` | Chapter assembly, publish manifest generation |

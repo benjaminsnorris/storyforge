@@ -330,6 +330,23 @@ def _build_eval_prompt(evaluator, is_custom, api_mode, project_dir, plugin_dir,
     else:
         persona = persona.replace('{GENRE}', 'fiction')
 
+    # Inject AI-tell word list for line-editor
+    if evaluator == 'line-editor':
+        from storyforge.prompts import load_ai_tell_words
+        ai_words = load_ai_tell_words(plugin_dir)
+        if ai_words:
+            vocab_words = [w['word'] for w in ai_words
+                          if w['severity'] == 'high']
+            word_block = (
+                'Specific AI-tell vocabulary to flag (these words almost never '
+                'belong in fiction): ' + ', '.join(vocab_words)
+            )
+            persona = persona.replace('{AI_TELL_WORDS}', word_block)
+        else:
+            persona = persona.replace('{AI_TELL_WORDS}', '')
+    else:
+        persona = persona.replace('{AI_TELL_WORDS}', '')
+
     # Inline manuscript content for API mode
     manuscript_inline = ''
     if api_mode:

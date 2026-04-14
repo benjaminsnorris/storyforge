@@ -32,6 +32,7 @@ Before doing anything else, orient yourself:
    - `working/plans/revision-plan.csv` (preferred) or `working/plans/revision-plan.yaml` (legacy)
    - `working/scores/structural-latest.csv` (structural scoring results)
    - `working/scores/structural-proposals.csv` (unaddressed structural proposals)
+   - `reference/voice-profile.csv` (voice profile with per-character banned words)
    - `working/cleanup-report.csv` (pending cleanup action items from a previous session)
    - The `scenes/` directory (any `.md` files = drafted scenes)
 4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
@@ -83,7 +84,7 @@ Check that scene files exist in `scenes/`. If ready, provide the command:
 Invoke the `revise` skill. This handles the full cycle: analyze findings, plan upstream + craft passes, execute, review results.
 For polish-only: `./storyforge revise --polish`
 
-**When naturalness is stalled:** If score history shows naturalness stuck for 2+ cycles, do NOT recommend another `--polish` or `--naturalness` pass. Instead explain: "These scenes have been polished multiple times without improvement. The problem is upstream — the briefs lack real dramatic conflict. Running `--polish --loop` will now detect this automatically and fix the briefs before polishing."
+**When naturalness is stalled:** If score history shows naturalness stuck for 2+ cycles, do NOT recommend another `--polish` or `--naturalness` pass. Instead explain: "These scenes have been polished multiple times without improvement. The problem is upstream — the briefs lack real dramatic conflict. Running `--polish --loop` will now detect this automatically and fix the briefs before polishing." Also check `prose_repetition` — it is a separate scoring dimension from `prose_naturalness` and should be assessed independently. Low `prose_repetition` scores indicate cross-scene repeated phrases (similes, tics, structural echoes) that naturalness passes will not fix; use `storyforge repetition` to diagnose those.
 
 **"Score" / "Score my scenes":**
 Invoke the `score` skill.
@@ -106,6 +107,12 @@ If scores are below target, review the diagnosis and proposals in `working/score
 
 **"Clean up" / "Health check" / "Check my project" / "Fix CSV issues" / "Project cleanup":**
 Invoke the `cleanup` skill. This runs the project health report (CSV schema validation, scene artifact detection, structural checks), then works through action items — fixing what it can directly and delegating to other skills/scripts as needed.
+
+**"Repetition check" / "Repeated phrases" / "Prose tics" / "Cross-chapter repetition":**
+Provide the `storyforge repetition` command. This runs a deterministic n-gram scanner across scenes to detect repeated similes, blocking tics, structural phrases, and signature phrases. No API calls required.
+```bash
+./storyforge repetition [options]
+```
 
 **"Reconcile" / "Normalize my data" / "Build registries" / "Clean up values" / "Hone" / "Improve my briefs" / "Fix abstract language" / "Fill gaps":**
 Invoke the `hone` skill. Hone consolidates all CSV data quality work: registry normalization, brief concretization (rewriting abstract language as concrete physical beats), structural CSV fixes from evaluation findings, and gap filling. It replaces the standalone reconcile command.

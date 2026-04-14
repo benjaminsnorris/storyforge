@@ -450,6 +450,107 @@ id|status
 
 
 # ============================================================================
+# Stage 5: Voice
+# ============================================================================
+
+def build_voice_prompt(project_dir: str, plugin_dir: str) -> str:
+    """Build the prompt for the voice stage.
+
+    Produces reference/voice-guide.md and reference/voice-profile.csv.
+
+    Args:
+        project_dir: Path to the book project.
+        plugin_dir: Path to the Storyforge plugin root.
+    """
+    context = _project_context(project_dir)
+    refs = _existing_refs(project_dir)
+    ref_dir = os.path.join(project_dir, 'reference')
+    characters_csv = _read_csv_contents(os.path.join(ref_dir, 'characters.csv'))
+
+    return f"""You are developing the voice of a novel — the prose register, per-character voice fingerprints, and style rules that every scene must embody.
+
+{context}
+
+## Reference Materials
+
+{refs}
+
+## Characters
+
+```
+{characters_csv}
+```
+
+## Instructions
+
+Produce two artifacts.
+
+### Artifact 1: Voice Guide
+
+Write a comprehensive voice guide as a markdown document covering:
+
+- **Prose register**: The overall tone, sentence rhythm, and diction level
+- **What this book sounds like**: 2-3 paragraphs describing the narrative voice in concrete terms — what it notices, how it moves, what it never does
+- **POV character voice fingerprints**: For each POV character, define:
+  - What they notice first in any scene (what their attention is drawn to)
+  - Their sentence rhythm (long and winding? short declarative? varied?)
+  - What metaphor domains they instinctively reach for
+  - Words and phrases they would never use
+  - How they speak in dialogue vs. how they narrate
+- **Style rules**: Specific rules the prose must follow (e.g., "no weather openings", "interiority in present tense", "never name emotions directly")
+- **Prohibited patterns**: Constructions, words, or moves that break this book's voice
+
+Output in a fenced block labeled `voice-guide`:
+
+```voice-guide
+# Voice Guide
+
+(your voice guide markdown here)
+```
+
+### Artifact 2: Voice Profile CSV
+
+After writing the voice guide, produce `reference/voice-profile.csv`.
+
+This is a pipe-delimited CSV with columns:
+character|preferred_words|banned_words|metaphor_families|rhythm_preference|register|dialogue_style
+
+Create these rows:
+1. A _project row with:
+   - banned_words: words that would break this book's voice (semicolon-separated)
+   - register: the prose register (e.g., "literary;restrained;precise")
+   - Leave preferred_words, metaphor_families, rhythm_preference, dialogue_style empty
+
+2. One row per POV character with:
+   - preferred_words: 10-20 words central to their voice (semicolon-separated)
+   - metaphor_families: domains they source images from (semicolon-separated)
+   - rhythm_preference: their sentence patterns (semicolon-separated descriptions)
+   - dialogue_style: how they speak (semicolon-separated descriptions)
+   - Leave banned_words and register empty (those are project-level)
+
+Character IDs must match the id column in reference/characters.csv.
+
+Output in a fenced block labeled `voice-profile-csv`:
+
+```voice-profile-csv
+character|preferred_words|banned_words|metaphor_families|rhythm_preference|register|dialogue_style
+_project||<banned_words>|||<register>|
+<character_id>|<preferred_words>||<metaphor_families>|<rhythm_preference>||<dialogue_style>
+(one row per POV character)
+```
+
+### Rules
+
+- The voice guide should be specific enough that a writer could use it to write a scene from scratch and sound like this book
+- banned_words in the _project row are in addition to universal AI-tell words (journey, beacon, resonate, embrace, tapestry, etc.) — focus on words that are wrong for THIS book specifically
+- preferred_words should be words the character actually uses, not words about them
+- metaphor_families are conceptual domains (e.g., "cartography", "decay", "machinery") not specific metaphors
+- rhythm_preference describes patterns (e.g., "short declarative for realization beats; longer sensory runs during observation")
+- dialogue_style describes speech register and habits (e.g., "clipped;formal;avoids contractions" or "casual;irreverent;trails off")
+"""
+
+
+# ============================================================================
 # Response parsing
 # ============================================================================
 

@@ -1,0 +1,64 @@
+word|category|severity|replacement_hint
+delve|vocabulary|high|investigate, examine, dig into
+tapestry|vocabulary|high|[use concrete image instead of metaphorical tapestry]
+nuanced|vocabulary|high|[show the nuance; don't name it]
+vibrant|vocabulary|medium|[use specific color, texture, or energy]
+multifaceted|vocabulary|high|[show the facets]
+beacon|vocabulary|high|[use concrete image instead of metaphorical beacon]
+realm|vocabulary|medium|domain, field, area, world
+testament|vocabulary|medium|proof, evidence, sign
+unprecedented|vocabulary|medium|[ground the claim in specifics]
+foster|vocabulary|high|build, grow, encourage
+navigate|vocabulary|medium|[use specific verb: cross, manage, handle]
+embark|vocabulary|medium|start, begin, set out
+resonate|vocabulary|medium|[show the emotional effect instead of naming it]
+pivotal|vocabulary|medium|crucial, critical, turning point
+interplay|vocabulary|high|[describe the interaction concretely]
+harness|vocabulary|high|use, channel, direct
+illuminate|vocabulary|high|reveal, show, clarify
+bolster|vocabulary|high|strengthen, support, reinforce
+compelling|vocabulary|medium|[show why it compels; don't label it]
+dynamic|vocabulary|medium|[describe what actually moves or changes]
+transformative|vocabulary|high|[show the transformation]
+seamless|vocabulary|high|smooth, fluid, effortless
+innovative|vocabulary|high|[describe the innovation specifically]
+facilitate|vocabulary|high|help, enable, allow
+streamline|vocabulary|high|simplify, speed up
+intricate|vocabulary|medium|[show the intricacy]
+profound|vocabulary|medium|[show depth instead of naming it]
+myriad|vocabulary|medium|many, countless
+juxtaposition|vocabulary|medium|contrast, tension
+dichotomy|vocabulary|medium|divide, split, tension
+paradigm|vocabulary|high|model, framework, pattern
+visceral|vocabulary|medium|[use specific sensation instead — gut, bone, nerve]
+palpable|vocabulary|medium|[show what makes it tangible]
+ever-evolving|vocabulary|high|changing, shifting
+cutting-edge|vocabulary|high|[describe what's new specifically]
+game-changing|vocabulary|high|[show the impact]
+scalable|vocabulary|high|[describe scope concretely]
+rich|vocabulary|medium|[show the richness with specific detail]
+journey|vocabulary|medium|path, process, road
+embrace|vocabulary|medium|accept, welcome, hold
+synergy|vocabulary|high|[describe the combined effect]
+perhaps|hedging|medium|[commit or cut]
+somewhat|hedging|medium|[commit or cut]
+almost as if|hedging|medium|[commit to the comparison]
+something like|hedging|medium|[name the thing]
+something between|hedging|medium|[pick one or describe both]
+a kind of|hedging|medium|[name it directly]
+the particular|hedging|medium|[name the specific]
+arguably|hedging|medium|[commit to the claim or cut]
+remarkably|hedging|medium|[show what's remarkable]
+to some extent|hedging|medium|[commit or cut]
+generally speaking|hedging|medium|[be specific]
+broadly speaking|hedging|medium|[be specific]
+one might argue|hedging|medium|[argue it or don't]
+it should be mentioned|hedging|high|[just mention it]
+it's worth noting|structural|high|[just state it]
+to put it simply|structural|high|[just say it simply]
+in essence|structural|medium|[cut and start with the point]
+in many cases|structural|medium|often, frequently, sometimes
+this underscores|structural|high|[show the emphasis through specifics]
+a key takeaway|structural|high|[state the point directly]
+from a broader perspective|structural|high|[cut or ground in specifics]
+at its core|structural|medium|[cut and start with the core idea]

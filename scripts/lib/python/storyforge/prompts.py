@@ -66,6 +66,148 @@ def _strip_yaml_value(raw: str) -> str:
 
 
 # ============================================================================
+# AI-tell word list
+# ============================================================================
+
+def load_ai_tell_words(plugin_dir: str) -> list[dict[str, str]]:
+    """Load the AI-tell word list from references/ai-tell-words.csv.
+
+    Args:
+        plugin_dir: Path to the Storyforge plugin root.
+
+    Returns:
+        List of dicts with keys: word, category, severity, replacement_hint.
+        Empty list if file not found.
+    """
+    path = os.path.join(plugin_dir, 'references', 'ai-tell-words.csv')
+    if not os.path.isfile(path):
+        return []
+
+    with open(path, encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return []
+
+    header = lines[0].split('|')
+    result = []
+    for line in lines[1:]:
+        fields = line.split('|')
+        entry = {header[i]: (fields[i] if i < len(fields) else '')
+                 for i in range(len(header))}
+        result.append(entry)
+    return result
+
+
+def build_ai_tell_constraint(words: list[dict[str, str]],
+                              severity: str = 'high') -> str:
+    """Build a constraint block listing words to avoid.
+
+    Args:
+        words: Output of load_ai_tell_words().
+        severity: Minimum severity to include ('high' = high only,
+                  'medium' = both high and medium).
+
+    Returns:
+        Formatted constraint text for prompt injection.
+    """
+    if not words:
+        return ''
+
+    include = {'high'}
+    if severity == 'medium':
+        include.add('medium')
+
+    filtered = [w['word'] for w in words if w.get('severity') in include]
+    if not filtered:
+        return ''
+
+    word_list = ', '.join(filtered)
+    return (
+        'VOCABULARY CONSTRAINT: Do not use these words or phrases — they signal '
+        'AI-generated prose and must be avoided entirely:\n'
+        f'{word_list}\n'
+        'Replace with concrete, specific words grounded in the scene and character.'
+    )
+
+
+# ============================================================================
+# Voice profile
+# ============================================================================
+
+def load_voice_profile(project_dir: str) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """Load the voice profile from reference/voice-profile.csv.
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        Tuple of (project_data, character_data).
+        project_data: dict of field -> value for the _project row.
+        character_data: dict of character_id -> {field: value}.
+        Both empty dicts if file not found.
+    """
+    path = os.path.join(project_dir, 'reference', 'voice-profile.csv')
+    if not os.path.isfile(path):
+        return {}, {}
+
+    with open(path, encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return {}, {}
+
+    header = lines[0].split('|')
+    project_data = {}
+    character_data = {}
+
+    for line in lines[1:]:
+        fields = line.split('|')
+        row = {header[i]: (fields[i] if i < len(fields) else '')
+               for i in range(len(header))}
+
+        char_id = row.get('character', '').strip()
+        if char_id == '_project':
+            project_data = {k: v for k, v in row.items() if k != 'character' and v.strip()}
+        elif char_id:
+            character_data[char_id] = {k: v for k, v in row.items()
+                                        if k != 'character' and v.strip()}
+
+    return project_data, character_data
+
+
+def merge_banned_words(project_profile: dict[str, str],
+                       ai_tell_words: list[dict[str, str]]) -> list[str]:
+    """Merge project-level banned words with universal AI-tell high-severity words.
+
+    Args:
+        project_profile: Project-level voice profile data (from load_voice_profile).
+        ai_tell_words: Output of load_ai_tell_words().
+
+    Returns:
+        Deduplicated sorted list of banned words.
+    """
+    banned = set()
+
+    # Project-level banned words
+    project_banned = project_profile.get('banned_words', '')
+    if project_banned:
+        for w in project_banned.split(';'):
+            w = w.strip()
+            if w:
+                banned.add(w)
+
+    # Universal high-severity AI-tell words
+    for entry in ai_tell_words:
+        if entry.get('severity') == 'high':
+            banned.add(entry['word'])
+
+    return sorted(banned)
+
+
+# ============================================================================
 # CSV helpers (pipe-delimited)
 # ============================================================================
 
@@ -568,18 +710,69 @@ def build_scene_prompt(scene_id: str, project_dir: str,
             with open(prev_file) as f:
                 prev_scene_content = f.read()
 
+    # --- Plugin root (used for craft engine fallback and word list) ---
+    # __file__ is scripts/lib/python/storyforge/prompts.py — 5 levels to repo root
+    plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+
     # --- Craft principles ---
     craft_sections = build_weighted_directive(project_dir)
     if not craft_sections:
         # Fallback: extract from craft engine
-        # __file__ is scripts/lib/python/storyforge/prompts.py — 5 levels to repo root
-        plugin_dir = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
         craft_sections = extract_craft_sections(plugin_dir, 2, 3, 4, 5)
 
     overrides = _get_scene_overrides(scene_id, project_dir)
     if overrides:
         craft_sections += f'\n\n## Scene-Specific Notes\n{overrides}'
+
+    # --- AI-tell vocabulary constraint ---
+    ai_tell_words = load_ai_tell_words(plugin_dir)
+    ai_tell_block = build_ai_tell_constraint(ai_tell_words)
+
+    # --- Voice profile ---
+    voice_profile_project, voice_profile_chars = load_voice_profile(project_dir)
+    pov_char = ''
+    if csv_file:
+        pov_char = read_csv_field(csv_file, scene_id, 'pov')
+
+    # Merge banned words: project profile + universal AI-tell list
+    if voice_profile_project or ai_tell_words:
+        merged_banned = merge_banned_words(voice_profile_project, ai_tell_words)
+        if merged_banned:
+            banned_str = ', '.join(merged_banned)
+            ai_tell_block = (
+                'VOCABULARY CONSTRAINT: Do not use these words or phrases — they '
+                'are banned for this project:\n'
+                f'{banned_str}\n'
+                'Replace with concrete, specific words grounded in the scene and character.'
+            )
+
+    # Character-specific constraints
+    char_voice_block = ''
+    if pov_char:
+        # Normalize POV name to slug form for matching (e.g. "Dorren Hayle" -> "dorren-hayle")
+        pov_slug = pov_char.lower().replace(' ', '-')
+        char_key = pov_char if pov_char in voice_profile_chars else (
+            pov_slug if pov_slug in voice_profile_chars else '')
+        if char_key:
+            char_data = voice_profile_chars[char_key]
+            parts = []
+            if char_data.get('preferred_words'):
+                parts.append(f'Favor these words (they define this character\'s voice): '
+                            f'{char_data["preferred_words"].replace(";", ", ")}')
+            if char_data.get('metaphor_families'):
+                parts.append(f'Source metaphors from: '
+                            f'{char_data["metaphor_families"].replace(";", ", ")}')
+            if char_data.get('rhythm_preference'):
+                parts.append(f'Sentence rhythm: '
+                            f'{char_data["rhythm_preference"].replace(";", ", ")}')
+            if char_data.get('dialogue_style'):
+                parts.append(f'Dialogue style: '
+                            f'{char_data["dialogue_style"].replace(";", ", ")}')
+            if parts:
+                char_voice_block = (
+                    f'CHARACTER VOICE ({pov_char}):\n' + '\n'.join(f'- {p}' for p in parts)
+                )
 
     # --- Title line ---
     title_part = f'"{title}"' if title else '"Untitled"'
@@ -626,6 +819,22 @@ def build_scene_prompt(scene_id: str, project_dir: str,
                      'in the prose.')
         lines.append('')
         lines.append(craft_sections)
+
+    if ai_tell_block:
+        lines.append('')
+        lines.append('===== VOCABULARY CONSTRAINTS =====')
+        lines.append('')
+        lines.append(ai_tell_block)
+
+    if char_voice_block:
+        lines.append('')
+        lines.append('===== CHARACTER VOICE =====')
+        lines.append('')
+        lines.append(char_voice_block)
+
+    if voice_profile_project.get('register'):
+        lines.append('')
+        lines.append(f'PROSE REGISTER: {voice_profile_project["register"].replace(";", ", ")}')
 
     # ===== STEP 2: PREVIOUS SCENE =====
     lines.append('')
@@ -1219,6 +1428,64 @@ def build_scene_prompt_from_briefs(
     craft = build_weighted_directive(project_dir)
     craft_block = f"## Craft Principles\n\n{craft}" if craft else ''
 
+    # --- AI-tell vocabulary constraint ---
+    ai_tell_words = load_ai_tell_words(plugin_dir)
+    ai_tell_block = build_ai_tell_constraint(ai_tell_words)
+
+    # --- Voice profile ---
+    voice_profile_project, voice_profile_chars = load_voice_profile(project_dir)
+    pov_char = scene.get('pov', '')
+
+    # Merge banned words: project profile + universal AI-tell list
+    if voice_profile_project or ai_tell_words:
+        merged_banned = merge_banned_words(voice_profile_project, ai_tell_words)
+        if merged_banned:
+            banned_str = ', '.join(merged_banned)
+            ai_tell_block = (
+                'VOCABULARY CONSTRAINT: Do not use these words or phrases — they '
+                'are banned for this project:\n'
+                f'{banned_str}\n'
+                'Replace with concrete, specific words grounded in the scene and character.'
+            )
+
+    # Character-specific voice constraints
+    char_voice_block = ''
+    if pov_char:
+        pov_slug = pov_char.lower().replace(' ', '-')
+        char_key = pov_char if pov_char in voice_profile_chars else (
+            pov_slug if pov_slug in voice_profile_chars else '')
+        if char_key:
+            char_data = voice_profile_chars[char_key]
+            parts = []
+            if char_data.get('preferred_words'):
+                parts.append(f'Favor these words (they define this character\'s voice): '
+                            f'{char_data["preferred_words"].replace(";", ", ")}')
+            if char_data.get('metaphor_families'):
+                parts.append(f'Source metaphors from: '
+                            f'{char_data["metaphor_families"].replace(";", ", ")}')
+            if char_data.get('rhythm_preference'):
+                parts.append(f'Sentence rhythm: '
+                            f'{char_data["rhythm_preference"].replace(";", ", ")}')
+            if char_data.get('dialogue_style'):
+                parts.append(f'Dialogue style: '
+                            f'{char_data["dialogue_style"].replace(";", ", ")}')
+            if parts:
+                char_voice_block = (
+                    f'CHARACTER VOICE ({pov_char}):\n' + '\n'.join(f'- {p}' for p in parts)
+                )
+
+    vocab_block = ''
+    if ai_tell_block:
+        vocab_block = f"## Vocabulary Constraints\n\n{ai_tell_block}"
+
+    char_voice_section = ''
+    if char_voice_block:
+        char_voice_section = f"## Character Voice\n\n{char_voice_block}"
+
+    register_line = ''
+    if voice_profile_project.get('register'):
+        register_line = f"PROSE REGISTER: {voice_profile_project['register'].replace(';', ', ')}"
+
     # Target word count
     target_words = scene.get('target_words', '') or scene.get('word_count', '')
     word_target_line = ''
@@ -1323,6 +1590,12 @@ Do NOT add creative interpretation or suggestions."""
 {char_block}
 
 {craft_block}
+
+{vocab_block}
+
+{char_voice_section}
+
+{register_line}
 
 {task_block}
 """

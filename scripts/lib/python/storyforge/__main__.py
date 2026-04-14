@@ -10,6 +10,7 @@ COMMANDS = {
     'validate': 'storyforge.cmd_validate',
     'hone': 'storyforge.cmd_hone',
     'reconcile': 'storyforge.cmd_reconcile',
+    'repetition': 'storyforge.cmd_repetition',
     'review': 'storyforge.cmd_review',
     'write': 'storyforge.cmd_write',
     'evaluate': 'storyforge.cmd_evaluate',
