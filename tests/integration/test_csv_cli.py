@@ -321,7 +321,8 @@ class TestRenumberSeq:
 
     def test_empty_file_noop(self, empty_csv):
         renumber_seq(empty_csv)
-        # Should not crash
+        # File should still be empty
+        assert open(empty_csv).read().strip() == ''
 
     def test_renumber_fixture(self, project_dir):
         """Renumbering the fixture scenes.csv should produce sequential seq values."""

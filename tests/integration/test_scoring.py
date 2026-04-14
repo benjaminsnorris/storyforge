@@ -949,8 +949,10 @@ class TestCollectExemplars:
         project_dir = str(tmp_path / 'project')
         os.makedirs(scores_dir)
         os.makedirs(os.path.join(project_dir, 'working'))
-        # Should not crash
+        # Should not crash, and should not create exemplars file
         collect_exemplars(scores_dir, project_dir, 'cycle-1')
+        exemplars = os.path.join(project_dir, 'working', 'exemplars.csv')
+        assert not os.path.isfile(exemplars)
 
 
 # ===========================================================================

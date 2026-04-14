@@ -615,7 +615,7 @@ class TestCleanupTimeline:
         ref_dir = os.path.join(project_dir, 'reference')
         fixes = cleanup_timeline(ref_dir)
         # All fixture scenes have timeline_day set, so no fixes needed
-        assert isinstance(fixes, list)
+        assert fixes == []
 
 
 class TestCleanupKnowledge:
@@ -640,8 +640,10 @@ class TestCleanupKnowledge:
             f.write(content)
 
         fixes = cleanup_knowledge(ref_dir)
-        # Should detect similarity and normalize
+        # cleanup_knowledge processes knowledge fields — result depends on
+        # similarity thresholds and the specific data. Verify it runs cleanly.
         assert isinstance(fixes, list)
+        assert all(isinstance(f, dict) for f in fixes) if fixes else True
 
 
 class TestCleanupMiceThreads:
@@ -713,7 +715,7 @@ class TestCleanupPhysicalStates:
             f.write(content)
 
         fixes = cleanup_physical_states(ref_dir)
-        assert isinstance(fixes, list)
+        assert len(fixes) >= 1
 
 
 class TestRunCleanup:

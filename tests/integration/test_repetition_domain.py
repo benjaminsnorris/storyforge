@@ -89,9 +89,9 @@ class TestScanScenes:
         relevant = [f for f in findings if 'eyes narrowed' in f['phrase']
                      or 'piercing eyes' in f['phrase']
                      or 'dark piercing eyes' in f['phrase']]
-        if relevant:
-            high = [f for f in relevant if f['severity'] == 'high']
-            assert len(high) > 0
+        assert len(relevant) > 0, "Expected repeated phrase to be detected"
+        high = [f for f in relevant if f['severity'] == 'high']
+        assert len(high) > 0
 
     def test_medium_severity_for_fewer_occurrences(self):
         # 4-grams need 5 occurrences for default threshold, so 3 should not match
@@ -102,10 +102,11 @@ class TestScanScenes:
             scenes[f's{i+1}'] = f'once upon {phrase} story told by many'
         findings = scan_scenes(scenes)
         relevant = [f for f in findings if 'specific unique' in f['phrase']]
+        assert len(relevant) > 0, "Expected repeated phrase to be detected"
         # Any findings at this count should be medium (count < 4)
-        for f in relevant:
-            if f['count'] < 4:
-                assert f['severity'] == 'medium'
+        medium = [f for f in relevant if f['count'] < 4]
+        for f in medium:
+            assert f['severity'] == 'medium'
 
     def test_custom_thresholds(self):
         """Custom min_occurrences overrides defaults."""
@@ -228,7 +229,7 @@ class TestScanManuscript:
 
         # No reference/scenes.csv -> should use directory listing
         findings = scan_manuscript(str(tmp_path))
-        assert isinstance(findings, list)
+        assert len(findings) >= 1  # repeated phrase should be detected
 
     def test_status_filtering(self, tmp_path):
         """Scenes with cut/merged/spine/architecture/mapped status are excluded."""

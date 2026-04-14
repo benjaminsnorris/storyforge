@@ -390,15 +390,15 @@ class TestSplitBySceneMarkers:
 # ============================================================================
 
 class TestGenerateRenamePlan:
-    def test_no_renames_needed(self, project_dir):
-        """When filenames already match slugs from titles, no renames."""
+    def test_generates_rename_plan_from_fixture(self, project_dir):
+        """Fixture scenes with titles producing different slugs yield a plan."""
         scenes_dir = os.path.join(project_dir, 'scenes')
         meta_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
-        # The fixture has scenes with IDs matching filenames, but titles
-        # that produce different slugs. So renames are expected.
         plan = generate_rename_plan(scenes_dir, meta_csv)
-        # Plan should contain entries where slug differs from file ID
         assert isinstance(plan, list)
+        # Each entry should be a (old_path, new_path) tuple or similar
+        for entry in plan:
+            assert len(entry) >= 2
 
     def test_missing_csv_returns_empty(self, project_dir):
         scenes_dir = os.path.join(project_dir, 'scenes')
