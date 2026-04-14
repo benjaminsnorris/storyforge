@@ -173,3 +173,83 @@ def reconcile(existing: dict[str, dict[str, str]],
 
     summary['total'] = len(result)
     return result, summary
+
+
+# ============================================================================
+# Revision findings generation
+# ============================================================================
+
+def generate_revision_findings(
+    annotations: dict[str, dict[str, str]],
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Generate revision findings from unaddressed annotations.
+
+    Groups annotations by scene and fix_location. Only includes annotations
+    with status 'new'.
+
+    Args:
+        annotations: Dict of annotations keyed by ID.
+
+    Returns:
+        Tuple of (craft_findings, structural_findings, protection_passages).
+        craft_findings: list of {scene_id, guidance} for pink annotations.
+        structural_findings: list of {scene_id, guidance} for orange annotations.
+        protection_passages: list of {scene_id, text, note} for green annotations.
+    """
+    actionable = [a for a in annotations.values() if a.get('status') == 'new']
+
+    craft_by_scene: dict[str, list[dict]] = {}
+    structural_by_scene: dict[str, list[dict]] = {}
+    protection_list: list[dict] = []
+
+    for ann in actionable:
+        scene_id = ann.get('scene_id', '')
+        fix_loc = ann.get('fix_location', '')
+
+        if fix_loc == 'craft':
+            craft_by_scene.setdefault(scene_id, []).append(ann)
+        elif fix_loc == 'structural':
+            structural_by_scene.setdefault(scene_id, []).append(ann)
+        elif fix_loc in ('protection', 'exemplar'):
+            protection_list.append({
+                'scene_id': scene_id,
+                'text': ann.get('text', ''),
+                'note': ann.get('note', ''),
+            })
+
+    craft_findings = []
+    for scene_id, anns in sorted(craft_by_scene.items()):
+        parts = []
+        for i, ann in enumerate(anns, 1):
+            text = ann.get('text', '')[:100]
+            note = ann.get('note', '')
+            label = ann.get('color_label', ann.get('color', ''))
+            entry = f'{i}. "{text}"'
+            if note:
+                entry += f' — Reader note: "{note}"'
+            else:
+                entry += ' — (no note)'
+            parts.append(entry)
+        guidance = (
+            f'Scene "{scene_id}" — {len(anns)} reader annotation(s) ({label}):\n'
+            + '\n'.join(parts)
+        )
+        craft_findings.append({'scene_id': scene_id, 'guidance': guidance})
+
+    structural_findings = []
+    for scene_id, anns in sorted(structural_by_scene.items()):
+        parts = []
+        for i, ann in enumerate(anns, 1):
+            text = ann.get('text', '')[:100]
+            note = ann.get('note', '')
+            entry = f'{i}. "{text}"'
+            if note:
+                entry += f' — Reader note: "{note}"'
+            parts.append(entry)
+        guidance = (
+            f'Scene "{scene_id}" — {len(anns)} reader annotation(s) (Cut / Reconsider):\n'
+            + '\n'.join(parts)
+        )
+        structural_findings.append({'scene_id': scene_id, 'guidance': guidance})
+
+    return craft_findings, structural_findings, protection_list

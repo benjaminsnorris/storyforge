@@ -172,3 +172,56 @@ def test_reconcile_marks_removed():
     result, summary = reconcile(existing, api_annotations)
     assert result['gone-1']['status'] == 'removed'
     assert summary['removed'] == 1
+
+
+def test_generate_revision_findings():
+    """generate_revision_findings aggregates annotations per scene."""
+    from storyforge.annotations import generate_revision_findings
+    annotations = {
+        'a1': {'id': 'a1', 'scene_id': 'arrival', 'color': 'pink',
+               'color_label': 'Needs Revision', 'text': 'the wagon lurched',
+               'note': 'pacing drags', 'status': 'new', 'fix_location': 'craft'},
+        'a2': {'id': 'a2', 'scene_id': 'arrival', 'color': 'pink',
+               'color_label': 'Needs Revision', 'text': 'she counted again',
+               'note': 'repetitive', 'status': 'new', 'fix_location': 'craft'},
+        'a3': {'id': 'a3', 'scene_id': 'field-book', 'color': 'orange',
+               'color_label': 'Cut / Reconsider', 'text': 'long description',
+               'note': '', 'status': 'new', 'fix_location': 'structural'},
+        'a4': {'id': 'a4', 'scene_id': 'arrival', 'color': 'green',
+               'color_label': 'Strong Passage', 'text': 'beautiful line',
+               'note': 'love this', 'status': 'new', 'fix_location': 'protection'},
+        'a5': {'id': 'a5', 'scene_id': 'arrival', 'color': 'pink',
+               'color_label': 'Needs Revision', 'text': 'old fix',
+               'note': 'done', 'status': 'addressed', 'fix_location': 'craft'},
+    }
+    craft, structural, protection = generate_revision_findings(annotations)
+
+    # Craft findings: 2 pink for 'arrival' (a5 is addressed, excluded)
+    assert len(craft) == 1  # one finding per scene
+    assert craft[0]['scene_id'] == 'arrival'
+    assert 'pacing drags' in craft[0]['guidance']
+    assert 'repetitive' in craft[0]['guidance']
+
+    # Structural: 1 orange for 'field-book'
+    assert len(structural) == 1
+    assert structural[0]['scene_id'] == 'field-book'
+
+    # Protection: 1 green for 'arrival'
+    assert len(protection) == 1
+    assert protection[0]['scene_id'] == 'arrival'
+    assert 'beautiful line' in protection[0]['text']
+
+
+def test_generate_revision_findings_excludes_skipped():
+    """Skipped and removed annotations are excluded from findings."""
+    from storyforge.annotations import generate_revision_findings
+    annotations = {
+        'a1': {'id': 'a1', 'scene_id': 'arrival', 'color': 'pink',
+               'text': 'text', 'note': '', 'status': 'skipped', 'fix_location': 'craft'},
+        'a2': {'id': 'a2', 'scene_id': 'arrival', 'color': 'pink',
+               'text': 'text', 'note': '', 'status': 'removed', 'fix_location': 'craft'},
+    }
+    craft, structural, protection = generate_revision_findings(annotations)
+    assert craft == []
+    assert structural == []
+    assert protection == []
