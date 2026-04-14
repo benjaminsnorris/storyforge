@@ -1,0 +1,4 @@
+{
+  "content": [{"type": "text", "text": "## Synthesis Report\n\n### Strengths\n- Strong POV voice maintained throughout\n- Effective use of setting details\n- Dialogue carries subtext well\n\n### Areas for Improvement\n- Opening paragraph could be tighter\n- Middle section pacing lags\n- Final beat needs stronger emotional closure\n\n### Priority Recommendations\n1. Tighten the opening hook (first 200 words)\n2. Cut redundant interior monologue in paragraphs 4-6\n3. Strengthen the closing image to mirror the opening motif\n\n### Fix Locations\n- fix_location: craft — prose polish for opening/closing\n- fix_location: brief — conflict needs sharper definition\n- fix_location: intent — emotional arc could use value shift clarification"}],
+  "usage": {"input_tokens": 8000, "output_tokens": 1200}
+}
