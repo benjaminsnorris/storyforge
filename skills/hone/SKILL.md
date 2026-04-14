@@ -148,6 +148,13 @@ Present results:
 - Which scenes have the most gaps
 - Recommend `storyforge-elaborate --gap-fill` to fill them
 
+### Voice Profile Validation
+
+If `reference/voice-profile.csv` exists, validate it:
+- Check for a missing `_project` row (the project-level voice profile entry)
+- Check that character IDs in the file match entries in `reference/characters.csv`
+- Check for empty `banned_words` when a voice guide (`reference/voice-guide.md`) exists — suggest populating it from the voice guide's avoidance lists
+
 ### Registries Domain
 
 Check if registries exist in `reference/` (characters.csv, locations.csv, values.csv, etc.). If missing or stale, recommend running registries.

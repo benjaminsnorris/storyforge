@@ -33,6 +33,7 @@ Read the following files to understand the full context:
   - `genre-scores.csv` -- novel-level genre scores (if available)
   - `narrative-scores.csv` -- novel-level narrative framework alignment (if exists)
   - `narrative-rationale.csv` -- rationale for narrative scores (if exists)
+  - `repetition-latest.csv` -- deterministic cross-chapter repetition scores (pr-1 through pr-4 markers)
 - `working/tuning.csv` -- history of weight tuning decisions (if exists)
 - `working/exemplars.csv` -- bank of high-scoring passages (if exists)
 - `scenes/author-scores.csv` -- author's own scores (if exists)
@@ -276,3 +277,4 @@ Reference these scoring concepts as needed:
 - **Tuning ledger** = history of all weight changes and their effects, used to detect validated patterns.
 - **Exemplars** = passages scoring 5 (masterful) that demonstrate craft excellence, useful as reference during revision.
 - **Author deltas** = systematic differences between system and author scores, revealing calibration gaps.
+- **prose_repetition** (weight 4) = deterministic detection of repeated phrases across scenes. Scored by the n-gram scanner, not by LLM evaluation. Markers: pr-1 (repeated similes), pr-2 (blocking tics/character tells), pr-3 (structural phrases), pr-4 (signature phrases). Run `storyforge repetition` independently for a detailed report without the full scoring pipeline.
