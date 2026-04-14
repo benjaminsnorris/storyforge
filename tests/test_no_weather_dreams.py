@@ -104,6 +104,18 @@ class TestNoWeatherDreams:
         result = score_no_weather_dreams(text)
         assert result['markers']['nwd-1'] == 1
 
+    def test_context_only_weather_opening(self):
+        """Weather context words (sky, temperature) without _WEATHER_WORDS
+        triggers via sentence count (lines 98-99)."""
+        # 'sky' and 'temperature' are in _WEATHER_CONTEXT but NOT _WEATHER_WORDS
+        text = (
+            'The sky hung low and heavy. The temperature dropped steadily '
+            'all morning. Marcus pulled his coat tighter and headed for the car.'
+        )
+        result = score_no_weather_dreams(text)
+        assert result['markers']['nwd-1'] == 1
+        assert 'extended weather' in result['details']
+
     def test_multiple_markers_score_1(self):
         """Weather + dream triggers score 1 when 2+ markers active."""
         text = (

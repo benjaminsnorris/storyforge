@@ -86,14 +86,9 @@ class TestAvoidAdverbs:
         assert result['score'] == 3
 
     def test_score_2_many_adverbs(self):
-        """7-10 adverbs per 1000 words -> score 2."""
-        # Short text (~100 words) with ~1 adverb hit -> 10/1000
-        base = (
-            '"Go," she said softly. He walked slowly to the door. '
-            '"Stop," he said quietly. She walked slowly back. '
-            '"No," he said angrily. She looked quickly at him. '
-            'He walked slowly away. "Wait," she said sadly.'
-        )
-        # ~80 words, several hits -> high per-1000 rate
-        result = score_avoid_adverbs(base)
-        assert result['score'] <= 2
+        """7-10 adverbs per 1000 words -> score 2 (line 48)."""
+        # ~110 words with 1 hit = ~9/1000 -> score 2
+        filler = ' '.join(['She opened the door and stepped through.'] * 15)
+        text = '"Go," she said softly. ' + filler
+        result = score_avoid_adverbs(text)
+        assert result['score'] == 2

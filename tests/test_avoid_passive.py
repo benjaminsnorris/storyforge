@@ -77,8 +77,22 @@ class TestAvoidPassive:
             result = score_avoid_passive(text)
             assert 1 <= result['score'] <= 5
 
+    def test_low_density_score_4(self):
+        """Density 5-10% should score 4 (line 53)."""
+        # 1 passive out of ~15 sentences = ~7%
+        text = (
+            'She opened the door. He walked inside. The room was dark. '
+            'She turned on the light. He sat in the chair. '
+            'The table was covered with papers. She picked one up. '
+            'He leaned forward. She read it aloud. He nodded slowly. '
+            'She set it down. He stood up. She walked away. He followed. '
+            'They left together.'
+        )
+        result = score_avoid_passive(text)
+        assert result['score'] == 4
+
     def test_moderate_density_score_3(self):
-        """~15% passive density should score 3 (density 0.10-0.20)."""
+        """Density 10-20% should score 3 (line 55)."""
         # 2 passive out of ~13 sentences -> ~15%
         text = (
             'She opened the door. He walked inside. The room was dark. '
@@ -88,34 +102,46 @@ class TestAvoidPassive:
             'carefully. He nodded slowly. She set it down. He stood up.'
         )
         result = score_avoid_passive(text)
-        assert result['score'] == 3 or result['score'] == 4  # borderline is OK
+        assert result['score'] == 3
 
     def test_high_density_score_2(self):
-        """~25% passive density should score 2 (density 0.20-0.30)."""
-        # 3 passive out of ~12 sentences -> ~25%
+        """Density 20-30% should score 2 (line 57), no cluster."""
+        # Passives spread across paragraphs to avoid cluster detection
         text = (
-            'She opened the door. The room was filled with smoke. '
-            'He walked inside. The windows were broken by the blast. '
-            'She turned on the light. He sat in the chair. '
-            'The table was covered with dust. She picked up a glass. '
-            'He leaned forward. She set it down. He stood up. She left.'
+            'She opened the door. The room was filled with smoke.\n\n'
+            'He walked inside carefully. The windows were broken long ago.\n\n'
+            'She turned on the light. He sat in the wooden chair.\n\n'
+            'The table was covered with old dust. She picked up a glass.\n\n'
+            'He leaned forward slowly. She set it down carefully.\n\n'
+            'He stood up and stretched. She walked to the window.\n\n'
+            'The garden was hidden by fog. He cleared his throat.\n\n'
+            'She turned to face him. He shrugged and said nothing.\n\n'
+            'She picked up her bag. He opened the back door.'
         )
         result = score_avoid_passive(text)
-        assert result['score'] <= 3
+        assert result['score'] == 2
+        assert result['markers']['ap-1'] == 0  # no cluster
 
     def test_cluster_penalty_applied(self):
-        """Cluster penalty reduces score by 1 when score > 1."""
-        # A paragraph of 3+ passive sentences with overall moderate density
+        """Cluster penalty reduces score by 1 when score > 1 (line 63)."""
+        # 3 passives in first paragraph -> cluster; density ~14% -> initial score 3
+        # Penalty -> final score 2
         text = (
-            'The door was opened. The light was turned on. The room was '
-            'cleaned. The floor was swept by the janitor.\n\n'
-            'She walked to the car. He drove them home. She cooked dinner. '
-            'He read a book. She watched television. He fell asleep. '
-            'She locked the door. He turned off the lights.'
+            'The door was opened by someone. The light was turned on by the maid. '
+            'The room was cleaned thoroughly by the staff.\n\n'
+            'She walked to the car and drove. He followed close behind her. '
+            'She cooked dinner for the family. He read a book in the armchair. '
+            'She watched television that evening. He fell asleep on the couch. '
+            'She locked the door before bed. He turned off all the lights. '
+            'They slept until the morning came. The sun rose over the hills. '
+            'She made the coffee as always. He read the morning newspaper. '
+            'They ate breakfast in comfortable silence. She cleared the dishes. '
+            'He washed them carefully at the sink. She dried and put them away. '
+            'They stepped outside into the garden. The path led to the old gate.'
         )
         result = score_avoid_passive(text)
         assert result['markers']['ap-1'] == 1  # cluster detected
-        # The cluster penalty should have reduced the score
+        assert result['score'] == 2  # initial 3, minus 1 penalty
 
     def test_cluster_penalty_not_below_1(self):
         """Cluster penalty does not reduce score below 1."""

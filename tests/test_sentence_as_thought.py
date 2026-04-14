@@ -103,18 +103,19 @@ class TestSentenceAsThought:
         # With similar-length sentences, stddev should be low-moderate
         assert result['score'] <= 4
 
-    def test_very_low_stddev_score_2(self):
-        """stddev 2-3 should score 2."""
-        # Nearly identical sentence lengths
+    def test_stddev_2_to_3_score_2(self):
+        """stddev 2-3 should score 2 (line 81)."""
+        # Mix of 4-word and 8-word sentences -> stddev ~2.2
         text = (
-            'She walked to the door. He sat in the chair. '
-            'The dog ate its food. She read from a book. '
-            'He looked at the wall. She set down her cup. '
-            'The clock ticked along. He picked up a pen. '
-            'She opened a window. He closed his old eyes.'
+            'She stopped and looked. He put down the heavy bag he carried. '
+            'The room was quiet. She crossed to the window and pulled back curtains. '
+            'Nothing moved at all. He sat down in the old chair by door. '
+            'She poured two drinks. The firelight made shadows on the far wall. '
+            'He said absolutely nothing. She picked up the letter from the table. '
+            'Time had passed slowly. He watched her read with careful quiet attention.'
         )
         result = score_sentence_as_thought(text)
-        assert result['score'] <= 3
+        assert result['score'] == 2
 
     def test_bucket_imbalance_penalty(self):
         """No short AND no long sentences triggers bucket imbalance penalty."""
