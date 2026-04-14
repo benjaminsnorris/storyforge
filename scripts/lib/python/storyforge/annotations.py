@@ -101,7 +101,7 @@ def save_annotations_csv(project_dir: str,
         f.write('|'.join(ANNOTATIONS_HEADER) + '\n')
         for ann in sorted(annotations.values(),
                           key=lambda a: a.get('created_at', '')):
-            values = [ann.get(col, '') for col in ANNOTATIONS_HEADER]
+            values = [ann.get(col, '').replace('|', '-') for col in ANNOTATIONS_HEADER]
             f.write('|'.join(values) + '\n')
     return path
 

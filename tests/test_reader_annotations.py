@@ -296,6 +296,24 @@ def test_promote_exemplars_skips_no_note():
     assert promoted == []
 
 
+def test_save_sanitizes_pipes(tmp_path):
+    """Pipe characters in text/note fields are replaced to prevent CSV corruption."""
+    from storyforge.annotations import save_annotations_csv, load_annotations_csv
+    annotations = {
+        'p1': {'id': 'p1', 'scene_id': 'arrival', 'chapter': '1',
+               'color': 'pink', 'color_label': 'Needs Revision',
+               'text': 'she said "yes|no" loudly', 'note': 'pipes|in|notes',
+               'reader': 'Alice', 'created_at': '2026-04-10',
+               'status': 'new', 'fix_location': 'craft', 'fetched_at': '2026-04-14'},
+    }
+    save_annotations_csv(str(tmp_path), annotations)
+    loaded = load_annotations_csv(str(tmp_path))
+    assert 'p1' in loaded
+    assert '|' not in loaded['p1']['text']
+    assert '|' not in loaded['p1']['note']
+    assert loaded['p1']['scene_id'] == 'arrival'
+
+
 def test_load_annotation_findings_for_revise(tmp_path):
     """Annotations CSV with new entries produces revision findings."""
     from storyforge.annotations import (
