@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, select_model,
@@ -138,12 +139,15 @@ def main(argv=None):
         log('============================================')
         return
 
+    # Load reader annotations if available, merge with any --findings file
+    effective_findings = _effective_findings_file(project_dir, args.findings, args.dry_run)
+
     # Run domains
     for domain in domains:
         log(f'\n--- Hone: {domain} ---')
         _run_domain(domain, ref_dir, project_dir, log_dir, model, coaching,
                     scene_filter, args.threshold, args.dry_run,
-                    findings_file=args.findings)
+                    findings_file=effective_findings)
 
     log('\n============================================')
     log('Hone complete')
@@ -630,3 +634,66 @@ def _run_diagnose(ref_dir: str, project_dir: str, scene_filter: list[str] | None
         print('\n  Recommendations:')
         for r in recs:
             print(f'    -> {r}')
+
+
+def _effective_findings_file(project_dir: str,
+                              findings_file: str | None,
+                              dry_run: bool) -> str | None:
+    """Return an effective findings file path that includes reader annotation findings.
+
+    If working/annotations.csv exists with unaddressed craft annotations, they are
+    converted to hone findings format (scene_id|target_file|fields|guidance) and
+    merged with any existing --findings file.  The merged content is written to a
+    temporary file so hone_briefs/hone_intent can consume it via load_external_findings.
+
+    Args:
+        project_dir: Path to the book project root.
+        findings_file: Path from --findings flag (may be None).
+        dry_run: If True, just log but don't write temp file.
+
+    Returns:
+        Path to an effective findings CSV, or None if there are no findings at all.
+    """
+    annotations_csv = os.path.join(project_dir, 'working', 'annotations.csv')
+    if not os.path.isfile(annotations_csv):
+        return findings_file
+
+    from storyforge.annotations import load_annotations_csv, generate_revision_findings
+    ann_data = load_annotations_csv(project_dir)
+    craft_findings, _, _ = generate_revision_findings(ann_data)
+
+    if not craft_findings:
+        return findings_file
+
+    log(f'Reader annotations: {len(craft_findings)} finding(s) from unaddressed craft annotations')
+
+    if dry_run:
+        for finding in craft_findings:
+            log(f'  (annotation) {finding["scene_id"]}: {finding["guidance"][:80]}...')
+        return findings_file
+
+    # Build annotation rows in hone findings format
+    ann_rows = []
+    for finding in craft_findings:
+        scene_id = finding['scene_id']
+        guidance = finding['guidance'].replace('\n', ' ')
+        ann_rows.append(f'{scene_id}|scene-briefs.csv||{guidance}')
+
+    # Merge with any existing findings file content
+    header = 'scene_id|target_file|fields|guidance'
+    existing_rows: list[str] = []
+    if findings_file and os.path.isfile(findings_file):
+        with open(findings_file, encoding='utf-8') as fh:
+            lines = fh.read().replace('\r\n', '\n').replace('\r', '').splitlines()
+        # Skip header line from existing file
+        existing_rows = [ln for ln in lines[1:] if ln.strip()] if len(lines) > 1 else []
+
+    merged_lines = [header] + existing_rows + ann_rows
+
+    tmp = tempfile.NamedTemporaryFile(
+        mode='w', suffix='.csv', prefix='hone_annotations_',
+        delete=False, encoding='utf-8',
+    )
+    tmp.write('\n'.join(merged_lines) + '\n')
+    tmp.close()
+    return tmp.name
