@@ -1,0 +1,65 @@
+# Autonomous Workflow Configuration
+# All configurable values for the autonomous-prompt skill
+#
+# This file centralizes values that were previously hardcoded.
+# Update values here to change behavior across the skill.
+
+# Commands used during implementation (project-specific)
+commands:
+  test: "python3 -m pytest tests/"
+  test_single: "python3 -m pytest tests/test_<name>.py -v"
+  test_wiring: "python3 -m pytest tests/wiring/ -v"
+  test_integration: "python3 -m pytest tests/integration/ -v"
+  lint: "python3 -m py_compile scripts/lib/python/storyforge/<module>.py"
+  runner: "./storyforge <command> --dry-run"
+
+# Paths
+paths:
+  prompts_dir: "prompts"
+  scripts_dir: "scripts/lib/python/storyforge"
+  tests_dir: "tests"
+  skills_dir: "skills"
+  templates_dir: "skills/autonomous-prompt/templates"
+  references_dir: "references"
+
+# Completion signals
+completion_signals:
+  success: "IMPLEMENTATION_COMPLETE"
+  blocked: "BLOCKED_NEEDS_HUMAN"
+
+# Issue type detection from labels
+# Maps label names to issue types
+label_mapping:
+  scoring: "scoring"
+  evaluation: "scoring"
+  deterministic: "scoring"
+  feature: "feature"
+  enhancement: "feature"
+  bug: "bug_fix"
+  fix: "bug_fix"
+  creative: "creative"
+  writing: "creative"
+  drafting: "creative"
+  pipeline: "pipeline"
+  infrastructure: "pipeline"
+  refactoring: "refactoring"
+  refactor: "refactoring"
+
+# Template file mapping for each issue type
+template_files:
+  scoring: "additions/scoring.md"
+  feature: "additions/feature.md"
+  bug_fix: "additions/bug-fix.md"
+  creative: "additions/creative.md"
+  pipeline: "additions/pipeline.md"
+  refactoring: "additions/refactoring.md"
+  default: "additions/feature.md"
+
+# Storyforge commit prefixes by issue type
+commit_prefixes:
+  scoring: "Score:"
+  feature: "Add"
+  bug_fix: "Fix"
+  creative: "Draft scene:"
+  pipeline: "Update"
+  refactoring: "Update"
