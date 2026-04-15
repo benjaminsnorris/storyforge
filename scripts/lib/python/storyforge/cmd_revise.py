@@ -505,6 +505,28 @@ def _format_scores_table(diag_rows: list[dict]) -> str:
     return '\n'.join(lines)
 
 
+def _build_polish_pr_body(title: str, scene_count: int, max_loops: int,
+                          diag_rows: list[dict]) -> str:
+    """Build the initial PR body for a polish loop run."""
+    scores_table = _format_scores_table(diag_rows)
+    summary = _summarize_diagnosis(diag_rows)
+
+    return f"""## Polish Loop — {title}
+
+{scene_count} scenes | {max_loops} max iterations
+
+## Initial Deterministic Scores
+
+Overall avg: **{summary['overall_avg']:.2f}** | {summary['high_count']} high | {summary['medium_count']} medium priority
+
+{scores_table}
+
+## Progress
+
+- [x] Initial deterministic scoring
+"""
+
+
 def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> list[dict]:
     """Generate a polish plan targeted at high/medium priority principles from diagnosis."""
     high = [r for r in diag_rows if r.get('priority') == 'high' and r.get('scale') == 'scene']

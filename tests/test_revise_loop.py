@@ -597,3 +597,36 @@ class TestFormatScoresTable:
         table = _format_scores_table(diag_rows)
         assert 'avoid passive' in table
         assert 'genre contract' not in table
+
+
+class TestBuildPolishPrBody:
+    def test_contains_initial_scores_table(self):
+        from storyforge.cmd_revise import _build_polish_pr_body
+
+        diag_rows = [
+            {'principle': 'avoid_passive', 'scale': 'scene', 'avg_score': '2.1',
+             'worst_items': 's01', 'priority': 'high'},
+        ]
+        body = _build_polish_pr_body('Test Novel', 5, 3, diag_rows)
+        assert '## Initial Deterministic Scores' in body
+        assert 'avoid passive' in body
+        assert '2.10' in body
+
+    def test_contains_task_checklist(self):
+        from storyforge.cmd_revise import _build_polish_pr_body
+
+        diag_rows = [
+            {'principle': 'avoid_passive', 'scale': 'scene', 'avg_score': '2.1',
+             'worst_items': 's01', 'priority': 'high'},
+        ]
+        body = _build_polish_pr_body('Test Novel', 5, 3, diag_rows)
+        assert '- [x] Initial deterministic scoring' in body
+        assert '## Progress' in body
+
+    def test_contains_metadata(self):
+        from storyforge.cmd_revise import _build_polish_pr_body
+
+        body = _build_polish_pr_body('My Novel', 10, 5, [])
+        assert 'My Novel' in body
+        assert '10 scenes' in body
+        assert '5 max iterations' in body
