@@ -62,6 +62,8 @@ def parse_args(argv):
                         help='Auto-generate 3-pass plan targeting AI prose patterns')
     parser.add_argument('--polish', action='store_true',
                         help='Auto-generate craft-only polish plan')
+    parser.add_argument('--scores', action='store_true',
+                        help='Auto-generate revision plan from scoring diagnosis (upstream + craft)')
     parser.add_argument('--coaching', choices=['full', 'coach', 'strict'],
                         help='Override coaching level')
     parser.add_argument('--loop', action='store_true',
@@ -442,6 +444,109 @@ def _generate_structural_plan(project_dir, plan_file):
 
     for i, (dim, info) in enumerate(sorted_dims, 1):
         log(f'  Pass {i}: {dim} (fix_location: {info["fix_location"]})')
+
+    return rows
+
+
+def _generate_scores_plan(plan_file: str, diag_rows: list) -> list:
+    """Generate a revision plan from scoring diagnosis data.
+
+    Creates upstream (brief) passes for brief-root-cause items and
+    targeted craft passes for craft-root-cause items. Returns empty list
+    if no actionable items.
+    """
+    from collections import Counter
+
+    # Filter to actionable scene-level items
+    actionable = [r for r in diag_rows
+                  if r.get('scale') == 'scene'
+                  and r.get('priority') in ('high', 'medium')
+                  and r.get('worst_items')]
+
+    if not actionable:
+        return []
+
+    # Separate by root cause
+    brief_items = [r for r in actionable if r.get('root_cause') == 'brief']
+    craft_items = [r for r in actionable if r.get('root_cause') != 'brief']
+
+    rows = []
+    pass_num = 0
+
+    # Brief passes: rank scenes by frequency across principles
+    if brief_items:
+        scene_freq = Counter()
+        scene_principles = {}
+        for item in brief_items:
+            for sid in item['worst_items'].split(';'):
+                sid = sid.strip()
+                if sid:
+                    scene_freq[sid] += 1
+                    scene_principles.setdefault(sid, []).append(
+                        item['principle'].replace('_', ' '))
+
+        ranked = [sid for sid, _ in scene_freq.most_common()]
+
+        principle_names = sorted(set(
+            item['principle'].replace('_', ' ') for item in brief_items))
+        guidance = (
+            'Score-driven upstream fixes. Weak principles: '
+            + ', '.join(principle_names)
+            + '. Scenes ranked by frequency of appearance across weak principles.'
+            + ' Fix abstract, overspecified, or verbose brief fields.'
+        )
+
+        pass_num += 1
+        rows.append({
+            'pass': str(pass_num),
+            'name': 'score-driven-briefs',
+            'purpose': f'Fix briefs for {len(ranked)} scenes with brief-root-cause issues across {len(brief_items)} principles',
+            'scope': 'scene-level',
+            'targets': ';'.join(ranked),
+            'guidance': guidance,
+            'protection': 'voice-quality',
+            'findings': 'scores',
+            'status': 'pending',
+            'model_tier': 'sonnet',
+            'fix_location': 'brief',
+        })
+
+    # Craft pass: targeted polish for craft-root-cause items
+    if craft_items:
+        craft_scenes = set()
+        craft_principles = []
+        for item in craft_items:
+            craft_principles.append(
+                f'{item["principle"].replace("_", " ")} (avg {item.get("avg_score", "?")})')
+            for sid in item['worst_items'].split(';'):
+                sid = sid.strip()
+                if sid:
+                    craft_scenes.add(sid)
+
+        guidance = (
+            'Score-driven craft polish. Target principles:\n'
+            + '\n'.join(f'  - {p}' for p in craft_principles)
+            + '\nFollow the voice guide strictly. Preserve plot, character, and continuity.'
+        )
+
+        pass_num += 1
+        rows.append({
+            'pass': str(pass_num),
+            'name': 'score-driven-craft',
+            'purpose': f'Craft polish targeting {len(craft_items)} weak principles',
+            'scope': 'scene-level',
+            'targets': ';'.join(sorted(craft_scenes)),
+            'guidance': guidance,
+            'protection': 'voice-quality',
+            'findings': 'scores',
+            'status': 'pending',
+            'model_tier': 'opus',
+            'fix_location': 'craft',
+        })
+
+    if rows:
+        _create_versioned_plan(plan_file, rows)
+        log(f'Generated score-driven plan: {len(rows)} passes')
 
     return rows
 
@@ -1481,9 +1586,9 @@ def main(argv=None):
     yaml_plan_file = os.path.join(project_dir, 'working', 'plans', 'revision-plan.yaml')
 
     # Check mutually exclusive modes
-    mode_count = sum([args.structural, args.polish, args.naturalness])
+    mode_count = sum([args.structural, args.polish, args.naturalness, args.scores])
     if mode_count > 1:
-        print('ERROR: --structural, --polish, and --naturalness are mutually exclusive.', file=sys.stderr)
+        print('ERROR: --structural, --polish, --naturalness, and --scores are mutually exclusive.', file=sys.stderr)
         sys.exit(1)
 
     # Validate --loop
@@ -1532,6 +1637,18 @@ def main(argv=None):
             commit_and_push(project_dir, 'Naturalness: upstream brief fixes',
                             ['reference/', 'scenes/', 'working/'])
         plan_rows = _generate_naturalness_plan(csv_plan_file, project_dir)
+    elif args.scores:
+        log('Scores mode -- generating revision plan from diagnosis data...')
+        diag_file = os.path.join(project_dir, 'working', 'scores', 'latest', 'diagnosis.csv')
+        if not os.path.isfile(diag_file):
+            log(f'ERROR: No diagnosis found at {diag_file}')
+            log('Run: storyforge score first')
+            sys.exit(1)
+        diag_rows = _read_diagnosis(os.path.dirname(diag_file))
+        plan_rows = _generate_scores_plan(csv_plan_file, diag_rows)
+        if not plan_rows:
+            log('No actionable items in diagnosis -- nothing to revise')
+            sys.exit(0)
     elif args.structural:
         plan_rows = _generate_structural_plan(project_dir, csv_plan_file)
     elif os.path.isfile(csv_plan_file):
