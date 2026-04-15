@@ -33,7 +33,7 @@ from storyforge.costs import estimate_cost, log_operation, print_summary
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
     update_pr_task, commit_and_push, _git, has_gh, current_branch,
-    get_pr_body, set_pr_body,
+    get_pr_body, set_pr_body, add_pr_comment,
 )
 from storyforge.api import (
     invoke_api, invoke_to_file, extract_text, extract_text_from_file,
@@ -547,6 +547,51 @@ def _update_pr_body_iteration(project_dir: str, pr_number: str,
 
     body = body.rstrip('\n') + '\n' + line + '\n'
     set_pr_body(project_dir, pr_number, body)
+
+
+def _post_polish_summary_comment(project_dir: str, pr_number: str,
+                                 baseline_diag: list[dict],
+                                 final_det_diag: list[dict], *,
+                                 final_llm_diag: list[dict] | None = None) -> None:
+    """Post a summary comment comparing baseline and final scores."""
+    if not pr_number:
+        return
+
+    # Build before/after comparison table for deterministic scores
+    baseline_by_p = {r['principle']: r for r in baseline_diag if r.get('scale') == 'scene'}
+    final_by_p = {r['principle']: r for r in final_det_diag if r.get('scale') == 'scene'}
+    all_principles = sorted(set(baseline_by_p) | set(final_by_p))
+
+    lines = ['## Deterministic Score Changes', '',
+             '| Principle | Baseline | Final | Delta |',
+             '|-----------|----------|-------|-------|']
+    for p in all_principles:
+        name = p.replace('_', ' ')
+        b_score = float(baseline_by_p[p]['avg_score']) if p in baseline_by_p else 0.0
+        f_score = float(final_by_p[p]['avg_score']) if p in final_by_p else 0.0
+        delta = f_score - b_score
+        sign = '+' if delta >= 0 else ''
+        lines.append(f'| {name} | {b_score:.2f} | {f_score:.2f} | {sign}{delta:.2f} |')
+
+    baseline_summary = _summarize_diagnosis(baseline_diag)
+    final_summary = _summarize_diagnosis(final_det_diag)
+    overall_delta = final_summary['overall_avg'] - baseline_summary['overall_avg']
+    sign = '+' if overall_delta >= 0 else ''
+    lines.append('')
+    lines.append(f'**Overall avg: {baseline_summary["overall_avg"]:.2f} → '
+                 f'{final_summary["overall_avg"]:.2f} ({sign}{overall_delta:.2f})**')
+
+    # Full LLM scores section
+    if final_llm_diag is not None:
+        llm_table = _format_scores_table(final_llm_diag)
+        llm_summary = _summarize_diagnosis(final_llm_diag)
+        lines.extend(['', '## Full LLM Scores', '',
+                      f'Overall avg: **{llm_summary["overall_avg"]:.2f}** | '
+                      f'{llm_summary["high_count"]} high | '
+                      f'{llm_summary["medium_count"]} medium priority', '',
+                      llm_table])
+
+    add_pr_comment(project_dir, pr_number, '\n'.join(lines))
 
 
 def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> list[dict]:

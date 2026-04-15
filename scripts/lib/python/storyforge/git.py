@@ -235,6 +235,16 @@ def set_pr_body(project_dir: str, pr_number: str, body: str) -> None:
     )
 
 
+def add_pr_comment(project_dir: str, pr_number: str, body: str) -> None:
+    """Post a comment on a PR."""
+    if not has_gh() or not pr_number:
+        return
+    subprocess.run(
+        ['gh', 'pr', 'comment', pr_number, '--body', body],
+        capture_output=True, cwd=project_dir,
+    )
+
+
 # ============================================================================
 # Commit helpers
 # ============================================================================

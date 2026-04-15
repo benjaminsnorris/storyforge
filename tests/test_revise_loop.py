@@ -690,3 +690,64 @@ class TestUpdatePrBodyIteration:
 
         assert '- [x] Iteration 2' in captured['body']
         assert 'converged' in captured['body'].lower()
+
+
+class TestPostPolishSummaryComment:
+    def test_posts_comparison_comment(self, tmp_path, monkeypatch):
+        from storyforge.cmd_revise import _post_polish_summary_comment
+
+        project_dir = str(tmp_path)
+        captured = {}
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment',
+                            lambda pd, pr, body: captured.update({'body': body}))
+
+        baseline_diag = [
+            {'principle': 'avoid_passive', 'scale': 'scene', 'avg_score': '2.1',
+             'worst_items': 's01', 'priority': 'high'},
+        ]
+        final_det_diag = [
+            {'principle': 'avoid_passive', 'scale': 'scene', 'avg_score': '3.8',
+             'worst_items': 's01', 'priority': 'low'},
+        ]
+        final_llm_diag = [
+            {'principle': 'avoid_passive', 'scale': 'scene', 'avg_score': '3.5',
+             'worst_items': 's01', 'priority': 'low'},
+            {'principle': 'prose_naturalness', 'scale': 'scene', 'avg_score': '3.0',
+             'worst_items': 's01', 'priority': 'medium'},
+        ]
+
+        _post_polish_summary_comment(project_dir, '42',
+                                     baseline_diag, final_det_diag,
+                                     final_llm_diag=final_llm_diag)
+
+        body = captured['body']
+        assert '## Deterministic Score Changes' in body
+        assert 'avoid passive' in body
+        assert '2.10' in body  # baseline
+        assert '3.80' in body  # final
+        assert '## Full LLM Scores' in body
+        assert 'prose naturalness' in body
+
+    def test_skips_llm_section_when_none(self, tmp_path, monkeypatch):
+        from storyforge.cmd_revise import _post_polish_summary_comment
+
+        project_dir = str(tmp_path)
+        captured = {}
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment',
+                            lambda pd, pr, body: captured.update({'body': body}))
+
+        baseline = [{'principle': 'avoid_passive', 'scale': 'scene',
+                     'avg_score': '2.1', 'worst_items': '', 'priority': 'high'}]
+        final = [{'principle': 'avoid_passive', 'scale': 'scene',
+                  'avg_score': '3.5', 'worst_items': '', 'priority': 'low'}]
+
+        _post_polish_summary_comment(project_dir, '42', baseline, final)
+
+        body = captured['body']
+        assert '## Deterministic Score Changes' in body
+        assert '## Full LLM Scores' not in body
+
+    def test_no_op_without_pr_number(self, tmp_path, monkeypatch):
+        from storyforge.cmd_revise import _post_polish_summary_comment
+        # Should not raise
+        _post_polish_summary_comment(str(tmp_path), '', [], [])
