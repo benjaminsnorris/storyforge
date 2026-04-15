@@ -499,6 +499,19 @@ def _score_repetition(scene_ids, project_dir, cycle_dir):
     rep_high = sum(1 for f in rep_findings if f['severity'] == 'high')
     log(f'Repetition scan: {len(rep_findings)} findings ({rep_high} high-severity)')
 
+    # Persist findings for revision guidance
+    findings_path = os.path.join(cycle_dir, 'repetition-findings.csv')
+    with open(findings_path, 'w', encoding='utf-8') as f:
+        f.write('phrase|category|severity|count|scene_ids\n')
+        for finding in rep_findings:
+            phrase = finding['phrase']
+            category = finding['category']
+            severity = finding['severity']
+            count = finding['count']
+            sids = ';'.join(finding['scene_ids'])
+            f.write(f'{phrase}|{category}|{severity}|{count}|{sids}\n')
+    log(f'Repetition findings: {findings_path} ({len(rep_findings)} entries)')
+
     rep_scores_path = os.path.join(cycle_dir, 'repetition-latest.csv')
     with open(rep_scores_path, 'w', encoding='utf-8') as f:
         f.write('id|prose_repetition\n')
