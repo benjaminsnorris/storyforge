@@ -214,6 +214,37 @@ def update_pr_task(task_text: str, project_dir: str, pr_number: str = '') -> Non
     )
 
 
+def get_pr_body(project_dir: str, pr_number: str) -> str:
+    """Read the current PR body. Returns empty string on failure."""
+    if not has_gh() or not pr_number:
+        return ''
+    r = subprocess.run(
+        ['gh', 'pr', 'view', pr_number, '--json', 'body', '--jq', '.body'],
+        capture_output=True, text=True, cwd=project_dir,
+    )
+    return r.stdout if r.returncode == 0 else ''
+
+
+def set_pr_body(project_dir: str, pr_number: str, body: str) -> None:
+    """Replace the PR body."""
+    if not has_gh() or not pr_number:
+        return
+    subprocess.run(
+        ['gh', 'pr', 'edit', pr_number, '--body', body],
+        capture_output=True, cwd=project_dir,
+    )
+
+
+def add_pr_comment(project_dir: str, pr_number: str, body: str) -> None:
+    """Post a comment on a PR."""
+    if not has_gh() or not pr_number:
+        return
+    subprocess.run(
+        ['gh', 'pr', 'comment', pr_number, '--body', body],
+        capture_output=True, cwd=project_dir,
+    )
+
+
 # ============================================================================
 # Commit helpers
 # ============================================================================
