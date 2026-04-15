@@ -203,6 +203,28 @@ def _count_passes(rows):
     return len(rows)
 
 
+def _collect_upstream_scenes(plan_rows: list) -> tuple:
+    """Scan plan for pending upstream passes and collect all target scenes.
+
+    Returns (scene_ids, upstream_pass_count). Used to defer redrafting
+    until all upstream CSV fixes are complete.
+    """
+    scenes = set()
+    count = 0
+    for row in plan_rows:
+        if row.get('fix_location') not in ('brief', 'intent'):
+            continue
+        if row.get('status') == 'completed':
+            continue
+        count += 1
+        targets = row.get('targets', '')
+        for sid in targets.split(';'):
+            sid = sid.strip()
+            if sid:
+                scenes.add(sid)
+    return scenes, count
+
+
 def _read_pass_field(rows, pass_num, field):
     """Read a field from a pass (1-indexed)."""
     idx = pass_num - 1
@@ -1796,6 +1818,14 @@ def main(argv=None):
         total_forecast = per_pass * pending
         log(f'Cost forecast: ~${total_forecast:.2f} ({pending} passes @ ~${per_pass:.2f})')
 
+    # Check for deferred redrafting (multiple upstream passes)
+    deferred_scenes, upstream_count = _collect_upstream_scenes(plan_rows)
+    defer_redraft = upstream_count >= 1 and len(deferred_scenes) > 0
+    if defer_redraft:
+        log(f'Deferred redrafting enabled: {upstream_count} upstream passes, '
+            f'{len(deferred_scenes)} scenes will be redrafted after all CSV fixes')
+    redraft_needed = set()
+
     # ---- MAIN PASS LOOP ----
     for pass_num in range(start_pass, total_passes + 1):
         pass_name = _read_pass_field(plan_rows, pass_num, 'name')
@@ -1915,10 +1945,14 @@ def main(argv=None):
             scenes_changed = hone_result.get('scenes_rewritten', 0)
             log(f'  Upstream: {scenes_changed} scenes, {fields_changed} fields rewritten')
 
-            # Redraft affected scenes in full coaching mode
+            # Track or execute redraft
             if effective_coaching == 'full' and targets:
                 affected = [t.strip() for t in targets.split(';') if t.strip()]
-                _redraft_from_briefs(project_dir, affected, pass_model, log_dir)
+                if defer_redraft:
+                    redraft_needed.update(affected)
+                    log(f'  Deferred redraft for {len(affected)} scenes (will batch after all upstream passes)')
+                else:
+                    _redraft_from_briefs(project_dir, affected, pass_model, log_dir)
 
             # Log usage (hone handles its own API logging; pass empty string)
             _log_usage(project_dir, '', 'revise', pass_name, pass_model, duration)
@@ -2213,6 +2247,12 @@ Rules:
             if next_status != 'completed':
                 log('Pausing 10s before next pass...')
                 time.sleep(10)
+
+    # Batch redraft deferred scenes
+    if defer_redraft and redraft_needed:
+        log(f'\n=== Batch Redraft: {len(redraft_needed)} scenes ===')
+        pass_model = select_revision_model('redraft', 'redraft from corrected briefs')
+        _redraft_from_briefs(project_dir, sorted(redraft_needed), pass_model, log_dir)
 
     # ---- SESSION SUMMARY ----
     completed = sum(
