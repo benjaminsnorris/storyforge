@@ -504,7 +504,7 @@ def _score_repetition(scene_ids, project_dir, cycle_dir):
     with open(findings_path, 'w', encoding='utf-8') as f:
         f.write('phrase|category|severity|count|scene_ids\n')
         for finding in rep_findings:
-            phrase = finding['phrase']
+            phrase = finding['phrase'].replace('|', ',').replace('\n', ' ')
             category = finding['category']
             severity = finding['severity']
             count = finding['count']

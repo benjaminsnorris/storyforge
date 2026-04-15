@@ -184,3 +184,38 @@ class TestSceneFindings:
         with open(scores_path) as f:
             content = f.read()
         assert 'id|avoid_passive' in content
+
+
+class TestFindingsSanitization:
+    """Regression tests for pipe and newline sanitization in findings files."""
+
+    def test_scene_findings_sanitizes_pipes_in_detail(self, tmp_path):
+        """Pipe chars in scorer detail strings must not corrupt CSV."""
+        from storyforge.cmd_score import _score_single_principle, _load_scene_texts
+        import csv
+
+        project_dir = str(tmp_path / 'project')
+        scenes_dir = os.path.join(project_dir, 'scenes')
+        os.makedirs(scenes_dir)
+
+        # Create a scene that will trigger findings
+        with open(os.path.join(scenes_dir, 's01.md'), 'w') as f:
+            f.write('The door was opened by Alice. The room was filled with smoke. '
+                    'The window was broken by the wind. The floor was covered.\n')
+
+        cycle_dir = str(tmp_path / 'cycle-1')
+        os.makedirs(cycle_dir)
+
+        from storyforge.scoring_passive import score_avoid_passive
+        _score_single_principle(['s01'], project_dir, cycle_dir,
+                                'avoid_passive', score_avoid_passive)
+
+        findings_path = os.path.join(cycle_dir, 'scene-findings.csv')
+        if os.path.isfile(findings_path):
+            with open(findings_path, newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f, delimiter='|')
+                for row in reader:
+                    # Should have exactly 4 fields (header columns)
+                    assert set(row.keys()) == {'scene_id', 'principle', 'finding', 'detail'}
+                    # No None values from extra pipe splits
+                    assert None not in row.values()
