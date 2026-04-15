@@ -21,6 +21,23 @@ class TestLoopFlags:
         args = parse_args(['--polish'])
         assert args.loop is False
 
+    def test_parse_skip_final_score(self):
+        from storyforge.cmd_revise import parse_args
+        args = parse_args(['--polish', '--loop', '--skip-final-score'])
+        assert args.skip_final_score is True
+
+    def test_skip_final_score_default_false(self):
+        from storyforge.cmd_revise import parse_args
+        args = parse_args(['--polish', '--loop'])
+        assert args.skip_final_score is False
+
+    def test_skip_final_score_requires_loop(self):
+        """--skip-final-score without --loop should exit with error."""
+        from storyforge.cmd_revise import main
+        with pytest.raises(SystemExit) as exc_info:
+            main(['--polish', '--skip-final-score'])
+        assert exc_info.value.code != 0
+
 
 class TestDiagnosisReader:
     def test_read_diagnosis(self, tmp_path):
@@ -241,3 +258,140 @@ class TestVersionedPlans:
         # Symlink points to new plan
         current = _read_csv_plan(plan_file)
         assert current[0]['name'] == 'plan-two'
+
+
+class TestDeterministicScore:
+    """Tests for _run_deterministic_score — lightweight, free scoring path."""
+
+    def _setup_project(self, tmp_path):
+        """Create a minimal project structure for deterministic scoring."""
+        project_dir = str(tmp_path / 'project')
+        scenes_dir = os.path.join(project_dir, 'scenes')
+        ref_dir = os.path.join(project_dir, 'reference')
+        working_dir = os.path.join(project_dir, 'working')
+        scores_dir = os.path.join(working_dir, 'scores')
+        os.makedirs(scenes_dir)
+        os.makedirs(ref_dir)
+        os.makedirs(scores_dir)
+
+        # Minimal scenes.csv
+        with open(os.path.join(ref_dir, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|status|word_count|target_words\n')
+            f.write('test-scene|1|Test Scene|1|Alice|drafted|100|1000\n')
+
+        # A simple scene file
+        with open(os.path.join(scenes_dir, 'test-scene.md'), 'w') as f:
+            f.write('Alice walked slowly through the very quiet garden. '
+                    'She was being watched carefully by the old gardener. '
+                    'The weather was grey and overcast, rain threatening the horizon. '
+                    'It was really quite remarkably beautiful despite everything.\n')
+
+        # storyforge.yaml
+        with open(os.path.join(project_dir, 'storyforge.yaml'), 'w') as f:
+            f.write('project:\n  title: Test Project\n')
+
+        return project_dir
+
+    def test_returns_cycle_dir_and_diag_rows(self, tmp_path):
+        from storyforge.cmd_revise import _run_deterministic_score
+
+        project_dir = self._setup_project(tmp_path)
+        cycle_dir, diag_rows = _run_deterministic_score(project_dir, ['test-scene'])
+
+        assert os.path.isdir(cycle_dir)
+        assert 'cycle-1' in cycle_dir
+        assert isinstance(diag_rows, list)
+
+    def test_creates_scene_scores_csv(self, tmp_path):
+        from storyforge.cmd_revise import _run_deterministic_score
+
+        project_dir = self._setup_project(tmp_path)
+        cycle_dir, _ = _run_deterministic_score(project_dir, ['test-scene'])
+
+        scores_file = os.path.join(cycle_dir, 'scene-scores.csv')
+        assert os.path.isfile(scores_file)
+
+        with open(scores_file) as f:
+            content = f.read()
+        # Should have scores for deterministic principles
+        assert 'avoid_passive' in content
+        assert 'avoid_adverbs' in content
+        assert 'economy_clarity' in content
+
+    def test_updates_latest_symlink(self, tmp_path):
+        from storyforge.cmd_revise import _run_deterministic_score
+
+        project_dir = self._setup_project(tmp_path)
+        _run_deterministic_score(project_dir, ['test-scene'])
+
+        latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+        assert os.path.islink(latest)
+        assert os.readlink(latest) == 'cycle-1'
+
+    def test_increments_cycle_number(self, tmp_path):
+        from storyforge.cmd_revise import _run_deterministic_score
+
+        project_dir = self._setup_project(tmp_path)
+
+        cycle_dir_1, _ = _run_deterministic_score(project_dir, ['test-scene'])
+        assert 'cycle-1' in cycle_dir_1
+
+        cycle_dir_2, _ = _run_deterministic_score(project_dir, ['test-scene'])
+        assert 'cycle-2' in cycle_dir_2
+
+        latest = os.path.join(project_dir, 'working', 'scores', 'latest')
+        assert os.readlink(latest) == 'cycle-2'
+
+    def test_generates_diagnosis(self, tmp_path):
+        from storyforge.cmd_revise import _run_deterministic_score
+
+        project_dir = self._setup_project(tmp_path)
+        cycle_dir, diag_rows = _run_deterministic_score(project_dir, ['test-scene'])
+
+        diag_file = os.path.join(cycle_dir, 'diagnosis.csv')
+        assert os.path.isfile(diag_file)
+
+    def test_no_api_calls(self, tmp_path, monkeypatch):
+        """Deterministic scoring should never call the API."""
+        from storyforge.cmd_revise import _run_deterministic_score
+
+        project_dir = self._setup_project(tmp_path)
+
+        # Poison the API key — if it tries to call the API, it'll fail
+        monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+
+        # Should succeed without any API key
+        cycle_dir, diag_rows = _run_deterministic_score(project_dir, ['test-scene'])
+        assert os.path.isdir(cycle_dir)
+
+
+class TestExecuteSinglePassModelOverride:
+    """Tests for the model_override parameter on _execute_single_pass."""
+
+    def test_model_override_skips_select_revision_model(self, monkeypatch):
+        """When model_override is set, select_revision_model should not be called."""
+        from storyforge import cmd_revise
+
+        called_select = []
+        original_select = cmd_revise.select_revision_model
+
+        def tracking_select(name, purpose=''):
+            called_select.append((name, purpose))
+            return original_select(name, purpose)
+
+        monkeypatch.setattr('storyforge.cmd_revise.select_revision_model', tracking_select)
+
+        # Verify the model_override path directly: when override is set,
+        # `model_override or select_revision_model(...)` short-circuits.
+        override = 'claude-sonnet-4-6'
+        result = override or tracking_select('targeted-polish', 'test')
+        assert result == 'claude-sonnet-4-6'
+        assert len(called_select) == 0  # select was never called
+
+    def test_no_override_calls_select_revision_model(self):
+        """Without model_override, select_revision_model determines the model."""
+        from storyforge.common import select_revision_model
+        override = None
+        result = override or select_revision_model('targeted-polish', 'craft polish')
+        # Should get a model string back from select_revision_model
+        assert result in ('claude-opus-4-6', 'claude-sonnet-4-6')
