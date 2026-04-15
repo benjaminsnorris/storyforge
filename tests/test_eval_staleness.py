@@ -105,3 +105,136 @@ class TestWordCountSnapshot:
 
         _write_word_count_snapshot(eval_dir, str(tmp_path))
         assert not os.path.isfile(os.path.join(eval_dir, 'word-counts.csv'))
+
+
+class TestCheckEvalStaleness:
+    def _setup_project(self, tmp_path, eval_date='20260408-120000',
+                       snapshot_words=None, current_words=None,
+                       full_cycles_after_eval=0, det_cycles_after_eval=0):
+        """Build a minimal project with eval dir and scoring cycles."""
+        project_dir = str(tmp_path / 'project')
+        eval_base = os.path.join(project_dir, 'working', 'evaluations')
+        scores_base = os.path.join(project_dir, 'working', 'scores')
+        ref_dir = os.path.join(project_dir, 'reference')
+        os.makedirs(eval_base)
+        os.makedirs(scores_base)
+        os.makedirs(ref_dir)
+
+        # Create eval dir with optional word count snapshot
+        eval_dir = os.path.join(eval_base, f'eval-{eval_date}')
+        os.makedirs(eval_dir)
+        with open(os.path.join(eval_dir, 'synthesis.md'), 'w') as f:
+            f.write('Evaluation summary')
+
+        if snapshot_words:
+            with open(os.path.join(eval_dir, 'word-counts.csv'), 'w') as f:
+                f.write('id|word_count\n')
+                for sid, wc in snapshot_words.items():
+                    f.write(f'{sid}|{wc}\n')
+
+        # Create current scenes.csv
+        words = current_words or snapshot_words or {'s01': 3000}
+        with open(os.path.join(ref_dir, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|status|word_count|target_words\n')
+            for i, (sid, wc) in enumerate(words.items(), 1):
+                f.write(f'{sid}|{i}|Scene {i}|1|Alice|drafted|{wc}|3000\n')
+
+        # Create scoring cycles (deterministic-only)
+        for c in range(1, det_cycles_after_eval + 1):
+            cycle_dir = os.path.join(scores_base, f'cycle-{c}')
+            os.makedirs(cycle_dir)
+            with open(os.path.join(cycle_dir, 'scene-scores.csv'), 'w') as f:
+                f.write('scene_id|principle|score\n')
+                f.write('s01|avoid_passive|3.5\n')
+
+        # Create full LLM cycles (numbered after deterministic)
+        offset = det_cycles_after_eval
+        for c in range(1, full_cycles_after_eval + 1):
+            cycle_dir = os.path.join(scores_base, f'cycle-{offset + c}')
+            os.makedirs(cycle_dir)
+            with open(os.path.join(cycle_dir, 'scene-scores.csv'), 'w') as f:
+                f.write('scene_id|principle|score\n')
+                f.write('s01|avoid_passive|3.5\n')
+                f.write('s01|prose_naturalness|2.8\n')
+
+        # storyforge.yaml
+        with open(os.path.join(project_dir, 'storyforge.yaml'), 'w') as f:
+            f.write('project:\n  title: Test\n')
+
+        return project_dir
+
+    def test_no_eval_is_stale(self, tmp_path):
+        from storyforge.scoring import check_eval_staleness
+
+        project_dir = str(tmp_path / 'project')
+        os.makedirs(os.path.join(project_dir, 'working', 'evaluations'))
+        result = check_eval_staleness(project_dir)
+        assert result['stale'] is True
+        assert 'no evaluation found' in result['reasons']
+
+    def test_fresh_eval_no_changes(self, tmp_path):
+        from storyforge.scoring import check_eval_staleness
+
+        words = {'s01': 3000, 's02': 2500}
+        project_dir = self._setup_project(tmp_path,
+            snapshot_words=words, current_words=words)
+        result = check_eval_staleness(project_dir)
+        assert result['stale'] is False
+        assert result['word_delta_pct'] == 0.0
+        assert result['score_runs_since'] == 0
+
+    def test_stale_by_word_delta(self, tmp_path):
+        from storyforge.scoring import check_eval_staleness
+
+        snapshot = {'s01': 3000, 's02': 2500, 's03': 2000}  # total 7500
+        current = {'s01': 4000, 's02': 3500, 's03': 2000}   # delta=2000, 26.7%
+        project_dir = self._setup_project(tmp_path,
+            snapshot_words=snapshot, current_words=current)
+        result = check_eval_staleness(project_dir)
+        assert result['stale'] is True
+        assert result['word_delta_pct'] > 0.20
+        assert any('word delta' in r for r in result['reasons'])
+
+    def test_not_stale_below_word_threshold(self, tmp_path):
+        from storyforge.scoring import check_eval_staleness
+
+        snapshot = {'s01': 3000, 's02': 2500}  # total 5500
+        current = {'s01': 3200, 's02': 2600}   # delta=300, 5.5%
+        project_dir = self._setup_project(tmp_path,
+            snapshot_words=snapshot, current_words=current)
+        result = check_eval_staleness(project_dir)
+        assert result['stale'] is False
+        assert result['word_delta_pct'] < 0.20
+
+    def test_stale_by_full_score_runs(self, tmp_path):
+        from storyforge.scoring import check_eval_staleness
+
+        words = {'s01': 3000}
+        project_dir = self._setup_project(tmp_path,
+            snapshot_words=words, current_words=words,
+            full_cycles_after_eval=2)
+        result = check_eval_staleness(project_dir)
+        assert result['stale'] is True
+        assert result['score_runs_since'] >= 2
+        assert any('score runs' in r for r in result['reasons'])
+
+    def test_deterministic_cycles_dont_count(self, tmp_path):
+        from storyforge.scoring import check_eval_staleness
+
+        words = {'s01': 3000}
+        project_dir = self._setup_project(tmp_path,
+            snapshot_words=words, current_words=words,
+            det_cycles_after_eval=5, full_cycles_after_eval=1)
+        result = check_eval_staleness(project_dir)
+        assert result['stale'] is False
+        assert result['score_runs_since'] == 1
+
+    def test_no_snapshot_still_works(self, tmp_path):
+        """Old evals without word-counts.csv should not crash."""
+        from storyforge.scoring import check_eval_staleness
+
+        project_dir = self._setup_project(tmp_path,
+            snapshot_words=None, current_words={'s01': 3000})
+        result = check_eval_staleness(project_dir)
+        assert result['word_delta_pct'] == 0.0
+        assert result['stale'] is False

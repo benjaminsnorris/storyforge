@@ -1885,5 +1885,100 @@ def is_full_llm_cycle(cycle_dir: str) -> bool:
     return False
 
 
+STALENESS_WORD_DELTA_THRESHOLD = 0.20  # 20% cumulative word delta
+STALENESS_SCORE_RUNS_THRESHOLD = 2     # 2+ full LLM scoring runs
+
+
+def check_eval_staleness(project_dir: str) -> dict:
+    """Check whether the latest evaluation is stale relative to current manuscript state.
+
+    Returns dict with keys: stale, reasons, eval_dir, eval_date,
+    word_delta_pct, score_runs_since.
+    """
+    result = {
+        'stale': False,
+        'reasons': [],
+        'eval_dir': None,
+        'eval_date': None,
+        'word_delta_pct': 0.0,
+        'score_runs_since': 0,
+    }
+
+    # Find latest evaluation
+    eval_base = os.path.join(project_dir, 'working', 'evaluations')
+    if not os.path.isdir(eval_base):
+        result['stale'] = True
+        result['reasons'].append('no evaluation found')
+        return result
+
+    eval_dirs = sorted([
+        d for d in os.listdir(eval_base)
+        if d.startswith('eval-') and os.path.isdir(os.path.join(eval_base, d))
+    ])
+    if not eval_dirs:
+        result['stale'] = True
+        result['reasons'].append('no evaluation found')
+        return result
+
+    latest_eval = eval_dirs[-1]
+    result['eval_dir'] = os.path.join(eval_base, latest_eval)
+    result['eval_date'] = latest_eval.removeprefix('eval-')[:8]
+
+    # Count full LLM scoring runs since eval
+    scores_base = os.path.join(project_dir, 'working', 'scores')
+    if os.path.isdir(scores_base):
+        for name in sorted(os.listdir(scores_base)):
+            if not name.startswith('cycle-'):
+                continue
+            cycle_dir = os.path.join(scores_base, name)
+            if not os.path.isdir(cycle_dir):
+                continue
+            if is_full_llm_cycle(cycle_dir):
+                result['score_runs_since'] += 1
+
+    if result['score_runs_since'] >= STALENESS_SCORE_RUNS_THRESHOLD:
+        result['stale'] = True
+        result['reasons'].append(
+            f'{result["score_runs_since"]} full score runs since evaluation')
+
+    # Compute word delta from snapshot
+    snapshot_file = os.path.join(result['eval_dir'], 'word-counts.csv')
+    if os.path.isfile(snapshot_file):
+        snapshot = {}
+        with open(snapshot_file, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f, delimiter='|')
+            for row in reader:
+                sid = row.get('id', '').strip()
+                wc = row.get('word_count', '0').strip()
+                if sid and wc and wc != '0':
+                    snapshot[sid] = int(wc)
+
+        # Read current word counts
+        from storyforge.csv_cli import get_column, list_ids
+        scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        if os.path.isfile(scenes_csv) and snapshot:
+            ids = list_ids(scenes_csv)
+            wc_col = get_column(scenes_csv, 'word_count')
+            current = {}
+            for sid, wc in zip(ids, wc_col):
+                if wc and wc != '0':
+                    current[sid] = int(wc)
+
+            total_snapshot = sum(snapshot.values())
+            if total_snapshot > 0:
+                delta_sum = sum(
+                    abs(current.get(sid, 0) - snapshot.get(sid, 0))
+                    for sid in set(snapshot) | set(current)
+                )
+                result['word_delta_pct'] = delta_sum / total_snapshot
+
+                if result['word_delta_pct'] >= STALENESS_WORD_DELTA_THRESHOLD:
+                    result['stale'] = True
+                    pct = result['word_delta_pct'] * 100
+                    result['reasons'].append(f'{pct:.0f}% word delta since evaluation')
+
+    return result
+
+
 if __name__ == '__main__':
     main()
