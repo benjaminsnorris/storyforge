@@ -261,3 +261,110 @@ class TestCheckEvalStaleness:
         result = check_eval_staleness(project_dir)
         assert result['word_delta_pct'] == 0.0
         assert result['stale'] is False
+
+    def test_nonstandard_eval_name_picks_most_recent(self, tmp_path):
+        """Non-standard eval names (eval-manual-*) should not break sorting."""
+        from storyforge.scoring import check_eval_staleness
+        import time
+
+        project_dir = str(tmp_path / 'project')
+        eval_base = os.path.join(project_dir, 'working', 'evaluations')
+        ref_dir = os.path.join(project_dir, 'reference')
+        os.makedirs(eval_base)
+        os.makedirs(os.path.join(project_dir, 'working', 'scores'))
+        os.makedirs(ref_dir)
+
+        with open(os.path.join(ref_dir, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|status|word_count|target_words\n')
+            f.write('s01|1|S1|1|A|drafted|3000|3000\n')
+
+        # Create an older standard eval
+        older = os.path.join(eval_base, 'eval-20260408-190141')
+        os.makedirs(older)
+        with open(os.path.join(older, 'synthesis.md'), 'w') as f:
+            f.write('older')
+
+        # Small delay to ensure different mtime
+        time.sleep(0.05)
+
+        # Create a newer non-standard eval (lexicographically after the standard one)
+        newer = os.path.join(eval_base, 'eval-manual-line-editor-20260331')
+        os.makedirs(newer)
+        with open(os.path.join(newer, 'synthesis.md'), 'w') as f:
+            f.write('newer')
+
+        with open(os.path.join(project_dir, 'storyforge.yaml'), 'w') as f:
+            f.write('project:\n  title: Test\n')
+
+        result = check_eval_staleness(project_dir)
+        # Should pick the newer one by mtime, not the lexicographically last one
+        assert result['eval_dir'] == newer
+
+    def test_nonstandard_eval_name_extracts_date_from_mtime(self, tmp_path):
+        """Eval names without a YYYYMMDD prefix should get date from mtime."""
+        from storyforge.scoring import check_eval_staleness
+
+        project_dir = str(tmp_path / 'project')
+        eval_base = os.path.join(project_dir, 'working', 'evaluations')
+        ref_dir = os.path.join(project_dir, 'reference')
+        os.makedirs(eval_base)
+        os.makedirs(os.path.join(project_dir, 'working', 'scores'))
+        os.makedirs(ref_dir)
+
+        with open(os.path.join(ref_dir, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|status|word_count|target_words\n')
+            f.write('s01|1|S1|1|A|drafted|3000|3000\n')
+
+        eval_dir = os.path.join(eval_base, 'eval-manual-custom-name')
+        os.makedirs(eval_dir)
+        with open(os.path.join(eval_dir, 'synthesis.md'), 'w') as f:
+            f.write('test')
+
+        with open(os.path.join(project_dir, 'storyforge.yaml'), 'w') as f:
+            f.write('project:\n  title: Test\n')
+
+        result = check_eval_staleness(project_dir)
+        # Date should be extracted from mtime, should be 8 digits
+        assert result['eval_date'] is not None
+        assert len(result['eval_date']) == 8
+        assert result['eval_date'].isdigit()
+
+    def test_wide_format_cycles_detected(self, tmp_path):
+        """Full LLM cycles in wide format (principles as columns) should be counted."""
+        from storyforge.scoring import check_eval_staleness
+
+        words = {'s01': 3000}
+        project_dir = str(tmp_path / 'project')
+        eval_base = os.path.join(project_dir, 'working', 'evaluations')
+        scores_base = os.path.join(project_dir, 'working', 'scores')
+        ref_dir = os.path.join(project_dir, 'reference')
+        os.makedirs(eval_base)
+        os.makedirs(scores_base)
+        os.makedirs(ref_dir)
+
+        # Create eval with snapshot
+        eval_dir = os.path.join(eval_base, 'eval-20260408-120000')
+        os.makedirs(eval_dir)
+        with open(os.path.join(eval_dir, 'synthesis.md'), 'w') as f:
+            f.write('Eval')
+        with open(os.path.join(eval_dir, 'word-counts.csv'), 'w') as f:
+            f.write('id|word_count\ns01|3000\n')
+
+        with open(os.path.join(ref_dir, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|status|word_count|target_words\n')
+            f.write('s01|1|S1|1|A|drafted|3000|3000\n')
+
+        # Create 2 full LLM cycles in wide format
+        for c in (1, 2):
+            cycle_dir = os.path.join(scores_base, f'cycle-{c}')
+            os.makedirs(cycle_dir)
+            with open(os.path.join(cycle_dir, 'scene-scores.csv'), 'w') as f:
+                f.write('id|avoid_passive|prose_naturalness|dialogue_authenticity\n')
+                f.write('s01|3.5|2.8|3.2\n')
+
+        with open(os.path.join(project_dir, 'storyforge.yaml'), 'w') as f:
+            f.write('project:\n  title: Test\n')
+
+        result = check_eval_staleness(project_dir)
+        assert result['score_runs_since'] == 2
+        assert result['stale'] is True
