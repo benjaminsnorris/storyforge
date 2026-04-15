@@ -59,18 +59,26 @@ def _get_price(model: str, token_type: str) -> float:
 # Core functions
 # ============================================================================
 
+BATCH_DISCOUNT = 0.50  # Anthropic Batch API charges 50% of standard pricing
+
+
 def calculate_cost(model: str, input_tokens: int, output_tokens: int,
-                   cache_read: int = 0, cache_create: int = 0) -> float:
+                   cache_read: int = 0, cache_create: int = 0,
+                   batch: bool = False) -> float:
     """Calculate cost in USD from token counts.
 
     Cache tokens are folded into the cost but not tracked separately
     in the ledger — they affect the dollar amount only.
+
+    If batch=True, applies the Anthropic Batch API 50% discount.
     """
     cost = 0.0
     cost += input_tokens * _get_price(model, 'input') / 1_000_000
     cost += output_tokens * _get_price(model, 'output') / 1_000_000
     cost += cache_read * _get_price(model, 'cache_read') / 1_000_000
     cost += cache_create * _get_price(model, 'cache_create') / 1_000_000
+    if batch:
+        cost *= BATCH_DISCOUNT
     return cost
 
 
