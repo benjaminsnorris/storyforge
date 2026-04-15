@@ -428,6 +428,11 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
+                            lambda title, body, pd, work_type='': '')
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body', lambda pd, pr, b: None)
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment', lambda pd, pr, body: None)
 
         _run_polish_loop(project_dir, 3, None)
 
@@ -458,6 +463,11 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
+                            lambda title, body, pd, work_type='': '')
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body', lambda pd, pr, b: None)
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment', lambda pd, pr, body: None)
 
         _run_polish_loop(project_dir, 3, None, skip_final_score=True)
 
@@ -490,6 +500,11 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
+                            lambda title, body, pd, work_type='': '')
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body', lambda pd, pr, b: None)
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment', lambda pd, pr, body: None)
 
         _run_polish_loop(project_dir, 3, None)
 
@@ -521,12 +536,18 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
+                            lambda title, body, pd, work_type='': '')
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body', lambda pd, pr, b: None)
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment', lambda pd, pr, body: None)
 
         _run_polish_loop(project_dir, 5, None, skip_final_score=True)
 
-        # Iteration 1: score + polish. Iteration 2: score, avg <= prev → converge.
-        assert call_count[0] == 2
-        assert polish_count[0] == 1
+        # Baseline (1) + iteration 1 re-score (2) + iteration 2 re-score (3)
+        assert call_count[0] == 3
+        # Iteration 1 polished + iteration 2 polished before convergence detected
+        assert polish_count[0] == 2
 
     def test_zero_max_loops_no_crash(self, tmp_path, monkeypatch):
         """max_loops=0 should not crash even with skip_final_score=True."""
@@ -537,6 +558,11 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
+                            lambda title, body, pd, work_type='': '')
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body', lambda pd, pr, b: None)
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment', lambda pd, pr, body: None)
 
         # Should not raise NameError
         _run_polish_loop(project_dir, 0, None, skip_final_score=True)
@@ -554,6 +580,11 @@ class TestPolishLoopOrchestration:
         monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
         monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
+                            lambda title, body, pd, work_type='': '')
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body', lambda pd, pr, b: None)
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment', lambda pd, pr, body: None)
 
         with pytest.raises(SystemExit):
             _run_polish_loop(project_dir, 3, None, skip_initial_score=True)
