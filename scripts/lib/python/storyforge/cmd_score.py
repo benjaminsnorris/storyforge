@@ -834,13 +834,16 @@ def _parse_scene_evaluation(text_content: str, output_scores: str,
 
 
 def _log_api_usage(log_file: str, operation: str, target: str, model: str,
-                   project_dir: str) -> None:
-    """Log API usage/cost from a JSON response file."""
+                   project_dir: str, batch: bool = False) -> None:
+    """Log API usage/cost from a JSON response file.
+
+    If batch=True, applies the Anthropic Batch API 50% discount to cost.
+    """
     try:
         with open(log_file) as f:
             response = json.load(f)
         usage = extract_usage(response)
-        cost = calculate_cost_from_usage(usage, model)
+        cost = calculate_cost_from_usage(usage, model, batch=batch)
         log_operation(
             project_dir, operation, model,
             usage['input_tokens'], usage['output_tokens'], cost,
@@ -848,8 +851,8 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
             cache_read=usage.get('cache_read', 0),
             cache_create=usage.get('cache_create', 0),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log(f'WARNING: Failed to log usage for {target}: {e}')
 
 
 # ============================================================================
@@ -904,10 +907,11 @@ def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
                      os.path.isfile(text_file))
 
         if status_ok:
-            # Log usage
+            # Log usage (batch=True for 50% discount pricing)
             if os.path.isfile(json_file):
                 _log_api_usage(json_file, 'score', sid, eval_model,
-                               os.path.dirname(os.path.dirname(cycle_dir)))
+                               os.path.dirname(os.path.dirname(cycle_dir)),
+                               batch=True)
 
             text_content = open(text_file).read()
             tmp_scores = os.path.join(cycle_dir, f'.tmp-scores-{sid}.csv')
@@ -1071,6 +1075,14 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                                sonnet_model, project_dir)
             except Exception:
                 log(f'  WARNING: Fidelity scoring failed for {sid}')
+
+    # Log batch fidelity costs
+    if score_mode == 'batch':
+        for sid in filtered_ids:
+            json_file = os.path.join(log_dir, f'fidelity-{sid}.json')
+            if os.path.isfile(json_file):
+                _log_api_usage(json_file, 'score-fidelity', sid,
+                               sonnet_model, project_dir, batch=True)
 
     # Process results
     results = []

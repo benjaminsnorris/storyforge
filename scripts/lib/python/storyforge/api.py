@@ -207,10 +207,11 @@ def extract_usage(response: dict) -> dict:
     }
 
 
-def calculate_cost_from_usage(usage: dict, model: str) -> float:
+def calculate_cost_from_usage(usage: dict, model: str, batch: bool = False) -> float:
     """Calculate cost in USD from a usage dict (as returned by extract_usage).
 
     Thin wrapper around costs.calculate_cost for backward compatibility.
+    If batch=True, applies the Anthropic Batch API 50% discount.
     """
     return calculate_cost(
         model,
@@ -218,6 +219,7 @@ def calculate_cost_from_usage(usage: dict, model: str) -> float:
         usage['output_tokens'],
         cache_read=usage.get('cache_read', 0),
         cache_create=usage.get('cache_create', 0),
+        batch=batch,
     )
 
 
