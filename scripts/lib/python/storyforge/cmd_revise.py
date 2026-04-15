@@ -488,7 +488,8 @@ def _generate_structural_plan(project_dir, plan_file):
     return rows
 
 
-def _generate_scores_plan(plan_file: str, diag_rows: list) -> list:
+def _generate_scores_plan(plan_file: str, diag_rows: list,
+                          findings_dir: str = '') -> list:
     """Generate a revision plan from scoring diagnosis data.
 
     Creates upstream (brief) passes for brief-root-cause items and
@@ -505,6 +506,18 @@ def _generate_scores_plan(plan_file: str, diag_rows: list) -> list:
 
     if not actionable:
         return []
+
+    # Load deterministic findings for enhanced guidance
+    findings_guidance = ''
+    if findings_dir:
+        findings = _load_findings(findings_dir)
+        target_scenes = set()
+        for item in actionable:
+            for sid in item['worst_items'].split(';'):
+                sid = sid.strip()
+                if sid:
+                    target_scenes.add(sid)
+        findings_guidance = _build_findings_guidance(findings, sorted(target_scenes))
 
     # Separate by root cause
     brief_items = [r for r in actionable if r.get('root_cause') == 'brief']
@@ -535,6 +548,8 @@ def _generate_scores_plan(plan_file: str, diag_rows: list) -> list:
             + '. Scenes ranked by frequency of appearance across weak principles.'
             + ' Fix abstract, overspecified, or verbose brief fields.'
         )
+        if findings_guidance:
+            guidance += '\n\n' + findings_guidance
 
         pass_num += 1
         rows.append({
@@ -568,6 +583,8 @@ def _generate_scores_plan(plan_file: str, diag_rows: list) -> list:
             + '\n'.join(f'  - {p}' for p in craft_principles)
             + '\nFollow the voice guide strictly. Preserve plot, character, and continuity.'
         )
+        if findings_guidance:
+            guidance += '\n\n' + findings_guidance
 
         pass_num += 1
         rows.append({
@@ -817,7 +834,8 @@ def _post_polish_summary_comment(project_dir: str, pr_number: str,
     add_pr_comment(project_dir, pr_number, '\n'.join(lines))
 
 
-def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> list[dict]:
+def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict],
+                                   findings_dir: str = '') -> list[dict]:
     """Generate a polish plan targeted at high/medium priority principles from diagnosis."""
     high = [r for r in diag_rows if r.get('priority') == 'high' and r.get('scale') == 'scene']
     medium = [r for r in diag_rows if r.get('priority') == 'medium' and r.get('scale') == 'scene']
@@ -851,6 +869,14 @@ def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> lis
         for sid in row.get('worst_items', '').split(';'):
             if sid.strip():
                 worst_scenes.add(sid.strip())
+
+    # Append deterministic findings to guidance
+    if findings_dir:
+        findings = _load_findings(findings_dir)
+        target_scenes = sorted(worst_scenes) if worst_scenes else []
+        findings_extra = _build_findings_guidance(findings, target_scenes)
+        if findings_extra:
+            guidance += '\n\n' + findings_extra
 
     rows = [{
         'pass': '1',
@@ -1295,7 +1321,9 @@ def _run_polish_loop(project_dir: str, max_loops: int,
 
         # Generate targeted plan from diagnosis and execute
         log(f'\n=== Iteration {iteration}/{max_loops}: Polish (Sonnet) ===')
-        plan_rows = _generate_targeted_polish_plan(csv_plan_file, latest_diag)
+        latest_cycle = os.path.join(project_dir, 'working', 'scores', 'latest')
+        plan_rows = _generate_targeted_polish_plan(csv_plan_file, latest_diag,
+                                                    findings_dir=latest_cycle)
         _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration,
                              model_override=sonnet_model)
 
@@ -1763,7 +1791,9 @@ def main(argv=None):
             log('Run: storyforge score first')
             sys.exit(1)
         diag_rows = _read_diagnosis(os.path.dirname(diag_file))
-        plan_rows = _generate_scores_plan(csv_plan_file, diag_rows)
+        findings_dir = os.path.dirname(diag_file)
+        plan_rows = _generate_scores_plan(csv_plan_file, diag_rows,
+                                          findings_dir=findings_dir)
         if not plan_rows:
             log('No actionable items in diagnosis -- nothing to revise')
             sys.exit(0)

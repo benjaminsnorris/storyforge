@@ -163,3 +163,60 @@ class TestBuildFindingsGuidance:
         assert 'detail 0' in guidance
         assert 'detail 4' in guidance
         assert 'detail 5' not in guidance
+
+
+class TestScoresPlanWithFindings:
+    def test_scores_plan_includes_repetition_guidance(self, tmp_path):
+        from storyforge.cmd_revise import _generate_scores_plan
+
+        plan_file = str(tmp_path / 'revision-plan.csv')
+
+        latest_dir = str(tmp_path / 'latest')
+        os.makedirs(latest_dir)
+        with open(os.path.join(latest_dir, 'repetition-findings.csv'), 'w') as f:
+            f.write('phrase|category|severity|count|scene_ids\n')
+            f.write('the edge of|signature_phrase|high|15|s01;s02;s03\n')
+
+        diag_rows = [
+            {'principle': 'prose_naturalness', 'scale': 'scene', 'avg_score': '2.1',
+             'worst_items': 's01;s02', 'priority': 'high', 'root_cause': 'brief'},
+        ]
+
+        rows = _generate_scores_plan(plan_file, diag_rows, findings_dir=latest_dir)
+        assert len(rows) >= 1
+        all_guidance = ' '.join(r['guidance'] for r in rows)
+        assert 'the edge of' in all_guidance
+        assert 'reduce' in all_guidance.lower()
+
+    def test_scores_plan_includes_scene_findings(self, tmp_path):
+        from storyforge.cmd_revise import _generate_scores_plan
+
+        plan_file = str(tmp_path / 'revision-plan.csv')
+
+        latest_dir = str(tmp_path / 'latest')
+        os.makedirs(latest_dir)
+        with open(os.path.join(latest_dir, 'scene-findings.csv'), 'w') as f:
+            f.write('scene_id|principle|finding|detail\n')
+            f.write('s01|avoid_passive|ap-1|passive cluster (25%)\n')
+
+        diag_rows = [
+            {'principle': 'avoid_passive', 'scale': 'scene', 'avg_score': '2.0',
+             'worst_items': 's01', 'priority': 'high', 'root_cause': 'craft'},
+        ]
+
+        rows = _generate_scores_plan(plan_file, diag_rows, findings_dir=latest_dir)
+        craft_passes = [r for r in rows if r['fix_location'] == 'craft']
+        assert len(craft_passes) >= 1
+        assert 'passive cluster' in craft_passes[0]['guidance']
+
+    def test_scores_plan_works_without_findings(self, tmp_path):
+        from storyforge.cmd_revise import _generate_scores_plan
+
+        plan_file = str(tmp_path / 'revision-plan.csv')
+        diag_rows = [
+            {'principle': 'prose_naturalness', 'scale': 'scene', 'avg_score': '2.1',
+             'worst_items': 's01', 'priority': 'high', 'root_cause': 'brief'},
+        ]
+
+        rows = _generate_scores_plan(plan_file, diag_rows, findings_dir=str(tmp_path))
+        assert len(rows) >= 1
