@@ -8,7 +8,7 @@ Usage:
     storyforge revise                 # Start from first pending pass
     storyforge revise 3               # Start from pass number 3 (1-indexed)
     storyforge revise --polish        # Craft-only polish plan
-    storyforge revise --polish --loop # Score → polish → re-score until stable
+    storyforge revise --polish --loop # Deterministic score → polish → re-score, then full LLM score
     storyforge revise --naturalness   # 3-pass AI pattern removal
     storyforge revise --structural    # CSV-only from structural proposals
     storyforge revise --dry-run       # Print prompts only
@@ -69,6 +69,8 @@ def parse_args(argv):
                         help='Maximum iterations in --loop mode (default: 5)')
     parser.add_argument('--skip-initial-score', action='store_true',
                         help='Skip initial scoring in --polish --loop (use existing scores)')
+    parser.add_argument('--skip-final-score', action='store_true',
+                        help='Skip full LLM scoring after deterministic loop converges (requires --loop)')
     parser.add_argument('--no-annotations', action='store_true',
                         help='Exclude reader annotations from revision plan')
     parser.add_argument('pass_num', nargs='?', type=int, default=0,
@@ -538,6 +540,78 @@ def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> lis
     return rows
 
 
+def _run_deterministic_score(project_dir: str,
+                             scene_ids: list[str]) -> tuple[str, list[dict]]:
+    """Run deterministic-only scoring (no API calls, $0 cost).
+
+    Scores the 6 deterministic principles (prose_repetition, avoid_passive,
+    avoid_adverbs, no_weather_dreams, sentence_as_thought, economy_clarity),
+    generates diagnosis, and returns (cycle_dir, diag_rows).
+
+    Same return signature as _run_lightweight_score for drop-in use.
+    """
+    from storyforge.scoring import merge_score_files, generate_diagnosis
+    from storyforge.cmd_score import (
+        DETERMINISTIC_PRINCIPLES,
+        _score_repetition, _score_passive, _score_adverbs,
+        _score_weather, _score_rhythm, _score_economy,
+    )
+
+    scores_base = os.path.join(project_dir, 'working', 'scores')
+
+    # Determine cycle number
+    highest = 0
+    if os.path.isdir(scores_base):
+        for name in os.listdir(scores_base):
+            if name.startswith('cycle-'):
+                try:
+                    highest = max(highest, int(name.removeprefix('cycle-')))
+                except ValueError:
+                    pass
+    cycle = highest + 1
+    cycle_dir = os.path.join(scores_base, f'cycle-{cycle}')
+    os.makedirs(cycle_dir, exist_ok=True)
+
+    log(f'  Deterministic scoring {len(scene_ids)} scenes (cycle {cycle}, $0)...')
+
+    scores_path = os.path.join(cycle_dir, 'scene-scores.csv')
+
+    # Run each deterministic scorer and merge results
+    scorers = [
+        ('prose_repetition', _score_repetition),
+        ('avoid_passive', _score_passive),
+        ('avoid_adverbs', _score_adverbs),
+        ('no_weather_dreams', _score_weather),
+        ('sentence_as_thought', _score_rhythm),
+        ('economy_clarity', _score_economy),
+    ]
+    for principle, scorer_fn in scorers:
+        path = scorer_fn(scene_ids, project_dir, cycle_dir)
+        merge_score_files(scores_path, path)
+
+    # Generate diagnosis
+    plugin_dir = get_plugin_dir()
+    weights_file = os.path.join(project_dir, 'working', 'craft-weights.csv')
+
+    # Initialize weights if not yet present
+    from storyforge.scoring import init_craft_weights
+    init_craft_weights(project_dir, plugin_dir)
+
+    prev_dir = os.path.join(scores_base, f'cycle-{highest}') if highest > 0 else '-'
+    if prev_dir != '-' and not os.path.isdir(prev_dir):
+        prev_dir = '-'
+    generate_diagnosis(cycle_dir, prev_dir, weights_file)
+
+    # Update latest symlink
+    latest_link = os.path.join(scores_base, 'latest')
+    if os.path.islink(latest_link):
+        os.remove(latest_link)
+    os.symlink(f'cycle-{cycle}', latest_link)
+
+    diag_rows = _read_diagnosis(cycle_dir)
+    return cycle_dir, diag_rows
+
+
 def _run_lightweight_score(project_dir: str, scene_ids: list[str],
                            parallel: int = 6) -> tuple[str, list[dict]]:
     """Run scene-level scoring only (no branch/PR) and return (cycle_dir, diagnosis_rows).
@@ -791,8 +865,16 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
 
 def _run_polish_loop(project_dir: str, max_loops: int,
                      coaching_override: str | None, *,
-                     skip_initial_score: bool = False) -> None:
-    """Score → polish → re-score convergence loop."""
+                     skip_initial_score: bool = False,
+                     skip_final_score: bool = False) -> None:
+    """Two-phase polish loop: deterministic scoring → full LLM scoring.
+
+    Phase 1: Score only deterministic principles (free, instant), polish with
+    Sonnet (mechanical fixes), repeat until converged or max_loops reached.
+
+    Phase 2: Run one full LLM scoring pass for the complete picture (unless
+    --skip-final-score is set).
+    """
     from storyforge.common import get_coaching_level, read_yaml_field
     from storyforge.git import create_branch, ensure_branch_pushed, commit_and_push
     from storyforge.scene_filter import build_scene_list
@@ -824,25 +906,34 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     log('============================================')
 
     csv_plan_file = os.path.join(project_dir, 'working', 'plans', 'revision-plan.csv')
+    sonnet_model = select_model('evaluation')
+
+    # ------------------------------------------------------------------
+    # Phase 1: Deterministic scoring loop (free, instant)
+    # ------------------------------------------------------------------
+    log(f'\n=== Phase 1: Deterministic Polish (free) ===')
+
     prev_avg = 0.0
     baseline_summary = None
+    summary = _summarize_diagnosis([])  # safe default if loop never executes
 
     for iteration in range(1, max_loops + 1):
-        log(f'\n=== Iteration {iteration}/{max_loops}: Score ===')
+        log(f'\n=== Iteration {iteration}/{max_loops}: Deterministic Score ===')
 
         if iteration == 1 and skip_initial_score:
-            # Load existing scores instead of running a new scoring cycle
             latest_dir = os.path.join(project_dir, 'working', 'scores', 'latest')
             if not os.path.isdir(latest_dir):
                 log('ERROR: --skip-initial-score but no existing scores in working/scores/latest')
                 sys.exit(1)
             diag_rows = _read_diagnosis(latest_dir)
             if not diag_rows:
-                log('WARNING: No diagnosis found in existing scores — generating empty baseline')
+                log('ERROR: --skip-initial-score but no diagnosis.csv in existing scores')
+                log('  Run a scoring cycle first, or remove --skip-initial-score')
+                sys.exit(1)
             log('  Skipped initial scoring (--skip-initial-score) — using existing scores')
             summary = _summarize_diagnosis(diag_rows)
         else:
-            cycle_dir, diag_rows = _run_lightweight_score(project_dir, scene_ids)
+            cycle_dir, diag_rows = _run_deterministic_score(project_dir, scene_ids)
             summary = _summarize_diagnosis(diag_rows)
 
         if iteration == 1:
@@ -876,39 +967,44 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                             f'Polish: upstream brief fixes for {len(upstream_scenes)} scenes',
                             ['reference/', 'scenes/', 'working/'])
 
-        # Generate targeted plan from diagnosis
-        log(f'\n=== Iteration {iteration}/{max_loops}: Polish ===')
+        # Generate targeted plan from diagnosis (writes plan file via _create_versioned_plan)
+        log(f'\n=== Iteration {iteration}/{max_loops}: Polish (Sonnet) ===')
         plan_rows = _generate_targeted_polish_plan(csv_plan_file, diag_rows)
 
-        # Execute the single polish pass
-        # Reset status to pending
-        plan_rows[0]['status'] = 'pending'
-        _write_csv_plan(csv_plan_file, plan_rows)
-
-        # Run the pass through the standard execution path
-        _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration)
+        # Use Sonnet for mechanical fixes during deterministic phase
+        _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration,
+                             model_override=sonnet_model)
 
     else:
         log(f'\n  Reached max iterations ({max_loops})')
 
-    # Final score for summary
-    log(f'\n=== Final Score ===')
-    _, final_diag = _run_lightweight_score(project_dir, scene_ids)
-    final_summary = _summarize_diagnosis(final_diag)
+    # Commit deterministic phase results
+    commit_and_push(project_dir, 'Polish: deterministic phase complete', ['working/'])
+
+    # ------------------------------------------------------------------
+    # Phase 2: Full LLM scoring (one run for the complete picture)
+    # ------------------------------------------------------------------
+    if skip_final_score:
+        log(f'\n=== Skipping Phase 2: Full Score (--skip-final-score) ===')
+        final_summary = summary
+    else:
+        log(f'\n=== Phase 2: Full Score ===')
+        _, final_diag = _run_lightweight_score(project_dir, scene_ids)
+        final_summary = _summarize_diagnosis(final_diag)
+        commit_and_push(project_dir, 'Polish: full score after deterministic loop',
+                        ['working/'])
 
     log('\n============================================')
     log('Polish loop complete')
     if baseline_summary:
-        log(f'  Before: avg {baseline_summary["overall_avg"]:.2f}, '
+        log(f'  Deterministic baseline: avg {baseline_summary["overall_avg"]:.2f}, '
             f'{baseline_summary["high_count"]} high / {baseline_summary["medium_count"]} medium priority')
-    log(f'  After:  avg {final_summary["overall_avg"]:.2f}, '
+    log(f'  Final: avg {final_summary["overall_avg"]:.2f}, '
         f'{final_summary["high_count"]} high / {final_summary["medium_count"]} medium priority')
     if baseline_summary and baseline_summary['overall_avg'] > 0:
         delta = final_summary['overall_avg'] - baseline_summary['overall_avg']
-        log(f'  Improvement: {delta:+.2f} avg score')
+        log(f'  Deterministic improvement: {delta:+.2f} avg score')
     log('============================================')
-
-    commit_and_push(project_dir, 'Polish: loop complete', ['working/'])
 
 
 def _extract_scene_rationales(project_dir: str, scene_ids: list,
@@ -988,7 +1084,8 @@ def _build_revision_config(plan_row: dict, extra: dict | None = None) -> str:
 
 
 def _execute_single_pass(project_dir: str, csv_plan_file: str,
-                         plan_rows: list[dict], iteration: int) -> None:
+                         plan_rows: list[dict], iteration: int,
+                         model_override: str | None = None) -> None:
     """Execute a single revision pass from a plan. Subset of main pass loop."""
     from storyforge.common import select_revision_model, get_coaching_level
     from storyforge.git import commit_and_push
@@ -1054,7 +1151,7 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     prompt = result.stdout
 
     # Select model and invoke API
-    pass_model = select_revision_model(pass_name, pass_purpose)
+    pass_model = model_override or select_revision_model(pass_name, pass_purpose)
     log_dir = os.path.join(project_dir, 'working', 'logs')
     step_log = os.path.join(log_dir, f'loop-{iteration}-{pass_name}.json')
 
@@ -1273,15 +1370,19 @@ def main(argv=None):
             print('ERROR: --loop and --interactive are incompatible', file=sys.stderr)
             sys.exit(1)
 
-    # Validate --skip-initial-score
+    # Validate --skip-initial-score / --skip-final-score
     if args.skip_initial_score and not args.loop:
         print('ERROR: --skip-initial-score requires --loop', file=sys.stderr)
+        sys.exit(1)
+    if args.skip_final_score and not args.loop:
+        print('ERROR: --skip-final-score requires --loop', file=sys.stderr)
         sys.exit(1)
 
     # Loop mode — takes over execution entirely
     if args.loop:
         _run_polish_loop(project_dir, args.max_loops, args.coaching,
-                         skip_initial_score=args.skip_initial_score)
+                         skip_initial_score=args.skip_initial_score,
+                         skip_final_score=args.skip_final_score)
         return
 
     # Auto-generate plans
