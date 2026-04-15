@@ -558,6 +558,85 @@ class TestPolishLoopOrchestration:
         with pytest.raises(SystemExit):
             _run_polish_loop(project_dir, 3, None, skip_initial_score=True)
 
+    def test_creates_pr_with_initial_scores(self, tmp_path, monkeypatch):
+        """Loop should create a draft PR after initial scoring."""
+        from storyforge.cmd_revise import _run_polish_loop
+
+        project_dir = self._setup_project(tmp_path)
+        pr_calls = {'create': [], 'comment': []}
+
+        converged_diag = self._make_diag(high=0, medium=0, avg=4.5)
+
+        def fake_deterministic(proj, scene_ids):
+            cycle_dir = os.path.join(proj, 'working', 'scores', 'cycle-1')
+            os.makedirs(cycle_dir, exist_ok=True)
+            return cycle_dir, converged_diag
+
+        monkeypatch.setattr('storyforge.cmd_revise._run_deterministic_score', fake_deterministic)
+        monkeypatch.setattr('storyforge.cmd_revise._run_lightweight_score',
+                            lambda p, s: ('', converged_diag))
+        monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: 'storyforge/revise-test')
+        monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: True)
+        monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
+                            lambda title, body, pd, work_type='': pr_calls['create'].append(body) or '99')
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body', lambda pd, pr: '')
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body', lambda pd, pr, b: None)
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment',
+                            lambda pd, pr, body: pr_calls['comment'].append(body))
+
+        _run_polish_loop(project_dir, 3, None)
+
+        # PR was created
+        assert len(pr_calls['create']) == 1
+        pr_body = pr_calls['create'][0]
+        assert 'Initial Deterministic Scores' in pr_body
+        assert '- [x] Initial deterministic scoring' in pr_body
+
+        # Final comment was posted
+        assert len(pr_calls['comment']) == 1
+        assert 'Deterministic Score Changes' in pr_calls['comment'][0]
+
+    def test_updates_pr_body_each_iteration(self, tmp_path, monkeypatch):
+        """Loop should update PR body after each polish iteration."""
+        from storyforge.cmd_revise import _run_polish_loop
+
+        project_dir = self._setup_project(tmp_path)
+        body_updates = []
+
+        call_count = [0]
+        def fake_deterministic(proj, scene_ids):
+            call_count[0] += 1
+            cycle_dir = os.path.join(proj, 'working', 'scores', f'cycle-{call_count[0]}')
+            os.makedirs(cycle_dir, exist_ok=True)
+            if call_count[0] == 1:
+                return cycle_dir, self._make_diag(high=1, avg=2.0)
+            return cycle_dir, self._make_diag(high=0, medium=0, avg=4.5)
+
+        def fake_set_body(pd, pr, body):
+            body_updates.append(body)
+
+        monkeypatch.setattr('storyforge.cmd_revise._run_deterministic_score', fake_deterministic)
+        monkeypatch.setattr('storyforge.cmd_revise._run_lightweight_score',
+                            lambda p, s: ('', self._make_diag(high=0, avg=4.5)))
+        monkeypatch.setattr('storyforge.cmd_revise._execute_single_pass',
+                            lambda *a, **kw: None)
+        monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: 'storyforge/revise-test')
+        monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: True)
+        monkeypatch.setattr('storyforge.cmd_revise.create_draft_pr',
+                            lambda title, body, pd, work_type='': '99')
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body',
+                            lambda pd, pr: '## Progress\n\n- [x] Initial deterministic scoring\n')
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body', fake_set_body)
+        monkeypatch.setattr('storyforge.cmd_revise.add_pr_comment', lambda pd, pr, body: None)
+
+        _run_polish_loop(project_dir, 3, None)
+
+        # At least one body update (iteration 1 converged after re-score)
+        assert len(body_updates) >= 1
+        assert any('Iteration' in u for u in body_updates)
+
 
 class TestFormatScoresTable:
     def test_formats_principles_as_markdown_table(self):

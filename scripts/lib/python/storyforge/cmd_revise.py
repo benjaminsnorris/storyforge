@@ -981,8 +981,6 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     Phase 2: Run one full LLM scoring pass for the complete picture (unless
     --skip-final-score is set).
     """
-    from storyforge.common import get_coaching_level, read_yaml_field
-    from storyforge.git import create_branch, ensure_branch_pushed, commit_and_push
     from storyforge.scene_filter import build_scene_list
 
     if coaching_override:
@@ -1015,56 +1013,55 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     sonnet_model = select_model('evaluation')
 
     # ------------------------------------------------------------------
+    # Initial scoring (before the loop)
+    # ------------------------------------------------------------------
+    if skip_initial_score:
+        latest_dir = os.path.join(project_dir, 'working', 'scores', 'latest')
+        if not os.path.isdir(latest_dir):
+            log('ERROR: --skip-initial-score but no existing scores in working/scores/latest')
+            sys.exit(1)
+        baseline_diag = _read_diagnosis(latest_dir)
+        if not baseline_diag:
+            log('ERROR: --skip-initial-score but no diagnosis.csv in existing scores')
+            log('  Run a scoring cycle first, or remove --skip-initial-score')
+            sys.exit(1)
+        log('  Skipped initial scoring (--skip-initial-score) — using existing scores')
+    else:
+        log(f'\n=== Initial Deterministic Score ===')
+        _, baseline_diag = _run_deterministic_score(project_dir, scene_ids)
+
+    baseline_summary = _summarize_diagnosis(baseline_diag)
+    log(f'  Overall avg: {baseline_summary["overall_avg"]:.2f}')
+    log(f'  High priority: {baseline_summary["high_count"]} principles')
+    log(f'  Medium priority: {baseline_summary["medium_count"]} principles')
+    if baseline_summary['high_principles']:
+        log(f'    High: {", ".join(p.replace("_", " ") for p in baseline_summary["high_principles"])}')
+
+    # Commit initial scores and create PR
+    commit_and_push(project_dir, 'Polish: initial deterministic scores', ['working/'])
+    pr_body = _build_polish_pr_body(title, len(scene_ids), max_loops, baseline_diag)
+    pr_number = create_draft_pr(f'Polish: {title}', pr_body, project_dir,
+                                work_type='polish')
+
+    # ------------------------------------------------------------------
     # Phase 1: Deterministic scoring loop (free, instant)
     # ------------------------------------------------------------------
     log(f'\n=== Phase 1: Deterministic Polish (free) ===')
 
-    prev_avg = 0.0
-    baseline_summary = None
-    summary = _summarize_diagnosis([])  # safe default if loop never executes
+    prev_avg = baseline_summary['overall_avg']
+    summary = baseline_summary
+    latest_diag = baseline_diag
 
     for iteration in range(1, max_loops + 1):
-        log(f'\n=== Iteration {iteration}/{max_loops}: Deterministic Score ===')
-
-        if iteration == 1 and skip_initial_score:
-            latest_dir = os.path.join(project_dir, 'working', 'scores', 'latest')
-            if not os.path.isdir(latest_dir):
-                log('ERROR: --skip-initial-score but no existing scores in working/scores/latest')
-                sys.exit(1)
-            diag_rows = _read_diagnosis(latest_dir)
-            if not diag_rows:
-                log('ERROR: --skip-initial-score but no diagnosis.csv in existing scores')
-                log('  Run a scoring cycle first, or remove --skip-initial-score')
-                sys.exit(1)
-            log('  Skipped initial scoring (--skip-initial-score) — using existing scores')
-            summary = _summarize_diagnosis(diag_rows)
-        else:
-            cycle_dir, diag_rows = _run_deterministic_score(project_dir, scene_ids)
-            summary = _summarize_diagnosis(diag_rows)
-
-        if iteration == 1:
-            baseline_summary = summary
-
-        log(f'  Overall avg: {summary["overall_avg"]:.2f}')
-        log(f'  High priority: {summary["high_count"]} principles')
-        log(f'  Medium priority: {summary["medium_count"]} principles')
-        if summary['high_principles']:
-            log(f'    High: {", ".join(p.replace("_", " ") for p in summary["high_principles"])}')
-
         # Convergence check: no actionable issues
         if summary['high_count'] == 0 and summary['medium_count'] == 0:
             log('  No high or medium priority issues — converged')
+            _update_pr_body_iteration(project_dir, pr_number, iteration, summary,
+                                      converged=True)
             break
-
-        # Convergence check: scores stopped improving
-        if iteration > 1 and summary['overall_avg'] <= prev_avg:
-            log(f'  Overall avg did not improve ({summary["overall_avg"]:.2f} <= {prev_avg:.2f}) — converged')
-            break
-
-        prev_avg = summary['overall_avg']
 
         # Check for upstream causes before craft polish
-        upstream_scenes = _detect_upstream_scenes(project_dir, diag_rows)
+        upstream_scenes = _detect_upstream_scenes(project_dir, latest_diag)
         if upstream_scenes:
             log(f'  Upstream issues in {len(upstream_scenes)} scenes — fixing briefs first')
             _fix_upstream_briefs(project_dir, upstream_scenes)
@@ -1073,13 +1070,33 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                             f'Polish: upstream brief fixes for {len(upstream_scenes)} scenes',
                             ['reference/', 'scenes/', 'working/'])
 
-        # Generate targeted plan from diagnosis (writes plan file via _create_versioned_plan)
+        # Generate targeted plan from diagnosis and execute
         log(f'\n=== Iteration {iteration}/{max_loops}: Polish (Sonnet) ===')
-        plan_rows = _generate_targeted_polish_plan(csv_plan_file, diag_rows)
-
-        # Use Sonnet for mechanical fixes during deterministic phase
+        plan_rows = _generate_targeted_polish_plan(csv_plan_file, latest_diag)
         _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration,
                              model_override=sonnet_model)
+
+        # Re-score
+        log(f'\n=== Iteration {iteration}/{max_loops}: Re-score ===')
+        _, latest_diag = _run_deterministic_score(project_dir, scene_ids)
+        summary = _summarize_diagnosis(latest_diag)
+
+        log(f'  Overall avg: {summary["overall_avg"]:.2f}')
+        log(f'  High priority: {summary["high_count"]} principles')
+
+        # Update PR with iteration results
+        converged = (summary['high_count'] == 0 and summary['medium_count'] == 0)
+        if not converged and iteration > 1 and summary['overall_avg'] <= prev_avg:
+            converged = True
+            log(f'  Overall avg did not improve ({summary["overall_avg"]:.2f} <= '
+                f'{prev_avg:.2f}) — converged')
+        _update_pr_body_iteration(project_dir, pr_number, iteration, summary,
+                                  converged=converged)
+
+        if converged:
+            break
+
+        prev_avg = summary['overall_avg']
 
     else:
         log(f'\n  Reached max iterations ({max_loops})')
@@ -1090,24 +1107,29 @@ def _run_polish_loop(project_dir: str, max_loops: int,
     # ------------------------------------------------------------------
     # Phase 2: Full LLM scoring (one run for the complete picture)
     # ------------------------------------------------------------------
+    final_llm_diag = None
     if skip_final_score:
         log(f'\n=== Skipping Phase 2: Full Score (--skip-final-score) ===')
         final_summary = summary
     else:
         log(f'\n=== Phase 2: Full Score ===')
-        _, final_diag = _run_lightweight_score(project_dir, scene_ids)
-        final_summary = _summarize_diagnosis(final_diag)
+        _, final_llm_diag = _run_lightweight_score(project_dir, scene_ids)
+        final_summary = _summarize_diagnosis(final_llm_diag)
         commit_and_push(project_dir, 'Polish: full score after deterministic loop',
                         ['working/'])
 
+    # Post summary comment
+    _post_polish_summary_comment(project_dir, pr_number,
+                                 baseline_diag, latest_diag,
+                                 final_llm_diag=final_llm_diag)
+
     log('\n============================================')
     log('Polish loop complete')
-    if baseline_summary:
-        log(f'  Deterministic baseline: avg {baseline_summary["overall_avg"]:.2f}, '
-            f'{baseline_summary["high_count"]} high / {baseline_summary["medium_count"]} medium priority')
+    log(f'  Deterministic baseline: avg {baseline_summary["overall_avg"]:.2f}, '
+        f'{baseline_summary["high_count"]} high / {baseline_summary["medium_count"]} medium priority')
     log(f'  Final: avg {final_summary["overall_avg"]:.2f}, '
         f'{final_summary["high_count"]} high / {final_summary["medium_count"]} medium priority')
-    if baseline_summary and baseline_summary['overall_avg'] > 0:
+    if baseline_summary['overall_avg'] > 0:
         delta = final_summary['overall_avg'] - baseline_summary['overall_avg']
         log(f'  Deterministic improvement: {delta:+.2f} avg score')
     log('============================================')
