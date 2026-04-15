@@ -488,6 +488,23 @@ def _summarize_diagnosis(diag_rows: list[dict]) -> dict:
     }
 
 
+def _format_scores_table(diag_rows: list[dict]) -> str:
+    """Format diagnosis rows as a markdown table for PR display."""
+    scene_rows = [r for r in diag_rows if r.get('scale') == 'scene']
+    if not scene_rows:
+        return 'No issues detected.'
+
+    lines = ['| Principle | Avg Score | Priority | Weakest Scenes |',
+             '|-----------|-----------|----------|----------------|']
+    for r in sorted(scene_rows, key=lambda x: x.get('priority', 'low') != 'high'):
+        principle = r.get('principle', '').replace('_', ' ')
+        avg = f'{float(r.get("avg_score", 0)):.2f}'
+        priority = r.get('priority', '')
+        worst = r.get('worst_items', '').replace(';', ', ')
+        lines.append(f'| {principle} | {avg} | {priority} | {worst} |')
+    return '\n'.join(lines)
+
+
 def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> list[dict]:
     """Generate a polish plan targeted at high/medium priority principles from diagnosis."""
     high = [r for r in diag_rows if r.get('priority') == 'high' and r.get('scale') == 'scene']

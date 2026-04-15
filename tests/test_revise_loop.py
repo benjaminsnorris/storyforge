@@ -557,3 +557,43 @@ class TestPolishLoopOrchestration:
 
         with pytest.raises(SystemExit):
             _run_polish_loop(project_dir, 3, None, skip_initial_score=True)
+
+
+class TestFormatScoresTable:
+    def test_formats_principles_as_markdown_table(self):
+        from storyforge.cmd_revise import _format_scores_table
+
+        diag_rows = [
+            {'principle': 'avoid_passive', 'scale': 'scene', 'avg_score': '2.1',
+             'worst_items': 's01;s03', 'priority': 'high'},
+            {'principle': 'avoid_adverbs', 'scale': 'scene', 'avg_score': '3.5',
+             'worst_items': 's02', 'priority': 'medium'},
+            {'principle': 'economy_clarity', 'scale': 'scene', 'avg_score': '4.2',
+             'worst_items': '', 'priority': 'low'},
+        ]
+
+        table = _format_scores_table(diag_rows)
+        assert '| Principle' in table
+        assert '| avoid passive' in table
+        assert '| 2.10' in table
+        assert '| high' in table
+        # Low priority still shown
+        assert '| economy clarity' in table
+
+    def test_empty_diag_returns_no_issues(self):
+        from storyforge.cmd_revise import _format_scores_table
+        table = _format_scores_table([])
+        assert 'No issues' in table
+
+    def test_only_scene_scale_included(self):
+        from storyforge.cmd_revise import _format_scores_table
+
+        diag_rows = [
+            {'principle': 'avoid_passive', 'scale': 'scene', 'avg_score': '2.1',
+             'worst_items': 's01', 'priority': 'high'},
+            {'principle': 'genre_contract', 'scale': 'act', 'avg_score': '1.5',
+             'worst_items': '', 'priority': 'high'},
+        ]
+        table = _format_scores_table(diag_rows)
+        assert 'avoid passive' in table
+        assert 'genre contract' not in table
