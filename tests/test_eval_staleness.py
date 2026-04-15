@@ -50,3 +50,58 @@ class TestIsFullLlmCycle:
             f.write('scene_id|principle|score\n')
 
         assert is_full_llm_cycle(cycle_dir) is False
+
+
+class TestWordCountSnapshot:
+    def test_write_snapshot(self, tmp_path):
+        from storyforge.cmd_evaluate import _write_word_count_snapshot
+
+        eval_dir = str(tmp_path / 'eval-20260415')
+        os.makedirs(eval_dir)
+        ref_dir = str(tmp_path / 'reference')
+        os.makedirs(ref_dir)
+
+        with open(os.path.join(ref_dir, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|status|word_count|target_words\n')
+            f.write('s01|1|First|1|Alice|drafted|2847|3000\n')
+            f.write('s02|2|Second|1|Bob|drafted|3102|3000\n')
+
+        _write_word_count_snapshot(eval_dir, str(tmp_path))
+
+        snapshot = os.path.join(eval_dir, 'word-counts.csv')
+        assert os.path.isfile(snapshot)
+
+        with open(snapshot) as f:
+            content = f.read()
+        assert 'id|word_count' in content
+        assert 's01|2847' in content
+        assert 's02|3102' in content
+
+    def test_write_snapshot_skips_zero_wordcount(self, tmp_path):
+        from storyforge.cmd_evaluate import _write_word_count_snapshot
+
+        eval_dir = str(tmp_path / 'eval-20260415')
+        os.makedirs(eval_dir)
+        ref_dir = str(tmp_path / 'reference')
+        os.makedirs(ref_dir)
+
+        with open(os.path.join(ref_dir, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|status|word_count|target_words\n')
+            f.write('s01|1|First|1|Alice|drafted|2847|3000\n')
+            f.write('s02|2|Second|1|Bob|outline|0|3000\n')
+
+        _write_word_count_snapshot(eval_dir, str(tmp_path))
+
+        with open(os.path.join(eval_dir, 'word-counts.csv')) as f:
+            content = f.read()
+        assert 's01|2847' in content
+        assert 's02' not in content
+
+    def test_write_snapshot_no_scenes_csv(self, tmp_path):
+        from storyforge.cmd_evaluate import _write_word_count_snapshot
+
+        eval_dir = str(tmp_path / 'eval-20260415')
+        os.makedirs(eval_dir)
+
+        _write_word_count_snapshot(eval_dir, str(tmp_path))
+        assert not os.path.isfile(os.path.join(eval_dir, 'word-counts.csv'))
