@@ -804,6 +804,24 @@ def _update_cycle(project_dir, cycle_id, field, value):
         f.writelines(lines)
 
 
+def _write_word_count_snapshot(eval_dir: str, project_dir: str) -> None:
+    """Write word count snapshot for staleness detection."""
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(scenes_csv):
+        return
+
+    from storyforge.csv_cli import get_column, list_ids
+    ids = list_ids(scenes_csv)
+    wc_col = get_column(scenes_csv, 'word_count')
+
+    snapshot_path = os.path.join(eval_dir, 'word-counts.csv')
+    with open(snapshot_path, 'w') as f:
+        f.write('id|word_count\n')
+        for scene_id, wc in zip(ids, wc_col):
+            if wc and wc != '0':
+                f.write(f'{scene_id}|{wc}\n')
+
+
 # ============================================================================
 # Main
 # ============================================================================
@@ -1327,6 +1345,9 @@ def main(argv=None):
     if os.path.isfile(os.path.join(eval_dir, 'findings.yaml')):
         log(f'  Browse findings:    cat {eval_dir}/findings.yaml')
     log(f'  Read individual:    ls {eval_dir}/')
+
+    # Write word count snapshot for staleness detection
+    _write_word_count_snapshot(eval_dir, project_dir)
 
     # Cost summary
     print_summary(project_dir, 'evaluate')
