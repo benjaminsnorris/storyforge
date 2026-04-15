@@ -33,6 +33,7 @@ from storyforge.costs import estimate_cost, log_operation, print_summary
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
     update_pr_task, commit_and_push, _git, has_gh, current_branch,
+    get_pr_body, set_pr_body,
 )
 from storyforge.api import (
     invoke_api, invoke_to_file, extract_text, extract_text_from_file,
@@ -525,6 +526,27 @@ Overall avg: **{summary['overall_avg']:.2f}** | {summary['high_count']} high | {
 
 - [x] Initial deterministic scoring
 """
+
+
+def _update_pr_body_iteration(project_dir: str, pr_number: str,
+                              iteration: int, summary: dict, *,
+                              converged: bool = False) -> None:
+    """Append an iteration result line to the PR body's Progress section."""
+    if not pr_number:
+        return
+
+    body = get_pr_body(project_dir, pr_number)
+    if not body:
+        return
+
+    status = (f'avg {summary["overall_avg"]:.2f}, '
+              f'{summary["high_count"]} high / {summary["medium_count"]} medium')
+    if converged:
+        status += ' — converged'
+    line = f'- [x] Iteration {iteration} — {status}\n'
+
+    body = body.rstrip('\n') + '\n' + line + '\n'
+    set_pr_body(project_dir, pr_number, body)
 
 
 def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> list[dict]:

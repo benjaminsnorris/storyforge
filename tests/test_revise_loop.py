@@ -630,3 +630,63 @@ class TestBuildPolishPrBody:
         assert 'My Novel' in body
         assert '10 scenes' in body
         assert '5 max iterations' in body
+
+
+class TestUpdatePrBodyIteration:
+    def test_appends_iteration_line(self, tmp_path, monkeypatch):
+        from storyforge.cmd_revise import _update_pr_body_iteration
+
+        project_dir = str(tmp_path)
+        existing_body = (
+            '## Progress\n\n'
+            '- [x] Initial deterministic scoring\n'
+        )
+
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body',
+                            lambda pd, pr: existing_body)
+        captured = {}
+        def fake_set(pd, pr, body):
+            captured['body'] = body
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body', fake_set)
+
+        summary = {'overall_avg': 3.5, 'high_count': 1, 'medium_count': 0,
+                   'high_principles': ['avoid_passive'], 'medium_principles': [],
+                   'scene_principle_count': 3}
+        _update_pr_body_iteration(project_dir, '42', 1, summary)
+
+        assert '- [x] Iteration 1' in captured['body']
+        assert 'avg 3.50' in captured['body']
+        assert '1 high' in captured['body']
+
+    def test_no_op_without_pr_number(self, tmp_path, monkeypatch):
+        from storyforge.cmd_revise import _update_pr_body_iteration
+
+        # Should not raise
+        _update_pr_body_iteration(str(tmp_path), '', 1,
+                                  {'overall_avg': 0, 'high_count': 0, 'medium_count': 0,
+                                   'high_principles': [], 'medium_principles': [],
+                                   'scene_principle_count': 0})
+
+    def test_appends_convergence_line(self, tmp_path, monkeypatch):
+        from storyforge.cmd_revise import _update_pr_body_iteration
+
+        project_dir = str(tmp_path)
+        existing_body = (
+            '## Progress\n\n'
+            '- [x] Initial deterministic scoring\n'
+            '- [x] Iteration 1 — avg 3.50, 1 high / 0 medium\n'
+        )
+
+        monkeypatch.setattr('storyforge.cmd_revise.get_pr_body',
+                            lambda pd, pr: existing_body)
+        captured = {}
+        monkeypatch.setattr('storyforge.cmd_revise.set_pr_body',
+                            lambda pd, pr, body: captured.update({'body': body}))
+
+        summary = {'overall_avg': 4.0, 'high_count': 0, 'medium_count': 0,
+                   'high_principles': [], 'medium_principles': [],
+                   'scene_principle_count': 3}
+        _update_pr_body_iteration(project_dir, '42', 2, summary, converged=True)
+
+        assert '- [x] Iteration 2' in captured['body']
+        assert 'converged' in captured['body'].lower()
