@@ -1,6 +1,6 @@
 ---
 name: revise
-description: Plan and execute revision — analyze evaluation findings, create upstream + craft passes, execute them, and review results. Use when the author has evaluation results and wants to revise, or after scoring reveals issues, or when the author asks to polish prose.
+description: Plan and execute revision — analyze evaluation findings or scoring data, create upstream + craft passes, execute them, and review results. Automatically detects stale evaluations and shifts to score-driven mode. Use when the author has evaluation results and wants to revise, after scoring reveals issues, or when the author asks to polish prose.
 ---
 
 # Storyforge Revise
@@ -23,12 +23,47 @@ Store this resolved plugin path for use throughout the session.
 6. Existing revision plan: `working/plans/revision-plan.csv`
 7. Latest review: `working/reviews/` (most recent)
 
+### Staleness Check
+
+After reading project state, check whether the evaluation findings are still current:
+
+```bash
+python3 -c "
+from storyforge.scoring import check_eval_staleness
+import json
+result = check_eval_staleness('PROJECT_DIR')
+print(json.dumps(result, indent=2))
+"
+```
+
+Replace `PROJECT_DIR` with the actual project directory path.
+
+**If `stale: true`:** The evaluation findings are historical context only. Do NOT use them to generate specific scene targets or structural recommendations. Base all revision planning on current scores (`diagnosis.csv`). Present a staleness notice to the author:
+
+> **Note:** The evaluation from {eval_date} has been superseded by significant changes ({reasons}). Recommendations below are based on current scores. Evaluation findings are shown as historical context.
+
+**If `stale: false`:** Evaluation findings are current and actionable. Use them alongside scores as normal.
+
+**If `eval_dir: null`:** No evaluation exists. Use scores only — do not recommend evaluation-based revision.
+
 ## Step 2: Determine Mode
 
 Based on the author's request and project state:
 
 ### "Revise" / "Fix the issues" / "Plan revision"
-→ Full revision cycle: analyze findings, plan passes, execute, review.
+→ Full revision cycle: analyze findings, plan passes, execute, review. **If evaluation is stale**, recommend score-driven mode instead (see below).
+
+### "Fix scores" / "Improve scores" / "Score-driven revision"
+→ Score-driven revision: generate a plan purely from `diagnosis.csv` — upstream brief fixes for brief-root-cause items, targeted craft polish for craft-root-cause items. Equivalent to `./storyforge revise --scores`. **This is the recommended mode when the evaluation is stale.** Also use when the author explicitly wants to work from scoring data rather than evaluation findings.
+
+#### When Evaluation Is Stale
+
+When the staleness check fires, present these options instead of the standard revision options:
+
+1. **Score-driven revision** (`storyforge revise --scores`) — Upstream brief fixes + targeted craft polish based on current diagnosis. **Recommended.**
+2. **Polish loop** (`storyforge revise --polish --loop`) — Craft-only convergence from current scores.
+3. **Re-evaluate first** — Run `storyforge evaluate` before planning revision.
+4. **Use evaluation anyway** — Treat stale evaluation findings as still actionable (author override).
 
 ### "Polish" / "Clean up the prose" / "Polish pass"
 → Craft-only revision: skip planning, target scenes with low craft scores. Equivalent to `./storyforge revise --polish`.
@@ -135,6 +170,7 @@ Offer two options:
 > ```bash
 > cd [project_dir] && [plugin_path]/scripts/storyforge-revise [flags]
 > ```
+> For score-driven (upstream + craft from diagnosis): `./storyforge revise --scores`
 > For craft-only: `./storyforge revise --polish`
 > For autonomous polish loop (score→polish→re-score until stable): `./storyforge revise --polish --loop`
 > For AI pattern removal: `./storyforge revise --naturalness`
