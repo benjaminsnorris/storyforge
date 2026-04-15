@@ -365,33 +365,195 @@ class TestDeterministicScore:
         assert os.path.isdir(cycle_dir)
 
 
-class TestExecuteSinglePassModelOverride:
-    """Tests for the model_override parameter on _execute_single_pass."""
+class TestPolishLoopOrchestration:
+    """Integration tests for _run_polish_loop two-phase orchestration."""
 
-    def test_model_override_skips_select_revision_model(self, monkeypatch):
-        """When model_override is set, select_revision_model should not be called."""
-        from storyforge import cmd_revise
+    def _setup_project(self, tmp_path):
+        """Create a minimal project with one scene for loop testing."""
+        project_dir = str(tmp_path / 'project')
+        for d in ('scenes', 'reference', 'working/scores', 'working/plans',
+                  'working/logs'):
+            os.makedirs(os.path.join(project_dir, d))
 
-        called_select = []
-        original_select = cmd_revise.select_revision_model
+        with open(os.path.join(project_dir, 'reference', 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|status|word_count|target_words\n')
+            f.write('s01|1|Test|1|Alice|drafted|100|1000\n')
 
-        def tracking_select(name, purpose=''):
-            called_select.append((name, purpose))
-            return original_select(name, purpose)
+        with open(os.path.join(project_dir, 'scenes', 's01.md'), 'w') as f:
+            f.write('Alice walked slowly through the very quiet garden.\n')
 
-        monkeypatch.setattr('storyforge.cmd_revise.select_revision_model', tracking_select)
+        with open(os.path.join(project_dir, 'storyforge.yaml'), 'w') as f:
+            f.write('project:\n  title: Test\n')
 
-        # Verify the model_override path directly: when override is set,
-        # `model_override or select_revision_model(...)` short-circuits.
-        override = 'claude-sonnet-4-6'
-        result = override or tracking_select('targeted-polish', 'test')
-        assert result == 'claude-sonnet-4-6'
-        assert len(called_select) == 0  # select was never called
+        return project_dir
 
-    def test_no_override_calls_select_revision_model(self):
-        """Without model_override, select_revision_model determines the model."""
-        from storyforge.common import select_revision_model
-        override = None
-        result = override or select_revision_model('targeted-polish', 'craft polish')
-        # Should get a model string back from select_revision_model
-        assert result in ('claude-opus-4-6', 'claude-sonnet-4-6')
+    def _make_diag(self, high=1, medium=0, avg=3.0):
+        """Build fake diagnosis rows."""
+        rows = []
+        if high:
+            rows.append({'principle': 'avoid_passive', 'scale': 'scene',
+                         'avg_score': str(avg), 'worst_items': 's01',
+                         'delta_from_last': '', 'priority': 'high',
+                         'root_cause': 'craft'})
+        if medium:
+            rows.append({'principle': 'avoid_adverbs', 'scale': 'scene',
+                         'avg_score': str(avg + 0.5), 'worst_items': 's01',
+                         'delta_from_last': '', 'priority': 'medium',
+                         'root_cause': 'craft'})
+        return rows
+
+    def test_phase1_uses_deterministic_score(self, tmp_path, monkeypatch):
+        """Phase 1 should call _run_deterministic_score, not _run_lightweight_score."""
+        from storyforge.cmd_revise import _run_polish_loop
+
+        project_dir = self._setup_project(tmp_path)
+        calls = {'deterministic': 0, 'lightweight': 0}
+
+        converged_diag = self._make_diag(high=0, medium=0)
+
+        def fake_deterministic(proj, scene_ids):
+            calls['deterministic'] += 1
+            cycle_dir = os.path.join(proj, 'working', 'scores', f'cycle-{calls["deterministic"]}')
+            os.makedirs(cycle_dir, exist_ok=True)
+            return cycle_dir, converged_diag
+
+        def fake_lightweight(proj, scene_ids):
+            calls['lightweight'] += 1
+            cycle_dir = os.path.join(proj, 'working', 'scores', f'cycle-full-{calls["lightweight"]}')
+            os.makedirs(cycle_dir, exist_ok=True)
+            return cycle_dir, converged_diag
+
+        monkeypatch.setattr('storyforge.cmd_revise._run_deterministic_score', fake_deterministic)
+        monkeypatch.setattr('storyforge.cmd_revise._run_lightweight_score', fake_lightweight)
+        monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+
+        _run_polish_loop(project_dir, 3, None)
+
+        # Phase 1 used deterministic, Phase 2 used lightweight
+        assert calls['deterministic'] == 1
+        assert calls['lightweight'] == 1
+
+    def test_skip_final_score_skips_phase2(self, tmp_path, monkeypatch):
+        """--skip-final-score should prevent _run_lightweight_score from being called."""
+        from storyforge.cmd_revise import _run_polish_loop
+
+        project_dir = self._setup_project(tmp_path)
+        calls = {'lightweight': 0}
+
+        converged_diag = self._make_diag(high=0, medium=0)
+
+        def fake_deterministic(proj, scene_ids):
+            cycle_dir = os.path.join(proj, 'working', 'scores', 'cycle-1')
+            os.makedirs(cycle_dir, exist_ok=True)
+            return cycle_dir, converged_diag
+
+        def fake_lightweight(proj, scene_ids):
+            calls['lightweight'] += 1
+            return '', converged_diag
+
+        monkeypatch.setattr('storyforge.cmd_revise._run_deterministic_score', fake_deterministic)
+        monkeypatch.setattr('storyforge.cmd_revise._run_lightweight_score', fake_lightweight)
+        monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+
+        _run_polish_loop(project_dir, 3, None, skip_final_score=True)
+
+        assert calls['lightweight'] == 0  # Phase 2 was skipped
+
+    def test_polish_uses_sonnet_model(self, tmp_path, monkeypatch):
+        """Phase 1 polish passes should use Sonnet, not Opus."""
+        from storyforge.cmd_revise import _run_polish_loop
+
+        project_dir = self._setup_project(tmp_path)
+        captured_overrides = []
+
+        # First call: high issues (triggers polish). Second call: converged.
+        call_count = [0]
+        def fake_deterministic(proj, scene_ids):
+            call_count[0] += 1
+            cycle_dir = os.path.join(proj, 'working', 'scores', f'cycle-{call_count[0]}')
+            os.makedirs(cycle_dir, exist_ok=True)
+            if call_count[0] == 1:
+                return cycle_dir, self._make_diag(high=1, avg=2.0)
+            return cycle_dir, self._make_diag(high=0, medium=0, avg=4.5)
+
+        def fake_execute(proj, plan_file, plan_rows, iteration, model_override=None):
+            captured_overrides.append(model_override)
+
+        monkeypatch.setattr('storyforge.cmd_revise._run_deterministic_score', fake_deterministic)
+        monkeypatch.setattr('storyforge.cmd_revise._run_lightweight_score',
+                            lambda p, s: ('', self._make_diag(high=0)))
+        monkeypatch.setattr('storyforge.cmd_revise._execute_single_pass', fake_execute)
+        monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+
+        _run_polish_loop(project_dir, 3, None)
+
+        assert len(captured_overrides) == 1
+        assert captured_overrides[0] == 'claude-sonnet-4-6'
+
+    def test_convergence_stops_loop(self, tmp_path, monkeypatch):
+        """Loop should stop when avg doesn't improve between iterations."""
+        from storyforge.cmd_revise import _run_polish_loop
+
+        project_dir = self._setup_project(tmp_path)
+
+        call_count = [0]
+        def fake_deterministic(proj, scene_ids):
+            call_count[0] += 1
+            cycle_dir = os.path.join(proj, 'working', 'scores', f'cycle-{call_count[0]}')
+            os.makedirs(cycle_dir, exist_ok=True)
+            # Same score every time — should converge after iteration 2
+            return cycle_dir, self._make_diag(high=1, avg=3.0)
+
+        polish_count = [0]
+        def fake_execute(proj, plan_file, plan_rows, iteration, model_override=None):
+            polish_count[0] += 1
+
+        monkeypatch.setattr('storyforge.cmd_revise._run_deterministic_score', fake_deterministic)
+        monkeypatch.setattr('storyforge.cmd_revise._run_lightweight_score',
+                            lambda p, s: ('', []))
+        monkeypatch.setattr('storyforge.cmd_revise._execute_single_pass', fake_execute)
+        monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+
+        _run_polish_loop(project_dir, 5, None, skip_final_score=True)
+
+        # Iteration 1: score + polish. Iteration 2: score, avg <= prev → converge.
+        assert call_count[0] == 2
+        assert polish_count[0] == 1
+
+    def test_zero_max_loops_no_crash(self, tmp_path, monkeypatch):
+        """max_loops=0 should not crash even with skip_final_score=True."""
+        from storyforge.cmd_revise import _run_polish_loop
+
+        project_dir = self._setup_project(tmp_path)
+
+        monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+
+        # Should not raise NameError
+        _run_polish_loop(project_dir, 0, None, skip_final_score=True)
+
+    def test_skip_initial_score_exits_on_empty_diagnosis(self, tmp_path, monkeypatch):
+        """--skip-initial-score with no diagnosis.csv should error, not silently converge."""
+        from storyforge.cmd_revise import _run_polish_loop
+
+        project_dir = self._setup_project(tmp_path)
+
+        # Create a latest dir with no diagnosis.csv
+        latest_dir = os.path.join(project_dir, 'working', 'scores', 'latest')
+        os.makedirs(latest_dir, exist_ok=True)
+
+        monkeypatch.setattr('storyforge.cmd_revise.create_branch', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.ensure_branch_pushed', lambda *a: None)
+        monkeypatch.setattr('storyforge.cmd_revise.commit_and_push', lambda *a, **kw: None)
+
+        with pytest.raises(SystemExit):
+            _run_polish_loop(project_dir, 3, None, skip_initial_score=True)

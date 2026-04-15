@@ -915,6 +915,7 @@ def _run_polish_loop(project_dir: str, max_loops: int,
 
     prev_avg = 0.0
     baseline_summary = None
+    summary = _summarize_diagnosis([])  # safe default if loop never executes
 
     for iteration in range(1, max_loops + 1):
         log(f'\n=== Iteration {iteration}/{max_loops}: Deterministic Score ===')
@@ -926,7 +927,9 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                 sys.exit(1)
             diag_rows = _read_diagnosis(latest_dir)
             if not diag_rows:
-                log('WARNING: No diagnosis found in existing scores — generating empty baseline')
+                log('ERROR: --skip-initial-score but no diagnosis.csv in existing scores')
+                log('  Run a scoring cycle first, or remove --skip-initial-score')
+                sys.exit(1)
             log('  Skipped initial scoring (--skip-initial-score) — using existing scores')
             summary = _summarize_diagnosis(diag_rows)
         else:
@@ -964,12 +967,9 @@ def _run_polish_loop(project_dir: str, max_loops: int,
                             f'Polish: upstream brief fixes for {len(upstream_scenes)} scenes',
                             ['reference/', 'scenes/', 'working/'])
 
-        # Generate targeted plan from diagnosis
+        # Generate targeted plan from diagnosis (writes plan file via _create_versioned_plan)
         log(f'\n=== Iteration {iteration}/{max_loops}: Polish (Sonnet) ===')
         plan_rows = _generate_targeted_polish_plan(csv_plan_file, diag_rows)
-
-        plan_rows[0]['status'] = 'pending'
-        _write_csv_plan(csv_plan_file, plan_rows)
 
         # Use Sonnet for mechanical fixes during deterministic phase
         _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration,
