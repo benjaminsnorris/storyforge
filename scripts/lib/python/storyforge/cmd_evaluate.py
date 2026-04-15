@@ -723,8 +723,12 @@ def _estimate_avg_words(project_dir, scene_files):
 # Log usage from API response
 # ============================================================================
 
-def _log_usage(project_dir, log_file_or_response, operation, target, model, duration_s=0):
-    """Log usage from an API response file or dict."""
+def _log_usage(project_dir, log_file_or_response, operation, target, model,
+               duration_s=0, batch=False):
+    """Log usage from an API response file or dict.
+
+    If batch=True, applies the Anthropic Batch API 50% discount to cost.
+    """
     if isinstance(log_file_or_response, dict):
         usage = extract_usage(log_file_or_response)
     elif os.path.isfile(log_file_or_response):
@@ -736,7 +740,7 @@ def _log_usage(project_dir, log_file_or_response, operation, target, model, dura
     else:
         return
 
-    cost = calculate_cost_from_usage(usage, model)
+    cost = calculate_cost_from_usage(usage, model, batch=batch)
     log_operation(
         project_dir, operation, model,
         usage['input_tokens'], usage['output_tokens'], cost,
@@ -1075,7 +1079,8 @@ def main(argv=None):
             eval_txt = os.path.join(log_dir, f'{name}.txt')
 
             if os.path.isfile(eval_json):
-                _log_usage(project_dir, eval_json, 'evaluate', name, eval_models[i])
+                _log_usage(project_dir, eval_json, 'evaluate', name, eval_models[i],
+                           batch=True)
 
             if os.path.isfile(status_file) and open(status_file).read().strip() == 'ok':
                 if os.path.isfile(eval_txt):

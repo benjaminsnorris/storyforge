@@ -488,9 +488,10 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
         if os.path.isfile(scene_json):
             _extract_scene_from_response(scene_json, scene_file)
 
-        # Log usage
+        # Log usage (batch=True for 50% discount pricing)
         if os.path.isfile(scene_json):
-            _log_api_usage(scene_json, 'draft', scene_id, model, project_dir)
+            _log_api_usage(scene_json, 'draft', scene_id, model, project_dir,
+                           batch=True)
 
         # Verify and commit
         wc, ok = _verify_and_commit_scene(
@@ -614,13 +615,16 @@ def _invoke_interactive(prompt: str, model: str, project_dir: str) -> int:
 
 
 def _log_api_usage(log_file: str, operation: str, target: str, model: str,
-                   project_dir: str) -> None:
-    """Log API usage/cost from a JSON response file."""
+                   project_dir: str, batch: bool = False) -> None:
+    """Log API usage/cost from a JSON response file.
+
+    If batch=True, applies the Anthropic Batch API 50% discount to cost.
+    """
     try:
         with open(log_file) as f:
             response = json.load(f)
         usage = extract_usage(response)
-        cost = calculate_cost_from_usage(usage, model)
+        cost = calculate_cost_from_usage(usage, model, batch=batch)
         log_operation(
             project_dir, operation, model,
             usage['input_tokens'], usage['output_tokens'], cost,

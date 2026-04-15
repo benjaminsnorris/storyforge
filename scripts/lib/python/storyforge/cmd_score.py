@@ -851,8 +851,8 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
             cache_read=usage.get('cache_read', 0),
             cache_create=usage.get('cache_create', 0),
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log(f'WARNING: Failed to log usage for {target}: {e}')
 
 
 # ============================================================================
