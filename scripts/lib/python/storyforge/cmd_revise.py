@@ -89,6 +89,11 @@ CSV_PLAN_FIELDS = ['pass', 'name', 'purpose', 'scope', 'targets', 'guidance',
                    'protection', 'findings', 'status', 'model_tier', 'fix_location']
 
 
+def _sanitize_csv_field(value: str) -> str:
+    """Sanitize a value for pipe-delimited CSV: replace pipes and newlines."""
+    return value.replace('|', ',').replace('\n', ' ').replace('\r', '')
+
+
 def _read_csv_plan(plan_file):
     """Read the CSV revision plan. Returns list of row dicts.
 
@@ -111,7 +116,10 @@ def _write_csv_plan(plan_file, rows):
     with open(plan_file, 'w') as f:
         f.write('|'.join(CSV_PLAN_FIELDS) + '\n')
         for row in rows:
-            f.write('|'.join(row.get(field, '') for field in CSV_PLAN_FIELDS) + '\n')
+            f.write('|'.join(
+                _sanitize_csv_field(row.get(field, ''))
+                for field in CSV_PLAN_FIELDS
+            ) + '\n')
 
 
 def _next_plan_number(plans_dir):
@@ -167,8 +175,7 @@ def _write_hone_findings(path, fix_location, targets, guidance):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     target_file = 'scene-briefs.csv' if fix_location == 'brief' else 'scene-intent.csv'
     scene_ids = [t.strip() for t in targets.split(';') if t.strip()] if targets else []
-    # Sanitize guidance: pipes break CSV columns, newlines break rows
-    safe_guidance = guidance.replace('|', ',').replace('\n', ' ').replace('\r', '')
+    safe_guidance = _sanitize_csv_field(guidance)
     with open(path, 'w') as f:
         f.write('scene_id|target_file|fields|guidance\n')
         if not scene_ids:
