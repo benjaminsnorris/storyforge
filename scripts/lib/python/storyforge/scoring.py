@@ -1871,6 +1871,8 @@ def is_full_llm_cycle(cycle_dir: str) -> bool:
     """Check if a scoring cycle contains full LLM results (not deterministic-only).
 
     A full LLM cycle has scores for principles beyond the 6 deterministic ones.
+    Handles both wide format (principles as column headers) and long format
+    (principle column with one row per scene-principle pair).
     """
     scores_file = os.path.join(cycle_dir, 'scene-scores.csv')
     if not os.path.isfile(scores_file):
@@ -1878,10 +1880,24 @@ def is_full_llm_cycle(cycle_dir: str) -> bool:
 
     with open(scores_file, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f, delimiter='|')
-        for row in reader:
-            principle = row.get('principle', '').strip()
-            if principle and principle not in _DETERMINISTIC_PRINCIPLES:
+        if reader.fieldnames is None:
+            return False
+
+        # Wide format: principles are column names (e.g., id|avoid_passive|prose_naturalness|...)
+        # Check if any column header is a non-deterministic principle
+        skip_cols = {'id', 'scene_id', 'principle', 'score', 'rationale'}
+        for col in reader.fieldnames:
+            col = col.strip()
+            if col and col not in skip_cols and col not in _DETERMINISTIC_PRINCIPLES:
                 return True
+
+        # Long format fallback: look for a 'principle' column with non-deterministic values
+        if 'principle' in reader.fieldnames:
+            for row in reader:
+                principle = row.get('principle', '').strip()
+                if principle and principle not in _DETERMINISTIC_PRINCIPLES:
+                    return True
+
     return False
 
 
@@ -1911,18 +1927,27 @@ def check_eval_staleness(project_dir: str) -> dict:
         result['reasons'].append('no evaluation found')
         return result
 
-    eval_dirs = sorted([
+    eval_dirs = [
         d for d in os.listdir(eval_base)
         if d.startswith('eval-') and os.path.isdir(os.path.join(eval_base, d))
-    ])
+    ]
     if not eval_dirs:
         result['stale'] = True
         result['reasons'].append('no evaluation found')
         return result
 
+    # Sort by modification time (most recent last) — handles non-standard names
+    eval_dirs.sort(key=lambda d: os.path.getmtime(os.path.join(eval_base, d)))
     latest_eval = eval_dirs[-1]
     result['eval_dir'] = os.path.join(eval_base, latest_eval)
-    result['eval_date'] = latest_eval.removeprefix('eval-')[:8]
+    # Extract date: try YYYYMMDD after 'eval-', fall back to dir mtime
+    date_part = latest_eval.removeprefix('eval-')
+    if len(date_part) >= 8 and date_part[:8].isdigit():
+        result['eval_date'] = date_part[:8]
+    else:
+        from datetime import datetime
+        mtime = os.path.getmtime(os.path.join(eval_base, latest_eval))
+        result['eval_date'] = datetime.fromtimestamp(mtime).strftime('%Y%m%d')
 
     # Count full LLM scoring runs since eval
     scores_base = os.path.join(project_dir, 'working', 'scores')

@@ -51,6 +51,29 @@ class TestIsFullLlmCycle:
 
         assert is_full_llm_cycle(cycle_dir) is False
 
+    def test_wide_format_full_llm(self, tmp_path):
+        """Wide format: principles as column headers, not a 'principle' column."""
+        from storyforge.scoring import is_full_llm_cycle
+
+        cycle_dir = str(tmp_path / 'cycle-5')
+        os.makedirs(cycle_dir)
+        with open(os.path.join(cycle_dir, 'scene-scores.csv'), 'w') as f:
+            f.write('id|avoid_passive|prose_naturalness|dialogue_authenticity\n')
+            f.write('s01|3.5|2.8|3.2\n')
+
+        assert is_full_llm_cycle(cycle_dir) is True
+
+    def test_wide_format_deterministic_only(self, tmp_path):
+        from storyforge.scoring import is_full_llm_cycle
+
+        cycle_dir = str(tmp_path / 'cycle-6')
+        os.makedirs(cycle_dir)
+        with open(os.path.join(cycle_dir, 'scene-scores.csv'), 'w') as f:
+            f.write('id|avoid_passive|avoid_adverbs|economy_clarity|prose_repetition|no_weather_dreams|sentence_as_thought\n')
+            f.write('s01|3.5|4.0|3.8|4.2|5.0|3.9\n')
+
+        assert is_full_llm_cycle(cycle_dir) is False
+
 
 class TestWordCountSnapshot:
     def test_write_snapshot(self, tmp_path):
