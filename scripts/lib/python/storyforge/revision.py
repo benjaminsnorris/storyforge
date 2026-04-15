@@ -167,10 +167,18 @@ def resolve_scope(scope: str, project_dir: str) -> list[str]:
 
     # Resolve existing IDs to file paths
     matched = []
+    # Collect known scene IDs from CSV for fallback
+    known_ids = {r['id'].strip() for r in active_rows}
+
     for sid in existing_ids:
         path = resolve_scene_file(scene_dir, sid)
         if path:
             matched.append(path)
+        elif sid in known_ids:
+            # Scene exists in metadata but has no prose file — treat as new scene to draft
+            print(f"INFO: Scene '{sid}' has metadata but no prose file — will draft from scratch",
+                  file=sys.stderr)
+            matched.append(os.path.join(scene_dir, f'NEW:{sid}.md'))
         else:
             print(f"WARNING: Scene file missing for id '{sid}': {scene_dir}/{sid}.md",
                   file=sys.stderr)
