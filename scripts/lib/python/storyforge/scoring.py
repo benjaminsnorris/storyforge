@@ -4,6 +4,7 @@ Replaces scripts/lib/scoring.sh — provides score parsing, CSV merging,
 weighted-text generation, diagnosis, and proposal generation.
 """
 
+import csv
 import math
 import os
 import re
@@ -1858,6 +1859,30 @@ def main():
     else:
         print(f'Unknown command: {command}', file=sys.stderr)
         sys.exit(1)
+
+
+_DETERMINISTIC_PRINCIPLES = frozenset([
+    'prose_repetition', 'avoid_passive', 'avoid_adverbs',
+    'no_weather_dreams', 'sentence_as_thought', 'economy_clarity',
+])
+
+
+def is_full_llm_cycle(cycle_dir: str) -> bool:
+    """Check if a scoring cycle contains full LLM results (not deterministic-only).
+
+    A full LLM cycle has scores for principles beyond the 6 deterministic ones.
+    """
+    scores_file = os.path.join(cycle_dir, 'scene-scores.csv')
+    if not os.path.isfile(scores_file):
+        return False
+
+    with open(scores_file, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f, delimiter='|')
+        for row in reader:
+            principle = row.get('principle', '').strip()
+            if principle and principle not in _DETERMINISTIC_PRINCIPLES:
+                return True
+    return False
 
 
 if __name__ == '__main__':
