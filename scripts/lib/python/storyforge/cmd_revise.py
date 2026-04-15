@@ -167,8 +167,12 @@ def _write_hone_findings(path, fix_location, targets, guidance):
     scene_ids = [t.strip() for t in targets.split(';') if t.strip()] if targets else []
     with open(path, 'w') as f:
         f.write('scene_id|target_file|fields|guidance\n')
-        for sid in scene_ids:
-            f.write(f'{sid}|{target_file}||{guidance}\n')
+        if not scene_ids:
+            # Global scope — write a single row with empty scene_id
+            f.write(f'|{target_file}||{guidance}\n')
+        else:
+            for sid in scene_ids:
+                f.write(f'{sid}|{target_file}||{guidance}\n')
 
 
 def _redraft_from_briefs(project_dir, scene_ids, model, log_dir):
@@ -412,25 +416,39 @@ def _generate_structural_plan(project_dir, plan_file):
     for row in proposals:
         dim = row['dimension']
         if dim not in groups:
-            groups[dim] = {'fix_location': row['fix_location'], 'targets': [], 'rationales': []}
+            groups[dim] = {'fix_location': row['fix_location'], 'targets': [], 'rationales': [], 'changes': []}
         target = row.get('target', 'global').strip()
         if target and target != 'global':
             groups[dim]['targets'].append(target)
         groups[dim]['rationales'].append(row.get('rationale', row.get('change', '')))
+        change = row.get('change', '').strip()
+        if change:
+            groups[dim]['changes'].append(change)
 
     # Sort by fix_location priority
     priority = {'structural': 0, 'intent': 1, 'registry': 2, 'brief': 3}
     sorted_dims = sorted(groups.items(), key=lambda x: priority.get(x[1]['fix_location'], 9))
 
+    from storyforge.structural import _PRESCRIPTIONS_FULL
+
     rows = []
     for i, (dim, info) in enumerate(sorted_dims, 1):
+        # Build guidance from prescription text + proposal change directives
+        guidance_parts = []
+        prescription = _PRESCRIPTIONS_FULL.get(dim, '')
+        if prescription:
+            guidance_parts.append(prescription)
+        if info['changes']:
+            guidance_parts.append('Proposed changes: ' + '; '.join(info['changes']))
+        guidance_text = ' '.join(guidance_parts)
+
         rows.append({
             'pass': str(i),
             'name': f'structural-{dim.replace("_", "-")}',
             'purpose': '; '.join(info['rationales']),
             'scope': 'full',
             'targets': ';'.join(info['targets']) if info['targets'] else '',
-            'guidance': '',
+            'guidance': guidance_text,
             'protection': 'all-strengths',
             'findings': '',
             'status': 'pending',

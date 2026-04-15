@@ -749,8 +749,9 @@ class TestHoneIntentSignature:
         )
         assert result == {'scenes_flagged': 0, 'scenes_rewritten': 0, 'fields_rewritten': 0}
 
-    def test_deterministic_subset_fix(self, tmp_path):
-        """Not-subset violations should be fixed without API calls."""
+    def test_deterministic_subset_fix_adds_to_characters(self, tmp_path):
+        """Regression: not_subset fix should add missing on_stage chars to characters,
+        not remove them from on_stage. character_presence rewards on_stage presence."""
         from storyforge.hone import hone_intent
         from storyforge.elaborate import _read_csv_as_map
         ref_dir = tmp_path / 'reference'
@@ -768,9 +769,45 @@ class TestHoneIntentSignature:
             coaching_level='strict',  # strict = no API calls, but deterministic fixes still apply
         )
         assert result['fields_rewritten'] >= 1
-        # Verify the fix was written
+        # Verify: bren was ADDED to characters (not removed from on_stage)
         updated = _read_csv_as_map(str(ref_dir / 'scene-intent.csv'))
+        characters = updated['scene-a']['characters']
         on_stage = updated['scene-a']['on_stage']
-        assert 'bren' not in on_stage.lower()
+        # on_stage should be unchanged — bren should still be there
+        assert 'bren' in on_stage.lower()
         assert 'kael' in on_stage.lower()
         assert 'sera' in on_stage.lower()
+        # characters should now include bren
+        assert 'bren' in characters.lower()
+        assert 'kael' in characters.lower()
+        assert 'sera' in characters.lower()
+
+    def test_not_subset_fix_preserves_existing_characters(self, tmp_path):
+        """The fix should preserve all existing characters when adding new ones."""
+        from storyforge.hone import hone_intent
+        from storyforge.elaborate import _read_csv_as_map
+        ref_dir = tmp_path / 'reference'
+        ref_dir.mkdir()
+        (ref_dir / 'scene-intent.csv').write_text(
+            'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n'
+            'scene-a|Kael reads the letter|action|dread|truth|-/+|action|kael;sera;dana|kael;sera;bren;tomas|\n'
+        )
+        (ref_dir / 'scenes.csv').write_text('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\nscene-a|1|Test|1|kael|here|1|morning|short|action|drafted|1000|1500\n')
+        os.makedirs(str(tmp_path / 'working' / 'logs'), exist_ok=True)
+        result = hone_intent(
+            ref_dir=str(ref_dir),
+            project_dir=str(tmp_path),
+            log_dir=str(tmp_path / 'working' / 'logs'),
+            coaching_level='strict',
+        )
+        assert result['fields_rewritten'] >= 1
+        updated = _read_csv_as_map(str(ref_dir / 'scene-intent.csv'))
+        characters = updated['scene-a']['characters']
+        chars_list = [c.strip().lower() for c in characters.split(';')]
+        # All original characters preserved
+        assert 'kael' in chars_list
+        assert 'sera' in chars_list
+        assert 'dana' in chars_list
+        # Missing on_stage chars added
+        assert 'bren' in chars_list
+        assert 'tomas' in chars_list

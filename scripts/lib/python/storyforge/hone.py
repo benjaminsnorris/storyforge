@@ -2196,6 +2196,9 @@ def hone_intent(
         }
 
     # --- Deterministic fix: not_subset (no API required) ---
+    # Add on_stage characters that are missing from characters (not the reverse).
+    # character_presence scoring rewards characters being in on_stage, so we
+    # expand the characters list rather than shrinking on_stage.
     det_fields_rewritten = 0
     not_subset_issues = [i for i in all_issues if i['issue'] == 'not_subset']
     for issue in not_subset_issues:
@@ -2206,10 +2209,11 @@ def hone_intent(
         valid_chars = {c.strip().lower() for c in chars_raw.split(';') if c.strip()}
         on_stage_raw = intent_map[sid].get('on_stage', '')
         on_stage_entries = [c.strip() for c in on_stage_raw.split(';') if c.strip()]
-        filtered = [c for c in on_stage_entries if c.lower() in valid_chars]
-        new_on_stage = ';'.join(filtered)
-        if new_on_stage != on_stage_raw:
-            intent_map[sid]['on_stage'] = new_on_stage
+        missing = [c for c in on_stage_entries if c.lower() not in valid_chars]
+        if missing:
+            existing_chars = [c.strip() for c in chars_raw.split(';') if c.strip()]
+            new_chars = existing_chars + missing
+            intent_map[sid]['characters'] = ';'.join(new_chars)
             det_fields_rewritten += 1
 
     # Write deterministic fixes immediately if any
