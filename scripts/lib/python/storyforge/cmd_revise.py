@@ -488,7 +488,8 @@ def _generate_structural_plan(project_dir, plan_file):
     return rows
 
 
-def _generate_scores_plan(plan_file: str, diag_rows: list) -> list:
+def _generate_scores_plan(plan_file: str, diag_rows: list,
+                          findings_dir: str = '') -> list:
     """Generate a revision plan from scoring diagnosis data.
 
     Creates upstream (brief) passes for brief-root-cause items and
@@ -505,6 +506,18 @@ def _generate_scores_plan(plan_file: str, diag_rows: list) -> list:
 
     if not actionable:
         return []
+
+    # Load deterministic findings for enhanced guidance
+    findings_guidance = ''
+    if findings_dir:
+        findings = _load_findings(findings_dir)
+        target_scenes = set()
+        for item in actionable:
+            for sid in item['worst_items'].split(';'):
+                sid = sid.strip()
+                if sid:
+                    target_scenes.add(sid)
+        findings_guidance = _build_findings_guidance(findings, sorted(target_scenes))
 
     # Separate by root cause
     brief_items = [r for r in actionable if r.get('root_cause') == 'brief']
@@ -535,6 +548,8 @@ def _generate_scores_plan(plan_file: str, diag_rows: list) -> list:
             + '. Scenes ranked by frequency of appearance across weak principles.'
             + ' Fix abstract, overspecified, or verbose brief fields.'
         )
+        if findings_guidance:
+            guidance += '\n\n' + findings_guidance
 
         pass_num += 1
         rows.append({
@@ -568,6 +583,8 @@ def _generate_scores_plan(plan_file: str, diag_rows: list) -> list:
             + '\n'.join(f'  - {p}' for p in craft_principles)
             + '\nFollow the voice guide strictly. Preserve plot, character, and continuity.'
         )
+        if findings_guidance:
+            guidance += '\n\n' + findings_guidance
 
         pass_num += 1
         rows.append({
@@ -649,6 +666,84 @@ def _format_scores_table(diag_rows: list[dict]) -> str:
         worst = r.get('worst_items', '').replace(';', ', ')
         lines.append(f'| {principle} | {avg} | {priority} | {worst} |')
     return '\n'.join(lines)
+
+
+def _load_findings(cycle_dir: str) -> dict:
+    """Load deterministic scorer findings from a scoring cycle directory.
+
+    Returns dict with 'repetition' (list of finding dicts) and
+    'scenes' (dict mapping scene_id to list of finding dicts).
+    """
+    result = {'repetition': [], 'scenes': {}}
+
+    # Load repetition findings (manuscript-wide)
+    rep_path = os.path.join(cycle_dir, 'repetition-findings.csv')
+    if os.path.isfile(rep_path):
+        with open(rep_path, newline='', encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+        reader = csv.DictReader(raw.splitlines(), delimiter='|')
+        for row in reader:
+            result['repetition'].append({
+                'phrase': row.get('phrase', ''),
+                'category': row.get('category', ''),
+                'severity': row.get('severity', ''),
+                'count': int(row.get('count', '0')),
+                'scene_ids': row.get('scene_ids', '').split(';'),
+            })
+
+    # Load per-scene findings
+    scene_path = os.path.join(cycle_dir, 'scene-findings.csv')
+    if os.path.isfile(scene_path):
+        with open(scene_path, newline='', encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+        reader = csv.DictReader(raw.splitlines(), delimiter='|')
+        for row in reader:
+            sid = row.get('scene_id', '').strip()
+            if sid:
+                result['scenes'].setdefault(sid, []).append({
+                    'principle': row.get('principle', ''),
+                    'finding': row.get('finding', ''),
+                    'detail': row.get('detail', ''),
+                })
+
+    return result
+
+
+def _build_findings_guidance(findings: dict, target_scenes: list[str]) -> str:
+    """Build two-layer guidance from deterministic scorer findings.
+
+    Layer 1: Manuscript-wide repetition patterns (top 10, frequency-aware).
+    Layer 2: Per-scene specifics for target scenes (top 5 per scene).
+    """
+    parts = []
+
+    # Layer 1: Manuscript-wide repetition preamble
+    rep = findings.get('repetition', [])
+    if rep:
+        top_rep = sorted(rep, key=lambda r: -r['count'])[:10]
+        lines = ['Cross-scene repetition patterns (reduce frequency — keep some occurrences):']
+        for r in top_rep:
+            target = max(2, r['count'] // 5)
+            lines.append(f'  - "{r["phrase"]}" ({r["count"]}x, {r["category"]}) '
+                         f'— reduce to {target} occurrences')
+        parts.append('\n'.join(lines))
+
+    # Layer 2: Per-scene specifics
+    scene_findings = findings.get('scenes', {})
+    scene_lines = []
+    for sid in target_scenes:
+        if sid not in scene_findings:
+            continue
+        scene_hits = scene_findings[sid][:5]
+        if not scene_hits:
+            continue
+        details = '; '.join(f'{h["principle"]}: {h["detail"]}' for h in scene_hits)
+        scene_lines.append(f'  {sid}: {details}')
+
+    if scene_lines:
+        parts.append('Scene-specific findings:\n' + '\n'.join(scene_lines))
+
+    return '\n\n'.join(parts)
 
 
 def _build_polish_pr_body(title: str, scene_count: int, max_loops: int,
@@ -739,7 +834,8 @@ def _post_polish_summary_comment(project_dir: str, pr_number: str,
     add_pr_comment(project_dir, pr_number, '\n'.join(lines))
 
 
-def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> list[dict]:
+def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict],
+                                   findings_dir: str = '') -> list[dict]:
     """Generate a polish plan targeted at high/medium priority principles from diagnosis."""
     high = [r for r in diag_rows if r.get('priority') == 'high' and r.get('scale') == 'scene']
     medium = [r for r in diag_rows if r.get('priority') == 'medium' and r.get('scale') == 'scene']
@@ -773,6 +869,14 @@ def _generate_targeted_polish_plan(plan_file: str, diag_rows: list[dict]) -> lis
         for sid in row.get('worst_items', '').split(';'):
             if sid.strip():
                 worst_scenes.add(sid.strip())
+
+    # Append deterministic findings to guidance
+    if findings_dir:
+        findings = _load_findings(findings_dir)
+        target_scenes = sorted(worst_scenes) if worst_scenes else []
+        findings_extra = _build_findings_guidance(findings, target_scenes)
+        if findings_extra:
+            guidance += '\n\n' + findings_extra
 
     rows = [{
         'pass': '1',
@@ -1217,7 +1321,9 @@ def _run_polish_loop(project_dir: str, max_loops: int,
 
         # Generate targeted plan from diagnosis and execute
         log(f'\n=== Iteration {iteration}/{max_loops}: Polish (Sonnet) ===')
-        plan_rows = _generate_targeted_polish_plan(csv_plan_file, latest_diag)
+        latest_cycle = os.path.join(project_dir, 'working', 'scores', 'latest')
+        plan_rows = _generate_targeted_polish_plan(csv_plan_file, latest_diag,
+                                                    findings_dir=latest_cycle)
         _execute_single_pass(project_dir, csv_plan_file, plan_rows, iteration,
                              model_override=sonnet_model)
 
@@ -1685,7 +1791,9 @@ def main(argv=None):
             log('Run: storyforge score first')
             sys.exit(1)
         diag_rows = _read_diagnosis(os.path.dirname(diag_file))
-        plan_rows = _generate_scores_plan(csv_plan_file, diag_rows)
+        findings_dir = os.path.dirname(diag_file)
+        plan_rows = _generate_scores_plan(csv_plan_file, diag_rows,
+                                          findings_dir=findings_dir)
         if not plan_rows:
             log('No actionable items in diagnosis -- nothing to revise')
             sys.exit(0)
