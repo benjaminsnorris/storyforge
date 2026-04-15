@@ -167,14 +167,16 @@ def _write_hone_findings(path, fix_location, targets, guidance):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     target_file = 'scene-briefs.csv' if fix_location == 'brief' else 'scene-intent.csv'
     scene_ids = [t.strip() for t in targets.split(';') if t.strip()] if targets else []
+    # Sanitize guidance: pipes break CSV columns, newlines break rows
+    safe_guidance = guidance.replace('|', ',').replace('\n', ' ').replace('\r', '')
     with open(path, 'w') as f:
         f.write('scene_id|target_file|fields|guidance\n')
         if not scene_ids:
             # Global scope — write a single row with empty scene_id
-            f.write(f'|{target_file}||{guidance}\n')
+            f.write(f'|{target_file}||{safe_guidance}\n')
         else:
             for sid in scene_ids:
-                f.write(f'{sid}|{target_file}||{guidance}\n')
+                f.write(f'{sid}|{target_file}||{safe_guidance}\n')
 
 
 def _redraft_from_briefs(project_dir, scene_ids, model, log_dir):
