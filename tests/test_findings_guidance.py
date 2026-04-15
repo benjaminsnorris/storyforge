@@ -222,6 +222,68 @@ class TestScoresPlanWithFindings:
         assert len(rows) >= 1
 
 
+class TestWriteCsvPlanSanitization:
+    def test_plan_csv_survives_enriched_guidance(self, tmp_path):
+        """Plan rows with pipes and newlines in guidance must round-trip cleanly."""
+        import csv
+        from storyforge.cmd_revise import _write_csv_plan, _read_csv_plan
+
+        plan_file = str(tmp_path / 'revision-plan.csv')
+        rows = [{
+            'pass': '1',
+            'name': 'score-driven-briefs',
+            'purpose': 'Fix briefs for 40 scenes',
+            'scope': 'scene-level',
+            'targets': 's01;s02',
+            'guidance': (
+                'Score-driven fixes.\n'
+                'Cross-scene patterns:\n'
+                '  - "chin on her paws" (16x|character_tell) — reduce to 3\n'
+                '  Scene s01: avoid_passive: 5/20 passive (25%)|cluster=True'
+            ),
+            'protection': 'voice-quality',
+            'findings': 'scores',
+            'status': 'pending',
+            'model_tier': 'sonnet',
+            'fix_location': 'brief',
+        }]
+
+        _write_csv_plan(plan_file, rows)
+
+        # Read back — should parse as exactly 1 row with correct fields
+        read_back = _read_csv_plan(plan_file)
+        assert len(read_back) == 1
+        assert read_back[0]['name'] == 'score-driven-briefs'
+        assert read_back[0]['fix_location'] == 'brief'
+        # Guidance content preserved (minus pipes/newlines)
+        assert 'chin on her paws' in read_back[0]['guidance']
+        assert 'reduce to 3' in read_back[0]['guidance']
+
+    def test_plan_csv_no_corruption_with_multiple_rows(self, tmp_path):
+        """Multi-row plan with enriched guidance should not have row bleeding."""
+        from storyforge.cmd_revise import _write_csv_plan, _read_csv_plan
+
+        plan_file = str(tmp_path / 'revision-plan.csv')
+        rows = [
+            {'pass': '1', 'name': 'brief-fix', 'purpose': 'Fix briefs',
+             'scope': 'full', 'targets': 's01', 'guidance': 'Line 1\nLine 2\nLine 3',
+             'protection': '', 'findings': '', 'status': 'pending',
+             'model_tier': 'sonnet', 'fix_location': 'brief'},
+            {'pass': '2', 'name': 'craft-polish', 'purpose': 'Polish prose',
+             'scope': 'full', 'targets': 's02', 'guidance': 'Simple guidance',
+             'protection': '', 'findings': '', 'status': 'pending',
+             'model_tier': 'opus', 'fix_location': 'craft'},
+        ]
+
+        _write_csv_plan(plan_file, rows)
+        read_back = _read_csv_plan(plan_file)
+
+        assert len(read_back) == 2
+        assert read_back[0]['name'] == 'brief-fix'
+        assert read_back[1]['name'] == 'craft-polish'
+        assert read_back[1]['fix_location'] == 'craft'
+
+
 class TestWriteHoneFindings:
     def test_sanitizes_pipes_and_newlines_in_guidance(self, tmp_path):
         """Guidance with pipes and newlines must not corrupt the hone findings CSV."""
