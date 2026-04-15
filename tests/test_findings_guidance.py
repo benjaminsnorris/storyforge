@@ -220,3 +220,36 @@ class TestScoresPlanWithFindings:
 
         rows = _generate_scores_plan(plan_file, diag_rows, findings_dir=str(tmp_path))
         assert len(rows) >= 1
+
+
+class TestWriteHoneFindings:
+    def test_sanitizes_pipes_and_newlines_in_guidance(self, tmp_path):
+        """Guidance with pipes and newlines must not corrupt the hone findings CSV."""
+        import csv
+        from storyforge.cmd_revise import _write_hone_findings
+
+        findings_path = str(tmp_path / 'findings.csv')
+        # Guidance with pipes (from detail fields) and newlines (from multi-line findings)
+        guidance = (
+            'Score-driven fixes.\n'
+            'Cross-scene patterns:\n'
+            '  - "the edge of the" (21x|signature_phrase) — reduce to 4\n'
+            '  Scene s01: avoid_passive: 5/20 passive (25%)|cluster=True'
+        )
+
+        _write_hone_findings(findings_path, 'brief', 's01;s02', guidance)
+
+        with open(findings_path, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f, delimiter='|')
+            rows = list(reader)
+
+        # Should parse cleanly — exactly 4 columns per row
+        assert len(rows) == 2
+        for row in rows:
+            assert set(row.keys()) == {'scene_id', 'target_file', 'fields', 'guidance'}
+            assert None not in row.values()
+            assert row['scene_id'] in ('s01', 's02')
+            assert row['target_file'] == 'scene-briefs.csv'
+            # Pipes and newlines should be sanitized
+            assert '|' not in row['guidance']
+            assert '\n' not in row['guidance']
