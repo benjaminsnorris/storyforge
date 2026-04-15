@@ -651,6 +651,84 @@ def _format_scores_table(diag_rows: list[dict]) -> str:
     return '\n'.join(lines)
 
 
+def _load_findings(cycle_dir: str) -> dict:
+    """Load deterministic scorer findings from a scoring cycle directory.
+
+    Returns dict with 'repetition' (list of finding dicts) and
+    'scenes' (dict mapping scene_id to list of finding dicts).
+    """
+    result = {'repetition': [], 'scenes': {}}
+
+    # Load repetition findings (manuscript-wide)
+    rep_path = os.path.join(cycle_dir, 'repetition-findings.csv')
+    if os.path.isfile(rep_path):
+        with open(rep_path, newline='', encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+        reader = csv.DictReader(raw.splitlines(), delimiter='|')
+        for row in reader:
+            result['repetition'].append({
+                'phrase': row.get('phrase', ''),
+                'category': row.get('category', ''),
+                'severity': row.get('severity', ''),
+                'count': int(row.get('count', '0')),
+                'scene_ids': row.get('scene_ids', '').split(';'),
+            })
+
+    # Load per-scene findings
+    scene_path = os.path.join(cycle_dir, 'scene-findings.csv')
+    if os.path.isfile(scene_path):
+        with open(scene_path, newline='', encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+        reader = csv.DictReader(raw.splitlines(), delimiter='|')
+        for row in reader:
+            sid = row.get('scene_id', '').strip()
+            if sid:
+                result['scenes'].setdefault(sid, []).append({
+                    'principle': row.get('principle', ''),
+                    'finding': row.get('finding', ''),
+                    'detail': row.get('detail', ''),
+                })
+
+    return result
+
+
+def _build_findings_guidance(findings: dict, target_scenes: list[str]) -> str:
+    """Build two-layer guidance from deterministic scorer findings.
+
+    Layer 1: Manuscript-wide repetition patterns (top 10, frequency-aware).
+    Layer 2: Per-scene specifics for target scenes (top 5 per scene).
+    """
+    parts = []
+
+    # Layer 1: Manuscript-wide repetition preamble
+    rep = findings.get('repetition', [])
+    if rep:
+        top_rep = sorted(rep, key=lambda r: -r['count'])[:10]
+        lines = ['Cross-scene repetition patterns (reduce frequency — keep some occurrences):']
+        for r in top_rep:
+            target = max(2, r['count'] // 5)
+            lines.append(f'  - "{r["phrase"]}" ({r["count"]}x, {r["category"]}) '
+                         f'— reduce to {target} occurrences')
+        parts.append('\n'.join(lines))
+
+    # Layer 2: Per-scene specifics
+    scene_findings = findings.get('scenes', {})
+    scene_lines = []
+    for sid in target_scenes:
+        if sid not in scene_findings:
+            continue
+        scene_hits = scene_findings[sid][:5]
+        if not scene_hits:
+            continue
+        details = '; '.join(f'{h["principle"]}: {h["detail"]}' for h in scene_hits)
+        scene_lines.append(f'  {sid}: {details}')
+
+    if scene_lines:
+        parts.append('Scene-specific findings:\n' + '\n'.join(scene_lines))
+
+    return '\n\n'.join(parts)
+
+
 def _build_polish_pr_body(title: str, scene_count: int, max_loops: int,
                           diag_rows: list[dict]) -> str:
     """Build the initial PR body for a polish loop run."""
