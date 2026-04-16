@@ -454,7 +454,6 @@ def main(argv=None):
     # Improvement cycle
     # =========================================================================
 
-    log('Running improvement cycle...')
     _run_improvement_cycle(
         cycle, cycle_dir, project_dir, weights_file, plugin_dir,
         intent_csv, title,
@@ -1361,11 +1360,20 @@ def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
         log(f'  WARNING: Narrative scoring API call failed: {e}')
 
 
+def _count_high_priority(diagnosis_file: str) -> int:
+    """Count high-priority principles in a diagnosis CSV."""
+    from storyforge.csv_cli import get_column
+    return sum(1 for v in get_column(diagnosis_file, 'priority') if v == 'high')
+
+
 def _run_improvement_cycle(cycle, cycle_dir, project_dir, weights_file,
                            plugin_dir, intent_csv, title):
     """Run diagnosis, proposals, and apply approved changes."""
     from storyforge.scoring import generate_diagnosis, generate_proposals
     from storyforge.csv_cli import update_field as csv_update
+
+    log('Improvement cycle: generating diagnosis...')
+    t0 = time.monotonic()
 
     # Previous cycle
     prev_dir = ''
@@ -1375,20 +1383,28 @@ def _run_improvement_cycle(cycle, cycle_dir, project_dir, weights_file,
             prev_dir = ''
 
     generate_diagnosis(cycle_dir, prev_dir or '-', weights_file)
+    log(f'Improvement cycle: diagnosis complete ({time.monotonic() - t0:.1f}s)')
+
+    log('Improvement cycle: generating proposals...')
+    t0 = time.monotonic()
     generate_proposals(cycle_dir, weights_file)
 
     proposals_file = os.path.join(cycle_dir, 'proposals.csv')
     diagnosis_file = os.path.join(cycle_dir, 'diagnosis.csv')
 
     if not os.path.isfile(proposals_file):
-        log('No proposals generated')
+        log(f'Improvement cycle: no proposals generated ({time.monotonic() - t0:.1f}s)')
         return
 
     # Count proposals
     with open(proposals_file) as f:
         lines = [l.strip() for l in f if l.strip()]
     proposal_count = len(lines) - 1  # subtract header
-    log(f'Generated {proposal_count} improvement proposals')
+
+    # Count high-priority principles from diagnosis
+    high_count = _count_high_priority(diagnosis_file)
+    priority_note = f' ({high_count} high-priority principles)' if high_count else ''
+    log(f'Improvement cycle: {proposal_count} proposals generated{priority_note} ({time.monotonic() - t0:.1f}s)')
 
     if proposal_count <= 0:
         return
@@ -1400,21 +1416,28 @@ def _run_improvement_cycle(cycle, cycle_dir, project_dir, weights_file,
         _approve_all_proposals(proposals_file)
     elif coaching == 'coach':
         log('Coaching level: coach — proposals require interactive approval')
-        # In non-interactive script, just report
+        # No approved proposals in non-interactive script; skip apply
     elif coaching == 'strict':
         log('Coaching level: strict — diagnosis and proposals generated as report only')
         _print_strict_report(diagnosis_file, proposals_file)
         return
 
-    # Apply approved proposals
-    if coaching != 'strict':
+    # Apply approved proposals (only 'full' will have approved proposals here)
+    if coaching == 'full':
+        log('Improvement cycle: applying proposals...')
+        t0 = time.monotonic()
         applied = _apply_proposals(proposals_file, weights_file, intent_csv,
                                    project_dir)
-        log(f'{applied} proposals applied. Run storyforge write to rewrite with updated guidance.')
+        log(f'Improvement cycle: {applied} proposals applied ({time.monotonic() - t0:.1f}s)')
+        if applied:
+            log('Run storyforge write to rewrite with updated guidance.')
 
     # Collect exemplars
+    log('Improvement cycle: collecting exemplars...')
+    t0 = time.monotonic()
     from storyforge.scoring import collect_exemplars
     collect_exemplars(cycle_dir, project_dir, str(cycle))
+    log(f'Improvement cycle: exemplars collected ({time.monotonic() - t0:.1f}s)')
 
     # Check for validated patterns
     from storyforge.scoring import check_validated_patterns
@@ -1427,6 +1450,8 @@ def _run_improvement_cycle(cycle, cycle_dir, project_dir, weights_file,
             parts = line.split('|')
             if len(parts) >= 3:
                 log(f'  {parts[0]} ({parts[1]}): avg improvement {parts[2]}')
+
+    log('Improvement cycle: complete')
 
 
 def _approve_all_proposals(proposals_file: str) -> None:
