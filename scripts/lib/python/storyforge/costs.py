@@ -203,7 +203,19 @@ def print_summary(project_dir: str, operation: str | None = None) -> None:
     print(f'Cache read:    {total_cache_r}')
     print(f'Cache create:  {total_cache_c}')
     print(f'Total cost:    ${total_cost:.4f}')
-    print(f'Total time:    {total_dur}s')
+    print(f'Total time:    {format_duration(total_dur)}')
+
+
+def format_duration(seconds: int) -> str:
+    """Format seconds as Xh Xm Xs, omitting zero leading components."""
+    if seconds < 60:
+        return f'{seconds}s'
+    if seconds < 3600:
+        m, s = divmod(seconds, 60)
+        return f'{m}m {s}s'
+    h, remainder = divmod(seconds, 3600)
+    m, s = divmod(remainder, 60)
+    return f'{h}h {m}m {s}s'
 
 
 def check_threshold(estimated_cost: float, threshold: float = 100.0) -> bool:

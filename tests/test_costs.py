@@ -1,6 +1,6 @@
 """Tests for cost calculation (migrated from test-costs.sh)."""
 
-from storyforge.costs import calculate_cost, estimate_cost, PRICING
+from storyforge.costs import calculate_cost, estimate_cost, format_duration, PRICING
 
 
 class TestPricing:
@@ -51,3 +51,26 @@ class TestEstimateCost:
     def test_zero_scope(self):
         result = estimate_cost('draft', 0, 2000, 'claude-sonnet-4')
         assert result == 0.00
+
+
+class TestFormatDuration:
+    def test_zero(self):
+        assert format_duration(0) == '0s'
+
+    def test_seconds_only(self):
+        assert format_duration(45) == '45s'
+
+    def test_minutes_and_seconds(self):
+        assert format_duration(180) == '3m 0s'
+
+    def test_minutes_and_nonzero_seconds(self):
+        assert format_duration(185) == '3m 5s'
+
+    def test_hours_minutes_seconds(self):
+        assert format_duration(3661) == '1h 1m 1s'
+
+    def test_large_duration(self):
+        assert format_duration(27888) == '7h 44m 48s'
+
+    def test_exact_hour(self):
+        assert format_duration(3600) == '1h 0m 0s'
