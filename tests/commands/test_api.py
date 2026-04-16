@@ -226,7 +226,7 @@ class TestInvokeApi:
     def test_returns_text_on_success(self, monkeypatch):
         from storyforge import api
 
-        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600):
+        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600, system=None):
             return {
                 'content': [{'type': 'text', 'text': 'Success text'}],
                 'usage': {'input_tokens': 10, 'output_tokens': 5},
@@ -239,7 +239,7 @@ class TestInvokeApi:
     def test_returns_empty_string_on_failure(self, monkeypatch):
         from storyforge import api
 
-        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600):
+        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600, system=None):
             raise RuntimeError('network down')
 
         monkeypatch.setattr(api, 'invoke', mock_invoke)
@@ -251,7 +251,7 @@ class TestInvokeApi:
 
         captured = {}
 
-        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600):
+        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600, system=None):
             captured['label'] = label
             captured['timeout'] = timeout
             return {'content': [{'type': 'text', 'text': 'ok'}], 'usage': {}}
@@ -275,7 +275,7 @@ class TestInvokeToFile:
             'usage': {'input_tokens': 10, 'output_tokens': 5},
         }
 
-        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600):
+        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600, system=None):
             return fake_response
 
         monkeypatch.setattr(api, 'invoke', mock_invoke)
@@ -292,7 +292,7 @@ class TestInvokeToFile:
     def test_creates_parent_directories(self, tmp_path, monkeypatch):
         from storyforge import api
 
-        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600):
+        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600, system=None):
             return {'content': [], 'usage': {}}
 
         monkeypatch.setattr(api, 'invoke', mock_invoke)
@@ -309,7 +309,7 @@ class TestInvokeToFile:
             'usage': {'input_tokens': 5, 'output_tokens': 3},
         }
 
-        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600):
+        def mock_invoke(prompt, model, max_tokens=4096, label='', timeout=600, system=None):
             return expected
 
         monkeypatch.setattr(api, 'invoke', mock_invoke)

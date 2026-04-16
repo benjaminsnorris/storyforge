@@ -2,6 +2,7 @@
 
 import json
 import os
+from unittest.mock import patch, MagicMock
 
 
 class TestExtractApiResponse:
@@ -60,6 +61,39 @@ class TestExtractApiUsage:
         result = extract_usage(response)
         assert result.get('cache_read_input_tokens', 0) == 0
         assert result.get('cache_creation_input_tokens', 0) == 0
+
+
+class TestInvokeSystemParam:
+    @patch('storyforge.api._api_request')
+    @patch('storyforge.api.get_api_key', return_value='test-key')
+    def test_invoke_without_system_omits_key(self, mock_key, mock_req):
+        from storyforge.api import invoke
+        mock_req.return_value = {
+            'content': [{'type': 'text', 'text': 'ok'}],
+            'usage': {'input_tokens': 10, 'output_tokens': 5},
+        }
+        invoke('hello', 'claude-sonnet-4-6', max_tokens=100)
+        body = mock_req.call_args[0][1]
+        assert 'system' not in body
+        assert body['messages'] == [{'role': 'user', 'content': 'hello'}]
+
+    @patch('storyforge.api._api_request')
+    @patch('storyforge.api.get_api_key', return_value='test-key')
+    def test_invoke_with_system_includes_key(self, mock_key, mock_req):
+        from storyforge.api import invoke
+        mock_req.return_value = {
+            'content': [{'type': 'text', 'text': 'ok'}],
+            'usage': {'input_tokens': 10, 'output_tokens': 5},
+        }
+        system_blocks = [
+            {'type': 'text', 'text': 'You are helpful.'},
+            {'type': 'text', 'text': 'Reference material here.',
+             'cache_control': {'type': 'ephemeral'}},
+        ]
+        invoke('hello', 'claude-sonnet-4-6', max_tokens=100, system=system_blocks)
+        body = mock_req.call_args[0][1]
+        assert body['system'] == system_blocks
+        assert body['messages'] == [{'role': 'user', 'content': 'hello'}]
 
 
 class TestLogApiUsage:
