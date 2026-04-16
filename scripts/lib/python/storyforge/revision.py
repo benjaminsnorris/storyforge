@@ -482,6 +482,7 @@ def build_revision_prompt(
     pass_config: str = '',
     coaching_level: str = 'full',
     api_mode: bool = False,
+    system_context: bool = False,
 ) -> str:
     """Assemble the full revision prompt.
 
@@ -498,6 +499,11 @@ def build_revision_prompt(
         pass_config: Optional YAML block with pass configuration.
         coaching_level: One of "full", "coach", "strict".
         api_mode: If True, inline file content for API use.
+        system_context: When True, shared reference material (craft engine,
+            scoring rubrics, voice guide, CSV files) is provided via the API
+            system parameter for prompt caching. The prompt skips inlining
+            those materials. Per-pass content (config, scene prose, briefs,
+            exemplars) is still included.
 
     Returns:
         The assembled prompt as a string.
@@ -588,9 +594,9 @@ def build_revision_prompt(
             'markdown with no YAML frontmatter.\n'
         )
 
-    # Inline reference files for API mode
+    # Inline reference files for API mode (skip when system_context provides them)
     inline_references = ''
-    if api_mode:
+    if api_mode and not system_context:
         ref_files = [
             'reference/voice-guide.md',
             'reference/scenes.csv',
@@ -625,23 +631,24 @@ def build_revision_prompt(
     # Scoring overrides
     overrides_section = _build_overrides_section(project_dir, pass_config)
 
-    # Craft sections
-    craft_text = _select_craft_sections(pass_name, purpose)
+    # Craft sections (skip when system_context provides the full craft engine)
     craft_section = ''
-    if craft_text:
-        craft_section = (
-            '\n## Craft Principles for This Pass\n\n'
-            'The following craft principles are relevant to this revision pass. '
-            'Let them guide your edits — do not reproduce them in the output, '
-            'but let them inform every editorial decision.\n\n'
-            + craft_text
-        )
+    if not system_context:
+        craft_text = _select_craft_sections(pass_name, purpose)
+        if craft_text:
+            craft_section = (
+                '\n## Craft Principles for This Pass\n\n'
+                'The following craft principles are relevant to this revision pass. '
+                'Let them guide your edits — do not reproduce them in the output, '
+                'but let them inform every editorial decision.\n\n'
+                + craft_text
+            )
 
     # Scoring rubrics for targeted principles — shows what each score level
     # looks like with literary exemplars, so the reviser knows what to aim for
     targeted_principles = _extract_pass_principles(pass_config, purpose)
     rubric_section = ''
-    if targeted_principles:
+    if targeted_principles and not system_context:
         rubric_text = _load_rubric_sections(targeted_principles)
         if rubric_text:
             rubric_section = (
@@ -684,8 +691,13 @@ def build_revision_prompt(
 
     # Mode-specific instructions
     if api_mode:
+        if system_context:
+            ref_note = ('Reference materials (craft engine, scoring rubrics, '
+                        'voice guide, registries) are provided in the system context.')
+        else:
+            ref_note = inline_references
         parts.append(
-            f'\n## Reference Context\n\n{inline_references}\n'
+            f'\n## Reference Context\n\n{ref_note}\n'
             f'\n## Scene Content\n\n'
             'Below are the full contents of every in-scope scene file. '
             'Read them all before making changes.\n'
@@ -1061,6 +1073,7 @@ def main():
         --config <yaml_block>           Pass configuration YAML
         --coaching full|coach|strict    Coaching level (default: full)
         --api-mode                      Inline files for API use
+        --system-context                Shared refs provided via system param
     """
     if len(sys.argv) < 2:
         print('Usage: python3 -m storyforge.revision <command> [args]', file=sys.stderr)
@@ -1097,6 +1110,7 @@ def main():
         pass_config = ''
         coaching_level = 'full'
         api_mode = False
+        system_context = False
         i = 6
         while i < len(sys.argv):
             if sys.argv[i] == '--config' and i + 1 < len(sys.argv):
@@ -1108,6 +1122,9 @@ def main():
             elif sys.argv[i] == '--api-mode':
                 api_mode = True
                 i += 1
+            elif sys.argv[i] == '--system-context':
+                system_context = True
+                i += 1
             else:
                 print(f'Unknown option: {sys.argv[i]}', file=sys.stderr)
                 sys.exit(1)
@@ -1118,6 +1135,7 @@ def main():
                 pass_config=pass_config,
                 coaching_level=coaching_level,
                 api_mode=api_mode,
+                system_context=system_context,
             )
             print(prompt)
         except (FileNotFoundError, ValueError) as e:

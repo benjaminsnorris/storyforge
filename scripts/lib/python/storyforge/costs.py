@@ -122,21 +122,86 @@ def estimate_cost(operation: str, scope_count: int, avg_words: int,
     return (input_tokens * price_in + output_tokens * price_out) / 1_000_000
 
 
-def print_summary(project_dir: str, operation: str | None = None) -> None:
-    """Print cost totals from the ledger, optionally filtered by operation."""
-    ledger_file = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
-
-    if not os.path.exists(ledger_file):
-        print('No cost data available.')
-        return
-
-    count = 0
+def _accumulate(rows: list, col_map: dict) -> dict:
+    """Sum up token counts, cost, and duration from a list of row-part lists."""
     total_input = 0
     total_output = 0
     total_cache_r = 0
     total_cache_c = 0
     total_cost = 0.0
     total_dur = 0
+
+    for parts in rows:
+        for col_name, target in [
+            ('input_tokens', 'input'),
+            ('output_tokens', 'output'),
+            ('cache_read', 'cache_r'),
+            ('cache_create', 'cache_c'),
+            ('duration_s', 'dur'),
+        ]:
+            if col_name in col_map and col_map[col_name] < len(parts):
+                val = parts[col_map[col_name]]
+                if val:
+                    if col_name == 'input_tokens':
+                        total_input += int(val)
+                    elif col_name == 'output_tokens':
+                        total_output += int(val)
+                    elif col_name == 'cache_read':
+                        total_cache_r += int(val)
+                    elif col_name == 'cache_create':
+                        total_cache_c += int(val)
+                    elif col_name == 'duration_s':
+                        total_dur += int(val)
+        if 'cost_usd' in col_map and col_map['cost_usd'] < len(parts):
+            val = parts[col_map['cost_usd']]
+            if val:
+                total_cost += float(val)
+
+    return {
+        'input': total_input,
+        'output': total_output,
+        'cache_r': total_cache_r,
+        'cache_c': total_cache_c,
+        'cost': total_cost,
+        'dur': total_dur,
+    }
+
+
+def _print_section(label: str, count: int, totals: dict, session_mode: bool) -> None:
+    """Print one summary section. session_mode uses Cost:/Time: labels; otherwise Total cost:/Total time:."""
+    inv_word = 'invocation' if count == 1 else 'invocations'
+    if session_mode:
+        print(f'--- {label} ({count} {inv_word}) ---')
+        print(f'Input tokens:  {totals["input"]:,}')
+        print(f'Output tokens: {totals["output"]:,}')
+        print(f'Cache read:    {totals["cache_r"]:,}')
+        print(f'Cache create:  {totals["cache_c"]:,}')
+        print(f'Cost:          ${totals["cost"]:.4f}')
+        print(f'Time:          {format_duration(totals["dur"])}')
+    else:
+        print(f'--- Cost Summary: {label} ---')
+        print(f'Invocations:   {count}')
+        print(f'Input tokens:  {totals["input"]:,}')
+        print(f'Output tokens: {totals["output"]:,}')
+        print(f'Cache read:    {totals["cache_r"]:,}')
+        print(f'Cache create:  {totals["cache_c"]:,}')
+        print(f'Total cost:    ${totals["cost"]:.4f}')
+        print(f'Total time:    {format_duration(totals["dur"])}')
+
+
+def print_summary(project_dir: str, operation: str | None = None,
+                  session_start: str | None = None) -> None:
+    """Print cost totals from the ledger, optionally filtered by operation.
+
+    If session_start (ISO timestamp string) is provided, shows two sections:
+    "This session" (rows at or after session_start) and "Project total" (all rows).
+    When session_start is None, shows the existing single-section format.
+    """
+    ledger_file = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
+
+    if not os.path.exists(ledger_file):
+        print('No cost data available.')
+        return
 
     with open(ledger_file) as f:
         header_line = f.readline().strip()
@@ -146,64 +211,59 @@ def print_summary(project_dir: str, operation: str | None = None) -> None:
         headers = header_line.split('|')
         col_map = {name: idx for idx, name in enumerate(headers)}
 
-        # Require at least the operation column to function
         if 'operation' not in col_map:
             print('No cost data available.')
             return
 
+        all_rows = []
         for line in f:
             line = line.strip()
             if not line:
                 continue
             parts = line.split('|')
-
             op_idx = col_map['operation']
             if op_idx >= len(parts):
                 continue
-            row_op = parts[op_idx]
-            if operation and row_op != operation:
+            if operation and parts[op_idx] != operation:
                 continue
+            all_rows.append(parts)
 
-            count += 1
-            for col_name, accumulate in [
-                ('input_tokens', lambda v: v),
-                ('output_tokens', lambda v: v),
-                ('cache_read', lambda v: v),
-                ('cache_create', lambda v: v),
-                ('duration_s', lambda v: v),
-            ]:
-                if col_name in col_map and col_map[col_name] < len(parts):
-                    val = parts[col_map[col_name]]
-                    if val:
-                        if col_name == 'input_tokens':
-                            total_input += int(val)
-                        elif col_name == 'output_tokens':
-                            total_output += int(val)
-                        elif col_name == 'cache_read':
-                            total_cache_r += int(val)
-                        elif col_name == 'cache_create':
-                            total_cache_c += int(val)
-                        elif col_name == 'duration_s':
-                            total_dur += int(val)
-            if 'cost_usd' in col_map and col_map['cost_usd'] < len(parts):
-                val = parts[col_map['cost_usd']]
-                if val:
-                    total_cost += float(val)
-
-    if count == 0:
+    if not all_rows:
         label = f' for operation: {operation}' if operation else ''
         print(f'No cost data{label}.')
         return
 
-    label = operation or 'all operations'
-    print(f'--- Cost Summary: {label} ---')
-    print(f'Invocations:   {count}')
-    print(f'Input tokens:  {total_input}')
-    print(f'Output tokens: {total_output}')
-    print(f'Cache read:    {total_cache_r}')
-    print(f'Cache create:  {total_cache_c}')
-    print(f'Total cost:    ${total_cost:.4f}')
-    print(f'Total time:    {total_dur}s')
+    op_label = operation or 'all operations'
+
+    if session_start is not None:
+        ts_idx = col_map.get('timestamp', -1)
+        if ts_idx >= 0:
+            session_rows = [p for p in all_rows if ts_idx < len(p) and p[ts_idx] >= session_start]
+        else:
+            session_rows = []
+
+        if session_rows:
+            session_totals = _accumulate(session_rows, col_map)
+            _print_section(f'This session: {op_label}', len(session_rows), session_totals, session_mode=True)
+            print()
+
+        project_totals = _accumulate(all_rows, col_map)
+        _print_section(f'Project total: {op_label}', len(all_rows), project_totals, session_mode=True)
+    else:
+        totals = _accumulate(all_rows, col_map)
+        _print_section(op_label, len(all_rows), totals, session_mode=False)
+
+
+def format_duration(seconds: int) -> str:
+    """Format seconds as Xh Xm Xs, omitting zero leading components."""
+    if seconds < 60:
+        return f'{seconds}s'
+    if seconds < 3600:
+        m, s = divmod(seconds, 60)
+        return f'{m}m {s}s'
+    h, remainder = divmod(seconds, 3600)
+    m, s = divmod(remainder, 60)
+    return f'{h}h {m}m {s}s'
 
 
 def check_threshold(estimated_cost: float, threshold: float = 100.0) -> bool:

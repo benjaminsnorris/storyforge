@@ -636,7 +636,8 @@ def _get_scene_overrides(scene_id: str, project_dir: str) -> str:
 
 def build_scene_prompt(scene_id: str, project_dir: str,
                        coaching_level: str = 'full',
-                       api_mode: bool = False) -> str:
+                       api_mode: bool = False,
+                       system_context: bool = False) -> str:
     """Assemble the complete drafting prompt for a single scene.
 
     Args:
@@ -645,6 +646,11 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         coaching_level: One of ``full``, ``coach``, ``strict``.
         api_mode: When True, inline reference file contents directly into
             the prompt. When False, emit file paths for ``claude -p``.
+        system_context: When True, shared reference material (reference files,
+            craft engine, AI-tell vocabulary, voice profile) is provided via
+            the API ``system`` parameter and should NOT be inlined in the
+            user prompt. Project-specific weighted directives, scene briefs,
+            and per-scene overrides are still included.
 
     Returns:
         The assembled prompt string.
@@ -693,14 +699,15 @@ def build_scene_prompt(scene_id: str, project_dir: str,
 
     ref_list = ''
     ref_inline = ''
-    for rf in ref_files:
-        ref_list += f'\n- {rf}'
-        if api_mode:
-            full_path = os.path.join(project_dir, rf)
-            if os.path.isfile(full_path):
-                with open(full_path) as f:
-                    content = f.read()
-                ref_inline += f'\n=== FILE: {rf} ===\n{content}\n=== END FILE ===\n'
+    if not system_context:
+        for rf in ref_files:
+            ref_list += f'\n- {rf}'
+            if api_mode:
+                full_path = os.path.join(project_dir, rf)
+                if os.path.isfile(full_path):
+                    with open(full_path) as f:
+                        content = f.read()
+                    ref_inline += f'\n=== FILE: {rf} ===\n{content}\n=== END FILE ===\n'
 
     # --- Previous scene content (API mode) ---
     prev_scene_content = ''
@@ -717,8 +724,9 @@ def build_scene_prompt(scene_id: str, project_dir: str,
 
     # --- Craft principles ---
     craft_sections = build_weighted_directive(project_dir)
-    if not craft_sections:
-        # Fallback: extract from craft engine
+    if not craft_sections and not system_context:
+        # Fallback: extract from craft engine (skipped when system_context
+        # provides the craft engine via the API system parameter)
         craft_sections = extract_craft_sections(plugin_dir, 2, 3, 4, 5)
 
     overrides = _get_scene_overrides(scene_id, project_dir)
@@ -726,11 +734,16 @@ def build_scene_prompt(scene_id: str, project_dir: str,
         craft_sections += f'\n\n## Scene-Specific Notes\n{overrides}'
 
     # --- AI-tell vocabulary constraint ---
-    ai_tell_words = load_ai_tell_words(plugin_dir)
+    # When system_context is True, the AI-tell word list and voice profile
+    # are provided in the system parameter — skip inlining them here.
+    ai_tell_words = [] if system_context else load_ai_tell_words(plugin_dir)
     ai_tell_block = build_ai_tell_constraint(ai_tell_words)
 
     # --- Voice profile ---
-    voice_profile_project, voice_profile_chars = load_voice_profile(project_dir)
+    if system_context:
+        voice_profile_project, voice_profile_chars = {}, {}
+    else:
+        voice_profile_project, voice_profile_chars = load_voice_profile(project_dir)
     pov_char = ''
     if csv_file:
         pov_char = read_csv_field(csv_file, scene_id, 'pov')
@@ -788,7 +801,12 @@ def build_scene_prompt(scene_id: str, project_dir: str,
 
     # ===== STEP 1: REFERENCE MATERIALS =====
     lines.append('===== STEP 1: REFERENCE MATERIALS =====')
-    if api_mode:
+    if system_context:
+        lines.append('')
+        lines.append('Reference materials (world bible, character bible, voice guide, '
+                     'story architecture, craft engine, vocabulary constraints) have '
+                     'been provided in the system context. Internalize them before writing.')
+    elif api_mode:
         lines.append('')
         lines.append('The following reference materials contain the world bible, '
                      'character bible, story architecture, timeline, and all '
@@ -805,7 +823,7 @@ def build_scene_prompt(scene_id: str, project_dir: str,
                      'story architecture, timeline, and all other reference '
                      'material for the project. Internalize them before writing.')
 
-    if voice_guide:
+    if voice_guide and not system_context:
         lines.append('')
         lines.append('Pay special attention to the voice guide — this is the '
                      'voice and style guide. Follow it exactly.')
@@ -1319,6 +1337,7 @@ def build_scene_prompt_from_briefs(
     plugin_dir: str,
     coaching_level: str = 'full',
     dep_scenes: list[str] | None = None,
+    system_context: bool = False,
 ) -> str:
     """Build a drafting prompt from the three-file scene CSV model.
 
@@ -1334,6 +1353,9 @@ def build_scene_prompt_from_briefs(
         coaching_level: full/coach/strict.
         dep_scenes: Scene IDs this scene depends on (from continuity_deps).
                     Their brief rows are included for context.
+        system_context: When True, shared reference material (voice guide,
+            character bible, AI-tell vocabulary, voice profile) is provided
+            via the API ``system`` parameter and should NOT be inlined.
     """
     from .elaborate import get_scene, get_scenes
 
@@ -1378,22 +1400,24 @@ def build_scene_prompt_from_briefs(
         if dep_parts:
             dep_block = "## Dependency Scenes\n\nThese scenes happen before this one. Their outcomes and knowledge states are your starting context.\n\n" + '\n\n'.join(dep_parts)
 
-    # Voice guide
+    # Voice guide (skipped when system_context provides it)
     voice_guide = ''
-    voice_path = os.path.join(ref_dir, 'voice-guide.md')
-    if os.path.isfile(voice_path):
-        with open(voice_path) as f:
-            voice_guide = f"## Voice Guide\n\n{f.read().strip()}"
+    if not system_context:
+        voice_path = os.path.join(ref_dir, 'voice-guide.md')
+        if os.path.isfile(voice_path):
+            with open(voice_path) as f:
+                voice_guide = f"## Voice Guide\n\n{f.read().strip()}"
 
-    # Character bible entries for on-stage characters
+    # Character bible entries for on-stage characters (skipped when system_context)
     char_block = ''
-    char_path = os.path.join(ref_dir, 'character-bible.md')
-    if os.path.isfile(char_path):
-        on_stage = scene.get('on_stage', '')
-        if on_stage:
-            char_block = f"## Character Bible (on-stage: {on_stage})\n\n"
-            with open(char_path) as f:
-                char_block += f.read().strip()
+    if not system_context:
+        char_path = os.path.join(ref_dir, 'character-bible.md')
+        if os.path.isfile(char_path):
+            on_stage = scene.get('on_stage', '')
+            if on_stage:
+                char_block = f"## Character Bible (on-stage: {on_stage})\n\n"
+                with open(char_path) as f:
+                    char_block += f.read().strip()
 
     # Physical state context
     state_block = ''
@@ -1429,11 +1453,16 @@ def build_scene_prompt_from_briefs(
     craft_block = f"## Craft Principles\n\n{craft}" if craft else ''
 
     # --- AI-tell vocabulary constraint ---
-    ai_tell_words = load_ai_tell_words(plugin_dir)
+    # When system_context is True, AI-tell words and voice profile are in the
+    # system parameter — skip inlining them here.
+    ai_tell_words = [] if system_context else load_ai_tell_words(plugin_dir)
     ai_tell_block = build_ai_tell_constraint(ai_tell_words)
 
     # --- Voice profile ---
-    voice_profile_project, voice_profile_chars = load_voice_profile(project_dir)
+    if system_context:
+        voice_profile_project, voice_profile_chars = {}, {}
+    else:
+        voice_profile_project, voice_profile_chars = load_voice_profile(project_dir)
     pov_char = scene.get('pov', '')
 
     # Merge banned words: project profile + universal AI-tell list

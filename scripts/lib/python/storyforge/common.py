@@ -239,6 +239,130 @@ def extract_craft_sections(*section_nums: int) -> str:
 
 
 # ============================================================================
+# Shared context for prompt caching
+# ============================================================================
+
+_shared_context_cache: dict[str, list[dict]] = {}
+
+
+def clear_shared_context_cache() -> None:
+    """Clear the in-process shared context cache.
+
+    Call after operations that modify reference files (commits, hone passes)
+    so the next build_shared_context reads fresh data.
+    """
+    _shared_context_cache.clear()
+
+
+# Minimum tokens per cache breakpoint (estimated at ~4 chars/token)
+_MIN_CACHE_CHARS = {
+    'opus': 4096 * 4,
+    'sonnet': 2048 * 4,
+    'haiku': 2048 * 4,
+}
+
+
+def _model_tier(model: str) -> str:
+    """Map model name to pricing tier for cache threshold."""
+    m = model.lower()
+    if 'opus' in m:
+        return 'opus'
+    if 'haiku' in m:
+        return 'haiku'
+    return 'sonnet'
+
+
+def _read_if_exists(path: str) -> str:
+    """Read a file if it exists, return empty string otherwise."""
+    if not os.path.isfile(path):
+        return ''
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'WARNING: Could not read {path}: {e}')
+        return ''
+
+
+def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
+    """Assemble project reference materials as cacheable system blocks.
+
+    Two-tier structure:
+    - Tier 1 (1h TTL): Plugin-level references (craft engine, rubrics, AI-tell words)
+    - Tier 2 (5m TTL): Project-level references (bibles, voice guide, registries)
+
+    Results are cached in-process so repeated calls don't re-read files.
+
+    Args:
+        project_dir: Path to the Storyforge project.
+        model: Model ID for determining minimum cache token threshold.
+
+    Returns:
+        List of content blocks for the API 'system' parameter.
+    """
+    cache_key = f'{project_dir}:{model}'
+    if cache_key in _shared_context_cache:
+        return _shared_context_cache[cache_key]
+
+    plugin_dir = get_plugin_dir()
+    min_chars = _MIN_CACHE_CHARS.get(_model_tier(model), 4096 * 4)
+
+    # --- Tier 1: Plugin-level (near-permanent) ---
+    tier1_sources = [
+        (os.path.join(plugin_dir, 'references', 'craft-engine.md'), 'Craft Engine'),
+        (os.path.join(plugin_dir, 'references', 'scoring-rubrics.md'), 'Scoring Rubrics'),
+        (os.path.join(plugin_dir, 'references', 'ai-tell-words.csv'), 'AI-Tell Vocabulary'),
+    ]
+
+    tier1_blocks = []
+    tier1_chars = 0
+    for path, label in tier1_sources:
+        content = _read_if_exists(path)
+        if content:
+            tier1_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
+            tier1_chars += len(content) + len(label) + 10
+
+    # --- Tier 2: Project-level (session-stable) ---
+    ref_dir = os.path.join(project_dir, 'reference')
+    tier2_sources = [
+        (os.path.join(ref_dir, 'character-bible.md'), 'Character Bible'),
+        (os.path.join(ref_dir, 'world-bible.md'), 'World Bible'),
+        (os.path.join(ref_dir, 'voice-guide.md'), 'Voice Guide'),
+        (os.path.join(ref_dir, 'voice-profile.csv'), 'Voice Profile'),
+        (os.path.join(ref_dir, 'characters.csv'), 'Character Registry'),
+        (os.path.join(ref_dir, 'locations.csv'), 'Location Registry'),
+        (os.path.join(ref_dir, 'mice-threads.csv'), 'MICE Thread Registry'),
+    ]
+
+    tier2_blocks = []
+    tier2_chars = 0
+    for path, label in tier2_sources:
+        content = _read_if_exists(path)
+        if content:
+            tier2_blocks.append({'type': 'text', 'text': f'=== {label} ===\n\n{content}'})
+            tier2_chars += len(content) + len(label) + 10
+
+    # --- Apply cache_control breakpoints ---
+    blocks = []
+
+    if tier1_blocks:
+        if tier1_chars >= min_chars:
+            # Tier 1 meets threshold — add breakpoint with extended TTL
+            tier1_blocks[-1]['cache_control'] = {'type': 'ephemeral', 'ttl': 3600}
+        blocks.extend(tier1_blocks)
+
+    if tier2_blocks:
+        cumulative_chars = tier1_chars + tier2_chars
+        if cumulative_chars >= min_chars:
+            # Cumulative prefix meets threshold — add breakpoint with default TTL
+            tier2_blocks[-1]['cache_control'] = {'type': 'ephemeral'}
+        blocks.extend(tier2_blocks)
+
+    _shared_context_cache[cache_key] = blocks
+    return blocks
+
+
+# ============================================================================
 # Pipeline manifest
 # ============================================================================
 

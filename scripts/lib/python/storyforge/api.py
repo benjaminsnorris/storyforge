@@ -109,7 +109,7 @@ def _api_request(path: str, body: dict | None = None, method: str = 'GET',
 
 
 def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
-           timeout: int = API_TIMEOUT) -> dict:
+           timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
     """Call the Anthropic Messages API.
 
     Args:
@@ -118,6 +118,7 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
         max_tokens: Maximum output tokens.
         label: Optional label for heartbeat messages (e.g., 'revision pass 3').
         timeout: Socket timeout in seconds (default API_TIMEOUT).
+        system: Optional list of system content blocks (supports cache_control).
 
     Returns:
         Full API response dict.
@@ -127,6 +128,8 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
         'max_tokens': max_tokens,
         'messages': [{'role': 'user', 'content': prompt}],
     }
+    if system:
+        body['system'] = system
     heartbeat = _Heartbeat(label or model)
     heartbeat.start()
     try:
@@ -136,7 +139,7 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
 
 
 def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 4096, label: str = '',
-                   timeout: int = API_TIMEOUT) -> dict:
+                   timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> dict:
     """Call the API and write the response to a JSON file.
 
     Args:
@@ -146,11 +149,12 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
         max_tokens: Maximum output tokens.
         label: Optional label for heartbeat messages.
         timeout: Socket timeout in seconds (default API_TIMEOUT).
+        system: Optional list of system content blocks (supports cache_control).
 
     Returns:
         Full API response dict.
     """
-    response = invoke(prompt, model, max_tokens, label=label, timeout=timeout)
+    response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system)
     os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
     with open(log_file, 'w') as f:
         json.dump(response, f)
@@ -158,14 +162,14 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
 
 
 def invoke_api(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
-               timeout: int = API_TIMEOUT) -> str:
+               timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> str:
     """High-level convenience: invoke API and return text response.
 
     Returns empty string on failure (logs warning but doesn't raise).
     Used by git.py review phase, runner.py healing zones, and command modules.
     """
     try:
-        response = invoke(prompt, model, max_tokens, label=label, timeout=timeout)
+        response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system)
         return extract_text(response)
     except Exception as e:
         from storyforge.common import log
@@ -221,6 +225,31 @@ def calculate_cost_from_usage(usage: dict, model: str, batch: bool = False) -> f
         cache_create=usage.get('cache_create', 0),
         batch=batch,
     )
+
+
+def build_batch_request(custom_id: str, prompt: str, model: str,
+                        max_tokens: int = 4096,
+                        system: list[dict] | None = None) -> dict:
+    """Build a single batch request item (one JSONL line).
+
+    Args:
+        custom_id: Unique identifier for this request in the batch.
+        prompt: The user message text.
+        model: Model ID.
+        max_tokens: Maximum output tokens.
+        system: Optional list of system content blocks with cache_control.
+
+    Returns:
+        Dict suitable for JSON serialization as one JSONL line.
+    """
+    params = {
+        'model': model,
+        'max_tokens': max_tokens,
+        'messages': [{'role': 'user', 'content': prompt}],
+    }
+    if system:
+        params['system'] = system
+    return {'custom_id': custom_id, 'params': params}
 
 
 # ============================================================================

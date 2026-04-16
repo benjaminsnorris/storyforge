@@ -29,7 +29,7 @@ from datetime import datetime
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field,
     select_model, get_plugin_dir, install_signal_handlers,
-    get_coaching_level,
+    get_coaching_level, build_shared_context,
 )
 from storyforge.costs import estimate_cost, log_operation, print_summary
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -41,7 +41,7 @@ from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file,
     extract_usage, calculate_cost_from_usage,
     submit_batch, poll_batch, download_batch_results,
-    get_api_key, invoke_api,
+    get_api_key, invoke_api, build_batch_request,
 )
 
 
@@ -975,7 +975,8 @@ def main(argv=None):
         return
 
     # ---- START REAL EXECUTION ----
-    session_start = time.time()
+    session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    _wall_start = time.time()
 
     # Pipeline manifest
     cycle_id = '0'
@@ -1045,20 +1046,18 @@ def main(argv=None):
     succeeded = []
     failed = []
 
+    # Build shared context for prompt caching (batch + direct modes)
+    system = build_shared_context(project_dir, model=eval_models[0] if eval_models else '')
+
     if eval_mode == 'batch':
+
         # Build JSONL batch
         log(f'Building batch request for {len(eval_names)} evaluators...')
         batch_file = os.path.join(log_dir, f'eval-batch-{eval_timestamp}.jsonl')
         with open(batch_file, 'w') as f:
             for i, name in enumerate(eval_names):
-                request = {
-                    'custom_id': name,
-                    'params': {
-                        'model': eval_models[i],
-                        'max_tokens': 8192,
-                        'messages': [{'role': 'user', 'content': eval_prompts[i]}],
-                    },
-                }
+                request = build_batch_request(name, eval_prompts[i], eval_models[i], 8192,
+                                              system=system)
                 f.write(json.dumps(request) + '\n')
                 log(f'  Added to batch: {name} (model: {eval_models[i]})')
 
@@ -1116,7 +1115,8 @@ def main(argv=None):
             eval_log = os.path.join(log_dir, f'eval-{name}.log')
 
             try:
-                response = invoke_to_file(prompt, model, eval_log, max_tokens=8192)
+                response = invoke_to_file(prompt, model, eval_log, max_tokens=8192,
+                                          system=system)
                 text = extract_text(response)
                 if text:
                     os.makedirs(eval_dir, exist_ok=True)
@@ -1214,7 +1214,8 @@ def main(argv=None):
 
         if api_mode:
             log(f'Running synthesis via direct API (model: {synth_model})...')
-            response = invoke_to_file(synth_prompt, synth_model, synth_log, max_tokens=8192)
+            response = invoke_to_file(synth_prompt, synth_model, synth_log, max_tokens=8192,
+                                      system=system)
             synth_response = extract_text(response)
 
             if synth_response:
@@ -1282,7 +1283,8 @@ def main(argv=None):
 
             if api_mode:
                 log(f'Running assessment via direct API (model: {assess_model})...')
-                response = invoke_to_file(assess_prompt, assess_model, assess_log, max_tokens=8192)
+                response = invoke_to_file(assess_prompt, assess_model, assess_log, max_tokens=8192,
+                                          system=system)
                 assess_response = extract_text(response)
                 if assess_response:
                     with open(os.path.join(eval_dir, 'assessment.md'), 'w') as f:
@@ -1323,7 +1325,7 @@ def main(argv=None):
     )
 
     # ---- SESSION SUMMARY ----
-    session_duration = int(time.time() - session_start)
+    session_duration = int(time.time() - _wall_start)
     session_mins = session_duration // 60
     session_secs = session_duration % 60
 
@@ -1355,9 +1357,9 @@ def main(argv=None):
     _write_word_count_snapshot(eval_dir, project_dir)
 
     # Cost summary
-    print_summary(project_dir, 'evaluate')
-    print_summary(project_dir, 'synthesize')
-    print_summary(project_dir, 'assess')
+    print_summary(project_dir, 'evaluate', session_start=session_start)
+    print_summary(project_dir, 'synthesize', session_start=session_start)
+    print_summary(project_dir, 'assess', session_start=session_start)
 
     # Mark cycle complete
     if cycle_id != '0':

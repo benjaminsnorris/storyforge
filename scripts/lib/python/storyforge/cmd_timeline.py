@@ -17,12 +17,13 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, select_model,
     install_signal_handlers, is_shutting_down,
     show_interactive_banner, offer_interactive,
-    build_interactive_system_prompt,
+    build_interactive_system_prompt, build_shared_context,
 )
 from storyforge.cli import add_scene_filter_args, resolve_filter_args
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -35,7 +36,7 @@ from storyforge.git import (
 from storyforge.api import (
     invoke_api, invoke_to_file, extract_text_from_file,
     submit_batch, poll_batch, download_batch_results,
-    extract_usage, calculate_cost_from_usage,
+    extract_usage, calculate_cost_from_usage, build_batch_request,
 )
 from storyforge.costs import log_operation
 from storyforge.timeline import (
@@ -76,6 +77,7 @@ def parse_args(argv):
 
 def main(argv=None):
     args = parse_args(argv or [])
+    session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     install_signal_handlers()
     project_dir = detect_project_root()
@@ -134,6 +136,7 @@ def main(argv=None):
     # Model selection
     haiku_model = select_model('extraction')
     sonnet_model = select_model('evaluation')
+    system = build_shared_context(project_dir, model=haiku_model)
 
     log('============================================')
     log('Storyforge Timeline')
@@ -318,14 +321,8 @@ def main(argv=None):
                     skipped_ids.append(sid)
                     continue
                 import json as _json
-                request = {
-                    'custom_id': sid,
-                    'params': {
-                        'model': haiku_model,
-                        'max_tokens': 1024,
-                        'messages': [{'role': 'user', 'content': prompt}],
-                    },
-                }
+                request = build_batch_request(sid, prompt, haiku_model,
+                                              max_tokens=1024, system=system)
                 bf.write(_json.dumps(request) + '\n')
 
         # Count API requests
@@ -396,7 +393,8 @@ def main(argv=None):
             lf = os.path.join(log_dir, f'timeline-phase1-{sid}.json')
 
             if timeline_mode == 'direct':
-                response_data = invoke_to_file(prompt, haiku_model, lf, max_tokens=1024)
+                response_data = invoke_to_file(prompt, haiku_model, lf, max_tokens=1024,
+                                               system=system)
                 from storyforge.api import extract_text
                 response = extract_text(response_data)
                 usage = extract_usage(response_data)
@@ -408,7 +406,8 @@ def main(argv=None):
                               cache_create=usage.get('cache_create', 0))
             else:
                 # Interactive mode -- use invoke_api (simplified)
-                response = invoke_api(prompt, haiku_model, max_tokens=1024)
+                response = invoke_api(prompt, haiku_model, max_tokens=1024,
+                                     system=system)
 
             indicators = parse_indicators(response, sid)
             _save_indicators(sid, indicators)
@@ -485,9 +484,10 @@ def main(argv=None):
         log(f'Sending {scene_count} scene summaries to Sonnet...')
 
         if timeline_mode == 'interactive':
-            response = invoke_api(prompt, sonnet_model, max_tokens=4096)
+            response = invoke_api(prompt, sonnet_model, max_tokens=4096, system=system)
         else:
-            response_data = invoke_to_file(prompt, sonnet_model, tl_log, max_tokens=4096)
+            response_data = invoke_to_file(prompt, sonnet_model, tl_log, max_tokens=4096,
+                                           system=system)
             from storyforge.api import extract_text
             response = extract_text(response_data)
             usage = extract_usage(response_data)
@@ -567,7 +567,7 @@ def main(argv=None):
         log('Review and edit indicator files as needed, then run Phase 2:')
         log('  storyforge timeline --skip-phase1 [same scene filters]')
         if not args.embedded:
-            print_summary(project_dir, 'timeline-phase1')
+            print_summary(project_dir, 'timeline-phase1', session_start=session_start)
             try:
                 os.remove(interactive_file)
             except FileNotFoundError:
@@ -642,5 +642,5 @@ def main(argv=None):
     log('============================================')
 
     if not args.embedded:
-        print_summary(project_dir, 'timeline-phase1')
-        print_summary(project_dir, 'timeline-phase2')
+        print_summary(project_dir, 'timeline-phase1', session_start=session_start)
+        print_summary(project_dir, 'timeline-phase2', session_start=session_start)

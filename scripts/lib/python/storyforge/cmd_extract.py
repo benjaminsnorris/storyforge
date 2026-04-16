@@ -18,12 +18,14 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 
 import argparse
 
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field, select_model,
     get_coaching_level, install_signal_handlers, get_plugin_dir,
+    build_shared_context,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr, commit_and_push,
@@ -32,6 +34,7 @@ from storyforge.git import (
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
+    build_batch_request,
 )
 from storyforge.costs import log_operation, print_summary
 
@@ -58,6 +61,7 @@ def parse_args(argv):
 
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
+    session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     install_signal_handlers()
 
@@ -118,6 +122,10 @@ def main(argv=None):
     # Profile file location
     profile_file = os.path.join(project_dir, 'working', 'extraction-profile.json')
 
+    # Shared context for prompt caching (built once, passed to all phases)
+    model = select_model('evaluation')
+    system = build_shared_context(project_dir, model=model)
+
     validate_passed = None
     validate_failures = 0
 
@@ -125,7 +133,7 @@ def main(argv=None):
         # Phase 0: Characterize
         if args.phase is None or args.phase == 0:
             _run_phase_0(project_dir, scenes_dir, log_dir, profile_file,
-                         args.dry_run)
+                         args.dry_run, system=system)
             if not args.dry_run:
                 commit_and_push(project_dir,
                                 'Extract: Phase 0 — manuscript characterization',
@@ -136,7 +144,7 @@ def main(argv=None):
         if args.phase is None or args.phase == 1:
             _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir,
                          log_dir, profile_file, plugin_dir, args.force,
-                         args.dry_run)
+                         args.dry_run, system=system)
             if not args.dry_run:
                 commit_and_push(project_dir,
                                 'Extract: Phase 1 — skeleton (scenes.csv)',
@@ -151,7 +159,7 @@ def main(argv=None):
         # Phase 2: Intent
         if args.phase is None or args.phase == 2:
             _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir,
-                         log_dir, profile_file, args.dry_run)
+                         log_dir, profile_file, args.dry_run, system=system)
             if not args.dry_run:
                 commit_and_push(project_dir,
                                 'Extract: Phase 2 — intent (scene-intent.csv)',
@@ -165,7 +173,8 @@ def main(argv=None):
         # Phase 3: Briefs
         if args.phase is None or args.phase == 3:
             _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir,
-                         log_dir, profile_file, args.force, args.dry_run)
+                         log_dir, profile_file, args.force, args.dry_run,
+                         system=system)
             if not args.dry_run:
                 update_pr_task('Phase 3: Extract briefs', project_dir)
 
@@ -206,7 +215,7 @@ def main(argv=None):
         log("  Next: run /storyforge:elaborate to fill structural gaps.")
     log('============================================')
 
-    print_summary(project_dir, 'extract')
+    print_summary(project_dir, 'extract', session_start=session_start)
 
 
 # ============================================================================
@@ -285,7 +294,8 @@ def _run_hone(plugin_dir: str, phase: int) -> None:
 # Phase 0: Characterize
 # ============================================================================
 
-def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run):
+def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run,
+                 system=None):
     log('')
     log('--- Phase 0: Characterize manuscript ---')
 
@@ -308,7 +318,7 @@ def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run):
 
     log(f'  Invoking {model} for manuscript characterization...')
 
-    response = invoke_to_file(prompt, model, char_log, 4096)
+    response = invoke_to_file(prompt, model, char_log, 4096, system=system)
     text = extract_text(response)
     _log_api_usage(char_log, 'extract-characterize', 'manuscript', model, project_dir)
 
@@ -326,7 +336,7 @@ def _run_phase_0(project_dir, scenes_dir, log_dir, profile_file, dry_run):
 # ============================================================================
 
 def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
-                 profile_file, plugin_dir, force, dry_run):
+                 profile_file, plugin_dir, force, dry_run, system=None):
     log('')
     log('--- Phase 1: Extract skeleton (scenes.csv) ---')
 
@@ -368,14 +378,8 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
         prompt = build_skeleton_prompt(scene_id, scene_text, profile,
                                         registries_text=registries)
-        request = {
-            'custom_id': scene_id,
-            'params': {
-                'model': model,
-                'max_tokens': 1024,
-                'messages': [{'role': 'user', 'content': prompt}],
-            },
-        }
+        request = build_batch_request(scene_id, prompt, model, 1024,
+                                      system=system)
         with open(batch_file, 'a') as f:
             f.write(json.dumps(request) + '\n')
 
@@ -433,7 +437,7 @@ def _run_phase_1(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # ============================================================================
 
 def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
-                 profile_file, dry_run):
+                 profile_file, dry_run, system=None):
     log('')
     log('--- Phase 2: Extract intent (scene-intent.csv) ---')
 
@@ -464,14 +468,8 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 
         prompt = build_intent_prompt(scene_id, scene_text, profile, skeleton,
                                       registries_text=registries)
-        request = {
-            'custom_id': scene_id,
-            'params': {
-                'model': model,
-                'max_tokens': 1024,
-                'messages': [{'role': 'user', 'content': prompt}],
-            },
-        }
+        request = build_batch_request(scene_id, prompt, model, 1024,
+                                      system=system)
         with open(batch_file, 'a') as f:
             f.write(json.dumps(request) + '\n')
 
@@ -527,7 +525,7 @@ def _run_phase_2(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
 # ============================================================================
 
 def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
-                 profile_file, force, dry_run):
+                 profile_file, force, dry_run, system=None):
     """Run Phase 3a (parallel briefs) + 3b (knowledge chain) + 3c (physical state)."""
 
     # Phase 3a: Parallel brief fields
@@ -576,14 +574,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         prompt = build_brief_parallel_prompt(scene_id, scene_text, profile,
                                               skeleton, intent,
                                               registries_text=registries)
-        request = {
-            'custom_id': scene_id,
-            'params': {
-                'model': model,
-                'max_tokens': 1024,
-                'messages': [{'role': 'user', 'content': prompt}],
-            },
-        }
+        request = build_batch_request(scene_id, prompt, model, 1024,
+                                      system=system)
         with open(batch_file, 'a') as f:
             f.write(json.dumps(request) + '\n')
 
@@ -660,7 +652,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         knowledge_log = os.path.join(log_dir, f'extract-knowledge-{scene_id}.json')
 
         try:
-            response = invoke_to_file(prompt, knowledge_model, knowledge_log, 1024)
+            response = invoke_to_file(prompt, knowledge_model, knowledge_log,
+                                      1024, system=system)
             text = extract_text(response)
             _log_api_usage(knowledge_log, 'extract-knowledge', scene_id,
                            knowledge_model, project_dir)
@@ -722,7 +715,8 @@ def _run_phase_3(sorted_scene_ids, project_dir, scenes_dir, ref_dir, log_dir,
         phys_log = os.path.join(log_dir, f'extract-physical-{scene_id}.json')
 
         try:
-            response = invoke_to_file(prompt, phys_model, phys_log, 1024)
+            response = invoke_to_file(prompt, phys_model, phys_log, 1024,
+                                      system=system)
             text = extract_text(response)
             _log_api_usage(phys_log, 'extract-physical', scene_id,
                            phys_model, project_dir)
