@@ -522,17 +522,18 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     stage_model = select_model('drafting')  # Opus for creative work
     system = build_shared_context(project_dir, model=stage_model)
 
+    has_system = bool(system)
     if stage == 'spine':
-        prompt = build_spine_prompt(project_dir, plugin_dir, seed, system_context=True)
+        prompt = build_spine_prompt(project_dir, plugin_dir, seed, system_context=has_system)
     elif stage == 'architecture':
         prompt = build_architecture_prompt(project_dir, plugin_dir, registries_text=registries,
-                                           system_context=True)
+                                           system_context=has_system)
     elif stage == 'map':
         prompt = build_map_prompt(project_dir, plugin_dir, registries_text=registries,
-                                  system_context=True)
+                                  system_context=has_system)
     elif stage == 'briefs':
         prompt = build_briefs_prompt(project_dir, plugin_dir, registries_text=registries,
-                                     system_context=True)
+                                     system_context=has_system)
     else:
         log(f'ERROR: Unknown stage: {stage}')
         sys.exit(1)

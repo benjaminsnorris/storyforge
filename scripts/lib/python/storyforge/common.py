@@ -244,6 +244,16 @@ def extract_craft_sections(*section_nums: int) -> str:
 
 _shared_context_cache: dict[str, list[dict]] = {}
 
+
+def clear_shared_context_cache() -> None:
+    """Clear the in-process shared context cache.
+
+    Call after operations that modify reference files (commits, hone passes)
+    so the next build_shared_context reads fresh data.
+    """
+    _shared_context_cache.clear()
+
+
 # Minimum tokens per cache breakpoint (estimated at ~4 chars/token)
 _MIN_CACHE_CHARS = {
     'opus': 4096 * 4,
@@ -264,10 +274,14 @@ def _model_tier(model: str) -> str:
 
 def _read_if_exists(path: str) -> str:
     """Read a file if it exists, return empty string otherwise."""
-    if os.path.isfile(path):
+    if not os.path.isfile(path):
+        return ''
+    try:
         with open(path) as f:
             return f.read().strip()
-    return ''
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'WARNING: Could not read {path}: {e}')
+        return ''
 
 
 def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
