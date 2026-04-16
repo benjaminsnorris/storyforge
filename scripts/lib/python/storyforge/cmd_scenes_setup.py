@@ -18,10 +18,11 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime
 
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, select_model,
-    install_signal_handlers,
+    install_signal_handlers, build_shared_context,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
@@ -29,7 +30,7 @@ from storyforge.git import (
 )
 from storyforge.api import (
     invoke_to_file, extract_text, extract_usage, calculate_cost_from_usage,
-    submit_batch, poll_batch, download_batch_results,
+    submit_batch, poll_batch, download_batch_results, build_batch_request,
 )
 from storyforge.costs import (
     estimate_cost, check_threshold, print_summary, log_operation,
@@ -72,6 +73,7 @@ def parse_args(argv):
 
 def main(argv=None):
     args = parse_args(argv or [])
+    session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     # Validate mode
     modes = sum([args.rename, args.split_chapters, args.split_manuscript])
@@ -115,6 +117,7 @@ def main(argv=None):
         log('Moved scenes/intent.csv -> reference/scene-intent.csv')
 
     model = select_model('evaluation')
+    system = build_shared_context(project_dir, model=model)
 
     # Track used slugs
     used_slugs = set()
@@ -314,7 +317,7 @@ def main(argv=None):
         prompt = build_boundary_prompt(chapter_text)
         lf = os.path.join(log_dir, f'scenes-setup-detect-{chapter_id}.json')
 
-        response_data = invoke_to_file(prompt, model, lf, max_tokens=4096)
+        response_data = invoke_to_file(prompt, model, lf, max_tokens=4096, system=system)
         response = extract_text(response_data)
 
         # Log usage
@@ -518,14 +521,8 @@ def main(argv=None):
                         with open(cf) as fh:
                             chapter_text = fh.read()
                         prompt = build_boundary_prompt(chapter_text)
-                        request = {
-                            'custom_id': ch_name,
-                            'params': {
-                                'model': model,
-                                'max_tokens': 4096,
-                                'messages': [{'role': 'user', 'content': prompt}],
-                            },
-                        }
+                        request = build_batch_request(ch_name, prompt, model,
+                                                      max_tokens=4096, system=system)
                         bf.write(json.dumps(request) + '\n')
 
                 batch_id = submit_batch(batch_file)
@@ -862,7 +859,7 @@ def main(argv=None):
 
             create_draft_pr('Scenes setup: split chapters into scenes',
                             pr_body, project_dir, 'drafting')
-            print_summary(project_dir, 'scene-detect')
+            print_summary(project_dir, 'scene-detect', session_start=session_start)
             log('Committed and pushed split results')
 
     elif args.split_manuscript:
@@ -893,7 +890,7 @@ def main(argv=None):
 
             create_draft_pr('Scenes setup: split manuscript into scenes',
                             pr_body, project_dir, 'drafting')
-            print_summary(project_dir, 'scene-detect')
+            print_summary(project_dir, 'scene-detect', session_start=session_start)
             log('Committed and pushed split results')
 
     log('============================================')
