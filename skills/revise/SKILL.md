@@ -140,7 +140,7 @@ Each upstream pass automatically re-drafts affected scenes from updated briefs.
 
 ### Plan Format
 
-Write the plan to `working/plans/revision-plan.csv`:
+The plan is a pipe-delimited CSV at `working/plans/revision-plan.csv`:
 
 ```
 pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|fix_location
@@ -149,15 +149,43 @@ pass|name|purpose|scope|targets|guidance|protection|findings|status|model_tier|f
 3|prose-tightening|Voice consistency and AI pattern cleanup|full||Follow voice guide strictly|scene-30b|F012;F015|pending|opus|craft
 ```
 
+### Writing the Plan — MANDATORY
+
+**You MUST write the plan CSV to disk immediately.** Do not just present it in conversation — `./storyforge revise` reads the file from disk.
+
+Use the versioned plan writer to write the file AND create the symlink:
+
+```bash
+python3 -c "
+from storyforge.cmd_revise import _create_versioned_plan, CSV_PLAN_FIELDS
+import os
+plan_file = os.path.join('PROJECT_DIR', 'working', 'plans', 'revision-plan.csv')
+rows = [
+    {'pass': '1', 'name': 'NAME', 'purpose': 'PURPOSE', 'scope': 'SCOPE', 'targets': '', 'guidance': 'GUIDANCE', 'protection': '', 'findings': '', 'status': 'pending', 'model_tier': 'sonnet', 'fix_location': 'brief'},
+]
+_create_versioned_plan(plan_file, rows)
+print(f'Plan written: {plan_file}')
+"
+```
+
+Replace `PROJECT_DIR` and the rows with actual values. After writing, verify:
+```bash
+ls -la PROJECT_DIR/working/plans/revision-plan.csv
+```
+
+If you cannot run `_create_versioned_plan` (e.g. import issues), write the CSV directly:
+1. Write the plan to `working/plans/revision-plan.csv` as a pipe-delimited CSV
+2. Verify the file exists and has the correct header
+
 ### Presenting the Plan
 
-Present each pass with:
+After writing the plan to disk, present each pass with:
 - Name and purpose
 - Which scenes are affected
 - What will change (upstream CSV updates or prose edits)
 - Key guidance decisions (with rationale the author can review)
 
-Ask the author to approve before executing. They can edit any guidance entry.
+Ask the author to approve before executing. They can edit any guidance entry — if they do, update the file on disk immediately. The plan is always on disk and ready to run.
 
 ## Step 4: Execute the Revision
 
