@@ -49,27 +49,79 @@ class TestWriteHoneFindings:
             content = f.read()
         assert 'scene-intent.csv' in content
 
-    def test_empty_targets_writes_global_scope_row(self, tmp_path):
-        """Regression: empty targets must produce a global-scope row, not an empty file."""
+    def test_empty_targets_no_ref_dir_writes_header_only(self, tmp_path):
+        """Without ref_dir, empty targets produces header-only file with warning."""
         from storyforge.cmd_revise import _write_hone_findings
         path = str(tmp_path / 'findings.csv')
         _write_hone_findings(path, 'brief', '', 'General fix')
 
         with open(path) as f:
             lines = f.read().strip().split('\n')
-        assert len(lines) == 2  # Header + one global-scope row
-        assert lines[1].startswith('|scene-briefs.csv||General fix')
+        assert len(lines) == 1  # Header only — no data rows
 
-    def test_empty_targets_intent_target_file(self, tmp_path):
-        """Global scope for intent fix_location uses scene-intent.csv."""
+    def test_empty_targets_with_ref_dir_expands_to_all_scenes(self, tmp_path, fixture_dir):
+        """Regression #199: full-scope pass must expand to all scene IDs from the CSV."""
         from storyforge.cmd_revise import _write_hone_findings
+        ref_dir = os.path.join(fixture_dir, 'reference')
         path = str(tmp_path / 'findings.csv')
-        _write_hone_findings(path, 'intent', '', 'Fix intent globally')
+        _write_hone_findings(path, 'brief', '', 'General fix', ref_dir=ref_dir)
 
         with open(path) as f:
             lines = f.read().strip().split('\n')
-        assert len(lines) == 2
-        assert 'scene-intent.csv' in lines[1]
+        # Header + one row per scene in scene-briefs.csv
+        assert len(lines) > 1
+        # Every data row should have a non-empty scene_id
+        for line in lines[1:]:
+            sid = line.split('|')[0]
+            assert sid, f'Empty scene_id in findings row: {line}'
+            assert 'scene-briefs.csv' in line
+
+    def test_empty_targets_intent_expands_to_all_scenes(self, tmp_path, fixture_dir):
+        """Full scope for intent fix_location expands to all scene IDs."""
+        from storyforge.cmd_revise import _write_hone_findings
+        ref_dir = os.path.join(fixture_dir, 'reference')
+        path = str(tmp_path / 'findings.csv')
+        _write_hone_findings(path, 'intent', '', 'Fix intent globally', ref_dir=ref_dir)
+
+        with open(path) as f:
+            lines = f.read().strip().split('\n')
+        assert len(lines) > 1
+        for line in lines[1:]:
+            sid = line.split('|')[0]
+            assert sid, f'Empty scene_id in findings row: {line}'
+            assert 'scene-intent.csv' in line
+
+    def test_character_name_targets_resolve_to_scenes(self, tmp_path, fixture_dir):
+        """Regression #199: character name targets must resolve to scene IDs."""
+        from storyforge.cmd_revise import _write_hone_findings
+        ref_dir = os.path.join(fixture_dir, 'reference')
+        path = str(tmp_path / 'findings.csv')
+        # "Pell" is a character in the fixture's scene-intent.csv
+        _write_hone_findings(path, 'brief', 'Pell', 'Fix Pell scenes', ref_dir=ref_dir)
+
+        with open(path) as f:
+            lines = f.read().strip().split('\n')
+        assert len(lines) > 1
+        # All data rows should have valid scene IDs, not "Pell"
+        for line in lines[1:]:
+            sid = line.split('|')[0]
+            assert sid != 'Pell', 'Character name should be resolved to scene IDs'
+            assert sid, f'Empty scene_id in findings row: {line}'
+
+    def test_mixed_scene_ids_and_character_names(self, tmp_path, fixture_dir):
+        """Mix of valid scene IDs and character names resolves correctly."""
+        from storyforge.cmd_revise import _write_hone_findings
+        ref_dir = os.path.join(fixture_dir, 'reference')
+        path = str(tmp_path / 'findings.csv')
+        # act1-sc01 is a valid scene ID, "Pell" is a character name
+        _write_hone_findings(path, 'intent', 'act1-sc01;Pell', 'Fix things', ref_dir=ref_dir)
+
+        with open(path) as f:
+            lines = f.read().strip().split('\n')
+        scene_ids = [line.split('|')[0] for line in lines[1:]]
+        assert 'act1-sc01' in scene_ids
+        # Pell should be resolved, not kept as raw target
+        assert 'Pell' not in scene_ids
 
 
 class TestGenerateStructuralPlan:

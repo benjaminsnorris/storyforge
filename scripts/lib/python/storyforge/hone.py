@@ -1505,6 +1505,9 @@ def hone_briefs(
     total_scenes = len(by_scene)
 
     for idx, (sid, issues) in enumerate(by_scene.items(), 1):
+        if sid not in briefs_map:
+            log(f'  [{idx}/{total_scenes}] WARNING: "{sid}" is not a valid scene ID in scene-briefs.csv — skipping')
+            continue
         abstract_issues = [i for i in issues if i['issue'] == 'abstract']
         trim_issues = [i for i in issues if i['issue'] in ('overspecified', 'verbose')]
         issue_types = sorted(set(i['issue'] for i in issues))

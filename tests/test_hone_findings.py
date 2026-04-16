@@ -83,3 +83,78 @@ class TestHoneBriefsWithFindings:
         from storyforge.hone import hone_briefs
         sig = inspect.signature(hone_briefs)
         assert 'findings_file' in sig.parameters
+
+    def test_invalid_scene_id_skipped_not_crash(self, project_dir):
+        """Regression #199: non-scene-ID targets must not crash hone_briefs."""
+        from storyforge.hone import hone_briefs
+        ref_dir = os.path.join(project_dir, 'reference')
+
+        # Write a findings file with an invalid scene ID (character name)
+        findings = os.path.join(project_dir, 'working', 'findings.csv')
+        os.makedirs(os.path.dirname(findings), exist_ok=True)
+        with open(findings, 'w') as f:
+            f.write('scene_id|target_file|fields|guidance\n')
+            f.write('not-a-real-scene|scene-briefs.csv|goal|Fix this\n')
+
+        # Should not raise KeyError
+        result = hone_briefs(
+            ref_dir=ref_dir,
+            project_dir=project_dir,
+            scene_ids=['not-a-real-scene'],
+            coaching_level='full',
+            dry_run=True,
+            findings_file=findings,
+        )
+        assert isinstance(result, dict)
+
+
+class TestHoneIntentWithFindings:
+    def test_invalid_scene_id_skipped_not_crash(self, project_dir):
+        """Regression #199: non-scene-ID targets must not crash hone_intent."""
+        from storyforge.hone import hone_intent
+        ref_dir = os.path.join(project_dir, 'reference')
+
+        findings = os.path.join(project_dir, 'working', 'findings.csv')
+        os.makedirs(os.path.dirname(findings), exist_ok=True)
+        with open(findings, 'w') as f:
+            f.write('scene_id|target_file|fields|guidance\n')
+            f.write('not-a-real-scene|scene-intent.csv|function|Fix this\n')
+
+        result = hone_intent(
+            ref_dir=ref_dir,
+            project_dir=project_dir,
+            scene_ids=['not-a-real-scene'],
+            coaching_level='full',
+            dry_run=True,
+            findings_file=findings,
+        )
+        assert isinstance(result, dict)
+
+
+class TestResolveTargetsToSceneIds:
+    def test_valid_scene_ids_pass_through(self):
+        """Valid scene IDs should pass through unchanged."""
+        from storyforge.cmd_revise import _resolve_targets_to_scene_ids
+        valid = {'scene-a', 'scene-b', 'scene-c'}
+        result = _resolve_targets_to_scene_ids(['scene-a', 'scene-b'], valid, '/tmp')
+        assert result == ['scene-a', 'scene-b']
+
+    def test_character_names_resolve_to_scenes(self, fixture_dir):
+        """Character names should resolve to scenes via scene-intent.csv."""
+        from storyforge.cmd_revise import _resolve_targets_to_scene_ids
+        from storyforge.elaborate import _read_csv_as_map
+        ref_dir = os.path.join(fixture_dir, 'reference')
+        briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+        valid = set(briefs_map.keys())
+        # "Pell" is a character in the fixture
+        result = _resolve_targets_to_scene_ids(['Pell'], valid, ref_dir)
+        assert len(result) > 0
+        assert 'Pell' not in result  # resolved to scene IDs
+
+    def test_unknown_targets_skipped(self, fixture_dir):
+        """Targets that are neither scene IDs nor character names are skipped."""
+        from storyforge.cmd_revise import _resolve_targets_to_scene_ids
+        ref_dir = os.path.join(fixture_dir, 'reference')
+        valid = {'scene-a'}
+        result = _resolve_targets_to_scene_ids(['nonexistent-thing'], valid, ref_dir)
+        assert result == []
