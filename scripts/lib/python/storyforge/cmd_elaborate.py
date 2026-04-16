@@ -24,7 +24,7 @@ import time
 
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, select_model,
-    install_signal_handlers, get_plugin_dir,
+    install_signal_handlers, get_plugin_dir, build_shared_context,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
@@ -118,6 +118,8 @@ def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool,
     ensure_branch_pushed(project_dir)
 
     mice_model = select_model('evaluation')
+    # Build shared context once for all MICE fill API calls (prompt caching)
+    system = build_shared_context(project_dir, model=mice_model)
     grand_total = 0
     baseline_gaps = len(gaps)
 
@@ -159,7 +161,7 @@ def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool,
 
             log_file = os.path.join(log_dir, f'mice-fill-{gap["thread_id"]}.json')
             invoke_to_file(prompt, mice_model, log_file, max_tokens=512,
-                           label=f'mice-fill {gap["thread_id"]}')
+                           label=f'mice-fill {gap["thread_id"]}', system=system)
             response = extract_text_from_file(log_file)
 
             scene_ids = parse_mice_fill_response(response)
@@ -214,7 +216,8 @@ def _run_mice_fill(project_dir: str, ref_dir: str, dry_run: bool,
 # Gap-fill
 # ============================================================================
 
-def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool) -> None:
+def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
+                  session_start: str | None = None) -> None:
     """Analyze gaps, batch-fill parallel fields, sequential knowledge fix."""
     scenes_dir = os.path.join(project_dir, 'scenes')
     gap_dir = os.path.join(project_dir, 'working', 'gap-fill')
@@ -225,7 +228,7 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool) -> None:
     log('Analyzing gaps...')
 
     from storyforge.elaborate import analyze_gaps, validate_structure, update_scene, get_scenes
-    from storyforge.api import submit_batch, poll_batch, download_batch_results, invoke, extract_text
+    from storyforge.api import submit_batch, poll_batch, download_batch_results, invoke, extract_text, build_batch_request
     from storyforge.prompts_elaborate import build_gap_fill_prompt, build_knowledge_fix_prompt, csv_block_to_rows
     from storyforge.enrich import format_registries_for_prompt, load_registry_alias_maps, normalize_fields
 
@@ -271,6 +274,9 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool) -> None:
         gap_model = select_model('evaluation')
         alias_maps = load_registry_alias_maps(project_dir)
 
+        # Build shared context once for all gap-fill API calls (prompt caching)
+        system = build_shared_context(project_dir, model=gap_model)
+
         # Parallel gap groups: build single batch
         parallel_groups = {k: v for k, v in groups.items() if v['batch_type'] == 'parallel'}
         parallel_count = sum(len(v['scenes']) for v in parallel_groups.values())
@@ -297,14 +303,8 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool) -> None:
                             registries_text=registries,
                         )
                         custom_id = f'{group_name}__{scene_id}'
-                        req = {
-                            'custom_id': custom_id,
-                            'params': {
-                                'model': gap_model,
-                                'max_tokens': 256,
-                                'messages': [{'role': 'user', 'content': prompt}],
-                            },
-                        }
+                        req = build_batch_request(custom_id, prompt, gap_model,
+                                                  max_tokens=256, system=system)
                         bf.write(json.dumps(req) + '\n')
 
             log('Submitting batch...')
@@ -393,7 +393,7 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool) -> None:
                         available_knowledge=available_knowledge,
                     )
 
-                    response = invoke(prompt, gap_model, max_tokens=512)
+                    response = invoke(prompt, gap_model, max_tokens=512, system=system)
                     klog_file = os.path.join(knowledge_log_dir, f'{sid}.json')
                     with open(klog_file, 'w') as f:
                         json.dump(response, f)
@@ -486,7 +486,7 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool) -> None:
         log(f'Validation: {validate_failures} issue(s) remaining — run again to continue')
     log('============================================')
 
-    print_summary(project_dir, 'elaborate-gap-fill')
+    print_summary(project_dir, 'elaborate-gap-fill', session_start=session_start)
 
 
 # ============================================================================
@@ -494,7 +494,8 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool) -> None:
 # ============================================================================
 
 def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
-                    dry_run: bool, interactive: bool, seed: str) -> None:
+                    dry_run: bool, interactive: bool, seed: str,
+                    session_start: str | None = None) -> None:
     """Run a standard elaboration stage (spine/architecture/map/briefs)."""
     plugin_dir = get_plugin_dir()
     log_dir = os.path.join(project_dir, 'working', 'logs')
@@ -517,14 +518,21 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
 
     registries = format_registries_for_prompt(project_dir)
 
+    # Build shared context once for all stage API calls (prompt caching)
+    stage_model = select_model('drafting')  # Opus for creative work
+    system = build_shared_context(project_dir, model=stage_model)
+
     if stage == 'spine':
-        prompt = build_spine_prompt(project_dir, plugin_dir, seed)
+        prompt = build_spine_prompt(project_dir, plugin_dir, seed, system_context=True)
     elif stage == 'architecture':
-        prompt = build_architecture_prompt(project_dir, plugin_dir, registries_text=registries)
+        prompt = build_architecture_prompt(project_dir, plugin_dir, registries_text=registries,
+                                           system_context=True)
     elif stage == 'map':
-        prompt = build_map_prompt(project_dir, plugin_dir, registries_text=registries)
+        prompt = build_map_prompt(project_dir, plugin_dir, registries_text=registries,
+                                  system_context=True)
     elif stage == 'briefs':
-        prompt = build_briefs_prompt(project_dir, plugin_dir, registries_text=registries)
+        prompt = build_briefs_prompt(project_dir, plugin_dir, registries_text=registries,
+                                     system_context=True)
     else:
         log(f'ERROR: Unknown stage: {stage}')
         sys.exit(1)
@@ -554,7 +562,6 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
 
     # Invoke Claude
     stage_log = os.path.join(log_dir, f'elaborate-{stage}.log')
-    stage_model = select_model('drafting')  # Opus for creative work
 
     from storyforge.api import invoke_to_file, extract_text_from_file, invoke_api
     from storyforge.costs import log_operation
@@ -575,7 +582,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     else:
         log(f'Invoking API for {stage} (model: {stage_model})...')
         try:
-            invoke_to_file(prompt, stage_model, stage_log, max_tokens=16384)
+            invoke_to_file(prompt, stage_model, stage_log, max_tokens=16384, system=system)
             claude_rc = 0
         except Exception as e:
             log(f'ERROR: API invocation failed: {e}')
@@ -833,7 +840,7 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         log(f'Validation: {validate_failures} issue(s) — review before advancing')
     log('============================================')
 
-    print_summary(project_dir, f'elaborate-{stage}')
+    print_summary(project_dir, f'elaborate-{stage}', session_start=session_start)
 
 
 # ============================================================================
@@ -844,6 +851,10 @@ def main(argv=None):
     args = parse_args(argv or [])
 
     install_signal_handlers()
+
+    from datetime import datetime
+    session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+
     project_dir = detect_project_root()
     ref_dir = os.path.join(project_dir, 'reference')
 
@@ -874,7 +885,8 @@ def main(argv=None):
     if args.stage == 'mice-fill':
         _run_mice_fill(project_dir, ref_dir, args.dry_run)
     elif args.stage == 'gap-fill':
-        _run_gap_fill(project_dir, ref_dir, args.dry_run)
+        _run_gap_fill(project_dir, ref_dir, args.dry_run, session_start=session_start)
     else:
         _run_main_stage(args.stage, project_dir, ref_dir,
-                        args.dry_run, args.interactive, args.seed)
+                        args.dry_run, args.interactive, args.seed,
+                        session_start=session_start)

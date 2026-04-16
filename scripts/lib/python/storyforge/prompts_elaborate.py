@@ -92,7 +92,8 @@ def _craft_principles(project_dir: str, plugin_dir: str) -> str:
 # Stage 1: Spine
 # ============================================================================
 
-def build_spine_prompt(project_dir: str, plugin_dir: str, seed: str = '') -> str:
+def build_spine_prompt(project_dir: str, plugin_dir: str, seed: str = '',
+                       system_context: bool = False) -> str:
     """Build the prompt for the spine stage.
 
     Args:
@@ -100,13 +101,16 @@ def build_spine_prompt(project_dir: str, plugin_dir: str, seed: str = '') -> str
         plugin_dir: Path to the Storyforge plugin root.
         seed: Author-provided seed text (logline, concepts, constraints).
               If empty, reads from storyforge.yaml logline.
+        system_context: If True, skip _existing_refs() (already in system prompt).
     """
     context = _project_context(project_dir)
-    refs = _existing_refs(project_dir)
+    refs = '' if system_context else _existing_refs(project_dir)
 
     yaml_path = os.path.join(project_dir, 'storyforge.yaml')
     if not seed:
         seed = read_yaml_field(yaml_path, 'project.logline') or ''
+
+    refs_section = f'\n## Existing Reference Materials\n\n{refs}\n' if refs else ''
 
     return f"""You are building the spine of a novel — the 5-10 irreducible story events that must happen.
 
@@ -115,11 +119,7 @@ def build_spine_prompt(project_dir: str, plugin_dir: str, seed: str = '') -> str
 ## Author's Seed
 
 {seed if seed else '(Use the logline above as the seed.)'}
-
-## Existing Reference Materials
-
-{refs}
-
+{refs_section}
 ## Instructions
 
 Produce the following deliverables:
@@ -189,15 +189,17 @@ id|function
 # ============================================================================
 
 def build_architecture_prompt(project_dir: str, plugin_dir: str,
-                              registries_text: str = '') -> str:
+                              registries_text: str = '',
+                              system_context: bool = False) -> str:
     """Build the prompt for the architecture stage."""
     context = _project_context(project_dir)
-    refs = _existing_refs(project_dir)
+    refs = '' if system_context else _existing_refs(project_dir)
     ref_dir = os.path.join(project_dir, 'reference')
     scenes = _read_csv_contents(os.path.join(ref_dir, 'scenes.csv'))
     intent = _read_csv_contents(os.path.join(ref_dir, 'scene-intent.csv'))
 
     registries_section = f'\n\n{registries_text}\n' if registries_text else ''
+    refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
 
     return f"""You are building the architecture of a novel — expanding the spine into a full structural plan.
 
@@ -214,11 +216,7 @@ def build_architecture_prompt(project_dir: str, plugin_dir: str,
 ```
 {intent}
 ```
-
-## Reference Materials
-
-{refs}
-{registries_section}
+{refs_section}{registries_section}
 ## Instructions
 
 Expand the spine (5-10 events) into 15-25 scenes. For each scene:
@@ -295,15 +293,17 @@ def _scene_count_range(project_dir: str) -> tuple[int, int]:
 
 
 def build_map_prompt(project_dir: str, plugin_dir: str,
-                     registries_text: str = '') -> str:
+                     registries_text: str = '',
+                     system_context: bool = False) -> str:
     """Build the prompt for the scene map stage."""
     context = _project_context(project_dir)
-    refs = _existing_refs(project_dir)
+    refs = '' if system_context else _existing_refs(project_dir)
     ref_dir = os.path.join(project_dir, 'reference')
     scenes = _read_csv_contents(os.path.join(ref_dir, 'scenes.csv'))
     intent = _read_csv_contents(os.path.join(ref_dir, 'scene-intent.csv'))
 
     registries_section = f'\n\n{registries_text}\n' if registries_text else ''
+    refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
 
     lo, hi = _scene_count_range(project_dir)
 
@@ -322,11 +322,7 @@ def build_map_prompt(project_dir: str, plugin_dir: str,
 ```
 {intent}
 ```
-
-## Reference Materials
-
-{refs}
-{registries_section}
+{refs_section}{registries_section}
 ## Instructions
 
 Expand the architecture into {lo}-{hi} scenes. Prefer **more, shorter scenes** (1500-2000 words each) over fewer, longer ones. This is important for drafting quality — Claude follows brief constraints more reliably in focused scenes under 2500 words, and scoring/revision are more precise on smaller units.
@@ -369,7 +365,8 @@ id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
 
 def build_briefs_prompt(project_dir: str, plugin_dir: str,
                         scene_ids: list[str] | None = None,
-                        registries_text: str = '') -> str:
+                        registries_text: str = '',
+                        system_context: bool = False) -> str:
     """Build the prompt for the briefs stage.
 
     Args:
@@ -378,20 +375,24 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
         scene_ids: If provided, only build briefs for these scenes.
                    If None, builds for all mapped scenes without briefs.
         registries_text: Optional formatted registry contents for prompt injection.
+        system_context: If True, skip _existing_refs() and _craft_principles()
+                        (already in system prompt).
     """
     context = _project_context(project_dir)
-    refs = _existing_refs(project_dir)
+    refs = '' if system_context else _existing_refs(project_dir)
     ref_dir = os.path.join(project_dir, 'reference')
     scenes = _read_csv_contents(os.path.join(ref_dir, 'scenes.csv'))
     intent = _read_csv_contents(os.path.join(ref_dir, 'scene-intent.csv'))
     briefs = _read_csv_contents(os.path.join(ref_dir, 'scene-briefs.csv'))
-    craft = _craft_principles(project_dir, plugin_dir)
+    craft = '' if system_context else _craft_principles(project_dir, plugin_dir)
 
     scope_note = ""
     if scene_ids:
         scope_note = f"\n**Scope:** Only write briefs for these scenes: {', '.join(scene_ids)}\n"
 
     registries_section = f'\n\n{registries_text}\n' if registries_text else ''
+    refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
+    craft_section = f'\n## Craft Principles\n\n{craft}\n' if craft else ''
 
     return f"""You are writing the drafting contracts for a novel — the scene-level briefs that define exactly what happens in each scene, in enough detail that scenes can be drafted independently and still cohere.
 
@@ -414,15 +415,7 @@ def build_briefs_prompt(project_dir: str, plugin_dir: str,
 ```
 {briefs}
 ```
-
-## Reference Materials
-
-{refs}
-
-## Craft Principles
-
-{craft if craft else '(craft engine not available)'}
-{registries_section}
+{refs_section}{craft_section}{registries_section}
 ## Instructions
 
 For each scene that needs a brief, define the complete drafting contract:
@@ -478,7 +471,8 @@ id|status
 # Stage 5: Voice
 # ============================================================================
 
-def build_voice_prompt(project_dir: str, plugin_dir: str) -> str:
+def build_voice_prompt(project_dir: str, plugin_dir: str,
+                       system_context: bool = False) -> str:
     """Build the prompt for the voice stage.
 
     Produces reference/voice-guide.md and reference/voice-profile.csv.
@@ -486,20 +480,19 @@ def build_voice_prompt(project_dir: str, plugin_dir: str) -> str:
     Args:
         project_dir: Path to the book project.
         plugin_dir: Path to the Storyforge plugin root.
+        system_context: If True, skip _existing_refs() (already in system prompt).
     """
     context = _project_context(project_dir)
-    refs = _existing_refs(project_dir)
+    refs = '' if system_context else _existing_refs(project_dir)
     ref_dir = os.path.join(project_dir, 'reference')
     characters_csv = _read_csv_contents(os.path.join(ref_dir, 'characters.csv'))
+
+    refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
 
     return f"""You are developing the voice of a novel — the prose register, per-character voice fingerprints, and style rules that every scene must embody.
 
 {context}
-
-## Reference Materials
-
-{refs}
-
+{refs_section}
 ## Characters
 
 ```
