@@ -2,6 +2,8 @@
 import json
 import os
 
+import pytest
+
 
 def _make_project(tmp_path, scenes, chapters):
     """Helper to create a minimal project for manifest tests."""
@@ -127,3 +129,56 @@ class TestGeneratePublishManifest:
         html = manifest['chapters'][0]['scenes'][0]['content_html']
         assert 'title: Some Title' not in html
         assert 'Actual prose' in html
+
+    def test_includes_dashboard_data(self, tmp_path):
+        """Manifest should always include structured dashboard_data."""
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        # Need scene-intent.csv for load_dashboard_data
+        ref = os.path.join(proj, 'reference')
+        with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+            f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
+            f.write('s1|test fn|action|calm to tense|truth|+/-|revelation|A|A|\n')
+        path = generate_publish_manifest(proj)
+        with open(path) as f:
+            manifest = json.load(f)
+        assert 'dashboard_data' in manifest
+        assert 'scenes' in manifest['dashboard_data']
+        assert 'project' in manifest['dashboard_data']
+
+
+class TestOptimizeCoverImage:
+    def test_small_jpeg_returns_original(self, tmp_path):
+        """Small JPEG files should pass through without optimization."""
+        from storyforge.assembly import _optimize_cover_image
+        # Create a small fake JPEG (under threshold)
+        cover = tmp_path / 'cover.jpg'
+        cover.write_bytes(b'\xff\xd8\xff' + b'\x00' * 100)
+        result = _optimize_cover_image(str(cover), str(tmp_path))
+        assert result == str(cover)
+
+    def test_large_png_triggers_optimization(self, tmp_path):
+        """Large PNG files should be converted to optimized JPEG."""
+        import platform
+        import subprocess
+        from storyforge.assembly import _optimize_cover_image, _COVER_MAX_BYTES
+        if platform.system() != 'Darwin':
+            pytest.skip('sips only available on macOS')
+        # Create a real PNG using sips (convert a blank JPEG)
+        cover = tmp_path / 'cover.png'
+        # Create a large-ish test image
+        try:
+            subprocess.run(
+                ['sips', '-s', 'format', 'png', '-z', '2000', '2000',
+                 '/System/Library/Desktop Pictures/Solid Colors/Black.png',
+                 '--out', str(cover)],
+                capture_output=True, check=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pytest.skip('Could not create test PNG with sips')
+        if cover.stat().st_size <= _COVER_MAX_BYTES:
+            pytest.skip('Test PNG not large enough to trigger optimization')
+        result = _optimize_cover_image(str(cover), str(tmp_path))
+        assert result != str(cover)
+        assert result.endswith('.jpg')
+        assert os.path.getsize(result) < cover.stat().st_size

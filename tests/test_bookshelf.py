@@ -1,4 +1,5 @@
 """Tests for bookshelf API client module."""
+import gzip
 import json
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -36,12 +37,18 @@ class _MockHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(length) if length else b''
+        raw = self.rfile.read(length) if length else b''
+        encoding = self.headers.get('Content-Encoding', '')
+        if encoding == 'gzip':
+            body = json.loads(gzip.decompress(raw))
+        else:
+            body = json.loads(raw) if raw else None
         _MockHandler.last_request = {
             'method': 'PUT',
             'path': self.path,
             'headers': dict(self.headers),
-            'body': json.loads(body) if body else None,
+            'body': body,
+            'was_gzipped': encoding == 'gzip',
         }
         self.send_response(_MockHandler.response_code)
         self.send_header('Content-Type', 'application/json')
@@ -206,6 +213,23 @@ class TestPublish:
 
         with pytest.raises(RuntimeError, match='upsert_scenes'):
             publish(mock_server, 'token', {'slug': 'test'})
+
+    def test_publish_sends_gzip(self, mock_server):
+        """Publish must gzip-compress the request body."""
+        from storyforge.bookshelf import publish
+        _MockHandler.response_body = json.dumps({
+            'ok': True, 'book_id': 'id', 'slug': 'test',
+            'published': {'chapters': 0, 'scenes': 0, 'words': 0},
+            'highlights': {'unchanged': 0, 'reanchored': 0, 'orphaned': 0},
+            'cover_uploaded': False,
+        }).encode()
+
+        manifest = {'title': 'T', 'author': 'A', 'slug': 'test', 'chapters': []}
+        publish(mock_server, 'token', manifest)
+
+        req = _MockHandler.last_request
+        assert req['was_gzipped'] is True
+        assert req['body']['slug'] == 'test'
 
 
 # ============================================================================
