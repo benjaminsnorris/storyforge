@@ -114,7 +114,8 @@ def authenticate(supabase_url: str, supabase_anon_key: str,
 def publish(bookshelf_url: str, token: str, manifest: dict) -> dict:
     """Publish a book via the Bookshelf API.
 
-    Sends the manifest as a PUT request to /api/books/<slug>.
+    Sends the manifest as a gzip-compressed PUT request to /api/books/<slug>.
+    Falls back to uncompressed if the server returns 415 Unsupported Media Type.
 
     Args:
         bookshelf_url: Deployed bookshelf URL.
@@ -127,22 +128,45 @@ def publish(bookshelf_url: str, token: str, manifest: dict) -> dict:
     Raises:
         RuntimeError: If the API returns an error.
     """
+    import gzip
+
     slug = manifest.get('slug', '')
     if not slug:
         raise RuntimeError('Manifest missing slug field')
 
     url = f'{bookshelf_url.rstrip("/")}/api/books/{urllib.parse.quote(slug)}'
-    body = json.dumps(manifest, ensure_ascii=False).encode()
+    raw_body = json.dumps(manifest, ensure_ascii=False).encode()
+
+    # Log manifest size breakdown
+    _log_manifest_size(manifest, raw_body)
+
+    # Gzip compress the body
+    compressed_body = gzip.compress(raw_body)
+    log(f'Manifest compressed: {len(raw_body):,} → {len(compressed_body):,} bytes '
+        f'({100 - len(compressed_body) * 100 // len(raw_body)}% reduction)')
+
     headers = {
         'Content-Type': 'application/json',
+        'Content-Encoding': 'gzip',
         'Authorization': f'Bearer {token}',
     }
 
-    req = urllib.request.Request(url, data=body, headers=headers, method='PUT')
+    req = urllib.request.Request(url, data=compressed_body, headers=headers, method='PUT')
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
+        if e.code == 415:
+            # Server doesn't support gzip — fall back to uncompressed
+            log('Server does not support gzip, retrying uncompressed...')
+            headers.pop('Content-Encoding')
+            req = urllib.request.Request(url, data=raw_body, headers=headers, method='PUT')
+            try:
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as e2:
+                e = e2  # fall through to error handling below
+
         detail = e.read().decode(errors='replace') if e.fp else ''
         try:
             error_data = json.loads(detail)
@@ -157,6 +181,21 @@ def publish(bookshelf_url: str, token: str, manifest: dict) -> dict:
         ) from e
     except urllib.error.URLError as e:
         raise RuntimeError(f'Cannot reach Bookshelf: {e.reason}') from e
+
+
+def _log_manifest_size(manifest: dict, raw_body: bytes) -> None:
+    """Log a breakdown of manifest component sizes."""
+    parts = []
+    for key in ('dashboard_html', 'dashboard_data', 'cover_base64'):
+        val = manifest.get(key)
+        if val:
+            size = len(json.dumps(val, ensure_ascii=False).encode())
+            if size > 10_000:
+                parts.append(f'{key}: {size:,} bytes')
+    chapters_size = len(json.dumps(manifest.get('chapters', []), ensure_ascii=False).encode())
+    parts.append(f'chapters: {chapters_size:,} bytes')
+    parts.append(f'total: {len(raw_body):,} bytes')
+    log(f'Manifest size: {"; ".join(parts)}')
 
 
 # ============================================================================

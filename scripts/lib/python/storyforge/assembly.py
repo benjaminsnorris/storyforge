@@ -1240,13 +1240,23 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
             with open(dashboard_path) as f:
                 manifest['dashboard_html'] = f.read()
 
+    # Always include structured dashboard data for server-side rendering
+    try:
+        from storyforge.visualize import load_dashboard_data
+        manifest['dashboard_data'] = load_dashboard_data(project_dir)
+    except Exception as exc:
+        from storyforge.common import log as _log
+        _log(f'WARNING: Could not load dashboard data: {exc}')
+        manifest['dashboard_data'] = {}
+
     # Embed cover as base64 if requested
     if include_cover:
         resolved = _resolve_cover_path(project_dir, cover_path)
         if resolved and os.path.isfile(resolved):
-            with open(resolved, 'rb') as f:
+            optimized = _optimize_cover_image(resolved, project_dir)
+            with open(optimized, 'rb') as f:
                 manifest['cover_base64'] = base64.b64encode(f.read()).decode('ascii')
-            manifest['cover_extension'] = os.path.splitext(resolved)[1]
+            manifest['cover_extension'] = os.path.splitext(optimized)[1]
 
     output_path = os.path.join(project_dir, 'working', 'publish-manifest.json')
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -1254,6 +1264,89 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     return output_path
+
+
+_COVER_MAX_DIMENSION = 1600
+_COVER_MAX_BYTES = 500_000  # 500 KB — skip optimization if already small
+
+
+def _optimize_cover_image(cover_path: str, project_dir: str) -> str:
+    """Optimize a cover image for publishing.
+
+    Converts PNG to JPEG and resizes if either dimension exceeds
+    _COVER_MAX_DIMENSION.  Uses macOS ``sips`` (available on Darwin).
+    Returns path to the optimized file in working/, or the original
+    path if optimization is unnecessary or unavailable.
+    """
+    import platform
+    import shutil
+    import subprocess
+
+    file_size = os.path.getsize(cover_path)
+    ext = os.path.splitext(cover_path)[1].lower()
+
+    # Skip if already small enough
+    if file_size <= _COVER_MAX_BYTES and ext in ('.jpg', '.jpeg'):
+        return cover_path
+
+    # sips is macOS-only
+    if platform.system() != 'Darwin':
+        from storyforge.common import log
+        if file_size > _COVER_MAX_BYTES:
+            log(f'WARNING: Cover image is {file_size:,} bytes — '
+                f'optimization requires macOS sips')
+        return cover_path
+
+    from storyforge.common import log
+    working_dir = os.path.join(project_dir, 'working')
+    os.makedirs(working_dir, exist_ok=True)
+
+    # Convert PNG/WebP to JPEG for smaller size
+    if ext in ('.png', '.webp'):
+        optimized = os.path.join(working_dir, 'cover-optimized.jpg')
+        shutil.copy2(cover_path, optimized)
+        try:
+            subprocess.run(
+                ['sips', '-s', 'format', 'jpeg',
+                 '-s', 'formatOptions', '85',
+                 optimized, '--out', optimized],
+                capture_output=True, check=True,
+            )
+            log(f'Cover: converted {ext} to JPEG '
+                f'({file_size:,} → {os.path.getsize(optimized):,} bytes)')
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            log(f'WARNING: sips conversion failed, using original')
+            return cover_path
+    else:
+        optimized = os.path.join(working_dir, f'cover-optimized{ext}')
+        shutil.copy2(cover_path, optimized)
+
+    # Resize if dimensions are too large
+    try:
+        result = subprocess.run(
+            ['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', optimized],
+            capture_output=True, text=True, check=True,
+        )
+        width = height = 0
+        for line in result.stdout.splitlines():
+            if 'pixelWidth' in line:
+                width = int(line.split(':')[-1].strip())
+            elif 'pixelHeight' in line:
+                height = int(line.split(':')[-1].strip())
+
+        if max(width, height) > _COVER_MAX_DIMENSION:
+            subprocess.run(
+                ['sips', '--resampleHeightWidthMax', str(_COVER_MAX_DIMENSION),
+                 optimized],
+                capture_output=True, check=True,
+            )
+            new_size = os.path.getsize(optimized)
+            log(f'Cover: resized from {width}x{height} to max {_COVER_MAX_DIMENSION}px '
+                f'({new_size:,} bytes)')
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        log('WARNING: cover resize failed, using converted image as-is')
+
+    return optimized
 
 
 def _resolve_cover_path(project_dir: str, cover_path: str | None) -> str | None:
