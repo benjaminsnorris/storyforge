@@ -133,7 +133,9 @@ def main(argv=None):
             return
 
     # Session start
+    from datetime import datetime
     session_start = time.time()
+    session_start_iso = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     # Branch + PR setup
     if not args.dry_run:
@@ -208,7 +210,7 @@ def main(argv=None):
     log('============================================')
 
     if not args.dry_run and drafted_count > 0:
-        print_summary(project_dir, 'draft')
+        print_summary(project_dir, 'draft', session_start=session_start_iso)
         run_review_phase('drafting', project_dir)
 
 
@@ -305,8 +307,17 @@ def _detect_briefs(project_dir: str) -> bool:
 
 
 def _build_prompt(scene_id: str, project_dir: str, coaching: str,
-                  use_briefs: bool) -> str:
-    """Build the drafting prompt for a scene."""
+                  use_briefs: bool, system_context: bool = False) -> str:
+    """Build the drafting prompt for a scene.
+
+    Args:
+        scene_id: Scene identifier.
+        project_dir: Project root directory.
+        coaching: Coaching level (full/coach/strict).
+        use_briefs: Whether to use brief-aware prompts.
+        system_context: When True, shared reference material is provided via
+            the API system parameter and should not be inlined in the prompt.
+    """
     from storyforge.common import get_plugin_dir
     plugin_dir = get_plugin_dir()
 
@@ -317,11 +328,13 @@ def _build_prompt(scene_id: str, project_dir: str, coaching: str,
         deps = scene.get('continuity_deps', '') if scene else ''
         dep_scenes = [d.strip() for d in deps.split(';') if d.strip()] if deps else None
         return build_scene_prompt_from_briefs(scene_id, project_dir, plugin_dir,
-                                              coaching, dep_scenes=dep_scenes)
+                                              coaching, dep_scenes=dep_scenes,
+                                              system_context=system_context)
     else:
         from storyforge.prompts import build_scene_prompt
         return build_scene_prompt(scene_id, project_dir, coaching,
-                                  api_mode=True)
+                                  api_mode=True,
+                                  system_context=system_context)
 
 
 def _extract_scene_from_response(log_file: str, scene_file: str) -> None:
@@ -412,6 +425,11 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
     model = select_model('drafting')
     batch_scene_ids = []
 
+    # Build shared context once for prompt caching across all scenes
+    from storyforge.common import build_shared_context
+    from storyforge.api import build_batch_request
+    system = build_shared_context(project_dir, model=model)
+
     for scene_id in pending_ids:
         scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
 
@@ -423,20 +441,15 @@ def _run_batch_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 log(f'Scene {scene_id} already has {existing_wc} words, skipping')
                 continue
 
-        prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs)
+        prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs,
+                               system_context=bool(system))
         if not prompt:
             log(f'ERROR: Failed to build prompt for scene {scene_id}')
             sys.exit(1)
 
-        # Build JSONL line
-        request = {
-            'custom_id': scene_id,
-            'params': {
-                'model': model,
-                'max_tokens': 8192,
-                'messages': [{'role': 'user', 'content': prompt}],
-            },
-        }
+        # Build JSONL line using batch request helper (includes system blocks)
+        request = build_batch_request(scene_id, prompt, model, 8192,
+                                      system=system or None)
         with open(batch_file, 'a') as f:
             f.write(json.dumps(request) + '\n')
         batch_scene_ids.append(scene_id)
@@ -517,6 +530,14 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
     total_words = 0
     from storyforge.git import _git
 
+    # Build shared context once for prompt caching across all scenes
+    # (only used in direct API mode, not interactive/dry-run)
+    system = None
+    if write_mode == 'direct' and not dry_run:
+        from storyforge.common import build_shared_context
+        model = select_model('drafting')
+        system = build_shared_context(project_dir, model=model)
+
     for i, scene_id in enumerate(pending_ids):
         scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
         scene_num = i + 1
@@ -531,7 +552,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
                 log(f'Scene file already has {existing_wc} words, skipping')
                 continue
 
-        prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs)
+        prompt = _build_prompt(scene_id, project_dir, coaching, use_briefs,
+                               system_context=bool(system))
         if not prompt:
             log(f'ERROR: Failed to build prompt for scene {scene_id}')
             log('Stopping — prompt generation failed.')
@@ -564,7 +586,8 @@ def _run_direct_mode(pending_ids, project_dir, scenes_dir, log_dir,
             try:
                 max_tokens = 16384 if write_mode != 'direct' else 8192
                 invoke_to_file(prompt, model, scene_log, max_tokens,
-                               label=f'drafting {scene_id}')
+                               label=f'drafting {scene_id}',
+                               system=system or None)
                 _extract_scene_from_response(scene_log, scene_file)
                 _log_api_usage(scene_log, 'draft', scene_id, model, project_dir)
                 exit_code = 0
