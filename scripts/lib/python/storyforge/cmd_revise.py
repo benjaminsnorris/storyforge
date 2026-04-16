@@ -222,7 +222,7 @@ def _resolve_targets_to_scene_ids(targets, valid_scene_ids, ref_dir):
             need_character_lookup.append(t)
 
     if not need_character_lookup:
-        return resolved
+        return sorted(set(resolved))
 
     # Try to resolve character names via scene-intent.csv characters column
     intent_path = os.path.join(ref_dir, 'scene-intent.csv')
@@ -2147,7 +2147,11 @@ def main(argv=None):
                 from storyforge.elaborate import _read_csv_as_map
                 valid_ids = set(_read_csv_as_map(target_csv).keys())
                 raw_targets = [t.strip() for t in targets.split(';') if t.strip()]
-                target_scenes = _resolve_targets_to_scene_ids(raw_targets, valid_ids, ref_dir) or None
+                target_scenes = _resolve_targets_to_scene_ids(raw_targets, valid_ids, ref_dir)
+                if not target_scenes:
+                    log(f'  WARNING: No valid scene IDs resolved from targets "{targets}" — skipping pass')
+                    _update_pass_field(plan_rows, pass_num, 'status', 'failed', csv_plan_file)
+                    continue
             else:
                 target_scenes = None
 
