@@ -457,3 +457,48 @@ class TestDetectRegressions:
         ])
         result = detect_regressions(str(tmp_path), 'prose_naturalness')
         assert result == []
+
+
+class TestCachedHistoryReads:
+    """Regression #203: detect_stalls and get_scene_history must accept pre-loaded rows."""
+
+    def _setup_history(self, project_dir, rows):
+        path = os.path.join(project_dir, 'working', 'scores', 'score-history.csv')
+        _write_scores_csv(path, rows, ['cycle', 'scene_id', 'principle', 'score'])
+
+    def test_detect_stalls_with_preloaded_rows(self, tmp_path):
+        from storyforge.history import detect_stalls, _read_history
+        self._setup_history(str(tmp_path), [
+            {'cycle': '1', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '2'},
+            {'cycle': '2', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '2'},
+        ])
+        rows = _read_history(str(tmp_path))
+        result = detect_stalls(str(tmp_path), 'p1', _rows=rows)
+        assert len(result) == 1
+        assert result[0]['scene_id'] == 'scene-a'
+
+    def test_get_scene_history_with_preloaded_rows(self, tmp_path):
+        from storyforge.history import get_scene_history, _read_history
+        self._setup_history(str(tmp_path), [
+            {'cycle': '1', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '3'},
+            {'cycle': '2', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '4'},
+        ])
+        rows = _read_history(str(tmp_path))
+        result = get_scene_history(str(tmp_path), 'scene-a', 'p1', _rows=rows)
+        assert len(result) == 2
+        assert result[0] == (1, 3.0)
+        assert result[1] == (2, 4.0)
+
+    def test_cached_and_uncached_produce_same_results(self, tmp_path):
+        from storyforge.history import detect_stalls, _read_history
+        self._setup_history(str(tmp_path), [
+            {'cycle': '1', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '2'},
+            {'cycle': '2', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '2'},
+            {'cycle': '1', 'scene_id': 'scene-b', 'principle': 'p1', 'score': '4'},
+            {'cycle': '2', 'scene_id': 'scene-b', 'principle': 'p1', 'score': '5'},
+        ])
+        uncached = detect_stalls(str(tmp_path), 'p1')
+        rows = _read_history(str(tmp_path))
+        cached = detect_stalls(str(tmp_path), 'p1', _rows=rows)
+        assert len(uncached) == len(cached)
+        assert uncached[0]['scene_id'] == cached[0]['scene_id']

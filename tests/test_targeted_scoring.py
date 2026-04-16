@@ -273,3 +273,19 @@ def test_deterministic_flag_dry_run(project_dir, plugin_dir, monkeypatch):
     assert 'Deterministic' in combined
     assert '$0.00' in combined
     assert 'prose_repetition' in combined
+
+
+# ---------------------------------------------------------------------------
+# --diagnosis-only flag
+# ---------------------------------------------------------------------------
+
+def test_parse_diagnosis_only_flag():
+    from storyforge.cmd_score import parse_args
+    args = parse_args(['--diagnosis-only'])
+    assert args.diagnosis_only is True
+
+
+def test_diagnosis_only_default_false():
+    from storyforge.cmd_score import parse_args
+    args = parse_args([])
+    assert args.diagnosis_only is False
