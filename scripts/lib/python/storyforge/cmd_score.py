@@ -1362,22 +1362,8 @@ def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
 
 def _count_high_priority(diagnosis_file: str) -> int:
     """Count high-priority principles in a diagnosis CSV."""
-    if not os.path.isfile(diagnosis_file):
-        return 0
-    with open(diagnosis_file) as f:
-        lines = [l.strip() for l in f if l.strip()]
-    if len(lines) < 2:
-        return 0
-    header = lines[0].split('|')
-    pri_idx = header.index('priority') if 'priority' in header else -1
-    if pri_idx < 0:
-        return 0
-    count = 0
-    for line in lines[1:]:
-        parts = line.split('|')
-        if pri_idx < len(parts) and parts[pri_idx] == 'high':
-            count += 1
-    return count
+    from storyforge.csv_cli import get_column
+    return sum(1 for v in get_column(diagnosis_file, 'priority') if v == 'high')
 
 
 def _run_improvement_cycle(cycle, cycle_dir, project_dir, weights_file,
@@ -1430,19 +1416,21 @@ def _run_improvement_cycle(cycle, cycle_dir, project_dir, weights_file,
         _approve_all_proposals(proposals_file)
     elif coaching == 'coach':
         log('Coaching level: coach — proposals require interactive approval')
-        # In non-interactive script, just report
+        # No approved proposals in non-interactive script; skip apply
     elif coaching == 'strict':
         log('Coaching level: strict — diagnosis and proposals generated as report only')
         _print_strict_report(diagnosis_file, proposals_file)
         return
 
-    # Apply approved proposals
-    if coaching != 'strict':
+    # Apply approved proposals (only 'full' will have approved proposals here)
+    if coaching == 'full':
         log('Improvement cycle: applying proposals...')
         t0 = time.monotonic()
         applied = _apply_proposals(proposals_file, weights_file, intent_csv,
                                    project_dir)
         log(f'Improvement cycle: {applied} proposals applied ({time.monotonic() - t0:.1f}s)')
+        if applied:
+            log('Run storyforge write to rewrite with updated guidance.')
 
     # Collect exemplars
     log('Improvement cycle: collecting exemplars...')

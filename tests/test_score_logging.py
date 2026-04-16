@@ -1,7 +1,7 @@
 """Tests for improvement cycle logging in cmd_score."""
 
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from storyforge.cmd_score import _count_high_priority, _run_improvement_cycle
 
@@ -95,6 +95,7 @@ def test_improvement_cycle_logs_all_phases(
     assert '1 proposals generated (1 high-priority principles)' in captured
     assert 'Improvement cycle: applying proposals...' in captured
     assert 'proposals applied' in captured
+    assert 'Run storyforge write to rewrite with updated guidance.' in captured
     assert 'Improvement cycle: collecting exemplars...' in captured
     assert 'Improvement cycle: exemplars collected' in captured
     assert 'Improvement cycle: complete' in captured
@@ -139,3 +140,58 @@ def test_improvement_cycle_no_proposals_logs_cleanly(
     # Should NOT reach later phases
     assert 'applying proposals' not in captured
     assert 'collecting exemplars' not in captured
+
+
+@patch('storyforge.scoring.check_validated_patterns', return_value='')
+@patch('storyforge.scoring.collect_exemplars')
+@patch('storyforge.scoring.generate_proposals')
+@patch('storyforge.scoring.generate_diagnosis')
+@patch('storyforge.cmd_score.get_coaching_level', return_value='coach')
+def test_improvement_cycle_coach_skips_apply(
+    mock_coaching, mock_diag, mock_proposals, mock_exemplars,
+    mock_patterns, tmp_path, capsys
+):
+    """Coach mode should not attempt to apply proposals."""
+    cycle_dir = str(tmp_path / 'cycle-1')
+    os.makedirs(cycle_dir)
+    project_dir = str(tmp_path / 'project')
+    os.makedirs(os.path.join(project_dir, 'working'), exist_ok=True)
+
+    weights_file = str(tmp_path / 'craft-weights.csv')
+    with open(weights_file, 'w') as f:
+        f.write('principle|weight\nprose_repetition|5\n')
+
+    intent_csv = str(tmp_path / 'scene-intent.csv')
+    with open(intent_csv, 'w') as f:
+        f.write('id|function\n')
+
+    def fake_diagnosis(cd, pd, wf):
+        with open(os.path.join(cd, 'diagnosis.csv'), 'w') as f:
+            f.write(
+                'principle|scale|avg_score|worst_items|delta_from_last|priority|root_cause\n'
+                'prose_repetition|scene|1.8|s1||high|craft\n'
+            )
+    mock_diag.side_effect = fake_diagnosis
+
+    def fake_proposals(cd, wf):
+        with open(os.path.join(cd, 'proposals.csv'), 'w') as f:
+            f.write(
+                'id|principle|lever|target|change|rationale|status\n'
+                'p001|prose_repetition|craft_weight|global|weight 5 → 7|avg_score 1.8, priority high|pending\n'
+            )
+    mock_proposals.side_effect = fake_proposals
+
+    _run_improvement_cycle(
+        cycle=1, cycle_dir=cycle_dir, project_dir=project_dir,
+        weights_file=weights_file, plugin_dir='/fake',
+        intent_csv=intent_csv, title='Test',
+    )
+
+    captured = capsys.readouterr().out
+    assert 'proposals require interactive approval' in captured
+    # Coach mode must NOT apply proposals or show the apply phase
+    assert 'applying proposals' not in captured
+    assert 'Run storyforge write' not in captured
+    # Should still collect exemplars
+    assert 'Improvement cycle: collecting exemplars...' in captured
+    assert 'Improvement cycle: complete' in captured
