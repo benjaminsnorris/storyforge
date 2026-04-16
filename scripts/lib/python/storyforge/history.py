@@ -39,7 +39,7 @@ def _is_principle_column(col: str) -> bool:
     return True
 
 
-def _read_history(project_dir: str) -> list[dict[str, str]]:
+def read_history(project_dir: str) -> list[dict[str, str]]:
     """Read score-history.csv, return list of row dicts.
 
     Returns [] if the file does not exist.
@@ -121,12 +121,17 @@ def get_scene_history(
     project_dir: str,
     scene_id: str,
     principle: str,
+    _rows: list[dict[str, str]] | None = None,
 ) -> list[tuple[int, float]]:
     """Return (cycle, score) tuples for one scene+principle, sorted by cycle.
 
     Returns [] if no history file exists or no matching rows.
+
+    Args:
+        _rows: Optional pre-loaded history rows (from ``_read_history``).
+            When provided, skips reading the file from disk.
     """
-    rows = _read_history(project_dir)
+    rows = _rows if _rows is not None else read_history(project_dir)
     matches = [
         r for r in rows
         if r.get('scene_id') == scene_id and r.get('principle') == principle
@@ -145,6 +150,7 @@ def detect_stalls(
     principle: str,
     min_cycles: int = 2,
     max_score: float = 3.0,
+    _rows: list[dict[str, str]] | None = None,
 ) -> list[dict]:
     """Find scenes stuck at low scores for consecutive recent cycles.
 
@@ -152,10 +158,16 @@ def detect_stalls(
     with no improvement (the last score is not higher than the first of the
     trailing window).
 
+    Args:
+        _rows: Optional pre-loaded history rows (from ``_read_history``).
+            When provided, skips reading the file from disk.  Passing this
+            avoids O(N) redundant file reads when calling detect_stalls in
+            a loop.
+
     Returns list of:
       {scene_id, scores: [(cycle, score), ...], cycles_stalled: int}
     """
-    rows = _read_history(project_dir)
+    rows = _rows if _rows is not None else read_history(project_dir)
     if not rows:
         return []
 
@@ -166,7 +178,7 @@ def detect_stalls(
 
     stalls = []
     for scene_id in scene_ids:
-        history = get_scene_history(project_dir, scene_id, principle)
+        history = get_scene_history(project_dir, scene_id, principle, _rows=rows)
         if len(history) < min_cycles:
             continue
 
@@ -191,13 +203,18 @@ def detect_regressions(
     project_dir: str,
     principle: str,
     threshold: float = -0.5,
+    _rows: list[dict[str, str]] | None = None,
 ) -> list[dict]:
     """Find scenes where score dropped by >= |threshold| between consecutive cycles.
+
+    Args:
+        _rows: Optional pre-loaded history rows (from ``read_history``).
+            When provided, skips reading the file from disk.
 
     Returns list of:
       {scene_id, from_cycle, to_cycle, from_score, to_score, delta}
     """
-    rows = _read_history(project_dir)
+    rows = _rows if _rows is not None else read_history(project_dir)
     if not rows:
         return []
 
@@ -208,7 +225,7 @@ def detect_regressions(
 
     regressions = []
     for scene_id in scene_ids:
-        history = get_scene_history(project_dir, scene_id, principle)
+        history = get_scene_history(project_dir, scene_id, principle, _rows=rows)
         if len(history) < 2:
             continue
 

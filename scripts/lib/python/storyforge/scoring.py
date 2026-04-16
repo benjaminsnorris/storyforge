@@ -314,6 +314,14 @@ def _attribute_root_causes(diag_rows, diag_header, project_dir):
     ref_dir = os.path.join(project_dir, 'reference')
     brief_issue_scenes = None
 
+    # Pre-load history once — avoids O(N) redundant file reads
+    history_rows = None
+    try:
+        from storyforge.history import read_history
+        history_rows = read_history(project_dir)
+    except Exception:
+        history_rows = []
+
     for row in diag_rows:
         priority = row[priority_idx]
         if priority not in ('high', 'medium'):
@@ -339,11 +347,11 @@ def _attribute_root_causes(diag_rows, diag_header, project_dir):
             except Exception:
                 brief_issue_scenes = set()
 
-        # Check stall history (lazy load per principle)
+        # Check stall history (using pre-loaded rows)
         stalled_scenes = set()
         try:
             from storyforge.history import detect_stalls
-            stalls = detect_stalls(project_dir, principle)
+            stalls = detect_stalls(project_dir, principle, _rows=history_rows)
             stalled_scenes = {s['scene_id'] for s in stalls}
         except Exception:
             pass

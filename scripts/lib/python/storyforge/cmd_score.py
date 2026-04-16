@@ -70,6 +70,9 @@ def parse_args(argv):
     parser.add_argument('--parallel', type=int,
                         default=int(os.environ.get('STORYFORGE_SCORE_PARALLEL', '6')),
                         help='Parallel workers for direct mode (default: 6)')
+    parser.add_argument('--diagnosis-only', action='store_true',
+                        help='Generate diagnosis and proposals from existing scores '
+                             '(skip scoring, run improvement cycle only)')
     return parser.parse_args(argv)
 
 
@@ -249,6 +252,43 @@ def main(argv=None):
             targeted_principles, scene_ids, project_dir, cycle, cycle_dir,
             plugin_dir, weights_file, title,
         )
+        return
+
+    # =========================================================================
+    # Diagnosis-only fast path
+    # =========================================================================
+    # When --diagnosis-only is set, skip all scoring and run just the
+    # improvement cycle (diagnosis + proposals) from existing scores.
+
+    if args.diagnosis_only:
+        # Use latest cycle dir if it has scores, otherwise use current
+        latest_link = os.path.join(project_dir, 'working', 'scores', 'latest')
+        if os.path.islink(latest_link):
+            diag_cycle_dir = os.path.realpath(latest_link)
+        else:
+            diag_cycle_dir = cycle_dir
+
+        scores_file = os.path.join(diag_cycle_dir, 'scene-scores.csv')
+        if not os.path.isfile(scores_file):
+            log(f'ERROR: No scene-scores.csv found in {diag_cycle_dir}')
+            log('Run a full scoring cycle first, then use --diagnosis-only.')
+            sys.exit(1)
+
+        log(f'Running diagnosis only from {diag_cycle_dir}')
+        try:
+            diag_cycle = int(os.path.basename(diag_cycle_dir).replace('cycle-', ''))
+        except ValueError:
+            log(f'ERROR: Could not determine cycle number from {diag_cycle_dir}')
+            sys.exit(1)
+        _run_improvement_cycle(
+            diag_cycle, diag_cycle_dir, project_dir, weights_file, plugin_dir,
+            intent_csv, title,
+        )
+        _generate_report_and_comment(
+            diag_cycle, diag_cycle_dir, project_dir, score_mode, scene_count,
+        )
+        commit_and_push(project_dir, f'Score: diagnosis-only cycle {diag_cycle}',
+                        ['working/'])
         return
 
     # Cost forecast
@@ -1593,8 +1633,8 @@ def _generate_report_and_comment(cycle, cycle_dir, project_dir, score_mode,
             pr_num = r.stdout.strip() if r.returncode == 0 else ''
             if pr_num:
                 subprocess.run(
-                    ['gh', 'pr', 'comment', pr_num, '--body', comment],
-                    capture_output=True, cwd=project_dir,
+                    ['gh', 'pr', 'comment', pr_num, '--body-file', '-'],
+                    input=comment.encode(), capture_output=True, cwd=project_dir,
                 )
                 log(f'Posted scoring summary to PR #{pr_num}')
 

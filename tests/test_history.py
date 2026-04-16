@@ -50,31 +50,31 @@ class TestHistoryPath:
 
 class TestReadHistory:
     def test_returns_empty_when_no_file(self, tmp_path):
-        from storyforge.history import _read_history
-        result = _read_history(str(tmp_path))
+        from storyforge.history import read_history
+        result = read_history(str(tmp_path))
         assert result == []
 
     def test_reads_existing_file(self, tmp_path):
-        from storyforge.history import _history_path, _read_history
+        from storyforge.history import _history_path, read_history
         path = _history_path(str(tmp_path))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', newline='', encoding='utf-8') as f:
             f.write('cycle|scene_id|principle|score\n')
             f.write('1|scene-a|prose_naturalness|4\n')
-        result = _read_history(str(tmp_path))
+        result = read_history(str(tmp_path))
         assert len(result) == 1
         assert result[0]['scene_id'] == 'scene-a'
         assert result[0]['score'] == '4'
 
     def test_coerces_none_to_empty_string(self, tmp_path):
-        from storyforge.history import _history_path, _read_history
+        from storyforge.history import _history_path, read_history
         path = _history_path(str(tmp_path))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         # Write a row with fewer fields than header (causes None in DictReader)
         with open(path, 'w', newline='', encoding='utf-8') as f:
             f.write('cycle|scene_id|principle|score\n')
             f.write('1|scene-a|prose_naturalness\n')  # missing score
-        result = _read_history(str(tmp_path))
+        result = read_history(str(tmp_path))
         assert result[0]['score'] == ''
 
 
@@ -457,3 +457,48 @@ class TestDetectRegressions:
         ])
         result = detect_regressions(str(tmp_path), 'prose_naturalness')
         assert result == []
+
+
+class TestCachedHistoryReads:
+    """Regression #203: detect_stalls and get_scene_history must accept pre-loaded rows."""
+
+    def _setup_history(self, project_dir, rows):
+        path = os.path.join(project_dir, 'working', 'scores', 'score-history.csv')
+        _write_scores_csv(path, rows, ['cycle', 'scene_id', 'principle', 'score'])
+
+    def test_detect_stalls_with_preloaded_rows(self, tmp_path):
+        from storyforge.history import detect_stalls, read_history
+        self._setup_history(str(tmp_path), [
+            {'cycle': '1', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '2'},
+            {'cycle': '2', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '2'},
+        ])
+        rows = read_history(str(tmp_path))
+        result = detect_stalls(str(tmp_path), 'p1', _rows=rows)
+        assert len(result) == 1
+        assert result[0]['scene_id'] == 'scene-a'
+
+    def test_get_scene_history_with_preloaded_rows(self, tmp_path):
+        from storyforge.history import get_scene_history, read_history
+        self._setup_history(str(tmp_path), [
+            {'cycle': '1', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '3'},
+            {'cycle': '2', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '4'},
+        ])
+        rows = read_history(str(tmp_path))
+        result = get_scene_history(str(tmp_path), 'scene-a', 'p1', _rows=rows)
+        assert len(result) == 2
+        assert result[0] == (1, 3.0)
+        assert result[1] == (2, 4.0)
+
+    def test_cached_and_uncached_produce_same_results(self, tmp_path):
+        from storyforge.history import detect_stalls, read_history
+        self._setup_history(str(tmp_path), [
+            {'cycle': '1', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '2'},
+            {'cycle': '2', 'scene_id': 'scene-a', 'principle': 'p1', 'score': '2'},
+            {'cycle': '1', 'scene_id': 'scene-b', 'principle': 'p1', 'score': '4'},
+            {'cycle': '2', 'scene_id': 'scene-b', 'principle': 'p1', 'score': '5'},
+        ])
+        uncached = detect_stalls(str(tmp_path), 'p1')
+        rows = read_history(str(tmp_path))
+        cached = detect_stalls(str(tmp_path), 'p1', _rows=rows)
+        assert len(uncached) == len(cached)
+        assert uncached[0]['scene_id'] == cached[0]['scene_id']
