@@ -18,6 +18,7 @@ from storyforge.cmd_evaluate import (
     _load_custom_evaluators,
     _resolve_voice_guide,
     _build_eval_prompt,
+    _build_manuscript_text,
     _build_synthesis_prompt,
 )
 
@@ -548,14 +549,9 @@ class TestBuildEvalPrompt:
         assert prompt is not None
         assert 'fantasy' in prompt
 
-    def test_prompt_api_mode_includes_manuscript_inline(self, project_dir):
-        """API mode should inline scene content in prompt."""
+    def test_prompt_api_mode_references_system_manuscript(self, project_dir):
+        """API mode prompt should reference manuscript in system context."""
         plugin_dir = PLUGIN_DIR
-
-        # Write scene content
-        scene_path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
-        with open(scene_path, 'w') as f:
-            f.write('The cartographer studied her instruments.')
 
         prompt = _build_eval_prompt(
             'first-reader', False, True, project_dir, plugin_dir,
@@ -563,7 +559,66 @@ class TestBuildEvalPrompt:
             'Test', 'fantasy', '', '', False, '20260101-000000', [],
         )
 
-        assert 'The cartographer studied her instruments.' in prompt
+        assert 'manuscript is provided in the system context' in prompt
+
+    def test_build_manuscript_text_inlines_content(self, project_dir):
+        """_build_manuscript_text should inline scene file content."""
+        scene_path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        with open(scene_path, 'w') as f:
+            f.write('The cartographer studied her instruments.')
+
+        text = _build_manuscript_text(['scenes/act1-sc01.md'], project_dir)
+        assert 'The cartographer studied her instruments.' in text
+        assert '===== scenes/act1-sc01.md =====' in text
+
+    def test_build_manuscript_text_multiple_scenes(self, project_dir):
+        """_build_manuscript_text should concatenate multiple scene files."""
+        scenes_dir = os.path.join(project_dir, 'scenes')
+        for name, content in [('act1-sc01.md', 'Scene one content.'),
+                              ('act1-sc02.md', 'Scene two content.'),
+                              ('act2-sc01.md', 'Scene three content.')]:
+            with open(os.path.join(scenes_dir, name), 'w') as f:
+                f.write(content)
+
+        text = _build_manuscript_text(
+            ['scenes/act1-sc01.md', 'scenes/act1-sc02.md', 'scenes/act2-sc01.md'],
+            project_dir,
+        )
+        assert 'Scene one content.' in text
+        assert 'Scene two content.' in text
+        assert 'Scene three content.' in text
+        assert '===== scenes/act1-sc01.md =====' in text
+        assert '===== scenes/act2-sc01.md =====' in text
+
+    def test_build_manuscript_text_skips_missing_files(self, project_dir):
+        """_build_manuscript_text should skip files that don't exist."""
+        scene_path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        with open(scene_path, 'w') as f:
+            f.write('Exists.')
+
+        text = _build_manuscript_text(
+            ['scenes/act1-sc01.md', 'scenes/nonexistent.md'],
+            project_dir,
+        )
+        assert 'Exists.' in text
+        assert 'nonexistent' not in text
+
+    def test_build_manuscript_text_empty_list(self, project_dir):
+        """_build_manuscript_text with no files returns empty string."""
+        assert _build_manuscript_text([], project_dir) == ''
+
+    def test_build_manuscript_text_chapter_files(self, project_dir):
+        """_build_manuscript_text should work with assembled chapter paths."""
+        ch_dir = os.path.join(project_dir, 'manuscript', 'chapters')
+        os.makedirs(ch_dir, exist_ok=True)
+        with open(os.path.join(ch_dir, 'chapter-01.md'), 'w') as f:
+            f.write('Chapter one assembled content.')
+
+        text = _build_manuscript_text(
+            ['manuscript/chapters/chapter-01.md'], project_dir,
+        )
+        assert 'Chapter one assembled content.' in text
+        assert '===== manuscript/chapters/chapter-01.md =====' in text
 
     def test_prompt_non_api_mode_no_inline(self, project_dir):
         """Non-API mode should reference files but not inline content."""

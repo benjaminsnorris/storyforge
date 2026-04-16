@@ -301,6 +301,22 @@ def _build_file_list(project_dir, filter_mode, filter_value, range_start,
 # Prompt building
 # ============================================================================
 
+
+def _build_manuscript_text(scene_files: list[str], project_dir: str) -> str:
+    """Build inline manuscript content from scene/chapter files.
+
+    Returns the concatenated manuscript text for inclusion in system blocks.
+    """
+    parts = []
+    for sf in scene_files:
+        sf_path = os.path.join(project_dir, sf)
+        if os.path.isfile(sf_path):
+            parts.append(f'===== {sf} =====\n\n')
+            parts.append(open(sf_path).read())
+            parts.append(f'\n\n===== END {sf} =====\n')
+    return ''.join(parts)
+
+
 def _build_eval_prompt(evaluator, is_custom, api_mode, project_dir, plugin_dir,
                        scene_files, scope_description, input_type,
                        project_title, genre_display, logline,
@@ -347,15 +363,8 @@ def _build_eval_prompt(evaluator, is_custom, api_mode, project_dir, plugin_dir,
     else:
         persona = persona.replace('{AI_TELL_WORDS}', '')
 
-    # Inline manuscript content for API mode
-    manuscript_inline = ''
-    if api_mode:
-        for sf in scene_files:
-            sf_path = os.path.join(project_dir, sf)
-            if os.path.isfile(sf_path):
-                manuscript_inline += f'\n===== {sf} =====\n\n'
-                manuscript_inline += open(sf_path).read()
-                manuscript_inline += f'\n\n===== END {sf} =====\n'
+    # Manuscript content is now passed via system blocks for caching.
+    # See _build_manuscript_text() and the batch/direct launch code.
 
     # Final evaluation context
     final_block = ''
@@ -399,10 +408,8 @@ def _build_eval_prompt(evaluator, is_custom, api_mode, project_dir, plugin_dir,
 
     if api_mode:
         parts.extend([
-            '===== MANUSCRIPT =====\n',
-            manuscript_inline,
-            '\n===== INSTRUCTIONS =====\n',
-            'The manuscript is provided above. Evaluate it following the structure defined in your role description.\n',
+            '===== INSTRUCTIONS =====\n',
+            'The manuscript is provided in the system context. Evaluate it following the structure defined in your role description.\n',
         ])
     else:
         if input_type == 'chapters':
@@ -1048,6 +1055,16 @@ def main(argv=None):
 
     # Build shared context for prompt caching (batch + direct modes)
     system = build_shared_context(project_dir, model=eval_models[0] if eval_models else '')
+
+    # Append manuscript as a cached system block (shared across all evaluators)
+    if use_api_prompts:
+        manuscript_text = _build_manuscript_text(scene_files, project_dir)
+        if manuscript_text:
+            system = system + [
+                {'type': 'text',
+                 'text': f'===== MANUSCRIPT =====\n\n{manuscript_text}',
+                 'cache_control': {'type': 'ephemeral'}},
+            ]
 
     if eval_mode == 'batch':
 
