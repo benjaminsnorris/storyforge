@@ -1268,11 +1268,16 @@ def _resolve_cover_path(project_dir: str, cover_path: str | None) -> str | None:
         return os.path.join(project_dir, cover_path)
 
     # Check production.cover_image YAML field
-    cover_image = read_production_field(project_dir, 'cover_image')
+    try:
+        cover_image = read_production_field(project_dir, 'cover_image')
+    except Exception:
+        cover_image = ''
     if cover_image:
         full = os.path.join(project_dir, cover_image)
         if os.path.isfile(full):
             return full
+        from storyforge.common import log
+        log(f'WARNING: production.cover_image set to {cover_image!r} but file not found, falling back to auto-detect')
 
     # Auto-detect from standard locations (jpg preferred for publishing)
     for directory in ('production', 'manuscript/assets'):
