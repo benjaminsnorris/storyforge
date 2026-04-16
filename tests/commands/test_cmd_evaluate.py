@@ -571,6 +571,55 @@ class TestBuildEvalPrompt:
         assert 'The cartographer studied her instruments.' in text
         assert '===== scenes/act1-sc01.md =====' in text
 
+    def test_build_manuscript_text_multiple_scenes(self, project_dir):
+        """_build_manuscript_text should concatenate multiple scene files."""
+        scenes_dir = os.path.join(project_dir, 'scenes')
+        for name, content in [('act1-sc01.md', 'Scene one content.'),
+                              ('act1-sc02.md', 'Scene two content.'),
+                              ('act2-sc01.md', 'Scene three content.')]:
+            with open(os.path.join(scenes_dir, name), 'w') as f:
+                f.write(content)
+
+        text = _build_manuscript_text(
+            ['scenes/act1-sc01.md', 'scenes/act1-sc02.md', 'scenes/act2-sc01.md'],
+            project_dir,
+        )
+        assert 'Scene one content.' in text
+        assert 'Scene two content.' in text
+        assert 'Scene three content.' in text
+        assert '===== scenes/act1-sc01.md =====' in text
+        assert '===== scenes/act2-sc01.md =====' in text
+
+    def test_build_manuscript_text_skips_missing_files(self, project_dir):
+        """_build_manuscript_text should skip files that don't exist."""
+        scene_path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        with open(scene_path, 'w') as f:
+            f.write('Exists.')
+
+        text = _build_manuscript_text(
+            ['scenes/act1-sc01.md', 'scenes/nonexistent.md'],
+            project_dir,
+        )
+        assert 'Exists.' in text
+        assert 'nonexistent' not in text
+
+    def test_build_manuscript_text_empty_list(self, project_dir):
+        """_build_manuscript_text with no files returns empty string."""
+        assert _build_manuscript_text([], project_dir) == ''
+
+    def test_build_manuscript_text_chapter_files(self, project_dir):
+        """_build_manuscript_text should work with assembled chapter paths."""
+        ch_dir = os.path.join(project_dir, 'manuscript', 'chapters')
+        os.makedirs(ch_dir, exist_ok=True)
+        with open(os.path.join(ch_dir, 'chapter-01.md'), 'w') as f:
+            f.write('Chapter one assembled content.')
+
+        text = _build_manuscript_text(
+            ['manuscript/chapters/chapter-01.md'], project_dir,
+        )
+        assert 'Chapter one assembled content.' in text
+        assert '===== manuscript/chapters/chapter-01.md =====' in text
+
     def test_prompt_non_api_mode_no_inline(self, project_dir):
         """Non-API mode should reference files but not inline content."""
         plugin_dir = PLUGIN_DIR
