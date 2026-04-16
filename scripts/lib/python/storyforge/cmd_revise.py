@@ -170,20 +170,85 @@ def _file_hash(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def _write_hone_findings(path, fix_location, targets, guidance):
-    """Write a findings file for hone from revision plan pass data."""
+def _write_hone_findings(path, fix_location, targets, guidance, ref_dir=''):
+    """Write a findings file for hone from revision plan pass data.
+
+    When *targets* is empty (full scope), reads the target CSV and expands to
+    all scene IDs so that ``load_external_findings`` can match them.
+
+    When targets contain values that are not valid scene IDs (e.g. character
+    names), they are resolved to the scenes where each character appears via the
+    ``characters`` column in scene-intent.csv.
+    """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     target_file = 'scene-briefs.csv' if fix_location == 'brief' else 'scene-intent.csv'
-    scene_ids = [t.strip() for t in targets.split(';') if t.strip()] if targets else []
+    raw_targets = [t.strip() for t in targets.split(';') if t.strip()] if targets else []
     safe_guidance = _sanitize_csv_field(guidance)
+
+    # Determine the set of valid scene IDs from the target CSV
+    valid_scene_ids: set[str] = set()
+    if ref_dir:
+        csv_path = os.path.join(ref_dir, target_file)
+        if os.path.isfile(csv_path):
+            from storyforge.elaborate import _read_csv_as_map
+            valid_scene_ids = set(_read_csv_as_map(csv_path).keys())
+
+    if not raw_targets:
+        # Full scope — expand to all scene IDs from the target CSV
+        scene_ids = sorted(valid_scene_ids) if valid_scene_ids else []
+    elif valid_scene_ids:
+        # Resolve any non-scene-ID targets (e.g. character names) to scenes
+        scene_ids = _resolve_targets_to_scene_ids(raw_targets, valid_scene_ids, ref_dir)
+    else:
+        scene_ids = raw_targets
+
     with open(path, 'w') as f:
         f.write('scene_id|target_file|fields|guidance\n')
         if not scene_ids:
-            # Global scope — write a single row with empty scene_id
-            f.write(f'|{target_file}||{safe_guidance}\n')
+            log('  WARNING: No scene IDs to write in findings file')
+        for sid in scene_ids:
+            f.write(f'{sid}|{target_file}||{safe_guidance}\n')
+
+
+def _resolve_targets_to_scene_ids(targets, valid_scene_ids, ref_dir):
+    """Resolve targets to scene IDs, expanding character names via scene-intent.csv."""
+    resolved = []
+    need_character_lookup = []
+
+    for t in targets:
+        if t in valid_scene_ids:
+            resolved.append(t)
         else:
-            for sid in scene_ids:
-                f.write(f'{sid}|{target_file}||{safe_guidance}\n')
+            need_character_lookup.append(t)
+
+    if not need_character_lookup:
+        return resolved
+
+    # Try to resolve character names via scene-intent.csv characters column
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    if not os.path.isfile(intent_path):
+        for name in need_character_lookup:
+            log(f'  WARNING: Target "{name}" is not a valid scene ID and '
+                f'scene-intent.csv not found for character lookup — skipping')
+        return resolved
+
+    from storyforge.elaborate import _read_csv_as_map
+    intent_map = _read_csv_as_map(intent_path)
+
+    for name in need_character_lookup:
+        name_lower = name.lower()
+        matching_scenes = []
+        for sid, row in intent_map.items():
+            chars = [c.strip().lower() for c in row.get('characters', '').split(';') if c.strip()]
+            if name_lower in chars:
+                matching_scenes.append(sid)
+        if matching_scenes:
+            log(f'  Resolved character "{name}" to {len(matching_scenes)} scenes')
+            resolved.extend(matching_scenes)
+        else:
+            log(f'  WARNING: Target "{name}" is not a valid scene ID or character name — skipping')
+
+    return sorted(set(resolved))
 
 
 def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
@@ -2065,18 +2130,26 @@ def main(argv=None):
             start_time = time.time()
             pass_model = select_revision_model(pass_name, pass_purpose)
 
+            ref_dir = os.path.join(project_dir, 'reference')
+
             findings_path = os.path.join(
                 project_dir, 'working', 'plans',
                 f'hone-findings-{pass_name}.csv')
-            _write_hone_findings(findings_path, fix_location, targets, guidance)
+            _write_hone_findings(findings_path, fix_location, targets, guidance, ref_dir=ref_dir)
 
             target_csv = os.path.join(
                 project_dir, 'reference',
                 'scene-briefs.csv' if fix_location == 'brief' else 'scene-intent.csv')
             old_hash = _file_hash(target_csv)
 
-            ref_dir = os.path.join(project_dir, 'reference')
-            target_scenes = [t.strip() for t in targets.split(';') if t.strip()] if targets else None
+            # Resolve targets to valid scene IDs (handles character names, full scope)
+            if targets:
+                from storyforge.elaborate import _read_csv_as_map
+                valid_ids = set(_read_csv_as_map(target_csv).keys())
+                raw_targets = [t.strip() for t in targets.split(';') if t.strip()]
+                target_scenes = _resolve_targets_to_scene_ids(raw_targets, valid_ids, ref_dir) or None
+            else:
+                target_scenes = None
 
             log(f'  Delegating to hone ({fix_location}) for {len(target_scenes) if target_scenes else "all"} scenes...')
 
