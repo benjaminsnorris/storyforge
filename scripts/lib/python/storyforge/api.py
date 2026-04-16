@@ -161,19 +161,34 @@ def invoke_to_file(prompt: str, model: str, log_file: str, max_tokens: int = 409
     return response
 
 
+_invoke_api_consecutive_failures = 0
+_INVOKE_API_FAILURE_THRESHOLD = 5
+
+
 def invoke_api(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
                timeout: int = API_TIMEOUT, system: list[dict] | None = None) -> str:
     """High-level convenience: invoke API and return text response.
 
     Returns empty string on failure (logs warning but doesn't raise).
+    Raises RuntimeError if failures exceed threshold (likely systemic issue).
     Used by git.py review phase, runner.py healing zones, and command modules.
     """
+    global _invoke_api_consecutive_failures
     try:
         response = invoke(prompt, model, max_tokens, label=label, timeout=timeout, system=system)
+        _invoke_api_consecutive_failures = 0
         return extract_text(response)
     except Exception as e:
         from storyforge.common import log
+        _invoke_api_consecutive_failures += 1
         log(f'WARNING: API call failed: {e}')
+        if _invoke_api_consecutive_failures >= _INVOKE_API_FAILURE_THRESHOLD:
+            _invoke_api_consecutive_failures = 0
+            raise RuntimeError(
+                f'API calls failed {_INVOKE_API_FAILURE_THRESHOLD} times consecutively — '
+                f'likely a systemic issue (bad API key, malformed request, etc.). '
+                f'Last error: {e}'
+            ) from e
         return ''
 
 

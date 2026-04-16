@@ -132,6 +132,18 @@ class TestSessionScopedSummary:
         assert 'Project total' in out
         assert 'This session' not in out
 
+    def test_corrupt_ledger_row_skipped(self, tmp_path, capsys):
+        project_dir = str(tmp_path / 'proj')
+        self._make_ledger(project_dir, [
+            '2026-04-15T10:00:00|revise|scene-1|claude-opus-4-6|100000|10000|0|0|5.250000|300',
+            '2026-04-15T11:00:00|revise|scene-2|claude-opus-4-6|CORRUPT|bad|x|y|nope|zzz',
+        ])
+        print_summary(project_dir, 'revise')
+        out = capsys.readouterr().out
+        # Should not crash — corrupt row's values treated as 0
+        assert 'Invocations:   2' in out
+        assert '100,000' in out
+
     def test_duration_uses_format_duration(self, tmp_path, capsys):
         project_dir = str(tmp_path / 'proj')
         self._make_ledger(project_dir, [
