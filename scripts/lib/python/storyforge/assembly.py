@@ -1241,8 +1241,13 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
                 manifest['dashboard_html'] = f.read()
 
     # Always include structured dashboard data for server-side rendering
-    from storyforge.visualize import load_dashboard_data
-    manifest['dashboard_data'] = load_dashboard_data(project_dir)
+    try:
+        from storyforge.visualize import load_dashboard_data
+        manifest['dashboard_data'] = load_dashboard_data(project_dir)
+    except Exception as exc:
+        from storyforge.common import log as _log
+        _log(f'WARNING: Could not load dashboard data: {exc}')
+        manifest['dashboard_data'] = {}
 
     # Embed cover as base64 if requested
     if include_cover:
@@ -1339,7 +1344,7 @@ def _optimize_cover_image(cover_path: str, project_dir: str) -> str:
             log(f'Cover: resized from {width}x{height} to max {_COVER_MAX_DIMENSION}px '
                 f'({new_size:,} bytes)')
     except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
-        pass  # resize failed — use whatever we have
+        log('WARNING: cover resize failed, using converted image as-is')
 
     return optimized
 

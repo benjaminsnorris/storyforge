@@ -157,16 +157,15 @@ class TestOptimizeCoverImage:
         result = _optimize_cover_image(str(cover), str(tmp_path))
         assert result == str(cover)
 
-    def test_large_png_triggers_optimization(self, tmp_path):
+    def test_large_png_triggers_optimization(self, tmp_path, monkeypatch):
         """Large PNG files should be converted to optimized JPEG."""
         import platform
         import subprocess
-        from storyforge.assembly import _optimize_cover_image, _COVER_MAX_BYTES
+        import storyforge.assembly as asm
         if platform.system() != 'Darwin':
             pytest.skip('sips only available on macOS')
-        # Create a real PNG using sips (convert a blank JPEG)
+        # Create a real PNG using sips
         cover = tmp_path / 'cover.png'
-        # Create a large-ish test image
         try:
             subprocess.run(
                 ['sips', '-s', 'format', 'png', '-z', '2000', '2000',
@@ -176,9 +175,9 @@ class TestOptimizeCoverImage:
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
             pytest.skip('Could not create test PNG with sips')
-        if cover.stat().st_size <= _COVER_MAX_BYTES:
-            pytest.skip('Test PNG not large enough to trigger optimization')
-        result = _optimize_cover_image(str(cover), str(tmp_path))
+        # Lower the threshold so the test image triggers optimization
+        monkeypatch.setattr(asm, '_COVER_MAX_BYTES', 1000)
+        result = asm._optimize_cover_image(str(cover), str(tmp_path))
         assert result != str(cover)
         assert result.endswith('.jpg')
         assert os.path.getsize(result) < cover.stat().st_size
