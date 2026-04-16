@@ -18,6 +18,7 @@ from storyforge.cmd_evaluate import (
     _load_custom_evaluators,
     _resolve_voice_guide,
     _build_eval_prompt,
+    _build_manuscript_text,
     _build_synthesis_prompt,
 )
 
@@ -548,14 +549,9 @@ class TestBuildEvalPrompt:
         assert prompt is not None
         assert 'fantasy' in prompt
 
-    def test_prompt_api_mode_includes_manuscript_inline(self, project_dir):
-        """API mode should inline scene content in prompt."""
+    def test_prompt_api_mode_references_system_manuscript(self, project_dir):
+        """API mode prompt should reference manuscript in system context."""
         plugin_dir = PLUGIN_DIR
-
-        # Write scene content
-        scene_path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
-        with open(scene_path, 'w') as f:
-            f.write('The cartographer studied her instruments.')
 
         prompt = _build_eval_prompt(
             'first-reader', False, True, project_dir, plugin_dir,
@@ -563,7 +559,17 @@ class TestBuildEvalPrompt:
             'Test', 'fantasy', '', '', False, '20260101-000000', [],
         )
 
-        assert 'The cartographer studied her instruments.' in prompt
+        assert 'manuscript is provided in the system context' in prompt
+
+    def test_build_manuscript_text_inlines_content(self, project_dir):
+        """_build_manuscript_text should inline scene file content."""
+        scene_path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+        with open(scene_path, 'w') as f:
+            f.write('The cartographer studied her instruments.')
+
+        text = _build_manuscript_text(['scenes/act1-sc01.md'], project_dir)
+        assert 'The cartographer studied her instruments.' in text
+        assert '===== scenes/act1-sc01.md =====' in text
 
     def test_prompt_non_api_mode_no_inline(self, project_dir):
         """Non-API mode should reference files but not inline content."""
