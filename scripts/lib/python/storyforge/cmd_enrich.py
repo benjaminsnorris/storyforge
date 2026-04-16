@@ -21,10 +21,11 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, select_model,
-    install_signal_handlers,
+    install_signal_handlers, build_shared_context,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
@@ -34,7 +35,7 @@ from storyforge.costs import estimate_cost, check_threshold, print_summary
 from storyforge.api import (
     invoke_to_file, extract_text_from_file, submit_batch,
     poll_batch, download_batch_results, extract_usage,
-    calculate_cost_from_usage,
+    calculate_cost_from_usage, build_batch_request,
 )
 from storyforge.costs import log_operation
 
@@ -217,6 +218,7 @@ def parse_args(argv):
 
 def main(argv=None):
     args = parse_args(argv or [])
+    session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     install_signal_handlers()
     project_dir = detect_project_root()
@@ -272,6 +274,7 @@ def main(argv=None):
         sys.exit(1)
 
     model = select_model('extraction')
+    system = build_shared_context(project_dir, model=model)
     log(f'Enrichment model: {model} (mode: {enrich_mode})')
 
     # ========================================================================
@@ -655,14 +658,8 @@ def main(argv=None):
             with open(batch_file, 'w') as bf:
                 for sid in claude_ids:
                     prompt = _build_prompt(sid)
-                    req = {
-                        'custom_id': sid,
-                        'params': {
-                            'model': model,
-                            'max_tokens': 4096,
-                            'messages': [{'role': 'user', 'content': prompt}],
-                        },
-                    }
+                    req = build_batch_request(sid, prompt, model, max_tokens=4096,
+                                             system=system)
                     bf.write(json.dumps(req) + '\n')
 
             log(f'Submitting batch ({os.path.getsize(batch_file)} bytes)...')
@@ -725,7 +722,8 @@ def main(argv=None):
                 result_file = os.path.join(enrich_dir, f'.enrich-{sid}.txt')
 
                 try:
-                    resp = invoke_to_file(prompt, model, log_file, max_tokens=4096)
+                    resp = invoke_to_file(prompt, model, log_file, max_tokens=4096,
+                                         system=system)
                     response_text = extract_text_from_file(log_file)
 
                     # Log usage
@@ -860,7 +858,7 @@ def main(argv=None):
     # Cost summary
     # ========================================================================
     print('')
-    print_summary(project_dir, 'enrich')
+    print_summary(project_dir, 'enrich', session_start=session_start)
 
     # ========================================================================
     # Seed alias CSVs from enriched data
