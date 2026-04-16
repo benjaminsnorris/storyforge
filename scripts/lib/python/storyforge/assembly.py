@@ -1240,14 +1240,14 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
             with open(dashboard_path) as f:
                 manifest['dashboard_html'] = f.read()
 
-    # Always include structured dashboard data for server-side rendering
-    try:
-        from storyforge.visualize import load_dashboard_data
-        manifest['dashboard_data'] = load_dashboard_data(project_dir)
-    except Exception as exc:
-        from storyforge.common import log as _log
-        _log(f'WARNING: Could not load dashboard data: {exc}')
-        manifest['dashboard_data'] = {}
+    # Include structured dashboard data only when dashboard is requested
+    if include_dashboard:
+        try:
+            from storyforge.visualize import load_dashboard_data
+            manifest['dashboard_data'] = load_dashboard_data(project_dir)
+        except Exception as exc:
+            from storyforge.common import log as _log
+            _log(f'WARNING: Could not load dashboard data: {exc}')
 
     # Embed cover as base64 if requested
     if include_cover:

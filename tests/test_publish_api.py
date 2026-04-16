@@ -82,6 +82,7 @@ class TestManifestDashboard:
         with open(path) as f:
             manifest = json.load(f)
         assert 'dashboard_html' not in manifest
+        assert 'dashboard_data' not in manifest
 
     def test_missing_dashboard_not_included(self, tmp_path):
         from storyforge.assembly import generate_publish_manifest

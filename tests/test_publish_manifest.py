@@ -130,8 +130,8 @@ class TestGeneratePublishManifest:
         assert 'title: Some Title' not in html
         assert 'Actual prose' in html
 
-    def test_includes_dashboard_data(self, tmp_path):
-        """Manifest should always include structured dashboard_data."""
+    def test_includes_dashboard_data_when_requested(self, tmp_path):
+        """Manifest includes dashboard_data only when include_dashboard=True."""
         from storyforge.assembly import generate_publish_manifest
         proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
         # Need scene-intent.csv for load_dashboard_data
@@ -139,12 +139,21 @@ class TestGeneratePublishManifest:
         with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
             f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads\n')
             f.write('s1|test fn|action|calm to tense|truth|+/-|revelation|A|A|\n')
-        path = generate_publish_manifest(proj)
+        path = generate_publish_manifest(proj, include_dashboard=True)
         with open(path) as f:
             manifest = json.load(f)
         assert 'dashboard_data' in manifest
         assert 'scenes' in manifest['dashboard_data']
         assert 'project' in manifest['dashboard_data']
+
+    def test_excludes_dashboard_data_when_not_requested(self, tmp_path):
+        """Manifest omits dashboard_data when include_dashboard=False (default)."""
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        path = generate_publish_manifest(proj)
+        with open(path) as f:
+            manifest = json.load(f)
+        assert 'dashboard_data' not in manifest
 
 
 class TestOptimizeCoverImage:
