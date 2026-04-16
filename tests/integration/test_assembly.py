@@ -760,6 +760,38 @@ class TestResolveCoverPath:
         result = _resolve_cover_path(str(tmp_path), None)
         assert result == str(assets / 'cover.jpg')
 
+    def test_jpg_preferred_over_png(self, tmp_path):
+        prod = tmp_path / 'production'
+        prod.mkdir()
+        (prod / 'cover.png').write_text('png')
+        (prod / 'cover.jpg').write_text('jpg')
+        result = _resolve_cover_path(str(tmp_path), None)
+        assert result == str(prod / 'cover.jpg')
+
+    def test_jpg_preferred_over_svg(self, tmp_path):
+        prod = tmp_path / 'production'
+        prod.mkdir()
+        (prod / 'cover.svg').write_text('svg')
+        (prod / 'cover.jpg').write_text('jpg')
+        result = _resolve_cover_path(str(tmp_path), None)
+        assert result == str(prod / 'cover.jpg')
+
+    def test_cover_image_yaml_field(self, tmp_path, monkeypatch):
+        """production.cover_image YAML field should be checked before auto-detect."""
+        prod = tmp_path / 'production'
+        prod.mkdir()
+        (prod / 'cover.svg').write_text('svg')
+        custom = tmp_path / 'assets' / 'final-cover.jpg'
+        custom.parent.mkdir(parents=True)
+        custom.write_text('custom')
+
+        monkeypatch.setattr(
+            'storyforge.assembly.read_production_field',
+            lambda pd, field: 'assets/final-cover.jpg' if field == 'cover_image' else None,
+        )
+        result = _resolve_cover_path(str(tmp_path), None)
+        assert result == str(custom)
+
     def test_no_cover_returns_none(self, tmp_path):
         assert _resolve_cover_path(str(tmp_path), None) is None
 
