@@ -26,7 +26,7 @@ import time
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field, select_model,
     get_coaching_level, get_current_cycle, install_signal_handlers,
-    get_plugin_dir,
+    get_plugin_dir, build_shared_context,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr, commit_and_push,
@@ -36,6 +36,7 @@ from storyforge.cli import add_scene_filter_args, resolve_filter_args, apply_coa
 from storyforge.api import (
     invoke_to_file, extract_text, extract_text_from_file, extract_usage,
     calculate_cost_from_usage, submit_batch, poll_batch, download_batch_results,
+    build_batch_request,
 )
 from storyforge.costs import estimate_cost, check_threshold, log_operation, print_summary
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
@@ -122,6 +123,9 @@ def main(argv=None):
 
     install_signal_handlers()
 
+    from datetime import datetime
+    session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+
     # Resolve score mode
     if args.direct and args.deep:
         score_mode = 'direct-deep'
@@ -174,6 +178,9 @@ def main(argv=None):
         eval_model = opus_model
 
     log(f'Mode: {score_mode}, Model: {eval_model}')
+
+    # Build shared context once for all API calls (prompt caching)
+    system = build_shared_context(project_dir, model=eval_model)
 
     # Initialize craft weights
     from storyforge.scoring import init_craft_weights
@@ -336,14 +343,14 @@ def main(argv=None):
         scored, failed = _score_batch(
             scene_ids, eval_model, eval_template, evaluation_criteria,
             weighted_text_str, metadata_csv, intent_csv, scenes_dir,
-            cycle_dir, log_dir, diagnostics_csv, plugin_dir,
+            cycle_dir, log_dir, diagnostics_csv, plugin_dir, system=system,
         )
     else:
         scored, failed = _score_direct(
             scene_ids, eval_model, eval_template, evaluation_criteria,
             weighted_text_str, metadata_csv, intent_csv, scenes_dir,
             cycle_dir, log_dir, diagnostics_csv, plugin_dir,
-            args.parallel, score_start,
+            args.parallel, score_start, system=system,
         )
 
     log('')
@@ -357,7 +364,7 @@ def main(argv=None):
     if has_briefs and not targeted_principles:
         _run_fidelity_scoring(
             filtered_ids, project_dir, scenes_dir, log_dir, cycle_dir,
-            briefs_csv, score_mode, sonnet_model, plugin_dir,
+            briefs_csv, score_mode, sonnet_model, plugin_dir, system=system,
         )
 
     # =========================================================================
@@ -369,6 +376,7 @@ def main(argv=None):
         _run_act_scoring(
             scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
             prompts_dir, weights_file, sonnet_model, plugin_dir, args.dry_run,
+            system=system,
         )
         update_pr_task('Act-level scoring', project_dir)
 
@@ -381,7 +389,7 @@ def main(argv=None):
         _run_novel_scoring(
             scene_count, metadata_csv, intent_csv, project_dir, cycle_dir,
             log_dir, prompts_dir, weights_file, sonnet_model, plugin_dir,
-            args.dry_run,
+            args.dry_run, system=system,
         )
         update_pr_task('Novel-level scoring', project_dir)
 
@@ -397,7 +405,7 @@ def main(argv=None):
 
         _run_narrative_scoring(
             title, metadata_csv, project_dir, cycle_dir, log_dir, prompts_dir,
-            weights_file, args.dry_run,
+            weights_file, args.dry_run, system=system,
         )
 
     # Update latest symlink
@@ -410,7 +418,7 @@ def main(argv=None):
 
     # Cost summary
     print('')
-    print_summary(project_dir, 'score')
+    print_summary(project_dir, 'score', session_start=session_start)
 
     # Append to score history for cross-cycle tracking
     from storyforge.history import append_cycle
@@ -861,7 +869,7 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
 
 def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
                  weighted_text_str, metadata_csv, intent_csv, scenes_dir,
-                 cycle_dir, log_dir, diagnostics_csv, plugin_dir):
+                 cycle_dir, log_dir, diagnostics_csv, plugin_dir, system=None):
     """Batch mode scoring. Returns (scored, failed)."""
     log('')
     log(f'Building batch request for {len(scene_ids)} scenes...')
@@ -873,14 +881,7 @@ def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
         prompt = _build_scene_prompt(sid, eval_template, evaluation_criteria,
                                      weighted_text_str, metadata_csv, intent_csv,
                                      scenes_dir)
-        request = {
-            'custom_id': sid,
-            'params': {
-                'model': eval_model,
-                'max_tokens': 4096,
-                'messages': [{'role': 'user', 'content': prompt}],
-            },
-        }
+        request = build_batch_request(sid, prompt, eval_model, 4096, system=system)
         with open(batch_file, 'a') as f:
             f.write(json.dumps(request) + '\n')
 
@@ -940,7 +941,7 @@ def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
 def _score_direct(scene_ids, eval_model, eval_template, evaluation_criteria,
                   weighted_text_str, metadata_csv, intent_csv, scenes_dir,
                   cycle_dir, log_dir, diagnostics_csv, plugin_dir,
-                  parallel, score_start):
+                  parallel, score_start, system=None):
     """Direct mode scoring with parallel workers. Returns (scored, failed)."""
     from storyforge.runner import run_batched
     from storyforge.scoring import merge_score_files
@@ -958,7 +959,8 @@ def _score_direct(scene_ids, eval_model, eval_template, evaluation_criteria,
         log_file = os.path.join(log_dir, f'score-{sid}.json')
 
         try:
-            response = invoke_to_file(prompt, eval_model, log_file, 4096)
+            response = invoke_to_file(prompt, eval_model, log_file, 4096,
+                                      system=system)
             _log_api_usage(log_file, 'score', sid, eval_model, project_dir)
 
             text = extract_text(response)
@@ -1002,7 +1004,7 @@ def _score_direct(scene_ids, eval_model, eval_template, evaluation_criteria,
 
 def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                           cycle_dir, briefs_csv, score_mode, sonnet_model,
-                          plugin_dir):
+                          plugin_dir, system=None):
     """Run brief fidelity scoring."""
     # Count scenes with brief data
     brief_count = 0
@@ -1040,14 +1042,8 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
             prompt = build_fidelity_prompt(sid, project_dir, plugin_dir)
             if not prompt:
                 continue
-            request = {
-                'custom_id': f'fidelity-{sid}',
-                'params': {
-                    'model': sonnet_model,
-                    'max_tokens': 2048,
-                    'messages': [{'role': 'user', 'content': prompt}],
-                },
-            }
+            request = build_batch_request(
+                f'fidelity-{sid}', prompt, sonnet_model, 2048, system=system)
             with open(fidelity_batch, 'a') as f:
                 f.write(json.dumps(request) + '\n')
 
@@ -1070,7 +1066,8 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
                 continue
             fidelity_log = os.path.join(log_dir, f'fidelity-{sid}.json')
             try:
-                invoke_to_file(prompt, sonnet_model, fidelity_log, 2048)
+                invoke_to_file(prompt, sonnet_model, fidelity_log, 2048,
+                               system=system)
                 _log_api_usage(fidelity_log, 'score-fidelity', sid,
                                sonnet_model, project_dir)
             except Exception:
@@ -1122,7 +1119,7 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
 
 def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
                      prompts_dir, weights_file, sonnet_model, plugin_dir,
-                     dry_run):
+                     dry_run, system=None):
     """Run act-level scoring."""
     act_template_file = os.path.join(prompts_dir, 'act-level.md')
     if not os.path.isfile(act_template_file):
@@ -1183,7 +1180,8 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
         project_dir = os.path.dirname(os.path.dirname(cycle_dir))
 
         try:
-            response = invoke_to_file(prompt, sonnet_model, log_file, 4096)
+            response = invoke_to_file(prompt, sonnet_model, log_file, 4096,
+                                      system=system)
             text = extract_text(response)
             _log_api_usage(log_file, 'score', act_id, sonnet_model, project_dir)
 
@@ -1208,7 +1206,7 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
 
 def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
                        cycle_dir, log_dir, prompts_dir, weights_file,
-                       sonnet_model, plugin_dir, dry_run):
+                       sonnet_model, plugin_dir, dry_run, system=None):
     """Run novel-level character + genre scoring."""
     novel_template_file = os.path.join(prompts_dir, 'novel-level.md')
     if not os.path.isfile(novel_template_file):
@@ -1261,7 +1259,8 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
     log_file = os.path.join(log_dir, 'score-novel-level.json')
 
     try:
-        response = invoke_to_file(prompt, sonnet_model, log_file, 4096)
+        response = invoke_to_file(prompt, sonnet_model, log_file, 4096,
+                                  system=system)
         text = extract_text(response)
         _log_api_usage(log_file, 'score', 'novel-level', sonnet_model, project_dir)
 
@@ -1290,7 +1289,8 @@ def _run_novel_scoring(scene_count, metadata_csv, intent_csv, project_dir,
 
 
 def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
-                           log_dir, prompts_dir, weights_file, dry_run):
+                           log_dir, prompts_dir, weights_file, dry_run,
+                           system=None):
     """Run novel-level narrative framework scoring."""
     narrative_template_file = os.path.join(prompts_dir, 'novel-narrative.md')
     if not os.path.isfile(narrative_template_file):
@@ -1337,7 +1337,8 @@ def _run_narrative_scoring(title, metadata_csv, project_dir, cycle_dir,
     narr_rationale = os.path.join(cycle_dir, 'narrative-rationale.csv')
 
     try:
-        response = invoke_to_file(prompt, narrative_model, log_file, 4096)
+        response = invoke_to_file(prompt, narrative_model, log_file, 4096,
+                                  system=system)
         text = extract_text(response)
         _log_api_usage(log_file, 'score', 'narrative', narrative_model, project_dir)
 
