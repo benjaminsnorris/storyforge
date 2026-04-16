@@ -348,7 +348,7 @@ def build_shared_context(project_dir: str, model: str = '') -> list[dict]:
     if tier1_blocks:
         if tier1_chars >= min_chars:
             # Tier 1 meets threshold — add breakpoint with extended TTL
-            tier1_blocks[-1]['cache_control'] = {'type': 'ephemeral', 'ttl': 3600}
+            tier1_blocks[-1]['cache_control'] = {'type': 'ephemeral', 'ttl': '1h'}
         blocks.extend(tier1_blocks)
 
     if tier2_blocks:
