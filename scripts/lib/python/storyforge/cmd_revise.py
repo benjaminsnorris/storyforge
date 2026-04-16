@@ -186,23 +186,29 @@ def _write_hone_findings(path, fix_location, targets, guidance):
                 f.write(f'{sid}|{target_file}||{safe_guidance}\n')
 
 
-def _redraft_from_briefs(project_dir, scene_ids, model, log_dir):
+def _redraft_from_briefs(project_dir, scene_ids, model, log_dir, system=None):
     """Re-draft scenes from their updated briefs."""
     from storyforge.cmd_write import _build_prompt, _extract_scene_from_response
     from storyforge.api import invoke_to_file as _invoke_to_file
+
+    # Build shared context for prompt caching if not provided
+    if system is None:
+        from storyforge.common import build_shared_context
+        system = build_shared_context(project_dir, model=model)
 
     log(f'  Redrafting {len(scene_ids)} scenes from updated briefs...')
     scenes_dir = os.path.join(project_dir, 'scenes')
 
     for i, sid in enumerate(scene_ids, 1):
         log(f'    [{i}/{len(scene_ids)}] Redrafting: {sid}')
-        prompt = _build_prompt(sid, project_dir, 'full', use_briefs=True)
+        prompt = _build_prompt(sid, project_dir, 'full', use_briefs=True,
+                               system_context=bool(system))
         if not prompt:
             log(f'    WARNING: Could not build prompt for {sid}, skipping')
             continue
         log_file = os.path.join(log_dir, f'redraft-{sid}.json')
         _invoke_to_file(prompt, model, log_file, max_tokens=16384,
-                        label=f'redraft {sid}')
+                        label=f'redraft {sid}', system=system or None)
         scene_file = os.path.join(scenes_dir, f'{sid}.md')
         _extract_scene_from_response(log_file, scene_file)
 
@@ -1190,13 +1196,16 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
     Returns number of scenes re-drafted.
     """
     from storyforge.prompts import build_scene_prompt
-    from storyforge.common import get_coaching_level
+    from storyforge.common import get_coaching_level, build_shared_context
     from storyforge.parsing import extract_single_scene
 
     scenes_dir = os.path.join(project_dir, 'scenes')
     coaching_level = get_coaching_level(project_dir)
     model = select_model('creative')
     count = 0
+
+    # Build shared context for prompt caching across all re-drafts
+    system = build_shared_context(project_dir, model=model)
 
     for scene_id in scene_ids:
         scene_file = os.path.join(scenes_dir, f'{scene_id}.md')
@@ -1207,12 +1216,14 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
         log(f'  Re-drafting scene: {scene_id}')
         try:
             prompt = build_scene_prompt(scene_id, project_dir,
-                                        coaching_level=coaching_level, api_mode=True)
+                                        coaching_level=coaching_level, api_mode=True,
+                                        system_context=bool(system))
         except Exception as e:
             log(f'  WARNING: Could not build prompt for {scene_id}: {e} — skipping')
             continue
 
-        response = invoke_api(prompt, model, max_tokens=16384)
+        response = invoke_api(prompt, model, max_tokens=16384,
+                              system=system or None)
         if not response:
             log(f'  WARNING: No response for {scene_id} re-draft — skipping')
             continue
@@ -1475,7 +1486,7 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
                          plan_rows: list[dict], iteration: int,
                          model_override: str | None = None) -> None:
     """Execute a single revision pass from a plan. Subset of main pass loop."""
-    from storyforge.common import select_revision_model, get_coaching_level
+    from storyforge.common import select_revision_model, get_coaching_level, build_shared_context
     from storyforge.git import commit_and_push
     from storyforge.api import invoke_to_file, extract_text
 
@@ -1490,6 +1501,10 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
 
     # Mark in_progress
     _update_pass_field(plan_rows, 1, 'status', 'in_progress', csv_plan_file)
+
+    # Build shared context for prompt caching
+    pass_model_early = model_override or select_revision_model(pass_name, pass_purpose)
+    system = build_shared_context(project_dir, model=pass_model_early)
 
     # Build prompt via the revision module (subprocess)
     plugin_dir = get_plugin_dir()
@@ -1529,6 +1544,8 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
     ]
     if config_yaml:
         cmd.extend(['--config', config_yaml])
+    if system:
+        cmd.append('--system-context')
 
     log(f'  Building revision prompt...')
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -1548,7 +1565,8 @@ def _execute_single_pass(project_dir: str, csv_plan_file: str,
         invoke_to_file(prompt, pass_model, step_log,
                        max_tokens=max_output_tokens(pass_model),
                        label=f'polish loop {iteration} ({pass_name})',
-                       timeout=REVISION_TIMEOUT)
+                       timeout=REVISION_TIMEOUT,
+                       system=system or None)
     except Exception as e:
         log(f'  API call failed: {e}')
         return
@@ -1725,8 +1743,10 @@ def _register_new_scenes(project_dir, targets, pass_name):
 # ============================================================================
 
 def main(argv=None):
+    from datetime import datetime
     args = parse_args(argv or [])
     install_signal_handlers()
+    session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     project_dir = detect_project_root()
 
@@ -1843,6 +1863,13 @@ def main(argv=None):
             sys.exit(1)
 
     os.makedirs(os.path.join(project_dir, 'working', 'coaching'), exist_ok=True)
+
+    # Build shared context once for prompt caching (direct API mode only)
+    system = None
+    if not args.dry_run and not args.interactive:
+        from storyforge.common import build_shared_context
+        revise_model = select_revision_model('prose', 'prose revision')
+        system = build_shared_context(project_dir, model=revise_model)
 
     # Determine start point
     start_pass = args.pass_num
@@ -2087,7 +2114,8 @@ def main(argv=None):
                     redraft_needed.update(affected)
                     log(f'  Deferred redraft for {len(affected)} scenes (will batch after all upstream passes)')
                 else:
-                    _redraft_from_briefs(project_dir, affected, pass_model, log_dir)
+                    _redraft_from_briefs(project_dir, affected, pass_model, log_dir,
+                                         system=system)
 
             # Log usage (hone handles its own API logging; pass empty string)
             _log_usage(project_dir, '', 'revise', pass_name, pass_model, duration)
@@ -2163,11 +2191,15 @@ Rules:
         else:
             # Standard prose revision -- use revision module
             try:
-                result = subprocess.run(
-                    [sys.executable, '-m', 'storyforge.revision', 'build-prompt',
+                cmd_args = [sys.executable, '-m', 'storyforge.revision', 'build-prompt',
                      pass_name, pass_purpose, effective_scope or pass_scope, project_dir,
                      '--config', pass_block, '--coaching', effective_coaching]
-                    + ([api_flag] if api_flag else []),
+                if api_flag:
+                    cmd_args.append(api_flag)
+                if system:
+                    cmd_args.append('--system-context')
+                result = subprocess.run(
+                    cmd_args,
                     capture_output=True, text=True, check=True,
                     env={**os.environ, 'PYTHONPATH': python_lib},
                 )
@@ -2213,7 +2245,8 @@ Rules:
                 response = invoke_to_file(prompt, pass_model, step_log,
                                          max_tokens=max_output_tokens(pass_model),
                                          label=f'pass {pass_num}/{total_passes} ({pass_name})',
-                                         timeout=REVISION_TIMEOUT)
+                                         timeout=REVISION_TIMEOUT,
+                                         system=system or None)
                 exit_code = 0
             except Exception as e:
                 log(f'  API call failed: {e}')
@@ -2387,7 +2420,8 @@ Rules:
     if defer_redraft and redraft_needed:
         log(f'\n=== Batch Redraft: {len(redraft_needed)} scenes ===')
         pass_model = select_revision_model('redraft', 'redraft from corrected briefs')
-        _redraft_from_briefs(project_dir, sorted(redraft_needed), pass_model, log_dir)
+        _redraft_from_briefs(project_dir, sorted(redraft_needed), pass_model, log_dir,
+                             system=system)
 
     # ---- SESSION SUMMARY ----
     completed = sum(
@@ -2433,7 +2467,7 @@ Rules:
 
     # Cost summary
     if not args.dry_run:
-        print_summary(project_dir, 'revise')
+        print_summary(project_dir, 'revise', session_start=session_start)
 
     if completed == total_passes:
         log('All revision passes are done!')
