@@ -275,7 +275,11 @@ def main(argv=None):
             sys.exit(1)
 
         log(f'Running diagnosis only from {diag_cycle_dir}')
-        diag_cycle = int(os.path.basename(diag_cycle_dir).replace('cycle-', ''))
+        try:
+            diag_cycle = int(os.path.basename(diag_cycle_dir).replace('cycle-', ''))
+        except ValueError:
+            log(f'ERROR: Could not determine cycle number from {diag_cycle_dir}')
+            sys.exit(1)
         _run_improvement_cycle(
             diag_cycle, diag_cycle_dir, project_dir, weights_file, plugin_dir,
             intent_csv, title,

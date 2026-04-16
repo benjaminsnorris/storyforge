@@ -187,10 +187,10 @@ class TestPromptsCrlf:
 
 
 class TestHistoryCrlf:
-    """history._read_history handles CRLF files."""
+    """history.read_history handles CRLF files."""
 
     def test_read_history_crlf(self, tmp_path):
-        from storyforge.history import _read_history
+        from storyforge.history import read_history
         history_dir = tmp_path / 'working' / 'scores'
         history_dir.mkdir(parents=True)
         history_csv = str(history_dir / 'score-history.csv')
@@ -198,7 +198,7 @@ class TestHistoryCrlf:
             f.write(b'cycle|scene_id|principle|score\r\n')
             f.write(b'1|sc-01|pacing|7\r\n')
             f.write(b'1|sc-02|pacing|5\r\n')
-        rows = _read_history(str(tmp_path))
+        rows = read_history(str(tmp_path))
         assert len(rows) == 2
         assert rows[0]['score'] == '7'
         assert rows[1]['scene_id'] == 'sc-02'

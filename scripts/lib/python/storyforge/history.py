@@ -39,7 +39,7 @@ def _is_principle_column(col: str) -> bool:
     return True
 
 
-def _read_history(project_dir: str) -> list[dict[str, str]]:
+def read_history(project_dir: str) -> list[dict[str, str]]:
     """Read score-history.csv, return list of row dicts.
 
     Returns [] if the file does not exist.
@@ -131,7 +131,7 @@ def get_scene_history(
         _rows: Optional pre-loaded history rows (from ``_read_history``).
             When provided, skips reading the file from disk.
     """
-    rows = _rows if _rows is not None else _read_history(project_dir)
+    rows = _rows if _rows is not None else read_history(project_dir)
     matches = [
         r for r in rows
         if r.get('scene_id') == scene_id and r.get('principle') == principle
@@ -167,7 +167,7 @@ def detect_stalls(
     Returns list of:
       {scene_id, scores: [(cycle, score), ...], cycles_stalled: int}
     """
-    rows = _rows if _rows is not None else _read_history(project_dir)
+    rows = _rows if _rows is not None else read_history(project_dir)
     if not rows:
         return []
 
@@ -203,13 +203,18 @@ def detect_regressions(
     project_dir: str,
     principle: str,
     threshold: float = -0.5,
+    _rows: list[dict[str, str]] | None = None,
 ) -> list[dict]:
     """Find scenes where score dropped by >= |threshold| between consecutive cycles.
+
+    Args:
+        _rows: Optional pre-loaded history rows (from ``read_history``).
+            When provided, skips reading the file from disk.
 
     Returns list of:
       {scene_id, from_cycle, to_cycle, from_score, to_score, delta}
     """
-    rows = _read_history(project_dir)
+    rows = _rows if _rows is not None else read_history(project_dir)
     if not rows:
         return []
 
@@ -220,7 +225,7 @@ def detect_regressions(
 
     regressions = []
     for scene_id in scene_ids:
-        history = get_scene_history(project_dir, scene_id, principle)
+        history = get_scene_history(project_dir, scene_id, principle, _rows=rows)
         if len(history) < 2:
             continue
 

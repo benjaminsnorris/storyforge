@@ -317,8 +317,8 @@ def _attribute_root_causes(diag_rows, diag_header, project_dir):
     # Pre-load history once — avoids O(N) redundant file reads
     history_rows = None
     try:
-        from storyforge.history import _read_history
-        history_rows = _read_history(project_dir)
+        from storyforge.history import read_history
+        history_rows = read_history(project_dir)
     except Exception:
         history_rows = []
 
