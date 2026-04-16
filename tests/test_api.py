@@ -96,6 +96,55 @@ class TestInvokeSystemParam:
         assert body['messages'] == [{'role': 'user', 'content': 'hello'}]
 
 
+class TestInvokeApiConsecutiveFailures:
+    @patch('storyforge.api._api_request')
+    @patch('storyforge.api.get_api_key', return_value='test-key')
+    def test_single_failure_returns_empty(self, mock_key, mock_req):
+        import storyforge.api as api_mod
+        api_mod._invoke_api_consecutive_failures = 0
+        mock_req.side_effect = RuntimeError('API error')
+        result = api_mod.invoke_api('hello', 'claude-sonnet-4-6')
+        assert result == ''
+
+    @patch('storyforge.api._api_request')
+    @patch('storyforge.api.get_api_key', return_value='test-key')
+    def test_consecutive_failures_raise(self, mock_key, mock_req):
+        import storyforge.api as api_mod
+        api_mod._invoke_api_consecutive_failures = 0
+        mock_req.side_effect = RuntimeError('API error')
+        for _ in range(4):
+            result = api_mod.invoke_api('hello', 'claude-sonnet-4-6')
+            assert result == ''
+        # 5th consecutive failure should raise
+        import pytest
+        with pytest.raises(RuntimeError, match='consecutively'):
+            api_mod.invoke_api('hello', 'claude-sonnet-4-6')
+
+    @patch('storyforge.api._api_request')
+    @patch('storyforge.api.get_api_key', return_value='test-key')
+    def test_success_resets_counter(self, mock_key, mock_req):
+        import storyforge.api as api_mod
+        api_mod._invoke_api_consecutive_failures = 0
+        # Fail 3 times, succeed, fail 3 more — should NOT raise
+        call_count = [0]
+        def side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 4:  # 4th call succeeds
+                return {'content': [{'type': 'text', 'text': 'ok'}],
+                        'usage': {'input_tokens': 10, 'output_tokens': 5}}
+            raise RuntimeError('API error')
+        mock_req.side_effect = side_effect
+        for _ in range(3):
+            api_mod.invoke_api('hello', 'claude-sonnet-4-6')
+        result = api_mod.invoke_api('hello', 'claude-sonnet-4-6')
+        assert result == 'ok'
+        assert api_mod._invoke_api_consecutive_failures == 0
+        # 3 more failures should not raise (counter was reset)
+        mock_req.side_effect = RuntimeError('API error')
+        for _ in range(3):
+            api_mod.invoke_api('hello', 'claude-sonnet-4-6')
+
+
 class TestLogApiUsage:
     def test_creates_ledger(self, tmp_path):
         from storyforge.api import log_operation, calculate_cost_from_usage

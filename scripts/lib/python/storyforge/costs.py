@@ -131,31 +131,38 @@ def _accumulate(rows: list, col_map: dict) -> dict:
     total_cost = 0.0
     total_dur = 0
 
+    def _safe_int(val: str) -> int:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return 0
+
+    def _safe_float(val: str) -> float:
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return 0.0
+
     for parts in rows:
-        for col_name, target in [
-            ('input_tokens', 'input'),
-            ('output_tokens', 'output'),
-            ('cache_read', 'cache_r'),
-            ('cache_create', 'cache_c'),
-            ('duration_s', 'dur'),
-        ]:
+        for col_name in ('input_tokens', 'output_tokens', 'cache_read',
+                         'cache_create', 'duration_s'):
             if col_name in col_map and col_map[col_name] < len(parts):
                 val = parts[col_map[col_name]]
                 if val:
                     if col_name == 'input_tokens':
-                        total_input += int(val)
+                        total_input += _safe_int(val)
                     elif col_name == 'output_tokens':
-                        total_output += int(val)
+                        total_output += _safe_int(val)
                     elif col_name == 'cache_read':
-                        total_cache_r += int(val)
+                        total_cache_r += _safe_int(val)
                     elif col_name == 'cache_create':
-                        total_cache_c += int(val)
+                        total_cache_c += _safe_int(val)
                     elif col_name == 'duration_s':
-                        total_dur += int(val)
+                        total_dur += _safe_int(val)
         if 'cost_usd' in col_map and col_map['cost_usd'] < len(parts):
             val = parts[col_map['cost_usd']]
             if val:
-                total_cost += float(val)
+                total_cost += _safe_float(val)
 
     return {
         'input': total_input,

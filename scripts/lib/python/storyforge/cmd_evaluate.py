@@ -1203,6 +1203,8 @@ def main(argv=None):
         log('Running synthesis session...')
         synth_start = time.time()
         synth_model = select_model('synthesis')
+        # Rebuild shared context for synthesis model tier (may differ from evaluator tier)
+        system = build_shared_context(project_dir, model=synth_model)
         synth_log = os.path.join(log_dir, 'eval-synthesis.log')
 
         api_mode = eval_mode != 'interactive'
