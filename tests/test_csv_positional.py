@@ -112,7 +112,7 @@ class TestPrintSummaryColumnOrder:
 
         print_summary(project_dir)
         captured = capsys.readouterr()
-        assert 'Input tokens:  1000' in captured.out
+        assert 'Input tokens:  1,000' in captured.out
         assert 'Output tokens: 500' in captured.out
         assert 'Cache read:    100' in captured.out
         assert 'Cache create:  50' in captured.out
@@ -133,7 +133,7 @@ class TestPrintSummaryColumnOrder:
         print_summary(project_dir, 'evaluate')
         captured = capsys.readouterr()
         assert 'Invocations:   2' in captured.out
-        assert 'Input tokens:  1200' in captured.out
+        assert 'Input tokens:  1,200' in captured.out
         assert 'Output tokens: 600' in captured.out
 
     def test_standard_order_still_works(self, tmp_path, capsys):
@@ -145,12 +145,12 @@ class TestPrintSummaryColumnOrder:
 
         print_summary(project_dir)
         captured = capsys.readouterr()
-        assert 'Input tokens:  2000' in captured.out
-        assert 'Output tokens: 1000' in captured.out
+        assert 'Input tokens:  2,000' in captured.out
+        assert 'Output tokens: 1,000' in captured.out
         assert 'Cache read:    200' in captured.out
         assert 'Cache create:  100' in captured.out
         assert '$1.0000' in captured.out
-        assert '60s' in captured.out
+        assert '1m 0s' in captured.out
 
     def test_missing_optional_columns(self, tmp_path, capsys):
         """Ledger with fewer columns (e.g., no cache columns) still produces a summary."""
@@ -163,7 +163,7 @@ class TestPrintSummaryColumnOrder:
         print_summary(project_dir)
         captured = capsys.readouterr()
         assert 'Invocations:   1' in captured.out
-        assert 'Input tokens:  1000' in captured.out
+        assert 'Input tokens:  1,000' in captured.out
         assert 'Output tokens: 500' in captured.out
         assert 'Cache read:    0' in captured.out  # Missing columns default to 0
         assert '$0.5000' in captured.out
@@ -179,8 +179,8 @@ class TestPrintSummaryColumnOrder:
         print_summary(project_dir, 'evaluate')
         captured = capsys.readouterr()
         assert 'Invocations:   2' in captured.out
-        assert 'Input tokens:  8000' in captured.out
-        assert 'Output tokens: 3000' in captured.out
+        assert 'Input tokens:  8,000' in captured.out
+        assert 'Output tokens: 3,000' in captured.out
         assert 'Cache read:    100' in captured.out
         assert 'Cache create:  50' in captured.out
 

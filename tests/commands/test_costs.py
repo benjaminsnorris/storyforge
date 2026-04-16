@@ -334,8 +334,8 @@ class TestPrintSummary:
         print_summary(project_dir)
         captured = capsys.readouterr()
         assert 'Invocations:   2' in captured.out
-        assert 'Input tokens:  3000' in captured.out
-        assert 'Output tokens: 1500' in captured.out
+        assert 'Input tokens:  3,000' in captured.out
+        assert 'Output tokens: 1,500' in captured.out
         assert '$0.7500' in captured.out
         assert '15s' in captured.out
         assert 'all operations' in captured.out
@@ -348,7 +348,7 @@ class TestPrintSummary:
         print_summary(project_dir, operation='draft')
         captured = capsys.readouterr()
         assert 'Invocations:   1' in captured.out
-        assert 'Input tokens:  1000' in captured.out
+        assert 'Input tokens:  1,000' in captured.out
         assert 'draft' in captured.out
 
     def test_no_matching_operation(self, tmp_path, capsys):
