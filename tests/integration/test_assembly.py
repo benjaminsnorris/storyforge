@@ -746,7 +746,7 @@ class TestResolveCoverPath:
         result = _resolve_cover_path(str(tmp_path), 'assets/cover.png')
         assert result == os.path.join(str(tmp_path), 'assets/cover.png')
 
-    def test_auto_detects_production_cover(self, tmp_path):
+    def test_auto_detects_production_png(self, tmp_path):
         prod = tmp_path / 'production'
         prod.mkdir()
         (prod / 'cover.png').write_text('img')
@@ -759,6 +759,71 @@ class TestResolveCoverPath:
         (assets / 'cover.jpg').write_text('img')
         result = _resolve_cover_path(str(tmp_path), None)
         assert result == str(assets / 'cover.jpg')
+
+    def test_jpg_preferred_over_png(self, tmp_path):
+        prod = tmp_path / 'production'
+        prod.mkdir()
+        (prod / 'cover.png').write_text('png')
+        (prod / 'cover.jpg').write_text('jpg')
+        result = _resolve_cover_path(str(tmp_path), None)
+        assert result == str(prod / 'cover.jpg')
+
+    def test_jpg_preferred_over_svg(self, tmp_path):
+        prod = tmp_path / 'production'
+        prod.mkdir()
+        (prod / 'cover.svg').write_text('svg')
+        (prod / 'cover.jpg').write_text('jpg')
+        result = _resolve_cover_path(str(tmp_path), None)
+        assert result == str(prod / 'cover.jpg')
+
+    def test_auto_detects_webp(self, tmp_path):
+        prod = tmp_path / 'production'
+        prod.mkdir()
+        (prod / 'cover.webp').write_text('webp')
+        result = _resolve_cover_path(str(tmp_path), None)
+        assert result == str(prod / 'cover.webp')
+
+    def test_cover_image_yaml_field(self, tmp_path, monkeypatch):
+        """production.cover_image YAML field should be checked before auto-detect."""
+        prod = tmp_path / 'production'
+        prod.mkdir()
+        (prod / 'cover.svg').write_text('svg')
+        custom = tmp_path / 'assets' / 'final-cover.jpg'
+        custom.parent.mkdir(parents=True)
+        custom.write_text('custom')
+
+        monkeypatch.setattr(
+            'storyforge.assembly.read_production_field',
+            lambda pd, field: 'assets/final-cover.jpg' if field == 'cover_image' else None,
+        )
+        result = _resolve_cover_path(str(tmp_path), None)
+        assert result == str(custom)
+
+    def test_cover_image_yaml_missing_file_falls_back(self, tmp_path, monkeypatch, capsys):
+        """When cover_image YAML points to a missing file, warn and fall back."""
+        prod = tmp_path / 'production'
+        prod.mkdir()
+        (prod / 'cover.jpg').write_text('fallback')
+
+        monkeypatch.setattr(
+            'storyforge.assembly.read_production_field',
+            lambda pd, field: 'nonexistent/cover.png' if field == 'cover_image' else None,
+        )
+        result = _resolve_cover_path(str(tmp_path), None)
+        assert result == str(prod / 'cover.jpg')
+        assert 'WARNING' in capsys.readouterr().out
+
+    def test_cover_image_yaml_read_error_falls_back(self, tmp_path, monkeypatch):
+        """When read_production_field raises, fall back to auto-detect."""
+        prod = tmp_path / 'production'
+        prod.mkdir()
+        (prod / 'cover.jpg').write_text('fallback')
+
+        def _raise(*a, **kw):
+            raise OSError('permission denied')
+        monkeypatch.setattr('storyforge.assembly.read_production_field', _raise)
+        result = _resolve_cover_path(str(tmp_path), None)
+        assert result == str(prod / 'cover.jpg')
 
     def test_no_cover_returns_none(self, tmp_path):
         assert _resolve_cover_path(str(tmp_path), None) is None

@@ -1257,15 +1257,31 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
 
 
 def _resolve_cover_path(project_dir: str, cover_path: str | None) -> str | None:
-    """Resolve a cover image path, auto-detecting if not provided."""
+    """Resolve a cover image path, auto-detecting if not provided.
+
+    Priority: explicit cover_path > production.cover_image YAML field >
+    auto-detect from production/ then manuscript/assets/ (jpg first).
+    """
     if cover_path:
         if os.path.isabs(cover_path):
             return cover_path
         return os.path.join(project_dir, cover_path)
 
-    # Auto-detect from standard locations
+    # Check production.cover_image YAML field
+    try:
+        cover_image = read_production_field(project_dir, 'cover_image')
+    except Exception:
+        cover_image = ''
+    if cover_image:
+        full = os.path.join(project_dir, cover_image)
+        if os.path.isfile(full):
+            return full
+        from storyforge.common import log
+        log(f'WARNING: production.cover_image set to {cover_image!r} but file not found, falling back to auto-detect')
+
+    # Auto-detect from standard locations (jpg preferred for publishing)
     for directory in ('production', 'manuscript/assets'):
-        for ext in ('png', 'jpg', 'jpeg', 'svg'):
+        for ext in ('jpg', 'jpeg', 'png', 'webp', 'svg'):
             candidate = os.path.join(project_dir, directory, f'cover.{ext}')
             if os.path.isfile(candidate):
                 return candidate
