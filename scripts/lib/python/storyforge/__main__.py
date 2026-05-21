@@ -40,6 +40,7 @@ COMMANDS = {
     'scenes-export': 'storyforge.cmd_scenes_export',
     'scenes-import': 'storyforge.cmd_scenes_import',
     'publish': 'storyforge.cmd_publish',
+    'write-gn': 'storyforge.cmd_write_gn',
 }
 
 # Aliases
