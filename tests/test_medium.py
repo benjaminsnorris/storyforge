@@ -98,3 +98,37 @@ def test_cmd_cleanup_csv_passes_on_gn_fixture(project_dir_gn, monkeypatch, capsy
     # in GN mode, so should not appear as warnings.
     assert 'characters.csv does not exist' not in captured.out
     assert 'locations.csv does not exist' not in captured.out
+
+
+def test_hone_gn_flags_missing_panel_breakdown(project_dir_gn, monkeypatch):
+    """A graphic-novel brief missing panel_breakdown is flagged by hone."""
+    from storyforge.csv_cli import update_field
+    briefs = os.path.join(project_dir_gn, 'reference', 'scene-briefs.csv')
+    update_field(briefs, 'the-blank-page', 'panel_breakdown', '')
+
+    from storyforge.hone import diagnose_briefs
+    findings = diagnose_briefs(project_dir_gn)
+    flagged = [f for f in findings if f.get('scene_id') == 'the-blank-page'
+               and f.get('field') == 'panel_breakdown']
+    assert flagged, 'expected a panel_breakdown finding for the-blank-page'
+
+
+def test_hone_gn_flags_missing_page_layout(project_dir_gn, monkeypatch):
+    """A graphic-novel brief missing page_layout is flagged by hone."""
+    from storyforge.csv_cli import update_field
+    briefs = os.path.join(project_dir_gn, 'reference', 'scene-briefs.csv')
+    update_field(briefs, 'shadows-arrive', 'page_layout', '')
+
+    from storyforge.hone import diagnose_briefs
+    findings = diagnose_briefs(project_dir_gn)
+    flagged = [f for f in findings if f.get('scene_id') == 'shadows-arrive'
+               and f.get('field') == 'page_layout']
+    assert flagged, 'expected a page_layout finding for shadows-arrive'
+
+
+def test_hone_novel_does_not_flag_panel_breakdown(project_dir, monkeypatch):
+    """Novel-mode briefs are not checked for panel_breakdown."""
+    from storyforge.hone import diagnose_briefs
+    findings = diagnose_briefs(project_dir)
+    panel_findings = [f for f in findings if f.get('field') == 'panel_breakdown']
+    assert not panel_findings

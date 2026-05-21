@@ -1127,6 +1127,83 @@ def detect_brief_issues(
 
 
 # ============================================================================
+# Briefs domain: graphic-novel diagnostics
+# ============================================================================
+
+def _diagnose_gn_briefs(project_dir: str, briefs_rows: list[dict]) -> list[dict]:
+    """Return findings for graphic-novel-specific brief gaps.
+
+    Checks:
+      - panel_breakdown must be non-empty on every briefed scene
+      - page_layout must be non-empty on every briefed scene
+    """
+    findings = []
+    for row in briefs_rows:
+        scene_id = row.get('id', '')
+        if not (row.get('panel_breakdown') or '').strip():
+            findings.append({
+                'scene_id': scene_id,
+                'field': 'panel_breakdown',
+                'severity': 'high',
+                'message': 'panel_breakdown is empty — graphic-novel briefs must specify per-page panel structure',
+                'fix_location': 'brief',
+                'issue': 'gn_missing_field',
+            })
+        if not (row.get('page_layout') or '').strip():
+            findings.append({
+                'scene_id': scene_id,
+                'field': 'page_layout',
+                'severity': 'medium',
+                'message': 'page_layout intent is empty — describe the rhythm of this scene',
+                'fix_location': 'brief',
+                'issue': 'gn_missing_field',
+            })
+    return findings
+
+
+def diagnose_briefs(project_dir: str) -> list[dict]:
+    """Run all brief quality diagnostics and return findings.
+
+    This is the public entrypoint for brief diagnostics. It loads briefs from
+    the project's reference directory, runs all existing quality detectors
+    (abstract language, overspecification, verbose fields, conflict-free), and
+    for graphic-novel projects also runs GN-specific checks (panel_breakdown,
+    page_layout).
+
+    Args:
+        project_dir: Path to the project root directory.
+
+    Returns:
+        List of finding dicts, each containing at minimum 'scene_id', 'field',
+        and 'issue' keys. Additional keys depend on the detector.
+    """
+    from storyforge.common import get_medium
+    from storyforge.elaborate import _read_csv, _read_csv_as_map
+
+    ref_dir = os.path.join(project_dir, 'reference')
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+
+    if not os.path.isfile(briefs_path):
+        return []
+
+    briefs_rows = _read_csv(briefs_path)
+    briefs_map = {r['id']: r for r in briefs_rows if r.get('id')}
+    scenes_map = _read_csv_as_map(scenes_path) if os.path.isfile(scenes_path) else {}
+    intent_map = (_read_csv_as_map(intent_path)
+                  if os.path.isfile(intent_path) else None)
+
+    findings = list(detect_brief_issues(briefs_map, scenes_map, intent_map=intent_map))
+
+    medium = get_medium(project_dir)
+    if medium == 'graphic-novel':
+        findings.extend(_diagnose_gn_briefs(project_dir, briefs_rows))
+
+    return findings
+
+
+# ============================================================================
 # Briefs domain: concretization prompt builder and parser
 # ============================================================================
 
