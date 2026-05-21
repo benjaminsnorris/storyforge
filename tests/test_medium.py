@@ -80,3 +80,21 @@ def test_cmd_validate_passes_on_gn_fixture(project_dir_gn, monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         cmd_validate.main(['--quiet'])
     assert exc_info.value.code == 0
+
+
+def test_cmd_cleanup_csv_passes_on_gn_fixture(project_dir_gn, monkeypatch, capsys):
+    """`storyforge cleanup --csv` does not flag GN-specific columns as unexpected."""
+    monkeypatch.chdir(project_dir_gn)
+    from storyforge import cmd_cleanup
+    # cmd_cleanup.main returns normally (no sys.exit) on --csv
+    cmd_cleanup.main(['--csv'])
+    captured = capsys.readouterr()
+    # GN-only columns must not be flagged as unexpected extras — they are valid
+    # in graphic-novel mode and the cleanup report should know that.
+    assert 'target_pages' not in captured.out or 'unexpected' not in captured.out
+    assert 'panel_count' not in captured.out or 'unexpected' not in captured.out
+    assert 'page_layout' not in captured.out or 'unexpected' not in captured.out
+    # Also: GN fixture does not have characters/locations/etc. — they are optional
+    # in GN mode, so should not appear as warnings.
+    assert 'characters.csv does not exist' not in captured.out
+    assert 'locations.csv does not exist' not in captured.out

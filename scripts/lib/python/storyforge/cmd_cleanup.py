@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 
-from storyforge.common import detect_project_root, log, read_yaml_field
+from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge.parsing import clean_scene_content, extract_single_scene
 
@@ -111,6 +111,40 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
 EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
 )
+
+# Graphic-novel schema overrides — these replace/augment the base schemas for
+# projects where project.medium == 'graphic-novel'.
+GN_CSV_SCHEMA_OVERRIDES: dict[str, list[str]] = {
+    'reference/scenes.csv': [
+        'id', 'seq', 'title', 'part', 'pov', 'location',
+        'timeline_day', 'time_of_day', 'duration', 'type', 'status',
+        'word_count', 'target_words', 'target_pages', 'panel_count', 'page_count',
+    ],
+    'reference/scene-briefs.csv': [
+        'id', 'goal', 'conflict', 'outcome', 'crisis', 'decision',
+        'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
+        'emotions', 'motifs', 'subtext', 'continuity_deps', 'has_overflow',
+        'physical_state_in', 'physical_state_out',
+        'page_layout', 'panel_breakdown', 'visual_keywords',
+        'page_turn_beats', 'caption_strategy',
+    ],
+    'reference/voice-profile.csv': [
+        'character', 'preferred_words', 'banned_words', 'metaphor_families',
+        'rhythm', 'register', 'dialogue_style', 'caption_voice', 'lettering_style',
+    ],
+}
+
+# CSV files that are optional (not required) in graphic-novel mode.
+GN_OPTIONAL_CSV_FILES: set[str] = {
+    'reference/characters.csv',
+    'reference/locations.csv',
+    'reference/values.csv',
+    'reference/knowledge.csv',
+    'reference/mice-threads.csv',
+    'reference/motif-taxonomy.csv',
+    'reference/physical-states.csv',
+    'reference/chapter-map.csv',
+}
 EXPECTED_WORKING_FILES = set(
     'pipeline.csv craft-weights.csv overrides.csv exemplars.csv dashboard.html cleanup-report.csv'.split()
 )
@@ -448,11 +482,29 @@ def migrate_storyforge_yaml(project_dir: str) -> None:
 def report_csv_schema(project_dir: str) -> list[str]:
     """Check all expected CSV files for existence and column completeness.
 
+    Detects project medium (novel vs graphic-novel) and applies the appropriate
+    column schemas. GN-specific columns are not flagged as extra; optional GN
+    registry files that are absent are not flagged as missing.
+
     Returns a list of issue strings (MISSING_CSV, MISSING_COLUMN, EXTRA_COLUMN).
     """
+    medium = get_medium(project_dir)
+    is_gn = (medium == 'graphic-novel')
+
+    # Build the effective schema for this project: start with base, apply GN overrides
+    effective_schemas = dict(EXPECTED_CSV_SCHEMAS)
+    optional_files: set[str] = set()
+    if is_gn:
+        effective_schemas.update(GN_CSV_SCHEMA_OVERRIDES)
+        optional_files = GN_OPTIONAL_CSV_FILES
+
     issues = []
 
-    for rel_path, expected_cols in EXPECTED_CSV_SCHEMAS.items():
+    for rel_path, expected_cols in effective_schemas.items():
+        # Skip files that are optional for this medium and not present on disk
+        if rel_path in optional_files and not os.path.isfile(os.path.join(project_dir, rel_path)):
+            continue
+
         csv_path = os.path.join(project_dir, rel_path)
 
         if not os.path.isfile(csv_path):
