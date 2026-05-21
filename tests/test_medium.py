@@ -154,3 +154,34 @@ def test_scorer_skips_in_gn_mode(project_dir_gn, monkeypatch, module_name):
         f'{module_name}.score_project should return {{"skipped": True}} in GN mode'
     )
     assert result.get('reason') == 'graphic-novel'
+
+
+def test_prompts_elaborate_gn_imports():
+    from storyforge import prompts_elaborate_gn
+    assert hasattr(prompts_elaborate_gn, 'build_scene_map_prompt')
+    assert hasattr(prompts_elaborate_gn, 'build_briefs_prompt')
+
+
+def test_scene_map_prompt_mentions_pages():
+    from storyforge.prompts_elaborate_gn import build_scene_map_prompt
+    prompt = build_scene_map_prompt(
+        project_dir='/tmp/fake',
+        scenes_csv_content='id|seq|title\nscene-a|1|Test',
+        architecture_doc='# Architecture\n\nThree acts.',
+    )
+    assert 'target_pages' in prompt
+    assert 'target_words' not in prompt
+
+
+def test_briefs_prompt_mentions_gn_columns():
+    from storyforge.prompts_elaborate_gn import build_briefs_prompt
+    prompt = build_briefs_prompt(
+        project_dir='/tmp/fake',
+        scene_id='scene-a',
+        scene_row={'id': 'scene-a', 'title': 'Test', 'target_pages': '6'},
+        intent_row={'function': 'setup'},
+        existing_brief_row={},
+    )
+    for col in ('page_layout', 'panel_breakdown', 'visual_keywords',
+                'page_turn_beats', 'caption_strategy'):
+        assert col in prompt, f'prompt missing GN column instruction: {col}'
