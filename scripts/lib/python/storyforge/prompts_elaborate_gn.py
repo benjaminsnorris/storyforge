@@ -81,8 +81,15 @@ def build_scene_map_prompt(project_dir, scenes_csv_content, architecture_doc):
 {scenes_csv_content}
 ```
 
-Return the updated scene index as a pipe-delimited CSV with the same columns,
-populating target_pages for each scene.
+### Output Format
+
+Return the updated scene index inside a fenced block tagged `scenes-csv`,
+populating target_pages for each scene:
+
+```scenes-csv
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words|target_pages|panel_count|page_count
+(all scenes — status is "mapped" for new/updated scenes)
+```
 """
 
 

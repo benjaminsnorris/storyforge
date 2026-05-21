@@ -202,7 +202,44 @@ def test_scene_map_prompt_mentions_pages():
         architecture_doc='# Architecture\n\nThree acts.',
     )
     assert 'target_pages' in prompt
-    assert 'target_words' not in prompt
+    # The preamble explicitly tells Claude that comics are paced in pages,
+    # not word counts. (target_words may still appear in the CSV header,
+    # which is shared between novel and GN modes — that's structural, not
+    # an instruction to populate it.)
+    assert 'comics are paced' in prompt
+    assert 'pages, not word counts' in prompt
+
+
+def test_scene_map_prompt_uses_scenes_csv_fenced_block():
+    """The GN scene-map prompt must ask for a `scenes-csv` fenced block so
+    that parse_stage_response (which only extracts labeled fenced blocks)
+    can recover the response. Without this, the model returns a bare CSV
+    that the parser silently drops."""
+    from storyforge.prompts_elaborate_gn import build_scene_map_prompt
+    from storyforge.prompts_elaborate import parse_stage_response
+
+    prompt = build_scene_map_prompt(
+        project_dir='/tmp/fake',
+        scenes_csv_content='id|seq|title\nscene-a|1|Test',
+        architecture_doc='# Architecture\n\nThree acts.',
+    )
+    assert '```scenes-csv' in prompt, (
+        'GN scene-map prompt must request a `scenes-csv` fenced block — '
+        'parse_stage_response only extracts labeled fenced blocks.'
+    )
+
+    # Sanity-check the parser round-trip: a labeled scenes-csv block from a
+    # hypothetical response should be extracted by parse_stage_response.
+    fake_response = (
+        'Sure — here is the updated index:\n\n'
+        '```scenes-csv\n'
+        'id|seq|title|target_pages\n'
+        'scene-a|1|Test|3\n'
+        '```\n'
+    )
+    blocks = parse_stage_response(fake_response)
+    assert 'scenes-csv' in blocks
+    assert 'target_pages' in blocks['scenes-csv']
 
 
 def test_briefs_prompt_mentions_gn_columns():
