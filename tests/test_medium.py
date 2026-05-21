@@ -156,6 +156,38 @@ def test_scorer_skips_in_gn_mode(project_dir_gn, monkeypatch, module_name):
     assert result.get('reason') == 'graphic-novel'
 
 
+def test_elaborate_scene_map_uses_gn_prompts(project_dir_gn, monkeypatch):
+    """In graphic-novel mode, the scene-map stage calls build_scene_map_prompt from
+    prompts_elaborate_gn, not prompts_elaborate."""
+    called = {'gn': False, 'novel': False}
+
+    def fake_gn_prompt(*args, **kwargs):
+        called['gn'] = True
+        return 'fake-gn-prompt'
+
+    def fake_novel_prompt(*args, **kwargs):
+        called['novel'] = True
+        return 'fake-novel-prompt'
+
+    from storyforge import prompts_elaborate_gn, prompts_elaborate
+    monkeypatch.setattr(prompts_elaborate_gn, 'build_scene_map_prompt', fake_gn_prompt)
+    monkeypatch.setattr(prompts_elaborate, 'build_scene_map_prompt', fake_novel_prompt, raising=False)
+
+    # Stub API to prevent real calls
+    from storyforge import api
+    monkeypatch.setattr(api, 'invoke_api', lambda *a, **kw: 'id|seq|title\nscene-a|1|Test')
+
+    monkeypatch.chdir(project_dir_gn)
+    from storyforge import cmd_elaborate
+    try:
+        cmd_elaborate.main(['--stage', 'map', '--dry-run'])
+    except SystemExit:
+        pass
+
+    assert called['gn'], 'expected graphic-novel scene-map prompt to be called'
+    assert not called['novel'], 'expected novel scene-map prompt NOT to be called'
+
+
 def test_prompts_elaborate_gn_imports():
     from storyforge import prompts_elaborate_gn
     assert hasattr(prompts_elaborate_gn, 'build_scene_map_prompt')
