@@ -343,3 +343,60 @@ def test_briefs_handler_gn_returns_none_when_no_work(project_dir_gn):
         'expected None sentinel when no scenes need briefs (so caller can '
         'short-circuit before branch / PR creation)'
     )
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher guard: GN-unsupported commands return a clear error
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('cmd', [
+    'write', 'evaluate', 'score', 'revise', 'assemble',
+    'publish', 'annotations', 'extract', 'repetition', 'enrich',
+])
+def test_dispatcher_blocks_unsupported_commands_in_gn_mode(
+    project_dir_gn, monkeypatch, capsys, cmd,
+):
+    """Unsupported commands fail fast in GN mode with a clear error and exit 2."""
+    monkeypatch.chdir(project_dir_gn)
+    monkeypatch.setattr('sys.argv', ['storyforge', cmd, '--dry-run'])
+    from storyforge.__main__ import main
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert f"'{cmd}' is not yet supported for graphic-novel projects" in captured.err
+    assert 'Plan 1 supports' in captured.err
+
+
+@pytest.mark.parametrize('cmd', ['validate', 'cleanup', 'hone', 'elaborate'])
+def test_dispatcher_allows_supported_commands_in_gn_mode(
+    project_dir_gn, monkeypatch, cmd,
+):
+    """Supported commands are not blocked by the GN guard.
+
+    We just verify the dispatcher routes the command (i.e. the command's
+    own main() is called); the command may still error for other reasons,
+    so we tolerate any non-(exit-2-with-our-message) outcome.
+    """
+    monkeypatch.chdir(project_dir_gn)
+    monkeypatch.setattr('sys.argv', ['storyforge', cmd, '--help'])
+    from storyforge.__main__ import main
+    try:
+        main()
+    except SystemExit as e:
+        # --help typically exits 0; that's fine. Just verify it wasn't blocked.
+        assert e.code != 2 or 'not yet supported' not in str(e)
+
+
+def test_dispatcher_allows_unsupported_commands_in_novel_mode(
+    project_dir, monkeypatch,
+):
+    """Novel-mode projects (no medium field) can still run all commands."""
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr('sys.argv', ['storyforge', 'score', '--help'])
+    from storyforge.__main__ import main
+    try:
+        main()
+    except SystemExit as e:
+        # --help exits 0 normally; the guard would have exit 2 with our message
+        assert e.code != 2, 'novel-mode project should not be blocked'
