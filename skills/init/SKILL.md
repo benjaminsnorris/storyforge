@@ -53,7 +53,15 @@ Ask the author for the following details **one question at a time** using `AskUs
 
    You can change this anytime in storyforge.yaml."
 
-7. **Pipeline approach** — "How do you want to build your novel?
+7. **Medium** — "What are you writing?
+   - **Novel** (default) — prose manuscript. Storyforge produces epub and PDF output.
+   - **Graphic novel** — panel script for an artist. Storyforge produces an artist-ready script package (markdown + PDF), character/setting visual references, and a chapter map. Drafting outputs page-by-page panel breakdowns instead of prose.
+
+   This choice is durable — a graphic-novel and a prose adaptation are separate projects."
+
+If the author chose **graphic novel**, the elaboration pipeline is required — present only the elaboration option in the next question and explain that the structural rigor matters more when art is the delivery vehicle.
+
+8. **Pipeline approach** — "How do you want to build your novel?
    - **Elaboration** (recommended) — Build structural integrity before writing prose. Progressive stages: spine → architecture → scene map → briefs → draft → polish. Catches continuity issues before they become prose problems. Enables parallel scene drafting.
    - **Traditional** — Jump into scene design and drafting. Evaluate and revise after. Good for authors who prefer to discover the story through writing.
 
@@ -117,6 +125,7 @@ Read the `storyforge.yaml` template from the Storyforge plugin's `templates/` di
 - Subgenre (if provided)
 - Target word count
 - Logline
+- Medium (novel or graphic-novel)
 
 Use the **Read tool** to load the template, then use the **Write tool** to write the populated version to `{project-dir}/storyforge.yaml`.
 
