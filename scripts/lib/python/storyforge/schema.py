@@ -119,6 +119,19 @@ COLUMN_SCHEMA = {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'map',
         'description': 'Target word count for the scene.',
     },
+    # scenes.csv — graphic-novel additions
+    'target_pages': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'scene-map',
+        'description': 'Target page count (graphic-novel mode). Set at scene-map stage; analog of target_words.',
+    },
+    'panel_count': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'drafting',
+        'description': 'Panel count after drafting (graphic-novel mode). Populated by cmd_write_gn.',
+    },
+    'page_count': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'drafting',
+        'description': 'Page count after drafting (graphic-novel mode). Populated by cmd_write_gn.',
+    },
 
     # scene-intent.csv
     'function': {
@@ -225,6 +238,27 @@ COLUMN_SCHEMA = {
     'has_overflow': {
         'type': 'boolean', 'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'Whether briefs/{id}.md exists for extended detail.',
+    },
+    # scene-briefs.csv — graphic-novel additions
+    'page_layout': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'briefs',
+        'description': 'High-level layout rhythm (e.g., "9-panel grid", "splash p3"). Graphic-novel only.',
+    },
+    'panel_breakdown': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'briefs',
+        'description': 'Per-page panel structure (e.g., "p1:splash; p2:6-grid"). Graphic-novel only.',
+    },
+    'visual_keywords': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'briefs',
+        'description': 'Visual beats that must appear, semicolon-separated. Graphic-novel only.',
+    },
+    'page_turn_beats': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'briefs',
+        'description': 'Beats that must land on a page turn. Graphic-novel only.',
+    },
+    'caption_strategy': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'briefs',
+        'description': 'Narration style ("minimal", "journal voiceover", "none"). Graphic-novel only.',
     },
     'physical_state_in': {
         'type': 'registry', 'registry': 'physical-states.csv', 'array': True,
