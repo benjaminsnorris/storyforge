@@ -90,6 +90,16 @@ def _fake_invoke_to_file_for_pipeline(prompt, model, log_file, **kwargs):
 
     We sniff the scene id from the prompt's 'id:' line.
     """
+    # Verify the prompt carries the brief contract — protects against
+    # silent regressions in build_drafting_prompt.
+    assert 'key_dialogue' in prompt or 'goal' in prompt, (
+        f'drafting prompt is missing brief contract fields. '
+        f'First 500 chars: {prompt[:500]}'
+    )
+    assert 'CAPTION' in prompt, (
+        'drafting prompt is missing script format instructions'
+    )
+
     scene_id = 'the-blank-page'  # default
     for sid in PIPELINE_SCRIPTS:
         if f'id: {sid}' in prompt:

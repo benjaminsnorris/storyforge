@@ -24,8 +24,6 @@ from storyforge.common import (
 
 def parse_args(argv):
     p = argparse.ArgumentParser(prog='storyforge assemble (gn)')
-    p.add_argument('--format', default='markdown',
-                   help='Output format: markdown (default)')
     p.add_argument('--dry-run', action='store_true',
                    help='Show what would be done without writing files')
     p.add_argument('--force', action='store_true',
@@ -42,7 +40,7 @@ def _read_chapter_map(path):
     if not os.path.isfile(path):
         return None
     chapters = []
-    with open(path) as f:
+    with open(path, encoding='utf-8') as f:
         header_line = next(f, None)
         if header_line is None:
             return chapters
@@ -111,7 +109,7 @@ def _assemble_script(project_dir, chapters, title):
                 log(f'  WARNING: scene file not found: scenes/{sid}.md')
                 body_parts.append(f'\n*[scene {sid} not found]*\n')
                 continue
-            text = open(scene_path).read()
+            text = open(scene_path, encoding='utf-8').read()
             total_panels += count_panels(text)
             renumbered, global_page = _renumber_pages(text, global_page)
             body_parts.append(renumbered)
@@ -130,11 +128,33 @@ def _assemble_script(project_dir, chapters, title):
 # Visual reference extraction
 # ---------------------------------------------------------------------------
 
-def _extract_visual_references(project_dir, title):
-    """Pull character Visual sections + world-bible visual notes.
+def _extract_visual_subsection(section_text, char_header):
+    """Extract only the ### Visual subsection from a ## Character section.
 
-    Extracts `## CharacterName` sections that contain a `### Visual` subsection
-    from character-bible.md, and similarly from world-bible.md.
+    Returns a string with the character header followed by the Visual
+    subsection content only (stops at the next ### or ## heading or EOF).
+    """
+    # Find the start of the ### Visual block
+    visual_match = re.search(r'^### [Vv]isual', section_text, re.MULTILINE)
+    if not visual_match:
+        return None
+    # Extract from the ### Visual heading to the next ### or ## heading
+    after_visual = section_text[visual_match.start():]
+    next_heading = re.search(r'^(?:###|##) ', after_visual[4:], re.MULTILINE)
+    if next_heading:
+        visual_block = after_visual[:next_heading.start() + 4].rstrip()
+    else:
+        visual_block = after_visual.rstrip()
+    return f'## {char_header}\n\n{visual_block}'
+
+
+def _extract_visual_references(project_dir, title):
+    """Pull character Visual subsections + world-bible visual notes.
+
+    Extracts only the `### Visual` subsection (plus the character header for
+    context) from each `## CharacterName` block in character-bible.md, and
+    similarly from world-bible.md. Non-visual subsections (### Personality,
+    ### Backstory, etc.) are excluded.
     """
     parts = [
         f'# {title} — Visual References\n',
@@ -145,25 +165,29 @@ def _extract_visual_references(project_dir, title):
 
     char_path = os.path.join(ref_dir, 'character-bible.md')
     if os.path.isfile(char_path):
-        content = open(char_path).read()
+        content = open(char_path, encoding='utf-8').read()
         # Split on level-2 headers (## ...).  sections[0] is pre-first-header preamble.
         sections = re.split(r'^## ', content, flags=re.MULTILINE)
         char_sections = []
         for sec in sections[1:]:
-            if re.search(r'^### [Vv]isual', sec, re.MULTILINE):
-                char_sections.append('## ' + sec.rstrip())
+            char_header = sec.split('\n', 1)[0].strip()
+            extracted = _extract_visual_subsection(sec, char_header)
+            if extracted is not None:
+                char_sections.append(extracted)
         if char_sections:
             parts.append('\n## Characters\n')
             parts.extend(s + '\n' for s in char_sections)
 
     world_path = os.path.join(ref_dir, 'world-bible.md')
     if os.path.isfile(world_path):
-        content = open(world_path).read()
+        content = open(world_path, encoding='utf-8').read()
         sections = re.split(r'^## ', content, flags=re.MULTILINE)
         world_sections = []
         for sec in sections[1:]:
-            if re.search(r'^### [Vv]isual', sec, re.MULTILINE):
-                world_sections.append('## ' + sec.rstrip())
+            loc_header = sec.split('\n', 1)[0].strip()
+            extracted = _extract_visual_subsection(sec, loc_header)
+            if extracted is not None:
+                world_sections.append(extracted)
         if world_sections:
             parts.append('\n## Settings\n')
             parts.extend(s + '\n' for s in world_sections)
@@ -264,6 +288,27 @@ def main(argv=None):
 
     title = read_yaml_field('project.title', project_dir) or 'Untitled'
 
+    # Dry-run: report what would be done (runs before the drafted check so
+    # authors can preview the bundle plan even if some scenes are not yet drafted)
+    if args.dry_run:
+        from storyforge.csv_cli import get_field as _gf
+        _scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+        print('===== DRY RUN: script-package =====')
+        print(f'Project: {title}')
+        print(f'Chapters: {len(chapters)}')
+        total_scenes = sum(len(c['scenes']) for c in chapters)
+        print(f'Scenes: {total_scenes}')
+        for chap in chapters:
+            print(f'  Chapter {chap["chapter"]}: {chap["title"]}')
+            for sid in chap['scenes']:
+                scene_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+                _status = _gf(_scenes_csv, sid, 'status') or 'unknown'
+                file_ok = 'OK' if os.path.isfile(scene_path) else 'MISSING'
+                print(f'    - {sid} [{file_ok}] status={_status}')
+        print('Output: manuscript/{script.md,visual-references.md,chapter-map.md,handoff-readme.md}')
+        print('===== END DRY RUN =====')
+        return
+
     # Validate that every mapped scene has status=drafted
     from storyforge.csv_cli import get_field
     scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
@@ -280,23 +325,6 @@ def main(argv=None):
         log("Run 'storyforge write-gn' to draft missing scenes, or use --force to bundle anyway.")
         sys.exit(1)
 
-    # Dry-run: report what would be done
-    if args.dry_run:
-        print('===== DRY RUN: script-package =====')
-        print(f'Project: {title}')
-        print(f'Chapters: {len(chapters)}')
-        total_scenes = sum(len(c['scenes']) for c in chapters)
-        print(f'Scenes: {total_scenes}')
-        for chap in chapters:
-            print(f'  Chapter {chap["chapter"]}: {chap["title"]}')
-            for sid in chap['scenes']:
-                scene_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
-                status = 'OK' if os.path.isfile(scene_path) else 'MISSING'
-                print(f'    - {sid} [{status}]')
-        print('Output: manuscript/{script.md,visual-references.md,chapter-map.md,handoff-readme.md}')
-        print('===== END DRY RUN =====')
-        return
-
     bundle_dir = os.path.join(project_dir, 'manuscript')
     os.makedirs(bundle_dir, exist_ok=True)
 
@@ -306,28 +334,28 @@ def main(argv=None):
     # script.md
     script_md = _assemble_script(project_dir, chapters, title)
     script_path = os.path.join(bundle_dir, 'script.md')
-    with open(script_path, 'w') as f:
+    with open(script_path, 'w', encoding='utf-8') as f:
         f.write(script_md)
     log('  manuscript/script.md')
 
     # visual-references.md
     refs = _extract_visual_references(project_dir, title)
     refs_path = os.path.join(bundle_dir, 'visual-references.md')
-    with open(refs_path, 'w') as f:
+    with open(refs_path, 'w', encoding='utf-8') as f:
         f.write(refs)
     log('  manuscript/visual-references.md')
 
     # chapter-map.md
     cm = _render_chapter_map(chapters, title)
     cm_path = os.path.join(bundle_dir, 'chapter-map.md')
-    with open(cm_path, 'w') as f:
+    with open(cm_path, 'w', encoding='utf-8') as f:
         f.write(cm)
     log('  manuscript/chapter-map.md')
 
     # handoff-readme.md
     readme = HANDOFF_README.format(title=title)
     readme_path = os.path.join(bundle_dir, 'handoff-readme.md')
-    with open(readme_path, 'w') as f:
+    with open(readme_path, 'w', encoding='utf-8') as f:
         f.write(readme)
     log('  manuscript/handoff-readme.md')
 

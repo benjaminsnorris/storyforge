@@ -75,8 +75,8 @@ def _build_visual_refs(project_dir):
     ref_dir = os.path.join(project_dir, 'reference')
     chars_path = os.path.join(ref_dir, 'character-bible.md')
     world_path = os.path.join(ref_dir, 'world-bible.md')
-    char_text = open(chars_path).read() if os.path.isfile(chars_path) else ''
-    world_text = open(world_path).read() if os.path.isfile(world_path) else ''
+    char_text = open(chars_path, encoding='utf-8').read() if os.path.isfile(chars_path) else ''
+    world_text = open(world_path, encoding='utf-8').read() if os.path.isfile(world_path) else ''
     return char_text, world_text
 
 
@@ -84,7 +84,7 @@ def _build_voice_text(project_dir):
     """Read voice-profile.csv as raw text for the prompt."""
     voice_path = os.path.join(project_dir, 'reference', 'voice-profile.csv')
     if os.path.isfile(voice_path):
-        return open(voice_path).read()
+        return open(voice_path, encoding='utf-8').read()
     return ''
 
 
@@ -156,7 +156,7 @@ def _draft_one_scene(args_tuple):
     scenes_dir = os.path.join(project_dir, 'scenes')
     os.makedirs(scenes_dir, exist_ok=True)
     scene_path = os.path.join(scenes_dir, f'{scene_id}.md')
-    with open(scene_path, 'w') as f:
+    with open(scene_path, 'w', encoding='utf-8') as f:
         f.write(script_text)
 
     # Compute page/panel counts; CSV updates happen in the main thread to
@@ -179,7 +179,7 @@ def _draft_one_scene(args_tuple):
         import json as _json
         from storyforge.api import extract_usage, calculate_cost_from_usage
         from storyforge.costs import log_operation
-        with open(log_file) as f:
+        with open(log_file, encoding='utf-8') as f:
             resp = _json.load(f)
         usage = extract_usage(resp)
         cost = calculate_cost_from_usage(usage, model)

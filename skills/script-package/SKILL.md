@@ -79,7 +79,7 @@ Check that the `./storyforge` runner script exists in the project. If not, tell 
 Tell the author:
 
 > **Option A: Run it here**
-> I'll launch the assembly in this conversation. Note: this requires unsetting CLAUDECODE in your terminal if the assembly invokes Claude internally.
+> I'll launch the assembly in this conversation.
 >
 > **Option B: Run it yourself**
 > Copy this command and run it in a separate terminal:
@@ -89,9 +89,7 @@ Tell the author:
 
 Available flags:
 - `--dry-run` — show what would be assembled without writing files
-- `--scenes SCENE_IDS` — assemble specific scenes only
-- `--act ACT` — assemble one act or part
-- `--from-seq N` — assemble from scene sequence N onward
+- `--force` — bundle even if some scenes are not yet drafted
 
 Wait for the author's choice. If Option B, provide the full command and end the skill session.
 
@@ -197,7 +195,6 @@ git add -A && git commit -m "Produce: create chapter map and script-package sett
 
 > **Option A: Run it here**
 > I'll launch the assembly in this conversation.
-> (If this command invokes Claude: "This requires unsetting CLAUDECODE in your terminal.")
 >
 > **Option B: Run it yourself**
 > Copy this command and run it in a separate terminal:

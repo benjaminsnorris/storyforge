@@ -150,3 +150,27 @@ def test_cmd_write_gn_rejects_novel_projects(project_dir, monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         cmd_write_gn.main(['some-scene', '--direct'])
     assert exc_info.value.code != 0
+
+
+def test_cmd_write_gn_errors_on_missing_brief(project_dir_gn, monkeypatch):
+    """Scenes with no brief row are reported as errors, not silently skipped."""
+    # Blank out the brief by overwriting scene-briefs.csv with header-only
+    briefs_csv = os.path.join(project_dir_gn, 'reference', 'scene-briefs.csv')
+    with open(briefs_csv, encoding='utf-8') as f:
+        header = f.readline()
+    with open(briefs_csv, 'w', encoding='utf-8') as f:
+        f.write(header)
+
+    monkeypatch.chdir(project_dir_gn)
+    from storyforge import api, cmd_write_gn
+    calls = []
+
+    def track_call(*args, **kwargs):
+        calls.append(args)
+        return _mock_invoke_to_file(*args, **kwargs)
+
+    monkeypatch.setattr(api, 'invoke_to_file', track_call)
+
+    # Should not crash — should report errors for each scene that lacks a brief
+    cmd_write_gn.main(['the-blank-page', '--direct'])
+    assert calls == [], 'should not invoke API when brief is missing'
