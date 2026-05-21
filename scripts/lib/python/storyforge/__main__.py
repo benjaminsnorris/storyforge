@@ -41,6 +41,8 @@ COMMANDS = {
     'scenes-import': 'storyforge.cmd_scenes_import',
     'publish': 'storyforge.cmd_publish',
     'write-gn': 'storyforge.cmd_write_gn',
+    # Temporary direct-invocation seam — Task 6 routes `assemble` here for
+    # graphic-novel projects and removes this entry. See Plan 2 doc.
     'script-package': 'storyforge.cmd_script_package',
 }
 

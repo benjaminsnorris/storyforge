@@ -28,6 +28,8 @@ def parse_args(argv):
                    help='Output format: markdown (default)')
     p.add_argument('--dry-run', action='store_true',
                    help='Show what would be done without writing files')
+    p.add_argument('--force', action='store_true',
+                   help='Bundle even if some scenes are not yet drafted.')
     return p.parse_args(argv)
 
 
@@ -121,7 +123,7 @@ def _assemble_script(project_dir, chapters, title):
         f'_Auto-generated. See handoff-readme.md for format conventions._\n\n'
         f'**Total pages:** {total_pages} | **Total panels:** {total_panels}\n'
     )
-    return header + '\n'.join(body_parts)
+    return header + ''.join(body_parts)
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +263,22 @@ def main(argv=None):
         sys.exit(1)
 
     title = read_yaml_field('project.title', project_dir) or 'Untitled'
+
+    # Validate that every mapped scene has status=drafted
+    from storyforge.csv_cli import get_field
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    not_drafted = []
+    for chap in chapters:
+        for sid in chap['scenes']:
+            status = get_field(scenes_csv, sid, 'status') or ''
+            if status != 'drafted':
+                not_drafted.append(f'{sid} (status={status or "unknown"})')
+    if not_drafted and not args.force:
+        log('WARNING: the following scenes are not drafted:')
+        for item in not_drafted:
+            log(f'  - {item}')
+        log("Run 'storyforge write-gn' to draft missing scenes, or use --force to bundle anyway.")
+        sys.exit(1)
 
     # Dry-run: report what would be done
     if args.dry_run:

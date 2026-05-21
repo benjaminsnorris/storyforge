@@ -126,3 +126,68 @@ def test_script_package_rejects_novel_projects(project_dir, monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         cmd_script_package.main([])
     assert exc_info.value.code != 0
+
+
+def test_renumber_pages_preserves_page_turn_marker():
+    """Global page renumbering must not strip the ⟵ PAGE-TURN REVEAL marker."""
+    from storyforge.cmd_script_package import _renumber_pages
+    text = '## Page 1 — SPLASH ⟵ PAGE-TURN REVEAL\n'
+    result, _ = _renumber_pages(text, 5)
+    assert result == '## Page 5 — SPLASH ⟵ PAGE-TURN REVEAL\n'
+
+
+def test_script_package_handles_missing_scene_file(project_dir_gn, monkeypatch):
+    """A chapter-map entry referencing a missing scene file produces a placeholder."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    # Chapter map references a scene that doesn't exist on disk
+    map_path = os.path.join(project_dir_gn, 'reference', 'chapter-map.csv')
+    with open(map_path, 'w') as f:
+        f.write('chapter|title|heading|scenes\n')
+        f.write('1|Opening|numbered-titled|the-blank-page;nonexistent-scene\n')
+    # Also need 'nonexistent-scene' to appear in scenes.csv with status='drafted'
+    # so the new draft-status check doesn't block it.
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    from storyforge.csv_cli import append_row
+    # 16 columns matching the GN scenes.csv header (id|seq|title|part|pov|location|
+    # timeline_day|time_of_day|duration|type|status|word_count|target_words|
+    # target_pages|panel_count|page_count)
+    append_row(scenes_csv, 'nonexistent-scene|99|Missing|1|cartographer|study|1|night|short|action|drafted||||')
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    script_md = open(os.path.join(project_dir_gn, 'manuscript', 'script.md')).read()
+    assert 'nonexistent-scene' in script_md
+    assert 'not found' in script_md
+
+
+def test_script_package_rejects_undrafted_scenes(project_dir_gn, monkeypatch):
+    """Scenes with status != drafted cause a non-zero exit unless --force is passed."""
+    monkeypatch.chdir(project_dir_gn)
+    # Write scene files but leave CSV status as 'briefed' (fixture default)
+    scenes_dir = os.path.join(project_dir_gn, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    with open(os.path.join(scenes_dir, 'the-blank-page.md'), 'w') as f:
+        f.write(SAMPLE_SCRIPT_A)
+    with open(os.path.join(scenes_dir, 'shadows-arrive.md'), 'w') as f:
+        f.write(SAMPLE_SCRIPT_B)
+    _setup_chapter_map(project_dir_gn)
+    from storyforge import cmd_script_package
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_script_package.main([])
+    assert exc_info.value.code != 0
+
+
+def test_script_package_force_bypasses_status_check(project_dir_gn, monkeypatch):
+    """--force allows bundling even when scenes are not drafted."""
+    monkeypatch.chdir(project_dir_gn)
+    scenes_dir = os.path.join(project_dir_gn, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    with open(os.path.join(scenes_dir, 'the-blank-page.md'), 'w') as f:
+        f.write(SAMPLE_SCRIPT_A)
+    with open(os.path.join(scenes_dir, 'shadows-arrive.md'), 'w') as f:
+        f.write(SAMPLE_SCRIPT_B)
+    _setup_chapter_map(project_dir_gn)
+    from storyforge import cmd_script_package
+    cmd_script_package.main(['--force'])
+    bundle = os.path.join(project_dir_gn, 'manuscript')
+    assert os.path.isfile(os.path.join(bundle, 'script.md'))
