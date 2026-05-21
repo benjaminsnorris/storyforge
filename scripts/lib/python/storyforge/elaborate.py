@@ -849,9 +849,22 @@ def _validate_pacing(scenes_map, intent_map, checks):
 def validate_structure(ref_dir: str) -> dict:
     """Run all structural validation checks against the scene CSVs.
 
+    Each check has a `severity` field — ``'blocking'`` (default) or
+    ``'advisory'``. Blocking failures indicate structural problems that
+    must be fixed before drafting (orphaned rows, missing required
+    columns, timeline contradictions, broken MICE nesting). Advisory
+    failures are reported as FYI signals — for example, crosscut pacing
+    on a single timeline_day — and do not gate the pipeline.
+
     Returns:
-        A dict with 'passed' (bool), 'checks' (list of check results),
-        and 'failures' (list of failed checks only).
+        A dict with:
+          - ``'passed'`` (bool): ``True`` when no BLOCKING failures exist.
+            Advisory failures are reported in ``'failures'`` but do NOT
+            affect ``'passed'``.
+          - ``'checks'`` (list): every check run, passed or failed.
+          - ``'failures'`` (list): all failed checks (blocking AND
+            advisory). Callers that need to distinguish should inspect
+            each entry's ``'severity'`` field.
     """
     checks: list[dict] = []
 
