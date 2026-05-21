@@ -53,3 +53,23 @@ def score_avoid_adverbs(scene_text: str) -> dict:
                f'tag={tag_count}, weak={weak_count}, redundant={redundant_count}')
 
     return {'score': score, 'markers': markers, 'details': details}
+
+
+def score_project(project_dir: str) -> dict:
+    """Project-level entrypoint for adverb scoring.
+
+    In graphic-novel mode, returns a skipped sentinel — dialogue-tag and
+    weak-verb adverb patterns are not meaningful for panel scripts.
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        {'skipped': True, 'reason': 'graphic-novel'} in GN mode, or
+        {'principle': 'avoid_adverbs'} in novel mode (full scoring is
+        driven by cmd_score via score_avoid_adverbs per scene).
+    """
+    from storyforge.common import get_medium
+    if get_medium(project_dir) == 'graphic-novel':
+        return {'skipped': True, 'reason': 'graphic-novel'}
+    return {'principle': 'avoid_adverbs'}

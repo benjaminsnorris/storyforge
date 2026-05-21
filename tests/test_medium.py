@@ -132,3 +132,25 @@ def test_hone_novel_does_not_flag_panel_breakdown(project_dir, monkeypatch):
     findings = diagnose_briefs(project_dir)
     panel_findings = [f for f in findings if f.get('field') == 'panel_breakdown']
     assert not panel_findings
+
+
+@pytest.mark.parametrize('module_name', [
+    'repetition',
+    'scoring_passive',
+    'scoring_adverbs',
+    'scoring_weather',
+    'scoring_rhythm',
+    'scoring_economy',
+])
+def test_scorer_skips_in_gn_mode(project_dir_gn, monkeypatch, module_name):
+    """Prose-craft scorers return a skipped sentinel in graphic-novel mode."""
+    import importlib
+    monkeypatch.chdir(project_dir_gn)
+    module = importlib.import_module(f'storyforge.{module_name}')
+    entrypoint = getattr(module, 'score_project', None)
+    assert entrypoint is not None, f'{module_name} must expose a score_project entry'
+    result = entrypoint(project_dir_gn)
+    assert result.get('skipped') is True, (
+        f'{module_name}.score_project should return {{"skipped": True}} in GN mode'
+    )
+    assert result.get('reason') == 'graphic-novel'

@@ -284,3 +284,24 @@ def score_scene_repetition(scene_id: str,
             scores[marker] = 1
 
     return scores
+
+
+def score_project(project_dir: str) -> dict:
+    """Project-level entrypoint for prose repetition scoring.
+
+    In graphic-novel mode, returns a skipped sentinel instead of running
+    the n-gram scan (panel scripts are not prose, so repetition scoring
+    is not meaningful).
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        {'skipped': True, 'reason': 'graphic-novel'} in GN mode, or a
+        summary dict with 'findings' in novel mode.
+    """
+    from storyforge.common import get_medium
+    if get_medium(project_dir) == 'graphic-novel':
+        return {'skipped': True, 'reason': 'graphic-novel'}
+    findings = scan_manuscript(project_dir)
+    return {'findings': findings, 'count': len(findings)}

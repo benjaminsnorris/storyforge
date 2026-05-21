@@ -126,3 +126,23 @@ def score_no_weather_dreams(scene_text: str) -> dict:
 
     details = '; '.join(findings) if findings else 'clean opening'
     return {'score': score, 'markers': markers, 'details': details}
+
+
+def score_project(project_dir: str) -> dict:
+    """Project-level entrypoint for weather/dream opening scoring.
+
+    In graphic-novel mode, returns a skipped sentinel — scene opening
+    patterns in panel scripts differ fundamentally from prose openers.
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        {'skipped': True, 'reason': 'graphic-novel'} in GN mode, or
+        {'principle': 'no_weather_dreams'} in novel mode (full scoring
+        is driven by cmd_score via score_no_weather_dreams per scene).
+    """
+    from storyforge.common import get_medium
+    if get_medium(project_dir) == 'graphic-novel':
+        return {'skipped': True, 'reason': 'graphic-novel'}
+    return {'principle': 'no_weather_dreams'}
