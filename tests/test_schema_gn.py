@@ -45,14 +45,17 @@ def test_gn_brief_text_columns_are_free_text():
 
 
 import shutil
-from pathlib import Path
 
 
 @pytest.fixture
 def gn_project_dir(tmp_path, fixture_dir):
     """A novel fixture copied and flipped to graphic-novel mode.
 
-    Used until the dedicated GN fixture lands in Task 6.
+    Intentionally distinct from ``project_dir_gn`` (which uses the dedicated
+    GN fixture with target_pages populated). This fixture starts from the
+    novel fixture's data — which has target_words but no target_pages — so
+    that GN-mode validation will surface the missing-target_pages failure
+    being asserted below.
     """
     dest = tmp_path / 'gn-project'
     shutil.copytree(fixture_dir, dest)

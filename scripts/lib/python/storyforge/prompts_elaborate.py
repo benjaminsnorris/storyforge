@@ -18,10 +18,20 @@ def _read_file(path: str) -> str:
         return f.read()
 
 
-def _read_csv_contents(path: str) -> str:
-    """Read CSV contents for inclusion in prompts."""
+def _read_file_contents(path: str) -> str:
+    """Read a file's contents for inclusion in prompts.
+
+    Returns the file contents stripped of surrounding whitespace, or
+    ``'(empty)'`` when the file is missing or empty. Works for any text
+    file — CSVs, markdown, plain text.
+    """
     content = _read_file(path)
     return content.strip() if content else '(empty)'
+
+
+# Backwards-compatible alias (was named _read_csv_contents before but also
+# used to read markdown). Prefer _read_file_contents in new code.
+_read_csv_contents = _read_file_contents
 
 
 def _project_context(project_dir: str) -> str:

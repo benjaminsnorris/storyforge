@@ -326,3 +326,20 @@ def test_briefs_handler_gn_round_trip_preserves_gn_columns(project_dir_gn, monke
             f'GN column {col!r} was lost on write — expected {expected!r}, '
             f'got {value!r}. This is the bug Issue #1 fixes.'
         )
+
+
+def test_briefs_handler_gn_returns_none_when_no_work(project_dir_gn):
+    """When all scenes are already briefed, _briefs_handler_gn returns None
+    so the caller can short-circuit before branch / PR creation."""
+    from storyforge import cmd_elaborate
+    ref_dir = os.path.join(project_dir_gn, 'reference')
+    # GN fixture has all scenes at status='briefed' — nothing for the handler to do
+    result = cmd_elaborate._briefs_handler_gn(
+        project_dir_gn, ref_dir,
+        dry_run=False, stage_model='claude-opus-4-6',
+        system=None,
+    )
+    assert result is None, (
+        'expected None sentinel when no scenes need briefs (so caller can '
+        'short-circuit before branch / PR creation)'
+    )

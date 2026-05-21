@@ -496,7 +496,7 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
 
 def _briefs_handler_gn(project_dir: str, ref_dir: str,
                        dry_run: bool, stage_model: str, system,
-                       interactive: bool = False) -> str:
+                       interactive: bool = False):
     """Run the briefs stage for graphic-novel projects.
 
     Unlike the novel path (one big batch prompt for all scenes), GN briefs
@@ -510,8 +510,12 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
       - pauses for confirmation when ``interactive`` is True (mirrors the
         per-step rejoin pattern used by other interactive stages)
 
-    Returns a combined prompt string for dry-run display, or runs API calls
-    and returns '' in live mode.
+    Return value:
+      - ``None`` when no scenes need briefs — the caller short-circuits before
+        creating a branch or PR.
+      - In dry-run mode, a string previewing the prompt for the first scene.
+      - In live mode, ``''`` after the API calls have completed and the CSV
+        has been written.
     """
     from storyforge.prompts_elaborate_gn import build_briefs_prompt as gn_briefs_prompt
     from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, _BRIEFS_COLS
@@ -539,7 +543,7 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
     ]
     if not target_ids:
         log('No scenes need GN briefs.')
-        return ''
+        return None
 
     if dry_run:
         # Build and return first scene's prompt as representative sample
@@ -691,10 +695,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     elif stage == 'map':
         if medium == 'graphic-novel':
             from storyforge.prompts_elaborate_gn import build_scene_map_prompt as gn_map_prompt
-            from storyforge.prompts_elaborate import _read_csv_contents
-            scenes_csv = _read_csv_contents(os.path.join(ref_dir, 'scenes.csv'))
+            from storyforge.prompts_elaborate import _read_file_contents
+            scenes_csv = _read_file_contents(os.path.join(ref_dir, 'scenes.csv'))
             arch_doc_path = os.path.join(ref_dir, 'story-architecture.md')
-            arch_doc = _read_csv_contents(arch_doc_path) if os.path.isfile(arch_doc_path) else ''
+            arch_doc = _read_file_contents(arch_doc_path) if os.path.isfile(arch_doc_path) else ''
             prompt = gn_map_prompt(project_dir, scenes_csv, arch_doc)
         else:
             prompt = build_map_prompt(project_dir, plugin_dir, registries_text=registries,
@@ -704,6 +708,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
             # GN briefs: per-scene calls; handle dry-run inline
             prompt = _briefs_handler_gn(project_dir, ref_dir, dry_run, stage_model,
                                        system, interactive=interactive)
+            if prompt is None:
+                # No scenes need briefs — short-circuit before branch / PR creation.
+                log('Skipping briefs stage — nothing to do.')
+                return
             if dry_run:
                 print(f'===== DRY RUN: elaborate {stage} (graphic-novel) =====')
                 print(prompt)
