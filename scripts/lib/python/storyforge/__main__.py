@@ -41,6 +41,7 @@ COMMANDS = {
     'cleanup': 'storyforge.cmd_cleanup',
     'cover': 'storyforge.cmd_cover',
     'migrate': 'storyforge.cmd_migrate',
+    'migrate-medium': 'storyforge.cmd_migrate_medium',
     'scenes-setup': 'storyforge.cmd_scenes_setup',
     'scenes-export': 'storyforge.cmd_scenes_export',
     'scenes-import': 'storyforge.cmd_scenes_import',
