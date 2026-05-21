@@ -400,3 +400,48 @@ def test_dispatcher_allows_unsupported_commands_in_novel_mode(
     except SystemExit as e:
         # --help exits 0 normally; the guard would have exit 2 with our message
         assert e.code != 2, 'novel-mode project should not be blocked'
+
+
+def test_prompts_gn_imports():
+    from storyforge import prompts_gn
+    assert hasattr(prompts_gn, 'build_drafting_prompt')
+
+
+def test_drafting_prompt_includes_brief_columns():
+    from storyforge.prompts_gn import build_drafting_prompt
+    prompt = build_drafting_prompt(
+        project_dir='/tmp/fake',
+        scene_id='scene-a',
+        scene_row={'id': 'scene-a', 'title': 'Test', 'target_pages': '4', 'pov': 'lucien'},
+        intent_row={'function': 'setup', 'characters': 'lucien', 'on_stage': 'lucien'},
+        brief_row={
+            'goal': 'find the page',
+            'conflict': 'the page is blank',
+            'outcome': 'no-and',
+            'key_dialogue': 'It always begins this way',
+            'visual_keywords': 'blank parchment; trembling hand',
+            'page_layout': 'splash p1, 4-grid p2',
+            'panel_breakdown': 'p1:splash; p2:4-grid',
+            'page_turn_beats': 'p2 reveal',
+            'caption_strategy': 'journal voiceover',
+        },
+        character_visuals='Lucien: tall, stoop-shouldered, wire spectacles.',
+        location_visuals='The Archive: amber lamplight, tall shelves.',
+        voice_profile_text='caption_voice: journal-voiceover; lettering_style: loose-natural',
+    )
+    # Brief contract surfaces in the prompt
+    assert 'find the page' in prompt
+    assert 'the page is blank' in prompt
+    assert 'It always begins this way' in prompt
+    assert 'blank parchment' in prompt
+    # Script format conventions are taught
+    assert '## Page' in prompt
+    assert '**Panel' in prompt
+    assert 'CAPTION' in prompt
+    # Target pages anchors output length
+    assert '4' in prompt  # target pages
+    # Visual references are present
+    assert 'wire spectacles' in prompt or 'Wire spectacles' in prompt
+    assert 'amber lamplight' in prompt
+    # Caption strategy and voice are present
+    assert 'journal voiceover' in prompt or 'journal-voiceover' in prompt
