@@ -10,11 +10,16 @@ import sys
 # Commands that don't yet support graphic-novel mode (Plan 1 boundary).
 # When a project's medium is graphic-novel, these commands return a clear
 # error instead of silently running novel-mode logic on the wrong data.
-# Plan 2 will deliver graphic-novel counterparts for write, assemble, etc.
 GN_UNSUPPORTED_COMMANDS = frozenset({
-    'write', 'evaluate', 'score', 'revise', 'assemble',
+    'evaluate', 'score', 'revise',
     'publish', 'annotations', 'extract', 'repetition', 'enrich',
 })
+
+# Commands that route to a different module based on project.medium
+GN_ROUTED_COMMANDS = {
+    'write': 'storyforge.cmd_write_gn',
+    'assemble': 'storyforge.cmd_script_package',
+}
 
 COMMANDS = {
     'annotations': 'storyforge.cmd_annotations',
@@ -87,6 +92,21 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(2)
+
+    # Route certain commands to GN-specific modules based on project.medium
+    if cmd in GN_ROUTED_COMMANDS:
+        project_medium = None
+        try:
+            from storyforge.common import detect_project_root, get_medium
+            project_dir = detect_project_root()
+            project_medium = get_medium(project_dir)
+        except (FileNotFoundError, OSError):
+            pass
+        if project_medium == 'graphic-novel':
+            sys.argv = [f'storyforge {cmd}'] + sys.argv[2:]
+            module = importlib.import_module(GN_ROUTED_COMMANDS[cmd])
+            module.main(sys.argv[1:])
+            return
 
     # Remove 'storyforge' and command from argv so the module sees its own args
     sys.argv = [f'storyforge {cmd}'] + sys.argv[2:]

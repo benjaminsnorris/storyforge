@@ -49,9 +49,9 @@ class TestMainDispatch:
             )
 
     def test_command_modules_match_filesystem(self):
-        """Every cmd_*.py file should be reachable via COMMANDS (possibly as an alias)."""
-        from storyforge.__main__ import COMMANDS
-        reachable_modules = set(COMMANDS.values())
+        """Every cmd_*.py file should be reachable via COMMANDS or GN_ROUTED_COMMANDS."""
+        from storyforge.__main__ import COMMANDS, GN_ROUTED_COMMANDS
+        reachable_modules = set(COMMANDS.values()) | set(GN_ROUTED_COMMANDS.values())
 
         for entry in sorted(os.listdir(_PKG_DIR)):
             if entry.startswith('cmd_') and entry.endswith('.py'):

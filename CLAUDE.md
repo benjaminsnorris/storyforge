@@ -354,13 +354,17 @@ Key principles:
 
 Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a project into graphic-novel mode. Medium is durable; switching means a new project.
 
-**Supported in current version (Plan 1):**
+**Supported (Plans 1 + 2):**
 - `elaborate` (spine, architecture, scene-map, voice, briefs)
 - `hone`, `validate`, `cleanup`
+- `write` — drafts panel scripts per scene (mirrors novel-mode write; routes to `cmd_write_gn`)
+- `assemble` — produces the artist handoff bundle: `manuscript/{script.md, visual-references.md, chapter-map.md, handoff-readme.md}` (routes to `cmd_script_package`)
 - Schema validation enforces graphic-novel column rules (target_pages required, panel_breakdown required at briefed status)
 
-**Not yet supported (Plan 2):**
-- `write`, `evaluate`, `score`, `revise`, `assemble`, `publish`, `annotations`, `extract`
+**Not yet supported (followups tracked as issues):**
+- `evaluate`, `score`, `revise` — GN-specific rubric is its own design problem (#209)
+- `publish`, `annotations` — Bookshelf integration for GN (#215)
+- `extract` — extract structure from existing scripts/prose (#213)
 
 **Schema additions:**
 - `reference/scenes.csv` adds: `target_pages`, `panel_count`, `page_count`
