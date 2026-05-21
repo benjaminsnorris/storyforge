@@ -32,6 +32,7 @@ class TestMainDispatch:
         'write', 'evaluate', 'revise', 'score', 'elaborate', 'extract',
         'validate', 'hone', 'reconcile', 'enrich', 'assemble', 'visualize',
         'timeline', 'cleanup', 'cover', 'scenes-setup', 'review', 'migrate',
+        'migrate-medium',
     }
 
     def test_all_documented_commands_present(self):

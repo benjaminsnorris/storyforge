@@ -352,7 +352,7 @@ Key principles:
 
 ## Graphic Novel Mode
 
-Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a project into graphic-novel mode. Medium is durable; switching means a new project.
+Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a project into graphic-novel mode. To convert an existing project between mediums, use `storyforge migrate-medium --to {novel|graphic-novel}` (archives current state, resets scene drafts, transforms CSV schemas).
 
 **Supported (Plans 1 + 2):**
 - `elaborate` (spine, architecture, scene-map, voice, briefs)
