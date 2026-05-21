@@ -20,6 +20,8 @@ _SCENES_COLS = [
     'id', 'seq', 'title', 'part', 'pov', 'location',
     'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',
+    # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
+    'target_pages', 'panel_count', 'page_count',
 ]
 _INTENT_COLS = [
     'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
@@ -31,6 +33,9 @@ _BRIEFS_COLS = [
     'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
     'emotions', 'motifs', 'subtext', 'continuity_deps', 'has_overflow',
     'physical_state_in', 'physical_state_out',
+    # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
+    'page_layout', 'panel_breakdown', 'visual_keywords',
+    'page_turn_beats', 'caption_strategy',
 ]
 
 _FILE_MAP = {

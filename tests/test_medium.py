@@ -217,3 +217,75 @@ def test_briefs_prompt_mentions_gn_columns():
     for col in ('page_layout', 'panel_breakdown', 'visual_keywords',
                 'page_turn_beats', 'caption_strategy'):
         assert col in prompt, f'prompt missing GN column instruction: {col}'
+
+
+def test_briefs_handler_gn_round_trip_preserves_gn_columns(project_dir_gn, monkeypatch):
+    """End-to-end: _briefs_handler_gn must preserve all five GN brief columns
+    when round-tripping through scene-briefs.csv.
+
+    This is the regression test that pins Issue #1 (graphic-novel columns
+    dropped on write because _BRIEFS_COLS lacked them). Without the column
+    list extension, DictWriter(extrasaction='ignore') silently drops the
+    GN columns on every write.
+    """
+    import json
+    from storyforge.csv_cli import update_field, get_field
+
+    ref_dir = os.path.join(project_dir_gn, 'reference')
+    briefs_csv = os.path.join(ref_dir, 'scene-briefs.csv')
+
+    # Blank panel_breakdown for one scene so the handler has work to do.
+    # Also blank status on scenes.csv so the scene is targeted (statuses in
+    # ('mapped', 'architecture', 'spine', '') qualify).
+    scenes_csv = os.path.join(ref_dir, 'scenes.csv')
+    update_field(scenes_csv, 'the-blank-page', 'status', 'mapped')
+    update_field(briefs_csv, 'the-blank-page', 'panel_breakdown', '')
+
+    # Fake API response: a bare CSV row (no fenced block) covering all GN cols.
+    fake_text = (
+        'the-blank-page|fill the blank page|inability to begin|no-and|'
+        'recognise the pattern|set the pen down|||stare at parchment;dip pen|'
+        'It always begins this way|resigned|empty map|the work is dead||false|'
+        'fatigued|fatigued|FAKE-LAYOUT|FAKE-PANELS|FAKE-KEYWORDS|'
+        'FAKE-TURN-BEATS|FAKE-CAPTION'
+    )
+
+    def fake_invoke_to_file(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': fake_text}],
+            'usage': {'input_tokens': 10, 'output_tokens': 20,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api
+    monkeypatch.setattr(api, 'invoke_to_file', fake_invoke_to_file)
+    # The handler imports invoke_to_file at function scope, so also patch
+    # the cmd_elaborate module reference once imported.
+    from storyforge import cmd_elaborate
+    # cmd_elaborate._briefs_handler_gn imports invoke_to_file locally from
+    # storyforge.api — patching api.invoke_to_file is sufficient.
+
+    cmd_elaborate._briefs_handler_gn(
+        project_dir_gn, ref_dir,
+        dry_run=False, stage_model='claude-opus-4-6',
+        system=None,
+    )
+
+    # Verify all five GN columns are present and non-empty for the scene.
+    for col, expected in [
+        ('page_layout', 'FAKE-LAYOUT'),
+        ('panel_breakdown', 'FAKE-PANELS'),
+        ('visual_keywords', 'FAKE-KEYWORDS'),
+        ('page_turn_beats', 'FAKE-TURN-BEATS'),
+        ('caption_strategy', 'FAKE-CAPTION'),
+    ]:
+        value = get_field(briefs_csv, 'the-blank-page', col)
+        assert value == expected, (
+            f'GN column {col!r} was lost on write — expected {expected!r}, '
+            f'got {value!r}. This is the bug Issue #1 fixes.'
+        )

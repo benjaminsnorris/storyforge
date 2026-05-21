@@ -507,7 +507,7 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
     and returns '' in live mode.
     """
     from storyforge.prompts_elaborate_gn import build_briefs_prompt as gn_briefs_prompt
-    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP
+    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, _BRIEFS_COLS
     from storyforge.api import invoke_to_file, extract_text_from_file
     from storyforge.prompts_elaborate import csv_block_to_rows
     from storyforge.enrich import load_registry_alias_maps, normalize_fields
@@ -567,8 +567,11 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
 
         rows = csv_block_to_rows(response)
         if not rows:
-            # Response might be a bare CSV row without fences
-            rows = csv_block_to_rows('id|goal\n' + response) or []
+            # Response might be a bare CSV row without fences — use the full
+            # briefs column list as the synthetic header so all GN columns
+            # (page_layout, panel_breakdown, etc.) are captured, not just id+goal.
+            synthetic_header = '|'.join(_BRIEFS_COLS)
+            rows = csv_block_to_rows(synthetic_header + '\n' + response) or []
 
         if rows:
             row = rows[0]
