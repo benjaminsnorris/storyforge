@@ -71,3 +71,12 @@ def test_gn_fixture_schema_passes(fixture_dir_gn):
     result = validate_schema(ref_dir, fixture_dir_gn)
     # The fixture should pass — failed count must be 0
     assert result['failed'] == 0, f"Fixture has schema failures: {result.get('errors')}"
+
+
+def test_cmd_validate_passes_on_gn_fixture(project_dir_gn, monkeypatch):
+    """Running `storyforge validate` on the GN fixture exits 0."""
+    monkeypatch.chdir(project_dir_gn)
+    from storyforge import cmd_validate
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_validate.main(['--quiet'])
+    assert exc_info.value.code == 0

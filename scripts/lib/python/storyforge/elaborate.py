@@ -906,8 +906,9 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_dir=ref_dir)
 
     failures = [c for c in checks if not c['passed']]
+    blocking_failures = [c for c in failures if c.get('severity', 'blocking') != 'advisory']
     return {
-        'passed': len(failures) == 0,
+        'passed': len(blocking_failures) == 0,
         'checks': checks,
         'failures': failures,
     }
