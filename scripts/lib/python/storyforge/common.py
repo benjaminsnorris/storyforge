@@ -610,6 +610,27 @@ def offer_interactive(project_dir: str, step_label: str) -> bool:
     return False
 
 
+# ============================================================================
+# Medium
+# ============================================================================
+
+def get_medium(project_dir: str) -> str:
+    """Return the project's medium: 'novel' (default) or 'graphic-novel'.
+
+    Reads `project.medium` from storyforge.yaml. Unknown values fall back
+    to 'novel' with a logged warning rather than failing — old projects
+    without the field stay valid.
+    """
+    value = read_yaml_field('project.medium', project_dir)
+    if not value:
+        return 'novel'
+    value = value.strip().lower()
+    if value in ('novel', 'graphic-novel'):
+        return value
+    log(f"Warning: project.medium='{value}' is not a recognized value; defaulting to 'novel'")
+    return 'novel'
+
+
 def build_interactive_system_prompt(project_dir: str, work_unit: str = 'step') -> str:
     """Build system prompt appendix for interactive mode."""
     interactive_file = os.path.join(project_dir, 'working', '.interactive')
