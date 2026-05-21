@@ -21,7 +21,7 @@ For each scene, you will set:
 
 Page counts are the unit of pacing in comics. A scene can be 1 page (a
 quick beat), 3-4 pages (a typical sequence), or 6-8+ pages (a major set
-piece. Most scenes are 2-4 pages.
+piece). Most scenes are 2-4 pages.
 """
 
 BRIEFS_GN_PREAMBLE = """\
