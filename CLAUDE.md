@@ -269,19 +269,21 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 
 | Skill | Purpose |
 |-------|---------|
-| `forge` | Hub — reads project state, recommends next action, routes to skills |
-| `elaborate` | All creative development: spine → architecture → voice → map → briefs. Character, world, story architecture. |
+| `forge`\* | Hub — reads project state, recommends next action, routes to skills |
+| `elaborate`\* | All creative development: spine → architecture → voice → map → briefs. Character, world, story architecture. |
 | `extract` | Reverse elaboration — extract structural data from existing prose |
 | `revise` | Plan + execute revision (upstream CSV fixes + prose polish). `--polish` for craft-only. |
 | `score` | Craft + fidelity scoring |
-| `hone` | CSV data quality — registries, brief concretization, intent quality, evaluation-driven fixes, gap detection. `--diagnose` for read-only assessment. |
+| `hone`\* | CSV data quality — registries, brief concretization, intent quality, evaluation-driven fixes, gap detection. `--diagnose` for read-only assessment. |
 | `cleanup` | Project health check — CSV schema validation, scene artifact cleanup, structural drift fixes. Generates report, works through action items. |
 | `publish` | Assemble web book + generate dashboard + push to bookshelf |
 | `produce` | Epub, PDF, print formats |
-| `init` | New project initialization |
+| `init`\* | New project initialization |
 | `cover` | Cover design |
 | `title` | Title development |
 | `press-kit` | Marketing materials |
+
+\* Medium-aware: behavior adapts to `project.medium` (novel | graphic-novel).
 
 ### Elaboration Pipeline
 
@@ -347,6 +349,25 @@ Key principles:
 | `scoring_weather.py` | Deterministic scorer: no_weather_dreams (scene opening patterns) |
 | `scoring_rhythm.py` | Deterministic scorer: sentence_as_thought (sentence length variance) |
 | `scoring_economy.py` | Deterministic scorer: economy_clarity (composite filler/AI-tell/passive/adverb) |
+
+## Graphic Novel Mode
+
+Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a project into graphic-novel mode. Medium is durable; switching means a new project.
+
+**Supported in current version (Plan 1):**
+- `elaborate` (spine, architecture, scene-map, voice, briefs)
+- `hone`, `validate`, `cleanup`
+- Schema validation enforces graphic-novel column rules (target_pages required, panel_breakdown required at briefed status)
+
+**Not yet supported (Plan 2):**
+- `write`, `evaluate`, `score`, `revise`, `assemble`, `publish`, `annotations`, `extract`
+
+**Schema additions:**
+- `reference/scenes.csv` adds: `target_pages`, `panel_count`, `page_count`
+- `reference/scene-briefs.csv` adds: `page_layout`, `panel_breakdown`, `visual_keywords`, `page_turn_beats`, `caption_strategy`
+- `reference/voice-profile.csv` `_project` row adds: `caption_voice`, `lettering_style`
+
+See the design spec: `docs/superpowers/specs/2026-05-20-graphic-novel-mode-design.md`.
 
 ## Commit Message Prefixes
 Use domain-specific prefixes:
