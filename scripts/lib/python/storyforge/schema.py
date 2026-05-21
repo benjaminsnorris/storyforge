@@ -407,6 +407,12 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
         Dict with keys: passed (int), failed (int), skipped (int),
         errors (list of error dicts).
     """
+    # Detect medium (defaults to 'novel' when project_dir not provided)
+    medium = 'novel'
+    if project_dir is not None:
+        from storyforge.common import get_medium
+        medium = get_medium(project_dir)
+
     # Load registry alias maps if project_dir provided
     registries: dict[str, dict] = {}
     mice_alias: dict[str, str] = {}
@@ -563,6 +569,25 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                             'constraint': 'scene_ids',
                             'unresolved': bad,
                         })
+
+    # Medium-aware required-field checks
+    if medium == 'graphic-novel':
+        # Every non-cut/non-merged scene needs target_pages
+        scenes_rows = _read_csv(os.path.join(ref_dir, 'scenes.csv'))
+        for row in scenes_rows:
+            status = (row.get('status') or '').strip()
+            if status in ('cut', 'merged'):
+                continue
+            if not (row.get('target_pages') or '').strip():
+                failed += 1
+                errors.append({
+                    'file': 'scenes.csv',
+                    'row': row.get('id', ''),
+                    'column': 'target_pages',
+                    'value': '',
+                    'constraint': 'required',
+                    'reason': 'target_pages is required in graphic-novel mode',
+                })
 
     return {
         'passed': passed,
