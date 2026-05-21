@@ -41,6 +41,7 @@ COMMANDS = {
     'scenes-import': 'storyforge.cmd_scenes_import',
     'publish': 'storyforge.cmd_publish',
     'write-gn': 'storyforge.cmd_write_gn',
+    'script-package': 'storyforge.cmd_script_package',
 }
 
 # Aliases
