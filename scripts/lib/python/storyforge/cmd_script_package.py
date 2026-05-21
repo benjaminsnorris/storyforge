@@ -322,7 +322,7 @@ def main(argv=None):
         log('WARNING: the following scenes are not drafted:')
         for item in not_drafted:
             log(f'  - {item}')
-        log("Run 'storyforge write-gn' to draft missing scenes, or use --force to bundle anyway.")
+        log("Run 'storyforge write' to draft missing scenes, or use --force to bundle anyway.")
         sys.exit(1)
 
     bundle_dir = os.path.join(project_dir, 'manuscript')
