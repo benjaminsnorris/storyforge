@@ -119,3 +119,34 @@ def test_cmd_write_gn_skips_already_drafted_scenes(project_dir_gn, monkeypatch):
     monkeypatch.setattr(api, 'invoke_to_file', track_call)
     cmd_write_gn.main(['the-blank-page', '--direct'])
     assert calls == [], 'should not draft an already-drafted scene without --force'
+
+
+def test_cmd_write_gn_force_re_drafts(project_dir_gn, monkeypatch):
+    """--force re-drafts an already-drafted scene."""
+    from storyforge.csv_cli import update_field
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    update_field(scenes_csv, 'the-blank-page', 'status', 'drafted')
+
+    monkeypatch.chdir(project_dir_gn)
+    from storyforge import api, cmd_write_gn
+    calls = []
+
+    def track_call(*args, **kwargs):
+        calls.append(args)
+        return _mock_invoke_to_file(*args, **kwargs)
+
+    monkeypatch.setattr(api, 'invoke_to_file', track_call)
+    cmd_write_gn.main(['the-blank-page', '--force', '--direct'])
+    assert len(calls) == 1, 'expected one API call with --force on a drafted scene'
+
+    # Scene should still be 'drafted' after the re-draft
+    assert get_field(scenes_csv, 'the-blank-page', 'status') == 'drafted'
+
+
+def test_cmd_write_gn_rejects_novel_projects(project_dir, monkeypatch):
+    """Running cmd_write_gn on a novel-mode project exits with an error."""
+    monkeypatch.chdir(project_dir)
+    from storyforge import cmd_write_gn
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_write_gn.main(['some-scene', '--direct'])
+    assert exc_info.value.code != 0

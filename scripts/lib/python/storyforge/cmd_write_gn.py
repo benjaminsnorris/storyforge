@@ -21,7 +21,7 @@ from storyforge.common import (
     install_signal_handlers, get_medium,
 )
 from storyforge.runner import run_parallel
-from storyforge.csv_cli import get_field, update_field, list_ids
+from storyforge.csv_cli import get_field, update_field
 from storyforge.scene_filter import build_scene_list, apply_scene_filter
 from storyforge.script_format import count_pages, count_panels, check_brief_fidelity
 from storyforge.api import invoke_to_file, extract_text_from_file
@@ -40,7 +40,8 @@ def parse_args(argv):
     parser.add_argument('--force', action='store_true',
                         help='Re-draft scenes even if already drafted')
     parser.add_argument('--direct', action='store_true',
-                        help='Use direct API calls (not batch)')
+                        help='Use direct API calls (not batch). '
+                             '(no-op for GN drafting: no batch path implemented in v1)')
     parser.add_argument('--scenes', type=str, default=None,
                         help='Comma-separated scene IDs')
     parser.add_argument('--act', '--part', type=str, default=None,
@@ -91,11 +92,12 @@ def _draft_one_scene(args_tuple):
     """Worker: draft one GN scene. Returns (scene_id, result_dict).
 
     This function is called both directly (sequential) and via
-    run_parallel (multiprocess). All imports are local to stay picklable.
+    run_parallel (threads). Local imports are kept for potential future
+    migration to ProcessPoolExecutor, which requires picklability.
     """
     scene_id, project_dir, force, dry_run, model = args_tuple
 
-    from storyforge.csv_cli import get_field, update_field
+    from storyforge.csv_cli import get_field
     from storyforge.script_format import count_pages, count_panels, check_brief_fidelity
     from storyforge.api import invoke_to_file, extract_text_from_file
     from storyforge.prompts_gn import build_drafting_prompt
@@ -157,12 +159,11 @@ def _draft_one_scene(args_tuple):
     with open(scene_path, 'w') as f:
         f.write(script_text)
 
-    # Update CSV: page_count, panel_count, status
+    # Compute page/panel counts; CSV updates happen in the main thread to
+    # avoid a race condition when --parallel > 1 (concurrent update_field
+    # calls on the same file can silently drop writes).
     pages = count_pages(script_text)
     panels = count_panels(script_text)
-    update_field(scenes_csv, scene_id, 'page_count', str(pages))
-    update_field(scenes_csv, scene_id, 'panel_count', str(panels))
-    update_field(scenes_csv, scene_id, 'status', 'drafted')
 
     log(f'  {scene_id}: wrote {pages} pages, {panels} panels → scenes/{scene_id}.md')
 
@@ -196,6 +197,7 @@ def _draft_one_scene(args_tuple):
         'drafted': True,
         'pages': pages,
         'panels': panels,
+        'new_status': 'drafted',
         'fidelity_failures': len(failures),
     }
 
@@ -255,10 +257,23 @@ def main(argv=None):
     ]
 
     if args.parallel > 1 and not args.dry_run:
-        results = run_parallel(work, _draft_one_scene,
-                               max_workers=args.parallel, label='scene')
+        # run_parallel returns {args_tuple: (scene_id, result_dict)}
+        parallel_dict = run_parallel(work, _draft_one_scene,
+                                     max_workers=args.parallel, label='scene')
+        results = list(parallel_dict.values())
     else:
         results = [_draft_one_scene(item) for item in work]
+
+    # Apply CSV updates sequentially in the main thread.
+    # Doing this here (rather than inside the worker) prevents a race
+    # condition under --parallel > 1: concurrent update_field calls on the
+    # same file can read the same baseline and silently drop each other's
+    # writes even though os.replace is atomic per-call.
+    for sid, result in results:
+        if result.get('drafted'):
+            update_field(scenes_csv, sid, 'page_count', str(result['pages']))
+            update_field(scenes_csv, sid, 'panel_count', str(result['panels']))
+            update_field(scenes_csv, sid, 'status', result['new_status'])
 
     # Report results
     drafted = 0
