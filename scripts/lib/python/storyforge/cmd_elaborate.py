@@ -495,7 +495,8 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
 # ============================================================================
 
 def _briefs_handler_gn(project_dir: str, ref_dir: str,
-                       dry_run: bool, stage_model: str, system) -> str:
+                       dry_run: bool, stage_model: str, system,
+                       interactive: bool = False) -> str:
     """Run the briefs stage for graphic-novel projects.
 
     Unlike the novel path (one big batch prompt for all scenes), GN briefs
@@ -503,14 +504,25 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
     visual_keywords, page_turn_beats, and caption_strategy — fields that
     benefit from focused per-scene context.
 
+    Each per-scene API call:
+      - checks ``is_shutting_down()`` to respect Ctrl-C between iterations
+      - logs cost to the ledger under operation ``elaborate-briefs-gn``
+      - pauses for confirmation when ``interactive`` is True (mirrors the
+        per-step rejoin pattern used by other interactive stages)
+
     Returns a combined prompt string for dry-run display, or runs API calls
     and returns '' in live mode.
     """
     from storyforge.prompts_elaborate_gn import build_briefs_prompt as gn_briefs_prompt
     from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, _BRIEFS_COLS
-    from storyforge.api import invoke_to_file, extract_text_from_file
+    from storyforge.api import (
+        invoke_to_file, extract_text_from_file,
+        extract_usage, calculate_cost_from_usage,
+    )
     from storyforge.prompts_elaborate import csv_block_to_rows
     from storyforge.enrich import load_registry_alias_maps, normalize_fields
+    from storyforge.common import is_shutting_down
+    from storyforge.costs import log_operation
 
     log_dir = os.path.join(project_dir, 'working', 'logs', 'briefs-gn')
     os.makedirs(log_dir, exist_ok=True)
@@ -545,6 +557,12 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
     written_ids = []
 
     for sid in target_ids:
+        # Respect Ctrl-C between iterations so users can interrupt long loops
+        # without leaving the API in flight on the next scene.
+        if is_shutting_down():
+            log('Interrupted, stopping briefs loop')
+            break
+
         prompt = gn_briefs_prompt(
             project_dir,
             sid,
@@ -552,26 +570,58 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
             intent_map.get(sid, {}),
             briefs_map.get(sid, {}),
         )
+
+        if interactive:
+            # Per-scene confirmation: show the prompt and let the author
+            # tweak instructions or skip the scene before each API call.
+            print(f'\n----- GN brief: {sid} -----')
+            print(prompt)
+            print('----- end prompt -----')
+            try:
+                answer = input(
+                    f'Run brief for {sid}? [Y]es / [s]kip / [q]uit: '
+                ).strip().lower()
+            except EOFError:
+                answer = ''
+            if answer in ('q', 'quit'):
+                log('Author quit; stopping briefs loop')
+                break
+            if answer in ('s', 'skip'):
+                log(f'  {sid}: skipped by author')
+                continue
+
         log_file = os.path.join(log_dir, f'{sid}.json')
 
         try:
-            invoke_to_file(prompt, stage_model, log_file, max_tokens=2048, system=system)
+            response = invoke_to_file(prompt, stage_model, log_file,
+                                      max_tokens=2048, system=system)
         except Exception as e:
             log(f'  ERROR: API failed for {sid}: {e}')
             continue
 
-        response = extract_text_from_file(log_file)
-        if not response:
+        # Log cost per scene under elaborate-briefs-gn so the ledger
+        # distinguishes GN briefs from novel-mode briefs.
+        try:
+            usage = extract_usage(response)
+            cost = calculate_cost_from_usage(usage, stage_model)
+            log_operation(project_dir, 'elaborate-briefs-gn', stage_model,
+                          usage['input_tokens'], usage['output_tokens'],
+                          cost, target=sid)
+        except Exception:
+            pass
+
+        response_text = extract_text_from_file(log_file)
+        if not response_text:
             log(f'  WARNING: Empty response for {sid}')
             continue
 
-        rows = csv_block_to_rows(response)
+        rows = csv_block_to_rows(response_text)
         if not rows:
             # Response might be a bare CSV row without fences — use the full
             # briefs column list as the synthetic header so all GN columns
             # (page_layout, panel_breakdown, etc.) are captured, not just id+goal.
             synthetic_header = '|'.join(_BRIEFS_COLS)
-            rows = csv_block_to_rows(synthetic_header + '\n' + response) or []
+            rows = csv_block_to_rows(synthetic_header + '\n' + response_text) or []
 
         if rows:
             row = rows[0]
@@ -652,7 +702,8 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     elif stage == 'briefs':
         if medium == 'graphic-novel':
             # GN briefs: per-scene calls; handle dry-run inline
-            prompt = _briefs_handler_gn(project_dir, ref_dir, dry_run, stage_model, system)
+            prompt = _briefs_handler_gn(project_dir, ref_dir, dry_run, stage_model,
+                                       system, interactive=interactive)
             if dry_run:
                 print(f'===== DRY RUN: elaborate {stage} (graphic-novel) =====')
                 print(prompt)
