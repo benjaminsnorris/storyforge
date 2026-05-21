@@ -21,7 +21,7 @@ PANEL_HEADER = re.compile(
     re.MULTILINE,
 )
 DIALOGUE_LINE = re.compile(
-    r'^- ([A-Z][A-Z\-]*(?:\s+[A-Z][A-Z\-]*)*)\s*:\s*(.*)$',
+    r'^- ([A-Z][A-Z\-]+(?:\s+[A-Z][A-Z\-]+)*)\s*:\s*(.*)$',
 )
 
 KNOWN_PREFIXES = {'CAPTION', 'SFX', 'WHISPER', 'THOUGHT', 'OFF-PANEL'}
@@ -145,7 +145,10 @@ def _panels_per_token(token):
     if not m:
         return None
     if m.group(2):  # N-grid
-        return int(m.group(2))
+        n = int(m.group(2))
+        if n <= 0:
+            return None
+        return n
     label = m.group(1).lower()
     if label == 'splash':
         return 1
@@ -186,6 +189,19 @@ def check_brief_fidelity(brief_row, script_text):
 
     Failure kind values: 'dialogue_missing', 'visual_keyword_missing',
     'panel_count_mismatch', 'page_turn_missing'.
+
+    Checks performed:
+      - Every non-empty segment of brief['key_dialogue'] appears as a
+        substring somewhere in the script (case-insensitive).
+      - Every entry in brief['visual_keywords'] appears in the composed
+        panel prose (case-insensitive).
+      - Each page whose panel breakdown is specified in brief['panel_breakdown']
+        has the expected number of panels.
+      - When brief['page_turn_beats'] is non-empty, at least ONE page in the
+        script must carry the page-turn marker. This is an existence-only
+        check; we don't try to parse beat descriptions like "p2 reveal" back
+        to specific page numbers. Position-specific verification is a future
+        improvement.
     """
     failures = []
     parsed = parse_script(script_text)
@@ -246,13 +262,14 @@ def check_brief_fidelity(brief_row, script_text):
                 'severity': 'medium',
             })
 
-    # 4. Page-turn beats: each brief page_turn_beats entry must land on a page
-    # whose first panel was tagged with the page-turn marker. We use a
-    # lightweight heuristic: any brief page_turn_beats text means SOME page
-    # in the script must carry the page-turn marker.
+    # 4. Page-turn beats: any brief page_turn_beats text means SOME page in
+    # the script must carry the page-turn marker. This is an existence-only
+    # check — we don't attempt to map beat descriptions like "p2 reveal" to
+    # specific page numbers (future improvement).
     page_turn_beats = (brief_row.get('page_turn_beats') or '').strip()
     if page_turn_beats:
-        turn_pages = detect_page_turn_pages(script_text)
+        # Reuse already-parsed page data; is_page_turn was populated by parse_script.
+        turn_pages = [p['number'] for p in pages if p['is_page_turn']]
         if not turn_pages:
             failures.append({
                 'kind': 'page_turn_missing',

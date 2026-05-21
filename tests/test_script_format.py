@@ -145,3 +145,36 @@ def test_fidelity_flags_missing_page_turn():
     script_no_turn = SAMPLE_SCRIPT.replace(' ⟵ PAGE-TURN REVEAL', '')
     failures = check_brief_fidelity(SAMPLE_BRIEF, script_no_turn)
     assert any(f['kind'] == 'page_turn_missing' for f in failures)
+
+
+def test_speaker_is_none_for_known_prefixes_and_set_for_characters():
+    """KNOWN_PREFIXES entries have speaker=None; character names populate speaker."""
+    result = parse_script(SAMPLE_SCRIPT)
+    all_dialogue = [d for page in result['pages']
+                    for panel in page['panels']
+                    for d in panel['dialogue']]
+    captions = [d for d in all_dialogue if d['prefix'] == 'CAPTION']
+    sfx = [d for d in all_dialogue if d['prefix'] == 'SFX']
+    chars = [d for d in all_dialogue if d['prefix'] == 'CARTOGRAPHER']
+    assert captions and all(d['speaker'] is None for d in captions)
+    assert sfx and all(d['speaker'] is None for d in sfx)
+    assert chars and all(d['speaker'] == 'CARTOGRAPHER' for d in chars)
+
+
+def test_dialogue_prefix_rejects_too_short_words():
+    """Bullet lines starting with single-letter all-caps tokens are not parsed as dialogue."""
+    script = (
+        '## Page 1 — SPLASH\n\n'
+        '**Panel 1**\n'
+        'Something happens.\n\n'
+        '- A: not dialogue\n'
+        '- NOTE: also not a speaker (would be polluting if not for fix)\n'
+    )
+    result = parse_script(script)
+    panel = result['pages'][0]['panels'][0]
+    # After fix: 'A' rejected (single char), 'NOTE' accepted (≥2 chars).
+    # The "NOTE" line still parses as dialogue under the relaxed contract,
+    # because the regex only enforces character minimums, not prefix
+    # whitelist. Document this and ensure 'A:' is filtered out.
+    speakers = [d['prefix'] for d in panel['dialogue']]
+    assert 'A' not in speakers, 'single-letter prefix should not match'
