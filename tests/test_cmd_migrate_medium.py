@@ -342,17 +342,27 @@ def test_step6_clears_gn_brief_columns(project_dir_gn):
                 assert row[col] == '', f'{col} should be cleared'
 
 
-def test_step6_skips_for_novel_to_gn(project_dir):
-    """step6 is a no-op for novel→GN direction."""
+def test_step6_widens_header_for_novel_to_gn(project_dir):
+    """step6 widens scene-briefs.csv to the full schema on novel→GN.
+
+    The five GN columns are added (empty) so the author can populate them
+    after migration without manually editing the header.
+    """
     briefs_csv = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
     with open(briefs_csv) as f:
-        original = f.read()
+        original_header = f.readline().strip().split('|')
+    # Novel fixture should NOT have GN columns yet
+    assert 'page_layout' not in original_header
 
     result = step6_transform_briefs_csv(project_dir, 'novel', 'graphic-novel', dry_run=False)
-    assert result.startswith('skip')
+    assert result.startswith('done')
 
     with open(briefs_csv) as f:
-        assert f.read() == original, 'scene-briefs.csv should not be modified for N→GN'
+        new_header = f.readline().strip().split('|')
+    # After widening, GN columns must be present
+    for col in ('page_layout', 'panel_breakdown', 'visual_keywords',
+                'page_turn_beats', 'caption_strategy'):
+        assert col in new_header, f'{col} must be in widened header'
 
 
 def test_step8_appends_visual_note_when_no_visual_sections(project_dir):
@@ -371,18 +381,28 @@ def test_step8_appends_visual_note_when_no_visual_sections(project_dir):
     assert 'Graphic Novel Migration Note' in updated
 
 
-def test_step8_skips_when_visual_already_present(project_dir_gn):
-    """step8 does not modify bibles that already have ### Visual sections."""
+def test_step8_appends_even_when_visual_already_present(project_dir_gn):
+    """step8 always appends the migration note, even when ### Visual sections exist.
+
+    A partial migration (some characters already have a Visual section) would
+    otherwise leave the remaining characters without a migration cue. The note
+    is additive and harmless to delete; skipping silently leaves gaps.
+    """
     char_bible = os.path.join(project_dir_gn, 'reference', 'character-bible.md')
     with open(char_bible) as f:
         content_before = f.read()
-    assert '### Visual' in content_before
+    assert '### Visual' in content_before, 'GN fixture should already have ### Visual'
 
     modified = step8_add_bible_visual_notes(project_dir_gn, dry_run=False)
-    assert char_bible not in modified
+    # The note SHOULD be appended (changed behavior)
+    assert char_bible in modified, 'char_bible should be in modified list'
 
     with open(char_bible) as f:
-        assert f.read() == content_before, 'file should be unchanged'
+        content_after = f.read()
+    assert 'Graphic Novel Migration Note' in content_after, \
+        'migration note should be appended even when ### Visual exists'
+    # The original content is preserved at the front
+    assert content_after.startswith(content_before)
 
 
 def test_migrate_preserves_cut_and_merged_statuses(project_dir, monkeypatch):
@@ -424,3 +444,89 @@ def test_parse_args_dry_run_and_force():
     args = parse_args(['--to', 'novel', '--dry-run', '--force'])
     assert args.dry_run is True
     assert args.force is True
+
+
+# ---------------------------------------------------------------------------
+# Regression: Fix #1 — branch creation
+# ---------------------------------------------------------------------------
+
+def test_migrate_creates_branch_when_on_main(project_dir, monkeypatch, tmp_path):
+    """Per CLAUDE.md, migrate-medium MUST create a feature branch if on main.
+
+    Skipping this would commit a medium conversion directly to main.
+    """
+    import subprocess
+    monkeypatch.chdir(project_dir)
+    # Initialize a git repo on main
+    subprocess.run(['git', 'init', '-b', 'main'], cwd=project_dir, check=True,
+                   capture_output=True)
+    subprocess.run(['git', 'add', '-A'], cwd=project_dir, check=True,
+                   capture_output=True)
+    subprocess.run(['git', '-c', 'user.email=test@test', '-c', 'user.name=test',
+                    'commit', '-m', 'initial'], cwd=project_dir, check=True,
+                   capture_output=True)
+    from storyforge import cmd_migrate_medium
+    cmd_migrate_medium.main(['--to', 'graphic-novel'])
+    # After migration, HEAD should be on a storyforge/migrate-medium-* branch
+    result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                            cwd=project_dir, capture_output=True, text=True)
+    branch = result.stdout.strip()
+    assert branch.startswith('storyforge/migrate-medium-'), (
+        f'expected feature branch, but on {branch}'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regression: Fix #2 — partial-Visual detection is binary
+# ---------------------------------------------------------------------------
+
+def test_migrate_appends_visual_note_even_when_one_visual_section_exists(
+        project_dir, monkeypatch):
+    """If a bible has SOME ### Visual sections already (partial migration),
+    the migration still appends the prompt so the author has a complete cue
+    for the un-migrated characters."""
+    monkeypatch.chdir(project_dir)
+    char_bible = os.path.join(project_dir, 'reference', 'character-bible.md')
+    # Seed a partial state: one Visual section
+    with open(char_bible, 'a') as f:
+        f.write('\n## Alice\n\n### Visual\n\nAlice has red hair.\n\n## Bob\n\n(needs visual)\n')
+    from storyforge import cmd_migrate_medium
+    cmd_migrate_medium.main(['--to', 'graphic-novel', '--no-commit'])
+    # The migration note should still appear at end of file
+    with open(char_bible) as f:
+        content = f.read()
+    assert 'Graphic Novel Migration Note' in content, \
+        'migration note must be appended even when partial ### Visual sections exist'
+    # Alice's section was NOT removed — original content is intact
+    assert '## Alice' in content
+    assert '## Bob' in content
+
+
+# ---------------------------------------------------------------------------
+# Regression: Fix #3 — non-scene .md files must not be archived
+# ---------------------------------------------------------------------------
+
+def test_migrate_preserves_readme_and_notes_in_scenes_dir(project_dir, monkeypatch):
+    """README.md, NOTES.md, and other non-scene .md files in scenes/ must
+    NOT be archived as scenes — they are author notes."""
+    monkeypatch.chdir(project_dir)
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    # Create a scene-shaped file and a README
+    for sid in ['the-opening', 'README', 'NOTES']:
+        with open(os.path.join(scenes_dir, f'{sid}.md'), 'w') as f:
+            f.write(f'# {sid}\n')
+    # Make 'the-opening' an actual scene in scenes.csv
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    with open(scenes_csv, 'a') as f:
+        f.write('the-opening|99|Opening|1|||||||drafted||||\n')
+    from storyforge import cmd_migrate_medium
+    cmd_migrate_medium.main(['--to', 'graphic-novel', '--no-commit'])
+    # README.md and NOTES.md should still be in scenes/
+    assert os.path.isfile(os.path.join(scenes_dir, 'README.md')), \
+        'README.md must not be archived'
+    assert os.path.isfile(os.path.join(scenes_dir, 'NOTES.md')), \
+        'NOTES.md must not be archived'
+    # the-opening.md should NOT be in scenes/ (archived)
+    assert not os.path.isfile(os.path.join(scenes_dir, 'the-opening.md')), \
+        'the-opening.md should have been archived'
