@@ -104,3 +104,24 @@ def score_economy_clarity(scene_text: str,
                f'adverb={adverb_score}({weak_per_1000:.1f}/1k)')
 
     return {'score': score, 'markers': markers, 'details': details}
+
+
+def score_project(project_dir: str) -> dict:
+    """Project-level entrypoint for economy/clarity scoring.
+
+    In graphic-novel mode, returns a skipped sentinel — filler phrases,
+    AI-tell vocabulary, and passive/adverb density are prose signals that
+    do not apply to panel scripts.
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        {'skipped': True, 'reason': 'graphic-novel'} in GN mode, or
+        {'principle': 'economy_clarity'} in novel mode (full scoring is
+        driven by cmd_score via score_economy_clarity per scene).
+    """
+    from storyforge.common import get_medium
+    if get_medium(project_dir) == 'graphic-novel':
+        return {'skipped': True, 'reason': 'graphic-novel'}
+    return {'principle': 'economy_clarity'}

@@ -94,3 +94,23 @@ def score_sentence_as_thought(scene_text: str) -> dict:
                f'short_ratio={short_ratio:.2f}, long_ratio={long_ratio:.2f}')
 
     return {'score': score, 'markers': markers, 'details': details}
+
+
+def score_project(project_dir: str) -> dict:
+    """Project-level entrypoint for sentence rhythm scoring.
+
+    In graphic-novel mode, returns a skipped sentinel — sentence length
+    variance is not a meaningful craft signal for panel scripts.
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        {'skipped': True, 'reason': 'graphic-novel'} in GN mode, or
+        {'principle': 'sentence_as_thought'} in novel mode (full scoring
+        is driven by cmd_score via score_sentence_as_thought per scene).
+    """
+    from storyforge.common import get_medium
+    if get_medium(project_dir) == 'graphic-novel':
+        return {'skipped': True, 'reason': 'graphic-novel'}
+    return {'principle': 'sentence_as_thought'}

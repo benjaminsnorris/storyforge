@@ -119,6 +119,19 @@ COLUMN_SCHEMA = {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'map',
         'description': 'Target word count for the scene.',
     },
+    # scenes.csv — graphic-novel additions
+    'target_pages': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'scene-map',
+        'description': 'Target page count (graphic-novel mode). Set at scene-map stage; analog of target_words.',
+    },
+    'panel_count': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'drafting',
+        'description': 'Panel count after drafting (graphic-novel mode). Populated by cmd_write_gn.',
+    },
+    'page_count': {
+        'type': 'integer', 'file': 'scenes.csv', 'stage': 'drafting',
+        'description': 'Page count after drafting (graphic-novel mode). Populated by cmd_write_gn.',
+    },
 
     # scene-intent.csv
     'function': {
@@ -225,6 +238,27 @@ COLUMN_SCHEMA = {
     'has_overflow': {
         'type': 'boolean', 'file': 'scene-briefs.csv', 'stage': 'brief',
         'description': 'Whether briefs/{id}.md exists for extended detail.',
+    },
+    # scene-briefs.csv — graphic-novel additions
+    'page_layout': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'briefs',
+        'description': 'High-level layout rhythm (e.g., "9-panel grid", "splash p3"). Graphic-novel only.',
+    },
+    'panel_breakdown': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'briefs',
+        'description': 'Per-page panel structure (e.g., "p1:splash; p2:6-grid"). Graphic-novel only.',
+    },
+    'visual_keywords': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'briefs',
+        'description': 'Visual beats that must appear, semicolon-separated. Graphic-novel only.',
+    },
+    'page_turn_beats': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'briefs',
+        'description': 'Beats that must land on a page turn. Graphic-novel only.',
+    },
+    'caption_strategy': {
+        'type': 'free_text', 'file': 'scene-briefs.csv', 'stage': 'briefs',
+        'description': 'Narration style ("minimal", "journal voiceover", "none"). Graphic-novel only.',
     },
     'physical_state_in': {
         'type': 'registry', 'registry': 'physical-states.csv', 'array': True,
@@ -373,6 +407,12 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
         Dict with keys: passed (int), failed (int), skipped (int),
         errors (list of error dicts).
     """
+    # Detect medium (defaults to 'novel' when project_dir not provided)
+    medium = 'novel'
+    if project_dir is not None:
+        from storyforge.common import get_medium
+        medium = get_medium(project_dir)
+
     # Load registry alias maps if project_dir provided
     registries: dict[str, dict] = {}
     mice_alias: dict[str, str] = {}
@@ -529,6 +569,25 @@ def validate_schema(ref_dir: str, project_dir: str | None = None) -> dict:
                             'constraint': 'scene_ids',
                             'unresolved': bad,
                         })
+
+    # Medium-aware required-field checks
+    if medium == 'graphic-novel':
+        # Every non-cut/non-merged scene needs target_pages
+        scenes_rows = _read_csv(os.path.join(ref_dir, 'scenes.csv'))
+        for row in scenes_rows:
+            status = (row.get('status') or '').strip()
+            if status in ('cut', 'merged'):
+                continue
+            if not (row.get('target_pages') or '').strip():
+                failed += 1
+                errors.append({
+                    'file': 'scenes.csv',
+                    'row': row.get('id', ''),
+                    'column': 'target_pages',
+                    'value': '',
+                    'constraint': 'required',
+                    'reason': 'target_pages is required in graphic-novel mode',
+                })
 
     return {
         'passed': passed,

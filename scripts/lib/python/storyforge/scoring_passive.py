@@ -66,3 +66,23 @@ def score_avoid_passive(scene_text: str) -> dict:
                f'({density:.0%}), cluster={has_cluster}')
 
     return {'score': score, 'markers': markers, 'details': details}
+
+
+def score_project(project_dir: str) -> dict:
+    """Project-level entrypoint for passive voice scoring.
+
+    In graphic-novel mode, returns a skipped sentinel — panel scripts are
+    not prose, so passive voice density is not a meaningful signal.
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        {'skipped': True, 'reason': 'graphic-novel'} in GN mode, or
+        {'principle': 'avoid_passive'} in novel mode (full scoring is
+        driven by cmd_score via score_avoid_passive per scene).
+    """
+    from storyforge.common import get_medium
+    if get_medium(project_dir) == 'graphic-novel':
+        return {'skipped': True, 'reason': 'graphic-novel'}
+    return {'principle': 'avoid_passive'}

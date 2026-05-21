@@ -196,6 +196,14 @@ If they choose Option B, provide the full command and end.
 6. Run validation — MICE nesting, timeline, character references
 7. Commit: `git add -A && git commit -m "Elaborate: scene map" && git push`
 
+### Graphic-novel mode
+
+In graphic-novel mode, the scene-map stage asks for `target_pages` per scene instead of `target_words`. Page-count guidance:
+- Short scene (single beat): 1-2 pages
+- Standard scene: 2-4 pages
+- Set piece / chapter centerpiece: 5-8+ pages
+- Full graphic-novel target: 100-200 pages typical for one volume
+
 ### Briefs Stage (Interactive)
 
 1. Read full scene map and all reference materials
@@ -206,6 +214,17 @@ If they choose Option B, provide the full command and end.
 5. Write updates
 6. Run validation — knowledge flow, completeness, DAG check
 7. Commit: `git add -A && git commit -m "Elaborate: briefs" && git push`
+
+### Graphic-novel mode
+
+Graphic-novel briefs populate five additional columns alongside the standard ones:
+- `page_layout` — high-level rhythm intent (e.g., "9-panel grid", "splash p3")
+- `panel_breakdown` — per-page structure (e.g., "p1:splash; p2:6-grid")
+- `visual_keywords` — visual beats that must appear, semicolon-separated
+- `page_turn_beats` — beats that must land on a page turn
+- `caption_strategy` — narration style for this scene
+
+All standard brief columns still apply with full meaning. `key_actions` reads as a panel-beat list; `key_dialogue` becomes the word-balloon contract; `continuity_deps` covers visual continuity too.
 
 ### Voice Stage (Interactive)
 
@@ -220,6 +239,12 @@ Voice development typically happens after architecture (you know your POV charac
 Voice work in coach mode: ask questions about what the author hears in their head — tone, rhythm, register. Don't propose voice; help the author discover it.
 
 Voice work in strict mode: collect the author's voice preferences, format into the voice guide structure, provide the template.
+
+### Graphic-novel mode
+
+Voice in graphic-novel mode still describes per-character speech register, but the `_project` row of `voice-profile.csv` carries two extra fields:
+- `caption_voice` — narration style: `journal-voiceover`, `omniscient`, `first-person`, `none`
+- `lettering_style` — visual treatment hint: `loose-natural`, `typeset`, `hand-lettered-feel`
 
 ### Voice Profile (Second Artifact)
 

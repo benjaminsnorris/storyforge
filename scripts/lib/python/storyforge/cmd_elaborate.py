@@ -25,6 +25,7 @@ import time
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, select_model,
     install_signal_handlers, get_plugin_dir, build_shared_context,
+    get_medium,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
@@ -490,6 +491,167 @@ def _run_gap_fill(project_dir: str, ref_dir: str, dry_run: bool,
 
 
 # ============================================================================
+# GN briefs helper
+# ============================================================================
+
+def _briefs_handler_gn(project_dir: str, ref_dir: str,
+                       dry_run: bool, stage_model: str, system,
+                       interactive: bool = False):
+    """Run the briefs stage for graphic-novel projects.
+
+    Unlike the novel path (one big batch prompt for all scenes), GN briefs
+    are generated per-scene because each needs page_layout, panel_breakdown,
+    visual_keywords, page_turn_beats, and caption_strategy — fields that
+    benefit from focused per-scene context.
+
+    Each per-scene API call:
+      - checks ``is_shutting_down()`` to respect Ctrl-C between iterations
+      - logs cost to the ledger under operation ``elaborate-briefs-gn``
+      - pauses for confirmation when ``interactive`` is True (mirrors the
+        per-step rejoin pattern used by other interactive stages)
+
+    Return value:
+      - ``None`` when no scenes need briefs — the caller short-circuits before
+        creating a branch or PR.
+      - In dry-run mode, a string previewing the prompt for the first scene.
+      - In live mode, ``''`` after the API calls have completed and the CSV
+        has been written.
+    """
+    from storyforge.prompts_elaborate_gn import build_briefs_prompt as gn_briefs_prompt
+    from storyforge.elaborate import _read_csv_as_map, _write_csv, _FILE_MAP, _BRIEFS_COLS
+    from storyforge.api import (
+        invoke_to_file, extract_text_from_file,
+        extract_usage, calculate_cost_from_usage,
+    )
+    from storyforge.prompts_elaborate import csv_block_to_rows
+    from storyforge.enrich import load_registry_alias_maps, normalize_fields
+    from storyforge.common import is_shutting_down
+    from storyforge.costs import log_operation
+
+    log_dir = os.path.join(project_dir, 'working', 'logs', 'briefs-gn')
+    os.makedirs(log_dir, exist_ok=True)
+
+    scenes_map = _read_csv_as_map(os.path.join(ref_dir, 'scenes.csv'))
+    intent_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-intent.csv'))
+    briefs_map = _read_csv_as_map(os.path.join(ref_dir, 'scene-briefs.csv'))
+    alias_maps = load_registry_alias_maps(project_dir)
+
+    # Target: mapped scenes without a complete brief
+    target_ids = [
+        sid for sid, row in scenes_map.items()
+        if row.get('status', '') in ('mapped', 'architecture', 'spine', '')
+    ]
+    if not target_ids:
+        log('No scenes need GN briefs.')
+        return None
+
+    if dry_run:
+        # Build and return first scene's prompt as representative sample
+        sid = target_ids[0]
+        prompt = gn_briefs_prompt(
+            project_dir,
+            sid,
+            scenes_map.get(sid, {}),
+            intent_map.get(sid, {}),
+            briefs_map.get(sid, {}),
+        )
+        return f'[GN briefs — {len(target_ids)} scenes — showing first]\n\n{prompt}'
+
+    log(f'Building GN briefs for {len(target_ids)} scenes...')
+    written_ids = []
+
+    for sid in target_ids:
+        # Respect Ctrl-C between iterations so users can interrupt long loops
+        # without leaving the API in flight on the next scene.
+        if is_shutting_down():
+            log('Interrupted, stopping briefs loop')
+            break
+
+        prompt = gn_briefs_prompt(
+            project_dir,
+            sid,
+            scenes_map.get(sid, {}),
+            intent_map.get(sid, {}),
+            briefs_map.get(sid, {}),
+        )
+
+        if interactive:
+            # Per-scene confirmation: show the prompt and let the author
+            # tweak instructions or skip the scene before each API call.
+            print(f'\n----- GN brief: {sid} -----')
+            print(prompt)
+            print('----- end prompt -----')
+            try:
+                answer = input(
+                    f'Run brief for {sid}? [Y]es / [s]kip / [q]uit: '
+                ).strip().lower()
+            except EOFError:
+                answer = ''
+            if answer in ('q', 'quit'):
+                log('Author quit; stopping briefs loop')
+                break
+            if answer in ('s', 'skip'):
+                log(f'  {sid}: skipped by author')
+                continue
+
+        log_file = os.path.join(log_dir, f'{sid}.json')
+
+        try:
+            response = invoke_to_file(prompt, stage_model, log_file,
+                                      max_tokens=2048, system=system)
+        except Exception as e:
+            log(f'  ERROR: API failed for {sid}: {e}')
+            continue
+
+        # Log cost per scene under elaborate-briefs-gn so the ledger
+        # distinguishes GN briefs from novel-mode briefs.
+        try:
+            usage = extract_usage(response)
+            cost = calculate_cost_from_usage(usage, stage_model)
+            log_operation(project_dir, 'elaborate-briefs-gn', stage_model,
+                          usage['input_tokens'], usage['output_tokens'],
+                          cost, target=sid)
+        except Exception:
+            pass
+
+        response_text = extract_text_from_file(log_file)
+        if not response_text:
+            log(f'  WARNING: Empty response for {sid}')
+            continue
+
+        rows = csv_block_to_rows(response_text)
+        if not rows:
+            # Response might be a bare CSV row without fences — use the full
+            # briefs column list as the synthetic header so all GN columns
+            # (page_layout, panel_breakdown, etc.) are captured, not just id+goal.
+            synthetic_header = '|'.join(_BRIEFS_COLS)
+            rows = csv_block_to_rows(synthetic_header + '\n' + response_text) or []
+
+        if rows:
+            row = rows[0]
+            normalize_fields(row, alias_maps)
+            row_sid = row.get('id', sid)
+            if row_sid in briefs_map:
+                briefs_map[row_sid].update({k: v for k, v in row.items() if v})
+            else:
+                new = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
+                new.update(row)
+                briefs_map[row_sid] = new
+            written_ids.append(row_sid)
+            log(f'  {sid}: brief written')
+        else:
+            log(f'  WARNING: Could not parse brief for {sid}')
+
+    if written_ids:
+        ordered = sorted(briefs_map.values(), key=lambda r: r.get('id', ''))
+        _write_csv(os.path.join(ref_dir, 'scene-briefs.csv'), ordered,
+                   _FILE_MAP['scene-briefs.csv'])
+        log(f'  Updated scene-briefs.csv ({len(written_ids)} scenes)')
+
+    return ''
+
+
+# ============================================================================
 # Main stage execution (spine/architecture/map/briefs)
 # ============================================================================
 
@@ -522,18 +684,45 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     stage_model = select_model('drafting')  # Opus for creative work
     system = build_shared_context(project_dir, model=stage_model)
 
+    medium = get_medium(project_dir)
     has_system = bool(system)
+
     if stage == 'spine':
         prompt = build_spine_prompt(project_dir, plugin_dir, seed, system_context=has_system)
     elif stage == 'architecture':
         prompt = build_architecture_prompt(project_dir, plugin_dir, registries_text=registries,
                                            system_context=has_system)
     elif stage == 'map':
-        prompt = build_map_prompt(project_dir, plugin_dir, registries_text=registries,
-                                  system_context=has_system)
+        if medium == 'graphic-novel':
+            from storyforge.prompts_elaborate_gn import build_scene_map_prompt as gn_map_prompt
+            from storyforge.prompts_elaborate import _read_file_contents
+            scenes_csv = _read_file_contents(os.path.join(ref_dir, 'scenes.csv'))
+            arch_doc_path = os.path.join(ref_dir, 'story-architecture.md')
+            arch_doc = _read_file_contents(arch_doc_path) if os.path.isfile(arch_doc_path) else ''
+            prompt = gn_map_prompt(project_dir, scenes_csv, arch_doc)
+        else:
+            prompt = build_map_prompt(project_dir, plugin_dir, registries_text=registries,
+                                      system_context=has_system)
     elif stage == 'briefs':
-        prompt = build_briefs_prompt(project_dir, plugin_dir, registries_text=registries,
-                                     system_context=has_system)
+        if medium == 'graphic-novel':
+            # GN briefs: per-scene calls; handle dry-run inline
+            prompt = _briefs_handler_gn(project_dir, ref_dir, dry_run, stage_model,
+                                       system, interactive=interactive)
+            if prompt is None:
+                # No scenes need briefs — short-circuit before branch / PR creation.
+                log('Skipping briefs stage — nothing to do.')
+                return
+            if dry_run:
+                print(f'===== DRY RUN: elaborate {stage} (graphic-novel) =====')
+                print(prompt)
+                print(f'===== END DRY RUN =====')
+                return
+            # Live mode: _briefs_handler_gn has already invoked the API and
+            # written scene-briefs.csv. Jump straight to validation.
+            prompt = ''  # sentinel — not used for API call below
+        else:
+            prompt = build_briefs_prompt(project_dir, plugin_dir, registries_text=registries,
+                                         system_context=has_system)
     else:
         log(f'ERROR: Unknown stage: {stage}')
         sys.exit(1)
@@ -543,6 +732,10 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
         print(prompt)
         print(f'===== END DRY RUN =====')
         return
+
+    # GN briefs live mode: API calls already done by _briefs_handler_gn;
+    # set flag to skip the single-prompt API invocation and response-parsing blocks.
+    gn_briefs_handled = (stage == 'briefs' and medium == 'graphic-novel')
 
     # Branch and PR
     create_branch(f'elaborate-{stage}', project_dir)
@@ -564,189 +757,190 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     # Invoke Claude
     stage_log = os.path.join(log_dir, f'elaborate-{stage}.log')
 
-    from storyforge.api import invoke_to_file, extract_text_from_file, invoke_api
-    from storyforge.costs import log_operation
+    if not gn_briefs_handled:
+        from storyforge.api import invoke_to_file, extract_text_from_file, invoke_api
+        from storyforge.costs import log_operation
 
-    if interactive:
-        log(f'Invoking interactive claude for {stage}...')
-        proc = subprocess.Popen(
-            ['claude', '-p', prompt,
-             '--model', stage_model,
-             '--dangerously-skip-permissions',
-             '--output-format', 'stream-json',
-             '--verbose'],
-            stdout=open(stage_log, 'w'),
-            stderr=subprocess.STDOUT,
-        )
-        proc.wait()
-        claude_rc = proc.returncode
-    else:
-        log(f'Invoking API for {stage} (model: {stage_model})...')
-        try:
-            invoke_to_file(prompt, stage_model, stage_log, max_tokens=16384, system=system)
-            claude_rc = 0
-        except Exception as e:
-            log(f'ERROR: API invocation failed: {e}')
-            claude_rc = 1
-
-    from storyforge.common import is_shutting_down
-    if is_shutting_down():
-        log(f'Interrupted during {stage} — partial work may be committed')
-        sys.exit(130)
-
-    if claude_rc != 0:
-        log(f'ERROR: Claude invocation failed (exit code {claude_rc})')
-        log(f'See: {stage_log}')
-        sys.exit(1)
-
-    # Log cost
-    if os.path.isfile(stage_log):
-        try:
-            from storyforge.api import extract_usage, calculate_cost_from_usage
-            with open(stage_log) as f:
-                resp = json.load(f)
-            usage = extract_usage(resp)
-            cost = calculate_cost_from_usage(usage, stage_model)
-            log_operation(project_dir, f'elaborate-{stage}', stage_model,
-                          usage['input_tokens'], usage['output_tokens'],
-                          cost, target=stage)
-        except Exception:
-            pass
-
-    # Parse response
-    log(f'Parsing {stage} response...')
-
-    response = ''
-    if os.path.isfile(stage_log):
-        try:
-            with open(stage_log, encoding='utf-8') as f:
-                raw = f.read()
-            # Try API JSON format
+        if interactive:
+            log(f'Invoking interactive claude for {stage}...')
+            proc = subprocess.Popen(
+                ['claude', '-p', prompt,
+                 '--model', stage_model,
+                 '--dangerously-skip-permissions',
+                 '--output-format', 'stream-json',
+                 '--verbose'],
+                stdout=open(stage_log, 'w'),
+                stderr=subprocess.STDOUT,
+            )
+            proc.wait()
+            claude_rc = proc.returncode
+        else:
+            log(f'Invoking API for {stage} (model: {stage_model})...')
             try:
-                data = json.loads(raw)
-                texts = []
-                for item in data.get('content', []):
-                    if item.get('type') == 'text':
-                        texts.append(item.get('text', ''))
-                if texts:
-                    response = '\n'.join(texts)
-            except (json.JSONDecodeError, KeyError):
+                invoke_to_file(prompt, stage_model, stage_log, max_tokens=16384, system=system)
+                claude_rc = 0
+            except Exception as e:
+                log(f'ERROR: API invocation failed: {e}')
+                claude_rc = 1
+
+        from storyforge.common import is_shutting_down
+        if is_shutting_down():
+            log(f'Interrupted during {stage} — partial work may be committed')
+            sys.exit(130)
+
+        if claude_rc != 0:
+            log(f'ERROR: Claude invocation failed (exit code {claude_rc})')
+            log(f'See: {stage_log}')
+            sys.exit(1)
+
+        # Log cost
+        if os.path.isfile(stage_log):
+            try:
+                from storyforge.api import extract_usage, calculate_cost_from_usage
+                with open(stage_log) as f:
+                    resp = json.load(f)
+                usage = extract_usage(resp)
+                cost = calculate_cost_from_usage(usage, stage_model)
+                log_operation(project_dir, f'elaborate-{stage}', stage_model,
+                              usage['input_tokens'], usage['output_tokens'],
+                              cost, target=stage)
+            except Exception:
                 pass
 
-            # Try stream-json format
-            if not response:
-                lines = raw.strip().split('\n')
-                texts = []
-                for line in lines:
-                    try:
-                        obj = json.loads(line)
-                        if obj.get('type') == 'content_block_delta':
-                            texts.append(obj.get('delta', {}).get('text', ''))
-                    except json.JSONDecodeError:
-                        pass
-                if texts:
-                    response = ''.join(texts)
+        # Parse response
+        log(f'Parsing {stage} response...')
 
-            # Fallback: use as plain text
-            if not response:
-                response = raw
-        except Exception:
-            pass
+        response = ''
+        if os.path.isfile(stage_log):
+            try:
+                with open(stage_log, encoding='utf-8') as f:
+                    raw = f.read()
+                # Try API JSON format
+                try:
+                    data = json.loads(raw)
+                    texts = []
+                    for item in data.get('content', []):
+                        if item.get('type') == 'text':
+                            texts.append(item.get('text', ''))
+                    if texts:
+                        response = '\n'.join(texts)
+                except (json.JSONDecodeError, KeyError):
+                    pass
 
-    if not response:
-        log(f'ERROR: Could not extract response from {stage_log}')
-        sys.exit(1)
+                # Try stream-json format
+                if not response:
+                    lines = raw.strip().split('\n')
+                    texts = []
+                    for line in lines:
+                        try:
+                            obj = json.loads(line)
+                            if obj.get('type') == 'content_block_delta':
+                                texts.append(obj.get('delta', {}).get('text', ''))
+                        except json.JSONDecodeError:
+                            pass
+                    if texts:
+                        response = ''.join(texts)
 
-    alias_maps = load_registry_alias_maps(project_dir)
-    blocks = parse_stage_response(response)
-    written = []
+                # Fallback: use as plain text
+                if not response:
+                    response = raw
+            except Exception:
+                pass
 
-    # Apply CSV blocks
-    for label, content in blocks.items():
-        if label == 'scenes-csv':
-            rows = csv_block_to_rows(content)
-            if rows:
-                path = os.path.join(ref_dir, 'scenes.csv')
-                existing = _read_csv_as_map(path)
-                for row in rows:
-                    normalize_fields(row, alias_maps)
-                    sid = row.get('id', '')
-                    if not sid:
-                        continue
-                    if sid in existing:
-                        existing[sid].update({k: v for k, v in row.items() if v})
-                    else:
-                        new = {c: '' for c in _FILE_MAP['scenes.csv']}
-                        new.update(row)
-                        existing[sid] = new
-                ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)) if r.get('seq', '').isdigit() else 0)
-                _write_csv(path, ordered, _FILE_MAP['scenes.csv'])
-                written.append(f'scenes.csv ({len(rows)} rows)')
+        if not response:
+            log(f'ERROR: Could not extract response from {stage_log}')
+            sys.exit(1)
 
-        elif label == 'intent-csv':
-            rows = csv_block_to_rows(content)
-            if rows:
-                path = os.path.join(ref_dir, 'scene-intent.csv')
-                existing = _read_csv_as_map(path)
-                for row in rows:
-                    normalize_fields(row, alias_maps)
-                    sid = row.get('id', '')
-                    if not sid:
-                        continue
-                    if sid in existing:
-                        existing[sid].update({k: v for k, v in row.items() if v})
-                    else:
-                        new = {c: '' for c in _FILE_MAP['scene-intent.csv']}
-                        new.update(row)
-                        existing[sid] = new
-                ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
-                _write_csv(path, ordered, _FILE_MAP['scene-intent.csv'])
-                written.append(f'scene-intent.csv ({len(rows)} rows)')
+        alias_maps = load_registry_alias_maps(project_dir)
+        blocks = parse_stage_response(response)
+        written = []
 
-        elif label == 'briefs-csv':
-            rows = csv_block_to_rows(content)
-            if rows:
-                path = os.path.join(ref_dir, 'scene-briefs.csv')
-                existing = _read_csv_as_map(path)
-                for row in rows:
-                    normalize_fields(row, alias_maps)
-                    sid = row.get('id', '')
-                    if not sid:
-                        continue
-                    if sid in existing:
-                        existing[sid].update({k: v for k, v in row.items() if v})
-                    else:
-                        new = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
-                        new.update(row)
-                        existing[sid] = new
-                ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
-                _write_csv(path, ordered, _FILE_MAP['scene-briefs.csv'])
-                written.append(f'scene-briefs.csv ({len(rows)} rows)')
+        # Apply CSV blocks
+        for label, content in blocks.items():
+            if label == 'scenes-csv':
+                rows = csv_block_to_rows(content)
+                if rows:
+                    path = os.path.join(ref_dir, 'scenes.csv')
+                    existing = _read_csv_as_map(path)
+                    for row in rows:
+                        normalize_fields(row, alias_maps)
+                        sid = row.get('id', '')
+                        if not sid:
+                            continue
+                        if sid in existing:
+                            existing[sid].update({k: v for k, v in row.items() if v})
+                        else:
+                            new = {c: '' for c in _FILE_MAP['scenes.csv']}
+                            new.update(row)
+                            existing[sid] = new
+                    ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)) if r.get('seq', '').isdigit() else 0)
+                    _write_csv(path, ordered, _FILE_MAP['scenes.csv'])
+                    written.append(f'scenes.csv ({len(rows)} rows)')
 
-        elif label == 'scenes-csv-update':
-            rows = csv_block_to_rows(content)
-            if rows:
-                path = os.path.join(ref_dir, 'scenes.csv')
-                existing = _read_csv_as_map(path)
-                for row in rows:
-                    sid = row.get('id', '')
-                    if sid in existing:
-                        existing[sid].update({k: v for k, v in row.items() if v and k != 'id'})
-                ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)) if r.get('seq', '').isdigit() else 0)
-                _write_csv(path, ordered, _FILE_MAP['scenes.csv'])
-                written.append(f'scenes.csv status updates ({len(rows)} rows)')
+            elif label == 'intent-csv':
+                rows = csv_block_to_rows(content)
+                if rows:
+                    path = os.path.join(ref_dir, 'scene-intent.csv')
+                    existing = _read_csv_as_map(path)
+                    for row in rows:
+                        normalize_fields(row, alias_maps)
+                        sid = row.get('id', '')
+                        if not sid:
+                            continue
+                        if sid in existing:
+                            existing[sid].update({k: v for k, v in row.items() if v})
+                        else:
+                            new = {c: '' for c in _FILE_MAP['scene-intent.csv']}
+                            new.update(row)
+                            existing[sid] = new
+                    ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
+                    _write_csv(path, ordered, _FILE_MAP['scene-intent.csv'])
+                    written.append(f'scene-intent.csv ({len(rows)} rows)')
 
-        elif label in ('story-architecture', 'character-bible', 'world-bible', 'voice-guide'):
-            filename = label + '.md'
-            path = os.path.join(ref_dir, filename)
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(content + '\n')
-            written.append(filename)
+            elif label == 'briefs-csv':
+                rows = csv_block_to_rows(content)
+                if rows:
+                    path = os.path.join(ref_dir, 'scene-briefs.csv')
+                    existing = _read_csv_as_map(path)
+                    for row in rows:
+                        normalize_fields(row, alias_maps)
+                        sid = row.get('id', '')
+                        if not sid:
+                            continue
+                        if sid in existing:
+                            existing[sid].update({k: v for k, v in row.items() if v})
+                        else:
+                            new = {c: '' for c in _FILE_MAP['scene-briefs.csv']}
+                            new.update(row)
+                            existing[sid] = new
+                    ordered = sorted(existing.values(), key=lambda r: r.get('id', ''))
+                    _write_csv(path, ordered, _FILE_MAP['scene-briefs.csv'])
+                    written.append(f'scene-briefs.csv ({len(rows)} rows)')
 
-    if written:
-        log(f'  Updated: {", ".join(written)}')
-    else:
-        log('  WARNING: No structured output blocks found in response')
+            elif label == 'scenes-csv-update':
+                rows = csv_block_to_rows(content)
+                if rows:
+                    path = os.path.join(ref_dir, 'scenes.csv')
+                    existing = _read_csv_as_map(path)
+                    for row in rows:
+                        sid = row.get('id', '')
+                        if sid in existing:
+                            existing[sid].update({k: v for k, v in row.items() if v and k != 'id'})
+                    ordered = sorted(existing.values(), key=lambda r: int(r.get('seq', 0)) if r.get('seq', '').isdigit() else 0)
+                    _write_csv(path, ordered, _FILE_MAP['scenes.csv'])
+                    written.append(f'scenes.csv status updates ({len(rows)} rows)')
+
+            elif label in ('story-architecture', 'character-bible', 'world-bible', 'voice-guide'):
+                filename = label + '.md'
+                path = os.path.join(ref_dir, filename)
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(content + '\n')
+                written.append(filename)
+
+        if written:
+            log(f'  Updated: {", ".join(written)}')
+        else:
+            log('  WARNING: No structured output blocks found in response')
 
     # ========================================================================
     # Validate

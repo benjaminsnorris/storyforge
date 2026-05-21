@@ -36,6 +36,7 @@ Before doing anything else, orient yourself:
    - `working/cleanup-report.csv` (pending cleanup action items from a previous session)
    - `working/annotations.csv` (reader annotations from Bookshelf, if present)
    - The `scenes/` directory (any `.md` files = drafted scenes)
+   - **Medium**: Read `project.medium` from storyforge.yaml. If `graphic-novel`, prefix any status summary with "Graphic novel project" and recommend graphic-novel-mode actions (e.g., elaborate stages, hone, validate — drafting and production are Plan 2).
 4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
 
 Do not present this information unless the author asks for a status check. This is your internal orientation.
@@ -359,6 +360,15 @@ Commit messages are descriptive and prefixed: `"Develop: ..."`, `"Voice: ..."`, 
 ```
 git add -A && git commit -m "Develop: {what was done}" && git push
 ```
+
+## Graphic-novel mode in v1
+
+The following commands and skills are NOT yet supported in graphic-novel mode:
+`write`, `evaluate`, `score`, `revise`, `assemble`, `publish`, `annotations`, `extract`.
+
+The following ARE supported: `elaborate` (spine, architecture, scene-map, voice, briefs), `hone`, `validate`, `cleanup`.
+
+If the author asks for an unsupported action, explain the limit and offer to help with what is supported.
 
 ## Coaching Posture
 

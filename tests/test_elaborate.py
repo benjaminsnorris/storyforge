@@ -255,6 +255,53 @@ class TestValidateStructure:
         assert 'crosscut' in messages
         assert 'blocking' not in severities
 
+    def test_advisory_only_failures_do_not_fail_passed(self, tmp_path):
+        """Regression: validate_structure returns passed=True when the ONLY
+        failures are advisory.
+
+        Documents the semantics introduced in commit 87b8080: advisory
+        findings (e.g., crosscut pacing on a single timeline_day) are
+        reported as FYI in `failures` but do not flip `passed` to False.
+        Blocking failures still do.
+        """
+        from storyforge.elaborate import validate_structure
+        ref = str(tmp_path / 'reference')
+        os.makedirs(ref)
+
+        # Same crosscut scenario as above — produces an advisory timeline check.
+        with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+            f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words\n')
+            f.write('s01|1|Scene One|1|Emmett|Town|13|morning|1 hour|action|briefed|1000|2000\n')
+            f.write('s02|2|Scene Two|1|Emmett|Town|14|morning|1 hour|action|briefed|1000|2000\n')
+            f.write('s03|3|Scene Three|1|Lena|Station|12|morning|1 hour|action|briefed|1000|2000\n')
+            f.write('s04|4|Scene Four|1|Emmett|Town|15|morning|1 hour|action|briefed|1000|2000\n')
+
+        with open(os.path.join(ref, 'scene-intent.csv'), 'w') as f:
+            f.write('id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|threads|characters|on_stage|mice_threads\n')
+            for sid, char in [('s01', 'Emmett'), ('s02', 'Emmett'), ('s03', 'Lena'), ('s04', 'Emmett')]:
+                f.write(f'{sid}|test|action|flat|truth|+/-|revelation|a|{char}|{char}|\n')
+
+        with open(os.path.join(ref, 'scene-briefs.csv'), 'w') as f:
+            f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow\n')
+            for i in range(1, 5):
+                f.write(f's0{i}|g|c|o|cr|d|k|k|a|d|e|m||false\n')
+
+        report = validate_structure(ref)
+        failures = report['failures']
+        # There must be at least one advisory failure (the crosscut).
+        assert any(f.get('severity') == 'advisory' for f in failures), (
+            'fixture expected to produce at least one advisory failure'
+        )
+        # And NO blocking failures.
+        assert not any(
+            f.get('severity', 'blocking') == 'blocking' for f in failures
+        ), 'fixture expected to produce ONLY advisory failures'
+        # Therefore passed must be True — advisory findings are FYI only.
+        assert report['passed'] is True, (
+            'validate_structure must return passed=True when the only '
+            'failures are advisory (FYI signals do not gate the pipeline)'
+        )
+
     def test_knowledge_flow(self, fixture_dir):
         from storyforge.elaborate import validate_structure
         report = validate_structure(os.path.join(fixture_dir, 'reference'))

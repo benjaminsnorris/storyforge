@@ -20,6 +20,8 @@ _SCENES_COLS = [
     'id', 'seq', 'title', 'part', 'pov', 'location',
     'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',
+    # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
+    'target_pages', 'panel_count', 'page_count',
 ]
 _INTENT_COLS = [
     'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
@@ -31,6 +33,9 @@ _BRIEFS_COLS = [
     'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
     'emotions', 'motifs', 'subtext', 'continuity_deps', 'has_overflow',
     'physical_state_in', 'physical_state_out',
+    # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
+    'page_layout', 'panel_breakdown', 'visual_keywords',
+    'page_turn_beats', 'caption_strategy',
 ]
 
 _FILE_MAP = {
@@ -844,9 +849,22 @@ def _validate_pacing(scenes_map, intent_map, checks):
 def validate_structure(ref_dir: str) -> dict:
     """Run all structural validation checks against the scene CSVs.
 
+    Each check has a `severity` field — ``'blocking'`` (default) or
+    ``'advisory'``. Blocking failures indicate structural problems that
+    must be fixed before drafting (orphaned rows, missing required
+    columns, timeline contradictions, broken MICE nesting). Advisory
+    failures are reported as FYI signals — for example, crosscut pacing
+    on a single timeline_day — and do not gate the pipeline.
+
     Returns:
-        A dict with 'passed' (bool), 'checks' (list of check results),
-        and 'failures' (list of failed checks only).
+        A dict with:
+          - ``'passed'`` (bool): ``True`` when no BLOCKING failures exist.
+            Advisory failures are reported in ``'failures'`` but do NOT
+            affect ``'passed'``.
+          - ``'checks'`` (list): every check run, passed or failed.
+          - ``'failures'`` (list): all failed checks (blocking AND
+            advisory). Callers that need to distinguish should inspect
+            each entry's ``'severity'`` field.
     """
     checks: list[dict] = []
 
@@ -906,8 +924,9 @@ def validate_structure(ref_dir: str) -> dict:
     _validate_physical_states(scenes_map, briefs_map, intent_map, checks, ref_dir=ref_dir)
 
     failures = [c for c in checks if not c['passed']]
+    blocking_failures = [c for c in failures if c.get('severity', 'blocking') != 'advisory']
     return {
-        'passed': len(failures) == 0,
+        'passed': len(blocking_failures) == 0,
         'checks': checks,
         'failures': failures,
     }

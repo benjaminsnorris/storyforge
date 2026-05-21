@@ -18,10 +18,20 @@ def _read_file(path: str) -> str:
         return f.read()
 
 
-def _read_csv_contents(path: str) -> str:
-    """Read CSV contents for inclusion in prompts."""
+def _read_file_contents(path: str) -> str:
+    """Read a file's contents for inclusion in prompts.
+
+    Returns the file contents stripped of surrounding whitespace, or
+    ``'(empty)'`` when the file is missing or empty. Works for any text
+    file — CSVs, markdown, plain text.
+    """
     content = _read_file(path)
     return content.strip() if content else '(empty)'
+
+
+# Backwards-compatible alias (was named _read_csv_contents before but also
+# used to read markdown). Prefer _read_file_contents in new code.
+_read_csv_contents = _read_file_contents
 
 
 def _project_context(project_dir: str) -> str:
@@ -477,11 +487,17 @@ def build_voice_prompt(project_dir: str, plugin_dir: str,
 
     Produces reference/voice-guide.md and reference/voice-profile.csv.
 
+    In graphic-novel mode, also asks for caption_voice and lettering_style
+    to be set on the _project row of voice-profile.csv.
+
     Args:
         project_dir: Path to the book project.
         plugin_dir: Path to the Storyforge plugin root.
         system_context: If True, skip _existing_refs() (already in system prompt).
     """
+    from .common import get_medium
+    medium = get_medium(project_dir)
+
     context = _project_context(project_dir)
     refs = '' if system_context else _existing_refs(project_dir)
     ref_dir = os.path.join(project_dir, 'reference')
@@ -489,7 +505,9 @@ def build_voice_prompt(project_dir: str, plugin_dir: str,
 
     refs_section = f'\n## Reference Materials\n\n{refs}\n' if refs else ''
 
-    return f"""You are developing the voice of a novel — the prose register, per-character voice fingerprints, and style rules that every scene must embody.
+    medium_label = 'graphic novel' if medium == 'graphic-novel' else 'novel'
+
+    return f"""You are developing the voice of a {medium_label} — the prose register, per-character voice fingerprints, and style rules that every scene must embody.
 
 {context}
 {refs_section}
@@ -565,6 +583,36 @@ _project||<banned_words>|||<register>|
 - metaphor_families are conceptual domains (e.g., "cartography", "decay", "machinery") not specific metaphors
 - rhythm_preference describes patterns (e.g., "short declarative for realization beats; longer sensory runs during observation")
 - dialogue_style describes speech register and habits (e.g., "clipped;formal;avoids contractions" or "casual;irreverent;trails off")
+{_gn_voice_extension() if medium == 'graphic-novel' else ''}"""
+
+
+def _gn_voice_extension() -> str:
+    """Return the graphic-novel–specific voice-stage instructions."""
+    return """
+### Graphic-Novel Voice Fields (add to _project row)
+
+Because this is a graphic novel, set two additional fields on the `_project` row
+of `voice-profile.csv`:
+
+**caption_voice** — the narrative register used in caption boxes. Choose one of:
+  - `journal-voiceover`: first-person, written-voice feel (diary, letter, field notes)
+  - `omniscient`: third-person omniscient narration in captions
+  - `first-person`: first-person present-tense narration
+  - `none`: no caption boxes — story told entirely through dialogue and art
+
+**lettering_style** — the visual feel of the lettering that complements the voice. Choose one of:
+  - `loose-natural`: hand-lettered feel, organic, imperfect
+  - `typeset`: clean, formal, print-like
+  - `hand-lettered-feel`: digital font imitating hand lettering
+
+Update the voice-profile-csv block so the _project row includes these two columns:
+
+```voice-profile-csv
+character|preferred_words|banned_words|metaphor_families|rhythm_preference|register|dialogue_style|caption_voice|lettering_style
+_project||<banned_words>|||<register>||<caption_voice>|<lettering_style>
+<character_id>|<preferred_words>||<metaphor_families>|<rhythm_preference>||<dialogue_style>||
+(one row per POV character)
+```
 """
 
 

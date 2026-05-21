@@ -167,6 +167,15 @@ Check if registries exist in `reference/` (characters.csv, locations.csv, values
 
 Check `working/scores/structural-proposals.csv` for unaddressed proposals with `fix_location` in {brief, intent, structural}. Present any findings.
 
+## Graphic-novel diagnostics
+
+When `project.medium = graphic-novel`, hone runs additional brief-quality checks:
+- Every briefed scene must have a non-empty `panel_breakdown`
+- Every briefed scene must have a non-empty `page_layout`
+- Standard diagnostics (abstract briefs, overspecified beats, vague intent) still apply with the same meanings
+
+Findings are reported alongside the standard diagnostic output.
+
 ## Step 5: Execute
 
 ### Command Builder

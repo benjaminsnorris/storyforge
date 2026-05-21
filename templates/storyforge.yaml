@@ -15,6 +15,11 @@
 # and the logline anchors continuity checks.
 project:
   title: "PROJECT_TITLE"                # Working title of the novel
+  # Delivery medium:
+  #   novel          — prose manuscript (default; produces epub/PDF)
+  #   graphic-novel  — panel script for an artist (produces script package)
+  # Set at init; durable. Switching mediums means a new project.
+  medium: novel
   genre: "PROJECT_GENRE"                # Primary genre (e.g., "fantasy", "thriller", "literary fiction")
   subgenre:                             # Optional: narrower classification (e.g., "urban fantasy", "techno-thriller")
   target_words: 80000                   # Target manuscript word count
