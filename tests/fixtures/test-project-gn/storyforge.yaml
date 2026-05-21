@@ -1,0 +1,15 @@
+project:
+  title: "The Cartographer's Silence — GN"
+  medium: graphic-novel
+  genre: "fantasy"
+  target_words: 0
+  logline: "A cartographer who maps lands he has never visited finds his pages begin filling themselves."
+  coaching_level: full
+
+artifacts:
+  scene_index:
+    exists: true
+    path: reference/scenes.csv
+    updated: 2026-05-20
+
+phase: briefs

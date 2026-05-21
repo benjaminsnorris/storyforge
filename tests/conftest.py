@@ -18,6 +18,21 @@ PYTHON_LIB = PLUGIN_DIR / 'scripts' / 'lib' / 'python'
 sys.path.insert(0, str(PYTHON_LIB))
 
 FIXTURE_DIR = TESTS_DIR / 'fixtures' / 'test-project'
+FIXTURE_DIR_GN = TESTS_DIR / 'fixtures' / 'test-project-gn'
+
+
+@pytest.fixture
+def fixture_dir_gn():
+    """Path to the graphic-novel test-project fixture."""
+    return str(FIXTURE_DIR_GN)
+
+
+@pytest.fixture
+def project_dir_gn(tmp_path):
+    """A fresh copy of the graphic-novel fixture in a temp directory."""
+    dest = tmp_path / 'test-project-gn'
+    shutil.copytree(FIXTURE_DIR_GN, dest)
+    return str(dest)
 
 
 @pytest.fixture

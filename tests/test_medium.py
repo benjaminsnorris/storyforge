@@ -56,3 +56,18 @@ def test_get_medium_returns_novel_for_unrecognized_value(project_dir):
     with open(yaml_path, 'w') as f:
         f.write(content)
     assert get_medium(project_dir) == 'novel'
+
+
+def test_gn_fixture_loads(fixture_dir_gn):
+    """The graphic-novel fixture exists and is graphic-novel mode."""
+    assert os.path.isfile(os.path.join(fixture_dir_gn, 'storyforge.yaml'))
+    assert get_medium(fixture_dir_gn) == 'graphic-novel'
+
+
+def test_gn_fixture_schema_passes(fixture_dir_gn):
+    """The graphic-novel fixture passes schema validation."""
+    from storyforge.schema import validate_schema
+    ref_dir = os.path.join(fixture_dir_gn, 'reference')
+    result = validate_schema(ref_dir, fixture_dir_gn)
+    # The fixture should pass — failed count must be 0
+    assert result['failed'] == 0, f"Fixture has schema failures: {result.get('errors')}"
