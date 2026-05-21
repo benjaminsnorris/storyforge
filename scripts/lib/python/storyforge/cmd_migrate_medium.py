@@ -7,7 +7,7 @@ Usage:
     storyforge migrate-medium --to novel           # convert to novel
     storyforge migrate-medium --to graphic-novel   # convert to graphic-novel
     storyforge migrate-medium --to X --dry-run     # show what would happen
-    storyforge migrate-medium --to X --force       # skip confirmation
+    storyforge migrate-medium --to X --force       # bypass the "already in target medium" guard
 """
 
 import argparse
@@ -53,7 +53,7 @@ def _clear_columns(rows: list[dict], columns: list[str]) -> int:
             if col in row:
                 row[col] = ''
                 count += 1
-    return len(rows)
+    return count
 
 
 def _set_column(rows: list[dict], column: str, value: str) -> int:
@@ -137,13 +137,8 @@ def step3_snapshot_state(
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.copy2(src, dest)
 
-    # Snapshot scenes/
-    scenes_dir = os.path.join(project_dir, 'scenes')
-    if os.path.isdir(scenes_dir):
-        snap.append('scenes/')
-        if not dry_run:
-            dest_scenes = os.path.join(archive_dir, 'scenes')
-            shutil.copytree(scenes_dir, dest_scenes, dirs_exist_ok=True)
+    # Note: scenes/ is NOT copied here — step 7 moves scene files to archive/scenes/,
+    # which IS the pre-migration snapshot of the scenes. Copying here would duplicate them.
 
     log(f'  Snapshot: {len(snap)} items archived')
     return snap
@@ -169,17 +164,30 @@ def step4_update_yaml(project_dir: str, target: str, dry_run: bool) -> None:
             flags=re.MULTILINE,
         )
     else:
-        # Insert medium: under the `project:` block
-        new_content = re.sub(
-            r'^(project:\n)',
+        # Insert medium: under the `project:` block.
+        # Match `project:` followed by anything up to and including the newline,
+        # so projects with `project: # main config` style yaml still get the field
+        # inserted under the project block.
+        pattern = re.compile(r'^(project:[^\n]*\n)', re.MULTILINE)
+        new_content = pattern.sub(
             rf'\g<1>  medium: {target}\n',
             content,
-            flags=re.MULTILINE,
         )
 
     if not dry_run:
         with open(yaml_path, 'w', encoding='utf-8') as f:
             f.write(new_content)
+        # Post-write verification: confirm medium was actually written correctly
+        from storyforge.common import get_medium
+        actual = get_medium(project_dir)
+        if actual != target:
+            log(
+                f'ERROR: storyforge.yaml was written but get_medium() returned {actual!r} '
+                f'(expected {target!r}). '
+                'The YAML file may have a non-standard format. '
+                'Please set `project.medium: {target}` manually under the `project:` key.'
+            )
+            sys.exit(1)
     log(f'  storyforge.yaml: medium set to {target!r}')
 
 
@@ -203,8 +211,17 @@ def step5_transform_scenes_csv(
         _clear_columns(rows, ['target_pages', 'panel_count', 'page_count'])
         log('  scenes.csv: cleared target_pages, panel_count, page_count')
 
-    _set_column(rows, 'status', 'mapped')
-    log(f'  scenes.csv: reset {len(rows)} scene(s) to status=mapped')
+    # Reset status to 'mapped' EXCEPT for terminal editorial states.
+    # (cut/merged are deliberate authorial decisions and must survive migration.)
+    TERMINAL_STATUSES = {'cut', 'merged'}
+    reset_count = 0
+    for row in rows:
+        if row.get('status') not in TERMINAL_STATUSES:
+            row['status'] = 'mapped'
+            reset_count += 1
+    skipped = len(rows) - reset_count
+    log(f'  scenes.csv: reset {reset_count} scene(s) to status=mapped'
+        + (f' (skipped {skipped} terminal: cut/merged)' if skipped else ''))
 
     if not dry_run:
         _write_csv(scenes_path, header, rows)
@@ -263,8 +280,7 @@ def step7_archive_and_clear_scenes_dir(
         log('  scenes/: no scene files to archive')
         return 0
 
-    subdir_name = 'scenes-novel' if from_medium == 'novel' else 'scenes-gn'
-    archive_scenes = os.path.join(archive_dir, subdir_name)
+    archive_scenes = os.path.join(archive_dir, 'scenes')
 
     if not dry_run:
         os.makedirs(archive_scenes, exist_ok=True)
@@ -276,7 +292,7 @@ def step7_archive_and_clear_scenes_dir(
         if not os.path.exists(gitkeep):
             open(gitkeep, 'w').close()
 
-    log(f'  scenes/: moved {len(scene_files)} file(s) to archive/{subdir_name}')
+    log(f'  scenes/: moved {len(scene_files)} file(s) to archive/scenes')
     return len(scene_files)
 
 
@@ -349,7 +365,7 @@ def step8_add_bible_visual_notes(
 
 def step9_print_summary(
     from_medium: str, to_medium: str, archive_dir: str,
-    scene_count: int, dry_run: bool
+    scene_count: int, dry_run: bool, no_commit: bool = False
 ) -> None:
     """Print a human-readable migration summary with next steps."""
     if dry_run:
@@ -369,16 +385,16 @@ def step9_print_summary(
     print()
     print('What changed:')
     print('  - storyforge.yaml: project.medium updated')
-    print('  - scenes.csv: status reset to "mapped" for all scenes')
+    print('  - scenes.csv: status reset to "mapped" for non-terminal scenes (cut/merged preserved)')
 
     if from_medium == 'novel' and to_medium == 'graphic-novel':
         print('  - scenes.csv: target_words and word_count cleared')
-        print(f'  - scenes/: {scene_count} prose file(s) moved to archive/scenes-novel')
+        print(f'  - scenes/: {scene_count} prose file(s) moved to archive/scenes')
         print('  - character-bible.md, world-bible.md: visual notes appended (if no ### Visual sections existed)')
     elif from_medium == 'graphic-novel' and to_medium == 'novel':
         print('  - scenes.csv: target_pages, panel_count, page_count cleared')
         print('  - scene-briefs.csv: GN columns cleared (page_layout, panel_breakdown, visual_keywords, page_turn_beats, caption_strategy)')
-        print(f'  - scenes/: {scene_count} script file(s) moved to archive/scenes-gn')
+        print(f'  - scenes/: {scene_count} script file(s) moved to archive/scenes')
 
     print()
     print('What was preserved:')
@@ -388,7 +404,11 @@ def step9_print_summary(
     print('  - All other reference files')
     print()
     print('Reversibility:')
-    print('  Every change is committed — use git to revert if needed.')
+    if no_commit:
+        print('  Changes are NOT committed (--no-commit). The archive in `working/migration/` is your')
+        print('  fallback if you need to recover. Run `git add -A && git commit` when ready.')
+    else:
+        print('  Every change is committed. Use `git revert` to undo the migration commit if needed.')
     print('  The full archive is preserved at:')
     print(f'    {archive_dir}')
     print()
@@ -430,7 +450,7 @@ def parse_args(argv):
     )
     parser.add_argument(
         '--force', action='store_true',
-        help='Skip confirmation; also bypass "already in target medium" guard',
+        help='Bypass the "already in target medium" guard. Useful if you previously aborted a migration and want to retry.',
     )
     parser.add_argument(
         '--no-commit', action='store_true',
@@ -498,7 +518,8 @@ def main(argv=None):
 
     # Step 9: Summary
     step9_print_summary(
-        from_medium, to_medium, archive_dir, scene_count, args.dry_run
+        from_medium, to_medium, archive_dir, scene_count, args.dry_run,
+        no_commit=args.no_commit,
     )
     log('  [9/9] Summary printed')
 

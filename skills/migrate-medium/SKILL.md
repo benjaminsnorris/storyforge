@@ -77,7 +77,7 @@ Before running anything, explain clearly what will happen:
 > **What changes:**
 > - `storyforge.yaml`: `project.medium` set to `graphic-novel`
 > - `reference/scenes.csv`: `target_words` and `word_count` cleared; all scenes reset to `status=mapped`
-> - `scenes/`: all `.md` files moved to `working/migration/{timestamp}-novel-to-graphic-novel/scenes-novel/`
+> - `scenes/`: all `.md` files moved to `working/migration/{timestamp}-novel-to-graphic-novel/scenes/`
 > - `reference/character-bible.md` and `reference/world-bible.md`: a visual migration note is appended if they lack `### Visual` sections
 >
 > **What stays the same:**
@@ -100,7 +100,7 @@ Before running anything, explain clearly what will happen:
 > - `storyforge.yaml`: `project.medium` set to `novel`
 > - `reference/scenes.csv`: `target_pages`, `panel_count`, `page_count` cleared; all scenes reset to `status=mapped`
 > - `reference/scene-briefs.csv`: GN columns cleared (`page_layout`, `panel_breakdown`, `visual_keywords`, `page_turn_beats`, `caption_strategy`)
-> - `scenes/`: all `.md` files moved to `working/migration/{timestamp}-graphic-novel-to-novel/scenes-gn/`
+> - `scenes/`: all `.md` files moved to `working/migration/{timestamp}-graphic-novel-to-novel/scenes/`
 >
 > **What stays the same:**
 > - `reference/scene-intent.csv`, `reference/voice-profile.csv`, `reference/story-architecture.md`
@@ -138,14 +138,13 @@ This command does not invoke Claude (no API calls), so there are no `CLAUDECODE`
 > ```bash
 > cd <project_dir> && <plugin_path>/storyforge migrate-medium --to {target} --force
 > ```
-> (The `--force` flag skips the interactive confirmation that the CLI would ask for in a terminal.)
+> (`--force` lets you re-run migration on a project that's already in the target medium.)
 >
 > **Option B: Run it yourself**
 > Copy this command and run it in a separate terminal:
 > ```bash
 > cd <project_dir> && <plugin_path>/storyforge migrate-medium --to {target}
 > ```
-> The command will ask for confirmation before changing anything.
 
 Wait for the author's choice. If Option B, provide the exact command (with the real paths filled in) and end the skill session.
 

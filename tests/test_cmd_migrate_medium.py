@@ -97,8 +97,8 @@ def test_migrate_novel_to_gn_basic(project_dir, monkeypatch):
     assert archive_dir is not None, 'migration archive directory must exist'
     assert 'novel' in archive_dir and 'graphic-novel' in archive_dir
 
-    archived_scenes = os.path.join(archive_dir, 'scenes-novel')
-    assert os.path.isdir(archived_scenes), 'archive must have scenes-novel subdir'
+    archived_scenes = os.path.join(archive_dir, 'scenes')
+    assert os.path.isdir(archived_scenes), 'archive must have scenes/ subdir'
     archived_files = [f for f in os.listdir(archived_scenes) if f.endswith('.md')]
     assert len(archived_files) == len(initial_scene_files), \
         f'all original scene files should be in archive'
@@ -172,10 +172,10 @@ def test_migrate_gn_to_novel_basic(project_dir_gn, monkeypatch, tmp_path):
                  if f.endswith('.md') and f != '.gitkeep']
     assert remaining == [], f'scenes/ should be empty after migration, found: {remaining}'
 
-    # Archive exists with scenes-gn
+    # Archive exists with scenes/
     archive_dir = _get_archive_dir(project_dir_gn)
     assert archive_dir is not None
-    archived = os.path.join(archive_dir, 'scenes-gn')
+    archived = os.path.join(archive_dir, 'scenes')
     assert os.path.isdir(archived)
     assert 'the-blank-page.md' in os.listdir(archived)
 
@@ -269,8 +269,8 @@ def test_archive_contains_snapshot(project_dir, monkeypatch):
     assert os.path.isfile(os.path.join(archive_dir, 'reference', 'scene-briefs.csv'))
 
     # scenes/ files
-    archived_scenes = os.path.join(archive_dir, 'scenes-novel')
-    assert os.path.isdir(archived_scenes), 'archive must contain scenes-novel/'
+    archived_scenes = os.path.join(archive_dir, 'scenes')
+    assert os.path.isdir(archived_scenes), 'archive must contain scenes/'
     archived_files = [f for f in os.listdir(archived_scenes) if f.endswith('.md')]
     assert len(archived_files) > 0, 'archive must contain at least one scene file'
 
@@ -383,6 +383,28 @@ def test_step8_skips_when_visual_already_present(project_dir_gn):
 
     with open(char_bible) as f:
         assert f.read() == content_before, 'file should be unchanged'
+
+
+def test_migrate_preserves_cut_and_merged_statuses(project_dir, monkeypatch):
+    """Scenes with status=cut or status=merged are terminal editorial states
+    and MUST be preserved across migration. Resetting them to 'mapped'
+    would reactivate scenes the author deliberately removed."""
+    monkeypatch.chdir(project_dir)
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    # Append rows with terminal statuses (13 columns to match the header:
+    # id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words)
+    with open(scenes_csv, 'a') as f:
+        f.write('cut-scene|99|Cut Scene|1|||||||cut||\n')
+        f.write('merged-scene|100|Merged Scene|1|||||||merged||\n')
+    from storyforge import cmd_migrate_medium
+    cmd_migrate_medium.main(['--to', 'graphic-novel', '--no-commit'])
+
+    # Verify cut and merged scenes still have their terminal statuses
+    from storyforge.csv_cli import get_field
+    assert get_field(scenes_csv, 'cut-scene', 'status') == 'cut', \
+        'cut scene status must survive migration'
+    assert get_field(scenes_csv, 'merged-scene', 'status') == 'merged', \
+        'merged scene status must survive migration'
 
 
 def test_parse_args_requires_to():
