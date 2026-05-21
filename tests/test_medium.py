@@ -1,8 +1,6 @@
 """Tests for project.medium handling."""
 
 import os
-import shutil
-from pathlib import Path
 
 import pytest
 
@@ -44,6 +42,17 @@ def test_get_medium_returns_novel_for_explicit_novel(project_dir):
         'project:\n  medium: novel\n',
         1,
     )
+    with open(yaml_path, 'w') as f:
+        f.write(content)
+    assert get_medium(project_dir) == 'novel'
+
+
+def test_get_medium_returns_novel_for_unrecognized_value(project_dir):
+    """An unrecognized medium value logs a warning and defaults to 'novel'."""
+    yaml_path = os.path.join(project_dir, 'storyforge.yaml')
+    with open(yaml_path) as f:
+        content = f.read()
+    content = content.replace('project:\n', 'project:\n  medium: screenplay\n', 1)
     with open(yaml_path, 'w') as f:
         f.write(content)
     assert get_medium(project_dir) == 'novel'
