@@ -161,3 +161,200 @@ Now write the script for scene `{scene_id}`. Produce exactly {target_pages}
 pages. Begin with the H1 header `# Scene: {scene_id}` and follow the format
 rules above. Do not write any commentary outside the script itself.
 """
+
+
+def _format_findings(score_findings, eval_findings):
+    """Group findings by source and category for the revision prompt.
+
+    Findings come in two flavors:
+      - Deterministic score findings: { kind, detail, severity }
+      - Persona eval findings: { persona, severity, message, page, panel, ... }
+
+    We render them as a markdown bulleted list grouped by source, with
+    the most actionable categories first. Returns '' if no findings.
+    """
+    blocks = []
+
+    if score_findings:
+        # Group by principle (kind prefix) so the revision sees related issues together
+        by_kind = {}
+        for f in score_findings:
+            kind = f.get('kind', 'other')
+            by_kind.setdefault(kind, []).append(f)
+
+        # Order kinds: brief-fidelity first (most important), then dialogue,
+        # then composition, then layout/density
+        kind_order = [
+            'dialogue_missing', 'visual_keyword_missing',
+            'panel_count_mismatch', 'page_turn_missing',
+            'balloon_too_long', 'caption_excess', 'caption_when_none',
+            'composition_too_sparse', 'composition_too_dense',
+            'panel_density_high', 'panel_density_zero',
+            'layout_too_uniform', 'layout_too_chaotic',
+        ]
+        ordered_kinds = (
+            [k for k in kind_order if k in by_kind]
+            + sorted(k for k in by_kind if k not in kind_order)
+        )
+
+        blocks.append('### Deterministic findings (from scoring)')
+        for kind in ordered_kinds:
+            for f in by_kind[kind]:
+                sev = f.get('severity', 'medium')
+                detail = f.get('detail', '')
+                blocks.append(f'- [{sev}] **{kind}**: {detail}')
+        blocks.append('')
+
+    if eval_findings:
+        # Group by persona so the revision sees each critic's themes together
+        by_persona = {}
+        for f in eval_findings:
+            persona = f.get('persona', 'unknown')
+            by_persona.setdefault(persona, []).append(f)
+
+        for persona in sorted(by_persona):
+            blocks.append(f'### Evaluator findings — {persona}')
+            for f in by_persona[persona]:
+                sev = f.get('severity', 'medium')
+                message = (
+                    f.get('message')
+                    or f.get('detail')
+                    or f.get('issue')
+                    or '(no message)'
+                )
+                loc_parts = []
+                if f.get('page'):
+                    loc_parts.append(f'page {f["page"]}')
+                if f.get('panel'):
+                    loc_parts.append(f'panel {f["panel"]}')
+                loc = f' ({", ".join(loc_parts)})' if loc_parts else ''
+                blocks.append(f'- [{sev}]{loc} {message}')
+            blocks.append('')
+
+    return '\n'.join(blocks).rstrip()
+
+
+def build_revision_prompt(
+    scene_id,
+    scene_row,
+    intent_row,
+    brief_row,
+    script_text,
+    character_visuals,
+    location_visuals,
+    voice_profile_text,
+    score_findings,
+    eval_findings,
+):
+    """Build a prompt asking Claude to revise a drafted GN panel script.
+
+    The revision pass is findings-driven: scorer and evaluator output drives
+    targeted edits while preserving the script's overall structure. When no
+    findings are provided (blind polish mode), the prompt asks for general
+    tightening against the brief and format rules.
+
+    Args:
+        scene_id: Scene ID being revised.
+        scene_row: Dict from scenes.csv (target_pages, pov, location, title).
+        intent_row: Dict from scene-intent.csv.
+        brief_row: Dict from scene-briefs.csv (the contract).
+        script_text: Current drafted script (markdown).
+        character_visuals: character-bible.md content.
+        location_visuals: world-bible.md content.
+        voice_profile_text: voice-profile.csv content.
+        score_findings: List of deterministic score findings (may be empty).
+        eval_findings: List of persona eval findings (may be empty).
+
+    Returns:
+        Prompt string for Claude.
+    """
+    target_pages = (scene_row.get('target_pages') or '?').strip()
+    title = (scene_row.get('title') or scene_id).strip()
+    pov = (scene_row.get('pov') or '').strip()
+    location = (scene_row.get('location') or '').strip()
+
+    intent_summary = '\n'.join(
+        f"- {k}: {v}" for k, v in intent_row.items() if (v or '').strip()
+    )
+    brief_summary = _format_brief(brief_row)
+
+    findings_block = _format_findings(score_findings, eval_findings)
+    if findings_block:
+        findings_section = (
+            '# Findings to address\n\n'
+            'These were produced by deterministic scorers and evaluator personas '
+            'against the current draft. Address them directly. Severity levels '
+            'indicate priority: high > medium > low.\n\n'
+            f'{findings_block}\n'
+        )
+        revision_directive = (
+            'Revise the script above to address the findings. Make targeted '
+            'changes only — do not rewrite passages that already work. '
+            'Preserve the page structure unless a finding explicitly requires '
+            'changing it (e.g., panel_count_mismatch).'
+        )
+    else:
+        findings_section = ''
+        revision_directive = (
+            'No findings were provided. Polish the script against the brief '
+            'contract: compress over-long dialogue (>25 words), tighten sparse '
+            'or overstuffed panel compositions, restore any missing '
+            'key_dialogue or visual_keywords, and confirm the panel_breakdown '
+            'matches the brief.'
+        )
+
+    return f"""\
+You are revising a graphic-novel scene. The script below has already been
+drafted; your job is to produce a tightened version that better honors
+the brief and addresses the findings listed.
+
+# Scene context
+
+- id: {scene_id}
+- title: {title}
+- target_pages: {target_pages}
+- pov: {pov}
+- location: {location}
+
+# Scene intent
+
+{intent_summary or '(none)'}
+
+# Scene brief — every column is a contract you must honor
+
+{brief_summary}
+
+Specifically:
+  - Every entry in `key_dialogue` MUST appear verbatim (or near-verbatim)
+    as a word-balloon or caption line in the script.
+  - Every entry in `visual_keywords` (semicolon-separated) MUST appear
+    in some panel's composition prose.
+  - The script's per-page panel structure MUST match `panel_breakdown`.
+  - Pages tagged in `page_turn_beats` MUST carry the ⟵ PAGE-TURN REVEAL
+    marker on their page header line.
+  - `caption_strategy` determines how narration is used.
+
+# Character visual references
+
+{character_visuals or '(none provided)'}
+
+# Location visual references
+
+{location_visuals or '(none provided)'}
+
+# Voice profile
+
+{voice_profile_text or '(default)'}
+
+# Current draft
+
+{script_text}
+
+{findings_section}{SCRIPT_FORMAT_INSTRUCTIONS}
+
+{revision_directive}
+
+Output the complete revised script for scene `{scene_id}`. Begin with the
+H1 header `# Scene: {scene_id}` and follow the format rules above. Do not
+write any commentary outside the script itself.
+"""
