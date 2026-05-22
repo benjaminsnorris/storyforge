@@ -20,11 +20,16 @@ PRINCIPLES = (
 
 
 def score_brief_fidelity(parsed, brief_row, script_text):
-    """1.0 - (failures / total_brief_checks). 4 checks: dialogue, visuals, panels, page-turns."""
+    """1.0 - (distinct_failing_kinds / 4). 4 kinds: dialogue, visuals, panels, page-turns.
+
+    Multiple failures of the same kind (e.g. 5 missing dialogue lines) count
+    as a single distinct failure kind so the score degrades by category, not
+    by raw count.
+    """
     failures = check_brief_fidelity(brief_row, script_text)
-    total_checks = 4  # 4 kinds of fidelity failures possible
-    failure_count = len(failures)
-    score = max(0.0, 1.0 - (failure_count / total_checks))
+    total_kinds = 4  # dialogue_missing, visual_keyword_missing, panel_count_mismatch, page_turn_missing
+    distinct_kinds = len({f['kind'] for f in failures}) if failures else 0
+    score = max(0.0, 1.0 - distinct_kinds / total_kinds)
     findings = [
         {'kind': f['kind'], 'detail': f['detail'], 'severity': f.get('severity', 'medium')}
         for f in failures
@@ -140,16 +145,7 @@ def score_caption_economy(parsed, brief_row, script_text=None):
             if d['prefix'] == 'CAPTION'
         ]
         cap_count = len(captions)
-        # Allow exceeding target by 1; flag at +2
-        if cap_count <= target + 1:
-            within += 1
-        else:
-            findings.append({
-                'kind': 'caption_excess',
-                'detail': f'Page {page["number"]}: {cap_count} captions (strategy "{strategy}" suggests <= {target})',
-                'severity': 'low' if cap_count <= target + 2 else 'medium',
-            })
-        # Strategy=none: any caption is a failure
+        # Strategy=none: any caption is a failure (takes priority over generic excess check)
         if strategy == 'none' and cap_count > 0:
             findings.append({
                 'kind': 'caption_when_none',
@@ -157,6 +153,16 @@ def score_caption_economy(parsed, brief_row, script_text=None):
                 'severity': 'high',
             })
             within = max(within - 1, 0)
+        else:
+            # Allow exceeding target by 1; flag at +2
+            if cap_count <= target + 1:
+                within += 1
+            else:
+                findings.append({
+                    'kind': 'caption_excess',
+                    'detail': f'Page {page["number"]}: {cap_count} captions (strategy "{strategy}" suggests <= {target})',
+                    'severity': 'low' if cap_count <= target + 2 else 'medium',
+                })
     score = within / len(pages)
     return {'principle': 'caption_economy', 'score': score, 'findings': findings}
 

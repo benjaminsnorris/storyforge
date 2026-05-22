@@ -325,3 +325,51 @@ class TestEvaluateJsonParsing:
         # The persona ran but produced no parseable findings
         assert data['personas_run'] == ['pacing']
         assert data['findings'] == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for _parse_findings robustness (regression: null findings crash)
+# ---------------------------------------------------------------------------
+
+class TestParseFindings:
+    """Direct unit tests for the _parse_findings helper."""
+
+    def _call(self, text, persona='test-persona', scene_id='scene-x'):
+        from storyforge.cmd_evaluate_gn import _parse_findings
+        return _parse_findings(text, persona, scene_id)
+
+    def test_null_findings_returns_empty_list(self):
+        """{"findings": null} must not crash and must return []."""
+        result = self._call('{"findings": null}')
+        assert result == [], (
+            '_parse_findings should return [] for {"findings": null}, not raise TypeError'
+        )
+
+    def test_null_findings_in_fenced_block_returns_empty_list(self):
+        """A fenced block with {"findings": null} must not crash."""
+        text = '```json\n{"findings": null}\n```'
+        result = self._call(text)
+        assert result == []
+
+    def test_normal_findings_parsed_correctly(self):
+        """Normal {"findings": [...]} parses to a list with scene_id stamped."""
+        text = '{"findings": [{"severity": "medium", "message": "Test finding"}]}'
+        result = self._call(text, scene_id='my-scene')
+        assert len(result) == 1
+        assert result[0]['scene_id'] == 'my-scene'
+        assert result[0]['severity'] == 'medium'
+
+    def test_empty_findings_list_returns_empty(self):
+        """{"findings": []} returns []."""
+        result = self._call('{"findings": []}')
+        assert result == []
+
+    def test_empty_response_returns_empty(self):
+        """Empty string returns []."""
+        result = self._call('')
+        assert result == []
+
+    def test_non_list_findings_returns_empty_list(self):
+        """{"findings": "some string"} returns [] without crashing."""
+        result = self._call('{"findings": "some string"}')
+        assert result == []

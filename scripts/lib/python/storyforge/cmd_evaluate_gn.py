@@ -214,12 +214,16 @@ def _parse_findings(response_text, persona_name, scene_id):
     # Attempt 1: direct parse
     try:
         data = json.loads(response_text)
-        findings = data.get('findings', [])
+        findings = data.get('findings', []) or []
+        if not isinstance(findings, list):
+            log(f'  WARNING [{persona_name}]: findings is not a list for {scene_id}; '
+                f'got {type(findings).__name__}')
+            return []
         # Ensure scene_id is stamped on each finding
         for f in findings:
             f.setdefault('scene_id', scene_id)
         return findings
-    except (json.JSONDecodeError, AttributeError):
+    except (json.JSONDecodeError, AttributeError, TypeError):
         pass
 
     # Attempt 2: extract from fenced code block (```json ... ``` or ``` ... ```)
@@ -228,11 +232,15 @@ def _parse_findings(response_text, persona_name, scene_id):
     if fenced:
         try:
             data = json.loads(fenced.group(1).strip())
-            findings = data.get('findings', [])
+            findings = data.get('findings', []) or []
+            if not isinstance(findings, list):
+                log(f'  WARNING [{persona_name}]: findings is not a list for {scene_id}; '
+                    f'got {type(findings).__name__}')
+                return []
             for f in findings:
                 f.setdefault('scene_id', scene_id)
             return findings
-        except (json.JSONDecodeError, AttributeError):
+        except (json.JSONDecodeError, AttributeError, TypeError):
             pass
 
     log(f'  WARNING [{persona_name}]: could not parse JSON findings for {scene_id} '
@@ -311,8 +319,15 @@ def _evaluate_scene(scene_id, project_dir, metadata_csv, personas, model,
         with open(prompt_path, encoding='utf-8') as f:
             system_prompt_text = f.read()
 
-        # The API system parameter is a list of content blocks
-        system_blocks = [{'type': 'text', 'text': system_prompt_text}]
+        # The API system parameter is a list of content blocks.
+        # cache_control marks the persona prompt for prompt caching — it is
+        # reused across every scene, so this saves significant cost on
+        # multi-scene runs.
+        system_blocks = [{
+            'type': 'text',
+            'text': system_prompt_text,
+            'cache_control': {'type': 'ephemeral'},
+        }]
 
         if dry_run:
             log(f'  DRY RUN: would call {persona_name} persona for {scene_id}')
@@ -492,10 +507,12 @@ def main(argv=None):
         if result is None:
             continue
 
-        # Write per-scene JSON
+        # Write per-scene JSON (atomic: write to .tmp then replace)
         json_path = os.path.join(output_dir, f'{sid}.json')
-        with open(json_path, 'w', encoding='utf-8') as f:
+        tmp_path = json_path + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(result, f, indent=2)
+        os.replace(tmp_path, json_path)
 
         results.append(result)
         log(f'  {sid}: {len(result["findings"])} finding(s) '

@@ -274,3 +274,78 @@ class TestScoreSkipsNonDraftedScenes:
         assert os.path.isfile(os.path.join(output_dir, 'the-blank-page.json'))
         assert not os.path.isfile(os.path.join(output_dir, 'shadows-arrive.json'))
         assert not os.path.isfile(os.path.join(output_dir, 'the-first-mark.json'))
+
+
+# ---------------------------------------------------------------------------
+# _load_weights: layered fallback (regression: fix #3)
+# ---------------------------------------------------------------------------
+
+class TestLoadWeightsLayering:
+    """Verify that local craft-weights.csv overrides only GN principles while
+    non-GN principles in a novel-mode weights file are ignored."""
+
+    def _call_load_weights(self, project_dir):
+        """Helper: import and call _load_weights using the real plugin_dir."""
+        from storyforge.cmd_score_gn import _load_weights
+        from storyforge.common import get_plugin_dir
+        plugin_dir = get_plugin_dir()
+        return _load_weights(project_dir, plugin_dir)
+
+    def test_local_override_for_brief_fidelity(self, project_dir_gn):
+        """A local weights file with brief_fidelity=9.0 overrides the default."""
+        weights_dir = os.path.join(project_dir_gn, 'working')
+        os.makedirs(weights_dir, exist_ok=True)
+        local_path = os.path.join(weights_dir, 'craft-weights.csv')
+        # Write a weights file that only has brief_fidelity overridden
+        with open(local_path, 'w', encoding='utf-8') as f:
+            f.write('principle|weight\n')
+            f.write('brief_fidelity|9.0\n')
+
+        weights = self._call_load_weights(project_dir_gn)
+
+        # brief_fidelity should dominate because it has weight 9.0 vs the
+        # others (which default to whatever the default file says or 1.0)
+        assert 'brief_fidelity' in weights
+        assert weights['brief_fidelity'] > weights['panel_density'], (
+            'brief_fidelity with local weight 9.0 should dominate panel_density'
+        )
+
+    def test_novel_mode_weights_file_ignored_for_missing_gn_principles(
+            self, project_dir_gn):
+        """A novel-mode weights file with only novel principles leaves GN
+        principles using defaults (not equal weights)."""
+        from storyforge.common import get_plugin_dir
+        from storyforge.cmd_score_gn import _load_weights
+
+        plugin_dir = get_plugin_dir()
+        default_path = os.path.join(
+            plugin_dir, 'references', 'default-craft-weights-gn.csv'
+        )
+        # Only run this assertion if the default file exists
+        if not os.path.isfile(default_path):
+            return  # can't test without default file
+
+        weights_dir = os.path.join(project_dir_gn, 'working')
+        os.makedirs(weights_dir, exist_ok=True)
+        local_path = os.path.join(weights_dir, 'craft-weights.csv')
+        # Simulate a migrated novel-mode weights file: only novel principles
+        with open(local_path, 'w', encoding='utf-8') as f:
+            f.write('principle|weight\n')
+            f.write('prose_repetition|1.5\n')
+            f.write('avoid_passive|2.0\n')
+            f.write('economy_clarity|1.0\n')
+
+        weights = _load_weights(project_dir_gn, plugin_dir)
+
+        # All 6 GN principles must be present and normalised
+        from storyforge.scoring_gn import PRINCIPLES
+        for p in PRINCIPLES:
+            assert p in weights, f'GN principle {p} missing from weights'
+        total = sum(weights.values())
+        assert abs(total - 1.0) < 1e-9, f'weights should sum to 1.0, got {total}'
+
+    def test_weights_sum_to_one(self, project_dir_gn):
+        """Regardless of local overrides, weights must sum to 1.0."""
+        weights = self._call_load_weights(project_dir_gn)
+        total = sum(weights.values())
+        assert abs(total - 1.0) < 1e-9, f'weights sum {total} != 1.0'

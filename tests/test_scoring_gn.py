@@ -258,6 +258,78 @@ def test_brief_fidelity_score_formula_one_failure():
 
 
 # ---------------------------------------------------------------------------
+# score_brief_fidelity — distinct-kinds math (regression: #2)
+# ---------------------------------------------------------------------------
+
+def test_brief_fidelity_multiple_same_kind_counts_as_one(monkeypatch):
+    """2 missing dialogue lines (same kind) → 1 distinct kind → score 0.75."""
+    import storyforge.scoring_gn as scoring_gn_mod
+    monkeypatch.setattr(
+        scoring_gn_mod, 'check_brief_fidelity',
+        lambda brief_row, script_text: [
+            {'kind': 'dialogue_missing', 'detail': 'line A', 'severity': 'high'},
+            {'kind': 'dialogue_missing', 'detail': 'line B', 'severity': 'high'},
+        ],
+    )
+    parsed = parse_script(GOOD_SCRIPT)
+    result = scoring_gn_mod.score_brief_fidelity(parsed, GOOD_BRIEF, GOOD_SCRIPT)
+    assert result['score'] == pytest.approx(0.75), (
+        '2 missing-dialogue failures are 1 distinct kind → 1/4 penalty → score 0.75'
+    )
+    assert len(result['findings']) == 2, 'all raw findings should still be reported'
+
+
+def test_brief_fidelity_two_distinct_kinds_score_half(monkeypatch):
+    """2 missing dialogues + 1 missing visual = 2 distinct kinds → score 0.5."""
+    import storyforge.scoring_gn as scoring_gn_mod
+    monkeypatch.setattr(
+        scoring_gn_mod, 'check_brief_fidelity',
+        lambda brief_row, script_text: [
+            {'kind': 'dialogue_missing', 'detail': 'line A', 'severity': 'high'},
+            {'kind': 'dialogue_missing', 'detail': 'line B', 'severity': 'high'},
+            {'kind': 'visual_keyword_missing', 'detail': 'kw C', 'severity': 'medium'},
+        ],
+    )
+    parsed = parse_script(GOOD_SCRIPT)
+    result = scoring_gn_mod.score_brief_fidelity(parsed, GOOD_BRIEF, GOOD_SCRIPT)
+    assert result['score'] == pytest.approx(0.5), (
+        '2 distinct kinds (dialogue_missing + visual_keyword_missing) → 2/4 penalty → 0.5'
+    )
+
+
+def test_brief_fidelity_all_four_distinct_kinds_score_zero(monkeypatch):
+    """1 failure of each of the 4 kinds → score 0.0."""
+    import storyforge.scoring_gn as scoring_gn_mod
+    monkeypatch.setattr(
+        scoring_gn_mod, 'check_brief_fidelity',
+        lambda brief_row, script_text: [
+            {'kind': 'dialogue_missing', 'detail': 'x', 'severity': 'high'},
+            {'kind': 'visual_keyword_missing', 'detail': 'y', 'severity': 'medium'},
+            {'kind': 'panel_count_mismatch', 'detail': 'z', 'severity': 'medium'},
+            {'kind': 'page_turn_missing', 'detail': 'w', 'severity': 'high'},
+        ],
+    )
+    parsed = parse_script(GOOD_SCRIPT)
+    result = scoring_gn_mod.score_brief_fidelity(parsed, GOOD_BRIEF, GOOD_SCRIPT)
+    assert result['score'] == pytest.approx(0.0), (
+        '4 distinct kinds → 4/4 penalty → score 0.0'
+    )
+
+
+def test_brief_fidelity_zero_failures_score_one(monkeypatch):
+    """0 failures → score 1.0."""
+    import storyforge.scoring_gn as scoring_gn_mod
+    monkeypatch.setattr(
+        scoring_gn_mod, 'check_brief_fidelity',
+        lambda brief_row, script_text: [],
+    )
+    parsed = parse_script(GOOD_SCRIPT)
+    result = scoring_gn_mod.score_brief_fidelity(parsed, GOOD_BRIEF, GOOD_SCRIPT)
+    assert result['score'] == pytest.approx(1.0)
+    assert result['findings'] == []
+
+
+# ---------------------------------------------------------------------------
 # score_panel_density
 # ---------------------------------------------------------------------------
 

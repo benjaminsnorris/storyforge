@@ -571,3 +571,25 @@ def test_dispatcher_routes_evaluate_to_novel_in_novel_mode(project_dir, monkeypa
         pass
     assert called['novel'], 'novel-mode evaluate should route to cmd_evaluate'
     assert not called['gn'], 'novel-mode evaluate should NOT call cmd_evaluate_gn'
+
+
+def test_dispatcher_routes_score_to_novel_in_novel_mode(project_dir, monkeypatch):
+    """In novel mode, ./storyforge score invokes cmd_score (not cmd_score_gn)."""
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr('sys.argv', ['storyforge', 'score', '--help'])
+    called = {'novel': False, 'gn': False}
+    from storyforge import cmd_score, cmd_score_gn
+    def novel_track(*args, **kwargs):
+        called['novel'] = True
+        raise SystemExit(0)
+    def gn_track(*args, **kwargs):
+        called['gn'] = True
+    monkeypatch.setattr(cmd_score, 'main', novel_track)
+    monkeypatch.setattr(cmd_score_gn, 'main', gn_track)
+    from storyforge.__main__ import main
+    try:
+        main()
+    except SystemExit:
+        pass
+    assert called['novel'], 'novel-mode score should route to cmd_score'
+    assert not called['gn'], 'novel-mode score should NOT call cmd_score_gn'

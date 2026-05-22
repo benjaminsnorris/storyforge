@@ -80,26 +80,8 @@ def _row_to_dict(csv_path, row_id):
 # Weights loading
 # ---------------------------------------------------------------------------
 
-def _load_weights(project_dir, plugin_dir):
-    """Load craft weights. Project-local file takes precedence over default.
-
-    Returns dict of principle -> weight (float, normalised so sum == 1.0).
-    Falls back to equal weights if no file found.
-    """
-    # Try project-local overrides first
-    local_path = os.path.join(project_dir, 'working', 'craft-weights.csv')
-    default_path = os.path.join(plugin_dir, 'references', 'default-craft-weights-gn.csv')
-
-    weights_path = None
-    if os.path.isfile(local_path):
-        weights_path = local_path
-    elif os.path.isfile(default_path):
-        weights_path = default_path
-
-    if not weights_path:
-        # Fallback: equal weights
-        return {p: 1.0 / len(PRINCIPLES) for p in PRINCIPLES}
-
+def _parse_weights_file(weights_path):
+    """Parse a pipe-delimited weights CSV and return {principle: float}."""
     raw = {}
     try:
         with open(weights_path, encoding='utf-8') as f:
@@ -121,20 +103,47 @@ def _load_weights(project_dir, plugin_dir):
                         pass
     except Exception as e:
         log(f'WARNING: Failed to load weights from {weights_path}: {e}')
-        return {p: 1.0 / len(PRINCIPLES) for p in PRINCIPLES}
+    return raw
 
-    # Keep only GN principles, fill missing with 1.0
-    result = {}
-    for p in PRINCIPLES:
-        result[p] = raw.get(p, 1.0)
 
-    total = sum(result.values())
-    if total > 0:
-        result = {p: w / total for p, w in result.items()}
+def _load_weights(project_dir, plugin_dir):
+    """Load craft weights using a layered approach.
+
+    1. Start from defaults in references/default-craft-weights-gn.csv
+    2. Overlay any GN principles found in working/craft-weights.csv
+
+    This means projects migrated from novel mode (which have a novel-style
+    weights file containing none of the GN principles) still get the curated
+    GN defaults rather than equal weights.
+
+    Returns dict of principle -> weight (float, normalised so sum == 1.0).
+    Falls back to equal weights if no default file found.
+    """
+    default_path = os.path.join(plugin_dir, 'references', 'default-craft-weights-gn.csv')
+    local_path = os.path.join(project_dir, 'working', 'craft-weights.csv')
+
+    # Step 1: load defaults
+    if os.path.isfile(default_path):
+        defaults = _parse_weights_file(default_path)
     else:
-        result = {p: 1.0 / len(PRINCIPLES) for p in PRINCIPLES}
+        defaults = {}
 
-    return result
+    # Fill any missing GN principles with 1.0 so all six are represented
+    raw = {}
+    for p in PRINCIPLES:
+        raw[p] = defaults.get(p, 1.0)
+
+    # Step 2: overlay local file — only for GN principles
+    if os.path.isfile(local_path):
+        local = _parse_weights_file(local_path)
+        for p in PRINCIPLES:
+            if p in local:
+                raw[p] = local[p]
+
+    total = sum(raw.values())
+    if total > 0:
+        return {p: w / total for p, w in raw.items()}
+    return {p: 1.0 / len(PRINCIPLES) for p in PRINCIPLES}
 
 
 # ---------------------------------------------------------------------------
@@ -380,10 +389,12 @@ def main(argv=None):
         if result is None:
             continue
 
-        # Write per-scene JSON
+        # Write per-scene JSON (atomic: write to .tmp then replace)
         json_path = os.path.join(output_dir, f'{sid}.json')
-        with open(json_path, 'w', encoding='utf-8') as f:
+        tmp_path = json_path + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(result, f, indent=2)
+        os.replace(tmp_path, json_path)
 
         results.append(result)
         finding_count = len(result['findings'])
