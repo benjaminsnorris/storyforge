@@ -343,6 +343,14 @@ class TestLoadWeightsLayering:
             assert p in weights, f'GN principle {p} missing from weights'
         total = sum(weights.values())
         assert abs(total - 1.0) < 1e-9, f'weights should sum to 1.0, got {total}'
+        # Defaults must actually be applied — not equal-weight fallback.
+        # The curated GN defaults give brief_fidelity weight=8 and
+        # panel_density weight=5, so brief_fidelity must outweigh panel_density.
+        assert weights['brief_fidelity'] > weights['panel_density'], (
+            'curated GN defaults should be applied when local file has no GN '
+            'principles — got equal weights, suggesting the fallback path '
+            'ignored defaults'
+        )
 
     def test_weights_sum_to_one(self, project_dir_gn):
         """Regardless of local overrides, weights must sum to 1.0."""
