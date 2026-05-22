@@ -363,9 +363,9 @@ Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a 
 - Schema validation enforces graphic-novel column rules (target_pages required, panel_breakdown required at briefed status)
 - `score` — 6 deterministic GN principles in `scoring_gn.py` (brief_fidelity, panel_density, dialogue_compression, layout_rhythm, caption_economy, panel_composition_depth); no API calls, instant and cost-free (routes to `cmd_score_gn`)
 - `evaluate` — 3-persona evaluation panel (panel-composition, pacing, dialogue critics) that adds subjective findings the deterministic scorers can't catch (routes to `cmd_evaluate_gn`)
+- `revise` — findings-driven polish pass; reads score + evaluator findings and produces a revised panel script per scene. One API call per scene (routes to `cmd_revise_gn`). Pass `--no-findings` to polish blind.
 
 **Not yet supported (followups tracked as issues):**
-- `revise` — GN-specific revision passes deferred pending real scoring/evaluation data (#209 followup)
 - `publish`, `annotations` — Bookshelf integration for GN (#215)
 - `extract` — extract structure from existing scripts/prose (#213)
 
