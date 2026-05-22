@@ -350,7 +350,7 @@ def test_briefs_handler_gn_returns_none_when_no_work(project_dir_gn):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize('cmd', [
-    'evaluate', 'score', 'revise',
+    'evaluate', 'revise',
     'publish', 'annotations', 'extract', 'repetition', 'enrich',
 ])
 def test_dispatcher_blocks_unsupported_commands_in_gn_mode(
@@ -508,3 +508,23 @@ def test_dispatcher_routes_write_to_novel_in_novel_mode(project_dir, monkeypatch
         pass
     assert called['novel'], 'novel-mode write should route to cmd_write'
     assert not called['gn'], 'novel-mode write should NOT call cmd_write_gn'
+
+
+def test_dispatcher_routes_score_to_gn_in_gn_mode(project_dir_gn, monkeypatch):
+    """In GN mode, `./storyforge score` invokes cmd_score_gn."""
+    monkeypatch.chdir(project_dir_gn)
+    monkeypatch.setattr('sys.argv', ['storyforge', 'score', '--dry-run'])
+    called = []
+    from storyforge import cmd_score_gn
+    real_main = cmd_score_gn.main
+    def track(*args, **kwargs):
+        called.append(True)
+        return real_main(*args, **kwargs)
+    monkeypatch.setattr(cmd_score_gn, 'main', track)
+
+    from storyforge.__main__ import main
+    try:
+        main()
+    except SystemExit:
+        pass
+    assert called, 'cmd_score_gn.main should be called for score in GN mode'

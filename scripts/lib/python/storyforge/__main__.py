@@ -11,7 +11,7 @@ import sys
 # When a project's medium is graphic-novel, these commands return a clear
 # error instead of silently running novel-mode logic on the wrong data.
 GN_UNSUPPORTED_COMMANDS = frozenset({
-    'evaluate', 'score', 'revise',
+    'evaluate', 'revise',
     'publish', 'annotations', 'extract', 'repetition', 'enrich',
 })
 
@@ -19,6 +19,7 @@ GN_UNSUPPORTED_COMMANDS = frozenset({
 GN_ROUTED_COMMANDS = {
     'write': 'storyforge.cmd_write_gn',
     'assemble': 'storyforge.cmd_script_package',
+    'score': 'storyforge.cmd_score_gn',
 }
 
 COMMANDS = {
