@@ -349,20 +349,23 @@ Key principles:
 | `scoring_weather.py` | Deterministic scorer: no_weather_dreams (scene opening patterns) |
 | `scoring_rhythm.py` | Deterministic scorer: sentence_as_thought (sentence length variance) |
 | `scoring_economy.py` | Deterministic scorer: economy_clarity (composite filler/AI-tell/passive/adverb) |
+| `scoring_gn.py` | Deterministic GN scorers: brief_fidelity, panel_density, dialogue_compression, layout_rhythm, caption_economy, panel_composition_depth |
 
 ## Graphic Novel Mode
 
 Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a project into graphic-novel mode. To convert an existing project between mediums, use `storyforge migrate-medium --to {novel|graphic-novel}` (archives current state, resets scene drafts, transforms CSV schemas).
 
-**Supported (Plans 1 + 2):**
+**Supported (Plans 1 + 2 + 3):**
 - `elaborate` (spine, architecture, scene-map, voice, briefs)
 - `hone`, `validate`, `cleanup`
 - `write` — drafts panel scripts per scene (mirrors novel-mode write; routes to `cmd_write_gn`)
 - `assemble` — produces the artist handoff bundle: `manuscript/{script.md, visual-references.md, chapter-map.md, handoff-readme.md}` (routes to `cmd_script_package`)
 - Schema validation enforces graphic-novel column rules (target_pages required, panel_breakdown required at briefed status)
+- `score` — 6 deterministic GN principles in `scoring_gn.py` (brief_fidelity, panel_density, dialogue_compression, layout_rhythm, caption_economy, panel_composition_depth); no API calls, instant and cost-free (routes to `cmd_score_gn`)
+- `evaluate` — 3-persona evaluation panel (panel-composition, pacing, dialogue critics) that adds subjective findings the deterministic scorers can't catch (routes to `cmd_evaluate_gn`)
 
 **Not yet supported (followups tracked as issues):**
-- `evaluate`, `score`, `revise` — GN-specific rubric is its own design problem (#209)
+- `revise` — GN-specific revision passes deferred pending real scoring/evaluation data (#209 followup)
 - `publish`, `annotations` — Bookshelf integration for GN (#215)
 - `extract` — extract structure from existing scripts/prose (#213)
 

@@ -253,6 +253,29 @@ Every time you modify weights, record author scores, or make any file changes, c
 
 3. Then continue to the next piece of work.
 
+## Graphic-novel mode
+
+When `project.medium: graphic-novel` is set, scoring runs a completely different pipeline. The novel's 25-44 LLM-evaluated principles are replaced by 6 GN-specific deterministic scorers in `scoring_gn.py`. All six principles run without any API calls — scoring is instant and completely cost-free.
+
+**The 6 GN principles:**
+
+| Principle | What it measures |
+|---|---|
+| `brief_fidelity` | Script honors the brief: key dialogue present, visual keywords appear, panel breakdown matches, page-turn beats delivered |
+| `panel_density` | Average panels per page — sweet spot is 4-7 (score peaks at 5.5 avg) |
+| `dialogue_compression` | Word balloons ≤ 25 words; long balloons break lettering reality and slow pacing |
+| `layout_rhythm` | Variation in per-page panel counts; stdev ≈ 1.5 is ideal (too uniform = mechanical, too chaotic = disorienting) |
+| `caption_economy` | Captions per page matched against the brief's `caption_strategy` (none / minimal / journal-voiceover / omniscient) |
+| `panel_composition_depth` | Composition prose 15-50 words per panel — enough visual detail for the artist, not so much it crowds them out |
+
+**Output:** Per-scene JSON at `working/scores/latest/{scene_id}.json` and an aggregate `working/scores/latest/summary.csv`.
+
+**Complement with `evaluate`:** `./storyforge evaluate` runs three subjective evaluator personas — panel-composition, pacing, and dialogue critics — that flag issues the deterministic scorers can't catch (inconsistent character silhouettes, page-turn beat quality, voice differentiation). Run both for full feedback.
+
+**Run mode in GN projects:** Present Option A / Option B as usual, but note there is no API cost for scoring. The evaluate command does invoke Claude (3 personas per scene).
+
+---
+
 ## Coaching Level Behavior
 
 Adapt your approach based on `project.coaching_level` in storyforge.yaml:
