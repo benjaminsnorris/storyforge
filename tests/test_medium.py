@@ -350,7 +350,7 @@ def test_briefs_handler_gn_returns_none_when_no_work(project_dir_gn):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize('cmd', [
-    'evaluate', 'revise',
+    'revise',
     'publish', 'annotations', 'extract', 'repetition', 'enrich',
 ])
 def test_dispatcher_blocks_unsupported_commands_in_gn_mode(
@@ -528,3 +528,46 @@ def test_dispatcher_routes_score_to_gn_in_gn_mode(project_dir_gn, monkeypatch):
     except SystemExit:
         pass
     assert called, 'cmd_score_gn.main should be called for score in GN mode'
+
+
+def test_dispatcher_routes_evaluate_to_gn_in_gn_mode(project_dir_gn, monkeypatch):
+    """In GN mode, `./storyforge evaluate` invokes cmd_evaluate_gn."""
+    monkeypatch.chdir(project_dir_gn)
+    monkeypatch.setattr('sys.argv', ['storyforge', 'evaluate', '--dry-run'])
+    called = []
+    from storyforge import cmd_evaluate_gn
+    def track(*args, **kwargs):
+        called.append(True)
+        raise SystemExit(0)
+    monkeypatch.setattr(cmd_evaluate_gn, 'main', track)
+
+    from storyforge.__main__ import main
+    try:
+        main()
+    except SystemExit:
+        pass
+    assert called, 'cmd_evaluate_gn.main should be called for evaluate in GN mode'
+
+
+def test_dispatcher_routes_evaluate_to_novel_in_novel_mode(project_dir, monkeypatch):
+    """In novel mode, `./storyforge evaluate` invokes cmd_evaluate (not cmd_evaluate_gn)."""
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setattr('sys.argv', ['storyforge', 'evaluate', '--help'])
+
+    called = {'novel': False, 'gn': False}
+    from storyforge import cmd_evaluate, cmd_evaluate_gn
+    def novel_track(*args, **kwargs):
+        called['novel'] = True
+        raise SystemExit(0)
+    def gn_track(*args, **kwargs):
+        called['gn'] = True
+    monkeypatch.setattr(cmd_evaluate, 'main', novel_track)
+    monkeypatch.setattr(cmd_evaluate_gn, 'main', gn_track)
+
+    from storyforge.__main__ import main
+    try:
+        main()
+    except SystemExit:
+        pass
+    assert called['novel'], 'novel-mode evaluate should route to cmd_evaluate'
+    assert not called['gn'], 'novel-mode evaluate should NOT call cmd_evaluate_gn'
