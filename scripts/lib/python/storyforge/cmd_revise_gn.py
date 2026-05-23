@@ -19,7 +19,6 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
 
 from storyforge.common import (
     detect_project_root, log, set_log_file, select_model,
@@ -96,36 +95,53 @@ def _build_voice_text(project_dir):
     return ''
 
 
-def _load_score_findings(project_dir, scene_id):
-    """Load deterministic score findings for one scene. Returns flat list."""
-    path = os.path.join(project_dir, 'working', 'scores', 'latest', f'{scene_id}.json')
+def _load_findings_file(path, kind):
+    """Load a findings file at `path`. Returns:
+
+      - []  when the file is absent (no findings yet — legitimate)
+      - None when the file exists but is corrupt or unreadable (real error)
+      - list of finding dicts otherwise
+    """
     if not os.path.isfile(path):
         return []
     try:
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return []
-    return data.get('findings', []) or []
+    except (json.JSONDecodeError, OSError) as e:
+        log(f'WARNING: could not read {kind} findings at {path}: {e}')
+        return None
+    raw = data.get('findings', []) or []
+    # Drop any non-dict entries (e.g. nulls) so downstream prompt-building
+    # can't crash with AttributeError on f.get(...).
+    findings = [f for f in raw if isinstance(f, dict)]
+    if len(findings) != len(raw):
+        log(f'WARNING: dropped {len(raw) - len(findings)} malformed '
+            f'{kind} finding(s) at {path}')
+    return findings
+
+
+def _load_score_findings(project_dir, scene_id):
+    """Load deterministic score findings for one scene.
+
+    Returns [] when no file exists, None on parse failure, else a list.
+    """
+    path = os.path.join(project_dir, 'working', 'scores', 'latest', f'{scene_id}.json')
+    return _load_findings_file(path, 'score')
 
 
 def _load_eval_findings(project_dir, scene_id):
-    """Load persona eval findings for one scene. Returns flat list."""
+    """Load persona eval findings for one scene.
+
+    Returns [] when no file exists, None on parse failure, else a list.
+    """
     path = os.path.join(project_dir, 'working', 'evaluations', 'latest', f'{scene_id}.json')
-    if not os.path.isfile(path):
-        return []
-    try:
-        with open(path, encoding='utf-8') as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return []
-    return data.get('findings', []) or []
+    return _load_findings_file(path, 'eval')
 
 
 def _resolve_target_scenes(args, metadata_csv):
-    """Resolve which scenes to revise, in priority order.
-
-    Mirrors the resolution logic used by cmd_write_gn / cmd_score_gn.
+    """Resolve which scenes to revise. Single-positional matches cmd_write_gn;
+    two positionals become a range; --scenes / --act / --from-seq delegate to
+    apply_scene_filter so unknown IDs are flagged loudly.
     """
     all_ids = build_scene_list(metadata_csv)
 
@@ -141,7 +157,7 @@ def _resolve_target_scenes(args, metadata_csv):
             'Provide one scene ID or two for a range.')
         sys.exit(1)
     if args.scenes:
-        return [s.strip() for s in args.scenes.split(',') if s.strip()]
+        return apply_scene_filter(metadata_csv, all_ids, 'scenes', args.scenes, None)
     if args.act:
         return apply_scene_filter(metadata_csv, all_ids, 'act', args.act, None)
     if args.from_seq:
@@ -152,7 +168,19 @@ def _resolve_target_scenes(args, metadata_csv):
 
 
 def _revise_one_scene(scene_id, project_dir, model, args):
-    """Revise a single scene. Returns (scene_id, result_dict)."""
+    """Revise a single scene.
+
+    Side effects (only on the success path, all gated past the dry-run return):
+      - overwrites scenes/{scene_id}.md with the revised script
+      - writes the API response JSON to working/logs/revise-gn/{scene_id}.json
+      - appends a row to the cost ledger via log_operation
+
+    Returns (scene_id, result_dict) where result_dict has exactly one of:
+      - {'skipped': True, 'reason': str} — scene intentionally not processed
+      - {'error': str}                   — recoverable per-scene failure
+      - {'dry_run': True, 'prompt': str, 'score_findings': int, 'eval_findings': int}
+      - {'revised': True, 'pages': int, 'panels': int, ...} — success
+    """
     ref_dir = os.path.join(project_dir, 'reference')
     scenes_csv = os.path.join(ref_dir, 'scenes.csv')
 
@@ -171,6 +199,8 @@ def _revise_one_scene(scene_id, project_dir, model, args):
     intent_row = _row_to_dict(os.path.join(ref_dir, 'scene-intent.csv'), scene_id)
     brief_row = _row_to_dict(os.path.join(ref_dir, 'scene-briefs.csv'), scene_id)
 
+    if not scene_row:
+        return scene_id, {'error': 'missing row in scenes.csv'}
     if not brief_row:
         return scene_id, {'error': 'missing brief row in scene-briefs.csv'}
 
@@ -183,6 +213,20 @@ def _revise_one_scene(scene_id, project_dir, model, args):
     else:
         score_findings = _load_score_findings(project_dir, scene_id)
         eval_findings = _load_eval_findings(project_dir, scene_id)
+        # _load_*_findings returns None when the file exists but is corrupt.
+        # Surface that as a real error instead of treating it like "no findings."
+        if score_findings is None or eval_findings is None:
+            broken = []
+            if score_findings is None:
+                broken.append('score')
+            if eval_findings is None:
+                broken.append('eval')
+            return scene_id, {
+                'error': (
+                    f'corrupt {"/".join(broken)} findings file (see WARNING above) — '
+                    f're-run scoring/evaluation or delete the file to clear it'
+                ),
+            }
         if not score_findings and not eval_findings:
             return scene_id, {
                 'skipped': True,
@@ -230,7 +274,6 @@ def _revise_one_scene(scene_id, project_dir, model, args):
     if not revised_text:
         return scene_id, {'error': 'empty API response'}
 
-    # Overwrite the scene file with the revised script
     with open(scene_path, 'w', encoding='utf-8') as f:
         f.write(revised_text)
 
@@ -329,18 +372,25 @@ def main(argv=None):
     model = select_model('revision') if not args.dry_run else 'dry-run'
     log(f'Model: {model}')
 
-    # Branch + draft PR (unless --no-branch or dry-run)
+    # Branch + draft PR (unless --no-branch or dry-run). Refuse to proceed if
+    # branch creation fails — committing revisions to the current branch
+    # (possibly main) would violate the project's git policy.
     pr_number = ''
     if not args.dry_run and not args.no_branch:
         branch = git_helpers.create_branch('revise-gn', project_dir)
-        if branch:
-            git_helpers.ensure_branch_pushed(project_dir, branch)
-            pr_number = git_helpers.create_draft_pr(
-                title=f'Revise (GN): {len(scene_ids)} scene(s)',
-                body=_build_pr_body(scene_ids),
-                project_dir=project_dir,
-                work_type='revision',
-            )
+        if not branch:
+            log('ERROR: Could not create or resume a feature branch. '
+                'Refusing to commit revisions to the current branch. '
+                'Check `git status` for a dirty working tree, or pass '
+                '--no-branch to run without git operations.')
+            sys.exit(1)
+        git_helpers.ensure_branch_pushed(project_dir, branch)
+        pr_number = git_helpers.create_draft_pr(
+            title=f'Revise (GN): {len(scene_ids)} scene(s)',
+            body=_build_pr_body(scene_ids),
+            project_dir=project_dir,
+            work_type='revision',
+        )
 
     # Revise each scene sequentially. Sequential is simpler than parallel for
     # the first version and keeps commit ordering deterministic — the LLM call
@@ -367,7 +417,6 @@ def main(argv=None):
             log(f'  ERROR {sid}: {result["error"]}')
             continue
 
-        # Apply CSV updates in the main thread (mirrors cmd_write_gn approach)
         update_field(metadata_csv, sid, 'page_count', str(result['pages']))
         update_field(metadata_csv, sid, 'panel_count', str(result['panels']))
         update_field(metadata_csv, sid, 'status', 'revised')

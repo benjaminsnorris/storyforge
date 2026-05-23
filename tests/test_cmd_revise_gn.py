@@ -447,3 +447,164 @@ def test_revise_via_dispatcher_routes_to_gn(project_dir_gn, monkeypatch):
 
     scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
     assert get_field(scenes_csv, 'the-blank-page', 'status') == 'revised'
+
+
+# ---------------------------------------------------------------------------
+# Draft preservation under failure (the critical invariant: revise must
+# never destroy a draft when something goes wrong)
+# ---------------------------------------------------------------------------
+
+def _empty_invoke_to_file(prompt, model, log_file, **kwargs):
+    """Fake invoke_to_file: API returned a response with no text content."""
+    os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+    response = {
+        'content': [],  # no text blocks at all
+        'stop_reason': 'max_tokens',
+        'usage': {
+            'input_tokens': 200, 'output_tokens': 0,
+            'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0,
+        },
+    }
+    with open(log_file, 'w') as f:
+        json.dump(response, f)
+    return response
+
+
+def test_revise_preserves_draft_on_empty_api_response(project_dir_gn, monkeypatch):
+    """If the API returns no text, the scene file and status must be untouched."""
+    monkeypatch.chdir(project_dir_gn)
+    _seed_draft(project_dir_gn, 'the-blank-page')
+    _seed_score_findings(project_dir_gn, 'the-blank-page', [
+        {'kind': 'balloon_too_long', 'detail': 'x', 'severity': 'high'},
+    ])
+
+    from storyforge import api, cmd_revise_gn
+    monkeypatch.setattr(api, 'invoke_to_file', _empty_invoke_to_file)
+    monkeypatch.setattr(cmd_revise_gn, 'invoke_to_file', _empty_invoke_to_file)
+
+    cmd_revise_gn.main(['the-blank-page', '--no-branch'])
+
+    scene_path = os.path.join(project_dir_gn, 'scenes', 'the-blank-page.md')
+    assert open(scene_path).read() == INITIAL_DRAFT, (
+        'empty API response must NOT clobber the original draft'
+    )
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    assert get_field(scenes_csv, 'the-blank-page', 'status') == 'drafted'
+    assert get_field(scenes_csv, 'the-blank-page', 'panel_count') == '5'
+    assert get_field(scenes_csv, 'the-blank-page', 'page_count') == '2'
+
+
+def test_revise_preserves_draft_on_api_exception(project_dir_gn, monkeypatch):
+    """If invoke_to_file raises, the scene file and status must be untouched."""
+    monkeypatch.chdir(project_dir_gn)
+    _seed_draft(project_dir_gn, 'the-blank-page')
+    _seed_score_findings(project_dir_gn, 'the-blank-page', [
+        {'kind': 'balloon_too_long', 'detail': 'x', 'severity': 'high'},
+    ])
+
+    def boom(*args, **kwargs):
+        raise RuntimeError('simulated API outage')
+
+    from storyforge import api, cmd_revise_gn
+    monkeypatch.setattr(api, 'invoke_to_file', boom)
+    monkeypatch.setattr(cmd_revise_gn, 'invoke_to_file', boom)
+
+    cmd_revise_gn.main(['the-blank-page', '--no-branch'])
+
+    scene_path = os.path.join(project_dir_gn, 'scenes', 'the-blank-page.md')
+    assert open(scene_path).read() == INITIAL_DRAFT, (
+        'API exception must NOT clobber the original draft'
+    )
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    assert get_field(scenes_csv, 'the-blank-page', 'status') == 'drafted'
+
+
+# ---------------------------------------------------------------------------
+# Findings file diagnostics
+# ---------------------------------------------------------------------------
+
+def test_revise_errors_on_corrupt_score_findings(project_dir_gn, monkeypatch):
+    """A corrupt findings file is surfaced as an error, not as "no findings"."""
+    monkeypatch.chdir(project_dir_gn)
+    _seed_draft(project_dir_gn, 'the-blank-page')
+
+    # Write malformed JSON to the score findings file
+    path = os.path.join(project_dir_gn, 'working', 'scores', 'latest',
+                        'the-blank-page.json')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('{this is not valid json')
+
+    calls = []
+
+    def track(*args, **kwargs):
+        calls.append(args)
+        return _make_fake_invoke(REVISED_SCRIPT)(*args, **kwargs)
+
+    from storyforge import api, cmd_revise_gn
+    monkeypatch.setattr(api, 'invoke_to_file', track)
+    monkeypatch.setattr(cmd_revise_gn, 'invoke_to_file', track)
+
+    cmd_revise_gn.main(['the-blank-page', '--no-branch'])
+    assert calls == [], 'should not invoke API when findings are corrupt'
+
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    assert get_field(scenes_csv, 'the-blank-page', 'status') == 'drafted'
+
+
+# ---------------------------------------------------------------------------
+# --scenes flag validates against scene list (no silent typo pass-through)
+# ---------------------------------------------------------------------------
+
+def test_revise_scenes_flag_rejects_unknown_scene_ids(project_dir_gn, monkeypatch):
+    """`--scenes typo-id` should fail loudly via apply_scene_filter, not silently skip."""
+    monkeypatch.chdir(project_dir_gn)
+
+    from storyforge import api, cmd_revise_gn
+    # Should not get this far, but if it does, fail the test loudly.
+    monkeypatch.setattr(api, 'invoke_to_file',
+                        lambda *a, **k: pytest.fail('API should not be called'))
+    monkeypatch.setattr(cmd_revise_gn, 'invoke_to_file',
+                        lambda *a, **k: pytest.fail('API should not be called'))
+
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_revise_gn.main(['--scenes', 'this-id-does-not-exist', '--no-branch'])
+    assert exc_info.value.code != 0
+
+
+# ---------------------------------------------------------------------------
+# Branch-creation failure must NOT fall through to committing on current branch
+# ---------------------------------------------------------------------------
+
+def test_revise_aborts_when_branch_creation_fails(project_dir_gn, monkeypatch):
+    """If git_helpers.create_branch returns '', the run must abort before any
+    API call or git commit happens — never commit revisions to the current
+    branch (potentially main)."""
+    monkeypatch.chdir(project_dir_gn)
+    _seed_draft(project_dir_gn, 'the-blank-page')
+    _seed_score_findings(project_dir_gn, 'the-blank-page', [
+        {'kind': 'balloon_too_long', 'detail': 'x', 'severity': 'high'},
+    ])
+
+    calls = []
+
+    def fake_invoke(*args, **kwargs):
+        calls.append(args)
+        return _make_fake_invoke(REVISED_SCRIPT)(*args, **kwargs)
+
+    from storyforge import api, cmd_revise_gn, git as git_helpers
+    monkeypatch.setattr(api, 'invoke_to_file', fake_invoke)
+    monkeypatch.setattr(cmd_revise_gn, 'invoke_to_file', fake_invoke)
+    monkeypatch.setattr(git_helpers, 'create_branch', lambda *a, **k: '')
+
+    # Invoke without --no-branch so the branch-creation path is exercised
+    with pytest.raises(SystemExit) as exc_info:
+        cmd_revise_gn.main(['the-blank-page'])
+    assert exc_info.value.code != 0
+    assert calls == [], 'API must not be called when branch creation fails'
+
+    # Scene file untouched, status unchanged
+    scene_path = os.path.join(project_dir_gn, 'scenes', 'the-blank-page.md')
+    assert open(scene_path).read() == INITIAL_DRAFT
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    assert get_field(scenes_csv, 'the-blank-page', 'status') == 'drafted'

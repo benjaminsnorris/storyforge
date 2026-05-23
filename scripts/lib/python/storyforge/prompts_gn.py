@@ -176,14 +176,14 @@ def _format_findings(score_findings, eval_findings):
     blocks = []
 
     if score_findings:
-        # Group by principle (kind prefix) so the revision sees related issues together
+        # Group by finding kind so the revision sees related issues together
         by_kind = {}
         for f in score_findings:
             kind = f.get('kind', 'other')
             by_kind.setdefault(kind, []).append(f)
 
-        # Order kinds: brief-fidelity first (most important), then dialogue,
-        # then composition, then layout/density
+        # Order: brief-fidelity → dialogue → captions → composition →
+        # layout/density (most actionable first)
         kind_order = [
             'dialogue_missing', 'visual_keyword_missing',
             'panel_count_mismatch', 'page_turn_missing',
