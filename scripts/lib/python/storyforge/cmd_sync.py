@@ -257,6 +257,14 @@ def run_sync(project_dir, md_rel=DEFAULT_OUTPUT_PATH, check_only=False):
         return 'exported'
 
     if state['md_dirty']:
+        # MD-dirty + not on disk means the user wiped a tracked MD —
+        # there's nothing to import; regenerate it from the CSVs.
+        if not state['md_exists']:
+            if check_only:
+                return 'exported'
+            export_scenes(project_dir, md_path)
+            log(f'Regenerated wiped {md_rel} from CSVs')
+            return 'exported'
         if check_only:
             return 'imported'
         # import_scenes raises RuntimeError on unknown scene IDs etc.
@@ -336,16 +344,22 @@ if [ -n "$UNSTAGED" ]; then
     exit 1
 fi
 
-# Step 3: find the storyforge runner. Fail closed if we can't.
+# Step 3: find the storyforge runner. Tries (1) PATH, (2) $STORYFORGE_HOME
+# override, (3) the absolute path baked in at install time. Fails closed
+# if none resolve — silent exit-0 here would let desync ship.
+DEFAULT_RUNNER='__STORYFORGE_RUNNER_PATH__'
 if command -v storyforge >/dev/null 2>&1; then
     SF=storyforge
 elif [ -n "${{STORYFORGE_HOME:-}}" ] && [ -x "$STORYFORGE_HOME/storyforge" ]; then
     SF="$STORYFORGE_HOME/storyforge"
+elif [ -x "$DEFAULT_RUNNER" ]; then
+    SF="$DEFAULT_RUNNER"
 else
     echo "" >&2
-    echo "ERROR: pre-commit hook needs 'storyforge' on PATH (or \\$STORYFORGE_HOME" >&2
-    echo "set to the plugin checkout) to keep scene files in sync." >&2
-    echo "Install storyforge or set STORYFORGE_SYNC_SKIP=1 to bypass." >&2
+    echo "ERROR: pre-commit hook can't find a 'storyforge' runner." >&2
+    echo "  Tried: PATH, \\$STORYFORGE_HOME, install-time default ($DEFAULT_RUNNER)." >&2
+    echo "  Re-run \\`storyforge sync --install-hook\\` to rebake the path," >&2
+    echo "  or set STORYFORGE_SYNC_SKIP=1 to bypass." >&2
     exit 1
 fi
 
@@ -367,8 +381,28 @@ done
 '''
 
 
+def _default_runner_path():
+    """Locate the `storyforge` runner relative to this module.
+
+    `cmd_sync.py` lives at <plugin>/scripts/lib/python/storyforge/cmd_sync.py;
+    walk up four levels to <plugin>, where the runner script sits.
+    Returns an empty string if the runner isn't where we expect.
+    """
+    here = os.path.abspath(__file__)
+    plugin_root = os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(here)))
+    ))
+    candidate = os.path.join(plugin_root, 'storyforge')
+    return candidate if os.path.isfile(candidate) else ''
+
+
 def install_hook(project_dir):
-    """Write the pre-commit hook into the project's .git/hooks/. Returns path."""
+    """Write the pre-commit hook into the project's .git/hooks/. Returns path.
+
+    The current plugin's runner path is baked into the hook so that the
+    installed hook keeps working without requiring `storyforge` on PATH or
+    any env-var setup. Re-run --install-hook after moving the plugin.
+    """
     hooks_dir = os.path.join(project_dir, '.git', 'hooks')
     if not os.path.isdir(hooks_dir):
         log(f'ERROR: {hooks_dir} not found — is this a git repository?')
@@ -381,10 +415,18 @@ def install_hook(project_dir):
             log(f'WARNING: {hook_path} already exists and is not a storyforge hook. '
                 'Refusing to overwrite — back it up or merge by hand.')
             sys.exit(1)
+    runner = _default_runner_path()
+    if not runner:
+        log('WARNING: could not locate the storyforge runner relative to '
+            'this module. Hook will fall back to PATH / $STORYFORGE_HOME at '
+            'commit time.')
+    hook_content = HOOK_SCRIPT.replace('__STORYFORGE_RUNNER_PATH__', runner)
     with open(hook_path, 'w', encoding='utf-8') as f:
-        f.write(HOOK_SCRIPT)
+        f.write(hook_content)
     os.chmod(hook_path, 0o755)
     log(f'Installed pre-commit hook at {hook_path}')
+    if runner:
+        log(f'  Hook will invoke: {runner}')
     return hook_path
 
 

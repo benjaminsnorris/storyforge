@@ -209,13 +209,19 @@ def test_sync_gn_first_export(git_project_gn):
 
 def test_install_hook_writes_executable_script(git_project):
     """--install-hook drops a pre-commit hook in .git/hooks/."""
-    from storyforge.cmd_sync import install_hook
+    from storyforge.cmd_sync import install_hook, _default_runner_path
 
     hook_path = install_hook(git_project)
     assert os.path.isfile(hook_path)
     assert os.access(hook_path, os.X_OK), 'hook must be executable'
     content = open(hook_path).read()
     assert 'storyforge sync' in content
+    # The placeholder must have been substituted with a real path
+    assert '__STORYFORGE_RUNNER_PATH__' not in content
+    runner = _default_runner_path()
+    assert runner and runner in content, (
+        'install_hook should bake the plugin runner path into the hook'
+    )
 
 
 def test_install_hook_refuses_to_overwrite_foreign_hook(git_project):
@@ -395,16 +401,14 @@ def test_hook_script_uses_staged_diff(git_project):
 
 
 def test_hook_script_fails_closed_without_storyforge():
-    """When neither $PATH nor $STORYFORGE_HOME provides the runner, the
-    hook must exit 1 — not silently exit 0 and let desync ship.
+    """When no runner is discoverable (PATH, $STORYFORGE_HOME, baked-in),
+    the hook must exit 1 — not silently exit 0 and let desync ship.
     """
     from storyforge.cmd_sync import HOOK_SCRIPT
-    # Look for the "not on PATH" branch and confirm it exits non-zero.
-    idx = HOOK_SCRIPT.find('needs \'storyforge\' on PATH')
-    assert idx != -1
-    tail = HOOK_SCRIPT[idx:idx + 400]
+    idx = HOOK_SCRIPT.find("can't find a 'storyforge' runner")
+    assert idx != -1, 'expected the runner-not-found error branch in HOOK_SCRIPT'
+    tail = HOOK_SCRIPT[idx:idx + 500]
     assert 'exit 1' in tail
-    # And there should be no `exit 0` between the warning and the exit 1.
     pre_exit = tail[:tail.index('exit 1')]
     assert 'exit 0' not in pre_exit
 
@@ -417,6 +421,24 @@ def test_sync_in_non_git_directory_errors_clearly(tmp_path):
     import pytest
     with pytest.raises(RuntimeError, match='not inside a git working tree'):
         detect_state(str(tmp_path))
+
+
+def test_sync_regenerates_wiped_md(git_project):
+    """If a tracked MD is deleted on disk, sync should re-export from the
+    CSVs rather than crashing trying to import from a missing file.
+    """
+    from storyforge.cmd_sync import run_sync, DEFAULT_OUTPUT_PATH
+
+    run_sync(git_project)
+    _git(git_project, 'add', DEFAULT_OUTPUT_PATH)
+    _git(git_project, 'commit', '-q', '-m', 'add MD')
+
+    md_path = os.path.join(git_project, DEFAULT_OUTPUT_PATH)
+    os.remove(md_path)
+
+    status = run_sync(git_project)
+    assert status == 'exported'
+    assert os.path.isfile(md_path)
 
 
 def test_import_silently_skips_scene_with_row_only_in_one_csv(project_dir):
