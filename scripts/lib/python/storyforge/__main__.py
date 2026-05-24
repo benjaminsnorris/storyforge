@@ -47,6 +47,7 @@ COMMANDS = {
     'scenes-setup': 'storyforge.cmd_scenes_setup',
     'scenes-export': 'storyforge.cmd_scenes_export',
     'scenes-import': 'storyforge.cmd_scenes_import',
+    'sync': 'storyforge.cmd_sync',
     'publish': 'storyforge.cmd_publish',
 }
 

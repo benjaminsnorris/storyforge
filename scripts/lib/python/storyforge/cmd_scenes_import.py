@@ -1,7 +1,9 @@
 """storyforge scenes-import — Import edited markdown back into scene CSVs.
 
 Parses a markdown file produced by scenes-export, diffs against the current
-CSV values, and updates only fields that changed.
+CSV values, and updates only fields that changed. The field set per section
+is read from each CSV's header row at runtime, so any columns present in the
+CSVs (including graphic-novel additions) are imported.
 
 Usage:
     storyforge scenes-import                      # Import from default path
@@ -13,20 +15,24 @@ import argparse
 import os
 import re
 
-from storyforge.cmd_scenes_export import SECTIONS
+from storyforge.cmd_scenes_export import DEFAULT_OUTPUT_PATH, get_sections
 from storyforge.common import detect_project_root, install_signal_handlers, log
 from storyforge.csv_cli import get_field, list_ids, update_field
-
-# Section name -> (csv relative path, known field names)
-SECTION_MAP = {name: (csv_rel, set(fields)) for name, csv_rel, fields in SECTIONS}
 
 
 # ============================================================================
 # Markdown parser
 # ============================================================================
 
-def parse_markdown(text):
+def parse_markdown(text, section_map=None):
     """Parse scenes-review markdown into a nested dict.
+
+    `section_map` is {section_name: (csv_rel, set(known_field_names))} — if
+    provided, only those section names are recognized and only the listed
+    fields are treated as fields (other `field: value`-looking lines are
+    treated as continuations). When None, every `### Name` opens a section
+    and every `field: value` line is a field — useful as a generic parser
+    or in tests where the CSVs aren't on hand.
 
     Returns: {scene_id: {section_name: {field: value}}}
     """
@@ -47,7 +53,7 @@ def parse_markdown(text):
         # Section heading
         if line.startswith('### '):
             section_name = line[4:].strip()
-            if current_scene and section_name in SECTION_MAP:
+            if current_scene and (section_map is None or section_name in section_map):
                 current_section = section_name
                 scenes[current_scene][current_section] = {}
                 last_field = None
@@ -59,10 +65,10 @@ def parse_markdown(text):
 
         # Field line or continuation
         if current_scene and current_section:
-            known_fields = SECTION_MAP[current_section][1]
             # Try to match "field_name: value"
             match = re.match(r'^([a-z_]+):\s?(.*)', line)
-            if match and match.group(1) in known_fields:
+            if match and (section_map is None
+                          or match.group(1) in section_map[current_section][1]):
                 field_name = match.group(1)
                 value = match.group(2)
                 scenes[current_scene][current_section][field_name] = value
@@ -88,18 +94,25 @@ def import_scenes(project_dir, input_path, dry_run=False):
     with open(input_path, encoding='utf-8') as f:
         text = f.read()
 
-    parsed = parse_markdown(text)
+    # Build section_map from the project's actual CSV headers so columns added
+    # by graphic-novel mode (or future schema changes) are recognized.
+    section_map = {
+        name: (csv_rel, set(fields))
+        for name, csv_rel, fields in get_sections(project_dir)
+    }
+
+    parsed = parse_markdown(text, section_map)
     changes = []
 
     # Build lookup of valid scene IDs per CSV
     csv_ids = {}
-    for section_name, (csv_rel, _fields) in SECTION_MAP.items():
+    for section_name, (csv_rel, _fields) in section_map.items():
         csv_path = os.path.join(project_dir, csv_rel)
         csv_ids[csv_rel] = set(list_ids(csv_path))
 
     for scene_id, sections in parsed.items():
         for section_name, fields in sections.items():
-            csv_rel, _known = SECTION_MAP[section_name]
+            csv_rel, _known = section_map[section_name]
             csv_path = os.path.join(project_dir, csv_rel)
 
             if scene_id not in csv_ids.get(csv_rel, set()):
@@ -127,7 +140,7 @@ def parse_args(argv):
         description='Import edited markdown back into scene CSVs.',
     )
     parser.add_argument('--input', type=str, default=None,
-                        help='Input path (default: working/scenes-review.md)')
+                        help='Input path (default: reference/scenes-review.md)')
     parser.add_argument('--dry-run', action='store_true',
                         help='Show changes without writing')
     return parser.parse_args(argv)
@@ -142,8 +155,7 @@ def main(argv=None):
     install_signal_handlers()
     project_dir = detect_project_root()
 
-    input_path = args.input or os.path.join(project_dir, 'working',
-                                            'scenes-review.md')
+    input_path = args.input or os.path.join(project_dir, DEFAULT_OUTPUT_PATH)
     if not os.path.isfile(input_path):
         log(f'ERROR: Input file not found: {input_path}')
         log("Run 'storyforge scenes-export' first.")

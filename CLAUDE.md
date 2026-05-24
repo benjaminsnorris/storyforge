@@ -260,8 +260,9 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge cleanup` | `cmd_cleanup.py` | Project structure cleanup. `--scenes` strips writing-agent artifacts from scene files. `--csv` runs only the CSV integrity report (schema + row checks). |
 | `storyforge cover` | `cmd_cover.py` | Cover design |
 | `storyforge scenes-setup` | `cmd_scenes_setup.py` | Scene file and metadata setup |
-| `storyforge scenes-export` | `cmd_scenes_export.py` | Export scenes to markdown with metadata headers |
-| `storyforge scenes-import` | `cmd_scenes_import.py` | Import scenes from markdown with metadata headers |
+| `storyforge scenes-export` | `cmd_scenes_export.py` | Export scenes to `reference/scenes-review.md` (header-driven; round-trips every column present in the CSVs, including GN additions) |
+| `storyforge scenes-import` | `cmd_scenes_import.py` | Import edited `scenes-review.md` back into scene CSVs |
+| `storyforge sync` | `cmd_sync.py` | Sync scene CSVs ↔ `reference/scenes-review.md` against git HEAD. Exports when CSVs are dirty, imports when MD is dirty, writes `working/sync-conflict.md` and exits 1 when both moved. `--install-hook` drops a pre-commit hook that runs this on every commit. |
 | `storyforge review` | `cmd_review.py` | Pipeline review |
 | `storyforge migrate` | `cmd_migrate.py` | Project migration |
 
