@@ -29,10 +29,16 @@ def parse_markdown(text, section_map=None):
 
     `section_map` is {section_name: (csv_rel, set(known_field_names))} — if
     provided, only those section names are recognized and only the listed
-    fields are treated as fields (other `field: value`-looking lines are
-    treated as continuations). When None, every `### Name` opens a section
-    and every `field: value` line is a field — useful as a generic parser
-    or in tests where the CSVs aren't on hand.
+    fields are treated as fields. When None, every `### Name` opens a section
+    and every `field: value` line is a field — useful as a generic parser or
+    in tests where the CSVs aren't on hand.
+
+    A line that looks like `field: value` but whose `field` isn't in the
+    section's known set is logged as a WARNING and skipped (it does NOT get
+    merged into the previous field's value — that would silently corrupt
+    CSV cells when an author types review notes into the MD). True multi-
+    line field values still work as long as the continuation line does not
+    start with `[a-z_]+:`.
 
     Returns: {scene_id: {section_name: {field: value}}}
     """
@@ -67,12 +73,19 @@ def parse_markdown(text, section_map=None):
         if current_scene and current_section:
             # Try to match "field_name: value"
             match = re.match(r'^([a-z_]+):\s?(.*)', line)
-            if match and (section_map is None
-                          or match.group(1) in section_map[current_section][1]):
+            if match:
                 field_name = match.group(1)
-                value = match.group(2)
-                scenes[current_scene][current_section][field_name] = value
-                last_field = field_name
+                if section_map is None or field_name in section_map[current_section][1]:
+                    value = match.group(2)
+                    scenes[current_scene][current_section][field_name] = value
+                    last_field = field_name
+                else:
+                    # field: value-shaped line, but the field isn't known.
+                    # Don't merge into last_field — that silently rewrites
+                    # whatever the previous real field was. Warn + skip.
+                    log(f'WARNING: {current_scene} / {current_section}: '
+                        f'unknown field "{field_name}" — line skipped')
+                    last_field = None
             elif last_field is not None:
                 # Continuation line — append to previous field
                 prev = scenes[current_scene][current_section][last_field]
@@ -89,7 +102,13 @@ def parse_markdown(text, section_map=None):
 def import_scenes(project_dir, input_path, dry_run=False):
     """Import edited markdown back into CSVs. Returns list of changes.
 
-    Each change is a tuple: (scene_id, csv_rel, field, old_value, new_value)
+    Each change is a tuple: (scene_id, csv_rel, field, old_value, new_value).
+
+    Raises RuntimeError when the markdown references a scene_id that does
+    not exist in any of the three CSVs — silently skipping such IDs would
+    let an author "rename" a scene by editing its `## heading` while leaving
+    the canonical CSV row unchanged (a phantom rename). The user must edit
+    CSVs directly to rename.
     """
     with open(input_path, encoding='utf-8') as f:
         text = f.read()
@@ -102,21 +121,36 @@ def import_scenes(project_dir, input_path, dry_run=False):
     }
 
     parsed = parse_markdown(text, section_map)
-    changes = []
 
-    # Build lookup of valid scene IDs per CSV
+    # Build lookup of valid scene IDs per CSV. Also build the union for the
+    # rename-detection check below.
     csv_ids = {}
+    all_known_ids = set()
     for section_name, (csv_rel, _fields) in section_map.items():
         csv_path = os.path.join(project_dir, csv_rel)
-        csv_ids[csv_rel] = set(list_ids(csv_path))
+        ids = set(list_ids(csv_path))
+        csv_ids[csv_rel] = ids
+        all_known_ids |= ids
 
+    unknown_ids = sorted(sid for sid in parsed if sid not in all_known_ids)
+    if unknown_ids:
+        raise RuntimeError(
+            f'Markdown references scene ID(s) not present in any CSV: '
+            f'{", ".join(unknown_ids)}. '
+            'To rename a scene, edit the CSV rows directly — renaming in '
+            'the MD alone would leave the canonical data untouched.'
+        )
+
+    changes = []
     for scene_id, sections in parsed.items():
         for section_name, fields in sections.items():
             csv_rel, _known = section_map[section_name]
             csv_path = os.path.join(project_dir, csv_rel)
 
+            # A scene may legitimately be missing from one CSV (e.g. no
+            # intent row yet) but present in another. Skip silently in that
+            # case — there's nothing to update on that side.
             if scene_id not in csv_ids.get(csv_rel, set()):
-                log(f'WARNING: Scene {scene_id} not found in {csv_rel}, skipping')
                 continue
 
             for field_name, new_value in fields.items():
@@ -161,7 +195,11 @@ def main(argv=None):
         log("Run 'storyforge scenes-export' first.")
         raise SystemExit(1)
 
-    changes = import_scenes(project_dir, input_path, dry_run=args.dry_run)
+    try:
+        changes = import_scenes(project_dir, input_path, dry_run=args.dry_run)
+    except RuntimeError as e:
+        log(f'ERROR: {e}')
+        raise SystemExit(1)
 
     if not changes:
         log('No changes detected.')

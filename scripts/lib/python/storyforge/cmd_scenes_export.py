@@ -20,7 +20,7 @@ import os
 
 from storyforge.cli import add_scene_filter_args, resolve_filter_args
 from storyforge.common import detect_project_root, install_signal_handlers, log
-from storyforge.csv_cli import get_field
+from storyforge.csv_cli import get_field, list_ids
 from storyforge.scene_filter import apply_scene_filter, build_scene_list
 
 
@@ -75,13 +75,27 @@ def get_sections(project_dir):
 
 def export_scenes(project_dir, output_path, filter_mode='all',
                   filter_value=None, filter_value2=None):
-    """Export scene data from the three CSVs to a single markdown file."""
+    """Export scene data from the three CSVs to a single markdown file.
+
+    Sections whose CSV has no row for a given scene are omitted entirely
+    rather than rendered as a header followed by all-empty field lines.
+    At early elaboration stages most scenes only have a Structural row,
+    and dragging the reader through 25 blank lines per scene to find the
+    one populated section makes the review file unreadable.
+    """
     meta_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
     all_ids = build_scene_list(meta_csv)
     scene_ids = apply_scene_filter(meta_csv, all_ids, filter_mode,
                                    filter_value, filter_value2)
 
     sections = get_sections(project_dir)
+
+    # Pre-compute which scene_ids exist in each section's CSV so we can skip
+    # rendering empty sections per scene. list_ids reads the file once each.
+    section_ids = {
+        csv_rel: set(list_ids(os.path.join(project_dir, csv_rel)))
+        for _, csv_rel, _ in sections
+    }
 
     lines = []
     for i, sid in enumerate(scene_ids):
@@ -90,6 +104,8 @@ def export_scenes(project_dir, output_path, filter_mode='all',
         lines.append(f'## {sid}')
 
         for section_name, csv_rel, fields in sections:
+            if sid not in section_ids[csv_rel]:
+                continue  # no row in this CSV — skip section entirely
             csv_path = os.path.join(project_dir, csv_rel)
             lines.append('')
             lines.append(f'### {section_name}')

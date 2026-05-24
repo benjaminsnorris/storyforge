@@ -256,7 +256,11 @@ class TestImport:
         assert get_field(csv_path, 'act1-sc02', 'pov') == 'Elara Voss'
         assert get_field(csv_path, 'act2-sc03', 'pov') == 'Elara Voss'
 
-    def test_import_unknown_scene_skipped(self, project_dir):
+    def test_import_unknown_scene_raises(self, project_dir):
+        """An MD referencing a scene_id not in any CSV must raise — silent
+        skip would let a "rename in MD" go undetected (phantom rename).
+        """
+        import pytest
         from storyforge.cmd_scenes_import import import_scenes
 
         md_path = os.path.join(project_dir, 'working', 'scenes-review.md')
@@ -264,5 +268,5 @@ class TestImport:
         with open(md_path, 'w') as f:
             f.write('## nonexistent-scene\n\n### Structural\nseq: 99\n')
 
-        changes = import_scenes(project_dir, md_path, dry_run=False)
-        assert changes == []
+        with pytest.raises(RuntimeError, match='nonexistent-scene'):
+            import_scenes(project_dir, md_path, dry_run=False)

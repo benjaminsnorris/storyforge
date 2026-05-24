@@ -229,3 +229,213 @@ def test_install_hook_refuses_to_overwrite_foreign_hook(git_project):
     with pytest.raises(SystemExit) as exc_info:
         install_hook(git_project)
     assert exc_info.value.code != 0
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for review fixes
+# ---------------------------------------------------------------------------
+
+def test_sync_refuses_to_overwrite_untracked_md(git_project):
+    """If MD exists on disk but is not in HEAD, refuse rather than seed.
+
+    Without this guard, a hand-edited MD copied in from another branch / a
+    backup / etc. would be silently destroyed on the first sync run.
+    """
+    from storyforge.cmd_sync import run_sync, DEFAULT_OUTPUT_PATH
+
+    md_path = os.path.join(git_project, DEFAULT_OUTPUT_PATH)
+    os.makedirs(os.path.dirname(md_path), exist_ok=True)
+    sentinel = '## from-another-project\n\n### Whatever\nfoo: bar\n'
+    with open(md_path, 'w') as f:
+        f.write(sentinel)
+
+    status = run_sync(git_project)
+    assert status == 'untracked-md'
+    # File is unchanged
+    assert open(md_path).read() == sentinel
+
+
+def test_sync_first_export_only_when_md_truly_absent(git_project):
+    """The first-export branch still works when MD doesn't exist on disk."""
+    from storyforge.cmd_sync import run_sync, DEFAULT_OUTPUT_PATH
+
+    md_path = os.path.join(git_project, DEFAULT_OUTPUT_PATH)
+    assert not os.path.isfile(md_path)
+    status = run_sync(git_project)
+    assert status == 'first-export'
+    assert os.path.isfile(md_path)
+
+
+def test_sync_refuses_when_csv_deleted_on_disk(git_project):
+    """Tracked CSV deleted from disk → missing-csv status, no MD writes."""
+    from storyforge.cmd_sync import run_sync, DEFAULT_OUTPUT_PATH
+
+    # Get a baseline MD in HEAD so we exercise the post-bootstrap path.
+    run_sync(git_project)
+    _git(git_project, 'add', DEFAULT_OUTPUT_PATH)
+    _git(git_project, 'commit', '-q', '-m', 'add MD')
+
+    os.remove(os.path.join(git_project, 'reference', 'scenes.csv'))
+    md_before = open(os.path.join(git_project, DEFAULT_OUTPUT_PATH)).read()
+
+    status = run_sync(git_project)
+    assert status == 'missing-csv'
+    # MD must NOT be regenerated against a half-broken project state
+    assert open(os.path.join(git_project, DEFAULT_OUTPUT_PATH)).read() == md_before
+
+
+def test_parse_markdown_unknown_field_does_not_clobber_previous(project_dir):
+    """A 'field: value'-shaped line whose field is unknown must NOT merge
+    into the prior real field's value — that's silent CSV corruption.
+    """
+    from storyforge.cmd_scenes_import import parse_markdown
+    from storyforge.cmd_scenes_export import get_sections
+
+    section_map = {
+        name: (csv_rel, set(fields))
+        for name, csv_rel, fields in get_sections(project_dir)
+    }
+    md = (
+        '## act1-sc01\n'
+        '\n'
+        '### Brief\n'
+        'goal: fill the blank page\n'
+        'note_to_author: revisit later\n'
+        'conflict: nothing comes\n'
+    )
+    parsed = parse_markdown(md, section_map)
+    assert parsed['act1-sc01']['Brief']['goal'] == 'fill the blank page'
+    assert parsed['act1-sc01']['Brief']['conflict'] == 'nothing comes'
+    assert 'note_to_author' not in parsed['act1-sc01']['Brief']
+
+
+def test_parse_markdown_continuation_still_works(project_dir):
+    """Multi-line field values (continuation without `field:` prefix) still
+    work after the unknown-field fix.
+    """
+    from storyforge.cmd_scenes_import import parse_markdown
+    from storyforge.cmd_scenes_export import get_sections
+
+    section_map = {
+        name: (csv_rel, set(fields))
+        for name, csv_rel, fields in get_sections(project_dir)
+    }
+    md = (
+        '## act1-sc01\n'
+        '\n'
+        '### Brief\n'
+        'goal: fill the blank page\n'
+        '  with steady deliberate movements\n'
+    )
+    parsed = parse_markdown(md, section_map)
+    assert parsed['act1-sc01']['Brief']['goal'] == (
+        'fill the blank page with steady deliberate movements'
+    )
+
+
+def test_export_omits_sections_for_scenes_with_no_row(project_dir):
+    """Scenes that don't have a row in scene-intent.csv or scene-briefs.csv
+    should not have those empty sections rendered at all."""
+    from storyforge.cmd_scenes_export import export_scenes
+    from storyforge.csv_cli import _read_lines, _write_lines
+
+    # Strip the brief row for act1-sc01 so it has Structural + Intent only.
+    briefs_csv = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    lines = _read_lines(briefs_csv)
+    kept = [lines[0]] + [l for l in lines[1:] if not l.startswith('act1-sc01|')]
+    _write_lines(briefs_csv, kept)
+
+    out = os.path.join(project_dir, 'reference', 'scenes-review.md')
+    export_scenes(project_dir, out)
+    content = open(out).read()
+
+    # Locate the act1-sc01 block in the rendered MD
+    start = content.index('## act1-sc01')
+    end = content.index('## act1-sc02')
+    block = content[start:end]
+    assert '### Structural' in block
+    assert '### Intent' in block
+    assert '### Brief' not in block, (
+        'Brief section should be omitted when the scene has no brief row'
+    )
+
+
+def test_hook_path_filter_matches_expected_paths():
+    """Regression: the regex the hook uses to decide whether to fire must
+    match every sync-tracked path and reject lookalikes."""
+    import re
+    from storyforge.cmd_sync import HOOK_PATH_FILTER
+
+    rx = re.compile(HOOK_PATH_FILTER, re.MULTILINE)
+    for good in (
+        'reference/scenes.csv',
+        'reference/scene-intent.csv',
+        'reference/scene-briefs.csv',
+        'reference/scenes-review.md',
+    ):
+        assert rx.search(good), f'expected hook to fire for {good!r}'
+    for bad in (
+        'reference/voice-profile.csv',     # different CSV
+        'scenes-review.md',                # wrong directory
+        'reference/scenes.csv.bak',        # extension boundary
+        'reference/scene-briefs.csv.tmp',  # extension boundary
+        'docs/reference/scenes.csv',       # wrong directory prefix
+    ):
+        assert not rx.search(bad), f'hook must not fire for {bad!r}'
+
+
+def test_hook_script_uses_staged_diff(git_project):
+    """The hook reads --cached (staged) changes, not the full working tree,
+    so partial-staging commits don't trigger spurious conflict reports."""
+    from storyforge.cmd_sync import HOOK_SCRIPT
+    # The first git diff in the script must filter by --cached.
+    first_diff = HOOK_SCRIPT.find('git diff')
+    assert first_diff != -1
+    assert '--cached' in HOOK_SCRIPT[first_diff:first_diff + 100]
+
+
+def test_hook_script_fails_closed_without_storyforge():
+    """When neither $PATH nor $STORYFORGE_HOME provides the runner, the
+    hook must exit 1 — not silently exit 0 and let desync ship.
+    """
+    from storyforge.cmd_sync import HOOK_SCRIPT
+    # Look for the "not on PATH" branch and confirm it exits non-zero.
+    idx = HOOK_SCRIPT.find('needs \'storyforge\' on PATH')
+    assert idx != -1
+    tail = HOOK_SCRIPT[idx:idx + 400]
+    assert 'exit 1' in tail
+    # And there should be no `exit 0` between the warning and the exit 1.
+    pre_exit = tail[:tail.index('exit 1')]
+    assert 'exit 0' not in pre_exit
+
+
+def test_sync_in_non_git_directory_errors_clearly(tmp_path):
+    """Running sync outside a git repo must surface the missing-repo case
+    rather than mis-classifying everything as 'dirty'."""
+    from storyforge.cmd_sync import detect_state
+    # tmp_path is a non-git directory
+    import pytest
+    with pytest.raises(RuntimeError, match='not inside a git working tree'):
+        detect_state(str(tmp_path))
+
+
+def test_import_silently_skips_scene_with_row_only_in_one_csv(project_dir):
+    """A scene present in scenes.csv but missing from scene-briefs.csv must
+    not raise — only IDs missing from *all* CSVs are an error.
+    """
+    from storyforge.cmd_scenes_export import export_scenes
+    from storyforge.cmd_scenes_import import import_scenes
+    from storyforge.csv_cli import _read_lines, _write_lines
+
+    # Remove act1-sc01 from scene-briefs.csv (still in scenes + intent).
+    briefs_csv = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    lines = _read_lines(briefs_csv)
+    kept = [lines[0]] + [l for l in lines[1:] if not l.startswith('act1-sc01|')]
+    _write_lines(briefs_csv, kept)
+
+    out = os.path.join(project_dir, 'reference', 'scenes-review.md')
+    export_scenes(project_dir, out)
+
+    # The MD references act1-sc01 (it's in scenes.csv). Import must succeed.
+    changes = import_scenes(project_dir, out, dry_run=True)
+    assert changes == [], 'expected no diff round-trip immediately after export'
