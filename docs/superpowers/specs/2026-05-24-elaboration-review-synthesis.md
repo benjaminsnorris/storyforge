@@ -43,9 +43,12 @@ This is the most important change. It addresses voice, craft-skeptic concerns, a
 **The change.** Replace the upward-faithfulness *score* with an upward-faithfulness *diff*. At each boundary, when triggered:
 
 1. The system surfaces the two sides as a structured comparison — what the upstream level says about this story unit, what the downstream level is doing.
-2. The author records a verdict: `correct=upstream`, `correct=downstream`, `both are right`, or `needs work`. A one-line rationale is optional but encouraged.
-3. The verdict persists across runs in `working/scoring-verdicts.csv` (scene/unit + boundary + verdict + rationale + timestamp).
-4. The system does not re-flag a boundary where a verdict is recorded unless one side has materially changed since the verdict.
+2. **Who records the verdict depends on coaching level:**
+   - **full** (default): the LLM looks at the content history on both sides, proposes a verdict (`correct=upstream` / `correct=downstream` / `both are right` / `needs work`) with a one-line rationale, and the proposal is always called out in the cascade review so the author can override.
+   - **coach**: the LLM proposes; the author confirms or overrides before the verdict is recorded.
+   - **strict**: only the author records verdicts. The LLM still produces the diff but never the verdict.
+3. The verdict persists across runs in `working/scoring-verdicts.csv` (scene/unit + boundary + verdict + rationale + actor + timestamp). `actor` records whether the LLM proposed or the author authored.
+4. The system does not re-flag a boundary where a verdict is recorded unless one side has materially changed since the verdict (content-hash delta, not just mtime).
 
 **What this preserves.** The LLM is still doing semantic comparison — the same prompt, the same cost. We just stop emitting a number for the comparison's result.
 
@@ -137,32 +140,39 @@ The originals proposed mtime-only drift detection. The workflow reviewer caught 
 
 ## Scoring revisions
 
-### Add an explicit thematic axis
+### Add an explicit thematic axis — with per-scene tracking
 
-The story-craft reviewer was right: no rubric across eight levels asks "is this story about something?" Motif registries are vehicles for theme, not theme itself.
+The story-craft reviewer was right: no rubric across eight levels asks "is this story about something?" Motifs in the existing registry are concrete *vehicles* for theme, not theme itself.
 
-**Revision: add `## Theme` as a fourth section in `reference/story-summary.md`** — alongside Logline, Synopsis, Act-shape. Two-to-four sentences naming what the story argues. The argument is internal-use only (it's not pitch material) and explicit.
+**Revision: two additions.**
 
-Scoring axes on the theme section:
-- *Presence* — deterministic. Empty section → finding.
-- *Engagement at lower levels* — LLM, on-demand. Do the briefs and drafts engage with this theme, or does it disappear after level 0?
+1. **Add `## Theme` as a fourth section in `reference/story-summary.md`** — alongside Logline, Synopsis, Act-shape. Two-to-four sentences naming what the story argues. The argument is internal-use only (not pitch material) and explicit.
 
-This is the smallest possible addition that gives the system a place to ask the most important story question.
+2. **Add `reference/themes.csv` registry** — abstract concerns the story is about. Same pattern as `mice-threads.csv` / `values.csv`:
 
-### Genre / structure escape hatch
-
-The originals encoded three-act, Swain action/sequel, McKee value shifts, and Weiland brief contracts as universal rules. They're one tradition (commercial American screenwriting + popular novel craft). They don't fit kishōtenketsu, mosaic, fragmented narrative, plotless literary, picaresque, or vignette-driven work.
-
-**Revision:** add `project.structure` field to `storyforge.yaml`:
-
-```yaml
-project:
-  structure: three-act        # three-act | four-act | kishōtenketsu | mosaic | episodic | custom
+```
+id|name|tier|description
+legibility|Legibility|primary|What is and isn't legible, to whom.
+recovery|Recovery|primary|What can be brought back from loss.
+erasure|Erasure|secondary|What gets erased and what survives.
 ```
 
-When `structure: custom`, the structure-specific scoring checks (action/sequel alternation, three-act value-shift distribution, "events spread evenly across acts") are *disabled*. The author opts in to whatever subset they want via a `scoring.enabled_checks` list. Default for novel mode is `three-act`; default for graphic-novel is `three-act` too unless author specifies.
+And **add a `theme_threads` column to `scene-intent.csv`** — semicolon-delimited list of theme IDs that each scene engages. Mirrors `mice_threads`.
 
-Other structures get bundled checks (e.g., `kishōtenketsu` enables a four-act value-shift check with a specific pattern). Bundled checks are out of scope for v1; the escape hatch (`custom`) is what ships.
+Scoring axes on the theme dimension:
+- *Theme section presence* — deterministic. Empty `## Theme` → finding.
+- *Themes registry presence* — deterministic. Empty themes.csv → finding (after Theme section is written).
+- *Per-theme coverage* — deterministic. For each registered theme, what fraction of scenes engage it? Flags themes with too few scene engagements (decorative themes that never land) or too many (one theme drowning out the others).
+- *Theme distribution* — deterministic. Where in the story does each theme light up? Flags themes that vanish for entire acts.
+- *Per-scene engagement validity* — LLM, on-demand. Does this scene actually engage the themes its `theme_threads` claims, or is it tagged-but-not-engaged?
+
+**Themes vs motifs.** They stay as separate registries. Themes are abstract concerns ("what does it mean to remember?"); motifs are concrete recurring elements ("the wire spectacles," "the lamp glow on paper"). The relationship is many-to-many: a theme can be carried by several motifs; a motif can serve several themes. Conflating them would lose information — `legibility` is a theme but not a motif; `wire spectacles` is a motif that might serve `legibility` as one of its themes. Per-scene tracking lives in two columns: `theme_threads` on scene-intent.csv (which abstract concerns this scene engages) and `motifs` on scene-briefs.csv (which concrete recurring elements appear in this scene). The motif registry stays as-is.
+
+### Genre / structure assumptions
+
+The originals encoded three-act, Swain action/sequel, McKee value shifts, and Weiland brief contracts as universal rules. The reviews proposed a `project.structure: custom` escape hatch for non-three-act stories.
+
+**Revision:** drop the `custom` option for v1. Author judgment (PR review): too much work for too little value at this stage. v1 assumes three-act throughout. Non-three-act stories can use whatever scoring axes apply to them and ignore the rest via the score-overrides mechanism. If specific bundled checks (kishōtenketsu, mosaic) emerge as a real need, they're added in a follow-up.
 
 ### Demote the causal-chain LLM check
 
@@ -184,11 +194,28 @@ The engineering review caught the cost: a full bible-consistency pass on a 50-sc
 
 ## Schema and engineering decisions
 
-### Defer the `spine_event` column
+### Structural-anchor tier: discrete artifacts, two new columns
 
-The original scoring doc proposed adding a `spine_event` column to `scene-intent.csv` to make 3→4 downward coverage trivially deterministic. The engineering review showed this is ~400-600 LOC across 8 files plus a schema migration plus per-architecture-scene population logic.
+The original docs treated the spine and architecture levels as `status` flags on the shared `scenes.csv`. Author pushback (PR review): the levels aren't just "same rows with more columns" — they have **different row counts**. The spine is 5–10 events; architecture is 15–25 anchor scenes; the scene map is 40–60 scenes. Each tier transition expands the row count by elaborating each upstream unit into multiple downstream units.
 
-**Revision: defer.** v1 uses LLM-driven mapping for 3→4 downward coverage (one call per cascade run that asks "which spine event does this architecture scene serve?"). This is cheap (~$0.05/run with caching) and good-enough at the scale a single project operates at. If v1 in author hands proves the mapping is slow or lossy, add the column in v2 with a proper migration.
+**Revision: the structural tier splits into discrete artifacts.**
+
+| Tier | Artifact(s) | Row count |
+|---|---|---|
+| Structural anchors | `reference/spine.csv` | 5–10 |
+| Structural anchors | `reference/architecture.csv` | 15–25, each with `spine_event` → spine.csv |
+| Manuscript | `reference/scenes.csv` + companions | 40–60, each with optional `architecture_scene` → architecture.csv |
+
+Two new reference columns make the level boundaries explicit:
+
+- `spine_event` on `architecture.csv` — every architecture row names its parent spine event. Required.
+- `architecture_scene` on `scenes.csv` — every map scene either *is* an architecture anchor (`architecture_scene = own_id`) or sits adjacent to one (`architecture_scene = nearest_anchor_id`) or is purely interstitial (`architecture_scene = ''`). Optional.
+
+The deterministic downward-coverage checks fall out of this for free: "every spine event has at least one architecture row referencing it"; "every architecture anchor has at least one map scene linked to it." Both are set-membership operations, both ship in v1.
+
+Why this is in v1 rather than deferred: the original engineering review estimated ~400–600 LOC across 8 files because it imagined the column added on top of the existing single-CSV-with-status pattern. Splitting into discrete artifacts is a different (and cleaner) refactor — and the user wants it from the start because the artifact split is what makes "the spine" something you can refer to as a thing.
+
+Migration for existing projects (Ashes, Meridian) is mechanical: `cmd_migrate` extracts `status=spine` rows from scenes.csv into spine.csv, copies `status=architecture` rows into architecture.csv, and populates `spine_event` references where derivable. Author confirms the spine event count.
 
 ### Hook performance budget
 
@@ -200,40 +227,43 @@ The engineering review's "v1 cut" landed on roughly what I'd commit to:
 
 **v1 includes:**
 - New file `reference/story-summary.md` with sections: Logline, Synopsis, Act-shape, Theme. Template at `templates/reference/`.
-- `storyforge init` writes the file pre-seeded with the project's logline.
+- `storyforge init` writes story-summary.md pre-seeded with the project's logline, plus empty `themes.csv`, `spine.csv`, `architecture.csv` with their headers.
 - One-time migration of `storyforge.yaml:project.logline` into the new file (loud, atomic, single command).
-- A parser in `common.py` that reads the four sections.
+- Migration of existing `status=spine` and `status=architecture` rows from scenes.csv into their new discrete CSVs (`cmd_migrate`).
+- A parser in `common.py` that reads story-summary.md's four sections (Logline / Synopsis / Act-shape / Theme).
+- New columns: `spine_event` (on architecture.csv, required), `architecture_scene` (on scenes.csv, optional), `theme_threads` (on scene-intent.csv, optional).
 - `storyforge score --level N` extension that emits deterministic quality + registry checks for levels 3–6 (generalizing existing `hone.py` + `structural.py` logic).
-- The orphan-registry check generalized across all structural levels.
+- The orphan-registry check generalized across all structural levels, including the new themes registry.
 - `working/scoring-overrides.csv` and the parser for it.
-- `STORYFORGE_DRAFTING=1` env-var bypass.
+- `working/scoring-verdicts.csv` and its parser (the diff+verdict persistence file).
+- `STORYFORGE_DRAFTING=1` env-var bypass and `project.cascade_mode` in storyforge.yaml.
 - `storyforge score --drift` — read-only drift report combining deterministic coverage + timestamps + content-hash deltas.
-- `project.structure` field with `custom` as the escape hatch.
+- Derived markdown renderings: `reference/spine.md`, `reference/architecture.md` (siblings of the existing `scenes-review.md`).
 
 **v1 does NOT include:**
-- The `spine_event` column (deferred).
-- The `storyforge cascade` command (ships as `score --drift` first).
+- The `storyforge cascade` command as its own surface (ships as `score --drift` first; cascade as a top-level command lands in v2/v3).
 - LLM-driven semantic boundary checks (the diff+verdict mechanism is designed but the v1 doesn't run the LLM calls — runs deterministic only).
 - Bible-consistency pass (the most expensive feature; designed but deferred).
+- `project.structure: custom` or any non-three-act bundled checks (deferred per author decision).
 - Pre-commit hook integration of new quality gates (hook stays as-is; quality gates are opt-in).
 
-Rough effort: ~600 LOC of Python, one template file, one new module, modest extensions to `cmd_score.py` and `schema.py`, plus tests. Two weeks of focused work, no schema migration, no new hook surface, no LLM cost story to explain at v1.
+Rough effort: ~800–1000 LOC of Python (up from the original ~600 because of the structural-anchor artifact split + the migration step), one template directory addition, two new modules, modest extensions to `cmd_score.py` and `schema.py`, plus tests. Maybe three weeks of focused work given the migration. No LLM cost story to explain at v1.
 
 ### Effort beyond v1
 
-v2 adds: LLM-driven semantic comparison at the prose-tier boundaries; bible-consistency with caching; the diff+verdict mechanism running over LLM checks; one round of acceptance-threshold tuning based on v1 usage.
+v2 adds: LLM-driven semantic comparison at the prose-tier and structural-tier boundaries; the diff+verdict mechanism running over LLM checks (coaching-level-driven actor); bible-consistency with caching; one round of acceptance-threshold tuning based on v1 usage.
 
-v3 adds: the proper `storyforge cascade` command surface (after `score --drift` has been used long enough to inform the design); the `spine_event` column if mapping perf is insufficient; bundled checks for non-three-act structures.
+v3 adds: the proper `storyforge cascade` command surface (after `score --drift` has been used long enough to inform the design); bundled checks for non-three-act structures if a real need emerges.
 
 ---
 
 ## Open questions remaining after review
 
-1. **Where does the scoring-verdicts file live?** Proposed `working/scoring-verdicts.csv` for now. Alternative: `reference/scoring-verdicts.csv` (canonical, committed). Argument for `reference/`: verdicts are author-authored content, not ephemeral state. Argument for `working/`: they're tied to current content and shouldn't bloat the canonical reference set. Lean `reference/` if pressed; flag for resolution.
+1. **~~Where does the scoring-verdicts file live?~~** *Resolved: `working/scoring-verdicts.csv`. The verdicts are part of the process, not canonical reference material.*
 
-2. **Theme axis: how deep does it go?** v1 has Theme as a section in story-summary.md with deterministic presence + LLM engagement checks. Should there also be a `theme_engaged` boolean column on `scene-intent.csv`? Probably not in v1 — too much schema commitment for a feature that should prove itself first.
+2. **~~Theme axis: how deep does it go?~~** *Resolved: separate themes.csv registry + `theme_threads` column on scene-intent.csv (mirrors the mice_threads pattern). Themes stay distinct from motifs.*
 
-3. **`project.structure: custom` semantics.** When `custom`, which checks are disabled by default? Strict interpretation: all structure-specific checks (action/sequel, value-shift distribution, three-act partitioning) are off. Loose: only the ones the author explicitly opts out of. Lean strict — opt-in is safer than opt-out for the escape hatch.
+3. **~~`project.structure: custom` semantics.~~** *Resolved: dropped for v1. Too much work for the value; non-three-act stories use the score-overrides mechanism. Bundled checks for other structures are follow-up work if needed.*
 
 4. **Cascade UI for the diff+verdict flow.** When a comparison is surfaced, what does the author actually see? A markdown file with the two sides + a verdict line they fill in? A slash-command in a Claude session? Both? Defer to implementation; flagged here so it doesn't get forgotten.
 

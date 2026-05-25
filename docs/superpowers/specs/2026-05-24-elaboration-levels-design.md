@@ -2,45 +2,58 @@
 
 Research design doc for issue [#225](https://github.com/benjaminsnorris/storyforge/issues/225), under the umbrella [#224](https://github.com/benjaminsnorris/storyforge/issues/224).
 
-Status: **draft**, expects iteration. Implementation out of scope.
+Status: **revised after review pass** (2026-05-24). The big revisions: the structural tier is now *three* sub-tiers (spine / anchors / manuscript) with discrete artifacts at each, not one CSV with status flags; story-summary.md gains a Theme section and a themes registry; story-architecture.md now points to story-summary.md rather than duplicating content. See the synthesis doc for full context.
 
 ---
 
 ## TL;DR
 
-The proposal is **eight levels in two tiers**, with two new artifacts at the top and the existing pipeline carrying the rest.
+The proposal is **eight levels in three tiers**, with each tier holding its own discrete artifacts so a reader can point at "the spine" or "the architecture" as a single thing.
 
-**Prose tier (free-form, LLM-scored):**
+**Prose tier (free-form, LLM-scored):** all in one file
 - 0. Logline (1 sentence)
 - 1. Synopsis (1 paragraph)
 - 2. Act-shape (3 paragraphs)
+- *Theme* (2–4 sentences) — what the story argues, paired with a themes registry
 
-**Structural tier (CSV-backed, mostly deterministic):**
-- 3. Spine (5–10 events)
-- 4. Architecture (15–25 scenes)
-- 5. Scene map (40–60 scenes with operational metadata)
-- 6. Briefs (drafting contracts)
-- 7. Draft (prose)
+**Structural-anchor tier (discrete CSVs, each a thing you can read):**
+- 3. Spine — `reference/spine.csv` (5–10 irreducible events)
+- 4. Architecture — `reference/architecture.csv` (15–25 anchor scenes with dramatic-skeleton metadata)
 
-Levels 0–2 are new and live in a new file `reference/story-summary.md`. Levels 3–7 already exist; this design reframes them but adds no new schema.
+**Manuscript tier (existing pipeline, scene rows + companions):**
+- 5. Scene map — `reference/scenes.csv` (40–60 scenes — anchors plus interstitial scenes)
+- 6. Briefs — `reference/scene-briefs.csv` (same scene IDs, status `briefed`)
+- 7. Draft — `scenes/{id}.md` files (same scene IDs, prose)
 
-The bibles, registries, and voice profile sit **alongside** the hierarchy as cross-cutting reference data, not above or within it.
+Two new reference columns make the level boundaries explicit:
+- `spine_event` on `architecture.csv` — each architecture scene names its parent spine event.
+- `architecture_scene` on `scenes.csv` (optional) — each manuscript scene either is, or sits adjacent to, an architecture anchor; or it's purely interstitial.
+
+The bibles, registries, and voice profile sit **alongside** the hierarchy as cross-cutting reference data. The themes registry joins them.
 
 ---
 
-## Why eight levels and not four, or twelve
+## Why eight levels in three tiers
 
-A boundary is worth a level only if it has a real semantic discontinuity — a question that the level below can answer and the level above cannot. The eight proposed boundaries each pass that test; collapsing any of them would either hide a real gap (e.g., merging spine into architecture loses the irreducible-events question) or paper over a quality leap that needs its own scoring rubric.
+A boundary is worth a level only if it has a real semantic discontinuity — a question that the level below can answer and the level above cannot. The eight boundaries each pass that test.
 
-The boundary I considered hardest is **1 → 2 (synopsis → act-shape)**. They're both prose summaries. The argument for keeping them separate: a one-paragraph synopsis answers "what kind of story is this?" while a three-paragraph act-shape answers "where are the turning points and how does each act bear its load?" The act-shape names the load-bearing structure that the synopsis only gestures at. Two different questions, two different levels.
+The **three tiers** come from a different observation: levels within a tier share artifact identity, but levels across tiers expand the row count.
 
-A boundary I considered adding but rejected: between architecture and scene-map at "draft scene order." The current architecture stage already produces ordered scenes, so there's no real semantic gap there — the scene-map stage adds *operational* metadata (location, timeline, cast), not new structural decisions.
+- Prose tier: three levels, one file, three sections. No row expansion (it's prose).
+- Structural-anchor tier: two levels, two CSVs. Spine has 5–10 events; architecture has 15–25 anchor scenes. Each architecture row names its parent spine event.
+- Manuscript tier: three levels, shared row identity. The scene map has 40–60 rows; briefs and drafts attach more data to the same rows. No further row expansion within the tier.
+
+The tier boundaries are where new artifacts get created and rows multiply. Within a tier, rows can be enriched without being duplicated.
+
+The boundary I considered hardest is still **1 → 2 (synopsis → act-shape)**. They're both prose summaries. The argument for keeping them separate: a one-paragraph synopsis answers "what kind of story is this?" while a three-paragraph act-shape answers "where are the turning points and how does each act bear its load?" Two different questions, two different levels — but they live in the same artifact.
+
+The boundary I had wrong in the original draft was **4 → 5 (architecture → scene map)**. The original said scene-map "adds operational metadata, not new structural decisions." That was incomplete. The scene map *expands* the scene count — it adds interstitial scenes (transitions, breathers, B-story, character moments) that aren't on the architectural skeleton. Architecture is the dramatic skeleton; scene map is the full manuscript inventory. They belong to different tiers because the row counts differ.
 
 ---
 
 ## The level taxonomy
 
-### Prose tier
+### Prose tier (all in `reference/story-summary.md`)
 
 | Level | Name | Scope | Question it answers | What it can't answer |
 |---|---|---|---|---|
@@ -48,20 +61,34 @@ A boundary I considered adding but rejected: between architecture and scene-map 
 | 1 | Synopsis | 1 paragraph (~5–7 sentences) | How does the story open, escalate, and resolve thematically? | Where the turning points land; the dramatic shape |
 | 2 | Act-shape | 3 paragraphs (one per act) | What's the load-bearing structure of each act? Where are the major turns? | The specific events; who is on stage |
 
-### Structural tier
+A fourth section, **Theme** (2–4 sentences), names what the story argues. It's not a numbered level (it doesn't elaborate downward in the same way), but it sits in the same file alongside the prose-tier sections and is queryable for scoring.
 
-| Level | Name | Scope | Question it answers | What it can't answer |
+### Structural-anchor tier (each its own CSV)
+
+| Level | Name | Artifact | Scope | Question it answers |
 |---|---|---|---|---|
-| 3 | Spine | 5–10 irreducible events | What are the load-bearing events of the story? | Action/sequel rhythm; subplot weave |
-| 4 | Architecture | 15–25 scenes | What's the dramatic rhythm — value shifts, action/sequel, character POV? | Where each scene happens, who's there, MICE thread weave |
-| 5 | Scene map | 40–60 scenes | What's the full plot inventory with operational metadata (location, timeline, cast)? | Specific goals, conflicts, key dialogue, motifs |
-| 6 | Briefs | All scenes | What is the drafting contract for each scene? | How the prose actually reads |
-| 7 | Draft | All scenes | How does the prose actually read? | (terminal) |
+| 3 | Spine | `reference/spine.csv` | 5–10 rows | What are the load-bearing events of the story? |
+| 4 | Architecture | `reference/architecture.csv` | 15–25 rows, each with `spine_event` → spine.csv | What's the dramatic skeleton — value shifts, action/sequel, POV at each anchor? |
+
+The architecture scenes are *not* a subset of manuscript scenes — they're a separate artifact representing the dramatic skeleton. When the author advances to scene map, the architecture rows seed scenes.csv (each architecture scene becomes a manuscript scene with an `architecture_scene` self-reference) and the author elaborates from there.
+
+### Manuscript tier (shared scene-row identity)
+
+| Level | Name | Artifact | Scope | Question it answers |
+|---|---|---|---|---|
+| 5 | Scene map | `reference/scenes.csv` + `reference/scene-intent.csv` | 40–60 rows, each with optional `architecture_scene` → architecture.csv | What's the full plot inventory with operational metadata? |
+| 6 | Briefs | `reference/scene-briefs.csv` | Same row IDs as scenes.csv, status `briefed` | What is the drafting contract for each scene? |
+| 7 | Draft | `scenes/{id}.md` | Same row IDs, prose | How does it actually read? |
+
+The status column on scenes.csv (`mapped | briefed | drafted | polished`) tracks per-scene level within this tier. No row expansion within the manuscript tier.
 
 ### What changes vs. today
 
-- Levels 0–2 are **new** as first-class artifacts. `project.logline` exists in `storyforge.yaml` today but isn't elaborated/scored as a level. No synopsis or act-shape artifact exists.
-- Levels 3–7 already exist exactly as documented above. The existing `scene.status` column already tracks per-scene level: `spine | architecture | mapped | briefed | drafted | polished`.
+- **Prose tier**: entirely new as first-class artifacts. `project.logline` exists in `storyforge.yaml` today but isn't elaborated/scored as a level; no synopsis, act-shape, or theme artifact exists.
+- **Structural-anchor tier**: spine and architecture get their own CSVs. Today both are tracked as `status` flags on `scenes.csv`, which conflates "5-10 spine events" and "15-25 architecture beats" into the same row set. This change separates them into discrete artifacts.
+- **Manuscript tier**: existing pipeline, no structural change. The `architecture_scene` column on scenes.csv is new; it's optional (purely interstitial map scenes leave it empty).
+
+Migration for existing projects: a one-time `cmd_migrate` step extracts spine events from the current `status=spine` rows into `spine.csv`, copies architecture-status rows into `architecture.csv` (and removes them from scenes.csv if they aren't yet at map stage), and rewrites `spine_event` / `architecture_scene` references where derivable. For Ashes specifically, this is mechanical because the project has 24 architecture-status scenes — the author or migrate identifies the 5–10 that should be the spine and the rest become architecture rows.
 
 ---
 
@@ -104,23 +131,36 @@ What this act bears. Where the midpoint shifts.
 
 ### Act 3
 What this act bears. The climax demand and the resolution.
+
+## Theme
+
+Two to four sentences naming what the story is arguing — its
+central question or claim. Internal use, not pitch material.
+Themes that recur as concrete imagery should be registered in
+`reference/themes.csv` and tagged per-scene via the `theme_threads`
+column on `scene-intent.csv`.
 ```
 
-The `## Logline`, `## Synopsis`, `## Act-shape` headers are load-bearing for parsing. Within each section, prose is free-form (no required sub-structure for logline and synopsis; act-shape gets `### Act N` sub-sections).
+The `## Logline`, `## Synopsis`, `## Act-shape`, `## Theme` headers are load-bearing for parsing. Within each section, prose is free-form (no required sub-structure for logline / synopsis / theme; act-shape gets `### Act N` sub-sections).
 
-### Structural tier — already in CSVs
+### Structural-anchor tier — two new CSVs
 
-No new artifacts. The structural levels reuse the existing three-file CSV model:
+| Level | Artifact | Columns | Notes |
+|---|---|---|---|
+| 3 Spine | `reference/spine.csv` | `id, seq, title, function, part` | 5–10 rows. Each row is an irreducible story event. `part` partitions events into acts so the architecture tier can spread anchors proportionally. |
+| 4 Architecture | `reference/architecture.csv` | `id, seq, title, part, pov, spine_event, action_sequel, emotional_arc, value_at_stake, value_shift, turning_point` | 15–25 rows. `spine_event` references `spine.csv.id` (every architecture row names its parent spine event). Carries the dramatic-skeleton metadata that today lives on scenes.csv at status `architecture`. |
+
+A derived human-readable view is rendered as `reference/spine.md` and `reference/architecture.md` by `scenes-export`, just as `scenes-review.md` is rendered today. The CSV is the substrate; the .md is the pointable artifact.
+
+### Manuscript tier — existing files, one new column
 
 | Level | Files | Columns added at this level |
 |---|---|---|
-| 3 Spine | `reference/scenes.csv`, `reference/scene-intent.csv`, `reference/story-architecture.md` | `id, seq, title` (scenes); `function` (intent); narrative framing (architecture md) |
-| 4 Architecture | same | `part, pov` (scenes); `action_sequel, emotional_arc, value_at_stake, value_shift, turning_point` (intent) |
-| 5 Scene map | same | `location, timeline_day, time_of_day, duration` (scenes); `characters, on_stage, mice_threads` (intent) |
-| 6 Briefs | + `reference/scene-briefs.csv` | full brief schema (goal, conflict, outcome, etc.); GN columns when applicable |
-| 7 Draft | + `scenes/{id}.md` | `word_count` (scenes); prose in scene files |
+| 5 Scene map | `reference/scenes.csv` + `reference/scene-intent.csv` | All non-anchor columns on scenes.csv (`location, timeline_day, time_of_day, duration`, etc.); MICE / characters / on_stage on intent; new column `architecture_scene` on scenes.csv references `architecture.csv.id` (optional — interstitial scenes leave it empty) |
+| 6 Briefs | + `reference/scene-briefs.csv` | Full brief schema (goal, conflict, outcome, etc.); GN columns when applicable. Same row IDs as scenes.csv. |
+| 7 Draft | + `scenes/{id}.md` | `word_count` on scenes.csv; prose in scene files. Same row IDs. |
 
-The `scenes.csv:status` column already records which level each scene has reached; no new tracking is needed.
+The status column on scenes.csv tracks per-scene progress within the manuscript tier: `mapped | briefed | drafted | polished`. The earlier statuses (`spine`, `architecture`) are no longer used — those rows live in their own CSVs now.
 
 ### Relationship of `project.logline` (yaml) to `## Logline` (md)
 
@@ -130,14 +170,15 @@ This is a backward-compat concern but a small one — `project.logline` is used 
 
 ### Relationship to `reference/story-architecture.md`
 
-This file already exists and contains premise + theme + three-level conflict + ending. It's populated at the spine stage. Two options:
+This file already exists and contains premise + theme + three-level conflict + ending. Most of that content overlaps with what now belongs in `story-summary.md` (premise ≈ synopsis; theme moves into the Theme section). The bits unique to story-architecture.md are the three-level conflict framing and the ending.
 
-- **A. Keep as-is.** story-summary.md and story-architecture.md coexist. Some overlap in content (the architecture file's premise paragraph is essentially the synopsis), but each has a primary purpose.
-- **B. Merge.** Restructure story-architecture.md to include the logline/synopsis/act-shape sections at the top, with premise/theme/conflict/ending at the bottom. One file.
+**Revision: story-architecture.md becomes a thin pointer + the unique content.** Specifically:
 
-**Recommendation: A.** Less migration risk, preserves existing code paths, and the conceptual split (summary vs. structural framing) is real — the synopsis tells you what kind of story this is; the architecture tells you how it works thematically. They can both exist.
+- At the top, link to `story-summary.md` as the canonical source for logline / synopsis / act-shape / theme.
+- Keep only the content that doesn't live anywhere else: the three-level conflict structure and the ending.
+- Do not duplicate content. When the synopsis changes, the architecture file is unaffected (because the architecture file doesn't carry the synopsis anymore).
 
-If overlap becomes a problem in practice, B is straightforward to do later.
+This drops the "two files describe the same content" maintenance burden and makes each file's role clear.
 
 ---
 
@@ -156,7 +197,8 @@ The cross-cutting set, as it stands today:
 | `reference/characters.csv` | pipe-csv | Character registry |
 | `reference/locations.csv` | pipe-csv | Location registry |
 | `reference/mice-threads.csv` | pipe-csv | MICE thread registry |
-| `reference/motif-taxonomy.csv` | pipe-csv | Motif registry |
+| `reference/motif-taxonomy.csv` | pipe-csv | Motif registry — concrete recurring elements (images, objects, sounds, phrases) that carry thematic weight |
+| `reference/themes.csv` | pipe-csv (new) | Theme registry — abstract questions/arguments the story makes. Referenced by `theme_threads` on scene-intent.csv. See note below on themes vs motifs. |
 | `reference/knowledge.csv` | pipe-csv | Story-fact registry |
 | `reference/values.csv` | pipe-csv | Value registry (for value_at_stake) |
 | `reference/physical-states.csv` | pipe-csv | Per-character physical state |
@@ -171,6 +213,8 @@ The cross-cutting set, as it stands today:
 
 The bibles and registries themselves can become richer / drift over time — they're living documents. The scoring design (#227) needs to be honest about that: the bibles are reference data *now*, but a discovery at level 7 (draft) might reasonably propagate back to the bible. That's a cascade case (#226), and it crosses the prose/reference boundary in addition to the level boundaries.
 
+**Themes vs motifs** — a note since this is a new registry. Themes are *abstract* questions or claims the story is making ("what does it mean to remember?", "power corrupts"). Motifs are *concrete* recurring elements that carry thematic weight (a specific image, object, phrase, sound). The relationship is many-to-many: one theme can be carried by several motifs; one motif can serve several themes. They're kept as separate registries because conflating them loses information — `legibility` is a theme but not a motif; `wire spectacles` is a motif that might serve `legibility` as one of its themes. Per-scene tracking lives in two columns: `theme_threads` on scene-intent.csv (which abstract concerns this scene engages) and `motifs` on scene-briefs.csv (which concrete recurring elements appear in this scene).
+
 ---
 
 ## Common metadata
@@ -182,14 +226,13 @@ The prose tier benefits from a small amount of explicit metadata so the cascade 
 logline_updated: 2026-05-24
 synopsis_updated: 2026-05-24
 act_shape_updated: 2026-05-24
+theme_updated: 2026-05-24
 ---
 ```
 
-A timestamp per section, not per-file. That gives the cascade enough signal to ask "the logline changed after the synopsis — does the synopsis still hold?" without having to compute content hashes.
+A timestamp per section, not per-file. That gives the cascade enough signal to ask "the logline changed after the synopsis — does the synopsis still hold?"
 
-The structural tier doesn't need explicit metadata — `scenes.csv:status` plus git timestamps on the CSV files give the cascade enough to work with.
-
-(Content hashes per section, derivation graphs, etc. were considered and rejected as over-engineering. The cascade design (#226) can revisit if needed.)
+For the structural tiers, the discrete artifacts (`spine.csv`, `architecture.csv`, `scenes.csv` + companions) carry their own git timestamps. The cascade combines mtime with a content-hash cache (see the cascade synthesis) to distinguish typo fixes from semantic edits.
 
 ---
 
@@ -206,11 +249,11 @@ The structural tier doesn't need explicit metadata — `scenes.csv:status` plus 
 
 1. **Is the prose tier really three levels, or one?** The proposal treats logline / synopsis / act-shape as three separate scored levels but one artifact. If in practice they always move together (you can't change one without re-doing the others), they might be one level with three views. Test this assumption with real iterations on Ashes once implemented.
 
-2. **Should `story-architecture.md` be absorbed into `story-summary.md`?** Currently kept separate (Option A above). If the duplication between "synopsis" and "premise paragraph" becomes painful, merge.
+2. **~~Should story-architecture.md be absorbed into story-summary.md?~~** *Resolved: architecture file becomes a thin pointer to summary + only the unique content (three-level conflict, ending). No duplication.*
 
 3. **What about projects that start with a beat sheet, treatment, or outline instead of a logline?** Real-world authoring rarely starts at level 0. The system needs to be hospitable to entering at any level. Implementation concern, not a taxonomy concern — flag and revisit.
 
-4. **Is the spine really a separate level from architecture, or just architecture with fewer scenes?** Today's pipeline treats them distinctly (`status=spine` vs `status=architecture`), and the survey confirmed they answer different questions (irreducible events vs. dramatic rhythm). Keep as separate levels.
+4. **~~Is the spine really a separate level from architecture, or just architecture with fewer scenes?~~** *Resolved: separate. They live in different artifacts (`spine.csv` and `architecture.csv`) and the architecture rows explicitly reference their parent spine event.*
 
 5. **GN mode and the prose tier.** The prose tier as proposed makes no medium distinction — a logline is a logline whether the medium is novel or graphic novel. GN-specific structure (page-turn beats, panel rhythm) starts at the structural tier. Confirm with a GN project iteration.
 
@@ -220,10 +263,12 @@ The structural tier doesn't need explicit metadata — `scenes.csv:status` plus 
 
 For when the three research docs converge and we move to building:
 
-- New file template at `templates/reference/story-summary.md`.
-- `storyforge init` writes the file with the project's seed logline.
-- A small `parse_story_summary(project_dir)` helper parses the three sections via `## Logline`, `## Synopsis`, `## Act-shape` headers, returns a dict.
-- `storyforge sync` extended to include `story-summary.md` in its watched paths (though the prose tier doesn't round-trip through CSVs — it's the source of truth for its three levels).
-- Migration: on first run after the change, if `story-summary.md` is absent and `storyforge.yaml:project.logline` is present, scaffold the file with the logline filled in and synopsis/act-shape empty.
+- New file templates: `templates/reference/story-summary.md`, `templates/reference/themes.csv`, `templates/reference/spine.csv`, `templates/reference/architecture.csv`.
+- `storyforge init` writes story-summary.md with the project's seed logline, and creates empty spine.csv / architecture.csv / themes.csv with their headers.
+- A small `parse_story_summary(project_dir)` helper parses the four sections (Logline / Synopsis / Act-shape / Theme) via `## ` headers, returns a dict.
+- `storyforge sync` extended to render derived markdown for the new structural-anchor artifacts: `reference/spine.md` and `reference/architecture.md` (sibling of the existing `scenes-review.md`).
+- Migrations:
+  - On first run, if story-summary.md is absent and `storyforge.yaml:project.logline` is present, scaffold the file with the logline filled in and synopsis/act-shape/theme empty.
+  - For existing projects whose spine and architecture rows currently live as `status=spine` / `status=architecture` on scenes.csv: `cmd_migrate` extracts spine rows into spine.csv (preserving IDs), copies architecture rows into architecture.csv, and rewrites references where derivable. The author confirms or adjusts the spine event count.
 
 Nothing here is committed; this section is just to confirm the taxonomy maps cleanly to an implementation plan when it's time.

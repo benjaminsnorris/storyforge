@@ -2,9 +2,14 @@
 
 Research design doc for issue [#226](https://github.com/benjaminsnorris/storyforge/issues/226), under the umbrella [#224](https://github.com/benjaminsnorris/storyforge/issues/224).
 
-Companion to [the levels-and-shapes doc](2026-05-24-elaboration-levels-design.md) — read that first. Refers to its level numbering throughout.
+Companion to [the levels-and-shapes doc](2026-05-24-elaboration-levels-design.md) and the [review synthesis](2026-05-24-elaboration-review-synthesis.md) — read those first. Refers to the levels doc's numbering throughout. The synthesis supersedes this doc where they disagree (it folded in author + reviewer feedback after this was written).
 
-Status: **draft**, expects iteration. Implementation out of scope.
+Status: **draft + revisions noted inline**. Implementation out of scope.
+
+> **Post-review revisions** that affect this doc:
+> - The structural tier is split into discrete artifacts (spine.csv, architecture.csv, scenes.csv) rather than `status` flags on a single CSV. This makes the 3→4 and 4→5 boundary detection trivially deterministic (set membership on `spine_event` and `architecture_scene` columns).
+> - The diff+verdict mechanism (used at LLM-judged boundaries) has a coaching-level-aware actor: in `full`, the LLM proposes the verdict and the author can override; in `coach`, the LLM proposes and the author confirms; in `strict`, only the author records verdicts. See the synthesis for details.
+> - `mtime`-only drift detection is replaced by `mtime + content_hash` so typo commits don't trigger false drift.
 
 ---
 
@@ -63,12 +68,13 @@ Several drift cases can be flagged without an LLM:
 
 | Detection | Where | How |
 |---|---|---|
-| A spine event has no descendant scenes | Spine → Architecture/Map | No `scenes.csv` row maps to spine event N |
-| An architecture scene has no entry in scene-intent.csv | Architecture → Map | Row missing |
+| A spine event has no descendant architecture rows | Spine → Architecture (3→4) | `spine.csv.id` not referenced by any `architecture.csv.spine_event` — set difference |
+| An architecture anchor has no descendant map scenes | Architecture → Map (4→5) | `architecture.csv.id` not referenced by any `scenes.csv.architecture_scene` — set difference |
+| A theme has no scene engagements | Theme → Manuscript | `themes.csv.id` not present in any `scene-intent.csv.theme_threads` — set difference |
 | A brief references a `value_at_stake` not in `values.csv` | Briefs ↔ Registries | Set difference |
 | A scene's `pov` character is not in `characters.csv` | Map ↔ Registries | Set difference |
 | A draft scene's word count is 0 (untouched) | Briefs → Draft | `word_count` column check |
-| A prose-tier section's `_updated` timestamp is older than a downstream level's | Logline → Synopsis, etc. | Frontmatter date compare |
+| A prose-tier section's `_updated` timestamp is older than a downstream level's | Logline → Synopsis, etc. | Frontmatter date compare + content-hash delta |
 | The MD file for a scene exists on disk but `status` is `briefed` | Status drift | File presence vs. status |
 
 These are coverage and freshness checks. They produce hard "X is missing / out of date / inconsistent" signals.

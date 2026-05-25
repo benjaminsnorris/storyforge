@@ -2,9 +2,15 @@
 
 Research design doc for issue [#227](https://github.com/benjaminsnorris/storyforge/issues/227), under the umbrella [#224](https://github.com/benjaminsnorris/storyforge/issues/224).
 
-Companion to [the levels-and-shapes doc](2026-05-24-elaboration-levels-design.md) and [the cascade-mechanics doc](2026-05-24-cascade-mechanics-design.md) — read those first; this one refers to the level numbering they establish.
+Companion to [the levels-and-shapes doc](2026-05-24-elaboration-levels-design.md), [the cascade-mechanics doc](2026-05-24-cascade-mechanics-design.md), and the [review synthesis](2026-05-24-elaboration-review-synthesis.md) — read those first; this one refers to the level numbering they establish. The synthesis supersedes this doc where they disagree.
 
-Status: **draft**, expects iteration. Implementation out of scope.
+Status: **draft + revisions noted inline**. Implementation out of scope.
+
+> **Post-review revisions** that affect this doc:
+> - The structural tier is split into discrete artifacts (`spine.csv`, `architecture.csv`, `scenes.csv` + companions). Downward coverage at 3→4 and 4→5 becomes a trivial set-membership check against the new `spine_event` and `architecture_scene` reference columns.
+> - **Upward faithfulness scores are replaced by diffs + author verdicts** at the prose-tier and structural-tier boundaries. Numbers go away; the LLM still runs the comparison but the output is a structured diff with a coaching-level-aware verdict actor. See the synthesis.
+> - A new theme dimension: `reference/themes.csv` registry and `theme_threads` column on scene-intent.csv. Themes and motifs stay as separate registries.
+> - `project.structure: custom` is dropped for v1.
 
 ---
 
@@ -132,33 +138,35 @@ These are different questions and need different checks.
 
 ### The cross-level scoring matrix
 
-| Boundary | Downward (deterministic where possible) | Upward (LLM) |
+| Boundary | Downward (deterministic where possible) | Upward (diff+verdict per synthesis) |
 |---|---|---|
-| 0 → 1 Logline → Synopsis | None deterministic — both are prose | "Does the synopsis still describe the logline's story?" |
-| 1 → 2 Synopsis → Act-shape | None deterministic | "Does the act-shape match the synopsis's outline?" |
-| 2 → 3 Act-shape → Spine | Each spine event maps to one of the three acts (per `part` column) | "Does the spine embody the act-shape's turns?" |
-| 3 → 4 Spine → Architecture | Every spine event has descendant scenes in `scenes.csv` (need a `spine_event` reference column — see "Schema additions" below) | "Do the architecture scenes serve the spine?" |
-| 4 → 5 Architecture → Map | Every architecture scene has full map columns populated | "Does the map's operational metadata honor architecture's structural intent?" |
-| 5 → 6 Map → Briefs | Every map scene has a brief row | "Does the brief honor the scene-intent?" |
-| 6 → 7 Briefs → Draft | Every brief has a draft file with word_count > 0 | "Does the draft honor the brief?" (reuse: this is exactly `brief_fidelity` in scoring_gn.py and the upward signal of `revise --findings`) |
+| 0 → 1 Logline → Synopsis | None deterministic — both are prose | LLM diff: "what does the synopsis say vs. what the logline implies?" |
+| 1 → 2 Synopsis → Act-shape | None deterministic | LLM diff |
+| 2 → 3 Act-shape → Spine | Each spine event's `part` field maps to one of the three acts | LLM diff |
+| 3 → 4 Spine → Architecture | Every `spine.csv.id` is referenced by at least one `architecture.csv.spine_event` — set membership | LLM diff |
+| 4 → 5 Architecture → Map | Every `architecture.csv.id` is referenced by at least one `scenes.csv.architecture_scene` — set membership | LLM diff |
+| 5 → 6 Map → Briefs | Every scene with `status >= briefed` has a row in `scene-briefs.csv` — set membership | LLM diff |
+| 6 → 7 Briefs → Draft | Every brief has a draft file with word_count > 0 | Reuse: `brief_fidelity` in scoring_gn.py + the upward signal of `revise --findings` |
 
 ### Where the prose tier is special
 
 The 0↔1, 1↔2 boundaries (and partly 2↔3) have no clean deterministic downward checks — both sides are prose. **All scoring at these boundaries is LLM-driven.** That's expensive and noisy, so we should:
 
-- Run these scores only on demand (not in the hook).
-- Trigger them from the cascade: if the drift detector sees mismatched `_updated` timestamps between, say, logline and synopsis, *then* run the LLM check.
+- Run these checks only on demand (not in the hook).
+- Trigger them from the cascade: if the drift detector sees mismatched `_updated` timestamps + content-hash deltas, *then* run the LLM check.
 - Cache results between runs; only re-check if either side has been touched.
+- Per the synthesis, the LLM output is a structured diff with a coaching-level-aware verdict actor, not a 0.0–1.0 score.
 
-### Schema additions to make downward coverage cheap
+### Schema that makes downward coverage cheap
 
-The deterministic downward check at 3 → 4 (Spine → Architecture) needs a way to map architecture scenes to their parent spine event. Today nothing tracks this — architecture scenes are just rows with `status=architecture`; their relationship to spine events is implicit in the title/sequence.
+The level-and-shapes doc and synthesis introduce two reference columns that make the structural-tier downward checks trivial:
 
-**Proposed addition: `spine_event` column in `scene-intent.csv`.** When the architecture stage elaborates the spine, each new scene gets the `id` of its parent spine event recorded. Downward coverage becomes a trivial set check.
+- **`spine_event`** on `architecture.csv` (required) — every architecture row names its parent spine event. 3→4 downward becomes "every spine.csv.id appears in some architecture.csv.spine_event."
+- **`architecture_scene`** on `scenes.csv` (optional) — every map scene either is an architecture anchor (`architecture_scene = own_id`), sits adjacent to one (`architecture_scene = anchor_id`), or is purely interstitial (`architecture_scene = ''`). 4→5 downward becomes "every architecture.csv.id appears in some scenes.csv.architecture_scene."
 
-For 2 → 3 (Act-shape → Spine), the existing `part` column on scenes.csv already partitions spine events into acts; no new column needed. The downward check is "each act has at least one spine event," "each act has events proportional to its length."
+For 2 → 3 (Act-shape → Spine), the existing `part` column on spine.csv partitions events into acts; no new column needed. The downward check is "each act has at least one spine event."
 
-For higher levels, the CSV row identity *is* the parent-child relationship (every architecture scene IS a map scene IS a brief IS a draft — same `id`, more columns populated). No new columns needed.
+For 6 → 7 (Briefs → Draft), the row identity is preserved (same scene id in scene-briefs.csv and scenes/{id}.md) — set membership over file existence + word_count.
 
 ---
 
@@ -176,12 +184,30 @@ For every level that has structural data (3–7), check that all references poin
 | `location` | `locations.csv` | 5, 6, 7 |
 | `value_at_stake` | `values.csv` | 4, 5, 6, 7 |
 | `motifs` | `motif-taxonomy.csv` | 6, 7 |
+| `theme_threads` | `themes.csv` *(new)* | 5, 6, 7 |
 | `mice_threads` | `mice-threads.csv` | 5, 6, 7 |
 | `physical_state_in` / `physical_state_out` | `physical-states.csv` | 6, 7 |
+| `spine_event` | `spine.csv` | 4 (required) |
+| `architecture_scene` | `architecture.csv` | 5 (optional) |
 
 These are pure set comparisons — each one is one CSV read + one set difference. Cheap. Already partly implemented in `hone`. The reorganization here is making the pattern explicit per level instead of hone-specific.
 
 **Score:** for each (level, registry) pair, `coverage = 1.0 - (orphan_count / total_refs)`. A score of 1.0 means every reference resolves; less than 1.0 means orphans exist. Findings are the orphan list with their containing scene IDs.
+
+### Per-theme coverage (deterministic, new)
+
+The themes registry adds a second dimension to the registry-conformance pattern: not just "are references valid" but "is each registry entry actually used."
+
+| Check | Mechanism | Source |
+|---|---|---|
+| Every theme in `themes.csv` is engaged by at least one scene | deterministic | new |
+| Each theme's per-scene engagement count crosses a minimum threshold (default: 3) | deterministic | new |
+| No single theme dominates more than X% of scenes (default: 70%) | deterministic | new |
+| Each theme has scene engagements spread across all acts (no theme drops out for a full act) | deterministic | new |
+
+These add per-theme findings of the form *"theme `erasure` is registered but engages only 1 scene — decorative, not load-bearing"* or *"theme `legibility` engages 38 of 50 scenes — drowning out other themes"* or *"theme `recovery` engages 12 scenes in Acts 1–2 but vanishes in Act 3."*
+
+These are the highest-leverage axes for the theme dimension: they catch the "theme is named at the top but never actually carried" failure mode that the story-craft reviewer flagged.
 
 ### Bible consistency (LLM, on demand)
 
