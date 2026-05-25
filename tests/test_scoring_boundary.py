@@ -391,6 +391,108 @@ def test_boundary_3_to_4_includes_summary_in_upstream(project_dir, monkeypatch):
     assert 'Summary:' in captured['prompt']
 
 
+def test_boundary_6_to_7_includes_scene_summary_as_promise(project_dir, monkeypatch):
+    """The 6->7 boundary diff (brief → draft) must lead the upstream with
+    the scene's summary so the LLM can answer 'did the prose deliver what
+    the summary promised?'"""
+    # Rewrite scenes.csv with the new-schema header (includes summary)
+    scenes_path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    with open(scenes_path, 'w') as f:
+        f.write('id|seq|title|summary|part|pov|location|timeline_day|'
+                'time_of_day|duration|type|status|word_count|target_words\n')
+        f.write('sc-promise|99|Test|'
+                'Lucien finalizes a portrait with growing unease.'
+                '|1|lucien|||||character|drafted||\n')
+    briefs_path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    with open(briefs_path, 'w') as f:
+        f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|'
+                'knowledge_out|key_actions|key_dialogue|emotions|motifs|'
+                'subtext|continuity_deps|has_overflow|physical_state_in|'
+                'physical_state_out\n')
+        f.write('sc-promise|Finalize||Notes shift quietly|||||||||||false||\n')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    with open(os.path.join(scenes_dir, 'sc-promise.md'), 'w') as f:
+        f.write('# Scene prose\n\nThe portrait finalized.')
+
+    captured = {}
+    def fake(prompt, model, log_file, **kwargs):
+        captured['prompt'] = prompt
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'upstream_summary': 'u', 'downstream_summary': 'd',
+                'alignment': 'a', 'proposed_verdict': 'both are right',
+                'rationale': 'r',
+            })}],
+            'usage': {'input_tokens': 100, 'output_tokens': 50,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api, scoring_boundary
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_boundary, 'invoke_to_file', fake)
+
+    score_boundary(project_dir, '6->7', scope='sc-promise',
+                   coaching_level='strict')
+    # The summary lead-line should appear in the prompt
+    assert 'Lucien finalizes a portrait with growing unease.' in captured['prompt']
+    assert 'the promise' in captured['prompt']
+    # The brief detail still follows
+    assert 'Finalize' in captured['prompt']
+    assert 'Notes shift quietly' in captured['prompt']
+
+
+def test_boundary_6_to_7_falls_back_when_summary_empty(project_dir, monkeypatch):
+    """Legacy project with no `summary` on the scene row: 6->7 still works,
+    just without the summary lead-line."""
+    # Rewrite scenes.csv with the OLD-schema header (no summary column)
+    scenes_path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    with open(scenes_path, 'w') as f:
+        f.write('id|seq|title|part|pov|location|timeline_day|time_of_day|'
+                'duration|type|status|word_count|target_words\n')
+        f.write('sc-legacy|100|Legacy|1|lucien|||||character|drafted||\n')
+    briefs_path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    with open(briefs_path, 'w') as f:
+        f.write('id|goal|conflict|outcome|crisis|decision|knowledge_in|'
+                'knowledge_out|key_actions|key_dialogue|emotions|motifs|'
+                'subtext|continuity_deps|has_overflow|physical_state_in|'
+                'physical_state_out\n')
+        f.write('sc-legacy|g||o|||||||||||false||\n')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    with open(os.path.join(scenes_dir, 'sc-legacy.md'), 'w') as f:
+        f.write('Legacy prose.')
+
+    captured = {}
+    def fake(prompt, model, log_file, **kwargs):
+        captured['prompt'] = prompt
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': '{"upstream_summary":"u","downstream_summary":"d","alignment":"a","proposed_verdict":"both are right","rationale":"r"}'}],
+            'usage': {'input_tokens': 50, 'output_tokens': 20,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api, scoring_boundary
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_boundary, 'invoke_to_file', fake)
+
+    score_boundary(project_dir, '6->7', scope='sc-legacy',
+                   coaching_level='strict')
+    # No summary-lead line, but brief detail still present
+    assert 'the promise' not in captured['prompt']
+    assert 'Brief for sc-legacy' in captured['prompt']
+
+
 def test_render_spine_text_leads_with_summary(project_dir):
     """_render_spine_text (used by the 2->3 boundary) must lead each
     bullet with the row's `summary` column when populated."""

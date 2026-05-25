@@ -363,11 +363,26 @@ def _collect_per_scene_intent_vs_brief(
 def _collect_per_brief_vs_draft(
     project_dir: str, scope: str | None
 ) -> list[tuple[str, str, str]]:
-    """For each scene that has both a brief and a draft on disk, compare."""
+    """For each scene that has both a brief and a draft on disk, compare.
+
+    Leads with the scene's one-sentence `summary` (the expanding-outline
+    column) so the LLM diff can directly answer "did the prose deliver
+    what the summary promised?" — alongside the brief-vs-draft check.
+    Falls back to brief-only when summary is empty (legacy projects).
+    """
     briefs_path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
     if not os.path.isfile(briefs_path):
         return []
     briefs = _read_csv(briefs_path)
+
+    # Map scene-id → summary from scenes.csv (used to lead the upstream).
+    scenes_path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    summary_by_id: dict[str, str] = {}
+    if os.path.isfile(scenes_path):
+        for s in _read_csv(scenes_path):
+            sid = s.get('id', '').strip()
+            if sid:
+                summary_by_id[sid] = s.get('summary', '').strip()
 
     pairs: list[tuple[str, str, str]] = []
     for brief in briefs:
@@ -377,18 +392,28 @@ def _collect_per_brief_vs_draft(
         draft_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
         if not os.path.isfile(draft_path):
             continue
-        upstream = (
-            f'Brief for {sid}:\n'
-            f'Goal: {brief.get("goal", "")}\n'
-            f'Conflict: {brief.get("conflict", "")}\n'
-            f'Outcome: {brief.get("outcome", "")}\n'
-            f'Key actions: {brief.get("key_actions", "")}\n'
-            f'Key dialogue: {brief.get("key_dialogue", "")}\n'
-            f'Emotions: {brief.get("emotions", "")}\n'
-            f'Subtext: {brief.get("subtext", "")}'
-        )
-        with open(draft_path, encoding='utf-8') as f:
-            downstream = f.read()
+        upstream_parts: list[str] = []
+        summary = summary_by_id.get(sid, '')
+        if summary:
+            upstream_parts.append(f'Scene {sid} summary (the promise): {summary}')
+            upstream_parts.append('')
+        upstream_parts.extend([
+            f'Brief for {sid}:',
+            f'Goal: {brief.get("goal", "")}',
+            f'Conflict: {brief.get("conflict", "")}',
+            f'Outcome: {brief.get("outcome", "")}',
+            f'Key actions: {brief.get("key_actions", "")}',
+            f'Key dialogue: {brief.get("key_dialogue", "")}',
+            f'Emotions: {brief.get("emotions", "")}',
+            f'Subtext: {brief.get("subtext", "")}',
+        ])
+        upstream = '\n'.join(upstream_parts)
+        try:
+            with open(draft_path, encoding='utf-8') as f:
+                downstream = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            log(f'  [6->7 / {sid}] skip: could not read draft ({e})')
+            continue
         pairs.append((sid, upstream, downstream))
     return pairs
 
