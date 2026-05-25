@@ -4,6 +4,14 @@ import os
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_api_key(monkeypatch):
+    """Clear ANTHROPIC_API_KEY by default so the style-guide step falls
+    back to the deterministic coach template — tests that explicitly
+    test the LLM path re-set the env via monkeypatch.setenv."""
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+
+
 SAMPLE_SCRIPT_A = """\
 # Scene: the-blank-page
 
@@ -76,6 +84,199 @@ def test_script_package_produces_bundle(project_dir_gn, monkeypatch):
     assert os.path.isfile(os.path.join(bundle, 'visual-references.md'))
     assert os.path.isfile(os.path.join(bundle, 'chapter-map.md'))
     assert os.path.isfile(os.path.join(bundle, 'handoff-readme.md'))
+    assert os.path.isfile(os.path.join(bundle, 'style-guide.md'))
+
+
+# ---------------------------------------------------------------------------
+# Style-guide generation (coaching-aware)
+# ---------------------------------------------------------------------------
+
+def test_style_guide_strict_template_no_llm(project_dir_gn, monkeypatch):
+    """coaching=strict produces a section template with no LLM call."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    from storyforge import api, cmd_script_package
+    def fail(*a, **k):
+        raise AssertionError('LLM must not be called in strict mode')
+    monkeypatch.setattr(api, 'invoke_to_file', fail)
+    cmd_script_package.main(['--coaching', 'strict'])
+    text = open(os.path.join(project_dir_gn, 'manuscript',
+                              'style-guide.md')).read()
+    assert '## Palette' in text
+    assert '## Line weight and inking' in text
+    assert '## Lettering and caption tone' in text
+    assert '## Panel-rhythm philosophy' in text
+    assert '## Reference-art inspirations' in text
+    # Strict template is a constraint list — no LLM-generated prose
+    assert 'constraint template' in text.lower() or 'Constraint template' in text
+
+
+def test_style_guide_coach_writes_questions_no_llm(project_dir_gn, monkeypatch):
+    """coaching=coach produces cues + questions, no LLM call."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    from storyforge import api, cmd_script_package
+    def fail(*a, **k):
+        raise AssertionError('LLM must not be called in coach mode')
+    monkeypatch.setattr(api, 'invoke_to_file', fail)
+    cmd_script_package.main(['--coaching', 'coach'])
+    text = open(os.path.join(project_dir_gn, 'manuscript',
+                              'style-guide.md')).read()
+    assert '## Palette' in text
+    assert '- Question:' in text
+    assert 'Coaching brief' in text or 'coaching=coach' in text
+
+
+def test_style_guide_full_uses_llm_when_key_set(project_dir_gn, monkeypatch):
+    """coaching=full + API key set → LLM-synthesized guide written to bundle."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    called = {}
+    def fake(prompt, model, log_file, **kwargs):
+        called['prompt'] = prompt
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text':
+                          f'# Test — Style guide\n\n## Palette\n\n'
+                          f'A pale, candlelit register with rare crimson.\n\n'
+                          f'## Line weight and inking\n\nMedium with brush.\n\n'
+                          f'## Lettering and caption tone\n\nWhisper captions.\n\n'
+                          f'## Panel-rhythm philosophy\n\n4-grid baseline.\n\n'
+                          f'## Reference-art inspirations\n\nMike Mignola.\n'}],
+            'usage': {'input_tokens': 1000, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    import json
+    from storyforge import api, cmd_script_package
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_script_package, 'invoke_to_file', fake,
+                        raising=False)
+    cmd_script_package.main(['--coaching', 'full'])
+    text = open(os.path.join(project_dir_gn, 'manuscript',
+                              'style-guide.md')).read()
+    assert 'A pale, candlelit register with rare crimson.' in text
+    assert called['prompt']  # was actually called
+
+
+def test_style_guide_full_falls_back_on_unparseable_response(
+    project_dir_gn, monkeypatch,
+):
+    """When the LLM returns a response that doesn't start with `#`, the
+    style-guide step must fall back to the coach template AND record
+    the call's cost with `:unparseable` target (the API call was
+    billed)."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    import json as _json
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text',
+                          'text': 'Sure! Here is the guide:\n(without a header)'}],
+            'usage': {'input_tokens': 100, 'output_tokens': 50,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            _json.dump(response, f)
+        return response
+    from storyforge import api, cmd_script_package
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_script_package, 'invoke_to_file', fake)
+    cmd_script_package.main(['--coaching', 'full'])
+    text = open(os.path.join(project_dir_gn, 'manuscript',
+                              'style-guide.md')).read()
+    # Falls back to coach template
+    assert '- Question:' in text
+    # Cost ledger has the `unparseable` target
+    ledger = open(os.path.join(project_dir_gn, 'working', 'costs',
+                                'ledger.csv')).read()
+    assert 'unparseable' in ledger
+
+
+def test_style_guide_full_falls_back_on_llm_exception(
+    project_dir_gn, monkeypatch,
+):
+    """When invoke_to_file raises, the bundle completes with the coach
+    template — no exception propagates."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    def raise_exc(*a, **k):
+        raise RuntimeError('simulated network failure')
+    from storyforge import api, cmd_script_package
+    monkeypatch.setattr(api, 'invoke_to_file', raise_exc)
+    monkeypatch.setattr(cmd_script_package, 'invoke_to_file', raise_exc)
+    cmd_script_package.main(['--coaching', 'full'])
+    text = open(os.path.join(project_dir_gn, 'manuscript',
+                              'style-guide.md')).read()
+    assert '- Question:' in text
+
+
+def test_style_guide_sections_consistent_across_modes():
+    """Every renderer (strict, coach, LLM prompt) must emit the same set
+    of sections in the same order. _STYLE_GUIDE_SECTIONS is the single
+    source of truth — drift here is a real bug."""
+    from storyforge.cmd_script_package import (
+        _STYLE_GUIDE_SECTIONS, _render_strict_style_guide,
+        _render_coach_style_guide, _build_full_style_guide_prompt,
+        StyleGuideCues,
+    )
+    cues = StyleGuideCues(
+        genre='', subgenre='', world_bible='', character_bible='',
+        voice_guide='', scene_intent_excerpt='',
+    )
+    strict = _render_strict_style_guide('T', cues)
+    coach = _render_coach_style_guide('T', cues)
+    prompt = _build_full_style_guide_prompt('T', cues)
+    for section in _STYLE_GUIDE_SECTIONS:
+        assert f'## {section}' in strict, f'strict missing {section}'
+        assert f'## {section}' in coach, f'coach missing {section}'
+        assert f'## {section}' in prompt, f'LLM prompt missing {section}'
+
+
+def test_style_guide_no_plan1_marker_in_user_facing_output():
+    """The coach template must not leak 'Plan 1' task-state markers
+    into the user-facing style-guide written to the artist bundle."""
+    from storyforge.cmd_script_package import (
+        _render_coach_style_guide, StyleGuideCues,
+    )
+    cues = StyleGuideCues(
+        genre='', subgenre='', world_bible='', character_bible='',
+        voice_guide='', scene_intent_excerpt='',
+    )
+    text = _render_coach_style_guide('T', cues)
+    assert 'Plan 1' not in text
+
+
+def test_style_guide_full_falls_back_without_api_key(project_dir_gn, monkeypatch, capsys):
+    """coaching=full without API key → falls back to coach template; bundle
+    still succeeds; final log line names the ACTUAL mode used, not 'full'."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    from storyforge import cmd_script_package
+    cmd_script_package.main(['--coaching', 'full'])
+    text = open(os.path.join(project_dir_gn, 'manuscript',
+                              'style-guide.md')).read()
+    # Falls back to coach template (recognizable by the Question: pattern)
+    assert '- Question:' in text
+    # The final log line must not lie about the mode: it should report
+    # the fallback, not 'coaching=full'.
+    out = capsys.readouterr().out
+    assert 'no API key' in out or 'full→coach' in out
 
 
 def test_script_package_global_page_numbering(project_dir_gn, monkeypatch):

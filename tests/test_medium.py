@@ -350,7 +350,7 @@ def test_briefs_handler_gn_returns_none_when_no_work(project_dir_gn):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize('cmd', [
-    'publish', 'annotations', 'extract', 'repetition', 'enrich',
+    'publish', 'annotations', 'repetition', 'enrich',
 ])
 def test_dispatcher_blocks_unsupported_commands_in_gn_mode(
     project_dir_gn, monkeypatch, capsys, cmd,

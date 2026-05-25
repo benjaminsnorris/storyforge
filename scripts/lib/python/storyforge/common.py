@@ -220,6 +220,9 @@ _MODEL_MAP = {
     'extraction': 'claude-haiku-4-5-20251001',
     'synthesis': 'claude-opus-4-6',
     'review': 'claude-sonnet-4-6',
+    # creative: synthesis-style work that needs strong judgment but isn't
+    # full-scene drafting (style guides, summary proposals, prose adaptation).
+    'creative': 'claude-opus-4-6',
 }
 
 
