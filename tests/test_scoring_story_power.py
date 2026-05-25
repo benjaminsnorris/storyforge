@@ -341,6 +341,49 @@ def test_out_of_range_score_is_dropped(tmp_path, monkeypatch):
 # Zero-tokens cost ledger guard
 # ---------------------------------------------------------------------------
 
+def test_delta_warns_on_axis_schema_drift(tmp_path, monkeypatch, capsys):
+    """A previous scorecard with a different axis set must surface a
+    warning — silently comparing partial-overlap scores would let
+    schema migrations look like score regressions."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    base = os.path.join(str(tmp_path), 'working', 'scores', 'story-power',
+                         '20260101T000000_000000Z')
+    os.makedirs(base)
+    # Previous run had an axis that no longer exists ("legacy_axis"),
+    # plus the current 8.
+    with open(os.path.join(base, 'scorecard.csv'), 'w') as f:
+        f.write('axis|score\nlegacy_axis|9\nspecificity|7\n'
+                'stakes_dilemma|8\n')
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _mock_llm(_full_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out = capsys.readouterr().out
+    assert 'drifted' in out
+    assert 'legacy_axis' in out
+
+
+def test_summary_column_warns_on_malformed_csv_row(tmp_path, capsys):
+    """A spine.csv row with the wrong cell count must surface a warning
+    so a schema drift doesn't silently drop rows from the prompt."""
+    csv_path = os.path.join(str(tmp_path), 'broken.csv')
+    with open(csv_path, 'w') as f:
+        f.write('id|seq|summary|function\n'
+                'e1|1|First event|setup\n'
+                'this row is wrong\n'
+                'e2|3|Third event|escalation\n')
+    from storyforge.scoring_story_power import _summary_column_from_csv
+    out = _summary_column_from_csv(csv_path)
+    err = capsys.readouterr().out
+    # First and third row survive; bad row warned about.
+    assert 'First event' in out
+    assert 'Third event' in out
+    assert 'malformed' in err
+
+
 def test_zero_tokens_skips_cost_ledger_row(tmp_path, monkeypatch):
     """An LLM response with 0 input + 0 output tokens is almost always a
     mocked or empty round-trip — a $0 ledger row hides the real signal."""

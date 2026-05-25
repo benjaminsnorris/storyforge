@@ -47,8 +47,10 @@ AXIS_BY_KEY = {a.key: a for a in AXES}
 def composite_score(scores: dict[str, int | float]) -> float:
     """Return the weighted composite from a {axis_key: score} dict.
 
-    Falls back to a flat average if any axis is missing; never raises.
-    Score range stays 1-10.
+    Computes a weighted average over the axes that are present (missing
+    axes drop out of both numerator and denominator). Returns 0.0 when
+    nothing is present. The caller decides whether a partial composite
+    is meaningful; this never raises. Score range stays 1-10.
     """
     total_w = 0.0
     total = 0.0
@@ -85,8 +87,11 @@ def _read_optional(path: str, head_lines: int | None = None) -> str:
 def gather_pitch_artifacts(project_dir: str) -> dict[str, str]:
     """Read the artifacts the story-power rubric operates on.
 
-    story-summary.md is required; spine and architecture summaries are
-    optional context (improve specificity scoring when present).
+    Always returns the six-key shape — empty strings for any artifact
+    that is absent. The caller (score_story_power) enforces the actual
+    requirement: both logline and synopsis must be present and
+    non-empty. Spine and architecture summaries are optional context
+    (they improve specificity scoring when present).
     """
     summary = parse_story_summary(project_dir) or {}
     spine_summaries = _summary_column_from_csv(
@@ -107,11 +112,20 @@ def gather_pitch_artifacts(project_dir: str) -> dict[str, str]:
 
 def _summary_column_from_csv(csv_path: str) -> str:
     """Pull the `summary` column from a pipe-delimited CSV as a numbered
-    bullet list. Returns '' if the file is missing or has no summary col."""
+    bullet list. Returns '' if the file is missing or has no summary col.
+
+    Logs a WARNING per row whose cell count doesn't match the header
+    so a schema drift between spine.csv / architecture.csv and this
+    reader surfaces instead of silently dropping rows from the prompt.
+    """
     if not os.path.isfile(csv_path):
         return ''
-    with open(csv_path, encoding='utf-8') as f:
-        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    try:
+        with open(csv_path, encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'WARNING: could not read {csv_path}: {e}')
+        return ''
     lines = [l for l in raw.splitlines() if l.strip()]
     if len(lines) < 2:
         return ''
@@ -122,6 +136,8 @@ def _summary_column_from_csv(csv_path: str) -> str:
     for i, line in enumerate(lines[1:], start=1):
         cells = line.split('|')
         if len(cells) != len(headers):
+            log(f'WARNING: skipping malformed row {i} in {csv_path} '
+                f'({len(cells)} cells, expected {len(headers)})')
             continue
         row = dict(zip(headers, cells))
         s = row.get('summary', '').strip()
@@ -177,7 +193,7 @@ Return a JSON object with this exact shape:
   }},
   "scores": [
     {{
-      "axis": "specificity",
+      "axis": "{AXES[0].key}",
       "score": 1-10 integer,
       "positive_signals": "semicolon-separated quoted signals from the pitch",
       "negative_signals": "semicolon-separated quoted abstractions / gaps",
@@ -468,22 +484,40 @@ def _compute_deltas(project_dir: str,
     """Compare current scores against the most recent prior run.
 
     Returns {axis_key: delta} where delta = current - previous. Empty
-    when no prior run exists.
+    when no prior run exists. Skips the just-created current directory
+    by filtering on scorecard.csv presence (the current dir hasn't
+    written its scorecard yet at this point in the flow).
     """
     base = os.path.join(project_dir, 'working', 'scores', 'story-power')
     if not os.path.isdir(base):
         return {}
+    # Restrict to directories that actually have a scorecard.csv on disk
+    # — the just-created current run is still empty when this is called.
     prior_runs = sorted(d for d in os.listdir(base)
-                        if os.path.isdir(os.path.join(base, d)))
-    # Drop the current run if it's already in the list (just-created dir).
-    prior_runs = [d for d in prior_runs
-                  if os.path.isfile(
-                      os.path.join(base, d, 'scorecard.csv'),
-                  )]
+                        if os.path.isdir(os.path.join(base, d))
+                        and os.path.isfile(
+                            os.path.join(base, d, 'scorecard.csv'),
+                        ))
     if not prior_runs:
         return {}
     prev_path = os.path.join(base, prior_runs[-1], 'scorecard.csv')
     prev_scores = _read_scorecard_scores(prev_path)
+    # Surface schema drift — if the previous CSV's axis set differs from
+    # the current run's, deltas are at best partial and at worst
+    # comparing apples-to-not-quite-apples (axes added/removed across
+    # runs).
+    prev_axes = set(prev_scores)
+    curr_axes = set(current_scores)
+    if prev_axes and prev_axes != curr_axes:
+        missing_prev = curr_axes - prev_axes
+        missing_curr = prev_axes - curr_axes
+        details = []
+        if missing_prev:
+            details.append(f'new in this run: {sorted(missing_prev)}')
+        if missing_curr:
+            details.append(f'absent in this run: {sorted(missing_curr)}')
+        log('WARNING: story-power axis set drifted between runs ('
+            + '; '.join(details) + '). Deltas cover only the overlap.')
     return {k: current_scores[k] - prev_scores[k]
             for k in current_scores if k in prev_scores}
 

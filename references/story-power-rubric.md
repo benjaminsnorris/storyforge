@@ -137,7 +137,13 @@ Each run compares to the previous run in `working/scores/story-power/`
 and reports per-axis movement. Authors see whether a synopsis revision
 actually moved the needle.
 
-## Worked example: *Ashes in the Archive*
+## Worked example: *Ashes in the Archive* (illustrative)
+
+The example below is **illustrative**, not a benchmark. The scores are
+one reviewer's read of a single synopsis used to demonstrate how the
+rubric and composite weighting work — they are not a ceiling or a
+target to beat. Your project's scores will reflect your project, not
+this one.
 
 Gothic speculative graphic novel. A Facekeeper falls for a woman no
 portrait can hold and is ordered by the Archive to finish her into

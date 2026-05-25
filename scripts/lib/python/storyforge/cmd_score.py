@@ -192,7 +192,8 @@ def _validate_flag_combinations(args) -> None:
     if args.scope and not (args.boundary or args.bible_consistency):
         log('ERROR: --scope only applies to --boundary or --bible-consistency. '
             'For --all-boundaries, drop --scope and run all boundaries; for '
-            'prose-tier comparison, --scope is not meaningful.')
+            'prose-tier comparison and the story-power scorecard, --scope is '
+            'not meaningful (these operate on whole-project artifacts).')
         sys.exit(1)
 
 
