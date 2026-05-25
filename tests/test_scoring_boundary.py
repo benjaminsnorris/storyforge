@@ -391,6 +391,91 @@ def test_boundary_3_to_4_includes_summary_in_upstream(project_dir, monkeypatch):
     assert 'Summary:' in captured['prompt']
 
 
+def test_boundary_3_to_4_skips_structurally_empty_spine_row(project_dir, monkeypatch, capsys):
+    """A spine row with no summary AND no title AND no function must be
+    skipped — not sent to the LLM as a labelled-but-empty prompt."""
+    _seed_spine_with_summary(project_dir, [
+        ('ev-good', '1', 'Good',
+         'Has all the content needed.', 'inciting', '1'),
+        ('ev-empty', '2', '', '', '', '2'),  # structurally empty
+    ])
+    _seed_architecture_with_summary(project_dir, [
+        ('arch-1', '1', 't', 's', '1', 'P', 'ev-good',
+         'action', 'arc', 'truth', '+/-', 'reveal'),
+    ])
+
+    captured = []
+    def fake(prompt, model, log_file, **kwargs):
+        captured.append(prompt)
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'upstream_summary': 'u', 'downstream_summary': 'd',
+                'alignment': 'a', 'proposed_verdict': 'both are right',
+                'rationale': 'r',
+            })}],
+            'usage': {'input_tokens': 50, 'output_tokens': 30,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api, scoring_boundary
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_boundary, 'invoke_to_file', fake)
+
+    results = score_boundary(project_dir, '3->4', coaching_level='strict')
+    scopes = {r['scope'] for r in results}
+    assert 'ev-good' in scopes
+    assert 'ev-empty' not in scopes  # skipped, not LLM-scored
+    # Only one LLM call (for ev-good)
+    assert len(captured) == 1
+    out = capsys.readouterr().out
+    assert 'skip' in out and 'ev-empty' in out
+
+
+def test_boundary_4_to_5_skips_structurally_empty_anchor(project_dir, monkeypatch):
+    """Same protection for architecture anchors."""
+    _seed_spine_with_summary(project_dir, [
+        ('ev-1', '1', 't', 's', 'f', '1'),
+    ])
+    _seed_architecture_with_summary(project_dir, [
+        ('arch-good', '1', 'Good', 'Has content.', '1', 'POV',
+         'ev-1', 'action', 'arc', 'truth', '+/-', 'reveal'),
+        ('arch-empty', '2', '', '', '1', '', 'ev-1',
+         'action', '', '', '', ''),
+    ])
+
+    captured = []
+    def fake(prompt, model, log_file, **kwargs):
+        captured.append(prompt)
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'upstream_summary': 'u', 'downstream_summary': 'd',
+                'alignment': 'a', 'proposed_verdict': 'both are right',
+                'rationale': 'r',
+            })}],
+            'usage': {'input_tokens': 50, 'output_tokens': 30,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api, scoring_boundary
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_boundary, 'invoke_to_file', fake)
+
+    results = score_boundary(project_dir, '4->5', coaching_level='strict')
+    scopes = {r['scope'] for r in results}
+    assert 'arch-good' in scopes
+    assert 'arch-empty' not in scopes
+
+
 def test_boundary_3_to_4_falls_back_when_summary_empty(project_dir, monkeypatch):
     """If summary is empty, the collector falls back to function/title so
     the diff still works on legacy projects that haven't backfilled summary."""

@@ -357,3 +357,45 @@ def test_outline_md_skips_csv_without_summary_column(tmp_path):
     # The Spine section renders but with no items (summary column absent)
     assert '## Spine' in text
     assert '(no rows yet)' in text
+
+
+def test_outline_md_missing_seq_renders_with_placeholder(tmp_path):
+    """A row whose seq cell is missing or non-integer renders with '?.' —
+    NOT with a billion-numbered list item."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'spine.csv'),
+        'id|seq|title|summary|function|part',
+        [
+            'ev-1|1|First|First in order.|inciting|1',
+            'ev-2||Has no seq|This row has no seq cell.|turn|2',
+            'ev-3|notanumber|Bad seq|This row has a non-integer seq.|midpoint|2',
+        ],
+    )
+    from storyforge.cmd_scenes_export import export_outline_md
+    text = open(export_outline_md(str(tmp_path))).read()
+    assert '1. First in order.' in text
+    assert '?. This row has no seq cell.' in text
+    assert '?. This row has a non-integer seq.' in text
+    # Should NEVER produce a billion-numbered item
+    assert '1000000000' not in text
+
+
+def test_outline_md_field_count_mismatch_logs_and_skips(tmp_path, capsys):
+    """A row with wrong field count is logged WARNING and skipped — not
+    silently misaligned via zip()."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    spine = ref / 'spine.csv'
+    with open(spine, 'w') as f:
+        f.write('id|seq|title|summary|function|part\n')
+        f.write('ev-1|1|Good|Good summary.|inciting|1\n')
+        f.write('ev-2|2|Truncated\n')  # too few fields
+    from storyforge.cmd_scenes_export import export_outline_md
+    text = open(export_outline_md(str(tmp_path))).read()
+    out = capsys.readouterr().out
+    assert 'WARNING' in out and 'fields' in out
+    assert '1. Good summary.' in text
+    # Truncated row should NOT appear
+    assert 'Truncated' not in text

@@ -159,8 +159,11 @@ def detect_state(project_dir, md_rel=DEFAULT_OUTPUT_PATH):
             'storyforge sync requires git for state detection.'
         )
     dirty_csvs = [p for p in CSV_RELS if _is_dirty(project_dir, p)]
+    # Only round-trip CSVs hard-refuse when missing: scenes-review.md
+    # depends on them. One-way CSVs (spine/architecture) can be legitimately
+    # deleted — sync clears the derived MD and continues.
     missing_csvs = [
-        p for p in CSV_RELS
+        p for p in ROUND_TRIP_CSV_RELS
         if _file_in_head(project_dir, p)
         and not os.path.isfile(os.path.join(project_dir, p))
     ]

@@ -217,6 +217,15 @@ def _collect_per_spine_event(project_dir: str,
         if scope and ev_id != scope:
             continue
         summary = ev.get('summary', '').strip()
+        title = ev.get('title', '').strip()
+        function = ev.get('function', '').strip()
+        # Reject structurally empty rows: if no substantive field carries
+        # content, the LLM would score a labelled-but-empty prompt and
+        # produce noise findings. Skip explicitly.
+        if not (summary or title or function):
+            log(f'  [3->4 / {ev_id}] skip: spine row has no '
+                f'summary/title/function content')
+            continue
         upstream_parts = [f'Spine event {ev_id}: {ev.get("title", "")}']
         if summary:
             upstream_parts.append(f'Summary: {summary}')
@@ -265,6 +274,13 @@ def _collect_per_architecture_anchor(project_dir: str,
         if scope and anchor_id != scope:
             continue
         summary = anchor.get('summary', '').strip()
+        title = anchor.get('title', '').strip()
+        pov = anchor.get('pov', '').strip()
+        # Reject structurally empty anchors (same reasoning as spine).
+        if not (summary or title or pov):
+            log(f'  [4->5 / {anchor_id}] skip: architecture row has no '
+                f'summary/title/POV content')
+            continue
         upstream_parts = [
             f'Architecture anchor {anchor_id}: {anchor.get("title", "")}'
         ]

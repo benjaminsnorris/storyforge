@@ -438,6 +438,43 @@ def test_csv_rels_includes_spine_and_architecture():
     assert 'reference/scene-briefs.csv' in CSV_RELS
 
 
+def test_missing_one_way_csv_does_not_block_sync(git_project):
+    """Deleting spine.csv after committing it should NOT trigger
+    'missing-csv' refusal — one-way CSVs are author-deletable (sync
+    just stops regenerating their derived MD)."""
+    from storyforge.cmd_sync import run_sync, detect_state, DEFAULT_OUTPUT_PATH
+
+    # First, seed a spine.csv and commit it (so it's "in HEAD")
+    spine_csv = os.path.join(git_project, 'reference', 'spine.csv')
+    with open(spine_csv, 'w') as f:
+        f.write('id|seq|title|summary|function|part\n')
+        f.write('ev-1|1|t|sentence.|f|1\n')
+    _git(git_project, 'add', 'reference/spine.csv')
+    _git(git_project, 'commit', '-q', '-m', 'add spine.csv')
+
+    # Now delete the file from disk (mimics author removing it)
+    os.remove(spine_csv)
+
+    # detect_state should NOT list spine.csv in missing_csvs
+    state = detect_state(git_project)
+    assert 'reference/spine.csv' not in state['missing_csvs'], (
+        f'one-way CSV should not block sync; got missing_csvs={state["missing_csvs"]!r}'
+    )
+
+
+def test_missing_round_trip_csv_still_blocks_sync(git_project):
+    """Round-trip CSVs (scenes.csv etc.) still hard-refuse when deleted —
+    scenes-review.md depends on them."""
+    from storyforge.cmd_sync import detect_state
+
+    scenes_csv = os.path.join(git_project, 'reference', 'scenes.csv')
+    assert os.path.isfile(scenes_csv)
+    # The fixture's scenes.csv is in HEAD. Remove it from disk.
+    os.remove(scenes_csv)
+    state = detect_state(git_project)
+    assert 'reference/scenes.csv' in state['missing_csvs']
+
+
 def test_sync_tracked_paths_includes_outline_md():
     """The pre-commit hook only stages files in SYNC_TRACKED_PATHS after
     sync regenerates them. outline.md MUST be in the list — otherwise
