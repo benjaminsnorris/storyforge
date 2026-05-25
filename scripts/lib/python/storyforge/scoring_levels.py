@@ -39,27 +39,41 @@ from storyforge.elaborate import _read_csv
 VALID_SEVERITIES = frozenset({'high', 'medium', 'low'})
 
 
-class CheckResult(TypedDict):
-    """One floor-check finding. Contract for every entry in LevelResult.checks."""
-    check: str
-    passed: bool
-    detail: str
-    severity: str  # one of VALID_SEVERITIES
+class CheckResult(TypedDict, total=False):
+    """One floor-check finding. Contract for every entry in LevelResult.checks.
+
+    `accepted` is added post-hoc by `_apply_overrides` when an author has
+    recorded an override for this finding in `working/scoring-overrides.csv`.
+    A passed check is never marked accepted (the override mechanism only
+    targets failed checks). Quality-gate logic should count
+    `failed - accepted` for refusal decisions; `passed`/`failed` reflect
+    the raw check evaluation regardless of overrides.
+    """
+    check: str         # required — the check name (stable, used as finding_id)
+    passed: bool       # required — did the check evaluation pass
+    detail: str        # required — explanation surfaced to the author
+    severity: str      # required — one of VALID_SEVERITIES
+    accepted: bool     # optional, default False — author override applied
 
 
 class LevelResult(TypedDict):
     """The result dict every per-level scorer returns.
 
-    Invariant (enforced at construction by _result): passed + failed ==
-    len(checks). Callers shouldn't mutate `checks` after construction;
-    consumers (cmd_score._print_level_result, scoring_consistency) read
-    these counts directly.
+    Invariants enforced at construction:
+      - passed + failed == len(checks)
+      - accepted is the count of CheckResults where accepted=True (always
+        a subset of failed: passed checks are never marked accepted).
+
+    Callers shouldn't mutate `checks` after construction; consumers
+    (cmd_score._print_level_result, scoring_consistency) read these counts
+    directly.
     """
     level: int
     name: str
     checks: list[CheckResult]
     passed: int
     failed: int
+    accepted: int
 
 
 # ============================================================================
@@ -69,13 +83,39 @@ class LevelResult(TypedDict):
 def _result(level: int, name: str, checks: list[CheckResult]) -> LevelResult:
     passed = sum(1 for c in checks if c['passed'])
     failed = sum(1 for c in checks if not c['passed'])
+    accepted = sum(1 for c in checks if c.get('accepted') and not c['passed'])
     return {
         'level': level,
         'name': name,
         'checks': checks,
         'passed': passed,
         'failed': failed,
+        'accepted': accepted,
     }
+
+
+def _apply_overrides(project_dir: str, result: LevelResult) -> LevelResult:
+    """Tag each failed check whose author-override is `accepted` and
+    recompute the result's `accepted` count.
+
+    Override scope = `level-N`, axis = `level-quality`, finding_id = the
+    check string itself (it's human-readable and stable across runs).
+    """
+    from storyforge.scoring_state import is_override_accepted
+    scope = f'level-{result["level"]}'
+    new_checks: list[CheckResult] = []
+    for c in result['checks']:
+        c_out: CheckResult = dict(c)  # type: ignore[assignment]
+        c_out.setdefault('accepted', False)
+        if not c['passed']:
+            if is_override_accepted(
+                scope=scope, axis='level-quality',
+                finding_id=c['check'], project_dir=project_dir,
+            ):
+                c_out['accepted'] = True
+        new_checks.append(c_out)
+    accepted = sum(1 for c in new_checks if c.get('accepted') and not c['passed'])
+    return {**result, 'checks': new_checks, 'accepted': accepted}
 
 
 def _check(check: str, passed: bool, detail: str = '',
@@ -500,14 +540,21 @@ LEVEL_NAMES = {
 
 
 def score_level(project_dir: str, level: int, medium: str = 'novel') -> dict:
-    """Run the floor checks for one level. Returns the standard result dict."""
+    """Run the floor checks for one level. Returns the standard result dict.
+
+    Each failed check is run through `_apply_overrides` so author-accepted
+    findings get tagged with `accepted=True` and excluded from the
+    `failed`-but-not-`accepted` count that quality-gate code consumes.
+    """
     if level not in LEVEL_SCORERS:
         raise ValueError(f'unknown level: {level}')
     scorer = LEVEL_SCORERS[level]
     # Only spine + architecture take medium today.
     if level in (3, 4):
-        return scorer(project_dir, medium=medium)
-    return scorer(project_dir)
+        raw = scorer(project_dir, medium=medium)
+    else:
+        raw = scorer(project_dir)
+    return _apply_overrides(project_dir, raw)
 
 
 def score_all_levels(project_dir: str, medium: str = 'novel') -> list[dict]:

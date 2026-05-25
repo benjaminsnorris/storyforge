@@ -372,6 +372,133 @@ def test_check_validates_severity():
         _check('test', True, '', severity='HIGH')
 
 
+# ---------------------------------------------------------------------------
+# v2 Phase 4: scoring-overrides wired as quality gate
+# ---------------------------------------------------------------------------
+
+def test_failed_check_with_override_tagged_accepted(tmp_path):
+    """An author-accepted override on a failed floor check tags the check
+    with accepted=True and decrements the effective failure count."""
+    # Empty story-summary triggers logline floor failures.
+    _write_summary(str(tmp_path), '''# Story summary
+
+## Logline
+
+''')
+    # Pre-record an override for the failing 'present' check.
+    from storyforge.scoring_state import append_override
+    append_override(
+        scope='level-0', axis='level-quality', finding_id='present',
+        verdict='accepted',
+        rationale='intentional placeholder while iterating',
+        recorded_at='2026-05-24', project_dir=str(tmp_path),
+    )
+
+    from storyforge.scoring_levels import score_level
+    r = score_level(str(tmp_path), 0)
+    # The 'present' check itself still surfaces (passed=False) but is
+    # tagged accepted.
+    present_check = next(c for c in r['checks'] if c['check'] == 'present')
+    assert not present_check['passed']
+    assert present_check.get('accepted') is True
+    # The result-level `accepted` count reflects this.
+    assert r['accepted'] == 1
+
+
+def test_unrelated_overrides_do_not_apply(tmp_path):
+    """An override for a different finding_id does NOT flip the unrelated
+    check."""
+    _write_summary(str(tmp_path), '''# Story summary
+
+## Logline
+
+''')
+    from storyforge.scoring_state import append_override
+    append_override(
+        scope='level-0', axis='level-quality',
+        finding_id='length ≤ 35 words',  # different finding
+        verdict='accepted', rationale='ok', recorded_at='2026-05-24',
+        project_dir=str(tmp_path),
+    )
+
+    from storyforge.scoring_levels import score_level
+    r = score_level(str(tmp_path), 0)
+    present_check = next(c for c in r['checks'] if c['check'] == 'present')
+    assert not present_check.get('accepted')
+
+
+def test_passed_check_is_never_marked_accepted(tmp_path):
+    """A passing check shouldn't pick up an `accepted=True` even if the
+    overrides file happens to mention its name."""
+    _write_summary(str(tmp_path), '''# Story summary
+
+## Logline
+
+A perfectly fine short logline.
+''')
+    from storyforge.scoring_state import append_override
+    append_override(
+        scope='level-0', axis='level-quality', finding_id='present',
+        verdict='accepted', rationale='whatever', recorded_at='2026-05-24',
+        project_dir=str(tmp_path),
+    )
+    from storyforge.scoring_levels import score_level
+    r = score_level(str(tmp_path), 0)
+    present_check = next(c for c in r['checks'] if c['check'] == 'present')
+    assert present_check['passed']
+    # Passing checks aren't tagged accepted (the field may be present
+    # but it's False for passing checks).
+    assert not present_check.get('accepted', False)
+
+
+def test_accepted_count_in_result_dict(tmp_path):
+    """LevelResult.accepted is an explicit count of accepted-failures."""
+    _write_summary(str(tmp_path), '''# Story summary
+
+## Logline
+
+''')
+    from storyforge.scoring_state import append_override
+    append_override(
+        scope='level-0', axis='level-quality', finding_id='present',
+        verdict='accepted', rationale='r', recorded_at='2026-05-24',
+        project_dir=str(tmp_path),
+    )
+    from storyforge.scoring_levels import score_level
+    r = score_level(str(tmp_path), 0)
+    # Invariant: accepted <= failed, accepted is part of failed not passed
+    assert r['accepted'] <= r['failed']
+    assert r['accepted'] >= 1
+
+
+def test_registry_consistency_respects_overrides(project_dir):
+    """The same override propagation applies to consistency checks."""
+    from storyforge.csv_cli import update_field
+    intent = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+    update_field(intent, 'act1-sc01', 'value_at_stake', 'definitely-not-a-real-value')
+
+    from storyforge.scoring_state import append_override
+    from storyforge.scoring_consistency import score_consistency_at_level
+
+    # First confirm the orphan flag is there (no override yet).
+    r = score_consistency_at_level(project_dir, 5)
+    bad = next((c for c in r['checks']
+                if 'value_at_stake' in c['check'] and not c['passed']), None)
+    assert bad is not None
+    assert not bad.get('accepted')
+
+    # Now add the override and re-run.
+    append_override(
+        scope='level-5', axis='registry-consistency',
+        finding_id=bad['check'], verdict='accepted',
+        rationale='intentional placeholder', recorded_at='2026-05-24',
+        project_dir=project_dir,
+    )
+    r2 = score_consistency_at_level(project_dir, 5)
+    bad2 = next(c for c in r2['checks'] if c['check'] == bad['check'])
+    assert bad2['accepted'] is True
+
+
 def test_score_all_levels_returns_seven(project_dir):
     results = score_all_levels(project_dir)
     assert len(results) == 7
