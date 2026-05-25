@@ -761,15 +761,11 @@ def _build_act_shape_prompt(act_shape: ActShape, artifacts: PitchArtifacts,
     """Assemble the prompt that asks for per-act matrix + structural axes.
 
     Returns a JSON response with two top-level objects: `per_act` (the
-    Layer 1 3×8 matrix) and `structural` (the Layer 2 4-axis scores
-    plus a cross-act diagnostic).
+    Layer 1 3×8 matrix) and `structural` (the Layer 2 4-axis scores)
+    plus a cross-act diagnostic.
     """
-    pitch_axes_block = '\n'.join(
-        f'  - "{a.key}": "{a.name}"' for a in AXES
-    )
-    structural_axes_block = '\n'.join(
-        f'  - "{a.key}": "{a.name}"' for a in STRUCTURAL_AXES
-    )
+    pitch_axis_list = ', '.join(f'"{a.key}"' for a in AXES)
+    structural_axis_list = ', '.join(f'"{a.key}"' for a in STRUCTURAL_AXES)
     return f"""You are scoring the ACT-SHAPE of a project at the structural-spec
 tier, using the rubric provided. The eight pitch-level axes have
 already been scored against the synopsis as a whole; your job now is
@@ -812,22 +808,22 @@ structural axes defined in the "Layer 2" section of the rubric.
 
 # Task
 
+Valid pitch axis keys (use exactly these in the `per_act` scores):
+{pitch_axis_list}
+
+Valid structural axis keys (use exactly these in `structural`):
+{structural_axis_list}
+
 Return a JSON object with this exact shape:
 
 {{
-  "pitch_axes": {{
-{pitch_axes_block}
-  }},
-  "structural_axes": {{
-{structural_axes_block}
-  }},
   "per_act": [
     {{
       "act": "act1",
       "scores": [
         {{"axis": "{AXES[0].key}", "score": 1-10 integer,
           "rationale": "one-sentence justification grounded in this act"}},
-        ... one entry per pitch axis key in the order listed above ...
+        ... one entry per pitch axis key ...
       ]
     }},
     ... one entry per act in order: act1, act2, act3 ...
@@ -838,7 +834,7 @@ Return a JSON object with this exact shape:
       "positive_signals": "semicolon-separated quoted signals across acts",
       "negative_signals": "semicolon-separated quoted gaps across acts",
       "rationale": "one-sentence justification grounded in cross-act relationships"}},
-    ... one entry per structural axis key in the order listed above ...
+    ... one entry per structural axis key ...
   ],
   "structural_diagnostic": {{
     "cross_act_pattern": "one sentence: when an axis drops in one act vs the others, or when two structural axes co-locate a problem, name it",
@@ -1026,18 +1022,24 @@ def _parse_response_act_shape(text: str) -> dict | None:
 
     Same three-tier fallback as _parse_response (raw → fenced → greedy),
     but the shape check looks for `per_act` AND `structural` rather than
-    `scores`.
+    `scores`. When shape failure is the reason for None, logs a WARNING
+    naming which list(s) were missing — this is more actionable than the
+    caller's generic "unparseable" ERROR for prompt debugging.
     """
-    saw_shape_failure = False
+    missing_fields: list[str] = []
 
     def _take(obj):
-        nonlocal saw_shape_failure
         if not isinstance(obj, dict):
             return None
         per_act = obj.get('per_act')
         structural = obj.get('structural')
-        if not isinstance(per_act, list) or not isinstance(structural, list):
-            saw_shape_failure = True
+        local_missing = []
+        if not isinstance(per_act, list):
+            local_missing.append('per_act')
+        if not isinstance(structural, list):
+            local_missing.append('structural')
+        if local_missing:
+            missing_fields[:] = local_missing
             return None
         return obj
     try:
@@ -1062,10 +1064,9 @@ def _parse_response_act_shape(text: str) -> dict | None:
                 return out
         except json.JSONDecodeError:
             pass
-    if saw_shape_failure:
-        log('WARNING: act-shape LLM returned valid JSON but with the wrong '
-            'shape (missing "per_act"/"structural" lists). Treating as '
-            'unparseable.')
+    if missing_fields:
+        log(f'WARNING: act-shape LLM returned valid JSON but missing '
+            f'required list(s): {", ".join(missing_fields)}.')
     return None
 
 
@@ -1328,6 +1329,14 @@ def _append_structural_diagnostic(output_dir: str,
     """Append the cross-act section to the existing diagnostic.md."""
     md_path = os.path.join(output_dir, 'diagnostic.md')
     if not os.path.isfile(md_path):
+        # The pitch-mode writer should have created this moments ago.
+        # If it isn't here, an upstream _safe_write failed silently —
+        # surface the cascade so the author knows two casualties came
+        # from one root cause.
+        log(f'WARNING: cross-act diagnostic could not be appended — '
+            f'{md_path} does not exist (upstream pitch-diagnostic write '
+            'likely failed). Per-act + structural scores were computed '
+            'but their diagnostic narrative is lost.')
         return
     try:
         with open(md_path, encoding='utf-8') as f:
@@ -1357,10 +1366,7 @@ def _append_structural_diagnostic(output_dir: str,
         s = structural.get(axis.key, '–')
         md_lines.append(f'| {axis.name} | {s} | {axis.weight} |')
 
-    # Surface flagged per-axis drops (act with the largest gap to the
-    # other two). A 2+ gap is meaningful; anything less is noise at the
-    # 1-10 band.
-    drops = _flag_act_drops(per_act)
+    drops, skipped = _flag_act_drops(per_act)
     if drops:
         md_lines.extend(['', '### Per-axis drops', ''])
         for axis_key, act_key, gap in drops:
@@ -1369,6 +1375,17 @@ def _append_structural_diagnostic(output_dir: str,
                 f'- **{axis.name}** drops in {act_key.upper()} '
                 f'(gap of {gap} vs. the other two acts).'
             )
+    if skipped:
+        md_lines.extend([
+            '',
+            '### Axes skipped from drops analysis',
+            '',
+            'One or more acts had no score for these axes; cross-act '
+            'drops could not be computed:',
+            '',
+        ])
+        for axis_key in skipped:
+            md_lines.append(f'- {AXIS_BY_KEY[axis_key].name}')
 
     md_lines.extend([
         '',
@@ -1392,26 +1409,33 @@ def _append_structural_diagnostic(output_dir: str,
 
 
 def _flag_act_drops(per_act: dict[str, dict[str, int]],
-                     min_gap: int = 2) -> list[tuple[str, str, int]]:
+                     min_gap: int = 2,
+                     ) -> tuple[list[tuple[str, str, int]], list[str]]:
     """Identify per-axis drops where one act lags ≥ min_gap behind the
     average of the other two.
 
-    Returns a list of (axis_key, act_key, gap) tuples. Ordered by axis
-    appearance in AXES and then descending gap.
+    Returns (drops, skipped_axes). drops is a list of (axis_key,
+    act_key, gap) tuples ordered by axis appearance in AXES, then by
+    act order within each axis. skipped_axes lists axis keys where one
+    or more acts had no score — surfacing these in the diagnostic keeps
+    the author from reading a clean drops list as "no problems found"
+    when really the analysis was incomplete.
     """
     out: list[tuple[str, str, int]] = []
+    skipped: list[str] = []
     for axis in AXES:
         scores_by_act = {act: per_act.get(act, {}).get(axis.key)
                          for act in ACT_KEYS}
         if any(v is None for v in scores_by_act.values()):
-            continue  # incomplete data — skip
+            skipped.append(axis.key)
+            continue
         for act in ACT_KEYS:
             other_avg = sum(scores_by_act[a] for a in ACT_KEYS
                             if a != act) / 2
             gap = round(other_avg - scores_by_act[act])
             if gap >= min_gap:
                 out.append((axis.key, act, gap))
-    return out
+    return out, skipped
 
 
 def _append_act_shape_coaching_brief(output_dir: str,
@@ -1424,6 +1448,10 @@ def _append_act_shape_coaching_brief(output_dir: str,
     existing coaching-brief.md."""
     md_path = os.path.join(output_dir, 'coaching-brief.md')
     if not os.path.isfile(md_path):
+        log(f'WARNING: act-shape coaching brief could not be appended — '
+            f'{md_path} does not exist (upstream coach-brief write likely '
+            'failed). Per-act + structural proposals were computed but '
+            'are not captured in the brief.')
         return
     try:
         with open(md_path, encoding='utf-8') as f:
@@ -1468,7 +1496,7 @@ def _append_act_shape_coaching_brief(output_dir: str,
             '',
         ])
 
-    drops = _flag_act_drops(per_act)
+    drops, skipped = _flag_act_drops(per_act)
     if drops:
         out.extend(['## Per-axis drops worth discussing', ''])
         for axis_key, act_key, gap in drops:
@@ -1478,6 +1506,17 @@ def _append_act_shape_coaching_brief(output_dir: str,
                 f'(gap of {gap}). Is this an intentional shape choice or '
                 'an unintentional dip?'
             )
+        out.append('')
+    if skipped:
+        out.extend([
+            '## Axes skipped from drops analysis',
+            '',
+            'One or more acts had no score for these axes; cross-act '
+            'drops could not be computed:',
+            '',
+        ])
+        for axis_key in skipped:
+            out.append(f'- {AXIS_BY_KEY[axis_key].name}')
         out.append('')
 
     out.extend([

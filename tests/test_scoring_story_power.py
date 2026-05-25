@@ -893,10 +893,26 @@ def test_act_shape_drop_flag(tmp_path):
         'act2': {'specificity': 9, 'emotional_resonance': 6},  # 3-point dip
         'act3': {'specificity': 9, 'emotional_resonance': 9},
     }
-    drops = _flag_act_drops(per_act)
+    drops, skipped = _flag_act_drops(per_act)
     assert ('emotional_resonance', 'act2', 3) in drops
     # Specificity is flat — no drop reported.
     assert not any(d[0] == 'specificity' for d in drops)
+    # Other axes have no data — they're skipped, not silently absent.
+    assert 'stakes_dilemma' in skipped
+
+
+def test_flag_act_drops_returns_skipped_axes():
+    """An axis with a missing act surfaces in `skipped` so the
+    diagnostic can flag incomplete cross-act analysis."""
+    from storyforge.scoring_story_power import _flag_act_drops
+    per_act = {
+        'act1': {'specificity': 9, 'emotional_resonance': 9},
+        'act2': {'specificity': 9},  # emotional_resonance missing
+        'act3': {'specificity': 9, 'emotional_resonance': 9},
+    }
+    drops, skipped = _flag_act_drops(per_act)
+    assert drops == []
+    assert 'emotional_resonance' in skipped
 
 
 def test_act_shape_extension_extract_drops_non_numeric():

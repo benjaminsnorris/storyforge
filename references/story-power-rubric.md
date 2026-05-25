@@ -201,12 +201,33 @@ matrix shows where the damage lands.
 
 ### Act-shape mode output
 
+**`full` coaching** (LLM scores; CSVs land on disk):
+
 ```
 working/scores/story-power/{timestamp}/
-├── scorecard.csv          # pitch-mode 8-axis scores (always)
+├── scorecard.csv          # pitch-mode 8-axis scores
 ├── per-act-matrix.csv     # 3 acts × 8 axes (act-shape only)
 ├── structural-axes.csv    # 4 structural axes (act-shape only)
 └── diagnostic.md          # cross-axis + cross-act root causes
+```
+
+**`coach` coaching** (LLM scores; the per-act matrix and structural
+sections are appended to the brief rather than written as separate
+CSVs):
+
+```
+working/scores/story-power/{timestamp}/
+└── coaching-brief.md      # pitch axes + per-act matrix + structural
+                           # axes + cross-act diagnostic, all inline
+```
+
+**`strict` coaching** (no LLM; the self-scoring checklist gets the
+per-act + structural blanks when act-shape is populated):
+
+```
+working/scores/story-power/{timestamp}/
+└── self-scoring-checklist.md  # 8 pitch axes + 24 per-act blanks +
+                               # 4 structural axes
 ```
 
 ## Scoring bands
