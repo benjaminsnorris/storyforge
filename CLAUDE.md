@@ -278,7 +278,8 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge scenes-import` | `cmd_scenes_import.py` | Import edited `scenes-review.md` back into scene CSVs |
 | `storyforge sync` | `cmd_sync.py` | Sync scene CSVs ↔ `reference/scenes-review.md` against git HEAD. Exports when CSVs are dirty, imports when MD is dirty, writes `working/sync-conflict.md` and exits 1 when both moved. `--install-hook` drops a pre-commit hook that runs this on every commit. |
 | `storyforge review` | `cmd_review.py` | Pipeline review |
-| `storyforge migrate` | `cmd_migrate.py` | Project migration. Eight steps: registry rename/seed/normalize/validate (1-5) + elaboration v1 (6-8): bootstrap `story-summary.md`, extract `status=spine` rows into `spine.csv`, extract `status=architecture` rows into `architecture.csv`. All steps idempotent. |
+| `storyforge migrate` | `cmd_migrate.py` | Project migration. Eight steps: registry rename/seed/normalize/validate (1-5) + elaboration v1 (6-8): bootstrap `story-summary.md`, extract `status=spine` rows into `spine.csv`, extract `status=architecture` rows into `architecture.csv`. All steps idempotent. Step 7/8 upgrade pre-`summary` headers in place. |
+| `storyforge propose-summaries` | `cmd_propose_summaries.py` | Draft candidate one-sentence `summary` cells from the level above. `--level 3` proposes from act-shape into spine; `--level 4` proposes from spine into architecture; `--level 5` proposes from architecture into scene-map. Coaching-aware: `full` writes to the target CSV (preserves existing summaries); `coach` writes a review brief; `strict` produces a rule-based constraint checklist (no LLM). |
 
 ### Skills
 
