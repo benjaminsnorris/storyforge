@@ -552,7 +552,12 @@ def _persist_per_coaching(project_dir: str, boundary: str, scope: str,
       - strict: same as coach. The LLM never authors verdicts.
     """
     verdict = diff.get('proposed_verdict', '')
-    if verdict not in VALID_BOUNDARY_VERDICTS:
+    if verdict and verdict not in VALID_BOUNDARY_VERDICTS:
+        log(f'  [{boundary} / {scope}] WARNING: LLM proposed unrecognized '
+            f'verdict {verdict!r}; not persisting (valid: '
+            f'{sorted(VALID_BOUNDARY_VERDICTS)})')
+        return False
+    if not verdict:
         return False
     if coaching_level != 'full':
         return False

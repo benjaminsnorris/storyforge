@@ -314,9 +314,10 @@ def test_finding_missing_required_fields_dropped(tmp_path, monkeypatch):
     assert results[0]['bible'] == 'world-bible.md'
 
 
-def test_invalid_severity_coerced_to_medium(tmp_path, monkeypatch):
+def test_invalid_severity_coerced_to_medium(tmp_path, monkeypatch, capsys):
     """LLM returning a severity outside {high, medium, low} → coerce to
-    medium rather than letting bad data flow through."""
+    medium rather than letting bad data flow through. The coercion must
+    be logged so the author can audit it."""
     def bad_severity(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
         payload = {'findings': [{
@@ -341,6 +342,70 @@ def test_invalid_severity_coerced_to_medium(tmp_path, monkeypatch):
     results = score_bible_consistency(str(tmp_path))
     assert len(results) == 1
     assert results[0]['severity'] == 'medium'
+    out = capsys.readouterr().out
+    assert 'WARNING' in out and 'severity' in out
+    assert 'CATASTROPHIC' in out or 'catastrophic' in out
+
+
+def test_invalid_fix_location_coerced_with_warning(tmp_path, monkeypatch, capsys):
+    """fix_location outside {bible, scene, either} → coerced to 'either'
+    with a WARNING log entry. Regression: PR #232 silent-failure review."""
+    def bad_loc(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        payload = {'findings': [{
+            'bible': 'character-bible.md', 'claim': 'c', 'scene_says': 's',
+            'severity': 'medium',
+            'fix_location': 'NEITHER',
+        }]}
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 100, 'output_tokens': 20,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api
+    monkeypatch.setattr(api, 'invoke_to_file', bad_loc)
+    from storyforge import scoring_bible as _sb
+    monkeypatch.setattr(_sb, 'invoke_to_file', bad_loc)
+    _seed_project(str(tmp_path))
+    results = score_bible_consistency(str(tmp_path))
+    assert len(results) == 1
+    assert results[0]['fix_location'] == 'either'
+    out = capsys.readouterr().out
+    assert 'WARNING' in out and 'fix_location' in out
+
+
+def test_dropped_finding_logged_with_missing_fields(tmp_path, monkeypatch, capsys):
+    """Findings dropped due to missing fields are visible in stdout, not silent.
+    Regression: PR #232 silent-failure review."""
+    def missing(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        payload = {'findings': [
+            {'bible': 'character-bible.md', 'claim': 'has eyes'},  # no scene_says
+        ]}
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 100, 'output_tokens': 20,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api
+    monkeypatch.setattr(api, 'invoke_to_file', missing)
+    from storyforge import scoring_bible as _sb
+    monkeypatch.setattr(_sb, 'invoke_to_file', missing)
+    _seed_project(str(tmp_path))
+    score_bible_consistency(str(tmp_path))
+    out = capsys.readouterr().out
+    assert 'WARNING' in out and 'dropped' in out
+    assert 'scene_says' in out
 
 
 # ---------------------------------------------------------------------------

@@ -301,10 +301,11 @@ def test_parse_diff_response_returns_none_on_garbage():
 # LLM verdict validation — bad verdict from LLM doesn't crash, just no persist
 # ---------------------------------------------------------------------------
 
-def test_llm_proposing_invalid_verdict_is_handled(project_dir, monkeypatch):
+def test_llm_proposing_invalid_verdict_is_handled(project_dir, monkeypatch, capsys):
     """If the LLM returns a verdict that isn't in VALID_BOUNDARY_VERDICTS,
     the diff is still surfaced but no persist happens. The author sees
-    the diff and can author a verdict themselves."""
+    the diff and can author a verdict themselves. The invalid value must
+    be logged so the author knows their persist failed for a real reason."""
     _seed_story_summary(project_dir)
 
     bogus = _mock_with_verdict('invented-verdict-string')
@@ -317,3 +318,5 @@ def test_llm_proposing_invalid_verdict_is_handled(project_dir, monkeypatch):
     assert not results[0]['persisted']
     assert results[0]['proposed_verdict'] == 'invented-verdict-string'
     assert read_verdicts(project_dir) == []
+    out = capsys.readouterr().out
+    assert 'WARNING' in out and 'invented-verdict-string' in out

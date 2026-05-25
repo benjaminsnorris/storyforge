@@ -271,20 +271,37 @@ def _invoke_bible_check(project_dir: str, scene_id: str, prose: str,
         log(f'  WARNING: cost ledger update failed: {e}')
 
     findings: list[dict] = []
+    dropped_count = 0
     for raw in parsed:
         if not isinstance(raw, dict):
+            dropped_count += 1
+            log(f'  [bible / {scene_id}] WARNING: dropped non-dict entry from LLM response')
             continue
         bible = str(raw.get('bible', '')).strip()
         claim = str(raw.get('claim', '')).strip()
         scene_says = str(raw.get('scene_says', '')).strip()
         if not (bible and claim and scene_says):
+            dropped_count += 1
+            missing = [k for k, v in
+                       (('bible', bible), ('claim', claim), ('scene_says', scene_says))
+                       if not v]
+            log(f'  [bible / {scene_id}] WARNING: dropped finding missing required '
+                f'field(s) {missing}')
             continue
-        severity = str(raw.get('severity', 'medium')).strip().lower()
-        if severity not in ('high', 'medium', 'low'):
+        severity_raw = str(raw.get('severity', 'medium')).strip().lower()
+        if severity_raw not in ('high', 'medium', 'low'):
+            log(f'  [bible / {scene_id}] WARNING: coerced invalid severity '
+                f'{severity_raw!r} to "medium"')
             severity = 'medium'
-        fix_location = str(raw.get('fix_location', 'either')).strip().lower()
-        if fix_location not in ('bible', 'scene', 'either'):
+        else:
+            severity = severity_raw
+        fix_location_raw = str(raw.get('fix_location', 'either')).strip().lower()
+        if fix_location_raw not in ('bible', 'scene', 'either'):
+            log(f'  [bible / {scene_id}] WARNING: coerced invalid fix_location '
+                f'{fix_location_raw!r} to "either"')
             fix_location = 'either'
+        else:
+            fix_location = fix_location_raw
         findings.append({
             'scope': scene_id,
             'bible': bible,
