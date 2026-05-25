@@ -89,6 +89,24 @@ def parse_args(argv):
     parser.add_argument('--drift', action='store_true',
                         help='Read-only drift report: which levels are out of '
                              'sync vs. git HEAD, registries, or each other.')
+    # Elaboration-v2 entry points (#231). LLM-driven semantic scoring.
+    parser.add_argument('--boundary', type=str, default=None, metavar='N->M',
+                        help='Run the LLM faithfulness diff at one level '
+                             'boundary (e.g. 5->6). Optional --scope filters '
+                             'to one scene/anchor/event.')
+    parser.add_argument('--all-boundaries', action='store_true',
+                        help='Run the LLM faithfulness diff at every boundary '
+                             '(0->1 through 6->7).')
+    parser.add_argument('--scope', type=str, default=None,
+                        help='Restrict --boundary or --bible-consistency to '
+                             'one scope id (scene/anchor/event).')
+    parser.add_argument('--semantic', action='store_true',
+                        help='Modifier on --compare: populate the LLM ceiling '
+                             'axes (specificity, irony, hook word, etc.) '
+                             'instead of leaving them as em-dash placeholders.')
+    parser.add_argument('--bible-consistency', action='store_true',
+                        help='LLM-check each drafted scene against the project '
+                             'bibles (character/world/voice). On-demand only.')
     return parser.parse_args(argv)
 
 
@@ -138,17 +156,20 @@ def _parse_principles(raw: str, plugin_dir: str) -> list[str]:
 
 
 def _run_elaboration_scoring(args) -> None:
-    """Handle --level / --all-levels / --compare / --drift (elaboration v1).
+    """Handle the elaboration-v1 + v2 scoring entry points.
 
     Short-circuits the existing scene-prose scoring path. Returns on
     success (implicit exit 0); calls `sys.exit(1)` on misuse.
 
-    **TODO(v2):** when LLM ceiling axes ship in `--compare --semantic`
-    and LLM-driven boundary faithfulness diffs land, this dispatch needs
-    to wire into the cost ledger and the create_branch / ensure_branch_pushed
-    machinery that the prose-tier scoring path uses today (cmd_score.main
-    around lines 295-310). v1 is deterministic-only, no API calls, no
-    commits — so the bypass is safe. Don't forget when v2 lands.
+    v2 entry points (LLM-driven) skip the branch / cost-ledger plumbing
+    of the existing scene-prose path because:
+      - The cost ledger is updated *inside* each scoring module
+        (score-boundary, score-bible, score-compare-ceiling entries).
+      - No commits land here — these commands only write to working/.
+
+    If a future entry point starts committing reviewable artifacts, gate
+    a `create_branch` / `ensure_branch_pushed` call on whether the
+    dispatched action writes outside working/.
     """
     from datetime import datetime
     from storyforge.scoring_levels import (
@@ -163,7 +184,30 @@ def _run_elaboration_scoring(args) -> None:
     project_dir = detect_project_root()
     medium = get_medium(project_dir) or 'novel'
 
-    # --compare: needs --level too, runs the comparison primitive.
+    # --bible-consistency (v2): LLM check vs character/world/voice bibles.
+    if args.bible_consistency:
+        from storyforge.scoring_bible import score_bible_consistency
+        findings = score_bible_consistency(project_dir, scope=args.scope)
+        _print_bible_findings(findings)
+        return
+
+    # --boundary / --all-boundaries (v2): LLM faithfulness diff.
+    if args.boundary or args.all_boundaries:
+        from storyforge.scoring_boundary import (
+            score_boundary, score_all_boundaries, BOUNDARY_IDS,
+        )
+        if args.boundary and args.boundary not in BOUNDARY_IDS:
+            log(f'ERROR: --boundary must be one of {", ".join(BOUNDARY_IDS)}; '
+                f'got {args.boundary!r}.')
+            sys.exit(1)
+        if args.all_boundaries:
+            diffs = score_all_boundaries(project_dir)
+        else:
+            diffs = score_boundary(project_dir, args.boundary, scope=args.scope)
+        _print_boundary_diffs(diffs)
+        return
+
+    # --compare (v1 deterministic floor axes + v2 --semantic ceiling axes).
     if args.compare:
         if args.level is None:
             log('ERROR: --compare requires --level to know what kind of '
@@ -171,11 +215,14 @@ def _run_elaboration_scoring(args) -> None:
             sys.exit(1)
         if args.level not in (0, 1, 2):
             log('ERROR: --compare is only supported at the prose tier '
-                '(levels 0-2 in v1).')
+                '(levels 0-2).')
             sys.exit(1)
         candidates_text = [_read_candidate(c) for c in args.compare]
         try:
-            result = compare_candidates(LEVEL_NAMES[args.level], candidates_text)
+            result = compare_candidates(
+                LEVEL_NAMES[args.level], candidates_text,
+                semantic=args.semantic, project_dir=project_dir,
+            )
         except ValueError as e:
             log(f'ERROR: {e}')
             sys.exit(1)
@@ -212,6 +259,53 @@ def _run_elaboration_scoring(args) -> None:
             _print_level_result(consistency)
 
 
+def _print_boundary_diffs(diffs: list[dict]) -> None:
+    """Render boundary-diff results to stdout."""
+    if not diffs:
+        print('\nNo boundary diffs produced — every checked scope already '
+              'has a recorded verdict, or content is incomplete.\n')
+        return
+    for d in diffs:
+        marker = '⌗' if d.get('persisted') else '⚠'
+        print(f'\n[{marker} {d["boundary"]} / {d["scope"]}]')
+        if d.get('upstream_summary'):
+            print(f'  upstream: {d["upstream_summary"]}')
+        if d.get('downstream_summary'):
+            print(f'  downstream: {d["downstream_summary"]}')
+        if d.get('alignment'):
+            print(f'  alignment: {d["alignment"]}')
+        if d.get('proposed_verdict'):
+            tag = ' (persisted)' if d.get('persisted') else ' (proposed; not persisted)'
+            print(f'  verdict: {d["proposed_verdict"]}{tag}')
+        if d.get('rationale'):
+            print(f'  rationale: {d["rationale"]}')
+
+
+def _print_bible_findings(findings: list[dict]) -> None:
+    """Render bible-consistency findings to stdout."""
+    if not findings:
+        print('\nNo bible-consistency findings (or no bibles / drafts to check).\n')
+        return
+    # Group by scope for legible output.
+    by_scope: dict[str, list[dict]] = {}
+    for f in findings:
+        by_scope.setdefault(f['scope'], []).append(f)
+    for scope in sorted(by_scope):
+        scope_findings = by_scope[scope]
+        accepted_count = sum(1 for f in scope_findings if f.get('accepted'))
+        active_count = len(scope_findings) - accepted_count
+        summary = f'{active_count} finding(s)'
+        if accepted_count:
+            summary += f' (+ {accepted_count} accepted)'
+        print(f'\n[bible / {scope}] {summary}')
+        for f in scope_findings:
+            tag = ' (accepted)' if f.get('accepted') else ''
+            print(f'  [{f["severity"]}] {f["bible"]}{tag}')
+            print(f'    bible: {f["claim"]}')
+            print(f'    scene: {f["scene_says"]}')
+            print(f'    fix:   {f["fix_location"]} (finding_id={f["finding_id"]})')
+
+
 def _read_candidate(arg: str) -> str:
     """If `arg` is a path that exists, read it; otherwise treat as literal text."""
     if os.path.isfile(arg):
@@ -221,16 +315,35 @@ def _read_candidate(arg: str) -> str:
 
 
 def _print_level_result(result: dict) -> None:
-    """Render a level-rubric result dict to stdout as a compact table."""
+    """Render a level-rubric result dict to stdout as a compact table.
+
+    Failed checks the author has marked as accepted in
+    working/scoring-overrides.csv surface with an `(accepted)` marker so
+    the author can still see them but the headline counts make it clear
+    they're not blocking quality.
+    """
     name = result.get('name', 'unknown')
     level = result.get('level', '?')
     passed = result.get('passed', 0)
     failed = result.get('failed', 0)
-    print(f'\n[level {level}] {name}: {passed} passed, {failed} failed')
+    accepted = result.get('accepted', 0)
+    real_failed = failed - accepted
+    summary = f'{passed} passed, {real_failed} failed'
+    if accepted:
+        summary += f' (+ {accepted} accepted)'
+    print(f'\n[level {level}] {name}: {summary}')
     for c in result.get('checks', []):
-        marker = '✓' if c['passed'] else '✗'
+        if c.get('accepted'):
+            marker = '~'  # accepted-failure marker — visible but not blocking
+            tag = ' (accepted)'
+        elif c['passed']:
+            marker = '✓'
+            tag = ''
+        else:
+            marker = '✗'
+            tag = ''
         detail = f' — {c["detail"]}' if c.get('detail') else ''
-        print(f'  {marker} {c["check"]}{detail}')
+        print(f'  {marker} {c["check"]}{tag}{detail}')
 
 
 def _print_drift_report(project_dir: str, medium: str) -> None:
@@ -261,8 +374,12 @@ def main(argv=None):
 
     install_signal_handlers()
 
-    # Elaboration-v1 entry points: short-circuit the prose-scoring flow.
-    if args.level is not None or args.all_levels or args.compare or args.drift:
+    # Elaboration entry points: short-circuit the prose-scoring flow.
+    # v1: --level / --all-levels / --compare / --drift
+    # v2: --boundary / --all-boundaries / --bible-consistency (--semantic
+    #     is a modifier on --compare, not a standalone trigger).
+    if (args.level is not None or args.all_levels or args.compare or args.drift
+            or args.boundary or args.all_boundaries or args.bible_consistency):
         _run_elaboration_scoring(args)
         return
 

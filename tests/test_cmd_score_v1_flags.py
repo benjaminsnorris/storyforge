@@ -112,3 +112,150 @@ def test_existing_score_path_unaffected(monkeypatch):
     assert args.scenes == 'a,b'
     assert args.level is None
     assert args.compare is None
+
+
+# ---------------------------------------------------------------------------
+# v2 CLI flags (#231)
+# ---------------------------------------------------------------------------
+
+import json
+
+
+def _mock_boundary_invoke(payload):
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 100, 'output_tokens': 50,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    return fake
+
+
+def _seed_story_summary(project_dir):
+    path = os.path.join(project_dir, 'reference', 'story-summary.md')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write(
+            '# Story summary\n\n'
+            '## Logline\nA test logline.\n\n'
+            '## Synopsis\nA test synopsis. With more text. And more. And more.\n\n'
+        )
+
+
+def test_boundary_flag_invokes_score_boundary(project_dir, monkeypatch, capsys):
+    """`storyforge score --boundary 0->1` dispatches to scoring_boundary."""
+    _seed_story_summary(project_dir)
+    monkeypatch.chdir(project_dir)
+
+    fake = _mock_boundary_invoke({
+        'upstream_summary': 'U', 'downstream_summary': 'D',
+        'alignment': 'They differ.', 'proposed_verdict': 'correct=upstream',
+        'rationale': 'because of X',
+    })
+    from storyforge import api, scoring_boundary
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_boundary, 'invoke_to_file', fake)
+
+    score_main(['--boundary', '0->1'])
+    out = capsys.readouterr().out
+    assert '0->1' in out
+    assert 'correct=upstream' in out
+
+
+def test_invalid_boundary_string_exits_nonzero(project_dir, monkeypatch):
+    monkeypatch.chdir(project_dir)
+    with pytest.raises(SystemExit) as exc:
+        score_main(['--boundary', '99->100'])
+    assert exc.value.code == 1
+
+
+def test_all_boundaries_runs_all(project_dir, monkeypatch, capsys):
+    _seed_story_summary(project_dir)
+    monkeypatch.chdir(project_dir)
+
+    fake = _mock_boundary_invoke({
+        'upstream_summary': 'U', 'downstream_summary': 'D',
+        'alignment': 'a', 'proposed_verdict': 'both are right',
+        'rationale': 'r',
+    })
+    from storyforge import api, scoring_boundary
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_boundary, 'invoke_to_file', fake)
+
+    score_main(['--all-boundaries'])
+    out = capsys.readouterr().out
+    # At least the prose-tier boundaries should be visited
+    assert '0->1' in out
+
+
+def test_bible_consistency_flag(project_dir, monkeypatch, capsys):
+    """`storyforge score --bible-consistency` dispatches to scoring_bible."""
+    # Seed bibles + a drafted scene
+    ref = os.path.join(project_dir, 'reference')
+    with open(os.path.join(ref, 'character-bible.md'), 'w') as f:
+        f.write('Character bible content.')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    with open(os.path.join(scenes_dir, 'scene-1.md'), 'w') as f:
+        f.write('Scene one prose.')
+
+    monkeypatch.chdir(project_dir)
+
+    findings_payload = {
+        'findings': [{
+            'bible': 'character-bible.md',
+            'claim': 'X is true',
+            'scene_says': 'but the scene shows Y',
+            'fix_location': 'either',
+            'severity': 'medium',
+        }],
+    }
+    fake = _mock_boundary_invoke(findings_payload)
+    from storyforge import api, scoring_bible
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_bible, 'invoke_to_file', fake)
+
+    score_main(['--bible-consistency'])
+    out = capsys.readouterr().out
+    assert 'bible / scene-1' in out
+    assert 'X is true' in out
+    assert 'finding_id=' in out
+
+
+def test_compare_semantic_flag_populates_ceiling(project_dir, monkeypatch, capsys):
+    """`--compare ... --semantic` populates the ceiling axes table."""
+    monkeypatch.chdir(project_dir)
+
+    fake = _mock_boundary_invoke({
+        'axes': [
+            {'name': 'specificity', 'values': ['low', 'high']},
+            {'name': 'irony between elements', 'values': ['absent', 'present']},
+            {'name': 'memorable hook word', 'values': ['none', 'X']},
+            {'name': 'genre/tone via imagery', 'values': ['generic', 'legible']},
+        ],
+    })
+    from storyforge import api
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+
+    score_main([
+        '--level', '0', '--semantic',
+        '--compare', 'A logline.', 'A different logline.',
+    ])
+    out = capsys.readouterr().out
+    # The populated ceiling header
+    assert 'Ceiling axes (LLM)' in out
+    # And the values came from the mock
+    assert 'specificity' in out
+    assert 'high' in out
+
+
+def test_compare_without_semantic_still_renders_placeholders(project_dir, monkeypatch, capsys):
+    monkeypatch.chdir(project_dir)
+    score_main(['--level', '0', '--compare', 'A logline.', 'Another logline.'])
+    out = capsys.readouterr().out
+    assert 'run with --semantic to populate' in out
