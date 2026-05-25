@@ -11,7 +11,7 @@ import sys
 # When a project's medium is graphic-novel, these commands return a clear
 # error instead of silently running novel-mode logic on the wrong data.
 GN_UNSUPPORTED_COMMANDS = frozenset({
-    'publish', 'annotations', 'extract', 'repetition', 'enrich',
+    'publish', 'annotations', 'repetition', 'enrich',
 })
 
 # Commands that route to a different module based on project.medium
@@ -21,6 +21,7 @@ GN_ROUTED_COMMANDS = {
     'score': 'storyforge.cmd_score_gn',
     'evaluate': 'storyforge.cmd_evaluate_gn',
     'revise': 'storyforge.cmd_revise_gn',
+    'extract': 'storyforge.cmd_extract_gn',
 }
 
 # `score` flags that target the medium-agnostic elaboration pipeline.
