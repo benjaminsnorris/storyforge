@@ -385,3 +385,50 @@ def test_compare_without_semantic_does_not_need_api_key(project_dir, monkeypatch
     ])
     out = capsys.readouterr().out
     assert 'Comparison' in out
+
+
+# ---------------------------------------------------------------------------
+# v2 flag-combination validation (regression: PR #232 review)
+# ---------------------------------------------------------------------------
+
+
+def test_bible_consistency_with_level_exits(project_dir, monkeypatch):
+    """--bible-consistency + --level cannot be combined."""
+    monkeypatch.chdir(project_dir)
+    with pytest.raises(SystemExit) as exc:
+        score_main(['--bible-consistency', '--level', '0', '--dry-run'])
+    assert exc.value.code == 1
+
+
+def test_boundary_with_compare_exits(project_dir, monkeypatch):
+    monkeypatch.chdir(project_dir)
+    with pytest.raises(SystemExit) as exc:
+        score_main(['--boundary', '0->1', '--compare', 'a', 'b', '--dry-run'])
+    assert exc.value.code == 1
+
+
+def test_all_boundaries_with_scope_exits(project_dir, monkeypatch):
+    """--scope is meaningless with --all-boundaries; reject the combo."""
+    monkeypatch.chdir(project_dir)
+    with pytest.raises(SystemExit) as exc:
+        score_main(['--all-boundaries', '--scope', 'foo', '--dry-run'])
+    assert exc.value.code == 1
+
+
+def test_drift_with_compare_exits(project_dir, monkeypatch):
+    monkeypatch.chdir(project_dir)
+    with pytest.raises(SystemExit) as exc:
+        score_main(['--drift', '--compare', 'a', 'b'])
+    assert exc.value.code == 1
+
+
+def test_bible_scope_nonexistent_exits(project_dir, monkeypatch):
+    """--scope X must match a real drafted scene; typo trap."""
+    ref = os.path.join(project_dir, 'reference')
+    with open(os.path.join(ref, 'character-bible.md'), 'w') as f:
+        f.write('content')
+    monkeypatch.chdir(project_dir)
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test')
+    with pytest.raises(SystemExit) as exc:
+        score_main(['--bible-consistency', '--scope', 'nonexistent-scene'])
+    assert exc.value.code == 1

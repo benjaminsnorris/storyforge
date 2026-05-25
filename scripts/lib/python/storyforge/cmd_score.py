@@ -155,6 +155,40 @@ def _parse_principles(raw: str, plugin_dir: str) -> list[str]:
     return requested
 
 
+def _validate_flag_combinations(args) -> None:
+    """Reject incoherent v1/v2 flag combinations early with a clear error.
+
+    Each entry point is mutually exclusive — silent precedence rules make
+    expensive flags (like --bible-consistency) easy to misfire.
+    """
+    triggers = []
+    if args.bible_consistency:
+        triggers.append('--bible-consistency')
+    if args.boundary:
+        triggers.append('--boundary')
+    if args.all_boundaries:
+        triggers.append('--all-boundaries')
+    if args.compare:
+        triggers.append('--compare')
+    if args.drift:
+        triggers.append('--drift')
+    if args.all_levels:
+        triggers.append('--all-levels')
+    if args.level is not None and not args.compare:
+        triggers.append('--level')
+    if len(triggers) > 1:
+        log(f'ERROR: these flags cannot be combined: {", ".join(triggers)}. '
+            'Pick one entry point and re-run.')
+        sys.exit(1)
+
+    # --scope only applies to --boundary and --bible-consistency.
+    if args.scope and not (args.boundary or args.bible_consistency):
+        log('ERROR: --scope only applies to --boundary or --bible-consistency. '
+            'For --all-boundaries, drop --scope and run all boundaries; for '
+            'prose-tier comparison, --scope is not meaningful.')
+        sys.exit(1)
+
+
 def _check_llm_preconditions(operation: str, dry_run: bool) -> None:
     """Verify ANTHROPIC_API_KEY is set before an LLM dispatch.
 
@@ -200,9 +234,17 @@ def _run_elaboration_scoring(args) -> None:
     project_dir = detect_project_root()
     medium = get_medium(project_dir) or 'novel'
 
+    _validate_flag_combinations(args)
+
     # --bible-consistency: LLM check vs character/world/voice bibles.
     if args.bible_consistency:
         from storyforge.scoring_bible import score_bible_consistency
+        if args.scope:
+            scene_path = os.path.join(project_dir, 'scenes', f'{args.scope}.md')
+            if not os.path.isfile(scene_path):
+                log(f'ERROR: --scope {args.scope!r} does not match any drafted '
+                    f'scene (looked for {scene_path}).')
+                sys.exit(1)
         _check_llm_preconditions('--bible-consistency', dry_run=args.dry_run)
         findings = score_bible_consistency(
             project_dir, scope=args.scope, dry_run=args.dry_run,
