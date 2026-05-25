@@ -759,7 +759,8 @@ def test_act_shape_mode_writes_matrix_and_structural_csvs(tmp_path, monkeypatch)
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
     result = scoring_story_power.score_story_power(str(tmp_path), 'full')
     out_dir = result['output_dir']
-    assert result['act_shape_mode']
+    ext = result['act_shape']
+    assert ext is not None
     assert os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
     assert os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
     assert os.path.isfile(os.path.join(out_dir, 'structural-axes.csv'))
@@ -776,9 +777,9 @@ def test_act_shape_mode_writes_matrix_and_structural_csvs(tmp_path, monkeypatch)
     diag = open(os.path.join(out_dir, 'diagnostic.md')).read()
     assert 'Per-act matrix' in diag
     assert 'Cross-act' in diag
-    # Returned result carries per-act + structural scores.
-    assert result['per_act_scores']['act2']['emotional_resonance'] == 6
-    assert result['structural_scores']['causal_integrity'] == 8
+    # Returned extension carries per-act + structural scores.
+    assert ext['per_act_scores']['act2']['emotional_resonance'] == 6
+    assert ext['structural_axis_scores']['causal_integrity'] == 8
 
 
 def test_pitch_only_when_act_shape_missing(tmp_path, monkeypatch):
@@ -800,7 +801,7 @@ def test_pitch_only_when_act_shape_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', pitch_fake)
     result = scoring_story_power.score_story_power(str(tmp_path), 'full')
     out_dir = result['output_dir']
-    assert not result['act_shape_mode']
+    assert result['act_shape'] is None
     assert os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
     assert not os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
     assert not os.path.isfile(os.path.join(out_dir, 'structural-axes.csv'))
@@ -821,7 +822,7 @@ def test_act_shape_llm_failure_does_not_kill_pitch_result(tmp_path, monkeypatch)
     result = scoring_story_power.score_story_power(str(tmp_path), 'full')
     out_dir = result['output_dir']
     assert os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
-    assert not result['act_shape_mode']
+    assert result['act_shape'] is None
     assert not os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
     # Pitch result still healthy.
     assert result['composite'] > 0
@@ -842,7 +843,7 @@ def test_act_shape_partial_per_act_tags_partial(tmp_path, monkeypatch):
     monkeypatch.setattr(api, 'invoke_to_file', fake)
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
     result = scoring_story_power.score_story_power(str(tmp_path), 'full')
-    assert result['act_shape_mode']
+    assert result['act_shape'] is not None
     assert result['status'] == 'partial'
     # Act 2 cells empty in the matrix.
     matrix = open(os.path.join(result['output_dir'],
@@ -942,7 +943,7 @@ def test_act_shape_unparseable_response_skips_extension(tmp_path, monkeypatch):
     monkeypatch.setattr(api, 'invoke_to_file', fake)
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
     result = scoring_story_power.score_story_power(str(tmp_path), 'full')
-    assert not result['act_shape_mode']
+    assert result['act_shape'] is None
     out_dir = result['output_dir']
     assert os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
     assert not os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
