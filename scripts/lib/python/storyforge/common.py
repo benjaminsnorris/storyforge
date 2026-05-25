@@ -126,6 +126,75 @@ def _strip_yaml_value(val: str) -> str:
 
 
 # ============================================================================
+# Story summary parsing (reference/story-summary.md)
+# ============================================================================
+
+STORY_SUMMARY_PATH = os.path.join('reference', 'story-summary.md')
+STORY_SUMMARY_SECTIONS = ('logline', 'synopsis', 'act_shape', 'theme')
+
+
+def parse_story_summary(project_dir: str | None = None) -> dict | None:
+    """Parse `reference/story-summary.md` into a structured dict.
+
+    Returns:
+        {
+          'frontmatter': {logline_updated, synopsis_updated,
+                          act_shape_updated, theme_updated},
+          'logline':   str,  # the body of `## Logline`
+          'synopsis':  str,  # the body of `## Synopsis`
+          'act_shape': str,  # the body of `## Act-shape` (includes `### Act N` sub-headers)
+          'theme':     str,  # the body of `## Theme`
+        }
+
+    Returns None if the file is absent. Missing sections return ''. The
+    HTML/Markdown comment at the top of the template is stripped before
+    section parsing.
+    """
+    if project_dir is None:
+        project_dir = detect_project_root()
+    path = os.path.join(project_dir, STORY_SUMMARY_PATH)
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+
+    # Strip a leading HTML comment block, if any (templates start with one).
+    text = re.sub(r'^\s*<!--.*?-->\s*', '', text, count=1, flags=re.DOTALL)
+
+    # Extract YAML frontmatter (between leading `---` lines).
+    frontmatter = {
+        'logline_updated': '',
+        'synopsis_updated': '',
+        'act_shape_updated': '',
+        'theme_updated': '',
+    }
+    fm_match = re.match(r'^---\n(.*?)\n---\n', text, flags=re.DOTALL)
+    if fm_match:
+        for line in fm_match.group(1).splitlines():
+            m = re.match(r'^([a-z_]+):\s*(.*)$', line)
+            if m and m.group(1) in frontmatter:
+                frontmatter[m.group(1)] = _strip_yaml_value(m.group(2))
+        text = text[fm_match.end():]
+
+    # Split on level-2 headings. Section keys are normalized:
+    #   "Logline"    → 'logline'
+    #   "Synopsis"   → 'synopsis'
+    #   "Act-shape"  → 'act_shape'  (hyphen → underscore)
+    #   "Theme"      → 'theme'
+    sections = {k: '' for k in STORY_SUMMARY_SECTIONS}
+    # The level-1 heading (`# Story summary`) is ignored.
+    parts = re.split(r'^##\s+(.+?)$', text, flags=re.MULTILINE)
+    # parts = [pre, name1, body1, name2, body2, ...]
+    for i in range(1, len(parts), 2):
+        name = parts[i].strip().lower().replace('-', '_').replace(' ', '_')
+        body = parts[i + 1].strip() if i + 1 < len(parts) else ''
+        if name in sections:
+            sections[name] = body
+
+    return {'frontmatter': frontmatter, **sections}
+
+
+# ============================================================================
 # File checks
 # ============================================================================
 

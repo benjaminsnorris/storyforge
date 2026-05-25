@@ -73,6 +73,22 @@ def parse_args(argv):
     parser.add_argument('--diagnosis-only', action='store_true',
                         help='Generate diagnosis and proposals from existing scores '
                              '(skip scoring, run improvement cycle only)')
+    # Elaboration-v1 entry points (#229). These short-circuit the existing
+    # scene-prose scoring path and run the level-rubric / comparison primitives.
+    parser.add_argument('--level', type=int, default=None,
+                        choices=range(0, 7), metavar='N',
+                        help='Run floor checks for elaboration level N (0-6). '
+                             'Levels: 0=logline, 1=synopsis, 2=act-shape, '
+                             '3=spine, 4=architecture, 5=scene-map, 6=briefs.')
+    parser.add_argument('--all-levels', action='store_true',
+                        help='Run floor checks for every elaboration level (0-6).')
+    parser.add_argument('--compare', nargs='+', metavar='CANDIDATE',
+                        help='Compare 2-4 candidate artifacts at the same level '
+                             '(used with --level for prose-tier levels). Each '
+                             'candidate is a file path or a literal text string.')
+    parser.add_argument('--drift', action='store_true',
+                        help='Read-only drift report: which levels are out of '
+                             'sync vs. git HEAD, registries, or each other.')
     return parser.parse_args(argv)
 
 
@@ -121,10 +137,134 @@ def _parse_principles(raw: str, plugin_dir: str) -> list[str]:
     return requested
 
 
+def _run_elaboration_scoring(args) -> None:
+    """Handle --level / --all-levels / --compare / --drift (elaboration v1).
+
+    Short-circuits the existing scene-prose scoring path. Returns on
+    success (implicit exit 0); calls `sys.exit(1)` on misuse.
+
+    **TODO(v2):** when LLM ceiling axes ship in `--compare --semantic`
+    and LLM-driven boundary faithfulness diffs land, this dispatch needs
+    to wire into the cost ledger and the create_branch / ensure_branch_pushed
+    machinery that the prose-tier scoring path uses today (cmd_score.main
+    around lines 295-310). v1 is deterministic-only, no API calls, no
+    commits — so the bypass is safe. Don't forget when v2 lands.
+    """
+    from datetime import datetime
+    from storyforge.scoring_levels import (
+        score_level, score_all_levels, LEVEL_NAMES,
+    )
+    from storyforge.scoring_consistency import (
+        score_consistency_at_level, score_consistency_all_levels,
+    )
+    from storyforge.scoring_comparison import compare_candidates, render_report
+    from storyforge.common import get_medium
+
+    project_dir = detect_project_root()
+    medium = get_medium(project_dir) or 'novel'
+
+    # --compare: needs --level too, runs the comparison primitive.
+    if args.compare:
+        if args.level is None:
+            log('ERROR: --compare requires --level to know what kind of '
+                'candidates these are (0=logline, 1=synopsis, 2=act-shape).')
+            sys.exit(1)
+        if args.level not in (0, 1, 2):
+            log('ERROR: --compare is only supported at the prose tier '
+                '(levels 0-2 in v1).')
+            sys.exit(1)
+        candidates_text = [_read_candidate(c) for c in args.compare]
+        try:
+            result = compare_candidates(LEVEL_NAMES[args.level], candidates_text)
+        except ValueError as e:
+            log(f'ERROR: {e}')
+            sys.exit(1)
+        md = render_report(result)
+        # Write to a working/ report and also echo to stdout.
+        out_dir = os.path.join(project_dir, 'working')
+        os.makedirs(out_dir, exist_ok=True)
+        ts = datetime.now().strftime('%Y%m%d-%H%M%S')
+        out_path = os.path.join(
+            out_dir, f'comparison-{LEVEL_NAMES[args.level]}-{ts}.md',
+        )
+        with open(out_path, 'w', encoding='utf-8') as f:
+            f.write(md)
+        log(f'Comparison report: {out_path}')
+        print(md)
+        return
+
+    # --drift: read-only report. Combines coverage + consistency.
+    if args.drift:
+        _print_drift_report(project_dir, medium)
+        return
+
+    # --level N or --all-levels: floor checks per level + consistency.
+    if args.all_levels:
+        levels = list(range(0, 7))
+    else:
+        levels = [args.level]
+
+    for level in levels:
+        floor = score_level(project_dir, level, medium=medium)
+        _print_level_result(floor)
+        if level in (3, 4, 5, 6):
+            consistency = score_consistency_at_level(project_dir, level)
+            _print_level_result(consistency)
+
+
+def _read_candidate(arg: str) -> str:
+    """If `arg` is a path that exists, read it; otherwise treat as literal text."""
+    if os.path.isfile(arg):
+        with open(arg, encoding='utf-8') as f:
+            return f.read()
+    return arg
+
+
+def _print_level_result(result: dict) -> None:
+    """Render a level-rubric result dict to stdout as a compact table."""
+    name = result.get('name', 'unknown')
+    level = result.get('level', '?')
+    passed = result.get('passed', 0)
+    failed = result.get('failed', 0)
+    print(f'\n[level {level}] {name}: {passed} passed, {failed} failed')
+    for c in result.get('checks', []):
+        marker = '✓' if c['passed'] else '✗'
+        detail = f' — {c["detail"]}' if c.get('detail') else ''
+        print(f'  {marker} {c["check"]}{detail}')
+
+
+def _print_drift_report(project_dir: str, medium: str) -> None:
+    """Compose a read-only drift report from floor + consistency checks.
+
+    v1 is deterministic only — coverage + timestamps + content-hash deltas
+    are out of scope here (they belong to cmd_sync's drift hook). Future
+    versions add LLM-driven faithfulness diffs across boundaries.
+    """
+    from storyforge.scoring_levels import score_all_levels
+    from storyforge.scoring_consistency import score_consistency_all_levels
+
+    print(f'\n# Drift report (deterministic floor + consistency)')
+    print(f'\nProject root: {project_dir}')
+    print(f'Medium: {medium}')
+
+    print('\n## Floor checks per level\n')
+    for result in score_all_levels(project_dir, medium=medium):
+        _print_level_result(result)
+
+    print('\n## Registry consistency per level\n')
+    for result in score_consistency_all_levels(project_dir):
+        _print_level_result(result)
+
+
 def main(argv=None):
     args = parse_args(argv if argv is not None else sys.argv[1:])
 
     install_signal_handlers()
+
+    # Elaboration-v1 entry points: short-circuit the prose-scoring flow.
+    if args.level is not None or args.all_levels or args.compare or args.drift:
+        _run_elaboration_scoring(args)
+        return
 
     from datetime import datetime
     session_start = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')

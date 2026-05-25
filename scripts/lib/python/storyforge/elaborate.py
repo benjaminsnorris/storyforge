@@ -22,11 +22,16 @@ _SCENES_COLS = [
     'word_count', 'target_words',
     # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
     'target_pages', 'panel_count', 'page_count',
+    # Pointer back to the architecture anchor this map scene serves
+    # (empty for purely interstitial scenes).
+    'architecture_scene',
 ]
 _INTENT_COLS = [
     'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
     'value_shift', 'turning_point', 'characters', 'on_stage',
     'mice_threads',
+    # Themes (abstract concerns) this scene engages — references themes.csv.
+    'theme_threads',
 ]
 _BRIEFS_COLS = [
     'id', 'goal', 'conflict', 'outcome', 'crisis', 'decision',
@@ -37,11 +42,29 @@ _BRIEFS_COLS = [
     'page_layout', 'panel_breakdown', 'visual_keywords',
     'page_turn_beats', 'caption_strategy',
 ]
+# Structural-anchor tier: discrete CSVs with their own row identity.
+_SPINE_COLS = [
+    'id', 'seq', 'title', 'function', 'part',
+]
+_ARCHITECTURE_COLS = [
+    'id', 'seq', 'title', 'part', 'pov', 'spine_event',
+    'action_sequel', 'emotional_arc', 'value_at_stake',
+    'value_shift', 'turning_point',
+]
 
+# Order matters: `_file_for_column` returns the first file whose column
+# list contains the lookup. The manuscript-tier files come first because
+# they own shared column names (seq, title, part, etc.) in the legacy code
+# path. Structural-anchor files (spine.csv, architecture.csv) follow; they
+# share several column names with the manuscript files, so callers that
+# need to disambiguate by tier should use a tier-aware helper rather than
+# `_file_for_column` alone.
 _FILE_MAP = {
     'scenes.csv': _SCENES_COLS,
     'scene-intent.csv': _INTENT_COLS,
     'scene-briefs.csv': _BRIEFS_COLS,
+    'spine.csv': _SPINE_COLS,
+    'architecture.csv': _ARCHITECTURE_COLS,
 }
 
 
@@ -211,7 +234,23 @@ def get_column(ref_dir: str, column: str) -> list[str]:
 # ============================================================================
 
 def update_scene(scene_id: str, ref_dir: str, updates: dict[str, str]) -> None:
-    """Update specific columns for a scene, writing to the correct file(s).
+    """Update specific columns for a *manuscript-tier* scene.
+
+    Writes to whichever of scenes.csv / scene-intent.csv / scene-briefs.csv
+    own each column, based on `_file_for_column` (which returns the
+    first matching file in `_FILE_MAP`).
+
+    **Manuscript tier only.** This function does NOT update spine.csv or
+    architecture.csv. Several columns are shared between the manuscript
+    files and the structural-anchor files (id, seq, title, part, pov,
+    action_sequel, emotional_arc, value_at_stake, value_shift,
+    turning_point) — for those columns, `_file_for_column` returns the
+    manuscript-tier file because `_FILE_MAP` puts those first. If a
+    caller wanted to edit a row in spine.csv or architecture.csv via
+    this function, the wrong file would silently get the write and an
+    empty manuscript row could even be created. Use a tier-specific
+    write path for structural-anchor edits (today, edit those CSVs
+    directly; a tier-aware helper can be added if real callers emerge).
 
     Args:
         scene_id: The scene's id value.

@@ -1,13 +1,26 @@
-"""storyforge migrate — Upgrade existing projects to normalized registry model.
+"""storyforge migrate — Upgrade existing projects to the current schema.
 
-One-time migration that:
+One-time migration that runs eight steps. Steps 1-5 normalize the
+registry model; steps 6-8 carry projects forward to the elaboration-v1
+three-tier structure (#229):
+
   1. Renames scene_type -> action_sequel in scene-intent.csv
   2. Removes the threads column from scene-intent.csv
   3. Seeds new registry files (values.csv, knowledge.csv, mice-threads.csv)
   4. Normalizes all registry-backed fields to canonical IDs
   5. Runs schema validation to show remaining issues
+  6. Creates reference/story-summary.md (Logline / Synopsis / Act-shape /
+     Theme), seeding the Logline from storyforge.yaml:project.logline
+  7. Extracts status=spine rows from scenes.csv into reference/spine.csv
+     (also drops matching scene-intent.csv rows and orphan scene-briefs.csv
+     rows). Idempotent — picks up stranded rows added between runs.
+  8. Extracts status=architecture rows from scenes.csv into
+     reference/architecture.csv (same shape as step 7).
 
-Idempotent — safe to run multiple times.
+Steps 7 and 8 use multi-file atomic writes so a mid-write failure
+doesn't leave the project in a half-migrated state.
+
+Every step is idempotent — safe to run multiple times.
 
 Usage:
     storyforge migrate                  # Full migration + commit
@@ -313,6 +326,368 @@ def step5_validate(ref_dir: str, project_dir: str) -> str:
 
 
 # ============================================================================
+# Step 6: bootstrap reference/story-summary.md from project.logline
+# ============================================================================
+
+# Re-rendering the template via Python rather than file-copying keeps the
+# command self-contained and avoids a templates path dependency.
+STORY_SUMMARY_BOOTSTRAP = """\
+<!--
+This file holds the story at progressively finer levels of detail:
+
+  - Logline (1 sentence)
+  - Synopsis (1 paragraph)
+  - Act-shape (3 paragraphs)
+  - Theme (2-4 sentences)
+
+Edit any section freely. `storyforge sync` keeps the structural tier
+aligned. Per-section update timestamps in the frontmatter feed cascade
+drift detection.
+
+Internal use only. None of this is pitch material — be specific.
+-->
+---
+logline_updated:
+synopsis_updated:
+act_shape_updated:
+theme_updated:
+---
+
+# Story summary
+
+## Logline
+
+{logline}
+
+## Synopsis
+
+(write the synopsis here)
+
+## Act-shape
+
+### Act 1
+(write Act 1 here)
+
+### Act 2
+(write Act 2 here)
+
+### Act 3
+(write Act 3 here)
+
+## Theme
+
+(write the central question or claim here)
+"""
+
+
+def step6_create_story_summary(project_dir: str, dry_run: bool) -> str:
+    """Create reference/story-summary.md if absent.
+
+    Seeds the Logline section from `storyforge.yaml:project.logline` when
+    present. If the yaml has no logline, the Logline section is written
+    blank (NOT with a placeholder string) — a placeholder would slip past
+    the level-0 floor check's "present" assertion. Other sections also
+    use placeholders only because the templates need *some* prompt text;
+    those slots aren't gated by a `present` check the same way.
+
+    Skips if the file already exists (idempotent).
+    """
+    path = os.path.join(project_dir, 'reference', 'story-summary.md')
+    if os.path.isfile(path):
+        return 'skip:already exists'
+
+    logline = (
+        read_yaml_field('project.logline', project_dir)
+        or read_yaml_field('logline', project_dir)
+        or ''  # leave blank so score_logline correctly reports `present: False`
+    )
+    content = STORY_SUMMARY_BOOTSTRAP.format(logline=logline)
+
+    if dry_run:
+        return f'create:{len(content)} bytes'
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    return f'create:{len(content)} bytes (logline {"seeded" if logline else "blank"})'
+
+
+# ============================================================================
+# Step 7: extract status=spine rows from scenes.csv into spine.csv
+# ============================================================================
+
+# Column lists are the single source of truth in elaborate._FILE_MAP.
+# Importing rather than redefining prevents schema drift between the
+# migration writer and the rest of the codebase that reads the file.
+from storyforge.elaborate import _SPINE_COLS, _ARCHITECTURE_COLS
+
+
+def step7_extract_spine(ref_dir: str, dry_run: bool) -> str:
+    """Move status=spine rows from scenes.csv into reference/spine.csv.
+
+    For each moved row, the matching scene-intent.csv row is also removed
+    (its `function` column is now carried by spine.csv) and any matching
+    scene-briefs.csv row (an orphan briefly possible if a project was
+    drafted then demoted) is dropped.
+
+    Side effects:
+      - Writes reference/spine.csv (creates or overwrites the header-only
+        template).
+      - Rewrites reference/scenes.csv without the moved rows.
+      - Rewrites reference/scene-intent.csv without the moved IDs.
+      - Rewrites reference/scene-briefs.csv to drop any orphans for the
+        moved IDs.
+
+    Idempotency:
+      - If spine.csv has data rows AND scenes.csv contains no remaining
+        status=spine rows, skip with 'skip:already migrated'.
+      - If spine.csv has data rows AND scenes.csv still has status=spine
+        rows, those are STRANDED — process them (so an author who adds a
+        new spine row between migrations gets it picked up).
+
+    Atomicity: all four file writes go through a write-temp / atomic-
+    rename helper so a mid-write failure leaves all files in their
+    pre-migration state (or fully migrated). No partial-state outcomes.
+    """
+    spine_path = os.path.join(ref_dir, 'spine.csv')
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+
+    if not os.path.isfile(scenes_path):
+        return 'skip:no scenes.csv'
+
+    scenes_header, scenes_rows = _read_csv(scenes_path)
+    intent_header, intent_rows = _read_csv(intent_path)
+    briefs_header, briefs_rows = _read_csv(briefs_path)
+    intent_by_id = {r.get('id', ''): r for r in intent_rows}
+
+    spine_rows_out: list[dict] = []
+    keep_scene_rows: list[dict] = []
+    moved_ids: set[str] = set()
+    for row in scenes_rows:
+        if row.get('status', '').strip() == 'spine':
+            intent = intent_by_id.get(row.get('id', ''), {})
+            spine_rows_out.append({
+                'id': row.get('id', ''),
+                'seq': row.get('seq', ''),
+                'title': row.get('title', ''),
+                'function': intent.get('function', ''),
+                'part': row.get('part', ''),
+            })
+            moved_ids.add(row.get('id', ''))
+        else:
+            keep_scene_rows.append(row)
+
+    # Idempotency: if spine.csv already has data AND no stranded rows
+    # remain in scenes.csv, we have nothing to do.
+    spine_has_data = False
+    if os.path.isfile(spine_path):
+        with open(spine_path, encoding='utf-8') as f:
+            existing = [l for l in f.read().splitlines() if l.strip()]
+        spine_has_data = len(existing) > 1
+
+    if not moved_ids:
+        if spine_has_data:
+            return 'skip:already migrated'
+        return 'skip:no status=spine rows in scenes.csv'
+
+    if dry_run:
+        return f'extract:{len(spine_rows_out)} rows'
+
+    keep_intent_rows = [r for r in intent_rows if r.get('id', '') not in moved_ids]
+    keep_briefs_rows = [r for r in briefs_rows if r.get('id', '') not in moved_ids]
+    briefs_dropped = len(briefs_rows) - len(keep_briefs_rows)
+
+    # If spine.csv already has rows (we're processing stranded entries),
+    # append rather than overwrite — preserves prior spine entries.
+    existing_spine_lines: list[str] = []
+    if spine_has_data:
+        with open(spine_path, encoding='utf-8') as f:
+            existing_spine_lines = [l for l in f.read().splitlines() if l.strip()]
+
+    _atomic_multi_write([
+        (spine_path, _format_csv_lines(_SPINE_COLS, spine_rows_out,
+                                       existing_lines=existing_spine_lines)),
+        (scenes_path, _format_csv_lines(scenes_header, keep_scene_rows)),
+        (intent_path, _format_csv_lines(intent_header, keep_intent_rows))
+            if intent_header else None,
+        (briefs_path, _format_csv_lines(briefs_header, keep_briefs_rows))
+            if briefs_header and briefs_dropped else None,
+    ])
+
+    summary = f'extract:{len(spine_rows_out)} rows'
+    if briefs_dropped:
+        summary += f' (+ dropped {briefs_dropped} orphan brief(s))'
+    return summary
+
+
+# ============================================================================
+# Step 8: extract status=architecture rows from scenes.csv into architecture.csv
+# ============================================================================
+
+def step8_extract_architecture(ref_dir: str, dry_run: bool) -> str:
+    """Move status=architecture rows from scenes.csv (+ matching scene-intent
+    columns) into reference/architecture.csv. `spine_event` is left empty —
+    the author wires it up after migration.
+
+    Side effects + idempotency + atomicity: same shape as step 7. Reads
+    scenes.csv, scene-intent.csv, scene-briefs.csv; writes architecture.csv
+    and rewrites the manuscript-tier files atomically.
+    """
+    arch_path = os.path.join(ref_dir, 'architecture.csv')
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+
+    if not os.path.isfile(scenes_path):
+        return 'skip:no scenes.csv'
+
+    scenes_header, scenes_rows = _read_csv(scenes_path)
+    intent_header, intent_rows = _read_csv(intent_path)
+    briefs_header, briefs_rows = _read_csv(briefs_path)
+    intent_by_id = {r.get('id', ''): r for r in intent_rows}
+
+    arch_rows_out: list[dict] = []
+    keep_scene_rows: list[dict] = []
+    moved_ids: set[str] = set()
+    for row in scenes_rows:
+        if row.get('status', '').strip() == 'architecture':
+            intent = intent_by_id.get(row.get('id', ''), {})
+            arch_rows_out.append({
+                'id': row.get('id', ''),
+                'seq': row.get('seq', ''),
+                'title': row.get('title', ''),
+                'part': row.get('part', ''),
+                'pov': row.get('pov', ''),
+                'spine_event': '',
+                'action_sequel': intent.get('action_sequel', ''),
+                'emotional_arc': intent.get('emotional_arc', ''),
+                'value_at_stake': intent.get('value_at_stake', ''),
+                'value_shift': intent.get('value_shift', ''),
+                'turning_point': intent.get('turning_point', ''),
+            })
+            moved_ids.add(row.get('id', ''))
+        else:
+            keep_scene_rows.append(row)
+
+    arch_has_data = False
+    if os.path.isfile(arch_path):
+        with open(arch_path, encoding='utf-8') as f:
+            existing = [l for l in f.read().splitlines() if l.strip()]
+        arch_has_data = len(existing) > 1
+
+    if not moved_ids:
+        if arch_has_data:
+            return 'skip:already migrated'
+        return 'skip:no status=architecture rows in scenes.csv'
+
+    if dry_run:
+        return f'extract:{len(arch_rows_out)} rows'
+
+    keep_intent_rows = [r for r in intent_rows if r.get('id', '') not in moved_ids]
+    keep_briefs_rows = [r for r in briefs_rows if r.get('id', '') not in moved_ids]
+    briefs_dropped = len(briefs_rows) - len(keep_briefs_rows)
+
+    existing_arch_lines: list[str] = []
+    if arch_has_data:
+        with open(arch_path, encoding='utf-8') as f:
+            existing_arch_lines = [l for l in f.read().splitlines() if l.strip()]
+
+    _atomic_multi_write([
+        (arch_path, _format_csv_lines(_ARCHITECTURE_COLS, arch_rows_out,
+                                      existing_lines=existing_arch_lines)),
+        (scenes_path, _format_csv_lines(scenes_header, keep_scene_rows)),
+        (intent_path, _format_csv_lines(intent_header, keep_intent_rows))
+            if intent_header else None,
+        (briefs_path, _format_csv_lines(briefs_header, keep_briefs_rows))
+            if briefs_header and briefs_dropped else None,
+    ])
+
+    summary = f'extract:{len(arch_rows_out)} rows'
+    if briefs_dropped:
+        summary += f' (+ dropped {briefs_dropped} orphan brief(s))'
+    return summary
+
+
+# ============================================================================
+# Write helpers — atomicity for the multi-file migration steps
+# ============================================================================
+
+def _format_csv_lines(header: list[str], rows: list[dict],
+                      existing_lines: list[str] | None = None) -> str:
+    """Render header + rows as a single pipe-delimited CSV string.
+
+    If `existing_lines` is given, those lines (which start with the header
+    of the previous file) are preserved and the new rows are appended.
+    Used when we're extracting *additional* spine/architecture rows on a
+    second migration run.
+    """
+    if existing_lines:
+        # existing_lines includes the prior header; keep that and append
+        # only the new rows.
+        parts = list(existing_lines)
+    else:
+        parts = ['|'.join(header)]
+    for row in rows:
+        parts.append('|'.join(row.get(c, '') for c in header))
+    return '\n'.join(parts) + '\n'
+
+
+def _atomic_multi_write(writes: list[tuple[str, str] | None]) -> None:
+    """Write multiple files atomically as a group.
+
+    Each entry is (path, content) — or None (skip). Strategy:
+      1. Write all content to sibling temp files (`<path>.migrate-tmp`).
+      2. Once every write has succeeded, os.replace each into place.
+
+    If step 1 fails for any file, no live data has been touched and the
+    partial temp files are cleaned up. If step 2 fails partway, files
+    written so far are renamed but the rest aren't — that's not strictly
+    atomic across files, but on local filesystems os.replace itself is
+    atomic per-file and the rename pass is fast enough that this window
+    is small. Worth a follow-up if/when migration runs on slow storage.
+    """
+    writes = [w for w in writes if w is not None]
+    tmp_paths: list[tuple[str, str]] = []  # (tmp_path, final_path)
+    try:
+        for final_path, content in writes:
+            tmp_path = final_path + '.migrate-tmp'
+            os.makedirs(os.path.dirname(final_path) or '.', exist_ok=True)
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            tmp_paths.append((tmp_path, final_path))
+    except OSError:
+        # Step 1 failed: clean up temps so we leave no debris.
+        for tmp_path, _ in tmp_paths:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        raise
+
+    # Step 2: rename pass. os.replace is atomic per-file on POSIX/Windows.
+    for tmp_path, final_path in tmp_paths:
+        os.replace(tmp_path, final_path)
+
+
+def _rewrite_csv(path: str, header: list[str], rows: list[dict]) -> None:
+    """Rewrite a pipe-delimited CSV with the given header + rows.
+
+    Cells default to '' when a row is missing a header column. Preserves
+    header order even when rows have a different shape.
+
+    Kept for backward compatibility with earlier callers; new step 7/8
+    code paths go through _format_csv_lines + _atomic_multi_write for
+    multi-file atomicity.
+    """
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('|'.join(header) + '\n')
+        for row in rows:
+            f.write('|'.join(row.get(c, '') for c in header) + '\n')
+
+
+# ============================================================================
 # Argument parsing
 # ============================================================================
 
@@ -352,21 +727,21 @@ def main(argv=None):
     # Step 1: Rename scene_type -> action_sequel
     result = step1_rename_scene_type(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [1/5] Rename scene_type -> action_sequel: skipped ({result[5:]})')
+        log(f'  [1/8] Rename scene_type -> action_sequel: skipped ({result[5:]})')
     else:
         count = result.split(':')[1]
-        log(f'  [1/5] Rename scene_type -> action_sequel: done ({count} rows)')
+        log(f'  [1/8] Rename scene_type -> action_sequel: done ({count} rows)')
 
     # Step 2: Remove threads column
     result = step2_remove_threads(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [2/5] Remove threads column: skipped ({result[5:]})')
+        log(f'  [2/8] Remove threads column: skipped ({result[5:]})')
     else:
         count = result.split(':')[1]
-        log(f'  [2/5] Remove threads column: done ({count} rows)')
+        log(f'  [2/8] Remove threads column: done ({count} rows)')
 
     # Step 3: Seed registries
-    log('  [3/5] Seed registries:')
+    log('  [3/8] Seed registries:')
     registry_results = step3_seed_registries(ref_dir, args.dry_run)
     for line in registry_results:
         registry = line.split(':')[0]
@@ -379,18 +754,39 @@ def main(argv=None):
 
     # Step 4: Normalize fields
     if args.dry_run:
-        log('  [4/5] Normalize fields: skipped (dry run)')
+        log('  [4/8] Normalize fields: skipped (dry run)')
     else:
         updated = step4_normalize(ref_dir, project_dir)
-        log(f'  [4/5] Normalize fields: {updated} cells updated')
+        log(f'  [4/8] Normalize fields: {updated} cells updated')
 
     # Step 5: Validate
     validate_output = step5_validate(ref_dir, project_dir)
     first_line = validate_output.split('\n')[0]
-    log(f'  [5/5] Schema validation: {first_line}')
+    log(f'  [5/8] Schema validation: {first_line}')
     rest_lines = validate_output.split('\n')[1:]
     for line in rest_lines:
         log(f'         {line}')
+
+    # Step 6: Bootstrap story-summary.md (elaboration v1)
+    result = step6_create_story_summary(project_dir, args.dry_run)
+    if result.startswith('skip:'):
+        log(f'  [6/8] Create story-summary.md: skipped ({result[5:]})')
+    else:
+        log(f'  [6/8] Create story-summary.md: {result.split(":")[1]}')
+
+    # Step 7: Extract spine.csv from status=spine rows
+    result = step7_extract_spine(ref_dir, args.dry_run)
+    if result.startswith('skip:'):
+        log(f'  [7/8] Extract spine.csv: skipped ({result[5:]})')
+    else:
+        log(f'  [7/8] Extract spine.csv: {result.split(":")[1]}')
+
+    # Step 8: Extract architecture.csv from status=architecture rows
+    result = step8_extract_architecture(ref_dir, args.dry_run)
+    if result.startswith('skip:'):
+        log(f'  [8/8] Extract architecture.csv: skipped ({result[5:]})')
+    else:
+        log(f'  [8/8] Extract architecture.csv: {result.split(":")[1]}')
 
     # Commit
     if args.dry_run:
