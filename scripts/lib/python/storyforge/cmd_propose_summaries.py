@@ -20,25 +20,37 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from storyforge.api import invoke_to_file, calculate_cost_from_usage, extract_usage
 from storyforge.common import (
-    detect_project_root, get_coaching_level, get_medium, install_signal_handlers,
-    log, parse_story_summary, select_model,
+    CoachingLevel, detect_project_root, get_coaching_level, get_medium,
+    install_signal_handlers, log, parse_story_summary, select_model,
 )
 from storyforge.costs import log_operation
 
 
-SUPPORTED_LEVELS = (3, 4, 5)
+class LevelSpec(NamedTuple):
+    """Per-level configuration for the propose-summaries pipeline.
 
-LEVEL_TO_NAME = {3: 'spine', 4: 'architecture', 5: 'scene-map'}
-LEVEL_TO_TARGET_CSV = {
-    3: 'spine.csv', 4: 'architecture.csv', 5: 'scenes.csv',
+    Source of truth for level→name→csv→parent→row-range mapping. Adding a
+    new level requires one entry here; the dispatch and prompt code reads
+    every field from this struct.
+    """
+    name: str
+    target_csv: str
+    parent_name: str
+    row_range_novel: tuple[int, int] | None
+    row_range_gn: tuple[int, int] | None
+
+
+LEVEL_SPEC: dict[int, LevelSpec] = {
+    3: LevelSpec('spine', 'spine.csv', 'act-shape', (5, 10), (4, 8)),
+    4: LevelSpec('architecture', 'architecture.csv', 'spine',
+                 (15, 25), (10, 18)),
+    5: LevelSpec('scene-map', 'scenes.csv', 'architecture', None, None),
 }
-
-# Target row count ranges (matching scoring_levels floor checks).
-ROW_RANGES_NOVEL = {3: (5, 10), 4: (15, 25)}
-ROW_RANGES_GN = {3: (4, 8), 4: (10, 18)}
+SUPPORTED_LEVELS = tuple(LEVEL_SPEC.keys())
 
 
 def parse_args(argv):
@@ -87,7 +99,7 @@ def main(argv=None):
 
 def _run_strict(project_dir: str, level: int, medium: str, dry_run: bool) -> None:
     upstream = _read_upstream(project_dir, level)
-    target_csv = LEVEL_TO_TARGET_CSV[level]
+    target_csv = LEVEL_SPEC[level].target_csv
     range_str = _row_range_for(level, medium)
 
     out_lines: list[str] = []
@@ -147,19 +159,19 @@ def _run_strict(project_dir: str, level: int, medium: str, dry_run: bool) -> Non
 # ---------------------------------------------------------------------------
 
 def _run_with_llm(project_dir: str, level: int, medium: str,
-                  coaching: str, dry_run: bool) -> None:
+                  coaching: CoachingLevel, dry_run: bool) -> None:
     upstream = _read_upstream(project_dir, level)
     if not upstream.strip():
         log(f'ERROR: upstream content for level {level} is empty. '
             'Populate the level above first.')
         sys.exit(1)
 
-    target_csv = LEVEL_TO_TARGET_CSV[level]
+    target_csv = LEVEL_SPEC[level].target_csv
     range_str = _row_range_for(level, medium)
     prompt = _build_prompt(level, upstream, range_str, coaching, medium)
 
     if dry_run:
-        log(f'DRY RUN — propose summaries for level {level} ({LEVEL_TO_NAME[level]})')
+        log(f'DRY RUN — propose summaries for level {level} ({LEVEL_SPEC[level].name})')
         log(f'Upstream content ({len(upstream)} chars):')
         log(upstream[:300] + ('…' if len(upstream) > 300 else ''))
         log('')
@@ -223,9 +235,10 @@ def _run_with_llm(project_dir: str, level: int, medium: str,
 
 
 def _build_prompt(level: int, upstream: str, range_str: str,
-                   coaching: str, medium: str) -> str:
-    target_name = LEVEL_TO_NAME[level]
-    parent_name = {3: 'act-shape', 4: 'spine', 5: 'architecture'}[level]
+                   coaching: CoachingLevel, medium: str) -> str:
+    spec = LEVEL_SPEC[level]
+    target_name = spec.name
+    parent_name = spec.parent_name
     extra_fields = ''
     if level == 3:
         extra_fields = ('Each event should belong to a specific Act '
@@ -356,7 +369,7 @@ def _write_to_csv(project_dir: str, level: int,
     cols_by_level = {3: _SPINE_COLS, 4: _ARCHITECTURE_COLS, 5: _SCENES_COLS}
     target_cols = cols_by_level[level]
     csv_path = os.path.join(project_dir, 'reference',
-                            LEVEL_TO_TARGET_CSV[level])
+                            LEVEL_SPEC[level].target_csv)
 
     if not os.path.isfile(csv_path):
         return _create_csv_with_proposals(csv_path, target_cols,
@@ -480,7 +493,7 @@ def _write_coaching_brief(project_dir: str, level: int, upstream: str,
 
     out: list[str] = [
         f'# Coaching brief: propose-summaries level {level} '
-        f'({LEVEL_TO_NAME[level]})',
+        f'({LEVEL_SPEC[level].name})',
         '',
         f'Generated {datetime.now(timezone.utc).isoformat()}.',
         '',
@@ -561,10 +574,12 @@ def _render_summaries_from(csv_path: str) -> str:
 
 def _row_range_for(level: int, medium: str) -> str:
     """Return human-readable row-count target like '5-10' for level/medium."""
-    ranges = ROW_RANGES_GN if medium == 'graphic-novel' else ROW_RANGES_NOVEL
-    if level in ranges:
-        lo, hi = ranges[level]
-        return f'{lo}-{hi}'
+    spec = LEVEL_SPEC.get(level)
+    if not spec:
+        return ''
+    rng = spec.row_range_gn if medium == 'graphic-novel' else spec.row_range_novel
+    if rng:
+        return f'{rng[0]}-{rng[1]}'
     return ''
 
 

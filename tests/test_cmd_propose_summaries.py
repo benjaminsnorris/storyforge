@@ -623,6 +623,23 @@ def test_parse_proposals_handles_greedy_object():
     assert proposals[0]['summary'] == 'Greedy.'
 
 
+def test_level_spec_matches_supported_levels():
+    """LEVEL_SPEC keys must equal SUPPORTED_LEVELS — the NamedTuple is the
+    single source of truth, so any drift between them is a bug."""
+    from storyforge.cmd_propose_summaries import LEVEL_SPEC, SUPPORTED_LEVELS
+    assert tuple(LEVEL_SPEC.keys()) == SUPPORTED_LEVELS
+
+
+def test_level_spec_carries_required_metadata():
+    """Every level's spec must have name, target_csv, parent_name set;
+    row ranges are optional (level 5 has none)."""
+    from storyforge.cmd_propose_summaries import LEVEL_SPEC
+    for level, spec in LEVEL_SPEC.items():
+        assert spec.name, f'level {level} missing name'
+        assert spec.target_csv, f'level {level} missing target_csv'
+        assert spec.parent_name, f'level {level} missing parent_name'
+
+
 def test_invalid_level_rejected(tmp_path, monkeypatch):
     """--level outside {3, 4, 5} is rejected by argparse."""
     _seed_story_summary(str(tmp_path))

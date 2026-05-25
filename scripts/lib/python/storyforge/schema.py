@@ -32,6 +32,14 @@ VALID_STATUSES = frozenset({
     'spine', 'architecture', 'mapped', 'briefed', 'drafted', 'polished',
 })
 
+# Statuses that mean the scene has at least been mapped (i.e., participates
+# in the manuscript tier as opposed to just the structural-anchor tier).
+# Source of truth — scoring modules import from here so a new status added
+# to VALID_STATUSES doesn't silently drift across consumers.
+MAPPED_OR_LATER_STATUSES = frozenset({
+    'mapped', 'briefed', 'drafted', 'polished',
+})
+
 VALID_VALUE_SHIFTS = frozenset({
     '+/-', '-/+', '+/++', '-/--', '+/+', '-/-',
 })

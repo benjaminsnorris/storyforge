@@ -22,6 +22,7 @@ import os
 import re
 
 from storyforge.common import log, parse_story_summary
+from storyforge.schema import MAPPED_OR_LATER_STATUSES
 from storyforge.scoring_state import is_override_accepted
 
 
@@ -210,10 +211,11 @@ def _coverage_architecture_to_scenes(project_dir: str) -> list[dict]:
             severity='high',
         )]
     scene_rows = _read_csv(os.path.join(project_dir, 'reference', 'scenes.csv'))
-    map_tier = frozenset({'mapped', 'briefed', 'drafted', 'polished'})
-    known_statuses = map_tier | {'spine', 'architecture', 'cut', 'merged', ''}
+    known_statuses = MAPPED_OR_LATER_STATUSES | {
+        'spine', 'architecture', 'cut', 'merged', ''
+    }
     map_rows = [r for r in scene_rows
-                if r.get('status', '').strip() in map_tier]
+                if r.get('status', '').strip() in MAPPED_OR_LATER_STATUSES]
     # Detect typo'd statuses that would silently exclude scenes from coverage.
     bad_statuses = sorted({r.get('status', '').strip() for r in scene_rows
                            if r.get('status', '').strip() not in known_statuses})
