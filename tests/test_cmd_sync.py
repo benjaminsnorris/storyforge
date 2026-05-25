@@ -183,6 +183,39 @@ def test_sync_conflicts_when_both_dirty(git_project):
     assert 'A Different Title' in open(md_path).read()
 
 
+def test_sync_conflict_with_header_only_scenes_does_not_crash(git_project):
+    """Regression: when both scenes.csv (header-only) and the MD are dirty,
+    the conflict-report rendering used to call build_scene_list, which
+    SystemExit'd on empty scenes — taking down the whole sync. The conflict
+    report should render with a 'pre-scene-map phase' note instead."""
+    from storyforge.cmd_sync import run_sync, CONFLICT_REPORT_PATH, DEFAULT_OUTPUT_PATH
+
+    run_sync(git_project)
+    md_path = os.path.join(git_project, DEFAULT_OUTPUT_PATH)
+    _git(git_project, 'add', DEFAULT_OUTPUT_PATH)
+    _git(git_project, 'commit', '-q', '-m', 'add MD')
+
+    # Reduce scenes.csv to header-only (simulates dropping back to architecture phase)
+    scenes_csv = os.path.join(git_project, 'reference', 'scenes.csv')
+    with open(scenes_csv) as f:
+        header = f.readline()
+    with open(scenes_csv, 'w') as f:
+        f.write(header)
+
+    # And edit MD
+    with open(md_path, 'a') as f:
+        f.write('\n## stray scene-section-from-md\n')
+
+    status = run_sync(git_project)
+    assert status == 'conflict'
+    report = os.path.join(git_project, CONFLICT_REPORT_PATH)
+    assert os.path.isfile(report)
+    report_text = open(report).read()
+    # The conflict report should note the empty-scenes state rather than
+    # crash trying to build a scene list from zero rows.
+    assert 'pre-scene-map phase' in report_text
+
+
 def test_sync_check_only_does_not_write(git_project):
     """--check returns the status without performing the sync."""
     from storyforge.cmd_sync import run_sync, DEFAULT_OUTPUT_PATH
@@ -377,7 +410,11 @@ def test_hook_path_filter_matches_expected_paths():
         'reference/scenes.csv',
         'reference/scene-intent.csv',
         'reference/scene-briefs.csv',
+        'reference/spine.csv',
+        'reference/architecture.csv',
         'reference/scenes-review.md',
+        'reference/spine.md',
+        'reference/architecture.md',
     ):
         assert rx.search(good), f'expected hook to fire for {good!r}'
     for bad in (
@@ -388,6 +425,17 @@ def test_hook_path_filter_matches_expected_paths():
         'docs/reference/scenes.csv',       # wrong directory prefix
     ):
         assert not rx.search(bad), f'hook must not fire for {bad!r}'
+
+
+def test_csv_rels_includes_spine_and_architecture():
+    """detect_state must track spine.csv + architecture.csv so a dirty
+    spine triggers sync export of spine.md (and same for architecture)."""
+    from storyforge.cmd_sync import CSV_RELS
+    assert 'reference/spine.csv' in CSV_RELS
+    assert 'reference/architecture.csv' in CSV_RELS
+    assert 'reference/scenes.csv' in CSV_RELS
+    assert 'reference/scene-intent.csv' in CSV_RELS
+    assert 'reference/scene-briefs.csv' in CSV_RELS
 
 
 def test_hook_script_uses_staged_diff(git_project):

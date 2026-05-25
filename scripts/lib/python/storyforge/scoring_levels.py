@@ -401,6 +401,18 @@ def score_scene_map(project_dir: str) -> dict:
                 if r.get('status', '').strip()
                 in ('mapped', 'briefed', 'drafted', 'polished')]
 
+    # Distinguish "scene-map elaborated" from "scenes.csv exists but has no
+    # map-tier rows yet" — without this, every check below vacuous-passes on
+    # empty input.
+    checks.append(_check(
+        'scene-map has at least one row',
+        bool(map_rows),
+        ('reference/scenes.csv has no rows with status mapped/briefed/'
+         'drafted/polished — run elaborate at the scene-map stage'
+         if not map_rows else ''),
+        severity='high',
+    ))
+
     # Required operational columns at the map level.
     required = ['location', 'timeline_day', 'time_of_day', 'duration']
     missing_any = []
@@ -477,6 +489,18 @@ def score_briefs(project_dir: str) -> dict:
         return _result(6, 'briefs', checks)
 
     rows = _read_csv(briefs_path)
+
+    # Distinguish "briefs elaborated" from "scene-briefs.csv exists but is
+    # empty" (pre-brief phase) — without this, the populated-fields check
+    # below vacuous-passes on zero rows.
+    checks.append(_check(
+        'scene-briefs.csv has at least one row',
+        bool(rows),
+        ('reference/scene-briefs.csv is header-only — run elaborate at '
+         'the brief stage' if not rows else ''),
+        severity='high',
+    ))
+
     # Required fields at brief stage.
     required = ['goal', 'conflict', 'outcome', 'crisis', 'decision']
     missing_any = []

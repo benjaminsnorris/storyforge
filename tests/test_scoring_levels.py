@@ -263,6 +263,68 @@ def test_briefs_against_fixture(project_dir):
     assert isinstance(r['checks'], list)
 
 
+def test_scene_map_fails_when_no_map_rows(tmp_path):
+    """Regression: header-only scenes.csv must NOT vacuous-pass level 5.
+
+    Pre-scene-map phases (spine, architecture) legitimately have empty
+    scenes.csv. Level 5 should report this as 'not yet elaborated', not
+    as 'metadata populated' (which is true only because there are zero
+    rows to check)."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|'
+        'type|status|word_count|target_words|target_pages|panel_count|page_count\n'
+    )
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
+        'turning_point|characters|on_stage|mice_threads\n'
+    )
+    r = score_scene_map(str(tmp_path))
+    assert r['level'] == 5
+    first = r['checks'][0]
+    assert first['check'] == 'scene-map has at least one row'
+    assert first['passed'] is False
+    assert 'scene-map stage' in first['detail']
+
+
+def test_scene_map_fails_when_only_pre_map_status_rows(tmp_path):
+    """Rows at status=architecture (pre-scene-map) should also trigger the
+    'no map rows' failure — those belong to architecture.csv, not the
+    scene-map tier."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|'
+        'type|status|word_count|target_words|target_pages|panel_count|page_count\n'
+        'sc-1|1|t|1|p|l|||||plot|architecture|||||\n'
+    )
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
+        'turning_point|characters|on_stage|mice_threads\n'
+    )
+    r = score_scene_map(str(tmp_path))
+    first = r['checks'][0]
+    assert first['check'] == 'scene-map has at least one row'
+    assert first['passed'] is False
+
+
+def test_briefs_fails_when_csv_is_header_only(tmp_path):
+    """Regression: header-only scene-briefs.csv must NOT vacuous-pass level 6."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scene-briefs.csv').write_text(
+        'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|'
+        'key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow\n'
+    )
+    r = score_briefs(str(tmp_path))
+    assert r['level'] == 6
+    first = r['checks'][0]
+    assert first['check'] == 'scene-briefs.csv has at least one row'
+    assert first['passed'] is False
+    assert 'brief stage' in first['detail']
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------

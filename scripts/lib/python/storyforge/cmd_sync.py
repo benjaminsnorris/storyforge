@@ -34,7 +34,20 @@ from storyforge.cmd_scenes_export import (
 from storyforge.cmd_scenes_import import import_scenes
 
 
-CSV_RELS = [csv_rel for _, csv_rel in SECTION_SPECS]
+# Round-trip CSVs participate in MD round-trip via scenes-review.md.
+ROUND_TRIP_CSV_RELS = [csv_rel for _, csv_rel in SECTION_SPECS]
+
+# One-way CSVs render to their own derived MD on every sync; no importer.
+# Tracking them here lets sync detect when only spine.csv or architecture.csv
+# changed and trigger the export. The corresponding MDs (spine.md,
+# architecture.md) are not tracked as round-trip targets — authors edit
+# the CSV; sync regenerates the MD.
+ONE_WAY_CSV_RELS = [
+    'reference/spine.csv',
+    'reference/architecture.csv',
+]
+
+CSV_RELS = ROUND_TRIP_CSV_RELS + ONE_WAY_CSV_RELS
 CONFLICT_REPORT_PATH = os.path.join('working', 'sync-conflict.md')
 
 # git diff --quiet exit codes
@@ -176,9 +189,15 @@ def _write_conflict_report(project_dir, state, md_rel):
     ) as tmp:
         tmp_md = tmp.name
     try:
-        export_scenes(project_dir, tmp_md)
-        with open(tmp_md, encoding='utf-8') as f:
-            csv_side = f.read()
+        if _scenes_csv_has_rows(project_dir):
+            export_scenes(project_dir, tmp_md)
+            with open(tmp_md, encoding='utf-8') as f:
+                csv_side = f.read()
+        else:
+            # Pre-scene-map phase: scenes.csv is header-only. Render an
+            # empty-but-valid CSV-side preview rather than letting
+            # build_scene_list SystemExit out of the conflict report.
+            csv_side = '(scenes.csv has no rows yet — pre-scene-map phase)'
     except (OSError, UnicodeError, ValueError) as e:
         # Narrow except: surface real bugs in export (schema drift, missing
         # CSVs, encoding) loudly rather than burying them in the report body.
