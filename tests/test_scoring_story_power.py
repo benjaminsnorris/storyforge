@@ -250,6 +250,128 @@ def test_refuses_without_logline_or_synopsis(tmp_path, monkeypatch, capsys):
     assert result['output_dir'] == ''
 
 
+def test_refuses_when_only_synopsis_missing(tmp_path, monkeypatch):
+    """logline present but synopsis missing must refuse — scoring requires both."""
+    yml = os.path.join(str(tmp_path), 'storyforge.yaml')
+    with open(yml, 'w') as f:
+        f.write('project:\n  title: T\n  medium: novel\n  coaching_level: full\n')
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'story-summary.md'), 'w') as f:
+        f.write('# Story summary\n\n## Logline\n\nA logline.\n\n## Synopsis\n\n')
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge.scoring_story_power import score_story_power
+    result = score_story_power(str(tmp_path), 'full')
+    assert result['output_dir'] == ''
+
+
+def test_refuses_when_only_logline_missing(tmp_path, monkeypatch):
+    """synopsis present but logline missing must refuse — scoring requires both."""
+    yml = os.path.join(str(tmp_path), 'storyforge.yaml')
+    with open(yml, 'w') as f:
+        f.write('project:\n  title: T\n  medium: novel\n  coaching_level: full\n')
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'story-summary.md'), 'w') as f:
+        f.write('# Story summary\n\n## Logline\n\n## Synopsis\n\nA synopsis.\n\n')
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge.scoring_story_power import score_story_power
+    result = score_story_power(str(tmp_path), 'full')
+    assert result['output_dir'] == ''
+
+
+# ---------------------------------------------------------------------------
+# Score extraction robustness
+# ---------------------------------------------------------------------------
+
+def test_non_numeric_score_does_not_crash(tmp_path, monkeypatch):
+    """If the LLM emits 'score': null or a string, the run must continue —
+    we drop that axis and warn the author, not raise TypeError."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    payload = _full_payload()
+    # Corrupt one row's score.
+    payload['scores'][2]['score'] = None
+    fake = _mock_llm(payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    # 7 of 8 axes scored; result should still come back as partial.
+    assert 'character_identification' not in result['scores']
+    assert len(result['scores']) == 7
+    assert 'partial' in result['mode']
+
+
+def test_partial_scores_flag_partial_in_mode(tmp_path, monkeypatch):
+    """When the LLM omits an axis row, result.mode is tagged '(partial)'."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    payload = _full_payload()
+    payload['scores'] = payload['scores'][:7]  # drop one axis
+    fake = _mock_llm(payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert 'partial' in result['mode']
+    assert len(result['scores']) == 7
+
+
+def test_out_of_range_score_is_dropped(tmp_path, monkeypatch):
+    """A score of 47 is almost always a parse artifact (e.g., 4 → 47 from
+    concatenation). Drop it rather than letting it skew the composite."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    payload = _full_payload()
+    payload['scores'][0]['score'] = 47
+    fake = _mock_llm(payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert 'specificity' not in result['scores']
+    assert 'partial' in result['mode']
+
+
+# ---------------------------------------------------------------------------
+# Zero-tokens cost ledger guard
+# ---------------------------------------------------------------------------
+
+def test_zero_tokens_skips_cost_ledger_row(tmp_path, monkeypatch):
+    """An LLM response with 0 input + 0 output tokens is almost always a
+    mocked or empty round-trip — a $0 ledger row hides the real signal."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake_zero(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text',
+                          'text': json.dumps(_full_payload())}],
+            'usage': {'input_tokens': 0, 'output_tokens': 0,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake_zero)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake_zero)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ledger_path = os.path.join(str(tmp_path), 'working', 'costs', 'ledger.csv')
+    if os.path.isfile(ledger_path):
+        ledger = open(ledger_path).read()
+        # No story-power ledger row for the zero-token call.
+        assert 'score-story-power' not in ledger
+
+
 # ---------------------------------------------------------------------------
 # CLI dispatch
 # ---------------------------------------------------------------------------

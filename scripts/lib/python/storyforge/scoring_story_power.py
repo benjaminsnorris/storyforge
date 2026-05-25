@@ -217,9 +217,10 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
       }
     """
     artifacts = gather_pitch_artifacts(project_dir)
-    if not artifacts['logline'] and not artifacts['synopsis']:
+    missing = [k for k in ('logline', 'synopsis') if not artifacts[k]]
+    if missing:
         log('ERROR: story-power scoring requires reference/story-summary.md '
-            'with at least a logline + synopsis populated.')
+            f'with both a logline and a synopsis. Missing: {", ".join(missing)}.')
         return _empty_result(coaching)
 
     rubric = _load_rubric()
@@ -253,25 +254,32 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         return _empty_result(coaching)
 
     os.makedirs(output_dir, exist_ok=True)
-    parsed, actual_mode = _invoke_and_parse(project_dir, output_dir,
+    log_dir = os.path.join(project_dir, 'working', 'logs', 'story-power')
+    log_file = os.path.join(log_dir, os.path.basename(output_dir) + '.json')
+    parsed, actual_mode = _invoke_and_parse(project_dir, output_dir, log_file,
                                               artifacts, rubric, coaching)
     if not parsed:
         return _empty_result(actual_mode, output_dir=output_dir)
 
-    scores = {row['axis']: int(row['score'])
-              for row in parsed.get('scores', [])
-              if row.get('axis') in AXIS_BY_KEY}
+    scores = _extract_scores(parsed)
+    missing_axes = [a.key for a in AXES if a.key not in scores]
+    if missing_axes:
+        log(f'WARNING: story-power LLM omitted or returned non-numeric '
+            f'scores for {len(missing_axes)} axis/axes: '
+            f'{", ".join(missing_axes)}. Composite reflects the present '
+            'axes only.')
     composite = composite_score(scores)
     deltas = _compute_deltas(project_dir, scores)
 
     if coaching == 'full':
         _write_full_scorecard(output_dir, scores, parsed, composite,
-                               deltas, artifacts)
+                               deltas, artifacts, recover_hint=log_file)
     else:  # coach
         _write_coach_brief(output_dir, scores, parsed, composite,
-                           deltas, artifacts)
+                           deltas, artifacts, recover_hint=log_file)
 
-    return {'mode': actual_mode, 'output_dir': output_dir,
+    final_mode = actual_mode if not missing_axes else f'{actual_mode} (partial)'
+    return {'mode': final_mode, 'output_dir': output_dir,
             'composite': composite, 'scores': scores, 'deltas': deltas,
             'diagnostic': parsed.get('diagnostic') or {}}
 
@@ -317,17 +325,14 @@ def _load_rubric() -> str:
         return ''
 
 
-def _invoke_and_parse(project_dir: str, output_dir: str,
+def _invoke_and_parse(project_dir: str, output_dir: str, log_file: str,
                        artifacts: dict[str, str], rubric: str,
                        coaching: CoachingLevel,
                        ) -> tuple[dict | None, str]:
     """Call the LLM and return (parsed_json, actual_mode)."""
     prompt = _build_prompt(artifacts, rubric)
     model = select_model('creative')
-    log_dir = os.path.join(project_dir, 'working', 'logs', 'story-power')
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir,
-                            os.path.basename(output_dir) + '.json')
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
     try:
         invoke_to_file(prompt, model, log_file, max_tokens=4096)
     except Exception as e:
@@ -356,13 +361,47 @@ def _read_response_text(log_file: str) -> str:
     return ''
 
 
+def _extract_scores(parsed: dict) -> dict[str, int]:
+    """Pull {axis_key: int_score} from the parsed LLM response.
+
+    Tolerant: drops any row missing/unknown axis, drops any non-coercible
+    score. The caller checks which axes are missing and warns. Bounded to
+    1-10 since out-of-range numbers are nearly always parse artifacts.
+    """
+    out: dict[str, int] = {}
+    for row in parsed.get('scores') or []:
+        if not isinstance(row, dict):
+            continue
+        axis = row.get('axis')
+        if axis not in AXIS_BY_KEY:
+            continue
+        raw = row.get('score')
+        try:
+            score = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= score <= 10:
+            continue
+        out[axis] = score
+    return out
+
+
 def _parse_response(text: str) -> dict | None:
-    """Tolerant JSON parse: direct → fenced → greedy. Validates shape."""
+    """Tolerant JSON parse: direct → fenced → greedy. Validates shape.
+
+    Logs WARNING when JSON parsed but the shape was wrong (separable from
+    "no valid JSON found at all"), so authors can tell whether to fix the
+    prompt or just retry.
+    """
+    saw_shape_failure = False
+
     def _take(obj):
+        nonlocal saw_shape_failure
         if not isinstance(obj, dict):
             return None
         scores = obj.get('scores')
         if not isinstance(scores, list):
+            saw_shape_failure = True
             return None
         return obj
     try:
@@ -387,6 +426,9 @@ def _parse_response(text: str) -> dict | None:
                 return out
         except json.JSONDecodeError:
             pass
+    if saw_shape_failure:
+        log('WARNING: story-power LLM returned valid JSON but with the wrong '
+            'shape (missing "scores" list). Treating as unparseable.')
     return None
 
 
@@ -399,10 +441,18 @@ def _record_cost(project_dir: str, log_file: str, model: str, *,
         log(f'WARNING: cost ledger update failed reading {log_file}: {e}')
         return
     usage = extract_usage(resp)
+    in_tok = usage.get('input_tokens', 0)
+    out_tok = usage.get('output_tokens', 0)
+    if in_tok == 0 and out_tok == 0:
+        # An LLM round-trip that records zero tokens is almost always a
+        # mocked or empty response. Logging a $0 ledger row hides this.
+        log(f'WARNING: story-power response had zero input+output tokens; '
+            f'skipping cost ledger entry (response at {log_file}).')
+        return
     cost = calculate_cost_from_usage(usage, model)
     log_operation(
         project_dir, 'score-story-power', model,
-        usage['input_tokens'], usage['output_tokens'], cost,
+        in_tok, out_tok, cost,
         target=target,
         cache_read=usage.get('cache_read', 0),
         cache_create=usage.get('cache_create', 0),
@@ -471,10 +521,29 @@ def _sanitize_cell(value: str) -> str:
     return value.replace('|', '/').replace('\n', ' ').replace('\r', '').strip()
 
 
+def _safe_write(path: str, content: str, *, recover_hint: str = '') -> bool:
+    """Write content to path, surfacing OSError without crashing the run.
+
+    The LLM call already cost money; a downstream filesystem failure
+    (disk full, permission denied) shouldn't lose the result silently.
+    Returns True on success. recover_hint names the log file the author
+    can recover from.
+    """
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return True
+    except OSError as e:
+        hint = f' Raw response: {recover_hint}' if recover_hint else ''
+        log(f'ERROR: failed to write story-power output to {path}: {e}.{hint}')
+        return False
+
+
 def _write_full_scorecard(output_dir: str, scores: dict[str, int],
                             parsed: dict, composite: float,
                             deltas: dict[str, int],
-                            artifacts: dict[str, str]) -> None:
+                            artifacts: dict[str, str], *,
+                            recover_hint: str = '') -> None:
     """full coaching: write scorecard.csv + diagnostic.md."""
     csv_path = os.path.join(output_dir, 'scorecard.csv')
     headers = ['axis', 'name', 'score', 'weight', 'positive_signals',
@@ -492,8 +561,7 @@ def _write_full_scorecard(output_dir: str, scores: dict[str, int],
             row.get('negative_signals', ''),
             row.get('rationale', ''),
         )))
-    with open(csv_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines) + '\n')
+    _safe_write(csv_path, '\n'.join(lines) + '\n', recover_hint=recover_hint)
 
     md_path = os.path.join(output_dir, 'diagnostic.md')
     diag = parsed.get('diagnostic') or {}
@@ -529,14 +597,14 @@ def _write_full_scorecard(output_dir: str, scores: dict[str, int],
             f'> {example}',
             '',
         ])
-    with open(md_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(md_lines) + '\n')
+    _safe_write(md_path, '\n'.join(md_lines) + '\n', recover_hint=recover_hint)
 
 
 def _write_coach_brief(output_dir: str, scores: dict[str, int],
                         parsed: dict, composite: float,
                         deltas: dict[str, int],
-                        artifacts: dict[str, str]) -> None:
+                        artifacts: dict[str, str], *,
+                        recover_hint: str = '') -> None:
     """coach coaching: write a review brief with the LLM proposals +
     author-facing questions per axis."""
     md_path = os.path.join(output_dir, 'coaching-brief.md')
@@ -578,8 +646,7 @@ def _write_coach_brief(output_dir: str, scores: dict[str, int],
             f'> {example}',
             '',
         ])
-    with open(md_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(out) + '\n')
+    _safe_write(md_path, '\n'.join(out) + '\n', recover_hint=recover_hint)
 
 
 def _write_strict_checklist(output_dir: str, artifacts: dict[str, str],
@@ -611,5 +678,4 @@ def _write_strict_checklist(output_dir: str, artifacts: dict[str, str],
             '- ',
             '',
         ])
-    with open(md_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(out) + '\n')
+    _safe_write(md_path, '\n'.join(out) + '\n')
