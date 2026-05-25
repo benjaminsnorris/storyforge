@@ -95,6 +95,44 @@ def test_composite_handles_missing_axes():
     assert composite_score({'stakes_dilemma': 10}) == 10.0
 
 
+def test_axes_module_load_invariants():
+    """AXES enforces unique keys, only-1.0-or-1.5 weights, and exactly
+    four 1.5x axes — drift in any of these silently shifts the composite
+    math, so they assert at import time."""
+    from storyforge.scoring_story_power import AXES
+    keys = [a.key for a in AXES]
+    assert len(keys) == len(set(keys))
+    assert all(a.weight in (1.0, 1.5) for a in AXES)
+    assert sum(1 for a in AXES if a.weight == 1.5) == 4
+
+
+def test_score_story_power_returns_typed_status(tmp_path, monkeypatch):
+    """Result has both coaching (the request) and status (the outcome)
+    as typed fields; consumers should branch on status rather than
+    substring-match the legacy `mode` display string."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _mock_llm(_full_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['coaching'] == 'full'
+    assert result['status'] == 'ok'
+    assert result['mode'] == 'full'  # display string preserved
+
+
+def test_status_when_api_key_missing(tmp_path, monkeypatch):
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    from storyforge.scoring_story_power import score_story_power
+    result = score_story_power(str(tmp_path), 'full')
+    assert result['status'] == 'no_api_key'
+    assert result['coaching'] == 'full'
+
+
 # ---------------------------------------------------------------------------
 # Strict coaching — no LLM
 # ---------------------------------------------------------------------------

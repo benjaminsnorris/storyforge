@@ -13,7 +13,7 @@ import json
 import os
 import re
 from datetime import datetime, timezone
-from typing import NamedTuple
+from typing import Literal, NamedTuple, TypedDict
 
 from storyforge.api import (
     invoke_to_file, calculate_cost_from_usage, extract_usage,
@@ -24,10 +24,44 @@ from storyforge.common import (
 from storyforge.costs import log_operation
 
 
+# Type-narrow the weight: the rubric defines only two values. A drift to
+# 1.25 / 2.0 would shift the composite math silently — catch it at import.
+Weight = Literal[1.0, 1.5]
+
+# Status values used by score_story_power's result. 'ok' covers every
+# happy path (full scorecard, coach brief, strict checklist); the rest
+# name a specific failure or short-circuit so callers can branch on the
+# field instead of substring-matching a free-form mode string.
+StoryPowerStatus = Literal[
+    'ok',           # full scorecard / coach brief / strict checklist written
+    'partial',      # LLM scored, but one or more axes missing / out-of-range
+    'unparseable',  # LLM returned content but parse failed
+    'llm_error',    # invoke_to_file raised
+    'dry_run',      # dry-run preview only; no work done
+    'no_api_key',   # full/coach with ANTHROPIC_API_KEY unset
+    'no_rubric',    # full/coach with references/story-power-rubric.md missing
+    'no_input',     # logline and/or synopsis missing
+]
+
+
+class StoryPowerResult(TypedDict):
+    """Result of score_story_power. Coaching is the requested level; status
+    is the outcome. Output_dir is the timestamped directory written to
+    (empty string when no directory was allocated)."""
+    coaching: CoachingLevel
+    status: StoryPowerStatus
+    mode: str  # human display string, for backward-compatible logging
+    output_dir: str
+    composite: float
+    scores: dict[str, int]
+    deltas: dict[str, int]
+    diagnostic: dict
+
+
 class Axis(NamedTuple):
     key: str
     name: str
-    weight: float  # 1.0 or 1.5
+    weight: Weight
 
 
 AXES: tuple[Axis, ...] = (
@@ -42,6 +76,26 @@ AXES: tuple[Axis, ...] = (
 )
 AXIS_KEYS = tuple(a.key for a in AXES)
 AXIS_BY_KEY = {a.key: a for a in AXES}
+
+# Module-load invariants. These guarantee the composite-weighting math
+# downstream and catch drift the moment AXES is edited.
+assert len({a.key for a in AXES}) == len(AXES), 'axis keys must be unique'
+assert all(a.weight in (1.0, 1.5) for a in AXES), 'axis weights must be 1.0 or 1.5'
+assert sum(1 for a in AXES if a.weight == 1.5) == 4, (
+    'exactly four axes must carry the 1.5x weight per references/story-power-rubric.md'
+)
+
+
+class PitchArtifacts(NamedTuple):
+    """The six pitch-tier artifacts the scorecard reads. Always returned
+    with all six fields populated — empty strings stand in for absent
+    inputs."""
+    logline: str
+    synopsis: str
+    act_shape: str
+    theme: str
+    spine_summaries: str
+    architecture_summaries: str
 
 
 def composite_score(scores: dict[str, int | float]) -> float:
@@ -84,30 +138,28 @@ def _read_optional(path: str, head_lines: int | None = None) -> str:
     return text
 
 
-def gather_pitch_artifacts(project_dir: str) -> dict[str, str]:
+def gather_pitch_artifacts(project_dir: str) -> PitchArtifacts:
     """Read the artifacts the story-power rubric operates on.
 
-    Always returns the six-key shape — empty strings for any artifact
-    that is absent. The caller (score_story_power) enforces the actual
-    requirement: both logline and synopsis must be present and
-    non-empty. Spine and architecture summaries are optional context
-    (they improve specificity scoring when present).
+    Always returns the six-field PitchArtifacts — empty strings for any
+    artifact that is absent. The caller (score_story_power) enforces
+    the actual requirement: both logline and synopsis must be present
+    and non-empty. Spine and architecture summaries are optional
+    context (they improve specificity scoring when present).
     """
     summary = parse_story_summary(project_dir) or {}
-    spine_summaries = _summary_column_from_csv(
-        os.path.join(project_dir, 'reference', 'spine.csv'),
+    return PitchArtifacts(
+        logline=summary.get('logline', '').strip(),
+        synopsis=summary.get('synopsis', '').strip(),
+        act_shape=summary.get('act_shape', '').strip(),
+        theme=summary.get('theme', '').strip(),
+        spine_summaries=_summary_column_from_csv(
+            os.path.join(project_dir, 'reference', 'spine.csv'),
+        ),
+        architecture_summaries=_summary_column_from_csv(
+            os.path.join(project_dir, 'reference', 'architecture.csv'),
+        ),
     )
-    architecture_summaries = _summary_column_from_csv(
-        os.path.join(project_dir, 'reference', 'architecture.csv'),
-    )
-    return {
-        'logline': summary.get('logline', '').strip(),
-        'synopsis': summary.get('synopsis', '').strip(),
-        'act_shape': summary.get('act_shape', '').strip(),
-        'theme': summary.get('theme', '').strip(),
-        'spine_summaries': spine_summaries,
-        'architecture_summaries': architecture_summaries,
-    }
 
 
 def _summary_column_from_csv(csv_path: str) -> str:
@@ -150,7 +202,7 @@ def _summary_column_from_csv(csv_path: str) -> str:
 # Prompt
 # ---------------------------------------------------------------------------
 
-def _build_prompt(artifacts: dict[str, str], rubric: str) -> str:
+def _build_prompt(artifacts: PitchArtifacts, rubric: str) -> str:
     """Assemble the LLM prompt for full-mode scoring."""
     axes_block = '\n'.join(
         f'  - "{a.key}": "{a.name}"' for a in AXES
@@ -166,22 +218,22 @@ the story is structurally and thematically built to last.
 # Pitch artifacts
 
 ## Logline
-{artifacts['logline'] or '(empty)'}
+{artifacts.logline or '(empty)'}
 
 ## Synopsis
-{artifacts['synopsis'] or '(empty)'}
+{artifacts.synopsis or '(empty)'}
 
 ## Act-shape
-{artifacts['act_shape'] or '(empty)'}
+{artifacts.act_shape or '(empty)'}
 
 ## Theme
-{artifacts['theme'] or '(empty)'}
+{artifacts.theme or '(empty)'}
 
 ## Spine (one sentence per event)
-{artifacts['spine_summaries'] or '(empty)'}
+{artifacts.spine_summaries or '(empty)'}
 
 ## Architecture (one sentence per anchor)
-{artifacts['architecture_summaries'] or '(empty)'}
+{artifacts.architecture_summaries or '(empty)'}
 
 # Task
 
@@ -219,25 +271,21 @@ Return ONLY the JSON object.
 # ---------------------------------------------------------------------------
 
 def score_story_power(project_dir: str, coaching: CoachingLevel,
-                      dry_run: bool = False) -> dict:
+                      dry_run: bool = False) -> StoryPowerResult:
     """Run the story-power scorecard at the given coaching level.
 
-    Returns a result dict:
-      {
-        'mode': 'full' | 'coach' | 'strict' | 'full→coach (...)',
-        'output_dir': absolute path to the timestamped output directory,
-        'composite': float (or 0.0 if no scores produced),
-        'scores': {axis_key: int} or {} (coach/strict),
-        'deltas': {axis_key: int} or {} (vs previous run),
-        'diagnostic': dict or {},
-      }
+    See StoryPowerResult for the return shape; status is the outcome
+    (ok / partial / unparseable / llm_error / dry_run / no_*),
+    coaching is the requested level, and mode is a human-readable
+    display string composed from those two for log lines.
     """
     artifacts = gather_pitch_artifacts(project_dir)
-    missing = [k for k in ('logline', 'synopsis') if not artifacts[k]]
+    missing = [k for k in ('logline', 'synopsis')
+               if not getattr(artifacts, k)]
     if missing:
         log('ERROR: story-power scoring requires reference/story-summary.md '
             f'with both a logline and a synopsis. Missing: {", ".join(missing)}.')
-        return _empty_result(coaching)
+        return _empty_result(coaching, 'no_input')
 
     rubric = _load_rubric()
     if not rubric and coaching != 'strict':
@@ -245,7 +293,7 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
             'references/story-power-rubric.md. Without the rubric the LLM '
             'has nothing to anchor its scores. Restore the file or use '
             '--coaching strict for the deterministic checklist.')
-        return _empty_result(coaching)
+        return _empty_result(coaching, 'no_rubric')
     # Microsecond-resolution timestamp + non-existence loop to keep two
     # back-to-back runs from clobbering each other.
     output_dir = _allocate_output_dir(project_dir)
@@ -253,29 +301,29 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
     if coaching == 'strict':
         if dry_run:
             log(f'DRY RUN — would write strict checklist to {output_dir}')
-            return _empty_result('strict', output_dir=output_dir)
+            return _empty_result('strict', 'dry_run', output_dir=output_dir)
         os.makedirs(output_dir, exist_ok=True)
         _write_strict_checklist(output_dir, artifacts, rubric)
-        return _empty_result('strict', output_dir=output_dir)
+        return _empty_result('strict', 'ok', output_dir=output_dir)
 
     if dry_run:
         log(f'DRY RUN — would call LLM to score 8 axes; output → {output_dir}')
-        return _empty_result(f'{coaching}→dry-run', output_dir=output_dir)
+        return _empty_result(coaching, 'dry_run', output_dir=output_dir)
 
     # full + coach both call the LLM; differ only in destination.
     if not os.environ.get('ANTHROPIC_API_KEY'):
         log('ERROR: ANTHROPIC_API_KEY is not set. story-power scoring in '
             f'{coaching} coaching requires an API key. Set it and re-run, '
             'or use --coaching strict for the deterministic checklist.')
-        return _empty_result(coaching)
+        return _empty_result(coaching, 'no_api_key')
 
     os.makedirs(output_dir, exist_ok=True)
     log_dir = os.path.join(project_dir, 'working', 'logs', 'story-power')
     log_file = os.path.join(log_dir, os.path.basename(output_dir) + '.json')
-    parsed, actual_mode = _invoke_and_parse(project_dir, output_dir, log_file,
-                                              artifacts, rubric, coaching)
+    parsed, llm_status = _invoke_and_parse(project_dir, output_dir, log_file,
+                                            artifacts, rubric, coaching)
     if not parsed:
-        return _empty_result(actual_mode, output_dir=output_dir)
+        return _empty_result(coaching, llm_status, output_dir=output_dir)
 
     scores = _extract_scores(parsed)
     missing_axes = [a.key for a in AXES if a.key not in scores]
@@ -294,16 +342,44 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         _write_coach_brief(output_dir, scores, parsed, composite,
                            deltas, artifacts, recover_hint=log_file)
 
-    final_mode = actual_mode if not missing_axes else f'{actual_mode} (partial)'
-    return {'mode': final_mode, 'output_dir': output_dir,
-            'composite': composite, 'scores': scores, 'deltas': deltas,
-            'diagnostic': parsed.get('diagnostic') or {}}
+    status: StoryPowerStatus = 'partial' if missing_axes else 'ok'
+    return _result(
+        coaching=coaching, status=status, output_dir=output_dir,
+        composite=composite, scores=scores, deltas=deltas,
+        diagnostic=parsed.get('diagnostic') or {},
+    )
 
 
-def _empty_result(mode: str, *, output_dir: str = '') -> dict:
-    """Helper to keep the empty-result shape consistent across early returns."""
-    return {'mode': mode, 'output_dir': output_dir, 'composite': 0.0,
-            'scores': {}, 'deltas': {}, 'diagnostic': {}}
+def _compose_mode(coaching: CoachingLevel, status: StoryPowerStatus) -> str:
+    """Human-readable display string for `result['mode']`."""
+    if status == 'ok':
+        return coaching
+    return f'{coaching} ({status})'
+
+
+def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
+             output_dir: str, composite: float,
+             scores: dict[str, int], deltas: dict[str, int],
+             diagnostic: dict) -> StoryPowerResult:
+    return {
+        'coaching': coaching,
+        'status': status,
+        'mode': _compose_mode(coaching, status),
+        'output_dir': output_dir,
+        'composite': composite,
+        'scores': scores,
+        'deltas': deltas,
+        'diagnostic': diagnostic,
+    }
+
+
+def _empty_result(coaching: CoachingLevel, status: StoryPowerStatus, *,
+                   output_dir: str = '') -> StoryPowerResult:
+    """Helper for the empty-data result shape across early returns."""
+    return _result(
+        coaching=coaching, status=status, output_dir=output_dir,
+        composite=0.0, scores={}, deltas={}, diagnostic={},
+    )
 
 
 def _allocate_output_dir(project_dir: str) -> str:
@@ -342,10 +418,15 @@ def _load_rubric() -> str:
 
 
 def _invoke_and_parse(project_dir: str, output_dir: str, log_file: str,
-                       artifacts: dict[str, str], rubric: str,
+                       artifacts: PitchArtifacts, rubric: str,
                        coaching: CoachingLevel,
-                       ) -> tuple[dict | None, str]:
-    """Call the LLM and return (parsed_json, actual_mode)."""
+                       ) -> tuple[dict | None, StoryPowerStatus]:
+    """Call the LLM and return (parsed_json, status).
+
+    status is 'ok' on success, 'llm_error' if the API call threw, and
+    'unparseable' if it returned but the response did not parse. The
+    caller may upgrade 'ok' to 'partial' if axis extraction is partial.
+    """
     prompt = _build_prompt(artifacts, rubric)
     model = select_model('creative')
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
@@ -353,15 +434,15 @@ def _invoke_and_parse(project_dir: str, output_dir: str, log_file: str,
         invoke_to_file(prompt, model, log_file, max_tokens=4096)
     except Exception as e:
         log(f'ERROR: story-power LLM call failed: {e}')
-        return None, f'{coaching} (LLM error)'
+        return None, 'llm_error'
     text = _read_response_text(log_file)
     parsed = _parse_response(text)
     if not parsed:
         _record_cost(project_dir, log_file, model, target='story-power:unparseable')
         log(f'ERROR: story-power LLM response unparseable; raw at {log_file}')
-        return None, f'{coaching} (unparseable)'
+        return None, 'unparseable'
     _record_cost(project_dir, log_file, model)
-    return parsed, coaching
+    return parsed, 'ok'
 
 
 def _read_response_text(log_file: str) -> str:
@@ -576,7 +657,7 @@ def _safe_write(path: str, content: str, *, recover_hint: str = '') -> bool:
 def _write_full_scorecard(output_dir: str, scores: dict[str, int],
                             parsed: dict, composite: float,
                             deltas: dict[str, int],
-                            artifacts: dict[str, str], *,
+                            artifacts: PitchArtifacts, *,
                             recover_hint: str = '') -> None:
     """full coaching: write scorecard.csv + diagnostic.md."""
     csv_path = os.path.join(output_dir, 'scorecard.csv')
@@ -637,7 +718,7 @@ def _write_full_scorecard(output_dir: str, scores: dict[str, int],
 def _write_coach_brief(output_dir: str, scores: dict[str, int],
                         parsed: dict, composite: float,
                         deltas: dict[str, int],
-                        artifacts: dict[str, str], *,
+                        artifacts: PitchArtifacts, *,
                         recover_hint: str = '') -> None:
     """coach coaching: write a review brief with the LLM proposals +
     author-facing questions per axis."""
@@ -683,7 +764,7 @@ def _write_coach_brief(output_dir: str, scores: dict[str, int],
     _safe_write(md_path, '\n'.join(out) + '\n', recover_hint=recover_hint)
 
 
-def _write_strict_checklist(output_dir: str, artifacts: dict[str, str],
+def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                               rubric: str) -> None:
     """strict coaching: rule-based checklist of signals per axis, no LLM
     call. Lists what to look for and a 'self-score 1-10' line the author
