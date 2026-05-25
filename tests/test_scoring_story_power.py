@@ -152,9 +152,18 @@ def test_strict_writes_checklist_no_llm(tmp_path, monkeypatch):
                               'self-scoring-checklist.md')
     assert os.path.isfile(checklist)
     text = open(checklist).read()
-    # All 8 axes appear
-    for axis_name in ('Specificity', 'Stakes & dilemma', 'Moral weight'):
-        assert axis_name in text
+    # All 8 axes get a section, plus the self-scoring scaffolding.
+    from storyforge.scoring_story_power import AXES
+    for axis in AXES:
+        assert f'## {axis.name}' in text
+        assert f'weight {axis.weight}' in text
+    # Self-scoring blanks: one per axis.
+    assert text.count('Self-score (1-10):') == len(AXES)
+    assert text.count('Positive signals you found:') == len(AXES)
+    assert text.count('Negative signals you found:') == len(AXES)
+    # No LLM commentary should leak in.
+    assert 'Proposed' not in text
+    assert 'rationale' not in text.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +486,72 @@ def test_cmd_score_story_power_flag(tmp_path, monkeypatch):
     dirs = os.listdir(base)
     assert len(dirs) == 1
     assert os.path.isfile(os.path.join(base, dirs[0], 'scorecard.csv'))
+
+
+# ---------------------------------------------------------------------------
+# _parse_response fallback branches
+# ---------------------------------------------------------------------------
+
+def test_parse_response_handles_fenced_json_block():
+    """Tier-2 fallback: response wrapped in ```json ... ``` fences must
+    still parse. Claude wraps JSON in fences without being asked to."""
+    from storyforge.scoring_story_power import _parse_response
+    payload = json.dumps(_full_payload())
+    text = f'Sure! Here is the scorecard:\n\n```json\n{payload}\n```\n'
+    parsed = _parse_response(text)
+    assert parsed is not None
+    assert isinstance(parsed['scores'], list)
+    assert len(parsed['scores']) == 8
+
+
+def test_parse_response_handles_bare_fenced_block():
+    """A ``` block with no language tag must also parse."""
+    from storyforge.scoring_story_power import _parse_response
+    payload = json.dumps(_full_payload())
+    text = f'```\n{payload}\n```'
+    parsed = _parse_response(text)
+    assert parsed is not None
+    assert len(parsed['scores']) == 8
+
+
+def test_parse_response_handles_greedy_extraction():
+    """Tier-3 fallback: when the model embeds JSON in prose with no
+    fence (a real failure mode), greedy `{...}` extraction finds it."""
+    from storyforge.scoring_story_power import _parse_response
+    payload = json.dumps(_full_payload())
+    text = f'Here is my analysis. {payload} Hope this helps!'
+    parsed = _parse_response(text)
+    assert parsed is not None
+    assert len(parsed['scores']) == 8
+
+
+def test_parse_response_rejects_wrong_shape_logs_warning(capsys):
+    """Valid JSON with the wrong shape must return None AND log a
+    WARNING — silent shape failure was the original bug."""
+    from storyforge.scoring_story_power import _parse_response
+    # Valid JSON, but `scores` is a dict (object) rather than a list.
+    bad = json.dumps({'scores': {'specificity': 8}})
+    parsed = _parse_response(bad)
+    assert parsed is None
+    out = capsys.readouterr().out
+    assert 'shape' in out.lower() or 'wrong shape' in out.lower()
+
+
+def test_parse_response_rejects_non_json():
+    """Pure prose returns None with no warning (separate from shape failure)."""
+    from storyforge.scoring_story_power import _parse_response
+    assert _parse_response('I cannot score this story.') is None
+
+
+def test_parse_response_rejects_scores_as_string(capsys):
+    """A `scores` value that's a string (instead of list/object) must
+    also surface as a shape failure rather than silently passing."""
+    from storyforge.scoring_story_power import _parse_response
+    bad = json.dumps({'scores': 'not a list'})
+    parsed = _parse_response(bad)
+    assert parsed is None
+    out = capsys.readouterr().out
+    assert 'shape' in out.lower() or 'wrong shape' in out.lower()
 
 
 def test_story_power_in_elaboration_score_flags():
