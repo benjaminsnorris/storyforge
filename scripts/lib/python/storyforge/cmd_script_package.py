@@ -70,10 +70,8 @@ def _read_chapter_map(path):
 # Page renumbering
 # ---------------------------------------------------------------------------
 
-# Matches `## Page N —` at start of line.  Group 1 = the number string.
-# The trailing content (layout tag + optional page-turn marker) is left intact
-# because the match uses the full prefix `## Page N — ` which is then replaced
-# only at the `N` part.
+# Matches `## Page N —` at start of line. Group 2 is the number; groups
+# 1 and 3 are the literal prefix/suffix preserved verbatim during renumber.
 PAGE_HEADER_RE = re.compile(r'^(## Page )(\d+)( — )', re.MULTILINE)
 
 
@@ -275,13 +273,40 @@ Reach out to the author with any questions about the script.
 # Style guide generation
 # ---------------------------------------------------------------------------
 
-_STYLE_GUIDE_SECTIONS = [
+# Single source of truth for style-guide section names — every renderer
+# (strict, coach, full-LLM-prompt) consumes this list so adding a section
+# is one edit per render-mode, not five.
+_STYLE_GUIDE_SECTIONS: tuple[str, ...] = (
     'Palette',
     'Line weight and inking',
     'Lettering and caption tone',
     'Panel-rhythm philosophy',
     'Reference-art inspirations',
-]
+)
+
+# Per-section constraint text for the strict renderer.
+_STRICT_GUIDANCE: dict[str, str] = {
+    'Palette':
+        'Cover: 4-8 hex codes for the primary palette; warm/cool/neutral '
+        'balance; one or two callouts for accent colors used sparingly; '
+        'palette shifts per act if intended.',
+    'Line weight and inking':
+        'Cover: line-weight intent (heavy / medium / variable); whether '
+        'silhouettes lead; ink texture (clean digital / brush / scratchy); '
+        'how line weight signals tone shifts.',
+    'Lettering and caption tone':
+        'Cover: caption voice (none / minimal / journal-voiceover / '
+        'omniscient); font-family intent; whisper / thought / SFX '
+        'treatments; balloon shape grammar.',
+    'Panel-rhythm philosophy':
+        'Cover: when to splash vs grid; preferred transitions '
+        '(moment / action / subject / scene / aspect / non-sequitur); '
+        'how page turns are reserved; tier or irregular usage guidance.',
+    'Reference-art inspirations':
+        'Cover: 3-6 specific reference artists or works; what to pull '
+        'from each (composition? palette? line work?); deliberate '
+        'distinctions from those references.',
+}
 
 
 def _gather_style_cues(project_dir: str) -> dict:
@@ -344,38 +369,11 @@ def _render_strict_style_guide(title: str, cues: dict) -> str:
         'character-bible.md, voice-guide.md, and scene-intent.csv. -->',
         '',
     ]
-    out.extend([
-        '## Palette',
-        '',
-        'Cover: 4-8 hex codes for the primary palette; warm/cool/neutral '
-        'balance; one or two callouts for accent colors used sparingly; '
-        'palette shifts per act if intended.',
-        '',
-        '## Line weight and inking',
-        '',
-        'Cover: line-weight intent (heavy / medium / variable); whether '
-        'silhouettes lead; ink texture (clean digital / brush / scratchy); '
-        'how line weight signals tone shifts.',
-        '',
-        '## Lettering and caption tone',
-        '',
-        'Cover: caption voice (none / minimal / journal-voiceover / '
-        'omniscient); font-family intent; whisper / thought / SFX '
-        'treatments; balloon shape grammar.',
-        '',
-        '## Panel-rhythm philosophy',
-        '',
-        'Cover: when to splash vs grid; preferred transitions '
-        '(moment / action / subject / scene / aspect / non-sequitur); '
-        'how page turns are reserved; tier or irregular usage guidance.',
-        '',
-        '## Reference-art inspirations',
-        '',
-        'Cover: 3-6 specific reference artists or works; what to pull from '
-        'each (composition? palette? line work?); deliberate distinctions '
-        'from those references.',
-        '',
-    ])
+    for section in _STYLE_GUIDE_SECTIONS:
+        out.append(f'## {section}')
+        out.append('')
+        out.append(_STRICT_GUIDANCE[section])
+        out.append('')
     # Append a compact source-map so the author can grep cues from project state.
     out.append('## Source pointers')
     out.append('')
@@ -408,88 +406,85 @@ def _render_coach_style_guide(title: str, cues: dict) -> str:
     subgenre = (cues['subgenre'] or '').strip()
     genre_line = (f'{genre}' + (f' / {subgenre}' if subgenre else '')) or 'unset'
 
-    out.extend([
-        '## Palette',
-        '',
-        f'- Genre cue: {genre_line} — what palette signals this register?',
-        '- Question: do you want a single palette across acts, or shifts?',
-        '- Question: which color is reserved for the protagonist? for the '
-        'antagonist? for emotional climaxes?',
-        '',
-    ])
-
-    out.extend([
-        '## Line weight and inking',
-        '',
-        '- Cue: voice-guide.md (see file) for the project\'s tonal register.',
-        '- Question: heavy / medium / variable — and where do you break the '
-        'pattern intentionally?',
-        '- Question: does line weight track POV or stakes?',
-        '',
-    ])
-
-    out.extend([
-        '## Lettering and caption tone',
-        '',
-        '- Cue: scene-briefs.csv `caption_strategy` field (none / minimal / '
-        'journal-voiceover / omniscient) — what mix appears across scenes?',
-        '- Question: is caption font a primary character beat or background '
-        'voice?',
-        '- Question: how do you treat off-panel and thought balloons?',
-        '',
-    ])
-
-    out.extend([
-        '## Panel-rhythm philosophy',
-        '',
-        '- Cue: scene-intent.csv `emotional_arc` patterns — what arc shapes '
-        'recur, and what page rhythm matches them?',
-        '- Question: when do you splash? when do you grid? when do you '
-        'allow tier or irregular?',
-        '- Question: are page turns reserved (per Plan 1 layout vocabulary), '
-        'and what beat earns them?',
-        '',
-    ])
-
-    out.extend([
-        '## Reference-art inspirations',
-        '',
-        '- Cue: world-bible.md and character-bible.md for visual reference '
-        'sections (if any).',
-        '- Question: 3-6 specific artists or works — what does each one '
-        'contribute to YOUR style, not theirs?',
-        '- Question: where do you DELIBERATELY diverge from each reference?',
-        '',
-    ])
+    coach_content: dict[str, list[str]] = {
+        'Palette': [
+            f'- Genre cue: {genre_line} — what palette signals this register?',
+            '- Question: do you want a single palette across acts, or shifts?',
+            '- Question: which color is reserved for the protagonist? for '
+            'the antagonist? for emotional climaxes?',
+        ],
+        'Line weight and inking': [
+            "- Cue: voice-guide.md (see file) for the project's tonal "
+            'register.',
+            '- Question: heavy / medium / variable — and where do you '
+            'break the pattern intentionally?',
+            '- Question: does line weight track POV or stakes?',
+        ],
+        'Lettering and caption tone': [
+            '- Cue: scene-briefs.csv `caption_strategy` field (none / '
+            'minimal / journal-voiceover / omniscient) — what mix appears '
+            'across scenes?',
+            '- Question: is caption font a primary character beat or '
+            'background voice?',
+            '- Question: how do you treat off-panel and thought balloons?',
+        ],
+        'Panel-rhythm philosophy': [
+            '- Cue: scene-intent.csv `emotional_arc` patterns — what arc '
+            'shapes recur, and what page rhythm matches them?',
+            '- Question: when do you splash? when do you grid? when do '
+            'you allow tier or irregular?',
+            '- Question: are page turns reserved, and what beat earns them?',
+        ],
+        'Reference-art inspirations': [
+            '- Cue: world-bible.md and character-bible.md for visual '
+            'reference sections (if any).',
+            '- Question: 3-6 specific artists or works — what does each '
+            'one contribute to YOUR style, not theirs?',
+            '- Question: where do you DELIBERATELY diverge from each '
+            'reference?',
+        ],
+    }
+    for section in _STYLE_GUIDE_SECTIONS:
+        out.append(f'## {section}')
+        out.append('')
+        out.extend(coach_content[section])
+        out.append('')
     return '\n'.join(out)
 
 
-_FULL_STYLE_GUIDE_PROMPT = """\
-You are drafting a style guide for the artist handing off a graphic
+def _build_full_style_guide_prompt(title: str, cues: dict) -> str:
+    """Build the LLM prompt for full-mode style-guide synthesis.
+
+    Section list is derived from _STYLE_GUIDE_SECTIONS so a change to
+    that tuple propagates here automatically — no drift between the
+    deterministic renderers and the LLM prompt.
+    """
+    section_block = '\n'.join(f'## {s}' for s in _STYLE_GUIDE_SECTIONS)
+    return f"""You are drafting a style guide for the artist handing off a graphic
 novel. The author has provided the following project context. Produce
 a single markdown document with the standard sections.
 
 # Project metadata
 
 Title: {title}
-Genre: {genre}
-Subgenre: {subgenre}
+Genre: {cues['genre'] or 'unset'}
+Subgenre: {cues['subgenre'] or 'unset'}
 
 # Voice guide (excerpt)
 
-{voice_guide}
+{cues['voice_guide'] or '(not present)'}
 
 # World bible (excerpt)
 
-{world_bible}
+{cues['world_bible'] or '(not present)'}
 
 # Character bible (excerpt)
 
-{character_bible}
+{cues['character_bible'] or '(not present)'}
 
 # Scene-intent excerpt (CSV)
 
-{scene_intent_excerpt}
+{cues['scene_intent_excerpt'] or '(empty)'}
 
 # Task
 
@@ -498,11 +493,7 @@ this order:
 
 # {title} — Style guide
 
-## Palette
-## Line weight and inking
-## Lettering and caption tone
-## Panel-rhythm philosophy
-## Reference-art inspirations
+{section_block}
 
 Each section: 3-6 sentences of specific, opinionated guidance grounded
 in the project metadata above. Be concrete (hex codes if you can,
@@ -515,29 +506,29 @@ Return only the markdown document — no JSON, no preamble.
 
 
 def _render_full_style_guide(project_dir: str, title: str, cues: dict,
-                              dry_run: bool) -> str:
-    """full coaching: LLM-generated style guide. Falls back to the coach
-    template if the LLM call fails or in dry-run mode."""
+                              dry_run: bool) -> tuple[str, str]:
+    """full coaching: LLM-generated style guide. Returns (text, actual_mode)
+    so callers can log truthfully when the LLM path falls back."""
     if dry_run:
-        return _render_coach_style_guide(title, cues)
+        return _render_coach_style_guide(title, cues), 'full→coach (dry-run)'
     # Truncate long bibles so the prompt stays bounded.
     def _trim(text: str, lines: int) -> str:
         if not text:
-            return '(not present)'
+            return ''
         parts = text.splitlines()
         if len(parts) > lines:
             return '\n'.join(parts[:lines]) + '\n…'
         return text
 
-    prompt = _FULL_STYLE_GUIDE_PROMPT.format(
-        title=title,
-        genre=cues['genre'] or 'unset',
-        subgenre=cues['subgenre'] or 'unset',
-        voice_guide=_trim(cues['voice_guide'], 80),
-        world_bible=_trim(cues['world_bible'], 100),
-        character_bible=_trim(cues['character_bible'], 100),
-        scene_intent_excerpt=cues['scene_intent_excerpt'] or '(empty)',
-    )
+    bounded_cues = {
+        'genre': cues['genre'],
+        'subgenre': cues['subgenre'],
+        'voice_guide': _trim(cues['voice_guide'], 80),
+        'world_bible': _trim(cues['world_bible'], 100),
+        'character_bible': _trim(cues['character_bible'], 100),
+        'scene_intent_excerpt': cues['scene_intent_excerpt'],
+    }
+    prompt = _build_full_style_guide_prompt(title, bounded_cues)
     model = select_model('creative')
     log_dir = os.path.join(project_dir, 'working', 'logs', 'script-package')
     os.makedirs(log_dir, exist_ok=True)
@@ -547,31 +538,50 @@ def _render_full_style_guide(project_dir: str, title: str, cues: dict,
     except Exception as e:
         log(f'WARNING: style-guide LLM call failed ({e}); falling back to '
             f'coach-mode template. No tokens were billed.')
-        return _render_coach_style_guide(title, cues)
+        return _render_coach_style_guide(title, cues), 'full→coach (LLM error)'
     text = _extract_response_text(log_file)
     if not text or not text.strip().startswith('#'):
-        # Anthropic still billed for this call; ledger it so the local
-        # total matches the API dashboard. Mark target as unparseable so
-        # cost summaries can distinguish productive spend.
         log(f'WARNING: style-guide LLM response unparseable; falling back '
             f'to coach-mode template. (API call was billed; raw response '
             f'saved at {log_file}.)')
         _record_style_guide_cost(project_dir, log_file, model,
                                   target='style-guide:unparseable')
-        return _render_coach_style_guide(title, cues)
+        return (_render_coach_style_guide(title, cues),
+                'full→coach (LLM unparseable)')
     _record_style_guide_cost(project_dir, log_file, model)
-    return text
+    return text, 'full'
 
 
 def _extract_response_text(log_file: str) -> str:
+    """Read the text content from an api log file. Differentiates the
+    distinct silent-failure modes so callers can act on them:
+    - File missing / unreadable → WARNING, return ''
+    - JSON decode failure → WARNING, return ''
+    - Response has no content blocks → WARNING with stop_reason
+    - No text block in content → WARNING with block types
+    - Text block is empty / whitespace → WARNING
+    """
     try:
         with open(log_file, encoding='utf-8') as f:
             resp = json.load(f)
-        for block in resp.get('content', []):
-            if block.get('type') == 'text':
-                return block.get('text', '')
     except (OSError, json.JSONDecodeError) as e:
         log(f'WARNING: could not read style-guide response file: {e}')
+        return ''
+    content = resp.get('content', [])
+    if not content:
+        stop = resp.get('stop_reason', '?')
+        log(f'WARNING: response has no content blocks '
+            f'(stop_reason={stop}, file={log_file})')
+        return ''
+    for block in content:
+        if block.get('type') == 'text':
+            text = block.get('text', '')
+            if not text.strip():
+                log(f'WARNING: response text block is empty '
+                    f'(file={log_file})')
+            return text
+    log(f'WARNING: no text block in response '
+        f'(types={[b.get("type") for b in content]}, file={log_file})')
     return ''
 
 
@@ -596,8 +606,13 @@ def _record_style_guide_cost(project_dir: str, log_file: str,
 
 
 def _assemble_style_guide(project_dir: str, title: str,
-                           coaching: CoachingLevel, dry_run: bool) -> str:
+                           coaching: CoachingLevel,
+                           dry_run: bool) -> tuple[str, str]:
     """Generate the style-guide markdown for the artist handoff bundle.
+
+    Returns (text, actual_mode) where actual_mode is the rendering path
+    that was used — so the caller can log truthfully even when the
+    requested coaching level was full but fell back to coach.
 
     Coaching levels:
       - strict: blank template + constraint list (no LLM).
@@ -608,19 +623,16 @@ def _assemble_style_guide(project_dir: str, title: str,
     """
     cues = _gather_style_cues(project_dir)
     if coaching == 'strict':
-        return _render_strict_style_guide(title, cues)
+        return _render_strict_style_guide(title, cues), 'strict'
     if coaching == 'coach':
-        return _render_coach_style_guide(title, cues)
-    # full coaching: LLM only if API key + not dry-run; else fall through
-    # to coach template (matches the rest of the bundle, which is also
-    # deterministic — the LLM is an enhancement, not a requirement).
+        return _render_coach_style_guide(title, cues), 'coach'
     if dry_run:
-        return _render_coach_style_guide(title, cues)
+        return _render_coach_style_guide(title, cues), 'full→coach (dry-run)'
     if not os.environ.get('ANTHROPIC_API_KEY'):
         log('NOTE: ANTHROPIC_API_KEY not set; style-guide will fall back '
             'to the coach-mode template (deterministic). Set the key for '
             'an LLM-synthesized guide.')
-        return _render_coach_style_guide(title, cues)
+        return _render_coach_style_guide(title, cues), 'full→coach (no API key)'
     return _render_full_style_guide(project_dir, title, cues, dry_run)
 
 
@@ -724,12 +736,13 @@ def main(argv=None):
 
     # style-guide.md (coaching-aware)
     coaching = args.coaching or get_coaching_level(project_dir)
-    style_guide = _assemble_style_guide(project_dir, title, coaching,
-                                         dry_run=False)
+    style_guide, actual_mode = _assemble_style_guide(
+        project_dir, title, coaching, dry_run=False,
+    )
     style_path = os.path.join(bundle_dir, 'style-guide.md')
     with open(style_path, 'w', encoding='utf-8') as f:
         f.write(style_guide)
-    log(f'  manuscript/style-guide.md (coaching={coaching})')
+    log(f'  manuscript/style-guide.md ({actual_mode})')
 
     log('Script package complete.')
 
