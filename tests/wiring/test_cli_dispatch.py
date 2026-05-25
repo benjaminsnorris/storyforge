@@ -186,3 +186,42 @@ class TestApiDispatch:
         assert not missing, (
             f'api.py main() missing subcommands: {missing}'
         )
+
+
+# ---------------------------------------------------------------------------
+# Elaboration score flags must bypass GN routing
+# ---------------------------------------------------------------------------
+
+class TestElaborationScoreBypassesGN:
+    """The elaboration entry points on `storyforge score` (--level, --drift,
+    --boundary, --bible-consistency, --compare, --all-levels, --all-boundaries)
+    are medium-agnostic. They must always route to cmd_score regardless of
+    project.medium so GN projects can run drift checks and floor scores."""
+
+    def test_all_elaboration_flags_listed(self):
+        from storyforge.__main__ import _ELABORATION_SCORE_FLAGS
+        expected = {
+            '--level', '--all-levels', '--compare', '--drift',
+            '--boundary', '--all-boundaries', '--bible-consistency',
+        }
+        assert _ELABORATION_SCORE_FLAGS == expected
+
+    def test_has_elaboration_score_flag_detects_simple(self):
+        from storyforge.__main__ import _has_elaboration_score_flag
+        assert _has_elaboration_score_flag(['--drift'])
+        assert _has_elaboration_score_flag(['--bible-consistency'])
+        assert _has_elaboration_score_flag(['--level', '0'])
+        assert _has_elaboration_score_flag(['--boundary', '0->1'])
+
+    def test_has_elaboration_score_flag_detects_equals_form(self):
+        """--level=0 syntax must also be detected."""
+        from storyforge.__main__ import _has_elaboration_score_flag
+        assert _has_elaboration_score_flag(['--level=0'])
+        assert _has_elaboration_score_flag(['--boundary=5->6'])
+
+    def test_has_elaboration_score_flag_returns_false_for_gn_args(self):
+        from storyforge.__main__ import _has_elaboration_score_flag
+        assert not _has_elaboration_score_flag([])
+        assert not _has_elaboration_score_flag(['--scenes', 'sc-1'])
+        assert not _has_elaboration_score_flag(['--act', '1'])
+        assert not _has_elaboration_score_flag(['--principles', 'panel_density'])

@@ -23,6 +23,20 @@ GN_ROUTED_COMMANDS = {
     'revise': 'storyforge.cmd_revise_gn',
 }
 
+# `score` flags that target the medium-agnostic elaboration pipeline.
+# When present, `score` must route to cmd_score (not cmd_score_gn) so GN
+# projects can run drift checks, level floors, boundary diffs, and
+# bible-consistency the same as novel projects.
+_ELABORATION_SCORE_FLAGS = frozenset({
+    '--level', '--all-levels', '--compare', '--drift',
+    '--boundary', '--all-boundaries', '--bible-consistency',
+})
+
+
+def _has_elaboration_score_flag(argv: list[str]) -> bool:
+    """True when `score` is invoked with any elaboration entry-point flag."""
+    return any(a.split('=', 1)[0] in _ELABORATION_SCORE_FLAGS for a in argv)
+
 COMMANDS = {
     'annotations': 'storyforge.cmd_annotations',
     'validate': 'storyforge.cmd_validate',
@@ -97,8 +111,14 @@ def main():
             )
             sys.exit(2)
 
-    # Route certain commands to GN-specific modules based on project.medium
+    # Route certain commands to GN-specific modules based on project.medium.
+    # Exception: `score` elaboration entry points are medium-agnostic and must
+    # always route to cmd_score regardless of medium (levels are the same
+    # logline → drafts hierarchy whether the manuscript is prose or panels).
     if cmd in GN_ROUTED_COMMANDS:
+        is_elaboration_score = (
+            cmd == 'score' and _has_elaboration_score_flag(sys.argv[2:])
+        )
         project_medium = None
         try:
             from storyforge.common import detect_project_root, get_medium
@@ -106,7 +126,7 @@ def main():
             project_medium = get_medium(project_dir)
         except (FileNotFoundError, OSError):
             pass
-        if project_medium == 'graphic-novel':
+        if project_medium == 'graphic-novel' and not is_elaboration_score:
             sys.argv = [f'storyforge {cmd}'] + sys.argv[2:]
             module = importlib.import_module(GN_ROUTED_COMMANDS[cmd])
             module.main(sys.argv[1:])
