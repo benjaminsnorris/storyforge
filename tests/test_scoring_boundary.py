@@ -239,11 +239,89 @@ def test_boundary_5_to_6_produces_one_result_per_brief(project_dir, patched_invo
 
 
 def test_boundary_5_to_6_filtered_to_scope(project_dir, patched_invoke):
-    """Passing a scope_id restricts to that scene only."""
+    """Passing a scope_id restricts to that scene only.
+
+    The fixture has act1-sc01 with both scene-intent and scene-briefs,
+    so we MUST get a non-empty result — an empty list would be a
+    regression in scope filtering or pair collection, not the test
+    correctly skipping a missing fixture.
+    """
     results = score_boundary(project_dir, '5->6', scope='act1-sc01',
                              coaching_level='strict')
-    if results:
-        assert all(r['scope'] == 'act1-sc01' for r in results)
+    assert len(results) == 1, (
+        f'expected one result for scope=act1-sc01 (fixture has intent+brief '
+        f'for that scene); got {results!r}'
+    )
+    assert results[0]['scope'] == 'act1-sc01'
+
+
+# ---------------------------------------------------------------------------
+# Per-boundary collector coverage (regression: PR #232 test review)
+# ---------------------------------------------------------------------------
+
+def _seed_spine(project_dir, rows):
+    path = os.path.join(project_dir, 'reference', 'spine.csv')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write('id|seq|title|function|part\n')
+        for r in rows:
+            f.write('|'.join(r) + '\n')
+
+
+def _seed_architecture(project_dir, rows):
+    path = os.path.join(project_dir, 'reference', 'architecture.csv')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write('id|seq|title|part|pov|spine_event|action_sequel|'
+                'emotional_arc|value_at_stake|value_shift|turning_point\n')
+        for r in rows:
+            f.write('|'.join(r) + '\n')
+
+
+def test_boundary_3_to_4_pairs_each_spine_event(project_dir, patched_invoke):
+    """3->4 (spine → architecture) must produce one diff per spine event,
+    with that event's id as the scope. Regression: the collector dispatch
+    was untested for this boundary."""
+    _seed_spine(project_dir, [
+        ('ev-1', '1', 'Inciting incident', 'turn', '1'),
+        ('ev-2', '2', 'First reversal', 'turn', '1'),
+    ])
+    _seed_architecture(project_dir, [
+        ('arch-1', '1', 'Opens cold', '1', 'POV', 'ev-1',
+         'action', 'tense', 'safety', '-', 'discovery'),
+        # Note: ev-2 has no descendants — should still produce a diff
+        # with a placeholder downstream.
+    ])
+    results = score_boundary(project_dir, '3->4', coaching_level='strict')
+    scopes = {r['scope'] for r in results}
+    assert scopes == {'ev-1', 'ev-2'}
+
+
+def test_boundary_3_to_4_scope_filter(project_dir, patched_invoke):
+    """3->4 with --scope X must return only the matching spine event."""
+    _seed_spine(project_dir, [
+        ('ev-1', '1', 'a', 'turn', '1'),
+        ('ev-2', '2', 'b', 'turn', '1'),
+    ])
+    _seed_architecture(project_dir, [
+        ('arch-1', '1', 'x', '1', 'P', 'ev-1', 'a', 'b', 'c', '-', 'd'),
+    ])
+    results = score_boundary(project_dir, '3->4', scope='ev-1',
+                             coaching_level='strict')
+    assert len(results) == 1
+    assert results[0]['scope'] == 'ev-1'
+
+
+def test_boundary_4_to_5_pairs_each_anchor(project_dir, patched_invoke):
+    """4->5 (architecture → scene-map) must produce one diff per anchor."""
+    _seed_spine(project_dir, [('ev-1', '1', 't', 'turn', '1')])
+    _seed_architecture(project_dir, [
+        ('arch-1', '1', 'anchor-1', '1', 'P', 'ev-1', 'a', 'b', 'c', '-', 'd'),
+        ('arch-2', '2', 'anchor-2', '1', 'P', 'ev-1', 'a', 'b', 'c', '-', 'd'),
+    ])
+    results = score_boundary(project_dir, '4->5', coaching_level='strict')
+    scopes = {r['scope'] for r in results}
+    assert {'arch-1', 'arch-2'}.issubset(scopes)
 
 
 # ---------------------------------------------------------------------------

@@ -503,3 +503,46 @@ def test_score_all_levels_returns_seven(project_dir):
     results = score_all_levels(project_dir)
     assert len(results) == 7
     assert [r['level'] for r in results] == [0, 1, 2, 3, 4, 5, 6]
+
+
+# ---------------------------------------------------------------------------
+# _print_level_result headline arithmetic (regression: PR #232 test review)
+# ---------------------------------------------------------------------------
+
+def test_print_level_result_subtracts_accepted_from_failed(capsys):
+    """The CLI headline must show `failed - accepted` so the author sees
+    the real blocking count, not the raw failure count that included
+    accepted overrides. Pre-fix, a regression here could leave the dict
+    invariant intact while showing the wrong number to the user."""
+    from storyforge.cmd_score import _print_level_result
+    result = {
+        'level': 0, 'name': 'logline', 'checks': [
+            {'check': 'a', 'passed': True, 'detail': '', 'severity': 'high'},
+            {'check': 'b', 'passed': False, 'detail': 'd1', 'severity': 'high'},
+            {'check': 'c', 'passed': False, 'detail': 'd2', 'severity': 'high',
+             'accepted': True},
+            {'check': 'd', 'passed': False, 'detail': 'd3', 'severity': 'high'},
+        ],
+        'passed': 1, 'failed': 3, 'accepted': 1,
+    }
+    _print_level_result(result)
+    out = capsys.readouterr().out
+    assert '1 passed' in out
+    # 3 failed - 1 accepted = 2 real blocking failures shown to the author.
+    assert '2 failed' in out
+    assert '(+ 1 accepted)' in out
+
+
+def test_print_level_result_no_accepted_renders_no_suffix(capsys):
+    from storyforge.cmd_score import _print_level_result
+    result = {
+        'level': 0, 'name': 'logline', 'checks': [
+            {'check': 'a', 'passed': True, 'detail': '', 'severity': 'high'},
+            {'check': 'b', 'passed': False, 'detail': 'd', 'severity': 'high'},
+        ],
+        'passed': 1, 'failed': 1, 'accepted': 0,
+    }
+    _print_level_result(result)
+    out = capsys.readouterr().out
+    assert '1 passed, 1 failed' in out
+    assert 'accepted' not in out
