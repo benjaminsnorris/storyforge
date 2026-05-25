@@ -106,6 +106,12 @@ def parse_args(argv):
     parser.add_argument('--bible-consistency', action='store_true',
                         help='LLM-check each drafted scene against the project '
                              'bibles (character/world/voice). On-demand only.')
+    parser.add_argument('--story-power', action='store_true',
+                        help='Run the story-power scorecard (8 craft axes) on '
+                             'logline + synopsis + theme + spine + architecture. '
+                             'Coaching-aware: full LLM-scores, coach writes a '
+                             'review brief, strict produces a self-scoring '
+                             'checklist with no LLM call.')
     return parser.parse_args(argv)
 
 
@@ -175,6 +181,8 @@ def _validate_flag_combinations(args) -> None:
         triggers.append('--all-levels')
     if args.level is not None and not args.compare:
         triggers.append('--level')
+    if args.story_power:
+        triggers.append('--story-power')
     if len(triggers) > 1:
         log(f'ERROR: these flags cannot be combined: {", ".join(triggers)}. '
             'Pick one entry point and re-run.')
@@ -184,7 +192,8 @@ def _validate_flag_combinations(args) -> None:
     if args.scope and not (args.boundary or args.bible_consistency):
         log('ERROR: --scope only applies to --boundary or --bible-consistency. '
             'For --all-boundaries, drop --scope and run all boundaries; for '
-            'prose-tier comparison, --scope is not meaningful.')
+            'prose-tier comparison and the story-power scorecard, --scope is '
+            'not meaningful (these operate on whole-project artifacts).')
         sys.exit(1)
 
 
@@ -220,6 +229,17 @@ def _run_elaboration_scoring(args) -> None:
     medium = get_medium(project_dir) or 'novel'
 
     _validate_flag_combinations(args)
+
+    # --story-power: 8-axis pitch-tier craft scorecard.
+    if args.story_power:
+        from storyforge.scoring_story_power import score_story_power
+        from storyforge.common import get_coaching_level
+        coaching = get_coaching_level(project_dir)
+        result = score_story_power(project_dir, coaching, dry_run=args.dry_run)
+        if result['output_dir']:
+            log(f'Story-power scorecard ({result["mode"]}): '
+                f'composite={result["composite"]} → {result["output_dir"]}')
+        return
 
     # --bible-consistency: LLM check vs character/world/voice bibles.
     if args.bible_consistency:
@@ -435,7 +455,8 @@ def main(argv=None):
     # Elaboration entry points short-circuit the prose-scoring flow.
     # (--semantic is a modifier on --compare, not a standalone trigger.)
     if (args.level is not None or args.all_levels or args.compare or args.drift
-            or args.boundary or args.all_boundaries or args.bible_consistency):
+            or args.boundary or args.all_boundaries or args.bible_consistency
+            or args.story_power):
         _run_elaboration_scoring(args)
         return
 

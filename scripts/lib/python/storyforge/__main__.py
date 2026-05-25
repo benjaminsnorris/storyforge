@@ -31,6 +31,7 @@ GN_ROUTED_COMMANDS = {
 _ELABORATION_SCORE_FLAGS = frozenset({
     '--level', '--all-levels', '--compare', '--drift',
     '--boundary', '--all-boundaries', '--bible-consistency',
+    '--story-power',
 })
 
 
