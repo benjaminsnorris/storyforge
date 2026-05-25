@@ -179,12 +179,18 @@ def _run_with_llm(project_dir: str, level: int, medium: str,
         sys.exit(1)
 
     response_text = _read_response_text(log_file)
-    proposals = _parse_proposals(response_text)
+    proposals, parse_status = _parse_proposals(response_text)
     _record_cost(project_dir, log_file, model, level)
 
     if not proposals:
-        log('ERROR: LLM returned no parseable proposals. See log file: '
-            + log_file)
+        if parse_status == 'no_proposals_key':
+            log('ERROR: LLM response was valid JSON but had no `proposals` '
+                'key (or it was empty). Response saved at: ' + log_file)
+        elif parse_status == 'no_json':
+            log('ERROR: LLM response could not be parsed as JSON. '
+                'Response saved at: ' + log_file)
+        else:
+            log('ERROR: LLM returned no proposals. See log file: ' + log_file)
         sys.exit(1)
 
     if coaching == 'full':
@@ -253,9 +259,15 @@ No prose outside the JSON.
 """
 
 
-def _parse_proposals(text: str) -> list[dict]:
-    """Extract the `proposals` list from the LLM response. Tolerant of
-    fenced or prose-wrapped JSON."""
+def _parse_proposals(text: str) -> tuple[list[dict], str]:
+    """Extract the `proposals` list from the LLM response.
+
+    Returns (proposals, status) where status is one of:
+      - 'ok'                 — proposals list extracted successfully
+      - 'no_proposals_key'   — JSON parsed but the proposals key was
+                               missing or empty
+      - 'no_json'            — could not find / parse JSON at all
+    """
     def _take(obj):
         if isinstance(obj, dict):
             inner = obj.get('proposals')
@@ -263,29 +275,36 @@ def _parse_proposals(text: str) -> list[dict]:
                 return [p for p in inner
                         if isinstance(p, dict) and p.get('summary', '').strip()]
         return None
+    parsed_any_json = False
     try:
-        out = _take(json.loads(text))
-        if out is not None:
-            return out
+        parsed = json.loads(text)
+        parsed_any_json = True
+        out = _take(parsed)
+        if out:
+            return out, 'ok'
     except json.JSONDecodeError:
         pass
     m = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
     if m:
         try:
-            out = _take(json.loads(m.group(1).strip()))
-            if out is not None:
-                return out
+            parsed = json.loads(m.group(1).strip())
+            parsed_any_json = True
+            out = _take(parsed)
+            if out:
+                return out, 'ok'
         except json.JSONDecodeError:
             pass
     m = re.search(r'\{.*\}', text, re.DOTALL)
     if m:
         try:
-            out = _take(json.loads(m.group(0)))
-            if out is not None:
-                return out
+            parsed = json.loads(m.group(0))
+            parsed_any_json = True
+            out = _take(parsed)
+            if out:
+                return out, 'ok'
         except json.JSONDecodeError:
             pass
-    return []
+    return [], 'no_proposals_key' if parsed_any_json else 'no_json'
 
 
 # ---------------------------------------------------------------------------
@@ -557,5 +576,5 @@ def _record_cost(project_dir: str, log_file: str, model: str,
             cache_read=usage.get('cache_read', 0),
             cache_create=usage.get('cache_create', 0),
         )
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, KeyError) as e:
         log(f'WARNING: cost ledger update failed: {e}')

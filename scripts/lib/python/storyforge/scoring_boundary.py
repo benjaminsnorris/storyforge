@@ -516,7 +516,7 @@ def _invoke_llm_diff(project_dir: str, boundary: str, scope: str,
             cache_read=usage.get('cache_read', 0),
             cache_create=usage.get('cache_create', 0),
         )
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, KeyError) as e:
         log(f'  WARNING: cost ledger update failed: {e}')
 
     return {

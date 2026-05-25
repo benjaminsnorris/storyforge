@@ -422,6 +422,29 @@ def test_id_collision_with_existing_rows(tmp_path, monkeypatch):
     assert 'proposed-3-1' in ids
 
 
+def test_parse_proposals_distinguishes_no_key_from_no_json():
+    """_parse_proposals returns a status code distinguishing 'valid JSON
+    but no proposals key' from 'no JSON at all', so the error message can
+    point the author at the right fix."""
+    from storyforge.cmd_propose_summaries import _parse_proposals
+    # No JSON at all
+    out, status = _parse_proposals('this is not json')
+    assert out == []
+    assert status == 'no_json'
+    # Valid JSON, wrong key
+    out, status = _parse_proposals('{"items": [{"summary": "x"}]}')
+    assert out == []
+    assert status == 'no_proposals_key'
+    # Valid JSON, empty proposals
+    out, status = _parse_proposals('{"proposals": []}')
+    assert out == []
+    assert status == 'no_proposals_key'
+    # Valid JSON with proposals
+    out, status = _parse_proposals('{"proposals": [{"summary": "ok"}]}')
+    assert len(out) == 1
+    assert status == 'ok'
+
+
 def test_invalid_level_rejected(tmp_path, monkeypatch):
     """--level outside {3, 4, 5} is rejected by argparse."""
     _seed_story_summary(str(tmp_path))

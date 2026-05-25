@@ -452,6 +452,30 @@ def test_outline_md_brief_falls_back_to_decision(tmp_path):
     assert 'decision "Choose to act"' in text
 
 
+def test_briefs_malformed_row_logs_warning_and_skips(tmp_path, capsys):
+    """A malformed row in scene-briefs.csv (wrong column count) is now
+    logged + skipped instead of silently dropping the brief sub-bullet
+    from outline.md without explanation."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'scenes.csv'),
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words',
+        ['sc-1|1|t|Scene one.|1|p|l|1|m|2h|character|mapped|0|2500'],
+    )
+    briefs = ref / 'scene-briefs.csv'
+    with open(briefs, 'w') as f:
+        f.write('id|goal|conflict|outcome|crisis|decision\n')
+        f.write('sc-1|truncated\n')  # missing fields
+    from storyforge.cmd_scenes_export import export_outline_md
+    export_outline_md(str(tmp_path))
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'scene-briefs.csv' in out
+    assert 'fields' in out
+
+
 def test_outline_md_no_briefs_csv_does_not_crash(tmp_path):
     """When scene-briefs.csv is absent, outline still renders cleanly
     without brief sub-bullets."""

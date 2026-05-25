@@ -278,7 +278,12 @@ def export_outline_md(project_dir: str, output_path: str | None = None) -> str:
 
 
 def _briefs_by_id(briefs_csv: str) -> dict[str, dict]:
-    """Read scene-briefs.csv into a dict keyed by id. Returns {} if absent."""
+    """Read scene-briefs.csv into a dict keyed by id. Returns {} if absent.
+
+    Rows whose column count doesn't match the header are logged and skipped
+    — same convention as _outline_rows so the author can see why a brief
+    sub-bullet is missing from outline.md.
+    """
     if not os.path.isfile(briefs_csv):
         return {}
     headers = _read_csv_headers(briefs_csv)
@@ -287,11 +292,13 @@ def _briefs_by_id(briefs_csv: str) -> dict[str, dict]:
     with open(briefs_csv, encoding='utf-8') as f:
         raw = f.read().replace('\r\n', '\n').replace('\r', '')
     out: dict[str, dict] = {}
-    for line in raw.splitlines()[1:]:
+    for lineno, line in enumerate(raw.splitlines()[1:], start=2):
         if not line.strip():
             continue
         cells = line.split('|')
         if len(cells) != len(headers):
+            log(f'WARNING: {briefs_csv}:{lineno} has {len(cells)} fields, '
+                f'expected {len(headers)}; row skipped')
             continue
         row = dict(zip(headers, cells))
         rid = row.get('id', '').strip()
