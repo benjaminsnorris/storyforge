@@ -500,6 +500,129 @@ def test_parse_proposals_distinguishes_no_key_from_no_json():
     assert status == 'ok'
 
 
+def test_legacy_csv_without_summary_column_upgrades_and_writes(tmp_path, monkeypatch):
+    """A pre-`summary` spine.csv flowing through _write_to_csv must
+    upgrade its header AND preserve any legacy columns, not silently
+    drop data when filling empty cells / appending rows."""
+    _seed_story_summary(str(tmp_path))
+    spine_csv = os.path.join(str(tmp_path), 'reference', 'spine.csv')
+    os.makedirs(os.path.dirname(spine_csv), exist_ok=True)
+    # OLD-shape header (no summary column) with an existing row that
+    # carries legacy data
+    with open(spine_csv, 'w') as f:
+        f.write('id|seq|title|function|part\n')
+        f.write('ev-1|1|Title|inciting|1\n')
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake, _ = _mock_llm({
+        'proposals': [
+            {'summary': 'Proposed summary 1.', 'rationale': 'r'},
+            {'summary': 'Proposed summary 2.', 'rationale': 'r'},
+            {'summary': 'Proposed summary 3.', 'rationale': 'r'},
+            {'summary': 'Proposed summary 4.', 'rationale': 'r'},
+        ],
+    })
+    from storyforge import api, cmd_propose_summaries
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_propose_summaries, 'invoke_to_file', fake)
+
+    from storyforge.cmd_propose_summaries import main as ps_main
+    ps_main(['--level', '3', '--coaching', 'full'])
+
+    content = open(spine_csv).read()
+    lines = [l for l in content.split('\n') if l.strip()]
+    header = lines[0]
+    # Summary column is now in the header
+    assert 'summary' in header.split('|')
+    # Legacy column (function) preserved
+    assert 'function' in header.split('|')
+    # Existing row's `function=inciting` cell preserved
+    assert 'inciting' in content
+    # The existing row got a proposed summary inserted (it had an empty
+    # one since the column didn't exist)
+    n_cols = len(header.split('|'))
+    for line in lines[1:]:
+        assert line.count('|') == n_cols - 1, (
+            f'column-count mismatch on row: {line!r}'
+        )
+
+
+def test_empty_proposal_summary_filtered_by_parser(tmp_path):
+    """An LLM-returned proposal with an empty/whitespace `summary` must
+    be filtered out by _parse_proposals so it never reaches _write_to_csv."""
+    from storyforge.cmd_propose_summaries import _parse_proposals
+    payload = json.dumps({
+        'proposals': [
+            {'summary': '   ', 'rationale': 'whitespace'},
+            {'summary': '', 'rationale': 'empty'},
+            {'summary': 'Real one.', 'rationale': 'ok'},
+        ],
+    })
+    proposals, status = _parse_proposals(payload)
+    assert status == 'ok'
+    assert len(proposals) == 1
+    assert proposals[0]['summary'] == 'Real one.'
+
+
+def test_llm_exception_exits_one_cleanly(tmp_path, monkeypatch):
+    """If invoke_to_file raises, propose-summaries logs the error and
+    exits 1 — never crashes with a raw traceback to stdout."""
+    _seed_story_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake_raises(prompt, model, log_file, **kwargs):
+        raise RuntimeError('network error')
+    from storyforge import api, cmd_propose_summaries
+    monkeypatch.setattr(api, 'invoke_to_file', fake_raises)
+    monkeypatch.setattr(cmd_propose_summaries, 'invoke_to_file', fake_raises)
+
+    from storyforge.cmd_propose_summaries import main as ps_main
+    with pytest.raises(SystemExit) as exc:
+        ps_main(['--level', '3', '--coaching', 'full'])
+    assert exc.value.code == 1
+
+
+def test_empty_proposals_exit_one_with_pointer_to_log(tmp_path, monkeypatch, capsys):
+    """LLM returns no usable proposals → exit 1 with a pointer to the log
+    file so the author can inspect what the LLM actually said."""
+    _seed_story_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake, _ = _mock_llm({'proposals': []})
+    from storyforge import api, cmd_propose_summaries
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_propose_summaries, 'invoke_to_file', fake)
+    from storyforge.cmd_propose_summaries import main as ps_main
+    with pytest.raises(SystemExit) as exc:
+        ps_main(['--level', '3', '--coaching', 'full'])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert 'working/logs/propose-summaries' in out or 'level-3.json' in out
+
+
+def test_parse_proposals_handles_fenced_block():
+    """LLM that wraps JSON in ```json ... ``` — _parse_proposals' tier-2
+    fallback must extract it."""
+    from storyforge.cmd_propose_summaries import _parse_proposals
+    text = 'Some preamble.\n```json\n{"proposals":[{"summary":"Fenced."}]}\n```\nDone.'
+    proposals, status = _parse_proposals(text)
+    assert status == 'ok'
+    assert len(proposals) == 1
+    assert proposals[0]['summary'] == 'Fenced.'
+
+
+def test_parse_proposals_handles_greedy_object():
+    """LLM that emits a bare {...} surrounded by prose — _parse_proposals'
+    tier-3 fallback must extract it."""
+    from storyforge.cmd_propose_summaries import _parse_proposals
+    text = 'Prose before. {"proposals":[{"summary":"Greedy."}]} prose after.'
+    proposals, status = _parse_proposals(text)
+    assert status == 'ok'
+    assert len(proposals) == 1
+    assert proposals[0]['summary'] == 'Greedy.'
+
+
 def test_invalid_level_rejected(tmp_path, monkeypatch):
     """--level outside {3, 4, 5} is rejected by argparse."""
     _seed_story_summary(str(tmp_path))
