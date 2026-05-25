@@ -67,6 +67,50 @@ def test_coverage_act_2_to_spine_flags_empty_act(tmp_path):
     assert bad['passed'] is False
 
 
+def test_coverage_act_2_unrecognized_notation_says_so(tmp_path):
+    """If the author writes `### Act One` or `### Part 1`, the error
+    message should mention that those formats are not recognized."""
+    (tmp_path / 'reference').mkdir()
+    _write(
+        os.path.join(str(tmp_path), 'reference', 'story-summary.md'),
+        '## Logline\nx\n## Synopsis\nx\n## Act-shape\n\n### Act One\nx\n'
+        '### Act Two\nx\n## Theme\nx\n',
+    )
+    from storyforge.scoring_coverage import score_coverage_at_level
+    r = score_coverage_at_level(str(tmp_path), 2)
+    assert r['failed'] == 1
+    detail = r['checks'][0]['detail']
+    assert 'Act One' in detail or 'Part 1' in detail
+    assert 'heading format' in detail
+
+
+def test_coverage_warns_on_unrecognized_scene_status(tmp_path):
+    """A typo'd status (`draft` instead of `drafted`) excludes the scene
+    silently from the coverage filter. Surface the typo'd value."""
+    _write(
+        os.path.join(str(tmp_path), 'reference', 'architecture.csv'),
+        'id|seq|title|summary|part|pov|spine_event|action_sequel|emotional_arc|'
+        'value_at_stake|value_shift|turning_point\n'
+        'a-1|1|t|s|1|p|ev-1|action|arc|truth|+/-|reveal\n',
+    )
+    _write(
+        os.path.join(str(tmp_path), 'reference', 'scenes.csv'),
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words|architecture_scene\n'
+        'sc-1|1|t|s|1|p|l|1|m|2h|character|draft|0|2500|a-1\n',
+    )
+    from storyforge.scoring_coverage import score_coverage_at_level
+    r = score_coverage_at_level(str(tmp_path), 4)
+    typo_check = next(
+        (c for c in r['checks']
+         if 'unrecognized status' in c['check']
+         or 'unrecognized' in (c.get('detail', '') or '')),
+        None,
+    )
+    assert typo_check is not None
+    assert 'draft' in typo_check['detail']
+
+
 def test_coverage_act_2_fails_when_act_shape_empty(tmp_path):
     (tmp_path / 'reference').mkdir()
     _write(

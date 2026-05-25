@@ -70,11 +70,11 @@ def main(argv=None):
         _run_strict(project_dir, args.level, medium, args.dry_run)
         return
 
-    if coaching == 'full' and not args.dry_run:
+    if coaching in ('full', 'coach') and not args.dry_run:
         if not os.environ.get('ANTHROPIC_API_KEY'):
-            log('ERROR: ANTHROPIC_API_KEY is not set. propose-summaries in '
-                'full coaching requires an API key. Set it and re-run, or '
-                'use --dry-run / --coaching strict.')
+            log(f'ERROR: ANTHROPIC_API_KEY is not set. propose-summaries in '
+                f'{coaching} coaching requires an API key. Set it and re-run, '
+                f'or use --dry-run / --coaching strict.')
             sys.exit(1)
 
     # full + coach both call the LLM; differ only in where output lands.
@@ -193,9 +193,28 @@ def _run_with_llm(project_dir: str, level: int, medium: str,
             log('ERROR: LLM returned no proposals. See log file: ' + log_file)
         sys.exit(1)
 
+    # Surface row-count mismatch with the level's expected range so the
+    # author doesn't first discover the gap when the next score --level N
+    # fails its row-count floor check.
+    if range_str:
+        lo, hi = (int(p) for p in range_str.split('-'))
+        if len(proposals) < lo:
+            log(f'WARNING: LLM returned {len(proposals)} proposals but '
+                f'level {level} expects {range_str}. Consider running again '
+                f'or filling additional rows manually.')
+
     if coaching == 'full':
+        was_new_csv = not os.path.isfile(
+            os.path.join(project_dir, 'reference', target_csv),
+        )
         written = _write_to_csv(project_dir, level, proposals)
         log(f'Wrote {written} summary(ies) to reference/{target_csv}')
+        if was_new_csv:
+            log(f'NOTE: created reference/{target_csv} with placeholder ids '
+                f'(proposed-{level}-*). Required columns other than '
+                f'id/seq/summary are empty — rename ids to meaningful '
+                f'slugs and fill remaining columns before validate/score '
+                f'will pass.')
     else:
         out_path = _write_coaching_brief(
             project_dir, level, upstream, proposals, response_text,

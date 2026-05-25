@@ -132,7 +132,10 @@ def _coverage_acts_to_spine(project_dir: str) -> list[dict]:
         return [_check(
             'act-shape declares Act sub-sections',
             False,
-            'no `### Act N` sub-sections found in story-summary.md',
+            'no `### Act N` sub-sections found in story-summary.md — '
+            'check the heading format (must be `### Act 1`, `### Act 2`, '
+            'etc.; word forms like `### Act One` or `### Part 1` are not '
+            'recognized)',
             severity='high',
         )]
 
@@ -207,11 +210,25 @@ def _coverage_architecture_to_scenes(project_dir: str) -> list[dict]:
             severity='high',
         )]
     scene_rows = _read_csv(os.path.join(project_dir, 'reference', 'scenes.csv'))
+    map_tier = frozenset({'mapped', 'briefed', 'drafted', 'polished'})
+    known_statuses = map_tier | {'spine', 'architecture', 'cut', 'merged', ''}
     map_rows = [r for r in scene_rows
-                if r.get('status', '').strip()
-                in ('mapped', 'briefed', 'drafted', 'polished')]
+                if r.get('status', '').strip() in map_tier]
+    # Detect typo'd statuses that would silently exclude scenes from coverage.
+    bad_statuses = sorted({r.get('status', '').strip() for r in scene_rows
+                           if r.get('status', '').strip() not in known_statuses})
+    extra_checks: list[dict] = []
+    if bad_statuses:
+        extra_checks.append(_check(
+            'all scene statuses are recognized',
+            False,
+            (f'scenes.csv has rows with unrecognized status value(s): '
+             f'{", ".join(bad_statuses)}. These rows are excluded from '
+             f'coverage; check for typos.'),
+            severity='medium',
+        ))
     if not map_rows:
-        return [_check(
+        return extra_checks + [_check(
             'scenes.csv has mapped rows', False,
             'reference/scenes.csv has no rows at status mapped/briefed/'
             'drafted/polished — run elaborate at the scene-map stage',
@@ -221,7 +238,7 @@ def _coverage_architecture_to_scenes(project_dir: str) -> list[dict]:
     referenced = {r.get('architecture_scene', '').strip() for r in map_rows}
     missing = [r.get('id', '') for r in arch_rows
                if r.get('id', '') and r.get('id', '') not in referenced]
-    return [_check(
+    return extra_checks + [_check(
         'every architecture anchor has a mapped scene',
         not missing,
         (f'{len(missing)} anchor(s) without mapped scenes: '

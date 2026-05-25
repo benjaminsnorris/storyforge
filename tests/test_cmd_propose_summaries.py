@@ -422,6 +422,61 @@ def test_id_collision_with_existing_rows(tmp_path, monkeypatch):
     assert 'proposed-3-1' in ids
 
 
+def test_coach_without_api_key_errors_cleanly(tmp_path, monkeypatch):
+    """coach mode also calls the LLM, so missing API key must exit 1 cleanly
+    just like full mode (previously only full was gated)."""
+    _seed_story_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    from storyforge.cmd_propose_summaries import main as ps_main
+    with pytest.raises(SystemExit) as exc:
+        ps_main(['--level', '3', '--coaching', 'coach'])
+    assert exc.value.code == 1
+
+
+def test_placeholder_id_warning_when_creating_csv(tmp_path, monkeypatch, capsys):
+    """When _create_csv_with_proposals fires (target CSV didn't exist),
+    surface a NOTE about placeholder ids + empty required columns so the
+    author isn't surprised by the next validate/score wave."""
+    _seed_story_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake, _ = _mock_llm({
+        'proposals': [
+            {'summary': f'Summary {i}.', 'rationale': 'r'} for i in range(1, 5)
+        ],
+    })
+    from storyforge import api, cmd_propose_summaries
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_propose_summaries, 'invoke_to_file', fake)
+    from storyforge.cmd_propose_summaries import main as ps_main
+    ps_main(['--level', '3', '--coaching', 'full'])
+    out = capsys.readouterr().out
+    assert 'NOTE' in out
+    assert 'placeholder ids' in out
+
+
+def test_row_count_below_range_warns(tmp_path, monkeypatch, capsys):
+    """LLM returns fewer proposals than the level's row range expects → WARN."""
+    _seed_story_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    # Level 3 (novel) range is 5-10; return only 2 proposals.
+    fake, _ = _mock_llm({
+        'proposals': [
+            {'summary': 'One.', 'rationale': 'r'},
+            {'summary': 'Two.', 'rationale': 'r'},
+        ],
+    })
+    from storyforge import api, cmd_propose_summaries
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_propose_summaries, 'invoke_to_file', fake)
+    from storyforge.cmd_propose_summaries import main as ps_main
+    ps_main(['--level', '3', '--coaching', 'full'])
+    out = capsys.readouterr().out
+    assert 'WARNING' in out and 'expects 5-10' in out
+
+
 def test_parse_proposals_distinguishes_no_key_from_no_json():
     """_parse_proposals returns a status code distinguishing 'valid JSON
     but no proposals key' from 'no JSON at all', so the error message can
