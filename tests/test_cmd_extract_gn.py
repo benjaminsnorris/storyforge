@@ -172,8 +172,11 @@ def test_from_script_does_not_overwrite_existing_rows(tmp_path, monkeypatch):
     assert 'Author summary.' in content
 
 
-def test_from_script_force_overwrites(tmp_path, monkeypatch):
-    """--force replaces existing fields with the extracted values."""
+def test_from_script_force_overwrites_structural_fields_only(tmp_path, monkeypatch):
+    """--force overwrites structural fields the extractor can derive
+    (status, panel_count, page_count, word_count) but MUST preserve
+    authored title and summary — the deterministic extractor can't
+    infer those from a slug, and overwriting them is data loss."""
     _seed_project(str(tmp_path))
     ref = tmp_path / 'reference'
     ref.mkdir()
@@ -193,10 +196,11 @@ def test_from_script_force_overwrites(tmp_path, monkeypatch):
     ex_main(['--from-script', str(scripts_dir), '--force'])
 
     content = (ref / 'scenes.csv').read_text()
-    # Forced: status flipped to drafted, panel/page counts populated.
-    assert 'drafted' in content
-    # title may have been replaced too (extracted humanizes the id)
-    assert 'Sc 1' in content or 'sc-1' in content
+    # Authored fields are preserved
+    assert 'Author Title' in content
+    assert 'Author summary.' in content
+    # Structural fields got the extracted values
+    assert 'drafted' in content  # status updated
 
 
 def test_caption_strategy_heuristic(tmp_path, monkeypatch):
@@ -357,6 +361,106 @@ def test_from_prose_full_without_api_key_errors_cleanly(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         ex_main(['--from-prose', str(prose_path), '--coaching', 'full'])
     assert exc.value.code == 1
+
+
+def test_from_prose_id_collision_within_one_run(tmp_path, monkeypatch):
+    """Two `## Interlude` headers in the same prose file must produce
+    two distinct scene ids (collision suffix), not silently drop one."""
+    _seed_project(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    prose_path = tmp_path / 'prose.md'
+    prose_path.write_text(
+        '## Interlude\n\nFirst interlude body.\n\n'
+        '## Interlude\n\nSecond interlude body.\n'
+    )
+    fake = _mock_llm({
+        'title': 't', 'summary': 's', 'key_actions': 'a',
+        'caption_strategy': 'minimal',
+    })
+    from storyforge import api, cmd_extract_gn
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_extract_gn, 'invoke_to_file', fake)
+    from storyforge.cmd_extract_gn import main as ex_main
+    ex_main(['--from-prose', str(prose_path), '--coaching', 'full'])
+
+    content = (tmp_path / 'reference' / 'scenes.csv').read_text()
+    # Both interludes should appear with distinct ids
+    assert 'interlude\n' in content or 'interlude|' in content
+    assert 'interlude-2' in content
+
+
+def test_from_prose_summary_logs_partial_failures(tmp_path, monkeypatch, capsys):
+    """When some LLM calls fail mid-run, the final log must report a
+    PARTIAL summary so the author knows not every section was written."""
+    _seed_project(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    prose_path = tmp_path / 'prose.md'
+    prose_path.write_text(
+        '## Section A\n\nBody A.\n\n'
+        '## Section B\n\nBody B.\n\n'
+        '## Section C\n\nBody C.\n'
+    )
+
+    call_count = {'n': 0}
+    def fake(prompt, model, log_file, **kwargs):
+        call_count['n'] += 1
+        # Second call fails
+        if call_count['n'] == 2:
+            raise RuntimeError('simulated rate limit')
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        payload = {'title': 't', 'summary': 's', 'key_actions': 'a',
+                   'caption_strategy': 'minimal'}
+        with open(log_file, 'w') as f:
+            json.dump({
+                'content': [{'type': 'text', 'text': json.dumps(payload)}],
+                'usage': {'input_tokens': 50, 'output_tokens': 30,
+                          'cache_read_input_tokens': 0,
+                          'cache_creation_input_tokens': 0},
+            }, f)
+        return {}
+    from storyforge import api, cmd_extract_gn
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_extract_gn, 'invoke_to_file', fake)
+
+    from storyforge.cmd_extract_gn import main as ex_main
+    ex_main(['--from-prose', str(prose_path), '--coaching', 'full'])
+    out = capsys.readouterr().out
+    assert 'PARTIAL' in out
+    assert '3 section(s) requested' in out
+    assert '1 LLM failure(s)' in out
+
+
+def test_from_prose_parse_failure_bills_as_unparseable(tmp_path, monkeypatch):
+    """When the LLM returns unparseable JSON, the ledger still records
+    the call (Anthropic billed for it) but with `:unparseable` suffix."""
+    _seed_project(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    prose_path = tmp_path / 'prose.md'
+    prose_path.write_text('## Section A\n\nBody.\n')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        # Response that's NOT valid JSON anywhere
+        with open(log_file, 'w') as f:
+            json.dump({
+                'content': [{'type': 'text', 'text': 'I cannot do that.'}],
+                'usage': {'input_tokens': 50, 'output_tokens': 5,
+                          'cache_read_input_tokens': 0,
+                          'cache_creation_input_tokens': 0},
+            }, f)
+        return {}
+    from storyforge import api, cmd_extract_gn
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_extract_gn, 'invoke_to_file', fake)
+
+    from storyforge.cmd_extract_gn import main as ex_main
+    ex_main(['--from-prose', str(prose_path), '--coaching', 'full'])
+
+    ledger = (tmp_path / 'working' / 'costs' / 'ledger.csv').read_text()
+    assert 'unparseable' in ledger
 
 
 def test_from_prose_splits_on_top_level_headers(tmp_path, monkeypatch):

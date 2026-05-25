@@ -546,12 +546,18 @@ def _render_full_style_guide(project_dir: str, title: str, cues: dict,
         invoke_to_file(prompt, model, log_file, max_tokens=4096)
     except Exception as e:
         log(f'WARNING: style-guide LLM call failed ({e}); falling back to '
-            f'coach-mode template.')
+            f'coach-mode template. No tokens were billed.')
         return _render_coach_style_guide(title, cues)
     text = _extract_response_text(log_file)
     if not text or not text.strip().startswith('#'):
-        log(f'WARNING: style-guide LLM response unparseable; falling back to '
-            f'coach-mode template.')
+        # Anthropic still billed for this call; ledger it so the local
+        # total matches the API dashboard. Mark target as unparseable so
+        # cost summaries can distinguish productive spend.
+        log(f'WARNING: style-guide LLM response unparseable; falling back '
+            f'to coach-mode template. (API call was billed; raw response '
+            f'saved at {log_file}.)')
+        _record_style_guide_cost(project_dir, log_file, model,
+                                  target='style-guide:unparseable')
         return _render_coach_style_guide(title, cues)
     _record_style_guide_cost(project_dir, log_file, model)
     return text
@@ -570,21 +576,23 @@ def _extract_response_text(log_file: str) -> str:
 
 
 def _record_style_guide_cost(project_dir: str, log_file: str,
-                              model: str) -> None:
+                              model: str, *,
+                              target: str = 'style-guide') -> None:
     try:
         with open(log_file, encoding='utf-8') as f:
             resp = json.load(f)
-        usage = extract_usage(resp)
-        cost = calculate_cost_from_usage(usage, model)
-        log_operation(
-            project_dir, 'assemble-gn-style-guide', model,
-            usage['input_tokens'], usage['output_tokens'], cost,
-            target='style-guide',
-            cache_read=usage.get('cache_read', 0),
-            cache_create=usage.get('cache_create', 0),
-        )
-    except (OSError, json.JSONDecodeError, KeyError) as e:
-        log(f'WARNING: cost ledger update failed: {e}')
+    except (OSError, json.JSONDecodeError) as e:
+        log(f'WARNING: cost ledger update failed reading {log_file}: {e}')
+        return
+    usage = extract_usage(resp)
+    cost = calculate_cost_from_usage(usage, model)
+    log_operation(
+        project_dir, 'assemble-gn-style-guide', model,
+        usage['input_tokens'], usage['output_tokens'], cost,
+        target=target,
+        cache_read=usage.get('cache_read', 0),
+        cache_create=usage.get('cache_create', 0),
+    )
 
 
 def _assemble_style_guide(project_dir: str, title: str,

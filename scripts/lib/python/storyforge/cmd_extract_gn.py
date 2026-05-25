@@ -173,11 +173,16 @@ def _resolve_script_paths(source: str) -> list[str]:
 
 
 def _scene_row_from_script(scene_id: str, text: str, parsed: dict) -> dict:
-    """Derive a scenes.csv row from a parsed script."""
+    """Derive a scenes.csv row from a parsed script.
+
+    Title is left empty: the deterministic extractor can't infer an
+    authored title from a slug, and the merge logic would otherwise
+    overwrite real author titles with humanized slugs under --force.
+    Authors set titles in the CSV or via author tools.
+    """
     word_count = len(re.findall(r'\b\w+\b', text))
     return {
         'id': scene_id,
-        'title': _humanize(scene_id),
         'status': 'drafted',
         'word_count': str(word_count),
         'panel_count': str(parsed['total_panels']),
@@ -293,6 +298,8 @@ def _run_from_prose(project_dir: str, source: str, coaching: CoachingLevel,
     scene_rows: list[dict] = []
     brief_rows: list[dict] = []
     coaching_notes: list[dict] = []
+    failed_llm: list[str] = []
+    failed_parse: list[str] = []
     for idx, (sid, header, prose) in enumerate(sections, start=1):
         log(f'Adapting section {idx}/{len(sections)}: {header!r}')
         prompt = _PROSE_PROMPT.format(prose=prose)
@@ -301,17 +308,34 @@ def _run_from_prose(project_dir: str, source: str, coaching: CoachingLevel,
             invoke_to_file(prompt, model, log_file, max_tokens=2048)
         except Exception as e:
             log(f'  ERROR: LLM call failed for {sid}: {e}')
+            failed_llm.append(sid)
             continue
         text = _read_response_text(log_file)
         parsed = _parse_prose_response(text)
-        _record_cost(project_dir, log_file, model, sid)
         if not parsed:
+            # Bill the call as 'unparseable' so the ledger reflects what
+            # Anthropic charged us, but mark it so a summary report can
+            # distinguish productive spend from waste.
+            _record_cost(project_dir, log_file, model, f'{sid}:unparseable')
             log(f'  WARNING: could not parse LLM response for {sid}; skipping')
+            failed_parse.append(sid)
             continue
+        _record_cost(project_dir, log_file, model, sid)
         scene_rows.append(_scene_row_from_prose(sid, header, parsed))
         brief_rows.append(_brief_row_from_prose(sid, parsed))
         coaching_notes.append({'scene_id': sid, 'header': header,
                                'parsed': parsed, 'prose_excerpt': prose[:400]})
+
+    if failed_llm or failed_parse:
+        log(f'PARTIAL: {len(sections)} section(s) requested, '
+            f'{len(scene_rows)} written, '
+            f'{len(failed_llm)} LLM failure(s), '
+            f'{len(failed_parse)} parse failure(s).')
+        if failed_llm:
+            log(f'  LLM failed for: {", ".join(failed_llm)}')
+        if failed_parse:
+            log(f'  Parse failed for: {", ".join(failed_parse)} '
+                f'(responses saved in {log_dir})')
 
     if coaching == 'coach':
         out_path = _write_coaching_brief(project_dir, coaching_notes)
@@ -389,7 +413,9 @@ def _split_prose_into_sections(path: str) -> list[tuple[str, str, str]]:
     """Split a prose manuscript into (scene_id, header_text, body) triples.
 
     Splits on top-level `##` headers. The scene_id is a slug derived
-    from the header. Content before the first `##` is ignored.
+    from the header; duplicate slugs get a numeric suffix so duplicate
+    headers like two `## Interlude` blocks don't silently collide and
+    lose a section. Content before the first `##` is ignored.
     """
     if not os.path.isfile(path):
         return []
@@ -398,6 +424,7 @@ def _split_prose_into_sections(path: str) -> list[tuple[str, str, str]]:
     header_pattern = re.compile(r'^##\s+(.+?)\s*$', re.MULTILINE)
     matches = list(header_pattern.finditer(text))
     sections: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
     for i, m in enumerate(matches):
         header = m.group(1).strip()
         body_start = m.end()
@@ -405,7 +432,13 @@ def _split_prose_into_sections(path: str) -> list[tuple[str, str, str]]:
         body = text[body_start:body_end].strip()
         if not body:
             continue
-        sid = _slugify(header) or f'adapted-{i + 1}'
+        base = _slugify(header) or f'adapted-{i + 1}'
+        sid = base
+        n = 2
+        while sid in seen:
+            sid = f'{base}-{n}'
+            n += 1
+        seen.add(sid)
         sections.append((sid, header, body))
     return sections
 
@@ -494,9 +527,13 @@ def _merge_rows_into_csv(csv_path: str, columns: list[str],
     """Merge `new_rows` into the CSV at `csv_path`.
 
     - If the CSV doesn't exist, create it with `columns` as the header.
-    - If a row id already exists, skip it unless `force=True` (then
-      replace).
+    - If a row id already exists and force=False, skip it (preserved).
+    - If force=True, fields with non-empty extracted values overwrite
+      existing fields; fields the extractor left empty keep their
+      prior value (field-level merge, not wholesale row replace).
     - New ids append at the end.
+    - Existing columns not in `columns` are preserved in the header
+      (legacy data is never silently dropped).
     """
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)
     if not os.path.isfile(csv_path):
@@ -600,14 +637,15 @@ def _record_cost(project_dir: str, log_file: str, model: str,
     try:
         with open(log_file, encoding='utf-8') as f:
             resp = json.load(f)
-        usage = extract_usage(resp)
-        cost = calculate_cost_from_usage(usage, model)
-        log_operation(
-            project_dir, 'extract-gn', model,
-            usage['input_tokens'], usage['output_tokens'], cost,
-            target=scene_id,
-            cache_read=usage.get('cache_read', 0),
-            cache_create=usage.get('cache_create', 0),
-        )
-    except (OSError, json.JSONDecodeError, KeyError) as e:
-        log(f'WARNING: cost ledger update failed: {e}')
+    except (OSError, json.JSONDecodeError) as e:
+        log(f'WARNING: cost ledger update failed reading {log_file}: {e}')
+        return
+    usage = extract_usage(resp)
+    cost = calculate_cost_from_usage(usage, model)
+    log_operation(
+        project_dir, 'extract-gn', model,
+        usage['input_tokens'], usage['output_tokens'], cost,
+        target=scene_id,
+        cache_read=usage.get('cache_read', 0),
+        cache_create=usage.get('cache_create', 0),
+    )
