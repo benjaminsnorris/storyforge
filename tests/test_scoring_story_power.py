@@ -217,13 +217,12 @@ def test_delta_tracking_compares_against_previous_run(tmp_path, monkeypatch):
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake1)
     scoring_story_power.score_story_power(str(tmp_path), 'full')
 
-    # Second run — improved specificity.
+    # Second run — improved specificity. Timestamps are microsecond
+    # resolution + non-existence loop, so back-to-back runs naturally land
+    # in distinct directories.
     fake2 = _mock_llm(_full_payload([8, 8, 7, 9, 9, 9, 8, 9]))
     monkeypatch.setattr(api, 'invoke_to_file', fake2)
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake2)
-    # Sleep to ensure timestamps differ
-    import time
-    time.sleep(1.1)
     result2 = scoring_story_power.score_story_power(str(tmp_path), 'full')
     assert result2['deltas']['specificity'] == 1
     assert result2['deltas']['emotional_resonance'] == 1
@@ -282,3 +281,57 @@ def test_story_power_in_elaboration_score_flags():
     routes it to cmd_score instead of cmd_score_gn."""
     from storyforge.__main__ import _ELABORATION_SCORE_FLAGS
     assert '--story-power' in _ELABORATION_SCORE_FLAGS
+
+
+# ---------------------------------------------------------------------------
+# Critical-fix regression tests
+# ---------------------------------------------------------------------------
+
+def test_missing_rubric_fails_full_mode_without_llm_call(tmp_path, monkeypatch):
+    """If the rubric file is gone, full/coach must refuse to score —
+    otherwise the LLM gets called with no rubric grounding."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    from storyforge import api, scoring_story_power
+
+    def boom(*a, **kw):
+        raise AssertionError('LLM must not be called when rubric is missing')
+    monkeypatch.setattr(api, 'invoke_to_file', boom)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', boom)
+    monkeypatch.setattr(scoring_story_power, '_load_rubric', lambda: '')
+
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['output_dir'] == ''
+    assert result['composite'] == 0.0
+
+
+def test_missing_rubric_does_not_block_strict(tmp_path, monkeypatch):
+    """strict coaching runs entirely off the per-axis names baked into AXES,
+    so an absent rubric must not stop it (the author can self-score)."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge import scoring_story_power
+    monkeypatch.setattr(scoring_story_power, '_load_rubric', lambda: '')
+    result = scoring_story_power.score_story_power(str(tmp_path), 'strict')
+    assert result['output_dir']
+    assert os.path.isfile(os.path.join(result['output_dir'],
+                                        'self-scoring-checklist.md'))
+
+
+def test_back_to_back_runs_get_distinct_output_dirs(tmp_path, monkeypatch):
+    """Two runs in the same second must land in distinct directories —
+    otherwise the second clobbers the first."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _mock_llm(_full_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+
+    r1 = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    r2 = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert r1['output_dir'] != r2['output_dir']
+    assert os.path.isfile(os.path.join(r1['output_dir'], 'scorecard.csv'))
+    assert os.path.isfile(os.path.join(r2['output_dir'], 'scorecard.csv'))

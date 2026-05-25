@@ -220,47 +220,43 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
     if not artifacts['logline'] and not artifacts['synopsis']:
         log('ERROR: story-power scoring requires reference/story-summary.md '
             'with at least a logline + synopsis populated.')
-        return {'mode': coaching, 'output_dir': '', 'composite': 0.0,
-                'scores': {}, 'deltas': {}, 'diagnostic': {}}
+        return _empty_result(coaching)
 
     rubric = _load_rubric()
-    timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    output_dir = os.path.join(project_dir, 'working', 'scores',
-                              'story-power', timestamp)
+    if not rubric and coaching != 'strict':
+        log('ERROR: story-power rubric not found at '
+            'references/story-power-rubric.md. Without the rubric the LLM '
+            'has nothing to anchor its scores. Restore the file or use '
+            '--coaching strict for the deterministic checklist.')
+        return _empty_result(coaching)
+    # Microsecond-resolution timestamp + non-existence loop to keep two
+    # back-to-back runs from clobbering each other.
+    output_dir = _allocate_output_dir(project_dir)
 
     if coaching == 'strict':
         if dry_run:
             log(f'DRY RUN — would write strict checklist to {output_dir}')
-            return {'mode': 'strict', 'output_dir': output_dir,
-                    'composite': 0.0, 'scores': {}, 'deltas': {},
-                    'diagnostic': {}}
+            return _empty_result('strict', output_dir=output_dir)
         os.makedirs(output_dir, exist_ok=True)
         _write_strict_checklist(output_dir, artifacts, rubric)
-        return {'mode': 'strict', 'output_dir': output_dir,
-                'composite': 0.0, 'scores': {}, 'deltas': {},
-                'diagnostic': {}}
+        return _empty_result('strict', output_dir=output_dir)
 
     if dry_run:
         log(f'DRY RUN — would call LLM to score 8 axes; output → {output_dir}')
-        return {'mode': f'{coaching}→dry-run', 'output_dir': output_dir,
-                'composite': 0.0, 'scores': {}, 'deltas': {},
-                'diagnostic': {}}
+        return _empty_result(f'{coaching}→dry-run', output_dir=output_dir)
 
     # full + coach both call the LLM; differ only in destination.
     if not os.environ.get('ANTHROPIC_API_KEY'):
         log('ERROR: ANTHROPIC_API_KEY is not set. story-power scoring in '
             f'{coaching} coaching requires an API key. Set it and re-run, '
             'or use --coaching strict for the deterministic checklist.')
-        return {'mode': coaching, 'output_dir': '', 'composite': 0.0,
-                'scores': {}, 'deltas': {}, 'diagnostic': {}}
+        return _empty_result(coaching)
 
     os.makedirs(output_dir, exist_ok=True)
     parsed, actual_mode = _invoke_and_parse(project_dir, output_dir,
                                               artifacts, rubric, coaching)
     if not parsed:
-        return {'mode': actual_mode, 'output_dir': output_dir,
-                'composite': 0.0, 'scores': {}, 'deltas': {},
-                'diagnostic': {}}
+        return _empty_result(actual_mode, output_dir=output_dir)
 
     scores = {row['axis']: int(row['score'])
               for row in parsed.get('scores', [])
@@ -280,16 +276,45 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
             'diagnostic': parsed.get('diagnostic') or {}}
 
 
+def _empty_result(mode: str, *, output_dir: str = '') -> dict:
+    """Helper to keep the empty-result shape consistent across early returns."""
+    return {'mode': mode, 'output_dir': output_dir, 'composite': 0.0,
+            'scores': {}, 'deltas': {}, 'diagnostic': {}}
+
+
+def _allocate_output_dir(project_dir: str) -> str:
+    """Microsecond-resolution timestamped directory under working/scores/story-power.
+
+    Two runs in the same microsecond are vanishingly unlikely, but the
+    non-existence loop still guards against it so a back-to-back invocation
+    can never clobber the prior run's CSV.
+    """
+    base = os.path.join(project_dir, 'working', 'scores', 'story-power')
+    for _ in range(8):
+        ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')
+        candidate = os.path.join(base, ts)
+        if not os.path.exists(candidate):
+            return candidate
+    # Vanishingly unlikely fallback — keep returning a unique-enough path.
+    ts = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')
+    return os.path.join(base, ts + '_x')
+
+
 def _load_rubric() -> str:
-    """Return the rubric text from references/story-power-rubric.md."""
+    """Return the rubric text from references/story-power-rubric.md.
+
+    Returns '' when the file is missing or unreadable. The caller decides
+    whether that's a fail-stop (full/coach) or an acceptable fallback
+    (strict, which uses only the per-axis section headings).
+    """
     path = os.path.join(get_plugin_dir(), 'references',
                         'story-power-rubric.md')
-    if not os.path.isfile(path):
-        log('WARNING: references/story-power-rubric.md not found; '
-            'the LLM scores will lack rubric grounding.')
+    try:
+        with open(path, encoding='utf-8') as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'WARNING: could not read references/story-power-rubric.md: {e}')
         return ''
-    with open(path, encoding='utf-8') as f:
-        return f.read()
 
 
 def _invoke_and_parse(project_dir: str, output_dir: str,
