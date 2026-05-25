@@ -19,7 +19,10 @@ from storyforge.scoring_state import is_override_accepted
 # Bible loading
 # ============================================================================
 
-# The three bibles checked by v2. Each maps a file path → finding label.
+# Each bible maps a file path → finding label.
+# Anthropic caps cache_control breakpoints at 4 per request. The current
+# layout uses 1 (instructions) + len(BIBLES) blocks, so adding a 4th bible
+# requires consolidating cache markers (e.g. only marking the last bible).
 BIBLES = (
     ('reference/character-bible.md', 'character-bible.md'),
     ('reference/world-bible.md', 'world-bible.md'),
@@ -193,6 +196,16 @@ def _invoke_bible_check(project_dir: str, scene_id: str, prose: str,
             'text': f'# Bible: {label}\n\n{content}',
             'cache_control': {'type': 'ephemeral'},
         })
+    # Anthropic caps cache_control breakpoints at 4 per request. Fail
+    # loud here rather than getting a less-actionable API error.
+    cache_breakpoints = sum(
+        1 for b in system_blocks if b.get('cache_control')
+    )
+    if cache_breakpoints > 4:
+        log(f'  [bible / {scene_id}] ERROR: {cache_breakpoints} cache '
+            f'breakpoints exceeds API limit of 4; consolidate BIBLES or '
+            f'mark only the final blocks with cache_control')
+        return []
 
     user_prompt = (
         f'# Scene: {scene_id}\n\n{prose}\n\n'
