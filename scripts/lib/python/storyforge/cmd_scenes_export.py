@@ -281,8 +281,7 @@ def _briefs_by_id(briefs_csv: str) -> dict[str, dict]:
     """Read scene-briefs.csv into a dict keyed by id. Returns {} if absent.
 
     Rows whose column count doesn't match the header are logged and skipped
-    — same convention as _outline_rows so the author can see why a brief
-    sub-bullet is missing from outline.md.
+    so the author can see why a brief sub-bullet is missing from outline.md.
     """
     if not os.path.isfile(briefs_csv):
         return {}
@@ -331,8 +330,9 @@ def _format_brief_promise(brief: dict) -> str:
 def _outline_rows_with_ids(csv_path: str) -> list[tuple[int | None, str, str]]:
     """Return [(seq, summary, id), ...] sorted by seq for outline rendering.
 
-    Wraps _outline_rows with the row id so the renderer can look up
-    matching briefs.
+    `seq` is None when the source row's seq is missing/non-integer; such
+    rows sort to the end (stable within group). Rows whose column count
+    doesn't match the header are logged + skipped.
     """
     headers = _read_csv_headers(csv_path)
     if 'summary' not in headers:
@@ -358,41 +358,6 @@ def _outline_rows_with_ids(csv_path: str) -> list[tuple[int | None, str, str]]:
         out.append((
             seq, row.get('summary', '').strip(), row.get('id', '').strip(),
         ))
-    out.sort(key=lambda x: (x[0] is None, x[0] if x[0] is not None else 0))
-    return out
-
-
-def _outline_rows(csv_path: str) -> list[tuple[int | None, str]]:
-    """Return [(seq, summary), ...] sorted by seq for an outline-eligible CSV.
-
-    `seq` is None when the source row's seq cell is missing/non-integer.
-    Such rows sort after rows with a parseable seq (stable within group).
-    Empty summary cells are passed through; the renderer marks them.
-    Rows whose column count doesn't match the header are logged + skipped.
-    """
-    headers = _read_csv_headers(csv_path)
-    if 'summary' not in headers:
-        return []
-    with open(csv_path, encoding='utf-8') as f:
-        raw = f.read().replace('\r\n', '\n').replace('\r', '')
-    out: list[tuple[int | None, str]] = []
-    for lineno, line in enumerate(raw.splitlines()[1:], start=2):
-        if not line.strip():
-            continue
-        cells = line.split('|')
-        if len(cells) != len(headers):
-            log(f'WARNING: {csv_path}:{lineno} has {len(cells)} fields, '
-                f'expected {len(headers)}; row skipped')
-            continue
-        row = dict(zip(headers, cells))
-        seq_str = row.get('seq', '').strip()
-        seq: int | None
-        try:
-            seq = int(seq_str) if seq_str else None
-        except ValueError:
-            seq = None
-        out.append((seq, row.get('summary', '').strip()))
-    # Stable sort: parseable seqs first (ascending), then unparseable.
     out.sort(key=lambda x: (x[0] is None, x[0] if x[0] is not None else 0))
     return out
 

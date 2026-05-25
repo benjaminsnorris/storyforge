@@ -1,4 +1,4 @@
-"""Tests for scoring_bible.py — bible-consistency LLM check (#231)."""
+"""Tests for scoring_bible.py — bible-consistency LLM check."""
 
 import json
 import os
@@ -349,7 +349,7 @@ def test_invalid_severity_coerced_to_medium(tmp_path, monkeypatch, capsys):
 
 def test_invalid_fix_location_coerced_with_warning(tmp_path, monkeypatch, capsys):
     """fix_location outside {bible, scene, either} → coerced to 'either'
-    with a WARNING log entry. Regression: PR #232 silent-failure review."""
+    with a WARNING log entry. Regression test for silent failure."""
     def bad_loc(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
         payload = {'findings': [{
@@ -381,7 +381,7 @@ def test_invalid_fix_location_coerced_with_warning(tmp_path, monkeypatch, capsys
 
 def test_dropped_finding_logged_with_missing_fields(tmp_path, monkeypatch, capsys):
     """Findings dropped due to missing fields are visible in stdout, not silent.
-    Regression: PR #232 silent-failure review."""
+    Regression test for silent failure."""
     def missing(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
         payload = {'findings': [

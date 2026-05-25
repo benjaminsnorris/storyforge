@@ -1,4 +1,4 @@
-"""Tests for spine.md / architecture.md derived markdown rendering (#229)."""
+"""Tests for spine.md / architecture.md derived markdown rendering."""
 
 import os
 

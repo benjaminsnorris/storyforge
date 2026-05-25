@@ -1,4 +1,4 @@
-"""Tests for scoring_comparison.py — `storyforge score --compare` (#229)."""
+"""Tests for scoring_comparison.py — `storyforge score --compare`."""
 
 import pytest
 

@@ -1,4 +1,4 @@
-"""Tests for scoring_levels.py — per-level floor checks (#229).
+"""Tests for scoring_levels.py — per-level floor checks.
 
 Spec: docs/superpowers/specs/2026-05-24-elaboration-scoring-design.md
 """
@@ -697,7 +697,7 @@ def test_score_all_levels_returns_seven(project_dir):
 
 
 # ---------------------------------------------------------------------------
-# _print_level_result headline arithmetic (regression: PR #232 test review)
+# _print_level_result headline arithmetic
 # ---------------------------------------------------------------------------
 
 def test_print_level_result_subtracts_accepted_from_failed(capsys):

@@ -299,7 +299,7 @@ def _run_elaboration_scoring(args) -> None:
         _print_drift_report(project_dir, medium)
         return
 
-    # --level N or --all-levels: floor checks per level + consistency.
+    # --level N or --all-levels: floor + consistency + coverage per level.
     if args.all_levels:
         levels = list(range(0, 7))
     else:

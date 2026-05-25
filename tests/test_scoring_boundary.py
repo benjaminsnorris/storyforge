@@ -1,4 +1,4 @@
-"""Tests for scoring_boundary.py — LLM faithfulness diffs (#231).
+"""Tests for scoring_boundary.py — LLM faithfulness diffs.
 
 Uses the same mock_invoke_to_file pattern as the existing GN revise / eval
 tests: monkeypatch both the api module's `invoke_to_file` AND the module-
@@ -256,7 +256,7 @@ def test_boundary_5_to_6_filtered_to_scope(project_dir, patched_invoke):
 
 
 # ---------------------------------------------------------------------------
-# Per-boundary collector coverage (regression: PR #232 test review)
+# Per-boundary collector coverage
 # ---------------------------------------------------------------------------
 
 def _seed_spine(project_dir, rows):
