@@ -183,6 +183,39 @@ def test_sync_conflicts_when_both_dirty(git_project):
     assert 'A Different Title' in open(md_path).read()
 
 
+def test_sync_conflict_with_header_only_scenes_does_not_crash(git_project):
+    """Regression: when both scenes.csv (header-only) and the MD are dirty,
+    the conflict-report rendering used to call build_scene_list, which
+    SystemExit'd on empty scenes — taking down the whole sync. The conflict
+    report should render with a 'pre-scene-map phase' note instead."""
+    from storyforge.cmd_sync import run_sync, CONFLICT_REPORT_PATH, DEFAULT_OUTPUT_PATH
+
+    run_sync(git_project)
+    md_path = os.path.join(git_project, DEFAULT_OUTPUT_PATH)
+    _git(git_project, 'add', DEFAULT_OUTPUT_PATH)
+    _git(git_project, 'commit', '-q', '-m', 'add MD')
+
+    # Reduce scenes.csv to header-only (simulates dropping back to architecture phase)
+    scenes_csv = os.path.join(git_project, 'reference', 'scenes.csv')
+    with open(scenes_csv) as f:
+        header = f.readline()
+    with open(scenes_csv, 'w') as f:
+        f.write(header)
+
+    # And edit MD
+    with open(md_path, 'a') as f:
+        f.write('\n## stray scene-section-from-md\n')
+
+    status = run_sync(git_project)
+    assert status == 'conflict'
+    report = os.path.join(git_project, CONFLICT_REPORT_PATH)
+    assert os.path.isfile(report)
+    report_text = open(report).read()
+    # The conflict report should note the empty-scenes state rather than
+    # crash trying to build a scene list from zero rows.
+    assert 'pre-scene-map phase' in report_text
+
+
 def test_sync_check_only_does_not_write(git_project):
     """--check returns the status without performing the sync."""
     from storyforge.cmd_sync import run_sync, DEFAULT_OUTPUT_PATH
@@ -377,7 +410,11 @@ def test_hook_path_filter_matches_expected_paths():
         'reference/scenes.csv',
         'reference/scene-intent.csv',
         'reference/scene-briefs.csv',
+        'reference/spine.csv',
+        'reference/architecture.csv',
         'reference/scenes-review.md',
+        'reference/spine.md',
+        'reference/architecture.md',
     ):
         assert rx.search(good), f'expected hook to fire for {good!r}'
     for bad in (
@@ -388,6 +425,66 @@ def test_hook_path_filter_matches_expected_paths():
         'docs/reference/scenes.csv',       # wrong directory prefix
     ):
         assert not rx.search(bad), f'hook must not fire for {bad!r}'
+
+
+def test_csv_rels_includes_spine_and_architecture():
+    """detect_state must track spine.csv + architecture.csv so a dirty
+    spine triggers sync export of spine.md (and same for architecture)."""
+    from storyforge.cmd_sync import CSV_RELS
+    assert 'reference/spine.csv' in CSV_RELS
+    assert 'reference/architecture.csv' in CSV_RELS
+    assert 'reference/scenes.csv' in CSV_RELS
+    assert 'reference/scene-intent.csv' in CSV_RELS
+    assert 'reference/scene-briefs.csv' in CSV_RELS
+
+
+def test_missing_one_way_csv_does_not_block_sync(git_project):
+    """Deleting spine.csv after committing it should NOT trigger
+    'missing-csv' refusal — one-way CSVs are author-deletable (sync
+    just stops regenerating their derived MD)."""
+    from storyforge.cmd_sync import run_sync, detect_state, DEFAULT_OUTPUT_PATH
+
+    # First, seed a spine.csv and commit it (so it's "in HEAD")
+    spine_csv = os.path.join(git_project, 'reference', 'spine.csv')
+    with open(spine_csv, 'w') as f:
+        f.write('id|seq|title|summary|function|part\n')
+        f.write('ev-1|1|t|sentence.|f|1\n')
+    _git(git_project, 'add', 'reference/spine.csv')
+    _git(git_project, 'commit', '-q', '-m', 'add spine.csv')
+
+    # Now delete the file from disk (mimics author removing it)
+    os.remove(spine_csv)
+
+    # detect_state should NOT list spine.csv in missing_csvs
+    state = detect_state(git_project)
+    assert 'reference/spine.csv' not in state['missing_csvs'], (
+        f'one-way CSV should not block sync; got missing_csvs={state["missing_csvs"]!r}'
+    )
+
+
+def test_missing_round_trip_csv_still_blocks_sync(git_project):
+    """Round-trip CSVs (scenes.csv etc.) still hard-refuse when deleted —
+    scenes-review.md depends on them."""
+    from storyforge.cmd_sync import detect_state
+
+    scenes_csv = os.path.join(git_project, 'reference', 'scenes.csv')
+    assert os.path.isfile(scenes_csv)
+    # The fixture's scenes.csv is in HEAD. Remove it from disk.
+    os.remove(scenes_csv)
+    state = detect_state(git_project)
+    assert 'reference/scenes.csv' in state['missing_csvs']
+
+
+def test_sync_tracked_paths_includes_outline_md():
+    """The pre-commit hook only stages files in SYNC_TRACKED_PATHS after
+    sync regenerates them. outline.md MUST be in the list — otherwise
+    every commit that touches a summary column leaves outline.md
+    perpetually unstaged."""
+    from storyforge.cmd_sync import SYNC_TRACKED_PATHS
+    assert 'reference/outline.md' in SYNC_TRACKED_PATHS
+    # And the existing one-way MDs too, for completeness.
+    assert 'reference/spine.md' in SYNC_TRACKED_PATHS
+    assert 'reference/architecture.md' in SYNC_TRACKED_PATHS
 
 
 def test_hook_script_uses_staged_diff(git_project):

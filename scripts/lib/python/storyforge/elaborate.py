@@ -16,8 +16,12 @@ from typing import Any
 DELIMITER = '|'
 
 # Column-to-file mapping (which file owns which columns)
+# `summary` is a one-sentence outline shared by spine, architecture, and
+# scenes — read top-to-bottom, the summary column is the expanding outline
+# of the story. Other columns add structural detail for downstream
+# elaboration.
 _SCENES_COLS = [
-    'id', 'seq', 'title', 'part', 'pov', 'location',
+    'id', 'seq', 'title', 'summary', 'part', 'pov', 'location',
     'timeline_day', 'time_of_day', 'duration', 'type', 'status',
     'word_count', 'target_words',
     # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
@@ -44,10 +48,10 @@ _BRIEFS_COLS = [
 ]
 # Structural-anchor tier: discrete CSVs with their own row identity.
 _SPINE_COLS = [
-    'id', 'seq', 'title', 'function', 'part',
+    'id', 'seq', 'title', 'summary', 'function', 'part',
 ]
 _ARCHITECTURE_COLS = [
-    'id', 'seq', 'title', 'part', 'pov', 'spine_event',
+    'id', 'seq', 'title', 'summary', 'part', 'pov', 'spine_event',
     'action_sequel', 'emotional_arc', 'value_at_stake',
     'value_shift', 'turning_point',
 ]

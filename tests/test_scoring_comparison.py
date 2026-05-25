@@ -138,3 +138,172 @@ def test_render_report_includes_all_candidate_columns():
     assert '| A |' in md or '| Axis | A |' in md
     assert 'B' in md
     assert 'C' in md
+
+
+# ---------------------------------------------------------------------------
+# Semantic (v2) ceiling axes
+# ---------------------------------------------------------------------------
+
+import json
+
+_FAKE_CEILING_RESPONSE = {
+    'axes': [
+        {'name': 'specificity', 'values': ['low', 'high']},
+        {'name': 'irony between elements', 'values': ['absent', 'present']},
+        {'name': 'memorable hook word', 'values': ['none', '"never recorded"']},
+        {'name': 'genre/tone via imagery', 'values': ['generic', 'literary']},
+    ],
+}
+
+
+def _mock_ceiling_invoke(prompt, model, log_file, **kwargs):
+    import os
+    os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+    response = {
+        'content': [{'type': 'text', 'text': json.dumps(_FAKE_CEILING_RESPONSE)}],
+        'usage': {
+            'input_tokens': 800, 'output_tokens': 300,
+            'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0,
+        },
+    }
+    with open(log_file, 'w') as f:
+        json.dump(response, f)
+    return response
+
+
+def test_semantic_requires_project_dir():
+    """semantic=True without project_dir raises (cost ledger needs the path)."""
+    with pytest.raises(ValueError, match='project_dir'):
+        compare_candidates('logline', ['a', 'b'], semantic=True)
+
+
+def test_semantic_populates_ceiling_axes(project_dir, monkeypatch):
+    """With semantic=True, ceiling axes get LLM-populated values instead of
+    em-dash placeholders."""
+    from storyforge import api, scoring_comparison
+    monkeypatch.setattr(api, 'invoke_to_file', _mock_ceiling_invoke)
+    # scoring_comparison imports invoke_to_file LOCALLY inside the function
+    # (to keep the module importable without API deps); the api-module
+    # patch is enough.
+
+    result = compare_candidates(
+        'logline',
+        ['A logline.', 'A different, more specific logline with a hook.'],
+        semantic=True, project_dir=project_dir,
+    )
+    ceiling = result['ceiling_axes']
+    # All four logline ceiling axes present
+    names = [a['name'] for a in ceiling]
+    assert 'specificity' in names
+    assert 'irony between elements' in names
+    assert 'memorable hook word' in names
+    # And the values came from the mock, not '—'
+    specificity = next(a for a in ceiling if a['name'] == 'specificity')
+    assert specificity['values'] == ['low', 'high']
+
+
+def test_semantic_off_uses_placeholders(project_dir):
+    """semantic=False → em-dash placeholders. (Default behavior unchanged.)"""
+    result = compare_candidates('logline', ['a', 'b'], semantic=False)
+    ceiling = result['ceiling_axes']
+    assert all(all(v == '—' for v in a['values']) for a in ceiling)
+
+
+def test_semantic_recovers_gracefully_from_bad_llm_response(project_dir, monkeypatch):
+    """LLM returns garbage → placeholders fill in, no crash."""
+    def garbage(prompt, model, log_file, **kwargs):
+        import os
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': 'this is not json'}],
+            'usage': {'input_tokens': 100, 'output_tokens': 20,
+                      'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api
+    monkeypatch.setattr(api, 'invoke_to_file', garbage)
+
+    result = compare_candidates('logline', ['a', 'b'], semantic=True,
+                                project_dir=project_dir)
+    ceiling = result['ceiling_axes']
+    assert all(all(v == '—' for v in a['values']) for a in ceiling)
+
+
+def test_semantic_pads_undersized_value_lists(project_dir, monkeypatch):
+    """If the LLM returns fewer values than candidates, pad with '—' rather
+    than crash."""
+    def short_response(prompt, model, log_file, **kwargs):
+        import os
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        payload = {'axes': [{'name': 'specificity', 'values': ['high']}]}  # only 1!
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 100, 'output_tokens': 20,
+                      'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api
+    monkeypatch.setattr(api, 'invoke_to_file', short_response)
+
+    result = compare_candidates('logline', ['a', 'b', 'c'], semantic=True,
+                                project_dir=project_dir)
+    specificity = next(a for a in result['ceiling_axes'] if a['name'] == 'specificity')
+    assert specificity['values'] == ['high', '—', '—']
+
+
+def test_render_report_shows_populated_ceiling_when_semantic(project_dir, monkeypatch):
+    """When ceiling axes are populated, the report header says "Ceiling
+    axes (LLM)" not "(LLM — run with --semantic ...)"."""
+    from storyforge import api
+    monkeypatch.setattr(api, 'invoke_to_file', _mock_ceiling_invoke)
+    result = compare_candidates('logline', ['a', 'b'], semantic=True,
+                                project_dir=project_dir)
+    md = render_report(result)
+    assert '## Ceiling axes (LLM)' in md
+    assert '--semantic to populate' not in md
+
+
+def test_render_report_shows_placeholder_ceiling_when_not_semantic():
+    """Default (no semantic) → the report invites the author to re-run."""
+    result = compare_candidates('logline', ['a', 'b'])
+    md = render_report(result)
+    assert 'run with --semantic to populate' in md
+
+
+def test_semantic_ledger_records_compare_call(project_dir, monkeypatch):
+    import os
+    from storyforge import api
+    monkeypatch.setattr(api, 'invoke_to_file', _mock_ceiling_invoke)
+
+    compare_candidates('logline', ['a', 'b'], semantic=True,
+                       project_dir=project_dir)
+    ledger = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
+    assert os.path.isfile(ledger)
+    content = open(ledger).read()
+    assert 'score-compare-ceiling' in content
+
+
+def test_semantic_response_does_not_declare_winner():
+    """The prompt explicitly forbids the LLM from declaring a winner. The
+    parser still won't emit one even if a bad LLM tried."""
+    # The contract is enforced by the prompt + the parser only reading the
+    # 'axes' list. If the LLM tried to add a 'winner' field, it'd be
+    # silently dropped. Confirm by sending a malicious response.
+    text = json.dumps({
+        'axes': _FAKE_CEILING_RESPONSE['axes'],
+        'winner': 'B',
+        'recommendation': 'use B',
+    })
+    from storyforge.scoring_comparison import _parse_ceiling_response
+    parsed = _parse_ceiling_response(text)
+    assert parsed is not None
+    # No 'winner' key surfaces — we only extract 'axes'.
+    # (The parser returns the list itself, not the wrapper dict.)
+    assert isinstance(parsed, list)
+    assert all('name' in axis for axis in parsed)

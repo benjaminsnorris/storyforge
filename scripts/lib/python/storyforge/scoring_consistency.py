@@ -39,12 +39,14 @@ LEVEL_FILES = {
 def _result(level: int, checks: list[dict]) -> dict:
     passed = sum(1 for c in checks if c['passed'])
     failed = sum(1 for c in checks if not c['passed'])
+    accepted = sum(1 for c in checks if c.get('accepted') and not c['passed'])
     return {
         'level': level,
         'name': 'registry-consistency',
         'checks': checks,
         'passed': passed,
         'failed': failed,
+        'accepted': accepted,
     }
 
 
@@ -104,6 +106,20 @@ def score_consistency_at_level(project_dir: str, level: int) -> dict:
                 detail,
                 severity='medium',
             ))
+
+    # Apply author overrides — same scope/axis convention as scoring_levels
+    # but with axis='registry-consistency' so overrides target the right
+    # finding family. Failed checks get tagged `accepted=True` when the
+    # author has recorded an override.
+    from storyforge.scoring_state import is_override_accepted
+    scope = f'level-{level}'
+    for c in checks:
+        if not c['passed']:
+            if is_override_accepted(
+                scope=scope, axis='registry-consistency',
+                finding_id=c['check'], project_dir=project_dir,
+            ):
+                c['accepted'] = True
 
     return _result(level, checks)
 

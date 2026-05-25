@@ -186,3 +186,80 @@ class TestApiDispatch:
         assert not missing, (
             f'api.py main() missing subcommands: {missing}'
         )
+
+
+# ---------------------------------------------------------------------------
+# Elaboration score flags must bypass GN routing
+# ---------------------------------------------------------------------------
+
+class TestElaborationScoreBypassesGN:
+    """The elaboration entry points on `storyforge score` (--level, --drift,
+    --boundary, --bible-consistency, --compare, --all-levels, --all-boundaries)
+    are medium-agnostic. They must always route to cmd_score regardless of
+    project.medium so GN projects can run drift checks and floor scores."""
+
+    def test_all_elaboration_flags_listed(self):
+        from storyforge.__main__ import _ELABORATION_SCORE_FLAGS
+        expected = {
+            '--level', '--all-levels', '--compare', '--drift',
+            '--boundary', '--all-boundaries', '--bible-consistency',
+        }
+        assert _ELABORATION_SCORE_FLAGS == expected
+
+    def test_has_elaboration_score_flag_detects_simple(self):
+        from storyforge.__main__ import _has_elaboration_score_flag
+        assert _has_elaboration_score_flag(['--drift'])
+        assert _has_elaboration_score_flag(['--bible-consistency'])
+        assert _has_elaboration_score_flag(['--level', '0'])
+        assert _has_elaboration_score_flag(['--boundary', '0->1'])
+
+    def test_has_elaboration_score_flag_detects_equals_form(self):
+        """--level=0 syntax must also be detected."""
+        from storyforge.__main__ import _has_elaboration_score_flag
+        assert _has_elaboration_score_flag(['--level=0'])
+        assert _has_elaboration_score_flag(['--boundary=5->6'])
+
+    def test_has_elaboration_score_flag_returns_false_for_gn_args(self):
+        from storyforge.__main__ import _has_elaboration_score_flag
+        assert not _has_elaboration_score_flag([])
+        assert not _has_elaboration_score_flag(['--scenes', 'sc-1'])
+        assert not _has_elaboration_score_flag(['--act', '1'])
+        assert not _has_elaboration_score_flag(['--principles', 'panel_density'])
+
+    def test_every_listed_flag_is_a_real_cmd_score_option(self):
+        """Drift catch: every entry in _ELABORATION_SCORE_FLAGS must actually
+        be a long-option on cmd_score.parse_args. If someone renames a flag
+        on the argparse side without updating the frozenset, GN routing
+        silently misroutes (the flag won't trip the bypass and the user
+        gets a confusing 'unrecognized argument' error in cmd_score_gn)."""
+        from storyforge.__main__ import _ELABORATION_SCORE_FLAGS
+        from storyforge.cmd_score import parse_args
+
+        # Pull every long-option string out of argparse by inspecting actions.
+        # parse_args([]) would exit; instead, build the parser directly via
+        # the same code path and walk _actions.
+        import argparse
+        parser = argparse.ArgumentParser()
+        # Re-run cmd_score's parse_args once to populate its argparse parser;
+        # we can grab the parser from the SystemExit-handling path indirectly
+        # by walking sys.argv. Cleaner: invoke parse_args with --help captured.
+        # Simplest: just import the module and look at its source via parse_args
+        # internals through a probe call.
+        from storyforge import cmd_score
+        import io
+        import contextlib
+        # cmd_score.parse_args(argv) builds the parser inside. Probe by
+        # asking for help, which writes options and exits.
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                cmd_score.parse_args(['--help'])
+        except SystemExit:
+            pass
+        help_text = buf.getvalue()
+        # Each elaboration flag must appear in the help output (long form).
+        for flag in _ELABORATION_SCORE_FLAGS:
+            assert flag in help_text, (
+                f'{flag!r} listed in _ELABORATION_SCORE_FLAGS but not in '
+                f'cmd_score.parse_args — drift will cause silent GN misrouting'
+            )

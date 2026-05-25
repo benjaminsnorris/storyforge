@@ -457,6 +457,12 @@ def step7_extract_spine(ref_dir: str, dry_run: bool) -> str:
     if not os.path.isfile(scenes_path):
         return 'skip:no scenes.csv'
 
+    # Upgrade old-schema spine.csv (e.g., pre-summary header) before any
+    # append, so stranded rows don't get written with a column-arity
+    # mismatch against the existing header.
+    if not dry_run:
+        _upgrade_csv_header_if_drifted(spine_path, _SPINE_COLS)
+
     scenes_header, scenes_rows = _read_csv(scenes_path)
     intent_header, intent_rows = _read_csv(intent_path)
     briefs_header, briefs_rows = _read_csv(briefs_path)
@@ -543,6 +549,10 @@ def step8_extract_architecture(ref_dir: str, dry_run: bool) -> str:
     if not os.path.isfile(scenes_path):
         return 'skip:no scenes.csv'
 
+    # Upgrade old-schema architecture.csv before any append.
+    if not dry_run:
+        _upgrade_csv_header_if_drifted(arch_path, _ARCHITECTURE_COLS)
+
     scenes_header, scenes_rows = _read_csv(scenes_path)
     intent_header, intent_rows = _read_csv(intent_path)
     briefs_header, briefs_rows = _read_csv(briefs_path)
@@ -614,21 +624,77 @@ def step8_extract_architecture(ref_dir: str, dry_run: bool) -> str:
 # Write helpers — atomicity for the multi-file migration steps
 # ============================================================================
 
+def _upgrade_csv_header_if_drifted(path: str, target_cols: list[str]) -> bool:
+    """If the CSV at `path` has a header that's a strict subset of
+    `target_cols` (older schema), rewrite the file with the new header and
+    pad existing rows with empty cells for the added columns.
+
+    Returns True if an upgrade was performed; False if the header already
+    matches or the file is absent. Raises ValueError if the existing
+    header has columns NOT in target_cols (would lose data).
+    """
+    if not os.path.isfile(path):
+        return False
+    with open(path, encoding='utf-8') as f:
+        lines = [l for l in f.read().splitlines() if l.strip()]
+    if not lines:
+        return False
+    existing_header = lines[0].split('|')
+    if existing_header == target_cols:
+        return False
+    extra = [c for c in existing_header if c not in target_cols]
+    if extra:
+        raise ValueError(
+            f'{path}: header has columns not in target schema {extra!r}; '
+            f'refusing to upgrade (would lose data)'
+        )
+    # Pad each existing row with empty cells for the new columns.
+    new_lines = ['|'.join(target_cols)]
+    for line in lines[1:]:
+        cells = line.split('|')
+        row = dict(zip(existing_header, cells))
+        new_lines.append('|'.join(row.get(c, '') for c in target_cols))
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(new_lines) + '\n')
+    return True
+
+
 def _format_csv_lines(header: list[str], rows: list[dict],
                       existing_lines: list[str] | None = None) -> str:
     """Render header + rows as a single pipe-delimited CSV string.
 
-    If `existing_lines` is given, those lines (which start with the header
-    of the previous file) are preserved and the new rows are appended.
-    Used when we're extracting *additional* spine/architecture rows on a
-    second migration run.
+    If `existing_lines` is given, the existing header is checked against
+    `header`. If they match, existing rows are kept and new rows appended.
+    If `header` adds columns not in the existing header (schema upgrade),
+    the existing rows are padded with empty cells for the new columns and
+    the file is rewritten with the new header. If `existing_lines` has
+    columns NOT in `header`, raises ValueError (would lose data).
     """
-    if existing_lines:
-        # existing_lines includes the prior header; keep that and append
-        # only the new rows.
+    if not existing_lines:
+        parts = ['|'.join(header)]
+        for row in rows:
+            parts.append('|'.join(row.get(c, '') for c in header))
+        return '\n'.join(parts) + '\n'
+
+    existing_header = existing_lines[0].split('|')
+    extra_in_existing = [c for c in existing_header if c not in header]
+    if extra_in_existing:
+        raise ValueError(
+            f'existing CSV has columns not in target schema '
+            f'{extra_in_existing!r}; refusing to migrate (would lose data)'
+        )
+
+    if existing_header == header:
+        # Headers match — keep the existing block verbatim.
         parts = list(existing_lines)
     else:
+        # Schema upgrade: rewrite header, pad existing rows with empty
+        # cells for any added columns.
         parts = ['|'.join(header)]
+        for line in existing_lines[1:]:
+            cells = line.split('|')
+            row = dict(zip(existing_header, cells))
+            parts.append('|'.join(row.get(c, '') for c in header))
     for row in rows:
         parts.append('|'.join(row.get(c, '') for c in header))
     return '\n'.join(parts) + '\n'

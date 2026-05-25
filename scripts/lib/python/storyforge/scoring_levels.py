@@ -1,11 +1,7 @@
-"""Per-level floor checks for the elaboration hierarchy (#229).
+"""Per-level floor checks for the elaboration hierarchy.
 
 Floor checks ask "is this level complete and consistent?" — they're
-deterministic, cheap, and produce specific actionable findings. Ceiling
-sketches (descriptive guidance for what separates passable from
-excellent) live in the design docs but aren't separately scored — they
-inform LLM prompts at v2 and beyond.
-
+deterministic, cheap, and produce specific actionable findings.
 Reuses existing scoring (structural.py, hone.py) at level 6 + 7 rather
 than re-implementing.
 
@@ -24,7 +20,7 @@ Each scorer returns:
 
 import os
 import re
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from storyforge.elaborate import _read_csv
 
@@ -39,27 +35,27 @@ from storyforge.elaborate import _read_csv
 VALID_SEVERITIES = frozenset({'high', 'medium', 'low'})
 
 
-class CheckResult(TypedDict):
+class CheckResult(TypedDict, total=False):
     """One floor-check finding. Contract for every entry in LevelResult.checks."""
-    check: str
-    passed: bool
-    detail: str
-    severity: str  # one of VALID_SEVERITIES
+    check: str         # required — the check name (stable, used as finding_id)
+    passed: bool       # required — did the check evaluation pass
+    detail: str        # required — explanation surfaced to the author
+    severity: str      # required — one of VALID_SEVERITIES
+    accepted: bool     # optional, default False — author override applied
 
 
 class LevelResult(TypedDict):
     """The result dict every per-level scorer returns.
 
-    Invariant (enforced at construction by _result): passed + failed ==
-    len(checks). Callers shouldn't mutate `checks` after construction;
-    consumers (cmd_score._print_level_result, scoring_consistency) read
-    these counts directly.
+    Invariants: passed + failed == len(checks); accepted ≤ failed
+    (passed checks are never marked accepted).
     """
     level: int
     name: str
     checks: list[CheckResult]
     passed: int
     failed: int
+    accepted: int
 
 
 # ============================================================================
@@ -69,13 +65,39 @@ class LevelResult(TypedDict):
 def _result(level: int, name: str, checks: list[CheckResult]) -> LevelResult:
     passed = sum(1 for c in checks if c['passed'])
     failed = sum(1 for c in checks if not c['passed'])
+    accepted = sum(1 for c in checks if c.get('accepted') and not c['passed'])
     return {
         'level': level,
         'name': name,
         'checks': checks,
         'passed': passed,
         'failed': failed,
+        'accepted': accepted,
     }
+
+
+def _apply_overrides(project_dir: str, result: LevelResult) -> LevelResult:
+    """Tag each failed check whose author-override is `accepted` and
+    recompute the result's `accepted` count.
+
+    Override scope = `level-N`, axis = `level-quality`, finding_id = the
+    check string itself (it's human-readable and stable across runs).
+    """
+    from storyforge.scoring_state import is_override_accepted
+    scope = f'level-{result["level"]}'
+    new_checks: list[CheckResult] = []
+    for c in result['checks']:
+        c_out: CheckResult = dict(c)  # type: ignore[assignment]
+        c_out.setdefault('accepted', False)
+        if not c['passed']:
+            if is_override_accepted(
+                scope=scope, axis='level-quality',
+                finding_id=c['check'], project_dir=project_dir,
+            ):
+                c_out['accepted'] = True
+        new_checks.append(c_out)
+    accepted = sum(1 for c in new_checks if c.get('accepted') and not c['passed'])
+    return {**result, 'checks': new_checks, 'accepted': accepted}
 
 
 def _check(check: str, passed: bool, detail: str = '',
@@ -239,7 +261,53 @@ def score_spine(project_dir: str, medium: str = 'novel') -> dict:
         severity='medium',
     ))
 
+    checks.extend(_summary_checks(rows, label='event'))
     return _result(3, 'spine', checks)
+
+
+# ============================================================================
+# Shared summary-column checks (spine, architecture, scene-map)
+# ============================================================================
+
+_SUMMARY_MAX_WORDS = 35
+
+
+def _summary_checks(
+    rows: list[dict], *, label: Literal['event', 'anchor', 'scene'],
+) -> list[dict]:
+    """Return floor-check entries for the `summary` column across rows.
+
+    Two checks per tier:
+      - summary populated for every row
+      - summary ≤ _SUMMARY_MAX_WORDS for every row
+    """
+    if not rows:
+        return []
+    missing = [r.get('id', '?') for r in rows if not r.get('summary', '').strip()]
+    too_long = []
+    for r in rows:
+        text = r.get('summary', '').strip()
+        if text and _count_words(text) > _SUMMARY_MAX_WORDS:
+            too_long.append((r.get('id', '?'), _count_words(text)))
+    return [
+        _check(
+            'summary non-empty for every ' + label,
+            not missing,
+            (f'{len(missing)} {label}(s) missing summary: '
+             + ', '.join(missing[:5])
+             + ('…' if len(missing) > 5 else ''))
+            if missing else '',
+            severity='medium',
+        ),
+        _check(
+            f'summary ≤ {_SUMMARY_MAX_WORDS} words for every ' + label,
+            not too_long,
+            (f'{len(too_long)} {label}(s) over the word limit; '
+             f'first: {too_long[0][0]} has {too_long[0][1]} words'
+             if too_long else ''),
+            severity='low',
+        ),
+    ]
 
 
 # ============================================================================
@@ -353,6 +421,7 @@ def score_architecture(project_dir: str, medium: str = 'novel') -> dict:
             severity='low',
         ))
 
+    checks.extend(_summary_checks(rows, label='anchor'))
     return _result(4, 'architecture', checks)
 
 
@@ -378,6 +447,18 @@ def score_scene_map(project_dir: str) -> dict:
     map_rows = [r for r in rows
                 if r.get('status', '').strip()
                 in ('mapped', 'briefed', 'drafted', 'polished')]
+
+    # Distinguish "scene-map elaborated" from "scenes.csv exists but has no
+    # map-tier rows yet" — without this, every check below vacuous-passes on
+    # empty input.
+    checks.append(_check(
+        'scene-map has at least one row',
+        bool(map_rows),
+        ('reference/scenes.csv has no rows with status mapped/briefed/'
+         'drafted/polished — run elaborate at the scene-map stage'
+         if not map_rows else ''),
+        severity='high',
+    ))
 
     # Required operational columns at the map level.
     required = ['location', 'timeline_day', 'time_of_day', 'duration']
@@ -432,6 +513,7 @@ def score_scene_map(project_dir: str) -> dict:
             severity='low',
         ))
 
+    checks.extend(_summary_checks(map_rows, label='scene'))
     return _result(5, 'scene-map', checks)
 
 
@@ -455,6 +537,18 @@ def score_briefs(project_dir: str) -> dict:
         return _result(6, 'briefs', checks)
 
     rows = _read_csv(briefs_path)
+
+    # Distinguish "briefs elaborated" from "scene-briefs.csv exists but is
+    # empty" (pre-brief phase) — without this, the populated-fields check
+    # below vacuous-passes on zero rows.
+    checks.append(_check(
+        'scene-briefs.csv has at least one row',
+        bool(rows),
+        ('reference/scene-briefs.csv is header-only — run elaborate at '
+         'the brief stage' if not rows else ''),
+        severity='high',
+    ))
+
     # Required fields at brief stage.
     required = ['goal', 'conflict', 'outcome', 'crisis', 'decision']
     missing_any = []
@@ -500,14 +594,21 @@ LEVEL_NAMES = {
 
 
 def score_level(project_dir: str, level: int, medium: str = 'novel') -> dict:
-    """Run the floor checks for one level. Returns the standard result dict."""
+    """Run the floor checks for one level. Returns the standard result dict.
+
+    Each failed check is run through `_apply_overrides` so author-accepted
+    findings get tagged with `accepted=True` and excluded from the
+    `failed`-but-not-`accepted` count that quality-gate code consumes.
+    """
     if level not in LEVEL_SCORERS:
         raise ValueError(f'unknown level: {level}')
     scorer = LEVEL_SCORERS[level]
     # Only spine + architecture take medium today.
     if level in (3, 4):
-        return scorer(project_dir, medium=medium)
-    return scorer(project_dir)
+        raw = scorer(project_dir, medium=medium)
+    else:
+        raw = scorer(project_dir)
+    return _apply_overrides(project_dir, raw)
 
 
 def score_all_levels(project_dir: str, medium: str = 'novel') -> list[dict]:

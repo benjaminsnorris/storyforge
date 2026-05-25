@@ -208,15 +208,30 @@ def _sanitize_field(value: str) -> str:
 def _read_pipe_csv(path: str) -> list[dict]:
     """Read a pipe-delimited CSV the project way: split on '|', no quoting.
 
-    Strips \\r so CRLF line endings don't bleed into field values.
+    Strips \\r so CRLF line endings don't bleed into field values. Rows
+    whose column count doesn't match the header are logged at WARNING
+    and skipped — a single corrupted row no longer silently disables
+    every override downstream.
     """
-    with open(path, encoding='utf-8') as f:
-        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    try:
+        with open(path, encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    except UnicodeDecodeError as e:
+        log(f'WARNING: could not read {path} as utf-8 ({e}); treating as empty')
+        return []
     lines = [line for line in raw.splitlines() if line.strip()]
     if not lines:
         return []
     header = lines[0].split('|')
-    return [dict(zip(header, line.split('|'))) for line in lines[1:]]
+    rows = []
+    for i, line in enumerate(lines[1:], start=2):
+        fields = line.split('|')
+        if len(fields) != len(header):
+            log(f'WARNING: {path}:{i} has {len(fields)} columns, expected '
+                f'{len(header)}; skipping row')
+            continue
+        rows.append(dict(zip(header, fields)))
+    return rows
 
 
 def _append_pipe_csv(path: str, header: list[str], row: dict) -> None:

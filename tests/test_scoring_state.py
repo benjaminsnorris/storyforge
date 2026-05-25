@@ -288,3 +288,53 @@ def test_verdict_header_includes_coaching_level(tmp_path):
     )
     content = open(os.path.join(str(tmp_path), VERDICTS_PATH)).read()
     assert 'coaching_level' in content.splitlines()[0]
+
+
+# ---------------------------------------------------------------------------
+# Robustness of _read_pipe_csv (regression: PR #232 silent-failure review)
+# ---------------------------------------------------------------------------
+
+def test_malformed_row_logged_and_skipped(tmp_path, capsys):
+    """A row with the wrong column count must be logged and skipped — not
+    silently zip()-truncated into a half-valid dict that disables overrides."""
+    overrides_path = os.path.join(str(tmp_path), OVERRIDES_PATH)
+    os.makedirs(os.path.dirname(overrides_path), exist_ok=True)
+    with open(overrides_path, 'w') as f:
+        # Valid row, then a truncated row missing 2 columns, then a valid row.
+        f.write('scope|axis|finding_id|verdict|rationale|recorded_at\n')
+        f.write('sc1|bible-consistency|abc123|accepted|reason|2026-05-24\n')
+        f.write('sc2|bible-consistency|def456|accepted\n')  # missing 2
+        f.write('sc3|bible-consistency|ghi789|accepted|r|2026-05-24\n')
+    entries = read_overrides(str(tmp_path))
+    assert len(entries) == 2
+    assert {e['scope'] for e in entries} == {'sc1', 'sc3'}
+    out = capsys.readouterr().out
+    assert 'WARNING' in out and 'columns' in out
+
+
+def test_extra_columns_logged_and_skipped(tmp_path, capsys):
+    """Same protection on the other side: more columns than the header."""
+    overrides_path = os.path.join(str(tmp_path), OVERRIDES_PATH)
+    os.makedirs(os.path.dirname(overrides_path), exist_ok=True)
+    with open(overrides_path, 'w') as f:
+        f.write('scope|axis|finding_id|verdict|rationale|recorded_at\n')
+        f.write('sc1|bible|abc|accepted|reason|2026-05-24|stray|extra\n')
+    entries = read_overrides(str(tmp_path))
+    assert entries == []
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+
+
+def test_override_lookup_survives_one_bad_row(tmp_path):
+    """is_override_accepted still finds valid entries when a sibling row is
+    corrupt — a typo in one row must not disable the override mechanism."""
+    overrides_path = os.path.join(str(tmp_path), OVERRIDES_PATH)
+    os.makedirs(os.path.dirname(overrides_path), exist_ok=True)
+    with open(overrides_path, 'w') as f:
+        f.write('scope|axis|finding_id|verdict|rationale|recorded_at\n')
+        f.write('sc2|bible|def|accepted\n')  # malformed
+        f.write('sc1|bible|abc|accepted|reason|2026-05-24\n')  # valid
+    assert is_override_accepted(
+        scope='sc1', axis='bible', finding_id='abc',
+        project_dir=str(tmp_path),
+    ) is True

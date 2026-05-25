@@ -211,6 +211,7 @@ def test_hook_path_filter_matches_new_paths():
         'reference/architecture.csv',
         'reference/spine.md',
         'reference/architecture.md',
+        'reference/outline.md',
         'reference/scenes.csv',  # existing — should still match
         'reference/scenes-review.md',
     ):
@@ -221,3 +222,180 @@ def test_hook_path_filter_matches_new_paths():
         'reference/spine.csv.bak',  # extension boundary
     ):
         assert not rx.search(bad), f'hook must not fire for {bad!r}'
+
+
+# ---------------------------------------------------------------------------
+# Unified outline.md rendering
+# ---------------------------------------------------------------------------
+
+def test_outline_md_renders_three_sections(tmp_path):
+    """export_outline_md produces a numbered list for each populated CSV."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'spine.csv'),
+        'id|seq|title|summary|function|part',
+        [
+            'ev-1|1|First|Lucien finds an anomaly.|inciting|1',
+            'ev-2|2|Second|The Archive responds with suppression.|turning|2',
+        ],
+    )
+    _write_csv(
+        os.path.join(str(ref), 'architecture.csv'),
+        'id|seq|title|summary|part|pov|spine_event|action_sequel|emotional_arc|'
+        'value_at_stake|value_shift|turning_point',
+        [
+            'a01|1|Studio|Lucien finalizes a portrait with growing unease.|1|'
+            'POV|ev-1|action|confidence to unease|vocation|+/-|revelation',
+        ],
+    )
+    _write_csv(
+        os.path.join(str(ref), 'scenes.csv'),
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words',
+        [
+            'sc-1|1|Studio|A portrait refuses to finish on a quiet morning.|'
+            '1|p|loc|1|morning|2h|character|mapped|0|2500',
+        ],
+    )
+
+    from storyforge.cmd_scenes_export import export_outline_md
+    out = export_outline_md(str(tmp_path))
+    assert out
+    text = open(out).read()
+    assert '# Story outline' in text
+    assert '## Spine' in text
+    assert '## Architecture' in text
+    assert '## Scenes' in text
+    # Numbered list aligned to seq
+    assert '1. Lucien finds an anomaly.' in text
+    assert '2. The Archive responds with suppression.' in text
+    assert '1. Lucien finalizes a portrait with growing unease.' in text
+    assert '1. A portrait refuses to finish on a quiet morning.' in text
+
+
+def test_outline_md_marks_missing_summaries(tmp_path):
+    """Empty summary cells render as _(missing)_ markers so the author can
+    see exactly which rows still need to be written."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'spine.csv'),
+        'id|seq|title|summary|function|part',
+        [
+            'ev-1|1|First|Has summary.|inciting|1',
+            'ev-2|2|Second||turning|2',
+        ],
+    )
+    from storyforge.cmd_scenes_export import export_outline_md
+    out = export_outline_md(str(tmp_path))
+    text = open(out).read()
+    assert '1. Has summary.' in text
+    assert '2. _(missing)_' in text
+
+
+def test_outline_md_handles_missing_csvs(tmp_path):
+    """If only spine.csv exists, the other sections render '(no source file yet)'."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'spine.csv'),
+        'id|seq|title|summary|function|part',
+        ['ev-1|1|First|Just the spine for now.|inciting|1'],
+    )
+    from storyforge.cmd_scenes_export import export_outline_md
+    out = export_outline_md(str(tmp_path))
+    text = open(out).read()
+    assert '1. Just the spine for now.' in text
+    assert '(no source file yet)' in text
+
+
+def test_outline_md_sorts_by_seq(tmp_path):
+    """Rows are rendered in seq order, not file order."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'spine.csv'),
+        'id|seq|title|summary|function|part',
+        [
+            'ev-c|3|Third|Third in story order.|f|2',
+            'ev-a|1|First|First in story order.|f|1',
+            'ev-b|2|Second|Second in story order.|f|1',
+        ],
+    )
+    from storyforge.cmd_scenes_export import export_outline_md
+    out = export_outline_md(str(tmp_path))
+    text = open(out).read()
+    pos1 = text.index('First in story order.')
+    pos2 = text.index('Second in story order.')
+    pos3 = text.index('Third in story order.')
+    assert pos1 < pos2 < pos3
+
+
+def test_outline_md_returns_empty_when_no_sources(tmp_path):
+    """No spine.csv, no architecture.csv, no scenes.csv → no file written."""
+    (tmp_path / 'reference').mkdir()
+    from storyforge.cmd_scenes_export import export_outline_md
+    out = export_outline_md(str(tmp_path))
+    assert out == ''
+    assert not os.path.isfile(str(tmp_path / 'reference' / 'outline.md'))
+
+
+def test_outline_md_skips_csv_without_summary_column(tmp_path):
+    """Legacy CSVs without a summary column render as empty sections — no
+    crash, just '(no rows yet)'."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'spine.csv'),
+        'id|seq|title|function|part',  # no summary column
+        ['ev-1|1|t|f|1'],
+    )
+    from storyforge.cmd_scenes_export import export_outline_md
+    out = export_outline_md(str(tmp_path))
+    text = open(out).read()
+    # The Spine section renders but with no items (summary column absent)
+    assert '## Spine' in text
+    assert '(no rows yet)' in text
+
+
+def test_outline_md_missing_seq_renders_with_placeholder(tmp_path):
+    """A row whose seq cell is missing or non-integer renders with '?.' —
+    NOT with a billion-numbered list item."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'spine.csv'),
+        'id|seq|title|summary|function|part',
+        [
+            'ev-1|1|First|First in order.|inciting|1',
+            'ev-2||Has no seq|This row has no seq cell.|turn|2',
+            'ev-3|notanumber|Bad seq|This row has a non-integer seq.|midpoint|2',
+        ],
+    )
+    from storyforge.cmd_scenes_export import export_outline_md
+    text = open(export_outline_md(str(tmp_path))).read()
+    assert '1. First in order.' in text
+    assert '?. This row has no seq cell.' in text
+    assert '?. This row has a non-integer seq.' in text
+    # Should NEVER produce a billion-numbered item
+    assert '1000000000' not in text
+
+
+def test_outline_md_field_count_mismatch_logs_and_skips(tmp_path, capsys):
+    """A row with wrong field count is logged WARNING and skipped — not
+    silently misaligned via zip()."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    spine = ref / 'spine.csv'
+    with open(spine, 'w') as f:
+        f.write('id|seq|title|summary|function|part\n')
+        f.write('ev-1|1|Good|Good summary.|inciting|1\n')
+        f.write('ev-2|2|Truncated\n')  # too few fields
+    from storyforge.cmd_scenes_export import export_outline_md
+    text = open(export_outline_md(str(tmp_path))).read()
+    out = capsys.readouterr().out
+    assert 'WARNING' in out and 'fields' in out
+    assert '1. Good summary.' in text
+    # Truncated row should NOT appear
+    assert 'Truncated' not in text

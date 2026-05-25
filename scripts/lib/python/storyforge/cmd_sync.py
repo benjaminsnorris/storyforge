@@ -29,12 +29,28 @@ import tempfile
 from storyforge.common import detect_project_root, install_signal_handlers, log
 from storyforge.cmd_scenes_export import (
     DEFAULT_OUTPUT_PATH, SECTION_SPECS, export_scenes,
-    export_spine_md, export_architecture_md,
+    export_spine_md, export_architecture_md, export_outline_md,
 )
 from storyforge.cmd_scenes_import import import_scenes
 
 
-CSV_RELS = [csv_rel for _, csv_rel in SECTION_SPECS]
+# Round-trip CSVs participate in MD round-trip via scenes-review.md.
+ROUND_TRIP_CSV_RELS = [csv_rel for _, csv_rel in SECTION_SPECS]
+
+# One-way CSVs render to their own derived MD on every sync; no importer.
+# Tracking them here lets sync detect when only spine.csv or architecture.csv
+# changed and trigger the export. The corresponding MDs (spine.md,
+# architecture.md) are not tracked as round-trip targets — authors edit
+# the CSV; sync regenerates the MD.
+ONE_WAY_CSV_RELS = [
+    'reference/spine.csv',
+    'reference/architecture.csv',
+]
+
+assert not (set(ROUND_TRIP_CSV_RELS) & set(ONE_WAY_CSV_RELS)), (
+    'a CSV cannot be both round-trip and one-way — would double-render'
+)
+CSV_RELS = ROUND_TRIP_CSV_RELS + ONE_WAY_CSV_RELS
 CONFLICT_REPORT_PATH = os.path.join('working', 'sync-conflict.md')
 
 # git diff --quiet exit codes
@@ -113,6 +129,9 @@ def _export_all_derived(project_dir: str, md_path: str) -> None:
     # missing, so we don't need a guard around these.
     export_spine_md(project_dir)
     export_architecture_md(project_dir)
+    # Unified outline view (one-way: regenerated from the summary columns
+    # of spine.csv / architecture.csv / scenes.csv).
+    export_outline_md(project_dir)
 
 
 def _scenes_csv_has_rows(project_dir: str) -> bool:
@@ -143,8 +162,11 @@ def detect_state(project_dir, md_rel=DEFAULT_OUTPUT_PATH):
             'storyforge sync requires git for state detection.'
         )
     dirty_csvs = [p for p in CSV_RELS if _is_dirty(project_dir, p)]
+    # Only round-trip CSVs hard-refuse when missing: scenes-review.md
+    # depends on them. One-way CSVs (spine/architecture) can be legitimately
+    # deleted — sync clears the derived MD and continues.
     missing_csvs = [
-        p for p in CSV_RELS
+        p for p in ROUND_TRIP_CSV_RELS
         if _file_in_head(project_dir, p)
         and not os.path.isfile(os.path.join(project_dir, p))
     ]
@@ -176,9 +198,15 @@ def _write_conflict_report(project_dir, state, md_rel):
     ) as tmp:
         tmp_md = tmp.name
     try:
-        export_scenes(project_dir, tmp_md)
-        with open(tmp_md, encoding='utf-8') as f:
-            csv_side = f.read()
+        if _scenes_csv_has_rows(project_dir):
+            export_scenes(project_dir, tmp_md)
+            with open(tmp_md, encoding='utf-8') as f:
+                csv_side = f.read()
+        else:
+            # Pre-scene-map phase: scenes.csv is header-only. Render an
+            # empty-but-valid CSV-side preview rather than letting
+            # build_scene_list SystemExit out of the conflict report.
+            csv_side = '(scenes.csv has no rows yet — pre-scene-map phase)'
     except (OSError, UnicodeError, ValueError) as e:
         # Narrow except: surface real bugs in export (schema drift, missing
         # CSVs, encoding) loudly rather than burying them in the report body.
@@ -331,20 +359,22 @@ SYNC_TRACKED_PATHS = [
     'reference/scene-intent.csv',
     'reference/scene-briefs.csv',
     'reference/scenes-review.md',
-    # Elaboration v1 (#229): structural-anchor tier CSVs + their derived
-    # markdown renderings. Sync regenerates spine.md / architecture.md
-    # when the underlying CSV is dirty.
+    # Structural-anchor CSVs and their derived markdown renderings.
     'reference/spine.csv',
     'reference/architecture.csv',
     'reference/spine.md',
     'reference/architecture.md',
+    # outline.md is the unified expanding-outline view rendered from the
+    # `summary` columns of all three structural CSVs. Must be in this list
+    # so the pre-commit hook stages it after regeneration.
+    'reference/outline.md',
 ]
 
 # Regex the hook uses to decide whether the current commit touches any
 # sync-tracked path. Defined here so it can be unit-tested in Python.
 HOOK_PATH_FILTER = (
     r'^reference/(scenes|scene-intent|scene-briefs|spine|architecture)\.csv$'
-    r'|^reference/(scenes-review|spine|architecture)\.md$'
+    r'|^reference/(scenes-review|spine|architecture|outline)\.md$'
 )
 
 HOOK_SCRIPT = f'''#!/usr/bin/env bash

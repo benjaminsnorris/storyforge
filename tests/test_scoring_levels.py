@@ -152,8 +152,9 @@ def test_spine_missing_file(tmp_path):
 def test_spine_correct_range_novel(tmp_path):
     _write_csv(
         os.path.join(str(tmp_path), 'reference', 'spine.csv'),
-        'id|seq|title|function|part',
-        [f'event-{i}|{i}|Title {i}|Causes the next thing|1' for i in range(1, 8)],
+        'id|seq|title|summary|function|part',
+        [f'event-{i}|{i}|Title {i}|Summary {i} in one sentence.|Causes the next thing|1'
+         for i in range(1, 8)],
     )
     r = score_spine(str(tmp_path), medium='novel')
     assert r['failed'] == 0
@@ -261,6 +262,196 @@ def test_briefs_against_fixture(project_dir):
     r = score_briefs(project_dir)
     assert r['level'] == 6
     assert isinstance(r['checks'], list)
+
+
+def test_scene_map_fails_when_no_map_rows(tmp_path):
+    """Regression: header-only scenes.csv must NOT vacuous-pass level 5.
+
+    Pre-scene-map phases (spine, architecture) legitimately have empty
+    scenes.csv. Level 5 should report this as 'not yet elaborated', not
+    as 'metadata populated' (which is true only because there are zero
+    rows to check)."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|'
+        'type|status|word_count|target_words|target_pages|panel_count|page_count\n'
+    )
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
+        'turning_point|characters|on_stage|mice_threads\n'
+    )
+    r = score_scene_map(str(tmp_path))
+    assert r['level'] == 5
+    first = r['checks'][0]
+    assert first['check'] == 'scene-map has at least one row'
+    assert first['passed'] is False
+    assert 'scene-map stage' in first['detail']
+
+
+def test_scene_map_fails_when_only_pre_map_status_rows(tmp_path):
+    """Rows at status=architecture (pre-scene-map) should also trigger the
+    'no map rows' failure — those belong to architecture.csv, not the
+    scene-map tier."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|'
+        'type|status|word_count|target_words|target_pages|panel_count|page_count\n'
+        'sc-1|1|t|1|p|l|||||plot|architecture|||||\n'
+    )
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
+        'turning_point|characters|on_stage|mice_threads\n'
+    )
+    r = score_scene_map(str(tmp_path))
+    first = r['checks'][0]
+    assert first['check'] == 'scene-map has at least one row'
+    assert first['passed'] is False
+
+
+def test_spine_summary_required(tmp_path):
+    """Level 3 must flag spine events that lack a one-sentence summary."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'spine.csv').write_text(
+        'id|seq|title|summary|function|part\n'
+        'ev-1|1|First|First event in one sentence.|inciting|1\n'
+        'ev-2|2|Second||turning point|2\n'
+        'ev-3|3|Third|Third event.|midpoint|2\n'
+        'ev-4|4|Fourth|Fourth event.|climax|3\n'
+    )
+    from storyforge.scoring_levels import score_spine
+    r = score_spine(str(tmp_path), medium='graphic-novel')
+    summary_check = next(
+        (c for c in r['checks'] if c['check'].startswith('summary non-empty')),
+        None,
+    )
+    assert summary_check is not None
+    assert summary_check['passed'] is False
+    assert 'ev-2' in summary_check['detail']
+
+
+def test_spine_summary_word_limit(tmp_path):
+    """Level 3 must flag spine summaries that exceed the word limit."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    long_summary = ' '.join(['word'] * 40)  # 40 words, over the 35 limit
+    (ref / 'spine.csv').write_text(
+        'id|seq|title|summary|function|part\n'
+        f'ev-1|1|t|{long_summary}|inciting|1\n'
+        'ev-2|2|t|short summary.|turn|2\n'
+        'ev-3|3|t|short summary.|midpoint|2\n'
+        'ev-4|4|t|short summary.|climax|3\n'
+    )
+    from storyforge.scoring_levels import score_spine
+    r = score_spine(str(tmp_path), medium='graphic-novel')
+    word_check = next(
+        (c for c in r['checks'] if 'words' in c['check']),
+        None,
+    )
+    assert word_check is not None
+    assert word_check['passed'] is False
+    assert '40 words' in word_check['detail']
+
+
+def test_architecture_summary_required(tmp_path):
+    """Level 4 must flag architecture anchors that lack a summary."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'spine.csv').write_text(
+        'id|seq|title|summary|function|part\n'
+        'ev-1|1|t|s|f|1\n'
+    )
+    rows = [
+        f'a{i:02d}|{i}|t||1|POV|ev-1|action|focus to ease|safety|+/-|reveal'
+        for i in range(1, 11)
+    ]
+    # First anchor has a summary; rest don't
+    rows[0] = 'a01|1|t|One-sentence summary.|1|POV|ev-1|action|focus to ease|safety|+/-|reveal'
+    (ref / 'architecture.csv').write_text(
+        'id|seq|title|summary|part|pov|spine_event|action_sequel|'
+        'emotional_arc|value_at_stake|value_shift|turning_point\n'
+        + '\n'.join(rows) + '\n'
+    )
+    from storyforge.scoring_levels import score_architecture
+    r = score_architecture(str(tmp_path), medium='graphic-novel')
+    summary_check = next(
+        (c for c in r['checks'] if c['check'].startswith('summary non-empty')),
+        None,
+    )
+    assert summary_check is not None
+    assert summary_check['passed'] is False
+
+
+def test_scene_map_summary_check_runs_only_on_map_tier_rows(tmp_path):
+    """If scenes.csv has mixed-status rows (some at architecture, some at
+    mapped), the summary check must run only against the map-tier subset.
+    Pre-map rows shouldn't false-positive as 'missing summary'."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words\n'
+        # mapped row WITH summary — should pass
+        'sc-1|1|t|Has summary.|1|p|loc|1|morning|2h|character|mapped|0|2500\n'
+        # mapped row WITHOUT summary — should fail
+        'sc-2|2|t||1|p|loc|1|morning|2h|character|mapped|0|2500\n'
+        # architecture row without summary — should NOT count as a failure
+        'sc-3|3|t||1|p||||||character|architecture|||\n'
+    )
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
+        'turning_point|characters|on_stage|mice_threads\n'
+    )
+    from storyforge.scoring_levels import score_scene_map
+    r = score_scene_map(str(tmp_path))
+    summary_check = next(
+        (c for c in r['checks'] if c['check'].startswith('summary non-empty')),
+        None,
+    )
+    assert summary_check is not None
+    assert summary_check['passed'] is False
+    # sc-2 (mapped, missing summary) flagged; sc-3 (architecture) not.
+    assert 'sc-2' in summary_check['detail']
+    assert 'sc-3' not in summary_check['detail']
+
+
+def test_scene_map_summary_check_skipped_when_no_map_rows(tmp_path):
+    """Summary check should not run when there are no map-tier rows
+    (the prior 'at least one row' check already covers that case)."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words\n'
+    )
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
+        'turning_point|characters|on_stage|mice_threads\n'
+    )
+    from storyforge.scoring_levels import score_scene_map
+    r = score_scene_map(str(tmp_path))
+    # 'has at least one row' should fail, but no summary check should appear.
+    summary_checks = [c for c in r['checks']
+                      if 'summary' in c['check'].lower()]
+    assert summary_checks == []
+
+
+def test_briefs_fails_when_csv_is_header_only(tmp_path):
+    """Regression: header-only scene-briefs.csv must NOT vacuous-pass level 6."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scene-briefs.csv').write_text(
+        'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|'
+        'key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow\n'
+    )
+    r = score_briefs(str(tmp_path))
+    assert r['level'] == 6
+    first = r['checks'][0]
+    assert first['check'] == 'scene-briefs.csv has at least one row'
+    assert first['passed'] is False
+    assert 'brief stage' in first['detail']
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +563,177 @@ def test_check_validates_severity():
         _check('test', True, '', severity='HIGH')
 
 
+# ---------------------------------------------------------------------------
+# v2 Phase 4: scoring-overrides wired as quality gate
+# ---------------------------------------------------------------------------
+
+def test_failed_check_with_override_tagged_accepted(tmp_path):
+    """An author-accepted override on a failed floor check tags the check
+    with accepted=True and decrements the effective failure count."""
+    # Empty story-summary triggers logline floor failures.
+    _write_summary(str(tmp_path), '''# Story summary
+
+## Logline
+
+''')
+    # Pre-record an override for the failing 'present' check.
+    from storyforge.scoring_state import append_override
+    append_override(
+        scope='level-0', axis='level-quality', finding_id='present',
+        verdict='accepted',
+        rationale='intentional placeholder while iterating',
+        recorded_at='2026-05-24', project_dir=str(tmp_path),
+    )
+
+    from storyforge.scoring_levels import score_level
+    r = score_level(str(tmp_path), 0)
+    # The 'present' check itself still surfaces (passed=False) but is
+    # tagged accepted.
+    present_check = next(c for c in r['checks'] if c['check'] == 'present')
+    assert not present_check['passed']
+    assert present_check.get('accepted') is True
+    # The result-level `accepted` count reflects this.
+    assert r['accepted'] == 1
+
+
+def test_unrelated_overrides_do_not_apply(tmp_path):
+    """An override for a different finding_id does NOT flip the unrelated
+    check."""
+    _write_summary(str(tmp_path), '''# Story summary
+
+## Logline
+
+''')
+    from storyforge.scoring_state import append_override
+    append_override(
+        scope='level-0', axis='level-quality',
+        finding_id='length ≤ 35 words',  # different finding
+        verdict='accepted', rationale='ok', recorded_at='2026-05-24',
+        project_dir=str(tmp_path),
+    )
+
+    from storyforge.scoring_levels import score_level
+    r = score_level(str(tmp_path), 0)
+    present_check = next(c for c in r['checks'] if c['check'] == 'present')
+    assert not present_check.get('accepted')
+
+
+def test_passed_check_is_never_marked_accepted(tmp_path):
+    """A passing check shouldn't pick up an `accepted=True` even if the
+    overrides file happens to mention its name."""
+    _write_summary(str(tmp_path), '''# Story summary
+
+## Logline
+
+A perfectly fine short logline.
+''')
+    from storyforge.scoring_state import append_override
+    append_override(
+        scope='level-0', axis='level-quality', finding_id='present',
+        verdict='accepted', rationale='whatever', recorded_at='2026-05-24',
+        project_dir=str(tmp_path),
+    )
+    from storyforge.scoring_levels import score_level
+    r = score_level(str(tmp_path), 0)
+    present_check = next(c for c in r['checks'] if c['check'] == 'present')
+    assert present_check['passed']
+    # Passing checks aren't tagged accepted (the field may be present
+    # but it's False for passing checks).
+    assert not present_check.get('accepted', False)
+
+
+def test_accepted_count_in_result_dict(tmp_path):
+    """LevelResult.accepted is an explicit count of accepted-failures."""
+    _write_summary(str(tmp_path), '''# Story summary
+
+## Logline
+
+''')
+    from storyforge.scoring_state import append_override
+    append_override(
+        scope='level-0', axis='level-quality', finding_id='present',
+        verdict='accepted', rationale='r', recorded_at='2026-05-24',
+        project_dir=str(tmp_path),
+    )
+    from storyforge.scoring_levels import score_level
+    r = score_level(str(tmp_path), 0)
+    # Invariant: accepted <= failed, accepted is part of failed not passed
+    assert r['accepted'] <= r['failed']
+    assert r['accepted'] >= 1
+
+
+def test_registry_consistency_respects_overrides(project_dir):
+    """The same override propagation applies to consistency checks."""
+    from storyforge.csv_cli import update_field
+    intent = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+    update_field(intent, 'act1-sc01', 'value_at_stake', 'definitely-not-a-real-value')
+
+    from storyforge.scoring_state import append_override
+    from storyforge.scoring_consistency import score_consistency_at_level
+
+    # First confirm the orphan flag is there (no override yet).
+    r = score_consistency_at_level(project_dir, 5)
+    bad = next((c for c in r['checks']
+                if 'value_at_stake' in c['check'] and not c['passed']), None)
+    assert bad is not None
+    assert not bad.get('accepted')
+
+    # Now add the override and re-run.
+    append_override(
+        scope='level-5', axis='registry-consistency',
+        finding_id=bad['check'], verdict='accepted',
+        rationale='intentional placeholder', recorded_at='2026-05-24',
+        project_dir=project_dir,
+    )
+    r2 = score_consistency_at_level(project_dir, 5)
+    bad2 = next(c for c in r2['checks'] if c['check'] == bad['check'])
+    assert bad2['accepted'] is True
+
+
 def test_score_all_levels_returns_seven(project_dir):
     results = score_all_levels(project_dir)
     assert len(results) == 7
     assert [r['level'] for r in results] == [0, 1, 2, 3, 4, 5, 6]
+
+
+# ---------------------------------------------------------------------------
+# _print_level_result headline arithmetic (regression: PR #232 test review)
+# ---------------------------------------------------------------------------
+
+def test_print_level_result_subtracts_accepted_from_failed(capsys):
+    """The CLI headline must show `failed - accepted` so the author sees
+    the real blocking count, not the raw failure count that included
+    accepted overrides. Pre-fix, a regression here could leave the dict
+    invariant intact while showing the wrong number to the user."""
+    from storyforge.cmd_score import _print_level_result
+    result = {
+        'level': 0, 'name': 'logline', 'checks': [
+            {'check': 'a', 'passed': True, 'detail': '', 'severity': 'high'},
+            {'check': 'b', 'passed': False, 'detail': 'd1', 'severity': 'high'},
+            {'check': 'c', 'passed': False, 'detail': 'd2', 'severity': 'high',
+             'accepted': True},
+            {'check': 'd', 'passed': False, 'detail': 'd3', 'severity': 'high'},
+        ],
+        'passed': 1, 'failed': 3, 'accepted': 1,
+    }
+    _print_level_result(result)
+    out = capsys.readouterr().out
+    assert '1 passed' in out
+    # 3 failed - 1 accepted = 2 real blocking failures shown to the author.
+    assert '2 failed' in out
+    assert '(+ 1 accepted)' in out
+
+
+def test_print_level_result_no_accepted_renders_no_suffix(capsys):
+    from storyforge.cmd_score import _print_level_result
+    result = {
+        'level': 0, 'name': 'logline', 'checks': [
+            {'check': 'a', 'passed': True, 'detail': '', 'severity': 'high'},
+            {'check': 'b', 'passed': False, 'detail': 'd', 'severity': 'high'},
+        ],
+        'passed': 1, 'failed': 1, 'accepted': 0,
+    }
+    _print_level_result(result)
+    out = capsys.readouterr().out
+    assert '1 passed, 1 failed' in out
+    assert 'accepted' not in out
