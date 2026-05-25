@@ -313,6 +313,249 @@ def step5_validate(ref_dir: str, project_dir: str) -> str:
 
 
 # ============================================================================
+# Step 6: bootstrap reference/story-summary.md from project.logline
+# ============================================================================
+
+# Re-rendering the template via Python rather than file-copying keeps the
+# command self-contained and avoids a templates path dependency.
+STORY_SUMMARY_BOOTSTRAP = """\
+<!--
+This file holds the story at progressively finer levels of detail:
+
+  - Logline (1 sentence)
+  - Synopsis (1 paragraph)
+  - Act-shape (3 paragraphs)
+  - Theme (2-4 sentences)
+
+Edit any section freely. `storyforge sync` keeps the structural tier
+aligned. Per-section update timestamps in the frontmatter feed cascade
+drift detection.
+
+Internal use only. None of this is pitch material — be specific.
+-->
+---
+logline_updated:
+synopsis_updated:
+act_shape_updated:
+theme_updated:
+---
+
+# Story summary
+
+## Logline
+
+{logline}
+
+## Synopsis
+
+(write the synopsis here)
+
+## Act-shape
+
+### Act 1
+(write Act 1 here)
+
+### Act 2
+(write Act 2 here)
+
+### Act 3
+(write Act 3 here)
+
+## Theme
+
+(write the central question or claim here)
+"""
+
+
+def step6_create_story_summary(project_dir: str, dry_run: bool) -> str:
+    """Create reference/story-summary.md if absent.
+
+    Seeds the Logline section from `storyforge.yaml:project.logline`
+    when present. Other sections get placeholder text the author fills in.
+    Skips if the file already exists (this step is idempotent).
+    """
+    path = os.path.join(project_dir, 'reference', 'story-summary.md')
+    if os.path.isfile(path):
+        return 'skip:already exists'
+
+    logline = (
+        read_yaml_field('project.logline', project_dir)
+        or read_yaml_field('logline', project_dir)
+        or '(write the logline here)'
+    )
+    content = STORY_SUMMARY_BOOTSTRAP.format(logline=logline)
+
+    if dry_run:
+        return f'create:{len(content)} bytes'
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    return f'create:{len(content)} bytes'
+
+
+# ============================================================================
+# Step 7: extract status=spine rows from scenes.csv into spine.csv
+# ============================================================================
+
+_SPINE_COLS_OUT = ['id', 'seq', 'title', 'function', 'part']
+
+
+def step7_extract_spine(ref_dir: str, dry_run: bool) -> str:
+    """Move spine-status rows from scenes.csv (+ scene-intent.csv `function`)
+    into reference/spine.csv.
+
+    Idempotent: skips if spine.csv already has data rows. Leaves scenes.csv
+    untouched in dry-run.
+    """
+    spine_path = os.path.join(ref_dir, 'spine.csv')
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+
+    if not os.path.isfile(scenes_path):
+        return 'skip:no scenes.csv'
+    if os.path.isfile(spine_path):
+        with open(spine_path, encoding='utf-8') as f:
+            existing = [l for l in f.read().splitlines() if l.strip()]
+        if len(existing) > 1:
+            return f'skip:spine.csv already has {len(existing) - 1} rows'
+
+    scenes_header, scenes_rows = _read_csv(scenes_path)
+    intent_header, intent_rows = _read_csv(intent_path)
+    intent_by_id = {r.get('id', ''): r for r in intent_rows}
+
+    spine_rows_out = []
+    keep_scene_rows = []
+    keep_intent_rows = []
+    for row in scenes_rows:
+        if row.get('status', '').strip() == 'spine':
+            intent = intent_by_id.get(row.get('id', ''), {})
+            spine_rows_out.append({
+                'id': row.get('id', ''),
+                'seq': row.get('seq', ''),
+                'title': row.get('title', ''),
+                'function': intent.get('function', ''),
+                'part': row.get('part', ''),
+            })
+        else:
+            keep_scene_rows.append(row)
+    for row in intent_rows:
+        if intent_by_id.get(row.get('id', '')) and \
+                row.get('id', '') in {r['id'] for r in spine_rows_out}:
+            continue  # this id moved to spine.csv
+        keep_intent_rows.append(row)
+
+    if not spine_rows_out:
+        return 'skip:no status=spine rows in scenes.csv'
+
+    if dry_run:
+        return f'extract:{len(spine_rows_out)} rows'
+
+    # Write spine.csv
+    with open(spine_path, 'w', encoding='utf-8') as f:
+        f.write('|'.join(_SPINE_COLS_OUT) + '\n')
+        for r in spine_rows_out:
+            f.write('|'.join(r[c] for c in _SPINE_COLS_OUT) + '\n')
+
+    # Rewrite scenes.csv without spine rows
+    _rewrite_csv(scenes_path, scenes_header, keep_scene_rows)
+    # Rewrite scene-intent.csv without rows that moved out
+    if intent_header:
+        _rewrite_csv(intent_path, intent_header, keep_intent_rows)
+
+    return f'extract:{len(spine_rows_out)} rows'
+
+
+# ============================================================================
+# Step 8: extract status=architecture rows from scenes.csv into architecture.csv
+# ============================================================================
+
+_ARCHITECTURE_COLS_OUT = [
+    'id', 'seq', 'title', 'part', 'pov', 'spine_event',
+    'action_sequel', 'emotional_arc', 'value_at_stake',
+    'value_shift', 'turning_point',
+]
+
+
+def step8_extract_architecture(ref_dir: str, dry_run: bool) -> str:
+    """Move architecture-status rows from scenes.csv (+ matching scene-intent
+    columns) into reference/architecture.csv. The `spine_event` reference
+    column is left empty; the author wires it up separately."""
+    arch_path = os.path.join(ref_dir, 'architecture.csv')
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    intent_path = os.path.join(ref_dir, 'scene-intent.csv')
+
+    if not os.path.isfile(scenes_path):
+        return 'skip:no scenes.csv'
+    if os.path.isfile(arch_path):
+        with open(arch_path, encoding='utf-8') as f:
+            existing = [l for l in f.read().splitlines() if l.strip()]
+        if len(existing) > 1:
+            return f'skip:architecture.csv already has {len(existing) - 1} rows'
+
+    scenes_header, scenes_rows = _read_csv(scenes_path)
+    intent_header, intent_rows = _read_csv(intent_path)
+    intent_by_id = {r.get('id', ''): r for r in intent_rows}
+
+    arch_rows_out = []
+    keep_scene_rows = []
+    keep_intent_rows = []
+    moved_ids = set()
+    for row in scenes_rows:
+        if row.get('status', '').strip() == 'architecture':
+            intent = intent_by_id.get(row.get('id', ''), {})
+            arch_rows_out.append({
+                'id': row.get('id', ''),
+                'seq': row.get('seq', ''),
+                'title': row.get('title', ''),
+                'part': row.get('part', ''),
+                'pov': row.get('pov', ''),
+                'spine_event': '',
+                'action_sequel': intent.get('action_sequel', ''),
+                'emotional_arc': intent.get('emotional_arc', ''),
+                'value_at_stake': intent.get('value_at_stake', ''),
+                'value_shift': intent.get('value_shift', ''),
+                'turning_point': intent.get('turning_point', ''),
+            })
+            moved_ids.add(row.get('id', ''))
+        else:
+            keep_scene_rows.append(row)
+    for row in intent_rows:
+        if row.get('id', '') in moved_ids:
+            continue
+        keep_intent_rows.append(row)
+
+    if not arch_rows_out:
+        return 'skip:no status=architecture rows in scenes.csv'
+
+    if dry_run:
+        return f'extract:{len(arch_rows_out)} rows'
+
+    with open(arch_path, 'w', encoding='utf-8') as f:
+        f.write('|'.join(_ARCHITECTURE_COLS_OUT) + '\n')
+        for r in arch_rows_out:
+            f.write('|'.join(r[c] for c in _ARCHITECTURE_COLS_OUT) + '\n')
+
+    _rewrite_csv(scenes_path, scenes_header, keep_scene_rows)
+    if intent_header:
+        _rewrite_csv(intent_path, intent_header, keep_intent_rows)
+
+    return f'extract:{len(arch_rows_out)} rows'
+
+
+def _rewrite_csv(path: str, header: list[str], rows: list[dict]) -> None:
+    """Rewrite a pipe-delimited CSV with the given header + rows.
+
+    Cells default to '' when a row is missing a header column. Preserves
+    header order even when rows have a different shape.
+    """
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('|'.join(header) + '\n')
+        for row in rows:
+            f.write('|'.join(row.get(c, '') for c in header) + '\n')
+
+
+# ============================================================================
 # Argument parsing
 # ============================================================================
 
@@ -352,21 +595,21 @@ def main(argv=None):
     # Step 1: Rename scene_type -> action_sequel
     result = step1_rename_scene_type(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [1/5] Rename scene_type -> action_sequel: skipped ({result[5:]})')
+        log(f'  [1/8] Rename scene_type -> action_sequel: skipped ({result[5:]})')
     else:
         count = result.split(':')[1]
-        log(f'  [1/5] Rename scene_type -> action_sequel: done ({count} rows)')
+        log(f'  [1/8] Rename scene_type -> action_sequel: done ({count} rows)')
 
     # Step 2: Remove threads column
     result = step2_remove_threads(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [2/5] Remove threads column: skipped ({result[5:]})')
+        log(f'  [2/8] Remove threads column: skipped ({result[5:]})')
     else:
         count = result.split(':')[1]
-        log(f'  [2/5] Remove threads column: done ({count} rows)')
+        log(f'  [2/8] Remove threads column: done ({count} rows)')
 
     # Step 3: Seed registries
-    log('  [3/5] Seed registries:')
+    log('  [3/8] Seed registries:')
     registry_results = step3_seed_registries(ref_dir, args.dry_run)
     for line in registry_results:
         registry = line.split(':')[0]
@@ -379,18 +622,39 @@ def main(argv=None):
 
     # Step 4: Normalize fields
     if args.dry_run:
-        log('  [4/5] Normalize fields: skipped (dry run)')
+        log('  [4/8] Normalize fields: skipped (dry run)')
     else:
         updated = step4_normalize(ref_dir, project_dir)
-        log(f'  [4/5] Normalize fields: {updated} cells updated')
+        log(f'  [4/8] Normalize fields: {updated} cells updated')
 
     # Step 5: Validate
     validate_output = step5_validate(ref_dir, project_dir)
     first_line = validate_output.split('\n')[0]
-    log(f'  [5/5] Schema validation: {first_line}')
+    log(f'  [5/8] Schema validation: {first_line}')
     rest_lines = validate_output.split('\n')[1:]
     for line in rest_lines:
         log(f'         {line}')
+
+    # Step 6: Bootstrap story-summary.md (elaboration v1)
+    result = step6_create_story_summary(project_dir, args.dry_run)
+    if result.startswith('skip:'):
+        log(f'  [6/8] Create story-summary.md: skipped ({result[5:]})')
+    else:
+        log(f'  [6/8] Create story-summary.md: {result.split(":")[1]}')
+
+    # Step 7: Extract spine.csv from status=spine rows
+    result = step7_extract_spine(ref_dir, args.dry_run)
+    if result.startswith('skip:'):
+        log(f'  [7/8] Extract spine.csv: skipped ({result[5:]})')
+    else:
+        log(f'  [7/8] Extract spine.csv: {result.split(":")[1]}')
+
+    # Step 8: Extract architecture.csv from status=architecture rows
+    result = step8_extract_architecture(ref_dir, args.dry_run)
+    if result.startswith('skip:'):
+        log(f'  [8/8] Extract architecture.csv: skipped ({result[5:]})')
+    else:
+        log(f'  [8/8] Extract architecture.csv: {result.split(":")[1]}')
 
     # Commit
     if args.dry_run:
