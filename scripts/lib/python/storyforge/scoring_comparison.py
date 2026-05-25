@@ -127,7 +127,8 @@ CEILING_AXES = {
 
 def compare_candidates(level: str, candidates: list[str],
                        semantic: bool = False,
-                       project_dir: str | None = None) -> dict:
+                       project_dir: str | None = None,
+                       dry_run: bool = False) -> dict:
     """Compare 2–4 candidate texts at the given level.
 
     Args:
@@ -138,6 +139,9 @@ def compare_candidates(level: str, candidates: list[str],
             (specificity, irony, hook word, etc.). When False (default),
             ceiling axes are returned with '—' placeholders.
         project_dir: required when semantic=True (for cost ledger).
+        dry_run: when True, semantic ceiling axes return em-dash
+            placeholders even with semantic=True — no LLM call is made.
+            Deterministic floor axes still populate normally.
 
     Returns:
         {
@@ -184,9 +188,11 @@ def compare_candidates(level: str, candidates: list[str],
         for name in axis_names
     ]
 
-    # Ceiling axes: populated via LLM when semantic=True.
-    ceiling_axes_table = _ceiling_axes_for(level, candidates, semantic,
-                                            project_dir=project_dir)
+    # Ceiling axes: populated via LLM when semantic=True (unless dry_run).
+    ceiling_axes_table = _ceiling_axes_for(
+        level, candidates, semantic and not dry_run,
+        project_dir=project_dir,
+    )
 
     return {
         'level': level,

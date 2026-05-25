@@ -155,6 +155,22 @@ def _parse_principles(raw: str, plugin_dir: str) -> list[str]:
     return requested
 
 
+def _check_llm_preconditions(operation: str, dry_run: bool) -> None:
+    """Verify ANTHROPIC_API_KEY is set before an LLM dispatch.
+
+    Skipped in dry-run mode (no API call will happen). Calls sys.exit(1)
+    with a clear message when the key is missing; this catches the case
+    before invoke_to_file raises a less-actionable network error.
+    """
+    if dry_run:
+        return
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        log(f'ERROR: ANTHROPIC_API_KEY is not set. {operation} requires '
+            'an API key. Set it and re-run, or use --dry-run to preview '
+            'without calling the LLM.')
+        sys.exit(1)
+
+
 def _run_elaboration_scoring(args) -> None:
     """Handle the elaboration-v1 + v2 scoring entry points.
 
@@ -184,14 +200,17 @@ def _run_elaboration_scoring(args) -> None:
     project_dir = detect_project_root()
     medium = get_medium(project_dir) or 'novel'
 
-    # --bible-consistency (v2): LLM check vs character/world/voice bibles.
+    # --bible-consistency: LLM check vs character/world/voice bibles.
     if args.bible_consistency:
         from storyforge.scoring_bible import score_bible_consistency
-        findings = score_bible_consistency(project_dir, scope=args.scope)
+        _check_llm_preconditions('--bible-consistency', dry_run=args.dry_run)
+        findings = score_bible_consistency(
+            project_dir, scope=args.scope, dry_run=args.dry_run,
+        )
         _print_bible_findings(findings)
         return
 
-    # --boundary / --all-boundaries (v2): LLM faithfulness diff.
+    # --boundary / --all-boundaries: LLM faithfulness diff.
     if args.boundary or args.all_boundaries:
         from storyforge.scoring_boundary import (
             score_boundary, score_all_boundaries, BOUNDARY_IDS,
@@ -200,14 +219,19 @@ def _run_elaboration_scoring(args) -> None:
             log(f'ERROR: --boundary must be one of {", ".join(BOUNDARY_IDS)}; '
                 f'got {args.boundary!r}.')
             sys.exit(1)
+        op = '--all-boundaries' if args.all_boundaries else f'--boundary {args.boundary}'
+        _check_llm_preconditions(op, dry_run=args.dry_run)
         if args.all_boundaries:
-            diffs = score_all_boundaries(project_dir)
+            diffs = score_all_boundaries(project_dir, dry_run=args.dry_run)
         else:
-            diffs = score_boundary(project_dir, args.boundary, scope=args.scope)
+            diffs = score_boundary(
+                project_dir, args.boundary,
+                scope=args.scope, dry_run=args.dry_run,
+            )
         _print_boundary_diffs(diffs)
         return
 
-    # --compare (v1 deterministic floor axes + v2 --semantic ceiling axes).
+    # --compare: deterministic floor axes + --semantic ceiling axes (LLM).
     if args.compare:
         if args.level is None:
             log('ERROR: --compare requires --level to know what kind of '
@@ -217,11 +241,14 @@ def _run_elaboration_scoring(args) -> None:
             log('ERROR: --compare is only supported at the prose tier '
                 '(levels 0-2).')
             sys.exit(1)
+        if args.semantic:
+            _check_llm_preconditions('--compare --semantic', dry_run=args.dry_run)
         candidates_text = [_read_candidate(c) for c in args.compare]
         try:
             result = compare_candidates(
                 LEVEL_NAMES[args.level], candidates_text,
                 semantic=args.semantic, project_dir=project_dir,
+                dry_run=args.dry_run,
             )
         except ValueError as e:
             log(f'ERROR: {e}')

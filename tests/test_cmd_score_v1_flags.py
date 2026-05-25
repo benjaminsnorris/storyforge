@@ -259,3 +259,129 @@ def test_compare_without_semantic_still_renders_placeholders(project_dir, monkey
     score_main(['--level', '0', '--compare', 'A logline.', 'Another logline.'])
     out = capsys.readouterr().out
     assert 'run with --semantic to populate' in out
+
+
+# ---------------------------------------------------------------------------
+# v2 dry-run + API-key + cost gating (regression: PR #232 review)
+# ---------------------------------------------------------------------------
+
+
+def _fail_if_called(prompt, model, log_file, **kwargs):
+    raise AssertionError(
+        f'LLM was called during dry-run: model={model} log_file={log_file}'
+    )
+
+
+def test_boundary_dry_run_does_not_call_llm(project_dir, monkeypatch, capsys):
+    """`--boundary --dry-run` must not call the LLM."""
+    _seed_story_summary(project_dir)
+    monkeypatch.chdir(project_dir)
+
+    from storyforge import api, scoring_boundary
+    monkeypatch.setattr(api, 'invoke_to_file', _fail_if_called)
+    monkeypatch.setattr(scoring_boundary, 'invoke_to_file', _fail_if_called)
+
+    # Should complete without raising.
+    score_main(['--boundary', '0->1', '--dry-run'])
+
+
+def test_all_boundaries_dry_run_does_not_call_llm(project_dir, monkeypatch, capsys):
+    """`--all-boundaries --dry-run` must not call the LLM."""
+    _seed_story_summary(project_dir)
+    monkeypatch.chdir(project_dir)
+
+    from storyforge import api, scoring_boundary
+    monkeypatch.setattr(api, 'invoke_to_file', _fail_if_called)
+    monkeypatch.setattr(scoring_boundary, 'invoke_to_file', _fail_if_called)
+
+    score_main(['--all-boundaries', '--dry-run'])
+
+
+def test_bible_consistency_dry_run_does_not_call_llm(project_dir, monkeypatch, capsys):
+    """`--bible-consistency --dry-run` must not call the LLM."""
+    ref = os.path.join(project_dir, 'reference')
+    with open(os.path.join(ref, 'character-bible.md'), 'w') as f:
+        f.write('content')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    with open(os.path.join(scenes_dir, 'scene-1.md'), 'w') as f:
+        f.write('Scene one prose.')
+
+    monkeypatch.chdir(project_dir)
+
+    from storyforge import api, scoring_bible
+    monkeypatch.setattr(api, 'invoke_to_file', _fail_if_called)
+    monkeypatch.setattr(scoring_bible, 'invoke_to_file', _fail_if_called)
+
+    score_main(['--bible-consistency', '--dry-run'])
+
+
+def test_compare_semantic_dry_run_does_not_call_llm(project_dir, monkeypatch, capsys):
+    """`--compare ... --semantic --dry-run` must not call the LLM."""
+    monkeypatch.chdir(project_dir)
+
+    from storyforge import api
+    monkeypatch.setattr(api, 'invoke_to_file', _fail_if_called)
+
+    score_main([
+        '--level', '0', '--semantic', '--dry-run',
+        '--compare', 'A logline.', 'A different logline.',
+    ])
+    out = capsys.readouterr().out
+    # Without LLM, ceiling table should show placeholders, not real values.
+    assert '—' in out or 'placeholder' in out.lower() or 'semantic' in out.lower()
+
+
+def test_bible_consistency_without_api_key_errors_cleanly(project_dir, monkeypatch):
+    """Missing ANTHROPIC_API_KEY should exit 1 with a clear message,
+    not crash inside invoke_to_file with a network error."""
+    ref = os.path.join(project_dir, 'reference')
+    with open(os.path.join(ref, 'character-bible.md'), 'w') as f:
+        f.write('content')
+    scenes_dir = os.path.join(project_dir, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    with open(os.path.join(scenes_dir, 'scene-1.md'), 'w') as f:
+        f.write('Scene one prose.')
+
+    monkeypatch.chdir(project_dir)
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+
+    with pytest.raises(SystemExit) as exc:
+        score_main(['--bible-consistency'])
+    assert exc.value.code == 1
+
+
+def test_boundary_without_api_key_errors_cleanly(project_dir, monkeypatch):
+    """Same as above for --boundary."""
+    _seed_story_summary(project_dir)
+    monkeypatch.chdir(project_dir)
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+
+    with pytest.raises(SystemExit) as exc:
+        score_main(['--boundary', '0->1'])
+    assert exc.value.code == 1
+
+
+def test_compare_semantic_without_api_key_errors_cleanly(project_dir, monkeypatch):
+    """--compare --semantic should also gate on API key."""
+    monkeypatch.chdir(project_dir)
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+
+    with pytest.raises(SystemExit) as exc:
+        score_main([
+            '--level', '0', '--semantic',
+            '--compare', 'A logline.', 'Another logline.',
+        ])
+    assert exc.value.code == 1
+
+
+def test_compare_without_semantic_does_not_need_api_key(project_dir, monkeypatch, capsys):
+    """Deterministic --compare (without --semantic) must NOT require a key."""
+    monkeypatch.chdir(project_dir)
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    score_main([
+        '--level', '0',
+        '--compare', 'A logline.', 'Another logline.',
+    ])
+    out = capsys.readouterr().out
+    assert 'Comparison' in out
