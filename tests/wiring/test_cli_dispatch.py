@@ -203,6 +203,7 @@ class TestElaborationScoreBypassesGN:
         expected = {
             '--level', '--all-levels', '--compare', '--drift',
             '--boundary', '--all-boundaries', '--bible-consistency',
+            '--story-power',
         }
         assert _ELABORATION_SCORE_FLAGS == expected
 
