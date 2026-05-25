@@ -22,11 +22,16 @@ _SCENES_COLS = [
     'word_count', 'target_words',
     # Graphic-novel-mode columns (ignored in novel mode, written in GN mode)
     'target_pages', 'panel_count', 'page_count',
+    # Pointer back to the architecture anchor this map scene serves
+    # (empty for purely interstitial scenes).
+    'architecture_scene',
 ]
 _INTENT_COLS = [
     'id', 'function', 'action_sequel', 'emotional_arc', 'value_at_stake',
     'value_shift', 'turning_point', 'characters', 'on_stage',
     'mice_threads',
+    # Themes (abstract concerns) this scene engages — references themes.csv.
+    'theme_threads',
 ]
 _BRIEFS_COLS = [
     'id', 'goal', 'conflict', 'outcome', 'crisis', 'decision',
@@ -37,11 +42,29 @@ _BRIEFS_COLS = [
     'page_layout', 'panel_breakdown', 'visual_keywords',
     'page_turn_beats', 'caption_strategy',
 ]
+# Structural-anchor tier: discrete CSVs with their own row identity.
+_SPINE_COLS = [
+    'id', 'seq', 'title', 'function', 'part',
+]
+_ARCHITECTURE_COLS = [
+    'id', 'seq', 'title', 'part', 'pov', 'spine_event',
+    'action_sequel', 'emotional_arc', 'value_at_stake',
+    'value_shift', 'turning_point',
+]
 
+# Order matters: `_file_for_column` returns the first file whose column
+# list contains the lookup. The manuscript-tier files come first because
+# they own shared column names (seq, title, part, etc.) in the legacy code
+# path. Structural-anchor files (spine.csv, architecture.csv) follow; they
+# share several column names with the manuscript files, so callers that
+# need to disambiguate by tier should use a tier-aware helper rather than
+# `_file_for_column` alone.
 _FILE_MAP = {
     'scenes.csv': _SCENES_COLS,
     'scene-intent.csv': _INTENT_COLS,
     'scene-briefs.csv': _BRIEFS_COLS,
+    'spine.csv': _SPINE_COLS,
+    'architecture.csv': _ARCHITECTURE_COLS,
 }
 
 

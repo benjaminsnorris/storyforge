@@ -132,6 +132,16 @@ COLUMN_SCHEMA = {
         'type': 'integer', 'file': 'scenes.csv', 'stage': 'drafting',
         'description': 'Page count after drafting (graphic-novel mode). Populated by cmd_write_gn.',
     },
+    'architecture_scene': {
+        'type': 'free_text', 'file': 'scenes.csv', 'stage': 'map',
+        'description': 'Reference to reference/architecture.csv:id — the architecture anchor this map scene serves (or own_id if the map scene IS the anchor). Empty for purely interstitial scenes.',
+    },
+
+    # architecture.csv — structural anchor tier
+    'spine_event': {
+        'type': 'free_text', 'file': 'architecture.csv', 'stage': 'architecture',
+        'description': 'Reference to reference/spine.csv:id — the spine event this architecture row elaborates. Required.',
+    },
 
     # scene-intent.csv
     'function': {
@@ -176,6 +186,11 @@ COLUMN_SCHEMA = {
         'type': 'mice', 'registry': 'mice-threads.csv',
         'file': 'scene-intent.csv', 'stage': 'map',
         'description': 'MICE thread operations: +name (open) or -name (close). Type resolved from registry. FILO nesting order (Kowal).',
+    },
+    'theme_threads': {
+        'type': 'registry', 'registry': 'themes.csv', 'array': True,
+        'file': 'scene-intent.csv', 'stage': 'map',
+        'description': 'Abstract concerns this scene engages, from reference/themes.csv. Distinct from motifs — themes are abstract questions, motifs are concrete vehicles.',
     },
 
     # scene-briefs.csv
