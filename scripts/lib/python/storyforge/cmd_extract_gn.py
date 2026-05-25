@@ -34,26 +34,11 @@ from storyforge.common import (
     install_signal_handlers, log, select_model,
 )
 from storyforge.costs import log_operation
+from storyforge.elaborate import _SCENES_COLS as SCENE_COLS
+from storyforge.elaborate import _BRIEFS_COLS as BRIEF_COLS
 from storyforge.script_format import (
-    parse_script, count_pages, count_panels, detect_page_turn_pages,
+    parse_script, detect_page_turn_pages,
 )
-
-
-SCENE_COLS = [
-    'id', 'seq', 'title', 'summary', 'part', 'pov', 'location',
-    'timeline_day', 'time_of_day', 'duration', 'type', 'status',
-    'word_count', 'target_words',
-    'target_pages', 'panel_count', 'page_count',
-    'architecture_scene',
-]
-BRIEF_COLS = [
-    'id', 'goal', 'conflict', 'outcome', 'crisis', 'decision',
-    'knowledge_in', 'knowledge_out', 'key_actions', 'key_dialogue',
-    'emotions', 'motifs', 'subtext', 'continuity_deps', 'has_overflow',
-    'physical_state_in', 'physical_state_out',
-    'page_layout', 'panel_breakdown', 'visual_keywords',
-    'page_turn_beats', 'caption_strategy',
-]
 
 
 def parse_args(argv):

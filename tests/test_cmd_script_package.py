@@ -166,9 +166,45 @@ def test_style_guide_full_uses_llm_when_key_set(project_dir_gn, monkeypatch):
     assert called['prompt']  # was actually called
 
 
-def test_style_guide_full_falls_back_without_api_key(project_dir_gn, monkeypatch):
+def test_style_guide_sections_consistent_across_modes():
+    """Every renderer (strict, coach, LLM prompt) must emit the same set
+    of sections in the same order. _STYLE_GUIDE_SECTIONS is the single
+    source of truth — drift here is a real bug."""
+    from storyforge.cmd_script_package import (
+        _STYLE_GUIDE_SECTIONS, _render_strict_style_guide,
+        _render_coach_style_guide, _build_full_style_guide_prompt,
+        StyleGuideCues,
+    )
+    cues = StyleGuideCues(
+        genre='', subgenre='', world_bible='', character_bible='',
+        voice_guide='', scene_intent_excerpt='',
+    )
+    strict = _render_strict_style_guide('T', cues)
+    coach = _render_coach_style_guide('T', cues)
+    prompt = _build_full_style_guide_prompt('T', cues)
+    for section in _STYLE_GUIDE_SECTIONS:
+        assert f'## {section}' in strict, f'strict missing {section}'
+        assert f'## {section}' in coach, f'coach missing {section}'
+        assert f'## {section}' in prompt, f'LLM prompt missing {section}'
+
+
+def test_style_guide_no_plan1_marker_in_user_facing_output():
+    """The coach template must not leak 'Plan 1' task-state markers
+    into the user-facing style-guide written to the artist bundle."""
+    from storyforge.cmd_script_package import (
+        _render_coach_style_guide, StyleGuideCues,
+    )
+    cues = StyleGuideCues(
+        genre='', subgenre='', world_bible='', character_bible='',
+        voice_guide='', scene_intent_excerpt='',
+    )
+    text = _render_coach_style_guide('T', cues)
+    assert 'Plan 1' not in text
+
+
+def test_style_guide_full_falls_back_without_api_key(project_dir_gn, monkeypatch, capsys):
     """coaching=full without API key → falls back to coach template; bundle
-    still succeeds."""
+    still succeeds; final log line names the ACTUAL mode used, not 'full'."""
     monkeypatch.chdir(project_dir_gn)
     _setup_drafted_scenes(project_dir_gn)
     _setup_chapter_map(project_dir_gn)
@@ -179,6 +215,10 @@ def test_style_guide_full_falls_back_without_api_key(project_dir_gn, monkeypatch
                               'style-guide.md')).read()
     # Falls back to coach template (recognizable by the Question: pattern)
     assert '- Question:' in text
+    # The final log line must not lie about the mode: it should report
+    # the fallback, not 'coaching=full'.
+    out = capsys.readouterr().out
+    assert 'no API key' in out or 'full→coach' in out
 
 
 def test_script_package_global_page_numbering(project_dir_gn, monkeypatch):

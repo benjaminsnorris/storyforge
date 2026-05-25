@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+from typing import NamedTuple
 
 from storyforge.api import (
     invoke_to_file, calculate_cost_from_usage, extract_usage,
@@ -309,31 +310,40 @@ _STRICT_GUIDANCE: dict[str, str] = {
 }
 
 
-def _gather_style_cues(project_dir: str) -> dict:
-    """Pull style cues from project state for the style-guide generator.
+class StyleGuideCues(NamedTuple):
+    """Snapshot of project state used to generate the artist style guide.
 
-    Returns a dict with whatever could be located; absent files are
-    represented as empty strings so callers can render cleanly without
-    extra existence checks.
+    Always-`str` invariant: every field is a (possibly empty) string,
+    never None, so callers can use `or 'unset'` / `.strip()` without
+    None-guards.
     """
-    out = {
-        'genre': read_yaml_field('project.genre', project_dir) or '',
-        'subgenre': read_yaml_field('project.subgenre', project_dir) or '',
-        'world_bible': _read_optional(
+    genre: str
+    subgenre: str
+    world_bible: str
+    character_bible: str
+    voice_guide: str
+    scene_intent_excerpt: str
+
+
+def _gather_style_cues(project_dir: str) -> StyleGuideCues:
+    """Pull style cues from project state for the style-guide generator."""
+    return StyleGuideCues(
+        genre=read_yaml_field('project.genre', project_dir) or '',
+        subgenre=read_yaml_field('project.subgenre', project_dir) or '',
+        world_bible=_read_optional(
             os.path.join(project_dir, 'reference', 'world-bible.md'),
         ),
-        'character_bible': _read_optional(
+        character_bible=_read_optional(
             os.path.join(project_dir, 'reference', 'character-bible.md'),
         ),
-        'voice_guide': _read_optional(
+        voice_guide=_read_optional(
             os.path.join(project_dir, 'reference', 'voice-guide.md'),
         ),
-        'scene_intent_excerpt': _read_optional(
+        scene_intent_excerpt=_read_optional(
             os.path.join(project_dir, 'reference', 'scene-intent.csv'),
             head_lines=8,
         ),
-    }
-    return out
+    )
 
 
 def _read_optional(path: str, head_lines: int | None = None) -> str:
@@ -353,7 +363,7 @@ def _read_optional(path: str, head_lines: int | None = None) -> str:
     return text
 
 
-def _render_strict_style_guide(title: str, cues: dict) -> str:
+def _render_strict_style_guide(title: str, cues: StyleGuideCues) -> str:
     """strict coaching: blank section template + constraint list.
 
     No prose, no LLM. The author fills each section themselves. Sections
@@ -377,20 +387,20 @@ def _render_strict_style_guide(title: str, cues: dict) -> str:
     # Append a compact source-map so the author can grep cues from project state.
     out.append('## Source pointers')
     out.append('')
-    if cues['genre'] or cues['subgenre']:
-        out.append(f'- Genre / subgenre: {cues["genre"]} / {cues["subgenre"]}')
-    for key, path in (
-        ('world_bible', 'reference/world-bible.md'),
-        ('character_bible', 'reference/character-bible.md'),
-        ('voice_guide', 'reference/voice-guide.md'),
+    if cues.genre or cues.subgenre:
+        out.append(f'- Genre / subgenre: {cues.genre} / {cues.subgenre}')
+    for value, path in (
+        (cues.world_bible, 'reference/world-bible.md'),
+        (cues.character_bible, 'reference/character-bible.md'),
+        (cues.voice_guide, 'reference/voice-guide.md'),
     ):
-        if cues[key]:
+        if value:
             out.append(f'- See: {path}')
     out.append('')
     return '\n'.join(out)
 
 
-def _render_coach_style_guide(title: str, cues: dict) -> str:
+def _render_coach_style_guide(title: str, cues: StyleGuideCues) -> str:
     """coach coaching: sections + 'cues from project state' bullet list
     under each, asking questions to focus the author's drafting. No LLM.
     """
@@ -402,8 +412,8 @@ def _render_coach_style_guide(title: str, cues: dict) -> str:
         'the author to weigh; the author writes the final guide. -->',
         '',
     ]
-    genre = (cues['genre'] or '').strip()
-    subgenre = (cues['subgenre'] or '').strip()
+    genre = cues.genre.strip()
+    subgenre = cues.subgenre.strip()
     genre_line = (f'{genre}' + (f' / {subgenre}' if subgenre else '')) or 'unset'
 
     coach_content: dict[str, list[str]] = {
@@ -452,7 +462,17 @@ def _render_coach_style_guide(title: str, cues: dict) -> str:
     return '\n'.join(out)
 
 
-def _build_full_style_guide_prompt(title: str, cues: dict) -> str:
+def _trim_for_prompt(text: str, lines: int) -> str:
+    """Truncate `text` to the first N lines so the LLM prompt stays bounded."""
+    if not text:
+        return ''
+    parts = text.splitlines()
+    if len(parts) > lines:
+        return '\n'.join(parts[:lines]) + '\n…'
+    return text
+
+
+def _build_full_style_guide_prompt(title: str, cues: StyleGuideCues) -> str:
     """Build the LLM prompt for full-mode style-guide synthesis.
 
     Section list is derived from _STYLE_GUIDE_SECTIONS so a change to
@@ -467,24 +487,24 @@ a single markdown document with the standard sections.
 # Project metadata
 
 Title: {title}
-Genre: {cues['genre'] or 'unset'}
-Subgenre: {cues['subgenre'] or 'unset'}
+Genre: {cues.genre or 'unset'}
+Subgenre: {cues.subgenre or 'unset'}
 
 # Voice guide (excerpt)
 
-{cues['voice_guide'] or '(not present)'}
+{_trim_for_prompt(cues.voice_guide, 80) or '(not present)'}
 
 # World bible (excerpt)
 
-{cues['world_bible'] or '(not present)'}
+{_trim_for_prompt(cues.world_bible, 100) or '(not present)'}
 
 # Character bible (excerpt)
 
-{cues['character_bible'] or '(not present)'}
+{_trim_for_prompt(cues.character_bible, 100) or '(not present)'}
 
 # Scene-intent excerpt (CSV)
 
-{cues['scene_intent_excerpt'] or '(empty)'}
+{cues.scene_intent_excerpt or '(empty)'}
 
 # Task
 
@@ -505,30 +525,13 @@ Return only the markdown document — no JSON, no preamble.
 """
 
 
-def _render_full_style_guide(project_dir: str, title: str, cues: dict,
+def _render_full_style_guide(project_dir: str, title: str, cues: StyleGuideCues,
                               dry_run: bool) -> tuple[str, str]:
     """full coaching: LLM-generated style guide. Returns (text, actual_mode)
     so callers can log truthfully when the LLM path falls back."""
     if dry_run:
         return _render_coach_style_guide(title, cues), 'full→coach (dry-run)'
-    # Truncate long bibles so the prompt stays bounded.
-    def _trim(text: str, lines: int) -> str:
-        if not text:
-            return ''
-        parts = text.splitlines()
-        if len(parts) > lines:
-            return '\n'.join(parts[:lines]) + '\n…'
-        return text
-
-    bounded_cues = {
-        'genre': cues['genre'],
-        'subgenre': cues['subgenre'],
-        'voice_guide': _trim(cues['voice_guide'], 80),
-        'world_bible': _trim(cues['world_bible'], 100),
-        'character_bible': _trim(cues['character_bible'], 100),
-        'scene_intent_excerpt': cues['scene_intent_excerpt'],
-    }
-    prompt = _build_full_style_guide_prompt(title, bounded_cues)
+    prompt = _build_full_style_guide_prompt(title, cues)
     model = select_model('creative')
     log_dir = os.path.join(project_dir, 'working', 'logs', 'script-package')
     os.makedirs(log_dir, exist_ok=True)
