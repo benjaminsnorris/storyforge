@@ -1,37 +1,4 @@
-"""Bible / voice consistency scoring (#231).
-
-LLM-driven check: for each drafted scene, compare what the scene shows
-against the project's bibles (character, world, voice). Surfaces
-findings where the two disagree — without privileging the bible as
-authority. The author decides via the diff+verdict mechanism whether
-to update the scene, update the bible, or accept that both are right
-(the character has multiple facets, the world rule has an exception,
-etc.).
-
-Per the engineering review of v1, this is the single most expensive
-v2 feature: ~$20-25 per full pass on a 50-scene project with prompt
-caching, ~$80 without. Caching is **mandatory** in this module — each
-LLM call sends the bibles as cached system content so the per-scene
-call only pays the (cheap) scene-content tokens after the first call.
-
-The check runs on demand only, never in the pre-commit hook. Authors
-opt in via `storyforge score --bible-consistency`.
-
-Finding shape:
-
-    {
-        'scope': 'act1-sc01',           # scene id
-        'bible': 'character-bible.md',  # which bible flagged this
-        'claim': str,                   # what the bible says
-        'scene_says': str,              # what the scene shows
-        'fix_location': str,            # 'bible' | 'scene' | 'either'
-        'severity': str,                # 'high' | 'medium' | 'low'
-        'finding_id': str,              # stable across runs for overrides
-    }
-
-`finding_id` is a deterministic hash of (scope, bible, claim) so the
-author's override (working/scoring-overrides.csv) persists across runs.
-"""
+"""LLM check of drafted scenes against character/world/voice bibles."""
 
 import hashlib
 import json

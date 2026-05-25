@@ -1,11 +1,7 @@
-"""Per-level floor checks for the elaboration hierarchy (#229).
+"""Per-level floor checks for the elaboration hierarchy.
 
 Floor checks ask "is this level complete and consistent?" — they're
-deterministic, cheap, and produce specific actionable findings. Ceiling
-sketches (descriptive guidance for what separates passable from
-excellent) live in the design docs but aren't separately scored — they
-inform LLM prompts at v2 and beyond.
-
+deterministic, cheap, and produce specific actionable findings.
 Reuses existing scoring (structural.py, hone.py) at level 6 + 7 rather
 than re-implementing.
 
@@ -40,15 +36,7 @@ VALID_SEVERITIES = frozenset({'high', 'medium', 'low'})
 
 
 class CheckResult(TypedDict, total=False):
-    """One floor-check finding. Contract for every entry in LevelResult.checks.
-
-    `accepted` is added post-hoc by `_apply_overrides` when an author has
-    recorded an override for this finding in `working/scoring-overrides.csv`.
-    A passed check is never marked accepted (the override mechanism only
-    targets failed checks). Quality-gate logic should count
-    `failed - accepted` for refusal decisions; `passed`/`failed` reflect
-    the raw check evaluation regardless of overrides.
-    """
+    """One floor-check finding. Contract for every entry in LevelResult.checks."""
     check: str         # required — the check name (stable, used as finding_id)
     passed: bool       # required — did the check evaluation pass
     detail: str        # required — explanation surfaced to the author
@@ -59,14 +47,8 @@ class CheckResult(TypedDict, total=False):
 class LevelResult(TypedDict):
     """The result dict every per-level scorer returns.
 
-    Invariants enforced at construction:
-      - passed + failed == len(checks)
-      - accepted is the count of CheckResults where accepted=True (always
-        a subset of failed: passed checks are never marked accepted).
-
-    Callers shouldn't mutate `checks` after construction; consumers
-    (cmd_score._print_level_result, scoring_consistency) read these counts
-    directly.
+    Invariants: passed + failed == len(checks); accepted ≤ failed
+    (passed checks are never marked accepted).
     """
     level: int
     name: str

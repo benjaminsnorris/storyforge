@@ -1,44 +1,5 @@
-"""LLM-driven boundary faithfulness scoring (#231).
-
-Per the cascade + scoring design docs, every level boundary has *two*
-checks: a deterministic downward coverage check (v1 ships these via
-scoring_levels + scoring_consistency) and a semantic upward faithfulness
-diff.
-
-This module is the semantic side. It runs the LLM, builds a structured
-diff between upstream and downstream content at each of the seven
-boundaries, and persists the result to working/scoring-verdicts.csv via
-scoring_state.
-
-The synthesis's coaching-level-aware actor rule:
-
-  - full   — LLM proposes a verdict; persists immediately; surfaced for
-             the author to override if they disagree. The author keeps
-             editorial control via working/scoring-overrides.csv.
-  - coach  — LLM proposes; the verdict is NOT persisted until the
-             author confirms. Returned as `proposed=True, persisted=False`.
-  - strict — LLM produces the diff only; never proposes a verdict.
-             Author authors verdicts directly via append_verdict.
-
-Output contract (one record per boundary scope):
-
-    {
-        'boundary': '5->6',
-        'scope': 'act1-sc01',      # 'global' for prose-tier
-        'upstream_summary': str,
-        'downstream_summary': str,
-        'alignment': str,           # narrative on how the two compare
-        'proposed_verdict': str,    # one of VALID_BOUNDARY_VERDICTS, or ''
-        'rationale': str,
-        'persisted': bool,
-    }
-
-Costs: every call goes through `invoke_to_file` and the cost ledger via
-`log_operation`, so v2 spending is visible in `working/costs/ledger.csv`
-exactly like every other LLM path. Per the engineering review of v1, a
-full `score --all-boundaries` run on a 50-scene project costs ~$1-2 with
-the existing model selection (Sonnet for analytical comparisons).
-"""
+"""LLM faithfulness diff between upstream and downstream content at each
+elaboration boundary."""
 
 import json
 import os
@@ -64,7 +25,7 @@ from storyforge.scoring_state import (
 # Boundary identifiers
 # ============================================================================
 
-# Boundaries the v2 LLM faithfulness pass supports. Each id is rendered
+# Boundaries the LLM faithfulness pass supports. Each id is rendered
 # as N->M so it matches the scoring-verdicts.csv format and the CLI flag
 # the author types.
 BOUNDARY_IDS = (
@@ -134,9 +95,7 @@ def score_boundary(project_dir: str, boundary: str,
             continue
 
         # Idempotency: if a verdict is already recorded for (scope, boundary),
-        # skip the LLM call. The cascade design (re-flag on content change)
-        # is content-hash-based and lives in cmd_sync; for v2 the simple
-        # rule is "verdict exists → trust it until explicitly cleared."
+        # skip the LLM call. Verdict exists → trust it until explicitly cleared.
         existing = get_verdict(scope_id, boundary, project_dir=project_dir)
         if existing and not dry_run:
             log(f'  [{boundary} / {scope_id}] skip: verdict already recorded '
@@ -537,19 +496,11 @@ def _parse_diff_response(text: str) -> dict | None:
 
 def _persist_per_coaching(project_dir: str, boundary: str, scope: str,
                           diff: dict, coaching_level: str) -> bool:
-    """Persist the verdict to scoring-verdicts.csv per coaching level.
+    """Persist the LLM verdict to scoring-verdicts.csv only when coaching=full.
 
-    Returns True if a verdict was written, False otherwise (in which case
-    the diff still surfaces — the author is expected to author the verdict
-    via append_verdict directly).
-
-    Per the synthesis:
-      - full:   LLM-proposed verdict is persisted immediately as actor='llm'.
-                The author can override later via append_verdict('author',
-                ...) or accept via working/scoring-overrides.csv.
-      - coach:  LLM-proposed verdict is NOT persisted. The diff is
-                surfaced; the author confirms or overrides explicitly.
-      - strict: same as coach. The LLM never authors verdicts.
+    Returns True if a verdict was written. In coach/strict the LLM still
+    proposes a verdict (surfaced in the diff) but the author records it
+    via append_verdict themselves.
     """
     verdict = diff.get('proposed_verdict', '')
     if verdict and verdict not in VALID_BOUNDARY_VERDICTS:

@@ -73,8 +73,7 @@ def parse_args(argv):
     parser.add_argument('--diagnosis-only', action='store_true',
                         help='Generate diagnosis and proposals from existing scores '
                              '(skip scoring, run improvement cycle only)')
-    # Elaboration-v1 entry points (#229). These short-circuit the existing
-    # scene-prose scoring path and run the level-rubric / comparison primitives.
+    # Elaboration entry points: deterministic floor checks + comparison.
     parser.add_argument('--level', type=int, default=None,
                         choices=range(0, 7), metavar='N',
                         help='Run floor checks for elaboration level N (0-6). '
@@ -89,7 +88,7 @@ def parse_args(argv):
     parser.add_argument('--drift', action='store_true',
                         help='Read-only drift report: which levels are out of '
                              'sync vs. git HEAD, registries, or each other.')
-    # Elaboration-v2 entry points (#231). LLM-driven semantic scoring.
+    # LLM-driven elaboration scoring entry points.
     parser.add_argument('--boundary', type=str, default=None, metavar='N->M',
                         help='Run the LLM faithfulness diff at one level '
                              'boundary (e.g. 5->6). Optional --scope filters '
@@ -156,7 +155,7 @@ def _parse_principles(raw: str, plugin_dir: str) -> list[str]:
 
 
 def _validate_flag_combinations(args) -> None:
-    """Reject incoherent v1/v2 flag combinations early with a clear error.
+    """Reject incoherent elaboration-entry-point combinations with a clear error.
 
     Each entry point is mutually exclusive — silent precedence rules make
     expensive flags (like --bible-consistency) easy to misfire.
@@ -206,21 +205,7 @@ def _check_llm_preconditions(operation: str, dry_run: bool) -> None:
 
 
 def _run_elaboration_scoring(args) -> None:
-    """Handle the elaboration-v1 + v2 scoring entry points.
-
-    Short-circuits the existing scene-prose scoring path. Returns on
-    success (implicit exit 0); calls `sys.exit(1)` on misuse.
-
-    v2 entry points (LLM-driven) skip the branch / cost-ledger plumbing
-    of the existing scene-prose path because:
-      - The cost ledger is updated *inside* each scoring module
-        (score-boundary, score-bible, score-compare-ceiling entries).
-      - No commits land here — these commands only write to working/.
-
-    If a future entry point starts committing reviewable artifacts, gate
-    a `create_branch` / `ensure_branch_pushed` call on whether the
-    dispatched action writes outside working/.
-    """
+    """Dispatch elaboration-scoring entry points; short-circuits scene-prose scoring."""
     from datetime import datetime
     from storyforge.scoring_levels import (
         score_level, score_all_levels, LEVEL_NAMES,
@@ -416,12 +401,7 @@ def _print_level_result(result: dict) -> None:
 
 
 def _print_drift_report(project_dir: str, medium: str) -> None:
-    """Compose a read-only drift report from floor + consistency checks.
-
-    v1 is deterministic only — coverage + timestamps + content-hash deltas
-    are out of scope here (they belong to cmd_sync's drift hook). Future
-    versions add LLM-driven faithfulness diffs across boundaries.
-    """
+    """Compose a read-only drift report from floor + consistency checks."""
     from storyforge.scoring_levels import score_all_levels
     from storyforge.scoring_consistency import score_consistency_all_levels
 
@@ -443,10 +423,8 @@ def main(argv=None):
 
     install_signal_handlers()
 
-    # Elaboration entry points: short-circuit the prose-scoring flow.
-    # v1: --level / --all-levels / --compare / --drift
-    # v2: --boundary / --all-boundaries / --bible-consistency (--semantic
-    #     is a modifier on --compare, not a standalone trigger).
+    # Elaboration entry points short-circuit the prose-scoring flow.
+    # (--semantic is a modifier on --compare, not a standalone trigger.)
     if (args.level is not None or args.all_levels or args.compare or args.drift
             or args.boundary or args.all_boundaries or args.bible_consistency):
         _run_elaboration_scoring(args)

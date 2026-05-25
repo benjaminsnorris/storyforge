@@ -279,9 +279,9 @@ When `project.medium: graphic-novel` is set, scoring runs a completely different
 ## Elaboration Scoring
 
 Beyond per-scene craft scoring, `storyforge score` also exposes the elaboration
-scoring pipeline — three tiers of checks that span the 8-level elaboration
-hierarchy (logline → synopsis → act-shape → spine → architecture → scene-map →
-briefs → drafts).
+scoring pipeline — three tiers of checks that span the elaboration hierarchy:
+7 directly-scored levels (0=logline through 6=briefs) plus drafts as the
+final boundary target.
 
 All elaboration scoring respects `working/scoring-overrides.csv`. A finding the
 author has marked "considered, accepted" still surfaces in the report (tagged

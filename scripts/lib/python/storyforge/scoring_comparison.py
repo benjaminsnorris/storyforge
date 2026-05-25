@@ -1,17 +1,9 @@
-"""Comparison scoring — `storyforge score --compare` (#229, #231).
+"""Multi-axis comparison of 2-4 candidates at the same level.
 
-Produces a multi-axis comparison of 2–4 candidates at the same level.
-**Never declares an overall winner**. The report surfaces what each
-candidate does best on each axis so the author decides.
-
-Spec: docs/superpowers/specs/2026-05-24-elaboration-scoring-design.md
-section "Comparison scoring".
-
-v1 ships the deterministic axes only (length, presence of required
-elements, registry conformance). v2 adds LLM ceiling axes (specificity,
-irony, hook word, etc.) when `compare_candidates(..., semantic=True)`.
-The LLM still never declares a winner — same design rule as the
-upward-faithfulness diff.
+Never declares an overall winner — the report surfaces what each candidate
+does best on each axis so the author decides. Deterministic floor axes
+(length, registry conformance) always populate; LLM ceiling axes
+(specificity, irony, hook word) populate when semantic=True.
 """
 
 import json
@@ -81,7 +73,7 @@ AXIS_EXTRACTORS = {
 
 
 # ============================================================================
-# Ceiling axes — per-level LLM-judged qualities (v2)
+# Ceiling axes — per-level LLM-judged qualities
 # ============================================================================
 
 # Per-level ceiling axis names. The LLM is asked to evaluate each
@@ -116,7 +108,7 @@ CEILING_AXES = {
         'distinct from generic claim',
         'alive in specifics',
         'asks a question rather than states a slogan',
-        'audible across all candidates of the story',
+        'audible across the story',
     ),
 }
 
@@ -207,7 +199,7 @@ def _ceiling_axes_for(level: str, candidates: list[str], semantic: bool,
                        project_dir: str | None) -> list[dict]:
     """Build the ceiling-axes table.
 
-    semantic=False → '—' placeholder values (the v1 behavior).
+    semantic=False → '—' placeholder values (deterministic-only).
     semantic=True  → one LLM call evaluates all candidates on the level's
                      ceiling-axis set, returns per-candidate values.
     """
