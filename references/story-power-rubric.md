@@ -102,6 +102,107 @@ Booth, *The Company We Keep*).
 - **Low signals:** choice is private and consequence-free; ethical
   mass is asserted rather than dramatized.
 
+## Act-shape mode: per-act application + structural axes
+
+When `reference/story-summary.md` has all three labeled paragraphs under
+`## Act-shape`, the scorecard runs in **act-shape mode**: it re-applies
+the eight pitch axes above to each act independently AND adds four
+cross-act structural axes that only become meaningful at this
+resolution.
+
+### Layer 1: per-act 8-axis matrix
+
+The same eight axes above, scored independently for Act 1, Act 2, and
+Act 3. Output is a 3×8 matrix. The unit of analysis changes (one act at
+a time, not the whole synopsis); the signals are the same.
+
+**Why this is valuable:** the holistic synopsis score hides act-level
+drift. If Act 2 scores 7 on emotional resonance while Acts 1 and 3
+both score 9, that's a precise diagnostic ("the middle is going
+intellectual") the holistic score cannot produce.
+
+### Layer 2: four cross-act structural axes
+
+These axes measure *relationships between acts*. They only make sense
+at the act-shape resolution and are weighted 1.5x in the act-shape
+composite — turning-point clarity and causal integrity are
+foundational in a way that hides damage when scored flat-average.
+
+#### A. Causal integrity (1.5x)
+Brian Boyd on causal coherence in narrative; Bruner on narrative
+thought; reader-memory research showing causally connected events
+are recalled and rated higher than sequential events.
+
+- **Question:** Does each act *cause* the next, or are they merely sequential?
+- **High signals:** Each act's closing state is the proximate cause of
+  the next act's opening conditions; obstacles in later acts trace
+  back to setup choices in earlier acts.
+- **Low signals:** Acts could be reshuffled without breaking the
+  story; transitions feel like temporal jumps rather than
+  consequential turns.
+
+#### B. Turning-point clarity (1.5x)
+Lajos Egri, *The Art of Dramatic Writing*; Robert McKee on dramatic
+structure; empirical work on plot-point recognition and reader
+engagement.
+
+- **Question:** Do the Act 1 turn, midpoint, and Act 2 closer actually
+  *turn* — do they redirect the story rather than merely escalate it?
+- **High signals:** Each turn changes the protagonist's understanding
+  of their situation; the midpoint inverts what the story has been
+  about; Act 2's closer compels Act 3 rather than just setting it up.
+- **Low signals:** "Turns" are just increases in intensity; the
+  midpoint is a stakes-raise rather than a reversal; Act 3 begins
+  because the page count demands it.
+
+#### C. Arc gradient (1.5x)
+Jane Smiley, *Thirteen Ways of Looking at the Novel*; character-arc
+research from the screenwriting tradition; Joseph Carroll on
+protagonist transformation as load-bearing structure.
+
+- **Question:** Does the protagonist change *measurably across acts*,
+  not just start to end?
+- **High signals:** Each act ends with the protagonist in a state
+  distinct from the previous act's end-state; their values,
+  knowledge, or relational stance moves between acts; the change
+  forms a gradient, not a single delta.
+- **Low signals:** Protagonist's interior state is essentially
+  constant through Act 2; or the change is a single jump rather
+  than a curve.
+
+#### D. Promise & payoff (1.5x)
+Stanley Fish on reader satisfaction; Chekhov's gun as empirical
+reader-response observation; theatrical and screenwriting traditions
+on planted/paid elements.
+
+- **Question:** Are Act 1 setups redeemed in Act 3?
+- **High signals:** Specific elements introduced in Act 1 (objects,
+  lines, motifs, secondary characters) acquire new meaning or cost
+  in Act 3; the closing image refers to the opening; promises the
+  reader noticed get answers.
+- **Low signals:** Act 1 introduces things that disappear; Act 3
+  introduces resolutions out of nowhere; the closing image is
+  unrelated to the opening.
+
+### Independence vs. coupling
+
+The structural axes (Layer 2) are scored **independently** of the
+per-act matrix (Layer 1). A weak turning-point clarity score
+*explains* a Layer 1 drop in stakes for that act, but does not
+mechanically drag it down. Keeping them independent preserves
+diagnostic precision — the structural score names the cause; the
+matrix shows where the damage lands.
+
+### Act-shape mode output
+
+```
+working/scores/story-power/{timestamp}/
+├── scorecard.csv          # pitch-mode 8-axis scores (always)
+├── per-act-matrix.csv     # 3 acts × 8 axes (act-shape only)
+├── structural-axes.csv    # 4 structural axes (act-shape only)
+└── diagnostic.md          # cross-axis + cross-act root causes
+```
+
 ## Scoring bands
 
 - **1-3:** Axis is essentially absent or actively damaged.
@@ -170,3 +271,34 @@ plant a single interior sensory line in the synopsis (e.g., "he can
 still draw her face from memory, but every day a piece of the curve
 of her mouth gets slightly more uncertain"). One sentence; two axes
 lifted.
+
+### Act-shape extension (illustrative)
+
+Hypothetical scores when the same project is scored in act-shape
+mode — illustrative numbers to show how Layer 2 surfaces structural
+problems Layer 1 cannot.
+
+Per-act 8-axis matrix (selected rows):
+
+| Axis | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| Emotional resonance | 9 | 6 | 9 |
+| Stakes & dilemma | 9 | 7 | 9 |
+| Character identification | 8 | 7 | 8 |
+
+Layer 2 structural axes:
+
+| Axis | Score | Key signals |
+|---|---|---|
+| Causal integrity | 8 | Act 1's portrait commission causes Act 2's discovery; Act 2's discovery compels Act 3's choice. Strong chain. |
+| Turning-point clarity | 7 | Act 1 turn (commission accepted) is sharp; midpoint (the failed portrait) is more of a stakes-raise than a reversal of what the story is about. |
+| Arc gradient | 8 | Act 1 → Act 2 shifts Mirelle from subject to person; Act 2 → Act 3 shifts protagonist from practitioner to heretic. Two distinct deltas. |
+| Promise & payoff | 9 | Opening portrait is paid off by the refusal to finish her; failed earlier portraits acquire elegiac weight in the closing image. |
+
+**Cross-act diagnostic:** emotional resonance and stakes both drop in
+Act 2 (9 → 6, 9 → 7). This co-locates with the turning-point clarity
+score of 7. The single high-leverage move: convert the midpoint from
+a stakes-raise to a reversal — let the failed portrait *teach*
+something about what record can and cannot hold, so the protagonist
+ends Act 2 understanding the story differently than they began it.
+One structural change; three axes lifted across two layers.

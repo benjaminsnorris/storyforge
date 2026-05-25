@@ -67,6 +67,89 @@ def _mock_llm(payload: dict):
     return fake
 
 
+def _act_shape_payload(per_act_overrides: dict[str, dict[str, int]] | None = None,
+                        structural_overrides: dict[str, int] | None = None) -> dict:
+    """Build a well-shaped act-shape LLM response payload.
+
+    per_act_overrides: {act_key: {axis_key: score}} — partial override
+    on top of the default per-act baseline (Act 2 dips on emotional
+    resonance + stakes vs Acts 1 and 3).
+    """
+    pitch_keys = [a for a in (
+        'specificity', 'emotional_resonance', 'character_identification',
+        'stakes_dilemma', 'archetypal_resonance', 'thematic_depth',
+        'surprise_subversion', 'moral_weight',
+    )]
+    baseline = {
+        'act1': {k: 9 for k in pitch_keys},
+        'act2': dict(zip(pitch_keys, [8, 6, 7, 7, 9, 9, 8, 9])),
+        'act3': {k: 9 for k in pitch_keys},
+    }
+    if per_act_overrides:
+        for act, scores in per_act_overrides.items():
+            baseline.setdefault(act, {}).update(scores)
+    per_act = [
+        {'act': act, 'scores': [
+            {'axis': k, 'score': v,
+             'rationale': f'{k} in {act}'}
+            for k, v in baseline[act].items()
+        ]}
+        for act in ('act1', 'act2', 'act3')
+    ]
+    structural_baseline = {
+        'causal_integrity': 8,
+        'turning_point_clarity': 7,
+        'arc_gradient': 8,
+        'promise_payoff': 9,
+    }
+    if structural_overrides:
+        structural_baseline.update(structural_overrides)
+    structural = [
+        {'axis': k, 'score': v,
+         'positive_signals': f'sig+ for {k}',
+         'negative_signals': f'sig- for {k}',
+         'rationale': f'rationale for {k}'}
+        for k, v in structural_baseline.items()
+    ]
+    return {
+        'pitch_axes': {k: k for k in pitch_keys},
+        'structural_axes': {k: k for k in structural_baseline},
+        'per_act': per_act,
+        'structural': structural,
+        'structural_diagnostic': {
+            'cross_act_pattern': 'Act 2 dips on emotional resonance + stakes; '
+                                  'co-locates with turning_point_clarity = 7',
+            'high_leverage_move': 'convert the midpoint from a stakes-raise to a reversal',
+            'example_beat': 'the failed portrait teaches what record cannot hold',
+        },
+    }
+
+
+def _dual_mock_llm(pitch_payload: dict, act_shape_payload: dict):
+    """Mock that returns the pitch payload first, then the act-shape
+    payload on the second call (when the act-shape extension fires)."""
+    state = {'call': 0}
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        # Route by which log file the caller passed: the act-shape call
+        # appends '-act-shape' to the basename. This is more robust than
+        # counting calls, since back-to-back tests can leak state.
+        payload = (act_shape_payload if '-act-shape' in log_file
+                   else pitch_payload)
+        state['call'] += 1
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    return fake
+
+
 # ---------------------------------------------------------------------------
 # Composite weighting
 # ---------------------------------------------------------------------------
@@ -152,15 +235,23 @@ def test_strict_writes_checklist_no_llm(tmp_path, monkeypatch):
                               'self-scoring-checklist.md')
     assert os.path.isfile(checklist)
     text = open(checklist).read()
-    # All 8 axes get a section, plus the self-scoring scaffolding.
-    from storyforge.scoring_story_power import AXES
+    # All 8 pitch axes get a section, plus the self-scoring scaffolding.
+    from storyforge.scoring_story_power import AXES, STRUCTURAL_AXES
     for axis in AXES:
         assert f'## {axis.name}' in text
         assert f'weight {axis.weight}' in text
-    # Self-scoring blanks: one per axis.
-    assert text.count('Self-score (1-10):') == len(AXES)
+    # The seeded fixture has all three act-shape paragraphs populated,
+    # so the strict checklist also extends with the per-act blanks and
+    # the four structural axes.
+    for axis in STRUCTURAL_AXES:
+        assert f'## {axis.name}' in text
+    # Pitch + structural blanks: one per axis. Per-act blanks use a
+    # different scaffolding line ("- {axis name}: __").
+    assert text.count('Self-score (1-10):') == len(AXES) + len(STRUCTURAL_AXES)
     assert text.count('Positive signals you found:') == len(AXES)
     assert text.count('Negative signals you found:') == len(AXES)
+    # Per-act blanks: three acts × eight axes = 24.
+    assert text.count(': __') >= 24
     # No LLM commentary should leak in.
     assert 'Proposed' not in text
     assert 'rationale' not in text.lower()
@@ -595,6 +686,266 @@ def test_missing_rubric_does_not_block_strict(tmp_path, monkeypatch):
     assert result['output_dir']
     assert os.path.isfile(os.path.join(result['output_dir'],
                                         'self-scoring-checklist.md'))
+
+
+# ---------------------------------------------------------------------------
+# Act-shape mode (Layer 1 per-act matrix + Layer 2 structural axes)
+# ---------------------------------------------------------------------------
+
+def test_parse_act_shape_splits_three_acts():
+    """Parser must split `### Act 1` / `### Act 2` / `### Act 3` into
+    three labeled paragraphs."""
+    from storyforge.scoring_story_power import parse_act_shape
+    body = (
+        '### Act 1\n\nFirst paragraph.\n\n'
+        '### Act 2\n\nSecond paragraph.\n\n'
+        '### Act 3\n\nThird paragraph.\n'
+    )
+    result = parse_act_shape(body)
+    assert result is not None
+    assert 'First' in result.act1
+    assert 'Second' in result.act2
+    assert 'Third' in result.act3
+
+
+def test_parse_act_shape_returns_none_when_act_missing():
+    """If Act 3 is missing or empty, the parser returns None so the
+    caller falls back to pitch-only mode."""
+    from storyforge.scoring_story_power import parse_act_shape
+    body = '### Act 1\n\nFirst.\n\n### Act 2\n\nSecond.\n\n'
+    assert parse_act_shape(body) is None
+    # Empty body short-circuits.
+    assert parse_act_shape('') is None
+    # Whitespace-only Act 2 also fails the population check.
+    assert parse_act_shape('### Act 1\n\nx\n\n### Act 2\n\n   \n\n### Act 3\n\nz\n') is None
+
+
+def test_parse_act_shape_accepts_optional_titles():
+    """`### Act 2 — the descent` should parse as Act 2."""
+    from storyforge.scoring_story_power import parse_act_shape
+    body = (
+        '### Act 1 — opening\n\nFirst.\n\n'
+        '### Act 2: midpoint\n\nSecond.\n\n'
+        '### Act 3 — resolution\n\nThird.\n'
+    )
+    result = parse_act_shape(body)
+    assert result is not None
+    assert 'First' in result.act1
+    assert 'midpoint' not in result.act2  # heading suffix not included in body
+    assert 'Third' in result.act3
+
+
+def test_structural_axes_invariants():
+    """STRUCTURAL_AXES enforces unique keys, all 1.5x weights, four axes,
+    and disjoint key set from pitch AXES."""
+    from storyforge.scoring_story_power import STRUCTURAL_AXES, AXIS_KEYS
+    keys = [a.key for a in STRUCTURAL_AXES]
+    assert len(keys) == 4
+    assert len(set(keys)) == 4
+    assert all(a.weight == 1.5 for a in STRUCTURAL_AXES)
+    assert not (set(keys) & set(AXIS_KEYS))
+
+
+def test_act_shape_mode_writes_matrix_and_structural_csvs(tmp_path, monkeypatch):
+    """When act-shape paragraphs are populated and the LLM returns a
+    well-shaped payload, the run writes per-act-matrix.csv and
+    structural-axes.csv alongside scorecard.csv."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _dual_mock_llm(_full_payload(), _act_shape_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out_dir = result['output_dir']
+    assert result['act_shape_mode']
+    assert os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
+    assert os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
+    assert os.path.isfile(os.path.join(out_dir, 'structural-axes.csv'))
+    # Per-act matrix has Act 2 dip on emotional_resonance.
+    matrix = open(os.path.join(out_dir, 'per-act-matrix.csv')).read()
+    assert 'emotional_resonance' in matrix
+    assert 'act1' in matrix and 'act2' in matrix and 'act3' in matrix
+    # Structural CSV carries all four axes.
+    struct = open(os.path.join(out_dir, 'structural-axes.csv')).read()
+    for axis in ('causal_integrity', 'turning_point_clarity',
+                 'arc_gradient', 'promise_payoff'):
+        assert axis in struct
+    # Diagnostic appended with cross-act section.
+    diag = open(os.path.join(out_dir, 'diagnostic.md')).read()
+    assert 'Per-act matrix' in diag
+    assert 'Cross-act' in diag
+    # Returned result carries per-act + structural scores.
+    assert result['per_act_scores']['act2']['emotional_resonance'] == 6
+    assert result['structural_scores']['causal_integrity'] == 8
+
+
+def test_pitch_only_when_act_shape_missing(tmp_path, monkeypatch):
+    """A project with only logline+synopsis (no act-shape) runs pitch-only
+    without the act-shape extension files."""
+    yml = os.path.join(str(tmp_path), 'storyforge.yaml')
+    with open(yml, 'w') as f:
+        f.write('project:\n  title: T\n  medium: novel\n  coaching_level: full\n')
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'story-summary.md'), 'w') as f:
+        f.write('# Story summary\n\n## Logline\n\nA logline.\n\n'
+                '## Synopsis\n\nA synopsis.\n\n## Act-shape\n\n## Theme\n\n')
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    pitch_fake = _mock_llm(_full_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', pitch_fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', pitch_fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out_dir = result['output_dir']
+    assert not result['act_shape_mode']
+    assert os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
+    assert not os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
+    assert not os.path.isfile(os.path.join(out_dir, 'structural-axes.csv'))
+
+
+def test_act_shape_llm_failure_does_not_kill_pitch_result(tmp_path, monkeypatch):
+    """If the act-shape LLM call fails (unparseable, error), the pitch
+    scorecard must still survive — act-shape is additive, not required."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    # Mock returns the pitch payload on both calls — the act-shape parser
+    # will reject it (wrong shape) and the extension will be skipped.
+    fake = _mock_llm(_full_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out_dir = result['output_dir']
+    assert os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
+    assert not result['act_shape_mode']
+    assert not os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
+    # Pitch result still healthy.
+    assert result['composite'] > 0
+    assert result['status'] in ('ok', 'partial')
+
+
+def test_act_shape_partial_per_act_tags_partial(tmp_path, monkeypatch):
+    """Missing axes in the per-act matrix surface as status='partial'."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    act_payload = _act_shape_payload()
+    # Drop Act 2 entirely from the per-act response.
+    act_payload['per_act'] = [r for r in act_payload['per_act']
+                               if r['act'] != 'act2']
+    fake = _dual_mock_llm(_full_payload(), act_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['act_shape_mode']
+    assert result['status'] == 'partial'
+    # Act 2 cells empty in the matrix.
+    matrix = open(os.path.join(result['output_dir'],
+                                'per-act-matrix.csv')).read()
+    lines = matrix.splitlines()
+    # Header + 8 axis rows; Act 2 column should be empty per row.
+    for line in lines[1:]:
+        cells = line.split('|')
+        # cells: axis|name|act1|act2|act3
+        assert cells[3].strip() == ''
+
+
+def test_act_shape_coach_mode_appends_to_brief(tmp_path, monkeypatch):
+    """coach mode extends coaching-brief.md with the per-act matrix +
+    structural sections, not a separate file."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _dual_mock_llm(_full_payload(), _act_shape_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'coach')
+    out_dir = result['output_dir']
+    brief = open(os.path.join(out_dir, 'coaching-brief.md')).read()
+    assert 'Per-act matrix' in brief
+    assert 'Cross-act structural' in brief
+    # No separate per-act CSV in coach mode.
+    assert not os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
+
+
+def test_act_shape_drop_flag(tmp_path):
+    """_flag_act_drops surfaces axes where one act lags ≥ 2 behind the
+    other two — the precondition for cross-act diagnostic patterns."""
+    from storyforge.scoring_story_power import _flag_act_drops
+    per_act = {
+        'act1': {'specificity': 9, 'emotional_resonance': 9},
+        'act2': {'specificity': 9, 'emotional_resonance': 6},  # 3-point dip
+        'act3': {'specificity': 9, 'emotional_resonance': 9},
+    }
+    drops = _flag_act_drops(per_act)
+    assert ('emotional_resonance', 'act2', 3) in drops
+    # Specificity is flat — no drop reported.
+    assert not any(d[0] == 'specificity' for d in drops)
+
+
+def test_act_shape_extension_extract_drops_non_numeric():
+    """_extract_per_act_scores / _extract_structural_scores must drop
+    null/string/out-of-range scores rather than raising."""
+    from storyforge.scoring_story_power import (
+        _extract_per_act_scores, _extract_structural_scores,
+    )
+    payload = {
+        'per_act': [
+            {'act': 'act1', 'scores': [
+                {'axis': 'specificity', 'score': 8},
+                {'axis': 'emotional_resonance', 'score': None},  # dropped
+                {'axis': 'stakes_dilemma', 'score': 'high'},     # dropped
+                {'axis': 'moral_weight', 'score': 47},           # out-of-range
+            ]},
+        ],
+        'structural': [
+            {'axis': 'causal_integrity', 'score': 8},
+            {'axis': 'turning_point_clarity', 'score': None},
+            {'axis': 'unknown_axis', 'score': 9},                # dropped
+        ],
+    }
+    per_act = _extract_per_act_scores(payload)
+    assert per_act['act1'] == {'specificity': 8}
+    structural = _extract_structural_scores(payload)
+    assert structural == {'causal_integrity': 8}
+
+
+def test_act_shape_unparseable_response_skips_extension(tmp_path, monkeypatch):
+    """If the act-shape response can't be parsed, the extension is
+    skipped silently (pitch result stands; no half-written CSVs)."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-act-shape' in log_file:
+            text = 'I cannot score these acts.'
+        else:
+            text = json.dumps(_full_payload())
+        response = {
+            'content': [{'type': 'text', 'text': text}],
+            'usage': {'input_tokens': 100, 'output_tokens': 50,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert not result['act_shape_mode']
+    out_dir = result['output_dir']
+    assert os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
+    assert not os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
 
 
 def test_back_to_back_runs_get_distinct_output_dirs(tmp_path, monkeypatch):

@@ -47,7 +47,13 @@ StoryPowerStatus = Literal[
 class StoryPowerResult(TypedDict):
     """Result of score_story_power. Coaching is the requested level; status
     is the outcome. Output_dir is the timestamped directory written to
-    (empty string when no directory was allocated)."""
+    (empty string when no directory was allocated).
+
+    act_shape_mode is True when the run also produced Layer 1 (per-act
+    matrix) and Layer 2 (structural axes) — i.e. all three act-shape
+    paragraphs were populated and scoring succeeded. Per-act and
+    structural fields stay empty when the run is pitch-only.
+    """
     coaching: CoachingLevel
     status: StoryPowerStatus
     mode: str  # human display string, for backward-compatible logging
@@ -56,6 +62,10 @@ class StoryPowerResult(TypedDict):
     scores: dict[str, int]
     deltas: dict[str, int]
     diagnostic: dict
+    act_shape_mode: bool
+    per_act_scores: dict[str, dict[str, int]]   # {act_key: {axis_key: score}}
+    structural_scores: dict[str, int]           # {structural_axis_key: score}
+    structural_diagnostic: dict
 
 
 class Axis(NamedTuple):
@@ -98,6 +108,46 @@ class PitchArtifacts(NamedTuple):
     architecture_summaries: str
 
 
+class ActShape(NamedTuple):
+    """The three labeled paragraphs from `## Act-shape`. All three must
+    be non-empty for the scorecard to run in act-shape mode."""
+    act1: str
+    act2: str
+    act3: str
+
+    @property
+    def is_populated(self) -> bool:
+        return all((self.act1.strip(), self.act2.strip(),
+                    self.act3.strip()))
+
+
+# Layer 2 structural axes — only meaningful at act-shape resolution.
+# All four weighted 1.5x: turning-point clarity and causal integrity
+# are foundational in a way that hides damage when scored flat-average
+# (see references/story-power-rubric.md §"Layer 2").
+STRUCTURAL_AXES: tuple[Axis, ...] = (
+    Axis('causal_integrity', 'Causal integrity', 1.5),
+    Axis('turning_point_clarity', 'Turning-point clarity', 1.5),
+    Axis('arc_gradient', 'Arc gradient', 1.5),
+    Axis('promise_payoff', 'Promise & payoff', 1.5),
+)
+STRUCTURAL_AXIS_KEYS = tuple(a.key for a in STRUCTURAL_AXES)
+STRUCTURAL_AXIS_BY_KEY = {a.key: a for a in STRUCTURAL_AXES}
+
+# Structural axes also enforce module-load invariants.
+assert len({a.key for a in STRUCTURAL_AXES}) == len(STRUCTURAL_AXES), (
+    'structural axis keys must be unique'
+)
+assert all(a.weight == 1.5 for a in STRUCTURAL_AXES), (
+    'all structural axes are weighted 1.5x'
+)
+# No overlap between pitch axes and structural axes — diagnostic
+# routing depends on which family an axis belongs to.
+assert not (set(AXIS_KEYS) & set(STRUCTURAL_AXIS_KEYS)), (
+    'pitch axes and structural axes must have disjoint keys'
+)
+
+
 def composite_score(scores: dict[str, int | float]) -> float:
     """Return the weighted composite from a {axis_key: score} dict.
 
@@ -136,6 +186,33 @@ def _read_optional(path: str, head_lines: int | None = None) -> str:
         if len(lines) > head_lines:
             text = '\n'.join(lines[:head_lines]) + '\n…'
     return text
+
+
+def parse_act_shape(act_shape_body: str) -> ActShape | None:
+    """Parse the body of `## Act-shape` into three labeled paragraphs.
+
+    Expects `### Act 1` / `### Act 2` / `### Act 3` sub-headings. Returns
+    None if the body is empty or fewer than three acts are present;
+    callers should treat that as "act-shape mode is not available, run
+    pitch-only."
+    """
+    if not act_shape_body.strip():
+        return None
+    parts = re.split(r'^###\s+Act\s+(\d+).*?$', act_shape_body,
+                     flags=re.MULTILINE | re.IGNORECASE)
+    # parts = [pre, n1, body1, n2, body2, ...]
+    acts: dict[int, str] = {}
+    for i in range(1, len(parts), 2):
+        try:
+            n = int(parts[i])
+        except ValueError:
+            continue
+        body = parts[i + 1].strip() if i + 1 < len(parts) else ''
+        if 1 <= n <= 3:
+            acts[n] = body
+    if not all(n in acts and acts[n] for n in (1, 2, 3)):
+        return None
+    return ActShape(act1=acts[1], act2=acts[2], act3=acts[3])
 
 
 def gather_pitch_artifacts(project_dir: str) -> PitchArtifacts:
@@ -343,10 +420,30 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
                            deltas, artifacts, recover_hint=log_file)
 
     status: StoryPowerStatus = 'partial' if missing_axes else 'ok'
+
+    # Act-shape extension: re-score per-act + structural axes when the
+    # author has populated the three labeled paragraphs. Pitch-only is a
+    # valid result; this is an additive layer, not a replacement.
+    act_shape = parse_act_shape(artifacts.act_shape)
+    act_shape_extension: dict = {}
+    if act_shape:
+        log('Act-shape detected — running Layer 1 (per-act matrix) + '
+            'Layer 2 (structural axes).')
+        act_shape_extension = _run_act_shape_extension(
+            project_dir, output_dir, log_dir, act_shape, artifacts,
+            rubric, coaching, scores,
+        )
+        if act_shape_extension.get('status') == 'partial':
+            status = 'partial'
+
     return _result(
         coaching=coaching, status=status, output_dir=output_dir,
         composite=composite, scores=scores, deltas=deltas,
         diagnostic=parsed.get('diagnostic') or {},
+        act_shape_mode=bool(act_shape_extension),
+        per_act_scores=act_shape_extension.get('per_act_scores') or {},
+        structural_scores=act_shape_extension.get('structural_scores') or {},
+        structural_diagnostic=act_shape_extension.get('structural_diagnostic') or {},
     )
 
 
@@ -360,7 +457,12 @@ def _compose_mode(coaching: CoachingLevel, status: StoryPowerStatus) -> str:
 def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
              output_dir: str, composite: float,
              scores: dict[str, int], deltas: dict[str, int],
-             diagnostic: dict) -> StoryPowerResult:
+             diagnostic: dict,
+             act_shape_mode: bool = False,
+             per_act_scores: dict[str, dict[str, int]] | None = None,
+             structural_scores: dict[str, int] | None = None,
+             structural_diagnostic: dict | None = None,
+             ) -> StoryPowerResult:
     return {
         'coaching': coaching,
         'status': status,
@@ -370,6 +472,10 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
         'scores': scores,
         'deltas': deltas,
         'diagnostic': diagnostic,
+        'act_shape_mode': act_shape_mode,
+        'per_act_scores': per_act_scores or {},
+        'structural_scores': structural_scores or {},
+        'structural_diagnostic': structural_diagnostic or {},
     }
 
 
@@ -627,6 +733,284 @@ def _read_scorecard_scores(path: str) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# Act-shape extension (Layer 1 per-act matrix + Layer 2 structural axes)
+# ---------------------------------------------------------------------------
+
+ACT_KEYS: tuple[str, ...] = ('act1', 'act2', 'act3')
+
+
+def _build_act_shape_prompt(act_shape: ActShape, artifacts: PitchArtifacts,
+                             rubric: str) -> str:
+    """Assemble the prompt that asks for per-act matrix + structural axes.
+
+    Returns a JSON response with two top-level objects: `per_act` (the
+    Layer 1 3×8 matrix) and `structural` (the Layer 2 4-axis scores
+    plus a cross-act diagnostic).
+    """
+    pitch_axes_block = '\n'.join(
+        f'  - "{a.key}": "{a.name}"' for a in AXES
+    )
+    structural_axes_block = '\n'.join(
+        f'  - "{a.key}": "{a.name}"' for a in STRUCTURAL_AXES
+    )
+    return f"""You are scoring the ACT-SHAPE of a project at the structural-spec
+tier, using the rubric provided. The eight pitch-level axes have
+already been scored against the synopsis as a whole; your job now is
+to re-apply those eight axes per act AND to score the four cross-act
+structural axes defined in the "Layer 2" section of the rubric.
+
+# Rubric
+
+{rubric}
+
+# Pitch context (already scored — do not re-score the synopsis)
+
+## Logline
+{artifacts.logline}
+
+## Synopsis
+{artifacts.synopsis}
+
+## Theme
+{artifacts.theme or '(empty)'}
+
+# Act-shape under evaluation
+
+## Act 1
+{act_shape.act1}
+
+## Act 2
+{act_shape.act2}
+
+## Act 3
+{act_shape.act3}
+
+# Optional structural context
+
+## Spine (one sentence per event)
+{artifacts.spine_summaries or '(empty)'}
+
+## Architecture (one sentence per anchor)
+{artifacts.architecture_summaries or '(empty)'}
+
+# Task
+
+Return a JSON object with this exact shape:
+
+{{
+  "pitch_axes": {{
+{pitch_axes_block}
+  }},
+  "structural_axes": {{
+{structural_axes_block}
+  }},
+  "per_act": [
+    {{
+      "act": "act1",
+      "scores": [
+        {{"axis": "{AXES[0].key}", "score": 1-10 integer,
+          "rationale": "one-sentence justification grounded in this act"}},
+        ... one entry per pitch axis key in the order listed above ...
+      ]
+    }},
+    ... one entry per act in order: act1, act2, act3 ...
+  ],
+  "structural": [
+    {{"axis": "{STRUCTURAL_AXES[0].key}",
+      "score": 1-10 integer,
+      "positive_signals": "semicolon-separated quoted signals across acts",
+      "negative_signals": "semicolon-separated quoted gaps across acts",
+      "rationale": "one-sentence justification grounded in cross-act relationships"}},
+    ... one entry per structural axis key in the order listed above ...
+  ],
+  "structural_diagnostic": {{
+    "cross_act_pattern": "one sentence: when an axis drops in one act vs the others, or when two structural axes co-locate a problem, name it",
+    "high_leverage_move": "one sentence: ONE structural change that would lift multiple axes across layers",
+    "example_beat": "an optional concrete beat to insert or revise that would deliver the move"
+  }}
+}}
+
+Score per-act using the same 1-10 bands as the pitch rubric; an act
+that scores 9 in isolation is one whose execution at the structural-
+spec level is top-tier. The four structural axes are scored over
+relationships between acts — do not double-count Layer 1 drops as
+Layer 2 problems; the rubric explicitly keeps them independent so the
+diagnostic can name causes vs. symptoms.
+
+Reserve 10 for prose-verified excellence. Be specific and grounded —
+quote the act-shape. Return ONLY the JSON object.
+"""
+
+
+def _extract_per_act_scores(parsed: dict) -> dict[str, dict[str, int]]:
+    """Pull {act_key: {pitch_axis_key: score}} from the act-shape response.
+
+    Tolerant in the same way _extract_scores is: drops malformed rows
+    rather than raising. Returns only act/axis combinations that survive
+    the (axis-known, score-int, score-in-range) checks.
+    """
+    out: dict[str, dict[str, int]] = {a: {} for a in ACT_KEYS}
+    for act_row in parsed.get('per_act') or []:
+        if not isinstance(act_row, dict):
+            continue
+        act_key = act_row.get('act')
+        if act_key not in ACT_KEYS:
+            continue
+        for score_row in act_row.get('scores') or []:
+            if not isinstance(score_row, dict):
+                continue
+            axis = score_row.get('axis')
+            if axis not in AXIS_BY_KEY:
+                continue
+            try:
+                score = int(score_row.get('score'))
+            except (TypeError, ValueError):
+                continue
+            if not 1 <= score <= 10:
+                continue
+            out[act_key][axis] = score
+    return out
+
+
+def _extract_structural_scores(parsed: dict) -> dict[str, int]:
+    """Pull {structural_axis_key: score} from the act-shape response."""
+    out: dict[str, int] = {}
+    for row in parsed.get('structural') or []:
+        if not isinstance(row, dict):
+            continue
+        axis = row.get('axis')
+        if axis not in STRUCTURAL_AXIS_BY_KEY:
+            continue
+        try:
+            score = int(row.get('score'))
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= score <= 10:
+            continue
+        out[axis] = score
+    return out
+
+
+def _run_act_shape_extension(project_dir: str, output_dir: str,
+                               log_dir: str, act_shape: ActShape,
+                               artifacts: PitchArtifacts, rubric: str,
+                               coaching: CoachingLevel,
+                               pitch_scores: dict[str, int]) -> dict:
+    """Run the Layer 1 + Layer 2 LLM call and write the act-shape CSVs.
+
+    Returns {} if the call failed (the pitch result still stands).
+    Returns a dict with per_act_scores, structural_scores,
+    structural_diagnostic, status, and the raw parsed payload (for
+    diagnostic composition) on success.
+    """
+    prompt = _build_act_shape_prompt(act_shape, artifacts, rubric)
+    model = select_model('creative')
+    log_file = os.path.join(log_dir,
+                            os.path.basename(output_dir) + '-act-shape.json')
+    os.makedirs(log_dir, exist_ok=True)
+    try:
+        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+    except Exception as e:
+        log(f'ERROR: act-shape LLM call failed: {e}. Pitch-mode scorecard '
+            'still stands.')
+        return {}
+    text = _read_response_text(log_file)
+    parsed = _parse_response_act_shape(text)
+    if not parsed:
+        _record_cost(project_dir, log_file, model,
+                     target='story-power:act-shape:unparseable')
+        log(f'ERROR: act-shape LLM response unparseable; raw at {log_file}. '
+            'Pitch-mode scorecard still stands.')
+        return {}
+    _record_cost(project_dir, log_file, model, target='story-power:act-shape')
+
+    per_act = _extract_per_act_scores(parsed)
+    structural = _extract_structural_scores(parsed)
+    structural_diag = parsed.get('structural_diagnostic') or {}
+
+    # Surface partial extraction so the act-shape mode tags itself partial.
+    missing_per_act = sum(len(AXIS_KEYS) - len(scores)
+                          for scores in per_act.values())
+    missing_struct = [a.key for a in STRUCTURAL_AXES if a.key not in structural]
+    status = 'ok'
+    if missing_per_act or missing_struct:
+        status = 'partial'
+        log(f'WARNING: act-shape extraction partial — '
+            f'{missing_per_act} per-act cell(s) missing, '
+            f'{len(missing_struct)} structural axis/axes missing '
+            f'({", ".join(missing_struct) or "all present"}).')
+
+    if coaching == 'full':
+        _write_per_act_matrix(output_dir, per_act, parsed,
+                              recover_hint=log_file)
+        _write_structural_axes(output_dir, structural, parsed,
+                               recover_hint=log_file)
+        _append_structural_diagnostic(output_dir, pitch_scores, per_act,
+                                       structural, structural_diag)
+    else:  # coach
+        _append_act_shape_coaching_brief(
+            output_dir, per_act, structural, parsed, structural_diag,
+            recover_hint=log_file,
+        )
+
+    return {
+        'status': status,
+        'per_act_scores': per_act,
+        'structural_scores': structural,
+        'structural_diagnostic': structural_diag,
+        'parsed': parsed,
+    }
+
+
+def _parse_response_act_shape(text: str) -> dict | None:
+    """Tolerant JSON parse for the act-shape payload.
+
+    Same three-tier fallback as _parse_response (raw → fenced → greedy),
+    but the shape check looks for `per_act` AND `structural` rather than
+    `scores`.
+    """
+    saw_shape_failure = False
+
+    def _take(obj):
+        nonlocal saw_shape_failure
+        if not isinstance(obj, dict):
+            return None
+        per_act = obj.get('per_act')
+        structural = obj.get('structural')
+        if not isinstance(per_act, list) or not isinstance(structural, list):
+            saw_shape_failure = True
+            return None
+        return obj
+    try:
+        out = _take(json.loads(text))
+        if out is not None:
+            return out
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+    if m:
+        try:
+            out = _take(json.loads(m.group(1).strip()))
+            if out is not None:
+                return out
+        except json.JSONDecodeError:
+            pass
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if m:
+        try:
+            out = _take(json.loads(m.group(0)))
+            if out is not None:
+                return out
+        except json.JSONDecodeError:
+            pass
+    if saw_shape_failure:
+        log('WARNING: act-shape LLM returned valid JSON but with the wrong '
+            'shape (missing "per_act"/"structural" lists). Treating as '
+            'unparseable.')
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Output writers
 # ---------------------------------------------------------------------------
 
@@ -768,7 +1152,12 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                               rubric: str) -> None:
     """strict coaching: rule-based checklist of signals per axis, no LLM
     call. Lists what to look for and a 'self-score 1-10' line the author
-    fills in by hand."""
+    fills in by hand.
+
+    Extends with per-act blanks and structural-axis blanks when the
+    act-shape section is populated (so strict-mode authors get the same
+    coverage the LLM modes produce automatically).
+    """
     md_path = os.path.join(output_dir, 'self-scoring-checklist.md')
     out: list[str] = [
         '# Story-power scorecard — self-scoring checklist',
@@ -778,6 +1167,8 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
         'review the signals in the rubric and assign a 1-10 score yourself. '
         'No LLM call has been made. See references/story-power-rubric.md '
         'for full signal definitions and scoring bands.',
+        '',
+        '# Pitch tier (whole synopsis)',
         '',
     ]
     for axis in AXES:
@@ -793,4 +1184,260 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
             '- ',
             '',
         ])
+    act_shape = parse_act_shape(artifacts.act_shape)
+    if act_shape:
+        out.extend([
+            '# Act-shape tier (per act + structural)',
+            '',
+            'The eight pitch axes above, scored independently per act:',
+            '',
+        ])
+        for act_label in ('Act 1', 'Act 2', 'Act 3'):
+            out.extend([f'## {act_label}', ''])
+            for axis in AXES:
+                out.append(f'- {axis.name}: __')
+            out.append('')
+        out.extend([
+            '# Cross-act structural axes',
+            '',
+            'These four axes measure relationships between acts (see the '
+            '"Layer 2" section of the rubric for full signals).',
+            '',
+        ])
+        for axis in STRUCTURAL_AXES:
+            out.extend([
+                f'## {axis.name} (weight {axis.weight})',
+                '',
+                f'Self-score (1-10): __',
+                '',
+                'Cross-act signals you found:',
+                '- ',
+                '',
+            ])
     _safe_write(md_path, '\n'.join(out) + '\n')
+
+
+# ---------------------------------------------------------------------------
+# Act-shape writers (Layer 1 + Layer 2 outputs)
+# ---------------------------------------------------------------------------
+
+def _write_per_act_matrix(output_dir: str,
+                            per_act: dict[str, dict[str, int]],
+                            parsed: dict, *,
+                            recover_hint: str = '') -> None:
+    """Write `per-act-matrix.csv` — 3 acts × 8 pitch axes."""
+    csv_path = os.path.join(output_dir, 'per-act-matrix.csv')
+    headers = ['axis', 'name'] + list(ACT_KEYS)
+    lines = ['|'.join(headers)]
+    for axis in AXES:
+        row = [axis.key, axis.name]
+        for act in ACT_KEYS:
+            row.append(str(per_act.get(act, {}).get(axis.key, '')))
+        lines.append('|'.join(_sanitize_cell(c) for c in row))
+    _safe_write(csv_path, '\n'.join(lines) + '\n', recover_hint=recover_hint)
+
+
+def _write_structural_axes(output_dir: str,
+                             structural: dict[str, int],
+                             parsed: dict, *,
+                             recover_hint: str = '') -> None:
+    """Write `structural-axes.csv` — 4 cross-act structural scores."""
+    csv_path = os.path.join(output_dir, 'structural-axes.csv')
+    headers = ['axis', 'name', 'score', 'weight', 'positive_signals',
+               'negative_signals', 'rationale']
+    rows_by_axis = {r.get('axis'): r for r in parsed.get('structural', [])
+                    if isinstance(r, dict)}
+    lines = ['|'.join(headers)]
+    for axis in STRUCTURAL_AXES:
+        row = rows_by_axis.get(axis.key, {})
+        lines.append('|'.join(_sanitize_cell(c) for c in (
+            axis.key,
+            axis.name,
+            str(structural.get(axis.key, '')),
+            str(axis.weight),
+            row.get('positive_signals', ''),
+            row.get('negative_signals', ''),
+            row.get('rationale', ''),
+        )))
+    _safe_write(csv_path, '\n'.join(lines) + '\n', recover_hint=recover_hint)
+
+
+def _append_structural_diagnostic(output_dir: str,
+                                    pitch_scores: dict[str, int],
+                                    per_act: dict[str, dict[str, int]],
+                                    structural: dict[str, int],
+                                    structural_diag: dict) -> None:
+    """Append the cross-act section to the existing diagnostic.md."""
+    md_path = os.path.join(output_dir, 'diagnostic.md')
+    if not os.path.isfile(md_path):
+        return
+    try:
+        with open(md_path, encoding='utf-8') as f:
+            existing = f.read()
+    except OSError as e:
+        log(f'WARNING: could not append cross-act diagnostic to {md_path}: {e}')
+        return
+
+    md_lines = [
+        '## Per-act matrix (Layer 1)',
+        '',
+        '| Axis | Act 1 | Act 2 | Act 3 |',
+        '|---|---|---|---|',
+    ]
+    for axis in AXES:
+        cells = [str(per_act.get(act, {}).get(axis.key, '–'))
+                 for act in ACT_KEYS]
+        md_lines.append(f'| {axis.name} | {cells[0]} | {cells[1]} | {cells[2]} |')
+    md_lines.extend([
+        '',
+        '## Cross-act structural axes (Layer 2)',
+        '',
+        '| Axis | Score | Weight |',
+        '|---|---|---|',
+    ])
+    for axis in STRUCTURAL_AXES:
+        s = structural.get(axis.key, '–')
+        md_lines.append(f'| {axis.name} | {s} | {axis.weight} |')
+
+    # Surface flagged per-axis drops (act with the largest gap to the
+    # other two). A 2+ gap is meaningful; anything less is noise at the
+    # 1-10 band.
+    drops = _flag_act_drops(per_act)
+    if drops:
+        md_lines.extend(['', '### Per-axis drops', ''])
+        for axis_key, act_key, gap in drops:
+            axis = AXIS_BY_KEY[axis_key]
+            md_lines.append(
+                f'- **{axis.name}** drops in {act_key.upper()} '
+                f'(gap of {gap} vs. the other two acts).'
+            )
+
+    md_lines.extend([
+        '',
+        '## Cross-act diagnostic',
+        '',
+        f'**Cross-act pattern:** {structural_diag.get("cross_act_pattern") or "(none identified)"}',
+        '',
+        f'**High-leverage move (structural):** {structural_diag.get("high_leverage_move") or "(none proposed)"}',
+        '',
+    ])
+    example = structural_diag.get('example_beat')
+    if example:
+        md_lines.extend([
+            '**Example beat to consider:**',
+            '',
+            f'> {example}',
+            '',
+        ])
+
+    _safe_write(md_path, existing + '\n' + '\n'.join(md_lines) + '\n')
+
+
+def _flag_act_drops(per_act: dict[str, dict[str, int]],
+                     min_gap: int = 2) -> list[tuple[str, str, int]]:
+    """Identify per-axis drops where one act lags ≥ min_gap behind the
+    average of the other two.
+
+    Returns a list of (axis_key, act_key, gap) tuples. Ordered by axis
+    appearance in AXES and then descending gap.
+    """
+    out: list[tuple[str, str, int]] = []
+    for axis in AXES:
+        scores_by_act = {act: per_act.get(act, {}).get(axis.key)
+                         for act in ACT_KEYS}
+        if any(v is None for v in scores_by_act.values()):
+            continue  # incomplete data — skip
+        for act in ACT_KEYS:
+            other_avg = sum(scores_by_act[a] for a in ACT_KEYS
+                            if a != act) / 2
+            gap = round(other_avg - scores_by_act[act])
+            if gap >= min_gap:
+                out.append((axis.key, act, gap))
+    return out
+
+
+def _append_act_shape_coaching_brief(output_dir: str,
+                                       per_act: dict[str, dict[str, int]],
+                                       structural: dict[str, int],
+                                       parsed: dict,
+                                       structural_diag: dict, *,
+                                       recover_hint: str = '') -> None:
+    """coach coaching: append per-act + structural sections to the
+    existing coaching-brief.md."""
+    md_path = os.path.join(output_dir, 'coaching-brief.md')
+    if not os.path.isfile(md_path):
+        return
+    try:
+        with open(md_path, encoding='utf-8') as f:
+            existing = f.read()
+    except OSError as e:
+        log(f'WARNING: could not append act-shape coaching brief to {md_path}: {e}')
+        return
+
+    out: list[str] = [
+        '# Act-shape extension (LLM proposals — author confirms)',
+        '',
+        'Per-act matrix and structural axes follow. The matrix surfaces '
+        '*where* a problem lands; the structural axes name *why* it lands. '
+        'Keeping them independent on purpose — use the structural scores '
+        'to localize root cause, not as a justification to drag matrix '
+        'scores up or down.',
+        '',
+        '## Per-act matrix (proposed)',
+        '',
+        '| Axis | Act 1 | Act 2 | Act 3 |',
+        '|---|---|---|---|',
+    ]
+    for axis in AXES:
+        cells = [str(per_act.get(act, {}).get(axis.key, '–'))
+                 for act in ACT_KEYS]
+        out.append(f'| {axis.name} | {cells[0]} | {cells[1]} | {cells[2]} |')
+
+    out.extend(['', '## Cross-act structural axes (proposed)', ''])
+    rows_by_axis = {r.get('axis'): r for r in parsed.get('structural', [])
+                    if isinstance(r, dict)}
+    for axis in STRUCTURAL_AXES:
+        row = rows_by_axis.get(axis.key, {})
+        s = structural.get(axis.key, '–')
+        out.extend([
+            f'### {axis.name} (proposed {s}, weight {axis.weight})',
+            '',
+            f'- Positive: {row.get("positive_signals", "—")}',
+            f'- Negative: {row.get("negative_signals", "—")}',
+            f'- Rationale: {row.get("rationale", "—")}',
+            f'- Question: does this structural read match your sense of how '
+            'the acts relate?',
+            '',
+        ])
+
+    drops = _flag_act_drops(per_act)
+    if drops:
+        out.extend(['## Per-axis drops worth discussing', ''])
+        for axis_key, act_key, gap in drops:
+            axis = AXIS_BY_KEY[axis_key]
+            out.append(
+                f'- **{axis.name}** drops in {act_key.upper()} '
+                f'(gap of {gap}). Is this an intentional shape choice or '
+                'an unintentional dip?'
+            )
+        out.append('')
+
+    out.extend([
+        '## Cross-act diagnostic',
+        '',
+        f'**Cross-act pattern:** {structural_diag.get("cross_act_pattern") or "(none identified)"}',
+        '',
+        f'**Proposed high-leverage move:** {structural_diag.get("high_leverage_move") or "(none proposed)"}',
+        '',
+    ])
+    example = structural_diag.get('example_beat')
+    if example:
+        out.extend([
+            '**Example beat to consider:**',
+            '',
+            f'> {example}',
+            '',
+        ])
+
+    _safe_write(md_path, existing + '\n' + '\n'.join(out) + '\n',
+                recover_hint=recover_hint)
