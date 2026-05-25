@@ -107,6 +107,19 @@ Run structural scoring — this is a deterministic analysis of the CSV data (no 
 ```
 If scores are below target, review the diagnosis and proposals in `working/scores/structural-proposals.csv`. At coaching level full, the diagnosis includes craft-grounded explanations and specific CSV changes. At coach, it produces guiding questions.
 
+**"Is my elaboration on track?" / "Drift check" / "Are the levels consistent?":**
+Run the elaboration drift report — deterministic, no LLM, no cost:
+```bash
+./storyforge score --drift
+```
+This combines floor checks and registry consistency across every level (logline → drafts). For a deeper cross-level fidelity check that asks an LLM to diff upstream vs downstream and propose which side is correct, use `./storyforge score --boundary N->M` (one boundary) or `./storyforge score --all-boundaries`. Verdicts are persisted to `working/scoring-verdicts.csv`.
+
+**"Bible consistency" / "Does my prose match the character/world bible?":**
+```bash
+./storyforge score --bible-consistency
+```
+LLM check of every drafted scene against `character-bible.md`, `world-bible.md`, `voice-guide.md`. Bibles are cached (~$20-25/run). Findings get stable `finding_id`s so overrides via `working/scoring-overrides.csv` persist.
+
 **"Clean up" / "Health check" / "Check my project" / "Fix CSV issues" / "Project cleanup":**
 Invoke the `cleanup` skill. This runs the project health report (CSV schema validation, scene artifact detection, structural checks), then works through action items — fixing what it can directly and delegating to other skills/scripts as needed.
 

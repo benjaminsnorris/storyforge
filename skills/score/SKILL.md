@@ -276,6 +276,81 @@ When `project.medium: graphic-novel` is set, scoring runs a completely different
 
 ---
 
+## Elaboration Scoring
+
+Beyond per-scene craft scoring, `storyforge score` also exposes the elaboration
+scoring pipeline — three tiers of checks that span the 8-level elaboration
+hierarchy (logline → synopsis → act-shape → spine → architecture → scene-map →
+briefs → drafts).
+
+All elaboration scoring respects `working/scoring-overrides.csv`. A finding the
+author has marked "considered, accepted" still surfaces in the report (tagged
+`accepted`) but doesn't count toward failure totals — the quality gate treats it
+as resolved.
+
+### Floor checks: per-level quality
+
+Deterministic checks per level. No LLM calls.
+
+- `--level N` (0-6) — run the floor checks for one level
+- `--all-levels` — run every level
+
+Use these to gate progression: a level should pass its own floor before the
+author elaborates downward.
+
+### Comparison: explore prose-tier candidates
+
+Generate two or three candidate loglines, synopses, or act-shapes and compare
+them side-by-side. The tool **never declares a winner** — that's an authorial
+decision.
+
+- `--compare a b [c] --level N` — compare candidates at level 0, 1, or 2
+- `--compare ... --semantic` — additionally populate LLM ceiling axes
+  (specificity, irony between elements, memorable hook word, genre/tone via
+  imagery). Without `--semantic`, the ceiling table renders as placeholders.
+
+Candidate args can be inline strings or paths to files.
+
+### Drift report
+
+- `--drift` — read-only deterministic report combining floor checks + registry
+  consistency across all levels. No LLM, no cost. Useful as a pre-elaborate
+  sanity check.
+
+### Boundary diffs: cross-level fidelity (LLM)
+
+Replaces upward-faithfulness scoring. Asks the LLM to diff the upstream and
+downstream artifacts at a boundary and propose which side is correct.
+
+- `--boundary N->M` — run one boundary (`0->1`, `1->2`, ..., `6->7`)
+- `--all-boundaries` — run every boundary
+- `--scope ID` — limit a structural-tier boundary to a single spine event,
+  architecture anchor, or scene id
+
+Verdicts are written to `working/scoring-verdicts.csv`. In `full` coaching the
+LLM persists a `proposed_verdict`; in `coach`/`strict` only the diff is shown
+and the author records the verdict themselves.
+
+### Bible-consistency (LLM, cached)
+
+- `--bible-consistency` — for every drafted scene, check the prose against
+  `reference/character-bible.md`, `reference/world-bible.md`, and
+  `reference/voice-guide.md`. The bibles are sent as cached system blocks, so
+  the per-scene incremental cost is small (~$20-25 total for a full run).
+
+Findings include a stable `finding_id` (sha1 of scope + bible + claim) so
+overrides persist across runs.
+
+### When to run what
+
+- New project elaborating top-down: `--drift` after each level to catch
+  drift before moving on; `--compare --semantic` while exploring loglines.
+- Mid-project structural change: `--boundary` at the affected boundary, or
+  `--all-boundaries` after a large rewrite.
+- After drafting completes (or any time the bibles change): `--bible-consistency`.
+
+---
+
 ## Coaching Level Behavior
 
 Adapt your approach based on `project.coaching_level` in storyforge.yaml:
