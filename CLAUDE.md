@@ -183,13 +183,14 @@ All structured data uses pipe-delimited CSV:
 
 **Prose tier — story summary at progressive granularity:**
 - `reference/story-summary.md` — four sections: `## Logline` (1 sentence), `## Synopsis` (1 paragraph), `## Act-shape` (3 paragraphs, one `### Act N` each), `## Theme` (2-4 sentences). Per-section `_updated` timestamps in YAML frontmatter feed cascade drift detection. `## Logline` is canonical; `storyforge.yaml:project.logline` is deprecated as an input.
+- `reference/outline.md` — read-only render of the expanding outline. Three numbered sections (Spine / Architecture / Scenes), each populated from the `summary` column of the corresponding CSV. Sync regenerates this file on every commit; authors edit summaries in the CSVs.
 
 **Structural-anchor tier — each its own discrete CSV:**
-- `reference/spine.csv` — 5-10 irreducible events (id, seq, title, function, part)
-- `reference/architecture.csv` — 15-25 anchor scenes (id, seq, title, part, pov, spine_event, action_sequel, emotional_arc, value_at_stake, value_shift, turning_point). `spine_event` is required; references `spine.csv:id`.
+- `reference/spine.csv` — 5-10 irreducible events (id, seq, title, summary, function, part). `summary` is a single sentence — what happens in this event.
+- `reference/architecture.csv` — 15-25 anchor scenes (id, seq, title, summary, part, pov, spine_event, action_sequel, emotional_arc, value_at_stake, value_shift, turning_point). `summary` is a single sentence; `spine_event` is required and references `spine.csv:id`.
 
 **Manuscript tier:**
-- `reference/scenes.csv` — structural identity (id, seq, title, part, pov, location, timeline_day, time_of_day, duration, type, status, word_count, target_words, target_pages, panel_count, page_count, architecture_scene). `architecture_scene` is optional; references `architecture.csv:id` (empty for purely interstitial scenes).
+- `reference/scenes.csv` — structural identity (id, seq, title, summary, part, pov, location, timeline_day, time_of_day, duration, type, status, word_count, target_words, target_pages, panel_count, page_count, architecture_scene). `summary` is a single sentence describing what happens; `architecture_scene` is optional and references `architecture.csv:id` (empty for purely interstitial scenes).
 - `reference/scene-intent.csv` — narrative dynamics (id, function, action_sequel, emotional_arc, value_at_stake, value_shift, turning_point, characters, on_stage, mice_threads, theme_threads). `theme_threads` references `themes.csv:id`.
 - `reference/scene-briefs.csv` — drafting contracts (id, goal, conflict, outcome, crisis, decision, knowledge_in, knowledge_out, key_actions, key_dialogue, emotions, motifs, continuity_deps, has_overflow)
 - `reference/voice-profile.csv` — structured voice constraints (_project row for banned words/register, per-character rows for preferred words/metaphor families/rhythm/dialogue style)

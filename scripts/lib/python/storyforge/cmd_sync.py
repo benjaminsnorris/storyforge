@@ -356,8 +356,7 @@ SYNC_TRACKED_PATHS = [
     'reference/scene-intent.csv',
     'reference/scene-briefs.csv',
     'reference/scenes-review.md',
-    # Structural-anchor CSVs + their derived MDs. Sync regenerates
-    # spine.md / architecture.md when the underlying CSV is dirty.
+    # Structural-anchor CSVs and their derived markdown renderings.
     'reference/spine.csv',
     'reference/architecture.csv',
     'reference/spine.md',

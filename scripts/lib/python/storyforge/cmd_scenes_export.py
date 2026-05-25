@@ -123,7 +123,7 @@ def export_scenes(project_dir, output_path, filter_mode='all',
 
 
 # ============================================================================
-# Derived markdown renderings for the structural-anchor tier (#229)
+# Derived markdown renderings for the structural-anchor tier
 # ============================================================================
 
 def export_spine_md(project_dir: str, output_path: str | None = None) -> str:
@@ -330,7 +330,7 @@ def main(argv=None):
     mode, value, value2 = resolve_filter_args(args)
     export_scenes(project_dir, output, mode, value, value2)
 
-    # Derived structural-anchor renderings (#229). Silently skip if the
+    # Derived structural-anchor renderings. Silently skip if the
     # underlying CSV doesn't exist yet (project hasn't reached that level).
     if args.output is None:
         export_spine_md(project_dir)

@@ -298,6 +298,11 @@ Deterministic checks per level. No LLM calls.
 Use these to gate progression: a level should pass its own floor before the
 author elaborates downward.
 
+Levels 3 (spine), 4 (architecture), and 5 (scene-map) require a one-sentence
+`summary` column on every row (≤ 35 words). The summaries form an expanding
+outline of the story, rendered together in `reference/outline.md`. Author
+edits live in the CSVs; sync regenerates outline.md.
+
 ### Comparison: explore prose-tier candidates
 
 Generate two or three candidate loglines, synopses, or act-shapes and compare
