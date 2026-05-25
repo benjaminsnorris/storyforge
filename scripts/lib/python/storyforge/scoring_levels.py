@@ -261,7 +261,51 @@ def score_spine(project_dir: str, medium: str = 'novel') -> dict:
         severity='medium',
     ))
 
+    checks.extend(_summary_checks(rows, label='event'))
     return _result(3, 'spine', checks)
+
+
+# ============================================================================
+# Shared summary-column checks (spine, architecture, scene-map)
+# ============================================================================
+
+_SUMMARY_MAX_WORDS = 35
+
+
+def _summary_checks(rows: list[dict], *, label: str) -> list[dict]:
+    """Return floor-check entries for the `summary` column across rows.
+
+    Two checks per tier:
+      - summary populated for every row
+      - summary ≤ _SUMMARY_MAX_WORDS for every row
+    """
+    if not rows:
+        return []
+    missing = [r.get('id', '?') for r in rows if not r.get('summary', '').strip()]
+    too_long = []
+    for r in rows:
+        text = r.get('summary', '').strip()
+        if text and _count_words(text) > _SUMMARY_MAX_WORDS:
+            too_long.append((r.get('id', '?'), _count_words(text)))
+    return [
+        _check(
+            'summary non-empty for every ' + label,
+            not missing,
+            (f'{len(missing)} {label}(s) missing summary: '
+             + ', '.join(missing[:5])
+             + ('…' if len(missing) > 5 else ''))
+            if missing else '',
+            severity='medium',
+        ),
+        _check(
+            f'summary ≤ {_SUMMARY_MAX_WORDS} words for every ' + label,
+            not too_long,
+            (f'{len(too_long)} {label}(s) over the word limit; '
+             f'first: {too_long[0][0]} has {too_long[0][1]} words'
+             if too_long else ''),
+            severity='low',
+        ),
+    ]
 
 
 # ============================================================================
@@ -375,6 +419,7 @@ def score_architecture(project_dir: str, medium: str = 'novel') -> dict:
             severity='low',
         ))
 
+    checks.extend(_summary_checks(rows, label='anchor'))
     return _result(4, 'architecture', checks)
 
 
@@ -466,6 +511,7 @@ def score_scene_map(project_dir: str) -> dict:
             severity='low',
         ))
 
+    checks.extend(_summary_checks(map_rows, label='scene'))
     return _result(5, 'scene-map', checks)
 
 

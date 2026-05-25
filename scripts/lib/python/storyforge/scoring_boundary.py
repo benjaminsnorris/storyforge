@@ -176,7 +176,11 @@ def _collect_pairs(project_dir: str, boundary: str,
 
 
 def _render_spine_text(project_dir: str) -> str:
-    """Render spine.csv as a readable bullet list for the LLM."""
+    """Render spine.csv as a readable bullet list for the LLM.
+
+    Leads with each event's one-sentence summary (the expanding-outline
+    column) and falls back to function/title when summary is empty.
+    """
     spine_path = os.path.join(project_dir, 'reference', 'spine.csv')
     if not os.path.isfile(spine_path):
         return ''
@@ -186,15 +190,20 @@ def _render_spine_text(project_dir: str) -> str:
     lines = []
     for r in rows:
         sid = r.get('id', '?')
-        title = r.get('title', '')
-        function = r.get('function', '')
-        lines.append(f'- {sid}: {title} — {function}')
+        summary = r.get('summary', '').strip()
+        body = summary or f'{r.get("title", "")} — {r.get("function", "")}'
+        lines.append(f'- {sid}: {body}')
     return '\n'.join(lines)
 
 
 def _collect_per_spine_event(project_dir: str,
                               scope: str | None) -> list[tuple[str, str, str]]:
-    """For each spine event, gather the architecture rows that reference it."""
+    """For each spine event, gather the architecture rows that reference it.
+
+    Both sides lead with the `summary` column (the one-sentence expanding
+    outline). Structural detail (function, arc, value) follows as
+    supporting context for the LLM.
+    """
     spine_path = os.path.join(project_dir, 'reference', 'spine.csv')
     arch_path = os.path.join(project_dir, 'reference', 'architecture.csv')
     if not (os.path.isfile(spine_path) and os.path.isfile(arch_path)):
@@ -207,9 +216,13 @@ def _collect_per_spine_event(project_dir: str,
         ev_id = ev.get('id', '')
         if scope and ev_id != scope:
             continue
-        upstream = (f'Spine event {ev_id}: {ev.get("title", "")}\n'
-                    f'Function: {ev.get("function", "")}\n'
-                    f'Act: {ev.get("part", "")}')
+        summary = ev.get('summary', '').strip()
+        upstream_parts = [f'Spine event {ev_id}: {ev.get("title", "")}']
+        if summary:
+            upstream_parts.append(f'Summary: {summary}')
+        upstream_parts.append(f'Function: {ev.get("function", "")}')
+        upstream_parts.append(f'Act: {ev.get("part", "")}')
+        upstream = '\n'.join(upstream_parts)
         descendants = [r for r in arch_rows
                        if r.get('spine_event', '').strip() == ev_id]
         if not descendants:
@@ -217,13 +230,15 @@ def _collect_per_spine_event(project_dir: str,
         else:
             lines = []
             for d in descendants:
+                d_summary = d.get('summary', '').strip()
+                lead = d_summary or d.get('title', '')
                 lines.append(
-                    f'- {d.get("id", "?")}: {d.get("title", "")} '
-                    f'({d.get("action_sequel", "")}). '
-                    f'Arc: {d.get("emotional_arc", "")}. '
-                    f'Value: {d.get("value_at_stake", "")} '
-                    f'{d.get("value_shift", "")}. '
-                    f'Turn: {d.get("turning_point", "")}.'
+                    f'- {d.get("id", "?")}: {lead}. '
+                    f'[{d.get("action_sequel", "")}; '
+                    f'arc {d.get("emotional_arc", "")}; '
+                    f'value {d.get("value_at_stake", "")} '
+                    f'{d.get("value_shift", "")}; '
+                    f'turn {d.get("turning_point", "")}]'
                 )
             downstream = '\n'.join(lines)
         pairs.append((ev_id, upstream, downstream))
@@ -232,7 +247,11 @@ def _collect_per_spine_event(project_dir: str,
 
 def _collect_per_architecture_anchor(project_dir: str,
                                       scope: str | None) -> list[tuple[str, str, str]]:
-    """Per architecture anchor, gather the map scenes that reference it."""
+    """Per architecture anchor, gather the map scenes that reference it.
+
+    Leads with the anchor's `summary` (one-sentence outline) and the
+    scenes' summaries, with structural detail as supporting context.
+    """
     arch_path = os.path.join(project_dir, 'reference', 'architecture.csv')
     scenes_path = os.path.join(project_dir, 'reference', 'scenes.csv')
     if not (os.path.isfile(arch_path) and os.path.isfile(scenes_path)):
@@ -245,15 +264,21 @@ def _collect_per_architecture_anchor(project_dir: str,
         anchor_id = anchor.get('id', '')
         if scope and anchor_id != scope:
             continue
-        upstream = (
-            f'Architecture anchor {anchor_id}: {anchor.get("title", "")}\n'
-            f'POV: {anchor.get("pov", "")}\n'
-            f'Action/sequel: {anchor.get("action_sequel", "")}\n'
-            f'Emotional arc: {anchor.get("emotional_arc", "")}\n'
-            f'Value at stake: {anchor.get("value_at_stake", "")} '
-            f'{anchor.get("value_shift", "")}\n'
-            f'Turning point: {anchor.get("turning_point", "")}'
-        )
+        summary = anchor.get('summary', '').strip()
+        upstream_parts = [
+            f'Architecture anchor {anchor_id}: {anchor.get("title", "")}'
+        ]
+        if summary:
+            upstream_parts.append(f'Summary: {summary}')
+        upstream_parts.extend([
+            f'POV: {anchor.get("pov", "")}',
+            f'Action/sequel: {anchor.get("action_sequel", "")}',
+            f'Emotional arc: {anchor.get("emotional_arc", "")}',
+            (f'Value at stake: {anchor.get("value_at_stake", "")} '
+             f'{anchor.get("value_shift", "")}'),
+            f'Turning point: {anchor.get("turning_point", "")}',
+        ])
+        upstream = '\n'.join(upstream_parts)
         descendants = [r for r in scene_rows
                        if r.get('architecture_scene', '').strip() == anchor_id]
         if not descendants:
@@ -261,8 +286,10 @@ def _collect_per_architecture_anchor(project_dir: str,
         else:
             lines = []
             for d in descendants:
+                d_summary = d.get('summary', '').strip()
+                lead = d_summary or d.get('title', '')
                 lines.append(
-                    f'- {d.get("id", "?")}: {d.get("title", "")} '
+                    f'- {d.get("id", "?")}: {lead} '
                     f'(loc={d.get("location", "")}, '
                     f'day={d.get("timeline_day", "")}, '
                     f'type={d.get("type", "")})'

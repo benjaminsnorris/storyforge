@@ -143,6 +143,14 @@ COLUMN_SCHEMA = {
         'description': 'Reference to reference/spine.csv:id — the spine event this architecture row elaborates. Required.',
     },
 
+    # spine.csv / architecture.csv / scenes.csv — shared one-sentence outline.
+    # Read top-to-bottom across the three tiers, `summary` is the expanding
+    # outline of the story (each row a single sentence of what happens).
+    'summary': {
+        'type': 'free_text', 'file': 'multi', 'stage': 'spine',
+        'description': 'One-sentence outline of what happens in this event/anchor/scene. Read across all rows, the summary column forms an expanding outline. ≤ 35 words.',
+    },
+
     # scene-intent.csv
     'function': {
         'type': 'free_text', 'file': 'scene-intent.csv', 'stage': 'spine',

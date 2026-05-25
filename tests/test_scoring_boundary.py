@@ -325,6 +325,112 @@ def test_boundary_4_to_5_pairs_each_anchor(project_dir, patched_invoke):
 
 
 # ---------------------------------------------------------------------------
+# Summary column appears in boundary diffs when populated
+# ---------------------------------------------------------------------------
+
+def _seed_spine_with_summary(project_dir, id_seq_title_summary_function_part):
+    path = os.path.join(project_dir, 'reference', 'spine.csv')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write('id|seq|title|summary|function|part\n')
+        for row in id_seq_title_summary_function_part:
+            f.write('|'.join(row) + '\n')
+
+
+def _seed_architecture_with_summary(project_dir, rows):
+    path = os.path.join(project_dir, 'reference', 'architecture.csv')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write('id|seq|title|summary|part|pov|spine_event|action_sequel|'
+                'emotional_arc|value_at_stake|value_shift|turning_point\n')
+        for r in rows:
+            f.write('|'.join(r) + '\n')
+
+
+def test_boundary_3_to_4_includes_summary_in_upstream(project_dir, monkeypatch):
+    """When summary is populated, the boundary diff prompt must include it
+    as a clear 'Summary:' line so the LLM can compare summaries directly."""
+    _seed_spine_with_summary(project_dir, [
+        ('ev-1', '1', 'Inciting incident',
+         'Lucien finds an anomaly he cannot explain.', 'turn', '1'),
+    ])
+    _seed_architecture_with_summary(project_dir, [
+        ('arch-1', '1', 'Studio scene',
+         'Lucien notices changed records during a routine sitting.',
+         '1', 'POV', 'ev-1', 'action', 'focus to alarm', 'truth', '+/-',
+         'reveal'),
+    ])
+
+    captured = {}
+    def fake(prompt, model, log_file, **kwargs):
+        captured['prompt'] = prompt
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps({
+                'upstream_summary': 'u', 'downstream_summary': 'd',
+                'alignment': 'a', 'proposed_verdict': 'both are right',
+                'rationale': 'r',
+            })}],
+            'usage': {'input_tokens': 100, 'output_tokens': 50,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api, scoring_boundary
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_boundary, 'invoke_to_file', fake)
+
+    score_boundary(project_dir, '3->4', coaching_level='strict')
+    assert 'Lucien finds an anomaly he cannot explain.' in captured['prompt']
+    assert 'Lucien notices changed records during a routine sitting.' in captured['prompt']
+    # The prompt should label the summary explicitly so the model can
+    # compare same-shape content cross-tier.
+    assert 'Summary:' in captured['prompt']
+
+
+def test_boundary_3_to_4_falls_back_when_summary_empty(project_dir, monkeypatch):
+    """If summary is empty, the collector falls back to function/title so
+    the diff still works on legacy projects that haven't backfilled summary."""
+    # No summary column at all (pre-migration shape)
+    path = os.path.join(project_dir, 'reference', 'spine.csv')
+    with open(path, 'w') as f:
+        f.write('id|seq|title|function|part\n')
+        f.write('ev-1|1|Inciting|turning point function|1\n')
+    arch_path = os.path.join(project_dir, 'reference', 'architecture.csv')
+    with open(arch_path, 'w') as f:
+        f.write('id|seq|title|part|pov|spine_event|action_sequel|'
+                'emotional_arc|value_at_stake|value_shift|turning_point\n')
+        f.write('arch-1|1|Anchor|1|POV|ev-1|action|arc|truth|+/-|reveal\n')
+
+    captured = {}
+    def fake(prompt, model, log_file, **kwargs):
+        captured['prompt'] = prompt
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': '{"alignment":"a","proposed_verdict":"both are right","rationale":"r","upstream_summary":"u","downstream_summary":"d"}'}],
+            'usage': {'input_tokens': 50, 'output_tokens': 20,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+
+    from storyforge import api, scoring_boundary
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_boundary, 'invoke_to_file', fake)
+
+    score_boundary(project_dir, '3->4', coaching_level='strict')
+    # Without summary, function should appear in the upstream framing.
+    assert 'turning point function' in captured['prompt']
+    # 'Summary:' line should NOT appear since the column was empty.
+    assert 'Summary:' not in captured['prompt']
+
+
+# ---------------------------------------------------------------------------
 # score_all_boundaries
 # ---------------------------------------------------------------------------
 

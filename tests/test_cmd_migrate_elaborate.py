@@ -120,7 +120,10 @@ def test_step7_extracts_spine_rows(project_dir):
     assert result.startswith('extract:')
     assert os.path.isfile(spine_csv)
     spine_content = _read_file(spine_csv)
-    assert spine_content.startswith('id|seq|title|function|part\n')
+    # Header includes the `summary` column (the expanding-outline addition).
+    # Migrate leaves the summary field empty for migrated rows — authors
+    # backfill it as part of the spine-tier review.
+    assert spine_content.startswith('id|seq|title|summary|function|part\n')
     assert 'act2-sc02' in spine_content
     # And it was removed from scenes.csv
     with open(scenes_csv) as f:

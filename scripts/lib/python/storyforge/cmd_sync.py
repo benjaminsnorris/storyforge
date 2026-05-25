@@ -29,7 +29,7 @@ import tempfile
 from storyforge.common import detect_project_root, install_signal_handlers, log
 from storyforge.cmd_scenes_export import (
     DEFAULT_OUTPUT_PATH, SECTION_SPECS, export_scenes,
-    export_spine_md, export_architecture_md,
+    export_spine_md, export_architecture_md, export_outline_md,
 )
 from storyforge.cmd_scenes_import import import_scenes
 
@@ -126,6 +126,9 @@ def _export_all_derived(project_dir: str, md_path: str) -> None:
     # missing, so we don't need a guard around these.
     export_spine_md(project_dir)
     export_architecture_md(project_dir)
+    # Unified outline view (one-way: regenerated from the summary columns
+    # of spine.csv / architecture.csv / scenes.csv).
+    export_outline_md(project_dir)
 
 
 def _scenes_csv_has_rows(project_dir: str) -> bool:
@@ -363,7 +366,7 @@ SYNC_TRACKED_PATHS = [
 # sync-tracked path. Defined here so it can be unit-tested in Python.
 HOOK_PATH_FILTER = (
     r'^reference/(scenes|scene-intent|scene-briefs|spine|architecture)\.csv$'
-    r'|^reference/(scenes-review|spine|architecture)\.md$'
+    r'|^reference/(scenes-review|spine|architecture|outline)\.md$'
 )
 
 HOOK_SCRIPT = f'''#!/usr/bin/env bash

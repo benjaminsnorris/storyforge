@@ -152,8 +152,9 @@ def test_spine_missing_file(tmp_path):
 def test_spine_correct_range_novel(tmp_path):
     _write_csv(
         os.path.join(str(tmp_path), 'reference', 'spine.csv'),
-        'id|seq|title|function|part',
-        [f'event-{i}|{i}|Title {i}|Causes the next thing|1' for i in range(1, 8)],
+        'id|seq|title|summary|function|part',
+        [f'event-{i}|{i}|Title {i}|Summary {i} in one sentence.|Causes the next thing|1'
+         for i in range(1, 8)],
     )
     r = score_spine(str(tmp_path), medium='novel')
     assert r['failed'] == 0
@@ -307,6 +308,101 @@ def test_scene_map_fails_when_only_pre_map_status_rows(tmp_path):
     first = r['checks'][0]
     assert first['check'] == 'scene-map has at least one row'
     assert first['passed'] is False
+
+
+def test_spine_summary_required(tmp_path):
+    """Level 3 must flag spine events that lack a one-sentence summary."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'spine.csv').write_text(
+        'id|seq|title|summary|function|part\n'
+        'ev-1|1|First|First event in one sentence.|inciting|1\n'
+        'ev-2|2|Second||turning point|2\n'
+        'ev-3|3|Third|Third event.|midpoint|2\n'
+        'ev-4|4|Fourth|Fourth event.|climax|3\n'
+    )
+    from storyforge.scoring_levels import score_spine
+    r = score_spine(str(tmp_path), medium='graphic-novel')
+    summary_check = next(
+        (c for c in r['checks'] if c['check'].startswith('summary non-empty')),
+        None,
+    )
+    assert summary_check is not None
+    assert summary_check['passed'] is False
+    assert 'ev-2' in summary_check['detail']
+
+
+def test_spine_summary_word_limit(tmp_path):
+    """Level 3 must flag spine summaries that exceed the word limit."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    long_summary = ' '.join(['word'] * 40)  # 40 words, over the 35 limit
+    (ref / 'spine.csv').write_text(
+        'id|seq|title|summary|function|part\n'
+        f'ev-1|1|t|{long_summary}|inciting|1\n'
+        'ev-2|2|t|short summary.|turn|2\n'
+        'ev-3|3|t|short summary.|midpoint|2\n'
+        'ev-4|4|t|short summary.|climax|3\n'
+    )
+    from storyforge.scoring_levels import score_spine
+    r = score_spine(str(tmp_path), medium='graphic-novel')
+    word_check = next(
+        (c for c in r['checks'] if 'words' in c['check']),
+        None,
+    )
+    assert word_check is not None
+    assert word_check['passed'] is False
+    assert '40 words' in word_check['detail']
+
+
+def test_architecture_summary_required(tmp_path):
+    """Level 4 must flag architecture anchors that lack a summary."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'spine.csv').write_text(
+        'id|seq|title|summary|function|part\n'
+        'ev-1|1|t|s|f|1\n'
+    )
+    rows = [
+        f'a{i:02d}|{i}|t||1|POV|ev-1|action|focus to ease|safety|+/-|reveal'
+        for i in range(1, 11)
+    ]
+    # First anchor has a summary; rest don't
+    rows[0] = 'a01|1|t|One-sentence summary.|1|POV|ev-1|action|focus to ease|safety|+/-|reveal'
+    (ref / 'architecture.csv').write_text(
+        'id|seq|title|summary|part|pov|spine_event|action_sequel|'
+        'emotional_arc|value_at_stake|value_shift|turning_point\n'
+        + '\n'.join(rows) + '\n'
+    )
+    from storyforge.scoring_levels import score_architecture
+    r = score_architecture(str(tmp_path), medium='graphic-novel')
+    summary_check = next(
+        (c for c in r['checks'] if c['check'].startswith('summary non-empty')),
+        None,
+    )
+    assert summary_check is not None
+    assert summary_check['passed'] is False
+
+
+def test_scene_map_summary_check_skipped_when_no_map_rows(tmp_path):
+    """Summary check should not run when there are no map-tier rows
+    (the prior 'at least one row' check already covers that case)."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words\n'
+    )
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
+        'turning_point|characters|on_stage|mice_threads\n'
+    )
+    from storyforge.scoring_levels import score_scene_map
+    r = score_scene_map(str(tmp_path))
+    # 'has at least one row' should fail, but no summary check should appear.
+    summary_checks = [c for c in r['checks']
+                      if 'summary' in c['check'].lower()]
+    assert summary_checks == []
 
 
 def test_briefs_fails_when_csv_is_header_only(tmp_path):
