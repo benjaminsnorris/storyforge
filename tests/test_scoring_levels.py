@@ -384,6 +384,39 @@ def test_architecture_summary_required(tmp_path):
     assert summary_check['passed'] is False
 
 
+def test_scene_map_summary_check_runs_only_on_map_tier_rows(tmp_path):
+    """If scenes.csv has mixed-status rows (some at architecture, some at
+    mapped), the summary check must run only against the map-tier subset.
+    Pre-map rows shouldn't false-positive as 'missing summary'."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words\n'
+        # mapped row WITH summary — should pass
+        'sc-1|1|t|Has summary.|1|p|loc|1|morning|2h|character|mapped|0|2500\n'
+        # mapped row WITHOUT summary — should fail
+        'sc-2|2|t||1|p|loc|1|morning|2h|character|mapped|0|2500\n'
+        # architecture row without summary — should NOT count as a failure
+        'sc-3|3|t||1|p||||||character|architecture|||\n'
+    )
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
+        'turning_point|characters|on_stage|mice_threads\n'
+    )
+    from storyforge.scoring_levels import score_scene_map
+    r = score_scene_map(str(tmp_path))
+    summary_check = next(
+        (c for c in r['checks'] if c['check'].startswith('summary non-empty')),
+        None,
+    )
+    assert summary_check is not None
+    assert summary_check['passed'] is False
+    # sc-2 (mapped, missing summary) flagged; sc-3 (architecture) not.
+    assert 'sc-2' in summary_check['detail']
+    assert 'sc-3' not in summary_check['detail']
+
+
 def test_scene_map_summary_check_skipped_when_no_map_rows(tmp_path):
     """Summary check should not run when there are no map-tier rows
     (the prior 'at least one row' check already covers that case)."""

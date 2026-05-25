@@ -391,6 +391,39 @@ def test_boundary_3_to_4_includes_summary_in_upstream(project_dir, monkeypatch):
     assert 'Summary:' in captured['prompt']
 
 
+def test_render_spine_text_leads_with_summary(project_dir):
+    """_render_spine_text (used by the 2->3 boundary) must lead each
+    bullet with the row's `summary` column when populated."""
+    _seed_spine_with_summary(project_dir, [
+        ('ev-1', '1', 'First', 'Sentence summary of first event.', 'inciting', '1'),
+        ('ev-2', '2', 'Second', 'Sentence summary of second event.', 'turn', '2'),
+    ])
+    from storyforge.scoring_boundary import _render_spine_text
+    text = _render_spine_text(project_dir)
+    assert '- ev-1: Sentence summary of first event.' in text
+    assert '- ev-2: Sentence summary of second event.' in text
+
+
+def test_render_spine_text_falls_back_when_summary_empty(project_dir):
+    """When summary is empty, fall back to 'title — function' so legacy
+    projects keep getting useful 2->3 prompts."""
+    # Old-shape spine.csv (no summary column at all)
+    path = os.path.join(project_dir, 'reference', 'spine.csv')
+    with open(path, 'w') as f:
+        f.write('id|seq|title|function|part\n')
+        f.write('ev-1|1|First|Inciting incident|1\n')
+    from storyforge.scoring_boundary import _render_spine_text
+    text = _render_spine_text(project_dir)
+    assert '- ev-1: First — Inciting incident' in text
+
+
+def test_render_spine_text_returns_empty_when_no_spine(tmp_path):
+    """Missing spine.csv → empty string (caller handles)."""
+    from storyforge.scoring_boundary import _render_spine_text
+    text = _render_spine_text(str(tmp_path))
+    assert text == ''
+
+
 def test_boundary_3_to_4_skips_structurally_empty_spine_row(project_dir, monkeypatch, capsys):
     """A spine row with no summary AND no title AND no function must be
     skipped — not sent to the LLM as a labelled-but-empty prompt."""
