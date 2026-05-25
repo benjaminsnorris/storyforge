@@ -47,6 +47,9 @@ ONE_WAY_CSV_RELS = [
     'reference/architecture.csv',
 ]
 
+assert not (set(ROUND_TRIP_CSV_RELS) & set(ONE_WAY_CSV_RELS)), (
+    'a CSV cannot be both round-trip and one-way — would double-render'
+)
 CSV_RELS = ROUND_TRIP_CSV_RELS + ONE_WAY_CSV_RELS
 CONFLICT_REPORT_PATH = os.path.join('working', 'sync-conflict.md')
 

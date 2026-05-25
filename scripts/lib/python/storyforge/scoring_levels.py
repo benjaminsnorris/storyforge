@@ -20,7 +20,7 @@ Each scorer returns:
 
 import os
 import re
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from storyforge.elaborate import _read_csv
 
@@ -272,7 +272,9 @@ def score_spine(project_dir: str, medium: str = 'novel') -> dict:
 _SUMMARY_MAX_WORDS = 35
 
 
-def _summary_checks(rows: list[dict], *, label: str) -> list[dict]:
+def _summary_checks(
+    rows: list[dict], *, label: Literal['event', 'anchor', 'scene'],
+) -> list[dict]:
     """Return floor-check entries for the `summary` column across rows.
 
     Two checks per tier:
