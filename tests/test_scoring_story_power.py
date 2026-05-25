@@ -1114,6 +1114,214 @@ def test_empty_structural_refuses_to_write_csv(tmp_path, monkeypatch, capsys):
                                         'per-act-matrix.csv'))
 
 
+def test_parse_act_shape_silently_drops_act_0_and_act_4():
+    """Acts outside 1-3 are silently ignored. Pins the behavior so a
+    future regex tightening doesn't shift it without a deliberate
+    decision."""
+    from storyforge.scoring_story_power import parse_act_shape
+    body = (
+        '### Act 0\n\nPrologue.\n\n'
+        '### Act 1\n\nFirst.\n\n'
+        '### Act 2\n\nSecond.\n\n'
+        '### Act 3\n\nThird.\n\n'
+        '### Act 4\n\nEpilogue.\n'
+    )
+    result = parse_act_shape(body)
+    assert result is not None
+    assert 'First' in result.act1
+    assert 'Prologue' not in result.act1
+
+
+def test_parse_act_shape_duplicate_act_keeps_last():
+    """A duplicate `### Act 2` header silently uses the second body
+    (dict overwrite). Pinning the behavior — if it changes to first-wins
+    or error, that should be a deliberate design choice."""
+    from storyforge.scoring_story_power import parse_act_shape
+    body = (
+        '### Act 1\n\nFirst.\n\n'
+        '### Act 2\n\nFirst Act 2.\n\n'
+        '### Act 3\n\nThird.\n\n'
+        '### Act 2\n\nSecond Act 2.\n'
+    )
+    result = parse_act_shape(body)
+    assert result is not None
+    assert result.act2 == 'Second Act 2.'
+
+
+def test_parse_act_shape_word_headings_not_recognized():
+    """`### Act One` (word, not digit) is not recognized. Author who
+    writes act headers as words gets pitch-only with no parse — the
+    partial-population INFO doesn't fire because no numbered acts were
+    detected at all."""
+    from storyforge.scoring_story_power import parse_act_shape
+    body = (
+        '### Act One\n\nFirst.\n\n'
+        '### Act Two\n\nSecond.\n\n'
+        '### Act Three\n\nThird.\n'
+    )
+    assert parse_act_shape(body) is None
+
+
+def test_append_structural_diagnostic_warns_when_md_missing(tmp_path, capsys):
+    """If diagnostic.md is absent (upstream _safe_write failed), the
+    appender must surface a WARNING — silent no-op cascades one error
+    into two casualties."""
+    from storyforge.scoring_story_power import _append_structural_diagnostic
+    _append_structural_diagnostic(str(tmp_path), {'act1': {}, 'act2': {},
+                                                    'act3': {}},
+                                    {}, {})
+    out = capsys.readouterr().out
+    assert 'cross-act diagnostic could not be appended' in out
+    assert 'upstream' in out
+
+
+def test_append_act_shape_coaching_brief_warns_when_md_missing(tmp_path, capsys):
+    """Same cascade-surfacing for the coach-mode appender."""
+    from storyforge.scoring_story_power import _append_act_shape_coaching_brief
+    _append_act_shape_coaching_brief(
+        str(tmp_path), {'act1': {}, 'act2': {}, 'act3': {}},
+        {}, {'structural': []}, {},
+    )
+    out = capsys.readouterr().out
+    assert 'act-shape coaching brief could not be appended' in out
+
+
+def test_diagnostic_md_carries_cross_act_payload(tmp_path, monkeypatch):
+    """Strengthen the diagnostic-content assertions — pin that
+    cross-act pattern, high-leverage move, example beat, and per-axis
+    drops all reach diagnostic.md."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _dual_mock_llm(_full_payload(), _act_shape_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    diag = open(os.path.join(result['output_dir'], 'diagnostic.md')).read()
+    # Cross-act diagnostic from _act_shape_payload baseline.
+    assert 'midpoint' in diag.lower() or 'turning_point' in diag.lower()
+    assert 'High-leverage move' in diag
+    # Example beat lands in the markdown.
+    assert 'failed portrait' in diag
+    # Act 2 has the multi-axis dip — drops section should mention act2.
+    assert 'ACT2' in diag
+
+
+def test_coach_brief_carries_full_act_shape_content(tmp_path, monkeypatch):
+    """Strengthen the coach-mode brief assertion — pin that the
+    structural rationale, drops, cross-act pattern, and independence
+    reminder all reach the brief."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _dual_mock_llm(_full_payload(), _act_shape_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'coach')
+    brief = open(os.path.join(result['output_dir'],
+                                'coaching-brief.md')).read()
+    # Independence-reminder paragraph from the writer.
+    assert 'independent' in brief.lower()
+    assert 'localize root cause' in brief
+    # Per-axis structural rows include Question/rationale scaffolding.
+    assert '- Rationale:' in brief
+    assert 'Question:' in brief
+    # Drops section + cross-act pattern from the payload.
+    assert 'ACT2' in brief
+    assert 'midpoint' in brief.lower()
+    assert 'failed portrait' in brief
+
+
+def test_strict_without_act_shape_omits_structural_section(tmp_path, monkeypatch):
+    """A project with only logline+synopsis runs strict mode without
+    the per-act blanks or structural-axis sections."""
+    yml = os.path.join(str(tmp_path), 'storyforge.yaml')
+    with open(yml, 'w') as f:
+        f.write('project:\n  title: T\n  medium: novel\n  coaching_level: strict\n')
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'story-summary.md'), 'w') as f:
+        f.write('# Story summary\n\n## Logline\n\nL.\n\n'
+                '## Synopsis\n\nS.\n\n## Act-shape\n\n## Theme\n\n')
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge.scoring_story_power import (
+        score_story_power, AXES, STRUCTURAL_AXES,
+    )
+    result = score_story_power(str(tmp_path), 'strict')
+    text = open(os.path.join(result['output_dir'],
+                              'self-scoring-checklist.md')).read()
+    # All 8 pitch axes appear.
+    for axis in AXES:
+        assert f'## {axis.name}' in text
+    # No structural axis sections, no per-act blanks.
+    for axis in STRUCTURAL_AXES:
+        assert axis.name not in text
+    assert 'Act 1' not in text
+    assert 'Act 2' not in text
+
+
+def test_flag_act_drops_rounding_boundary():
+    """Half-point gaps round to flag at 1.5 (rounds to 2) but not at
+    0.5 (rounds to 0). Pins Python's banker's-rounding behavior so an
+    accidental switch to integer truncation would be caught."""
+    from storyforge.scoring_story_power import _flag_act_drops
+    # other_avg = (9 + 8) / 2 = 8.5; gap = 8.5 - 7 = 1.5 → rounds to 2 → flags
+    per_act = {
+        'act1': {'specificity': 9},
+        'act2': {'specificity': 7},
+        'act3': {'specificity': 8},
+    }
+    drops, _skipped = _flag_act_drops(per_act)
+    assert ('specificity', 'act2', 2) in drops
+    # other_avg = (9 + 9) / 2 = 9; gap = 9 - 8 = 1 → does not flag (< 2)
+    per_act = {
+        'act1': {'specificity': 9},
+        'act2': {'specificity': 8},
+        'act3': {'specificity': 9},
+    }
+    drops, _skipped = _flag_act_drops(per_act)
+    assert not drops
+
+
+def test_dry_run_full_does_not_call_llm(tmp_path, monkeypatch):
+    """dry-run for full coaching: no LLM call, status='dry_run', no
+    CSVs written. CLI contract for `storyforge score --story-power
+    --dry-run`."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    from storyforge import api, scoring_story_power
+
+    def boom(*a, **k):
+        raise AssertionError('LLM must not be called in dry-run')
+    monkeypatch.setattr(api, 'invoke_to_file', boom)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', boom)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full',
+                                                    dry_run=True)
+    assert result['status'] == 'dry_run'
+    # No CSVs land on disk.
+    out_dir = result['output_dir']
+    if out_dir and os.path.isdir(out_dir):
+        assert not os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
+
+
+def test_dry_run_strict_does_not_call_llm(tmp_path, monkeypatch):
+    """dry-run for strict coaching: status='dry_run', no checklist."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge import api, scoring_story_power
+
+    def boom(*a, **k):
+        raise AssertionError('LLM must not be called in strict')
+    monkeypatch.setattr(api, 'invoke_to_file', boom)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', boom)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'strict',
+                                                    dry_run=True)
+    assert result['status'] == 'dry_run'
+
+
 def test_back_to_back_runs_get_distinct_output_dirs(tmp_path, monkeypatch):
     """Two runs in the same second must land in distinct directories —
     otherwise the second clobbers the first."""
