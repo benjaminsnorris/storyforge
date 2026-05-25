@@ -63,6 +63,7 @@ COMMANDS = {
     'scenes-import': 'storyforge.cmd_scenes_import',
     'sync': 'storyforge.cmd_sync',
     'publish': 'storyforge.cmd_publish',
+    'propose-summaries': 'storyforge.cmd_propose_summaries',
 }
 
 # Aliases
