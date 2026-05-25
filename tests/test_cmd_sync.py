@@ -438,6 +438,18 @@ def test_csv_rels_includes_spine_and_architecture():
     assert 'reference/scene-briefs.csv' in CSV_RELS
 
 
+def test_sync_tracked_paths_includes_outline_md():
+    """The pre-commit hook only stages files in SYNC_TRACKED_PATHS after
+    sync regenerates them. outline.md MUST be in the list — otherwise
+    every commit that touches a summary column leaves outline.md
+    perpetually unstaged."""
+    from storyforge.cmd_sync import SYNC_TRACKED_PATHS
+    assert 'reference/outline.md' in SYNC_TRACKED_PATHS
+    # And the existing one-way MDs too, for completeness.
+    assert 'reference/spine.md' in SYNC_TRACKED_PATHS
+    assert 'reference/architecture.md' in SYNC_TRACKED_PATHS
+
+
 def test_hook_script_uses_staged_diff(git_project):
     """The hook reads --cached (staged) changes, not the full working tree,
     so partial-staging commits don't trigger spurious conflict reports."""

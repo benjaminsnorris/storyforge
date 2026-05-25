@@ -362,3 +362,106 @@ def test_full_v1_sequence_on_fixture(project_dir):
     assert step6_create_story_summary(project_dir, dry_run=False).startswith('skip:')
     assert step7_extract_spine(ref_dir, dry_run=False).startswith('skip:')
     assert step8_extract_architecture(ref_dir, dry_run=False).startswith('skip:')
+
+
+# ---------------------------------------------------------------------------
+# Schema-drift upgrade (PR #232 review finding)
+# ---------------------------------------------------------------------------
+
+def test_step7_upgrades_old_header_with_stranded_row(project_dir):
+    """If spine.csv predates the `summary` column AND a stranded status=spine
+    row exists in scenes.csv, step7 must upgrade the header AND append the
+    new row with the right column arity — not silently produce mismatched
+    rows."""
+    ref_dir = os.path.join(project_dir, 'reference')
+    spine_csv = os.path.join(ref_dir, 'spine.csv')
+    # Pre-write spine.csv with the OLD header (no summary column).
+    with open(spine_csv, 'w') as f:
+        f.write('id|seq|title|function|part\n')
+        f.write('ev-prior|1|Prior event|inciting|1\n')
+    # Fixture already has a stranded status=spine row (act2-sc02).
+    result = step7_extract_spine(ref_dir, dry_run=False)
+    assert result.startswith('extract:')
+    content = _read_file(spine_csv)
+    lines = content.strip().split('\n')
+    # Header now has summary
+    assert lines[0] == 'id|seq|title|summary|function|part'
+    # Existing row was padded with empty summary cell
+    assert 'ev-prior|1|Prior event||inciting|1' in lines
+    # Every row has the same column count as the header
+    n_cols = len(lines[0].split('|'))
+    for line in lines[1:]:
+        assert len(line.split('|')) == n_cols, (
+            f'column-count mismatch: header has {n_cols}, row {line!r} differs'
+        )
+
+
+def test_step7_upgrades_old_header_without_stranded_rows(project_dir):
+    """If spine.csv predates `summary` and there are NO stranded rows,
+    step7 still upgrades the header in place (no rows to add, but the
+    schema is current after migrate)."""
+    ref_dir = os.path.join(project_dir, 'reference')
+    spine_csv = os.path.join(ref_dir, 'spine.csv')
+    # Pre-write spine.csv with the OLD header and one row.
+    with open(spine_csv, 'w') as f:
+        f.write('id|seq|title|function|part\n')
+        f.write('ev-prior|1|Prior event|inciting|1\n')
+    # Remove the stranded status=spine row from scenes.csv to force
+    # the "no moved_ids" path.
+    scenes_csv = os.path.join(ref_dir, 'scenes.csv')
+    with open(scenes_csv) as f:
+        lines = f.readlines()
+    with open(scenes_csv, 'w') as f:
+        for line in lines:
+            if not line.startswith('act2-sc02'):
+                f.write(line)
+    result = step7_extract_spine(ref_dir, dry_run=False)
+    assert result.startswith('skip:')  # nothing to extract
+    # Header was upgraded even though no rows were appended.
+    content = _read_file(spine_csv)
+    assert content.startswith('id|seq|title|summary|function|part\n')
+    assert 'ev-prior|1|Prior event||inciting|1' in content
+
+
+def test_step8_upgrades_old_header_with_stranded_row(project_dir):
+    """Same protection for architecture.csv."""
+    ref_dir = os.path.join(project_dir, 'reference')
+    arch_csv = os.path.join(ref_dir, 'architecture.csv')
+    # Old-format architecture.csv (no summary column)
+    old_header = ('id|seq|title|part|pov|spine_event|action_sequel|'
+                  'emotional_arc|value_at_stake|value_shift|turning_point')
+    with open(arch_csv, 'w') as f:
+        f.write(old_header + '\n')
+        f.write('arch-prior|1|Prior|1|POV|ev-x|action|arc|truth|+/-|reveal\n')
+    result = step8_extract_architecture(ref_dir, dry_run=False)
+    assert result.startswith('extract:') or result.startswith('skip:')
+    content = _read_file(arch_csv)
+    lines = content.strip().split('\n')
+    expected_header = ('id|seq|title|summary|part|pov|spine_event|'
+                       'action_sequel|emotional_arc|value_at_stake|'
+                       'value_shift|turning_point')
+    assert lines[0] == expected_header
+    # The prior row was padded; summary is the empty cell at position 3.
+    prior = next(l for l in lines if l.startswith('arch-prior'))
+    cells = prior.split('|')
+    assert cells[3] == ''  # summary is empty after upgrade
+    # All rows have matching column counts
+    n_cols = len(lines[0].split('|'))
+    for line in lines[1:]:
+        assert len(line.split('|')) == n_cols
+
+
+def test_upgrade_helper_refuses_when_existing_has_extra_columns(tmp_path):
+    """If existing header has columns not in target schema, upgrade refuses
+    rather than silently dropping data."""
+    from storyforge.cmd_migrate import _upgrade_csv_header_if_drifted
+    import pytest
+
+    path = str(tmp_path / 'spine.csv')
+    with open(path, 'w') as f:
+        f.write('id|seq|title|function|part|legacy_extra\n')
+        f.write('ev-1|1|t|f|1|x\n')
+
+    target_cols = ['id', 'seq', 'title', 'summary', 'function', 'part']
+    with pytest.raises(ValueError, match='lose data'):
+        _upgrade_csv_header_if_drifted(path, target_cols)

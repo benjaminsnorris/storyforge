@@ -353,13 +353,16 @@ SYNC_TRACKED_PATHS = [
     'reference/scene-intent.csv',
     'reference/scene-briefs.csv',
     'reference/scenes-review.md',
-    # Elaboration v1 (#229): structural-anchor tier CSVs + their derived
-    # markdown renderings. Sync regenerates spine.md / architecture.md
-    # when the underlying CSV is dirty.
+    # Structural-anchor CSVs + their derived MDs. Sync regenerates
+    # spine.md / architecture.md when the underlying CSV is dirty.
     'reference/spine.csv',
     'reference/architecture.csv',
     'reference/spine.md',
     'reference/architecture.md',
+    # outline.md is the unified expanding-outline view rendered from the
+    # `summary` columns of all three structural CSVs. Must be in this list
+    # so the pre-commit hook stages it after regeneration.
+    'reference/outline.md',
 ]
 
 # Regex the hook uses to decide whether the current commit touches any
