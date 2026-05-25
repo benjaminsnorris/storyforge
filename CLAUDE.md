@@ -375,7 +375,7 @@ Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a 
 - `elaborate` (spine, architecture, scene-map, voice, briefs)
 - `hone`, `validate`, `cleanup`
 - `write` — drafts panel scripts per scene (mirrors novel-mode write; routes to `cmd_write_gn`)
-- `assemble` — produces the artist handoff bundle: `manuscript/{script.md, visual-references.md, chapter-map.md, handoff-readme.md}` (routes to `cmd_script_package`)
+- `assemble` — produces the artist handoff bundle: `manuscript/{script.md, visual-references.md, chapter-map.md, handoff-readme.md, style-guide.md}` (routes to `cmd_script_package`). The style guide is coaching-aware: `full` LLM-synthesizes from world/character/voice bibles; `coach` produces a cues + author-questions template; `strict` produces a blank section template with constraint lists. Falls back to the coach template when ANTHROPIC_API_KEY is missing.
 - Schema validation enforces graphic-novel column rules (target_pages required, panel_breakdown required at briefed status)
 - `score` — 6 deterministic GN principles in `scoring_gn.py` (brief_fidelity, panel_density, dialogue_compression, layout_rhythm, caption_economy, panel_composition_depth); no API calls, instant and cost-free (routes to `cmd_score_gn`)
 - `evaluate` — 3-persona evaluation panel (panel-composition, pacing, dialogue critics) that adds subjective findings the deterministic scorers can't catch (routes to `cmd_evaluate_gn`)
