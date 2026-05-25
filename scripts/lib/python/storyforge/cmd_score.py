@@ -305,12 +305,16 @@ def _run_elaboration_scoring(args) -> None:
     else:
         levels = [args.level]
 
+    from storyforge.scoring_coverage import score_coverage_at_level
     for level in levels:
         floor = score_level(project_dir, level, medium=medium)
         _print_level_result(floor)
         if level in (3, 4, 5, 6):
             consistency = score_consistency_at_level(project_dir, level)
             _print_level_result(consistency)
+        if level in (2, 3, 4):
+            coverage = score_coverage_at_level(project_dir, level)
+            _print_level_result(coverage)
 
 
 def _print_boundary_diffs(diffs: list[dict]) -> None:
@@ -401,11 +405,12 @@ def _print_level_result(result: dict) -> None:
 
 
 def _print_drift_report(project_dir: str, medium: str) -> None:
-    """Compose a read-only drift report from floor + consistency checks."""
+    """Compose a read-only drift report from floor + consistency + coverage."""
     from storyforge.scoring_levels import score_all_levels
     from storyforge.scoring_consistency import score_consistency_all_levels
+    from storyforge.scoring_coverage import score_coverage_all_levels
 
-    print(f'\n# Drift report (deterministic floor + consistency)')
+    print(f'\n# Drift report (deterministic floor + consistency + coverage)')
     print(f'\nProject root: {project_dir}')
     print(f'Medium: {medium}')
 
@@ -415,6 +420,10 @@ def _print_drift_report(project_dir: str, medium: str) -> None:
 
     print('\n## Registry consistency per level\n')
     for result in score_consistency_all_levels(project_dir):
+        _print_level_result(result)
+
+    print('\n## Cross-tier coverage per level\n')
+    for result in score_coverage_all_levels(project_dir):
         _print_level_result(result)
 
 
