@@ -382,6 +382,93 @@ def test_outline_md_missing_seq_renders_with_placeholder(tmp_path):
     assert '1000000000' not in text
 
 
+def test_outline_md_shows_brief_promise_under_scene(tmp_path):
+    """When a scene has a brief with goal + outcome, outline.md adds a
+    sub-bullet showing what the brief promises."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'scenes.csv'),
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words',
+        ['sc-1|1|t|Scene one summary.|1|p|l|1|m|2h|character|briefed|0|2500'],
+    )
+    _write_csv(
+        os.path.join(str(ref), 'scene-briefs.csv'),
+        'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|'
+        'key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow',
+        ['sc-1|Complete the audit|Anomalous readings|Report or hide|'
+         'Choose protocol|Files as error|||Reviews maps|Quote|focus|maps||false'],
+    )
+    from storyforge.cmd_scenes_export import export_outline_md
+    text = open(export_outline_md(str(tmp_path))).read()
+    assert '1. Scene one summary.' in text
+    assert 'Brief:' in text
+    assert 'Complete the audit' in text
+    assert 'Report or hide' in text
+
+
+def test_outline_md_omits_brief_when_too_sparse(tmp_path):
+    """A brief with no goal/outcome/decision doesn't render a sub-bullet."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'scenes.csv'),
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words',
+        ['sc-1|1|t|Scene one.|1|p|l|1|m|2h|character|mapped|0|2500'],
+    )
+    _write_csv(
+        os.path.join(str(ref), 'scene-briefs.csv'),
+        'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|'
+        'key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow',
+        ['sc-1|||||||||||||false'],  # all empty
+    )
+    from storyforge.cmd_scenes_export import export_outline_md
+    text = open(export_outline_md(str(tmp_path))).read()
+    assert '1. Scene one.' in text
+    assert 'Brief:' not in text
+
+
+def test_outline_md_brief_falls_back_to_decision(tmp_path):
+    """Sequel-shaped scenes (no goal, but decision present) render with
+    'decision \"...\"' as the brief promise."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'scenes.csv'),
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words',
+        ['sc-1|1|t|Sequel scene.|1|p|l|1|m|2h|character|mapped|0|2500'],
+    )
+    _write_csv(
+        os.path.join(str(ref), 'scene-briefs.csv'),
+        'id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|'
+        'key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow',
+        ['sc-1||||Dilemma|Choose to act||||||||false'],
+    )
+    from storyforge.cmd_scenes_export import export_outline_md
+    text = open(export_outline_md(str(tmp_path))).read()
+    assert 'decision "Choose to act"' in text
+
+
+def test_outline_md_no_briefs_csv_does_not_crash(tmp_path):
+    """When scene-briefs.csv is absent, outline still renders cleanly
+    without brief sub-bullets."""
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    _write_csv(
+        os.path.join(str(ref), 'scenes.csv'),
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words',
+        ['sc-1|1|t|Scene only.|1|p|l|1|m|2h|character|mapped|0|2500'],
+    )
+    from storyforge.cmd_scenes_export import export_outline_md
+    text = open(export_outline_md(str(tmp_path))).read()
+    assert '1. Scene only.' in text
+    assert 'Brief:' not in text
+
+
 def test_outline_md_field_count_mismatch_logs_and_skips(tmp_path, capsys):
     """A row with wrong field count is logged WARNING and skipped — not
     silently misaligned via zip()."""
