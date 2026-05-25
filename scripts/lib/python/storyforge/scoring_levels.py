@@ -444,9 +444,9 @@ def score_scene_map(project_dir: str) -> dict:
 
     # Filter to manuscript-tier rows (status >= mapped). Earlier-status rows
     # belong to spine.csv / architecture.csv after migration.
+    from storyforge.schema import MAPPED_OR_LATER_STATUSES
     map_rows = [r for r in rows
-                if r.get('status', '').strip()
-                in ('mapped', 'briefed', 'drafted', 'polished')]
+                if r.get('status', '').strip() in MAPPED_OR_LATER_STATUSES]
 
     # Distinguish "scene-map elaborated" from "scenes.csv exists but has no
     # map-tier rows yet" — without this, every check below vacuous-passes on

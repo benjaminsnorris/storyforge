@@ -365,7 +365,7 @@ def test_full_v1_sequence_on_fixture(project_dir):
 
 
 # ---------------------------------------------------------------------------
-# Schema-drift upgrade (PR #232 review finding)
+# Schema-drift upgrade
 # ---------------------------------------------------------------------------
 
 def test_step7_upgrades_old_header_with_stranded_row(project_dir):

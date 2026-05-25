@@ -1,4 +1,4 @@
-"""Tests for scoring_state.py — overrides, verdicts, drafting mode (#229)."""
+"""Tests for scoring_state.py — overrides, verdicts, drafting mode."""
 
 import os
 
@@ -291,7 +291,7 @@ def test_verdict_header_includes_coaching_level(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Robustness of _read_pipe_csv (regression: PR #232 silent-failure review)
+# Robustness of _read_pipe_csv
 # ---------------------------------------------------------------------------
 
 def test_malformed_row_logged_and_skipped(tmp_path, capsys):

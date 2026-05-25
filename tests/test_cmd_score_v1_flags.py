@@ -1,4 +1,4 @@
-"""Tests for the elaboration-v1 cmd_score entry points (#229).
+"""Tests for the elaboration-v1 cmd_score entry points.
 
 Covers `storyforge score --level N`, `--all-levels`, `--compare`,
 `--drift`. These all short-circuit the existing scene-prose scoring path.
@@ -115,7 +115,7 @@ def test_existing_score_path_unaffected(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# v2 CLI flags (#231)
+# v2 CLI flags
 # ---------------------------------------------------------------------------
 
 import json
@@ -262,7 +262,7 @@ def test_compare_without_semantic_still_renders_placeholders(project_dir, monkey
 
 
 # ---------------------------------------------------------------------------
-# v2 dry-run + API-key + cost gating (regression: PR #232 review)
+# v2 dry-run + API-key + cost gating
 # ---------------------------------------------------------------------------
 
 
@@ -388,7 +388,7 @@ def test_compare_without_semantic_does_not_need_api_key(project_dir, monkeypatch
 
 
 # ---------------------------------------------------------------------------
-# v2 flag-combination validation (regression: PR #232 review)
+# v2 flag-combination validation
 # ---------------------------------------------------------------------------
 
 

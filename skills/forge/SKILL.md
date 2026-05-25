@@ -24,7 +24,9 @@ Before doing anything else, orient yourself:
 3. **Scan for key artifacts** — check for the existence of:
    - `reference/character-bible.md`
    - `reference/world-bible.md`
-   - `reference/story-architecture.md`
+   - `reference/story-summary.md` (logline / synopsis / act-shape / theme — canonical prose tier)
+   - `reference/spine.csv`, `reference/architecture.csv` (structural-anchor tier — each has a `summary` column)
+   - `reference/outline.md` (read-only expanding outline rendered from the three summary columns)
    - `reference/voice-guide.md`
    - `reference/timeline.md`
    - `reference/scenes.csv`
@@ -32,6 +34,7 @@ Before doing anything else, orient yourself:
    - `working/plans/revision-plan.csv` (preferred) or `working/plans/revision-plan.yaml` (legacy)
    - `working/scores/structural-latest.csv` (structural scoring results)
    - `working/scores/structural-proposals.csv` (unaddressed structural proposals)
+   - `working/scoring-verdicts.csv` (LLM boundary-diff verdicts, if any boundaries have been run)
    - `reference/voice-profile.csv` (voice profile with per-character banned words)
    - `working/cleanup-report.csv` (pending cleanup action items from a previous session)
    - `working/annotations.csv` (reader annotations from Bookshelf, if present)
@@ -112,7 +115,23 @@ Run the elaboration drift report — deterministic, no LLM, no cost:
 ```bash
 ./storyforge score --drift
 ```
-This combines floor checks and registry consistency across every level (logline → drafts). For a deeper cross-level fidelity check that asks an LLM to diff upstream vs downstream and propose which side is correct, use `./storyforge score --boundary N->M` (one boundary) or `./storyforge score --all-boundaries`. Verdicts are persisted to `working/scoring-verdicts.csv`.
+Three deterministic sections: floor checks (does each level have the required shape?), registry consistency (do downward references resolve?), cross-tier coverage (every Act has ≥1 spine event, every spine event has ≥1 architecture anchor, every anchor has ≥1 mapped scene). For a deeper cross-level fidelity check that asks an LLM to diff upstream vs downstream and propose which side is correct, use `./storyforge score --boundary N->M` (one boundary) or `./storyforge score --all-boundaries`. Verdicts are persisted to `working/scoring-verdicts.csv`.
+
+**"Read the outline" / "Show me the story so far" / "Where are we?":**
+Point the author to `reference/outline.md` — the read-only expanding outline derived from the `summary` columns of spine.csv, architecture.csv, scenes.csv, plus brief-derived "what the scene must deliver" sub-bullets. Sync regenerates it; authors edit summaries in the CSVs.
+
+**"Propose summaries" / "Help me expand to the next level" / "Draft the spine/architecture/scenes":**
+Provide the propose-summaries command — coaching-level-aware draft proposals from the level above:
+```bash
+./storyforge propose-summaries --level 3   # propose spine summaries from act-shape
+./storyforge propose-summaries --level 4   # propose architecture summaries from spine
+./storyforge propose-summaries --level 5   # propose scene summaries from architecture
+```
+- `full` coaching: writes proposals into the target CSV (preserves existing author summaries; fills empty cells first, then appends new rows).
+- `coach` coaching: writes a brief with rationales + considerations to `working/coaching/`. No CSV writes.
+- `strict` coaching: produces a rule-based constraint checklist (no LLM call).
+
+Use `--dry-run` to preview without invoking the LLM.
 
 **"Bible consistency" / "Does my prose match the character/world bible?":**
 ```bash
@@ -205,6 +224,10 @@ Determine the single highest-value next action based on project state. Work thro
 
 **1. Elaboration phase:** If phase is `spine`/`architecture`/`scene-map`/`briefs` → "Continue elaboration" → invoke `elaborate`.
 
+**1.1. Missing summaries at the current tier:** If the active level's CSV exists but has rows with empty `summary` cells (run `./storyforge score --level N` to see — the "summary non-empty" floor check will fail) → "Some {tier} rows are missing their one-sentence summary." → at full coaching, offer to run `./storyforge propose-summaries --level N` to draft candidates; at coach, suggest running it with `--coaching coach` to get a review brief; at strict, suggest running it with `--coaching strict` to get the constraint checklist. Recommend reading `reference/outline.md` after to see the expanding outline read top-to-bottom.
+
+**1.2. Cross-tier coverage gaps:** If `./storyforge score --drift` reports failures in the "Cross-tier coverage per level" section (an Act with no spine events, a spine event with no architecture anchors, an anchor with no mapped scenes) → "Some upstream rows have no downstream fan-out — the outline could fragment." → Walk the author through which gap to fill and at what level.
+
 **1.5. Post-extraction reconciliation:** If `scenes.csv` has rows AND registries are missing or incomplete (no `characters.csv`, `values.csv`, etc.) → "Your data needs reconciliation to normalize cross-scene consistency." → Provide `./storyforge reconcile` command.
 
 **1.6. Post-extraction gaps:** If `scenes.csv` has rows with `status=drafted` AND `scene-briefs.csv` is populated AND `validate_structure()` returns failures > 0 → "Your extracted data has structural gaps. Run elaborate to fill them." → invoke `elaborate` (which will detect gap-fill state).
@@ -236,6 +259,7 @@ The author wants to see where things stand. Present a clean summary:
 - **Phase:** spine / architecture / scene-map / briefs / drafting / evaluation / revision / polish / production
 - **Coaching level:** full / coach / strict
 - **Elaboration depth:** How many scenes at each status (spine/architecture/mapped/briefed/drafted/polished)
+- **Outline state:** If `reference/outline.md` exists, mention it as the reading view of the expanding outline (spine + architecture + scenes summary columns + brief promises). If any summary cells are empty at the current tier, flag the count.
 - **Word count:** current vs. target
 - **Validation:** pass/fail counts if validation has run
 - **Pipeline cycle:** current cycle status (evaluating/planning/revising/reviewing)

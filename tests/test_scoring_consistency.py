@@ -1,4 +1,4 @@
-"""Tests for scoring_consistency.py — registry conformance per level (#229)."""
+"""Tests for scoring_consistency.py — registry conformance per level."""
 
 import os
 

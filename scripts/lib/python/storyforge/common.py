@@ -253,19 +253,24 @@ def select_revision_model(pass_name: str, purpose: str = '') -> str:
 # Coaching level
 # ============================================================================
 
-def get_coaching_level(project_dir: str | None = None) -> str:
+from typing import Literal
+
+CoachingLevel = Literal['full', 'coach', 'strict']
+
+
+def get_coaching_level(project_dir: str | None = None) -> CoachingLevel:
     """Get coaching level: full, coach, or strict.
 
     Priority: STORYFORGE_COACHING env > storyforge.yaml > 'full'
     """
     env = os.environ.get('STORYFORGE_COACHING')
-    if env:
-        return env
+    if env in ('full', 'coach', 'strict'):
+        return env  # type: ignore[return-value]
 
     if project_dir:
         level = read_yaml_field('project.coaching_level', project_dir)
         if level in ('full', 'coach', 'strict'):
-            return level
+            return level  # type: ignore[return-value]
 
     return 'full'
 
