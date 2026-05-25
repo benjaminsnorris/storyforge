@@ -45,9 +45,16 @@ The two "expensive + on-demand" lines are the ones we have to be most careful ab
 
 ## Per-level quality rubrics
 
-For each level, what does "good" look like? Some criteria are deterministic; some need an LLM. Some reuse existing scoring; some are new.
+For each level, what does "good" look like? Each level gets two rubrics:
+
+- **Floor checks** — does this level even exist, complete, and consistent? Mostly deterministic. A failure here means the level is broken or missing pieces. This is what most existing scoring does today.
+- **Ceiling sketch** — what separates *passable* from *excellent* at this level? Mostly LLM-judged, often subjective, never a number. This gives the LLM a target richer than "complete," and gives the author language for what the iteration is trying to reach.
+
+The floor checks ship in v1 as deterministic + cheap LLM. The ceiling sketches inform LLM prompts at v2 and beyond; they're descriptive guidance, not gates.
 
 ### Level 0 — Logline
+
+**Floor checks**
 
 | Check | Mechanism | Source |
 |---|---|---|
@@ -56,11 +63,21 @@ For each level, what does "good" look like? Some criteria are deterministic; som
 | Names a want/goal | LLM | new |
 | Names an obstacle | LLM | new |
 | Names stakes | LLM | new |
-| Genre/tone legible | LLM | new |
 
-All four LLM checks fit in one prompt → one API call. Cheap-enough on-demand.
+All four LLM checks fit in one prompt → one API call. Cheap-enough on-demand. The "genre/tone legible" check from the original draft is dropped — most great loglines convey genre through specific imagery rather than tagging, and the check would produce noise.
+
+**Ceiling sketch — what separates passable from excellent**
+
+A passable logline names protagonist + want + obstacle + stakes. An excellent logline additionally:
+
+- Uses *specific* nouns and verbs rather than generic ones (the difference between "a man wants to find his daughter" and "a cartographer wants to find his daughter, who exists only in maps no one else can read").
+- Creates *irony* between elements — the want is also the flaw, or the obstacle is internal not just external.
+- Contains a hook word or phrase that makes it memorable.
+- Suggests genre and tone through imagery, not tagging.
 
 ### Level 1 — Synopsis
+
+**Floor checks**
 
 | Check | Mechanism | Source |
 |---|---|---|
@@ -68,48 +85,108 @@ All four LLM checks fit in one prompt → one API call. Cheap-enough on-demand.
 | Opens with a hook (inciting incident or premise) | LLM | new |
 | Names the protagonist + central conflict | LLM (logline alignment) | new |
 | Reveals the ending or resolution (this is internal, not a pitch) | LLM | new |
-| Stays at "story" abstraction (no scene-level specifics) | LLM | new |
+
+The "stays at story abstraction" check from the original is dropped — a synopsis with one vivid scene-level detail is often better than fully abstract prose. Risks punishing good writing.
+
+**Ceiling sketch**
+
+A passable synopsis names protagonist + conflict + ending. An excellent synopsis additionally:
+
+- Shows *causation* between events (X *because of* Y, not X *and then* Y).
+- Traces an *internal arc* alongside the plot — the protagonist's relationship to their want changes through the story.
+- Makes the stakes *escalate* in visible steps, not in one jump at the end.
+- Lands the ending as inevitable-in-retrospect, not tacked-on.
 
 ### Level 2 — Act-shape
+
+**Floor checks**
 
 | Check | Mechanism | Source |
 |---|---|---|
 | Exactly 3 paragraphs | deterministic | new |
 | Each paragraph names a turn (inciting / midpoint / climax) | LLM | new |
 | Escalation is visible (act stakes grow) | LLM | new |
-| Theme is implicit in the shape | LLM | new |
+
+The "theme is implicit in the shape" check from the original is dropped — too vague to operationalize consistently. The themes dimension is now first-class (see the themes-registry section); we don't need a fuzzy theme check at the act-shape level.
+
+**Ceiling sketch**
+
+A passable act-shape has three paragraphs each naming a turn. An excellent act-shape additionally:
+
+- Shows Act 2 as having *its own internal arc*, not as a long middle.
+- Makes Act 3's climax fall out of Act 2's setup (the climax is prepared, not introduced).
+- Shows *opposition pressure* scaling alongside the protagonist's progression.
+- Gives each act a different *kind* of pressure (e.g., external in Act 1, internal in Act 2, ethical in Act 3 — or some other meaningful variation).
 
 ### Level 3 — Spine
+
+**Floor checks**
 
 | Check | Mechanism | Source |
 |---|---|---|
 | 5–10 events for novel / 4–8 for GN | deterministic | new |
-| Events spread roughly evenly across acts | deterministic | new |
-| Each event has a non-empty `function` in scene-intent | deterministic | reuse (already validated) |
+| Each event has a non-empty `function` in scene-intent | deterministic | reuse |
 | Each event is irreducible (cutting it breaks causation) | LLM | new |
-| Causal chain holds (event N enables event N+1) | LLM | new |
+
+The "events spread roughly evenly across acts" check is dropped — genre-bound. Thrillers cluster in Act 3, literary in Act 2. The author can use score-overrides if a spread check matters for their specific project. The "causal chain holds" LLM check stays in the advisory tier per the synthesis (not a floor gate).
+
+**Ceiling sketch**
+
+A passable spine has 5–10 irreducible events. An excellent spine additionally:
+
+- Makes each event *cause* the next, not just precede it.
+- Shows the protagonist's relationship to the central question *change across events* — the question they ask themselves at event 5 is different in kind from event 1, not just in intensity.
+- Contains at least one event that *can't be predicted* from earlier ones — a real turn, not just escalation.
+- Ends on a state that's different *in kind* from where it started.
 
 ### Level 4 — Architecture
+
+**Floor checks**
 
 | Check | Mechanism | Source |
 |---|---|---|
 | 15–25 scenes total (novel) / 10–18 (GN) | deterministic | new |
-| Every scene has `part`, `pov`, `action_sequel`, `emotional_arc`, `value_at_stake`, `value_shift`, `turning_point` | deterministic | reuse (structural validation) |
-| Action/sequel alternates | deterministic | new (count check on `action_sequel`) |
-| Value shifts present and varied | deterministic | reuse (existing flat-shift check) |
-| POV distribution matches story design | deterministic + LLM | new |
+| Every scene has `part`, `pov`, `action_sequel`, `emotional_arc`, `value_at_stake`, `value_shift`, `turning_point` | deterministic | reuse |
+| Both action and sequel scenes present (at least 25% of each) | deterministic | new — softened from "alternates" |
+| Value shifts present and varied | deterministic | reuse |
+| POV distribution matches story design | LLM | new |
+
+The original "action/sequel alternates" check is softened — strict alternation produces mechanical pacing. Many great novels have multiple action scenes in a row (thriller climax) or multiple sequels (literary). The new check confirms both modes are present without enforcing rhythm.
+
+**Ceiling sketch**
+
+A passable architecture has all columns populated and uses both action and sequel scenes. An excellent architecture additionally:
+
+- Ends most scenes with a *question* the next scene answers or complicates (forward pull).
+- Shows *stakes escalating across the sequence*, not just within each scene.
+- Gives the antagonist force its *own visible arc* across the architecture — the opposition has a story too.
+- Varies *value at stake* across the sequence rather than hammering one value.
 
 ### Level 5 — Scene map
+
+**Floor checks**
 
 | Check | Mechanism | Source |
 |---|---|---|
 | Every scene has `location`, `timeline_day`, `time_of_day`, `duration` | deterministic | reuse |
-| Timeline is causally consistent | deterministic + LLM | reuse partial (timeline construction) |
-| POV is on-stage where they're POV | deterministic | reuse (`hone`) |
-| MICE threads opened are closed | deterministic | new (set walk on `mice_threads`) |
-| Scene types are diverse | deterministic | new (count check) |
+| Timeline is causally consistent (ordering) | deterministic | reuse |
+| POV is on-stage where they're POV | deterministic | reuse |
+| MICE threads opened are closed by story end | deterministic | new (set walk) |
+
+The "scene types are diverse" check is dropped per the choosiness pass (genre-bound, not universal).
+
+**Ceiling sketch**
+
+A passable scene map has full operational metadata and MICE threads that resolve. An excellent scene map additionally:
+
+- Uses *spatial economy* — few locations recurring with meaning, rather than many scattered ones.
+- Inserts *breathing scenes* between high-pressure ones so the reader doesn't burn out.
+- Uses *time-of-day variation* with intention, not randomness.
+- Plants *setup details* that pay off later (foreshadowing through specifics, not just plot).
 
 ### Level 6 — Briefs
+
+**Floor checks**
 
 | Check | Mechanism | Source |
 |---|---|---|
@@ -119,11 +196,89 @@ All four LLM checks fit in one prompt → one API call. Cheap-enough on-demand.
 | GN: panel_breakdown / page_layout / visual_keywords present | deterministic | reuse |
 | Brief honors scene-intent's value_at_stake | LLM | new (this is a 5→6 fidelity check too) |
 
+**Ceiling sketch**
+
+A passable brief has goal/conflict/outcome with non-abstract language. An excellent brief additionally:
+
+- Names *subtext* explicitly in the `subtext` field — what's beneath the surface dialogue and action.
+- Aligns the *emotional_arc* with the *key_actions* — not plot-level specifics with vague emotional notes, or vice versa.
+- Makes the *key_dialogue* carry the scene's argument, not just exposition.
+- Names what the *POV character notices* in a way that reveals their state without telling.
+
 ### Level 7 — Draft
 
 **Use existing scoring.** Novel mode: the 25-principle rubric in `scoring.py`. GN mode: the 6-principle deterministic rubric in `scoring_gn.py` plus the 3-persona evaluation panel.
 
 No new per-level rubric needed at level 7. The existing scoring is the rubric.
+
+**Ceiling sketch**
+
+A passable draft hits the principle rubric. An excellent draft additionally:
+
+- Shows *consistent voice* across the scene — not just hitting craft-rule averages.
+- Makes the scene's *subtext* live in concrete imagery and behavior, not in stated emotion.
+- Uses *specifics that earn their place* — every concrete detail does work for character, mood, or plot.
+- Leaves the reader with a *question* that pulls them into the next scene.
+
+These ceiling axes inform the LLM persona evaluation panel's prompts but aren't separate scored axes — they describe what the existing evaluators should be reaching for.
+
+---
+
+## Comparison scoring — for iteration across alternatives
+
+The per-level rubrics above grade *one* artifact at a time. Most real iteration involves several candidates: three logline drafts, two competing synopses, alternative spines. The grade-each-independently model can't say *which is best for this story* — and an axis-by-axis improvement loop biases toward axis-satisficing prose. The comparison primitive fixes that.
+
+**`storyforge score --compare <artifact1> <artifact2> [<artifact3>] [<artifact4>]`**
+
+Produces a multi-axis comparison report — explicitly *not* a winner. The author uses the report to decide; the system never declares an overall best.
+
+Inputs: 2–4 candidate artifacts at the same level. Most common: prose-tier (logline / synopsis / theme statement). Useful at level 3 (alternative spines). Rarely needed at deeper levels — at the scene map and below, you don't usually have full-artifact alternatives.
+
+Output: `working/comparison-<level>-<timestamp>.md` shaped like this:
+
+```markdown
+# Comparison: logline candidates (3)
+
+## Candidates
+- **A**: A cartographer who maps places no one else can find loses the daughter he never recorded.
+- **B**: When an imperial archivist discovers his mentor's secret atlas, he must choose between burning it and being burned with it.
+- **C**: A man fights to find his daughter using only the maps in his head.
+
+## Floor checks (deterministic)
+
+| Axis | A | B | C |
+|---|---|---|---|
+| Length (words) | 21 | 28 | 17 |
+| Names protagonist | ✓ | ✓ | partial (generic "a man") |
+| Names want | ✓ | ✓ | ✓ |
+| Names obstacle | implicit | ✓ | partial |
+| Names stakes | ✓ | ✓ | weak |
+
+## Ceiling axes (LLM, on demand)
+
+| Axis | A | B | C |
+|---|---|---|---|
+| Specific vs generic nouns | medium | high | low |
+| Irony between elements | want = flaw | duty vs preservation | absent |
+| Memorable hook word | "never recorded" | "burning / burned" | none |
+| Genre/tone via imagery | literary | thriller-tinged | generic |
+
+## What each does best
+- **A**: most distinctive *want+flaw* irony; the "never recorded" hook lands.
+- **B**: strongest stakes and most active phrasing; longest.
+- **C**: tightest length but weakest specificity and stakes.
+
+## Author task
+Pick the axes that matter most for THIS story and decide. The system does
+not recommend a winner — it surfaces what each candidate does best so you
+can either pick one or synthesize.
+```
+
+**Why no overall winner.** Same reason the upward-faithfulness score became a diff: an overall "best candidate" score would re-create the gradient-toward-LLM-taste problem. The candidates may differ in ways the rubric can't weigh against each other (irony vs. tightness vs. genre fit) and the choice depends on what *this story* needs — which the system doesn't know. The author decides; the system surfaces.
+
+**v1 vs v2.** The deterministic axes ship in v1 — they're set-membership and counts, cheap. The "ceiling axes" (LLM-judged comparative qualities) ship in v2 with the rest of the LLM scoring infrastructure. In v1 the ceiling-axes table is present but populated with "—" placeholders; running with `--semantic` flag in v2 fills them in.
+
+**Where this lives.** New module `scoring_comparison.py`. Reuses the per-level floor and ceiling definitions; no new rubrics. The CLI surface adds one flag.
 
 ---
 

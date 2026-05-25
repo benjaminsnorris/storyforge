@@ -174,6 +174,40 @@ The originals encoded three-act, Swain action/sequel, McKee value shifts, and We
 
 **Revision:** drop the `custom` option for v1. Author judgment (PR review): too much work for too little value at this stage. v1 assumes three-act throughout. Non-three-act stories can use whatever scoring axes apply to them and ignore the rest via the score-overrides mechanism. If specific bundled checks (kishōtenketsu, mosaic) emerge as a real need, they're added in a follow-up.
 
+### Floor vs ceiling: making the rubric useful for iteration
+
+A self-critique of the original scoring design (after the four-agent review): the proposed rubrics tested *completeness* at each level, not *quality*. A complete logline with all four elements present could still be flat; the rubric would call it passing. The scoring would catch broken states but not push toward excellent ones.
+
+**Revision: each level now has two rubrics.**
+
+- **Floor checks** — does this level exist, complete, and consistent? Mostly deterministic. Failure means the level is missing pieces or broken. This is the original rubric, with the noise culled (see below).
+- **Ceiling sketch** — what separates *passable* from *excellent* at this level? Descriptive guidance, not gates. Examples: "uses specific nouns rather than generic ones," "shows causation between events not just sequence," "ends most scenes with a question the next one answers." The ceiling sketches inform LLM prompts (v2+) and give the author language for what iteration is reaching for.
+
+The full per-level ceilings live in the scoring doc. They're not separate scored axes in v1 — they're how the existing axes get framed and what the LLM judges should be reaching for.
+
+### Comparison primitive: helping iterate across alternatives
+
+Another gap the original scoring design left: the rubrics grade one artifact at a time. Real iteration is usually "I have three candidate loglines, which fits this story best?" Grading each independently can't answer that — and a fix-the-low-axes loop biases toward axis-satisficing prose.
+
+**Revision: add a comparison primitive.**
+
+`storyforge score --compare candidate1 candidate2 [candidate3] [candidate4]` produces a multi-axis comparison report showing what each candidate does best, **without declaring a winner**. The author decides. The "no winner" rule is intentional: an LLM-declared best candidate would re-create the gradient-toward-LLM-taste problem the diff+verdict already solved.
+
+Most useful at the prose tier (logline / synopsis / theme statement) where authors iterate on alternative drafts. Also useful for candidate spines. Less common at deeper structural levels.
+
+Ships in v1 with deterministic floor axes filled in; LLM ceiling axes ship in v2.
+
+### Cull the extraneous
+
+The original per-level rubrics included four checks that the scoring-design review identified as noise:
+
+- **"Genre/tone legible" at logline** — most great loglines convey genre through specific imagery, not tagging. The LLM check is fuzzy and produces noise.
+- **"Stays at story abstraction" at synopsis** — punishes good writing; a synopsis with one vivid scene-level detail is often better than fully abstract.
+- **"Theme is implicit in the shape" at act-shape** — too vague to operationalize; the themes dimension is now first-class, so we don't need a fuzzy theme check here.
+- **"Action/sequel alternates" at architecture (strict)** — strict alternation produces mechanical pacing. Softened to "both action and sequel scenes present (at least 25% of each)" — confirms presence without dictating rhythm.
+
+Also dropped: "Events spread roughly evenly across acts" at spine (genre-bound) and "Scene types are diverse" at scene map (genre-bound per existing choosiness pass).
+
 ### Demote the causal-chain LLM check
 
 The original scoring doc listed "Causal chain holds (event N enables event N+1)" as a level-3 LLM check. The craft skeptic was right: postmodern, magic-realist, mosaic, and theme-driven structures intentionally violate causal chains. An LLM saying "event 3 doesn't lead to event 4" might be confused or might be right — but the cost of false positives here is high.
@@ -232,7 +266,8 @@ The engineering review's "v1 cut" landed on roughly what I'd commit to:
 - Migration of existing `status=spine` and `status=architecture` rows from scenes.csv into their new discrete CSVs (`cmd_migrate`).
 - A parser in `common.py` that reads story-summary.md's four sections (Logline / Synopsis / Act-shape / Theme).
 - New columns: `spine_event` (on architecture.csv, required), `architecture_scene` (on scenes.csv, optional), `theme_threads` (on scene-intent.csv, optional).
-- `storyforge score --level N` extension that emits deterministic quality + registry checks for levels 3–6 (generalizing existing `hone.py` + `structural.py` logic).
+- `storyforge score --level N` extension that emits deterministic *floor checks* per level (length, presence, registry conformance, coverage). Per-level *ceiling sketches* are encoded as guidance for LLM prompts and ship empty in v1.
+- `storyforge score --compare candidate1 candidate2 [candidate3] [candidate4]` — new comparison primitive that produces a multi-axis comparison report (deterministic axes in v1; LLM ceiling axes filled in at v2). Never declares an overall winner — the author decides.
 - The orphan-registry check generalized across all structural levels, including the new themes registry.
 - `working/scoring-overrides.csv` and the parser for it.
 - `working/scoring-verdicts.csv` and its parser (the diff+verdict persistence file).
