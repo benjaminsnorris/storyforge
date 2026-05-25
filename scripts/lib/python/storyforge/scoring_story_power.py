@@ -438,15 +438,15 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
     if coaching == 'full':
         _write_full_scorecard(output_dir, scores, parsed, composite,
                                deltas, artifacts, recover_hint=log_file)
-    else:  # coach
+    else:
         _write_coach_brief(output_dir, scores, parsed, composite,
                            deltas, artifacts, recover_hint=log_file)
 
     status: StoryPowerStatus = 'partial' if missing_axes else 'ok'
 
-    # Act-shape extension: re-score per-act + structural axes when the
-    # author has populated the three labeled paragraphs. Pitch-only is a
-    # valid result; this is an additive layer, not a replacement.
+    # Pitch-only is a valid result; the act-shape extension is additive,
+    # not a replacement. A failed extension never overwrites the pitch
+    # scorecard.
     act_shape = parse_act_shape(artifacts.act_shape)
     act_shape_extension: ActShapeExtension | None = None
     if act_shape:
@@ -1002,7 +1002,7 @@ def _run_act_shape_extension(project_dir: str, output_dir: str,
         if write_matrix or write_structural:
             _append_structural_diagnostic(output_dir, per_act,
                                            structural, structural_diag)
-    else:  # coach
+    else:
         if write_matrix or write_structural:
             _append_act_shape_coaching_brief(
                 output_dir, per_act, structural, parsed, structural_diag,
