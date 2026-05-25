@@ -29,6 +29,7 @@ import tempfile
 from storyforge.common import detect_project_root, install_signal_handlers, log
 from storyforge.cmd_scenes_export import (
     DEFAULT_OUTPUT_PATH, SECTION_SPECS, export_scenes,
+    export_spine_md, export_architecture_md,
 )
 from storyforge.cmd_scenes_import import import_scenes
 
@@ -88,6 +89,19 @@ def _file_in_head(project_dir, path_rel):
 # ============================================================================
 # Sync state machine
 # ============================================================================
+
+def _export_all_derived(project_dir: str, md_path: str) -> None:
+    """Run the full set of derived-markdown exports.
+
+    Renders the main scenes-review.md, plus spine.md and architecture.md
+    if their source CSVs exist. The structural-anchor renderings are
+    silent no-ops when their CSVs aren't present yet (project hasn't
+    reached that level).
+    """
+    export_scenes(project_dir, md_path)
+    export_spine_md(project_dir)
+    export_architecture_md(project_dir)
+
 
 def detect_state(project_dir, md_rel=DEFAULT_OUTPUT_PATH):
     """Return a dict describing what's dirty.
@@ -238,7 +252,7 @@ def run_sync(project_dir, md_rel=DEFAULT_OUTPUT_PATH, check_only=False):
     if not state['md_in_head']:
         if check_only:
             return 'first-export'
-        export_scenes(project_dir, md_path)
+        _export_all_derived(project_dir, md_path)
         return 'first-export'
 
     if state['csv_dirty'] and state['md_dirty']:
@@ -252,7 +266,7 @@ def run_sync(project_dir, md_rel=DEFAULT_OUTPUT_PATH, check_only=False):
     if state['csv_dirty']:
         if check_only:
             return 'exported'
-        export_scenes(project_dir, md_path)
+        _export_all_derived(project_dir, md_path)
         log(f'Exported CSV changes → {md_rel}')
         return 'exported'
 
@@ -262,7 +276,7 @@ def run_sync(project_dir, md_rel=DEFAULT_OUTPUT_PATH, check_only=False):
         if not state['md_exists']:
             if check_only:
                 return 'exported'
-            export_scenes(project_dir, md_path)
+            _export_all_derived(project_dir, md_path)
             log(f'Regenerated wiped {md_rel} from CSVs')
             return 'exported'
         if check_only:
@@ -276,7 +290,7 @@ def run_sync(project_dir, md_rel=DEFAULT_OUTPUT_PATH, check_only=False):
     if not state['md_exists']:
         if check_only:
             return 'exported'
-        export_scenes(project_dir, md_path)
+        _export_all_derived(project_dir, md_path)
         log(f'Regenerated missing {md_rel}')
         return 'exported'
 
@@ -294,13 +308,20 @@ SYNC_TRACKED_PATHS = [
     'reference/scene-intent.csv',
     'reference/scene-briefs.csv',
     'reference/scenes-review.md',
+    # Elaboration v1 (#229): structural-anchor tier CSVs + their derived
+    # markdown renderings. Sync regenerates spine.md / architecture.md
+    # when the underlying CSV is dirty.
+    'reference/spine.csv',
+    'reference/architecture.csv',
+    'reference/spine.md',
+    'reference/architecture.md',
 ]
 
 # Regex the hook uses to decide whether the current commit touches any
 # sync-tracked path. Defined here so it can be unit-tested in Python.
 HOOK_PATH_FILTER = (
-    r'^reference/(scenes|scene-intent|scene-briefs)\.csv$'
-    r'|^reference/scenes-review\.md$'
+    r'^reference/(scenes|scene-intent|scene-briefs|spine|architecture)\.csv$'
+    r'|^reference/(scenes-review|spine|architecture)\.md$'
 )
 
 HOOK_SCRIPT = f'''#!/usr/bin/env bash

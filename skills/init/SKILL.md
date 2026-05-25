@@ -164,22 +164,41 @@ If no templates are found in the plugin directory, note this to the author and l
 
 The CSV files depend on which pipeline the author chose.
 
-**If elaboration pipeline:** Create three files with headers only:
+**If elaboration pipeline:** Create the three scene-CSV files plus the structural-anchor tier (`spine.csv` and `architecture.csv`) and the themes registry. All start with headers only.
 
 **`{project-dir}/reference/scenes.csv`:**
 ```
-id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words
+id|seq|title|part|pov|location|timeline_day|time_of_day|duration|type|status|word_count|target_words|target_pages|panel_count|page_count|architecture_scene
 ```
 
 **`{project-dir}/reference/scene-intent.csv`:**
 ```
-id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads
+id|function|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point|characters|on_stage|mice_threads|theme_threads
 ```
 
 **`{project-dir}/reference/scene-briefs.csv`:**
 ```
 id|goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|key_actions|key_dialogue|emotions|motifs|continuity_deps|has_overflow
 ```
+
+**`{project-dir}/reference/spine.csv`:**
+```
+id|seq|title|function|part
+```
+
+**`{project-dir}/reference/architecture.csv`:**
+```
+id|seq|title|part|pov|spine_event|action_sequel|emotional_arc|value_at_stake|value_shift|turning_point
+```
+
+**`{project-dir}/reference/themes.csv`:**
+```
+id|name|tier|description
+```
+
+Also create the prose-tier summary file:
+
+**`{project-dir}/reference/story-summary.md`** — copy from the plugin's `templates/reference/story-summary.md`. Seed the `## Logline` section with the project's logline if the author provided one.
 
 Copy these from the plugin's `templates/reference/` directory if available.
 
