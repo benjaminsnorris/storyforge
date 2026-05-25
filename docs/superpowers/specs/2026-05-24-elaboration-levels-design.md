@@ -259,6 +259,20 @@ For the structural tiers, the discrete artifacts (`spine.csv`, `architecture.csv
 
 ---
 
+## How each level supports iteration
+
+Defining the levels alone doesn't make the system useful for iteration — the author also needs ways to (a) tell whether *this version* of a level is any good and (b) decide between *multiple candidates* at the same level. The scoring doc handles both, but worth noting the contract here so the levels make sense:
+
+- **Per-level scoring is split into floor and ceiling.** Floor checks ask "is this level complete and consistent?" — they're mostly deterministic and they're what `storyforge score --level N` reports. Ceiling sketches name what separates passable from excellent at the level; they inform LLM prompts and give the author shared language for what iteration is reaching for. The floor catches broken; the ceiling targets great. Full per-level rubrics live in the [scoring doc](2026-05-24-elaboration-scoring-design.md).
+
+- **`storyforge score --compare` lets the author iterate across alternatives.** When the author drafts three loglines, two competing synopses, or alternative spines, the comparison primitive renders a multi-axis report showing what each candidate does best — without declaring a winner. The author decides; the system surfaces. Most useful at the prose tier and at the spine level; less common at the manuscript-tier levels where full-artifact alternatives are rare.
+
+- **Boundaries between levels use diff + verdict, not score.** Per the synthesis: when an upper level changes and the lower level may be out of date, the LLM produces a structured diff, and the verdict is recorded (proposed by the LLM in `full` coaching, by the author in `strict`). The verdict persists; the boundary isn't re-flagged unless content changes materially.
+
+These three mechanisms together — floor/ceiling at each level, comparison across alternatives, diff+verdict across boundaries — are what the level taxonomy is in service of. The taxonomy without those scoring mechanisms is just an organizational chart.
+
+---
+
 ## Implementation sketch (informational only)
 
 For when the three research docs converge and we move to building:

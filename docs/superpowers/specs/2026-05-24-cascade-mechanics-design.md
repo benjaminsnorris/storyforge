@@ -89,6 +89,8 @@ Some drift can only be detected by reading both sides:
 
 These are expensive and noisy. They should run **on demand** (when the author asks "is this still aligned?") rather than continuously. The cascade command can offer them as a flag (`--semantic`) but the default should be the cheap deterministic pass.
 
+**Floor vs ceiling in cascade.** Drift fires only on *floor* failures — completeness, coverage, registry conformance, timestamp/hash deltas. The ceiling axes from the scoring doc (specificity, irony, causation, voice consistency, etc.) inform the LLM faithfulness diffs that get rendered for the author *after* drift is detected, but they don't themselves trigger drift. This keeps cascade signal-driven (something is broken or stale) rather than verdict-driven (something could be better).
+
 ### A drift report
 
 The output of detection is a structured drift report, written to `working/cascade-drift.md` (analogous to `working/sync-conflict.md`). Shape:
@@ -146,6 +148,8 @@ The system **does not author content**. It identifies what needs work and what d
 #### Forward
 
 Already exists as today's pipeline. Cascade adds nothing new for the forward motion except surfacing it as the natural next step in the drift report ("spine event 7 has no children — forward elaborate?").
+
+When the author produces multiple candidate elaborations (e.g., three drafts of a logline, two competing synopses, or alternative spines), use `storyforge score --compare` from the scoring doc rather than running the cascade on each one separately. The comparison primitive produces a multi-axis report that surfaces what each candidate does best without declaring a winner — the author decides; the cascade resumes once the chosen candidate is in place.
 
 #### Upward refactor
 

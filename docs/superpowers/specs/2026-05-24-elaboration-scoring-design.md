@@ -452,17 +452,20 @@ What carries over from existing scoring, what's new:
 | Structural scoring (brief-level) | `structural.py` | Reuse for level 6 |
 | Findings → revision feedback loop | `cmd_revise.py`, `cmd_revise_gn.py` | Reuse for 6→7 upward fidelity |
 | Score history tracking | `history.py`, `score-history.csv` | Reuse, extend schema to include level + boundary scores |
-| Per-level quality rubrics for levels 0–5 | — | New |
-| LLM faithfulness scoring at boundaries | — | New (small wrapper per boundary; reuses API/cost infra) |
+| Per-level floor checks (levels 0–6) | — | New |
+| Per-level ceiling sketches (levels 0–7) | — | New (descriptive guidance for LLM prompts, not separately scored) |
+| LLM faithfulness scoring at boundaries (diff+verdict per synthesis) | — | New (small wrapper per boundary; reuses API/cost infra) |
 | Cross-cutting bible-consistency scoring | — | New |
 | Score reporting at non-scene levels (logline, synopsis, etc.) | — | New |
+| **Comparison primitive** (`score --compare`) | — | New (deterministic axes v1, LLM axes v2) |
 
 **Where this lands in code (rough):**
 
-- `scoring_levels.py` — new module: per-level quality rubrics for levels 0–6, dispatching to existing scorers where they exist.
-- `scoring_boundary.py` — new module: cross-level fidelity checks, both directions.
+- `scoring_levels.py` — new module: per-level floor checks for levels 0–6, dispatching to existing scorers where they exist. Ceiling sketches inform LLM prompts but don't need their own module.
+- `scoring_boundary.py` — new module: cross-level fidelity (downward coverage + upward diff+verdict).
 - `scoring_consistency.py` — new module: registry + bible conformance, applied per level.
-- `cmd_score.py` (and `cmd_score_gn.py`) — extended to accept `--level N`, `--boundary N-M`, or `--all`.
+- `scoring_comparison.py` — new module: multi-candidate comparison (reuses floor + ceiling axes; emits the no-winner comparison report).
+- `cmd_score.py` (and `cmd_score_gn.py`) — extended to accept `--level N`, `--boundary N-M`, `--compare a b [c] [d]`, or `--all`.
 
 This is implementation detail and out of scope for the design doc, but flagged so future implementers know the existing scoring code doesn't need to be refactored from the ground up.
 
