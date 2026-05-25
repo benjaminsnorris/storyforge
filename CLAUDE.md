@@ -181,10 +181,21 @@ All structured data uses pipe-delimited CSV:
 
 ### Key CSV Files
 
-- `reference/scenes.csv` — structural identity (id, seq, title, part, pov, location, timeline_day, time_of_day, duration, type, status, word_count, target_words)
-- `reference/scene-intent.csv` — narrative dynamics (id, function, action_sequel, emotional_arc, value_at_stake, value_shift, turning_point, characters, on_stage, mice_threads)
+**Prose tier — story summary at progressive granularity:**
+- `reference/story-summary.md` — four sections: `## Logline` (1 sentence), `## Synopsis` (1 paragraph), `## Act-shape` (3 paragraphs, one `### Act N` each), `## Theme` (2-4 sentences). Per-section `_updated` timestamps in YAML frontmatter feed cascade drift detection. `## Logline` is canonical; `storyforge.yaml:project.logline` is deprecated as an input.
+
+**Structural-anchor tier — each its own discrete CSV:**
+- `reference/spine.csv` — 5-10 irreducible events (id, seq, title, function, part)
+- `reference/architecture.csv` — 15-25 anchor scenes (id, seq, title, part, pov, spine_event, action_sequel, emotional_arc, value_at_stake, value_shift, turning_point). `spine_event` is required; references `spine.csv:id`.
+
+**Manuscript tier:**
+- `reference/scenes.csv` — structural identity (id, seq, title, part, pov, location, timeline_day, time_of_day, duration, type, status, word_count, target_words, target_pages, panel_count, page_count, architecture_scene). `architecture_scene` is optional; references `architecture.csv:id` (empty for purely interstitial scenes).
+- `reference/scene-intent.csv` — narrative dynamics (id, function, action_sequel, emotional_arc, value_at_stake, value_shift, turning_point, characters, on_stage, mice_threads, theme_threads). `theme_threads` references `themes.csv:id`.
 - `reference/scene-briefs.csv` — drafting contracts (id, goal, conflict, outcome, crisis, decision, knowledge_in, knowledge_out, key_actions, key_dialogue, emotions, motifs, continuity_deps, has_overflow)
 - `reference/voice-profile.csv` — structured voice constraints (_project row for banned words/register, per-character rows for preferred words/metaphor families/rhythm/dialogue style)
+
+**Cross-cutting registries:**
+- `reference/themes.csv` — abstract concerns the story argues (id, name, tier, description). Distinct from motif-taxonomy.csv (concrete recurring vehicles). Per-scene tracking via `theme_threads` on scene-intent.csv.
 
 **Shared:**
 - `working/annotations.csv` — reader annotations from Bookshelf (id, scene_id, chapter, color, color_label, text, note, reader, created_at, status, fix_location, fetched_at)
@@ -192,6 +203,8 @@ All structured data uses pipe-delimited CSV:
 - `working/costs/ledger.csv` — per-invocation cost tracking
 - `reference/chapter-map.csv` — chapter-to-scene mapping
 - `working/scores/score-history.csv` — per-scene, per-principle scores across cycles (cycle, scene_id, principle, score)
+- `working/scoring-overrides.csv` — per-finding "considered, accepted" markers (scope, axis, finding_id, verdict, rationale, recorded_at). Cascade / quality gates skip findings the author has overridden.
+- `working/scoring-verdicts.csv` — diff+verdict persistence for cross-level boundary diffs (scope, boundary, verdict, rationale, actor, recorded_at). Actor is `llm` (proposed in full-coaching mode) or `author`.
 - `references/ai-tell-words.csv` — universal AI-tell vocabulary (word, category, severity, replacement_hint)
 
 ### Scene Files
@@ -246,7 +259,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge write` | `cmd_write.py` | Draft scenes (brief-aware, parallel wave drafting) |
 | `storyforge evaluate` | `cmd_evaluate.py` | Multi-agent evaluation panel (6 evaluators + synthesis) |
 | `storyforge revise` | `cmd_revise.py` | Execute revision passes. `--polish` for craft-only. `--polish --loop` for score→polish convergence. `--naturalness` for AI pattern removal. |
-| `storyforge score` | `cmd_score.py` | Craft scoring (25 principles + fidelity scoring against briefs). `--principles P1,P2` for targeted scoring; deterministic principles (`prose_repetition`, `avoid_passive`, `avoid_adverbs`, `no_weather_dreams`, `sentence_as_thought`, `economy_clarity`) skip the LLM pipeline entirely. |
+| `storyforge score` | `cmd_score.py` | Craft scoring (25 principles + fidelity scoring against briefs). `--principles P1,P2` for targeted scoring; deterministic principles (`prose_repetition`, `avoid_passive`, `avoid_adverbs`, `no_weather_dreams`, `sentence_as_thought`, `economy_clarity`) skip the LLM pipeline entirely. **Elaboration-v1 entry points:** `--level N` (0-6) runs floor checks for one elaboration level; `--all-levels` runs every level; `--compare a b [c]` produces a multi-candidate report at the prose tier (no winner declared); `--drift` produces a read-only deterministic drift report. |
 | `storyforge elaborate` | `cmd_elaborate.py` | Run elaboration stages (spine/architecture/map/briefs) |
 | `storyforge extract` | `cmd_extract.py` | Extract structural data from prose. `--force` overwrites. |
 | `storyforge validate` | `cmd_validate.py` | Structural + schema validation. `--structural` for scoring. |
@@ -264,7 +277,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge scenes-import` | `cmd_scenes_import.py` | Import edited `scenes-review.md` back into scene CSVs |
 | `storyforge sync` | `cmd_sync.py` | Sync scene CSVs ↔ `reference/scenes-review.md` against git HEAD. Exports when CSVs are dirty, imports when MD is dirty, writes `working/sync-conflict.md` and exits 1 when both moved. `--install-hook` drops a pre-commit hook that runs this on every commit. |
 | `storyforge review` | `cmd_review.py` | Pipeline review |
-| `storyforge migrate` | `cmd_migrate.py` | Project migration |
+| `storyforge migrate` | `cmd_migrate.py` | Project migration. Eight steps: registry rename/seed/normalize/validate (1-5) + elaboration v1 (6-8): bootstrap `story-summary.md`, extract `status=spine` rows into `spine.csv`, extract `status=architecture` rows into `architecture.csv`. All steps idempotent. |
 
 ### Skills
 
