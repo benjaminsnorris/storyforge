@@ -166,6 +166,64 @@ def test_style_guide_full_uses_llm_when_key_set(project_dir_gn, monkeypatch):
     assert called['prompt']  # was actually called
 
 
+def test_style_guide_full_falls_back_on_unparseable_response(
+    project_dir_gn, monkeypatch,
+):
+    """When the LLM returns a response that doesn't start with `#`, the
+    style-guide step must fall back to the coach template AND record
+    the call's cost with `:unparseable` target (the API call was
+    billed)."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    import json as _json
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text',
+                          'text': 'Sure! Here is the guide:\n(without a header)'}],
+            'usage': {'input_tokens': 100, 'output_tokens': 50,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            _json.dump(response, f)
+        return response
+    from storyforge import api, cmd_script_package
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_script_package, 'invoke_to_file', fake)
+    cmd_script_package.main(['--coaching', 'full'])
+    text = open(os.path.join(project_dir_gn, 'manuscript',
+                              'style-guide.md')).read()
+    # Falls back to coach template
+    assert '- Question:' in text
+    # Cost ledger has the `unparseable` target
+    ledger = open(os.path.join(project_dir_gn, 'working', 'costs',
+                                'ledger.csv')).read()
+    assert 'unparseable' in ledger
+
+
+def test_style_guide_full_falls_back_on_llm_exception(
+    project_dir_gn, monkeypatch,
+):
+    """When invoke_to_file raises, the bundle completes with the coach
+    template — no exception propagates."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    def raise_exc(*a, **k):
+        raise RuntimeError('simulated network failure')
+    from storyforge import api, cmd_script_package
+    monkeypatch.setattr(api, 'invoke_to_file', raise_exc)
+    monkeypatch.setattr(cmd_script_package, 'invoke_to_file', raise_exc)
+    cmd_script_package.main(['--coaching', 'full'])
+    text = open(os.path.join(project_dir_gn, 'manuscript',
+                              'style-guide.md')).read()
+    assert '- Question:' in text
+
+
 def test_style_guide_sections_consistent_across_modes():
     """Every renderer (strict, coach, LLM prompt) must emit the same set
     of sections in the same order. _STYLE_GUIDE_SECTIONS is the single

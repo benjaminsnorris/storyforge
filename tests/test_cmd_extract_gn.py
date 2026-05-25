@@ -353,6 +353,45 @@ def test_from_prose_strict_writes_checklist_no_llm(tmp_path, monkeypatch):
     assert not (tmp_path / 'reference' / 'scenes.csv').is_file()
 
 
+def test_from_prose_coach_without_api_key_errors_cleanly(tmp_path, monkeypatch):
+    """coach mode also calls the LLM — missing key must exit 1."""
+    _seed_project(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    prose_path = tmp_path / 'prose.md'
+    prose_path.write_text(_PROSE_SAMPLE)
+    from storyforge.cmd_extract_gn import main as ex_main
+    with pytest.raises(SystemExit) as exc:
+        ex_main(['--from-prose', str(prose_path), '--coaching', 'coach'])
+    assert exc.value.code == 1
+
+
+def test_merge_preserves_deprecated_columns(tmp_path, monkeypatch):
+    """If scenes.csv has a column NOT in SCENE_COLS (legacy data), the
+    merge must preserve it — never silently drop author data."""
+    _seed_project(str(tmp_path))
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    # Header has a `legacy_note` column that isn't in SCENE_COLS.
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|summary|part|pov|location|timeline_day|time_of_day|'
+        'duration|type|status|word_count|target_words|target_pages|'
+        'panel_count|page_count|architecture_scene|legacy_note\n'
+        'sc-1|1|Author Title|s|1|p|loc|1|m|2h|character|briefed|0|2500|||||'
+        'author wrote this in 2024\n'
+    )
+    scripts_dir = tmp_path / 'manuscript'
+    scripts_dir.mkdir()
+    (scripts_dir / 'sc-1.md').write_text(_SCRIPT_SAMPLE)
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge.cmd_extract_gn import main as ex_main
+    ex_main(['--from-script', str(scripts_dir)])
+    content = (ref / 'scenes.csv').read_text()
+    header = content.split('\n')[0]
+    assert 'legacy_note' in header.split('|')
+    assert 'author wrote this in 2024' in content
+
+
 def test_from_prose_full_without_api_key_errors_cleanly(tmp_path, monkeypatch):
     """Missing ANTHROPIC_API_KEY exits 1 cleanly for full mode."""
     _seed_project(str(tmp_path))
