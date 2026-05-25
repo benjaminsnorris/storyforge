@@ -94,13 +94,14 @@ def test_append_verdict_creates_file(tmp_path):
     append_verdict(
         scope='act1-sc05', boundary='5->6', verdict='correct=upstream',
         rationale='the brief was right; the scene drifted',
-        actor='author', recorded_at='2026-05-24',
+        actor='author', coaching_level='full',
+        recorded_at='2026-05-24',
         project_dir=str(tmp_path),
     )
     path = os.path.join(str(tmp_path), VERDICTS_PATH)
     assert os.path.isfile(path)
     content = open(path).read()
-    assert 'scope|boundary|verdict|rationale|actor|recorded_at' in content
+    assert 'scope|boundary|verdict|rationale|actor|coaching_level|recorded_at' in content
     assert 'act1-sc05' in content
     assert 'correct=upstream' in content
 
@@ -114,7 +115,7 @@ def test_get_verdict_returns_most_recent(tmp_path):
     ):
         append_verdict(
             'act1-sc05', '5->6', verdict, 'rationale',
-            'author', ts, project_dir=str(tmp_path),
+            'author', 'full', ts, project_dir=str(tmp_path),
         )
     result = get_verdict('act1-sc05', '5->6', project_dir=str(tmp_path))
     assert result is not None
@@ -129,7 +130,7 @@ def test_get_verdict_returns_none_when_unknown(tmp_path):
 def test_invalid_boundary_verdict_raises(tmp_path):
     with pytest.raises(ValueError):
         append_verdict(
-            'a', '5->6', 'invented-verdict', 'r', 'author', '2026-05-24',
+            'a', '5->6', 'invented-verdict', 'r', 'author', 'full', '2026-05-24',
             project_dir=str(tmp_path),
         )
 
@@ -138,7 +139,7 @@ def test_invalid_actor_raises(tmp_path):
     with pytest.raises(ValueError):
         append_verdict(
             'a', '5->6', 'both are right', 'r',
-            'some-other-actor', '2026-05-24',
+            'some-other-actor', 'full', '2026-05-24',
             project_dir=str(tmp_path),
         )
 
@@ -191,3 +192,99 @@ def test_env_var_overrides_yaml(tmp_path, monkeypatch):
         'project:\n  title: test\n  cascade_mode: live\n'
     )
     assert is_drafting_mode(str(tmp_path))
+
+
+def test_drafting_mode_unknown_value_warns_and_falls_to_live(tmp_path, monkeypatch, capsys):
+    """A typo'd cascade_mode value falls to live with a WARNING (not silent)."""
+    monkeypatch.delenv('STORYFORGE_DRAFTING', raising=False)
+    (tmp_path / 'storyforge.yaml').write_text(
+        'project:\n  title: test\n  cascade_mode: drating\n'  # typo
+    )
+    assert not is_drafting_mode(str(tmp_path))
+    captured = capsys.readouterr()
+    # Warning surfaced via log (which goes to stdout per common.log)
+    assert 'WARNING' in captured.out
+    assert 'drating' in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Pipe sanitization in rationale field (#1)
+# ---------------------------------------------------------------------------
+
+def test_pipe_in_rationale_sanitized_on_write(tmp_path):
+    """A rationale containing pipes is silently sanitized (pipes → slashes)
+    so the file stays consistent with the project's split-on-pipe CSV
+    convention. The on-disk file MUST NOT use RFC-4180 double-quoting,
+    which would break downstream awk/cut readers."""
+    append_override(
+        'sc1', 'pacing', 'too-slow', 'accepted',
+        'A | B | C considered',  # author typed pipes
+        '2026-05-24', project_dir=str(tmp_path),
+    )
+    # On-disk content must not contain '"' (no RFC-4180 quoting)
+    content = open(os.path.join(str(tmp_path), OVERRIDES_PATH)).read()
+    assert '"' not in content, (
+        'rationale should be sanitized in place, not RFC-4180-quoted'
+    )
+    # The substituted rationale is what comes back
+    entries = read_overrides(str(tmp_path))
+    assert entries[0]['rationale'] == 'A / B / C considered'
+
+
+def test_rationale_without_pipes_preserved_verbatim(tmp_path):
+    """Normal rationales survive untouched."""
+    append_override(
+        'sc1', 'pacing', 'too-slow', 'accepted',
+        'the slow is intentional here',
+        '2026-05-24', project_dir=str(tmp_path),
+    )
+    entries = read_overrides(str(tmp_path))
+    assert entries[0]['rationale'] == 'the slow is intentional here'
+
+
+def test_verdict_rationale_also_sanitized(tmp_path):
+    """The same pipe-sanitization applies to verdicts (same field name)."""
+    append_verdict(
+        'sc1', '5->6', 'both are right',
+        'either reading is defensible | depends on the act',
+        'author', 'full', '2026-05-24',
+        project_dir=str(tmp_path),
+    )
+    content = open(os.path.join(str(tmp_path), VERDICTS_PATH)).read()
+    assert '"' not in content
+    entry = read_verdicts(str(tmp_path))[0]
+    assert entry['rationale'] == 'either reading is defensible / depends on the act'
+
+
+# ---------------------------------------------------------------------------
+# coaching_level on verdicts (#14)
+# ---------------------------------------------------------------------------
+
+def test_verdict_records_coaching_level(tmp_path):
+    append_verdict(
+        'sc1', '5->6', 'correct=upstream', 'rationale',
+        'llm', 'full', '2026-05-24',
+        project_dir=str(tmp_path),
+    )
+    entry = read_verdicts(str(tmp_path))[0]
+    assert entry['coaching_level'] == 'full'
+    assert entry['actor'] == 'llm'
+
+
+def test_verdict_rejects_invalid_coaching_level(tmp_path):
+    with pytest.raises(ValueError, match='coaching_level'):
+        append_verdict(
+            'sc1', '5->6', 'correct=upstream', 'rationale',
+            'author', 'invented-mode', '2026-05-24',
+            project_dir=str(tmp_path),
+        )
+
+
+def test_verdict_header_includes_coaching_level(tmp_path):
+    """File format check: header must contain coaching_level."""
+    append_verdict(
+        'sc1', '5->6', 'needs work', 'r', 'author', 'strict', '2026-05-24',
+        project_dir=str(tmp_path),
+    )
+    content = open(os.path.join(str(tmp_path), VERDICTS_PATH)).read()
+    assert 'coaching_level' in content.splitlines()[0]

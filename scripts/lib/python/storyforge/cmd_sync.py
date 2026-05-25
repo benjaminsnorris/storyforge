@@ -94,13 +94,36 @@ def _export_all_derived(project_dir: str, md_path: str) -> None:
     """Run the full set of derived-markdown exports.
 
     Renders the main scenes-review.md, plus spine.md and architecture.md
-    if their source CSVs exist. The structural-anchor renderings are
-    silent no-ops when their CSVs aren't present yet (project hasn't
-    reached that level).
+    if their source CSVs exist.
+
+    Handles three "nothing to export" cases without aborting the caller:
+      - scenes.csv is missing or empty (fresh init; export_scenes would
+        SystemExit via build_scene_list — we suppress that).
+      - spine.csv / architecture.csv are absent (project hasn't reached
+        that tier yet; the export helpers silently return '').
+
+    Without these guards, a fresh-init project's first commit would hit
+    the sync hook → SystemExit → hook refuses commit.
     """
-    export_scenes(project_dir, md_path)
+    if _scenes_csv_has_rows(project_dir):
+        export_scenes(project_dir, md_path)
+    else:
+        log(f'INFO: scenes.csv has no rows yet — skipping {md_path}')
+    # Structural-anchor renderings are silent no-ops when their CSVs are
+    # missing, so we don't need a guard around these.
     export_spine_md(project_dir)
     export_architecture_md(project_dir)
+
+
+def _scenes_csv_has_rows(project_dir: str) -> bool:
+    """True if reference/scenes.csv exists and has at least one data row."""
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(path):
+        return False
+    with open(path, encoding='utf-8') as f:
+        # Header line + at least one data line means there's content to export
+        non_empty = sum(1 for line in f if line.strip())
+    return non_empty > 1
 
 
 def detect_state(project_dir, md_rel=DEFAULT_OUTPUT_PATH):
@@ -325,8 +348,11 @@ HOOK_PATH_FILTER = (
 )
 
 HOOK_SCRIPT = f'''#!/usr/bin/env bash
-# Installed by `storyforge sync --install-hook`. Keeps scene CSVs and
-# reference/scenes-review.md in sync before each commit.
+# Installed by `storyforge sync --install-hook`. Keeps the scene CSVs
+# (scenes.csv, scene-intent.csv, scene-briefs.csv), the structural-anchor
+# CSVs (spine.csv, architecture.csv), and their derived markdown
+# renderings (scenes-review.md, spine.md, architecture.md) in sync
+# before each commit.
 #
 # Behavior:
 #   1. Skip unless the staged change touches a sync-tracked path.
@@ -334,8 +360,8 @@ HOOK_SCRIPT = f'''#!/usr/bin/env bash
 #      so sync can't accidentally bundle unrelated work into the commit.
 #   3. Run `storyforge sync`. Refuse the commit if sync writes a conflict
 #      report or otherwise exits non-zero.
-#   4. Stage the four sync-tracked files so anything sync produced lands
-#      in the commit.
+#   4. Stage every sync-tracked file that exists so anything sync produced
+#      lands in the commit.
 #
 # Bypass for one-off cases: STORYFORGE_SYNC_SKIP=1 git commit ...
 set -e

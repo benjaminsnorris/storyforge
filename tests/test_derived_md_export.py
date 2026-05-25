@@ -162,6 +162,43 @@ def test_sync_skips_structural_renderings_when_csvs_absent(tmp_path):
     assert not os.path.isfile(os.path.join(ref, 'architecture.md'))
 
 
+def test_sync_handles_empty_scenes_csv(tmp_path):
+    """A fresh-init project (scenes.csv header-only, no data rows) must
+    NOT abort sync — that would refuse the first commit. _export_all_derived
+    skips the scenes-review.md write but still runs the structural-anchor
+    renderings if their CSVs exist."""
+    ref = os.path.join(str(tmp_path), 'reference')
+    _write_csv(
+        os.path.join(ref, 'scenes.csv'),
+        'id|seq|title|part|pov|location|timeline_day|time_of_day|duration|'
+        'type|status|word_count|target_words|target_pages|panel_count|page_count|'
+        'architecture_scene',
+        [],  # header only, no data
+    )
+    _write_csv(
+        os.path.join(ref, 'scene-intent.csv'),
+        'id|function|action_sequel|emotional_arc|value_at_stake|value_shift|'
+        'turning_point|characters|on_stage|mice_threads|theme_threads',
+        [],
+    )
+    # Seed a spine.csv to confirm the structural-anchor rendering still runs
+    _write_csv(
+        os.path.join(ref, 'spine.csv'),
+        'id|seq|title|function|part',
+        ['e-1|1|Title|inciting|1'],
+    )
+
+    from storyforge.cmd_sync import _export_all_derived
+    md_path = os.path.join(ref, 'scenes-review.md')
+    # MUST NOT SystemExit
+    _export_all_derived(str(tmp_path), md_path)
+
+    # No scenes-review.md because there are no scenes
+    assert not os.path.isfile(md_path)
+    # But spine.md still got rendered
+    assert os.path.isfile(os.path.join(ref, 'spine.md'))
+
+
 def test_hook_path_filter_matches_new_paths():
     """The sync hook's path regex should fire on spine.csv / architecture.csv
     edits and on the derived MDs."""

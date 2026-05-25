@@ -140,8 +140,15 @@ def _parse_principles(raw: str, plugin_dir: str) -> list[str]:
 def _run_elaboration_scoring(args) -> None:
     """Handle --level / --all-levels / --compare / --drift (elaboration v1).
 
-    Short-circuits the existing scene-prose scoring path. Prints a report
-    to stdout and exits with code 0 on success or 1 on misuse.
+    Short-circuits the existing scene-prose scoring path. Returns on
+    success (implicit exit 0); calls `sys.exit(1)` on misuse.
+
+    **TODO(v2):** when LLM ceiling axes ship in `--compare --semantic`
+    and LLM-driven boundary faithfulness diffs land, this dispatch needs
+    to wire into the cost ledger and the create_branch / ensure_branch_pushed
+    machinery that the prose-tier scoring path uses today (cmd_score.main
+    around lines 295-310). v1 is deterministic-only, no API calls, no
+    commits — so the bypass is safe. Don't forget when v2 lands.
     """
     from datetime import datetime
     from storyforge.scoring_levels import (

@@ -24,15 +24,49 @@ Each scorer returns:
 
 import os
 import re
+from typing import TypedDict
 
 from storyforge.elaborate import _read_csv
+
+
+# ============================================================================
+# Types
+# ============================================================================
+
+# Severity is part of the cascade contract — a finding's severity controls
+# whether the cascade or quality-gate logic treats it as blocking. Validated
+# at construction so a typo can't silently degrade behavior.
+VALID_SEVERITIES = frozenset({'high', 'medium', 'low'})
+
+
+class CheckResult(TypedDict):
+    """One floor-check finding. Contract for every entry in LevelResult.checks."""
+    check: str
+    passed: bool
+    detail: str
+    severity: str  # one of VALID_SEVERITIES
+
+
+class LevelResult(TypedDict):
+    """The result dict every per-level scorer returns.
+
+    Invariant (enforced at construction by _result): passed + failed ==
+    len(checks). Callers shouldn't mutate `checks` after construction;
+    consumers (cmd_score._print_level_result, scoring_consistency) read
+    these counts directly.
+    """
+    level: int
+    name: str
+    checks: list[CheckResult]
+    passed: int
+    failed: int
 
 
 # ============================================================================
 # Helpers
 # ============================================================================
 
-def _result(level: int, name: str, checks: list[dict]) -> dict:
+def _result(level: int, name: str, checks: list[CheckResult]) -> LevelResult:
     passed = sum(1 for c in checks if c['passed'])
     failed = sum(1 for c in checks if not c['passed'])
     return {
@@ -44,7 +78,12 @@ def _result(level: int, name: str, checks: list[dict]) -> dict:
     }
 
 
-def _check(check: str, passed: bool, detail: str = '', severity: str = 'medium') -> dict:
+def _check(check: str, passed: bool, detail: str = '',
+           severity: str = 'medium') -> CheckResult:
+    if severity not in VALID_SEVERITIES:
+        raise ValueError(
+            f'severity must be one of {sorted(VALID_SEVERITIES)}; got {severity!r}'
+        )
     return {'check': check, 'passed': passed, 'detail': detail, 'severity': severity}
 
 
@@ -255,7 +294,24 @@ def score_architecture(project_dir: str, medium: str = 'novel') -> dict:
         severity='medium',
     ))
 
-    # spine_event must reference a real spine.csv id.
+    # spine_event must reference a real spine.csv id. When spine.csv is
+    # absent AND any architecture row has a spine_event value, the
+    # cross-reference check can't run — emit an explicit failed check so
+    # the author sees the gap rather than thinking architecture is clean.
+    # If spine.csv is absent and NO row has spine_event populated, skip
+    # the spine-reference check entirely; everything else still runs.
+    if not os.path.isfile(spine_path):
+        non_empty_spine_refs = [r.get('id', '?') for r in rows
+                                if r.get('spine_event', '').strip()]
+        if non_empty_spine_refs:
+            checks.append(_check(
+                'spine_event references resolve to spine.csv',
+                False,
+                (f'spine.csv is missing; {len(non_empty_spine_refs)} architecture '
+                 f'row(s) have spine_event values that cannot be validated. '
+                 'Run step 7 of migrate or `storyforge elaborate spine` to populate.'),
+                severity='medium',
+            ))
     if os.path.isfile(spine_path):
         spine_ids = {r.get('id', '').strip() for r in _read_csv(spine_path)}
         bad_refs = [r.get('id', '?') for r in rows
@@ -340,16 +396,25 @@ def score_scene_map(project_dir: str) -> dict:
     ))
 
     # POV character must appear in on_stage for that scene.
+    # If on_stage is unpopulated (intent CSV hasn't been filled yet at
+    # this tier), don't false-positive the cross-check — surface a
+    # separate lower-severity finding for the unpopulated state.
     bad_pov = []
+    unpopulated_pov = []
     for r in map_rows:
         sid = r.get('id', '?')
         pov = r.get('pov', '').strip()
-        on_stage = intent_by_id.get(sid, {}).get('on_stage', '')
+        on_stage = intent_by_id.get(sid, {}).get('on_stage', '').strip()
+        if not pov:
+            continue
+        if not on_stage:
+            unpopulated_pov.append(sid)
+            continue
         on_stage_set = {s.strip() for s in on_stage.split(';') if s.strip()}
-        if pov and pov not in on_stage_set:
+        if pov not in on_stage_set:
             bad_pov.append(sid)
     checks.append(_check(
-        'POV is on-stage in every scene',
+        'POV is on-stage in every scene with on_stage populated',
         not bad_pov,
         (f'{len(bad_pov)} scene(s) have POV not in on_stage: '
          + ', '.join(bad_pov[:5])
@@ -357,6 +422,15 @@ def score_scene_map(project_dir: str) -> dict:
         if bad_pov else '',
         severity='medium',
     ))
+    if unpopulated_pov:
+        # Lower-severity informational: not yet wired up.
+        checks.append(_check(
+            'on_stage data populated for every POV scene',
+            False,
+            (f'{len(unpopulated_pov)} scene(s) have a POV but on_stage is '
+             f'empty (the POV check will run once on_stage is populated)'),
+            severity='low',
+        ))
 
     return _result(5, 'scene-map', checks)
 

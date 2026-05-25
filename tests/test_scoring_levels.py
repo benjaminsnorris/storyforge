@@ -273,6 +273,105 @@ def test_score_level_unknown_raises(tmp_path):
         score_level(str(tmp_path), 99)
 
 
+# ---------------------------------------------------------------------------
+# Regression tests for review fixes
+# ---------------------------------------------------------------------------
+
+def test_architecture_warns_when_spine_csv_missing(tmp_path):
+    """When architecture rows have spine_event references but spine.csv
+    isn't present, the floor check should explicitly flag the gap rather
+    than silently skipping the cross-reference check."""
+    ref = os.path.join(str(tmp_path), 'reference')
+    _write_csv(
+        os.path.join(ref, 'architecture.csv'),
+        'id|seq|title|part|pov|spine_event|action_sequel|emotional_arc|'
+        'value_at_stake|value_shift|turning_point',
+        [f'arch-{i}|{i}|T|1|hero|event-x|action|a|truth|+/-|action'
+         for i in range(1, 17)],
+    )
+    # NO spine.csv
+    from storyforge.scoring_levels import score_architecture
+    r = score_architecture(str(tmp_path), medium='novel')
+    # A check should fail with detail mentioning spine.csv
+    bad = [c for c in r['checks'] if not c['passed']]
+    assert any('spine.csv' in (c.get('detail') or '') for c in bad), (
+        'architecture check should surface missing spine.csv when '
+        'spine_event references exist'
+    )
+
+
+def test_architecture_no_warning_when_spine_event_all_empty(tmp_path):
+    """If no architecture row has a spine_event yet (project at architecture
+    stage but spine.csv hasn't been populated), the warning should NOT
+    fire — the cross-reference simply isn't required yet."""
+    ref = os.path.join(str(tmp_path), 'reference')
+    _write_csv(
+        os.path.join(ref, 'architecture.csv'),
+        'id|seq|title|part|pov|spine_event|action_sequel|emotional_arc|'
+        'value_at_stake|value_shift|turning_point',
+        [f'arch-{i}|{i}|T|1|hero||action|a|truth|+/-|action'
+         for i in range(1, 17)],
+    )
+    from storyforge.scoring_levels import score_architecture
+    r = score_architecture(str(tmp_path), medium='novel')
+    spine_msg_findings = [
+        c for c in r['checks']
+        if 'spine.csv is missing' in (c.get('detail') or '')
+    ]
+    assert not spine_msg_findings, (
+        'should not warn about missing spine.csv when no architecture row '
+        'has a spine_event value yet'
+    )
+
+
+def test_scene_map_pov_check_skips_empty_on_stage(project_dir):
+    """When on_stage is empty for a POV scene, the check should not
+    false-positive — it should surface a separate informational finding
+    about on_stage being unpopulated."""
+    from storyforge.csv_cli import update_field
+    intent_path = os.path.join(project_dir, 'reference', 'scene-intent.csv')
+    # Find a POV scene at status=mapped+ and blank its on_stage
+    update_field(intent_path, 'act1-sc01', 'on_stage', '')
+
+    from storyforge.scoring_levels import score_scene_map
+    r = score_scene_map(project_dir)
+    # The POV-vs-on_stage check should NOT fail on the unpopulated scene
+    pov_check = next(c for c in r['checks'] if 'POV is on-stage' in c['check'])
+    detail = pov_check.get('detail') or ''
+    assert 'act1-sc01' not in detail, (
+        'unpopulated on_stage should not trigger the POV mismatch check'
+    )
+    # And we should see the informational on_stage-populated finding
+    populated_check = next(
+        (c for c in r['checks'] if 'on_stage data populated' in c['check']),
+        None,
+    )
+    assert populated_check is not None, (
+        'expected an informational finding about unpopulated on_stage'
+    )
+    assert populated_check.get('severity') == 'low'
+
+
+# ---------------------------------------------------------------------------
+# Severity validation (#13)
+# ---------------------------------------------------------------------------
+
+def test_check_validates_severity():
+    """_check() should reject any severity not in VALID_SEVERITIES."""
+    import pytest
+    from storyforge.scoring_levels import _check
+    # Valid ones work
+    for sev in ('high', 'medium', 'low'):
+        _check('test', True, '', severity=sev)
+    # Invalid raises
+    with pytest.raises(ValueError, match='severity'):
+        _check('test', True, '', severity='critical')
+    with pytest.raises(ValueError, match='severity'):
+        _check('test', True, '', severity='')
+    with pytest.raises(ValueError, match='severity'):
+        _check('test', True, '', severity='HIGH')
+
+
 def test_score_all_levels_returns_seven(project_dir):
     results = score_all_levels(project_dir)
     assert len(results) == 7

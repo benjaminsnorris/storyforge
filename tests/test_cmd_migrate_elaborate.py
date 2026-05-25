@@ -65,6 +65,30 @@ def test_step6_dry_run_does_not_write(project_dir):
     assert not os.path.isfile(path)
 
 
+def test_step6_leaves_logline_blank_when_yaml_has_none(tmp_path):
+    """When storyforge.yaml has no project.logline, the bootstrapped
+    story-summary.md leaves the Logline section blank (not a placeholder
+    string). This is so score_logline correctly reports present: False
+    instead of being fooled by a placeholder that the user clearly
+    didn't author."""
+    (tmp_path / 'storyforge.yaml').write_text('project:\n  title: test\n')
+    step6_create_story_summary(str(tmp_path), dry_run=False)
+    md = _read_file(os.path.join(str(tmp_path), 'reference', 'story-summary.md'))
+    # The template has `## Logline\n\n{logline}\n\n## Synopsis` — the
+    # logline-section body should be empty between those headers.
+    assert '(write the logline here)' not in md
+    # The Logline section header still exists but its body is empty
+    assert '## Logline' in md
+    # Verify the level-0 floor check correctly reports `present: False`
+    from storyforge.scoring_levels import score_logline
+    r = score_logline(str(tmp_path))
+    present_check = next(c for c in r['checks'] if c['check'] == 'present')
+    assert not present_check['passed'], (
+        'level-0 floor check should report Logline section as not present '
+        'when the yaml had no logline'
+    )
+
+
 def test_step6_seeds_logline_from_yaml(project_dir):
     """The project's storyforge.yaml:project.logline gets written into the
     Logline section of the bootstrapped file. Uses the fixture's pre-existing
@@ -199,6 +223,124 @@ def test_step8_preserves_briefed_and_mapped_rows(project_dir):
 # ---------------------------------------------------------------------------
 # Combined: full migration sequence on the fixture
 # ---------------------------------------------------------------------------
+
+def test_step7_drops_orphan_brief_for_moved_id(project_dir):
+    """When a spine-status scene has a brief row (e.g., a previously
+    drafted scene demoted back to spine), the brief is dropped on
+    extraction — not left as an orphan."""
+    ref_dir = os.path.join(project_dir, 'reference')
+    # Insert a brief row for act2-sc02 (status=spine in the fixture)
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    with open(briefs_path) as f:
+        header_line = f.readline().rstrip('\n')
+        existing = f.read()
+    cols = header_line.split('|')
+    orphan_row = '|'.join(['act2-sc02' if c == 'id' else '' for c in cols])
+    with open(briefs_path, 'w') as f:
+        f.write(header_line + '\n')
+        f.write(existing.rstrip('\n') + '\n' if existing.strip() else '')
+        f.write(orphan_row + '\n')
+
+    result = step7_extract_spine(ref_dir, dry_run=False)
+    assert 'orphan brief' in result
+
+    with open(briefs_path) as f:
+        after = f.read()
+    assert 'act2-sc02' not in after, (
+        'orphan brief for the moved spine scene should be dropped'
+    )
+
+
+def test_step8_drops_orphan_brief_for_moved_id(project_dir):
+    """Same as above for architecture-status moves."""
+    ref_dir = os.path.join(project_dir, 'reference')
+    briefs_path = os.path.join(ref_dir, 'scene-briefs.csv')
+    with open(briefs_path) as f:
+        header_line = f.readline().rstrip('\n')
+        existing = f.read()
+    cols = header_line.split('|')
+    orphan_row = '|'.join(['act2-sc01' if c == 'id' else '' for c in cols])
+    with open(briefs_path, 'w') as f:
+        f.write(header_line + '\n')
+        f.write(existing.rstrip('\n') + '\n' if existing.strip() else '')
+        f.write(orphan_row + '\n')
+
+    result = step8_extract_architecture(ref_dir, dry_run=False)
+    assert 'orphan brief' in result
+
+    with open(briefs_path) as f:
+        after = f.read()
+    assert 'act2-sc01' not in after
+
+
+def test_step7_picks_up_stranded_spine_rows_added_between_runs(project_dir):
+    """If the author adds a NEW status=spine row to scenes.csv after the
+    first migration, a second migrate run should pick it up rather than
+    silently skipping because spine.csv already has data."""
+    ref_dir = os.path.join(project_dir, 'reference')
+    # First run extracts act2-sc02 → spine.csv
+    step7_extract_spine(ref_dir, dry_run=False)
+    first_spine = _read_file(os.path.join(ref_dir, 'spine.csv'))
+    assert 'act2-sc02' in first_spine
+
+    # Author adds a new status=spine row to scenes.csv
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    with open(scenes_path) as f:
+        scenes_header = f.readline().rstrip('\n').split('|')
+    new_row = {c: '' for c in scenes_header}
+    new_row.update({
+        'id': 'late-add-1', 'seq': '99', 'title': 'A new spine event',
+        'part': '1', 'pov': 'Dorren Hayle', 'status': 'spine',
+    })
+    with open(scenes_path, 'a', encoding='utf-8') as f:
+        f.write('|'.join(new_row[c] for c in scenes_header) + '\n')
+
+    # Second run: should pick up the stranded row
+    result = step7_extract_spine(ref_dir, dry_run=False)
+    assert result.startswith('extract:'), (
+        f'expected stranded row to be picked up; got {result!r}'
+    )
+
+    second_spine = _read_file(os.path.join(ref_dir, 'spine.csv'))
+    assert 'late-add-1' in second_spine, (
+        'late-added spine row should now be in spine.csv'
+    )
+    assert 'act2-sc02' in second_spine, (
+        'previously-migrated row should still be in spine.csv'
+    )
+
+
+def test_step7_skip_when_truly_idempotent(project_dir):
+    """When spine.csv has data AND scenes.csv has no stranded spine rows,
+    step 7 reports `skip:already migrated`."""
+    ref_dir = os.path.join(project_dir, 'reference')
+    step7_extract_spine(ref_dir, dry_run=False)
+    result = step7_extract_spine(ref_dir, dry_run=False)
+    assert result == 'skip:already migrated'
+
+
+def test_step8_picks_up_stranded_architecture_rows(project_dir):
+    """Symmetric to test_step7_picks_up_stranded_spine_rows."""
+    ref_dir = os.path.join(project_dir, 'reference')
+    step8_extract_architecture(ref_dir, dry_run=False)
+
+    scenes_path = os.path.join(ref_dir, 'scenes.csv')
+    with open(scenes_path) as f:
+        scenes_header = f.readline().rstrip('\n').split('|')
+    new_row = {c: '' for c in scenes_header}
+    new_row.update({
+        'id': 'late-arch-1', 'seq': '99', 'title': 'Late arch beat',
+        'part': '2', 'pov': 'Dorren Hayle', 'status': 'architecture',
+    })
+    with open(scenes_path, 'a', encoding='utf-8') as f:
+        f.write('|'.join(new_row[c] for c in scenes_header) + '\n')
+
+    result = step8_extract_architecture(ref_dir, dry_run=False)
+    assert result.startswith('extract:')
+    arch_content = _read_file(os.path.join(ref_dir, 'architecture.csv'))
+    assert 'late-arch-1' in arch_content
+    assert 'act2-sc01' in arch_content  # earlier run's row still present
+
 
 def test_full_v1_sequence_on_fixture(project_dir):
     """Run all three steps in order; final state should have spine.csv,

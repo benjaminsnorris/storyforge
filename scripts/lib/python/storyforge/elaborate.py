@@ -234,7 +234,23 @@ def get_column(ref_dir: str, column: str) -> list[str]:
 # ============================================================================
 
 def update_scene(scene_id: str, ref_dir: str, updates: dict[str, str]) -> None:
-    """Update specific columns for a scene, writing to the correct file(s).
+    """Update specific columns for a *manuscript-tier* scene.
+
+    Writes to whichever of scenes.csv / scene-intent.csv / scene-briefs.csv
+    own each column, based on `_file_for_column` (which returns the
+    first matching file in `_FILE_MAP`).
+
+    **Manuscript tier only.** This function does NOT update spine.csv or
+    architecture.csv. Several columns are shared between the manuscript
+    files and the structural-anchor files (id, seq, title, part, pov,
+    action_sequel, emotional_arc, value_at_stake, value_shift,
+    turning_point) — for those columns, `_file_for_column` returns the
+    manuscript-tier file because `_FILE_MAP` puts those first. If a
+    caller wanted to edit a row in spine.csv or architecture.csv via
+    this function, the wrong file would silently get the write and an
+    empty manuscript row could even be created. Use a tier-specific
+    write path for structural-anchor edits (today, edit those CSVs
+    directly; a tier-aware helper can be added if real callers emerge).
 
     Args:
         scene_id: The scene's id value.
