@@ -206,15 +206,17 @@ def parse_act_shape(act_shape_body: str) -> ActShape | None:
     """Parse the body of `## Act-shape` into three labeled paragraphs.
 
     Expects `### Act 1` / `### Act 2` / `### Act 3` sub-headings. Returns
-    None if the body is empty or fewer than three acts are present;
-    callers should treat that as "act-shape mode is not available, run
-    pitch-only."
+    None when act-shape mode is not available — body empty, fewer than
+    three acts populated, or any act body is empty.
+
+    Logs INFO when the body was *partially* populated (e.g. Act 1 only)
+    so an author who almost made it doesn't silently fall back to
+    pitch-only without knowing why.
     """
     if not act_shape_body.strip():
         return None
     parts = re.split(r'^###\s+Act\s+(\d+).*?$', act_shape_body,
                      flags=re.MULTILINE | re.IGNORECASE)
-    # parts = [pre, n1, body1, n2, body2, ...]
     acts: dict[int, str] = {}
     for i in range(1, len(parts), 2):
         try:
@@ -224,9 +226,16 @@ def parse_act_shape(act_shape_body: str) -> ActShape | None:
         body = parts[i + 1].strip() if i + 1 < len(parts) else ''
         if 1 <= n <= 3:
             acts[n] = body
-    if not all(n in acts and acts[n] for n in (1, 2, 3)):
-        return None
-    return ActShape(act1=acts[1], act2=acts[2], act3=acts[3])
+    populated = {n for n, body in acts.items() if body}
+    if populated == {1, 2, 3}:
+        return ActShape(act1=acts[1], act2=acts[2], act3=acts[3])
+    if populated:
+        missing = sorted({1, 2, 3} - populated)
+        log(f'INFO: ## Act-shape is partially populated (missing Act '
+            f'{", Act ".join(str(m) for m in missing)}). Running '
+            'pitch-only; fill in the remaining act paragraph(s) to '
+            'unlock per-act + structural scoring.')
+    return None
 
 
 def gather_pitch_artifacts(project_dir: str) -> PitchArtifacts:
@@ -447,7 +456,10 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
             project_dir, output_dir, log_dir, act_shape, artifacts,
             rubric, coaching,
         )
-        if act_shape_extension and act_shape_extension['status'] == 'partial':
+        # Any non-ok act-shape outcome degrades the overall status so a
+        # consumer that branches on `result['status']` sees the failure
+        # even if they don't drill into result['act_shape']['status'].
+        if act_shape_extension['status'] != 'ok':
             status = 'partial'
 
     return _result(
@@ -896,17 +908,33 @@ def _extract_structural_scores(parsed: dict) -> dict[str, int]:
     return out
 
 
+def _empty_extension(status: StoryPowerStatus) -> ActShapeExtension:
+    """Build a placeholder ActShapeExtension for a failed run.
+
+    The extension lives in the result so consumers can distinguish
+    "act-shape attempted and failed" (act_shape is not None,
+    status in {'llm_error', 'unparseable'}) from "act-shape never
+    attempted" (act_shape is None).
+    """
+    return {
+        'status': status,
+        'per_act_scores': {},
+        'structural_axis_scores': {},
+        'structural_diagnostic': {},
+    }
+
+
 def _run_act_shape_extension(project_dir: str, output_dir: str,
                                log_dir: str, act_shape: ActShape,
                                artifacts: PitchArtifacts, rubric: str,
                                coaching: CoachingLevel,
-                               ) -> ActShapeExtension | None:
+                               ) -> ActShapeExtension:
     """Run the Layer 1 + Layer 2 LLM call and write the act-shape CSVs.
 
-    Returns None when the call failed at the LLM-or-parse level (pitch
-    result still stands; no act-shape outputs land on disk). Returns a
-    populated ActShapeExtension on success or partial success — caller
-    uses `result['act_shape'] is None` to detect the failure mode.
+    Always returns an ActShapeExtension; status carries the outcome:
+    'ok' / 'partial' on success, 'llm_error' / 'unparseable' on failure.
+    Pitch result still stands either way — act-shape never throws past
+    this boundary.
     """
     prompt = _build_act_shape_prompt(act_shape, artifacts, rubric)
     model = select_model('creative')
@@ -918,7 +946,7 @@ def _run_act_shape_extension(project_dir: str, output_dir: str,
     except Exception as e:
         log(f'ERROR: act-shape LLM call failed: {e}. Pitch-mode scorecard '
             'still stands.')
-        return None
+        return _empty_extension('llm_error')
     text = _read_response_text(log_file)
     parsed = _parse_response_act_shape(text)
     if not parsed:
@@ -926,12 +954,27 @@ def _run_act_shape_extension(project_dir: str, output_dir: str,
                      target='story-power:act-shape:unparseable')
         log(f'ERROR: act-shape LLM response unparseable; raw at {log_file}. '
             'Pitch-mode scorecard still stands.')
-        return None
+        return _empty_extension('unparseable')
     _record_cost(project_dir, log_file, model, target='story-power:act-shape')
 
     per_act = _extract_per_act_scores(parsed)
     structural = _extract_structural_scores(parsed)
     structural_diag = parsed.get('structural_diagnostic') or {}
+
+    # Floor on partial extraction: if a whole act is empty or structural
+    # came back empty, refuse to write the matching CSV. Empty cells in
+    # a published CSV are read as data ("zero across the board"); silent
+    # half-empty tables would mislead more than the missing file does.
+    empty_acts = [a for a in ACT_KEYS if not per_act.get(a)]
+    has_any_per_act = any(per_act.get(a) for a in ACT_KEYS)
+    if empty_acts and has_any_per_act:
+        log(f'ERROR: act-shape extraction produced zero valid scores for '
+            f'{", ".join(empty_acts)}; refusing to write per-act-matrix.csv '
+            f'with empty column(s). Raw response: {log_file}')
+    if not structural:
+        log(f'ERROR: act-shape extraction produced zero valid structural '
+            f'axes; refusing to write structural-axes.csv. Raw response: '
+            f'{log_file}')
 
     missing_per_act = sum(len(AXIS_KEYS) - len(scores)
                           for scores in per_act.values())
@@ -949,18 +992,26 @@ def _run_act_shape_extension(project_dir: str, output_dir: str,
             )
         log(f'WARNING: act-shape extraction partial — {"; ".join(parts)}.')
 
+    # Only write outputs that have data backing them. Missing files
+    # are clearer signal than empty rows.
+    write_matrix = has_any_per_act and not empty_acts
+    write_structural = bool(structural)
     if coaching == 'full':
-        _write_per_act_matrix(output_dir, per_act, parsed,
-                              recover_hint=log_file)
-        _write_structural_axes(output_dir, structural, parsed,
-                               recover_hint=log_file)
-        _append_structural_diagnostic(output_dir, per_act,
-                                       structural, structural_diag)
+        if write_matrix:
+            _write_per_act_matrix(output_dir, per_act, parsed,
+                                  recover_hint=log_file)
+        if write_structural:
+            _write_structural_axes(output_dir, structural, parsed,
+                                   recover_hint=log_file)
+        if write_matrix or write_structural:
+            _append_structural_diagnostic(output_dir, per_act,
+                                           structural, structural_diag)
     else:  # coach
-        _append_act_shape_coaching_brief(
-            output_dir, per_act, structural, parsed, structural_diag,
-            recover_hint=log_file,
-        )
+        if write_matrix or write_structural:
+            _append_act_shape_coaching_brief(
+                output_dir, per_act, structural, parsed, structural_diag,
+                recover_hint=log_file,
+            )
 
     return {
         'status': status,

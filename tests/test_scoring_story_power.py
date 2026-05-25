@@ -196,7 +196,9 @@ def test_score_story_power_returns_typed_status(tmp_path, monkeypatch):
     _seed_summary(str(tmp_path))
     monkeypatch.chdir(str(tmp_path))
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
-    fake = _mock_llm(_full_payload())
+    # Seeded fixture has act-shape populated, so both calls fire. Use
+    # the dual mock so this test exercises the fully-ok path.
+    fake = _dual_mock_llm(_full_payload(), _act_shape_payload())
     from storyforge import api, scoring_story_power
     monkeypatch.setattr(api, 'invoke_to_file', fake)
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
@@ -809,12 +811,14 @@ def test_pitch_only_when_act_shape_missing(tmp_path, monkeypatch):
 
 def test_act_shape_llm_failure_does_not_kill_pitch_result(tmp_path, monkeypatch):
     """If the act-shape LLM call fails (unparseable, error), the pitch
-    scorecard must still survive — act-shape is additive, not required."""
+    scorecard must still survive — act-shape is additive, not required.
+    The extension is present with a failure status so consumers can
+    distinguish 'tried and failed' from 'never tried'."""
     _seed_summary(str(tmp_path))
     monkeypatch.chdir(str(tmp_path))
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     # Mock returns the pitch payload on both calls — the act-shape parser
-    # will reject it (wrong shape) and the extension will be skipped.
+    # will reject it (wrong shape).
     fake = _mock_llm(_full_payload())
     from storyforge import api, scoring_story_power
     monkeypatch.setattr(api, 'invoke_to_file', fake)
@@ -822,22 +826,27 @@ def test_act_shape_llm_failure_does_not_kill_pitch_result(tmp_path, monkeypatch)
     result = scoring_story_power.score_story_power(str(tmp_path), 'full')
     out_dir = result['output_dir']
     assert os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
-    assert result['act_shape'] is None
+    assert result['act_shape'] is not None
+    assert result['act_shape']['status'] == 'unparseable'
     assert not os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
-    # Pitch result still healthy.
+    # Pitch result still healthy; overall status degraded to partial.
     assert result['composite'] > 0
-    assert result['status'] in ('ok', 'partial')
+    assert result['status'] == 'partial'
 
 
 def test_act_shape_partial_per_act_tags_partial(tmp_path, monkeypatch):
-    """Missing axes in the per-act matrix surface as status='partial'."""
+    """Missing axes (but not a whole act) surface as status='partial'
+    and the matrix writes with some empty cells. A whole-act drop is
+    handled separately by test_empty_per_act_column_refuses_to_write_matrix."""
     _seed_summary(str(tmp_path))
     monkeypatch.chdir(str(tmp_path))
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     act_payload = _act_shape_payload()
-    # Drop Act 2 entirely from the per-act response.
-    act_payload['per_act'] = [r for r in act_payload['per_act']
-                               if r['act'] != 'act2']
+    # Keep one Act 2 score; drop the rest so Act 2 is partial but
+    # not empty (the floor only triggers on entirely-empty acts).
+    for row in act_payload['per_act']:
+        if row['act'] == 'act2':
+            row['scores'] = row['scores'][:1]
     fake = _dual_mock_llm(_full_payload(), act_payload)
     from storyforge import api, scoring_story_power
     monkeypatch.setattr(api, 'invoke_to_file', fake)
@@ -845,15 +854,15 @@ def test_act_shape_partial_per_act_tags_partial(tmp_path, monkeypatch):
     result = scoring_story_power.score_story_power(str(tmp_path), 'full')
     assert result['act_shape'] is not None
     assert result['status'] == 'partial'
-    # Act 2 cells empty in the matrix.
+    # Matrix written; Act 2 column has one score + seven blanks.
     matrix = open(os.path.join(result['output_dir'],
                                 'per-act-matrix.csv')).read()
     lines = matrix.splitlines()
-    # Header + 8 axis rows; Act 2 column should be empty per row.
-    for line in lines[1:]:
-        cells = line.split('|')
-        # cells: axis|name|act1|act2|act3
-        assert cells[3].strip() == ''
+    act2_filled = sum(
+        1 for line in lines[1:]
+        if line.split('|')[3].strip()
+    )
+    assert act2_filled == 1
 
 
 def test_act_shape_coach_mode_appends_to_brief(tmp_path, monkeypatch):
@@ -918,8 +927,9 @@ def test_act_shape_extension_extract_drops_non_numeric():
 
 
 def test_act_shape_unparseable_response_skips_extension(tmp_path, monkeypatch):
-    """If the act-shape response can't be parsed, the extension is
-    skipped silently (pitch result stands; no half-written CSVs)."""
+    """If the act-shape response can't be parsed, no CSVs are written
+    but the result still carries the extension with status='unparseable'
+    so consumers can tell 'tried and failed' from 'never tried'."""
     _seed_summary(str(tmp_path))
     monkeypatch.chdir(str(tmp_path))
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
@@ -943,10 +953,149 @@ def test_act_shape_unparseable_response_skips_extension(tmp_path, monkeypatch):
     monkeypatch.setattr(api, 'invoke_to_file', fake)
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
     result = scoring_story_power.score_story_power(str(tmp_path), 'full')
-    assert result['act_shape'] is None
+    assert result['act_shape'] is not None
+    assert result['act_shape']['status'] == 'unparseable'
     out_dir = result['output_dir']
     assert os.path.isfile(os.path.join(out_dir, 'scorecard.csv'))
     assert not os.path.isfile(os.path.join(out_dir, 'per-act-matrix.csv'))
+
+
+def test_partial_act_shape_logs_info_with_missing_acts(tmp_path, monkeypatch, capsys):
+    """An act-shape with only Act 1 populated must surface an INFO log
+    naming Act 2 + Act 3 — silent fallback to pitch-only hides the
+    one-paragraph-away case from the author."""
+    yml = os.path.join(str(tmp_path), 'storyforge.yaml')
+    with open(yml, 'w') as f:
+        f.write('project:\n  title: T\n  medium: novel\n  coaching_level: full\n')
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'story-summary.md'), 'w') as f:
+        f.write('# Story summary\n\n## Logline\n\nL.\n\n## Synopsis\n\nS.\n\n'
+                '## Act-shape\n\n### Act 1\n\nOnly Act 1 populated.\n\n'
+                '## Theme\n\nT.\n')
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _mock_llm(_full_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out = capsys.readouterr().out
+    assert 'partially populated' in out
+    assert 'Act 2' in out and 'Act 3' in out
+
+
+def test_act_shape_llm_failure_surfaces_in_extension_status(tmp_path, monkeypatch):
+    """When the act-shape LLM call raises, the result must carry the
+    extension with status='llm_error' (not None) so callers can tell
+    'tried and failed' from 'never tried'."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-act-shape' in log_file:
+            raise RuntimeError('simulated API outage')
+        # Pitch call succeeds.
+        response = {
+            'content': [{'type': 'text',
+                          'text': json.dumps(_full_payload())}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['act_shape'] is not None
+    assert result['act_shape']['status'] == 'llm_error'
+    assert result['status'] == 'partial'  # overall degraded
+    # Pitch result still healthy.
+    assert os.path.isfile(os.path.join(result['output_dir'], 'scorecard.csv'))
+    # No matrix/structural CSVs written.
+    assert not os.path.isfile(os.path.join(result['output_dir'],
+                                            'per-act-matrix.csv'))
+
+
+def test_act_shape_unparseable_surfaces_status(tmp_path, monkeypatch):
+    """Unparseable act-shape response sets act_shape['status']='unparseable'."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        text = ('not json' if '-act-shape' in log_file
+                else json.dumps(_full_payload()))
+        response = {
+            'content': [{'type': 'text', 'text': text}],
+            'usage': {'input_tokens': 100, 'output_tokens': 50,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['act_shape'] is not None
+    assert result['act_shape']['status'] == 'unparseable'
+    assert result['status'] == 'partial'
+
+
+def test_empty_per_act_column_refuses_to_write_matrix(tmp_path, monkeypatch, capsys):
+    """If one whole act has zero valid scores, refuse to write
+    per-act-matrix.csv (don't publish an empty column as data)."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    act_payload = _act_shape_payload()
+    # Wipe Act 2's score rows entirely.
+    for row in act_payload['per_act']:
+        if row['act'] == 'act2':
+            row['scores'] = []
+    fake = _dual_mock_llm(_full_payload(), act_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out = capsys.readouterr().out
+    assert 'refusing to write per-act-matrix.csv' in out
+    assert not os.path.isfile(os.path.join(result['output_dir'],
+                                            'per-act-matrix.csv'))
+    # Structural CSV still writes (it had scores).
+    assert os.path.isfile(os.path.join(result['output_dir'],
+                                        'structural-axes.csv'))
+    assert result['status'] == 'partial'
+
+
+def test_empty_structural_refuses_to_write_csv(tmp_path, monkeypatch, capsys):
+    """If structural extraction is entirely empty, refuse to write
+    structural-axes.csv."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    act_payload = _act_shape_payload()
+    act_payload['structural'] = []
+    fake = _dual_mock_llm(_full_payload(), act_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out = capsys.readouterr().out
+    assert 'refusing to write structural-axes.csv' in out
+    assert not os.path.isfile(os.path.join(result['output_dir'],
+                                            'structural-axes.csv'))
+    # Per-act matrix still writes.
+    assert os.path.isfile(os.path.join(result['output_dir'],
+                                        'per-act-matrix.csv'))
 
 
 def test_back_to_back_runs_get_distinct_output_dirs(tmp_path, monkeypatch):

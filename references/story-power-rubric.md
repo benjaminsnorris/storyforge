@@ -124,9 +124,15 @@ intellectual") the holistic score cannot produce.
 ### Layer 2: four cross-act structural axes
 
 These axes measure *relationships between acts*. They only make sense
-at the act-shape resolution and are weighted 1.5x in the act-shape
-composite — turning-point clarity and causal integrity are
-foundational in a way that hides damage when scored flat-average.
+at the act-shape resolution and carry a weight of 1.5 in
+`structural-axes.csv`. No act-shape-level composite is computed today;
+the per-axis scores stand on their own and feed the cross-act
+diagnostic.
+
+The 1.5x weight reflects the rubric's argument that turning-point
+clarity and causal integrity are foundational in a way that would hide
+damage if averaged flat. If a future revision introduces a composite
+that consumes those weights, this comment is the place to point at it.
 
 #### A. Causal integrity (1.5x)
 Brian Boyd on causal coherence in narrative; Bruner on narrative
