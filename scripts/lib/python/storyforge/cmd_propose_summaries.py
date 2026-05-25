@@ -292,18 +292,27 @@ def _parse_proposals(text: str) -> list[dict]:
 # Output: CSV writes (full) or coaching briefs (coach)
 # ---------------------------------------------------------------------------
 
+def _sanitize_cell(value: str) -> str:
+    """Strip pipes/newlines from a value before writing to a pipe-CSV.
+
+    LLM responses may contain `|` or `\\n` in summaries; without
+    sanitization those would shatter the row at write time AND be
+    silently dropped by the column-arity filter on the next read.
+    Matches the convention used by cmd_score and cmd_revise.
+    """
+    if not isinstance(value, str):
+        value = str(value)
+    return value.replace('|', '/').replace('\n', ' ').replace('\r', '').strip()
+
+
 def _write_to_csv(project_dir: str, level: int,
                   proposals: list[dict]) -> int:
     """Write proposals into the target CSV's `summary` column.
 
-    Strategy:
-      - If target CSV doesn't exist, create it with header + N proposal rows.
-      - If target CSV exists with rows: fill empty `summary` cells in order,
-        then append new rows for any leftover proposals.
-      - Existing non-empty summaries are NEVER overwritten — author work
-        is preserved.
-
-    Returns the number of summaries actually written.
+    Existing non-empty summaries are NEVER overwritten. Empty cells fill
+    first, then leftover proposals append as new rows. Header upgrades
+    preserve every column from the old header (orphan columns are not
+    silently dropped).
     """
     from storyforge.elaborate import _SPINE_COLS, _ARCHITECTURE_COLS, _SCENES_COLS
     cols_by_level = {3: _SPINE_COLS, 4: _ARCHITECTURE_COLS, 5: _SCENES_COLS}
@@ -315,7 +324,6 @@ def _write_to_csv(project_dir: str, level: int,
         return _create_csv_with_proposals(csv_path, target_cols,
                                            proposals, level)
 
-    # Read existing
     with open(csv_path, encoding='utf-8') as f:
         raw = f.read().replace('\r\n', '\n').replace('\r', '')
     lines = [l for l in raw.splitlines() if l.strip()]
@@ -327,25 +335,30 @@ def _write_to_csv(project_dir: str, level: int,
             rows.append(dict(zip(headers, cells)))
 
     if 'summary' not in headers:
-        # Upgrade the header in place (matches cmd_migrate behavior).
-        log(f'INFO: {csv_path} predates `summary` column; upgrading header.')
+        # Header upgrade: preserve every existing column AND add the new
+        # target columns. The old header may include legacy columns not
+        # in target_cols — we keep them rather than silently dropping
+        # author data.
+        log(f'INFO: {csv_path} predates `summary` column; upgrading header '
+            f'(preserving any existing columns).')
+        extra_cols = [c for c in headers if c not in target_cols]
+        headers = list(target_cols) + extra_cols
         for r in rows:
-            r['summary'] = ''
-        headers = target_cols
+            r.setdefault('summary', '')
+
+    existing_ids = {r.get('id', '').strip() for r in rows
+                    if r.get('id', '').strip()}
 
     written = 0
     proposal_iter = iter(proposals)
-    # Fill empty summary cells on existing rows.
     for r in rows:
         if not r.get('summary', '').strip():
             p = next(proposal_iter, None)
             if p is None:
                 break
-            r['summary'] = p['summary'].strip()
+            r['summary'] = _sanitize_cell(p['summary'])
             written += 1
 
-    # Append additional proposals as new rows. Start seq numbering from the
-    # max existing seq + 1.
     max_seq = 0
     for r in rows:
         try:
@@ -355,21 +368,35 @@ def _write_to_csv(project_dir: str, level: int,
         except ValueError:
             pass
 
-    for i, p in enumerate(proposal_iter, start=1):
-        new_id = f'proposed-{level}-{max_seq + i}'
+    # Append remaining proposals as new rows. Bump the id counter past
+    # any collision with existing rows (re-runs of propose-summaries
+    # can land on the same `proposed-{level}-N` namespace).
+    next_seq = max_seq + 1
+    for p in proposal_iter:
+        new_id = f'proposed-{level}-{next_seq}'
+        while new_id in existing_ids:
+            next_seq += 1
+            new_id = f'proposed-{level}-{next_seq}'
+        existing_ids.add(new_id)
         new_row: dict = {c: '' for c in headers}
         new_row['id'] = new_id
-        new_row['seq'] = str(max_seq + i)
-        new_row['summary'] = p['summary'].strip()
+        new_row['seq'] = str(next_seq)
+        new_row['summary'] = _sanitize_cell(p['summary'])
         rows.append(new_row)
         written += 1
+        next_seq += 1
 
-    # Write back
     out_lines = ['|'.join(headers)]
     for r in rows:
-        out_lines.append('|'.join(r.get(c, '') for c in headers))
-    with open(csv_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(out_lines) + '\n')
+        out_lines.append('|'.join(_sanitize_cell(r.get(c, '')) for c in headers))
+    try:
+        with open(csv_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(out_lines) + '\n')
+    except OSError as e:
+        log(f'ERROR: could not write {csv_path}: {e}')
+        log(f'  LLM proposals were not lost — recover them from the '
+            f'response file under working/logs/propose-summaries/')
+        raise
     return written
 
 
@@ -383,10 +410,17 @@ def _create_csv_with_proposals(csv_path: str, target_cols: list[str],
         new_row = {c: '' for c in target_cols}
         new_row['id'] = new_id
         new_row['seq'] = str(i)
-        new_row['summary'] = p['summary'].strip()
-        out_lines.append('|'.join(new_row.get(c, '') for c in target_cols))
-    with open(csv_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(out_lines) + '\n')
+        new_row['summary'] = _sanitize_cell(p['summary'])
+        out_lines.append('|'.join(_sanitize_cell(new_row.get(c, ''))
+                                   for c in target_cols))
+    try:
+        with open(csv_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(out_lines) + '\n')
+    except OSError as e:
+        log(f'ERROR: could not write {csv_path}: {e}')
+        log(f'  LLM proposals were not lost — recover them from the '
+            f'response file under working/logs/propose-summaries/')
+        raise
     return len(proposals)
 
 

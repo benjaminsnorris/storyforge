@@ -280,6 +280,148 @@ def test_level_4_reads_spine_summaries_as_upstream(tmp_path, monkeypatch):
     assert 'Anchor A.' in open(arch_csv).read()
 
 
+def test_csv_pipes_in_summary_are_sanitized(tmp_path, monkeypatch):
+    """LLM summary containing `|` or `\\n` must be sanitized before write —
+    otherwise the row shatters and gets silently dropped on next read."""
+    _seed_story_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    fake, _ = _mock_llm({
+        'proposals': [
+            {'summary': 'Has a | pipe and a\nnewline.', 'rationale': 'r'},
+            {'summary': 'Second proposal.', 'rationale': 'r'},
+            {'summary': 'Third proposal.', 'rationale': 'r'},
+            {'summary': 'Fourth proposal.', 'rationale': 'r'},
+        ],
+    })
+    from storyforge import api, cmd_propose_summaries
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_propose_summaries, 'invoke_to_file', fake)
+
+    from storyforge.cmd_propose_summaries import main as ps_main
+    ps_main(['--level', '3', '--coaching', 'full'])
+    spine_csv = os.path.join(str(tmp_path), 'reference', 'spine.csv')
+    content = open(spine_csv).read()
+    # Every data line has the same number of pipes as the header
+    lines = [l for l in content.split('\n') if l.strip()]
+    header_pipes = lines[0].count('|')
+    for line in lines[1:]:
+        assert line.count('|') == header_pipes, (
+            f'row {line!r} has wrong pipe count'
+        )
+    # The pipe in the summary got replaced (with `/`)
+    assert 'Has a / pipe' in content
+    # The newline got replaced with a space
+    assert 'pipe and a newline.' in content
+
+
+def test_header_upgrade_preserves_orphan_columns(tmp_path, monkeypatch):
+    """When upgrading a CSV that predates `summary`, existing columns
+    NOT in target_cols must be preserved — never silently dropped."""
+    _seed_story_summary(str(tmp_path))
+    spine_csv = os.path.join(str(tmp_path), 'reference', 'spine.csv')
+    os.makedirs(os.path.dirname(spine_csv), exist_ok=True)
+    # Pre-PR header (no `summary`) + a hypothetical legacy column.
+    with open(spine_csv, 'w') as f:
+        f.write('id|seq|title|function|part|legacy_note\n')
+        f.write('ev-1|1|Title|fn|1|author wrote this in 2024\n')
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    fake, _ = _mock_llm({
+        'proposals': [
+            {'summary': 'Proposed summary 1.', 'rationale': 'r'},
+            {'summary': 'Proposed summary 2.', 'rationale': 'r'},
+            {'summary': 'Proposed summary 3.', 'rationale': 'r'},
+            {'summary': 'Proposed summary 4.', 'rationale': 'r'},
+        ],
+    })
+    from storyforge import api, cmd_propose_summaries
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_propose_summaries, 'invoke_to_file', fake)
+
+    from storyforge.cmd_propose_summaries import main as ps_main
+    ps_main(['--level', '3', '--coaching', 'full'])
+
+    content = open(spine_csv).read()
+    # The legacy_note column survives in the header and the row data
+    assert 'legacy_note' in content.split('\n')[0]
+    assert 'author wrote this in 2024' in content
+
+
+def test_write_failure_surfaces_log_pointer(tmp_path, monkeypatch, capsys):
+    """If the CSV write blows up after the LLM has already been billed,
+    surface a clear pointer to the log file where proposals were recorded."""
+    _seed_story_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    fake, _ = _mock_llm({
+        'proposals': [
+            {'summary': 'Summary 1.', 'rationale': 'r'},
+            {'summary': 'Summary 2.', 'rationale': 'r'},
+            {'summary': 'Summary 3.', 'rationale': 'r'},
+            {'summary': 'Summary 4.', 'rationale': 'r'},
+        ],
+    })
+    from storyforge import api, cmd_propose_summaries
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_propose_summaries, 'invoke_to_file', fake)
+
+    # Force the write to fail: stub open() for the target CSV path.
+    real_open = open
+    target = os.path.join(str(tmp_path), 'reference', 'spine.csv')
+    def failing_open(path, *args, **kwargs):
+        if path == target and 'w' in (args[0] if args else kwargs.get('mode', '')):
+            raise OSError('disk full')
+        return real_open(path, *args, **kwargs)
+    monkeypatch.setattr('builtins.open', failing_open)
+
+    from storyforge.cmd_propose_summaries import main as ps_main
+    with pytest.raises(OSError):
+        ps_main(['--level', '3', '--coaching', 'full'])
+    out = capsys.readouterr().out
+    assert 'disk full' in out
+    assert 'working/logs/propose-summaries' in out
+
+
+def test_id_collision_with_existing_rows(tmp_path, monkeypatch):
+    """If a CSV already has rows named `proposed-3-N`, the next run must
+    avoid colliding on those ids."""
+    _seed_story_summary(str(tmp_path))
+    spine_csv = os.path.join(str(tmp_path), 'reference', 'spine.csv')
+    os.makedirs(os.path.dirname(spine_csv), exist_ok=True)
+    with open(spine_csv, 'w') as f:
+        f.write('id|seq|title|summary|function|part\n')
+        f.write('proposed-3-1|1|t|Old proposal kept.|inciting|1\n')
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    fake, _ = _mock_llm({
+        'proposals': [
+            {'summary': 'New proposal one.', 'rationale': 'r'},
+            {'summary': 'New proposal two.', 'rationale': 'r'},
+            {'summary': 'New proposal three.', 'rationale': 'r'},
+            {'summary': 'New proposal four.', 'rationale': 'r'},
+        ],
+    })
+    from storyforge import api, cmd_propose_summaries
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(cmd_propose_summaries, 'invoke_to_file', fake)
+
+    from storyforge.cmd_propose_summaries import main as ps_main
+    ps_main(['--level', '3', '--coaching', 'full'])
+
+    content = open(spine_csv).read()
+    lines = [l for l in content.split('\n') if l.strip()]
+    ids = [l.split('|')[0] for l in lines[1:]]
+    # No duplicate ids
+    assert len(ids) == len(set(ids)), f'duplicate ids in {ids!r}'
+    # Existing row preserved
+    assert 'proposed-3-1' in ids
+
+
 def test_invalid_level_rejected(tmp_path, monkeypatch):
     """--level outside {3, 4, 5} is rejected by argparse."""
     _seed_story_summary(str(tmp_path))

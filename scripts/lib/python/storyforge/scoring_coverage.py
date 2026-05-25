@@ -58,7 +58,11 @@ def _check(check: str, passed: bool, detail: str = '',
 def _result(level: int, checks: list[dict]) -> dict:
     passed = sum(1 for c in checks if c['passed'])
     failed = sum(1 for c in checks if not c['passed'])
-    accepted = sum(1 for c in checks if c.get('accepted'))
+    # accepted is the count of FAILED checks the author has overridden.
+    # Passed checks never carry accepted=True; mirroring this filter keeps
+    # the count consistent with scoring_levels._result and prevents the
+    # report headline from inflating the accepted total.
+    accepted = sum(1 for c in checks if not c['passed'] and c.get('accepted'))
     return {
         'level': level, 'name': 'coverage',
         'checks': checks, 'passed': passed,

@@ -208,6 +208,26 @@ def test_score_coverage_all_levels_returns_three(tmp_path):
     assert [r['level'] for r in results] == [2, 3, 4]
 
 
+def test_coverage_accepted_count_only_includes_failed_checks(tmp_path):
+    """Regression: _result must count accepted ONLY among failed checks.
+    A passed check carrying accepted=True (shouldn't happen, but if a
+    future override mechanism does set it) must not inflate the
+    headline accepted total."""
+    from storyforge.scoring_coverage import _result, _check
+    checks = [
+        _check('passing check', True, ''),
+        _check('failed-and-accepted', False, 'detail'),
+        _check('failed-no-override', False, 'detail'),
+    ]
+    # Forcibly set accepted on the passing check too (defensive case).
+    checks[0]['accepted'] = True
+    checks[1]['accepted'] = True
+    r = _result(3, checks)
+    assert r['passed'] == 1
+    assert r['failed'] == 2
+    assert r['accepted'] == 1  # NOT 2 — passed check excluded
+
+
 def test_coverage_respects_overrides(tmp_path):
     """When the author has recorded an override for a coverage finding,
     it surfaces tagged accepted=True."""
