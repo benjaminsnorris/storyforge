@@ -1007,8 +1007,10 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         os.makedirs(output_dir, exist_ok=True)
         spine_events = parse_spine(project_dir)
         architecture_scenes = parse_architecture(project_dir)
+        scene_map_scenes = parse_scene_map(project_dir)
         _write_strict_checklist(output_dir, artifacts, rubric,
-                                  spine_events, architecture_scenes)
+                                  spine_events, architecture_scenes,
+                                  scene_map_scenes)
         return _empty_result('strict', 'ok', output_dir=output_dir)
 
     if dry_run:
@@ -1095,6 +1097,18 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         if architecture_extension['status'] != 'ok':
             status = 'partial'
 
+    scene_map_scenes = parse_scene_map(project_dir)
+    scene_map_extension: SceneMapExtension | None = None
+    if scene_map_scenes:
+        log(f'Scene map detected ({len(scene_map_scenes)} scenes) — '
+            'running per-scene-map matrix + whole-map axes.')
+        scene_map_extension = _run_scene_map_extension(
+            project_dir, output_dir, log_dir, scene_map_scenes,
+            architecture_scenes, artifacts, rubric, coaching,
+        )
+        if scene_map_extension['status'] != 'ok':
+            status = 'partial'
+
     return _result(
         coaching=coaching, status=status, output_dir=output_dir,
         composite=composite, scores=scores, deltas=deltas,
@@ -1102,6 +1116,7 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         act_shape=act_shape_extension,
         spine=spine_extension,
         architecture=architecture_extension,
+        scene_map=scene_map_extension,
     )
 
 
@@ -1861,13 +1876,15 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                               rubric: str,
                               spine_events: list[SpineEvent] | None = None,
                               architecture_scenes: list[SceneRow] | None = None,
+                              scene_map_scenes: list[MappedScene] | None = None,
                               ) -> None:
     """strict coaching: rule-based checklist of signals per axis, no LLM
     call. Extends with per-act + structural blanks when act-shape is
     populated, per-event + whole-spine blanks when spine.csv exists,
-    and per-scene + whole-architecture blanks when architecture.csv
-    exists — strict-mode authors get the same coverage the LLM modes
-    produce automatically.
+    per-scene + whole-architecture blanks when architecture.csv exists,
+    and per-scene-map + whole-map blanks when scenes.csv exists —
+    strict-mode authors get the same coverage the LLM modes produce
+    automatically.
     """
     md_path = os.path.join(output_dir, 'self-scoring-checklist.md')
     out: list[str] = [
@@ -1987,6 +2004,40 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                 f'Self-score (1-10): __',
                 '',
                 'Whole-architecture signals you found:',
+                '- ',
+                '',
+            ])
+    if scene_map_scenes:
+        out.extend([
+            '# Scene-map tier (per scene + whole-map)',
+            '',
+            'Two axes per scene-map row (architecture coverage, '
+            'continuity coherence).',
+            '',
+        ])
+        for s in scene_map_scenes:
+            out.extend([
+                f'## {s.id} — pov={s.pov or "—"} '
+                f'arch={s.architecture_scene or "(interstitial)"}',
+                '',
+            ])
+            for axis in PER_MAP_SCENE_AXES:
+                out.append(f'- {axis.name}: __')
+            out.append('')
+        out.extend([
+            '# Whole-scene-map axes',
+            '',
+            'Five axes scored over the scene map as a whole (see the '
+            '"Scene-map mode" section of the rubric for full signals).',
+            '',
+        ])
+        for axis in MAP_AXES:
+            out.extend([
+                f'## {axis.name} (weight {axis.weight})',
+                '',
+                f'Self-score (1-10): __',
+                '',
+                'Whole-scene-map signals you found:',
                 '- ',
                 '',
             ])
