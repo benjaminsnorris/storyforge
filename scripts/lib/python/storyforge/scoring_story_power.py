@@ -63,14 +63,44 @@ class ActShapeExtension(TypedDict):
     status: StoryPowerStatus
 
 
+class WeakHandoff(TypedDict):
+    """A flagged causal-handoff transition. from_event/to_event are
+    spine event ids; score is the causal_handoff axis score (1-10);
+    is_act_bridge marks transitions across act boundaries — diagnostic
+    surfaces these prominently since they're structurally load-bearing."""
+    from_event: str
+    to_event: str
+    score: int
+    is_act_bridge: bool
+
+
+class SpineExtension(TypedDict):
+    """The spine-mode payload that lands when spine.csv is present.
+
+    per_event_scores is keyed by spine event id, each holding the three
+    Layer 1 axis scores. whole_spine_scores carries the five Layer 2
+    axes. weak_handoffs lists every below-threshold causal_handoff so
+    the diagnostic can surface them all (not just the worst). The
+    proposed_fix names a concrete one-clause bridge for the
+    highest-leverage weak handoff.
+    """
+    per_event_scores: dict[str, dict[str, int]]
+    whole_spine_scores: dict[str, int]
+    spine_diagnostic: dict
+    weak_handoffs: list[WeakHandoff]
+    proposed_fix: dict
+    status: StoryPowerStatus
+
+
 class StoryPowerResult(TypedDict):
     """Result of score_story_power. Coaching is the requested level; status
     is the outcome. Output_dir is the timestamped directory written to
     (empty string when no directory was allocated).
 
-    act_shape is None for pitch-only runs (no `## Act-shape` populated,
-    or act-shape LLM failed before producing usable data); when set, the
-    ActShapeExtension carries per-act + structural payloads.
+    act_shape and spine are None when their inputs weren't present (no
+    `## Act-shape` populated, no spine.csv on disk) or the extension
+    failed before producing usable data; otherwise they carry the
+    payload from each Layer 1/2 scoring run.
     """
     coaching: CoachingLevel
     status: StoryPowerStatus
@@ -81,6 +111,7 @@ class StoryPowerResult(TypedDict):
     deltas: dict[str, int]
     diagnostic: dict
     act_shape: ActShapeExtension | None
+    spine: SpineExtension | None
 
 
 class Axis(NamedTuple):
@@ -162,6 +193,82 @@ assert not (set(AXIS_KEYS) & set(STRUCTURAL_AXIS_KEYS)), (
 )
 
 
+# Per-event axes (spine Layer 1). Causal handoff is the load-bearing
+# axis at this resolution and carries the elevated weight.
+PER_EVENT_AXES: tuple[Axis, ...] = (
+    Axis('function_alignment', 'Function / summary alignment', 1.0),
+    Axis('concreteness', 'Concreteness', 1.0),
+    Axis('causal_handoff', 'Causal handoff', 1.5),
+)
+PER_EVENT_AXIS_KEYS = tuple(a.key for a in PER_EVENT_AXES)
+PER_EVENT_AXIS_BY_KEY = {a.key: a for a in PER_EVENT_AXES}
+
+# Whole-spine axes (spine Layer 2). Function coverage and escalation
+# curve are foundational; arc visibility, thematic distribution, and
+# spine↔act-shape alignment are the scaffold the others rest on.
+SPINE_AXES: tuple[Axis, ...] = (
+    Axis('function_coverage', 'Function coverage', 1.5),
+    Axis('escalation_curve', 'Escalation curve', 1.5),
+    Axis('arc_visibility', 'Arc visibility', 1.0),
+    Axis('thematic_distribution', 'Thematic distribution', 1.0),
+    Axis('spine_act_shape_alignment', 'Spine ↔ act-shape alignment', 1.0),
+)
+SPINE_AXIS_KEYS = tuple(a.key for a in SPINE_AXES)
+SPINE_AXIS_BY_KEY = {a.key: a for a in SPINE_AXES}
+
+assert len({a.key for a in PER_EVENT_AXES}) == len(PER_EVENT_AXES), (
+    'per-event axis keys must be unique'
+)
+assert len({a.key for a in SPINE_AXES}) == len(SPINE_AXES), (
+    'whole-spine axis keys must be unique'
+)
+# No overlap with pitch/structural/per-event so diagnostic routing
+# can identify an axis's family from its key alone.
+_ALL_AXIS_KEYS = (set(AXIS_KEYS) | set(STRUCTURAL_AXIS_KEYS)
+                  | set(PER_EVENT_AXIS_KEYS) | set(SPINE_AXIS_KEYS))
+assert (len(_ALL_AXIS_KEYS)
+        == len(AXIS_KEYS) + len(STRUCTURAL_AXIS_KEYS)
+        + len(PER_EVENT_AXIS_KEYS) + len(SPINE_AXIS_KEYS)), (
+    'pitch, structural, per-event, and whole-spine axis key sets must be disjoint'
+)
+
+
+# Function-class lookup for the function-appropriate concreteness floor.
+# Inherently-conceptual function names (midpoint reversal, revelations,
+# discoveries) earn a lower expected-concreteness floor than concrete-
+# event functions (inciting incidents, climaxes, resolutions). The LLM
+# prompt cites these classes so the score reflects function fit, not
+# absolute prose specificity.
+CONCEPTUAL_SHIFT_FUNCTION_KEYWORDS = (
+    'midpoint reversal', 'reversal', 'revelation', 'recognition',
+    'discovery', 'realization', 'epiphany', 'reveal',
+)
+
+
+def function_concreteness_floor(function_text: str) -> int:
+    """Return the minimum concreteness expectation (1-10) for a function.
+
+    Conceptual-shift functions (midpoint reversal, revelation, etc.)
+    earn a floor of 7 — at-ceiling for the function class. All other
+    functions (concrete events: inciting incident, climax, resolution,
+    turning points) earn a floor of 8.
+    """
+    f = (function_text or '').lower()
+    if any(kw in f for kw in CONCEPTUAL_SHIFT_FUNCTION_KEYWORDS):
+        return 7
+    return 8
+
+
+class SpineEvent(NamedTuple):
+    """A single row from `reference/spine.csv`. Other columns (seq,
+    part, etc.) are read straight from the CSV when needed but the
+    scoring path only consumes these four."""
+    id: str
+    title: str
+    summary: str
+    function: str
+
+
 def composite_score(scores: dict[str, int | float]) -> float:
     """Return the weighted composite from a {axis_key: score} dict.
 
@@ -236,6 +343,54 @@ def parse_act_shape(act_shape_body: str) -> ActShape | None:
             'pitch-only; fill in the remaining act paragraph(s) to '
             'unlock per-act + structural scoring.')
     return None
+
+
+def parse_spine(project_dir: str) -> list[SpineEvent]:
+    """Read `reference/spine.csv` as an ordered list of SpineEvent.
+
+    Returns [] when the file is missing, empty, or has no `summary`
+    column. Order matches CSV row order (the existing scripts rely on
+    seq-ordered CSV writes; we trust the file's order rather than
+    re-sorting). Rows with a non-int seq are still included if the
+    other fields are populated — sort happens at write time elsewhere.
+    """
+    csv_path = os.path.join(project_dir, 'reference', 'spine.csv')
+    if not os.path.isfile(csv_path):
+        return []
+    try:
+        with open(csv_path, encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'WARNING: could not read {csv_path}: {e}')
+        return []
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return []
+    headers = lines[0].split('|')
+    required = {'id', 'summary', 'function'}
+    if not required.issubset(set(headers)):
+        log(f'WARNING: spine.csv missing required columns; have {headers}, '
+            f'need {sorted(required)}. Skipping spine mode.')
+        return []
+    out: list[SpineEvent] = []
+    for i, line in enumerate(lines[1:], start=1):
+        cells = line.split('|')
+        if len(cells) != len(headers):
+            log(f'WARNING: skipping malformed spine row {i} in {csv_path} '
+                f'({len(cells)} cells, expected {len(headers)})')
+            continue
+        row = dict(zip(headers, cells))
+        event_id = row.get('id', '').strip()
+        summary = row.get('summary', '').strip()
+        if not event_id or not summary:
+            continue
+        out.append(SpineEvent(
+            id=event_id,
+            title=row.get('title', '').strip(),
+            summary=summary,
+            function=row.get('function', '').strip(),
+        ))
+    return out
 
 
 def gather_pitch_artifacts(project_dir: str) -> PitchArtifacts:
@@ -482,6 +637,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
              scores: dict[str, int], deltas: dict[str, int],
              diagnostic: dict,
              act_shape: ActShapeExtension | None = None,
+             spine: SpineExtension | None = None,
              ) -> StoryPowerResult:
     return {
         'coaching': coaching,
@@ -493,6 +649,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
         'deltas': deltas,
         'diagnostic': diagnostic,
         'act_shape': act_shape,
+        'spine': spine,
     }
 
 
