@@ -230,6 +230,215 @@ working/scores/story-power/{timestamp}/
                                # 4 structural axes
 ```
 
+## Spine mode: per-event matrix + whole-spine axes
+
+When `reference/spine.csv` exists, the scorecard also runs in
+**spine mode**. The spine is an event list — its job is to make the
+backbone of the story legible at a glance. Most of the eight pitch
+axes (emotional resonance, character identification, surprise) cannot
+be assessed from a single event summary; spine mode therefore uses
+its own axes.
+
+Spine mode is **independent of act-shape mode**. Both can run in
+either order on the same artifacts; the spine's findings can drive
+architecture revisions without requiring act-shape to be present.
+
+### Layer 1: per-event 3-axis matrix
+
+Three axes scored per spine event (8 events × 3 axes = 24 cells for
+a typical spine).
+
+#### A. Function / summary alignment (1.0x)
+Dramatic-structure theory (Egri, McKee) — each structural function is
+a specific job (inciting incident, midpoint reversal, climax setup)
+that the event either does or doesn't deliver.
+
+- **Question:** Does the event's `summary` actually deliver on what
+  its `function` claims?
+- **High signals:** Function says "Act 1 turning point" and the
+  summary names a specific reversal of the protagonist's situation;
+  function says "midpoint reversal" and the summary inverts the
+  story's premise; function says "climax" and the summary delivers
+  the impossible choice.
+- **Low signals:** Function says "turning point" but summary
+  describes more rising action; function and summary describe
+  different events.
+
+#### B. Concreteness (1.0x)
+Same memory/stickiness research as the pitch axis (Heath &amp; Heath;
+Bartlett). Spine summaries should pick out specific beats, not gesture
+at categories of beat.
+
+- **Question:** Is the summary a *specific beat* or a *vague gesture*?
+- **High signals:** Named places/objects/actions; specific cognitive
+  shifts; verbs that pick out a particular moment.
+- **Low signals:** Genre-shorthand verbs ("things escalate"); unnamed
+  threats; conceptual claims that could describe many possible events.
+- **Function-appropriate floor:** Some events are inherently
+  conceptual. A midpoint reversal that's an epistemological inversion
+  will be more abstract than a meeting event. The scoring prompt
+  weights concreteness expectations by function class:
+  - **Concrete-event functions** (inciting incident, Act 1 turn,
+    Act 2 turn, climax setup, climax, resolution, denouement) —
+    expect concreteness ≥ 8 for a strong score.
+  - **Conceptual-shift functions** (midpoint reversal, revelation,
+    discovery, recognition) — expect concreteness ≥ 7; a 7 here is
+    at-ceiling for the function rather than a defect.
+
+#### C. Causal handoff (1.5x)
+Brian Boyd on causal coherence; Bruner's narrative-thought work;
+reader memory research showing causally connected events are recalled
+more reliably than sequential ones. **This axis is unique to spine
+mode.** The pitch (synopsis) and act-shape (narrative paragraphs)
+inherit causal feel from prose flow; a spine, being an event list,
+must make causation explicit — and this is exactly where defects
+hide that no other rubric layer catches.
+
+- **Question:** Does this event's outcome cause the next event's setup?
+- **High signals:** The summary ends on a clause that *names the
+  cause* of the next event's opening conditions; the reader does not
+  have to invent the bridge.
+- **Low signals:** The summary describes the event in isolation;
+  transitions feel like temporal jumps; the next event's setup appears
+  "imported" rather than caused.
+- **N/A for the final event** in the spine (no next event).
+- **Act-bridge handoffs** (the last event of one act → the first event
+  of the next) are flagged prominently in the diagnostic; they are
+  load-bearing and worth weighting more in revision decisions even
+  when the score itself is not re-weighted.
+
+The 1.5x weight reflects this axis's load-bearing role at the spine
+resolution — defects here translate directly to "the story doesn't
+hang together" without any single event seeming weak.
+
+### Layer 2: five whole-spine axes
+
+Scored once over the spine as a whole, not per event.
+
+#### D. Function coverage (1.5x)
+Are all required structural beats present, in the right acts?
+
+- **3-act expectation:** Act 1 (inciting + turning point) → Act 2
+  (rising action + midpoint + turning point) → Act 3 (climax setup +
+  climax + resolution).
+- **4- or 5-act structures:** infer required functions from the
+  project's stated act structure.
+- **High signals:** Every required function present; events are in
+  the right acts.
+- **Low signals:** Missing midpoint; climax in wrong act; multiple
+  events sharing the same function without justification.
+
+#### E. Escalation curve (1.5x)
+- **Question:** Do stakes visibly rise across events?
+- **High signals:** Each event's stakes are visibly higher than the
+  previous; midpoint changes the *nature* of the threat (not just
+  intensity); Act 3 carries the highest stakes.
+- **Low signals:** Middle plateau; climax stakes similar to Act 2's;
+  resolution event with stakes equal to or lower than the climax setup.
+
+#### F. Arc visibility (1.0x)
+- **Question:** Can the protagonist's change be traced across events?
+- **High signals:** Each event implies (or names) a state-change in
+  the protagonist; the protagonist's *want* is visible in at least
+  one summary; the resolution's protagonist is recognizably different
+  from the inciting-incident's.
+- **Low signals:** Spine reads as plot-only; protagonist appears as
+  a passive grammatical subject; no event names the want.
+
+#### G. Thematic distribution (1.0x)
+- **Question:** Does the theme operate across multiple events, or
+  only at the climax?
+- **High signals:** Theme is enacted across 3+ events; the practice
+  / belief / question the theme names appears in event summaries
+  beyond the climax.
+- **Low signals:** Theme is climax-localized; spine reads as plot
+  scaffolding with thematic intent grafted onto the resolution.
+
+#### H. Spine ↔ act-shape alignment (1.0x)
+- **Question:** If an act-shape exists, do spine events map cleanly
+  to act-shape paragraphs?
+- **High signals:** Every spine event has a clear correspondence in
+  an act-shape paragraph; every act-shape beat has a spine event; no
+  orphans on either side.
+- **Low signals:** Spine events that don't appear in the act-shape;
+  act-shape beats with no spine event; multiple spine events crammed
+  into one act-shape paragraph with no clear breakdown.
+- **N/A when act-shape is empty** — skip cleanly rather than penalize.
+
+### Weak-handoff threshold
+
+Causal-handoff scores **below 8** are flagged as weak in the
+diagnostic. The threshold reflects that 7 is "strong with specific
+gaps" — at the spine resolution where causal handoff is the
+load-bearing axis, "strong with specific gaps" is a revision target,
+not an acceptance.
+
+### Diagnostic-as-action
+
+Spine mode's diagnostic must propose **specific clause-level fixes**,
+not just identify weak axes. For the highest-leverage weak handoff,
+the LLM proposes a one-clause bridge the author could add to the
+upstream event's summary. The Ashes example below shows the pattern:
+a 5-10 word addition lifted the causal handoff average from 7.4 to
+8.4 across the spine.
+
+### Spine mode output
+
+**`full` coaching:**
+
+```
+working/scores/story-power/{timestamp}/
+├── scorecard.csv             # pitch-mode 8-axis scores
+├── per-event-matrix.csv      # spine events × 3 axes (spine only)
+├── whole-spine-axes.csv      # 5 spine axes (spine only)
+└── diagnostic.md             # cross-axis + cross-event + spine
+                              # weak-handoff list + proposed fix
+```
+
+**`coach` coaching:** spine sections append to `coaching-brief.md`.
+**`strict` coaching:** extends `self-scoring-checklist.md` with
+per-event blanks + 5 whole-spine axis blanks.
+
+### Ashes-in-the-Archive worked example
+
+Real scoring from the Ashes spine (illustrative — your numbers will
+reflect your project, not this one).
+
+**Initial scoring (pre-fix).** Per-event Layer 1 matrix:
+
+| Event | Alignment | Concreteness | Causal handoff |
+|---|---|---|---|
+| ev-portrait-refuses | 9 | 8 | 7 |
+| ev-erased-archivist | 9 | 9 | 8 |
+| ev-failed-portraits | 8 | 8 | **6** |
+| ev-archive-finalizes | 9 | 7 | 8 |
+| ev-archive-moves | 9 | 7 | 7 |
+| ev-deepest-chamber | 9 | 9 | 7 |
+| ev-vault-refusal | 10 | 9 | 9 |
+| ev-fracture | 9 | 7 | n/a |
+| **Per-axis avg** | **9.0** | **8.0** | **7.4** |
+
+Whole-spine Layer 2: function coverage 9, escalation 9, arc
+visibility 8, thematic distribution 9, act-shape alignment 9.
+Average 8.8.
+
+**Diagnostic surfaced:** causal handoff (7.4) is the weakest axis.
+Four transitions below the 8-threshold (the three at 7, plus the one
+at 6). Highest-leverage move: add a one-clause causal bridge to
+ev-failed-portraits.
+
+**Post-fix scoring** after three ~5-10-word bridges:
+
+| | Was | Now |
+|---|---|---|
+| Alignment avg | 9.0 | 9.0 |
+| Concreteness avg | 8.0 | 8.1 |
+| Causal handoff avg | **7.4** | **8.4** |
+
+The diagnostic prediction held exactly: the targeted axis lifted ~1
+point on minimal effort, with a side-effect bump in concreteness on
+one event.
+
 ## Scoring bands
 
 - **1-3:** Axis is essentially absent or actively damaged.
