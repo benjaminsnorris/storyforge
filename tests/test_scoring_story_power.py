@@ -1731,11 +1731,13 @@ def test_weak_handoff_threshold_flags_below_8():
         'c': {'causal_handoff': 6},  # weak
         'd': {},                      # final, no handoff
     }
-    weak = _identify_weak_handoffs(events, per_event)
+    weak, skipped = _identify_weak_handoffs(events, per_event)
     weak_pairs = [(h['from_event'], h['to_event'], h['score']) for h in weak]
     assert ('a', 'b', 7) in weak_pairs
     assert ('c', 'd', 6) in weak_pairs
     assert ('b', 'c', 8) not in weak_pairs
+    # All transitions had upstream scores → no skipped entries.
+    assert skipped == []
 
 
 def test_weak_handoff_act_bridge_detection():
@@ -1754,10 +1756,93 @@ def test_weak_handoff_act_bridge_detection():
         'b': {'causal_handoff': 5},
         'c': {},
     }
-    weak = _identify_weak_handoffs(events, per_event)
+    weak, _skipped = _identify_weak_handoffs(events, per_event)
     by_from = {h['from_event']: h for h in weak}
     assert by_from['a']['is_act_bridge'] is False
     assert by_from['b']['is_act_bridge'] is True
+
+
+def test_identify_weak_handoffs_surfaces_skipped_transitions():
+    """When the upstream's causal_handoff score is missing (LLM omitted
+    the row), the transition is skipped rather than silently treated
+    as not-weak. The caller surfaces these so the author knows the
+    analysis is incomplete at that position."""
+    from storyforge.scoring_story_power import (
+        _identify_weak_handoffs, SpineEvent,
+    )
+    events = [
+        SpineEvent('a', 'A', 'sa', 'inciting incident'),
+        SpineEvent('b', 'B', 'sb', 'midpoint reversal'),
+        SpineEvent('c', 'C', 'sc', 'climax'),
+    ]
+    per_event = {
+        'a': {'causal_handoff': 9},  # strong, not weak
+        'b': {},                       # no score — should appear in skipped
+        'c': {},
+    }
+    weak, skipped = _identify_weak_handoffs(events, per_event)
+    assert weak == []
+    assert ('b', 'c') in skipped
+    assert ('a', 'b') not in skipped
+
+
+def test_partial_per_event_column_refuses_to_write_spine_matrix(tmp_path,
+                                                                  monkeypatch,
+                                                                  capsys):
+    """Mirror of the act-shape matrix-floor behavior: if any spine event
+    has zero valid scores, refuse to write per-event-matrix.csv. The
+    floor prevents publishing a half-empty CSV that downstream consumers
+    would read as 'score 0 / N/A'."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    spine_payload = _spine_payload()
+    # Wipe ev-climax's score rows entirely (whole row empty, not just
+    # missing one axis).
+    for row in spine_payload['per_event']:
+        if row['event_id'] == 'ev-climax':
+            row['scores'] = []
+    fake = _triple_mock_llm(_full_payload(), _act_shape_payload(),
+                              spine_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out = capsys.readouterr().out
+    assert 'refusing to write per-event-matrix.csv' in out
+    assert 'ev-climax' in out
+    assert not os.path.isfile(os.path.join(result['output_dir'],
+                                            'per-event-matrix.csv'))
+    # Whole-spine CSV still writes (it has data).
+    assert os.path.isfile(os.path.join(result['output_dir'],
+                                        'whole-spine-axes.csv'))
+    assert result['status'] == 'partial'
+
+
+def test_skipped_handoff_surfaces_in_diagnostic(tmp_path, monkeypatch):
+    """When the LLM omits the causal_handoff score for a non-final event,
+    the spine diagnostic surfaces the skipped transition so the author
+    knows the cross-event analysis is incomplete at that position."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    spine_payload = _spine_payload()
+    # Strip causal_handoff from ev-discovery (a non-final event).
+    for row in spine_payload['per_event']:
+        if row['event_id'] == 'ev-discovery':
+            row['scores'] = [s for s in row['scores']
+                             if s['axis'] != 'causal_handoff']
+    fake = _triple_mock_llm(_full_payload(), _act_shape_payload(),
+                              spine_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    diag = open(os.path.join(result['output_dir'], 'diagnostic.md')).read()
+    assert 'Skipped causal handoffs' in diag
+    assert 'ev-discovery → ev-climax' in diag
 
 
 def test_spine_partial_per_event_tags_partial(tmp_path, monkeypatch):

@@ -1938,24 +1938,27 @@ def _extract_whole_spine_scores(parsed: dict) -> dict[str, int]:
 def _identify_weak_handoffs(events: list[SpineEvent],
                               per_event: dict[str, dict[str, int]],
                               threshold: int = WEAK_HANDOFF_THRESHOLD,
-                              ) -> list[WeakHandoff]:
-    """List every transition (event[i] → event[i+1]) where event[i]'s
-    causal_handoff score is below threshold. The final event has no
-    handoff and is skipped.
+                              ) -> tuple[list[WeakHandoff], list[tuple[str, str]]]:
+    """List transitions where upstream causal_handoff is below threshold.
 
-    Act-bridge detection is best-effort: we don't have act metadata in
-    the SpineEvent shape, so the diagnostic flags act bridges via
-    keyword inference from the function strings (when the upstream's
-    function suggests an act closer like "turning point" / "midpoint"
-    / "Act N closer"). False negatives are acceptable — the surface is
-    a hint, not load-bearing.
+    Returns (weak, skipped). `skipped` carries (from_event, to_event)
+    pairs whose upstream had no causal_handoff score at all — surfacing
+    these keeps the author from reading a clean weak-handoff list as
+    "no problems found" when the analysis was actually incomplete.
+
+    is_act_bridge is a heuristic (keyword match on the upstream's
+    function); false negatives are acceptable — it's a surfacing hint.
     """
-    out: list[WeakHandoff] = []
+    weak: list[WeakHandoff] = []
+    skipped: list[tuple[str, str]] = []
     for i in range(len(events) - 1):
         upstream = events[i]
         downstream = events[i + 1]
         score = per_event.get(upstream.id, {}).get('causal_handoff')
-        if score is None or score >= threshold:
+        if score is None:
+            skipped.append((upstream.id, downstream.id))
+            continue
+        if score >= threshold:
             continue
         f = (upstream.function or '').lower()
         is_act_bridge = any(
@@ -1963,13 +1966,13 @@ def _identify_weak_handoffs(events: list[SpineEvent],
             ('turning point', 'midpoint', 'act 1 closer', 'act 2 closer',
              'climax setup', 'climax')
         )
-        out.append({
+        weak.append({
             'from_event': upstream.id,
             'to_event': downstream.id,
             'score': score,
             'is_act_bridge': is_act_bridge,
         })
-    return out
+    return weak, skipped
 
 
 def _parse_response_spine(text: str) -> dict | None:
@@ -2057,11 +2060,18 @@ def _run_spine_extension(project_dir: str, output_dir: str, log_dir: str,
     spine_diag = parsed.get('spine_diagnostic') or {}
     proposed_fix = parsed.get('proposed_fix') or {}
 
-    # Floor: refuse to write per-event matrix when entirely empty (same
-    # principle as the act-shape extension — empty rows are misleading).
-    has_any_per_event = any(per_event[eid] for eid in event_ids)
+    # Floor mirrors the act-shape extension: refuse to publish a matrix
+    # with any empty row, not just a wholly-empty one. A CSV with sparse
+    # cells reads as "score 0 / N/A" to downstream consumers — missing
+    # files are clearer signal than half-empty tables.
+    empty_events = [eid for eid in event_ids if not per_event.get(eid)]
+    has_any_per_event = any(per_event.get(eid) for eid in event_ids)
     has_any_whole_spine = bool(whole_spine)
-    if not has_any_per_event:
+    if empty_events and has_any_per_event:
+        log(f'ERROR: spine extraction produced zero valid scores for '
+            f'{", ".join(empty_events)}; refusing to write '
+            f'per-event-matrix.csv with empty row(s). Raw response: {log_file}')
+    elif not has_any_per_event:
         log(f'ERROR: spine extraction produced zero valid per-event scores; '
             f'refusing to write per-event-matrix.csv. Raw response: {log_file}')
     if not has_any_whole_spine:
@@ -2069,7 +2079,7 @@ def _run_spine_extension(project_dir: str, output_dir: str, log_dir: str,
             f'scores; refusing to write whole-spine-axes.csv. Raw response: '
             f'{log_file}')
 
-    weak_handoffs = _identify_weak_handoffs(events, per_event)
+    weak_handoffs, skipped_handoffs = _identify_weak_handoffs(events, per_event)
 
     # Partial-extraction tagging. The final event has no causal handoff
     # so its expected per-event score count is 2 not 3.
@@ -2094,22 +2104,30 @@ def _run_spine_extension(project_dir: str, output_dir: str, log_dir: str,
             )
         log(f'WARNING: spine extraction partial — {"; ".join(parts)}.')
 
+    write_matrix = has_any_per_event and not empty_events
+    write_whole_spine = has_any_whole_spine
     if coaching == 'full':
-        if has_any_per_event:
+        if write_matrix:
             _write_per_event_matrix(output_dir, events, per_event,
                                       recover_hint=log_file)
-        if has_any_whole_spine:
+        if write_whole_spine:
             _write_whole_spine_axes(output_dir, whole_spine, parsed,
                                       recover_hint=log_file)
-        if has_any_per_event or has_any_whole_spine:
+        if write_matrix or write_whole_spine:
             _append_spine_diagnostic(output_dir, events, per_event,
                                        whole_spine, weak_handoffs,
-                                       spine_diag, proposed_fix)
+                                       skipped_handoffs,
+                                       spine_diag, proposed_fix,
+                                       include_matrix=write_matrix,
+                                       include_whole_spine=write_whole_spine)
     else:
-        if has_any_per_event or has_any_whole_spine:
+        if write_matrix or write_whole_spine:
             _append_spine_coaching_brief(
                 output_dir, events, per_event, whole_spine,
-                weak_handoffs, spine_diag, proposed_fix,
+                weak_handoffs, skipped_handoffs,
+                spine_diag, proposed_fix,
+                include_matrix=write_matrix,
+                include_whole_spine=write_whole_spine,
                 recover_hint=log_file,
             )
 
@@ -2171,29 +2189,37 @@ def _spine_diagnostic_section(events: list[SpineEvent],
                                 per_event: dict[str, dict[str, int]],
                                 whole_spine: dict[str, int],
                                 weak_handoffs: list[WeakHandoff],
+                                skipped_handoffs: list[tuple[str, str]],
                                 spine_diag: dict,
-                                proposed_fix: dict) -> list[str]:
-    """Build the spine markdown section. Shared between the full-mode
-    diagnostic.md append and the coach-mode coaching-brief.md append."""
-    out: list[str] = [
-        '## Per-event matrix (spine Layer 1)',
-        '',
-        '| Event | Function | Alignment | Concreteness | Causal handoff |',
-        '|---|---|---|---|---|',
-    ]
-    for ev in events:
-        scores = per_event.get(ev.id, {})
-        out.append(
-            f'| {ev.id} | {ev.function or "—"} | '
-            f'{scores.get("function_alignment", "–")} | '
-            f'{scores.get("concreteness", "–")} | '
-            f'{scores.get("causal_handoff", "–")} |'
-        )
-    out.extend(['', '## Whole-spine axes (spine Layer 2)', '',
-                '| Axis | Score | Weight |', '|---|---|---|'])
-    for axis in SPINE_AXES:
-        s = whole_spine.get(axis.key, '–')
-        out.append(f'| {axis.name} | {s} | {axis.weight} |')
+                                proposed_fix: dict, *,
+                                include_matrix: bool = True,
+                                include_whole_spine: bool = True,
+                                ) -> list[str]:
+    """Shared spine markdown section (full diagnostic.md + coach brief)."""
+    out: list[str] = []
+    if include_matrix:
+        out.extend([
+            '## Per-event matrix (spine Layer 1)',
+            '',
+            '| Event | Function | Alignment | Concreteness | Causal handoff |',
+            '|---|---|---|---|---|',
+        ])
+        for ev in events:
+            scores = per_event.get(ev.id, {})
+            out.append(
+                f'| {ev.id} | {ev.function or "—"} | '
+                f'{scores.get("function_alignment", "–")} | '
+                f'{scores.get("concreteness", "–")} | '
+                f'{scores.get("causal_handoff", "–")} |'
+            )
+    if include_whole_spine:
+        if out:
+            out.append('')
+        out.extend(['## Whole-spine axes (spine Layer 2)', '',
+                    '| Axis | Score | Weight |', '|---|---|---|'])
+        for axis in SPINE_AXES:
+            s = whole_spine.get(axis.key, '–')
+            out.append(f'| {axis.name} | {s} | {axis.weight} |')
 
     if weak_handoffs:
         out.extend(['', '## Weak causal handoffs (below threshold {})'
@@ -2204,6 +2230,18 @@ def _spine_diagnostic_section(events: list[SpineEvent],
                 f'- **{h["from_event"]} → {h["to_event"]}**: '
                 f'score {h["score"]}{tag}'
             )
+
+    if skipped_handoffs:
+        out.extend([
+            '',
+            '## Skipped causal handoffs',
+            '',
+            'These transitions had no causal_handoff score in the response, '
+            'so the weak-handoff analysis is incomplete here:',
+            '',
+        ])
+        for from_ev, to_ev in skipped_handoffs:
+            out.append(f'- {from_ev} → {to_ev}')
 
     out.extend([
         '',
@@ -2243,8 +2281,12 @@ def _append_spine_diagnostic(output_dir: str, events: list[SpineEvent],
                                per_event: dict[str, dict[str, int]],
                                whole_spine: dict[str, int],
                                weak_handoffs: list[WeakHandoff],
+                               skipped_handoffs: list[tuple[str, str]],
                                spine_diag: dict,
-                               proposed_fix: dict) -> None:
+                               proposed_fix: dict, *,
+                               include_matrix: bool = True,
+                               include_whole_spine: bool = True,
+                               ) -> None:
     """Append the spine section to the existing diagnostic.md."""
     md_path = os.path.join(output_dir, 'diagnostic.md')
     if not os.path.isfile(md_path):
@@ -2259,9 +2301,12 @@ def _append_spine_diagnostic(output_dir: str, events: list[SpineEvent],
     except OSError as e:
         log(f'WARNING: could not append spine diagnostic to {md_path}: {e}')
         return
-    section = _spine_diagnostic_section(events, per_event, whole_spine,
-                                          weak_handoffs, spine_diag,
-                                          proposed_fix)
+    section = _spine_diagnostic_section(
+        events, per_event, whole_spine, weak_handoffs, skipped_handoffs,
+        spine_diag, proposed_fix,
+        include_matrix=include_matrix,
+        include_whole_spine=include_whole_spine,
+    )
     _safe_write(md_path, existing + '\n' + '\n'.join(section) + '\n')
 
 
@@ -2270,8 +2315,11 @@ def _append_spine_coaching_brief(output_dir: str,
                                     per_event: dict[str, dict[str, int]],
                                     whole_spine: dict[str, int],
                                     weak_handoffs: list[WeakHandoff],
+                                    skipped_handoffs: list[tuple[str, str]],
                                     spine_diag: dict,
                                     proposed_fix: dict, *,
+                                    include_matrix: bool = True,
+                                    include_whole_spine: bool = True,
                                     recover_hint: str = '') -> None:
     """coach coaching: append spine sections to coaching-brief.md."""
     md_path = os.path.join(output_dir, 'coaching-brief.md')
@@ -2287,9 +2335,12 @@ def _append_spine_coaching_brief(output_dir: str,
     except OSError as e:
         log(f'WARNING: could not append spine coaching brief to {md_path}: {e}')
         return
-    section = _spine_diagnostic_section(events, per_event, whole_spine,
-                                          weak_handoffs, spine_diag,
-                                          proposed_fix)
+    section = _spine_diagnostic_section(
+        events, per_event, whole_spine, weak_handoffs, skipped_handoffs,
+        spine_diag, proposed_fix,
+        include_matrix=include_matrix,
+        include_whole_spine=include_whole_spine,
+    )
     # Coach-mode prelude: same independence reminder pattern as the
     # act-shape brief — keep the proposed fix as a proposal, not a
     # directive.
