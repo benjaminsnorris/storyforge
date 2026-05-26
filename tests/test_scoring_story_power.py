@@ -3998,6 +3998,161 @@ def test_extract_proposed_operations_validates_operation_field(capsys):
     assert 'proposed_operations extraction dropped' in info
 
 
+def test_extract_proposed_operations_enforces_arity(capsys):
+    """merge/reorder require exactly 2 scene_ids; split/insert/promote
+    require exactly 1. The docstring promises this; the extractor now
+    enforces it (previously documented-only, allowing the LLM to slip
+    a 1-id 'merge' through silently)."""
+    from storyforge.scoring_story_power import _extract_proposed_operations
+    parsed = {
+        'proposed_operations': [
+            # Wrong arity: merge needs 2, this has 1 → dropped.
+            {'operation': 'merge', 'scene_ids': ['s1'],
+             'summary': 'bogus single-id merge'},
+            # Wrong arity: split needs 1, this has 2 → dropped.
+            {'operation': 'split', 'scene_ids': ['s1', 's2'],
+             'summary': 'bogus dual-id split'},
+            # Right arity: merge with 2.
+            {'operation': 'merge', 'scene_ids': ['s1', 's2'],
+             'summary': 'Merge s1 and s2.'},
+            # Right arity: split with 1.
+            {'operation': 'split', 'scene_ids': ['s3'],
+             'summary': 'Split s3.'},
+            # Right arity: promote with 1.
+            {'operation': 'promote', 'scene_ids': ['s4'],
+             'summary': 'Promote s4.'},
+            # Right arity: reorder with 2.
+            {'operation': 'reorder', 'scene_ids': ['s5', 's6'],
+             'summary': 'Swap s5 and s6.'},
+            # Right arity: insert with 1.
+            {'operation': 'insert', 'scene_ids': ['s7'],
+             'summary': 'Insert after s7.'},
+        ],
+    }
+    out = _extract_proposed_operations(parsed)
+    operations = [o['operation'] for o in out]
+    assert operations == ['merge', 'split', 'promote', 'reorder', 'insert']
+    info = capsys.readouterr().out
+    assert 'merge requires 2' in info
+    assert 'split requires 1' in info
+
+
+def test_continuity_deterministic_skips_arch_xref_when_no_architecture(capsys):
+    """When architecture_ids is empty (no architecture.csv on disk),
+    the cross-reference check is skipped wholesale. Without the skip,
+    every scene with a populated architecture_scene would flag as
+    broken — a noise storm. One INFO breadcrumb is logged."""
+    from storyforge.scoring_story_power import (
+        _check_continuity_deterministic, MappedScene,
+    )
+    scenes = [
+        MappedScene('s1', 1, 'T', 'a.', 'A', 'L', '1', 'morning', '',
+                    1000, 1000, 'a01'),
+        MappedScene('s2', 2, 'T', 'b.', 'A', 'L', '2', 'morning', '',
+                    1000, 1000, 'a02'),
+        MappedScene('s3', 3, 'T', 'c.', 'A', 'L', '3', 'morning', '',
+                    1000, 1000, 'a03'),
+    ]
+    findings = _check_continuity_deterministic(scenes, set())
+    assert not any(f['field'] == 'architecture_scene' for f in findings)
+    out = capsys.readouterr().out
+    assert 'skipping architecture cross-reference' in out
+
+
+def test_continuity_deterministic_allows_prologue_and_interlude_types():
+    """The deterministic timeline-backward check exempts prologue and
+    interlude in addition to flashback. The previous implementation
+    only excluded flashback, but the issue message advertised both —
+    fixing the message/code mismatch."""
+    from storyforge.scoring_story_power import (
+        _check_continuity_deterministic, MappedScene,
+    )
+    scenes_prologue = [
+        MappedScene('s1', 1, 'T', 'a.', 'A', 'L', '3', 'morning', '',
+                    1000, 1000, ''),
+        MappedScene('s2', 2, 'T', 'b.', 'A', 'L', '1', 'morning',
+                    'prologue', 1000, 1000, ''),
+    ]
+    findings = _check_continuity_deterministic(scenes_prologue, set())
+    assert not any(f['field'] == 'timeline_day' for f in findings)
+
+    scenes_interlude = [
+        MappedScene('s1', 1, 'T', 'a.', 'A', 'L', '3', 'morning', '',
+                    1000, 1000, ''),
+        MappedScene('s2', 2, 'T', 'b.', 'A', 'L', '1', 'morning',
+                    'interlude', 1000, 1000, ''),
+    ]
+    findings = _check_continuity_deterministic(scenes_interlude, set())
+    assert not any(f['field'] == 'timeline_day' for f in findings)
+
+
+def test_continuity_finding_issue_text_names_allowed_types():
+    """When timeline goes backward without an allowed scene_type, the
+    issue text should name ALL allowed types (not just 'flashback')
+    so the author knows the actual remedy set."""
+    from storyforge.scoring_story_power import (
+        _check_continuity_deterministic, MappedScene,
+    )
+    scenes = [
+        MappedScene('s1', 1, 'T', 'a.', 'A', 'L', '3', 'morning', '',
+                    1000, 1000, ''),
+        MappedScene('s2', 2, 'T', 'b.', 'A', 'L', '1', 'morning',
+                    'regular', 1000, 1000, ''),
+    ]
+    findings = _check_continuity_deterministic(scenes, set())
+    timeline_findings = [f for f in findings if f['field'] == 'timeline_day']
+    assert timeline_findings
+    issue = timeline_findings[0]['issue']
+    # Names all three allowed types so the author has the full remedy.
+    for kw in ('flashback', 'interlude', 'prologue'):
+        assert kw in issue
+
+
+def test_parse_scene_map_unset_seq_sorts_to_end(tmp_path, capsys):
+    """Mixed-seq scenarios: rows with seq=blank/non-int (seq=None) must
+    sort AFTER rows with explicit seq. The previous int+0-sentinel sort
+    put unset-seq scenes at the TOP, silently mis-ordering interstitials
+    added without seq numbers."""
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+        f.write(
+            'id|seq|summary\n'
+            'unset-first||first row but unset seq — should sort to end\n'
+            'chapter-1|1|first explicit\n'
+            'unset-second|nonint|second unset — also to end\n'
+            'chapter-2|2|second explicit\n'
+        )
+    from storyforge.scoring_story_power import parse_scene_map
+    scenes = parse_scene_map(str(tmp_path))
+    # Explicit-seq rows come first, in seq order. Unset-seq rows come
+    # last, in CSV row order.
+    assert [s.id for s in scenes] == [
+        'chapter-1', 'chapter-2', 'unset-first', 'unset-second',
+    ]
+    # Non-int seq logs a WARNING (rather than silently treating as 0).
+    out = capsys.readouterr().out
+    assert 'non-int seq' in out
+
+
+def test_parse_scene_map_all_blank_seq_preserves_csv_order(tmp_path):
+    """When every row has blank seq, the stable sort preserves CSV
+    order via the secondary key."""
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'scenes.csv'), 'w') as f:
+        f.write(
+            'id|seq|summary\n'
+            'alpha||first.\n'
+            'beta||second.\n'
+            'gamma||third.\n'
+        )
+    from storyforge.scoring_story_power import parse_scene_map
+    scenes = parse_scene_map(str(tmp_path))
+    assert [s.id for s in scenes] == ['alpha', 'beta', 'gamma']
+    assert all(s.seq is None for s in scenes)
+
+
 def test_extract_continuity_findings_drops_incomplete_rows(capsys):
     from storyforge.scoring_story_power import _extract_continuity_findings
     parsed = {

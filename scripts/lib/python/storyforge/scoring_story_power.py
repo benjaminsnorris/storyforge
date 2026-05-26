@@ -212,6 +212,18 @@ class ContinuityFinding(TypedDict):
 
 
 SceneOperation = Literal['merge', 'split', 'insert', 'reorder', 'promote']
+SCENE_OPERATIONS: tuple[SceneOperation, ...] = (
+    'merge', 'split', 'insert', 'reorder', 'promote',
+)
+# Required scene_ids arity per operation — enforced at extraction.
+# merge/reorder act on a pair; split/insert/promote act on a single row.
+SCENE_OPERATION_ARITY: dict[SceneOperation, int] = {
+    'merge': 2,
+    'reorder': 2,
+    'split': 1,
+    'insert': 1,
+    'promote': 1,
+}
 
 
 class _ProposedSceneOperationRequired(TypedDict):
@@ -517,11 +529,9 @@ class SceneRow(NamedTuple):
 
 class MappedScene(NamedTuple):
     """A single row from reference/scenes.csv carrying the columns
-    scene-map scoring consumes. seq is parsed as int when possible
-    (used for ordering); other unconsumed columns (part, duration,
-    target_pages, panel_count, page_count, status) stay in the CSV."""
+    scene-map scoring consumes."""
     id: str
-    seq: int                    # 0 when the cell is blank or non-int
+    seq: int | None             # None when the cell is blank or non-int
     title: str
     summary: str
     pov: str
@@ -797,9 +807,20 @@ def parse_scene_map(project_dir: str) -> list[MappedScene]:
             except (TypeError, ValueError):
                 return 0
 
+        seq_raw = row.get('seq', '').strip()
+        if not seq_raw:
+            seq_val: int | None = None
+        else:
+            try:
+                seq_val = int(seq_raw)
+            except (TypeError, ValueError):
+                log(f'WARNING: scenes.csv row {i} has non-int seq='
+                    f'{seq_raw!r}; treating as unset')
+                seq_val = None
+
         scene = MappedScene(
             id=scene_id,
-            seq=_as_int('seq'),
+            seq=seq_val,
             title=row.get('title', '').strip(),
             summary=summary,
             pov=row.get('pov', '').strip(),
@@ -812,10 +833,11 @@ def parse_scene_map(project_dir: str) -> list[MappedScene]:
             architecture_scene=row.get('architecture_scene', '').strip(),
         )
         rows.append((scene.seq, i, scene))
-    # Sort by (seq, original row index) — seq=0 rows preserve CSV order
-    # within their group. This matches author expectations: a manuscript
-    # whose author hasn't seq-numbered yet still scores in CSV order.
-    rows.sort(key=lambda r: (r[0], r[1]))
+    # Sort key: scenes with seq=None go to the end (preserving CSV
+    # order within the unset group). The previous int+0-sentinel sort
+    # put unset-seq scenes at the top — silently wrong for mixed cases
+    # where some rows had explicit seq and others didn't.
+    rows.sort(key=lambda r: (r[0] is None, r[0] if r[0] is not None else 0, r[1]))
     return [r[2] for r in rows]
 
 
@@ -3870,14 +3892,33 @@ def _empty_scene_map_extension(status: StoryPowerStatus) -> SceneMapExtension:
     }
 
 
+_BACKWARD_TIMELINE_ALLOWED_TYPES = frozenset({
+    'flashback', 'interlude', 'prologue',
+})
+
+
 def _check_continuity_deterministic(scenes: list[MappedScene],
                                       architecture_ids: set[str],
                                       ) -> list[ContinuityFinding]:
     """High-confidence continuity checks on adjacent pairs + per-row
-    cross-reference validation."""
+    cross-reference validation.
+
+    When architecture_ids is empty (no architecture.csv on disk),
+    the cross-reference check is skipped wholesale with one INFO log.
+    Without the skip, every scene with a populated architecture_scene
+    field would flag as "broken" — a noise storm that swamps the
+    actionable findings.
+    """
     findings: list[ContinuityFinding] = []
+    check_architecture = bool(architecture_ids)
+    if not check_architecture and any(s.architecture_scene for s in scenes):
+        log('INFO: scene-map continuity check skipping architecture '
+            'cross-reference — no reference/architecture.csv detected. '
+            'Populated architecture_scene values will be re-validated '
+            'once architecture.csv exists.')
     for i, scene in enumerate(scenes):
-        if scene.architecture_scene and scene.architecture_scene not in architecture_ids:
+        if (check_architecture and scene.architecture_scene
+                and scene.architecture_scene not in architecture_ids):
             findings.append({
                 'scene_id': scene.id,
                 'preceding_id': '',
@@ -3914,7 +3955,8 @@ def _check_continuity_deterministic(scenes: list[MappedScene],
             curr_day = prev_day = None
         if (curr_day is not None and prev_day is not None
                 and curr_day < prev_day
-                and scene.scene_type.lower() != 'flashback'):
+                and scene.scene_type.lower() not in _BACKWARD_TIMELINE_ALLOWED_TYPES):
+            allowed = ', '.join(sorted(_BACKWARD_TIMELINE_ALLOWED_TYPES))
             findings.append({
                 'scene_id': scene.id,
                 'preceding_id': prev.id,
@@ -3922,7 +3964,7 @@ def _check_continuity_deterministic(scenes: list[MappedScene],
                 'issue': (
                     f'timeline_day went backward ({prev_day} → {curr_day}) '
                     f'but scene_type={scene.scene_type!r} '
-                    "(not 'flashback' / 'interlude')"
+                    f'(expected one of: {allowed})'
                 ),
                 'severity': 'high',
             })
@@ -3939,7 +3981,7 @@ def _build_scene_map_prompt(scenes: list[MappedScene],
     per_axis_list = ', '.join(f'"{a.key}"' for a in PER_MAP_SCENE_AXES)
     map_axis_list = ', '.join(f'"{a.key}"' for a in MAP_AXES)
     scenes_block = '\n'.join(
-        f'### {s.id} (seq={s.seq} pov={s.pov or "—"} '
+        f'### {s.id} (seq={s.seq if s.seq is not None else "—"} pov={s.pov or "—"} '
         f'day={s.timeline_day or "—"} type={s.scene_type or "—"} '
         f'arch={s.architecture_scene or "(interstitial)"})\n'
         f'  location: {s.location or "—"}, time_of_day: {s.time_of_day or "—"}, '
@@ -4159,9 +4201,6 @@ def _extract_continuity_findings(parsed: dict) -> list[ContinuityFinding]:
 
 def _extract_proposed_operations(parsed: dict
                                     ) -> list[ProposedSceneOperation]:
-    valid_ops: set[SceneOperation] = {
-        'merge', 'split', 'insert', 'reorder', 'promote',
-    }
     out: list[ProposedSceneOperation] = []
     drops: list[str] = []
     for row in parsed.get('proposed_operations') or []:
@@ -4171,7 +4210,7 @@ def _extract_proposed_operations(parsed: dict
         operation = row.get('operation', '').strip().lower()
         scene_ids = row.get('scene_ids', [])
         summary = row.get('summary', '').strip()
-        if operation not in valid_ops:
+        if operation not in SCENE_OPERATIONS:
             drops.append(f'unknown operation={operation!r}')
             continue
         if not isinstance(scene_ids, list) or not scene_ids:
@@ -4180,10 +4219,18 @@ def _extract_proposed_operations(parsed: dict
         if not summary:
             drops.append(f'missing summary in {operation} {scene_ids}')
             continue
+        cleaned_ids = [str(s).strip() for s in scene_ids
+                       if str(s).strip()]
+        expected = SCENE_OPERATION_ARITY[operation]
+        if len(cleaned_ids) != expected:
+            drops.append(
+                f'{operation} requires {expected} scene_id(s); got '
+                f'{len(cleaned_ids)}: {cleaned_ids}'
+            )
+            continue
         out.append({
             'operation': operation,  # type: ignore[typeddict-item]
-            'scene_ids': [str(s).strip() for s in scene_ids
-                          if str(s).strip()],
+            'scene_ids': cleaned_ids,
             'summary': summary,
             'rationale': row.get('rationale', '').strip(),
         })
