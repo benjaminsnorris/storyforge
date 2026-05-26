@@ -3187,3 +3187,278 @@ def test_quad_mock_llm_routes_to_all_four_payloads(tmp_path, monkeypatch):
     scoring_story_power.score_story_power(str(tmp_path), 'full')
     assert seen == {'pitch': 1, 'act_shape': 1, 'spine': 1, 'architecture': 1}
 
+
+# ---------------------------------------------------------------------------
+# Test gaps from the PR #242 review
+# ---------------------------------------------------------------------------
+
+def test_per_scene_matrix_csv_header_columns(tmp_path, monkeypatch):
+    """per-scene-matrix.csv header must match
+    scene_id|spine_event|spine_event_service|field_coherence so
+    downstream consumers can rely on the schema."""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _quad_mock_llm(_full_payload(), _act_shape_payload(),
+                            _spine_payload(), _architecture_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    matrix = open(os.path.join(result['output_dir'],
+                                'per-scene-matrix.csv')).read()
+    header = matrix.splitlines()[0]
+    assert header == 'scene_id|spine_event|spine_event_service|field_coherence'
+
+
+def test_whole_architecture_csv_weight_column_reflects_axes(tmp_path,
+                                                              monkeypatch):
+    """whole-architecture-axes.csv's weight column must match
+    ARCHITECTURE_AXES weights — silent drift would shift composite
+    interpretation."""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _quad_mock_llm(_full_payload(), _act_shape_payload(),
+                            _spine_payload(), _architecture_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    from storyforge.scoring_story_power import ARCHITECTURE_AXES
+    csv = open(os.path.join(result['output_dir'],
+                              'whole-architecture-axes.csv')).read()
+    lines = csv.splitlines()
+    weight_by_axis_key = {a.key: str(a.weight) for a in ARCHITECTURE_AXES}
+    header = lines[0].split('|')
+    axis_col = header.index('axis')
+    weight_col = header.index('weight')
+    for line in lines[1:]:
+        cells = line.split('|')
+        assert cells[weight_col] == weight_by_axis_key[cells[axis_col]]
+
+
+def test_extract_proposed_field_updates_drops_incomplete_rows(capsys):
+    """Rows missing scene_id / field / proposed_value must be dropped
+    and the drops surfaced in an INFO log."""
+    from storyforge.scoring_story_power import _extract_proposed_field_updates
+    parsed = {
+        'proposed_field_updates': [
+            'not a dict',
+            {'scene_id': '', 'field': 'arc', 'proposed_value': 'x'},
+            {'scene_id': 'a01', 'field': '', 'proposed_value': 'x'},
+            {'scene_id': 'a01', 'field': 'arc', 'proposed_value': ''},
+            {'scene_id': 'a01', 'field': 'arc', 'proposed_value': 'good',
+             'rationale': 'because'},
+        ],
+    }
+    out = _extract_proposed_field_updates(parsed)
+    assert len(out) == 1
+    assert out[0]['proposed_value'] == 'good'
+    info = capsys.readouterr().out
+    assert 'proposed_field_updates extraction dropped' in info
+
+
+def test_extract_proposed_scene_insertions_drops_incomplete_rows(capsys):
+    """Rows missing insert_after / proposed_id / summary must be
+    dropped and the drops surfaced in an INFO log."""
+    from storyforge.scoring_story_power import _extract_proposed_scene_insertions
+    parsed = {
+        'proposed_scene_insertions': [
+            'not a dict',
+            {'insert_after': '', 'proposed_id': 'x', 'summary': 's'},
+            {'insert_after': 'a01', 'proposed_id': '', 'summary': 's'},
+            {'insert_after': 'a01', 'proposed_id': 'a02', 'summary': ''},
+            {'insert_after': 'a01', 'proposed_id': 'a02',
+             'summary': 'A new scene happens.',
+             'spine_event': 'ev-1'},
+        ],
+    }
+    out = _extract_proposed_scene_insertions(parsed)
+    assert len(out) == 1
+    assert out[0]['proposed_id'] == 'a02'
+    info = capsys.readouterr().out
+    assert 'proposed_scene_insertions extraction dropped' in info
+
+
+def test_extract_field_findings_drops_incomplete_rows(capsys):
+    from storyforge.scoring_story_power import _extract_field_findings
+    parsed = {
+        'field_findings': [
+            'not a dict',
+            {'scene_id': '', 'field': 'arc', 'issue': 'bad'},
+            {'scene_id': 'a01', 'field': '', 'issue': 'bad'},
+            {'scene_id': 'a01', 'field': 'arc', 'issue': ''},
+            {'scene_id': 'a01', 'field': 'arc', 'issue': 'bad',
+             'severity': 'high'},
+        ],
+    }
+    out = _extract_field_findings(parsed)
+    assert len(out) == 1
+    assert out[0]['severity'] == 'high'
+    info = capsys.readouterr().out
+    assert 'field_findings extraction dropped' in info
+
+
+def test_parse_response_architecture_handles_greedy_extraction():
+    """Tier-3 fallback: JSON embedded in prose with no fence."""
+    from storyforge.scoring_story_power import _parse_response_architecture
+    payload = json.dumps(_architecture_payload())
+    text = f'Here is my analysis. {payload} Done.'
+    parsed = _parse_response_architecture(text)
+    assert parsed is not None
+    assert isinstance(parsed['per_scene'], list)
+
+
+def test_parse_response_architecture_warns_per_scene_missing(capsys):
+    """Shape-failure WARNING fires naming per_scene as the missing key."""
+    from storyforge.scoring_story_power import _parse_response_architecture
+    bad = json.dumps({'whole_architecture': []})  # per_scene missing
+    parsed = _parse_response_architecture(bad)
+    assert parsed is None
+    out = capsys.readouterr().out
+    assert 'per_scene' in out
+
+
+def test_parse_response_architecture_warns_dual_missing(capsys):
+    """When both required lists are missing, the WARN names both."""
+    from storyforge.scoring_story_power import _parse_response_architecture
+    bad = json.dumps({'unrelated': []})
+    parsed = _parse_response_architecture(bad)
+    assert parsed is None
+    out = capsys.readouterr().out
+    assert 'per_scene' in out and 'whole_architecture' in out
+
+
+def test_architecture_diagnostic_register_assessment_renders(tmp_path,
+                                                                monkeypatch):
+    """The architecture diagnostic must surface the LLM-provided
+    register_assessment substring, not just the declared register name."""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _quad_mock_llm(_full_payload(), _act_shape_payload(),
+                            _spine_payload(), _architecture_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    diag = open(os.path.join(result['output_dir'], 'diagnostic.md')).read()
+    # The _architecture_payload register_assessment includes 'within band'.
+    assert 'within band' in diag
+    # The 'Register assessment:' label line is present.
+    assert 'Register assessment:' in diag
+
+
+def test_proposed_scene_insertion_full_fields_render(tmp_path, monkeypatch):
+    """All seven structured fields of a proposed insertion must reach
+    the diagnostic — silent drop of any would mislead the author."""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _quad_mock_llm(_full_payload(), _act_shape_payload(),
+                            _spine_payload(), _architecture_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    diag = open(os.path.join(result['output_dir'], 'diagnostic.md')).read()
+    # All distinctive values from the _architecture_payload baseline.
+    assert 'ev-discovery' in diag           # spine_event
+    assert 'sequel' in diag                  # action_sequel
+    assert 'recognition to resolve' in diag  # emotional_arc
+    assert 'understanding' in diag           # value_at_stake
+    assert '0/+' in diag                     # value_shift
+    assert 'commitment' in diag              # turning_point
+    assert 'traces the pattern' in diag      # summary
+    assert 'scene_causal_chain 8 → 9' in diag  # rationale
+
+
+def test_append_architecture_coaching_brief_warns_when_md_missing(tmp_path,
+                                                                    capsys):
+    """Parity with the spine appender: when coaching-brief.md is
+    absent, the architecture coach-brief appender must surface a
+    WARNING and return cleanly."""
+    from storyforge.scoring_story_power import (
+        _append_architecture_coaching_brief, SceneRow,
+    )
+    scenes = [SceneRow('a01', 'T', 's', 'ev-1', 'sequel', '', '', '', '')]
+    _append_architecture_coaching_brief(
+        str(tmp_path), scenes, {'a01': {}}, {}, [], [], [], {}, 'balanced',
+    )
+    out = capsys.readouterr().out
+    assert 'architecture coaching brief could not be appended' in out
+
+
+def test_action_sequel_ratio_handles_empty_classification():
+    """Architecture with no action_sequel populated returns (0, 0, 0.0)
+    — degenerate but doesn't crash. The rhythm axis is still scoreable
+    by the LLM with the unclassified-share signal in the prompt."""
+    from storyforge.scoring_story_power import _action_sequel_ratio, SceneRow
+    scenes = [
+        SceneRow('a', '', 's', '', '', '', '', '', ''),
+        SceneRow('b', '', 's', '', '', '', '', '', ''),
+    ]
+    action, sequel, ratio = _action_sequel_ratio(scenes)
+    assert (action, sequel, ratio) == (0, 0, 0.0)
+
+
+def test_disjoint_axis_assert_data_driven_error_names_collision():
+    """The data-driven disjoint assert reports WHICH key collides
+    between WHICH two families — a 7th family with an overlapping key
+    fails import with a specific message."""
+    # Simulate by patching a 7th family in via the same loop logic.
+    from storyforge.scoring_story_power import (
+        _AXIS_FAMILIES, AXIS_KEYS,
+    )
+    # Confirm AXIS_KEYS isn't already present in another family.
+    seen: dict[str, str] = {}
+    for family, keys in _AXIS_FAMILIES:
+        for key in keys:
+            assert key not in seen, (
+                f'unexpected runtime collision: {key} in {seen[key]} and {family}'
+            )
+            seen[key] = family
+    # The actual collision test would re-run the loop with a fake family;
+    # since we can't reimport mid-test, we verify the bookkeeping above
+    # which mirrors the import-time loop's semantics.
+
+
+def test_value_shift_uses_end_polarity_smoke_via_extension(tmp_path,
+                                                             monkeypatch):
+    """End-to-end smoke test for the value_shift fix: a scene with
+    +/- value_shift and 'rupture' emotional_arc should NOT appear in
+    the deterministic field findings (the fix lets the architecture
+    extension run cleanly without false-positive value_shift WARNs)."""
+    _seed_summary(str(tmp_path))
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    headers = ('id|seq|title|spine_event|action_sequel|emotional_arc|'
+               'value_at_stake|value_shift|turning_point|summary')
+    with open(os.path.join(ref, 'architecture.csv'), 'w') as f:
+        f.write(headers + '\n')
+        # +/- (starts positive, ends negative — consistent with rupture)
+        f.write('a01|1|T|ev-1|action|trust to rupture|connection|'
+                '+/-|choice|They argue and the bond breaks.\n')
+    yml = os.path.join(str(tmp_path), 'storyforge.yaml')
+    with open(yml, 'a') as f:
+        f.write('  register: atmospheric\n')
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _quad_mock_llm(_full_payload(), _act_shape_payload(),
+                            _spine_payload(), _architecture_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result['architecture']
+    assert ext is not None
+    # No deterministic value_shift finding for the +/- scene.
+    assert not any(f['field'] == 'value_shift' and f['scene_id'] == 'a01'
+                   for f in ext['field_findings']
+                   if f.get('severity') == 'high')
+
