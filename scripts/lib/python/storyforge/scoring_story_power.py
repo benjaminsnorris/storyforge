@@ -236,11 +236,9 @@ class _ProposedSceneOperationRequired(TypedDict):
 
 
 class ProposedSceneOperation(_ProposedSceneOperationRequired, total=False):
-    """A concrete structural change the diagnostic proposes:
-    merge / split / insert / reorder / promote. scene_ids carries the
-    rows the operation acts on (one for split/insert/promote, two for
-    merge/reorder). The author reviews and accepts / edits / rejects
-    each proposal."""
+    """A concrete structural change the diagnostic proposes. Arity is
+    enforced via SCENE_OPERATION_ARITY at extraction time. The author
+    reviews and accepts / edits / rejects each proposal."""
     rationale: str
 
 
@@ -249,7 +247,7 @@ class SceneMapDiagnostic(TypedDict, total=False):
     lowest_axis: str
     lowest_axis_average: str
     summary: str
-    coverage_assessment: str   # e.g., "3 architecture anchors have no mapped scene"
+    coverage_assessment: str
     high_leverage_move: str
 
 
@@ -1904,13 +1902,9 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                               scene_map_scenes: list[MappedScene] | None = None,
                               ) -> None:
     """strict coaching: rule-based checklist of signals per axis, no LLM
-    call. Extends with per-act + structural blanks when act-shape is
-    populated, per-event + whole-spine blanks when spine.csv exists,
-    per-scene + whole-architecture blanks when architecture.csv exists,
-    and per-scene-map + whole-map blanks when scenes.csv exists —
-    strict-mode authors get the same coverage the LLM modes produce
-    automatically.
-    """
+    call. Extends with blanks for each populated tier (act-shape,
+    spine, architecture, scene-map) so strict-mode authors get the
+    same coverage the LLM modes produce."""
     md_path = os.path.join(output_dir, 'self-scoring-checklist.md')
     out: list[str] = [
         '# Story-power scorecard — self-scoring checklist',
@@ -3876,9 +3870,7 @@ def _append_architecture_coaching_brief(
 # Scene-map extension (Layer 1 per-scene + Layer 2 whole-map)
 # ---------------------------------------------------------------------------
 
-# Word-count off-target threshold for the deterministic pre-pass.
-# Anything outside [0.5×, 2×] of target_words is flagged as medium
-# severity. Conservative — typical drafts vary 20-40% from target.
+# Conservative band — typical drafts vary 20-40% from target.
 _WORD_COUNT_LOW_RATIO = 0.5
 _WORD_COUNT_HIGH_RATIO = 2.0
 
@@ -4337,10 +4329,17 @@ def _run_scene_map_extension(project_dir: str, output_dir: str,
     has_any_per_scene = any(per_scene.get(sid) for sid in scene_ids)
     has_any_whole_map = bool(whole_map)
     if empty_scenes and has_any_per_scene:
+        # Write the full empty-scene id list to a sidecar so the author
+        # can grep it. The previous "first 5, then ..." truncation lost
+        # actionability for large scene maps (30 of 60 empty → only 5
+        # named in the log, 25 lost).
+        sidecar = os.path.join(output_dir, 'scene-map-empty-scenes.txt')
+        _safe_write(sidecar, '\n'.join(empty_scenes) + '\n',
+                    recover_hint=log_file)
         log(f'ERROR: scene-map extraction produced zero valid scores for '
-            f'{len(empty_scenes)} scene(s) ({", ".join(empty_scenes[:5])}'
-            f'{"..." if len(empty_scenes) > 5 else ""}); refusing to write '
-            f'per-scene-map-matrix.csv with empty row(s). Raw response: {log_file}')
+            f'{len(empty_scenes)} scene(s); full list at {sidecar}; '
+            f'refusing to write per-scene-map-matrix.csv with empty row(s). '
+            f'Raw response: {log_file}')
     elif not has_any_per_scene:
         log(f'ERROR: scene-map extraction produced zero valid per-scene '
             f'scores; refusing to write per-scene-map-matrix.csv. '
