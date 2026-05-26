@@ -626,16 +626,23 @@ class SceneRow(NamedTuple):
     turning_point: str
 
 
-VALID_BRIEF_OUTCOMES: frozenset[str] = frozenset({
+# Brief outcomes form a closed enum per the schema (see
+# schema.VALID_OUTCOMES). The Literal narrows static checks (e.g.
+# `outcome == 'yes-but'` is statically verifiable as reachable);
+# VALID_BRIEF_OUTCOMES retains the runtime membership set the
+# deterministic pre-pass uses to flag invalid values.
+BriefOutcome = Literal['yes', 'no', 'yes-but', 'no-and']
+VALID_BRIEF_OUTCOMES: frozenset[BriefOutcome] = frozenset({
     'yes', 'no', 'yes-but', 'no-and',
 })
 
 
 class Brief(NamedTuple):
-    """A single row from reference/scene-briefs.csv carrying the columns
-    briefs scoring consumes. Array fields (knowledge_in, knowledge_out,
-    motifs, continuity_deps) are parsed from `;`-separated cells and
-    stored as tuples for hashability + immutability."""
+    """A scene-briefs.csv row. Array fields are `;`-split tuples.
+
+    Construct with keyword args only — CSV column order is not guaranteed
+    to match this tuple's positional order, so `Brief(*csv_row)` would
+    silently misalign."""
     id: str
     goal: str
     conflict: str
