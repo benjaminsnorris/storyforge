@@ -391,6 +391,18 @@ def parse_spine(project_dir: str) -> list[SpineEvent]:
         event_id = row.get('id', '').strip()
         summary = row.get('summary', '').strip()
         if not event_id or not summary:
+            # A row that parsed structurally but lacks required identity
+            # is almost always an in-progress edit or migration drift —
+            # silently dropping it lets the LLM score a spine that's
+            # missing an event without telling anyone.
+            missing = []
+            if not event_id:
+                missing.append('id')
+            if not summary:
+                missing.append('summary')
+            log(f'WARNING: spine.csv row {i} missing required field(s) '
+                f'{", ".join(missing)}; skipping. '
+                f'(id={event_id or "<blank>"})')
             continue
         out.append(SpineEvent(
             id=event_id,
@@ -1898,44 +1910,70 @@ def _extract_per_event_scores(parsed: dict, event_ids: list[str]
     _extract_per_act_scores)."""
     valid_ids = set(event_ids)
     out: dict[str, dict[str, int]] = {eid: {} for eid in event_ids}
+    drops: list[str] = []
     for ev_row in parsed.get('per_event') or []:
         if not isinstance(ev_row, dict):
+            drops.append(f'non-dict per_event row: {ev_row!r}')
             continue
         event_id = ev_row.get('event_id')
         if event_id not in valid_ids:
+            drops.append(f'unknown event_id={event_id!r}')
             continue
         for score_row in ev_row.get('scores') or []:
             if not isinstance(score_row, dict):
+                drops.append(f'non-dict score row in {event_id}')
                 continue
             axis = score_row.get('axis')
             if axis not in PER_EVENT_AXIS_BY_KEY:
+                drops.append(f'unknown axis={axis!r} in {event_id}')
                 continue
             try:
                 score = int(score_row.get('score'))
             except (TypeError, ValueError):
+                drops.append(
+                    f'non-int score in {event_id}.{axis}: '
+                    f'{score_row.get("score")!r}'
+                )
                 continue
             if not 1 <= score <= 10:
+                drops.append(f'out-of-range score in {event_id}.{axis}: {score}')
                 continue
             out[event_id][axis] = score
+    if drops:
+        shown = '; '.join(drops[:5])
+        suffix = f' (and {len(drops) - 5} more)' if len(drops) > 5 else ''
+        log(f'INFO: per-event extraction dropped {len(drops)} row(s): '
+            f'{shown}{suffix}')
     return out
 
 
 def _extract_whole_spine_scores(parsed: dict) -> WholeSpineScores:
     """Pull {axis_key: score} from the whole-spine response."""
     out: WholeSpineScores = {}
+    drops: list[str] = []
     for row in parsed.get('whole_spine') or []:
         if not isinstance(row, dict):
+            drops.append(f'non-dict whole_spine row: {row!r}')
             continue
         axis = row.get('axis')
         if axis not in SPINE_AXIS_BY_KEY:
+            drops.append(f'unknown whole-spine axis={axis!r}')
             continue
         try:
             score = int(row.get('score'))
         except (TypeError, ValueError):
+            drops.append(f'non-int whole-spine score in {axis}: '
+                         f'{row.get("score")!r}')
             continue
         if not 1 <= score <= 10:
+            drops.append(f'out-of-range whole-spine score in {axis}: {score}')
             continue
         out[axis] = score  # type: ignore[literal-required]
+    if drops:
+        shown = '; '.join(drops[:5])
+        suffix = f' (and {len(drops) - 5} more)' if len(drops) > 5 else ''
+        log(f'INFO: whole-spine extraction dropped {len(drops)} row(s): '
+            f'{shown}{suffix}')
     return out
 
 
