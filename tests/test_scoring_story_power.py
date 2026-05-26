@@ -1956,3 +1956,406 @@ def test_strict_mode_with_spine_extends_checklist(tmp_path, monkeypatch):
     for axis in SPINE_AXES:
         assert axis.name in text
 
+
+# ---------------------------------------------------------------------------
+# Test gaps from the PR #240 review
+# ---------------------------------------------------------------------------
+
+def test_append_spine_diagnostic_warns_when_md_missing(tmp_path, capsys):
+    """Mirror of the act-shape gap PR #238 caught — if diagnostic.md
+    is absent, the spine appender must surface a WARNING."""
+    from storyforge.scoring_story_power import (
+        _append_spine_diagnostic, SpineEvent,
+    )
+    events = [SpineEvent('a', 'A', 'sa', 'inciting incident')]
+    _append_spine_diagnostic(str(tmp_path), events, {'a': {}}, {}, [], [], {}, {})
+    out = capsys.readouterr().out
+    assert 'spine diagnostic could not be appended' in out
+    assert 'upstream' in out
+
+
+def test_append_spine_coaching_brief_warns_when_md_missing(tmp_path, capsys):
+    from storyforge.scoring_story_power import (
+        _append_spine_coaching_brief, SpineEvent,
+    )
+    events = [SpineEvent('a', 'A', 'sa', 'inciting incident')]
+    _append_spine_coaching_brief(str(tmp_path), events, {'a': {}}, {}, [],
+                                   [], {}, {})
+    out = capsys.readouterr().out
+    assert 'spine coaching brief could not be appended' in out
+
+
+def test_parse_response_spine_handles_fenced_json():
+    """Tier-2 fallback: ```json {...} ``` wrapper must still parse."""
+    from storyforge.scoring_story_power import _parse_response_spine
+    payload = json.dumps(_spine_payload())
+    text = f'Here is the spine score:\n\n```json\n{payload}\n```\n'
+    parsed = _parse_response_spine(text)
+    assert parsed is not None
+    assert isinstance(parsed['per_event'], list)
+    assert isinstance(parsed['whole_spine'], list)
+
+
+def test_parse_response_spine_handles_greedy_extraction():
+    """Tier-3 fallback: JSON embedded in prose with no fences."""
+    from storyforge.scoring_story_power import _parse_response_spine
+    payload = json.dumps(_spine_payload())
+    text = f'Here is my analysis. {payload} Done.'
+    parsed = _parse_response_spine(text)
+    assert parsed is not None
+
+
+def test_parse_response_spine_warns_when_list_is_missing(capsys):
+    """If JSON parses but per_event or whole_spine isn't a list, the
+    shape-failure WARNING fires naming the missing key."""
+    from storyforge.scoring_story_power import _parse_response_spine
+    bad = json.dumps({'per_event': []})  # whole_spine missing
+    parsed = _parse_response_spine(bad)
+    assert parsed is None
+    out = capsys.readouterr().out
+    assert 'whole_spine' in out
+
+
+def test_extract_per_event_scores_drops_malformed(capsys):
+    """Drop paths: non-dict event row, unknown event_id, non-dict score
+    row, unknown axis, non-int score, out-of-range score. Logs INFO
+    naming the drops."""
+    from storyforge.scoring_story_power import _extract_per_event_scores
+    parsed = {
+        'per_event': [
+            'not a dict',                                # non-dict row
+            {'event_id': 'unknown-id', 'scores': []},    # unknown event
+            {'event_id': 'ev-a', 'scores': [
+                'not a dict',                            # non-dict score row
+                {'axis': 'made_up', 'score': 8},         # unknown axis
+                {'axis': 'concreteness', 'score': 'h'},  # non-int
+                {'axis': 'function_alignment', 'score': 15},  # out-of-range
+                {'axis': 'function_alignment', 'score': 7},   # valid, kept
+            ]},
+        ],
+    }
+    out = _extract_per_event_scores(parsed, ['ev-a'])
+    assert out == {'ev-a': {'function_alignment': 7}}
+    info = capsys.readouterr().out
+    assert 'per-event extraction dropped' in info
+
+
+def test_extract_whole_spine_scores_drops_malformed(capsys):
+    """Same drop pattern for whole-spine extraction."""
+    from storyforge.scoring_story_power import _extract_whole_spine_scores
+    parsed = {
+        'whole_spine': [
+            'not a dict',
+            {'axis': 'made_up_axis', 'score': 7},
+            {'axis': 'arc_visibility', 'score': 'low'},
+            {'axis': 'arc_visibility', 'score': 0},
+            {'axis': 'arc_visibility', 'score': 8},
+        ],
+    }
+    out = _extract_whole_spine_scores(parsed)
+    assert out == {'arc_visibility': 8}
+    info = capsys.readouterr().out
+    assert 'whole-spine extraction dropped' in info
+
+
+def test_parse_spine_warns_on_blank_required_field(tmp_path, capsys):
+    """A row with blank id or blank summary must surface a WARNING —
+    not silently drop the event."""
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'spine.csv'), 'w') as f:
+        f.write(
+            'id|seq|title|function|summary\n'
+            'ev-a|1|A|inciting incident|first.\n'
+            '|2|Untitled|midpoint reversal|paragraph with blank id.\n'
+            'ev-c|3|C|climax|\n'
+        )
+    from storyforge.scoring_story_power import parse_spine
+    events = parse_spine(str(tmp_path))
+    assert [e.id for e in events] == ['ev-a']
+    out = capsys.readouterr().out
+    assert 'missing required field' in out
+    assert 'id' in out
+    assert 'summary' in out
+
+
+def test_spine_csv_header_columns(tmp_path, monkeypatch):
+    """per-event-matrix.csv header must match
+    event_id|function|function_alignment|concreteness|causal_handoff."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _triple_mock_llm(_full_payload(), _act_shape_payload(),
+                              _spine_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    matrix = open(os.path.join(result['output_dir'],
+                                'per-event-matrix.csv')).read()
+    header = matrix.splitlines()[0]
+    assert header == 'event_id|function|function_alignment|concreteness|causal_handoff'
+
+
+def test_whole_spine_csv_weight_column_reflects_axes(tmp_path, monkeypatch):
+    """whole-spine-axes.csv's weight column must match SPINE_AXES."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _triple_mock_llm(_full_payload(), _act_shape_payload(),
+                              _spine_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    from storyforge.scoring_story_power import SPINE_AXES
+    csv = open(os.path.join(result['output_dir'],
+                              'whole-spine-axes.csv')).read()
+    lines = csv.splitlines()
+    weight_by_axis_key = {a.key: str(a.weight) for a in SPINE_AXES}
+    header = lines[0].split('|')
+    axis_col = header.index('axis')
+    weight_col = header.index('weight')
+    for line in lines[1:]:
+        cells = line.split('|')
+        assert cells[weight_col] == weight_by_axis_key[cells[axis_col]]
+
+
+def test_proposed_fix_renders_all_five_fields_in_diagnostic(tmp_path,
+                                                              monkeypatch):
+    """diagnostic.md must surface target_handoff, target_event_id,
+    current_summary_tail, proposed_clause, AND expected_lift."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _triple_mock_llm(_full_payload(), _act_shape_payload(),
+                              _spine_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    diag = open(os.path.join(result['output_dir'], 'diagnostic.md')).read()
+    # All five proposed_fix fields from the _spine_payload baseline.
+    assert 'ev-discovery -> ev-climax' in diag           # target_handoff
+    assert 'ev-discovery' in diag                          # target_event_id
+    assert 'is unmaking memory' in diag                    # current_summary_tail
+    assert 'refuse the portrait commission' in diag        # proposed_clause
+    assert 'causal_handoff: 6 → 8' in diag                 # expected_lift
+
+
+def test_spine_independent_prompt_contains_no_act_shape_fallback(tmp_path,
+                                                                   monkeypatch):
+    """When act-shape is empty, the spine prompt must include the
+    fallback instruction telling the LLM to score
+    spine_act_shape_alignment as N/A. Capture the prompt to verify."""
+    yml = os.path.join(str(tmp_path), 'storyforge.yaml')
+    with open(yml, 'w') as f:
+        f.write('project:\n  title: T\n  medium: novel\n  coaching_level: full\n')
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'story-summary.md'), 'w') as f:
+        f.write('# Story summary\n\n## Logline\n\nL.\n\n## Synopsis\n\nS.\n\n'
+                '## Act-shape\n\n## Theme\n\nT.\n')
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    captured = {'spine_prompt': None}
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-spine' in log_file:
+            captured['spine_prompt'] = prompt
+            payload = _spine_payload()
+        else:
+            payload = _full_payload()
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert captured['spine_prompt'] is not None
+    assert 'no act-shape populated' in captured['spine_prompt']
+    assert 'spine_act_shape_alignment' in captured['spine_prompt']
+
+
+def test_strict_mode_spine_without_act_shape(tmp_path, monkeypatch):
+    """Strict mode with spine.csv but no act-shape: checklist includes
+    spine tier but omits the per-act / structural tiers."""
+    yml = os.path.join(str(tmp_path), 'storyforge.yaml')
+    with open(yml, 'w') as f:
+        f.write('project:\n  title: T\n  medium: novel\n  coaching_level: strict\n')
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'story-summary.md'), 'w') as f:
+        f.write('# Story summary\n\n## Logline\n\nL.\n\n## Synopsis\n\nS.\n\n'
+                '## Act-shape\n\n## Theme\n\nT.\n')
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge.scoring_story_power import score_story_power
+    result = score_story_power(str(tmp_path), 'strict')
+    text = open(os.path.join(result['output_dir'],
+                              'self-scoring-checklist.md')).read()
+    assert 'Spine tier' in text
+    assert 'Act-shape tier' not in text
+    assert 'Cross-act structural axes' not in text
+
+
+def test_function_concreteness_floor_returns_literal_seven_or_eight():
+    """The return annotation is Literal[7, 8]; verify both literals
+    are reachable from real-world function strings."""
+    from storyforge.scoring_story_power import function_concreteness_floor
+    sevens = ['midpoint reversal', 'climactic revelation',
+              'pinpoint discovery', 'inciting recognition']
+    eights = ['inciting incident', 'climax setup', 'Act 2 closer',
+              'resolution', 'denouement', 'custom function']
+    for f in sevens:
+        assert function_concreteness_floor(f) == 7, f
+    for f in eights:
+        assert function_concreteness_floor(f) == 8, f
+
+
+def test_function_concreteness_floor_conceptual_wins_on_mixed_keywords():
+    """A function containing both a conceptual and a concrete keyword
+    takes the conceptual floor (7). Pins the precedence so a future
+    ordering change is loud."""
+    from storyforge.scoring_story_power import function_concreteness_floor
+    assert function_concreteness_floor('discovery during midpoint reversal') == 7
+    assert function_concreteness_floor('revelation at the climax') == 7
+
+
+def test_identify_weak_handoffs_single_event_spine():
+    """A spine with one event has no handoffs — returns ([], []) cleanly."""
+    from storyforge.scoring_story_power import (
+        _identify_weak_handoffs, SpineEvent,
+    )
+    events = [SpineEvent('only', 'O', 'so', 'climax')]
+    per_event = {'only': {'causal_handoff': 5}}  # would be weak if there were a next
+    weak, skipped = _identify_weak_handoffs(events, per_event)
+    assert weak == []
+    assert skipped == []
+
+
+def test_llm_includes_final_event_causal_handoff_does_not_crash(tmp_path,
+                                                                  monkeypatch):
+    """If the LLM violates the prompt instruction and includes a
+    causal_handoff for the final event, the extractor accepts it and
+    _identify_weak_handoffs doesn't crash (final event isn't iterated)."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    spine_payload = _spine_payload()
+    # Add a causal_handoff to ev-fracture (the final event).
+    for row in spine_payload['per_event']:
+        if row['event_id'] == 'ev-fracture':
+            row['scores'].append({
+                'axis': 'causal_handoff', 'score': 5,
+                'rationale': 'LLM violated prompt instruction',
+            })
+    fake = _triple_mock_llm(_full_payload(), _act_shape_payload(),
+                              spine_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result['spine']
+    assert ext is not None
+    # Score is accepted (not rejected).
+    assert ext['per_event_scores']['ev-fracture'].get('causal_handoff') == 5
+    # No weak-handoff entry naming ev-fracture as upstream (no next event).
+    assert all(h['from_event'] != 'ev-fracture' for h in ext['weak_handoffs'])
+
+
+def test_parse_spine_strips_whitespace(tmp_path):
+    """Trailing whitespace in cells must be stripped, not preserved."""
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    with open(os.path.join(ref, 'spine.csv'), 'w') as f:
+        f.write(
+            'id|seq|title|function|summary\n'
+            'ev-1 |1| Inciting | inciting incident |  A paragraph.  \n'
+        )
+    from storyforge.scoring_story_power import parse_spine
+    events = parse_spine(str(tmp_path))
+    assert events[0].id == 'ev-1'
+    assert events[0].title == 'Inciting'
+    assert events[0].function == 'inciting incident'
+    assert events[0].summary == 'A paragraph.'
+
+
+def test_missing_whole_spine_axes_path_partial_warning(tmp_path, monkeypatch,
+                                                        capsys):
+    """If the LLM drops one whole-spine axis, the partial WARN fires
+    naming the missing axis and overall status degrades to partial."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    spine_payload = _spine_payload()
+    # Drop arc_visibility from the whole_spine list.
+    spine_payload['whole_spine'] = [r for r in spine_payload['whole_spine']
+                                       if r['axis'] != 'arc_visibility']
+    fake = _triple_mock_llm(_full_payload(), _act_shape_payload(),
+                              spine_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out = capsys.readouterr().out
+    assert 'spine extraction partial' in out
+    assert 'arc_visibility' in out
+    assert result['spine']['status'] == 'partial'
+    assert result['status'] == 'partial'
+
+
+def test_triple_mock_llm_routes_to_all_three_payloads(tmp_path, monkeypatch):
+    """Defensive: assert the triple mock is actually routing to spine,
+    not silently returning pitch when the suffix key drifts. Counts
+    each route via a sentinel marker in each payload."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    seen: dict[str, int] = {'pitch': 0, 'act_shape': 0, 'spine': 0}
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-spine' in log_file:
+            seen['spine'] += 1
+            payload = _spine_payload()
+        elif '-act-shape' in log_file:
+            seen['act_shape'] += 1
+            payload = _act_shape_payload()
+        else:
+            seen['pitch'] += 1
+            payload = _full_payload()
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    # All three routes must have been hit. If the log-file naming on the
+    # implementation side drifts, this fails loudly instead of silently.
+    assert seen == {'pitch': 1, 'act_shape': 1, 'spine': 1}
+
