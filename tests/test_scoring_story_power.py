@@ -1762,6 +1762,29 @@ def test_weak_handoff_act_bridge_detection():
     assert by_from['b']['is_act_bridge'] is True
 
 
+def test_spine_extension_status_ok_implies_non_empty_scores(tmp_path, monkeypatch):
+    """Invariant: if SpineExtension status == 'ok', per_event_scores AND
+    whole_spine_scores must be non-empty. The arithmetic that enforces
+    this lives in the missing-count calculation in _run_spine_extension
+    — easy to break in a "performance tweak" refactor that short-circuits
+    on LLM failure. Pin it."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _triple_mock_llm(_full_payload(), _act_shape_payload(),
+                              _spine_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result['spine']
+    assert ext is not None
+    if ext['status'] == 'ok':
+        assert ext['per_event_scores']
+        assert ext['whole_spine_scores']
+
+
 def test_identify_weak_handoffs_surfaces_skipped_transitions():
     """When the upstream's causal_handoff score is missing (LLM omitted
     the row), the transition is skipped rather than silently treated

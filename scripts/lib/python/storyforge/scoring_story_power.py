@@ -72,14 +72,44 @@ class WeakHandoff(TypedDict):
     is_act_bridge: bool
 
 
+class WholeSpineScores(TypedDict, total=False):
+    """Closed-key Layer 2 axis scores. total=False because partial
+    extraction is acceptable (missing axes surface in the partial-WARN)."""
+    function_coverage: int
+    escalation_curve: int
+    arc_visibility: int
+    thematic_distribution: int
+    spine_act_shape_alignment: int
+
+
+class SpineDiagnostic(TypedDict, total=False):
+    """LLM-provided cross-axis pattern + high-leverage move at the spine
+    resolution. total=False because the LLM may omit fields."""
+    lowest_axis: str
+    lowest_axis_average: str   # the LLM returns this as a decimal string
+    summary: str
+    high_leverage_move: str
+
+
+class ProposedFix(TypedDict, total=False):
+    """One concrete clause-level bridge for the highest-leverage weak
+    handoff. target_handoff is the 'from -> to' string; proposed_clause
+    is the additive fragment to splice onto the upstream summary."""
+    target_event_id: str
+    target_handoff: str
+    current_summary_tail: str
+    proposed_clause: str
+    expected_lift: str
+
+
 class SpineExtension(TypedDict):
     """Spine-mode payload (per-event + whole-spine scores, weak-handoff
     list, and the LLM's proposed clause-level fix)."""
     per_event_scores: dict[str, dict[str, int]]
-    whole_spine_scores: dict[str, int]
-    spine_diagnostic: dict
+    whole_spine_scores: WholeSpineScores
+    spine_diagnostic: SpineDiagnostic
     weak_handoffs: list[WeakHandoff]
-    proposed_fix: dict
+    proposed_fix: ProposedFix
     status: StoryPowerStatus
 
 
@@ -234,7 +264,7 @@ CONCEPTUAL_SHIFT_FUNCTION_KEYWORDS = (
 )
 
 
-def function_concreteness_floor(function_text: str) -> int:
+def function_concreteness_floor(function_text: str) -> Literal[7, 8]:
     """Return 7 for conceptual-shift functions, 8 otherwise."""
     f = (function_text or '').lower()
     if any(kw in f for kw in CONCEPTUAL_SHIFT_FUNCTION_KEYWORDS):
@@ -1890,9 +1920,9 @@ def _extract_per_event_scores(parsed: dict, event_ids: list[str]
     return out
 
 
-def _extract_whole_spine_scores(parsed: dict) -> dict[str, int]:
+def _extract_whole_spine_scores(parsed: dict) -> WholeSpineScores:
     """Pull {axis_key: score} from the whole-spine response."""
-    out: dict[str, int] = {}
+    out: WholeSpineScores = {}
     for row in parsed.get('whole_spine') or []:
         if not isinstance(row, dict):
             continue
@@ -1905,7 +1935,7 @@ def _extract_whole_spine_scores(parsed: dict) -> dict[str, int]:
             continue
         if not 1 <= score <= 10:
             continue
-        out[axis] = score
+        out[axis] = score  # type: ignore[literal-required]
     return out
 
 
