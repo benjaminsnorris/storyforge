@@ -495,9 +495,12 @@ craft tradition on scene-element alignment.
 The 1.5x weight reflects this axis's unique-and-load-bearing role
 at the architecture resolution. **No other artifact has structured
 fields**, so no other scoring mode can detect summary↔field drift.
-Field-coherence checks are heavily automatable: many cases are
-deterministic regex/keyword matches; the LLM refines and
-contextualizes the rest.
+A handful of field-coherence patterns are deterministic regex/keyword
+matches (turning-point named as recognition without a recognition
+verb in the summary; action_sequel='action' with no concrete action
+verbs; net-positive value_shift with rupture/loss language in the
+emotional_arc). The deterministic pre-pass catches those; the LLM
+refines and contextualizes the rest.
 
 ### Layer 2: five whole-architecture axes
 

@@ -159,10 +159,8 @@ class _ProposedSceneInsertionRequired(TypedDict):
 
 
 class ProposedSceneInsertion(_ProposedSceneInsertionRequired, total=False):
-    """A new sequel scene to deliver a spine bridge that no architecture
-    scene enacts. insert_after, proposed_id, and summary are required
-    (extractor drops rows missing any); the structured-craft fields and
-    rationale are LLM-optional."""
+    """A new sequel scene proposed to deliver a spine bridge that no
+    architecture scene enacts."""
     spine_event: str
     action_sequel: str
     emotional_arc: str
@@ -182,9 +180,8 @@ class ArchitectureDiagnostic(TypedDict, total=False):
 
 
 class ArchitectureExtension(TypedDict):
-    """Architecture-mode payload (per-scene scores, whole-architecture
-    scores, deterministic + LLM field findings, and the LLM's proposed
-    field updates and scene insertions)."""
+    """Architecture-mode payload (Layer 1 + Layer 2 scores, field
+    findings, and the LLM's proposed updates / insertions)."""
     per_scene_scores: dict[str, dict[str, int]]
     whole_architecture_scores: WholeArchitectureScores
     architecture_diagnostic: ArchitectureDiagnostic
@@ -359,18 +356,31 @@ assert len({a.key for a in PER_SCENE_AXES}) == len(PER_SCENE_AXES), (
 assert len({a.key for a in ARCHITECTURE_AXES}) == len(ARCHITECTURE_AXES), (
     'whole-architecture axis keys must be unique'
 )
-# No overlap across the six families so diagnostic routing can
-# identify an axis's family from its key alone.
-_ALL_AXIS_KEYS = (set(AXIS_KEYS) | set(STRUCTURAL_AXIS_KEYS)
-                  | set(PER_EVENT_AXIS_KEYS) | set(SPINE_AXIS_KEYS)
-                  | set(PER_SCENE_AXIS_KEYS) | set(ARCHITECTURE_AXIS_KEYS))
-assert (len(_ALL_AXIS_KEYS)
-        == len(AXIS_KEYS) + len(STRUCTURAL_AXIS_KEYS)
-        + len(PER_EVENT_AXIS_KEYS) + len(SPINE_AXIS_KEYS)
-        + len(PER_SCENE_AXIS_KEYS) + len(ARCHITECTURE_AXIS_KEYS)), (
-    'all six axis-key families (pitch, structural, per-event, '
-    'whole-spine, per-scene, whole-architecture) must be disjoint'
+# Diagnostic routing identifies an axis's family from its key alone,
+# which requires every family's keys to be disjoint. The data-driven
+# loop below adds a new family in one line and reports *which* key
+# collides between *which two* families on failure — no count math to
+# keep in sync with the family list.
+_AXIS_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ('pitch', AXIS_KEYS),
+    ('structural', STRUCTURAL_AXIS_KEYS),
+    ('per_event', PER_EVENT_AXIS_KEYS),
+    ('whole_spine', SPINE_AXIS_KEYS),
+    ('per_scene', PER_SCENE_AXIS_KEYS),
+    ('whole_architecture', ARCHITECTURE_AXIS_KEYS),
 )
+_axis_family_by_key: dict[str, str] = {}
+for _family, _keys in _AXIS_FAMILIES:
+    for _key in _keys:
+        if _key in _axis_family_by_key:
+            raise AssertionError(
+                f'axis key {_key!r} appears in both '
+                f'{_axis_family_by_key[_key]!r} and {_family!r} families; '
+                'diagnostic routing requires disjoint keys across all axis '
+                'families.'
+            )
+        _axis_family_by_key[_key] = _family
+del _family, _keys, _key
 
 
 # Function-class keywords for the function-appropriate concreteness
@@ -885,8 +895,6 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         if spine_extension['status'] != 'ok':
             status = 'partial'
 
-    # Architecture mode runs independently too — receives the spine
-    # events list for the spine_event_service axis (empty list is fine).
     architecture_scenes = parse_architecture(project_dir)
     architecture_extension: ArchitectureExtension | None = None
     if architecture_scenes:
@@ -1766,7 +1774,7 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
         out.extend([
             '# Architecture tier (per scene + whole-architecture)',
             '',
-            'Two axes per architecture scene (service, field coherence).',
+            'Two axes per architecture scene (spine-event service, field coherence).',
             '',
         ])
         for s in architecture_scenes:
@@ -2699,10 +2707,9 @@ def _append_spine_coaching_brief(output_dir: str,
 # Architecture extension (Layer 1 per-scene + Layer 2 whole-architecture)
 # ---------------------------------------------------------------------------
 
-# Word-boundary regexes used by the deterministic field-coherence
-# pre-pass when scanning the *summary* text for verbs that signal a
-# recognition or action beat. Stem-substring matching ('see' inside
-# 'seeks') silently swallowed false negatives in v1 of this pre-pass.
+# Word-boundary regexes used to scan the scene *summary* for verbs
+# of recognition or action — the deterministic pre-pass flags
+# turning_point/action_sequel labels whose summary contains none.
 _REVELATION_RE = re.compile(
     r'\b(?:realiz\w*|recogniz\w*|understand\w*|understood|'
     r'discover\w*|reveal\w*|sees?|saw|knows?|knew|'
@@ -2716,8 +2723,7 @@ _ACTION_RE = re.compile(
 
 
 def _empty_architecture_extension(status: StoryPowerStatus) -> ArchitectureExtension:
-    """Placeholder ArchitectureExtension for a failed run (mirrors
-    _empty_extension / _empty_spine_extension)."""
+    """Placeholder ArchitectureExtension for a failed run."""
     return {
         'status': status,
         'per_scene_scores': {},
@@ -2806,9 +2812,8 @@ def _check_field_coherence_deterministic(scene: SceneRow
 
 
 def _action_sequel_ratio(scenes: list[SceneRow]) -> tuple[int, int, float]:
-    """Return (action_count, sequel_count, action_ratio). Anything that
-    isn't a clear action/sequel classification counts as neither — the
-    rubric's whole-architecture axis weights against this honestly."""
+    """Return (action_count, sequel_count, action_ratio). Values not
+    starting with 'action'/'sequel' count as neither."""
     action = sum(1 for s in scenes
                  if s.action_sequel.strip().lower().startswith('action'))
     sequel = sum(1 for s in scenes
@@ -3119,9 +3124,8 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
     Returns an ArchitectureExtension; status carries the outcome. Pitch
     result still stands on any failure.
     """
-    # Deterministic pre-pass runs unconditionally — it costs no tokens
-    # and informs the LLM call. Even if the LLM call fails, the
-    # findings are preserved in the result.
+    # Pre-pass costs no tokens and seeds the LLM with high-confidence
+    # findings; preserved on the extension even if the LLM call fails.
     det_findings: list[FieldCoherenceFinding] = []
     for scene in scenes:
         det_findings.extend(_check_field_coherence_deterministic(scene))
@@ -3170,11 +3174,9 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
     proposed_updates = _extract_proposed_field_updates(parsed)
     proposed_inserts = _extract_proposed_scene_insertions(parsed)
 
-    # Merge deterministic + LLM findings, keeping deterministic first
-    # (they're higher-confidence; the LLM may corroborate or extend).
+    # Deterministic findings first — higher confidence; LLM may corroborate.
     field_findings = det_findings + llm_findings
 
-    # Empty-extraction floor mirrors spine/act-shape.
     empty_scenes = [sid for sid in scene_ids if not per_scene.get(sid)]
     has_any_per_scene = any(per_scene.get(sid) for sid in scene_ids)
     has_any_whole_arch = bool(whole_arch)
@@ -3254,16 +3256,34 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
     }
 
 
+def _log_extraction_drops(name: str, drops: list[str]) -> None:
+    """Emit one INFO line listing the first 5 drop reasons. The full
+    raw response is on disk; this is just the localization breadcrumb."""
+    if not drops:
+        return
+    shown = '; '.join(drops[:5])
+    suffix = f' (and {len(drops) - 5} more)' if len(drops) > 5 else ''
+    log(f'INFO: {name} extraction dropped {len(drops)} row(s): {shown}{suffix}')
+
+
 def _extract_field_findings(parsed: dict) -> list[FieldCoherenceFinding]:
     """Pull LLM-provided field-coherence findings."""
     out: list[FieldCoherenceFinding] = []
+    drops: list[str] = []
     for row in parsed.get('field_findings') or []:
         if not isinstance(row, dict):
+            drops.append(f'non-dict row: {row!r}')
             continue
         scene_id = row.get('scene_id', '').strip()
         field = row.get('field', '').strip()
         issue = row.get('issue', '').strip()
-        if not (scene_id and field and issue):
+        missing = [name for name, val in
+                   (('scene_id', scene_id), ('field', field),
+                    ('issue', issue))
+                   if not val]
+        if missing:
+            drops.append(f'incomplete row (scene_id={scene_id!r}, '
+                         f'missing: {",".join(missing)})')
             continue
         raw_severity = row.get('severity', 'medium').strip().lower()
         severity: Severity = (
@@ -3276,19 +3296,28 @@ def _extract_field_findings(parsed: dict) -> list[FieldCoherenceFinding]:
             'issue': issue,
             'severity': severity,
         })
+    _log_extraction_drops('field_findings', drops)
     return out
 
 
 def _extract_proposed_field_updates(parsed: dict) -> list[ProposedFieldUpdate]:
     """Pull LLM-proposed field updates. Tolerant of missing optional fields."""
     out: list[ProposedFieldUpdate] = []
+    drops: list[str] = []
     for row in parsed.get('proposed_field_updates') or []:
         if not isinstance(row, dict):
+            drops.append(f'non-dict row: {row!r}')
             continue
         scene_id = row.get('scene_id', '').strip()
         field = row.get('field', '').strip()
         proposed_value = row.get('proposed_value', '').strip()
-        if not (scene_id and field and proposed_value):
+        missing = [name for name, val in
+                   (('scene_id', scene_id), ('field', field),
+                    ('proposed_value', proposed_value))
+                   if not val]
+        if missing:
+            drops.append(f'incomplete row (scene_id={scene_id!r}, '
+                         f'missing: {",".join(missing)})')
             continue
         out.append({
             'scene_id': scene_id,
@@ -3297,6 +3326,7 @@ def _extract_proposed_field_updates(parsed: dict) -> list[ProposedFieldUpdate]:
             'proposed_value': proposed_value,
             'rationale': row.get('rationale', '').strip(),
         })
+    _log_extraction_drops('proposed_field_updates', drops)
     return out
 
 
@@ -3304,13 +3334,21 @@ def _extract_proposed_scene_insertions(parsed: dict
                                          ) -> list[ProposedSceneInsertion]:
     """Pull LLM-proposed scene insertions."""
     out: list[ProposedSceneInsertion] = []
+    drops: list[str] = []
     for row in parsed.get('proposed_scene_insertions') or []:
         if not isinstance(row, dict):
+            drops.append(f'non-dict row: {row!r}')
             continue
         insert_after = row.get('insert_after', '').strip()
         proposed_id = row.get('proposed_id', '').strip()
         summary = row.get('summary', '').strip()
-        if not (insert_after and proposed_id and summary):
+        missing = [name for name, val in
+                   (('insert_after', insert_after),
+                    ('proposed_id', proposed_id), ('summary', summary))
+                   if not val]
+        if missing:
+            drops.append(f'incomplete row (proposed_id={proposed_id!r}, '
+                         f'missing: {",".join(missing)})')
             continue
         out.append({
             'insert_after': insert_after,
@@ -3324,6 +3362,7 @@ def _extract_proposed_scene_insertions(parsed: dict
             'summary': summary,
             'rationale': row.get('rationale', '').strip(),
         })
+    _log_extraction_drops('proposed_scene_insertions', drops)
     return out
 
 
