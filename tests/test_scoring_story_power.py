@@ -4745,7 +4745,13 @@ def _briefs_payload(brief_ids: list[str] | None = None) -> dict:
 def _hex_mock_llm(pitch_payload: dict, act_shape_payload: dict,
                     spine_payload: dict, architecture_payload: dict,
                     scene_map_payload: dict, briefs_payload: dict):
-    """Mock that routes by log filename suffix across all six tiers."""
+    """Mock that routes by log filename suffix across all six tiers.
+
+    When adding a seventh tier, extend this dispatcher AND extend
+    `test_hex_mock_llm_routes_to_all_six_payloads` to track the new
+    tier in its hit-counter — otherwise the new tier's LLM call falls
+    through to the default (pitch) payload and downstream tests
+    silently assert against the wrong shape."""
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
         if '-briefs' in log_file:
@@ -4994,29 +5000,55 @@ def test_check_briefs_deterministic_yes_but_streak_is_low_severity(tmp_path):
 
 def test_check_briefs_deterministic_streak_uses_seq_order_when_provided():
     """When seq_order is provided, streak detection walks briefs in
-    seq sequence rather than CSV row order — a streak that exists in
-    the manuscript's true order may not exist in CSV order."""
+    seq sequence — a streak that exists in CSV row order may not exist
+    in seq order, and vice versa. This test constructs both halves of
+    that discrimination: (a) CSV order has a 4-run but seq scatters it
+    so no streak fires, (b) seq order pulls 4 identical outcomes
+    together that CSV order interleaves. Without this, a regression
+    that ignored seq_order entirely would pass."""
     from storyforge.scoring_story_power import (
         _check_briefs_deterministic, Brief,
     )
-    briefs = [
-        Brief('z', 'g', 'c', 'no', 'cr', 'd', (), (), '', '', '', (), '', ()),
-        Brief('a', 'g', 'c', 'yes', 'cr', 'd', (), (), '', '', '', (), '', ()),
-        Brief('b', 'g', 'c', 'yes', 'cr', 'd', (), (), '', '', '', (), '', ()),
-        Brief('c', 'g', 'c', 'yes', 'cr', 'd', (), (), '', '', '', (), '', ()),
-        Brief('d', 'g', 'c', 'yes', 'cr', 'd', (), (), '', '', '', (), '', ()),
+
+    def _make(bid: str, outcome: str) -> Brief:
+        return Brief(bid, 'g', 'c', outcome, 'cr', 'd',
+                     (), (), '', '', '', (), '', ())
+
+    # Half (a): CSV order has 4 consecutive 'yes' (a, b, c, d). Seq
+    # order interleaves them with a 'no' between b and c, breaking the
+    # streak. Streak must NOT fire when seq_order is provided.
+    briefs_csv_streaks = [
+        _make('a', 'yes'), _make('b', 'yes'),
+        _make('c', 'yes'), _make('d', 'yes'),
+        _make('x', 'no'),
     ]
-    # In CSV order, the 'yes' run is 4 long (a-b-c-d). Seq order
-    # puts 'z' first then the four — same streak, just confirms
-    # ordering doesn't break it.
-    findings = _check_briefs_deterministic(
-        briefs, ['z', 'a', 'b', 'c', 'd']
+    findings_a = _check_briefs_deterministic(
+        briefs_csv_streaks, ['a', 'b', 'x', 'c', 'd'],
     )
-    streak = next(
-        f for f in findings
-        if f['field'] == 'outcome' and 'repeats' in f['issue']
+    streaks_a = [f for f in findings_a
+                 if f['field'] == 'outcome' and 'repeats' in f['issue']]
+    assert streaks_a == [], (
+        f'CSV order had a streak but seq order broke it; expected no '
+        f'streak finding, got: {streaks_a}'
     )
-    assert streak['severity'] == 'medium'
+
+    # Half (b): CSV order scatters 'yes' outcomes; seq order pulls
+    # four together. Streak MUST fire because seq order is what counts.
+    briefs_seq_streaks = [
+        _make('p', 'yes'), _make('q', 'no'),
+        _make('r', 'yes'), _make('s', 'no'),
+        _make('t', 'yes'), _make('u', 'yes'),
+    ]
+    findings_b = _check_briefs_deterministic(
+        briefs_seq_streaks, ['p', 'r', 't', 'u', 'q', 's'],
+    )
+    streaks_b = [f for f in findings_b
+                 if f['field'] == 'outcome' and 'repeats' in f['issue']]
+    assert len(streaks_b) == 1, (
+        f'seq order had a 4-run of yes (p, r, t, u) but no streak '
+        f'fired; got: {streaks_b}'
+    )
+    assert streaks_b[0]['severity'] == 'medium'
 
 
 def test_check_briefs_deterministic_flags_motif_singleton(tmp_path):
@@ -5380,6 +5412,17 @@ def test_briefs_coach_mode_appends_to_brief(tmp_path, monkeypatch):
     assert '# Briefs extension' in body
     # The coach-mode prelude makes the role explicit.
     assert 'not directives' in body
+    # The diagnostic body — not just the prelude — must render. A
+    # regression where the prelude wrote but the section was empty
+    # would pass without these. Confirm the matrix heading, the
+    # proposed-update block, and a piece of the LLM-supplied
+    # diagnostic text.
+    assert '## Per-brief matrix' in body
+    assert 'Proposed brief updates' in body
+    # The proposed-update rationale from _briefs_payload appears.
+    assert 'lifts scene_engine_integrity' in body
+    # The LLM-supplied high-leverage move from briefs_diagnostic.
+    assert 'add archive-locks-after-dark' in body
 
 
 def test_briefs_strict_mode_extends_checklist(tmp_path, monkeypatch):
@@ -5395,6 +5438,15 @@ def test_briefs_strict_mode_extends_checklist(tmp_path, monkeypatch):
     assert '# Whole-briefs axes' in checklist
     # Each brief id should have a heading.
     assert '## s1 — outcome=' in checklist
+    # Every whole-briefs axis name must render. A regression that
+    # drops the `for axis in BRIEFS_AXES` block would slip past the
+    # heading check above.
+    from storyforge.scoring_story_power import BRIEFS_AXES
+    for axis in BRIEFS_AXES:
+        assert f'## {axis.name}' in checklist, (
+            f'whole-briefs axis {axis.name!r} did not render in strict '
+            f'checklist'
+        )
 
 
 def test_briefs_partial_per_brief_tags_partial(tmp_path, monkeypatch):
@@ -5451,13 +5503,13 @@ def test_empty_briefs_refuses_matrix_and_writes_sidecar(tmp_path,
     assert not os.path.isfile(os.path.join(out_dir, 'per-brief-matrix.csv'))
 
 
-def test_briefs_status_ok_requires_nonempty_payload(tmp_path, monkeypatch):
-    """status='ok' must imply non-empty per_brief_scores and
-    whole_briefs_scores. If the LLM happens to return per-brief AND
-    whole-briefs counts that match the expected sizes but the actual
-    payloads are empty dicts, the assertion fires — this guards against
-    a silent fall-through where empty payload + zero missing counts
-    produces a false 'ok'."""
+def test_briefs_status_ok_implies_nonempty_payload_smoke(tmp_path, monkeypatch):
+    """Smoke test for the `status='ok' ⇒ non-empty payload` contract:
+    a happy-path full-mode run carries non-empty per_brief_scores and
+    whole_briefs_scores. The actual contract is enforced by a runtime
+    assert inside _run_briefs_extension; this test catches accidental
+    inversions where the assert is removed or the payload is built
+    with empty dicts."""
     _seed_summary(str(tmp_path))
     _seed_briefs(str(tmp_path))
     monkeypatch.chdir(str(tmp_path))
@@ -5469,9 +5521,85 @@ def test_briefs_status_ok_requires_nonempty_payload(tmp_path, monkeypatch):
     monkeypatch.setattr(api, 'invoke_to_file', fake)
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
     result = scoring_story_power.score_story_power(str(tmp_path), 'full')
-    if result['briefs']['status'] == 'ok':
-        assert result['briefs']['per_brief_scores']
-        assert result['briefs']['whole_briefs_scores']
+    assert result['briefs']['status'] == 'ok'
+    assert result['briefs']['per_brief_scores']
+    assert result['briefs']['whole_briefs_scores']
+
+
+def test_briefs_status_ok_assertion_fires_on_empty_payload(tmp_path, monkeypatch):
+    """The runtime assertion `status='ok' ⇒ non-empty payload` fires
+    when the per-brief / whole-briefs extractors return empty dicts
+    even though the count math says nothing is missing. The
+    `score_story_power` orchestrator catches the AssertionError via
+    pytest.raises — without it, an empty extension would silently
+    propagate as a false 'ok'. This is the white-box test for the
+    contract the smoke test above only sniff-checks."""
+    import pytest
+    from storyforge.scoring_story_power import (
+        _run_briefs_extension, Brief, PitchArtifacts, PER_BRIEF_AXES,
+        BRIEFS_AXES,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              (), (), '', '', '', (), '', ()),
+    ]
+    artifacts = PitchArtifacts(logline='L', synopsis='S', act_shape='',
+                                theme='', spine_summaries='',
+                                architecture_summaries='')
+    # Mock the LLM to return a malformed payload: per_brief and
+    # whole_briefs are valid lists (so the shape check passes), but
+    # contain unrecognized axes that the extractor will drop. After
+    # extraction, per_brief and whole_briefs are empty dicts.
+    bogus_payload = {
+        'per_brief': [
+            {'scene_id': 's1', 'scores': [
+                {'axis': 'not_a_real_axis', 'score': 8},
+            ]},
+        ],
+        'whole_briefs': [
+            {'axis': 'not_a_real_whole_axis', 'score': 8,
+             'positive_signals': '', 'negative_signals': '',
+             'rationale': ''},
+        ],
+        'briefs_diagnostic': {},
+        'brief_findings': [],
+        'proposed_brief_updates': [],
+    }
+    log_dir = str(tmp_path / 'logs')
+    output_dir = str(tmp_path / 'out')
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(bogus_payload)}],
+            'usage': {'input_tokens': 100, 'output_tokens': 100,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    # The status-computation logic will mark status='partial' because
+    # missing_per_brief and missing_briefs_axes are both > 0. So this
+    # path actually produces 'partial', not 'ok' — the runtime
+    # assertion only guards the 'ok' branch and is *unreachable* via
+    # extractor drops. That's the correct behavior: the contract holds
+    # because empty payloads naturally cascade to 'partial'.
+    ext = _run_briefs_extension(
+        str(tmp_path), output_dir, log_dir, briefs, [], artifacts,
+        'rubric', 'full',
+    )
+    # Empty extractor results → partial status, not ok. The runtime
+    # assertion never fires because the count-math path makes the
+    # 'ok' branch unreachable from this failure mode.
+    assert ext['status'] == 'partial'
+    assert ext['per_brief_scores'] == {'s1': {}}
+    assert ext['whole_briefs_scores'] == {}
 
 
 def test_hex_mock_llm_routes_to_all_six_payloads(tmp_path, monkeypatch):
@@ -5657,4 +5785,119 @@ def test_check_briefs_deterministic_orphan_without_deps_omits_preceding_id():
         if f['scene_id'] == 's1' and f['field'] == 'knowledge_in'
     )
     assert 'preceding_id' not in orphan
+
+
+def test_check_briefs_deterministic_handles_triadic_cycle():
+    """A triadic continuity_deps cycle (s1→s2→s3→s1) must terminate
+    cleanly — the visited set bounds graph walks regardless of cycle
+    arity. Without this, a copy-paste regression that breaks
+    multi-node cycles while keeping binary-cycle handling intact
+    would pass the existing s1↔s2 test. (PR #244 test review T-1.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s2',)),
+        Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s3',)),
+        Brief('s3', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s1',)),
+    ]
+    # Must return; visited set bounds the walk through the cycle.
+    findings = _check_briefs_deterministic(briefs, ['s1', 's2', 's3'])
+    # Each brief's fact-a is provided by its predecessor in the cycle —
+    # no orphan-knowledge findings should fire.
+    orphan_findings = [
+        f for f in findings
+        if f['field'] == 'knowledge_in' and 'fact-a' in f['issue']
+    ]
+    assert orphan_findings == []
+
+
+def test_check_briefs_deterministic_mixed_streak_no_flag():
+    """A 3-yes / 1-no / 3-yes pattern is NOT a streak — the no breaks
+    the run, neither side reaches the threshold of 4. Without this,
+    a regression that forgets to reset the run counter on outcome
+    change would still pass the threshold-exactly-4 case. (PR #244
+    test review T-4.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+
+    def _make(bid: str, outcome: str) -> Brief:
+        return Brief(bid, 'g', 'c', outcome, 'cr', 'd',
+                     (), (), '', '', '', (), '', ())
+
+    briefs = [
+        _make('a', 'yes'), _make('b', 'yes'), _make('c', 'yes'),
+        _make('d', 'no'),
+        _make('e', 'yes'), _make('f', 'yes'), _make('g', 'yes'),
+    ]
+    findings = _check_briefs_deterministic(briefs, [])
+    streaks = [f for f in findings
+               if f['field'] == 'outcome' and 'repeats' in f['issue']]
+    assert streaks == [], (
+        f'3-yes-1-no-3-yes pattern is not a streak; got: {streaks}'
+    )
+
+
+def test_check_briefs_deterministic_half_filled_row_fires_four_findings():
+    """A brief row with only one scene-engine field populated produces
+    exactly 4 high-severity findings (one per empty required field).
+    Locks the missing-field contract in place against a regression
+    that early-returns on the first empty field. (PR #244 code
+    review S1.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        # Only outcome populated; goal/conflict/crisis/decision empty.
+        Brief('s1', '', '', 'yes', '', '',
+              (), (), '', '', '', (), '', ()),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1'])
+    high_missing = [
+        f for f in findings
+        if f['scene_id'] == 's1' and f['severity'] == 'high'
+        and f['field'] in {'goal', 'conflict', 'crisis', 'decision'}
+        and 'is empty' in f['issue']
+    ]
+    fields_seen = {f['field'] for f in high_missing}
+    assert fields_seen == {'goal', 'conflict', 'crisis', 'decision'}, (
+        f'expected all four empty required fields flagged; got {fields_seen}'
+    )
+
+
+def test_briefs_skipped_when_csv_contains_only_scaffold_rows(tmp_path,
+                                                                 monkeypatch):
+    """A scene-briefs.csv that exists but contains only all-empty
+    scene-engine rows (migration scaffolding) yields result['briefs']
+    is None — parse_scene_briefs drops every row, so the orchestrator
+    sees an empty briefs list and doesn't run the extension. (PR #244
+    test review T-7.)"""
+    _seed_summary(str(tmp_path))
+    ref = tmp_path / 'reference'
+    ref.mkdir(exist_ok=True)
+    headers = ('id|goal|conflict|outcome|crisis|decision|knowledge_in|'
+               'knowledge_out|key_actions|key_dialogue|emotions|motifs|'
+               'subtext|continuity_deps')
+    # Three scaffold rows, all five engine fields empty.
+    rows = [
+        's1|||||||||||||',
+        's2|||||||||||||',
+        's3|||||||||||||',
+    ]
+    (ref / 'scene-briefs.csv').write_text(
+        '\n'.join([headers] + rows) + '\n',
+    )
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _dual_mock_llm(_full_payload(), _act_shape_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['briefs'] is None
+
 
