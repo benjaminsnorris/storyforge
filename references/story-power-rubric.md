@@ -241,7 +241,10 @@ its own axes.
 
 Spine mode is **independent of act-shape mode**. Both can run in
 either order on the same artifacts; the spine's findings can drive
-architecture revisions without requiring act-shape to be present.
+architecture revisions without requiring act-shape to be present. The
+one act-shape coupling is the `spine_act_shape_alignment` Layer 2
+axis, which scores N/A (and the LLM is instructed to mark it so) when
+act-shape is empty.
 
 ### Layer 1: per-event 3-axis matrix
 
@@ -379,7 +382,7 @@ Spine mode's diagnostic must propose **specific clause-level fixes**,
 not just identify weak axes. For the highest-leverage weak handoff,
 the LLM proposes a one-clause bridge the author could add to the
 upstream event's summary. The Ashes example below shows the pattern:
-a 5-10 word addition lifted the causal handoff average from 7.4 to
+a 5-15 word addition lifted the causal handoff average from 7.4 to
 8.4 across the spine.
 
 ### Spine mode output
@@ -427,7 +430,7 @@ Four transitions below the 8-threshold (the three at 7, plus the one
 at 6). Highest-leverage move: add a one-clause causal bridge to
 ev-failed-portraits.
 
-**Post-fix scoring** after three ~5-10-word bridges:
+**Post-fix scoring** after three short (5-15 word) bridges:
 
 | | Was | Now |
 |---|---|---|

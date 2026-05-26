@@ -64,10 +64,8 @@ class ActShapeExtension(TypedDict):
 
 
 class WeakHandoff(TypedDict):
-    """A flagged causal-handoff transition. from_event/to_event are
-    spine event ids; score is the causal_handoff axis score (1-10);
-    is_act_bridge marks transitions across act boundaries — diagnostic
-    surfaces these prominently since they're structurally load-bearing."""
+    """A flagged causal-handoff transition. is_act_bridge is a heuristic
+    (keyword match on the upstream's function — see _identify_weak_handoffs)."""
     from_event: str
     to_event: str
     score: int
@@ -75,15 +73,8 @@ class WeakHandoff(TypedDict):
 
 
 class SpineExtension(TypedDict):
-    """The spine-mode payload that lands when spine.csv is present.
-
-    per_event_scores is keyed by spine event id, each holding the three
-    Layer 1 axis scores. whole_spine_scores carries the five Layer 2
-    axes. weak_handoffs lists every below-threshold causal_handoff so
-    the diagnostic can surface them all (not just the worst). The
-    proposed_fix names a concrete one-clause bridge for the
-    highest-leverage weak handoff.
-    """
+    """Spine-mode payload (per-event + whole-spine scores, weak-handoff
+    list, and the LLM's proposed clause-level fix)."""
     per_event_scores: dict[str, dict[str, int]]
     whole_spine_scores: dict[str, int]
     spine_diagnostic: dict
@@ -203,9 +194,9 @@ PER_EVENT_AXES: tuple[Axis, ...] = (
 PER_EVENT_AXIS_KEYS = tuple(a.key for a in PER_EVENT_AXES)
 PER_EVENT_AXIS_BY_KEY = {a.key: a for a in PER_EVENT_AXES}
 
-# Whole-spine axes (spine Layer 2). Function coverage and escalation
-# curve are foundational; arc visibility, thematic distribution, and
-# spine↔act-shape alignment are the scaffold the others rest on.
+# Whole-spine axes (spine Layer 2). The 1.5x-weighted pair (function
+# coverage, escalation curve) is foundational; the other three are
+# descriptive — see rubric §"Whole-spine axes".
 SPINE_AXES: tuple[Axis, ...] = (
     Axis('function_coverage', 'Function coverage', 1.5),
     Axis('escalation_curve', 'Escalation curve', 1.5),
@@ -233,12 +224,10 @@ assert (len(_ALL_AXIS_KEYS)
 )
 
 
-# Function-class lookup for the function-appropriate concreteness floor.
-# Inherently-conceptual function names (midpoint reversal, revelations,
-# discoveries) earn a lower expected-concreteness floor than concrete-
-# event functions (inciting incidents, climaxes, resolutions). The LLM
-# prompt cites these classes so the score reflects function fit, not
-# absolute prose specificity.
+# Function-class keywords for the function-appropriate concreteness
+# floor. Quoted in the LLM prompt so the score reflects function fit,
+# not absolute prose specificity (see rubric §"Function-appropriate
+# floor").
 CONCEPTUAL_SHIFT_FUNCTION_KEYWORDS = (
     'midpoint reversal', 'reversal', 'revelation', 'recognition',
     'discovery', 'realization', 'epiphany', 'reveal',
@@ -246,13 +235,7 @@ CONCEPTUAL_SHIFT_FUNCTION_KEYWORDS = (
 
 
 def function_concreteness_floor(function_text: str) -> int:
-    """Return the minimum concreteness expectation (1-10) for a function.
-
-    Conceptual-shift functions (midpoint reversal, revelation, etc.)
-    earn a floor of 7 — at-ceiling for the function class. All other
-    functions (concrete events: inciting incident, climax, resolution,
-    turning points) earn a floor of 8.
-    """
+    """Return 7 for conceptual-shift functions, 8 otherwise."""
     f = (function_text or '').lower()
     if any(kw in f for kw in CONCEPTUAL_SHIFT_FUNCTION_KEYWORDS):
         return 7
@@ -260,9 +243,7 @@ def function_concreteness_floor(function_text: str) -> int:
 
 
 class SpineEvent(NamedTuple):
-    """A single row from `reference/spine.csv`. Other columns (seq,
-    part, etc.) are read straight from the CSV when needed but the
-    scoring path only consumes these four."""
+    """A single row from reference/spine.csv (id, title, summary, function only)."""
     id: str
     title: str
     summary: str
@@ -346,13 +327,10 @@ def parse_act_shape(act_shape_body: str) -> ActShape | None:
 
 
 def parse_spine(project_dir: str) -> list[SpineEvent]:
-    """Read `reference/spine.csv` as an ordered list of SpineEvent.
+    """Read reference/spine.csv as an ordered list of SpineEvent.
 
-    Returns [] when the file is missing, empty, or has no `summary`
-    column. Order matches CSV row order (the existing scripts rely on
-    seq-ordered CSV writes; we trust the file's order rather than
-    re-sorting). Rows with a non-int seq are still included if the
-    other fields are populated — sort happens at write time elsewhere.
+    Returns [] when the file is missing, empty, or lacks required
+    columns. Trusts CSV row order — callers write seq-sorted elsewhere.
     """
     csv_path = os.path.join(project_dir, 'reference', 'spine.csv')
     if not os.path.isfile(csv_path):
@@ -1757,9 +1735,7 @@ WEAK_HANDOFF_THRESHOLD = 8  # see rubric §"Weak-handoff threshold"
 
 
 def _empty_spine_extension(status: StoryPowerStatus) -> SpineExtension:
-    """Placeholder SpineExtension for a failed spine run. Same purpose
-    as _empty_extension for act-shape — keeps the result discriminator
-    consistent ("tried and failed" vs "never tried")."""
+    """Placeholder SpineExtension for a failed spine run (mirrors _empty_extension)."""
     return {
         'status': status,
         'per_event_scores': {},
@@ -1887,11 +1863,9 @@ quote the spine summaries. Return ONLY the JSON object.
 
 def _extract_per_event_scores(parsed: dict, event_ids: list[str]
                                 ) -> dict[str, dict[str, int]]:
-    """Pull {event_id: {axis_key: score}} from the spine response.
-
-    Tolerant in the same way _extract_per_act_scores is: drops malformed
-    rows, drops scores outside 1-10, drops unknown axes/events.
-    """
+    """Pull {event_id: {axis_key: score}} from the spine response,
+    dropping malformed / out-of-range / unknown rows (mirrors
+    _extract_per_act_scores)."""
     valid_ids = set(event_ids)
     out: dict[str, dict[str, int]] = {eid: {} for eid in event_ids}
     for ev_row in parsed.get('per_event') or []:
