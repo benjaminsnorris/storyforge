@@ -785,7 +785,9 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
             return _empty_result('strict', 'dry_run', output_dir=output_dir)
         os.makedirs(output_dir, exist_ok=True)
         spine_events = parse_spine(project_dir)
-        _write_strict_checklist(output_dir, artifacts, rubric, spine_events)
+        architecture_scenes = parse_architecture(project_dir)
+        _write_strict_checklist(output_dir, artifacts, rubric,
+                                  spine_events, architecture_scenes)
         return _empty_result('strict', 'ok', output_dir=output_dir)
 
     if dry_run:
@@ -858,12 +860,29 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         if spine_extension['status'] != 'ok':
             status = 'partial'
 
+    # Architecture mode runs independently too — receives the spine
+    # events list for the spine_event_service axis (empty list is fine).
+    architecture_scenes = parse_architecture(project_dir)
+    architecture_extension: ArchitectureExtension | None = None
+    if architecture_scenes:
+        register = read_project_register(project_dir)
+        log(f'Architecture detected ({len(architecture_scenes)} scenes, '
+            f'register={register}) — running per-scene matrix + '
+            'whole-architecture axes.')
+        architecture_extension = _run_architecture_extension(
+            project_dir, output_dir, log_dir, architecture_scenes,
+            spine_events, artifacts, register, rubric, coaching,
+        )
+        if architecture_extension['status'] != 'ok':
+            status = 'partial'
+
     return _result(
         coaching=coaching, status=status, output_dir=output_dir,
         composite=composite, scores=scores, deltas=deltas,
         diagnostic=parsed.get('diagnostic') or {},
         act_shape=act_shape_extension,
         spine=spine_extension,
+        architecture=architecture_extension,
     )
 
 
@@ -1612,15 +1631,14 @@ def _write_coach_brief(output_dir: str, scores: dict[str, int],
 def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                               rubric: str,
                               spine_events: list[SpineEvent] | None = None,
+                              architecture_scenes: list[SceneRow] | None = None,
                               ) -> None:
     """strict coaching: rule-based checklist of signals per axis, no LLM
-    call. Lists what to look for and a 'self-score 1-10' line the author
-    fills in by hand.
-
-    Extends with per-act + structural blanks when act-shape is populated,
-    and with per-event + whole-spine blanks when spine_events is non-empty,
-    so strict-mode authors get the same coverage the LLM modes produce
-    automatically.
+    call. Extends with per-act + structural blanks when act-shape is
+    populated, per-event + whole-spine blanks when spine.csv exists,
+    and per-scene + whole-architecture blanks when architecture.csv
+    exists — strict-mode authors get the same coverage the LLM modes
+    produce automatically.
     """
     md_path = os.path.join(output_dir, 'self-scoring-checklist.md')
     out: list[str] = [
@@ -1708,6 +1726,38 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                 f'Self-score (1-10): __',
                 '',
                 'Whole-spine signals you found:',
+                '- ',
+                '',
+            ])
+    if architecture_scenes:
+        out.extend([
+            '# Architecture tier (per scene + whole-architecture)',
+            '',
+            'Two axes per architecture scene (service, field coherence).',
+            '',
+        ])
+        for s in architecture_scenes:
+            out.extend([
+                f'## {s.id} — serves {s.spine_event or "(no spine event)"}',
+                '',
+            ])
+            for axis in PER_SCENE_AXES:
+                out.append(f'- {axis.name}: __')
+            out.append('')
+        out.extend([
+            '# Whole-architecture axes',
+            '',
+            'Five axes scored over the architecture as a whole (see the '
+            '"Architecture mode" section of the rubric for full signals).',
+            '',
+        ])
+        for axis in ARCHITECTURE_AXES:
+            out.extend([
+                f'## {axis.name} (weight {axis.weight})',
+                '',
+                f'Self-score (1-10): __',
+                '',
+                'Whole-architecture signals you found:',
                 '- ',
                 '',
             ])
