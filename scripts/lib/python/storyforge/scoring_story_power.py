@@ -262,16 +262,74 @@ class SceneMapExtension(TypedDict):
     status: StoryPowerStatus
 
 
+class WholeBriefsScores(TypedDict, total=False):
+    """Closed-key Layer 2 briefs axis scores."""
+    outcome_distribution: int
+    knowledge_flow_continuity: int
+    crisis_density: int
+    subtext_presence: int
+    motif_recurrence: int
+
+
+class _BriefFindingRequired(TypedDict):
+    scene_id: str
+    field: str
+    issue: str
+    severity: Severity
+
+
+class BriefFinding(_BriefFindingRequired, total=False):
+    """A brief-level problem flagged by the deterministic pre-pass or
+    the LLM. `preceding_id` is present only for orphan-knowledge findings
+    that pin a transitive ancestor (the scene where the fact should
+    have appeared in knowledge_out)."""
+    preceding_id: str
+
+
+class _ProposedBriefUpdateRequired(TypedDict):
+    scene_id: str
+    field: str
+    proposed_value: str
+
+
+class ProposedBriefUpdate(_ProposedBriefUpdateRequired, total=False):
+    """A concrete brief-field fix the diagnostic proposes. scene_id,
+    field, and proposed_value are required (extractor drops rows
+    missing any); current_value and rationale are LLM-optional."""
+    current_value: str
+    rationale: str
+
+
+class BriefsDiagnostic(TypedDict, total=False):
+    """LLM-provided cross-axis pattern at the briefs resolution."""
+    lowest_axis: str
+    lowest_axis_average: str
+    summary: str
+    scene_engine_assessment: str
+    high_leverage_move: str
+
+
+class BriefsExtension(TypedDict):
+    """Briefs-mode payload (Layer 1 + Layer 2 scores, brief findings,
+    and the LLM's proposed field updates)."""
+    per_brief_scores: dict[str, dict[str, int]]
+    whole_briefs_scores: WholeBriefsScores
+    briefs_diagnostic: BriefsDiagnostic
+    brief_findings: list[BriefFinding]
+    proposed_brief_updates: list[ProposedBriefUpdate]
+    status: StoryPowerStatus
+
+
 class StoryPowerResult(TypedDict):
     """Result of score_story_power. Coaching is the requested level; status
     is the outcome. Output_dir is the timestamped directory written to
     (empty string when no directory was allocated).
 
-    act_shape, spine, architecture, and scene_map are None when their
-    inputs weren't present (no `## Act-shape` populated, no spine.csv
-    on disk, no architecture.csv on disk, no scenes.csv on disk) or the
-    extension failed before producing usable data; otherwise they
-    carry the payload from each Layer 1/2 scoring run.
+    act_shape, spine, architecture, scene_map, and briefs are None when
+    their inputs weren't present (no `## Act-shape` populated, no
+    spine.csv / architecture.csv / scenes.csv / scene-briefs.csv on
+    disk) or the extension failed before producing usable data;
+    otherwise they carry the payload from each Layer 1/2 scoring run.
     """
     coaching: CoachingLevel
     status: StoryPowerStatus
@@ -285,6 +343,7 @@ class StoryPowerResult(TypedDict):
     spine: SpineExtension | None
     architecture: ArchitectureExtension | None
     scene_map: SceneMapExtension | None
+    briefs: BriefsExtension | None
 
 
 class Axis(NamedTuple):
@@ -458,6 +517,39 @@ assert len({a.key for a in MAP_AXES}) == len(MAP_AXES), (
     'whole-scene-map axis keys must be unique'
 )
 
+
+# Per-brief axes (briefs Layer 1). scene_engine_integrity is the
+# load-bearing axis — briefs exist to encode goal→conflict→outcome→
+# crisis→decision, and no other mode scores that chain.
+PER_BRIEF_AXES: tuple[Axis, ...] = (
+    Axis('scene_engine_integrity', 'Scene-engine integrity', 1.5),
+    Axis('concreteness_brief', 'Concreteness (brief)', 1.0),
+)
+PER_BRIEF_AXIS_KEYS = tuple(a.key for a in PER_BRIEF_AXES)
+PER_BRIEF_AXIS_BY_KEY = {a.key: a for a in PER_BRIEF_AXES}
+
+# Whole-briefs axes (briefs Layer 2). knowledge_flow_continuity is the
+# unique-and-load-bearing axis — only briefs track per-scene knowledge
+# state, so it's the only place where the fact-provenance graph can
+# be scored.
+BRIEFS_AXES: tuple[Axis, ...] = (
+    Axis('outcome_distribution', 'Outcome distribution', 1.5),
+    Axis('knowledge_flow_continuity', 'Knowledge-flow continuity', 1.5),
+    Axis('crisis_density', 'Crisis density', 1.0),
+    Axis('subtext_presence', 'Subtext presence', 1.0),
+    Axis('motif_recurrence', 'Motif recurrence', 1.0),
+)
+BRIEFS_AXIS_KEYS = tuple(a.key for a in BRIEFS_AXES)
+BRIEFS_AXIS_BY_KEY = {a.key: a for a in BRIEFS_AXES}
+
+assert len({a.key for a in PER_BRIEF_AXES}) == len(PER_BRIEF_AXES), (
+    'per-brief axis keys must be unique'
+)
+assert len({a.key for a in BRIEFS_AXES}) == len(BRIEFS_AXES), (
+    'whole-briefs axis keys must be unique'
+)
+
+
 # Diagnostic routing identifies an axis's family from its key alone,
 # which requires every family's keys to be disjoint. The data-driven
 # loop below adds a new family in one line and reports *which* key
@@ -472,6 +564,8 @@ _AXIS_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ('whole_architecture', ARCHITECTURE_AXIS_KEYS),
     ('per_map_scene', PER_MAP_SCENE_AXIS_KEYS),
     ('whole_scene_map', MAP_AXIS_KEYS),
+    ('per_brief', PER_BRIEF_AXIS_KEYS),
+    ('whole_briefs', BRIEFS_AXIS_KEYS),
 )
 _axis_family_by_key: dict[str, str] = {}
 for _family, _keys in _AXIS_FAMILIES:
@@ -526,6 +620,32 @@ class SceneRow(NamedTuple):
     value_at_stake: str
     value_shift: str
     turning_point: str
+
+
+VALID_BRIEF_OUTCOMES: frozenset[str] = frozenset({
+    'yes', 'no', 'yes-but', 'no-and',
+})
+
+
+class Brief(NamedTuple):
+    """A single row from reference/scene-briefs.csv carrying the columns
+    briefs scoring consumes. Array fields (knowledge_in, knowledge_out,
+    motifs, continuity_deps) are parsed from `;`-separated cells and
+    stored as tuples for hashability + immutability."""
+    id: str
+    goal: str
+    conflict: str
+    outcome: str
+    crisis: str
+    decision: str
+    knowledge_in: tuple[str, ...]
+    knowledge_out: tuple[str, ...]
+    key_actions: str
+    key_dialogue: str
+    emotions: str
+    motifs: tuple[str, ...]
+    subtext: str
+    continuity_deps: tuple[str, ...]
 
 
 class MappedScene(NamedTuple):
@@ -842,6 +962,91 @@ def parse_scene_map(project_dir: str) -> list[MappedScene]:
     return [r[2] for r in rows]
 
 
+def parse_scene_briefs(project_dir: str) -> list[Brief]:
+    """Read reference/scene-briefs.csv as a list of Brief in CSV order.
+
+    Returns [] when the file is missing, empty, or lacks the required
+    `id` column. Briefs with empty `id` are dropped with a WARNING.
+    Briefs with all five scene-engine fields empty are dropped with a
+    WARNING too — they're scaffolding rows from migration, not briefs.
+
+    Array fields (knowledge_in, knowledge_out, motifs, continuity_deps)
+    are split on `;`. Empty cells produce empty tuples.
+
+    Order in the returned list mirrors CSV row order. Callers that need
+    seq-ordering should align against scenes.csv.
+    """
+    csv_path = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    if not os.path.isfile(csv_path):
+        return []
+    try:
+        with open(csv_path, encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'WARNING: could not read {csv_path}: {e}')
+        return []
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return []
+    headers = lines[0].split('|')
+    if 'id' not in headers:
+        log(f'WARNING: scene-briefs.csv missing required column id; '
+            f'have {headers}. Skipping briefs mode.')
+        return []
+    out: list[Brief] = []
+    for i, line in enumerate(lines[1:], start=1):
+        cells = line.split('|')
+        if len(cells) != len(headers):
+            log(f'WARNING: skipping malformed scene-briefs.csv row {i} in '
+                f'{csv_path} ({len(cells)} cells, expected {len(headers)})')
+            continue
+        row = dict(zip(headers, cells))
+        brief_id = row.get('id', '').strip()
+        if not brief_id:
+            log(f'WARNING: scene-briefs.csv row {i} missing id; skipping.')
+            continue
+
+        def _arr(col: str) -> tuple[str, ...]:
+            cell = row.get(col, '').strip()
+            if not cell:
+                return ()
+            return tuple(s.strip() for s in cell.split(';') if s.strip())
+
+        engine_fields = (
+            row.get('goal', '').strip(),
+            row.get('conflict', '').strip(),
+            row.get('outcome', '').strip(),
+            row.get('crisis', '').strip(),
+            row.get('decision', '').strip(),
+        )
+        if not any(engine_fields):
+            # Migration scaffolding — empty placeholder row for a scene
+            # that hasn't been briefed yet. The deterministic pre-pass
+            # would otherwise emit five high-severity findings per row
+            # for the entire pre-briefed corpus.
+            log(f'INFO: scene-briefs.csv row {i} (id={brief_id}) has all '
+                'scene-engine fields empty; treating as pre-briefed and '
+                'skipping.')
+            continue
+        out.append(Brief(
+            id=brief_id,
+            goal=engine_fields[0],
+            conflict=engine_fields[1],
+            outcome=engine_fields[2],
+            crisis=engine_fields[3],
+            decision=engine_fields[4],
+            knowledge_in=_arr('knowledge_in'),
+            knowledge_out=_arr('knowledge_out'),
+            key_actions=row.get('key_actions', '').strip(),
+            key_dialogue=row.get('key_dialogue', '').strip(),
+            emotions=row.get('emotions', '').strip(),
+            motifs=_arr('motifs'),
+            subtext=row.get('subtext', '').strip(),
+            continuity_deps=_arr('continuity_deps'),
+        ))
+    return out
+
+
 def read_project_register(project_dir: str) -> Register:
     """Return the project's declared register from storyforge.yaml's
     `project.register` field. Defaults to 'balanced' when absent or
@@ -1031,9 +1236,10 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         spine_events = parse_spine(project_dir)
         architecture_scenes = parse_architecture(project_dir)
         scene_map_scenes = parse_scene_map(project_dir)
+        briefs = parse_scene_briefs(project_dir)
         _write_strict_checklist(output_dir, artifacts, rubric,
                                   spine_events, architecture_scenes,
-                                  scene_map_scenes)
+                                  scene_map_scenes, briefs)
         return _empty_result('strict', 'ok', output_dir=output_dir)
 
     if dry_run:
@@ -1132,6 +1338,18 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         if scene_map_extension['status'] != 'ok':
             status = 'partial'
 
+    briefs = parse_scene_briefs(project_dir)
+    briefs_extension: BriefsExtension | None = None
+    if briefs:
+        log(f'Briefs detected ({len(briefs)} briefed scenes) — running '
+            'per-brief matrix + whole-briefs axes.')
+        briefs_extension = _run_briefs_extension(
+            project_dir, output_dir, log_dir, briefs, scene_map_scenes,
+            artifacts, rubric, coaching,
+        )
+        if briefs_extension['status'] != 'ok':
+            status = 'partial'
+
     return _result(
         coaching=coaching, status=status, output_dir=output_dir,
         composite=composite, scores=scores, deltas=deltas,
@@ -1140,6 +1358,7 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         spine=spine_extension,
         architecture=architecture_extension,
         scene_map=scene_map_extension,
+        briefs=briefs_extension,
     )
 
 
@@ -1158,6 +1377,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
              spine: SpineExtension | None = None,
              architecture: ArchitectureExtension | None = None,
              scene_map: SceneMapExtension | None = None,
+             briefs: BriefsExtension | None = None,
              ) -> StoryPowerResult:
     return {
         'coaching': coaching,
@@ -1172,6 +1392,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
         'spine': spine,
         'architecture': architecture,
         'scene_map': scene_map,
+        'briefs': briefs,
     }
 
 
@@ -1900,11 +2121,12 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                               spine_events: list[SpineEvent] | None = None,
                               architecture_scenes: list[SceneRow] | None = None,
                               scene_map_scenes: list[MappedScene] | None = None,
+                              briefs: list[Brief] | None = None,
                               ) -> None:
     """strict coaching: rule-based checklist of signals per axis, no LLM
     call. Extends with blanks for each populated tier (act-shape,
-    spine, architecture, scene-map) so strict-mode authors get the
-    same coverage the LLM modes produce."""
+    spine, architecture, scene-map, briefs) so strict-mode authors get
+    the same coverage the LLM modes produce."""
     md_path = os.path.join(output_dir, 'self-scoring-checklist.md')
     out: list[str] = [
         '# Story-power scorecard — self-scoring checklist',
@@ -2057,6 +2279,38 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                 f'Self-score (1-10): __',
                 '',
                 'Whole-scene-map signals you found:',
+                '- ',
+                '',
+            ])
+    if briefs:
+        out.extend([
+            '# Briefs tier (per brief + whole-briefs)',
+            '',
+            'Two axes per brief (scene-engine integrity, concreteness).',
+            '',
+        ])
+        for b in briefs:
+            out.extend([
+                f'## {b.id} — outcome={b.outcome or "—"}',
+                '',
+            ])
+            for axis in PER_BRIEF_AXES:
+                out.append(f'- {axis.name}: __')
+            out.append('')
+        out.extend([
+            '# Whole-briefs axes',
+            '',
+            'Five axes scored over the briefs corpus as a whole (see the '
+            '"Briefs mode" section of the rubric for full signals).',
+            '',
+        ])
+        for axis in BRIEFS_AXES:
+            out.extend([
+                f'## {axis.name} (weight {axis.weight})',
+                '',
+                f'Self-score (1-10): __',
+                '',
+                'Whole-briefs signals you found:',
                 '- ',
                 '',
             ])
@@ -4606,6 +4860,829 @@ def _append_scene_map_coaching_brief(
         'Proposed scene operations are concrete structural moves, not '
         'directives — the author decides whether each merge/split/insert/'
         'reorder/promote is the right move at this stage.',
+        '',
+    ]
+    _safe_write(md_path,
+                existing + '\n' + '\n'.join(prelude + section) + '\n',
+                recover_hint=recover_hint)
+
+
+# ---------------------------------------------------------------------------
+# Briefs extension (Layer 1 per-brief + Layer 2 whole-briefs)
+# ---------------------------------------------------------------------------
+
+# Threshold: 4+ consecutive briefs with the same outcome enum is a streak.
+# Smaller windows fire on coincidence (any well-paced novel has runs of
+# `yes-but` outcomes during rising action); 4 is the band where the
+# repetition starts feeling monotonic.
+_OUTCOME_STREAK_LEN = 4
+
+
+def _empty_briefs_extension(status: StoryPowerStatus) -> BriefsExtension:
+    """Placeholder BriefsExtension for a failed run."""
+    return {
+        'per_brief_scores': {},
+        'whole_briefs_scores': {},
+        'briefs_diagnostic': {},
+        'brief_findings': [],
+        'proposed_brief_updates': [],
+        'status': status,
+    }
+
+
+def _check_briefs_deterministic(
+        briefs: list[Brief], seq_order: list[str],
+        ) -> list[BriefFinding]:
+    """Five high-confidence checks the briefs pre-pass runs against the
+    corpus:
+
+    1. Missing required scene-engine field (goal/conflict/outcome/
+       crisis/decision): high per missing field.
+    2. Invalid outcome enum: high.
+    3. Knowledge orphan: knowledge_in fact has no upstream knowledge_out
+       (walking continuity_deps transitively when present, falling back
+       to seq when not): medium.
+    4. Outcome streak of 4+ identical outcomes (by seq when both
+       briefs+scenes.csv exist, falling back to brief list order): medium
+       (low when the streak is `yes-but`).
+    5. Motif singleton (motif appears in exactly one brief): low.
+
+    seq_order is the ordered list of scene ids from scenes.csv; when
+    empty, brief-list order is used as the seq stand-in. The LLM seeds
+    its scoring with these findings.
+    """
+    findings: list[BriefFinding] = []
+    brief_by_id = {b.id: b for b in briefs}
+
+    for b in briefs:
+        for field_name, value in (
+            ('goal', b.goal), ('conflict', b.conflict),
+            ('outcome', b.outcome), ('crisis', b.crisis),
+            ('decision', b.decision),
+        ):
+            if not value:
+                findings.append({
+                    'scene_id': b.id,
+                    'field': field_name,
+                    'issue': f'required brief field {field_name!r} is empty',
+                    'severity': 'high',
+                })
+        if b.outcome and b.outcome not in VALID_BRIEF_OUTCOMES:
+            allowed = ', '.join(sorted(VALID_BRIEF_OUTCOMES))
+            findings.append({
+                'scene_id': b.id,
+                'field': 'outcome',
+                'issue': (
+                    f'outcome={b.outcome!r} not in valid set '
+                    f'({allowed})'
+                ),
+                'severity': 'high',
+            })
+
+    # Knowledge orphans: walk continuity_deps to gather ancestor
+    # knowledge_out; any knowledge_in fact not covered is an orphan.
+    for b in briefs:
+        if not b.knowledge_in:
+            continue
+        # Bounded BFS over continuity_deps to avoid pathological cycles.
+        ancestor_knowledge: set[str] = set()
+        ancestor_origin: dict[str, str] = {}  # fact → providing scene id
+        visited: set[str] = set()
+        stack = [b.id]
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            cb = brief_by_id.get(current)
+            if cb is None:
+                continue
+            if cb.id != b.id:
+                # Don't credit B's own knowledge_out as covering B's
+                # knowledge_in; a brief can't be its own source.
+                for fact in cb.knowledge_out:
+                    if fact and fact not in ancestor_origin:
+                        ancestor_origin[fact] = cb.id
+                        ancestor_knowledge.add(fact)
+            for dep in cb.continuity_deps:
+                if dep not in visited:
+                    stack.append(dep)
+        for fact in b.knowledge_in:
+            if not fact:
+                continue
+            if fact not in ancestor_knowledge:
+                findings.append({
+                    'scene_id': b.id,
+                    'field': 'knowledge_in',
+                    'issue': (
+                        f'knowledge_in fact {fact!r} has no upstream '
+                        'knowledge_out in any continuity_deps ancestor'
+                    ),
+                    'severity': 'medium',
+                })
+
+    # Outcome streak: order briefs by scene seq when possible.
+    if seq_order:
+        seq_index = {sid: i for i, sid in enumerate(seq_order)}
+        ordered = sorted(briefs, key=lambda b: seq_index.get(b.id, len(seq_order)))
+    else:
+        ordered = list(briefs)
+    streak_start = 0
+    while streak_start < len(ordered):
+        current_outcome = ordered[streak_start].outcome
+        if not current_outcome:
+            streak_start += 1
+            continue
+        end = streak_start + 1
+        while (end < len(ordered)
+               and ordered[end].outcome == current_outcome):
+            end += 1
+        run_len = end - streak_start
+        if run_len >= _OUTCOME_STREAK_LEN:
+            run_ids = [ordered[i].id for i in range(streak_start, end)]
+            severity: Severity = 'low' if current_outcome == 'yes-but' else 'medium'
+            findings.append({
+                'scene_id': run_ids[0],
+                'field': 'outcome',
+                'issue': (
+                    f'outcome={current_outcome!r} repeats for '
+                    f'{run_len} consecutive briefs ({", ".join(run_ids)})'
+                ),
+                'severity': severity,
+            })
+        streak_start = end
+
+    # Motif singletons.
+    motif_counts: dict[str, list[str]] = {}
+    for b in briefs:
+        for m in b.motifs:
+            motif_counts.setdefault(m, []).append(b.id)
+    for motif, scene_ids in motif_counts.items():
+        if len(scene_ids) == 1:
+            findings.append({
+                'scene_id': scene_ids[0],
+                'field': 'motifs',
+                'issue': (
+                    f'motif {motif!r} appears in only one brief — '
+                    'singleton motifs miss the recurrence craft surface'
+                ),
+                'severity': 'low',
+            })
+
+    return findings
+
+
+def _build_briefs_prompt(briefs: list[Brief],
+                           scene_seq: list[str],
+                           artifacts: PitchArtifacts,
+                           det_findings: list[BriefFinding],
+                           rubric: str) -> str:
+    """Assemble the briefs LLM prompt. Inlines deterministic findings as
+    ground-truth signal."""
+    per_axis_list = ', '.join(f'"{a.key}"' for a in PER_BRIEF_AXES)
+    briefs_axis_list = ', '.join(f'"{a.key}"' for a in BRIEFS_AXES)
+    # Render briefs in seq order when possible, otherwise CSV order.
+    if scene_seq:
+        seq_index = {sid: i for i, sid in enumerate(scene_seq)}
+        ordered = sorted(briefs,
+                         key=lambda b: seq_index.get(b.id, len(scene_seq)))
+    else:
+        ordered = briefs
+
+    def _arr_str(arr: tuple[str, ...]) -> str:
+        return '; '.join(arr) if arr else '—'
+
+    briefs_block = '\n\n'.join(
+        f'### {b.id}\n'
+        f'  goal: {b.goal or "—"}\n'
+        f'  conflict: {b.conflict or "—"}\n'
+        f'  outcome: {b.outcome or "—"}\n'
+        f'  crisis: {b.crisis or "—"}\n'
+        f'  decision: {b.decision or "—"}\n'
+        f'  knowledge_in: {_arr_str(b.knowledge_in)}\n'
+        f'  knowledge_out: {_arr_str(b.knowledge_out)}\n'
+        f'  key_actions: {b.key_actions or "—"}\n'
+        f'  key_dialogue: {b.key_dialogue or "—"}\n'
+        f'  emotions: {b.emotions or "—"}\n'
+        f'  motifs: {_arr_str(b.motifs)}\n'
+        f'  subtext: {b.subtext or "—"}\n'
+        f'  continuity_deps: {_arr_str(b.continuity_deps)}'
+        for b in ordered
+    )
+    if det_findings:
+        det_block = '\n'.join(
+            f'- {f["scene_id"]}.{f["field"]} [{f["severity"]}]: {f["issue"]}'
+            for f in det_findings
+        )
+    else:
+        det_block = '(no deterministic findings — score from the LLM-only pass)'
+    allowed_outcomes = ', '.join(sorted(VALID_BRIEF_OUTCOMES))
+
+    return f"""You are scoring the BRIEFS of a manuscript. A brief is the drafting
+contract for one scene: scene-engine fields (goal, conflict, outcome,
+crisis, decision), information state (knowledge_in / knowledge_out),
+execution beats (key_actions, key_dialogue, emotions, motifs, subtext),
+and scene-graph edges (continuity_deps).
+
+Your job:
+
+1. Per-brief Layer 1: score each brief on the two per-brief axes
+   (scene_engine_integrity, concreteness_brief).
+2. Whole-briefs Layer 2: score the corpus on the five whole-briefs
+   axes (outcome_distribution, knowledge_flow_continuity,
+   crisis_density, subtext_presence, motif_recurrence).
+3. Surface brief findings and propose SPECIFIC brief-field updates
+   (full proposed_value text, not vague critique).
+
+The deterministic pre-pass already flagged the findings below — treat
+these as ground-truth signal and seed scene_engine_integrity,
+knowledge_flow_continuity, and outcome_distribution scoring with them
+rather than re-discovering them.
+
+Valid outcome enum: {allowed_outcomes}.
+
+# Rubric
+
+{rubric}
+
+# Pitch context
+
+## Logline
+{artifacts.logline}
+
+## Synopsis
+{artifacts.synopsis}
+
+# Briefs under evaluation
+
+{briefs_block}
+
+# Deterministic brief findings (pre-pass)
+
+{det_block}
+
+# Task
+
+Valid per-brief axis keys: {per_axis_list}
+Valid whole-briefs axis keys: {briefs_axis_list}
+
+Return a JSON object with this exact shape:
+
+{{
+  "per_brief": [
+    {{
+      "scene_id": "<brief id>",
+      "scores": [
+        {{"axis": "{PER_BRIEF_AXES[0].key}", "score": 1-10 integer,
+          "rationale": "one-sentence justification"}},
+        ... one entry per per-brief axis ...
+      ]
+    }},
+    ... one entry per brief ...
+  ],
+  "whole_briefs": [
+    {{"axis": "{BRIEFS_AXES[0].key}",
+      "score": 1-10 integer,
+      "positive_signals": "semicolon-separated quoted signals",
+      "negative_signals": "semicolon-separated quoted gaps",
+      "rationale": "one-sentence justification"}},
+    ... one entry per whole-briefs axis ...
+  ],
+  "briefs_diagnostic": {{
+    "lowest_axis": "name of the lowest-scoring axis across both layers",
+    "lowest_axis_average": "the average on that axis as a decimal",
+    "summary": "one sentence: what the lowest axis tells you",
+    "scene_engine_assessment": "one sentence: how the briefs corpus encodes scene-engine integrity overall",
+    "high_leverage_move": "one sentence: ONE specific change that would lift the most ground"
+  }},
+  "brief_findings": [
+    {{"scene_id": "<id>",
+      "field": "goal|conflict|outcome|crisis|decision|knowledge_in|knowledge_out|emotions|subtext|motifs|...",
+      "issue": "what's wrong",
+      "severity": "high|medium|low"}}
+  ],
+  "proposed_brief_updates": [
+    {{"scene_id": "<id>",
+      "field": "<brief field name>",
+      "current_value": "<existing value or empty>",
+      "proposed_value": "<concrete replacement text the author can drop in>",
+      "rationale": "which axes this lifts, in 'axis: was → now' form"}}
+  ]
+}}
+
+Reserve 10 for prose-verified excellence. Be specific and grounded —
+quote the brief fields. The proposed updates are the most valuable
+output; treat them as concrete drafting contracts the author can
+literally paste into the CSV.
+Return ONLY the JSON object.
+"""
+
+
+def _extract_per_brief_scores(parsed: dict, brief_ids: list[str]
+                                 ) -> dict[str, dict[str, int]]:
+    valid_ids = set(brief_ids)
+    out: dict[str, dict[str, int]] = {bid: {} for bid in brief_ids}
+    drops: list[str] = []
+    for sc_row in parsed.get('per_brief') or []:
+        if not isinstance(sc_row, dict):
+            drops.append(f'non-dict per_brief row: {sc_row!r}')
+            continue
+        scene_id = sc_row.get('scene_id')
+        if scene_id not in valid_ids:
+            drops.append(f'unknown scene_id={scene_id!r}')
+            continue
+        for score_row in sc_row.get('scores') or []:
+            if not isinstance(score_row, dict):
+                drops.append(f'non-dict score row in {scene_id}')
+                continue
+            axis = score_row.get('axis')
+            if axis not in PER_BRIEF_AXIS_BY_KEY:
+                drops.append(f'unknown axis={axis!r} in {scene_id}')
+                continue
+            try:
+                score = int(score_row.get('score'))
+            except (TypeError, ValueError):
+                drops.append(
+                    f'non-int score in {scene_id}.{axis}: '
+                    f'{score_row.get("score")!r}'
+                )
+                continue
+            if not 1 <= score <= 10:
+                drops.append(f'out-of-range score in {scene_id}.{axis}: {score}')
+                continue
+            out[scene_id][axis] = score
+    _log_extraction_drops('per-brief', drops)
+    return out
+
+
+def _extract_whole_briefs_scores(parsed: dict) -> WholeBriefsScores:
+    out: WholeBriefsScores = {}
+    drops: list[str] = []
+    for row in parsed.get('whole_briefs') or []:
+        if not isinstance(row, dict):
+            drops.append(f'non-dict whole_briefs row: {row!r}')
+            continue
+        axis = row.get('axis')
+        if axis not in BRIEFS_AXIS_BY_KEY:
+            drops.append(f'unknown whole-briefs axis={axis!r}')
+            continue
+        try:
+            score = int(row.get('score'))
+        except (TypeError, ValueError):
+            drops.append(f'non-int whole-briefs score in {axis}: '
+                         f'{row.get("score")!r}')
+            continue
+        if not 1 <= score <= 10:
+            drops.append(
+                f'out-of-range whole-briefs score in {axis}: {score}'
+            )
+            continue
+        out[axis] = score  # type: ignore[literal-required]
+    _log_extraction_drops('whole-briefs', drops)
+    return out
+
+
+def _extract_brief_findings(parsed: dict) -> list[BriefFinding]:
+    out: list[BriefFinding] = []
+    drops: list[str] = []
+    for row in parsed.get('brief_findings') or []:
+        if not isinstance(row, dict):
+            drops.append(f'non-dict row: {row!r}')
+            continue
+        scene_id = row.get('scene_id', '').strip()
+        field = row.get('field', '').strip()
+        issue = row.get('issue', '').strip()
+        missing = [name for name, val in
+                   (('scene_id', scene_id), ('field', field),
+                    ('issue', issue))
+                   if not val]
+        if missing:
+            drops.append(f'incomplete row (scene_id={scene_id!r}, '
+                         f'missing: {",".join(missing)})')
+            continue
+        raw_severity = row.get('severity', 'medium').strip().lower()
+        severity: Severity = (
+            raw_severity if raw_severity in ('high', 'medium', 'low')
+            else 'medium'
+        )  # type: ignore[assignment]
+        finding: BriefFinding = {
+            'scene_id': scene_id,
+            'field': field,
+            'issue': issue,
+            'severity': severity,
+        }
+        preceding_id = row.get('preceding_id', '').strip()
+        if preceding_id:
+            finding['preceding_id'] = preceding_id
+        out.append(finding)
+    _log_extraction_drops('brief_findings', drops)
+    return out
+
+
+def _extract_proposed_brief_updates(parsed: dict
+                                       ) -> list[ProposedBriefUpdate]:
+    """Pull LLM-proposed brief-field updates. Tolerant of missing
+    optional fields. Drops rows missing scene_id, field, or
+    proposed_value."""
+    out: list[ProposedBriefUpdate] = []
+    drops: list[str] = []
+    for row in parsed.get('proposed_brief_updates') or []:
+        if not isinstance(row, dict):
+            drops.append(f'non-dict row: {row!r}')
+            continue
+        scene_id = row.get('scene_id', '').strip()
+        field = row.get('field', '').strip()
+        proposed_value = row.get('proposed_value', '').strip()
+        missing = [name for name, val in
+                   (('scene_id', scene_id), ('field', field),
+                    ('proposed_value', proposed_value))
+                   if not val]
+        if missing:
+            drops.append(f'incomplete row (scene_id={scene_id!r}, '
+                         f'missing: {",".join(missing)})')
+            continue
+        out.append({
+            'scene_id': scene_id,
+            'field': field,
+            'current_value': row.get('current_value', '').strip(),
+            'proposed_value': proposed_value,
+            'rationale': row.get('rationale', '').strip(),
+        })
+    _log_extraction_drops('proposed_brief_updates', drops)
+    return out
+
+
+def _parse_response_briefs(text: str) -> dict | None:
+    missing_fields: list[str] = []
+
+    def _take(obj):
+        if not isinstance(obj, dict):
+            return None
+        per_brief = obj.get('per_brief')
+        whole_briefs = obj.get('whole_briefs')
+        local_missing = []
+        if not isinstance(per_brief, list):
+            local_missing.append('per_brief')
+        if not isinstance(whole_briefs, list):
+            local_missing.append('whole_briefs')
+        if local_missing:
+            missing_fields[:] = local_missing
+            return None
+        return obj
+    try:
+        out = _take(json.loads(text))
+        if out is not None:
+            return out
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+    if m:
+        try:
+            out = _take(json.loads(m.group(1).strip()))
+            if out is not None:
+                return out
+        except json.JSONDecodeError:
+            pass
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if m:
+        try:
+            out = _take(json.loads(m.group(0)))
+            if out is not None:
+                return out
+        except json.JSONDecodeError:
+            pass
+    if missing_fields:
+        log(f'WARNING: briefs LLM returned valid JSON but missing '
+            f'required list(s): {", ".join(missing_fields)}.')
+    return None
+
+
+def _run_briefs_extension(project_dir: str, output_dir: str,
+                            log_dir: str,
+                            briefs: list[Brief],
+                            scene_map_scenes: list[MappedScene],
+                            artifacts: PitchArtifacts,
+                            rubric: str,
+                            coaching: CoachingLevel,
+                            ) -> BriefsExtension:
+    """Run the briefs LLM call after the deterministic pre-pass. Pitch
+    result still stands on any failure."""
+    seq_order = [s.id for s in scene_map_scenes]
+    det_findings = _check_briefs_deterministic(briefs, seq_order)
+
+    prompt = _build_briefs_prompt(briefs, seq_order, artifacts,
+                                    det_findings, rubric)
+    model = select_model('creative')
+    log_file = os.path.join(log_dir,
+                            os.path.basename(output_dir) + '-briefs.json')
+    os.makedirs(log_dir, exist_ok=True)
+    try:
+        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+    except Exception as e:
+        log(f'ERROR: briefs LLM call failed: {e}. Pitch result still stands.')
+        ext = _empty_briefs_extension('llm_error')
+        ext['brief_findings'] = det_findings
+        return ext
+    text = _read_response_text(log_file)
+    parsed = _parse_response_briefs(text)
+    if not parsed:
+        _record_cost(project_dir, log_file, model,
+                     target='story-power:briefs:unparseable')
+        log(f'ERROR: briefs LLM response unparseable; raw at {log_file}.')
+        ext = _empty_briefs_extension('unparseable')
+        ext['brief_findings'] = det_findings
+        return ext
+    _record_cost(project_dir, log_file, model,
+                 target='story-power:briefs')
+
+    brief_ids = [b.id for b in briefs]
+    per_brief = _extract_per_brief_scores(parsed, brief_ids)
+    whole_briefs = _extract_whole_briefs_scores(parsed)
+    diag = parsed.get('briefs_diagnostic') or {}
+    llm_findings = _extract_brief_findings(parsed)
+    proposed_updates = _extract_proposed_brief_updates(parsed)
+    brief_findings = det_findings + llm_findings
+
+    empty_briefs = [bid for bid in brief_ids if not per_brief.get(bid)]
+    has_any_per_brief = any(per_brief.get(bid) for bid in brief_ids)
+    has_any_whole_briefs = bool(whole_briefs)
+    if empty_briefs and has_any_per_brief:
+        sidecar = os.path.join(output_dir, 'briefs-empty-scenes.txt')
+        _safe_write(sidecar, '\n'.join(empty_briefs) + '\n',
+                    recover_hint=log_file)
+        log(f'ERROR: briefs extraction produced zero valid scores for '
+            f'{len(empty_briefs)} brief(s); full list at {sidecar}; '
+            f'refusing to write per-brief-matrix.csv with empty row(s). '
+            f'Raw response: {log_file}')
+    elif not has_any_per_brief:
+        log(f'ERROR: briefs extraction produced zero valid per-brief '
+            f'scores; refusing to write per-brief-matrix.csv. '
+            f'Raw response: {log_file}')
+    if not has_any_whole_briefs:
+        log(f'ERROR: briefs extraction produced zero valid whole-briefs '
+            f'scores; refusing to write whole-briefs-axes.csv. '
+            f'Raw response: {log_file}')
+
+    expected_per_brief = len(PER_BRIEF_AXES) * len(briefs)
+    actual_per_brief = sum(len(s) for s in per_brief.values())
+    missing_per_brief = max(0, expected_per_brief - actual_per_brief)
+    missing_briefs_axes = [a.key for a in BRIEFS_AXES
+                           if a.key not in whole_briefs]
+    status: StoryPowerStatus = 'ok'
+    if missing_per_brief or missing_briefs_axes:
+        status = 'partial'
+        parts = []
+        if missing_per_brief:
+            parts.append(f'{missing_per_brief} per-brief cell(s) missing')
+        if missing_briefs_axes:
+            parts.append(
+                f'{len(missing_briefs_axes)} whole-briefs axis/axes missing '
+                f'({", ".join(missing_briefs_axes)})'
+            )
+        log(f'WARNING: briefs extraction partial — {"; ".join(parts)}.')
+    if status == 'ok':
+        assert per_brief and whole_briefs, (
+            'briefs extension status=ok requires non-empty '
+            'per_brief_scores and whole_briefs_scores'
+        )
+
+    write_matrix = has_any_per_brief and not empty_briefs
+    write_whole_briefs = has_any_whole_briefs
+    if coaching == 'full':
+        if write_matrix:
+            _write_per_brief_matrix(output_dir, briefs, per_brief,
+                                      recover_hint=log_file)
+        if write_whole_briefs:
+            _write_whole_briefs_axes(output_dir, whole_briefs, parsed,
+                                      recover_hint=log_file)
+        if write_matrix or write_whole_briefs:
+            _append_briefs_diagnostic(
+                output_dir, briefs, per_brief, whole_briefs,
+                brief_findings, proposed_updates, diag,
+                include_matrix=write_matrix,
+                include_whole_briefs=write_whole_briefs,
+            )
+    else:
+        if write_matrix or write_whole_briefs:
+            _append_briefs_coaching_brief(
+                output_dir, briefs, per_brief, whole_briefs,
+                brief_findings, proposed_updates, diag,
+                include_matrix=write_matrix,
+                include_whole_briefs=write_whole_briefs,
+                recover_hint=log_file,
+            )
+
+    return {
+        'status': status,
+        'per_brief_scores': per_brief,
+        'whole_briefs_scores': whole_briefs,
+        'briefs_diagnostic': diag,
+        'brief_findings': brief_findings,
+        'proposed_brief_updates': proposed_updates,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Briefs writers
+# ---------------------------------------------------------------------------
+
+def _write_per_brief_matrix(output_dir: str, briefs: list[Brief],
+                              per_brief: dict[str, dict[str, int]],
+                              *, recover_hint: str = '') -> None:
+    """Write per-brief-matrix.csv — one row per brief with the two
+    per-brief axes."""
+    csv_path = os.path.join(output_dir, 'per-brief-matrix.csv')
+    headers = (['scene_id', 'outcome']
+               + [a.key for a in PER_BRIEF_AXES])
+    lines = ['|'.join(headers)]
+    for brief in briefs:
+        scores = per_brief.get(brief.id, {})
+        row = [brief.id, brief.outcome or '']
+        for axis in PER_BRIEF_AXES:
+            row.append(str(scores.get(axis.key, '')))
+        lines.append('|'.join(_sanitize_cell(c) for c in row))
+    _safe_write(csv_path, '\n'.join(lines) + '\n', recover_hint=recover_hint)
+
+
+def _write_whole_briefs_axes(output_dir: str,
+                               whole_briefs: WholeBriefsScores,
+                               parsed: dict, *,
+                               recover_hint: str = '') -> None:
+    """Write whole-briefs-axes.csv — one row per Layer 2 axis."""
+    csv_path = os.path.join(output_dir, 'whole-briefs-axes.csv')
+    headers = ['axis', 'name', 'score', 'weight', 'positive_signals',
+               'negative_signals', 'rationale']
+    rows_by_axis = {r.get('axis'): r for r in parsed.get('whole_briefs', [])
+                    if isinstance(r, dict)}
+    lines = ['|'.join(headers)]
+    for axis in BRIEFS_AXES:
+        row = rows_by_axis.get(axis.key, {})
+        lines.append('|'.join(_sanitize_cell(c) for c in (
+            axis.key,
+            axis.name,
+            str(whole_briefs.get(axis.key, '')),
+            str(axis.weight),
+            row.get('positive_signals', ''),
+            row.get('negative_signals', ''),
+            row.get('rationale', ''),
+        )))
+    _safe_write(csv_path, '\n'.join(lines) + '\n', recover_hint=recover_hint)
+
+
+def _briefs_diagnostic_section(
+        briefs: list[Brief],
+        per_brief: dict[str, dict[str, int]],
+        whole_briefs: WholeBriefsScores,
+        brief_findings: list[BriefFinding],
+        proposed_updates: list[ProposedBriefUpdate],
+        diag: BriefsDiagnostic, *,
+        include_matrix: bool = True,
+        include_whole_briefs: bool = True,
+        ) -> list[str]:
+    """Shared briefs markdown section (full diagnostic.md + coach brief)."""
+    out: list[str] = []
+    if include_matrix:
+        out.extend([
+            '## Per-brief matrix (briefs Layer 1)',
+            '',
+            '| Scene | Outcome | Scene-engine | Concreteness |',
+            '|---|---|---|---|',
+        ])
+        for b in briefs:
+            sc = per_brief.get(b.id, {})
+            out.append(
+                f'| {b.id} | {b.outcome or "—"} | '
+                f'{sc.get("scene_engine_integrity", "–")} | '
+                f'{sc.get("concreteness_brief", "–")} |'
+            )
+    if include_whole_briefs:
+        if out:
+            out.append('')
+        out.extend([
+            '## Whole-briefs axes (briefs Layer 2)',
+            '',
+            '| Axis | Score | Weight |',
+            '|---|---|---|',
+        ])
+        for axis in BRIEFS_AXES:
+            s = whole_briefs.get(axis.key, '–')
+            out.append(f'| {axis.name} | {s} | {axis.weight} |')
+
+    if brief_findings:
+        out.extend(['', '## Brief findings', ''])
+        for f in brief_findings:
+            ctx = (f' (after {f["preceding_id"]})'
+                   if f.get('preceding_id') else '')
+            out.append(
+                f'- **{f["scene_id"]}**{ctx} [{f["severity"]}] '
+                f'`{f["field"]}`: {f["issue"]}'
+            )
+
+    if proposed_updates:
+        out.extend(['', '## Proposed brief updates', ''])
+        for u in proposed_updates:
+            out.extend([
+                f'### {u["scene_id"]}.{u["field"]}',
+                '',
+                f'**Proposed value:** {u["proposed_value"]}',
+                '',
+            ])
+            current = u.get('current_value')
+            if current:
+                out.extend([f'**Current value:** {current}', ''])
+            rationale = u.get('rationale')
+            if rationale:
+                out.extend([f'**Rationale:** {rationale}', ''])
+
+    out.extend([
+        '',
+        '## Briefs diagnostic',
+        '',
+        f'**Scene-engine assessment:** {diag.get("scene_engine_assessment") or "(none provided)"}',
+        '',
+        f'**Lowest axis:** {diag.get("lowest_axis") or "(none identified)"} '
+        f'({diag.get("lowest_axis_average") or "?"})',
+        '',
+        f'**Summary:** {diag.get("summary") or "(none identified)"}',
+        '',
+        f'**High-leverage move:** {diag.get("high_leverage_move") or "(none proposed)"}',
+        '',
+    ])
+
+    return out
+
+
+def _append_briefs_diagnostic(
+        output_dir: str, briefs: list[Brief],
+        per_brief: dict[str, dict[str, int]],
+        whole_briefs: WholeBriefsScores,
+        brief_findings: list[BriefFinding],
+        proposed_updates: list[ProposedBriefUpdate],
+        diag: BriefsDiagnostic, *,
+        include_matrix: bool = True,
+        include_whole_briefs: bool = True,
+        ) -> None:
+    """Append the briefs section to the existing diagnostic.md."""
+    md_path = os.path.join(output_dir, 'diagnostic.md')
+    if not os.path.isfile(md_path):
+        log(f'WARNING: briefs diagnostic could not be appended — '
+            f'{md_path} does not exist (upstream pitch-diagnostic write '
+            'likely failed). Briefs scores were computed but their '
+            'diagnostic narrative is lost.')
+        return
+    try:
+        with open(md_path, encoding='utf-8') as f:
+            existing = f.read()
+    except OSError as e:
+        log(f'WARNING: could not append briefs diagnostic to {md_path}: {e}')
+        return
+    section = _briefs_diagnostic_section(
+        briefs, per_brief, whole_briefs, brief_findings,
+        proposed_updates, diag,
+        include_matrix=include_matrix,
+        include_whole_briefs=include_whole_briefs,
+    )
+    _safe_write(md_path, existing + '\n' + '\n'.join(section) + '\n')
+
+
+def _append_briefs_coaching_brief(
+        output_dir: str, briefs: list[Brief],
+        per_brief: dict[str, dict[str, int]],
+        whole_briefs: WholeBriefsScores,
+        brief_findings: list[BriefFinding],
+        proposed_updates: list[ProposedBriefUpdate],
+        diag: BriefsDiagnostic, *,
+        include_matrix: bool = True,
+        include_whole_briefs: bool = True,
+        recover_hint: str = '',
+        ) -> None:
+    """coach coaching: append briefs sections to coaching-brief.md."""
+    md_path = os.path.join(output_dir, 'coaching-brief.md')
+    if not os.path.isfile(md_path):
+        log(f'WARNING: briefs coaching brief could not be appended — '
+            f'{md_path} does not exist (upstream coach-brief write likely '
+            'failed). Briefs scores were computed but are not captured '
+            'in the brief.')
+        return
+    try:
+        with open(md_path, encoding='utf-8') as f:
+            existing = f.read()
+    except OSError as e:
+        log(f'WARNING: could not append briefs coaching brief to {md_path}: {e}')
+        return
+    section = _briefs_diagnostic_section(
+        briefs, per_brief, whole_briefs, brief_findings,
+        proposed_updates, diag,
+        include_matrix=include_matrix,
+        include_whole_briefs=include_whole_briefs,
+    )
+    prelude = [
+        '# Briefs extension (LLM proposals — author confirms)',
+        '',
+        'Proposed brief updates are concrete drafting-contract text the '
+        'author can drop into the CSV, not directives — the author '
+        'decides whether each proposed_value is the right move at this '
+        'stage.',
         '',
     ]
     _safe_write(md_path,
