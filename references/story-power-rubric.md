@@ -904,13 +904,13 @@ fact provenance across the scene graph.
 #### G. Motif recurrence (1.0x)
 - **Question:** Do motifs (recurring images / symbols) appear across
   multiple briefs, or are most motifs one-shots?
-- **High signals:** Most motifs from `motif-taxonomy.csv` appear in
-  ≥3 briefs; high-load motifs (the title image, the central object)
+- **High signals:** Most motifs declared in briefs appear in ≥3
+  briefs; high-load motifs (the title image, the central object)
   appear in ≥5 briefs distributed across acts; motif arcs build
   (introduce → echo → recontextualize → resolve).
-- **Low signals:** ≥50% of declared motifs appear in only one brief
-  (singletons); motifs cluster in Act 1 and disappear; the title
-  motif appears only at the open and close.
+- **Low signals:** ≥50% of motifs declared in any brief appear in
+  only one brief (singletons); motifs cluster in Act 1 and disappear;
+  the title motif appears only at the open and close.
 
 ### Diagnostic-as-action
 
@@ -967,7 +967,7 @@ corpus (parallel to scene-map's continuity pre-pass):
 4. **Outcome streak:** 4+ consecutive briefs (by `scenes.csv` seq)
    with the same outcome enum: medium severity (low if the streak
    is `yes-but` — it's an escalation pattern, not stagnation).
-5. **Motif singleton:** a motif from `motif-taxonomy.csv` appears in
+5. **Motif singleton:** a motif declared in any brief appears in
    exactly one brief: low severity.
 
 The LLM seeds its scene_engine_integrity, knowledge_flow_continuity,

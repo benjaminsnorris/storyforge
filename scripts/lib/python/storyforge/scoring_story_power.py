@@ -971,8 +971,12 @@ def parse_scene_briefs(project_dir: str) -> list[Brief]:
 
     Returns [] when the file is missing, empty, or lacks the required
     `id` column. Briefs with empty `id` are dropped with a WARNING.
-    Briefs with all five scene-engine fields empty are dropped with a
-    WARNING too — they're scaffolding rows from migration, not briefs.
+    Briefs with all five scene-engine fields empty are dropped with an
+    INFO log — they're scaffolding rows from migration, expected
+    during elaboration. (WARNING would be misleading since this is the
+    intended steady-state for pre-briefed scenes; if the parent scene
+    declares status>=briefed, the right escalation is in upstream
+    validation, not here.)
 
     Array fields (knowledge_in, knowledge_out, motifs, continuity_deps)
     are split on `;`. Empty cells produce empty tuples.

@@ -4939,8 +4939,9 @@ def test_check_briefs_deterministic_walks_continuity_deps_transitively(tmp_path)
 
 
 def test_check_briefs_deterministic_handles_continuity_dep_cycle():
-    """A continuity_deps cycle (s1 ↔ s2) must not hang the BFS — the
-    visited set bounds the walk regardless of cycle topology."""
+    """A continuity_deps cycle (s1 ↔ s2) must not hang the graph
+    walk — the visited set bounds traversal regardless of cycle
+    topology."""
     from storyforge.scoring_story_power import (
         _check_briefs_deterministic, Brief,
     )
@@ -4950,7 +4951,8 @@ def test_check_briefs_deterministic_handles_continuity_dep_cycle():
         Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
               ('fact-a',), ('fact-a',), '', '', '', (), '', ('s1',)),
     ]
-    # Must return cleanly — the BFS guard prevents infinite recursion.
+    # Must return cleanly — the visited-set guard prevents infinite
+    # recursion through the cycle.
     findings = _check_briefs_deterministic(briefs, ['s1', 's2'])
     # Both fact-a appears via s2's knowledge_out for s1's check (and v-v).
     assert all(
