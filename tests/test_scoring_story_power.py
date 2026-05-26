@@ -4283,4 +4283,276 @@ def test_scene_map_integration_with_backward_timeline(tmp_path, monkeypatch,
     assert ext is not None
     assert any(f['field'] == 'timeline_day' and f['severity'] == 'high'
                for f in ext['continuity_findings'])
+    # The finding's issue text should describe what went wrong (T-9
+    # tightening) — pin the substring so a future generic-ified
+    # message would fail loudly.
+    timeline_finding = next(
+        f for f in ext['continuity_findings']
+        if f['field'] == 'timeline_day'
+    )
+    assert 'went backward' in timeline_finding['issue']
+
+
+# ---------------------------------------------------------------------------
+# Test gaps from the PR #243 review
+# ---------------------------------------------------------------------------
+
+def test_parse_response_scene_map_handles_greedy_extraction():
+    """Tier-3 fallback: JSON embedded in prose with no fence — the
+    last line of defense against an LLM that wraps JSON in commentary."""
+    from storyforge.scoring_story_power import _parse_response_scene_map
+    payload = json.dumps(_scene_map_payload())
+    text = f'Here is my analysis. {payload} Done.'
+    parsed = _parse_response_scene_map(text)
+    assert parsed is not None
+    assert isinstance(parsed['per_scene'], list)
+
+
+def test_parse_response_scene_map_handles_only_per_scene_missing(capsys):
+    """Shape-failure WARN names the per_scene list specifically when
+    that's the only missing field."""
+    from storyforge.scoring_story_power import _parse_response_scene_map
+    bad = json.dumps({'whole_scene_map': []})
+    parsed = _parse_response_scene_map(bad)
+    assert parsed is None
+    out = capsys.readouterr().out
+    assert 'per_scene' in out
+
+
+def test_parse_response_scene_map_handles_only_whole_map_missing(capsys):
+    """Shape-failure WARN names whole_scene_map specifically when
+    that's the only missing field."""
+    from storyforge.scoring_story_power import _parse_response_scene_map
+    bad = json.dumps({'per_scene': []})
+    parsed = _parse_response_scene_map(bad)
+    assert parsed is None
+    out = capsys.readouterr().out
+    assert 'whole_scene_map' in out
+
+
+def test_scene_map_runs_without_architecture_csv(tmp_path, monkeypatch, capsys):
+    """When scenes.csv exists but architecture.csv doesn't, scene-map
+    mode runs without producing an architecture-cross-ref storm.
+    Deterministic check skips the cross-ref loop and emits one INFO
+    breadcrumb instead of N high-severity findings."""
+    _seed_summary(str(tmp_path))
+    _seed_scene_map(str(tmp_path))  # No _seed_architecture call.
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-scene-map' in log_file:
+            payload = _scene_map_payload()
+        elif '-act-shape' in log_file:
+            payload = _act_shape_payload()
+        else:
+            payload = _full_payload()
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result['scene_map']
+    assert ext is not None
+    out = capsys.readouterr().out
+    # The skip log fires once.
+    assert 'skipping architecture cross-reference' in out
+    # No architecture_scene findings appear in the result.
+    arch_findings = [f for f in ext['continuity_findings']
+                     if f['field'] == 'architecture_scene']
+    assert arch_findings == []
+
+
+def test_continuity_deterministic_non_numeric_timeline_day_safe():
+    """Non-int timeline_day values (e.g., 'day-after', 'morning') must
+    be silently tolerated — the check skips the timeline comparison
+    rather than crashing or flagging."""
+    from storyforge.scoring_story_power import (
+        _check_continuity_deterministic, MappedScene,
+    )
+    scenes = [
+        MappedScene('s1', 1, 'T', 'a.', 'A', 'L', '1', 'morning', '',
+                    1000, 1000, ''),
+        MappedScene('s2', 2, 'T', 'b.', 'A', 'L', 'day-after', 'morning',
+                    '', 1000, 1000, ''),
+    ]
+    findings = _check_continuity_deterministic(scenes, set())
+    assert not any(f['field'] == 'timeline_day' for f in findings)
+
+
+def test_build_scene_map_prompt_renders_no_architecture_fallback():
+    """When architecture_scenes is empty, the prompt embeds the
+    '(no architecture.csv populated)' placeholder so the LLM knows
+    not to fault scenes for missing coverage."""
+    from storyforge.scoring_story_power import (
+        _build_scene_map_prompt, MappedScene, PitchArtifacts,
+    )
+    scenes = [
+        MappedScene('s1', 1, 'T', 'a beat.', '', '', '1', '', '',
+                    1000, 1000, ''),
+    ]
+    artifacts = PitchArtifacts(logline='L', synopsis='S', act_shape='',
+                                theme='', spine_summaries='',
+                                architecture_summaries='')
+    prompt = _build_scene_map_prompt(scenes, [], artifacts, [], 'rubric')
+    assert '(no architecture.csv populated)' in prompt
+
+
+def test_build_scene_map_prompt_inlines_deterministic_findings():
+    """The prompt's 'Deterministic continuity findings' block surfaces
+    the actual finding text — the LLM seeds its continuity_coherence
+    scoring against these. Without the inlining, the LLM would
+    re-discover the issues at extra token cost."""
+    from storyforge.scoring_story_power import (
+        _build_scene_map_prompt, MappedScene, PitchArtifacts,
+        _check_continuity_deterministic,
+    )
+    scenes = [
+        MappedScene('s1', 1, 'T', 'a.', 'A', 'L', '3', 'morning', '',
+                    1000, 1000, ''),
+        MappedScene('s2', 2, 'T', 'b.', 'A', 'L', '1', 'morning',
+                    'regular', 1000, 1000, ''),
+    ]
+    artifacts = PitchArtifacts(logline='L', synopsis='S', act_shape='',
+                                theme='', spine_summaries='',
+                                architecture_summaries='')
+    det_findings = _check_continuity_deterministic(scenes, set())
+    assert det_findings  # sanity check the test fixture
+    prompt = _build_scene_map_prompt(scenes, [], artifacts,
+                                       det_findings, 'rubric')
+    # The finding's issue text appears in the prompt — the LLM gets
+    # the actionable detail, not just the count.
+    assert 'went backward' in prompt
+
+
+def test_scene_map_partial_per_scene_tags_partial(tmp_path, monkeypatch):
+    """A scene-map payload missing per-scene axes for one scene
+    surfaces as status='partial' rather than collapsing to 'ok'."""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    _seed_scene_map(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    scene_map_payload = _scene_map_payload()
+    # Keep one s2 axis; drop the other so per-scene is partial but
+    # not empty (the empty-scene floor doesn't trigger).
+    for row in scene_map_payload['per_scene']:
+        if row['scene_id'] == 's2':
+            row['scores'] = row['scores'][:1]
+    fake = _quint_mock_llm(_full_payload(), _act_shape_payload(),
+                            _spine_payload(), _architecture_payload(),
+                            scene_map_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['scene_map']['status'] == 'partial'
+    assert result['status'] == 'partial'
+
+
+def test_empty_scene_map_refuses_matrix_and_writes_sidecar(tmp_path,
+                                                             monkeypatch,
+                                                             capsys):
+    """When the LLM returns no per-scene scores for a non-trivial
+    fraction of the scenes, refuse to write the matrix AND write the
+    full list of empty scene ids to a sidecar file."""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    _seed_scene_map(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    scene_map_payload = _scene_map_payload()
+    # Drop s2 and s3 entirely from the per-scene response.
+    scene_map_payload['per_scene'] = [
+        r for r in scene_map_payload['per_scene']
+        if r['scene_id'] not in {'s2', 's3'}
+    ]
+    fake = _quint_mock_llm(_full_payload(), _act_shape_payload(),
+                            _spine_payload(), _architecture_payload(),
+                            scene_map_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out_dir = result['output_dir']
+    log_out = capsys.readouterr().out
+    assert 'refusing to write per-scene-map-matrix.csv' in log_out
+    sidecar = os.path.join(out_dir, 'scene-map-empty-scenes.txt')
+    assert os.path.isfile(sidecar)
+    body = open(sidecar).read()
+    assert 's2' in body and 's3' in body
+    # And the CSV itself was NOT written.
+    assert not os.path.isfile(os.path.join(out_dir,
+                                            'per-scene-map-matrix.csv'))
+
+
+def test_extract_per_scene_map_scores_drops_malformed(capsys):
+    """Drop paths: non-dict event row, unknown scene_id, non-dict
+    score row, unknown axis, non-int score, out-of-range score."""
+    from storyforge.scoring_story_power import _extract_per_scene_map_scores
+    parsed = {
+        'per_scene': [
+            'not a dict',
+            {'scene_id': 'unknown', 'scores': []},
+            {'scene_id': 's1', 'scores': [
+                'not a dict',
+                {'axis': 'made_up', 'score': 8},
+                {'axis': 'continuity_coherence', 'score': 'high'},
+                {'axis': 'architecture_coverage', 'score': 47},
+                {'axis': 'architecture_coverage', 'score': 7},
+            ]},
+        ],
+    }
+    out = _extract_per_scene_map_scores(parsed, ['s1'])
+    assert out == {'s1': {'architecture_coverage': 7}}
+    info = capsys.readouterr().out
+    assert 'per-scene-map extraction dropped' in info
+
+
+def test_extract_whole_scene_map_scores_drops_malformed(capsys):
+    from storyforge.scoring_story_power import _extract_whole_scene_map_scores
+    parsed = {
+        'whole_scene_map': [
+            'not a dict',
+            {'axis': 'made_up_axis', 'score': 7},
+            {'axis': 'pov_rotation', 'score': 'mid'},
+            {'axis': 'pov_rotation', 'score': 0},
+            {'axis': 'pov_rotation', 'score': 7},
+        ],
+    }
+    out = _extract_whole_scene_map_scores(parsed)
+    assert out == {'pov_rotation': 7}
+    info = capsys.readouterr().out
+    assert 'whole-scene-map extraction dropped' in info
+
+
+def test_extract_proposed_operations_normalizes_case_and_strips_ids(capsys):
+    """The extractor accepts mixed-case operation strings and strips
+    whitespace from scene_ids; pure-whitespace ids are filtered out."""
+    from storyforge.scoring_story_power import _extract_proposed_operations
+    parsed = {
+        'proposed_operations': [
+            {'operation': '  MERGE  ',
+             'scene_ids': ['s1', '  s2  ', '   '],
+             'summary': 'Merge s1 and s2.'},
+            {'operation': 'Promote',
+             'scene_ids': ['s3'],
+             'summary': 'Promote s3.'},
+        ],
+    }
+    out = _extract_proposed_operations(parsed)
+    assert len(out) == 2
+    assert out[0]['operation'] == 'merge'
+    # Whitespace stripped + empty-string entry filtered.
+    assert out[0]['scene_ids'] == ['s1', 's2']
+    assert out[1]['operation'] == 'promote'
 
