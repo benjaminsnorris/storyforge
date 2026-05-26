@@ -260,7 +260,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge write` | `cmd_write.py` | Draft scenes (brief-aware, parallel wave drafting) |
 | `storyforge evaluate` | `cmd_evaluate.py` | Multi-agent evaluation panel (6 evaluators + synthesis) |
 | `storyforge revise` | `cmd_revise.py` | Execute revision passes. `--polish` for craft-only. `--polish --loop` for score→polish convergence. `--naturalness` for AI pattern removal. |
-| `storyforge score` | `cmd_score.py` | Craft scoring (25 principles + fidelity scoring against briefs). `--principles P1,P2` targets specific principles; deterministic principles skip the LLM pipeline (see `DETERMINISTIC_PRINCIPLES` in `cmd_score.py`). **Elaboration entry points:** `--level N` / `--all-levels` (floor checks); `--compare a b [c]` (prose-tier multi-candidate report); `--compare ... --semantic` (LLM ceiling axes); `--drift` (read-only deterministic drift report); `--boundary N->M` / `--all-boundaries` (LLM faithfulness diff, optional `--scope`); `--bible-consistency` (LLM check vs character/world/voice bibles, ~$20-25/run); `--story-power` (8-axis pitch-tier scorecard; auto-extends to act-shape mode with per-act 3×8 matrix + 4 cross-act structural axes when `## Act-shape` is populated; auto-extends to spine mode with per-event 3-axis matrix + 5 whole-spine axes + weak-handoff diagnostic when `reference/spine.csv` exists; auto-extends to architecture mode with per-scene 2-axis matrix + 5 whole-architecture axes + field-coherence pre-pass + proposed field updates and scene insertions when `reference/architecture.csv` exists, register-aware via `project.register`; coaching-aware; delta tracking; see `references/story-power-rubric.md`). All scoring respects `working/scoring-overrides.csv` — accepted findings surface tagged but don't count toward failure totals. |
+| `storyforge score` | `cmd_score.py` | Craft scoring (25 principles + fidelity scoring against briefs). `--principles P1,P2` targets specific principles; deterministic principles skip the LLM pipeline (see `DETERMINISTIC_PRINCIPLES` in `cmd_score.py`). **Elaboration entry points:** `--level N` / `--all-levels` (floor checks); `--compare a b [c]` (prose-tier multi-candidate report); `--compare ... --semantic` (LLM ceiling axes); `--drift` (read-only deterministic drift report); `--boundary N->M` / `--all-boundaries` (LLM faithfulness diff, optional `--scope`); `--bible-consistency` (LLM check vs character/world/voice bibles, ~$20-25/run); `--story-power` (8-axis pitch-tier scorecard; auto-extends to act-shape mode with per-act 3×8 matrix + 4 cross-act structural axes when `## Act-shape` is populated; auto-extends to spine mode with per-event 3-axis matrix + 5 whole-spine axes + weak-handoff diagnostic when `reference/spine.csv` exists; auto-extends to architecture mode with per-scene 2-axis matrix + 5 whole-architecture axes + field-coherence pre-pass + proposed field updates and scene insertions when `reference/architecture.csv` exists, register-aware via `project.register`; auto-extends to scene-map mode with per-scene 2-axis matrix + 5 whole-map axes + continuity pre-pass + proposed scene operations (merge/split/insert/reorder/promote) when `reference/scenes.csv` exists; coaching-aware; delta tracking; see `references/story-power-rubric.md`). All scoring respects `working/scoring-overrides.csv` — accepted findings surface tagged but don't count toward failure totals. |
 | `storyforge elaborate` | `cmd_elaborate.py` | Run elaboration stages (spine/architecture/map/briefs) |
 | `storyforge extract` | `cmd_extract.py` | Extract structural data from prose. `--force` overwrites. |
 | `storyforge validate` | `cmd_validate.py` | Structural + schema validation. `--structural` for scoring. |
@@ -391,6 +391,39 @@ Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a 
 - `reference/voice-profile.csv` `_project` row adds: `caption_voice`, `lettering_style`
 
 See the design spec: `docs/superpowers/specs/2026-05-20-graphic-novel-mode-design.md`.
+
+## PR Review Workflow — MANDATORY
+
+When the user asks for "the 5-agent review" or after creating a PR, run **all five** specialized review agents **in parallel** (single message, multiple `Agent` tool calls). The five agents are:
+
+1. `pr-review-toolkit:code-reviewer` — bugs, project-convention violations, schema mismatches
+2. `pr-review-toolkit:pr-test-analyzer` — uncovered branches, missing behavioral assertions, mock-helper fragility
+3. `pr-review-toolkit:silent-failure-hunter` — error swallowing, missing WARN logs, regressions of patterns earlier reviews fixed
+4. `pr-review-toolkit:type-design-analyzer` — TypedDict shape, Literal narrowing, invariant enforcement
+5. `pr-review-toolkit:comment-analyzer` — docstring drift, over-commenting, rubric vs implementation lies
+
+**Run them in the background.** Each completes async; acknowledge each briefly when it lands ("X analysis in: N findings"). Do NOT start fixing until the user explicitly says to (typically "fix all of them in logical commits") OR all five have reported in.
+
+**Each prompt must be substantive.** Specify the PR's risk areas by name, reference prior-tier reviews of related code (so the agent doesn't rediscover the same patterns), and quote project conventions from this file. Terse prompts produce shallow agent work — these prompts have repeatedly caught real bugs.
+
+**After all five report in**, consolidate into a single punch list (CRITICAL / HIGH / IMPORTANT / SUGGESTIONS) ordered by severity, deduplicated across reviewers. Show the list to the user. Wait for "fix all of them in logical commits".
+
+**Fix in logical commits**, typically 4-6:
+- Commit 1: CRITICAL bugs first (often the code-reviewer's CRITICAL + silent-failure HIGH together)
+- Commit 2: Type tightening (the type-design IMPORTANT items)
+- Commit 3: LOW silent-failure + comment cleanup
+- Commit 4: Test gaps (close every uncovered branch the test-analyzer flagged)
+- Commit 5: Version bump + any code-reviewer follow-ups
+
+Every commit must include:
+- The fix(es)
+- A regression test for each fix (per the project's regression-test memory)
+- A descriptive message naming each finding addressed (CR-N from code-reviewer, SF-N from silent-failure, TD-N from type-design, T-N from test-analyzer, C-N from comment-analyzer)
+- Immediate `git push` (per the always-commit-and-push memory)
+
+**Trust but verify.** The review agents have surfaced real bugs every round — but they've also occasionally been wrong (e.g., the f-string brace-escape finding in PR #238 was a false positive). Read the agent's reasoning, verify by checking the code, and document false-positives explicitly so a future agent doesn't reintroduce them.
+
+After all fixes land, the user typically asks to "merge it and pull main" — use `gh pr merge N --merge --delete-branch` (regular merge, not squash, per the no-squash-merge memory).
 
 ## Commit Message Prefixes
 Use domain-specific prefixes:

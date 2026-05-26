@@ -191,16 +191,87 @@ class ArchitectureExtension(TypedDict):
     status: StoryPowerStatus
 
 
+class WholeSceneMapScores(TypedDict, total=False):
+    """Closed-key Layer 2 scene-map axis scores."""
+    coverage_completeness: int
+    pov_rotation: int
+    pacing_distribution: int
+    timeline_flow: int
+    interstitial_economy: int
+
+
+class _ContinuityFindingRequired(TypedDict):
+    scene_id: str
+    field: str
+    issue: str
+    severity: Severity
+
+
+class ContinuityFinding(_ContinuityFindingRequired, total=False):
+    """A scene-map continuity problem from the deterministic pre-pass
+    or the LLM. preceding_id is present only for adjacency findings
+    (transition between two scenes); absent for per-row findings."""
+    preceding_id: str
+
+
+SceneOperation = Literal['merge', 'split', 'insert', 'reorder', 'promote']
+SCENE_OPERATIONS: tuple[SceneOperation, ...] = (
+    'merge', 'split', 'insert', 'reorder', 'promote',
+)
+# Required scene_ids arity per operation — enforced at extraction.
+# merge/reorder act on a pair; split/insert/promote act on a single row.
+SCENE_OPERATION_ARITY: dict[SceneOperation, int] = {
+    'merge': 2,
+    'reorder': 2,
+    'split': 1,
+    'insert': 1,
+    'promote': 1,
+}
+
+
+class _ProposedSceneOperationRequired(TypedDict):
+    operation: SceneOperation
+    scene_ids: list[str]
+    summary: str
+
+
+class ProposedSceneOperation(_ProposedSceneOperationRequired, total=False):
+    """A concrete structural change the diagnostic proposes. Arity is
+    enforced via SCENE_OPERATION_ARITY at extraction time. The author
+    reviews and accepts / edits / rejects each proposal."""
+    rationale: str
+
+
+class SceneMapDiagnostic(TypedDict, total=False):
+    """LLM-provided cross-axis pattern + coverage assessment."""
+    lowest_axis: str
+    lowest_axis_average: str
+    summary: str
+    coverage_assessment: str
+    high_leverage_move: str
+
+
+class SceneMapExtension(TypedDict):
+    """Scene-map mode payload (Layer 1 + Layer 2 scores, continuity
+    findings, and the LLM's proposed scene operations)."""
+    per_scene_scores: dict[str, dict[str, int]]
+    whole_scene_map_scores: WholeSceneMapScores
+    scene_map_diagnostic: SceneMapDiagnostic
+    continuity_findings: list[ContinuityFinding]
+    proposed_operations: list[ProposedSceneOperation]
+    status: StoryPowerStatus
+
+
 class StoryPowerResult(TypedDict):
     """Result of score_story_power. Coaching is the requested level; status
     is the outcome. Output_dir is the timestamped directory written to
     (empty string when no directory was allocated).
 
-    act_shape, spine, and architecture are None when their inputs
-    weren't present (no `## Act-shape` populated, no spine.csv on disk,
-    no architecture.csv on disk) or the extension failed before
-    producing usable data; otherwise they carry the payload from each
-    Layer 1/2 scoring run.
+    act_shape, spine, architecture, and scene_map are None when their
+    inputs weren't present (no `## Act-shape` populated, no spine.csv
+    on disk, no architecture.csv on disk, no scenes.csv on disk) or the
+    extension failed before producing usable data; otherwise they
+    carry the payload from each Layer 1/2 scoring run.
     """
     coaching: CoachingLevel
     status: StoryPowerStatus
@@ -213,6 +284,7 @@ class StoryPowerResult(TypedDict):
     act_shape: ActShapeExtension | None
     spine: SpineExtension | None
     architecture: ArchitectureExtension | None
+    scene_map: SceneMapExtension | None
 
 
 class Axis(NamedTuple):
@@ -356,6 +428,36 @@ assert len({a.key for a in PER_SCENE_AXES}) == len(PER_SCENE_AXES), (
 assert len({a.key for a in ARCHITECTURE_AXES}) == len(ARCHITECTURE_AXES), (
     'whole-architecture axis keys must be unique'
 )
+
+
+# Per-scene-map axes (scene-map Layer 1). continuity_coherence is the
+# load-bearing axis — no other mode catches scene→scene adjacency
+# (pov / location / timeline_day / type continuity).
+PER_MAP_SCENE_AXES: tuple[Axis, ...] = (
+    Axis('architecture_coverage', 'Architecture coverage', 1.0),
+    Axis('continuity_coherence', 'Continuity coherence', 1.5),
+)
+PER_MAP_SCENE_AXIS_KEYS = tuple(a.key for a in PER_MAP_SCENE_AXES)
+PER_MAP_SCENE_AXIS_BY_KEY = {a.key: a for a in PER_MAP_SCENE_AXES}
+
+# Whole-scene-map axes (scene-map Layer 2).
+MAP_AXES: tuple[Axis, ...] = (
+    Axis('coverage_completeness', 'Coverage completeness', 1.5),
+    Axis('pov_rotation', 'POV rotation', 1.0),
+    Axis('pacing_distribution', 'Pacing distribution', 1.5),
+    Axis('timeline_flow', 'Timeline flow', 1.0),
+    Axis('interstitial_economy', 'Interstitial economy', 1.0),
+)
+MAP_AXIS_KEYS = tuple(a.key for a in MAP_AXES)
+MAP_AXIS_BY_KEY = {a.key: a for a in MAP_AXES}
+
+assert len({a.key for a in PER_MAP_SCENE_AXES}) == len(PER_MAP_SCENE_AXES), (
+    'per-scene-map axis keys must be unique'
+)
+assert len({a.key for a in MAP_AXES}) == len(MAP_AXES), (
+    'whole-scene-map axis keys must be unique'
+)
+
 # Diagnostic routing identifies an axis's family from its key alone,
 # which requires every family's keys to be disjoint. The data-driven
 # loop below adds a new family in one line and reports *which* key
@@ -368,6 +470,8 @@ _AXIS_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ('whole_spine', SPINE_AXIS_KEYS),
     ('per_scene', PER_SCENE_AXIS_KEYS),
     ('whole_architecture', ARCHITECTURE_AXIS_KEYS),
+    ('per_map_scene', PER_MAP_SCENE_AXIS_KEYS),
+    ('whole_scene_map', MAP_AXIS_KEYS),
 )
 _axis_family_by_key: dict[str, str] = {}
 for _family, _keys in _AXIS_FAMILIES:
@@ -422,6 +526,23 @@ class SceneRow(NamedTuple):
     value_at_stake: str
     value_shift: str
     turning_point: str
+
+
+class MappedScene(NamedTuple):
+    """A single row from reference/scenes.csv carrying the columns
+    scene-map scoring consumes."""
+    id: str
+    seq: int | None             # None when the cell is blank or non-int
+    title: str
+    summary: str
+    pov: str
+    location: str
+    timeline_day: str
+    time_of_day: str
+    scene_type: str             # 'type' is reserved; named scene_type here
+    word_count: int             # 0 when blank
+    target_words: int           # 0 when blank
+    architecture_scene: str     # empty for interstitials
 
 
 # Recognized register tokens for project.register (see rubric
@@ -633,6 +754,94 @@ def parse_architecture(project_dir: str) -> list[SceneRow]:
     return out
 
 
+def parse_scene_map(project_dir: str) -> list[MappedScene]:
+    """Read reference/scenes.csv as a seq-ordered list of MappedScene.
+
+    Required columns: id, summary. All other scene-map columns (seq,
+    title, pov, location, timeline_day, time_of_day, type, word_count,
+    target_words, architecture_scene) are optional with sensible
+    defaults. Returns [] when the file is missing or lacks the
+    required columns. Sorts by seq when present; falls back to CSV
+    row order when seq is missing or non-int."""
+    csv_path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(csv_path):
+        return []
+    try:
+        with open(csv_path, encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'WARNING: could not read {csv_path}: {e}')
+        return []
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return []
+    headers = lines[0].split('|')
+    required = {'id', 'summary'}
+    if not required.issubset(set(headers)):
+        log(f'WARNING: scenes.csv missing required columns; have '
+            f'{headers}, need {sorted(required)}. Skipping scene-map mode.')
+        return []
+    rows: list[tuple[int, int, MappedScene]] = []  # (seq, row_index, scene)
+    for i, line in enumerate(lines[1:], start=1):
+        cells = line.split('|')
+        if len(cells) != len(headers):
+            log(f'WARNING: skipping malformed scenes.csv row {i} in '
+                f'{csv_path} ({len(cells)} cells, expected {len(headers)})')
+            continue
+        row = dict(zip(headers, cells))
+        scene_id = row.get('id', '').strip()
+        summary = row.get('summary', '').strip()
+        if not scene_id or not summary:
+            missing = []
+            if not scene_id:
+                missing.append('id')
+            if not summary:
+                missing.append('summary')
+            log(f'WARNING: scenes.csv row {i} missing required field(s) '
+                f'{", ".join(missing)}; skipping. '
+                f'(id={scene_id or "<blank>"})')
+            continue
+
+        def _as_int(col: str) -> int:
+            try:
+                return int(row.get(col, '').strip() or '0')
+            except (TypeError, ValueError):
+                return 0
+
+        seq_raw = row.get('seq', '').strip()
+        if not seq_raw:
+            seq_val: int | None = None
+        else:
+            try:
+                seq_val = int(seq_raw)
+            except (TypeError, ValueError):
+                log(f'WARNING: scenes.csv row {i} has non-int seq='
+                    f'{seq_raw!r}; treating as unset')
+                seq_val = None
+
+        scene = MappedScene(
+            id=scene_id,
+            seq=seq_val,
+            title=row.get('title', '').strip(),
+            summary=summary,
+            pov=row.get('pov', '').strip(),
+            location=row.get('location', '').strip(),
+            timeline_day=row.get('timeline_day', '').strip(),
+            time_of_day=row.get('time_of_day', '').strip(),
+            scene_type=row.get('type', '').strip(),
+            word_count=_as_int('word_count'),
+            target_words=_as_int('target_words'),
+            architecture_scene=row.get('architecture_scene', '').strip(),
+        )
+        rows.append((scene.seq, i, scene))
+    # Sort key: scenes with seq=None go to the end (preserving CSV
+    # order within the unset group). The previous int+0-sentinel sort
+    # put unset-seq scenes at the top — silently wrong for mixed cases
+    # where some rows had explicit seq and others didn't.
+    rows.sort(key=lambda r: (r[0] is None, r[0] if r[0] is not None else 0, r[1]))
+    return [r[2] for r in rows]
+
+
 def read_project_register(project_dir: str) -> Register:
     """Return the project's declared register from storyforge.yaml's
     `project.register` field. Defaults to 'balanced' when absent or
@@ -821,8 +1030,10 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         os.makedirs(output_dir, exist_ok=True)
         spine_events = parse_spine(project_dir)
         architecture_scenes = parse_architecture(project_dir)
+        scene_map_scenes = parse_scene_map(project_dir)
         _write_strict_checklist(output_dir, artifacts, rubric,
-                                  spine_events, architecture_scenes)
+                                  spine_events, architecture_scenes,
+                                  scene_map_scenes)
         return _empty_result('strict', 'ok', output_dir=output_dir)
 
     if dry_run:
@@ -909,6 +1120,18 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         if architecture_extension['status'] != 'ok':
             status = 'partial'
 
+    scene_map_scenes = parse_scene_map(project_dir)
+    scene_map_extension: SceneMapExtension | None = None
+    if scene_map_scenes:
+        log(f'Scene map detected ({len(scene_map_scenes)} scenes) — '
+            'running per-scene-map matrix + whole-map axes.')
+        scene_map_extension = _run_scene_map_extension(
+            project_dir, output_dir, log_dir, scene_map_scenes,
+            architecture_scenes, artifacts, rubric, coaching,
+        )
+        if scene_map_extension['status'] != 'ok':
+            status = 'partial'
+
     return _result(
         coaching=coaching, status=status, output_dir=output_dir,
         composite=composite, scores=scores, deltas=deltas,
@@ -916,6 +1139,7 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         act_shape=act_shape_extension,
         spine=spine_extension,
         architecture=architecture_extension,
+        scene_map=scene_map_extension,
     )
 
 
@@ -933,6 +1157,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
              act_shape: ActShapeExtension | None = None,
              spine: SpineExtension | None = None,
              architecture: ArchitectureExtension | None = None,
+             scene_map: SceneMapExtension | None = None,
              ) -> StoryPowerResult:
     return {
         'coaching': coaching,
@@ -946,6 +1171,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
         'act_shape': act_shape,
         'spine': spine,
         'architecture': architecture,
+        'scene_map': scene_map,
     }
 
 
@@ -1673,14 +1899,12 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                               rubric: str,
                               spine_events: list[SpineEvent] | None = None,
                               architecture_scenes: list[SceneRow] | None = None,
+                              scene_map_scenes: list[MappedScene] | None = None,
                               ) -> None:
     """strict coaching: rule-based checklist of signals per axis, no LLM
-    call. Extends with per-act + structural blanks when act-shape is
-    populated, per-event + whole-spine blanks when spine.csv exists,
-    and per-scene + whole-architecture blanks when architecture.csv
-    exists — strict-mode authors get the same coverage the LLM modes
-    produce automatically.
-    """
+    call. Extends with blanks for each populated tier (act-shape,
+    spine, architecture, scene-map) so strict-mode authors get the
+    same coverage the LLM modes produce."""
     md_path = os.path.join(output_dir, 'self-scoring-checklist.md')
     out: list[str] = [
         '# Story-power scorecard — self-scoring checklist',
@@ -1799,6 +2023,40 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                 f'Self-score (1-10): __',
                 '',
                 'Whole-architecture signals you found:',
+                '- ',
+                '',
+            ])
+    if scene_map_scenes:
+        out.extend([
+            '# Scene-map tier (per scene + whole-map)',
+            '',
+            'Two axes per scene-map row (architecture coverage, '
+            'continuity coherence).',
+            '',
+        ])
+        for s in scene_map_scenes:
+            out.extend([
+                f'## {s.id} — pov={s.pov or "—"} '
+                f'arch={s.architecture_scene or "(interstitial)"}',
+                '',
+            ])
+            for axis in PER_MAP_SCENE_AXES:
+                out.append(f'- {axis.name}: __')
+            out.append('')
+        out.extend([
+            '# Whole-scene-map axes',
+            '',
+            'Five axes scored over the scene map as a whole (see the '
+            '"Scene-map mode" section of the rubric for full signals).',
+            '',
+        ])
+        for axis in MAP_AXES:
+            out.extend([
+                f'## {axis.name} (weight {axis.weight})',
+                '',
+                f'Self-score (1-10): __',
+                '',
+                'Whole-scene-map signals you found:',
                 '- ',
                 '',
             ])
@@ -3601,6 +3859,753 @@ def _append_architecture_coaching_brief(
         'Proposed field updates and scene insertions are concrete craft '
         'moves, not directives — the author decides whether each is the '
         'right move at this stage of the manuscript.',
+        '',
+    ]
+    _safe_write(md_path,
+                existing + '\n' + '\n'.join(prelude + section) + '\n',
+                recover_hint=recover_hint)
+
+
+# ---------------------------------------------------------------------------
+# Scene-map extension (Layer 1 per-scene + Layer 2 whole-map)
+# ---------------------------------------------------------------------------
+
+# Conservative band — typical drafts vary 20-40% from target.
+_WORD_COUNT_LOW_RATIO = 0.5
+_WORD_COUNT_HIGH_RATIO = 2.0
+
+
+def _empty_scene_map_extension(status: StoryPowerStatus) -> SceneMapExtension:
+    """Placeholder SceneMapExtension for a failed run."""
+    return {
+        'per_scene_scores': {},
+        'whole_scene_map_scores': {},
+        'scene_map_diagnostic': {},
+        'continuity_findings': [],
+        'proposed_operations': [],
+        'status': status,
+    }
+
+
+_BACKWARD_TIMELINE_ALLOWED_TYPES = frozenset({
+    'flashback', 'interlude', 'prologue',
+})
+
+
+def _check_continuity_deterministic(scenes: list[MappedScene],
+                                      architecture_ids: set[str],
+                                      ) -> list[ContinuityFinding]:
+    """High-confidence continuity checks on adjacent pairs + per-row
+    cross-reference validation.
+
+    When architecture_ids is empty (no architecture.csv on disk),
+    the cross-reference check is skipped wholesale with one INFO log.
+    Without the skip, every scene with a populated architecture_scene
+    field would flag as "broken" — a noise storm that swamps the
+    actionable findings.
+    """
+    findings: list[ContinuityFinding] = []
+    check_architecture = bool(architecture_ids)
+    if not check_architecture and any(s.architecture_scene for s in scenes):
+        log('INFO: scene-map continuity check skipping architecture '
+            'cross-reference — no reference/architecture.csv detected. '
+            'Populated architecture_scene values will be re-validated '
+            'once architecture.csv exists.')
+    for i, scene in enumerate(scenes):
+        if (check_architecture and scene.architecture_scene
+                and scene.architecture_scene not in architecture_ids):
+            findings.append({
+                'scene_id': scene.id,
+                'field': 'architecture_scene',
+                'issue': (
+                    f"architecture_scene={scene.architecture_scene!r} "
+                    'does not match any id in reference/architecture.csv'
+                ),
+                'severity': 'high',
+            })
+        if scene.target_words > 0 and scene.word_count > 0:
+            ratio = scene.word_count / scene.target_words
+            if ratio < _WORD_COUNT_LOW_RATIO or ratio > _WORD_COUNT_HIGH_RATIO:
+                findings.append({
+                    'scene_id': scene.id,
+                    'field': 'word_count',
+                    'issue': (
+                        f'word_count={scene.word_count} vs '
+                        f'target_words={scene.target_words} '
+                        f'({ratio:.1f}× — outside the '
+                        f'{_WORD_COUNT_LOW_RATIO}-{_WORD_COUNT_HIGH_RATIO}× '
+                        'pacing band)'
+                    ),
+                    'severity': 'medium',
+                })
+        if i == 0:
+            continue
+        prev = scenes[i - 1]
+        try:
+            curr_day = int(scene.timeline_day) if scene.timeline_day else None
+            prev_day = int(prev.timeline_day) if prev.timeline_day else None
+        except (TypeError, ValueError):
+            curr_day = prev_day = None
+        if (curr_day is not None and prev_day is not None
+                and curr_day < prev_day
+                and scene.scene_type.lower() not in _BACKWARD_TIMELINE_ALLOWED_TYPES):
+            allowed = ', '.join(sorted(_BACKWARD_TIMELINE_ALLOWED_TYPES))
+            findings.append({
+                'scene_id': scene.id,
+                'preceding_id': prev.id,
+                'field': 'timeline_day',
+                'issue': (
+                    f'timeline_day went backward ({prev_day} → {curr_day}) '
+                    f'but scene_type={scene.scene_type!r} '
+                    f'(expected one of: {allowed})'
+                ),
+                'severity': 'high',
+            })
+    return findings
+
+
+def _build_scene_map_prompt(scenes: list[MappedScene],
+                              architecture_scenes: list[SceneRow],
+                              artifacts: PitchArtifacts,
+                              det_findings: list[ContinuityFinding],
+                              rubric: str) -> str:
+    """Assemble the scene-map LLM prompt. Inlines deterministic
+    continuity findings as ground-truth signal."""
+    per_axis_list = ', '.join(f'"{a.key}"' for a in PER_MAP_SCENE_AXES)
+    map_axis_list = ', '.join(f'"{a.key}"' for a in MAP_AXES)
+    scenes_block = '\n'.join(
+        f'### {s.id} (seq={s.seq if s.seq is not None else "—"} pov={s.pov or "—"} '
+        f'day={s.timeline_day or "—"} type={s.scene_type or "—"} '
+        f'arch={s.architecture_scene or "(interstitial)"})\n'
+        f'  location: {s.location or "—"}, time_of_day: {s.time_of_day or "—"}, '
+        f'words: {s.word_count}/{s.target_words}\n'
+        f'  summary: {s.summary}'
+        for s in scenes
+    )
+    if architecture_scenes:
+        arch_block = '\n'.join(
+            f'- {a.id} ({a.title or "—"}): {a.summary[:200]}'
+            for a in architecture_scenes
+        )
+    else:
+        arch_block = '(no architecture.csv populated)'
+    if det_findings:
+        det_block = '\n'.join(
+            f'- {f["scene_id"]}.{f["field"]} [{f["severity"]}]: {f["issue"]}'
+            for f in det_findings
+        )
+    else:
+        det_block = '(no deterministic findings — score from the LLM-only pass)'
+
+    return f"""You are scoring the SCENE MAP of a manuscript. The scene map is the
+full sequence of every scene including interstitials. Each row carries
+continuity metadata (pov, location, timeline_day, time_of_day,
+scene_type, word_count, architecture_scene) no upstream artifact has.
+Your job:
+
+1. Per-scene Layer 1: score each scene-map row on the two per-scene
+   axes (architecture_coverage, continuity_coherence).
+2. Whole-map Layer 2: score the map as a whole on the five
+   whole-scene-map axes.
+3. Surface continuity findings and propose SPECIFIC scene operations
+   (merge / split / insert / reorder / promote) — full id lists, not
+   vague rewrites.
+
+The deterministic pre-pass already flagged the findings below — treat
+these as ground-truth signal and seed continuity_coherence scoring
+with them rather than re-discovering them.
+
+# Rubric
+
+{rubric}
+
+# Pitch context
+
+## Logline
+{artifacts.logline}
+
+## Synopsis
+{artifacts.synopsis}
+
+# Architecture anchors (for coverage_completeness)
+
+{arch_block}
+
+# Scene map under evaluation
+
+{scenes_block}
+
+# Deterministic continuity findings (pre-pass)
+
+{det_block}
+
+# Task
+
+Valid per-scene axis keys: {per_axis_list}
+Valid whole-scene-map axis keys: {map_axis_list}
+
+Return a JSON object with this exact shape:
+
+{{
+  "per_scene": [
+    {{
+      "scene_id": "<scene id>",
+      "scores": [
+        {{"axis": "{PER_MAP_SCENE_AXES[0].key}", "score": 1-10 integer,
+          "rationale": "one-sentence justification"}},
+        ... one entry per per-scene axis ...
+      ]
+    }},
+    ... one entry per scene in seq order ...
+  ],
+  "whole_scene_map": [
+    {{"axis": "{MAP_AXES[0].key}",
+      "score": 1-10 integer,
+      "positive_signals": "semicolon-separated quoted signals",
+      "negative_signals": "semicolon-separated quoted gaps",
+      "rationale": "one-sentence justification"}},
+    ... one entry per whole-scene-map axis ...
+  ],
+  "scene_map_diagnostic": {{
+    "lowest_axis": "name of the lowest-scoring axis across both layers",
+    "lowest_axis_average": "the average on that axis as a decimal",
+    "summary": "one sentence: what the lowest axis tells you",
+    "coverage_assessment": "one sentence: how scene-map coverage maps to architecture anchors",
+    "high_leverage_move": "one sentence: ONE specific change that would lift the most ground"
+  }},
+  "continuity_findings": [
+    {{"scene_id": "<id>", "preceding_id": "<id or empty>",
+      "field": "pov|location|timeline_day|word_count|architecture_scene",
+      "issue": "what's wrong",
+      "severity": "high|medium|low"}}
+  ],
+  "proposed_operations": [
+    {{"operation": "merge|split|insert|reorder|promote",
+      "scene_ids": ["<id1>", "<id2>"],
+      "summary": "one sentence: what the operation accomplishes",
+      "rationale": "which axes this would lift, in 'axis: was → now' form"}}
+  ]
+}}
+
+Reserve 10 for prose-verified excellence. Be specific and grounded —
+quote the scene-map rows. The proposed operations are the most
+valuable output; treat them as concrete structural moves.
+Return ONLY the JSON object.
+"""
+
+
+def _extract_per_scene_map_scores(parsed: dict, scene_ids: list[str]
+                                     ) -> dict[str, dict[str, int]]:
+    valid_ids = set(scene_ids)
+    out: dict[str, dict[str, int]] = {sid: {} for sid in scene_ids}
+    drops: list[str] = []
+    for sc_row in parsed.get('per_scene') or []:
+        if not isinstance(sc_row, dict):
+            drops.append(f'non-dict per_scene row: {sc_row!r}')
+            continue
+        scene_id = sc_row.get('scene_id')
+        if scene_id not in valid_ids:
+            drops.append(f'unknown scene_id={scene_id!r}')
+            continue
+        for score_row in sc_row.get('scores') or []:
+            if not isinstance(score_row, dict):
+                drops.append(f'non-dict score row in {scene_id}')
+                continue
+            axis = score_row.get('axis')
+            if axis not in PER_MAP_SCENE_AXIS_BY_KEY:
+                drops.append(f'unknown axis={axis!r} in {scene_id}')
+                continue
+            try:
+                score = int(score_row.get('score'))
+            except (TypeError, ValueError):
+                drops.append(
+                    f'non-int score in {scene_id}.{axis}: '
+                    f'{score_row.get("score")!r}'
+                )
+                continue
+            if not 1 <= score <= 10:
+                drops.append(f'out-of-range score in {scene_id}.{axis}: {score}')
+                continue
+            out[scene_id][axis] = score
+    _log_extraction_drops('per-scene-map', drops)
+    return out
+
+
+def _extract_whole_scene_map_scores(parsed: dict) -> WholeSceneMapScores:
+    out: WholeSceneMapScores = {}
+    drops: list[str] = []
+    for row in parsed.get('whole_scene_map') or []:
+        if not isinstance(row, dict):
+            drops.append(f'non-dict whole_scene_map row: {row!r}')
+            continue
+        axis = row.get('axis')
+        if axis not in MAP_AXIS_BY_KEY:
+            drops.append(f'unknown whole-scene-map axis={axis!r}')
+            continue
+        try:
+            score = int(row.get('score'))
+        except (TypeError, ValueError):
+            drops.append(f'non-int whole-scene-map score in {axis}: '
+                         f'{row.get("score")!r}')
+            continue
+        if not 1 <= score <= 10:
+            drops.append(
+                f'out-of-range whole-scene-map score in {axis}: {score}'
+            )
+            continue
+        out[axis] = score  # type: ignore[literal-required]
+    _log_extraction_drops('whole-scene-map', drops)
+    return out
+
+
+def _extract_continuity_findings(parsed: dict) -> list[ContinuityFinding]:
+    out: list[ContinuityFinding] = []
+    drops: list[str] = []
+    for row in parsed.get('continuity_findings') or []:
+        if not isinstance(row, dict):
+            drops.append(f'non-dict row: {row!r}')
+            continue
+        scene_id = row.get('scene_id', '').strip()
+        field = row.get('field', '').strip()
+        issue = row.get('issue', '').strip()
+        missing = [name for name, val in
+                   (('scene_id', scene_id), ('field', field),
+                    ('issue', issue))
+                   if not val]
+        if missing:
+            drops.append(f'incomplete row (scene_id={scene_id!r}, '
+                         f'missing: {",".join(missing)})')
+            continue
+        raw_severity = row.get('severity', 'medium').strip().lower()
+        severity: Severity = (
+            raw_severity if raw_severity in ('high', 'medium', 'low')
+            else 'medium'
+        )  # type: ignore[assignment]
+        finding: ContinuityFinding = {
+            'scene_id': scene_id,
+            'field': field,
+            'issue': issue,
+            'severity': severity,
+        }
+        preceding_id = row.get('preceding_id', '').strip()
+        if preceding_id:
+            finding['preceding_id'] = preceding_id
+        out.append(finding)
+    _log_extraction_drops('continuity_findings', drops)
+    return out
+
+
+def _extract_proposed_operations(parsed: dict
+                                    ) -> list[ProposedSceneOperation]:
+    out: list[ProposedSceneOperation] = []
+    drops: list[str] = []
+    for row in parsed.get('proposed_operations') or []:
+        if not isinstance(row, dict):
+            drops.append(f'non-dict row: {row!r}')
+            continue
+        operation = row.get('operation', '').strip().lower()
+        scene_ids = row.get('scene_ids', [])
+        summary = row.get('summary', '').strip()
+        if operation not in SCENE_OPERATIONS:
+            drops.append(f'unknown operation={operation!r}')
+            continue
+        if not isinstance(scene_ids, list) or not scene_ids:
+            drops.append(f'empty/non-list scene_ids in {operation} row')
+            continue
+        if not summary:
+            drops.append(f'missing summary in {operation} {scene_ids}')
+            continue
+        cleaned_ids = [str(s).strip() for s in scene_ids
+                       if str(s).strip()]
+        expected = SCENE_OPERATION_ARITY[operation]
+        if len(cleaned_ids) != expected:
+            drops.append(
+                f'{operation} requires {expected} scene_id(s); got '
+                f'{len(cleaned_ids)}: {cleaned_ids}'
+            )
+            continue
+        out.append({
+            'operation': operation,  # type: ignore[typeddict-item]
+            'scene_ids': cleaned_ids,
+            'summary': summary,
+            'rationale': row.get('rationale', '').strip(),
+        })
+    _log_extraction_drops('proposed_operations', drops)
+    return out
+
+
+def _parse_response_scene_map(text: str) -> dict | None:
+    missing_fields: list[str] = []
+
+    def _take(obj):
+        if not isinstance(obj, dict):
+            return None
+        per_scene = obj.get('per_scene')
+        whole_map = obj.get('whole_scene_map')
+        local_missing = []
+        if not isinstance(per_scene, list):
+            local_missing.append('per_scene')
+        if not isinstance(whole_map, list):
+            local_missing.append('whole_scene_map')
+        if local_missing:
+            missing_fields[:] = local_missing
+            return None
+        return obj
+    try:
+        out = _take(json.loads(text))
+        if out is not None:
+            return out
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+    if m:
+        try:
+            out = _take(json.loads(m.group(1).strip()))
+            if out is not None:
+                return out
+        except json.JSONDecodeError:
+            pass
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if m:
+        try:
+            out = _take(json.loads(m.group(0)))
+            if out is not None:
+                return out
+        except json.JSONDecodeError:
+            pass
+    if missing_fields:
+        log(f'WARNING: scene-map LLM returned valid JSON but missing '
+            f'required list(s): {", ".join(missing_fields)}.')
+    return None
+
+
+def _run_scene_map_extension(project_dir: str, output_dir: str,
+                                log_dir: str,
+                                scenes: list[MappedScene],
+                                architecture_scenes: list[SceneRow],
+                                artifacts: PitchArtifacts,
+                                rubric: str,
+                                coaching: CoachingLevel,
+                                ) -> SceneMapExtension:
+    """Run the scene-map LLM call after the deterministic continuity
+    pre-pass. Pitch result still stands on any failure."""
+    architecture_ids = {a.id for a in architecture_scenes}
+    det_findings = _check_continuity_deterministic(scenes, architecture_ids)
+
+    prompt = _build_scene_map_prompt(scenes, architecture_scenes, artifacts,
+                                        det_findings, rubric)
+    model = select_model('creative')
+    log_file = os.path.join(log_dir,
+                            os.path.basename(output_dir) + '-scene-map.json')
+    os.makedirs(log_dir, exist_ok=True)
+    try:
+        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+    except Exception as e:
+        log(f'ERROR: scene-map LLM call failed: {e}. Pitch result still stands.')
+        ext = _empty_scene_map_extension('llm_error')
+        ext['continuity_findings'] = det_findings
+        return ext
+    text = _read_response_text(log_file)
+    parsed = _parse_response_scene_map(text)
+    if not parsed:
+        _record_cost(project_dir, log_file, model,
+                     target='story-power:scene-map:unparseable')
+        log(f'ERROR: scene-map LLM response unparseable; raw at {log_file}.')
+        ext = _empty_scene_map_extension('unparseable')
+        ext['continuity_findings'] = det_findings
+        return ext
+    _record_cost(project_dir, log_file, model,
+                 target='story-power:scene-map')
+
+    scene_ids = [s.id for s in scenes]
+    per_scene = _extract_per_scene_map_scores(parsed, scene_ids)
+    whole_map = _extract_whole_scene_map_scores(parsed)
+    diag = parsed.get('scene_map_diagnostic') or {}
+    llm_findings = _extract_continuity_findings(parsed)
+    proposed_ops = _extract_proposed_operations(parsed)
+    continuity_findings = det_findings + llm_findings
+
+    empty_scenes = [sid for sid in scene_ids if not per_scene.get(sid)]
+    has_any_per_scene = any(per_scene.get(sid) for sid in scene_ids)
+    has_any_whole_map = bool(whole_map)
+    if empty_scenes and has_any_per_scene:
+        # Write the full empty-scene id list to a sidecar so the author
+        # can grep it. The previous "first 5, then ..." truncation lost
+        # actionability for large scene maps (30 of 60 empty → only 5
+        # named in the log, 25 lost).
+        sidecar = os.path.join(output_dir, 'scene-map-empty-scenes.txt')
+        _safe_write(sidecar, '\n'.join(empty_scenes) + '\n',
+                    recover_hint=log_file)
+        log(f'ERROR: scene-map extraction produced zero valid scores for '
+            f'{len(empty_scenes)} scene(s); full list at {sidecar}; '
+            f'refusing to write per-scene-map-matrix.csv with empty row(s). '
+            f'Raw response: {log_file}')
+    elif not has_any_per_scene:
+        log(f'ERROR: scene-map extraction produced zero valid per-scene '
+            f'scores; refusing to write per-scene-map-matrix.csv. '
+            f'Raw response: {log_file}')
+    if not has_any_whole_map:
+        log(f'ERROR: scene-map extraction produced zero valid whole-map '
+            f'scores; refusing to write whole-scene-map-axes.csv. '
+            f'Raw response: {log_file}')
+
+    expected_per_scene = 2 * len(scenes)
+    actual_per_scene = sum(len(s) for s in per_scene.values())
+    missing_per_scene = max(0, expected_per_scene - actual_per_scene)
+    missing_map_axes = [a.key for a in MAP_AXES if a.key not in whole_map]
+    status: StoryPowerStatus = 'ok'
+    if missing_per_scene or missing_map_axes:
+        status = 'partial'
+        parts = []
+        if missing_per_scene:
+            parts.append(f'{missing_per_scene} per-scene cell(s) missing')
+        if missing_map_axes:
+            parts.append(
+                f'{len(missing_map_axes)} whole-map axis/axes missing '
+                f'({", ".join(missing_map_axes)})'
+            )
+        log(f'WARNING: scene-map extraction partial — {"; ".join(parts)}.')
+    if status == 'ok':
+        assert per_scene and whole_map, (
+            'scene-map extension status=ok requires non-empty '
+            'per_scene_scores and whole_scene_map_scores'
+        )
+
+    write_matrix = has_any_per_scene and not empty_scenes
+    write_whole_map = has_any_whole_map
+    if coaching == 'full':
+        if write_matrix:
+            _write_per_scene_map_matrix(output_dir, scenes, per_scene,
+                                          recover_hint=log_file)
+        if write_whole_map:
+            _write_whole_scene_map_axes(output_dir, whole_map, parsed,
+                                          recover_hint=log_file)
+        if write_matrix or write_whole_map:
+            _append_scene_map_diagnostic(
+                output_dir, scenes, per_scene, whole_map,
+                continuity_findings, proposed_ops, diag,
+                include_matrix=write_matrix,
+                include_whole_map=write_whole_map,
+            )
+    else:
+        if write_matrix or write_whole_map:
+            _append_scene_map_coaching_brief(
+                output_dir, scenes, per_scene, whole_map,
+                continuity_findings, proposed_ops, diag,
+                include_matrix=write_matrix,
+                include_whole_map=write_whole_map,
+                recover_hint=log_file,
+            )
+
+    return {
+        'status': status,
+        'per_scene_scores': per_scene,
+        'whole_scene_map_scores': whole_map,
+        'scene_map_diagnostic': diag,
+        'continuity_findings': continuity_findings,
+        'proposed_operations': proposed_ops,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Scene-map writers
+# ---------------------------------------------------------------------------
+
+def _write_per_scene_map_matrix(output_dir: str, scenes: list[MappedScene],
+                                   per_scene: dict[str, dict[str, int]],
+                                   *, recover_hint: str = '') -> None:
+    """Write per-scene-map-matrix.csv — one row per scene-map scene
+    with the two per-scene axes."""
+    csv_path = os.path.join(output_dir, 'per-scene-map-matrix.csv')
+    headers = (['scene_id', 'pov', 'architecture_scene']
+               + [a.key for a in PER_MAP_SCENE_AXES])
+    lines = ['|'.join(headers)]
+    for scene in scenes:
+        scores = per_scene.get(scene.id, {})
+        row = [scene.id, scene.pov or '',
+               scene.architecture_scene or '']
+        for axis in PER_MAP_SCENE_AXES:
+            row.append(str(scores.get(axis.key, '')))
+        lines.append('|'.join(_sanitize_cell(c) for c in row))
+    _safe_write(csv_path, '\n'.join(lines) + '\n', recover_hint=recover_hint)
+
+
+def _write_whole_scene_map_axes(output_dir: str,
+                                   whole_map: WholeSceneMapScores,
+                                   parsed: dict, *,
+                                   recover_hint: str = '') -> None:
+    """Write whole-scene-map-axes.csv — one row per Layer 2 axis."""
+    csv_path = os.path.join(output_dir, 'whole-scene-map-axes.csv')
+    headers = ['axis', 'name', 'score', 'weight', 'positive_signals',
+               'negative_signals', 'rationale']
+    rows_by_axis = {r.get('axis'): r for r in parsed.get('whole_scene_map', [])
+                    if isinstance(r, dict)}
+    lines = ['|'.join(headers)]
+    for axis in MAP_AXES:
+        row = rows_by_axis.get(axis.key, {})
+        lines.append('|'.join(_sanitize_cell(c) for c in (
+            axis.key,
+            axis.name,
+            str(whole_map.get(axis.key, '')),
+            str(axis.weight),
+            row.get('positive_signals', ''),
+            row.get('negative_signals', ''),
+            row.get('rationale', ''),
+        )))
+    _safe_write(csv_path, '\n'.join(lines) + '\n', recover_hint=recover_hint)
+
+
+def _scene_map_diagnostic_section(
+        scenes: list[MappedScene],
+        per_scene: dict[str, dict[str, int]],
+        whole_map: WholeSceneMapScores,
+        continuity_findings: list[ContinuityFinding],
+        proposed_ops: list[ProposedSceneOperation],
+        diag: SceneMapDiagnostic, *,
+        include_matrix: bool = True,
+        include_whole_map: bool = True,
+        ) -> list[str]:
+    """Shared scene-map markdown section (full diagnostic.md + coach brief)."""
+    out: list[str] = []
+    if include_matrix:
+        out.extend([
+            '## Per-scene matrix (scene-map Layer 1)',
+            '',
+            '| Scene | POV | Architecture | Coverage | Continuity |',
+            '|---|---|---|---|---|',
+        ])
+        for s in scenes:
+            sc = per_scene.get(s.id, {})
+            out.append(
+                f'| {s.id} | {s.pov or "—"} | '
+                f'{s.architecture_scene or "—"} | '
+                f'{sc.get("architecture_coverage", "–")} | '
+                f'{sc.get("continuity_coherence", "–")} |'
+            )
+    if include_whole_map:
+        if out:
+            out.append('')
+        out.extend([
+            '## Whole-scene-map axes (scene-map Layer 2)',
+            '',
+            '| Axis | Score | Weight |',
+            '|---|---|---|',
+        ])
+        for axis in MAP_AXES:
+            s = whole_map.get(axis.key, '–')
+            out.append(f'| {axis.name} | {s} | {axis.weight} |')
+
+    if continuity_findings:
+        out.extend(['', '## Continuity findings', ''])
+        for f in continuity_findings:
+            ctx = (f' (after {f["preceding_id"]})'
+                   if f.get('preceding_id') else '')
+            out.append(
+                f'- **{f["scene_id"]}**{ctx} [{f["severity"]}] '
+                f'`{f["field"]}`: {f["issue"]}'
+            )
+
+    if proposed_ops:
+        out.extend(['', '## Proposed scene operations', ''])
+        for op in proposed_ops:
+            ids = ', '.join(op['scene_ids'])
+            out.extend([
+                f'### {op["operation"].upper()}: {ids}',
+                '',
+                f'**Summary:** {op["summary"]}',
+                '',
+                f'**Rationale:** {op.get("rationale") or "(none provided)"}',
+                '',
+            ])
+
+    out.extend([
+        '',
+        '## Scene-map diagnostic',
+        '',
+        f'**Coverage assessment:** {diag.get("coverage_assessment") or "(none provided)"}',
+        '',
+        f'**Lowest axis:** {diag.get("lowest_axis") or "(none identified)"} '
+        f'({diag.get("lowest_axis_average") or "?"})',
+        '',
+        f'**Summary:** {diag.get("summary") or "(none identified)"}',
+        '',
+        f'**High-leverage move:** {diag.get("high_leverage_move") or "(none proposed)"}',
+        '',
+    ])
+
+    return out
+
+
+def _append_scene_map_diagnostic(
+        output_dir: str, scenes: list[MappedScene],
+        per_scene: dict[str, dict[str, int]],
+        whole_map: WholeSceneMapScores,
+        continuity_findings: list[ContinuityFinding],
+        proposed_ops: list[ProposedSceneOperation],
+        diag: SceneMapDiagnostic, *,
+        include_matrix: bool = True,
+        include_whole_map: bool = True,
+        ) -> None:
+    """Append the scene-map section to the existing diagnostic.md."""
+    md_path = os.path.join(output_dir, 'diagnostic.md')
+    if not os.path.isfile(md_path):
+        log(f'WARNING: scene-map diagnostic could not be appended — '
+            f'{md_path} does not exist (upstream pitch-diagnostic write '
+            'likely failed). Scene-map scores were computed but their '
+            'diagnostic narrative is lost.')
+        return
+    try:
+        with open(md_path, encoding='utf-8') as f:
+            existing = f.read()
+    except OSError as e:
+        log(f'WARNING: could not append scene-map diagnostic to {md_path}: {e}')
+        return
+    section = _scene_map_diagnostic_section(
+        scenes, per_scene, whole_map, continuity_findings,
+        proposed_ops, diag,
+        include_matrix=include_matrix,
+        include_whole_map=include_whole_map,
+    )
+    _safe_write(md_path, existing + '\n' + '\n'.join(section) + '\n')
+
+
+def _append_scene_map_coaching_brief(
+        output_dir: str, scenes: list[MappedScene],
+        per_scene: dict[str, dict[str, int]],
+        whole_map: WholeSceneMapScores,
+        continuity_findings: list[ContinuityFinding],
+        proposed_ops: list[ProposedSceneOperation],
+        diag: SceneMapDiagnostic, *,
+        include_matrix: bool = True,
+        include_whole_map: bool = True,
+        recover_hint: str = '',
+        ) -> None:
+    """coach coaching: append scene-map sections to coaching-brief.md."""
+    md_path = os.path.join(output_dir, 'coaching-brief.md')
+    if not os.path.isfile(md_path):
+        log(f'WARNING: scene-map coaching brief could not be appended — '
+            f'{md_path} does not exist (upstream coach-brief write likely '
+            'failed). Scene-map scores were computed but are not captured '
+            'in the brief.')
+        return
+    try:
+        with open(md_path, encoding='utf-8') as f:
+            existing = f.read()
+    except OSError as e:
+        log(f'WARNING: could not append scene-map coaching brief to {md_path}: {e}')
+        return
+    section = _scene_map_diagnostic_section(
+        scenes, per_scene, whole_map, continuity_findings,
+        proposed_ops, diag,
+        include_matrix=include_matrix,
+        include_whole_map=include_whole_map,
+    )
+    prelude = [
+        '# Scene-map extension (LLM proposals — author confirms)',
+        '',
+        'Proposed scene operations are concrete structural moves, not '
+        'directives — the author decides whether each merge/split/insert/'
+        'reorder/promote is the right move at this stage.',
         '',
     ]
     _safe_write(md_path,
