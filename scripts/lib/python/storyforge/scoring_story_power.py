@@ -3174,6 +3174,17 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
     proposed_updates = _extract_proposed_field_updates(parsed)
     proposed_inserts = _extract_proposed_scene_insertions(parsed)
 
+    # Flag proposed insertion ids that collide with existing scenes —
+    # otherwise an author who accepts the proposal naively would end
+    # up with a duplicate id in architecture.csv.
+    existing_ids = set(scene_ids)
+    for ins in proposed_inserts:
+        if ins['proposed_id'] in existing_ids:
+            log(f'WARNING: proposed scene insertion id '
+                f'{ins["proposed_id"]!r} collides with an existing '
+                'architecture scene; the author must rename before '
+                'accepting this proposal.')
+
     # Deterministic findings first — higher confidence; LLM may corroborate.
     field_findings = det_findings + llm_findings
 

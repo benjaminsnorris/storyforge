@@ -3428,6 +3428,29 @@ def test_disjoint_axis_assert_data_driven_error_names_collision():
     # which mirrors the import-time loop's semantics.
 
 
+def test_proposed_scene_insertion_id_collision_warns(tmp_path, monkeypatch,
+                                                       capsys):
+    """If the LLM proposes a scene id that collides with an existing
+    architecture scene, the diagnostic should WARN — silently accepting
+    would let the author duplicate an id in architecture.csv."""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    arch_payload = _architecture_payload()
+    # Override proposed_id to collide with a01 (an existing scene).
+    arch_payload['proposed_scene_insertions'][0]['proposed_id'] = 'a01'
+    fake = _quad_mock_llm(_full_payload(), _act_shape_payload(),
+                            _spine_payload(), arch_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out = capsys.readouterr().out
+    assert 'collides with an existing' in out
+    assert "'a01'" in out
+
+
 def test_value_shift_uses_end_polarity_smoke_via_extension(tmp_path,
                                                              monkeypatch):
     """End-to-end smoke test for the value_shift fix: a scene with
