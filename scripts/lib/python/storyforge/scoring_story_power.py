@@ -2605,3 +2605,836 @@ def _append_spine_coaching_brief(output_dir: str,
     _safe_write(md_path,
                 existing + '\n' + '\n'.join(prelude + section) + '\n',
                 recover_hint=recover_hint)
+
+
+# ---------------------------------------------------------------------------
+# Architecture extension (Layer 1 per-scene + Layer 2 whole-architecture)
+# ---------------------------------------------------------------------------
+
+# Keywords that signal a turning point's nature. Used by the
+# deterministic field-coherence pre-pass to flag obvious mismatches
+# between `turning_point` and `summary` (e.g., turning_point names a
+# revelation but the summary contains only action verbs).
+_REVELATION_VERBS = (
+    'realiz', 'recogniz', 'understand', 'discover', 'reveal', 'see',
+    'know', 'remember', 'recall', 'glimpse', 'perceive',
+)
+_ACTION_VERBS = (
+    'strike', 'attack', 'flee', 'chase', 'fight', 'break', 'leap',
+    'run', 'shoot', 'grab', 'push', 'pull', 'shove',
+)
+
+
+def _empty_architecture_extension(status: StoryPowerStatus) -> ArchitectureExtension:
+    """Placeholder ArchitectureExtension for a failed run (mirrors
+    _empty_extension / _empty_spine_extension)."""
+    return {
+        'status': status,
+        'per_scene_scores': {},
+        'whole_architecture_scores': {},
+        'architecture_diagnostic': {},
+        'field_findings': [],
+        'proposed_field_updates': [],
+        'proposed_scene_insertions': [],
+    }
+
+
+def _check_field_coherence_deterministic(scene: SceneRow
+                                            ) -> list[FieldCoherenceFinding]:
+    """Run high-confidence regex/keyword checks on a single scene's
+    fields. Returns a list of findings — the LLM is then told about
+    these as ground-truth signal and refines / contextualizes the rest.
+
+    Only flags cases where a mismatch is structurally unambiguous (e.g.,
+    `turning_point: revelation` with a summary containing zero
+    recognition verbs). Higher-noise cases are left to the LLM.
+    """
+    findings: list[FieldCoherenceFinding] = []
+    summary_lower = scene.summary.lower()
+    turning_point_lower = scene.turning_point.lower()
+    action_sequel_lower = scene.action_sequel.lower()
+    value_shift = scene.value_shift.strip()
+
+    # 1. turning_point names a revelation/recognition but summary has
+    # no verb of recognition.
+    if turning_point_lower and any(kw in turning_point_lower for kw in (
+            'revelation', 'recognition', 'realization', 'discovery',
+            'epiphany')):
+        if not any(v in summary_lower for v in _REVELATION_VERBS):
+            findings.append({
+                'scene_id': scene.id,
+                'field': 'turning_point',
+                'issue': (
+                    f"turning_point={scene.turning_point!r} signals a "
+                    'recognition beat, but the summary contains no verb '
+                    'of realization/recognition/discovery'
+                ),
+                'severity': 'high',
+            })
+
+    # 2. action_sequel == 'action' but summary reads as pure reflection
+    # (no action verbs at all). Lower confidence — sequel scenes can
+    # still contain action; only flag when the asymmetry is extreme.
+    if action_sequel_lower in ('action', 'action scene'):
+        if not any(v in summary_lower for v in _ACTION_VERBS):
+            findings.append({
+                'scene_id': scene.id,
+                'field': 'action_sequel',
+                'issue': (
+                    f"action_sequel={scene.action_sequel!r} but the "
+                    'summary contains no concrete action verbs — verify '
+                    'the classification'
+                ),
+                'severity': 'medium',
+            })
+
+    # 3. value_shift names a positive shift (+/+) but emotional_arc
+    # uses friction/rupture/loss language.
+    if value_shift.startswith('+'):
+        arc_lower = scene.emotional_arc.lower()
+        if any(kw in arc_lower for kw in
+               ('rupture', 'loss', 'collapse', 'shatter')):
+            findings.append({
+                'scene_id': scene.id,
+                'field': 'value_shift',
+                'issue': (
+                    f"value_shift={value_shift!r} (positive) contradicts "
+                    f"emotional_arc={scene.emotional_arc!r} (rupture/loss "
+                    'language)'
+                ),
+                'severity': 'high',
+            })
+
+    return findings
+
+
+def _action_sequel_ratio(scenes: list[SceneRow]) -> tuple[int, int, float]:
+    """Return (action_count, sequel_count, action_ratio). Anything that
+    isn't a clear action/sequel classification counts as neither — the
+    rubric's whole-architecture axis weights against this honestly."""
+    action = sum(1 for s in scenes
+                 if s.action_sequel.strip().lower().startswith('action'))
+    sequel = sum(1 for s in scenes
+                 if s.action_sequel.strip().lower().startswith('sequel'))
+    total = action + sequel
+    ratio = (action / total) if total else 0.0
+    return action, sequel, ratio
+
+
+def _build_architecture_prompt(scenes: list[SceneRow],
+                                  spine_events: list[SpineEvent],
+                                  artifacts: PitchArtifacts,
+                                  register: str,
+                                  deterministic_findings: list[FieldCoherenceFinding],
+                                  rubric: str) -> str:
+    """Assemble the architecture-mode LLM prompt. Inlines deterministic
+    findings as ground-truth signal so the LLM refines rather than
+    re-discovering them."""
+    per_scene_axis_list = ', '.join(f'"{a.key}"' for a in PER_SCENE_AXES)
+    arch_axis_list = ', '.join(f'"{a.key}"' for a in ARCHITECTURE_AXES)
+    scenes_block = '\n'.join(
+        f'### {s.id} (serves spine_event={s.spine_event or "(none)"})\n'
+        f'  title: {s.title or "(none)"}\n'
+        f'  action_sequel: {s.action_sequel or "(blank)"}\n'
+        f'  emotional_arc: {s.emotional_arc or "(blank)"}\n'
+        f'  value_at_stake: {s.value_at_stake or "(blank)"}\n'
+        f'  value_shift: {s.value_shift or "(blank)"}\n'
+        f'  turning_point: {s.turning_point or "(blank)"}\n'
+        f'  summary: {s.summary}'
+        for s in scenes
+    )
+    if spine_events:
+        spine_block = '\n'.join(
+            f'- {ev.id} ({ev.function or "no function"}): {ev.summary}'
+            for ev in spine_events
+        )
+    else:
+        spine_block = '(no spine.csv populated)'
+    if deterministic_findings:
+        det_block = '\n'.join(
+            f'- {f["scene_id"]}.{f["field"]} [{f["severity"]}]: {f["issue"]}'
+            for f in deterministic_findings
+        )
+    else:
+        det_block = '(no deterministic findings — base your scoring on the LLM-only pass)'
+
+    action_count, sequel_count, ratio = _action_sequel_ratio(scenes)
+
+    return f"""You are scoring the ARCHITECTURE of a project at the scene resolution.
+Each scene has structured fields beyond its prose summary. Your job:
+
+1. Per-scene Layer 1: score each scene on the two per-scene axes.
+2. Whole-architecture Layer 2: score the architecture as a whole on
+   the five whole-architecture axes.
+3. Surface field-coherence problems and propose SPECIFIC field updates
+   (which field, what new value).
+4. Detect spine bridges that no architecture scene enacts and propose
+   new sequel scenes with full field definitions.
+
+The deterministic pre-pass already flagged the findings below — treat
+these as ground-truth signal and use them to seed your field-coherence
+scoring rather than re-discovering them.
+
+# Rubric
+
+{rubric}
+
+# Pitch context (already scored)
+
+## Logline
+{artifacts.logline}
+
+## Synopsis
+{artifacts.synopsis}
+
+## Theme
+{artifacts.theme or '(empty)'}
+
+# Spine events (for spine-event service axis)
+
+{spine_block}
+
+# Architecture scenes under evaluation
+
+{scenes_block}
+
+# Project register (for action/sequel rhythm axis)
+
+Declared register: **{register}**
+Current ratio: {action_count} action / {sequel_count} sequel
+({ratio:.0%} action of {action_count + sequel_count} classified scenes)
+
+Register-specific expected bands:
+- thriller / action / fast / commercial: 60-80% action
+- literary / decompressed / atmospheric / contemplative: 25-50% action
+- balanced (default): 40-60% action
+
+Score action_sequel_rhythm against the declared register's band.
+
+# Deterministic field-coherence findings (pre-pass)
+
+{det_block}
+
+# Task
+
+Valid per-scene axis keys: {per_scene_axis_list}
+Valid whole-architecture axis keys: {arch_axis_list}
+
+Return a JSON object with this exact shape:
+
+{{
+  "per_scene": [
+    {{
+      "scene_id": "<architecture scene id>",
+      "scores": [
+        {{"axis": "{PER_SCENE_AXES[0].key}", "score": 1-10 integer,
+          "rationale": "one-sentence justification grounded in this scene"}},
+        ... one entry per per-scene axis ...
+      ]
+    }},
+    ... one entry per architecture scene in order ...
+  ],
+  "whole_architecture": [
+    {{"axis": "{ARCHITECTURE_AXES[0].key}",
+      "score": 1-10 integer,
+      "positive_signals": "semicolon-separated quoted signals",
+      "negative_signals": "semicolon-separated quoted gaps",
+      "rationale": "one-sentence justification"}},
+    ... one entry per whole-architecture axis ...
+  ],
+  "architecture_diagnostic": {{
+    "lowest_axis": "name of the lowest-scoring axis across both layers",
+    "lowest_axis_average": "the average on that axis as a decimal",
+    "summary": "one sentence: what the lowest axis tells you about the architecture",
+    "register_assessment": "one sentence: how the action/sequel ratio compares to the declared register",
+    "high_leverage_move": "one sentence: ONE specific change that would lift the most ground"
+  }},
+  "field_findings": [
+    {{"scene_id": "<id>", "field": "<field name>",
+      "issue": "what's wrong",
+      "severity": "high|medium|low"}}
+  ],
+  "proposed_field_updates": [
+    {{"scene_id": "<id>", "field": "emotional_arc",
+      "current_value": "<current field value>",
+      "proposed_value": "<concrete new value>",
+      "rationale": "one sentence: why this update fixes the coherence drop"}}
+  ],
+  "proposed_scene_insertions": [
+    {{"insert_after": "<existing scene id>",
+      "proposed_id": "<new scene id>",
+      "spine_event": "<spine event id the new scene serves>",
+      "action_sequel": "sequel",
+      "emotional_arc": "<value>",
+      "value_at_stake": "<value>",
+      "value_shift": "<value>",
+      "turning_point": "<value>",
+      "summary": "one sentence: what happens in this scene",
+      "rationale": "which axes this scene insertion would lift, in 'axis: was → now' form"}}
+  ]
+}}
+
+Reserve 10 for prose-verified excellence. Be specific and grounded —
+quote the architecture scenes. The proposed updates and insertions are
+the most valuable output; treat them as concrete craft moves, not
+abstract recommendations. Return ONLY the JSON object.
+"""
+
+
+def _extract_per_scene_scores(parsed: dict, scene_ids: list[str]
+                                ) -> dict[str, dict[str, int]]:
+    """Pull {scene_id: {axis_key: score}} from the architecture response,
+    dropping malformed / out-of-range / unknown rows."""
+    valid_ids = set(scene_ids)
+    out: dict[str, dict[str, int]] = {sid: {} for sid in scene_ids}
+    drops: list[str] = []
+    for sc_row in parsed.get('per_scene') or []:
+        if not isinstance(sc_row, dict):
+            drops.append(f'non-dict per_scene row: {sc_row!r}')
+            continue
+        scene_id = sc_row.get('scene_id')
+        if scene_id not in valid_ids:
+            drops.append(f'unknown scene_id={scene_id!r}')
+            continue
+        for score_row in sc_row.get('scores') or []:
+            if not isinstance(score_row, dict):
+                drops.append(f'non-dict score row in {scene_id}')
+                continue
+            axis = score_row.get('axis')
+            if axis not in PER_SCENE_AXIS_BY_KEY:
+                drops.append(f'unknown axis={axis!r} in {scene_id}')
+                continue
+            try:
+                score = int(score_row.get('score'))
+            except (TypeError, ValueError):
+                drops.append(
+                    f'non-int score in {scene_id}.{axis}: '
+                    f'{score_row.get("score")!r}'
+                )
+                continue
+            if not 1 <= score <= 10:
+                drops.append(f'out-of-range score in {scene_id}.{axis}: {score}')
+                continue
+            out[scene_id][axis] = score
+    if drops:
+        shown = '; '.join(drops[:5])
+        suffix = f' (and {len(drops) - 5} more)' if len(drops) > 5 else ''
+        log(f'INFO: per-scene extraction dropped {len(drops)} row(s): '
+            f'{shown}{suffix}')
+    return out
+
+
+def _extract_whole_architecture_scores(parsed: dict) -> WholeArchitectureScores:
+    """Pull {axis_key: score} from the whole-architecture response."""
+    out: WholeArchitectureScores = {}
+    drops: list[str] = []
+    for row in parsed.get('whole_architecture') or []:
+        if not isinstance(row, dict):
+            drops.append(f'non-dict whole_architecture row: {row!r}')
+            continue
+        axis = row.get('axis')
+        if axis not in ARCHITECTURE_AXIS_BY_KEY:
+            drops.append(f'unknown whole-architecture axis={axis!r}')
+            continue
+        try:
+            score = int(row.get('score'))
+        except (TypeError, ValueError):
+            drops.append(f'non-int whole-architecture score in {axis}: '
+                         f'{row.get("score")!r}')
+            continue
+        if not 1 <= score <= 10:
+            drops.append(
+                f'out-of-range whole-architecture score in {axis}: {score}'
+            )
+            continue
+        out[axis] = score  # type: ignore[literal-required]
+    if drops:
+        shown = '; '.join(drops[:5])
+        suffix = f' (and {len(drops) - 5} more)' if len(drops) > 5 else ''
+        log(f'INFO: whole-architecture extraction dropped {len(drops)} '
+            f'row(s): {shown}{suffix}')
+    return out
+
+
+def _parse_response_architecture(text: str) -> dict | None:
+    """Tolerant JSON parse for the architecture payload. Three-tier
+    fallback; shape check requires `per_scene` AND `whole_architecture`
+    lists."""
+    missing_fields: list[str] = []
+
+    def _take(obj):
+        if not isinstance(obj, dict):
+            return None
+        per_scene = obj.get('per_scene')
+        whole_arch = obj.get('whole_architecture')
+        local_missing = []
+        if not isinstance(per_scene, list):
+            local_missing.append('per_scene')
+        if not isinstance(whole_arch, list):
+            local_missing.append('whole_architecture')
+        if local_missing:
+            missing_fields[:] = local_missing
+            return None
+        return obj
+    try:
+        out = _take(json.loads(text))
+        if out is not None:
+            return out
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+    if m:
+        try:
+            out = _take(json.loads(m.group(1).strip()))
+            if out is not None:
+                return out
+        except json.JSONDecodeError:
+            pass
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if m:
+        try:
+            out = _take(json.loads(m.group(0)))
+            if out is not None:
+                return out
+        except json.JSONDecodeError:
+            pass
+    if missing_fields:
+        log(f'WARNING: architecture LLM returned valid JSON but missing '
+            f'required list(s): {", ".join(missing_fields)}.')
+    return None
+
+
+def _run_architecture_extension(project_dir: str, output_dir: str,
+                                  log_dir: str,
+                                  scenes: list[SceneRow],
+                                  spine_events: list[SpineEvent],
+                                  artifacts: PitchArtifacts,
+                                  register: str,
+                                  rubric: str,
+                                  coaching: CoachingLevel,
+                                  ) -> ArchitectureExtension:
+    """Run the architecture-mode LLM call (after the deterministic
+    field-coherence pre-pass) and write the architecture CSVs.
+
+    Returns an ArchitectureExtension; status carries the outcome. Pitch
+    result still stands on any failure.
+    """
+    # Deterministic pre-pass runs unconditionally — it costs no tokens
+    # and informs the LLM call. Even if the LLM call fails, the
+    # findings are preserved in the result.
+    det_findings: list[FieldCoherenceFinding] = []
+    for scene in scenes:
+        det_findings.extend(_check_field_coherence_deterministic(scene))
+
+    prompt = _build_architecture_prompt(scenes, spine_events, artifacts,
+                                          register, det_findings, rubric)
+    model = select_model('creative')
+    log_file = os.path.join(log_dir,
+                            os.path.basename(output_dir) + '-architecture.json')
+    os.makedirs(log_dir, exist_ok=True)
+    try:
+        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+    except Exception as e:
+        log(f'ERROR: architecture LLM call failed: {e}. Pitch result still stands.')
+        ext = _empty_architecture_extension('llm_error')
+        ext['field_findings'] = det_findings  # preserve deterministic signal
+        return ext
+    text = _read_response_text(log_file)
+    parsed = _parse_response_architecture(text)
+    if not parsed:
+        _record_cost(project_dir, log_file, model,
+                     target='story-power:architecture:unparseable')
+        log(f'ERROR: architecture LLM response unparseable; raw at {log_file}.')
+        ext = _empty_architecture_extension('unparseable')
+        ext['field_findings'] = det_findings
+        return ext
+    _record_cost(project_dir, log_file, model,
+                 target='story-power:architecture')
+
+    scene_ids = [s.id for s in scenes]
+    per_scene = _extract_per_scene_scores(parsed, scene_ids)
+    whole_arch = _extract_whole_architecture_scores(parsed)
+    diag = parsed.get('architecture_diagnostic') or {}
+    llm_findings = _extract_field_findings(parsed)
+    proposed_updates = _extract_proposed_field_updates(parsed)
+    proposed_inserts = _extract_proposed_scene_insertions(parsed)
+
+    # Merge deterministic + LLM findings, keeping deterministic first
+    # (they're higher-confidence; the LLM may corroborate or extend).
+    field_findings = det_findings + llm_findings
+
+    # Empty-extraction floor mirrors spine/act-shape.
+    empty_scenes = [sid for sid in scene_ids if not per_scene.get(sid)]
+    has_any_per_scene = any(per_scene.get(sid) for sid in scene_ids)
+    has_any_whole_arch = bool(whole_arch)
+    if empty_scenes and has_any_per_scene:
+        log(f'ERROR: architecture extraction produced zero valid scores for '
+            f'{", ".join(empty_scenes)}; refusing to write '
+            f'per-scene-matrix.csv with empty row(s). Raw response: {log_file}')
+    elif not has_any_per_scene:
+        log(f'ERROR: architecture extraction produced zero valid per-scene '
+            f'scores; refusing to write per-scene-matrix.csv. Raw response: '
+            f'{log_file}')
+    if not has_any_whole_arch:
+        log(f'ERROR: architecture extraction produced zero valid '
+            f'whole-architecture scores; refusing to write '
+            f'whole-architecture-axes.csv. Raw response: {log_file}')
+
+    # Partial-status: per-scene has 2 axes per scene, all expected.
+    expected_per_scene = 2 * len(scenes)
+    actual_per_scene = sum(len(s) for s in per_scene.values())
+    missing_per_scene = max(0, expected_per_scene - actual_per_scene)
+    missing_arch_axes = [a.key for a in ARCHITECTURE_AXES
+                          if a.key not in whole_arch]
+    status: StoryPowerStatus = 'ok'
+    if missing_per_scene or missing_arch_axes:
+        status = 'partial'
+        parts = []
+        if missing_per_scene:
+            parts.append(f'{missing_per_scene} per-scene cell(s) missing')
+        if missing_arch_axes:
+            parts.append(
+                f'{len(missing_arch_axes)} whole-architecture axis/axes '
+                f'missing ({", ".join(missing_arch_axes)})'
+            )
+        log(f'WARNING: architecture extraction partial — {"; ".join(parts)}.')
+
+    write_matrix = has_any_per_scene and not empty_scenes
+    write_whole_arch = has_any_whole_arch
+    if coaching == 'full':
+        if write_matrix:
+            _write_per_scene_matrix(output_dir, scenes, per_scene,
+                                      recover_hint=log_file)
+        if write_whole_arch:
+            _write_whole_architecture_axes(output_dir, whole_arch, parsed,
+                                              recover_hint=log_file)
+        if write_matrix or write_whole_arch:
+            _append_architecture_diagnostic(
+                output_dir, scenes, per_scene, whole_arch,
+                field_findings, proposed_updates, proposed_inserts,
+                diag, register,
+                include_matrix=write_matrix,
+                include_whole_arch=write_whole_arch,
+            )
+    else:
+        if write_matrix or write_whole_arch:
+            _append_architecture_coaching_brief(
+                output_dir, scenes, per_scene, whole_arch,
+                field_findings, proposed_updates, proposed_inserts,
+                diag, register,
+                include_matrix=write_matrix,
+                include_whole_arch=write_whole_arch,
+                recover_hint=log_file,
+            )
+
+    return {
+        'status': status,
+        'per_scene_scores': per_scene,
+        'whole_architecture_scores': whole_arch,
+        'architecture_diagnostic': diag,
+        'field_findings': field_findings,
+        'proposed_field_updates': proposed_updates,
+        'proposed_scene_insertions': proposed_inserts,
+    }
+
+
+def _extract_field_findings(parsed: dict) -> list[FieldCoherenceFinding]:
+    """Pull LLM-provided field-coherence findings."""
+    out: list[FieldCoherenceFinding] = []
+    for row in parsed.get('field_findings') or []:
+        if not isinstance(row, dict):
+            continue
+        scene_id = row.get('scene_id', '').strip()
+        field = row.get('field', '').strip()
+        issue = row.get('issue', '').strip()
+        if not (scene_id and field and issue):
+            continue
+        severity = row.get('severity', 'medium').strip().lower()
+        if severity not in ('high', 'medium', 'low'):
+            severity = 'medium'
+        out.append({
+            'scene_id': scene_id,
+            'field': field,
+            'issue': issue,
+            'severity': severity,
+        })
+    return out
+
+
+def _extract_proposed_field_updates(parsed: dict) -> list[ProposedFieldUpdate]:
+    """Pull LLM-proposed field updates. Tolerant of missing optional fields."""
+    out: list[ProposedFieldUpdate] = []
+    for row in parsed.get('proposed_field_updates') or []:
+        if not isinstance(row, dict):
+            continue
+        scene_id = row.get('scene_id', '').strip()
+        field = row.get('field', '').strip()
+        proposed_value = row.get('proposed_value', '').strip()
+        if not (scene_id and field and proposed_value):
+            continue
+        out.append({
+            'scene_id': scene_id,
+            'field': field,
+            'current_value': row.get('current_value', '').strip(),
+            'proposed_value': proposed_value,
+            'rationale': row.get('rationale', '').strip(),
+        })
+    return out
+
+
+def _extract_proposed_scene_insertions(parsed: dict
+                                         ) -> list[ProposedSceneInsertion]:
+    """Pull LLM-proposed scene insertions."""
+    out: list[ProposedSceneInsertion] = []
+    for row in parsed.get('proposed_scene_insertions') or []:
+        if not isinstance(row, dict):
+            continue
+        insert_after = row.get('insert_after', '').strip()
+        proposed_id = row.get('proposed_id', '').strip()
+        summary = row.get('summary', '').strip()
+        if not (insert_after and proposed_id and summary):
+            continue
+        out.append({
+            'insert_after': insert_after,
+            'proposed_id': proposed_id,
+            'spine_event': row.get('spine_event', '').strip(),
+            'action_sequel': row.get('action_sequel', '').strip(),
+            'emotional_arc': row.get('emotional_arc', '').strip(),
+            'value_at_stake': row.get('value_at_stake', '').strip(),
+            'value_shift': row.get('value_shift', '').strip(),
+            'turning_point': row.get('turning_point', '').strip(),
+            'summary': summary,
+            'rationale': row.get('rationale', '').strip(),
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Architecture writers
+# ---------------------------------------------------------------------------
+
+def _write_per_scene_matrix(output_dir: str, scenes: list[SceneRow],
+                              per_scene: dict[str, dict[str, int]],
+                              *, recover_hint: str = '') -> None:
+    """Write per-scene-matrix.csv — one row per scene, columns for the
+    two per-scene axes (spine_event_service, field_coherence)."""
+    csv_path = os.path.join(output_dir, 'per-scene-matrix.csv')
+    headers = (['scene_id', 'spine_event']
+               + [a.key for a in PER_SCENE_AXES])
+    lines = ['|'.join(headers)]
+    for scene in scenes:
+        scores = per_scene.get(scene.id, {})
+        row = [scene.id, scene.spine_event or '']
+        for axis in PER_SCENE_AXES:
+            row.append(str(scores.get(axis.key, '')))
+        lines.append('|'.join(_sanitize_cell(c) for c in row))
+    _safe_write(csv_path, '\n'.join(lines) + '\n', recover_hint=recover_hint)
+
+
+def _write_whole_architecture_axes(output_dir: str,
+                                      whole_arch: WholeArchitectureScores,
+                                      parsed: dict, *,
+                                      recover_hint: str = '') -> None:
+    """Write whole-architecture-axes.csv — one row per Layer 2 axis."""
+    csv_path = os.path.join(output_dir, 'whole-architecture-axes.csv')
+    headers = ['axis', 'name', 'score', 'weight', 'positive_signals',
+               'negative_signals', 'rationale']
+    rows_by_axis = {r.get('axis'): r for r in parsed.get('whole_architecture', [])
+                    if isinstance(r, dict)}
+    lines = ['|'.join(headers)]
+    for axis in ARCHITECTURE_AXES:
+        row = rows_by_axis.get(axis.key, {})
+        lines.append('|'.join(_sanitize_cell(c) for c in (
+            axis.key,
+            axis.name,
+            str(whole_arch.get(axis.key, '')),
+            str(axis.weight),
+            row.get('positive_signals', ''),
+            row.get('negative_signals', ''),
+            row.get('rationale', ''),
+        )))
+    _safe_write(csv_path, '\n'.join(lines) + '\n', recover_hint=recover_hint)
+
+
+def _architecture_diagnostic_section(
+        scenes: list[SceneRow],
+        per_scene: dict[str, dict[str, int]],
+        whole_arch: WholeArchitectureScores,
+        field_findings: list[FieldCoherenceFinding],
+        proposed_updates: list[ProposedFieldUpdate],
+        proposed_inserts: list[ProposedSceneInsertion],
+        diag: ArchitectureDiagnostic,
+        register: str, *,
+        include_matrix: bool = True,
+        include_whole_arch: bool = True,
+        ) -> list[str]:
+    """Shared architecture markdown section (full diagnostic.md + coach brief)."""
+    out: list[str] = []
+    if include_matrix:
+        out.extend([
+            '## Per-scene matrix (architecture Layer 1)',
+            '',
+            '| Scene | Spine event | Service | Field coherence |',
+            '|---|---|---|---|',
+        ])
+        for s in scenes:
+            sc = per_scene.get(s.id, {})
+            out.append(
+                f'| {s.id} | {s.spine_event or "—"} | '
+                f'{sc.get("spine_event_service", "–")} | '
+                f'{sc.get("field_coherence", "–")} |'
+            )
+    if include_whole_arch:
+        if out:
+            out.append('')
+        out.extend([
+            '## Whole-architecture axes (architecture Layer 2)',
+            '',
+            '| Axis | Score | Weight |',
+            '|---|---|---|',
+        ])
+        for axis in ARCHITECTURE_AXES:
+            s = whole_arch.get(axis.key, '–')
+            out.append(f'| {axis.name} | {s} | {axis.weight} |')
+
+    if field_findings:
+        out.extend(['', '## Field-coherence findings', ''])
+        for f in field_findings:
+            out.append(
+                f'- **{f["scene_id"]}** [{f["severity"]}] '
+                f'`{f["field"]}`: {f["issue"]}'
+            )
+
+    if proposed_updates:
+        out.extend(['', '## Proposed field updates', ''])
+        for u in proposed_updates:
+            out.extend([
+                f'### {u["scene_id"]}.`{u["field"]}`',
+                '',
+                f'**Current:** {u.get("current_value") or "(blank)"}',
+                '',
+                f'**Proposed:** {u.get("proposed_value", "—")}',
+                '',
+                f'**Rationale:** {u.get("rationale") or "(none provided)"}',
+                '',
+            ])
+
+    if proposed_inserts:
+        out.extend(['', '## Proposed scene insertions', ''])
+        for ins in proposed_inserts:
+            out.extend([
+                f'### Insert after {ins["insert_after"]}: {ins["proposed_id"]}',
+                '',
+                f'- **spine_event:** {ins.get("spine_event") or "—"}',
+                f'- **action_sequel:** {ins.get("action_sequel") or "—"}',
+                f'- **emotional_arc:** {ins.get("emotional_arc") or "—"}',
+                f'- **value_at_stake:** {ins.get("value_at_stake") or "—"}',
+                f'- **value_shift:** {ins.get("value_shift") or "—"}',
+                f'- **turning_point:** {ins.get("turning_point") or "—"}',
+                '',
+                f'**Summary:** {ins["summary"]}',
+                '',
+                f'**Rationale:** {ins.get("rationale") or "(none provided)"}',
+                '',
+            ])
+
+    out.extend([
+        '',
+        '## Architecture diagnostic',
+        '',
+        f'**Declared register:** {register}',
+        '',
+        f'**Register assessment:** {diag.get("register_assessment") or "(none provided)"}',
+        '',
+        f'**Lowest axis:** {diag.get("lowest_axis") or "(none identified)"} '
+        f'({diag.get("lowest_axis_average") or "?"})',
+        '',
+        f'**Summary:** {diag.get("summary") or "(none identified)"}',
+        '',
+        f'**High-leverage move:** {diag.get("high_leverage_move") or "(none proposed)"}',
+        '',
+    ])
+
+    return out
+
+
+def _append_architecture_diagnostic(
+        output_dir: str, scenes: list[SceneRow],
+        per_scene: dict[str, dict[str, int]],
+        whole_arch: WholeArchitectureScores,
+        field_findings: list[FieldCoherenceFinding],
+        proposed_updates: list[ProposedFieldUpdate],
+        proposed_inserts: list[ProposedSceneInsertion],
+        diag: ArchitectureDiagnostic,
+        register: str, *,
+        include_matrix: bool = True,
+        include_whole_arch: bool = True,
+        ) -> None:
+    """Append the architecture section to the existing diagnostic.md."""
+    md_path = os.path.join(output_dir, 'diagnostic.md')
+    if not os.path.isfile(md_path):
+        log(f'WARNING: architecture diagnostic could not be appended — '
+            f'{md_path} does not exist (upstream pitch-diagnostic write '
+            'likely failed). Architecture scores were computed but their '
+            'diagnostic narrative is lost.')
+        return
+    try:
+        with open(md_path, encoding='utf-8') as f:
+            existing = f.read()
+    except OSError as e:
+        log(f'WARNING: could not append architecture diagnostic to {md_path}: {e}')
+        return
+    section = _architecture_diagnostic_section(
+        scenes, per_scene, whole_arch, field_findings,
+        proposed_updates, proposed_inserts, diag, register,
+        include_matrix=include_matrix,
+        include_whole_arch=include_whole_arch,
+    )
+    _safe_write(md_path, existing + '\n' + '\n'.join(section) + '\n')
+
+
+def _append_architecture_coaching_brief(
+        output_dir: str, scenes: list[SceneRow],
+        per_scene: dict[str, dict[str, int]],
+        whole_arch: WholeArchitectureScores,
+        field_findings: list[FieldCoherenceFinding],
+        proposed_updates: list[ProposedFieldUpdate],
+        proposed_inserts: list[ProposedSceneInsertion],
+        diag: ArchitectureDiagnostic,
+        register: str, *,
+        include_matrix: bool = True,
+        include_whole_arch: bool = True,
+        recover_hint: str = '',
+        ) -> None:
+    """coach coaching: append architecture sections to coaching-brief.md."""
+    md_path = os.path.join(output_dir, 'coaching-brief.md')
+    if not os.path.isfile(md_path):
+        log(f'WARNING: architecture coaching brief could not be appended — '
+            f'{md_path} does not exist (upstream coach-brief write likely '
+            'failed). Architecture scores were computed but are not '
+            'captured in the brief.')
+        return
+    try:
+        with open(md_path, encoding='utf-8') as f:
+            existing = f.read()
+    except OSError as e:
+        log(f'WARNING: could not append architecture coaching brief to '
+            f'{md_path}: {e}')
+        return
+    section = _architecture_diagnostic_section(
+        scenes, per_scene, whole_arch, field_findings,
+        proposed_updates, proposed_inserts, diag, register,
+        include_matrix=include_matrix,
+        include_whole_arch=include_whole_arch,
+    )
+    prelude = [
+        '# Architecture extension (LLM proposals — author confirms)',
+        '',
+        'Proposed field updates and scene insertions are concrete craft '
+        'moves, not directives — the author decides whether each is the '
+        'right move at this stage of the manuscript.',
+        '',
+    ]
+    _safe_write(md_path,
+                existing + '\n' + '\n'.join(prelude + section) + '\n',
+                recover_hint=recover_hint)
