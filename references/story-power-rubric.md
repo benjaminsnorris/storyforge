@@ -627,6 +627,169 @@ mode catches, and a single well-chosen scene insertion can lift
 multiple Layer 2 axes when it both serves a spine bridge and corrects
 a rhythm imbalance.
 
+## Scene-map mode: per-scene matrix + whole-map axes
+
+When `reference/scenes.csv` exists, the scorecard runs in **scene-map
+mode**. The scene map is the manuscript's full sequence — every scene
+including interstitials that don't appear in `architecture.csv`. Each
+row carries continuity metadata (pov, location, timeline_day,
+time_of_day, type, word_count, target_words, architecture_scene)
+that no upstream artifact has.
+
+Scene-map mode is **independent of the other modes**. All five can
+run on the same project. The coupling that matters is upstream — the
+per-row `architecture_scene` column references `architecture.csv:id`
+when present, and the scene map should *cover* every architecture
+anchor with at least one mapped scene.
+
+### Layer 1: per-scene 2-axis matrix
+
+Two axes scored per scene-map row (the load shifts to Layer 2 because
+many scene-map rows are interstitials with thin per-row signal).
+
+#### A. Architecture coverage (1.0x)
+- **Question (mapped scenes):** Does this scene's summary deliver
+  something the linked `architecture_scene` requires at this beat?
+- **Question (interstitial scenes — empty `architecture_scene`):**
+  Does this scene earn its space — provides a transition, a
+  character beat, a world detail, a pacing breath — or is it
+  load-bearing nothing?
+- **High signals:** A mapped scene names the specific beat the
+  architecture row promised; an interstitial does *one* thing
+  cleanly (rest beat, transition signal, character interior).
+- **Low signals:** Mapped scene's summary describes a beat the
+  architecture row doesn't ask for; interstitial summary lists
+  multiple weak purposes ("a transition + some character + some
+  setup") — diffused, not deliberate.
+
+#### B. Continuity coherence (1.5x — the unique-and-load-bearing axis)
+Continuity research from screenwriting tradition (Snyder, Field) and
+adjacent-shot theory in film editing — the audience holds onto pov,
+location, and time across cuts; unintentional jumps cost
+comprehension.
+
+- **Question:** Does this scene's pov / location / timeline_day /
+  time_of_day flow coherently from the preceding scene (and into
+  the next)?
+- **High signals:** POV transitions are signaled by a clear handoff
+  in the prior scene's closing; timeline jumps are flagged via the
+  `type` field (`flashback` / `interlude`); location changes have a
+  travel beat or scene break.
+- **Low signals:** Adjacent scenes share pov + location + day but
+  feel like cuts; pov changes appear mid-sequence without setup;
+  timeline_day goes backward and the scene type is regular.
+
+The 1.5x weight reflects this axis's unique-and-load-bearing role:
+**no other scoring mode catches adjacency.** Spine causal handoff
+checks event→event causation in summaries; architecture field
+coherence checks within-scene field alignment. Only scene-map mode
+checks scene→scene flow on the continuity metadata.
+
+### Layer 2: five whole-map axes
+
+#### C. Coverage completeness (1.5x)
+- **Question:** Does every `architecture.csv` scene have at least
+  one mapped scene serving it?
+- **High signals:** Each architecture anchor has 1-3 scene-map rows
+  delivering it; the climax and resolution anchors have proportionate
+  coverage.
+- **Low signals:** An architecture scene has zero scene-map rows
+  pointing to it (gap); one anchor has 8+ rows while neighbors have
+  none (compression imbalance).
+
+#### D. POV rotation (1.0x)
+- **Question:** Is POV use intentional? Each POV shift should earn
+  its cost.
+- **High signals:** Single-POV manuscripts maintain consistency;
+  multi-POV manuscripts establish each POV in early act 1 and rotate
+  on structural beats (turning points, midpoint).
+- **Low signals:** A POV appears once and never returns; POV jumps
+  every other scene without a structural rationale.
+
+#### E. Pacing distribution (1.5x)
+- **Question:** Do word counts (or page counts in graphic-novel
+  mode) build to a meaningful distribution against `target_words`?
+- **High signals:** Scene lengths vary with function (intimate
+  scenes shorter than action set-pieces); totals track the project's
+  declared register's expected page count.
+- **Low signals:** Every scene is the same length (no rhythm);
+  totals are far from the register's expected band; one scene is
+  3× the average without justification.
+
+#### F. Timeline flow (1.0x)
+- **Question:** Does timeline_day progression hold? Are flashbacks
+  and time skips signposted via `type`?
+- **High signals:** Linear runs are monotonic on timeline_day;
+  flashbacks have `type=flashback`; time skips between scenes are
+  acknowledged in adjacent summaries.
+- **Low signals:** timeline_day jumps without type or summary
+  reference; multiple consecutive scenes share a day but compress
+  unrealistically; long gaps with no continuity bridging.
+
+#### G. Interstitial economy (1.0x)
+- **Question:** Are unmapped scenes (no `architecture_scene`)
+  earning their space?
+- **High signals:** Interstitials cluster around turning points (a
+  rest beat after the midpoint, a transition before the climax
+  setup); each does one identifiable thing.
+- **Low signals:** Interstitial scenes outnumber mapped scenes by
+  2:1 or more; an interstitial is doing what an architecture scene
+  should be doing (and probably belongs *in* architecture).
+
+### Diagnostic-as-action
+
+Scene-map mode's diagnostic proposes **specific scene operations**,
+not just identifies weak axes:
+
+- **Merge operation:** scenes X and Y cover the same architecture
+  beat — propose merging.
+- **Split operation:** scene X has multiple distinct beats with
+  different pov/turning-point — propose splitting.
+- **Insert operation:** an architecture scene has no coverage —
+  propose a new scene-map row.
+- **Reorder operation:** continuity flows better if X and Y swap.
+- **Promote operation:** an interstitial scene is doing
+  architecture-level work — promote it to architecture.csv.
+
+Each operation names the scenes by id and proposes the structural
+change, leaving the prose work to the author.
+
+### Scene-map mode output
+
+**`full` coaching:**
+
+```
+working/scores/story-power/{timestamp}/
+├── scorecard.csv                 # pitch
+├── per-act-matrix.csv / structural-axes.csv     # act-shape
+├── per-event-matrix.csv / whole-spine-axes.csv  # spine
+├── per-scene-matrix.csv / whole-architecture-axes.csv  # architecture
+├── per-scene-map-matrix.csv      # scene-map Layer 1 (NEW)
+├── whole-scene-map-axes.csv      # scene-map Layer 2 (NEW)
+└── diagnostic.md                 # all five tiers
+```
+
+**`coach` coaching:** scene-map sections append to
+`coaching-brief.md`.
+**`strict` coaching:** extends `self-scoring-checklist.md` with
+per-scene-map blanks + 5 whole-map axis blanks.
+
+### Deterministic continuity pre-pass
+
+Three high-confidence checks the pre-pass runs against adjacent
+scene pairs (parallel to architecture's field-coherence pre-pass):
+
+1. `timeline_day` decreased from scene N-1 to scene N with
+   `type != 'flashback'` (and not blank): high severity.
+2. `architecture_scene` references an id not found in
+   `architecture.csv`: high severity (broken cross-reference).
+3. `word_count` deviates from `target_words` by ≥ 2× in either
+   direction (and `target_words` non-zero): medium severity.
+
+The LLM seeds its continuity_coherence scoring with these findings.
+Higher-noise continuity cases (subtle pov-rotation, mid-act-day
+compression) are left to the LLM.
+
 ## Scoring bands
 
 - **1-3:** Axis is essentially absent or actively damaged.
