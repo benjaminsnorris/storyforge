@@ -558,7 +558,8 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
             log(f'DRY RUN — would write strict checklist to {output_dir}')
             return _empty_result('strict', 'dry_run', output_dir=output_dir)
         os.makedirs(output_dir, exist_ok=True)
-        _write_strict_checklist(output_dir, artifacts, rubric)
+        spine_events = parse_spine(project_dir)
+        _write_strict_checklist(output_dir, artifacts, rubric, spine_events)
         return _empty_result('strict', 'ok', output_dir=output_dir)
 
     if dry_run:
@@ -599,9 +600,9 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
 
     status: StoryPowerStatus = 'partial' if missing_axes else 'ok'
 
-    # Pitch-only is a valid result; the act-shape extension is additive,
-    # not a replacement. A failed extension never overwrites the pitch
-    # scorecard.
+    # Pitch-only is a valid result; the act-shape and spine extensions
+    # are additive, not replacements. A failed extension never overwrites
+    # the pitch scorecard.
     act_shape = parse_act_shape(artifacts.act_shape)
     act_shape_extension: ActShapeExtension | None = None
     if act_shape:
@@ -617,11 +618,26 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         if act_shape_extension['status'] != 'ok':
             status = 'partial'
 
+    # Spine mode runs independently of act-shape — both can fire on the
+    # same artifacts and the diagnostic outputs coexist in the same dir.
+    spine_events = parse_spine(project_dir)
+    spine_extension: SpineExtension | None = None
+    if spine_events:
+        log(f'Spine detected ({len(spine_events)} events) — running per-event '
+            'matrix + whole-spine axes.')
+        spine_extension = _run_spine_extension(
+            project_dir, output_dir, log_dir, spine_events, artifacts,
+            act_shape, rubric, coaching,
+        )
+        if spine_extension['status'] != 'ok':
+            status = 'partial'
+
     return _result(
         coaching=coaching, status=status, output_dir=output_dir,
         composite=composite, scores=scores, deltas=deltas,
         diagnostic=parsed.get('diagnostic') or {},
         act_shape=act_shape_extension,
+        spine=spine_extension,
     )
 
 
@@ -1366,14 +1382,17 @@ def _write_coach_brief(output_dir: str, scores: dict[str, int],
 
 
 def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
-                              rubric: str) -> None:
+                              rubric: str,
+                              spine_events: list[SpineEvent] | None = None,
+                              ) -> None:
     """strict coaching: rule-based checklist of signals per axis, no LLM
     call. Lists what to look for and a 'self-score 1-10' line the author
     fills in by hand.
 
-    Extends with per-act blanks and structural-axis blanks when the
-    act-shape section is populated (so strict-mode authors get the same
-    coverage the LLM modes produce automatically).
+    Extends with per-act + structural blanks when act-shape is populated,
+    and with per-event + whole-spine blanks when spine_events is non-empty,
+    so strict-mode authors get the same coverage the LLM modes produce
+    automatically.
     """
     md_path = os.path.join(output_dir, 'self-scoring-checklist.md')
     out: list[str] = [
@@ -1428,6 +1447,39 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                 f'Self-score (1-10): __',
                 '',
                 'Cross-act signals you found:',
+                '- ',
+                '',
+            ])
+    if spine_events:
+        out.extend([
+            '# Spine tier (per event + whole-spine)',
+            '',
+            'Three axes per spine event. The final event has no causal '
+            'handoff — leave that blank for the last row.',
+            '',
+        ])
+        for ev in spine_events:
+            out.extend([
+                f'## {ev.id} — {ev.function or "(no function)"}',
+                '',
+            ])
+            for axis in PER_EVENT_AXES:
+                out.append(f'- {axis.name}: __')
+            out.append('')
+        out.extend([
+            '# Whole-spine axes',
+            '',
+            'Five axes scored over the spine as a whole (see the "Spine '
+            'mode" section of the rubric for full signals).',
+            '',
+        ])
+        for axis in SPINE_AXES:
+            out.extend([
+                f'## {axis.name} (weight {axis.weight})',
+                '',
+                f'Self-score (1-10): __',
+                '',
+                'Whole-spine signals you found:',
                 '- ',
                 '',
             ])
