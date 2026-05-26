@@ -608,15 +608,24 @@ def read_project_register(project_dir: str) -> str:
     """Return the project's declared register from storyforge.yaml's
     `project.register` field. Defaults to 'balanced' when absent or
     unrecognized — the scoring prompt then scores against a 40-60%
-    action target band rather than a register-specific one."""
+    action target band rather than a register-specific one. Logs INFO
+    in either fallback case so the author can see when their score is
+    being computed against the default target rather than a declared
+    register-specific band."""
     raw = read_yaml_field('project.register', project_dir) or ''
     register = raw.strip().lower()
-    if register and register not in KNOWN_REGISTERS:
+    if not register:
+        log('INFO: project.register not declared in storyforge.yaml; '
+            'scoring architecture against the balanced 40-60% action '
+            'band. Set project.register to thriller/literary/atmospheric/'
+            'etc. for register-specific scoring.')
+        return 'balanced'
+    if register not in KNOWN_REGISTERS:
         log(f'INFO: project.register={raw!r} is not a recognized register '
             f'({", ".join(KNOWN_REGISTERS)}); the scoring prompt will fall '
             'back to a balanced target band.')
         return 'balanced'
-    return register or 'balanced'
+    return register
 
 
 def gather_pitch_artifacts(project_dir: str) -> PitchArtifacts:
@@ -2661,17 +2670,19 @@ def _append_spine_coaching_brief(output_dir: str,
 # Architecture extension (Layer 1 per-scene + Layer 2 whole-architecture)
 # ---------------------------------------------------------------------------
 
-# Keywords that signal a turning point's nature. Used by the
-# deterministic field-coherence pre-pass to flag obvious mismatches
-# between `turning_point` and `summary` (e.g., turning_point names a
-# revelation but the summary contains only action verbs).
-_REVELATION_VERBS = (
-    'realiz', 'recogniz', 'understand', 'discover', 'reveal', 'see',
-    'know', 'remember', 'recall', 'glimpse', 'perceive',
+# Word-boundary regexes used by the deterministic field-coherence
+# pre-pass when scanning the *summary* text for verbs that signal a
+# recognition or action beat. Stem-substring matching ('see' inside
+# 'seeks') silently swallowed false negatives in v1 of this pre-pass.
+_REVELATION_RE = re.compile(
+    r'\b(?:realiz\w*|recogniz\w*|understand\w*|understood|'
+    r'discover\w*|reveal\w*|sees?|saw|knows?|knew|'
+    r'remember\w*|recall\w*|glimps\w*|perceiv\w*)\b'
 )
-_ACTION_VERBS = (
-    'strike', 'attack', 'flee', 'chase', 'fight', 'break', 'leap',
-    'run', 'shoot', 'grab', 'push', 'pull', 'shove',
+_ACTION_RE = re.compile(
+    r'\b(?:strik\w*|struck|attack\w*|fle\w*|flew|chas\w*|'
+    r'fight\w*|fought|break\w*|broke|broken|leap\w*|leapt|'
+    r'runs?|ran|shoot\w*|shot|grab\w*|push\w*|pull\w*|shov\w*)\b'
 )
 
 
@@ -2710,7 +2721,7 @@ def _check_field_coherence_deterministic(scene: SceneRow
     if turning_point_lower and any(kw in turning_point_lower for kw in (
             'revelation', 'recognition', 'realization', 'discovery',
             'epiphany')):
-        if not any(v in summary_lower for v in _REVELATION_VERBS):
+        if not _REVELATION_RE.search(summary_lower):
             findings.append({
                 'scene_id': scene.id,
                 'field': 'turning_point',
@@ -2722,11 +2733,12 @@ def _check_field_coherence_deterministic(scene: SceneRow
                 'severity': 'high',
             })
 
-    # 2. action_sequel == 'action' but summary reads as pure reflection
-    # (no action verbs at all). Lower confidence — sequel scenes can
-    # still contain action; only flag when the asymmetry is extreme.
-    if action_sequel_lower in ('action', 'action scene'):
-        if not any(v in summary_lower for v in _ACTION_VERBS):
+    # 2. action_sequel starts with 'action' but summary reads as pure
+    # reflection (no action verbs at all). Lower confidence — sequel
+    # scenes can still contain action; only flag when the asymmetry is
+    # extreme. Uses startswith for symmetry with _action_sequel_ratio.
+    if action_sequel_lower.startswith('action'):
+        if not _ACTION_RE.search(summary_lower):
             findings.append({
                 'scene_id': scene.id,
                 'field': 'action_sequel',
@@ -2738,9 +2750,15 @@ def _check_field_coherence_deterministic(scene: SceneRow
                 'severity': 'medium',
             })
 
-    # 3. value_shift names a positive shift (+/+) but emotional_arc
-    # uses friction/rupture/loss language.
-    if value_shift.startswith('+'):
+    # 3. value_shift names a net-positive ending (+/+, +/++, -/+) but
+    # emotional_arc uses rupture/loss language. The schema is
+    # start_polarity/end_polarity — only the END polarity tells you
+    # whether the scene resolves positive or negative, so we check the
+    # second half. A '+/-' (starts positive, ends negative) scene with
+    # 'trust to rupture' is consistent, not contradictory.
+    parts = value_shift.split('/', 1)
+    ends_positive = len(parts) == 2 and parts[1].startswith('+')
+    if ends_positive:
         arc_lower = scene.emotional_arc.lower()
         if any(kw in arc_lower for kw in
                ('rupture', 'loss', 'collapse', 'shatter')):
@@ -2748,9 +2766,9 @@ def _check_field_coherence_deterministic(scene: SceneRow
                 'scene_id': scene.id,
                 'field': 'value_shift',
                 'issue': (
-                    f"value_shift={value_shift!r} (positive) contradicts "
-                    f"emotional_arc={scene.emotional_arc!r} (rupture/loss "
-                    'language)'
+                    f"value_shift={value_shift!r} (net-positive ending) "
+                    f"contradicts emotional_arc={scene.emotional_arc!r} "
+                    '(rupture/loss language)'
                 ),
                 'severity': 'high',
             })
@@ -2809,6 +2827,7 @@ def _build_architecture_prompt(scenes: list[SceneRow],
         det_block = '(no deterministic findings — base your scoring on the LLM-only pass)'
 
     action_count, sequel_count, ratio = _action_sequel_ratio(scenes)
+    unclassified_count = len(scenes) - action_count - sequel_count
 
     return f"""You are scoring the ARCHITECTURE of a project at the scene resolution.
 Each scene has structured fields beyond its prose summary. Your job:
@@ -2852,7 +2871,9 @@ scoring rather than re-discovering them.
 
 Declared register: **{register}**
 Current ratio: {action_count} action / {sequel_count} sequel
-({ratio:.0%} action of {action_count + sequel_count} classified scenes)
+({ratio:.0%} action of {action_count + sequel_count} classified scenes;
+{unclassified_count} of {len(scenes)} scenes are unclassified — if that
+share is large, the ratio is unreliable; name this in register_assessment.)
 
 Register-specific expected bands:
 - thriller / action / fast / commercial: 60-80% action
@@ -3075,6 +3096,17 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
     det_findings: list[FieldCoherenceFinding] = []
     for scene in scenes:
         det_findings.extend(_check_field_coherence_deterministic(scene))
+
+    # WARN when more than half the scenes lack an action_sequel
+    # classification — the rhythm axis will score against a small
+    # denominator and the result may look decisive but be meaningless.
+    action_count, sequel_count, _ = _action_sequel_ratio(scenes)
+    unclassified = len(scenes) - action_count - sequel_count
+    if scenes and unclassified / len(scenes) > 0.5:
+        log(f'WARNING: {unclassified}/{len(scenes)} architecture scenes '
+            f'lack an action_sequel classification; action_sequel_rhythm '
+            f'will score against only {action_count + sequel_count} '
+            'classified scenes. Run `storyforge hone` to fill the gaps.')
 
     prompt = _build_architecture_prompt(scenes, spine_events, artifacts,
                                           register, det_findings, rubric)

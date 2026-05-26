@@ -2639,6 +2639,160 @@ def test_field_coherence_deterministic_clean_scene_returns_no_findings():
     assert findings == []
 
 
+def test_value_shift_uses_end_polarity_not_start():
+    """+/- (starts positive, ends negative) is a loss scene. Pairing it
+    with 'rupture' language is CONSISTENT, not contradictory — the
+    deterministic check must look at the end polarity, not the start.
+
+    Previously the check used .startswith('+'), which falsely flagged
+    every +/- scene that mentioned rupture/loss in emotional_arc.
+    """
+    from storyforge.scoring_story_power import (
+        _check_field_coherence_deterministic, SceneRow,
+    )
+    # +/- = starts positive, ends negative. Pairing with 'trust to rupture'
+    # is the expected shape; should NOT flag.
+    s = SceneRow('a01', 'T', 'Things go wrong and the bond breaks.',
+                 'ev-1', 'action', 'trust to rupture', 'connection',
+                 '+/-', 'choice')
+    findings = _check_field_coherence_deterministic(s)
+    assert not any(f['field'] == 'value_shift' for f in findings)
+
+
+def test_value_shift_negative_to_positive_with_rupture_arc_flags():
+    """-/+ (starts negative, ends positive) with rupture/loss emotional_arc
+    IS contradictory: a recovery scene shouldn't end on rupture language.
+    Previously this case was silently missed because the check looked
+    at the start polarity."""
+    from storyforge.scoring_story_power import (
+        _check_field_coherence_deterministic, SceneRow,
+    )
+    s = SceneRow('a01', 'T', 'They escape and reunite.',
+                 'ev-1', 'action', 'fear to rupture', 'safety',
+                 '-/+', 'reunion')
+    findings = _check_field_coherence_deterministic(s)
+    assert any(f['field'] == 'value_shift' and f['severity'] == 'high'
+               for f in findings)
+
+
+def test_revelation_check_uses_word_boundaries_not_substrings():
+    """The revelation-verb match must be word-bounded. A summary
+    containing 'seeks' (which substring-contains 'see') is NOT a
+    recognition verb and should NOT satisfy the recognition check;
+    the scene should still flag as missing-recognition."""
+    from storyforge.scoring_story_power import (
+        _check_field_coherence_deterministic, SceneRow,
+    )
+    # 'seeks' contains 'see' as a substring; the v1 check would have
+    # incorrectly passed this scene. Word-bounded regex catches it.
+    s = SceneRow('a01', 'T', 'She seeks the door at the end of the hall.',
+                 'ev-1', 'sequel', 'tension', 'memory', '0/-', 'revelation')
+    findings = _check_field_coherence_deterministic(s)
+    assert any(f['field'] == 'turning_point' and f['severity'] == 'high'
+               for f in findings)
+
+
+def test_action_check_uses_word_boundaries_not_substrings():
+    """Similar word-boundary fix on the action-verb regex. 'rune' should
+    not satisfy 'run'."""
+    from storyforge.scoring_story_power import (
+        _check_field_coherence_deterministic, SceneRow,
+    )
+    s = SceneRow('a01', 'T',
+                 'She studies the rune and the brunch arrangement.',
+                 'ev-1', 'action', 'curiosity', 'understanding',
+                 '0/-', 'choice')
+    findings = _check_field_coherence_deterministic(s)
+    assert any(f['field'] == 'action_sequel' for f in findings)
+
+
+def test_action_sequel_check_normalizes_via_startswith_for_symmetry():
+    """The deterministic action_sequel check and _action_sequel_ratio
+    must use the same matching rule (startswith). An 'action-heavy' or
+    'action: high' value should be eligible for the action-verb check."""
+    from storyforge.scoring_story_power import (
+        _check_field_coherence_deterministic, SceneRow,
+    )
+    # action_sequel='action-heavy' starts with 'action'; the check
+    # should still fire when the summary has no action verbs.
+    s = SceneRow('a01', 'T', 'She thinks about what she has lost.',
+                 'ev-1', 'action-heavy', 'longing', 'connection',
+                 '0/-', 'choice')
+    findings = _check_field_coherence_deterministic(s)
+    assert any(f['field'] == 'action_sequel' for f in findings)
+
+
+def test_read_project_register_logs_info_when_absent(tmp_path, capsys):
+    """Absent project.register must surface INFO so the author sees
+    that scoring is happening against the balanced default. Previously
+    the absent path was silent — only the unrecognized-value path
+    logged INFO."""
+    yml = os.path.join(str(tmp_path), 'storyforge.yaml')
+    with open(yml, 'w') as f:
+        f.write('project:\n  title: T\n  medium: novel\n')
+    from storyforge.scoring_story_power import read_project_register
+    result = read_project_register(str(tmp_path))
+    assert result == 'balanced'
+    out = capsys.readouterr().out
+    assert 'project.register not declared' in out
+    assert 'balanced' in out
+
+
+def test_unclassified_action_sequel_majority_warns(tmp_path, monkeypatch,
+                                                     capsys):
+    """When more than half the scenes lack an action_sequel
+    classification, the rhythm axis would score against an unreliable
+    denominator. A WARNING surfaces the ratio of unclassified rows."""
+    _seed_summary(str(tmp_path))
+    # Custom architecture with mostly-empty action_sequel cells.
+    ref = os.path.join(str(tmp_path), 'reference')
+    os.makedirs(ref, exist_ok=True)
+    headers = ('id|seq|title|spine_event|action_sequel|emotional_arc|'
+               'value_at_stake|value_shift|turning_point|summary')
+    rows = [
+        'a01|1|T|ev-1|action|arc|stake|+/-|choice|first.',
+        'a02|2|T|ev-2||arc|stake|+/-|choice|second.',
+        'a03|3|T|ev-3||arc|stake|+/-|choice|third.',
+        'a04|4|T|ev-4||arc|stake|+/-|choice|fourth.',
+    ]
+    with open(os.path.join(ref, 'architecture.csv'), 'w') as f:
+        f.write(headers + '\n' + '\n'.join(rows) + '\n')
+    yml = os.path.join(str(tmp_path), 'storyforge.yaml')
+    with open(yml, 'a') as f:
+        f.write('  register: atmospheric\n')
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _quad_mock_llm(_full_payload(), _act_shape_payload(),
+                            _spine_payload(), _architecture_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out = capsys.readouterr().out
+    assert 'lack an action_sequel classification' in out
+    assert '3/4' in out  # 3 of 4 scenes unclassified
+
+
+def test_architecture_prompt_surfaces_unclassified_count(tmp_path):
+    """The prompt must name the unclassified count so the LLM can
+    factor reliability into the register_assessment."""
+    from storyforge.scoring_story_power import (
+        _build_architecture_prompt, SceneRow, PitchArtifacts,
+    )
+    scenes = [
+        SceneRow('a01', '', 's', '', 'action', '', '', '', ''),
+        SceneRow('a02', '', 's', '', '', '', '', '', ''),
+        SceneRow('a03', '', 's', '', '', '', '', '', ''),
+    ]
+    artifacts = PitchArtifacts(logline='L', synopsis='S', act_shape='',
+                                theme='', spine_summaries='',
+                                architecture_summaries='')
+    prompt = _build_architecture_prompt(scenes, [], artifacts,
+                                          'atmospheric', [], 'rubric')
+    assert '2 of 3 scenes are unclassified' in prompt or \
+           '2 of 3' in prompt
+
+
 def test_action_sequel_ratio_computes_correctly():
     from storyforge.scoring_story_power import _action_sequel_ratio, SceneRow
     scenes = [
