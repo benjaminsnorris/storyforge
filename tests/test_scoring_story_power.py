@@ -5540,3 +5540,119 @@ def test_briefs_runs_without_scene_map_csv(tmp_path, monkeypatch):
     assert result['briefs'] is not None
     assert result['scene_map'] is None
 
+
+# ---------------------------------------------------------------------------
+# PR #244 review fixes — regression tests
+# ---------------------------------------------------------------------------
+
+def test_check_briefs_deterministic_flags_broken_continuity_dep():
+    """A continuity_deps entry pointing to a brief id not present in
+    scene-briefs.csv is a typo / deleted-scene / rename-drift bug.
+    Surface it as its own medium-severity finding rather than silently
+    absorbing the broken edge into downstream orphan-knowledge
+    false-positives. (PR #244 silent-failure review HIGH-1.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        # s2 lists 's99' (typo / deleted scene) as a dep; s99 isn't a
+        # brief. Without the explicit finding, the orphan-knowledge
+        # check for fact-a in s2 fires (false positive) and the broken
+        # graph edge is invisible.
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              (), ('fact-a',), '', '', '', (), '', ()),
+        Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s99',)),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1', 's2'])
+    broken = [f for f in findings
+              if f['field'] == 'continuity_deps' and 's99' in f['issue']]
+    assert len(broken) == 1
+    assert broken[0]['severity'] == 'medium'
+    assert broken[0]['scene_id'] == 's2'
+
+
+def test_check_briefs_deterministic_dedupes_broken_dep_findings():
+    """Multiple briefs that list the same nonexistent dep produce one
+    finding per (referrer, missing-target) pair, not one per
+    visit-during-walk. (PR #244 silent-failure review HIGH-1 detail.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        # s1 and s2 both list the same nonexistent 's99' dep.
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s99',)),
+        Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s99',)),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1', 's2'])
+    broken = [f for f in findings
+              if f['field'] == 'continuity_deps' and 's99' in f['issue']]
+    # Two referrers, both pointing at the same missing target → 2 findings.
+    assert len(broken) == 2
+    scene_ids = {f['scene_id'] for f in broken}
+    assert scene_ids == {'s1', 's2'}
+
+
+def test_check_briefs_deterministic_finds_broken_dep_without_knowledge_in():
+    """A brief with empty knowledge_in still surfaces broken-dep
+    findings — the dep typo is a real signal even when no orphan
+    knowledge walk would have caught it. (PR #244 silent-failure
+    review HIGH-1 detail.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              (), (), '', '', '', (), '', ('s99',)),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1'])
+    broken = [f for f in findings
+              if f['field'] == 'continuity_deps' and 's99' in f['issue']]
+    assert len(broken) == 1
+
+
+def test_check_briefs_deterministic_orphan_finding_carries_preceding_id():
+    """An orphan-knowledge finding pins the brief's first
+    continuity_deps entry as preceding_id — the closest ancestor where
+    the author would expect the missing fact. (PR #244 type-design
+    review TD-3 + comment review CO-1.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        # s2 depends on s1, but s1 doesn't produce fact-a; the orphan
+        # finding should point at s1 since that's the brief author
+        # would investigate first.
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              (), (), '', '', '', (), '', ()),
+        Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s1',)),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1', 's2'])
+    orphan = next(
+        f for f in findings
+        if f['scene_id'] == 's2' and f['field'] == 'knowledge_in'
+    )
+    assert orphan.get('preceding_id') == 's1'
+
+
+def test_check_briefs_deterministic_orphan_without_deps_omits_preceding_id():
+    """An orphan-knowledge finding on a brief with empty
+    continuity_deps omits preceding_id — there's no closest ancestor
+    to pin. (PR #244 type-design review TD-3 + comment review CO-1.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ()),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1'])
+    orphan = next(
+        f for f in findings
+        if f['scene_id'] == 's1' and f['field'] == 'knowledge_in'
+    )
+    assert 'preceding_id' not in orphan
+

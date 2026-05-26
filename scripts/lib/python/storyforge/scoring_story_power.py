@@ -280,9 +280,13 @@ class _BriefFindingRequired(TypedDict):
 
 class BriefFinding(_BriefFindingRequired, total=False):
     """A brief-level problem flagged by the deterministic pre-pass or
-    the LLM. `preceding_id` is present only for orphan-knowledge findings
-    that pin a transitive ancestor (the scene where the fact should
-    have appeared in knowledge_out)."""
+    the LLM. `preceding_id` is optional: the deterministic pre-pass
+    sets it on orphan-knowledge findings to the brief's first
+    `continuity_deps` entry (the closest ancestor where the missing
+    fact would have been expected); the LLM may set it on any finding
+    where it wants to pin a related scene. Absent when no related
+    scene is meaningful (e.g., missing-field findings, motif
+    singletons, broken-dep findings)."""
     preceding_id: str
 
 
@@ -4941,10 +4945,34 @@ def _check_briefs_deterministic(
 
     # Knowledge orphans: walk continuity_deps to gather ancestor
     # knowledge_out; any knowledge_in fact not covered is an orphan.
+    # Broken continuity_deps (referrer → non-existent brief id) are
+    # collected separately so they surface as their own (referrer,
+    # missing_target)-deduped findings instead of being silently
+    # absorbed into orphan-knowledge false-positives.
+    seen_missing_deps: set[tuple[str, str]] = set()
     for b in briefs:
         if not b.knowledge_in:
+            # Still walk the dep graph to surface broken-dep findings —
+            # a brief with no knowledge_in can still have a typo in
+            # continuity_deps that downstream briefs rely on.
+            for dep in b.continuity_deps:
+                if dep and dep not in brief_by_id:
+                    key = (b.id, dep)
+                    if key not in seen_missing_deps:
+                        seen_missing_deps.add(key)
+                        findings.append({
+                            'scene_id': b.id,
+                            'field': 'continuity_deps',
+                            'issue': (
+                                f'continuity_deps references {dep!r} '
+                                'which is not present in scene-briefs.csv'
+                            ),
+                            'severity': 'medium',
+                        })
             continue
-        # Bounded BFS over continuity_deps to avoid pathological cycles.
+        # Bounded graph walk over continuity_deps (DFS via stack/pop;
+        # the `visited` set bounds the walk regardless of cycle
+        # topology, so triadic and deeper cycles terminate too).
         ancestor_knowledge: set[str] = set()
         ancestor_origin: dict[str, str] = {}  # fact → providing scene id
         visited: set[str] = set()
@@ -4956,6 +4984,26 @@ def _check_briefs_deterministic(
             visited.add(current)
             cb = brief_by_id.get(current)
             if cb is None:
+                # Broken dep — surface it as its own finding (deduped
+                # by referrer+target across the outer loop) so the
+                # author sees the typo, not just downstream
+                # orphan-knowledge false-positives the broken edge
+                # produces. `current` here is the dep id that pointed
+                # to nothing; the referrer is whichever brief listed
+                # it (we don't track that here — the absence is
+                # blamed on `b` since the orphan is in b's chain).
+                key = (b.id, current)
+                if key not in seen_missing_deps:
+                    seen_missing_deps.add(key)
+                    findings.append({
+                        'scene_id': b.id,
+                        'field': 'continuity_deps',
+                        'issue': (
+                            f'continuity_deps chain reaches {current!r} '
+                            'which is not present in scene-briefs.csv'
+                        ),
+                        'severity': 'medium',
+                    })
                 continue
             if cb.id != b.id:
                 # Don't credit B's own knowledge_out as covering B's
@@ -4971,7 +5019,7 @@ def _check_briefs_deterministic(
             if not fact:
                 continue
             if fact not in ancestor_knowledge:
-                findings.append({
+                orphan: BriefFinding = {
                     'scene_id': b.id,
                     'field': 'knowledge_in',
                     'issue': (
@@ -4979,7 +5027,16 @@ def _check_briefs_deterministic(
                         'knowledge_out in any continuity_deps ancestor'
                     ),
                     'severity': 'medium',
-                })
+                }
+                # When the brief lists a direct dep, point the author
+                # at it as the closest ancestor they'd expect the fact
+                # to have appeared in. Orphan findings without any
+                # dep at all leave preceding_id unset.
+                if b.continuity_deps:
+                    direct_dep = b.continuity_deps[0]
+                    if direct_dep:
+                        orphan['preceding_id'] = direct_dep
+                findings.append(orphan)
 
     # Outcome streak: order briefs by scene seq when possible.
     if seq_order:
