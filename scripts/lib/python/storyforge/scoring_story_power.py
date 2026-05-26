@@ -1469,7 +1469,8 @@ def _invoke_and_parse(project_dir: str, output_dir: str, log_file: str,
     model = select_model('creative')
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=4096)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_PITCH_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: story-power LLM call failed: {e}')
         return None, 'llm_error'
@@ -1477,7 +1478,8 @@ def _invoke_and_parse(project_dir: str, output_dir: str, log_file: str,
     parsed = _parse_response(text)
     if not parsed:
         _record_cost(project_dir, log_file, model, target='story-power:unparseable')
-        log(f'ERROR: story-power LLM response unparseable; raw at {log_file}')
+        log(f'ERROR: story-power LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _PITCH_MAX_TOKENS)}')
         return None, 'unparseable'
     _record_cost(project_dir, log_file, model)
     return parsed, 'ok'
@@ -1494,6 +1496,55 @@ def _read_response_text(log_file: str) -> str:
         if block.get('type') == 'text':
             return block.get('text', '')
     return ''
+
+
+def _read_stop_reason(log_file: str) -> str:
+    """Read the LLM's `stop_reason` from the raw log file. Returns an
+    empty string when the file is missing / unreadable / lacks the
+    field. Used to distinguish truncation (`max_tokens`) from other
+    unparseable-response causes so the error message names the
+    actual cause rather than just 'parse failed'."""
+    try:
+        with open(log_file, encoding='utf-8') as f:
+            resp = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return ''
+    return resp.get('stop_reason', '') or ''
+
+
+# Output-token ceilings per tier. The pitch + act-shape + spine tiers
+# return bounded payloads (8 axes × ≤3 acts; 5-10 events × 3 axes); 4K
+# and 8K respectively are sufficient. The per-row-heavy tiers
+# (architecture, scene-map, briefs) emit per-scene / per-brief
+# rationales that scale with project size — on a 25-scene
+# architecture or 60-scene scene map the 8K ceiling truncates the
+# response mid-JSON, producing parse failures (issue #245). 32K
+# leaves 4× headroom over the observed wall and is well below the
+# 64K Claude Opus output cap.
+_PITCH_MAX_TOKENS = 4096
+_BOUNDED_TIER_MAX_TOKENS = 8192
+_PER_ROW_TIER_MAX_TOKENS = 32768
+
+
+def _truncation_hint(log_file: str, max_tokens: int) -> str:
+    """Return a descriptive suffix when the LLM hit `max_tokens` and
+    the response is therefore truncated mid-JSON. Returns '' when
+    stop_reason is anything else (genuine parse error, not
+    truncation). The caller appends this to the unparseable ERROR so
+    the user sees the actual cause without having to grep the raw log.
+
+    Pinned by issue #245: a 25-scene architecture or 60-scene scene
+    map can hit the 8K ceiling silently; the previous error message
+    said only 'unparseable' without distinguishing truncation from
+    other parse failures."""
+    if _read_stop_reason(log_file) != 'max_tokens':
+        return ''
+    return (
+        f' (LLM hit max_tokens={max_tokens} and the response was '
+        'truncated mid-JSON — not a genuine parse failure. The tier '
+        'output scales with project size; consider reducing scope '
+        'with --scope or raising the per-tier ceiling.)'
+    )
 
 
 def _extract_scores(parsed: dict) -> dict[str, int]:
@@ -1853,7 +1904,8 @@ def _run_act_shape_extension(project_dir: str, output_dir: str,
                             os.path.basename(output_dir) + '-act-shape.json')
     os.makedirs(log_dir, exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_BOUNDED_TIER_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: act-shape LLM call failed: {e}. Pitch-mode scorecard '
             'still stands.')
@@ -1863,7 +1915,8 @@ def _run_act_shape_extension(project_dir: str, output_dir: str,
     if not parsed:
         _record_cost(project_dir, log_file, model,
                      target='story-power:act-shape:unparseable')
-        log(f'ERROR: act-shape LLM response unparseable; raw at {log_file}. '
+        log(f'ERROR: act-shape LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _BOUNDED_TIER_MAX_TOKENS)}. '
             'Pitch-mode scorecard still stands.')
         return _empty_extension('unparseable')
     _record_cost(project_dir, log_file, model, target='story-power:act-shape')
@@ -2909,7 +2962,8 @@ def _run_spine_extension(project_dir: str, output_dir: str, log_dir: str,
                             os.path.basename(output_dir) + '-spine.json')
     os.makedirs(log_dir, exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_BOUNDED_TIER_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: spine LLM call failed: {e}. Pitch result still stands.')
         return _empty_spine_extension('llm_error')
@@ -2918,7 +2972,8 @@ def _run_spine_extension(project_dir: str, output_dir: str, log_dir: str,
     if not parsed:
         _record_cost(project_dir, log_file, model,
                      target='story-power:spine:unparseable')
-        log(f'ERROR: spine LLM response unparseable; raw at {log_file}.')
+        log(f'ERROR: spine LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _BOUNDED_TIER_MAX_TOKENS)}.')
         return _empty_spine_extension('unparseable')
     _record_cost(project_dir, log_file, model, target='story-power:spine')
 
@@ -3675,7 +3730,8 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
                             os.path.basename(output_dir) + '-architecture.json')
     os.makedirs(log_dir, exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_PER_ROW_TIER_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: architecture LLM call failed: {e}. Pitch result still stands.')
         ext = _empty_architecture_extension('llm_error')
@@ -3686,7 +3742,8 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
     if not parsed:
         _record_cost(project_dir, log_file, model,
                      target='story-power:architecture:unparseable')
-        log(f'ERROR: architecture LLM response unparseable; raw at {log_file}.')
+        log(f'ERROR: architecture LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _PER_ROW_TIER_MAX_TOKENS)}.')
         ext = _empty_architecture_extension('unparseable')
         ext['field_findings'] = det_findings
         return ext
@@ -4568,7 +4625,8 @@ def _run_scene_map_extension(project_dir: str, output_dir: str,
                             os.path.basename(output_dir) + '-scene-map.json')
     os.makedirs(log_dir, exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_PER_ROW_TIER_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: scene-map LLM call failed: {e}. Pitch result still stands.')
         ext = _empty_scene_map_extension('llm_error')
@@ -4579,7 +4637,8 @@ def _run_scene_map_extension(project_dir: str, output_dir: str,
     if not parsed:
         _record_cost(project_dir, log_file, model,
                      target='story-power:scene-map:unparseable')
-        log(f'ERROR: scene-map LLM response unparseable; raw at {log_file}.')
+        log(f'ERROR: scene-map LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _PER_ROW_TIER_MAX_TOKENS)}.')
         ext = _empty_scene_map_extension('unparseable')
         ext['continuity_findings'] = det_findings
         return ext
@@ -5445,7 +5504,8 @@ def _run_briefs_extension(project_dir: str, output_dir: str,
                             os.path.basename(output_dir) + '-briefs.json')
     os.makedirs(log_dir, exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_PER_ROW_TIER_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: briefs LLM call failed: {e}. Pitch result still stands.')
         ext = _empty_briefs_extension('llm_error')
@@ -5456,7 +5516,8 @@ def _run_briefs_extension(project_dir: str, output_dir: str,
     if not parsed:
         _record_cost(project_dir, log_file, model,
                      target='story-power:briefs:unparseable')
-        log(f'ERROR: briefs LLM response unparseable; raw at {log_file}.')
+        log(f'ERROR: briefs LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _PER_ROW_TIER_MAX_TOKENS)}.')
         ext = _empty_briefs_extension('unparseable')
         ext['brief_findings'] = det_findings
         return ext

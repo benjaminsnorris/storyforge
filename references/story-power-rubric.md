@@ -995,6 +995,31 @@ Four axes predict *lasting* more strongly than the others and get a
 
 Composite = `sum(score * weight) / sum(weights)`. Range stays 1-10.
 
+## Output token budget
+
+Per-tier `max_tokens` ceilings, codified in `scoring_story_power.py`:
+
+| Tier | Ceiling | Why |
+|---|---|---|
+| Pitch | 4,096 | 8 axes × bounded rationale |
+| Act-shape | 8,192 | 3 acts × 8 axes + 4 structural axes |
+| Spine | 8,192 | 5-10 events × 3 axes + 5 whole-spine |
+| Architecture | 32,768 | Per-scene axes scale with scene count |
+| Scene-map | 32,768 | Per-scene axes scale with scene count |
+| Briefs | 32,768 | Per-brief axes scale with brief count |
+
+The per-row-heavy tiers (architecture, scene-map, briefs) emit
+rationale that scales with project size. On real-sized manuscripts
+(25+ architecture scenes, 60+ scene-map rows, 30+ briefs), an 8K
+ceiling silently truncates the response mid-JSON; the parser then
+fails with a generic "unparseable" error. 32K leaves substantial
+headroom and is well under the 64K Claude Opus output cap.
+
+When the LLM truncates anyway (unusually large project, a future
+rubric that grew the prompt), the unparseable error message names
+truncation explicitly via `stop_reason=max_tokens` — so the cause is
+visible without grep-ing the raw log.
+
 ## Diagnostic output
 
 The scorecard ALSO produces a `diagnostic.md` that surfaces cross-axis
