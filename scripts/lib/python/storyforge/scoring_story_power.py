@@ -19,7 +19,8 @@ from storyforge.api import (
     invoke_to_file, calculate_cost_from_usage, extract_usage,
 )
 from storyforge.common import (
-    CoachingLevel, get_plugin_dir, log, parse_story_summary, select_model,
+    CoachingLevel, get_plugin_dir, log, parse_story_summary,
+    read_yaml_field, select_model,
 )
 from storyforge.costs import log_operation
 
@@ -113,15 +114,81 @@ class SpineExtension(TypedDict):
     status: StoryPowerStatus
 
 
+class WholeArchitectureScores(TypedDict, total=False):
+    """Closed-key Layer 2 architecture axis scores."""
+    action_sequel_rhythm: int
+    spine_coverage_balance: int
+    cumulative_arc_gradient: int
+    scene_causal_chain: int
+    promise_payoff: int
+
+
+class FieldCoherenceFinding(TypedDict):
+    """A scene-level field-coherence problem flagged by the deterministic
+    pre-pass or the LLM. severity is 'high' / 'medium' / 'low'."""
+    scene_id: str
+    field: str
+    issue: str
+    severity: str
+
+
+class ProposedFieldUpdate(TypedDict, total=False):
+    """A concrete field-level fix the diagnostic proposes for a scene."""
+    scene_id: str
+    field: str
+    current_value: str
+    proposed_value: str
+    rationale: str
+
+
+class ProposedSceneInsertion(TypedDict, total=False):
+    """A new sequel scene the diagnostic proposes to deliver a spine
+    bridge that no architecture scene enacts. Full field definition so
+    the author can accept/edit/reject without re-deriving."""
+    insert_after: str          # scene id the new scene comes after
+    proposed_id: str
+    spine_event: str
+    action_sequel: str
+    emotional_arc: str
+    value_at_stake: str
+    value_shift: str
+    turning_point: str
+    summary: str
+    rationale: str             # why this scene + which axes it lifts
+
+
+class ArchitectureDiagnostic(TypedDict, total=False):
+    """LLM-provided cross-axis pattern + register assessment."""
+    lowest_axis: str
+    lowest_axis_average: str
+    summary: str
+    register_assessment: str   # e.g., "73% action vs declared atmospheric register"
+    high_leverage_move: str
+
+
+class ArchitectureExtension(TypedDict):
+    """Architecture-mode payload (per-scene scores, whole-architecture
+    scores, deterministic + LLM field findings, and the LLM's proposed
+    field updates and scene insertions)."""
+    per_scene_scores: dict[str, dict[str, int]]
+    whole_architecture_scores: WholeArchitectureScores
+    architecture_diagnostic: ArchitectureDiagnostic
+    field_findings: list[FieldCoherenceFinding]
+    proposed_field_updates: list[ProposedFieldUpdate]
+    proposed_scene_insertions: list[ProposedSceneInsertion]
+    status: StoryPowerStatus
+
+
 class StoryPowerResult(TypedDict):
     """Result of score_story_power. Coaching is the requested level; status
     is the outcome. Output_dir is the timestamped directory written to
     (empty string when no directory was allocated).
 
-    act_shape and spine are None when their inputs weren't present (no
-    `## Act-shape` populated, no spine.csv on disk) or the extension
-    failed before producing usable data; otherwise they carry the
-    payload from each Layer 1/2 scoring run.
+    act_shape, spine, and architecture are None when their inputs
+    weren't present (no `## Act-shape` populated, no spine.csv on disk,
+    no architecture.csv on disk) or the extension failed before
+    producing usable data; otherwise they carry the payload from each
+    Layer 1/2 scoring run.
     """
     coaching: CoachingLevel
     status: StoryPowerStatus
@@ -133,6 +200,7 @@ class StoryPowerResult(TypedDict):
     diagnostic: dict
     act_shape: ActShapeExtension | None
     spine: SpineExtension | None
+    architecture: ArchitectureExtension | None
 
 
 class Axis(NamedTuple):
@@ -243,14 +311,50 @@ assert len({a.key for a in PER_EVENT_AXES}) == len(PER_EVENT_AXES), (
 assert len({a.key for a in SPINE_AXES}) == len(SPINE_AXES), (
     'whole-spine axis keys must be unique'
 )
-# No overlap with pitch/structural/per-event so diagnostic routing
-# can identify an axis's family from its key alone.
+
+
+# Per-scene axes (architecture Layer 1). Field coherence is the
+# load-bearing axis — no other mode can detect summary↔field drift.
+PER_SCENE_AXES: tuple[Axis, ...] = (
+    Axis('spine_event_service', 'Spine-event service', 1.0),
+    Axis('field_coherence', 'Field coherence', 1.5),
+)
+PER_SCENE_AXIS_KEYS = tuple(a.key for a in PER_SCENE_AXES)
+PER_SCENE_AXIS_BY_KEY = {a.key: a for a in PER_SCENE_AXES}
+
+# Whole-architecture axes (Layer 2). Action/sequel rhythm and scene
+# causal chain carry the 1.5x weight — they're the ones that define
+# whether a sequenced list of scenes feels like a story.
+ARCHITECTURE_AXES: tuple[Axis, ...] = (
+    Axis('action_sequel_rhythm', 'Action/sequel rhythm', 1.5),
+    Axis('spine_coverage_balance', 'Spine coverage balance', 1.0),
+    Axis('cumulative_arc_gradient', 'Cumulative arc gradient', 1.0),
+    Axis('scene_causal_chain', 'Scene-level causal chain', 1.5),
+    # Scene-level promise/payoff — distinct key from STRUCTURAL_AXES'
+    # `promise_payoff` (which is the act-shape Layer 2 version of the
+    # same rubric concept at a different resolution).
+    Axis('scene_promise_payoff', 'Promise & payoff (scene)', 1.0),
+)
+ARCHITECTURE_AXIS_KEYS = tuple(a.key for a in ARCHITECTURE_AXES)
+ARCHITECTURE_AXIS_BY_KEY = {a.key: a for a in ARCHITECTURE_AXES}
+
+assert len({a.key for a in PER_SCENE_AXES}) == len(PER_SCENE_AXES), (
+    'per-scene axis keys must be unique'
+)
+assert len({a.key for a in ARCHITECTURE_AXES}) == len(ARCHITECTURE_AXES), (
+    'whole-architecture axis keys must be unique'
+)
+# No overlap across the six families so diagnostic routing can
+# identify an axis's family from its key alone.
 _ALL_AXIS_KEYS = (set(AXIS_KEYS) | set(STRUCTURAL_AXIS_KEYS)
-                  | set(PER_EVENT_AXIS_KEYS) | set(SPINE_AXIS_KEYS))
+                  | set(PER_EVENT_AXIS_KEYS) | set(SPINE_AXIS_KEYS)
+                  | set(PER_SCENE_AXIS_KEYS) | set(ARCHITECTURE_AXIS_KEYS))
 assert (len(_ALL_AXIS_KEYS)
         == len(AXIS_KEYS) + len(STRUCTURAL_AXIS_KEYS)
-        + len(PER_EVENT_AXIS_KEYS) + len(SPINE_AXIS_KEYS)), (
-    'pitch, structural, per-event, and whole-spine axis key sets must be disjoint'
+        + len(PER_EVENT_AXIS_KEYS) + len(SPINE_AXIS_KEYS)
+        + len(PER_SCENE_AXIS_KEYS) + len(ARCHITECTURE_AXIS_KEYS)), (
+    'all six axis-key families (pitch, structural, per-event, '
+    'whole-spine, per-scene, whole-architecture) must be disjoint'
 )
 
 
@@ -278,6 +382,32 @@ class SpineEvent(NamedTuple):
     title: str
     summary: str
     function: str
+
+
+class SceneRow(NamedTuple):
+    """A single row from reference/architecture.csv carrying the columns
+    architecture scoring consumes. Other columns (seq, part, pov, etc.)
+    are read straight from the CSV when needed."""
+    id: str
+    title: str
+    summary: str
+    spine_event: str
+    action_sequel: str
+    emotional_arc: str
+    value_at_stake: str
+    value_shift: str
+    turning_point: str
+
+
+# Project-register keywords drive the action/sequel rhythm scoring.
+# Defaults to 'balanced' when project.register is absent — the prompt
+# scores against the named register's expected band; an absent
+# declaration scores against the balanced 40-60% action target.
+KNOWN_REGISTERS = (
+    'thriller', 'action', 'fast', 'commercial',
+    'literary', 'decompressed', 'atmospheric', 'contemplative',
+    'balanced',
+)
 
 
 def composite_score(scores: dict[str, int | float]) -> float:
@@ -411,6 +541,82 @@ def parse_spine(project_dir: str) -> list[SpineEvent]:
             function=row.get('function', '').strip(),
         ))
     return out
+
+
+def parse_architecture(project_dir: str) -> list[SceneRow]:
+    """Read reference/architecture.csv as an ordered list of SceneRow.
+
+    Required columns: id, summary, spine_event. Other architecture
+    fields (action_sequel, emotional_arc, value_at_stake, value_shift,
+    turning_point, title) are read when present and default to empty
+    strings otherwise. Returns [] when the file is missing or lacks
+    required columns.
+    """
+    csv_path = os.path.join(project_dir, 'reference', 'architecture.csv')
+    if not os.path.isfile(csv_path):
+        return []
+    try:
+        with open(csv_path, encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'WARNING: could not read {csv_path}: {e}')
+        return []
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return []
+    headers = lines[0].split('|')
+    required = {'id', 'summary', 'spine_event'}
+    if not required.issubset(set(headers)):
+        log(f'WARNING: architecture.csv missing required columns; have '
+            f'{headers}, need {sorted(required)}. Skipping architecture mode.')
+        return []
+    out: list[SceneRow] = []
+    for i, line in enumerate(lines[1:], start=1):
+        cells = line.split('|')
+        if len(cells) != len(headers):
+            log(f'WARNING: skipping malformed architecture row {i} in '
+                f'{csv_path} ({len(cells)} cells, expected {len(headers)})')
+            continue
+        row = dict(zip(headers, cells))
+        scene_id = row.get('id', '').strip()
+        summary = row.get('summary', '').strip()
+        if not scene_id or not summary:
+            missing = []
+            if not scene_id:
+                missing.append('id')
+            if not summary:
+                missing.append('summary')
+            log(f'WARNING: architecture.csv row {i} missing required '
+                f'field(s) {", ".join(missing)}; skipping. '
+                f'(id={scene_id or "<blank>"})')
+            continue
+        out.append(SceneRow(
+            id=scene_id,
+            title=row.get('title', '').strip(),
+            summary=summary,
+            spine_event=row.get('spine_event', '').strip(),
+            action_sequel=row.get('action_sequel', '').strip(),
+            emotional_arc=row.get('emotional_arc', '').strip(),
+            value_at_stake=row.get('value_at_stake', '').strip(),
+            value_shift=row.get('value_shift', '').strip(),
+            turning_point=row.get('turning_point', '').strip(),
+        ))
+    return out
+
+
+def read_project_register(project_dir: str) -> str:
+    """Return the project's declared register from storyforge.yaml's
+    `project.register` field. Defaults to 'balanced' when absent or
+    unrecognized — the scoring prompt then scores against a 40-60%
+    action target band rather than a register-specific one."""
+    raw = read_yaml_field('project.register', project_dir) or ''
+    register = raw.strip().lower()
+    if register and register not in KNOWN_REGISTERS:
+        log(f'INFO: project.register={raw!r} is not a recognized register '
+            f'({", ".join(KNOWN_REGISTERS)}); the scoring prompt will fall '
+            'back to a balanced target band.')
+        return 'balanced'
+    return register or 'balanced'
 
 
 def gather_pitch_artifacts(project_dir: str) -> PitchArtifacts:
@@ -674,6 +880,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
              diagnostic: dict,
              act_shape: ActShapeExtension | None = None,
              spine: SpineExtension | None = None,
+             architecture: ArchitectureExtension | None = None,
              ) -> StoryPowerResult:
     return {
         'coaching': coaching,
@@ -686,6 +893,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
         'diagnostic': diagnostic,
         'act_shape': act_shape,
         'spine': spine,
+        'architecture': architecture,
     }
 
 
