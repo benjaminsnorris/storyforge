@@ -191,16 +191,74 @@ class ArchitectureExtension(TypedDict):
     status: StoryPowerStatus
 
 
+class WholeSceneMapScores(TypedDict, total=False):
+    """Closed-key Layer 2 scene-map axis scores."""
+    coverage_completeness: int
+    pov_rotation: int
+    pacing_distribution: int
+    timeline_flow: int
+    interstitial_economy: int
+
+
+class ContinuityFinding(TypedDict):
+    """A scene-map continuity problem flagged by the deterministic
+    pre-pass or the LLM. scene_id and (optionally) preceding_id name
+    the adjacent pair when the finding is about a transition."""
+    scene_id: str
+    preceding_id: str  # '' for non-adjacency findings
+    field: str
+    issue: str
+    severity: Severity
+
+
+SceneOperation = Literal['merge', 'split', 'insert', 'reorder', 'promote']
+
+
+class _ProposedSceneOperationRequired(TypedDict):
+    operation: SceneOperation
+    scene_ids: list[str]
+    summary: str
+
+
+class ProposedSceneOperation(_ProposedSceneOperationRequired, total=False):
+    """A concrete structural change the diagnostic proposes:
+    merge / split / insert / reorder / promote. scene_ids carries the
+    rows the operation acts on (one for split/insert/promote, two for
+    merge/reorder). The author reviews and accepts / edits / rejects
+    each proposal."""
+    rationale: str
+
+
+class SceneMapDiagnostic(TypedDict, total=False):
+    """LLM-provided cross-axis pattern + coverage assessment."""
+    lowest_axis: str
+    lowest_axis_average: str
+    summary: str
+    coverage_assessment: str   # e.g., "3 architecture anchors have no mapped scene"
+    high_leverage_move: str
+
+
+class SceneMapExtension(TypedDict):
+    """Scene-map mode payload (Layer 1 + Layer 2 scores, continuity
+    findings, and the LLM's proposed scene operations)."""
+    per_scene_scores: dict[str, dict[str, int]]
+    whole_scene_map_scores: WholeSceneMapScores
+    scene_map_diagnostic: SceneMapDiagnostic
+    continuity_findings: list[ContinuityFinding]
+    proposed_operations: list[ProposedSceneOperation]
+    status: StoryPowerStatus
+
+
 class StoryPowerResult(TypedDict):
     """Result of score_story_power. Coaching is the requested level; status
     is the outcome. Output_dir is the timestamped directory written to
     (empty string when no directory was allocated).
 
-    act_shape, spine, and architecture are None when their inputs
-    weren't present (no `## Act-shape` populated, no spine.csv on disk,
-    no architecture.csv on disk) or the extension failed before
-    producing usable data; otherwise they carry the payload from each
-    Layer 1/2 scoring run.
+    act_shape, spine, architecture, and scene_map are None when their
+    inputs weren't present (no `## Act-shape` populated, no spine.csv
+    on disk, no architecture.csv on disk, no scenes.csv on disk) or the
+    extension failed before producing usable data; otherwise they
+    carry the payload from each Layer 1/2 scoring run.
     """
     coaching: CoachingLevel
     status: StoryPowerStatus
@@ -213,6 +271,7 @@ class StoryPowerResult(TypedDict):
     act_shape: ActShapeExtension | None
     spine: SpineExtension | None
     architecture: ArchitectureExtension | None
+    scene_map: SceneMapExtension | None
 
 
 class Axis(NamedTuple):
@@ -356,6 +415,36 @@ assert len({a.key for a in PER_SCENE_AXES}) == len(PER_SCENE_AXES), (
 assert len({a.key for a in ARCHITECTURE_AXES}) == len(ARCHITECTURE_AXES), (
     'whole-architecture axis keys must be unique'
 )
+
+
+# Per-scene-map axes (scene-map Layer 1). continuity_coherence is the
+# load-bearing axis — no other mode catches scene→scene adjacency
+# (pov / location / timeline_day / type continuity).
+PER_MAP_SCENE_AXES: tuple[Axis, ...] = (
+    Axis('architecture_coverage', 'Architecture coverage', 1.0),
+    Axis('continuity_coherence', 'Continuity coherence', 1.5),
+)
+PER_MAP_SCENE_AXIS_KEYS = tuple(a.key for a in PER_MAP_SCENE_AXES)
+PER_MAP_SCENE_AXIS_BY_KEY = {a.key: a for a in PER_MAP_SCENE_AXES}
+
+# Whole-scene-map axes (scene-map Layer 2).
+MAP_AXES: tuple[Axis, ...] = (
+    Axis('coverage_completeness', 'Coverage completeness', 1.5),
+    Axis('pov_rotation', 'POV rotation', 1.0),
+    Axis('pacing_distribution', 'Pacing distribution', 1.5),
+    Axis('timeline_flow', 'Timeline flow', 1.0),
+    Axis('interstitial_economy', 'Interstitial economy', 1.0),
+)
+MAP_AXIS_KEYS = tuple(a.key for a in MAP_AXES)
+MAP_AXIS_BY_KEY = {a.key: a for a in MAP_AXES}
+
+assert len({a.key for a in PER_MAP_SCENE_AXES}) == len(PER_MAP_SCENE_AXES), (
+    'per-scene-map axis keys must be unique'
+)
+assert len({a.key for a in MAP_AXES}) == len(MAP_AXES), (
+    'whole-scene-map axis keys must be unique'
+)
+
 # Diagnostic routing identifies an axis's family from its key alone,
 # which requires every family's keys to be disjoint. The data-driven
 # loop below adds a new family in one line and reports *which* key
@@ -368,6 +457,8 @@ _AXIS_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ('whole_spine', SPINE_AXIS_KEYS),
     ('per_scene', PER_SCENE_AXIS_KEYS),
     ('whole_architecture', ARCHITECTURE_AXIS_KEYS),
+    ('per_map_scene', PER_MAP_SCENE_AXIS_KEYS),
+    ('whole_scene_map', MAP_AXIS_KEYS),
 )
 _axis_family_by_key: dict[str, str] = {}
 for _family, _keys in _AXIS_FAMILIES:
@@ -422,6 +513,25 @@ class SceneRow(NamedTuple):
     value_at_stake: str
     value_shift: str
     turning_point: str
+
+
+class MappedScene(NamedTuple):
+    """A single row from reference/scenes.csv carrying the columns
+    scene-map scoring consumes. seq is parsed as int when possible
+    (used for ordering); other unconsumed columns (part, duration,
+    target_pages, panel_count, page_count, status) stay in the CSV."""
+    id: str
+    seq: int                    # 0 when the cell is blank or non-int
+    title: str
+    summary: str
+    pov: str
+    location: str
+    timeline_day: str
+    time_of_day: str
+    scene_type: str             # 'type' is reserved; named scene_type here
+    word_count: int             # 0 when blank
+    target_words: int           # 0 when blank
+    architecture_scene: str     # empty for interstitials
 
 
 # Recognized register tokens for project.register (see rubric
@@ -631,6 +741,82 @@ def parse_architecture(project_dir: str) -> list[SceneRow]:
             turning_point=row.get('turning_point', '').strip(),
         ))
     return out
+
+
+def parse_scene_map(project_dir: str) -> list[MappedScene]:
+    """Read reference/scenes.csv as a seq-ordered list of MappedScene.
+
+    Required columns: id, summary. All other scene-map columns (seq,
+    title, pov, location, timeline_day, time_of_day, type, word_count,
+    target_words, architecture_scene) are optional with sensible
+    defaults. Returns [] when the file is missing or lacks the
+    required columns. Sorts by seq when present; falls back to CSV
+    row order when seq is missing or non-int."""
+    csv_path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(csv_path):
+        return []
+    try:
+        with open(csv_path, encoding='utf-8') as f:
+            raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    except (OSError, UnicodeDecodeError) as e:
+        log(f'WARNING: could not read {csv_path}: {e}')
+        return []
+    lines = [l for l in raw.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return []
+    headers = lines[0].split('|')
+    required = {'id', 'summary'}
+    if not required.issubset(set(headers)):
+        log(f'WARNING: scenes.csv missing required columns; have '
+            f'{headers}, need {sorted(required)}. Skipping scene-map mode.')
+        return []
+    rows: list[tuple[int, int, MappedScene]] = []  # (seq, row_index, scene)
+    for i, line in enumerate(lines[1:], start=1):
+        cells = line.split('|')
+        if len(cells) != len(headers):
+            log(f'WARNING: skipping malformed scenes.csv row {i} in '
+                f'{csv_path} ({len(cells)} cells, expected {len(headers)})')
+            continue
+        row = dict(zip(headers, cells))
+        scene_id = row.get('id', '').strip()
+        summary = row.get('summary', '').strip()
+        if not scene_id or not summary:
+            missing = []
+            if not scene_id:
+                missing.append('id')
+            if not summary:
+                missing.append('summary')
+            log(f'WARNING: scenes.csv row {i} missing required field(s) '
+                f'{", ".join(missing)}; skipping. '
+                f'(id={scene_id or "<blank>"})')
+            continue
+
+        def _as_int(col: str) -> int:
+            try:
+                return int(row.get(col, '').strip() or '0')
+            except (TypeError, ValueError):
+                return 0
+
+        scene = MappedScene(
+            id=scene_id,
+            seq=_as_int('seq'),
+            title=row.get('title', '').strip(),
+            summary=summary,
+            pov=row.get('pov', '').strip(),
+            location=row.get('location', '').strip(),
+            timeline_day=row.get('timeline_day', '').strip(),
+            time_of_day=row.get('time_of_day', '').strip(),
+            scene_type=row.get('type', '').strip(),
+            word_count=_as_int('word_count'),
+            target_words=_as_int('target_words'),
+            architecture_scene=row.get('architecture_scene', '').strip(),
+        )
+        rows.append((scene.seq, i, scene))
+    # Sort by (seq, original row index) — seq=0 rows preserve CSV order
+    # within their group. This matches author expectations: a manuscript
+    # whose author hasn't seq-numbered yet still scores in CSV order.
+    rows.sort(key=lambda r: (r[0], r[1]))
+    return [r[2] for r in rows]
 
 
 def read_project_register(project_dir: str) -> Register:
@@ -933,6 +1119,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
              act_shape: ActShapeExtension | None = None,
              spine: SpineExtension | None = None,
              architecture: ArchitectureExtension | None = None,
+             scene_map: SceneMapExtension | None = None,
              ) -> StoryPowerResult:
     return {
         'coaching': coaching,
@@ -946,6 +1133,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
         'act_shape': act_shape,
         'spine': spine,
         'architecture': architecture,
+        'scene_map': scene_map,
     }
 
 
