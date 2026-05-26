@@ -200,15 +200,18 @@ class WholeSceneMapScores(TypedDict, total=False):
     interstitial_economy: int
 
 
-class ContinuityFinding(TypedDict):
-    """A scene-map continuity problem flagged by the deterministic
-    pre-pass or the LLM. scene_id and (optionally) preceding_id name
-    the adjacent pair when the finding is about a transition."""
+class _ContinuityFindingRequired(TypedDict):
     scene_id: str
-    preceding_id: str  # '' for non-adjacency findings
     field: str
     issue: str
     severity: Severity
+
+
+class ContinuityFinding(_ContinuityFindingRequired, total=False):
+    """A scene-map continuity problem from the deterministic pre-pass
+    or the LLM. preceding_id is present only for adjacency findings
+    (transition between two scenes); absent for per-row findings."""
+    preceding_id: str
 
 
 SceneOperation = Literal['merge', 'split', 'insert', 'reorder', 'promote']
@@ -3883,12 +3886,12 @@ _WORD_COUNT_HIGH_RATIO = 2.0
 def _empty_scene_map_extension(status: StoryPowerStatus) -> SceneMapExtension:
     """Placeholder SceneMapExtension for a failed run."""
     return {
-        'status': status,
         'per_scene_scores': {},
         'whole_scene_map_scores': {},
         'scene_map_diagnostic': {},
         'continuity_findings': [],
         'proposed_operations': [],
+        'status': status,
     }
 
 
@@ -3921,7 +3924,6 @@ def _check_continuity_deterministic(scenes: list[MappedScene],
                 and scene.architecture_scene not in architecture_ids):
             findings.append({
                 'scene_id': scene.id,
-                'preceding_id': '',
                 'field': 'architecture_scene',
                 'issue': (
                     f"architecture_scene={scene.architecture_scene!r} "
@@ -3934,7 +3936,6 @@ def _check_continuity_deterministic(scenes: list[MappedScene],
             if ratio < _WORD_COUNT_LOW_RATIO or ratio > _WORD_COUNT_HIGH_RATIO:
                 findings.append({
                     'scene_id': scene.id,
-                    'preceding_id': '',
                     'field': 'word_count',
                     'issue': (
                         f'word_count={scene.word_count} vs '
@@ -4188,13 +4189,16 @@ def _extract_continuity_findings(parsed: dict) -> list[ContinuityFinding]:
             raw_severity if raw_severity in ('high', 'medium', 'low')
             else 'medium'
         )  # type: ignore[assignment]
-        out.append({
+        finding: ContinuityFinding = {
             'scene_id': scene_id,
-            'preceding_id': row.get('preceding_id', '').strip(),
             'field': field,
             'issue': issue,
             'severity': severity,
-        })
+        }
+        preceding_id = row.get('preceding_id', '').strip()
+        if preceding_id:
+            finding['preceding_id'] = preceding_id
+        out.append(finding)
     _log_extraction_drops('continuity_findings', drops)
     return out
 
