@@ -442,6 +442,188 @@ The diagnostic prediction held exactly: the targeted axis lifted ~1
 point on minimal effort, with a side-effect bump in concreteness on
 one event.
 
+## Architecture mode: per-scene matrix + whole-architecture axes
+
+When `reference/architecture.csv` exists, the scorecard runs in
+**architecture mode**. The architecture is the only artifact in the
+project with **structured fields per row** beyond a prose summary:
+`action_sequel`, `emotional_arc`, `value_at_stake`, `value_shift`,
+`turning_point`. These are structured craft data that no other layer
+has, and no other scoring mode can check.
+
+Architecture mode is **independent of pitch, act-shape, and spine
+modes**. All four can run on the same project in any order. The
+coupling that matters is *upstream* — the per-scene `spine_event`
+column references `spine.csv:id`, and the architecture should align
+with the act-shape (the spine_act_shape_alignment axis in spine mode
+checks the inverse).
+
+### Layer 1: per-scene 2-axis matrix
+
+Two axes scored per architecture scene (15 scenes × 2 axes = 30 cells
+for a mid-novel architecture).
+
+#### A. Spine-event service (1.0x)
+Dramatic-structure theory; scene-function research (McKee, Snyder).
+
+- **Question:** Does this scene's summary deliver on what its assigned
+  `spine_event` needs at this beat?
+- **High signals:** The scene clearly advances the spine event; the
+  summary names the specific beat the event requires; if removed, the
+  spine event would be under-served.
+- **Low signals:** Scene is tangential to its assigned event; the same
+  scene could serve a different event better; the scene is doing
+  relational or thematic work that doesn't map onto the assigned spine
+  event's function.
+
+#### B. Field coherence (1.5x)
+Internal-consistency principles from structured-information theory;
+craft tradition on scene-element alignment.
+
+- **Question:** Do the scene's structured fields (`action_sequel`,
+  `emotional_arc`, `value_at_stake`, `value_shift`, `turning_point`)
+  cohere with each other and with the summary?
+- **High signals:** All fields tell the same story — the emotional
+  arc matches the value shift, the turning point matches the
+  action/sequel mode, the summary delivers what the fields claim.
+- **Low signals:** Field contradicts summary (`turning_point:
+  revelation` but the summary describes pure action with no
+  realization); fields contradict each other (`value_shift: +/+` with
+  a `friction to rupture` emotional arc); summary has been expanded
+  with new beats but the supporting fields didn't update to match.
+
+The 1.5x weight reflects this axis's unique-and-load-bearing role
+at the architecture resolution. **No other artifact has structured
+fields**, so no other scoring mode can detect summary↔field drift.
+Field-coherence checks are heavily automatable: many cases are
+deterministic regex/keyword matches; the LLM refines and
+contextualizes the rest.
+
+### Layer 2: five whole-architecture axes
+
+#### C. Action/sequel rhythm (1.5x — register-aware)
+Dwight Swain, *Techniques of the Selling Writer*; McKee on pacing.
+
+- **Question:** Is the `action_sequel` distribution varied and
+  intentional, or monotonous?
+- **High signals:** Action and sequel scenes alternate with deliberate
+  variation; ratio matches the project's declared register.
+- **Low signals:** Long runs of one type; ratio mismatched with the
+  declared register.
+- **Register awareness:** A 70/30 action-to-sequel ratio is correct
+  for a thriller but defective for a decompressed atmospheric story.
+  The scoring prompt is given the project's `project.register` value
+  from `storyforge.yaml` and scores against that register's expected
+  ratio band. Defaults to `balanced` (40-60% action acceptable) when
+  no register is declared.
+
+#### D. Spine coverage balance (1.0x)
+- **Question:** Does each spine event have proportionate scene coverage?
+- **High signals:** Climax / midpoint events have enough scenes to
+  deliver their work; setup-heavy or payoff-heavy distributions are
+  appropriate to the declared register.
+- **Low signals:** A single scene loaded with too many beats to
+  deliver one spine event; a spine event over-served at the cost of
+  late-act compression.
+
+#### E. Cumulative arc gradient (1.0x)
+Character-arc research (Smiley, Carroll), applied scene-by-scene.
+
+- **Question:** Can the protagonist's change be traced *scene by
+  scene*, or are there flat zones or repeated arcs?
+- **High signals:** `emotional_arc` values shift meaningfully across
+  scenes; no consecutive scenes share the same arc unless intentional.
+- **Low signals:** The same `emotional_arc` repeats three or more
+  times (e.g., "investigation to recognition" appearing across the
+  discovery scenes); flat plateaus in the middle of the architecture.
+
+#### F. Scene-level causal chain (1.5x)
+Same Boyd/Bruner causal-coherence research as spine mode, applied
+at finer resolution.
+
+- **Question:** Does each scene cause the next? Or do scenes feel
+  like a sequenced list?
+- **High signals:** Scene N's outcome is the proximate cause of scene
+  N+1's opening conditions; spine-level bridges are *delivered* by
+  actual scenes, not just implied.
+- **Low signals:** Adjacent scenes feel like jump-cuts; the spine has
+  causal bridges that no architecture scene enacts.
+
+#### G. Promise & payoff (1.0x)
+- **Question:** Are Act 1 scene-level setups (objects, lines, motifs)
+  paid off in Act 3 scenes?
+- **High signals:** Specific Act 1 scene elements recur with new
+  meaning in Act 3; closing image refers to opening image.
+- **Low signals:** Act 1 scenes plant elements that disappear; Act 3
+  scenes introduce resolutions out of nowhere.
+
+### Diagnostic-as-action
+
+Architecture mode's diagnostic must propose **specific field-level
+updates AND scene insertions**, not just identify weak axes.
+
+- **Field-update proposals:** for scenes with low field coherence,
+  the diagnostic names the specific field and the proposed new value
+  (e.g., "a07 emotional_arc → 'search to recognition and recurrence'").
+- **Scene-insertion proposals:** for spine bridges that no
+  architecture scene enacts, the diagnostic proposes a new sequel
+  scene with a full definition: id, spine_event, action_sequel,
+  emotional_arc, value_at_stake, value_shift, turning_point, and a
+  one-sentence summary.
+
+### Architecture mode output
+
+**`full` coaching:**
+
+```
+working/scores/story-power/{timestamp}/
+├── scorecard.csv                 # pitch-mode 8-axis scores
+├── per-scene-matrix.csv          # 2 axes × N scenes (architecture only)
+├── whole-architecture-axes.csv   # 5 architecture axes (only)
+└── diagnostic.md                 # cross-axis + cross-scene + field-update
+                                  # and scene-insertion proposals
+```
+
+**`coach` coaching:** architecture sections append to
+`coaching-brief.md`.
+**`strict` coaching:** extends `self-scoring-checklist.md` with
+per-scene blanks (id + 2 axes) + 5 whole-architecture axis blanks.
+
+### Worked example: Ashes-in-the-Archive (illustrative)
+
+Real scoring from a 15-scene architecture before-and-after field
+updates plus one scene insertion (numbers are one reviewer's read,
+not a target).
+
+Per-scene Layer 1 averages: service 9.0, **field coherence 8.1**
+(three scenes — a07, a19, a21 — at 7).
+
+Whole-architecture Layer 2:
+- Action/sequel rhythm: 7 (11 action / 4 sequel = 73% action — too
+  heavy for a project declared as `atmospheric`)
+- Spine coverage balance: 8
+- Cumulative arc gradient: 8
+- Scene-level causal chain: 7 (one weak handoff a10 → a15)
+- Promise & payoff: 9
+
+**Two targeted moves the diagnostic proposed:**
+- Update `emotional_arc` on a07/a19/a21 to match their expanded
+  summaries (each field had drifted during spine→architecture
+  propagation).
+- Add a new sequel scene `a12-tracing-the-pattern` between a10 and
+  a15 to deliver the spine's bridge.
+
+**Post-fix:** coherence 8.1 → 8.3; causal chain 7 → 9; action/sequel
+rhythm 7 → 8 (11:5 = 69% action). The new scene lifted *two* Layer 2
+axes simultaneously (causal chain + action/sequel rhythm) — a single
+high-leverage move addressing both the spine bridge and the register
+imbalance.
+
+The takeaway for the rubric: field coherence is the axis no other
+mode catches, and a single well-chosen scene insertion can lift
+multiple Layer 2 axes when it both serves a spine bridge and corrects
+a rhythm imbalance.
+
 ## Scoring bands
 
 - **1-3:** Axis is essentially absent or actively damaged.
