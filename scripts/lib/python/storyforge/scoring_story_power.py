@@ -92,14 +92,20 @@ class SpineDiagnostic(TypedDict, total=False):
     high_leverage_move: str
 
 
-class ProposedFix(TypedDict, total=False):
-    """One concrete clause-level bridge for the highest-leverage weak
-    handoff. target_handoff is the 'from -> to' string; proposed_clause
-    is the additive fragment to splice onto the upstream summary."""
-    target_event_id: str
+Severity = Literal['high', 'medium', 'low']
+
+
+class _ProposedFixRequired(TypedDict):
     target_handoff: str
-    current_summary_tail: str
     proposed_clause: str
+
+
+class ProposedFix(_ProposedFixRequired, total=False):
+    """One concrete clause-level bridge for the highest-leverage weak
+    handoff. target_handoff and proposed_clause are required (extractor
+    drops rows missing either); the rest are LLM-optional."""
+    target_event_id: str
+    current_summary_tail: str
     expected_lift: str
 
 
@@ -120,41 +126,50 @@ class WholeArchitectureScores(TypedDict, total=False):
     spine_coverage_balance: int
     cumulative_arc_gradient: int
     scene_causal_chain: int
-    promise_payoff: int
+    scene_promise_payoff: int
 
 
 class FieldCoherenceFinding(TypedDict):
     """A scene-level field-coherence problem flagged by the deterministic
-    pre-pass or the LLM. severity is 'high' / 'medium' / 'low'."""
+    pre-pass or the LLM."""
     scene_id: str
     field: str
     issue: str
-    severity: str
+    severity: Severity
 
 
-class ProposedFieldUpdate(TypedDict, total=False):
-    """A concrete field-level fix the diagnostic proposes for a scene."""
+class _ProposedFieldUpdateRequired(TypedDict):
     scene_id: str
     field: str
-    current_value: str
     proposed_value: str
+
+
+class ProposedFieldUpdate(_ProposedFieldUpdateRequired, total=False):
+    """A concrete field-level fix the diagnostic proposes. scene_id,
+    field, and proposed_value are required (extractor drops rows
+    missing any); current_value and rationale are LLM-optional."""
+    current_value: str
     rationale: str
 
 
-class ProposedSceneInsertion(TypedDict, total=False):
-    """A new sequel scene the diagnostic proposes to deliver a spine
-    bridge that no architecture scene enacts. Full field definition so
-    the author can accept/edit/reject without re-deriving."""
-    insert_after: str          # scene id the new scene comes after
+class _ProposedSceneInsertionRequired(TypedDict):
+    insert_after: str
     proposed_id: str
+    summary: str
+
+
+class ProposedSceneInsertion(_ProposedSceneInsertionRequired, total=False):
+    """A new sequel scene to deliver a spine bridge that no architecture
+    scene enacts. insert_after, proposed_id, and summary are required
+    (extractor drops rows missing any); the structured-craft fields and
+    rationale are LLM-optional."""
     spine_event: str
     action_sequel: str
     emotional_arc: str
     value_at_stake: str
     value_shift: str
     turning_point: str
-    summary: str
-    rationale: str             # why this scene + which axes it lifts
+    rationale: str
 
 
 class ArchitectureDiagnostic(TypedDict, total=False):
@@ -399,11 +414,15 @@ class SceneRow(NamedTuple):
     turning_point: str
 
 
-# Project-register keywords drive the action/sequel rhythm scoring.
-# Defaults to 'balanced' when project.register is absent — the prompt
-# scores against the named register's expected band; an absent
-# declaration scores against the balanced 40-60% action target.
-KNOWN_REGISTERS = (
+# Recognized register tokens for project.register (see rubric
+# §"Action/sequel rhythm"). Literal narrowing on the return of
+# read_project_register lets the prompt builder reason exhaustively.
+Register = Literal[
+    'thriller', 'action', 'fast', 'commercial',
+    'literary', 'decompressed', 'atmospheric', 'contemplative',
+    'balanced',
+]
+KNOWN_REGISTERS: tuple[Register, ...] = (
     'thriller', 'action', 'fast', 'commercial',
     'literary', 'decompressed', 'atmospheric', 'contemplative',
     'balanced',
@@ -604,14 +623,11 @@ def parse_architecture(project_dir: str) -> list[SceneRow]:
     return out
 
 
-def read_project_register(project_dir: str) -> str:
+def read_project_register(project_dir: str) -> Register:
     """Return the project's declared register from storyforge.yaml's
     `project.register` field. Defaults to 'balanced' when absent or
-    unrecognized — the scoring prompt then scores against a 40-60%
-    action target band rather than a register-specific one. Logs INFO
-    in either fallback case so the author can see when their score is
-    being computed against the default target rather than a declared
-    register-specific band."""
+    unrecognized. Logs INFO in either fallback case so the author can
+    see when their score is being computed against the default target."""
     raw = read_yaml_field('project.register', project_dir) or ''
     register = raw.strip().lower()
     if not register:
@@ -625,7 +641,7 @@ def read_project_register(project_dir: str) -> str:
             f'({", ".join(KNOWN_REGISTERS)}); the scoring prompt will fall '
             'back to a balanced target band.')
         return 'balanced'
-    return register
+    return register  # type: ignore[return-value]
 
 
 def gather_pitch_artifacts(project_dir: str) -> PitchArtifacts:
@@ -1416,6 +1432,14 @@ def _run_act_shape_extension(project_dir: str, output_dir: str,
                 f'({", ".join(missing_struct)})'
             )
         log(f'WARNING: act-shape extraction partial — {"; ".join(parts)}.')
+    # Couples the type-system invariant: ok ⇒ non-empty payload. The
+    # missing-count arithmetic above enforces this in practice; the
+    # assert catches a future shortcut that bypasses it.
+    if status == 'ok':
+        assert per_act and structural, (
+            'act-shape extension status=ok requires non-empty per_act '
+            'and structural scores'
+        )
 
     # Only write outputs that have data backing them. Missing files
     # are clearer signal than empty rows.
@@ -2412,6 +2436,11 @@ def _run_spine_extension(project_dir: str, output_dir: str, log_dir: str,
                 f'({", ".join(missing_spine_axes)})'
             )
         log(f'WARNING: spine extraction partial — {"; ".join(parts)}.')
+    if status == 'ok':
+        assert per_event and whole_spine, (
+            'spine extension status=ok requires non-empty per_event_scores '
+            'and whole_spine_scores'
+        )
 
     write_matrix = has_any_per_event and not empty_events
     write_whole_spine = has_any_whole_spine
@@ -2792,7 +2821,7 @@ def _action_sequel_ratio(scenes: list[SceneRow]) -> tuple[int, int, float]:
 def _build_architecture_prompt(scenes: list[SceneRow],
                                   spine_events: list[SpineEvent],
                                   artifacts: PitchArtifacts,
-                                  register: str,
+                                  register: Register,
                                   deterministic_findings: list[FieldCoherenceFinding],
                                   rubric: str) -> str:
     """Assemble the architecture-mode LLM prompt. Inlines deterministic
@@ -3080,7 +3109,7 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
                                   scenes: list[SceneRow],
                                   spine_events: list[SpineEvent],
                                   artifacts: PitchArtifacts,
-                                  register: str,
+                                  register: Register,
                                   rubric: str,
                                   coaching: CoachingLevel,
                                   ) -> ArchitectureExtension:
@@ -3180,6 +3209,11 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
                 f'missing ({", ".join(missing_arch_axes)})'
             )
         log(f'WARNING: architecture extraction partial — {"; ".join(parts)}.')
+    if status == 'ok':
+        assert per_scene and whole_arch, (
+            'architecture extension status=ok requires non-empty '
+            'per_scene_scores and whole_architecture_scores'
+        )
 
     write_matrix = has_any_per_scene and not empty_scenes
     write_whole_arch = has_any_whole_arch
@@ -3231,9 +3265,11 @@ def _extract_field_findings(parsed: dict) -> list[FieldCoherenceFinding]:
         issue = row.get('issue', '').strip()
         if not (scene_id and field and issue):
             continue
-        severity = row.get('severity', 'medium').strip().lower()
-        if severity not in ('high', 'medium', 'low'):
-            severity = 'medium'
+        raw_severity = row.get('severity', 'medium').strip().lower()
+        severity: Severity = (
+            raw_severity if raw_severity in ('high', 'medium', 'low')
+            else 'medium'
+        )  # type: ignore[assignment]
         out.append({
             'scene_id': scene_id,
             'field': field,
@@ -3346,7 +3382,7 @@ def _architecture_diagnostic_section(
         proposed_updates: list[ProposedFieldUpdate],
         proposed_inserts: list[ProposedSceneInsertion],
         diag: ArchitectureDiagnostic,
-        register: str, *,
+        register: Register, *,
         include_matrix: bool = True,
         include_whole_arch: bool = True,
         ) -> list[str]:
@@ -3448,7 +3484,7 @@ def _append_architecture_diagnostic(
         proposed_updates: list[ProposedFieldUpdate],
         proposed_inserts: list[ProposedSceneInsertion],
         diag: ArchitectureDiagnostic,
-        register: str, *,
+        register: Register, *,
         include_matrix: bool = True,
         include_whole_arch: bool = True,
         ) -> None:
@@ -3483,7 +3519,7 @@ def _append_architecture_coaching_brief(
         proposed_updates: list[ProposedFieldUpdate],
         proposed_inserts: list[ProposedSceneInsertion],
         diag: ArchitectureDiagnostic,
-        register: str, *,
+        register: Register, *,
         include_matrix: bool = True,
         include_whole_arch: bool = True,
         recover_hint: str = '',
