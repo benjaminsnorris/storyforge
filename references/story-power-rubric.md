@@ -790,6 +790,190 @@ The LLM seeds its continuity_coherence scoring with these findings.
 Higher-noise continuity cases (subtle pov-rotation, mid-act-day
 compression) are left to the LLM.
 
+## Briefs mode: per-brief matrix + whole-briefs axes
+
+When `reference/scene-briefs.csv` exists and has at least one populated
+row, the scorecard runs in **briefs mode**. A brief is the drafting
+contract for one scene — the scene-engine fields (goal, conflict,
+outcome, crisis, decision) plus information state (knowledge_in /
+knowledge_out), execution beats (key_actions, key_dialogue, emotions),
+recurring vehicles (motifs), under-the-line direction (subtext), and
+the scene-graph edge (continuity_deps).
+
+Briefs mode is **independent of the other modes**. All six can run on
+the same project. The coupling that matters is upstream — `continuity_deps`
+references `scenes.csv:id`, and brief rows are keyed by scene id.
+
+### Layer 1: per-brief 2-axis matrix
+
+Two axes scored per brief row. The asymmetric weighting (1.5x on
+scene-engine integrity) reflects that this axis is the entire reason
+the brief format exists; concreteness is a secondary craft floor.
+
+#### A. Scene-engine integrity (1.5x — the load-bearing axis)
+Swain's motivation-reaction unit and Weiland's scene/sequel structure
+both insist that a scene is the smallest unit where a *character with
+a goal* meets *specific opposition* and arrives at an *outcome* that
+forces a *crisis* answered by a *decision*. Briefs that skip any link
+in this chain produce scenes that feel like episodes rather than
+scenes-as-engines.
+
+- **Question:** Do `goal → conflict → outcome → crisis → decision`
+  cohere as a single causal sequence for this scene?
+- **High signals:** Goal names a concrete objective; conflict names
+  the specific opposition (person, force, internal block); outcome
+  matches the allowed enum (`yes`, `no`, `yes-but`, `no-and`) and
+  follows from the goal/conflict; crisis articulates a real dilemma
+  (best-bad-choice or irreconcilable goods); decision names what the
+  character actively chooses in response.
+- **Low signals:** Goal is abstract ("understand herself"); conflict
+  is missing or vague ("internal struggle"); outcome doesn't match
+  what the goal/conflict set up; crisis is restated outcome rather
+  than a dilemma; decision is passive ("she lets it happen").
+
+#### B. Concreteness (1.0x)
+- **Question:** Are the brief's fields specific drafting *instructions*,
+  or do they restate the scene's summary in different words?
+- **High signals:** key_actions names specific beats ("Mira opens the
+  ledger to page 47 before her father stops her"); key_dialogue
+  carries an actual line; emotions traces a sequence ("relief → dread
+  → resignation").
+- **Low signals:** key_actions paraphrases the scene summary;
+  key_dialogue is "Mira and her father argue"; emotions is a single
+  word ("tense").
+
+### Layer 2: five whole-briefs axes
+
+#### C. Outcome distribution (1.5x)
+- **Question:** Across all briefs, does the outcome enum vary in a
+  way that builds escalation, or does the same outcome repeat in
+  streaks?
+- **High signals:** Outcomes spread across `yes` / `no` / `yes-but` /
+  `no-and`; the `no-and` outcomes cluster around turning points;
+  Act 2's midpoint has a `no-and` (Save the Cat all-is-lost).
+- **Low signals:** A streak of 4+ consecutive `yes` outcomes (no
+  stakes); a streak of 4+ `no` outcomes (the protagonist loses
+  monotonically and stops feeling agentic); `yes-but` and `no-and`
+  never appear (the story has no complications).
+
+#### D. Knowledge-flow continuity (1.5x — the unique-and-load-bearing axis)
+Briefs are the only artifact tracking per-scene knowledge state.
+Architecture tracks structure; scene-map tracks continuity metadata.
+Only briefs answer "when did the protagonist learn X, and from where?"
+
+- **Question:** Does `knowledge_out` of an upstream scene cover the
+  `knowledge_in` of a downstream scene that depends on it?
+- **High signals:** Each scene's `knowledge_in` items appear in some
+  ancestor scene's `knowledge_out`; new facts that appear mid-stream
+  are introduced cleanly (knowledge_out grows by 0.5-1.5 items per
+  scene); the protagonist's knowledge state is consistent across the
+  manuscript.
+- **Low signals:** A scene's `knowledge_in` ∋ a fact that no upstream
+  `knowledge_out` provides (orphan knowledge); `knowledge_out`
+  contracts across scenes (fact known then forgotten); a fact is
+  re-introduced in scene K when it was already known in scene J<K.
+
+The 1.5x weight reflects this axis's unique role: **no other scoring
+mode catches knowledge orphans.** Field coherence checks scene-row
+fields; scene-map checks continuity metadata; only briefs can check
+fact provenance across the scene graph.
+
+#### E. Crisis density (1.0x)
+- **Question:** How often do briefs articulate a real *crisis* — a
+  dilemma the POV character must choose through? Crisis is the
+  most-skipped scene-engine field.
+- **High signals:** ≥60% of briefs have a non-empty crisis field that
+  names a true dilemma (best-bad-choice or irreconcilable goods);
+  Act-structure crisis points (Act 1 climax, midpoint, Act 2 climax)
+  have the strongest dilemmas.
+- **Low signals:** <20% of briefs have a populated crisis field; the
+  crisis field paraphrases the conflict ("the conflict gets harder");
+  no crisis field invokes a value trade-off.
+
+#### F. Subtext presence (1.0x)
+- **Question:** How often is subtext articulated — "character says X
+  but means Y; do not state Y directly"?
+- **High signals:** ≥50% of dialogue-heavy briefs have a populated
+  subtext field giving drafting direction; subtext recurs across
+  scenes featuring the same character pair (an established subtext
+  channel); subtext invokes the theme.
+- **Low signals:** Subtext field is empty across most briefs; subtext
+  is just a restatement of what the character is feeling; the same
+  subtext line is reused across multiple briefs.
+
+#### G. Motif recurrence (1.0x)
+- **Question:** Do motifs (recurring images / symbols) appear across
+  multiple briefs, or are most motifs one-shots?
+- **High signals:** Most motifs declared in briefs appear in ≥3
+  briefs; high-load motifs (the title image, the central object)
+  appear in ≥5 briefs distributed across acts; motif arcs build
+  (introduce → echo → recontextualize → resolve).
+- **Low signals:** ≥50% of motifs declared in any brief appear in
+  only one brief (singletons); motifs cluster in Act 1 and disappear;
+  the title motif appears only at the open and close.
+
+### Diagnostic-as-action
+
+Briefs mode's diagnostic proposes **specific field updates**, not just
+identifies weak axes:
+
+- **Crisis field updates:** for briefs missing a real dilemma, propose
+  concrete crisis text grounded in the goal/conflict.
+- **Knowledge field updates:** for orphan-knowledge findings, propose
+  adding the missing fact to an upstream `knowledge_out` *or* removing
+  it from the downstream `knowledge_in`.
+- **Subtext field updates:** for dialogue-heavy briefs missing subtext,
+  propose a one-line subtext directive ("character says X but means
+  Y; do not state Y directly").
+- **Outcome distribution:** for streaks, propose flipping a brief's
+  outcome from `yes` to `yes-but` to break the streak.
+
+Each proposal names the scene id, the field, the proposed new value,
+and (when available) the current value plus rationale.
+
+### Briefs mode output
+
+**`full` coaching:**
+
+```
+working/scores/story-power/{timestamp}/
+├── scorecard.csv                 # pitch
+├── per-act-matrix.csv / structural-axes.csv     # act-shape
+├── per-event-matrix.csv / whole-spine-axes.csv  # spine
+├── per-scene-matrix.csv / whole-architecture-axes.csv  # architecture
+├── per-scene-map-matrix.csv / whole-scene-map-axes.csv # scene-map
+├── per-brief-matrix.csv          # briefs Layer 1 (NEW)
+├── whole-briefs-axes.csv         # briefs Layer 2 (NEW)
+└── diagnostic.md                 # all six tiers
+```
+
+**`coach` coaching:** briefs sections append to `coaching-brief.md`.
+**`strict` coaching:** extends `self-scoring-checklist.md` with
+per-brief blanks + 5 whole-briefs axis blanks.
+
+### Deterministic brief pre-pass
+
+Five high-confidence checks the pre-pass runs against the briefs
+corpus (parallel to scene-map's continuity pre-pass):
+
+1. **Missing required field:** any of `goal`, `conflict`, `outcome`,
+   `crisis`, `decision` is empty: high severity per missing field.
+2. **Invalid outcome:** `outcome` is non-empty but not in
+   `{yes, no, yes-but, no-and}`: high severity.
+3. **Knowledge orphan:** a scene's `knowledge_in` ∋ a fact that no
+   upstream brief's `knowledge_out` provides (walking the
+   `continuity_deps` graph transitively when present, falling back
+   to seq order otherwise): medium severity.
+4. **Outcome streak:** 4+ consecutive briefs (by `scenes.csv` seq)
+   with the same outcome enum: medium severity (low if the streak
+   is `yes-but` — it's an escalation pattern, not stagnation).
+5. **Motif singleton:** a motif declared in any brief appears in
+   exactly one brief: low severity.
+
+The LLM seeds its scene_engine_integrity, knowledge_flow_continuity,
+and outcome_distribution scoring with these findings. Higher-noise
+cases (subtext quality, crisis dilemma rigor) are left to the LLM.
+
 ## Scoring bands
 
 - **1-3:** Axis is essentially absent or actively damaged.

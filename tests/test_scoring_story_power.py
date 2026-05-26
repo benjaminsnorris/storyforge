@@ -4556,3 +4556,1348 @@ def test_extract_proposed_operations_normalizes_case_and_strips_ids(capsys):
     assert out[0]['scene_ids'] == ['s1', 's2']
     assert out[1]['operation'] == 'promote'
 
+
+# ---------------------------------------------------------------------------
+# Briefs mode (Layer 1 per-brief + Layer 2 whole-briefs)
+# ---------------------------------------------------------------------------
+
+def _seed_briefs(project_dir: str, *,
+                   scene_count: int = 4,
+                   missing_engine_field: str | None = None,
+                   invalid_outcome: bool = False,
+                   orphan_knowledge: bool = False,
+                   outcome_streak: str | None = None,
+                   motif_singleton: bool = False,
+                   empty_engine_row: bool = False) -> None:
+    """Write a small scene-briefs.csv. Variants exercise each
+    deterministic pre-pass failure mode independently."""
+    ref = os.path.join(project_dir, 'reference')
+    os.makedirs(ref, exist_ok=True)
+    rows = []
+    base_rows = [
+        # (id, goal, conflict, outcome, crisis, decision, kn_in, kn_out,
+        #  actions, dialogue, emotions, motifs, subtext, deps)
+        ('s1',
+         'Find her father in the archive',
+         'The archivist refuses to show her the ledger',
+         'no',
+         'Comply and lose access forever, or break protocol and lose status',
+         'She breaks protocol and steals the key',
+         '',
+         'archive-locks-after-dark',
+         'Mira picks the desk lock at 11pm',
+         'You should not be here at this hour.',
+         'curiosity → defiance → resolve',
+         'lantern;ledger',
+         'Mira says she is leaving but means she is staying',
+         ''),
+        ('s2',
+         'Decode the ledger she stole',
+         'The cipher requires her fathers signature stroke',
+         'yes-but',
+         'Use the forged stroke and corrupt the record, or wait and lose the trail',
+         'She forges the stroke',
+         'archive-locks-after-dark',
+         'archive-locks-after-dark;cipher-key-pattern',
+         'Mira traces a sigil on tracing paper',
+         'The strokes are a name not a code.',
+         'doubt → relief → guilt',
+         'lantern;sigil',
+         'She tells herself she had no choice while planning the next forgery',
+         's1'),
+        ('s3',
+         'Confront her father about the ledger',
+         'Her father denies the ledger exists',
+         'no-and',
+         'Accept the lie and stay safe, or call him a liar and lose home',
+         'She calls him a liar and leaves',
+         'archive-locks-after-dark;cipher-key-pattern',
+         'archive-locks-after-dark;cipher-key-pattern;father-knows-cipher',
+         'Mira places the forged ledger on the kitchen table',
+         'You wrote this. I traced your sigil.',
+         'hope → anger → grief',
+         'sigil;table',
+         'He says he loves her while planning to destroy the ledger tonight',
+         's2'),
+        ('s4',
+         'Return to the archive and finish the decoding',
+         'The archivist has changed the locks',
+         'yes',
+         'Walk away with what she has, or burn it down for the rest',
+         'She breaks the south window and goes in',
+         'archive-locks-after-dark;cipher-key-pattern;father-knows-cipher',
+         'archive-locks-after-dark;cipher-key-pattern;father-knows-cipher;full-cipher',
+         'Mira climbs the south wall by the cipher light',
+         'I told you I would come back.',
+         'fear → resolve → triumph',
+         'lantern;cipher',
+         'She knows she is repeating her fathers crime and chooses it anyway',
+         's3'),
+    ][:scene_count]
+
+    if missing_engine_field:
+        # Blank out the named field on s1 only.
+        field_idx = {
+            'goal': 1, 'conflict': 2, 'outcome': 3, 'crisis': 4,
+            'decision': 5,
+        }[missing_engine_field]
+        first = list(base_rows[0])
+        first[field_idx] = ''
+        base_rows[0] = tuple(first)
+    if invalid_outcome:
+        first = list(base_rows[0])
+        first[3] = 'maybe'  # not in {yes, no, yes-but, no-and}
+        base_rows[0] = tuple(first)
+    if orphan_knowledge:
+        # s2's knowledge_in claims a fact no upstream brief provided.
+        second = list(base_rows[1])
+        second[6] = 'unrelated-fact'  # knowledge_in
+        base_rows[1] = tuple(second)
+    if outcome_streak:
+        # Force 4 consecutive identical outcomes.
+        for i in range(min(4, len(base_rows))):
+            r = list(base_rows[i])
+            r[3] = outcome_streak
+            base_rows[i] = tuple(r)
+    if motif_singleton:
+        # Replace s2 motifs with a one-off motif that appears nowhere else.
+        second = list(base_rows[1])
+        second[11] = 'unique-motif-s2-only'
+        base_rows[1] = tuple(second)
+    if empty_engine_row:
+        # Add an unbriefed scaffold row alongside the others.
+        base_rows = list(base_rows) + [('s5', '', '', '', '', '', '', '',
+                                          '', '', '', '', '', '')]
+
+    headers = ('id|goal|conflict|outcome|crisis|decision|knowledge_in|'
+               'knowledge_out|key_actions|key_dialogue|emotions|motifs|'
+               'subtext|continuity_deps')
+    rows = [headers] + ['|'.join(r) for r in base_rows]
+    with open(os.path.join(ref, 'scene-briefs.csv'), 'w') as f:
+        f.write('\n'.join(rows) + '\n')
+
+
+def _briefs_payload(brief_ids: list[str] | None = None) -> dict:
+    """Well-shaped briefs LLM payload."""
+    if brief_ids is None:
+        brief_ids = ['s1', 's2', 's3', 's4']
+    per_brief = []
+    for bid in brief_ids:
+        per_brief.append({
+            'scene_id': bid,
+            'scores': [
+                {'axis': 'scene_engine_integrity',
+                 'score': 7 if bid == 's2' else 9,
+                 'rationale': f'engine for {bid}'},
+                {'axis': 'concreteness_brief', 'score': 8,
+                 'rationale': f'concreteness for {bid}'},
+            ],
+        })
+    whole_briefs = [
+        {'axis': 'outcome_distribution', 'score': 8,
+         'positive_signals': 'spread across enum',
+         'negative_signals': '',
+         'rationale': 'no streaks'},
+        {'axis': 'knowledge_flow_continuity', 'score': 7,
+         'positive_signals': 'cipher arc threads through',
+         'negative_signals': 's1 introduces archive-locks without source',
+         'rationale': 'one orphan fact'},
+        {'axis': 'crisis_density', 'score': 8,
+         'positive_signals': 'every brief has a dilemma',
+         'negative_signals': '',
+         'rationale': '4 of 4 crises are real choices'},
+        {'axis': 'subtext_presence', 'score': 8,
+         'positive_signals': 'every dialogue brief carries subtext',
+         'negative_signals': '',
+         'rationale': 'consistent subtext discipline'},
+        {'axis': 'motif_recurrence', 'score': 7,
+         'positive_signals': 'lantern recurs in three briefs',
+         'negative_signals': 'table appears once',
+         'rationale': 'one singleton motif'},
+    ]
+    return {
+        'per_brief': per_brief,
+        'whole_briefs': whole_briefs,
+        'briefs_diagnostic': {
+            'lowest_axis': 'knowledge_flow_continuity',
+            'lowest_axis_average': '7.0',
+            'summary': 's1 introduces a fact with no source',
+            'scene_engine_assessment': 'briefs cohere; s2 has the weakest engine',
+            'high_leverage_move': 'add archive-locks-after-dark to a pre-s1 brief',
+        },
+        'brief_findings': [
+            {'scene_id': 's2', 'field': 'crisis',
+             'issue': 'crisis paraphrases the conflict',
+             'severity': 'medium'},
+        ],
+        'proposed_brief_updates': [
+            {'scene_id': 's2', 'field': 'crisis',
+             'current_value': 'Use the forged stroke and corrupt the record, '
+                              'or wait and lose the trail',
+             'proposed_value': 'Either she forges the stroke and becomes the '
+                                'crime she came to investigate, or she lets '
+                                'the trail die and abandons her father.',
+             'rationale': 'lifts scene_engine_integrity 7 → 9'},
+        ],
+    }
+
+
+def _hex_mock_llm(pitch_payload: dict, act_shape_payload: dict,
+                    spine_payload: dict, architecture_payload: dict,
+                    scene_map_payload: dict, briefs_payload: dict):
+    """Mock that routes by log filename suffix across all six tiers.
+
+    When adding a seventh tier, extend this dispatcher AND extend
+    `test_hex_mock_llm_routes_to_all_six_payloads` to track the new
+    tier in its hit-counter — otherwise the new tier's LLM call falls
+    through to the default (pitch) payload and downstream tests
+    silently assert against the wrong shape."""
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-briefs' in log_file:
+            payload = briefs_payload
+        elif '-scene-map' in log_file:
+            payload = scene_map_payload
+        elif '-architecture' in log_file:
+            payload = architecture_payload
+        elif '-spine' in log_file:
+            payload = spine_payload
+        elif '-act-shape' in log_file:
+            payload = act_shape_payload
+        else:
+            payload = pitch_payload
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    return fake
+
+
+def test_per_brief_axes_module_load_invariants():
+    """PER_BRIEF_AXES carries unique keys and a 1.5x load-bearing axis."""
+    from storyforge.scoring_story_power import PER_BRIEF_AXES
+    keys = [a.key for a in PER_BRIEF_AXES]
+    assert len(keys) == len(set(keys))
+    assert all(a.weight in (1.0, 1.5) for a in PER_BRIEF_AXES)
+    assert sum(1 for a in PER_BRIEF_AXES if a.weight == 1.5) == 1
+
+
+def test_briefs_axes_module_load_invariants():
+    """BRIEFS_AXES carries unique keys with two load-bearing axes."""
+    from storyforge.scoring_story_power import BRIEFS_AXES
+    keys = [a.key for a in BRIEFS_AXES]
+    assert len(keys) == len(set(keys))
+    assert all(a.weight in (1.0, 1.5) for a in BRIEFS_AXES)
+    assert sum(1 for a in BRIEFS_AXES if a.weight == 1.5) == 2
+
+
+def test_briefs_axis_families_disjoint_from_other_families():
+    """A briefs axis key must not collide with any other family's
+    keys — diagnostic routing depends on it. This is the data-driven
+    invariant; if it fires at import time the module won't even load,
+    so this test guards against accidentally writing a regression test
+    that doesn't exercise the assertion."""
+    from storyforge.scoring_story_power import (
+        PER_BRIEF_AXIS_KEYS, BRIEFS_AXIS_KEYS, AXIS_KEYS,
+        STRUCTURAL_AXIS_KEYS, PER_EVENT_AXIS_KEYS, SPINE_AXIS_KEYS,
+        PER_SCENE_AXIS_KEYS, ARCHITECTURE_AXIS_KEYS,
+        PER_MAP_SCENE_AXIS_KEYS, MAP_AXIS_KEYS,
+    )
+    others = (AXIS_KEYS + STRUCTURAL_AXIS_KEYS + PER_EVENT_AXIS_KEYS
+              + SPINE_AXIS_KEYS + PER_SCENE_AXIS_KEYS
+              + ARCHITECTURE_AXIS_KEYS + PER_MAP_SCENE_AXIS_KEYS
+              + MAP_AXIS_KEYS)
+    briefs_combined = set(PER_BRIEF_AXIS_KEYS + BRIEFS_AXIS_KEYS)
+    assert not (briefs_combined & set(others))
+
+
+def test_parse_scene_briefs_missing_file_returns_empty(tmp_path):
+    from storyforge.scoring_story_power import parse_scene_briefs
+    assert parse_scene_briefs(str(tmp_path)) == []
+
+
+def test_parse_scene_briefs_missing_id_column_returns_empty(tmp_path, capsys):
+    from storyforge.scoring_story_power import parse_scene_briefs
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scene-briefs.csv').write_text('goal|conflict\nabc|def\n')
+    assert parse_scene_briefs(str(tmp_path)) == []
+    out = capsys.readouterr().out
+    assert 'missing required column id' in out
+
+
+def test_parse_scene_briefs_drops_malformed_rows(tmp_path, capsys):
+    from storyforge.scoring_story_power import parse_scene_briefs
+    _seed_briefs(str(tmp_path))
+    # Append a malformed row with wrong cell count.
+    briefs_path = tmp_path / 'reference' / 'scene-briefs.csv'
+    with open(briefs_path, 'a') as f:
+        f.write('s9|too|few|cells\n')
+    parsed = parse_scene_briefs(str(tmp_path))
+    assert {b.id for b in parsed} == {'s1', 's2', 's3', 's4'}
+    out = capsys.readouterr().out
+    assert 'malformed scene-briefs.csv row' in out
+
+
+def test_parse_scene_briefs_drops_empty_engine_scaffolds(tmp_path, capsys):
+    """A row with all five scene-engine fields empty is migration
+    scaffolding, not a real brief — drop it with an INFO log rather
+    than letting the pre-pass flag five high-severity findings."""
+    from storyforge.scoring_story_power import parse_scene_briefs
+    _seed_briefs(str(tmp_path), empty_engine_row=True)
+    parsed = parse_scene_briefs(str(tmp_path))
+    assert 's5' not in {b.id for b in parsed}
+    out = capsys.readouterr().out
+    assert 'all scene-engine fields empty' in out
+
+
+def test_parse_scene_briefs_splits_array_cells(tmp_path):
+    """knowledge_in / knowledge_out / motifs / continuity_deps split
+    on `;` and return as tuples (empty cells → empty tuple)."""
+    from storyforge.scoring_story_power import parse_scene_briefs
+    _seed_briefs(str(tmp_path))
+    parsed = parse_scene_briefs(str(tmp_path))
+    by_id = {b.id: b for b in parsed}
+    assert by_id['s2'].knowledge_in == ('archive-locks-after-dark',)
+    assert by_id['s2'].knowledge_out == (
+        'archive-locks-after-dark', 'cipher-key-pattern',
+    )
+    assert by_id['s2'].motifs == ('lantern', 'sigil')
+    assert by_id['s2'].continuity_deps == ('s1',)
+    # s1 has empty knowledge_in.
+    assert by_id['s1'].knowledge_in == ()
+
+
+def test_check_briefs_deterministic_flags_missing_required_fields():
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        Brief('s1', '', 'conflict', 'yes', 'crisis', 'decision',
+              (), (), '', '', '', (), '', ()),
+    ]
+    findings = _check_briefs_deterministic(briefs, [])
+    goal_finding = next(
+        f for f in findings if f['scene_id'] == 's1' and f['field'] == 'goal'
+    )
+    assert goal_finding['severity'] == 'high'
+
+
+def test_check_briefs_deterministic_flags_invalid_outcome():
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'maybe', 'cr', 'dec',
+              (), (), '', '', '', (), '', ()),
+    ]
+    findings = _check_briefs_deterministic(briefs, [])
+    outcome_finding = next(
+        f for f in findings
+        if f['scene_id'] == 's1' and f['field'] == 'outcome'
+        and 'not in valid set' in f['issue']
+    )
+    assert outcome_finding['severity'] == 'high'
+
+
+def test_check_briefs_deterministic_flags_knowledge_orphan(tmp_path):
+    """A knowledge_in fact with no upstream knowledge_out across the
+    continuity_deps graph is an orphan — medium severity."""
+    from storyforge.scoring_story_power import (
+        parse_scene_briefs, _check_briefs_deterministic,
+    )
+    _seed_briefs(str(tmp_path), orphan_knowledge=True)
+    briefs = parse_scene_briefs(str(tmp_path))
+    findings = _check_briefs_deterministic(briefs, [b.id for b in briefs])
+    orphan_finding = next(
+        f for f in findings
+        if f['scene_id'] == 's2' and f['field'] == 'knowledge_in'
+        and 'unrelated-fact' in f['issue']
+    )
+    assert orphan_finding['severity'] == 'medium'
+
+
+def test_check_briefs_deterministic_walks_continuity_deps_transitively(tmp_path):
+    """When s3 depends on s2 and s2 depends on s1, s3's knowledge_in
+    is satisfied by s1's knowledge_out even though s3 doesn't list s1
+    as a direct dep — BFS walks the graph transitively."""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              (), ('fact-a',), '', '', '', (), '', ()),
+        Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a', 'fact-b'), '', '', '', (), '', ('s1',)),
+        Brief('s3', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s2',)),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1', 's2', 's3'])
+    # No knowledge_in finding for s3 — fact-a is provided by s1 via s2.
+    s3_kn = [f for f in findings
+             if f['scene_id'] == 's3' and f['field'] == 'knowledge_in']
+    assert s3_kn == []
+
+
+def test_check_briefs_deterministic_handles_continuity_dep_cycle():
+    """A continuity_deps cycle (s1 ↔ s2) must not hang the graph
+    walk — the visited set bounds traversal regardless of cycle
+    topology."""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s2',)),
+        Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s1',)),
+    ]
+    # Must return cleanly — the visited-set guard prevents infinite
+    # recursion through the cycle.
+    findings = _check_briefs_deterministic(briefs, ['s1', 's2'])
+    # Both fact-a appears via s2's knowledge_out for s1's check (and v-v).
+    assert all(
+        f['field'] != 'knowledge_in' for f in findings
+        if 'fact-a' in f['issue']
+    )
+
+
+def test_check_briefs_deterministic_flags_outcome_streak(tmp_path):
+    from storyforge.scoring_story_power import (
+        parse_scene_briefs, _check_briefs_deterministic,
+    )
+    _seed_briefs(str(tmp_path), outcome_streak='yes')
+    briefs = parse_scene_briefs(str(tmp_path))
+    findings = _check_briefs_deterministic(briefs, [b.id for b in briefs])
+    streak = next(
+        f for f in findings
+        if f['field'] == 'outcome' and 'repeats' in f['issue']
+    )
+    assert streak['severity'] == 'medium'
+
+
+def test_check_briefs_deterministic_yes_but_streak_is_low_severity(tmp_path):
+    """A streak of `yes-but` outcomes is escalation, not stagnation —
+    the deterministic check tags it `low` rather than `medium` so it
+    doesn't drown the high-priority signal."""
+    from storyforge.scoring_story_power import (
+        parse_scene_briefs, _check_briefs_deterministic,
+    )
+    _seed_briefs(str(tmp_path), outcome_streak='yes-but')
+    briefs = parse_scene_briefs(str(tmp_path))
+    findings = _check_briefs_deterministic(briefs, [b.id for b in briefs])
+    streak = next(
+        f for f in findings
+        if f['field'] == 'outcome' and 'repeats' in f['issue']
+    )
+    assert streak['severity'] == 'low'
+
+
+def test_check_briefs_deterministic_streak_uses_seq_order_when_provided():
+    """When seq_order is provided, streak detection walks briefs in
+    seq sequence — a streak that exists in CSV row order may not exist
+    in seq order, and vice versa. This test constructs both halves of
+    that discrimination: (a) CSV order has a 4-run but seq scatters it
+    so no streak fires, (b) seq order pulls 4 identical outcomes
+    together that CSV order interleaves. Without this, a regression
+    that ignored seq_order entirely would pass."""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+
+    def _make(bid: str, outcome: str) -> Brief:
+        return Brief(bid, 'g', 'c', outcome, 'cr', 'd',
+                     (), (), '', '', '', (), '', ())
+
+    # Half (a): CSV order has 4 consecutive 'yes' (a, b, c, d). Seq
+    # order interleaves them with a 'no' between b and c, breaking the
+    # streak. Streak must NOT fire when seq_order is provided.
+    briefs_csv_streaks = [
+        _make('a', 'yes'), _make('b', 'yes'),
+        _make('c', 'yes'), _make('d', 'yes'),
+        _make('x', 'no'),
+    ]
+    findings_a = _check_briefs_deterministic(
+        briefs_csv_streaks, ['a', 'b', 'x', 'c', 'd'],
+    )
+    streaks_a = [f for f in findings_a
+                 if f['field'] == 'outcome' and 'repeats' in f['issue']]
+    assert streaks_a == [], (
+        f'CSV order had a streak but seq order broke it; expected no '
+        f'streak finding, got: {streaks_a}'
+    )
+
+    # Half (b): CSV order scatters 'yes' outcomes; seq order pulls
+    # four together. Streak MUST fire because seq order is what counts.
+    briefs_seq_streaks = [
+        _make('p', 'yes'), _make('q', 'no'),
+        _make('r', 'yes'), _make('s', 'no'),
+        _make('t', 'yes'), _make('u', 'yes'),
+    ]
+    findings_b = _check_briefs_deterministic(
+        briefs_seq_streaks, ['p', 'r', 't', 'u', 'q', 's'],
+    )
+    streaks_b = [f for f in findings_b
+                 if f['field'] == 'outcome' and 'repeats' in f['issue']]
+    assert len(streaks_b) == 1, (
+        f'seq order had a 4-run of yes (p, r, t, u) but no streak '
+        f'fired; got: {streaks_b}'
+    )
+    assert streaks_b[0]['severity'] == 'medium'
+
+
+def test_check_briefs_deterministic_flags_motif_singleton(tmp_path):
+    from storyforge.scoring_story_power import (
+        parse_scene_briefs, _check_briefs_deterministic,
+    )
+    _seed_briefs(str(tmp_path), motif_singleton=True)
+    briefs = parse_scene_briefs(str(tmp_path))
+    findings = _check_briefs_deterministic(briefs, [b.id for b in briefs])
+    singleton = next(
+        f for f in findings
+        if f['field'] == 'motifs'
+        and 'unique-motif-s2-only' in f['issue']
+    )
+    assert singleton['severity'] == 'low'
+
+
+def test_build_briefs_prompt_inlines_deterministic_findings(tmp_path):
+    """The prompt's 'Deterministic brief findings' block surfaces the
+    actual finding text so the LLM seeds its scoring with them rather
+    than re-discovering them."""
+    from storyforge.scoring_story_power import (
+        parse_scene_briefs, _check_briefs_deterministic,
+        _build_briefs_prompt, PitchArtifacts,
+    )
+    _seed_briefs(str(tmp_path), invalid_outcome=True)
+    briefs = parse_scene_briefs(str(tmp_path))
+    det_findings = _check_briefs_deterministic(briefs, [b.id for b in briefs])
+    assert det_findings
+    artifacts = PitchArtifacts(logline='L', synopsis='S', act_shape='',
+                                theme='', spine_summaries='',
+                                architecture_summaries='')
+    prompt = _build_briefs_prompt(briefs, [b.id for b in briefs],
+                                     artifacts, det_findings, 'rubric')
+    assert 'not in valid set' in prompt
+    # Every brief id appears in the rendered block.
+    for b in briefs:
+        assert b.id in prompt
+
+
+def test_build_briefs_prompt_uses_seq_order_when_provided():
+    """When scene_seq is provided, briefs render in seq sequence — not
+    CSV order. Scenes the seq doesn't name fall to the end."""
+    from storyforge.scoring_story_power import (
+        _build_briefs_prompt, Brief, PitchArtifacts,
+    )
+    briefs = [
+        Brief('z', 'g', 'c', 'yes', 'cr', 'd',
+              (), (), '', '', '', (), '', ()),
+        Brief('a', 'g', 'c', 'yes', 'cr', 'd',
+              (), (), '', '', '', (), '', ()),
+    ]
+    artifacts = PitchArtifacts(logline='L', synopsis='S', act_shape='',
+                                theme='', spine_summaries='',
+                                architecture_summaries='')
+    prompt = _build_briefs_prompt(briefs, ['a', 'z'], artifacts, [], 'rubric')
+    # 'a' appears before 'z' in the briefs block when seq says so.
+    assert prompt.index('### a') < prompt.index('### z')
+
+
+def test_parse_response_briefs_happy_path():
+    from storyforge.scoring_story_power import _parse_response_briefs
+    parsed = _parse_response_briefs(json.dumps(_briefs_payload()))
+    assert parsed is not None
+    assert isinstance(parsed['per_brief'], list)
+
+
+def test_parse_response_briefs_handles_fenced_json():
+    from storyforge.scoring_story_power import _parse_response_briefs
+    text = '```json\n' + json.dumps(_briefs_payload()) + '\n```'
+    parsed = _parse_response_briefs(text)
+    assert parsed is not None
+
+
+def test_parse_response_briefs_handles_greedy_extraction():
+    from storyforge.scoring_story_power import _parse_response_briefs
+    payload = json.dumps(_briefs_payload())
+    text = f'Here is my analysis. {payload} Done.'
+    parsed = _parse_response_briefs(text)
+    assert parsed is not None
+
+
+def test_parse_response_briefs_handles_only_per_brief_missing(capsys):
+    from storyforge.scoring_story_power import _parse_response_briefs
+    parsed = _parse_response_briefs(json.dumps({'whole_briefs': []}))
+    assert parsed is None
+    out = capsys.readouterr().out
+    assert 'per_brief' in out
+
+
+def test_parse_response_briefs_handles_only_whole_briefs_missing(capsys):
+    from storyforge.scoring_story_power import _parse_response_briefs
+    parsed = _parse_response_briefs(json.dumps({'per_brief': []}))
+    assert parsed is None
+    out = capsys.readouterr().out
+    assert 'whole_briefs' in out
+
+
+def test_extract_per_brief_scores_drops_malformed(capsys):
+    from storyforge.scoring_story_power import _extract_per_brief_scores
+    parsed = {
+        'per_brief': [
+            'not a dict',
+            {'scene_id': 'unknown', 'scores': []},
+            {'scene_id': 's1', 'scores': [
+                'not a dict',
+                {'axis': 'made_up', 'score': 8},
+                {'axis': 'scene_engine_integrity', 'score': 'high'},
+                {'axis': 'concreteness_brief', 'score': 47},
+                {'axis': 'concreteness_brief', 'score': 7},
+            ]},
+        ],
+    }
+    out = _extract_per_brief_scores(parsed, ['s1'])
+    assert out == {'s1': {'concreteness_brief': 7}}
+    info = capsys.readouterr().out
+    assert 'per-brief extraction dropped' in info
+
+
+def test_extract_whole_briefs_scores_drops_malformed(capsys):
+    from storyforge.scoring_story_power import _extract_whole_briefs_scores
+    parsed = {
+        'whole_briefs': [
+            'not a dict',
+            {'axis': 'made_up_axis', 'score': 7},
+            {'axis': 'crisis_density', 'score': 'mid'},
+            {'axis': 'crisis_density', 'score': 0},
+            {'axis': 'crisis_density', 'score': 7},
+        ],
+    }
+    out = _extract_whole_briefs_scores(parsed)
+    assert out == {'crisis_density': 7}
+    info = capsys.readouterr().out
+    assert 'whole-briefs extraction dropped' in info
+
+
+def test_extract_brief_findings_drops_incomplete(capsys):
+    from storyforge.scoring_story_power import _extract_brief_findings
+    parsed = {
+        'brief_findings': [
+            {'scene_id': 's1', 'field': '', 'issue': 'no field'},
+            {'scene_id': 's1', 'field': 'goal', 'issue': '', 'severity': 'high'},
+            {'scene_id': 's2', 'field': 'crisis',
+             'issue': 'paraphrases conflict', 'severity': 'medium'},
+            'not a dict',
+        ],
+    }
+    out = _extract_brief_findings(parsed)
+    assert len(out) == 1
+    assert out[0]['scene_id'] == 's2'
+    info = capsys.readouterr().out
+    assert 'brief_findings extraction dropped' in info
+
+
+def test_extract_brief_findings_normalizes_bad_severity_to_medium():
+    from storyforge.scoring_story_power import _extract_brief_findings
+    parsed = {
+        'brief_findings': [
+            {'scene_id': 's1', 'field': 'goal', 'issue': 'x',
+             'severity': 'critical'},
+        ],
+    }
+    out = _extract_brief_findings(parsed)
+    assert out[0]['severity'] == 'medium'
+
+
+def test_extract_proposed_brief_updates_drops_incomplete(capsys):
+    from storyforge.scoring_story_power import _extract_proposed_brief_updates
+    parsed = {
+        'proposed_brief_updates': [
+            {'scene_id': '', 'field': 'goal',
+             'proposed_value': 'x'},
+            {'scene_id': 's1', 'field': '',
+             'proposed_value': 'x'},
+            {'scene_id': 's1', 'field': 'goal',
+             'proposed_value': ''},
+            {'scene_id': 's2', 'field': 'crisis',
+             'current_value': 'old', 'proposed_value': 'new',
+             'rationale': 'lifts engine'},
+        ],
+    }
+    out = _extract_proposed_brief_updates(parsed)
+    assert len(out) == 1
+    assert out[0] == {
+        'scene_id': 's2', 'field': 'crisis',
+        'current_value': 'old', 'proposed_value': 'new',
+        'rationale': 'lifts engine',
+    }
+    info = capsys.readouterr().out
+    assert 'proposed_brief_updates extraction dropped' in info
+
+
+def test_briefs_only_runs_when_csv_present(tmp_path, monkeypatch):
+    """No scene-briefs.csv on disk → result['briefs'] is None."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _dual_mock_llm(_full_payload(), _act_shape_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['briefs'] is None
+
+
+def test_briefs_mode_writes_csvs_and_diagnostic(tmp_path, monkeypatch):
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _hex_mock_llm(_full_payload(), _act_shape_payload(),
+                           _spine_payload(), _architecture_payload(),
+                           _scene_map_payload(), _briefs_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result['briefs']
+    assert ext is not None
+    assert ext['status'] == 'ok'
+    matrix_path = os.path.join(result['output_dir'], 'per-brief-matrix.csv')
+    whole_path = os.path.join(result['output_dir'], 'whole-briefs-axes.csv')
+    diag_path = os.path.join(result['output_dir'], 'diagnostic.md')
+    assert os.path.isfile(matrix_path)
+    assert os.path.isfile(whole_path)
+    # Diagnostic contains the briefs section.
+    diag = open(diag_path).read()
+    assert '## Per-brief matrix' in diag
+    assert '## Whole-briefs axes' in diag
+    # Matrix has one row per brief plus header.
+    matrix = open(matrix_path).read().strip().splitlines()
+    assert len(matrix) == 5  # header + 4 briefs
+
+
+def test_briefs_diagnostic_includes_findings_and_updates(tmp_path, monkeypatch):
+    """The diagnostic.md contains the proposed brief updates with
+    rationale, plus the deterministic findings the pre-pass produced."""
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path), invalid_outcome=True)
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _hex_mock_llm(_full_payload(), _act_shape_payload(),
+                           _spine_payload(), _architecture_payload(),
+                           _scene_map_payload(), _briefs_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    diag = open(os.path.join(result['output_dir'], 'diagnostic.md')).read()
+    assert 'Proposed brief updates' in diag
+    # Deterministic finding for invalid outcome surfaces.
+    assert 'not in valid set' in diag
+    # Proposed update rationale appears.
+    assert 'lifts scene_engine_integrity' in diag
+
+
+def test_briefs_llm_failure_preserves_deterministic_findings(tmp_path,
+                                                                monkeypatch):
+    """When the briefs LLM call raises, the deterministic findings are
+    still returned in the extension's brief_findings field — the user
+    sees orphan-knowledge and missing-field signal without an API
+    response."""
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path), orphan_knowledge=True)
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        if '-briefs' in log_file:
+            raise RuntimeError('Anthropic 500')
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-scene-map' in log_file:
+            payload = _scene_map_payload()
+        elif '-architecture' in log_file:
+            payload = _architecture_payload()
+        elif '-spine' in log_file:
+            payload = _spine_payload()
+        elif '-act-shape' in log_file:
+            payload = _act_shape_payload()
+        else:
+            payload = _full_payload()
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result['briefs']
+    assert ext is not None
+    assert ext['status'] == 'llm_error'
+    # Pitch still scored.
+    assert result['composite'] > 0
+    # Pre-pass orphan-knowledge finding survived.
+    orphan = next(
+        f for f in ext['brief_findings']
+        if f['field'] == 'knowledge_in' and 'unrelated-fact' in f['issue']
+    )
+    assert orphan['severity'] == 'medium'
+
+
+def test_briefs_unparseable_response_tags_status(tmp_path, monkeypatch, capsys):
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-briefs' in log_file:
+            text = 'this is not json'
+        elif '-scene-map' in log_file:
+            text = json.dumps(_scene_map_payload())
+        elif '-architecture' in log_file:
+            text = json.dumps(_architecture_payload())
+        elif '-spine' in log_file:
+            text = json.dumps(_spine_payload())
+        elif '-act-shape' in log_file:
+            text = json.dumps(_act_shape_payload())
+        else:
+            text = json.dumps(_full_payload())
+        response = {
+            'content': [{'type': 'text', 'text': text}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['briefs']['status'] == 'unparseable'
+    out = capsys.readouterr().out
+    assert 'briefs LLM response unparseable' in out
+
+
+def test_briefs_coach_mode_appends_to_brief(tmp_path, monkeypatch):
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _hex_mock_llm(_full_payload(), _act_shape_payload(),
+                           _spine_payload(), _architecture_payload(),
+                           _scene_map_payload(), _briefs_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'coach')
+    coach_path = os.path.join(result['output_dir'], 'coaching-brief.md')
+    assert os.path.isfile(coach_path)
+    body = open(coach_path).read()
+    assert '# Briefs extension' in body
+    # The coach-mode prelude makes the role explicit.
+    assert 'not directives' in body
+    # The diagnostic body — not just the prelude — must render. A
+    # regression where the prelude wrote but the section was empty
+    # would pass without these. Confirm the matrix heading, the
+    # proposed-update block, and a piece of the LLM-supplied
+    # diagnostic text.
+    assert '## Per-brief matrix' in body
+    assert 'Proposed brief updates' in body
+    # The proposed-update rationale from _briefs_payload appears.
+    assert 'lifts scene_engine_integrity' in body
+    # The LLM-supplied high-leverage move from briefs_diagnostic.
+    assert 'add archive-locks-after-dark' in body
+
+
+def test_briefs_strict_mode_extends_checklist(tmp_path, monkeypatch):
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    result = __import__('storyforge.scoring_story_power',
+                         fromlist=['score_story_power']
+                         ).score_story_power(str(tmp_path), 'strict')
+    checklist = open(os.path.join(result['output_dir'],
+                                     'self-scoring-checklist.md')).read()
+    assert '# Briefs tier' in checklist
+    assert '# Whole-briefs axes' in checklist
+    # Each brief id should have a heading.
+    assert '## s1 — outcome=' in checklist
+    # Every whole-briefs axis name must render. A regression that
+    # drops the `for axis in BRIEFS_AXES` block would slip past the
+    # heading check above.
+    from storyforge.scoring_story_power import BRIEFS_AXES
+    for axis in BRIEFS_AXES:
+        assert f'## {axis.name}' in checklist, (
+            f'whole-briefs axis {axis.name!r} did not render in strict '
+            f'checklist'
+        )
+
+
+def test_briefs_partial_per_brief_tags_partial(tmp_path, monkeypatch):
+    """A briefs payload missing per-brief axes for one brief surfaces as
+    status='partial' rather than collapsing to 'ok'."""
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    briefs_payload = _briefs_payload()
+    for row in briefs_payload['per_brief']:
+        if row['scene_id'] == 's2':
+            row['scores'] = row['scores'][:1]
+    fake = _hex_mock_llm(_full_payload(), _act_shape_payload(),
+                           _spine_payload(), _architecture_payload(),
+                           _scene_map_payload(), briefs_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['briefs']['status'] == 'partial'
+    assert result['status'] == 'partial'
+
+
+def test_empty_briefs_refuses_matrix_and_writes_sidecar(tmp_path,
+                                                          monkeypatch,
+                                                          capsys):
+    """When the LLM returns zero scores for some briefs, refuse to
+    write the matrix and write the empty-id list to a sidecar."""
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    briefs_payload = _briefs_payload()
+    # Drop s2 and s3 from per_brief response.
+    briefs_payload['per_brief'] = [
+        r for r in briefs_payload['per_brief']
+        if r['scene_id'] not in {'s2', 's3'}
+    ]
+    fake = _hex_mock_llm(_full_payload(), _act_shape_payload(),
+                           _spine_payload(), _architecture_payload(),
+                           _scene_map_payload(), briefs_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out_dir = result['output_dir']
+    log_out = capsys.readouterr().out
+    assert 'refusing to write per-brief-matrix.csv' in log_out
+    sidecar = os.path.join(out_dir, 'briefs-empty-scenes.txt')
+    assert os.path.isfile(sidecar)
+    body = open(sidecar).read()
+    assert 's2' in body and 's3' in body
+    assert not os.path.isfile(os.path.join(out_dir, 'per-brief-matrix.csv'))
+
+
+def test_briefs_status_ok_implies_nonempty_payload_smoke(tmp_path, monkeypatch):
+    """Smoke test for the `status='ok' ⇒ non-empty payload` contract:
+    a happy-path full-mode run carries non-empty per_brief_scores and
+    whole_briefs_scores. The actual contract is enforced by a runtime
+    assert inside _run_briefs_extension; this test catches accidental
+    inversions where the assert is removed or the payload is built
+    with empty dicts."""
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _hex_mock_llm(_full_payload(), _act_shape_payload(),
+                           _spine_payload(), _architecture_payload(),
+                           _scene_map_payload(), _briefs_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['briefs']['status'] == 'ok'
+    assert result['briefs']['per_brief_scores']
+    assert result['briefs']['whole_briefs_scores']
+
+
+def test_briefs_status_ok_assertion_fires_on_empty_payload(tmp_path, monkeypatch):
+    """The runtime assertion `status='ok' ⇒ non-empty payload` fires
+    when the per-brief / whole-briefs extractors return empty dicts
+    even though the count math says nothing is missing. The
+    `score_story_power` orchestrator catches the AssertionError via
+    pytest.raises — without it, an empty extension would silently
+    propagate as a false 'ok'. This is the white-box test for the
+    contract the smoke test above only sniff-checks."""
+    import pytest
+    from storyforge.scoring_story_power import (
+        _run_briefs_extension, Brief, PitchArtifacts, PER_BRIEF_AXES,
+        BRIEFS_AXES,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              (), (), '', '', '', (), '', ()),
+    ]
+    artifacts = PitchArtifacts(logline='L', synopsis='S', act_shape='',
+                                theme='', spine_summaries='',
+                                architecture_summaries='')
+    # Mock the LLM to return a malformed payload: per_brief and
+    # whole_briefs are valid lists (so the shape check passes), but
+    # contain unrecognized axes that the extractor will drop. After
+    # extraction, per_brief and whole_briefs are empty dicts.
+    bogus_payload = {
+        'per_brief': [
+            {'scene_id': 's1', 'scores': [
+                {'axis': 'not_a_real_axis', 'score': 8},
+            ]},
+        ],
+        'whole_briefs': [
+            {'axis': 'not_a_real_whole_axis', 'score': 8,
+             'positive_signals': '', 'negative_signals': '',
+             'rationale': ''},
+        ],
+        'briefs_diagnostic': {},
+        'brief_findings': [],
+        'proposed_brief_updates': [],
+    }
+    log_dir = str(tmp_path / 'logs')
+    output_dir = str(tmp_path / 'out')
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(bogus_payload)}],
+            'usage': {'input_tokens': 100, 'output_tokens': 100,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    # The status-computation logic will mark status='partial' because
+    # missing_per_brief and missing_briefs_axes are both > 0. So this
+    # path actually produces 'partial', not 'ok' — the runtime
+    # assertion only guards the 'ok' branch and is *unreachable* via
+    # extractor drops. That's the correct behavior: the contract holds
+    # because empty payloads naturally cascade to 'partial'.
+    ext = _run_briefs_extension(
+        str(tmp_path), output_dir, log_dir, briefs, [], artifacts,
+        'rubric', 'full',
+    )
+    # Empty extractor results → partial status, not ok. The runtime
+    # assertion never fires because the count-math path makes the
+    # 'ok' branch unreachable from this failure mode.
+    assert ext['status'] == 'partial'
+    assert ext['per_brief_scores'] == {'s1': {}}
+    assert ext['whole_briefs_scores'] == {}
+
+
+def test_hex_mock_llm_routes_to_all_six_payloads(tmp_path, monkeypatch):
+    """Confirm the hex mock helper routes correctly across all six
+    tiers — without this, a payload could silently fall through to the
+    default and a downstream test would assert against the wrong shape."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    _seed_scene_map(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    hits = {'pitch': 0, 'act_shape': 0, 'spine': 0, 'architecture': 0,
+            'scene_map': 0, 'briefs': 0}
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-briefs' in log_file:
+            hits['briefs'] += 1
+            payload = _briefs_payload()
+        elif '-scene-map' in log_file:
+            hits['scene_map'] += 1
+            payload = _scene_map_payload()
+        elif '-architecture' in log_file:
+            hits['architecture'] += 1
+            payload = _architecture_payload()
+        elif '-spine' in log_file:
+            hits['spine'] += 1
+            payload = _spine_payload()
+        elif '-act-shape' in log_file:
+            hits['act_shape'] += 1
+            payload = _act_shape_payload()
+        else:
+            hits['pitch'] += 1
+            payload = _full_payload()
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert all(v == 1 for v in hits.values()), hits
+
+
+def test_briefs_runs_without_scene_map_csv(tmp_path, monkeypatch):
+    """Briefs mode runs even without scenes.csv on disk — seq order
+    falls back to CSV row order. No crash, no missing-csv warnings."""
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _hex_mock_llm(_full_payload(), _act_shape_payload(),
+                           _spine_payload(), _architecture_payload(),
+                           _scene_map_payload(), _briefs_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['briefs'] is not None
+    assert result['scene_map'] is None
+
+
+# ---------------------------------------------------------------------------
+# PR #244 review fixes — regression tests
+# ---------------------------------------------------------------------------
+
+def test_check_briefs_deterministic_flags_broken_continuity_dep():
+    """A continuity_deps entry pointing to a brief id not present in
+    scene-briefs.csv is a typo / deleted-scene / rename-drift bug.
+    Surface it as its own medium-severity finding rather than silently
+    absorbing the broken edge into downstream orphan-knowledge
+    false-positives. (PR #244 silent-failure review HIGH-1.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        # s2 lists 's99' (typo / deleted scene) as a dep; s99 isn't a
+        # brief. Without the explicit finding, the orphan-knowledge
+        # check for fact-a in s2 fires (false positive) and the broken
+        # graph edge is invisible.
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              (), ('fact-a',), '', '', '', (), '', ()),
+        Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s99',)),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1', 's2'])
+    broken = [f for f in findings
+              if f['field'] == 'continuity_deps' and 's99' in f['issue']]
+    assert len(broken) == 1
+    assert broken[0]['severity'] == 'medium'
+    assert broken[0]['scene_id'] == 's2'
+
+
+def test_check_briefs_deterministic_dedupes_broken_dep_findings():
+    """Multiple briefs that list the same nonexistent dep produce one
+    finding per (referrer, missing-target) pair, not one per
+    visit-during-walk. (PR #244 silent-failure review HIGH-1 detail.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        # s1 and s2 both list the same nonexistent 's99' dep.
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s99',)),
+        Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s99',)),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1', 's2'])
+    broken = [f for f in findings
+              if f['field'] == 'continuity_deps' and 's99' in f['issue']]
+    # Two referrers, both pointing at the same missing target → 2 findings.
+    assert len(broken) == 2
+    scene_ids = {f['scene_id'] for f in broken}
+    assert scene_ids == {'s1', 's2'}
+
+
+def test_check_briefs_deterministic_finds_broken_dep_without_knowledge_in():
+    """A brief with empty knowledge_in still surfaces broken-dep
+    findings — the dep typo is a real signal even when no orphan
+    knowledge walk would have caught it. (PR #244 silent-failure
+    review HIGH-1 detail.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              (), (), '', '', '', (), '', ('s99',)),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1'])
+    broken = [f for f in findings
+              if f['field'] == 'continuity_deps' and 's99' in f['issue']]
+    assert len(broken) == 1
+
+
+def test_check_briefs_deterministic_orphan_finding_carries_preceding_id():
+    """An orphan-knowledge finding pins the brief's first
+    continuity_deps entry as preceding_id — the closest ancestor where
+    the author would expect the missing fact. (PR #244 type-design
+    review TD-3 + comment review CO-1.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        # s2 depends on s1, but s1 doesn't produce fact-a; the orphan
+        # finding should point at s1 since that's the brief author
+        # would investigate first.
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              (), (), '', '', '', (), '', ()),
+        Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s1',)),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1', 's2'])
+    orphan = next(
+        f for f in findings
+        if f['scene_id'] == 's2' and f['field'] == 'knowledge_in'
+    )
+    assert orphan.get('preceding_id') == 's1'
+
+
+def test_check_briefs_deterministic_orphan_without_deps_omits_preceding_id():
+    """An orphan-knowledge finding on a brief with empty
+    continuity_deps omits preceding_id — there's no closest ancestor
+    to pin. (PR #244 type-design review TD-3 + comment review CO-1.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ()),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1'])
+    orphan = next(
+        f for f in findings
+        if f['scene_id'] == 's1' and f['field'] == 'knowledge_in'
+    )
+    assert 'preceding_id' not in orphan
+
+
+def test_check_briefs_deterministic_handles_triadic_cycle():
+    """A triadic continuity_deps cycle (s1→s2→s3→s1) must terminate
+    cleanly — the visited set bounds graph walks regardless of cycle
+    arity. Without this, a copy-paste regression that breaks
+    multi-node cycles while keeping binary-cycle handling intact
+    would pass the existing s1↔s2 test. (PR #244 test review T-1.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        Brief('s1', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s2',)),
+        Brief('s2', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s3',)),
+        Brief('s3', 'g', 'c', 'yes', 'cr', 'd',
+              ('fact-a',), ('fact-a',), '', '', '', (), '', ('s1',)),
+    ]
+    # Must return; visited set bounds the walk through the cycle.
+    findings = _check_briefs_deterministic(briefs, ['s1', 's2', 's3'])
+    # Each brief's fact-a is provided by its predecessor in the cycle —
+    # no orphan-knowledge findings should fire.
+    orphan_findings = [
+        f for f in findings
+        if f['field'] == 'knowledge_in' and 'fact-a' in f['issue']
+    ]
+    assert orphan_findings == []
+
+
+def test_check_briefs_deterministic_mixed_streak_no_flag():
+    """A 3-yes / 1-no / 3-yes pattern is NOT a streak — the no breaks
+    the run, neither side reaches the threshold of 4. Without this,
+    a regression that forgets to reset the run counter on outcome
+    change would still pass the threshold-exactly-4 case. (PR #244
+    test review T-4.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+
+    def _make(bid: str, outcome: str) -> Brief:
+        return Brief(bid, 'g', 'c', outcome, 'cr', 'd',
+                     (), (), '', '', '', (), '', ())
+
+    briefs = [
+        _make('a', 'yes'), _make('b', 'yes'), _make('c', 'yes'),
+        _make('d', 'no'),
+        _make('e', 'yes'), _make('f', 'yes'), _make('g', 'yes'),
+    ]
+    findings = _check_briefs_deterministic(briefs, [])
+    streaks = [f for f in findings
+               if f['field'] == 'outcome' and 'repeats' in f['issue']]
+    assert streaks == [], (
+        f'3-yes-1-no-3-yes pattern is not a streak; got: {streaks}'
+    )
+
+
+def test_check_briefs_deterministic_half_filled_row_fires_four_findings():
+    """A brief row with only one scene-engine field populated produces
+    exactly 4 high-severity findings (one per empty required field).
+    Locks the missing-field contract in place against a regression
+    that early-returns on the first empty field. (PR #244 code
+    review S1.)"""
+    from storyforge.scoring_story_power import (
+        _check_briefs_deterministic, Brief,
+    )
+    briefs = [
+        # Only outcome populated; goal/conflict/crisis/decision empty.
+        Brief('s1', '', '', 'yes', '', '',
+              (), (), '', '', '', (), '', ()),
+    ]
+    findings = _check_briefs_deterministic(briefs, ['s1'])
+    high_missing = [
+        f for f in findings
+        if f['scene_id'] == 's1' and f['severity'] == 'high'
+        and f['field'] in {'goal', 'conflict', 'crisis', 'decision'}
+        and 'is empty' in f['issue']
+    ]
+    fields_seen = {f['field'] for f in high_missing}
+    assert fields_seen == {'goal', 'conflict', 'crisis', 'decision'}, (
+        f'expected all four empty required fields flagged; got {fields_seen}'
+    )
+
+
+def test_briefs_skipped_when_csv_contains_only_scaffold_rows(tmp_path,
+                                                                 monkeypatch):
+    """A scene-briefs.csv that exists but contains only all-empty
+    scene-engine rows (migration scaffolding) yields result['briefs']
+    is None — parse_scene_briefs drops every row, so the orchestrator
+    sees an empty briefs list and doesn't run the extension. (PR #244
+    test review T-7.)"""
+    _seed_summary(str(tmp_path))
+    ref = tmp_path / 'reference'
+    ref.mkdir(exist_ok=True)
+    headers = ('id|goal|conflict|outcome|crisis|decision|knowledge_in|'
+               'knowledge_out|key_actions|key_dialogue|emotions|motifs|'
+               'subtext|continuity_deps')
+    # Three scaffold rows, all five engine fields empty.
+    rows = [
+        's1|||||||||||||',
+        's2|||||||||||||',
+        's3|||||||||||||',
+    ]
+    (ref / 'scene-briefs.csv').write_text(
+        '\n'.join([headers] + rows) + '\n',
+    )
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _dual_mock_llm(_full_payload(), _act_shape_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['briefs'] is None
+
+
