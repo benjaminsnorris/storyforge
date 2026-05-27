@@ -55,6 +55,10 @@ def parse_args(argv):
                      help='Path to a prose manuscript file. LLM-extracts '
                           'GN intent + brief shapes per scene section. '
                           'Coaching level controls destination.')
+    src.add_argument('--from-pages', action='store_true',
+                     help='Sync scene-level metadata from pages/<prefix>-pN.md '
+                          'files: panel_count (sum), page_count (count). '
+                          'Deterministic; no LLM call.')
     parser.add_argument('--coaching', type=str, default=None,
                         choices=['full', 'coach', 'strict'],
                         help='Override coaching level (default: project setting)')
@@ -78,6 +82,10 @@ def main(argv=None):
         sys.exit(1)
     coaching = args.coaching or get_coaching_level(project_dir)
 
+    if args.from_pages:
+        _run_from_pages(project_dir, args.dry_run)
+        return
+
     if args.from_script:
         _run_from_script(project_dir, args.from_script, args.dry_run,
                           args.force)
@@ -94,6 +102,60 @@ def main(argv=None):
                 sys.exit(1)
         _run_from_prose(project_dir, args.from_prose, coaching, args.dry_run,
                          args.force)
+
+
+# ---------------------------------------------------------------------------
+# --from-pages: deterministic metadata sync
+# ---------------------------------------------------------------------------
+
+def _run_from_pages(project_dir: str, dry_run: bool) -> None:
+    """Sum panel_count + page_count per scene from page files and write
+    those columns back to scenes.csv. Deterministic — no LLM call."""
+    from storyforge.pages import list_page_files, parse_page_file
+    from storyforge.csv_cli import update_field, list_ids
+
+    page_paths = list_page_files(project_dir)
+    if not page_paths:
+        log('ERROR: no pages/*.md files found. Create per-page files first.')
+        sys.exit(1)
+
+    by_scene: dict[str, dict[str, int]] = {}
+    for p in page_paths:
+        page = parse_page_file(p)
+        if page is None:
+            log(f'  WARNING: {p} has no frontmatter; skipping')
+            continue
+        sid = page.get('scene_id')
+        if not sid:
+            log(f'  WARNING: {p} has no scene_id; skipping')
+            continue
+        bucket = by_scene.setdefault(sid, {'panels': 0, 'pages': 0})
+        bucket['panels'] += page.get('panel_count', 0) or 0
+        bucket['pages'] += 1
+
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(scenes_csv):
+        log(f'ERROR: scenes.csv not found at {scenes_csv}')
+        sys.exit(1)
+    known_ids = set(list_ids(scenes_csv))
+
+    written = 0
+    for sid, counts in sorted(by_scene.items()):
+        if sid not in known_ids:
+            log(f'  WARNING: {sid} referenced by page files but not in '
+                f'scenes.csv; skipping')
+            continue
+        log(f'  {sid}: {counts["pages"]} page(s), {counts["panels"]} panel(s)')
+        if dry_run:
+            continue
+        update_field(scenes_csv, sid, 'panel_count', str(counts['panels']))
+        update_field(scenes_csv, sid, 'page_count', str(counts['pages']))
+        written += 1
+
+    if dry_run:
+        log(f'DRY RUN — would update {len(by_scene)} scene row(s).')
+    else:
+        log(f'Updated panel_count / page_count for {written} scene(s).')
 
 
 # ---------------------------------------------------------------------------
