@@ -125,18 +125,42 @@ def _act_shape_payload(per_act_overrides: dict[str, dict[str, int]] | None = Non
     }
 
 
+def _cross_tier_payload() -> dict:
+    """Minimal well-shaped cross-tier synthesis payload.
+
+    Returns an empty narrative + empty proposals list — valid shape
+    for the cross-tier parser, but signals "nothing to synthesize."
+    The cross-tier extension treats this as `ok` when the
+    deterministic pre-pass also found nothing (legitimate empty
+    result on clean projects), or `partial` when pre-pass had
+    patterns the LLM ignored.
+
+    Tests that exercise specific cross-tier behavior should pass a
+    populated payload via `_septa_mock_llm` instead of relying on
+    this default."""
+    return {
+        'cross_tier_diagnostic': {},
+        'proposals': [],
+    }
+
+
 def _dual_mock_llm(pitch_payload: dict, act_shape_payload: dict):
-    """Mock that returns the pitch payload first, then the act-shape
-    payload on the second call (when the act-shape extension fires)."""
+    """Mock that routes pitch + act-shape + cross-tier calls.
+
+    Cross-tier defaults to an empty synthesis payload so existing
+    tests don't trip the new extension's partial-status warning.
+    Tests that need a specific cross-tier shape should use
+    `_septa_mock_llm` instead."""
     state = {'call': 0}
 
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
-        # Route by which log file the caller passed: the act-shape call
-        # appends '-act-shape' to the basename. This is more robust than
-        # counting calls, since back-to-back tests can leak state.
-        payload = (act_shape_payload if '-act-shape' in log_file
-                   else pitch_payload)
+        if '-cross-tier' in log_file:
+            payload = _cross_tier_payload()
+        elif '-act-shape' in log_file:
+            payload = act_shape_payload
+        else:
+            payload = pitch_payload
         state['call'] += 1
         response = {
             'content': [{'type': 'text', 'text': json.dumps(payload)}],
@@ -233,11 +257,14 @@ def _spine_payload(per_event_overrides=None, whole_spine_overrides=None,
 
 def _triple_mock_llm(pitch_payload: dict, act_shape_payload: dict,
                       spine_payload: dict):
-    """Mock that routes by log filename suffix: -act-shape, -spine,
-    or default (pitch)."""
+    """Mock that routes by log filename suffix: -cross-tier, -spine,
+    -act-shape, or default (pitch). Cross-tier routes to the empty
+    synthesis payload."""
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
-        if '-spine' in log_file:
+        if '-cross-tier' in log_file:
+            payload = _cross_tier_payload()
+        elif '-spine' in log_file:
             payload = spine_payload
         elif '-act-shape' in log_file:
             payload = act_shape_payload
@@ -359,11 +386,14 @@ def _architecture_payload(register_assessment: str | None = None) -> dict:
 
 def _quad_mock_llm(pitch_payload: dict, act_shape_payload: dict,
                     spine_payload: dict, architecture_payload: dict):
-    """Mock that routes by log filename suffix: -act-shape, -spine,
-    -architecture, or default (pitch)."""
+    """Mock that routes -cross-tier, -architecture, -spine,
+    -act-shape, or default (pitch). Cross-tier routes to the empty
+    synthesis payload."""
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
-        if '-architecture' in log_file:
+        if '-cross-tier' in log_file:
+            payload = _cross_tier_payload()
+        elif '-architecture' in log_file:
             payload = architecture_payload
         elif '-spine' in log_file:
             payload = spine_payload
@@ -470,11 +500,14 @@ def _scene_map_payload() -> dict:
 def _quint_mock_llm(pitch_payload: dict, act_shape_payload: dict,
                      spine_payload: dict, architecture_payload: dict,
                      scene_map_payload: dict):
-    """Mock that routes by log filename suffix: -scene-map, -architecture,
-    -spine, -act-shape, or default (pitch)."""
+    """Mock that routes -cross-tier, -scene-map, -architecture, -spine,
+    -act-shape, or default (pitch). Cross-tier routes to the empty
+    synthesis payload."""
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
-        if '-scene-map' in log_file:
+        if '-cross-tier' in log_file:
+            payload = _cross_tier_payload()
+        elif '-scene-map' in log_file:
             payload = scene_map_payload
         elif '-architecture' in log_file:
             payload = architecture_payload
@@ -2570,11 +2603,15 @@ def test_triple_mock_llm_routes_to_all_three_payloads(tmp_path, monkeypatch):
     monkeypatch.chdir(str(tmp_path))
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
 
-    seen: dict[str, int] = {'pitch': 0, 'act_shape': 0, 'spine': 0}
+    seen: dict[str, int] = {'pitch': 0, 'act_shape': 0, 'spine': 0,
+                              'cross_tier': 0}
 
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
-        if '-spine' in log_file:
+        if '-cross-tier' in log_file:
+            seen['cross_tier'] += 1
+            payload = _cross_tier_payload()
+        elif '-spine' in log_file:
             seen['spine'] += 1
             payload = _spine_payload()
         elif '-act-shape' in log_file:
@@ -2596,9 +2633,11 @@ def test_triple_mock_llm_routes_to_all_three_payloads(tmp_path, monkeypatch):
     monkeypatch.setattr(api, 'invoke_to_file', fake)
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
     scoring_story_power.score_story_power(str(tmp_path), 'full')
-    # All three routes must have been hit. If the log-file naming on the
-    # implementation side drifts, this fails loudly instead of silently.
-    assert seen == {'pitch': 1, 'act_shape': 1, 'spine': 1}
+    # All four routes (3 tiers + cross-tier) must have been hit. If the
+    # log-file naming on the implementation side drifts, this fails
+    # loudly instead of silently.
+    assert seen == {'pitch': 1, 'act_shape': 1, 'spine': 1,
+                    'cross_tier': 1}
 
 
 # ---------------------------------------------------------------------------
@@ -3269,11 +3308,14 @@ def test_quad_mock_llm_routes_to_all_four_payloads(tmp_path, monkeypatch):
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
 
     seen: dict[str, int] = {'pitch': 0, 'act_shape': 0, 'spine': 0,
-                              'architecture': 0}
+                              'architecture': 0, 'cross_tier': 0}
 
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
-        if '-architecture' in log_file:
+        if '-cross-tier' in log_file:
+            seen['cross_tier'] += 1
+            payload = _cross_tier_payload()
+        elif '-architecture' in log_file:
             seen['architecture'] += 1
             payload = _architecture_payload()
         elif '-spine' in log_file:
@@ -3298,7 +3340,8 @@ def test_quad_mock_llm_routes_to_all_four_payloads(tmp_path, monkeypatch):
     monkeypatch.setattr(api, 'invoke_to_file', fake)
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
     scoring_story_power.score_story_power(str(tmp_path), 'full')
-    assert seen == {'pitch': 1, 'act_shape': 1, 'spine': 1, 'architecture': 1}
+    assert seen == {'pitch': 1, 'act_shape': 1, 'spine': 1,
+                    'architecture': 1, 'cross_tier': 1}
 
 
 # ---------------------------------------------------------------------------
@@ -4226,12 +4269,15 @@ def test_quint_mock_llm_routes_to_all_five_payloads(tmp_path, monkeypatch):
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     seen: dict[str, int] = {
         'pitch': 0, 'act_shape': 0, 'spine': 0,
-        'architecture': 0, 'scene_map': 0,
+        'architecture': 0, 'scene_map': 0, 'cross_tier': 0,
     }
 
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
-        if '-scene-map' in log_file:
+        if '-cross-tier' in log_file:
+            seen['cross_tier'] += 1
+            payload = _cross_tier_payload()
+        elif '-scene-map' in log_file:
             seen['scene_map'] += 1
             payload = _scene_map_payload()
         elif '-architecture' in log_file:
@@ -4260,7 +4306,8 @@ def test_quint_mock_llm_routes_to_all_five_payloads(tmp_path, monkeypatch):
     monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
     scoring_story_power.score_story_power(str(tmp_path), 'full')
     assert seen == {'pitch': 1, 'act_shape': 1, 'spine': 1,
-                     'architecture': 1, 'scene_map': 1}
+                     'architecture': 1, 'scene_map': 1,
+                     'cross_tier': 1}
 
 
 def test_scene_map_integration_with_backward_timeline(tmp_path, monkeypatch,
@@ -4745,16 +4792,56 @@ def _briefs_payload(brief_ids: list[str] | None = None) -> dict:
 def _hex_mock_llm(pitch_payload: dict, act_shape_payload: dict,
                     spine_payload: dict, architecture_payload: dict,
                     scene_map_payload: dict, briefs_payload: dict):
-    """Mock that routes by log filename suffix across all six tiers.
+    """Mock that routes -cross-tier + all six tier payloads. The
+    cross-tier slot uses an empty synthesis payload by default;
+    tests that need a populated cross-tier shape should construct a
+    fake() directly or use `_septa_mock_llm`.
 
-    When adding a seventh tier, extend this dispatcher AND extend
-    `test_hex_mock_llm_routes_to_all_six_payloads` to track the new
-    tier in its hit-counter — otherwise the new tier's LLM call falls
-    through to the default (pitch) payload and downstream tests
-    silently assert against the wrong shape."""
+    When adding a seventh data tier, extend this dispatcher AND
+    extend `test_hex_mock_llm_routes_to_all_six_payloads` to track
+    the new tier in its hit-counter — otherwise the new tier's LLM
+    call falls through to the default (pitch) payload and downstream
+    tests silently assert against the wrong shape."""
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
-        if '-briefs' in log_file:
+        if '-cross-tier' in log_file:
+            payload = _cross_tier_payload()
+        elif '-briefs' in log_file:
+            payload = briefs_payload
+        elif '-scene-map' in log_file:
+            payload = scene_map_payload
+        elif '-architecture' in log_file:
+            payload = architecture_payload
+        elif '-spine' in log_file:
+            payload = spine_payload
+        elif '-act-shape' in log_file:
+            payload = act_shape_payload
+        else:
+            payload = pitch_payload
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    return fake
+
+
+def _septa_mock_llm(pitch_payload: dict, act_shape_payload: dict,
+                      spine_payload: dict, architecture_payload: dict,
+                      scene_map_payload: dict, briefs_payload: dict,
+                      cross_tier_payload: dict):
+    """Mock that routes all seven payloads (six tiers + cross-tier).
+    Use this when a test needs to assert specific cross-tier
+    synthesis content rather than the default empty payload."""
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-cross-tier' in log_file:
+            payload = cross_tier_payload
+        elif '-briefs' in log_file:
             payload = briefs_payload
         elif '-scene-map' in log_file:
             payload = scene_map_payload
@@ -5615,11 +5702,14 @@ def test_hex_mock_llm_routes_to_all_six_payloads(tmp_path, monkeypatch):
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
 
     hits = {'pitch': 0, 'act_shape': 0, 'spine': 0, 'architecture': 0,
-            'scene_map': 0, 'briefs': 0}
+            'scene_map': 0, 'briefs': 0, 'cross_tier': 0}
 
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
-        if '-briefs' in log_file:
+        if '-cross-tier' in log_file:
+            hits['cross_tier'] += 1
+            payload = _cross_tier_payload()
+        elif '-briefs' in log_file:
             hits['briefs'] += 1
             payload = _briefs_payload()
         elif '-scene-map' in log_file:
@@ -6080,7 +6170,10 @@ def test_all_tiers_pass_correct_max_tokens_constant(tmp_path, monkeypatch):
 
     def fake(prompt, model, log_file, **kwargs):
         os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
-        if '-briefs' in log_file:
+        if '-cross-tier' in log_file:
+            seen['cross-tier'] = kwargs.get('max_tokens', -1)
+            payload = _cross_tier_payload()
+        elif '-briefs' in log_file:
             seen['briefs'] = kwargs.get('max_tokens', -1)
             payload = _briefs_payload()
         elif '-scene-map' in log_file:
@@ -6118,6 +6211,7 @@ def test_all_tiers_pass_correct_max_tokens_constant(tmp_path, monkeypatch):
         'architecture': scoring_story_power._PER_ROW_TIER_MAX_TOKENS,
         'scene-map': scoring_story_power._PER_ROW_TIER_MAX_TOKENS,
         'briefs': scoring_story_power._PER_ROW_TIER_MAX_TOKENS,
+        'cross-tier': scoring_story_power._FIXED_PAYLOAD_TIER_MAX_TOKENS,
     }
     assert seen == expected, (
         f'tier → max_tokens mismatch.\nexpected: {expected}\n'

@@ -1457,6 +1457,29 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         if briefs_extension['status'] != 'ok':
             status = 'partial'
 
+    # Build a provisional result so the cross-tier synthesis can walk
+    # the in-memory tier outputs; if ≥2 tiers ran successfully, the
+    # synthesis fires and overwrites cross_tier on the final result.
+    provisional = _result(
+        coaching=coaching, status=status, output_dir=output_dir,
+        composite=composite, scores=scores, deltas=deltas,
+        diagnostic=parsed.get('diagnostic') or {},
+        act_shape=act_shape_extension,
+        spine=spine_extension,
+        architecture=architecture_extension,
+        scene_map=scene_map_extension,
+        briefs=briefs_extension,
+    )
+    cross_tier_extension: CrossTierExtension | None = None
+    if _count_present_tiers(provisional) >= 2:
+        log(f'Cross-tier synthesis running over '
+            f'{_count_present_tiers(provisional)} tier outputs.')
+        cross_tier_extension = _run_cross_tier_extension(
+            project_dir, output_dir, log_dir, provisional, rubric, coaching,
+        )
+        if cross_tier_extension['status'] != 'ok':
+            status = 'partial'
+
     return _result(
         coaching=coaching, status=status, output_dir=output_dir,
         composite=composite, scores=scores, deltas=deltas,
@@ -1466,6 +1489,7 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
         architecture=architecture_extension,
         scene_map=scene_map_extension,
         briefs=briefs_extension,
+        cross_tier=cross_tier_extension,
     )
 
 
@@ -2554,6 +2578,60 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
                 '- ',
                 '',
             ])
+    # Cross-tier section — strict mode can't run the deterministic
+    # detectors (those need tier outputs that strict mode doesn't
+    # produce). Instead, give the author the pattern catalog as a
+    # self-check prompt.
+    out.extend([
+        '# Cross-tier patterns (self-check)',
+        '',
+        'After scoring the tiers above, look for these patterns. They '
+        'surface defects that recur at multiple resolutions — when '
+        'two or more tiers flag a related weakness, the underlying '
+        'cause usually lives at the higher-resolution tier and the '
+        'high-leverage move targets that tier.',
+        '',
+        '## 1. Lowest-axis recurrence',
+        '',
+        'Did the same concept appear as the lowest-scoring axis in '
+        'multiple tiers (e.g. "coherence" in architecture AND '
+        'scene-map; "concreteness" in pitch AND spine)?',
+        '',
+        'Tiers affected: __',
+        'Pattern: __',
+        '',
+        '## 2. Scene-id overlap in proposals',
+        '',
+        'Did the same scene id appear in proposed fixes across '
+        'multiple tiers (architecture field updates AND scene-map '
+        'operations AND/OR brief updates)? Those scenes are '
+        'multi-tier leverage points.',
+        '',
+        'Scene ids: __',
+        '',
+        '## 3. Field-coherence cascade',
+        '',
+        'Did the same scene id appear in findings across multiple '
+        'tiers (architecture field_findings, scene-map '
+        'continuity_findings, briefs brief_findings)? Fix the '
+        'upstream tier to resolve the downstream symptoms.',
+        '',
+        'Scene ids: __',
+        '',
+        '## 4. Project-level disposition',
+        '',
+        'Are four or more tiers below 7? If yes, the '
+        "project's structural-craft layer is underweight overall — "
+        'consider returning to elaboration before continuing to '
+        'drafting.',
+        '',
+        'Weak tiers: __',
+        '',
+        '## High-leverage move',
+        '',
+        'One move that lifts the most ground across tiers: __',
+        '',
+    ])
     _safe_write(md_path, '\n'.join(out) + '\n')
 
 
@@ -6589,8 +6667,22 @@ def _run_cross_tier_extension(project_dir: str, output_dir: str,
                                   ) -> CrossTierExtension:
     """Run the cross-tier LLM synthesis after the deterministic
     pre-pass. The pre-pass output is the load-bearing surface — on
-    any LLM failure, the deterministic patterns still surface."""
+    any LLM failure, the deterministic patterns still surface.
+
+    Gate: if the pre-pass found no patterns AND fewer than 3 tiers
+    ran successfully, skip the LLM call. With nothing structurally
+    interesting to synthesize and only 2 tier outputs to compare,
+    the LLM has insufficient substrate; paying ~8K tokens for an
+    empty synthesis isn't worth the cost. Returns status='ok' with
+    empty payloads (legitimate "nothing to synthesize" state).
+    """
     det_patterns = _check_cross_tier_deterministic(result)
+    tier_count = _count_present_tiers(result)
+    if not det_patterns and tier_count < 3:
+        log(f'INFO: cross-tier synthesis skipped — pre-pass found no '
+            f'patterns and only {tier_count} tier(s) ran; insufficient '
+            'substrate for LLM synthesis.')
+        return _empty_cross_tier_extension('ok', det_patterns)
 
     prompt = _build_cross_tier_prompt(result, det_patterns, rubric)
     model = select_model('creative')
@@ -6620,18 +6712,20 @@ def _run_cross_tier_extension(project_dir: str, output_dir: str,
     diag = _extract_cross_tier_diagnostic(parsed)
     proposals = _extract_cross_tier_proposals(parsed)
 
-    # Status discipline: the LLM may genuinely have nothing to add
-    # (a perfectly-scoring project produces no synthesis). That is
-    # NOT a partial result — it's a legitimate empty narrative.
-    # 'partial' fires only when the LLM returned malformed/missing
-    # data the parser could not extract.
+    # Status discipline:
+    #   - 'ok' when the LLM returned content (diag and/or proposals)
+    #   - 'ok' when the LLM returned empty AND the deterministic
+    #     pre-pass also found nothing (legitimately nothing to
+    #     synthesize — common on small / clean projects)
+    #   - 'partial' when the LLM returned empty BUT the
+    #     deterministic pre-pass had patterns the LLM ignored
+    #     (the cost was paid for no signal)
     status: StoryPowerStatus = 'ok'
-    # If the LLM returned but neither diag nor proposals carry any
-    # content, tag partial — the call cost was paid for no signal.
-    if not diag and not proposals:
-        log('WARNING: cross-tier LLM returned no diagnostic content '
-            'and no proposals — synthesis surface is empty. The '
-            'deterministic pre-pass output still stands.')
+    if not diag and not proposals and det_patterns:
+        log(f'WARNING: cross-tier LLM returned no diagnostic content '
+            f'and no proposals despite {len(det_patterns)} '
+            'deterministic pattern(s) firing — synthesis ignored '
+            'the pre-pass signal.')
         status = 'partial'
 
     if coaching == 'full':
