@@ -5989,3 +5989,341 @@ def _append_briefs_coaching_brief(
     _safe_write(md_path,
                 existing + '\n' + '\n'.join(prelude + section) + '\n',
                 recover_hint=recover_hint)
+
+
+# ---------------------------------------------------------------------------
+# Cross-tier meta-diagnostic (synthesizes patterns across tier outputs)
+# ---------------------------------------------------------------------------
+
+# Tokens to ignore when tokenizing lowest_axis names — they appear in
+# many tier-specific axis names but don't represent a *project-level*
+# craft dimension. 'distribution', 'rhythm', 'gradient', etc. are
+# axis-shape words; the meaningful tokens are concept-level
+# ('concreteness', 'coherence', 'causal', 'arc', 'coverage').
+_AXIS_TOKEN_STOPWORDS: frozenset[str] = frozenset({
+    '', 'and', 'of', 'the', 'a', 'an',
+    'distribution', 'rhythm', 'gradient', 'visibility',
+    'integrity', 'depth', 'service', 'completeness',
+    'resonance', 'identification', 'subversion', 'flow',
+    'weight', 'shape', 'shift', 'recurrence', 'presence',
+    'density', 'balance', 'rotation', 'economy', 'pacing',
+})
+
+# Tiers below this threshold count toward the project-disposition
+# pattern. Picked to match the rubric's "7-8: strong; specific gaps"
+# band — anything below 7 is "present but inert" or weaker.
+_TIER_WEAK_THRESHOLD = 7.0
+
+# Minimum number of weak tiers to fire the project-disposition
+# pattern. At 4-of-6, the project's overall structural-craft
+# strength is the actionable signal, not any single tier.
+_PROJECT_DISPOSITION_THRESHOLD = 4
+
+
+def _tokenize_axis_name(axis_name: str) -> set[str]:
+    """Split an axis name into lowercase concept tokens for cross-tier
+    matching. Drops stop-words + numeric tokens."""
+    parts = re.split(r'[_\s\-]+', axis_name.lower())
+    return {
+        p for p in parts
+        if p and p not in _AXIS_TOKEN_STOPWORDS and not p.isdigit()
+    }
+
+
+def _gather_tier_lowest_axes(result: StoryPowerResult) -> dict[str, str]:
+    """Collect each tier's `lowest_axis` (when present + ok-ish).
+
+    Keys are tier names ('pitch', 'act_shape', 'spine', 'architecture',
+    'scene_map', 'briefs'); values are the axis names. Tiers without
+    a populated lowest_axis are omitted.
+    """
+    out: dict[str, str] = {}
+    diag = result.get('diagnostic') or {}
+    pitch_lowest = (diag or {}).get('lowest_axis') if isinstance(diag, dict) else None
+    if isinstance(pitch_lowest, str) and pitch_lowest:
+        out['pitch'] = pitch_lowest
+
+    for tier_key, diag_key in (
+        ('act_shape', 'structural_diagnostic'),
+        ('spine', 'spine_diagnostic'),
+        ('architecture', 'architecture_diagnostic'),
+        ('scene_map', 'scene_map_diagnostic'),
+        ('briefs', 'briefs_diagnostic'),
+    ):
+        ext = result.get(tier_key)  # type: ignore[misc]
+        if not ext:
+            continue
+        tier_diag = ext.get(diag_key) or {}
+        lowest = tier_diag.get('lowest_axis') if isinstance(tier_diag, dict) else None
+        if isinstance(lowest, str) and lowest:
+            out[tier_key] = lowest
+    return out
+
+
+def _detect_lowest_axis_recurrence(
+        lowest_axes: dict[str, str],
+        ) -> list[CrossTierPattern]:
+    """Find concept tokens shared by ≥2 tiers' lowest_axis names."""
+    if len(lowest_axes) < 2:
+        return []
+    token_tiers: dict[str, list[tuple[str, str]]] = {}
+    for tier, axis in lowest_axes.items():
+        for token in _tokenize_axis_name(axis):
+            token_tiers.setdefault(token, []).append((tier, axis))
+    out: list[CrossTierPattern] = []
+    for token, entries in sorted(token_tiers.items()):
+        if len(entries) < 2:
+            continue
+        tiers_seen = {t for t, _ in entries}
+        if len(tiers_seen) < 2:
+            continue
+        severity: Severity = 'high' if len(tiers_seen) >= 3 else 'medium'
+        out.append({
+            'pattern': 'lowest_axis_recurrence',
+            'description': (
+                f'token {token!r} appears in the lowest_axis of '
+                f'{len(tiers_seen)} tiers '
+                f'({", ".join(sorted(tiers_seen))}): '
+                + '; '.join(f'{t}:{a}' for t, a in entries)
+            ),
+            'severity': severity,
+            'affected_tiers': sorted(tiers_seen),
+            'affected_ids': sorted({axis for _, axis in entries}),
+        })
+    return out
+
+
+def _gather_proposal_scene_ids(
+        result: StoryPowerResult,
+        ) -> dict[str, set[str]]:
+    """Collect each tier's scene-id proposal targets."""
+    out: dict[str, set[str]] = {}
+    arch = result.get('architecture')
+    if arch:
+        arch_ids: set[str] = set()
+        for u in arch.get('proposed_field_updates') or []:
+            sid = (u or {}).get('scene_id', '').strip()
+            if sid:
+                arch_ids.add(sid)
+        for ins in arch.get('proposed_scene_insertions') or []:
+            sid = (ins or {}).get('insert_after', '').strip()
+            if sid:
+                arch_ids.add(sid)
+        if arch_ids:
+            out['architecture'] = arch_ids
+    sm = result.get('scene_map')
+    if sm:
+        sm_ids: set[str] = set()
+        for op in sm.get('proposed_operations') or []:
+            for sid in (op or {}).get('scene_ids') or []:
+                sid = str(sid).strip()
+                if sid:
+                    sm_ids.add(sid)
+        if sm_ids:
+            out['scene_map'] = sm_ids
+    br = result.get('briefs')
+    if br:
+        br_ids: set[str] = set()
+        for u in br.get('proposed_brief_updates') or []:
+            sid = (u or {}).get('scene_id', '').strip()
+            if sid:
+                br_ids.add(sid)
+        if br_ids:
+            out['briefs'] = br_ids
+    return out
+
+
+def _detect_scene_id_overlap(
+        proposal_ids: dict[str, set[str]],
+        ) -> list[CrossTierPattern]:
+    """Find scene_ids targeted by proposals in ≥2 tiers."""
+    if len(proposal_ids) < 2:
+        return []
+    by_id: dict[str, set[str]] = {}
+    for tier, ids in proposal_ids.items():
+        for sid in ids:
+            by_id.setdefault(sid, set()).add(tier)
+    out: list[CrossTierPattern] = []
+    for sid in sorted(by_id):
+        tiers = by_id[sid]
+        if len(tiers) < 2:
+            continue
+        severity: Severity = 'high' if len(tiers) >= 3 else 'medium'
+        out.append({
+            'pattern': 'scene_id_overlap',
+            'description': (
+                f'scene {sid!r} is targeted by proposed fixes in '
+                f'{len(tiers)} tiers ({", ".join(sorted(tiers))}) — '
+                'a multi-tier leverage point'
+            ),
+            'severity': severity,
+            'affected_tiers': sorted(tiers),
+            'affected_ids': [sid],
+        })
+    return out
+
+
+def _gather_finding_scene_ids(
+        result: StoryPowerResult,
+        ) -> dict[str, set[str]]:
+    """Collect each tier's finding-list scene_ids."""
+    out: dict[str, set[str]] = {}
+    arch = result.get('architecture')
+    if arch:
+        arch_ids = {
+            (f or {}).get('scene_id', '').strip()
+            for f in arch.get('field_findings') or []
+        }
+        arch_ids.discard('')
+        if arch_ids:
+            out['architecture'] = arch_ids
+    sm = result.get('scene_map')
+    if sm:
+        sm_ids = {
+            (f or {}).get('scene_id', '').strip()
+            for f in sm.get('continuity_findings') or []
+        }
+        sm_ids.discard('')
+        if sm_ids:
+            out['scene_map'] = sm_ids
+    br = result.get('briefs')
+    if br:
+        br_ids = {
+            (f or {}).get('scene_id', '').strip()
+            for f in br.get('brief_findings') or []
+        }
+        br_ids.discard('')
+        if br_ids:
+            out['briefs'] = br_ids
+    return out
+
+
+def _detect_field_coherence_cascade(
+        finding_ids: dict[str, set[str]],
+        ) -> list[CrossTierPattern]:
+    """Find scene_ids flagged in ≥2 tiers' finding lists."""
+    if len(finding_ids) < 2:
+        return []
+    by_id: dict[str, set[str]] = {}
+    for tier, ids in finding_ids.items():
+        for sid in ids:
+            by_id.setdefault(sid, set()).add(tier)
+    out: list[CrossTierPattern] = []
+    for sid in sorted(by_id):
+        tiers = by_id[sid]
+        if len(tiers) < 2:
+            continue
+        severity: Severity = 'high' if len(tiers) >= 3 else 'medium'
+        out.append({
+            'pattern': 'field_coherence_cascade',
+            'description': (
+                f'scene {sid!r} carries findings in {len(tiers)} tiers '
+                f'({", ".join(sorted(tiers))}) — fix the upstream '
+                "tier's row to resolve the downstream symptoms"
+            ),
+            'severity': severity,
+            'affected_tiers': sorted(tiers),
+            'affected_ids': [sid],
+        })
+    return out
+
+
+def _tier_composite_average(scores: dict[str, int] | None) -> float | None:
+    """Return the unweighted average of a tier's whole-axis scores, or
+    None when nothing is present."""
+    if not scores:
+        return None
+    vals = [v for v in scores.values() if isinstance(v, int)]
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+
+def _gather_tier_strengths(result: StoryPowerResult) -> dict[str, float]:
+    """Collect each tier's representative strength score (composite
+    for pitch, unweighted axis average for the others)."""
+    out: dict[str, float] = {}
+    pitch_composite = result.get('composite')
+    if isinstance(pitch_composite, (int, float)) and pitch_composite > 0:
+        out['pitch'] = float(pitch_composite)
+    for tier_key, scores_key in (
+        ('act_shape', 'structural_axis_scores'),
+        ('spine', 'whole_spine_scores'),
+        ('architecture', 'whole_architecture_scores'),
+        ('scene_map', 'whole_scene_map_scores'),
+        ('briefs', 'whole_briefs_scores'),
+    ):
+        ext = result.get(tier_key)  # type: ignore[misc]
+        if not ext:
+            continue
+        avg = _tier_composite_average(ext.get(scores_key))
+        if avg is not None:
+            out[tier_key] = avg
+    return out
+
+
+def _detect_project_disposition(
+        tier_strengths: dict[str, float],
+        ) -> list[CrossTierPattern]:
+    """Fire when ≥4 tiers score below the weak threshold."""
+    weak = [
+        (tier, score) for tier, score in tier_strengths.items()
+        if score < _TIER_WEAK_THRESHOLD
+    ]
+    if len(weak) < _PROJECT_DISPOSITION_THRESHOLD:
+        return []
+    return [{
+        'pattern': 'project_disposition',
+        'description': (
+            f'{len(weak)} of {len(tier_strengths)} tiers score below '
+            f'{_TIER_WEAK_THRESHOLD} on their representative strength '
+            f'({", ".join(f"{t}={s:.1f}" for t, s in weak)}). '
+            "The project's structural-craft layer is underweight "
+            'overall — consider returning to elaboration before '
+            'continuing to drafting.'
+        ),
+        'severity': 'high',
+        'affected_tiers': sorted(t for t, _ in weak),
+        'affected_ids': [],
+    }]
+
+
+def _check_cross_tier_deterministic(
+        result: StoryPowerResult,
+        ) -> list[CrossTierPattern]:
+    """Run the four deterministic detectors against the in-memory
+    tier outputs. Each detector is independent and emits zero or more
+    patterns; the full list is returned to the LLM as ground-truth
+    signal."""
+    findings: list[CrossTierPattern] = []
+    findings.extend(_detect_lowest_axis_recurrence(
+        _gather_tier_lowest_axes(result),
+    ))
+    findings.extend(_detect_scene_id_overlap(
+        _gather_proposal_scene_ids(result),
+    ))
+    findings.extend(_detect_field_coherence_cascade(
+        _gather_finding_scene_ids(result),
+    ))
+    findings.extend(_detect_project_disposition(
+        _gather_tier_strengths(result),
+    ))
+    return findings
+
+
+def _count_present_tiers(result: StoryPowerResult) -> int:
+    """Count how many tier outputs are available for synthesis.
+
+    Pitch counts when composite > 0 (pitch produced output). Each
+    extension counts when present in the result — status doesn't
+    have to be 'ok' since 'partial' extensions still carry data the
+    LLM can synthesize.
+    """
+    count = 0
+    if isinstance(result.get('composite'), (int, float)) and result['composite'] > 0:
+        count += 1
+    for tier_key in ('act_shape', 'spine', 'architecture',
+                      'scene_map', 'briefs'):
+        if result.get(tier_key) is not None:  # type: ignore[misc]
+            count += 1
+    return count
