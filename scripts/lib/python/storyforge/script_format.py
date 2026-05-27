@@ -139,7 +139,15 @@ PANEL_TOKEN = re.compile(r'^\s*(splash|double-spread|tier|irregular|(\d+)-grid)\
 
 def _panels_per_token(token):
     """Return expected panel count for a brief panel-breakdown token, or None
-    when the token is 'irregular' (no count check)."""
+    when the token is 'irregular' OR 'tier' (no exact-count check).
+
+    'tier' is conventionally 2-4 panels (see references/gn-layout-vocabulary.md);
+    a single expected count would mis-flag canonical 2- or 4-panel tiers.
+    The `tier_panel_count_unconventional` detector in check_layout_anti_patterns
+    owns the tier-range check; this function returns None for 'tier' so
+    check_brief_fidelity's `panel_count_mismatch` doesn't double-fire on the
+    same offense.
+    """
     token = token.strip().lower()
     m = PANEL_TOKEN.match(token)
     if not m:
@@ -155,7 +163,9 @@ def _panels_per_token(token):
     if label == 'double-spread':
         return 1
     if label == 'tier':
-        return 3
+        # See docstring — tier's range check lives in check_layout_anti_patterns
+        # to avoid double-firing with check_brief_fidelity.
+        return None
     return None  # irregular
 
 
@@ -318,6 +328,22 @@ def check_layout_anti_patterns(script_text, brief_row=None):
     failures = []
     parsed = parse_script(script_text)
     pages = parsed['pages']
+
+    # 0. Unparseable script: text is non-empty but no pages parsed.
+    # Without this guard the function returns [] (clean), indistinguishable
+    # from a well-formed clean script. Catches encoding regressions, regex
+    # drift, header-format violations, or accidental truncation.
+    if not pages and script_text.strip():
+        failures.append({
+            'kind': 'script_unparseable',
+            'detail': 'script text is non-empty but no pages parsed; '
+                      'check the page header format '
+                      '(expected `## Page N — LAYOUT [⟵ PAGE-TURN REVEAL]`)',
+            'expected': 'at least one parseable `## Page N` header',
+            'severity': 'high',
+        })
+        # Bail early — the rest of the checks have nothing to iterate.
+        return failures
 
     # 1. Page-turn marker on page 1.
     for page in pages:

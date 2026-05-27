@@ -10,7 +10,9 @@ otherwise a structured score dict).
 """
 
 import statistics
-from storyforge.script_format import parse_script, check_brief_fidelity
+from storyforge.script_format import (
+    parse_script, check_brief_fidelity, check_layout_anti_patterns,
+)
 from storyforge.common import get_medium
 
 PRINCIPLES = (
@@ -91,12 +93,54 @@ def score_dialogue_compression(parsed, brief_row=None, script_text=None):
     return {'principle': 'dialogue_compression', 'score': score, 'findings': findings}
 
 
+# Per-severity score deductions for layout anti-patterns surfaced by
+# check_layout_anti_patterns. Capped at the score floor (0.0) by the
+# enclosing max(). Values picked so that one high-severity anti-pattern
+# (page_turn_on_page_one) costs ~30% of the layout-rhythm score, in
+# line with the deterministic principles' overall calibration.
+_ANTI_PATTERN_DEDUCTIONS = {'high': 0.3, 'medium': 0.15, 'low': 0.05}
+
+
 def score_layout_rhythm(parsed, brief_row=None, script_text=None):
-    """Stdev of panels-per-page. Penalize both extremes (<= 0.3 = mechanical,
-    >= 3.0 = chaotic). Sweet spot stdev ~1.0-2.0."""
+    """Stdev of panels-per-page + deterministic anti-pattern findings.
+
+    The score combines two layers:
+    1. Triangle scoring on panel-count stdev — too uniform (<=0.3,
+       mechanical) or too chaotic (>=3.0) both lose points; sweet
+       spot stdev ~1.0-2.0.
+    2. Anti-pattern penalties from check_layout_anti_patterns (the
+       deterministic detectors documented in
+       references/gn-layout-vocabulary.md): page_turn_on_page_one
+       (high, -0.3), panel_density_excessive (medium, -0.15),
+       tier_panel_count_unconventional (low, -0.05), and
+       script_unparseable (high, -0.3).
+
+    Both layers' findings surface in the result so the revision prompt
+    receives them; the score reflects the combined penalty floored at 0.
+    """
     pages = parsed['pages']
+    findings = []
+
+    # Anti-pattern findings always run; they don't depend on having
+    # multiple pages (a 1-page script with the page-turn marker is
+    # still wrong) and they're cheap.
+    if script_text is not None:
+        findings.extend(
+            check_layout_anti_patterns(script_text, brief_row)
+        )
+
     if len(pages) < 2:
-        return {'principle': 'layout_rhythm', 'score': 1.0, 'findings': []}
+        # Stdev needs ≥2 pages; with fewer, the rhythm score floor is
+        # 1.0 but anti-pattern penalties still apply.
+        score = 1.0
+        for f in findings:
+            score -= _ANTI_PATTERN_DEDUCTIONS.get(f.get('severity', 'medium'), 0.15)
+        return {
+            'principle': 'layout_rhythm',
+            'score': max(0.0, score),
+            'findings': findings,
+        }
+
     densities = [len(p['panels']) for p in pages]
     stdev = statistics.stdev(densities)
     # Triangle scoring: peak at stdev=1.5, falls off either side
@@ -104,7 +148,6 @@ def score_layout_rhythm(parsed, brief_row=None, script_text=None):
         score = max(0.0, stdev / 1.5)
     else:
         score = max(0.0, 1.0 - (stdev - 1.5) / 2.0)
-    findings = []
     if stdev <= 0.3:
         findings.append({
             'kind': 'layout_too_uniform',
@@ -117,7 +160,26 @@ def score_layout_rhythm(parsed, brief_row=None, script_text=None):
             'detail': f'Panel-count stdev {stdev:.2f}: wild variation may disorient',
             'severity': 'low',
         })
-    return {'principle': 'layout_rhythm', 'score': score, 'findings': findings}
+
+    # Apply anti-pattern penalties to the stdev-based score, floored at 0.
+    for f in findings:
+        # Only deduct for anti-pattern kinds we own; layout_too_uniform/
+        # layout_too_chaotic already factor into the stdev triangle.
+        if f.get('kind') in {
+            'page_turn_on_page_one',
+            'panel_density_excessive',
+            'tier_panel_count_unconventional',
+            'script_unparseable',
+        }:
+            score -= _ANTI_PATTERN_DEDUCTIONS.get(
+                f.get('severity', 'medium'), 0.15,
+            )
+
+    return {
+        'principle': 'layout_rhythm',
+        'score': max(0.0, score),
+        'findings': findings,
+    }
 
 
 CAPTION_STRATEGY_TARGETS = {
