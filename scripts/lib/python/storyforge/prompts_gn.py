@@ -138,10 +138,36 @@ Specifically:
     in some panel's composition prose.
   - The script's per-page panel structure MUST match `panel_breakdown`
     (e.g., `p1:splash` means page 1 has exactly 1 panel — a full splash).
+    Layout tokens carry narrative weight; see
+    references/gn-layout-vocabulary.md for the full vocabulary. A
+    splash on a non-climactic page wastes its emphasis. A 9-grid in
+    an action scene kills motion. A tier compresses time across a
+    horizontal row.
   - Pages tagged in `page_turn_beats` MUST carry the ⟵ PAGE-TURN REVEAL
-    marker on their page header line.
+    marker on their page header line. The page-turn is comics' most
+    load-bearing tool — use it for genuine reveals. NEVER place a
+    page-turn marker on page 1 (there's no preceding page to turn
+    from); the validator flags this as page_turn_on_page_one.
   - `caption_strategy` determines how narration is used: minimal,
     journal voiceover, omniscient narration, none, or as specified.
+
+Panel-to-panel transitions (McCloud, *Understanding Comics* 1993 —
+the canonical taxonomy for what happens in the gutter between
+panels):
+  - moment-to-moment: small time steps; emotional weight, observation
+  - action-to-action: medium time steps; plot motion, kinetics
+  - subject-to-subject: same time, different subjects; coverage,
+    dialogue
+  - scene-to-scene: time/place jumps; compression
+  - aspect-to-aspect: atmosphere panels, no time advance; mood, manga
+  - non-sequitur: experimental, rare
+Match the transition to the beat — see
+references/gn-layout-vocabulary.md "Panel-to-panel transitions".
+
+Density limit: ≥13 panels on a single page is a legibility crisis.
+The validator emits `panel_density_excessive` at that threshold.
+Keep individual pages under 12 panels except in deliberate
+exception-cases.
 
 # Character visual references
 

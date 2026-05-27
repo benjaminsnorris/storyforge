@@ -5,9 +5,16 @@ and verifies that the drafted script matches the brief's contract:
 dialogue lines, visual keywords, panel breakdown, page-turn beats.
 
 Script format reference: docs/superpowers/specs/2026-05-20-graphic-novel-mode-design.md
+Layout anti-patterns: references/gn-layout-vocabulary.md
 """
 
 import re
+from typing import Final, Literal, TypedDict
+
+# Severity Literal reused from scoring_story_power (the canonical
+# severity scale across the codebase). Imported lazily inside the
+# TypedDict context to avoid a circular import at module load.
+from storyforge.scoring_story_power import Severity
 
 # --- Regex patterns ---
 
@@ -139,7 +146,15 @@ PANEL_TOKEN = re.compile(r'^\s*(splash|double-spread|tier|irregular|(\d+)-grid)\
 
 def _panels_per_token(token):
     """Return expected panel count for a brief panel-breakdown token, or None
-    when the token is 'irregular' (no count check)."""
+    when the token is 'irregular' OR 'tier' (no exact-count check).
+
+    'tier' is conventionally 2-4 panels (see references/gn-layout-vocabulary.md);
+    a single expected count would mis-flag canonical 2- or 4-panel tiers.
+    The `tier_panel_count_unconventional` detector in check_layout_anti_patterns
+    owns the tier-range check; this function returns None for 'tier' so
+    check_brief_fidelity's `panel_count_mismatch` doesn't double-fire on the
+    same offense.
+    """
     token = token.strip().lower()
     m = PANEL_TOKEN.match(token)
     if not m:
@@ -155,7 +170,9 @@ def _panels_per_token(token):
     if label == 'double-spread':
         return 1
     if label == 'tier':
-        return 3
+        # See docstring — tier's range check lives in check_layout_anti_patterns
+        # to avoid double-firing with check_brief_fidelity.
+        return None
     return None  # irregular
 
 
@@ -277,5 +294,154 @@ def check_brief_fidelity(brief_row, script_text):
                 'expected': page_turn_beats,
                 'severity': 'high',
             })
+
+    return failures
+
+
+# Density and tier conventions per references/gn-layout-vocabulary.md.
+# Density limit: 13+ panels on a single page becomes a legibility
+# crisis (the reader can't scan comfortably). Tier convention: 2-4
+# panels in a single horizontal row; outside this band the token is
+# almost certainly mis-labeled.
+_PANEL_DENSITY_LIMIT: Final[int] = 13
+_TIER_PANEL_RANGE: Final[tuple[int, int]] = (2, 4)
+
+
+# Closed set of layout anti-pattern kinds. Mirrors the
+# CrossTierPatternKey / StoryPowerStatus / BriefOutcome Literal+tuple
+# pattern from scoring_story_power.py — a consumer doing
+# `finding['kind'] == 'panel_density_excesive'` (typo) gets a static
+# mypy error instead of a silent false-negative.
+LayoutAntiPatternKind = Literal[
+    'page_turn_on_page_one',
+    'panel_density_excessive',
+    'tier_panel_count_unconventional',
+    'script_unparseable',
+]
+
+
+class _LayoutAntiPatternRequired(TypedDict):
+    kind: LayoutAntiPatternKind
+    detail: str
+    severity: Severity
+    expected: str
+
+
+class LayoutAntiPattern(_LayoutAntiPatternRequired, total=False):
+    """A deterministic layout anti-pattern surfaced by
+    check_layout_anti_patterns. `page` is set for page-anchored
+    findings (page_turn_on_page_one, panel_density_excessive,
+    tier_panel_count_unconventional); absent for script-wide
+    findings (script_unparseable).
+
+    Failure-shape Required+Optional split mirrors ContinuityFinding /
+    BriefFinding / FieldCoherenceFinding in scoring_story_power.py.
+    """
+    page: int
+
+
+def check_layout_anti_patterns(
+        script_text: str,
+        brief_row: dict | None = None,
+        ) -> list[LayoutAntiPattern]:
+    """Return a list of failure dicts for deterministic layout
+    anti-patterns documented in references/gn-layout-vocabulary.md.
+
+    Three checks today:
+
+    1. `page_turn_on_page_one`: a script with the ⟵ PAGE-TURN REVEAL
+       marker on page 1. Impossible — there's no preceding page to
+       turn from. Severity high.
+
+    2. `panel_density_excessive`: any page with ≥13 panels. Legibility
+       crisis at this threshold; the reader can no longer scan the
+       panels comfortably. Severity medium.
+
+    3. `tier_panel_count_unconventional`: the brief's panel_breakdown
+       declares `pN:tier` but the script's page N has a panel count
+       outside {2, 3, 4}. A tier conventionally holds 2-4 panels;
+       outside this band it's almost certainly an N-grid mis-labeled,
+       or a splash mis-labeled as a tier. Severity low. Requires
+       brief_row (skipped when no brief is provided).
+
+    Each failure dict carries: kind, detail, severity, and (where
+    available) page/expected fields for the revision prompt. Empty
+    list when the script is clean.
+    """
+    failures: list[LayoutAntiPattern] = []
+    parsed = parse_script(script_text)
+    pages = parsed['pages']
+
+    # 0. Unparseable script: text is non-empty but no pages parsed.
+    # Without this guard the function returns [] (clean), indistinguishable
+    # from a well-formed clean script. Catches encoding regressions, regex
+    # drift, header-format violations, or accidental truncation.
+    if not pages and script_text.strip():
+        failures.append({
+            'kind': 'script_unparseable',
+            'detail': 'script text is non-empty but no pages parsed; '
+                      'check the page header format '
+                      '(expected `## Page N — LAYOUT [⟵ PAGE-TURN REVEAL]`)',
+            'expected': 'at least one parseable `## Page N` header',
+            'severity': 'high',
+        })
+        # Bail early — the rest of the checks have nothing to iterate.
+        return failures
+
+    # 1. Page-turn marker on page 1.
+    # Defensive against malformed scripts with duplicate `## Page 1`
+    # headers (e.g. cross-chapter regenerated drafts); surface one
+    # finding rather than N when multiple match.
+    for page in pages:
+        if page['number'] == 1 and page['is_page_turn']:
+            failures.append({
+                'kind': 'page_turn_on_page_one',
+                'detail': 'page 1 carries the ⟵ PAGE-TURN REVEAL marker, '
+                          'but page 1 cannot be a page-turn (no preceding '
+                          'page to turn from)',
+                'expected': 'remove the marker from page 1, or move the '
+                            'reveal beat to a later page',
+                'severity': 'high',
+                'page': 1,
+            })
+            break
+
+    # 2. Panel-density ceiling.
+    for page in pages:
+        n = len(page['panels'])
+        if n >= _PANEL_DENSITY_LIMIT:
+            failures.append({
+                'kind': 'panel_density_excessive',
+                'detail': f'page {page["number"]}: {n} panels exceeds the '
+                          f'{_PANEL_DENSITY_LIMIT}-panel legibility '
+                          'ceiling',
+                'expected': f'≤{_PANEL_DENSITY_LIMIT - 1} panels per page',
+                'severity': 'medium',
+                'page': page['number'],
+            })
+
+    # 3. Tier-panel-count check against brief's panel_breakdown.
+    if brief_row:
+        breakdown_map = _parse_panel_breakdown(
+            brief_row.get('panel_breakdown') or ''
+        )
+        low, high = _TIER_PANEL_RANGE
+        for page in pages:
+            token = breakdown_map.get(page['number'])
+            if not token or token.strip().lower() != 'tier':
+                continue
+            n = len(page['panels'])
+            if not (low <= n <= high):
+                failures.append({
+                    'kind': 'tier_panel_count_unconventional',
+                    'detail': (
+                        f'page {page["number"]}: declared `tier` in '
+                        f'panel_breakdown but rendered with {n} panels '
+                        f'(convention is {low}-{high} panels per tier)'
+                    ),
+                    'expected': f'{low}-{high} panels on a tier page',
+                    'severity': 'low',
+                    'page': page['number'],
+                })
 
     return failures
