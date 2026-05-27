@@ -390,6 +390,12 @@ Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a 
 - `reference/scene-briefs.csv` adds: `page_layout`, `panel_breakdown`, `visual_keywords`, `page_turn_beats`, `caption_strategy`
 - `reference/voice-profile.csv` `_project` row adds: `caption_voice`, `lettering_style`
 
+**Per-page files (issue #251):**
+- A `pages/` directory (sibling to `scenes/`) can hold per-page markdown files at `pages/<prefix>-pN.md` where the prefix is `sN` for scene ids starting with `sN-` (e.g., `s01-studio-finalization` → `s01`) or the full scene id otherwise.
+- Each page file has YAML frontmatter (`page_id`, `scene_id`, `page_within_scene`, `total_pages_in_scene`, `panel_count`, plus recommended `spread_position`, `characters_present`, `location`, `timeline`) and body sections: Scene context, Page architecture, Panel script, Image-generation prompts, Page-specific notes.
+- When `pages/` is populated, `script-package` assembles the artist bundle from page files (preferring the `## Panel script` section of each), `extract --from-pages` syncs `panel_count` + `page_count` on `scenes.csv` from the page metadata, and `cleanup` validates page-file frontmatter and filename / `page_id` consistency.
+- Scene files (`scenes/<scene_id>.md`) remain the creative source of truth — function, page index, cross-page continuity notes live there.
+
 See the design spec: `docs/superpowers/specs/2026-05-20-graphic-novel-mode-design.md`.
 
 ## PR Review Workflow — MANDATORY

@@ -25,6 +25,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from typing import TypedDict
 
 from storyforge.api import (
     invoke_to_file, calculate_cost_from_usage, extract_usage,
@@ -55,6 +56,10 @@ def parse_args(argv):
                      help='Path to a prose manuscript file. LLM-extracts '
                           'GN intent + brief shapes per scene section. '
                           'Coaching level controls destination.')
+    src.add_argument('--from-pages', action='store_true',
+                     help='Sync scene-level metadata from pages/<prefix>-pN.md '
+                          'files: panel_count (sum), page_count (count). '
+                          'Deterministic; no LLM call.')
     parser.add_argument('--coaching', type=str, default=None,
                         choices=['full', 'coach', 'strict'],
                         help='Override coaching level (default: project setting)')
@@ -78,6 +83,10 @@ def main(argv=None):
         sys.exit(1)
     coaching = args.coaching or get_coaching_level(project_dir)
 
+    if args.from_pages:
+        _run_from_pages(project_dir, args.dry_run)
+        return
+
     if args.from_script:
         _run_from_script(project_dir, args.from_script, args.dry_run,
                           args.force)
@@ -94,6 +103,101 @@ def main(argv=None):
                 sys.exit(1)
         _run_from_prose(project_dir, args.from_prose, coaching, args.dry_run,
                          args.force)
+
+
+# ---------------------------------------------------------------------------
+# --from-pages: deterministic metadata sync
+# ---------------------------------------------------------------------------
+
+class _SceneCounts(TypedDict):
+    panels: int
+    pages: int
+
+
+def _run_from_pages(project_dir: str, dry_run: bool) -> None:
+    """Sum panel_count + page_count per scene from page files and write
+    those columns back to scenes.csv. Deterministic — no LLM call.
+
+    Fails loudly if scenes.csv lacks the panel_count or page_count columns
+    (GN-mode columns added in #251; pre-fix projects need `storyforge
+    cleanup` to add them first) — otherwise csv_cli.update_field silently
+    no-ops on a missing column and the run would falsely claim success.
+    Also tracks pages missing panel_count and reports partial sums so a
+    silent undercount is visible.
+    """
+    from storyforge.pages import list_page_files, parse_page_file
+    from storyforge.csv_cli import update_field, list_ids
+
+    page_paths = list_page_files(project_dir)
+    if not page_paths:
+        log('ERROR: no pages/*.md files found. Create per-page files first.')
+        sys.exit(1)
+
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(scenes_csv):
+        log(f'ERROR: scenes.csv not found at {scenes_csv}')
+        sys.exit(1)
+
+    # Verify the target columns exist BEFORE we sum — update_field silently
+    # returns on a missing column, so writing without this check would lie
+    # about success on projects that haven't run `storyforge cleanup` since
+    # the GN schema was extended.
+    with open(scenes_csv, encoding='utf-8') as f:
+        header = f.readline().strip().split('|')
+    missing_cols = [c for c in ('panel_count', 'page_count') if c not in header]
+    if missing_cols and not dry_run:
+        log(f'ERROR: scenes.csv is missing required column(s): '
+            f'{", ".join(missing_cols)}. Run `storyforge cleanup` to add '
+            f'the GN-mode columns before --from-pages.')
+        sys.exit(1)
+
+    by_scene: dict[str, _SceneCounts] = {}
+    pages_missing_panel_count: dict[str, list[str]] = {}
+    for p in page_paths:
+        page = parse_page_file(p)
+        if page is None:
+            log(f'  WARNING: {p} has no frontmatter; skipping')
+            continue
+        sid = page.get('scene_id')
+        if not sid:
+            log(f'  WARNING: {p} has no scene_id; skipping')
+            continue
+        bucket = by_scene.setdefault(sid, {'panels': 0, 'pages': 0})
+        panel_count = page.get('panel_count')
+        if isinstance(panel_count, int):
+            bucket['panels'] += panel_count
+        else:
+            # Field absent or coerced to string by malformed frontmatter —
+            # don't silently treat as zero; surface so authors notice.
+            pages_missing_panel_count.setdefault(sid, []).append(
+                os.path.basename(p),
+            )
+        bucket['pages'] += 1
+
+    for sid, files in pages_missing_panel_count.items():
+        log(f'  WARNING: scene {sid}: {len(files)} page(s) lack a valid '
+            f'integer panel_count ({", ".join(files)}); panel_count sum '
+            f'is partial')
+
+    known_ids = set(list_ids(scenes_csv))
+
+    written = 0
+    for sid, counts in sorted(by_scene.items()):
+        if sid not in known_ids:
+            log(f'  WARNING: {sid} referenced by page files but not in '
+                f'scenes.csv; skipping')
+            continue
+        log(f'  {sid}: {counts["pages"]} page(s), {counts["panels"]} panel(s)')
+        if dry_run:
+            continue
+        update_field(scenes_csv, sid, 'panel_count', str(counts['panels']))
+        update_field(scenes_csv, sid, 'page_count', str(counts['pages']))
+        written += 1
+
+    if dry_run:
+        log(f'DRY RUN — would update {len(by_scene)} scene row(s).')
+    else:
+        log(f'Updated panel_count / page_count for {written} scene(s).')
 
 
 # ---------------------------------------------------------------------------

@@ -79,6 +79,243 @@ def test_script_package_produces_bundle(project_dir_gn, monkeypatch):
     from storyforge import cmd_script_package
     cmd_script_package.main([])
 
+
+def test_script_package_prefers_page_files_when_present(project_dir_gn, monkeypatch):
+    """When pages/sN-pX.md files exist for a scene, the assembled bundle
+    uses their '## Panel script' sections instead of the inline scene
+    file body. The scene file's metadata table and page index are still
+    skipped; the global page-number sequence still runs across the
+    bundle as a whole."""
+    monkeypatch.chdir(project_dir_gn)
+
+    scenes_dir = os.path.join(project_dir_gn, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    pages_dir = os.path.join(project_dir_gn, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+
+    # s01-studio scene-file: page index only (no inline panel script)
+    with open(os.path.join(scenes_dir, 's01-studio.md'), 'w') as f:
+        f.write('# Scene s01\n\n## Page index\n\nSee pages/.\n')
+    # Two page files for s01
+    for i, comp in enumerate(['Wide establishing.', 'Lucien enters.'], start=1):
+        with open(os.path.join(pages_dir, f's01-p{i}.md'), 'w') as f:
+            f.write(
+                f"---\n"
+                f"page_id: s01-p{i}\n"
+                f"scene_id: s01-studio\n"
+                f"page_within_scene: {i}\n"
+                f"total_pages_in_scene: 2\n"
+                f"panel_count: 1\n"
+                f"---\n\n"
+                f"## Panel script\n\n"
+                f"## Page {i} — SPLASH\n\n"
+                f"**Panel 1**\n{comp}\n"
+            )
+
+    # s02 inline-only
+    with open(os.path.join(scenes_dir, 's02-other.md'), 'w') as f:
+        f.write(
+            '## Page 1 — SPLASH\n\n**Panel 1**\nInline content.\n'
+        )
+
+    # Replace seeded scenes with our two test scenes
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    with open(scenes_csv) as f:
+        header = f.readline()
+    cols = header.strip().split('|')
+
+    def _row(sid):
+        row = {c: '' for c in cols}
+        row['id'] = sid
+        row['status'] = 'drafted'
+        row['title'] = sid
+        return '|'.join(row[c] for c in cols)
+
+    with open(scenes_csv, 'w') as f:
+        f.write(header)
+        f.write(_row('s01-studio') + '\n')
+        f.write(_row('s02-other') + '\n')
+
+    map_path = os.path.join(project_dir_gn, 'reference', 'chapter-map.csv')
+    with open(map_path, 'w') as f:
+        f.write('chapter|title|heading|scenes\n')
+        f.write('1|Opening|numbered-titled|s01-studio;s02-other\n')
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    script_md = open(os.path.join(project_dir_gn, 'manuscript', 'script.md')).read()
+    assert 'Wide establishing.' in script_md
+    assert 'Lucien enters.' in script_md
+    assert 'Inline content.' in script_md
+    # The scene file's page-index section is not included
+    assert '## Page index' not in script_md
+
+
+def test_script_package_warns_when_all_pages_empty(project_dir_gn, monkeypatch, capsys):
+    """Regression for CR-2/SF-1: a scene with page files that all lack a
+    `## Panel script` section silently produced an empty bundle scene.
+    Now must surface a WARNING so the artist isn't handed empty pages."""
+    monkeypatch.chdir(project_dir_gn)
+
+    scenes_dir = os.path.join(project_dir_gn, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    pages_dir = os.path.join(project_dir_gn, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+
+    # Two page files for s01-stub, both frontmatter-only (no Panel script)
+    for i in (1, 2):
+        with open(os.path.join(pages_dir, f's01-p{i}.md'), 'w') as f:
+            f.write(
+                f"---\npage_id: s01-p{i}\nscene_id: s01-stub\n"
+                f"page_within_scene: {i}\ntotal_pages_in_scene: 2\n"
+                f"panel_count: 1\n---\n\n# Heading only, no script section\n"
+            )
+
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    with open(scenes_csv) as f:
+        header = f.readline()
+    cols = header.strip().split('|')
+
+    def _row(sid, status='briefed'):
+        row = {c: '' for c in cols}
+        row['id'] = sid
+        row['status'] = status
+        row['title'] = sid
+        return '|'.join(row[c] for c in cols)
+
+    with open(scenes_csv, 'w') as f:
+        f.write(header)
+        f.write(_row('s01-stub') + '\n')
+
+    map_path = os.path.join(project_dir_gn, 'reference', 'chapter-map.csv')
+    with open(map_path, 'w') as f:
+        f.write('chapter|title|heading|scenes\n')
+        f.write('1|Opening|numbered-titled|s01-stub\n')
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    captured = capsys.readouterr().out
+    assert 's01-stub' in captured
+    assert 'none contain' in captured and '`## Panel script`' in captured
+
+
+def test_script_package_global_page_numbering_across_mixed_scenes(project_dir_gn,
+                                                                   monkeypatch):
+    """T-8: global page numbering must be sequential across the boundary
+    between page-file scenes and inline scenes. A future tightening of
+    _NEXT_SECTION_HEADER that strips page headers would break global
+    renumbering — this catches it."""
+    monkeypatch.chdir(project_dir_gn)
+
+    scenes_dir = os.path.join(project_dir_gn, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    pages_dir = os.path.join(project_dir_gn, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+
+    # s01: two pages via per-page files
+    for i, comp in enumerate(['A.', 'B.'], start=1):
+        with open(os.path.join(pages_dir, f's01-p{i}.md'), 'w') as f:
+            f.write(
+                f"---\npage_id: s01-p{i}\nscene_id: s01-pages\n"
+                f"page_within_scene: {i}\ntotal_pages_in_scene: 2\n"
+                f"panel_count: 1\n---\n\n"
+                f"## Panel script\n\n## Page {i} — SPLASH\n\n"
+                f"**Panel 1**\n{comp}\n"
+            )
+    # s02: one page via inline scene file
+    with open(os.path.join(scenes_dir, 's02-inline.md'), 'w') as f:
+        f.write('## Page 1 — SPLASH\n\n**Panel 1**\nC.\n')
+
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    with open(scenes_csv) as f:
+        header = f.readline()
+    cols = header.strip().split('|')
+
+    def _row(sid):
+        row = {c: '' for c in cols}
+        row['id'] = sid
+        row['status'] = 'drafted'
+        row['title'] = sid
+        return '|'.join(row[c] for c in cols)
+
+    with open(scenes_csv, 'w') as f:
+        f.write(header)
+        f.write(_row('s01-pages') + '\n')
+        f.write(_row('s02-inline') + '\n')
+
+    map_path = os.path.join(project_dir_gn, 'reference', 'chapter-map.csv')
+    with open(map_path, 'w') as f:
+        f.write('chapter|title|heading|scenes\n')
+        f.write('1|All|numbered-titled|s01-pages;s02-inline\n')
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    script_md = open(os.path.join(project_dir_gn, 'manuscript', 'script.md')).read()
+    # Total page count in header
+    assert '**Total pages:** 3' in script_md
+    # All three page numbers present in sequence
+    assert '## Page 1 — SPLASH' in script_md
+    assert '## Page 2 — SPLASH' in script_md
+    assert '## Page 3 — SPLASH' in script_md
+    # Sequential: Page 2 appears AFTER Page 1, Page 3 after Page 2
+    assert script_md.index('## Page 1') < script_md.index('## Page 2')
+    assert script_md.index('## Page 2') < script_md.index('## Page 3')
+
+
+def test_script_package_warns_on_partial_page_script_coverage(project_dir_gn,
+                                                              monkeypatch, capsys):
+    """SF-1 partial-coverage variant: when SOME but not all pages have a
+    Panel script section, log a partial-coverage warning so missing
+    content is visible."""
+    monkeypatch.chdir(project_dir_gn)
+
+    pages_dir = os.path.join(project_dir_gn, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+
+    # Page 1 has a Panel script; page 2 does not.
+    with open(os.path.join(pages_dir, 's01-p1.md'), 'w') as f:
+        f.write(
+            "---\npage_id: s01-p1\nscene_id: s01-half\n"
+            "page_within_scene: 1\ntotal_pages_in_scene: 2\npanel_count: 1\n"
+            "---\n\n## Panel script\n\n## Page 1 — SPLASH\n\n**Panel 1**\nHi.\n"
+        )
+    with open(os.path.join(pages_dir, 's01-p2.md'), 'w') as f:
+        f.write(
+            "---\npage_id: s01-p2\nscene_id: s01-half\n"
+            "page_within_scene: 2\ntotal_pages_in_scene: 2\npanel_count: 1\n"
+            "---\n\n## Notes only\n\nNo script.\n"
+        )
+
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    with open(scenes_csv) as f:
+        header = f.readline()
+    cols = header.strip().split('|')
+
+    def _row(sid):
+        row = {c: '' for c in cols}
+        row['id'] = sid
+        row['status'] = 'briefed'
+        row['title'] = sid
+        return '|'.join(row[c] for c in cols)
+
+    with open(scenes_csv, 'w') as f:
+        f.write(header)
+        f.write(_row('s01-half') + '\n')
+
+    map_path = os.path.join(project_dir_gn, 'reference', 'chapter-map.csv')
+    with open(map_path, 'w') as f:
+        f.write('chapter|title|heading|scenes\n')
+        f.write('1|Opening|numbered-titled|s01-half\n')
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    captured = capsys.readouterr().out
+    assert '1/2' in captured or '1 of 2' in captured.lower()
+
     bundle = os.path.join(project_dir_gn, 'manuscript')
     assert os.path.isfile(os.path.join(bundle, 'script.md'))
     assert os.path.isfile(os.path.join(bundle, 'visual-references.md'))

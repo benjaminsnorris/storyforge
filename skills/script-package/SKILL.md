@@ -32,6 +32,21 @@ Before doing anything else, orient yourself:
    - Present → check if the author's request is an update or straight assembly
 4. **Note `project.coaching_level`** — controls how proactively you propose chapter structure (see Coaching Level Behavior below).
 
+### Page files
+
+If `pages/<prefix>-pN.md` files exist for any scene, the assembly command uses those as the panel-script source for that scene (sorted by `page_within_scene`). The scene file's metadata table, function, and page index are still read for context but are not concatenated into the artist bundle.
+
+Surface this to the author when relevant:
+
+- "I see pages/ has 27 files across 5 scenes — those will be the source for the bundle."
+- "Scene `s03-arrival` has no page files; its inline panel script will be used."
+
+If the author wants to refresh scene-level panel/page counts from the page files before assembly, suggest:
+
+```bash
+./storyforge extract --from-pages
+```
+
 ## Step 2: Determine Mode
 
 Based on the author's message and project state, pick one of three modes:

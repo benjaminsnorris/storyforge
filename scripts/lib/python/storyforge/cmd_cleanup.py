@@ -645,11 +645,14 @@ def report_csv_integrity(project_dir: str) -> list[str]:
 def report_unexpected_files(project_dir: str) -> list[str]:
     """Report unexpected files and directories. Returns list of issue strings."""
     issues = []
+    allowed_top_dirs = set(EXPECTED_TOP_DIRS)
+    if get_medium(project_dir) == 'graphic-novel':
+        allowed_top_dirs.add('pages')
 
     # Top-level dirs
     for entry in sorted(os.listdir(project_dir)):
         path = os.path.join(project_dir, entry)
-        if os.path.isdir(path) and entry not in EXPECTED_TOP_DIRS:
+        if os.path.isdir(path) and entry not in allowed_top_dirs:
             issues.append(f'UNEXPECTED_DIR:{entry}')
         elif os.path.isfile(path) and entry not in EXPECTED_TOP_FILES:
             issues.append(f'UNEXPECTED_FILE:{entry}')
@@ -1014,6 +1017,84 @@ def _check_stale_ledger(project_dir: str) -> list[dict]:
     }]
 
 
+def _check_page_files(project_dir: str) -> list[dict]:
+    """Validate page files under pages/ for GN projects. Returns finding dicts
+    in cleanup-report shape. Returns [] for non-GN projects or when pages/
+    is absent/empty."""
+    if get_medium(project_dir) != 'graphic-novel':
+        return []
+    from storyforge.pages import list_page_files, validate_page_file
+
+    findings: list[dict] = []
+    for page_path in list_page_files(project_dir):
+        for issue in validate_page_file(page_path):
+            rel_path = os.path.relpath(page_path, project_dir)
+            kind = issue['kind']
+            if kind == 'missing_file':
+                # Defensive: list_page_files only returns existing files,
+                # so this is a TOCTOU race (file deleted mid-scan).
+                findings.append({
+                    'type': 'page_missing_file', 'file': rel_path,
+                    'detail': f'{rel_path} disappeared during validation',
+                    'action': 'Re-run cleanup',
+                    'severity': 'warning',
+                })
+            elif kind == 'no_frontmatter':
+                findings.append({
+                    'type': 'page_no_frontmatter', 'file': rel_path,
+                    'detail': f'{rel_path} has no YAML frontmatter',
+                    'action': 'Add the page-file frontmatter '
+                              '(page_id, scene_id, page_within_scene, '
+                              'total_pages_in_scene, panel_count)',
+                    'severity': 'warning',
+                })
+            elif kind == 'missing_field':
+                findings.append({
+                    'type': 'page_missing_field', 'file': rel_path,
+                    'detail': f'{rel_path} is missing required field '
+                              f'{issue["field"]!r}',
+                    'action': f'Add `{issue["field"]}: ...` to the frontmatter',
+                    'severity': 'warning',
+                })
+            elif kind == 'bad_integer_field':
+                findings.append({
+                    'type': 'page_bad_integer_field', 'file': rel_path,
+                    'detail': f'{rel_path} field {issue["field"]!r} is '
+                              f'not an integer',
+                    'action': f'Replace the {issue["field"]} value with '
+                              f'an integer',
+                    'severity': 'warning',
+                })
+            elif kind == 'filename_page_id_mismatch':
+                findings.append({
+                    'type': 'page_filename_mismatch', 'file': rel_path,
+                    'detail': issue['detail'],
+                    'action': 'Rename the file to match page_id, '
+                              'or fix the page_id in frontmatter',
+                    'severity': 'warning',
+                })
+            elif kind == 'page_within_scene_out_of_range':
+                findings.append({
+                    'type': 'page_out_of_range', 'file': rel_path,
+                    'detail': issue['detail'],
+                    'action': 'Correct page_within_scene or '
+                              'total_pages_in_scene to be consistent',
+                    'severity': 'warning',
+                })
+            else:
+                # Catches future PageFindingKind values that nobody wires
+                # up here — silent drop would re-introduce SF-6.
+                findings.append({
+                    'type': 'page_unknown_finding', 'file': rel_path,
+                    'detail': f'{rel_path}: unhandled validator kind '
+                              f'{kind!r} ({issue.get("detail", "")})',
+                    'action': 'File a bug — cmd_cleanup needs a branch '
+                              'for this PageFindingKind',
+                    'severity': 'warning',
+                })
+    return findings
+
+
 def _check_crlf(project_dir: str) -> list[dict]:
     """Check CSV files for CRLF line endings."""
     findings: list[dict] = []
@@ -1083,6 +1164,11 @@ def build_cleanup_report(project_dir: str) -> dict:
     # --- Scene artifacts ---
     all_findings.extend(_check_scene_artifacts(project_dir))
 
+    # --- Page files (GN-only) ---
+    for finding in _check_page_files(project_dir):
+        finding['category'] = 'pages'
+        all_findings.append(finding)
+
     # --- CSV schema ---
     schema_issues = report_csv_schema(project_dir)
     rename_pairs = _detect_rename_pairs(schema_issues)
@@ -1135,6 +1221,7 @@ def _print_report(report: dict) -> None:
     categories = [
         ('structure', 'Project Structure'),
         ('scenes', 'Scene Files'),
+        ('pages', 'Page Files'),
         ('schema', 'CSV Schema'),
         ('integrity', 'CSV Integrity'),
         ('unexpected', 'Unexpected Files'),
