@@ -242,3 +242,30 @@ def validate_page_file(path: str) -> list[PageFinding]:
             })
 
     return findings
+
+
+_PANEL_SCRIPT_HEADER = re.compile(
+    r'^##\s+Panel script\s*$', re.MULTILINE | re.IGNORECASE,
+)
+_NEXT_SECTION_HEADER = re.compile(r'^##\s+\S', re.MULTILINE)
+
+
+def extract_panel_script(path: str) -> str:
+    """Return the contents of the '## Panel script' section, or '' if absent.
+
+    Used by script-package to assemble the artist bundle from page files.
+    Output is the section body — strips the '## Panel script' heading
+    itself but keeps everything until the next ## heading or EOF.
+    """
+    page = parse_page_file(path)
+    if page is None:
+        return ''
+    body = page.get('body', '')
+    m = _PANEL_SCRIPT_HEADER.search(body)
+    if not m:
+        return ''
+    start = m.end()
+    rest = body[start:]
+    next_m = _NEXT_SECTION_HEADER.search(rest)
+    end = next_m.start() if next_m else len(rest)
+    return rest[:end].strip('\n')

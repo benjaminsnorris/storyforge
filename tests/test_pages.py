@@ -243,3 +243,33 @@ def test_validate_no_frontmatter(tmp_path):
     path.write_text('# No frontmatter here\n')
     findings = validate_page_file(str(path))
     assert findings == [{'kind': 'no_frontmatter', 'path': str(path)}]
+
+
+def test_extract_panel_script_body(tmp_path):
+    """Extract the '## Panel script' section text only."""
+    from storyforge.pages import extract_panel_script
+    text = (
+        "---\npage_id: s01-p1\n---\n\n"
+        "# Page heading\n\n"
+        "## Scene context\n\nSome context.\n\n"
+        "## Page architecture\n\n### Intent\nThings.\n\n"
+        "## Panel script\n\n"
+        "**Panel 1.** Wide. A studio.\n\n*No dialogue.*\n\n"
+        "**Panel 2.** Close. A hand.\n\n"
+        "## Image-generation workflow\n\nshould not appear\n"
+    )
+    path = tmp_path / 's01-p1.md'
+    path.write_text(text)
+    result = extract_panel_script(str(path))
+    assert '**Panel 1.**' in result
+    assert '**Panel 2.**' in result
+    assert 'A studio' in result
+    assert 'should not appear' not in result
+    assert 'Scene context' not in result
+
+
+def test_extract_panel_script_missing_section_returns_empty(tmp_path):
+    from storyforge.pages import extract_panel_script
+    path = tmp_path / 's01-p1.md'
+    path.write_text('---\npage_id: s01-p1\n---\n\n# Heading\n\nno script section\n')
+    assert extract_panel_script(str(path)) == ''
