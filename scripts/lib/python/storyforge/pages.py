@@ -190,3 +190,55 @@ def pages_for_scene(project_dir: str, scene_id: str) -> list[PageFile]:
             matched.append(parsed)
     matched.sort(key=lambda p: p.get('page_within_scene', 0))
     return matched
+
+
+class PageFinding(TypedDict, total=False):
+    kind: str
+    path: str
+    field: str
+    detail: str
+
+
+def validate_page_file(path: str) -> list[PageFinding]:
+    """Validate a single page file. Returns list of findings (empty when clean).
+
+    Kinds:
+      - missing_file: file does not exist
+      - no_frontmatter: file has no YAML frontmatter
+      - missing_field: a REQUIRED_FIELDS key is absent
+      - filename_page_id_mismatch: filename stem != page_id
+      - page_within_scene_out_of_range: not in [1, total_pages_in_scene]
+    """
+    page = parse_page_file(path)
+    if page is None:
+        if not os.path.isfile(path):
+            return [{'kind': 'missing_file', 'path': path}]
+        return [{'kind': 'no_frontmatter', 'path': path}]
+
+    findings: list[PageFinding] = []
+
+    for field in REQUIRED_FIELDS:
+        if field not in page:
+            findings.append({
+                'kind': 'missing_field', 'path': path, 'field': field,
+                'detail': f'required frontmatter field {field!r} is missing',
+            })
+
+    stem = os.path.splitext(os.path.basename(path))[0]
+    page_id = page.get('page_id')
+    if page_id and stem != page_id:
+        findings.append({
+            'kind': 'filename_page_id_mismatch', 'path': path,
+            'detail': f'filename stem {stem!r} does not match page_id {page_id!r}',
+        })
+
+    within = page.get('page_within_scene')
+    total = page.get('total_pages_in_scene')
+    if isinstance(within, int) and isinstance(total, int):
+        if within < 1 or within > total:
+            findings.append({
+                'kind': 'page_within_scene_out_of_range', 'path': path,
+                'detail': f'page_within_scene={within} not in [1, {total}]',
+            })
+
+    return findings

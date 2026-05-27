@@ -190,3 +190,56 @@ def test_pages_for_scene_groups_by_prefix(tmp_path):
     _write_page(pages / 's02-p1.md', 's02-p1', 's02-other', 1, 1, 1)
     result = pages_for_scene(str(tmp_path), 's01-studio-finalization')
     assert [p['page_id'] for p in result] == ['s01-p1', 's01-p2', 's01-p3']
+
+
+def test_validate_page_file_clean_passes(tmp_path):
+    """A page file with all required fields and correct filename/page_id
+    match returns no findings."""
+    from storyforge.pages import validate_page_file
+    path = tmp_path / 's01-p1.md'
+    _write_page(path, 's01-p1', 's01-studio-finalization', 1, 5, 2)
+    assert validate_page_file(str(path)) == []
+
+
+def test_validate_missing_required_field(tmp_path):
+    """A missing required field surfaces a 'missing_field' finding."""
+    from storyforge.pages import validate_page_file
+    path = tmp_path / 's01-p1.md'
+    path.write_text(
+        "---\n"
+        "page_id: s01-p1\n"
+        "scene_id: s01-studio-finalization\n"
+        "total_pages_in_scene: 5\n"
+        "panel_count: 2\n"
+        "---\n\nbody\n"
+    )
+    findings = validate_page_file(str(path))
+    assert any(f['kind'] == 'missing_field'
+               and f['field'] == 'page_within_scene' for f in findings)
+
+
+def test_validate_filename_mismatch(tmp_path):
+    """Filename stem must equal page_id."""
+    from storyforge.pages import validate_page_file
+    path = tmp_path / 's01-p7.md'
+    _write_page(path, 's01-p1', 's01', 1, 5, 2)
+    findings = validate_page_file(str(path))
+    assert any(f['kind'] == 'filename_page_id_mismatch' for f in findings)
+
+
+def test_validate_page_within_scene_out_of_range(tmp_path):
+    """page_within_scene must be in [1, total_pages_in_scene]."""
+    from storyforge.pages import validate_page_file
+    path = tmp_path / 's01-p9.md'
+    _write_page(path, 's01-p9', 's01', 9, 5, 2)
+    findings = validate_page_file(str(path))
+    assert any(f['kind'] == 'page_within_scene_out_of_range' for f in findings)
+
+
+def test_validate_no_frontmatter(tmp_path):
+    """A file without frontmatter surfaces 'no_frontmatter'."""
+    from storyforge.pages import validate_page_file
+    path = tmp_path / 's01-p1.md'
+    path.write_text('# No frontmatter here\n')
+    findings = validate_page_file(str(path))
+    assert findings == [{'kind': 'no_frontmatter', 'path': str(path)}]
