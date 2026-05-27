@@ -280,6 +280,86 @@ def test_run_act_scoring_forwards_project_dir_verbatim(tmp_path, monkeypatch):
         )
 
 
+def test_check_stale_ledger_surfaces_buggy_path(tmp_path):
+    """When a project carries a working/working/costs/ledger.csv from
+    pre-#205 score runs, cmd_cleanup's build_cleanup_report includes a
+    warning-severity 'stale_ledger' action item naming the path and a
+    merge/move action. (PR #249 silent-failure review SF-HIGH.)"""
+    from storyforge.cmd_cleanup import _check_stale_ledger
+    project_dir = str(tmp_path)
+    stale = os.path.join(project_dir, 'working', 'working', 'costs',
+                          'ledger.csv')
+    os.makedirs(os.path.dirname(stale), exist_ok=True)
+    with open(stale, 'w') as f:
+        f.write('timestamp|operation|target|model|input_tokens|output_tokens|'
+                'cache_read|cache_create|cost_usd|duration_s\n')
+        f.write('2026-01-01T00:00:00|score|s1|m|100|100|0|0|0.01|0\n')
+
+    findings = _check_stale_ledger(project_dir)
+    assert len(findings) == 1
+    f = findings[0]
+    assert f['type'] == 'stale_ledger'
+    assert f['severity'] == 'warning'
+    assert f['file'] == 'working/working/costs/ledger.csv'
+    assert 'stale' in f['detail'].lower()
+
+
+def test_check_stale_ledger_silent_when_only_correct_path_exists(tmp_path):
+    """When only the correct working/costs/ledger.csv exists (no stale
+    sibling), no finding fires. The detector is a one-time post-fix
+    reconciliation prompt, not an always-on assertion."""
+    from storyforge.cmd_cleanup import _check_stale_ledger
+    project_dir = str(tmp_path)
+    correct = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
+    os.makedirs(os.path.dirname(correct), exist_ok=True)
+    with open(correct, 'w') as f:
+        f.write('timestamp|operation|target|model\n')
+
+    assert _check_stale_ledger(project_dir) == []
+
+
+def test_check_stale_ledger_silent_on_empty_project(tmp_path):
+    """No ledgers at all → no finding. Avoids noise on fresh projects."""
+    from storyforge.cmd_cleanup import _check_stale_ledger
+    assert _check_stale_ledger(str(tmp_path)) == []
+
+
+def test_check_stale_ledger_action_differs_when_no_correct_ledger(tmp_path):
+    """When the stale ledger exists but no correct ledger exists, the
+    action is 'move' rather than 'merge' — the historical data is the
+    project's only cost record."""
+    from storyforge.cmd_cleanup import _check_stale_ledger
+    project_dir = str(tmp_path)
+    stale = os.path.join(project_dir, 'working', 'working', 'costs',
+                          'ledger.csv')
+    os.makedirs(os.path.dirname(stale), exist_ok=True)
+    with open(stale, 'w') as f:
+        f.write('timestamp|operation\n2026-01-01|score\n')
+
+    findings = _check_stale_ledger(project_dir)
+    assert len(findings) == 1
+    # 'move' rather than 'merge' when the correct path doesn't exist.
+    assert 'move' in findings[0]['action'].lower()
+
+
+def test_log_api_usage_warning_includes_operation_and_model(tmp_path, capsys):
+    """_log_api_usage WARNING on failure must name `operation` and
+    `model` for triage, not just the scene target. With the path bug
+    fixed, surviving warnings should be rare — when they fire, the
+    extra context matters. (PR #249 silent-failure review SF-MED-1.)"""
+    from storyforge.cmd_score import _log_api_usage
+    # Pass a non-existent log file so the inner read fails and the
+    # except branch fires.
+    missing = str(tmp_path / 'no-such-log.json')
+    _log_api_usage(missing, 'score-fidelity', 'scene-42',
+                   'claude-haiku-4-5-20251001', str(tmp_path))
+    out = capsys.readouterr().out
+    assert 'WARNING:' in out
+    assert 'score-fidelity' in out  # operation
+    assert 'scene-42' in out  # target
+    assert 'claude-haiku-4-5-20251001' in out  # model
+
+
 def test_revise_lightweight_score_does_not_typeerror_on_signature():
     """`cmd_revise._run_lightweight_score` imports `_score_direct` and
     must call it with the current signature. Without this test, a

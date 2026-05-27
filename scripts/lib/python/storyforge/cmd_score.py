@@ -1234,7 +1234,8 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
             cache_create=usage.get('cache_create', 0),
         )
     except Exception as e:
-        log(f'WARNING: Failed to log usage for {target}: {e}')
+        log(f'WARNING: Failed to log usage for {operation}/{target} '
+            f'(model={model}): {e}')
 
 
 # ============================================================================

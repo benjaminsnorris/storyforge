@@ -963,6 +963,57 @@ def _check_scene_artifacts(project_dir: str) -> list[dict]:
     return findings
 
 
+def _check_stale_ledger(project_dir: str) -> list[dict]:
+    """Detect the #205 stale ledger at working/working/costs/ledger.csv.
+
+    Pre-fix score runs silently wrote cost entries to a path one
+    directory level too deep. After the fix lands, `print_summary`
+    only reads the correct path — historical cost data is invisible
+    unless surfaced. Cleanup flags the stale file so the author can
+    merge / archive / delete it deliberately. The detection has zero
+    impact on the corrected ledger; it's a one-time post-fix
+    reconciliation prompt.
+    """
+    stale = os.path.join(project_dir, 'working', 'working',
+                          'costs', 'ledger.csv')
+    if not os.path.isfile(stale):
+        return []
+    correct = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
+    correct_exists = os.path.isfile(correct)
+    if correct_exists:
+        detail = (
+            'Stale cost ledger at working/working/costs/ledger.csv from '
+            'pre-#205 score runs. The correct ledger at '
+            'working/costs/ledger.csv is in use. Historical cost data '
+            'in the stale file is invisible to `costs.print_summary` '
+            'until merged.'
+        )
+        action = (
+            'Merge rows from working/working/costs/ledger.csv into '
+            'working/costs/ledger.csv (skip the duplicate header row), '
+            'then remove the stale file and the empty parent directory.'
+        )
+    else:
+        detail = (
+            'Stale cost ledger at working/working/costs/ledger.csv from '
+            'pre-#205 score runs, with no current ledger present. The '
+            'historical cost data is intact but mis-located.'
+        )
+        action = (
+            'Move working/working/costs/ledger.csv to '
+            'working/costs/ledger.csv, then remove the empty parent '
+            'directory.'
+        )
+    return [{
+        'type': 'stale_ledger',
+        'file': 'working/working/costs/ledger.csv',
+        'category': 'costs',
+        'detail': detail,
+        'action': action,
+        'severity': 'warning',
+    }]
+
+
 def _check_crlf(project_dir: str) -> list[dict]:
     """Check CSV files for CRLF line endings."""
     findings: list[dict] = []
@@ -1025,6 +1076,9 @@ def build_cleanup_report(project_dir: str) -> dict:
 
     # CRLF check
     all_findings.extend(_check_crlf(project_dir))
+
+    # Stale ledger from #205 (pre-fix score runs)
+    all_findings.extend(_check_stale_ledger(project_dir))
 
     # --- Scene artifacts ---
     all_findings.extend(_check_scene_artifacts(project_dir))
