@@ -256,7 +256,7 @@ def test_extract_panel_script_body(tmp_path):
         "## Panel script\n\n"
         "**Panel 1.** Wide. A studio.\n\n*No dialogue.*\n\n"
         "**Panel 2.** Close. A hand.\n\n"
-        "## Image-generation workflow\n\nshould not appear\n"
+        "## Image-generation prompts\n\nshould not appear\n"
     )
     path = tmp_path / 's01-p1.md'
     path.write_text(text)
@@ -285,7 +285,7 @@ def test_extract_panel_script_keeps_page_headers(tmp_path):
         "---\npage_id: s01-p1\n---\n\n"
         "## Panel script\n\n"
         "## Page 1 — SPLASH\n\n**Panel 1**\nWide.\n\n"
-        "## Image-generation workflow\n\nstops here\n"
+        "## Image-generation prompts\n\nstops here\n"
     )
     result = extract_panel_script(str(path))
     assert '## Page 1 — SPLASH' in result

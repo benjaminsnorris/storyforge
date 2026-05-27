@@ -104,9 +104,12 @@ def _assemble_script(project_dir, chapters, title):
 
     For GN projects with per-page files (pages/<prefix>-pN.md), the panel
     script content is assembled from the page files' '## Panel script'
-    sections, sorted by page_within_scene. Scenes without page files
-    fall back to the inline scene-file body (legacy / pre-#251 projects).
-    Returns the assembled markdown string.
+    sections, sorted by page_within_scene, and prepended with a synthetic
+    `# Scene: {sid}` header so the bundle stays navigable (page files
+    carry per-page headers, not scene-level ones). Scenes without page
+    files fall back to the inline scene-file body — that path uses the
+    file's existing header rather than synthesizing one. Returns the
+    assembled markdown string.
     """
     from storyforge.script_format import count_panels
     from storyforge.pages import pages_for_scene, extract_panel_script

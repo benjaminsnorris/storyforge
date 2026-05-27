@@ -323,3 +323,70 @@ class TestPagesDirectory:
         page_findings = [f for f in report['findings']
                          if f.get('category') == 'pages']
         assert page_findings == []
+
+    def test_missing_field_finding_surfaced(self, tmp_path):
+        """T-9: missing required field surfaces as page_missing_field."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: graphic-novel\n'
+        )
+        pages = tmp_path / 'pages'
+        pages.mkdir()
+        (pages / 's01-p1.md').write_text(
+            "---\npage_id: s01-p1\nscene_id: s01\n"
+            "total_pages_in_scene: 5\npanel_count: 2\n---\n"
+        )
+        report = build_cleanup_report(str(tmp_path))
+        types = {f['type'] for f in report['findings']
+                 if f.get('category') == 'pages'}
+        assert 'page_missing_field' in types
+
+    def test_filename_mismatch_finding_surfaced(self, tmp_path):
+        """T-9: filename != page_id surfaces as page_filename_mismatch."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: graphic-novel\n'
+        )
+        pages = tmp_path / 'pages'
+        pages.mkdir()
+        (pages / 's01-p7.md').write_text(
+            "---\npage_id: s01-p1\nscene_id: s01\n"
+            "page_within_scene: 1\ntotal_pages_in_scene: 5\npanel_count: 2\n"
+            "---\n"
+        )
+        report = build_cleanup_report(str(tmp_path))
+        types = {f['type'] for f in report['findings']
+                 if f.get('category') == 'pages'}
+        assert 'page_filename_mismatch' in types
+
+    def test_out_of_range_finding_surfaced(self, tmp_path):
+        """T-9: page_within_scene > total_pages_in_scene → page_out_of_range."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: graphic-novel\n'
+        )
+        pages = tmp_path / 'pages'
+        pages.mkdir()
+        (pages / 's01-p9.md').write_text(
+            "---\npage_id: s01-p9\nscene_id: s01\n"
+            "page_within_scene: 9\ntotal_pages_in_scene: 5\npanel_count: 2\n"
+            "---\n"
+        )
+        report = build_cleanup_report(str(tmp_path))
+        types = {f['type'] for f in report['findings']
+                 if f.get('category') == 'pages'}
+        assert 'page_out_of_range' in types
+
+    def test_bad_integer_field_finding_surfaced(self, tmp_path):
+        """bad_integer_field (introduced for CR-5/SF-3) surfaces in cleanup."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: graphic-novel\n'
+        )
+        pages = tmp_path / 'pages'
+        pages.mkdir()
+        (pages / 's01-p1.md').write_text(
+            "---\npage_id: s01-p1\nscene_id: s01\n"
+            "page_within_scene: 1\ntotal_pages_in_scene: 1\n"
+            "panel_count: bananas\n---\n"
+        )
+        report = build_cleanup_report(str(tmp_path))
+        types = {f['type'] for f in report['findings']
+                 if f.get('category') == 'pages'}
+        assert 'page_bad_integer_field' in types
