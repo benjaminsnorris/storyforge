@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 
-from storyforge.canon import validate_canon_directory
+from storyforge.canon import CANON_DIR, validate_canon_directory
 from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge.parsing import clean_scene_content, extract_single_scene
@@ -1045,10 +1045,29 @@ def report_canon_files(project_dir: str) -> list[dict]:
     """Validate reference/canon/ for graphic-novel projects.
 
     Returns a list of canon-category findings. Canon validation only
-    runs when the project is in graphic-novel mode — the directory has
-    no meaning in novel mode and silently absent canon is not a finding.
+    runs when the project is in graphic-novel mode. If canon files
+    exist but the project isn't graphic-novel (typically: missing or
+    malformed storyforge.yaml), emit a single finding rather than
+    silently skip — somebody put canon files there on purpose.
     """
+    canon_dir_present = os.path.isdir(os.path.join(project_dir, CANON_DIR))
     if get_medium(project_dir) != 'graphic-novel':
+        if canon_dir_present:
+            return [{
+                'category': 'canon',
+                'type': 'canon_present_in_novel_project',
+                'file': CANON_DIR + '/',
+                'detail': (
+                    'reference/canon/ exists but project.medium is not '
+                    'graphic-novel; canon validation skipped'
+                ),
+                'action': (
+                    'Set project.medium: graphic-novel in storyforge.yaml '
+                    '(or remove reference/canon/ if it was left over from '
+                    'an aborted migration)'
+                ),
+                'severity': 'warning',
+            }]
         return []
     findings = validate_canon_directory(project_dir)
     for f in findings:

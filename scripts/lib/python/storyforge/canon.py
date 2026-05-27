@@ -56,15 +56,23 @@ _SECTION_RE = re.compile(r'^##\s+(.+?)\s*$', re.MULTILINE)
 _SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]*$')
 
 
-def _parse_frontmatter(text: str) -> tuple[dict[str, str] | None, str]:
+_TRUNCATED = object()
+
+
+def _parse_frontmatter(text: str) -> tuple[dict[str, str] | None | object, str]:
     """Extract YAML-style frontmatter as a flat dict.
 
-    Returns (None, '') if the file does not start with `---`. Only flat
-    `key: value` lines are supported — canon files do not use nested
-    structures.
+    Returns:
+        (dict, body) — frontmatter parsed
+        (None, text) — file has no frontmatter at all
+        (_TRUNCATED, text) — file starts with `---` but never closes
+            the block; distinct from missing-frontmatter because the
+            author's diagnostic and fix are different
     """
     match = _FRONTMATTER_RE.match(text)
     if not match:
+        if text.startswith('---'):
+            return _TRUNCATED, text
         return None, text
 
     block = match.group(1)
@@ -107,6 +115,10 @@ def parse_canon_file(path: str) -> dict:
         }
     with open(path, encoding='utf-8') as f:
         text = f.read()
+    # Strip BOM so frontmatter parsing isn't disabled by editors that
+    # auto-write one (Notion/Word/etc.).
+    if text.startswith('﻿'):
+        text = text.lstrip('﻿')
     frontmatter, body = _parse_frontmatter(text)
     sections = {m.group(1).strip() for m in _SECTION_RE.finditer(body)}
     return {
@@ -129,8 +141,20 @@ def _expected_canon_id(path: str) -> str:
     return os.path.splitext(os.path.basename(path))[0]
 
 
-def _read_registry_ids(project_dir: str, registry_filename: str) -> set[str] | None:
-    """Read the `id` column of a registry CSV; None if the file is absent."""
+_REGISTRY_MALFORMED = 'malformed'
+
+
+def _read_registry_ids(project_dir: str, registry_filename: str
+                       ) -> set[str] | None | str:
+    """Read the `id` column of a registry CSV.
+
+    Returns:
+        None — file is absent (caller skips cross-ref silently)
+        _REGISTRY_MALFORMED — file exists but has no readable `id` column
+            (caller emits a project-level finding instead of flagging every
+            canon file as orphan)
+        set[str] — the `id` values in the CSV
+    """
     csv_path = os.path.join(project_dir, 'reference', registry_filename)
     if not os.path.isfile(csv_path):
         return None
@@ -138,12 +162,12 @@ def _read_registry_ids(project_dir: str, registry_filename: str) -> set[str] | N
     with open(csv_path, encoding='utf-8') as f:
         header = f.readline().rstrip('\n')
         if not header:
-            return ids
+            return _REGISTRY_MALFORMED
         cols = header.split('|')
         try:
             id_idx = cols.index('id')
         except ValueError:
-            return ids
+            return _REGISTRY_MALFORMED
         for line in f:
             row = line.rstrip('\n')
             if not row:
@@ -183,6 +207,14 @@ def validate_canon_file(path: str, project_root: str) -> list[dict]:
         return findings  # callers handle missing files at the directory level
 
     fm = parsed['frontmatter']
+    if fm is _TRUNCATED:
+        findings.append(_finding(
+            rel,
+            'canon file opens a frontmatter block with `---` but does not close it',
+            'Close the frontmatter with a `---` line before the body',
+            'canon_truncated_frontmatter',
+        ))
+        return findings  # nothing else to check — frontmatter is unparseable
     if fm is None:
         findings.append(_finding(
             rel,
@@ -262,6 +294,18 @@ def validate_canon_file(path: str, project_root: str) -> list[dict]:
                 'or to the canon/ root',
                 'canon_unknown_subdir',
             ))
+    else:
+        # Depth ≥3 paths (e.g., canon/characters/lucien/portrait.md) bypass
+        # the subdir-vs-type and registry checks. Flag rather than silently
+        # accept — the canon schema only defines depth 1 (root) and depth 2
+        # (subdir).
+        findings.append(_finding(
+            rel,
+            f'canon file nested too deep ({len(parts)} levels under canon/)',
+            'Move the file to canon/ or one of canon/characters/, '
+            'canon/locations/, canon/motifs/',
+            'canon_unexpected_nesting',
+        ))
 
     for section in REQUIRED_SECTIONS:
         if section not in parsed['sections']:
@@ -298,13 +342,16 @@ def _registry_findings(project_dir: str, files: list[str]) -> list[dict]:
     against their corresponding registry CSVs.
 
     A character canon file at characters/foo.md is expected to have a
-    matching `id` row in reference/characters.csv. When the registry CSV
-    is missing entirely we skip the check rather than spam findings —
-    novel-style registry files are optional in graphic-novel mode.
+    matching `id` row in reference/characters.csv. Absent CSVs are
+    skipped silently — novel-style registry files are optional in
+    graphic-novel mode. Malformed CSVs (no readable `id` column) emit
+    one project-level finding rather than flagging every canon file as
+    an orphan; the misdirection would point authors at the wrong fix.
     """
     canon_dir_abs = os.path.join(project_dir, CANON_DIR)
     findings: list[dict] = []
-    registry_cache: dict[str, set[str] | None] = {}
+    registry_cache: dict[str, set[str] | None | str] = {}
+    malformed_reported: set[str] = set()
 
     for path in files:
         rel_to_canon = os.path.relpath(path, canon_dir_abs)
@@ -321,7 +368,20 @@ def _registry_findings(project_dir: str, files: list[str]) -> list[dict]:
             )
         registry_ids = registry_cache[registry_file]
         if registry_ids is None:
-            continue  # registry not present; skip silently
+            continue
+        if registry_ids is _REGISTRY_MALFORMED:
+            if registry_file not in malformed_reported:
+                malformed_reported.add(registry_file)
+                findings.append(_finding(
+                    os.path.join('reference', registry_file),
+                    f'reference/{registry_file} is missing the `id` column '
+                    f'(or is empty); canon cross-reference cannot run for '
+                    f'canon/{subdir}/',
+                    f'Repair reference/{registry_file} so the header includes '
+                    '`id`',
+                    'canon_registry_unreadable',
+                ))
+            continue
         slug = os.path.splitext(filename)[0]
         if slug not in registry_ids:
             rel = os.path.relpath(path, project_dir)

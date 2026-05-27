@@ -147,6 +147,95 @@ def test_validate_valid_root_canon_no_findings(tmp_path):
     assert findings == []
 
 
+def test_validate_truncated_frontmatter(tmp_path):
+    """SF-5: a file that opens `---` but never closes the block must report
+    canon_truncated_frontmatter, not canon_missing_frontmatter — the author's
+    fix is different (close the block vs add a block)."""
+    project = str(tmp_path)
+    canon_dir = os.path.join(project, CANON_DIR)
+    os.makedirs(canon_dir)
+    path = os.path.join(canon_dir, 'truncated.md')
+    with open(path, 'w') as f:
+        f.write('---\ncanon_id: truncated\ncanon_type: foundation\n')
+        f.write('## Embeddable block\nbody text\n')
+    findings = validate_canon_file(path, project)
+    types = [f['type'] for f in findings]
+    assert types == ['canon_truncated_frontmatter']
+
+
+def test_validate_bom_prefixed_frontmatter_parses(tmp_path):
+    """CR-3: BOM-prefixed files (common when authors copy from Notion/Word)
+    must still parse — we strip the BOM before frontmatter detection.
+    """
+    project = str(tmp_path)
+    canon_dir = os.path.join(project, CANON_DIR)
+    os.makedirs(canon_dir)
+    path = os.path.join(canon_dir, 'style-foundation.md')
+    fm = VALID_FRONTMATTER.format(
+        canon_id='style-foundation', canon_type='foundation',
+    )
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('﻿' + fm + VALID_BODY)
+    findings = validate_canon_file(path, project)
+    assert findings == []
+
+
+def test_validate_nested_canon_flagged(tmp_path):
+    """CR-2: a canon file under canon/characters/<dir>/<file>.md is deeper
+    than the schema defines. Without an explicit finding it would silently
+    bypass both the subdir/type rule and the registry cross-reference.
+    """
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/lucien/portrait.md', 'portrait',
+        canon_type='character',
+    )
+    findings = validate_canon_file(path, project)
+    types = [f['type'] for f in findings]
+    assert 'canon_unexpected_nesting' in types
+
+
+def test_validate_directory_emits_one_registry_finding_for_malformed_csv(tmp_path):
+    """CR-1 / SF-1 / T-2: a registry CSV without an `id` column previously
+    caused every canon file in the corresponding subdir to be flagged as a
+    missing-registry-entry orphan. The author would chase a non-bug in canon
+    files while the real bug is the CSV header. Fix: one finding per bad CSV,
+    no per-canon-file noise.
+    """
+    project = str(tmp_path)
+    write_canon(project, 'characters/lucien-vey.md', 'lucien-vey',
+                canon_type='character')
+    write_canon(project, 'characters/other.md', 'other',
+                canon_type='character')
+    # Registry exists but lacks `id` column.
+    chars_path = os.path.join(project, 'reference', 'characters.csv')
+    os.makedirs(os.path.dirname(chars_path), exist_ok=True)
+    with open(chars_path, 'w') as f:
+        f.write('name|description\n')
+        f.write('Lucien|the cartographer\n')
+    findings = validate_canon_directory(project)
+    unreadable = [f for f in findings if f['type'] == 'canon_registry_unreadable']
+    orphan = [f for f in findings if f['type'] == 'canon_missing_registry_entry']
+    assert len(unreadable) == 1
+    assert unreadable[0]['file'] == 'reference/characters.csv'
+    assert orphan == []
+
+
+def test_validate_directory_emits_one_registry_finding_for_empty_csv(tmp_path):
+    """An empty/zero-byte registry CSV must produce the same single
+    project-level finding as a header-without-id CSV."""
+    project = str(tmp_path)
+    write_canon(project, 'characters/lucien-vey.md', 'lucien-vey',
+                canon_type='character')
+    chars_path = os.path.join(project, 'reference', 'characters.csv')
+    os.makedirs(os.path.dirname(chars_path), exist_ok=True)
+    open(chars_path, 'w').close()
+    findings = validate_canon_directory(project)
+    types = [f['type'] for f in findings]
+    assert 'canon_registry_unreadable' in types
+    assert 'canon_missing_registry_entry' not in types
+
+
 def test_validate_missing_frontmatter(tmp_path):
     project = str(tmp_path)
     canon_dir = os.path.join(project, CANON_DIR)
@@ -366,17 +455,47 @@ def test_cleanup_report_includes_canon_findings_for_gn(tmp_path):
         assert f['category'] == 'canon'
 
 
-def test_cleanup_report_skips_canon_for_novel_medium(tmp_path):
+def test_cleanup_report_skips_canon_for_novel_medium_without_canon_dir(tmp_path):
+    """When canon/ is genuinely absent, novel-medium projects skip cleanly."""
     from storyforge.cmd_cleanup import report_canon_files
 
     project = str(tmp_path)
     os.makedirs(project, exist_ok=True)
     with open(os.path.join(project, 'storyforge.yaml'), 'w') as f:
         f.write('project:\n  medium: novel\n')
-    # Even with a populated canon dir, novel projects skip canon validation.
-    write_canon(project, 'style-foundation.md', 'mismatched-id')
     findings = report_canon_files(project)
     assert findings == []
+
+
+def test_cleanup_report_warns_when_canon_dir_in_novel_project(tmp_path):
+    """SF-4: canon/ present but medium isn't graphic-novel should warn rather
+    than silently skip — otherwise a deleted-yaml or misconfigured-medium
+    project ships with unvalidated canon and a green cleanup report.
+    """
+    from storyforge.cmd_cleanup import report_canon_files
+
+    project = str(tmp_path)
+    os.makedirs(project, exist_ok=True)
+    with open(os.path.join(project, 'storyforge.yaml'), 'w') as f:
+        f.write('project:\n  medium: novel\n')
+    write_canon(project, 'style-foundation.md', 'mismatched-id')
+    findings = report_canon_files(project)
+    assert len(findings) == 1
+    assert findings[0]['type'] == 'canon_present_in_novel_project'
+    assert findings[0]['category'] == 'canon'
+
+
+def test_cleanup_report_warns_when_canon_dir_present_no_yaml(tmp_path):
+    """SF-4: missing storyforge.yaml causes get_medium → 'novel' fallback. If
+    canon/ is populated, we surface a finding rather than silently skipping.
+    """
+    from storyforge.cmd_cleanup import report_canon_files
+
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    findings = report_canon_files(project)
+    assert len(findings) == 1
+    assert findings[0]['type'] == 'canon_present_in_novel_project'
 
 
 # ---------------------------------------------------------------------------
