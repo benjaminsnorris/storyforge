@@ -367,6 +367,115 @@ def test_validate_character_in_characters_subdir_clean(tmp_path):
 # validate_canon_directory
 # ---------------------------------------------------------------------------
 
+def test_parse_preserves_colons_in_value(tmp_path):
+    """T-4: partition() splits on the first colon, keeping `:` inside values
+    intact. A future `.split(':')` regression would silently truncate fields
+    like `embeds_as: scene-3: panel-2 (zoom: tight)`.
+    """
+    project = str(tmp_path)
+    fm = textwrap.dedent("""\
+        ---
+        canon_id: style-foundation
+        canon_type: foundation
+        canon_updated: 2026-05-27
+        appears_in: scene-3: panel-2 (zoom: tight)
+        embeds_as: Test
+        first_appearance: scene-1
+        ---
+    """)
+    path = write_canon(project, 'style-foundation.md', 'style-foundation',
+                       frontmatter=fm)
+    parsed = parse_canon_file(path)
+    assert parsed['frontmatter']['appears_in'] == 'scene-3: panel-2 (zoom: tight)'
+
+
+def test_walk_skips_non_markdown_and_dotfiles(tmp_path):
+    """T-3: filter rules cover non-.md, dotfiles, and _ prefix. Without
+    coverage a regression in the filter would silently start trying to
+    validate image/dotfile contents and produce confusing findings."""
+    project = str(tmp_path)
+    canon_dir = os.path.join(project, CANON_DIR)
+    os.makedirs(canon_dir)
+    # Real canon file — should validate.
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    # Non-md — must be ignored.
+    with open(os.path.join(canon_dir, 'cover.png'), 'wb') as f:
+        f.write(b'\x89PNG\r\n')
+    # Dotfile — must be ignored.
+    with open(os.path.join(canon_dir, '.DS_Store.md'), 'w') as f:
+        f.write('not canon')
+    findings = validate_canon_directory(project)
+    assert findings == []
+
+
+def test_read_registry_ids_with_trailing_pipes(tmp_path):
+    """T-3: rows with extra trailing `|` characters parse correctly. The
+    registry CSV format allows variable trailing columns; canon must read
+    only the `id` column robustly."""
+    project = str(tmp_path)
+    write_canon(project, 'characters/lucien-vey.md', 'lucien-vey',
+                canon_type='character')
+    chars_path = os.path.join(project, 'reference', 'characters.csv')
+    os.makedirs(os.path.dirname(chars_path), exist_ok=True)
+    with open(chars_path, 'w') as f:
+        f.write('id|name|aliases\n')
+        f.write('lucien-vey|Lucien|the cartographer||extra|trailing|fields\n')
+    findings = validate_canon_directory(project)
+    assert [f for f in findings if 'registry' in f['type']] == []
+
+
+def test_cleanup_report_skips_canon_with_unset_medium_no_canon_dir(tmp_path):
+    """T-5: project with no medium and no canon/ — fully clean, no findings.
+    Locks in the fallback behavior so a future change to get_medium can't
+    silently start emitting findings on novel projects."""
+    from storyforge.cmd_cleanup import report_canon_files
+
+    project = str(tmp_path)
+    # storyforge.yaml without project.medium
+    with open(os.path.join(project, 'storyforge.yaml'), 'w') as f:
+        f.write('project:\n  title: Test\n')
+    findings = report_canon_files(project)
+    assert findings == []
+
+
+def test_build_cleanup_report_round_trips_canon_findings(tmp_path):
+    """T-1: the integration risk flagged by pr-test-analyzer. Builds a GN
+    project with a known-bad canon file, runs build_cleanup_report ->
+    _write_report, and asserts the CSV round-trips a canon-category row
+    with all REPORT_COLUMNS populated. A regression in category routing
+    or column shape would silently ship without this test.
+    """
+    from storyforge.cmd_cleanup import (
+        REPORT_COLUMNS,
+        _write_report,
+        build_cleanup_report,
+    )
+
+    project = str(tmp_path)
+    with open(os.path.join(project, 'storyforge.yaml'), 'w') as f:
+        f.write('project:\n  medium: graphic-novel\n')
+    write_canon(project, 'style-foundation.md', 'wrong-id-slug')
+    report = build_cleanup_report(project)
+    canon_findings = [f for f in report['findings'] if f.get('category') == 'canon']
+    assert canon_findings, 'expected at least one canon finding in report'
+    for f in canon_findings:
+        assert f['type'].startswith('canon_')
+        assert f['severity'] in ('info', 'warning', 'error')
+
+    report_path = _write_report(report, project)
+    with open(report_path) as f:
+        lines = f.read().splitlines()
+    header = lines[0].split('|')
+    assert header == REPORT_COLUMNS
+    canon_rows = [line for line in lines[1:] if line.startswith('canon|')]
+    assert canon_rows, 'expected at least one canon row in the cleanup CSV'
+    for row in canon_rows:
+        cells = row.split('|')
+        assert len(cells) == len(REPORT_COLUMNS), (
+            f'row has {len(cells)} cells, expected {len(REPORT_COLUMNS)}: {row}'
+        )
+
+
 def test_validate_directory_skips_template_files(tmp_path):
     project = str(tmp_path)
     canon_dir = os.path.join(project, CANON_DIR, 'characters')
@@ -505,14 +614,14 @@ def test_cleanup_report_warns_when_canon_dir_present_no_yaml(tmp_path):
 def test_shipped_templates_pass_validation(plugin_dir, tmp_path):
     """The starter canon files in templates/reference/canon/ are author-facing
     scaffolding; they should pass structural validation as-is (the TODO
-    markers live in body sections, not in fields the validator inspects).
-    """
+    markers live in body sections, not in fields the validator inspects)."""
     import shutil
     src = os.path.join(plugin_dir, 'templates', 'reference', 'canon')
     project = str(tmp_path)
     dst = os.path.join(project, 'reference', 'canon')
     shutil.copytree(src, dst)
     findings = validate_canon_directory(project)
-    # _template.md files are skipped; the four root files must pass.
-    blocking = [f for f in findings if f['severity'] != 'info']
-    assert blocking == [], f'shipped templates failed validation: {blocking}'
+    # SF-7: assert directly on the empty list rather than filtering by
+    # severity; the filter would silently widen if info-level findings
+    # were added in future.
+    assert findings == [], f'shipped templates failed validation: {findings}'
