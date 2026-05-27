@@ -6927,28 +6927,81 @@ def _cross_tier_section(
     return out
 
 
+def _write_cross_tier_fallback(
+        output_dir: str,
+        det_patterns: list[CrossTierPattern],
+        proposals: list[CrossTierProposal],
+        diag: CrossTierDiagnostic,
+        prelude_lines: list[str],
+        primary_path: str,
+        recover_hint: str = '',
+        ) -> None:
+    """Standalone fallback when the primary append target
+    (diagnostic.md / coaching-brief.md) doesn't exist.
+
+    Writes the cross-tier synthesis to its own file so the paid LLM
+    output isn't lost when the upstream cascade fails. Same flaw as
+    PR #247 flagged for other tiers; here we surface the cross-tier
+    case so the cost doesn't vanish silently."""
+    fallback_path = os.path.join(output_dir, 'cross-tier-diagnostic.md')
+    section = _cross_tier_section(det_patterns, proposals, diag)
+    header = [
+        '# Cross-tier diagnostic (standalone)',
+        '',
+        f'_(The primary append target {primary_path!r} did not exist '
+        'when this synthesis was computed. The LLM output is preserved '
+        'in this standalone file rather than lost.)_',
+        '',
+    ]
+    content = '\n'.join(header + prelude_lines + section) + '\n'
+    log(f'WARNING: cross-tier writing standalone fallback at '
+        f'{fallback_path} because {primary_path} did not exist '
+        '(upstream write cascade failed; LLM output preserved).')
+    _safe_write(fallback_path, content, recover_hint=recover_hint)
+
+
 def _append_cross_tier_diagnostic(
         output_dir: str,
         det_patterns: list[CrossTierPattern],
         proposals: list[CrossTierProposal],
         diag: CrossTierDiagnostic,
         ) -> None:
-    """Append the cross-tier section to diagnostic.md (full coaching)."""
+    """Append the cross-tier section to diagnostic.md (full coaching),
+    or fall back to a standalone cross-tier-diagnostic.md when the
+    primary target is missing."""
     md_path = os.path.join(output_dir, 'diagnostic.md')
     if not os.path.isfile(md_path):
-        log(f'WARNING: cross-tier diagnostic could not be appended — '
-            f'{md_path} does not exist (upstream pitch-diagnostic write '
-            'likely failed). Cross-tier synthesis was computed but its '
-            'narrative is lost.')
+        _write_cross_tier_fallback(
+            output_dir, det_patterns, proposals, diag,
+            prelude_lines=[],
+            primary_path=md_path,
+        )
         return
     try:
         with open(md_path, encoding='utf-8') as f:
             existing = f.read()
     except OSError as e:
         log(f'WARNING: could not append cross-tier diagnostic to {md_path}: {e}')
+        _write_cross_tier_fallback(
+            output_dir, det_patterns, proposals, diag,
+            prelude_lines=[],
+            primary_path=md_path,
+        )
         return
     section = _cross_tier_section(det_patterns, proposals, diag)
     _safe_write(md_path, existing + '\n' + '\n'.join(section) + '\n')
+
+
+_COACH_CROSS_TIER_PRELUDE = [
+    '# Cross-tier synthesis (LLM proposals — author confirms)',
+    '',
+    'Cross-tier patterns surface defects that appear at multiple '
+    'resolutions. The proposals below name where the root cause '
+    'most likely lives — they are not directives. The author '
+    'decides whether to fix at the proposed locus or to address '
+    'each downstream symptom independently.',
+    '',
+]
 
 
 def _append_cross_tier_coaching_brief(
@@ -6959,31 +7012,30 @@ def _append_cross_tier_coaching_brief(
         recover_hint: str = '',
         ) -> None:
     """Append the cross-tier section to coaching-brief.md (coach
-    coaching), framed as questions rather than directives."""
+    coaching), or fall back to a standalone cross-tier-diagnostic.md
+    when the primary target is missing."""
     md_path = os.path.join(output_dir, 'coaching-brief.md')
     if not os.path.isfile(md_path):
-        log(f'WARNING: cross-tier coaching brief could not be appended — '
-            f'{md_path} does not exist (upstream coach-brief write likely '
-            'failed). Cross-tier synthesis was computed but is not '
-            'captured in the brief.')
+        _write_cross_tier_fallback(
+            output_dir, det_patterns, proposals, diag,
+            prelude_lines=_COACH_CROSS_TIER_PRELUDE,
+            primary_path=md_path,
+            recover_hint=recover_hint,
+        )
         return
     try:
         with open(md_path, encoding='utf-8') as f:
             existing = f.read()
     except OSError as e:
         log(f'WARNING: could not append cross-tier coaching brief to {md_path}: {e}')
+        _write_cross_tier_fallback(
+            output_dir, det_patterns, proposals, diag,
+            prelude_lines=_COACH_CROSS_TIER_PRELUDE,
+            primary_path=md_path,
+            recover_hint=recover_hint,
+        )
         return
     section = _cross_tier_section(det_patterns, proposals, diag)
-    prelude = [
-        '# Cross-tier synthesis (LLM proposals — author confirms)',
-        '',
-        'Cross-tier patterns surface defects that appear at multiple '
-        'resolutions. The proposals below name where the root cause '
-        'most likely lives — they are not directives. The author '
-        'decides whether to fix at the proposed locus or to address '
-        'each downstream symptom independently.',
-        '',
-    ]
     _safe_write(md_path,
-                existing + '\n' + '\n'.join(prelude + section) + '\n',
+                existing + '\n' + '\n'.join(_COACH_CROSS_TIER_PRELUDE + section) + '\n',
                 recover_hint=recover_hint)
