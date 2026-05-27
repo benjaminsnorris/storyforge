@@ -711,6 +711,26 @@ def test_script_package_handoff_readme_omits_canon_when_no_canon_dir(
     assert not os.path.isdir(os.path.join(project_dir_gn, 'manuscript', 'canon'))
 
 
+def test_handoff_readme_placeholders_all_supplied():
+    """SF2-9: HANDOFF_README.format() will KeyError at runtime if a new
+    {placeholder} is added without updating the call site. This test
+    catches the drift at test time. Doubled-brace `{{...}}` literals
+    used in the dialogue-prefix examples are intentional and excluded
+    from the supplied set."""
+    import re
+
+    from storyforge.cmd_script_package import HANDOFF_README
+
+    # Single-brace placeholders only; `{{...}}` are doubled-literal escapes.
+    single_brace_re = re.compile(r'(?<!\{)\{(\w+)\}(?!\})')
+    placeholders = set(single_brace_re.findall(HANDOFF_README))
+    supplied = {'title', 'canon_line'}
+    assert placeholders == supplied, (
+        f'HANDOFF_README placeholders {placeholders} differ from supplied '
+        f'{supplied}; .format() will KeyError at runtime'
+    )
+
+
 def test_script_package_canon_copy_replaces_stale_bundle(
     project_dir_gn, monkeypatch,
 ):

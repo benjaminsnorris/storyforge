@@ -118,6 +118,16 @@ def test_migrate_novel_to_gn_basic(project_dir, monkeypatch):
         assert 'Graphic Novel Migration Note' in content, \
             'character-bible.md should have visual migration note'
 
+    # T2-3: canon tree scaffolded by step8b survives the full main() run
+    canon_dir = os.path.join(project_dir, 'reference', 'canon')
+    assert os.path.isdir(canon_dir), \
+        'reference/canon/ should be scaffolded by step8b'
+    assert os.path.isfile(os.path.join(canon_dir, 'style-foundation.md')), \
+        'starter canon files should be present'
+    assert os.path.isfile(
+        os.path.join(project_dir, 'reference', 'visual-style.md'),
+    ), 'reference/visual-style.md should be scaffolded'
+
 
 # ---------------------------------------------------------------------------
 # Test 2: GN → novel basic
@@ -420,6 +430,28 @@ def test_step8b_idempotent_when_canon_dir_exists(project_dir):
     assert not os.path.isfile(
         os.path.join(canon_dir, 'style-foundation.md'),
     )
+
+
+def test_step8b_skips_when_canon_dir_exists_even_if_incomplete(project_dir):
+    """T2-4: step8b respects any pre-existing reference/canon/ directory,
+    even when it contains only a partial canon tree (e.g., the author
+    deleted some of the root files). This is deliberate — the author may
+    have purposefully removed canon they don't want — but it's silent
+    by design. Pinned so a future "helpful" change to fill in missing
+    files doesn't sneak past review."""
+    canon_dir = os.path.join(project_dir, 'reference', 'canon', 'characters')
+    os.makedirs(canon_dir)
+    # Only a subdir file — no root canon.
+    with open(os.path.join(canon_dir, 'lucien.md'), 'w') as f:
+        f.write('# canon')
+    created = step8b_scaffold_canon_tree(project_dir, dry_run=False)
+    assert 'reference/canon/' not in created
+    # Root canon files were NOT filled in.
+    assert not os.path.isfile(
+        os.path.join(project_dir, 'reference', 'canon', 'style-foundation.md'),
+    )
+    # Author's file is untouched.
+    assert os.path.isfile(os.path.join(canon_dir, 'lucien.md'))
 
 
 def test_step8b_dry_run_makes_no_changes(project_dir):

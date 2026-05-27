@@ -2,6 +2,7 @@
 cross-references."""
 
 import os
+import re
 import textwrap
 
 import pytest
@@ -432,6 +433,55 @@ def test_cleanup_report_skips_canon_with_unset_medium_no_canon_dir(tmp_path):
         f.write('project:\n  title: Test\n')
     findings = report_canon_files(project)
     assert findings == []
+
+
+def test_build_cleanup_report_clean_canon_plus_pages_zero_findings(
+    fixture_dir_gn, tmp_path,
+):
+    """T2-2: end-to-end happy-path integration. A GN project with a valid
+    canon tree (the committed fixture) plus a pages/ file containing a
+    canon-embed of the actual Embeddable block text produces zero canon
+    findings in the full cleanup report pipeline. Guards against a
+    regression in any of the layers: list_page_files, _walk_canon_files,
+    _resolve_canon_path, _embeddable_block_text, _normalize_for_drift."""
+    import shutil
+    from storyforge.cmd_cleanup import build_cleanup_report
+
+    project = str(tmp_path / 'gn-project')
+    shutil.copytree(fixture_dir_gn, project)
+
+    canon_text = _embeddable_text(
+        project, 'characters', 'cartographer.md',
+    )
+    pages_dir = os.path.join(project, 'pages')
+    os.makedirs(pages_dir)
+    with open(os.path.join(pages_dir, 's01-p1.md'), 'w') as f:
+        f.write(
+            '<!-- canon-embed: cartographer -->\n'
+            f'{canon_text.strip()}\n'
+            '<!-- /canon-embed -->\n'
+        )
+
+    report = build_cleanup_report(project)
+    canon_findings = [
+        f for f in report['findings'] if f.get('category') == 'canon'
+    ]
+    assert canon_findings == [], (
+        f'expected zero canon findings on clean canon+pages project, '
+        f'got: {canon_findings}'
+    )
+
+
+def _embeddable_text(project_dir, subdir, filename):
+    """Read the Embeddable block body of a canon file in the fixture."""
+    path = os.path.join(project_dir, CANON_DIR, subdir, filename)
+    with open(path) as f:
+        body = f.read()
+    match = re.search(
+        r'^##\s+Embeddable block\s*\n(.*?)(?=^##\s|\Z)',
+        body, re.MULTILINE | re.DOTALL,
+    )
+    return match.group(1) if match else ''
 
 
 def test_build_cleanup_report_round_trips_canon_findings(tmp_path):
