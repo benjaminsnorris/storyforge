@@ -422,9 +422,10 @@ class StoryPowerResult(TypedDict):
     otherwise they carry the payload from each Layer 1/2 scoring run.
 
     cross_tier is None when fewer than 2 tier outputs are available
-    (single-tier projects have nothing to synthesize across) or the
-    deterministic pre-pass found nothing AND the LLM call failed.
-    Otherwise carries the synthesis payload.
+    (single-tier projects have nothing to synthesize across).
+    Otherwise carries the synthesis payload — the LLM-failure /
+    unparseable paths still produce a populated extension (with the
+    deterministic pre-pass patterns) and the corresponding status.
     """
     coaching: CoachingLevel
     status: StoryPowerStatus
@@ -6564,10 +6565,22 @@ consolidate.  Return ONLY the JSON object.
 
 
 def _extract_cross_tier_diagnostic(parsed: dict) -> CrossTierDiagnostic:
-    """Pull the LLM's cross_tier_diagnostic dict (all fields
-    optional)."""
+    """Pull the LLM's cross_tier_diagnostic dict (all fields optional).
+
+    When the field is present but isn't a dict (e.g., the LLM stuttered
+    and returned the synthesis paragraph directly as a string), log a
+    WARNING naming the unexpected type — silently coercing to {} would
+    discard real synthesis content as `status='ok'` (the PR #243
+    silent-failure class)."""
     raw = parsed.get('cross_tier_diagnostic')
+    if raw is None:
+        return {}
     if not isinstance(raw, dict):
+        log(f'WARNING: cross_tier_diagnostic field present but not a '
+            f'dict (type={type(raw).__name__}); discarding malformed '
+            'payload. The LLM may have returned the synthesis '
+            'directly as a string instead of nesting it under the '
+            'expected keys.')
         return {}
     out: CrossTierDiagnostic = {}
     for key in ('synthesis', 'root_cause', 'project_disposition',

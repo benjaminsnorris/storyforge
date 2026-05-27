@@ -7040,6 +7040,29 @@ def test_cross_tier_partial_when_llm_returns_empty_with_patterns(
     assert 'synthesis ignored the pre-pass signal' in out
 
 
+def test_extract_cross_tier_diagnostic_warns_on_non_dict(capsys):
+    """When the LLM returns cross_tier_diagnostic as a string instead
+    of a dict (stutter / format error), surface a WARNING. Silent
+    coercion to {} would discard real synthesis content as
+    status='ok' — the PR #243 silent-failure class repeated. (PR
+    #248 review SF-CR-1.)"""
+    from storyforge.scoring_story_power import _extract_cross_tier_diagnostic
+    parsed = {'cross_tier_diagnostic': 'The tiers all cohere.'}
+    out = _extract_cross_tier_diagnostic(parsed)
+    assert out == {}
+    log_out = capsys.readouterr().out
+    assert 'cross_tier_diagnostic field present but not a dict' in log_out
+    assert 'type=str' in log_out
+
+
+def test_extract_cross_tier_diagnostic_silent_on_missing_field():
+    """When the field is absent entirely (vs malformed), no log fires
+    — that's the documented optional-field case."""
+    from storyforge.scoring_story_power import _extract_cross_tier_diagnostic
+    out = _extract_cross_tier_diagnostic({})
+    assert out == {}
+
+
 def test_cross_tier_proposals_extractor_drops_incomplete(capsys):
     """Proposals require both target and move; rows missing either
     are dropped."""

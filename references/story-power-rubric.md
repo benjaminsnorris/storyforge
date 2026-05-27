@@ -1026,11 +1026,11 @@ in-memory tier outputs:
 
 4. **Project-level disposition.** When ≥4 of the six tiers score
    below their respective "strong" threshold (below 7 on the
-   weighted composite for tiers that produce a composite, or
-   below 7 on the lowest-axis average for those that don't), the
-   project's structural-craft layer is underweight overall. The
-   high-leverage move is to return to elaboration before
-   continuing to drafting. **Severity:** high (project-wide).
+   weighted composite for pitch, below 7 on the unweighted mean of
+   the tier's whole-axis scores for the others), the project's
+   structural-craft layer is underweight overall. The high-leverage
+   move is to return to elaboration before continuing to drafting.
+   **Severity:** high (project-wide).
 
 These patterns are the load-bearing surface. They are detected
 deterministically (no LLM call required) and always populate the
