@@ -717,14 +717,15 @@ def main(argv=None):
         scored, failed = _score_batch(
             scene_ids, eval_model, eval_template, evaluation_criteria,
             weighted_text_str, metadata_csv, intent_csv, scenes_dir,
-            cycle_dir, log_dir, diagnostics_csv, plugin_dir, system=system,
+            cycle_dir, log_dir, diagnostics_csv, plugin_dir,
+            project_dir, system=system,
         )
     else:
         scored, failed = _score_direct(
             scene_ids, eval_model, eval_template, evaluation_criteria,
             weighted_text_str, metadata_csv, intent_csv, scenes_dir,
             cycle_dir, log_dir, diagnostics_csv, plugin_dir,
-            args.parallel, score_start, system=system,
+            args.parallel, score_start, project_dir, system=system,
         )
 
     log('')
@@ -750,7 +751,7 @@ def main(argv=None):
         _run_act_scoring(
             scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
             prompts_dir, weights_file, sonnet_model, plugin_dir, args.dry_run,
-            system=system,
+            project_dir, system=system,
         )
         update_pr_task('Act-level scoring', project_dir)
 
@@ -1233,7 +1234,8 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
             cache_create=usage.get('cache_create', 0),
         )
     except Exception as e:
-        log(f'WARNING: Failed to log usage for {target}: {e}')
+        log(f'WARNING: Failed to log usage for {operation}/{target} '
+            f'(model={model}): {e}')
 
 
 # ============================================================================
@@ -1242,7 +1244,8 @@ def _log_api_usage(log_file: str, operation: str, target: str, model: str,
 
 def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
                  weighted_text_str, metadata_csv, intent_csv, scenes_dir,
-                 cycle_dir, log_dir, diagnostics_csv, plugin_dir, system=None):
+                 cycle_dir, log_dir, diagnostics_csv, plugin_dir,
+                 project_dir, system=None):
     """Batch mode scoring. Returns (scored, failed)."""
     log('')
     log(f'Building batch request for {len(scene_ids)} scenes...')
@@ -1284,8 +1287,7 @@ def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
             # Log usage (batch=True for 50% discount pricing)
             if os.path.isfile(json_file):
                 _log_api_usage(json_file, 'score', sid, eval_model,
-                               os.path.dirname(os.path.dirname(cycle_dir)),
-                               batch=True)
+                               project_dir, batch=True)
 
             text_content = open(text_file).read()
             tmp_scores = os.path.join(cycle_dir, f'.tmp-scores-{sid}.csv')
@@ -1314,7 +1316,7 @@ def _score_batch(scene_ids, eval_model, eval_template, evaluation_criteria,
 def _score_direct(scene_ids, eval_model, eval_template, evaluation_criteria,
                   weighted_text_str, metadata_csv, intent_csv, scenes_dir,
                   cycle_dir, log_dir, diagnostics_csv, plugin_dir,
-                  parallel, score_start, system=None):
+                  parallel, score_start, project_dir, system=None):
     """Direct mode scoring with parallel workers. Returns (scored, failed)."""
     from storyforge.runner import run_batched
     from storyforge.scoring import merge_score_files
@@ -1323,7 +1325,6 @@ def _score_direct(scene_ids, eval_model, eval_template, evaluation_criteria,
 
     scored = 0
     failed = 0
-    project_dir = os.path.dirname(os.path.dirname(cycle_dir))
 
     def score_one(sid):
         prompt = _build_scene_prompt(sid, eval_template, evaluation_criteria,
@@ -1492,7 +1493,7 @@ def _run_fidelity_scoring(filtered_ids, project_dir, scenes_dir, log_dir,
 
 def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
                      prompts_dir, weights_file, sonnet_model, plugin_dir,
-                     dry_run, system=None):
+                     dry_run, project_dir, system=None):
     """Run act-level scoring."""
     act_template_file = os.path.join(prompts_dir, 'act-level.md')
     if not os.path.isfile(act_template_file):
@@ -1550,7 +1551,6 @@ def _run_act_scoring(scene_ids, metadata_csv, scenes_dir, cycle_dir, log_dir,
             continue
 
         log_file = os.path.join(log_dir, f'score-{act_id}.json')
-        project_dir = os.path.dirname(os.path.dirname(cycle_dir))
 
         try:
             response = invoke_to_file(prompt, sonnet_model, log_file, 4096,

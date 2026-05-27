@@ -1110,7 +1110,7 @@ def _run_lightweight_score(project_dir: str, scene_ids: list[str],
         scene_ids, eval_model, eval_template, evaluation_criteria,
         weighted_text_str, metadata_csv, intent_csv, scenes_dir,
         cycle_dir, log_dir, diagnostics_csv, plugin_dir,
-        parallel, _time.time(),
+        parallel, _time.time(), project_dir,
     )
 
     log(f'  Scored: {scored}, failed: {failed}')
