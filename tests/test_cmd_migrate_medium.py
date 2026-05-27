@@ -15,6 +15,7 @@ from storyforge.cmd_migrate_medium import (
     step6_transform_briefs_csv,
     step7_archive_and_clear_scenes_dir,
     step8_add_bible_visual_notes,
+    step8b_scaffold_canon_tree,
     main,
 )
 from storyforge.common import get_medium
@@ -379,6 +380,56 @@ def test_step8_appends_visual_note_when_no_visual_sections(project_dir):
     with open(char_bible) as f:
         updated = f.read()
     assert 'Graphic Novel Migration Note' in updated
+
+
+def test_step8b_scaffolds_canon_tree(project_dir):
+    """step8b copies templates/reference/canon/ + visual-style.md so the
+    author can start authoring canon blocks immediately after the
+    novel→GN migration completes."""
+    assert not os.path.isdir(os.path.join(project_dir, 'reference', 'canon'))
+    assert not os.path.isfile(
+        os.path.join(project_dir, 'reference', 'visual-style.md'),
+    )
+    created = step8b_scaffold_canon_tree(project_dir, dry_run=False)
+    assert 'reference/canon/' in created
+    assert 'reference/visual-style.md' in created
+    # Starter templates landed.
+    assert os.path.isfile(
+        os.path.join(project_dir, 'reference', 'canon',
+                     'style-foundation.md'),
+    )
+    assert os.path.isfile(
+        os.path.join(project_dir, 'reference', 'canon', 'characters',
+                     '_template.md'),
+    )
+
+
+def test_step8b_idempotent_when_canon_dir_exists(project_dir):
+    """If reference/canon/ already exists (author started canon work
+    between migration runs), step8b must not clobber it."""
+    canon_dir = os.path.join(project_dir, 'reference', 'canon')
+    os.makedirs(canon_dir)
+    with open(os.path.join(canon_dir, 'authors-own-canon.md'), 'w') as f:
+        f.write('AUTHOR WORK — do not clobber')
+    created = step8b_scaffold_canon_tree(project_dir, dry_run=False)
+    assert 'reference/canon/' not in created
+    # The author's file survives.
+    with open(os.path.join(canon_dir, 'authors-own-canon.md')) as f:
+        assert f.read() == 'AUTHOR WORK — do not clobber'
+    # The starter templates were NOT copied (because canon/ existed).
+    assert not os.path.isfile(
+        os.path.join(canon_dir, 'style-foundation.md'),
+    )
+
+
+def test_step8b_dry_run_makes_no_changes(project_dir):
+    """In dry-run mode, step8b reports what it would do but writes
+    nothing."""
+    created = step8b_scaffold_canon_tree(project_dir, dry_run=True)
+    assert 'reference/canon/' in created
+    assert not os.path.isdir(
+        os.path.join(project_dir, 'reference', 'canon'),
+    )
 
 
 def test_step8_appends_even_when_visual_already_present(project_dir_gn):

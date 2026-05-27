@@ -432,6 +432,57 @@ def step8_add_bible_visual_notes(
 
 
 # ============================================================================
+# Step 8b: Scaffold canon tree (novel → graphic-novel only)
+# ============================================================================
+
+def step8b_scaffold_canon_tree(
+    project_dir: str, dry_run: bool
+) -> list[str]:
+    """Copy templates/reference/canon/ and visual-style.md into the project.
+
+    Authors converting from novel to graphic-novel need the canon
+    architecture from issue #254 to start authoring visual blocks. This
+    step copies the shipped starter templates so the migration leaves the
+    project ready for `storyforge cleanup --csv` to validate canon work
+    as it gets filled in.
+
+    Idempotent: if reference/canon/ already exists, no files are copied
+    or overwritten — the author may have started canon work between
+    migration runs and we don't want to clobber it. The visual-style.md
+    is copied only when it's absent for the same reason.
+
+    Returns list of project-relative paths that were created.
+    """
+    import shutil
+
+    from storyforge.common import get_plugin_dir
+
+    created: list[str] = []
+    plugin_dir = get_plugin_dir()
+    src_canon = os.path.join(plugin_dir, 'templates', 'reference', 'canon')
+    src_visual = os.path.join(
+        plugin_dir, 'templates', 'reference', 'visual-style.md',
+    )
+    dst_canon = os.path.join(project_dir, 'reference', 'canon')
+    dst_visual = os.path.join(project_dir, 'reference', 'visual-style.md')
+
+    if not os.path.isdir(dst_canon) and os.path.isdir(src_canon):
+        if not dry_run:
+            shutil.copytree(src_canon, dst_canon)
+        created.append('reference/canon/')
+        log('  reference/canon/: scaffolded from templates')
+
+    if not os.path.isfile(dst_visual) and os.path.isfile(src_visual):
+        if not dry_run:
+            os.makedirs(os.path.dirname(dst_visual), exist_ok=True)
+            shutil.copy2(src_visual, dst_visual)
+        created.append('reference/visual-style.md')
+        log('  reference/visual-style.md: scaffolded from template')
+
+    return created
+
+
+# ============================================================================
 # Step 9: Print summary
 # ============================================================================
 
@@ -463,6 +514,7 @@ def step9_print_summary(
         print('  - scenes.csv: target_words and word_count cleared')
         print(f'  - scenes/: {scene_count} prose file(s) moved to archive/scenes')
         print('  - character-bible.md, world-bible.md: visual migration notes appended')
+        print('  - reference/canon/ and reference/visual-style.md: scaffolded')
     elif from_medium == 'graphic-novel' and to_medium == 'novel':
         print('  - scenes.csv: target_pages, panel_count, page_count cleared')
         print('  - scene-briefs.csv: GN columns cleared (page_layout, panel_breakdown, visual_keywords, page_turn_beats, caption_strategy)')
@@ -489,10 +541,12 @@ def step9_print_summary(
         print('Next steps:')
         print('  1. Add ### Visual subsections to reference/character-bible.md per character')
         print('  2. Add ### Visual subsections to reference/world-bible.md per location')
-        print('  3. Set target_pages for each scene in reference/scenes.csv')
-        print('  4. Run: ./storyforge elaborate --stage briefs')
+        print('  3. Fill in reference/canon/ — style-foundation, lighting-laws, etc.')
+        print('     plus a canon/characters/<slug>.md per on-page character')
+        print('  4. Set target_pages for each scene in reference/scenes.csv')
+        print('  5. Run: ./storyforge elaborate --stage briefs')
         print('     (fills page_layout, panel_breakdown, visual_keywords, page_turn_beats, caption_strategy)')
-        print('  5. Run: ./storyforge write  (to draft panel scripts scene by scene)')
+        print('  6. Run: ./storyforge write  (to draft panel scripts scene by scene)')
     elif from_medium == 'graphic-novel' and to_medium == 'novel':
         print('Next steps:')
         print('  1. Set target_words per scene in reference/scenes.csv')
@@ -590,6 +644,8 @@ def main(argv=None):
     if from_medium == 'novel' and to_medium == 'graphic-novel':
         modified = step8_add_bible_visual_notes(project_dir, args.dry_run)
         log(f'  [8/9] Bible visual notes: {len(modified)} file(s) updated')
+        created = step8b_scaffold_canon_tree(project_dir, args.dry_run)
+        log(f'  [8b/9] Canon tree: {len(created)} item(s) scaffolded')
     else:
         log('  [8/9] Bible visual notes: skipped (GN→novel direction)')
 

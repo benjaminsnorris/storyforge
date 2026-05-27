@@ -410,6 +410,16 @@ When orienting yourself in a GN project, check whether `pages/` exists:
 - **If `pages/` is populated:** recommend per-page work. Suggest extracting metadata after page edits — `./storyforge extract --from-pages` updates `scenes.csv` panel_count + page_count from the page files. Recommend the script-package skill once the page files are ready for handoff — it now assembles the artist bundle from page files when present, falling back to the inline scene file otherwise.
 - **If `pages/` is empty or absent:** the project is using scene-level files only. That's still supported. Suggest migrating to per-page files when a scene's panel-level content gets unwieldy (around 3+ pages with detailed image prompts).
 
+### Visual canon (`reference/canon/`)
+
+Check whether `reference/canon/` exists in the project. The canon tree is the source-of-truth for visual blocks (Style Foundation, Lighting Laws, Panel Registers, Page Rhythm, plus one file per character/location/motif) that get embedded inline into per-panel prompts.
+
+- **If `reference/canon/` is absent:** recommend scaffolding it before serious panel-prompt work begins. Authors who skip canon end up with drift across panels (one scene's "Lucien" doesn't match the next). The starter templates live at `templates/reference/canon/` in the plugin; the cleanest path is to copy them in.
+- **If `reference/canon/` exists but the four root files (`style-foundation.md`, `lighting-laws.md`, `panel-registers.md`, `page-rhythm-rules.md`) still contain `TODO` placeholders:** suggest filling them before drafting panel scripts. The root canon embeds into every panel; placeholders mean every panel ships with the same hole.
+- **If `pages/` has page files that reference canon (look for `<!-- canon-embed: ... -->` markers) and `storyforge cleanup --csv` reports `canon_drift` or `canon_embed_orphan` findings:** the author needs to re-embed the affected blocks. Drift means a canon block changed but its inline copies are stale.
+
+The canon-embed convention is documented in `reference/visual-style.md` (also scaffolded when the canon tree is set up).
+
 These commands and skills work in GN mode: `elaborate`, `hone`, `validate`, `cleanup`, `write`, `evaluate`, `score`, `revise`, `extract`, `script-package`. Not yet supported: `publish`, `annotations` (Bookshelf integration — tracked as #215).
 
 If the author asks for an unsupported action, explain the limit and offer to help with what is supported.

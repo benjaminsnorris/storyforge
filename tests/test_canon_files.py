@@ -776,6 +776,15 @@ def test_cleanup_report_warns_when_canon_dir_present_no_yaml(tmp_path):
 # Templates ship valid canon files (foundation set)
 # ---------------------------------------------------------------------------
 
+def test_gn_fixture_canon_tree_is_clean(fixture_dir_gn):
+    """The committed canon tree in tests/fixtures/test-project-gn/ is the
+    reference example for what a healthy GN project's canon looks like.
+    It must pass validation with zero findings so future contributors
+    have a working baseline to compare against."""
+    findings = validate_canon_directory(fixture_dir_gn)
+    assert findings == [], f'GN fixture canon has findings: {findings}'
+
+
 def test_shipped_templates_pass_validation(plugin_dir, tmp_path):
     """The starter canon files in templates/reference/canon/ are author-facing
     scaffolding; they should pass structural validation as-is (the TODO

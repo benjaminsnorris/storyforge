@@ -693,8 +693,13 @@ def test_script_package_handoff_readme_omits_canon_when_no_canon_dir(
     project_dir_gn, monkeypatch,
 ):
     """Without a canon dir, the readme must not mention canon — would be
-    a broken pointer."""
+    a broken pointer. The GN fixture ships with a canon tree, so this
+    test explicitly removes it first to exercise the no-canon path."""
+    import shutil
     monkeypatch.chdir(project_dir_gn)
+    fixture_canon = os.path.join(project_dir_gn, 'reference', 'canon')
+    if os.path.isdir(fixture_canon):
+        shutil.rmtree(fixture_canon)
     _setup_drafted_scenes(project_dir_gn)
     _setup_chapter_map(project_dir_gn)
 
