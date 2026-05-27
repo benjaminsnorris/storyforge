@@ -247,7 +247,12 @@ def validate_page_file(path: str) -> list[PageFinding]:
 _PANEL_SCRIPT_HEADER = re.compile(
     r'^##\s+Panel script\s*$', re.MULTILINE | re.IGNORECASE,
 )
-_NEXT_SECTION_HEADER = re.compile(r'^##\s+\S', re.MULTILINE)
+# Match the NEXT page-file section (## Image-generation..., ## Page-specific
+# notes, etc.) but NOT page-script headers (## Page N — LAYOUT), since
+# those are part of the script and must remain inside the extracted body.
+_NEXT_SECTION_HEADER = re.compile(
+    r'^##\s+(?!Page\s+\d+\s+—)\S', re.MULTILINE,
+)
 
 
 def extract_panel_script(path: str) -> str:

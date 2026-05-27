@@ -79,6 +79,78 @@ def test_script_package_produces_bundle(project_dir_gn, monkeypatch):
     from storyforge import cmd_script_package
     cmd_script_package.main([])
 
+
+def test_script_package_prefers_page_files_when_present(project_dir_gn, monkeypatch):
+    """When pages/sN-pX.md files exist for a scene, the assembled bundle
+    uses their '## Panel script' sections instead of the inline scene
+    file body. The scene file's metadata table and page index are still
+    skipped; the global page-number sequence still runs across the
+    bundle as a whole."""
+    monkeypatch.chdir(project_dir_gn)
+
+    scenes_dir = os.path.join(project_dir_gn, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    pages_dir = os.path.join(project_dir_gn, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+
+    # s01-studio scene-file: page index only (no inline panel script)
+    with open(os.path.join(scenes_dir, 's01-studio.md'), 'w') as f:
+        f.write('# Scene s01\n\n## Page index\n\nSee pages/.\n')
+    # Two page files for s01
+    for i, comp in enumerate(['Wide establishing.', 'Lucien enters.'], start=1):
+        with open(os.path.join(pages_dir, f's01-p{i}.md'), 'w') as f:
+            f.write(
+                f"---\n"
+                f"page_id: s01-p{i}\n"
+                f"scene_id: s01-studio\n"
+                f"page_within_scene: {i}\n"
+                f"total_pages_in_scene: 2\n"
+                f"panel_count: 1\n"
+                f"---\n\n"
+                f"## Panel script\n\n"
+                f"## Page {i} — SPLASH\n\n"
+                f"**Panel 1**\n{comp}\n"
+            )
+
+    # s02 inline-only
+    with open(os.path.join(scenes_dir, 's02-other.md'), 'w') as f:
+        f.write(
+            '## Page 1 — SPLASH\n\n**Panel 1**\nInline content.\n'
+        )
+
+    # Replace seeded scenes with our two test scenes
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    with open(scenes_csv) as f:
+        header = f.readline()
+    cols = header.strip().split('|')
+
+    def _row(sid):
+        row = {c: '' for c in cols}
+        row['id'] = sid
+        row['status'] = 'drafted'
+        row['title'] = sid
+        return '|'.join(row[c] for c in cols)
+
+    with open(scenes_csv, 'w') as f:
+        f.write(header)
+        f.write(_row('s01-studio') + '\n')
+        f.write(_row('s02-other') + '\n')
+
+    map_path = os.path.join(project_dir_gn, 'reference', 'chapter-map.csv')
+    with open(map_path, 'w') as f:
+        f.write('chapter|title|heading|scenes\n')
+        f.write('1|Opening|numbered-titled|s01-studio;s02-other\n')
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    script_md = open(os.path.join(project_dir_gn, 'manuscript', 'script.md')).read()
+    assert 'Wide establishing.' in script_md
+    assert 'Lucien enters.' in script_md
+    assert 'Inline content.' in script_md
+    # The scene file's page-index section is not included
+    assert '## Page index' not in script_md
+
     bundle = os.path.join(project_dir_gn, 'manuscript')
     assert os.path.isfile(os.path.join(bundle, 'script.md'))
     assert os.path.isfile(os.path.join(bundle, 'visual-references.md'))

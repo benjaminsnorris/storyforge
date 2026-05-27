@@ -273,3 +273,21 @@ def test_extract_panel_script_missing_section_returns_empty(tmp_path):
     path = tmp_path / 's01-p1.md'
     path.write_text('---\npage_id: s01-p1\n---\n\n# Heading\n\nno script section\n')
     assert extract_panel_script(str(path)) == ''
+
+
+def test_extract_panel_script_keeps_page_headers(tmp_path):
+    """`## Page N — LAYOUT` is part of the script format; the extractor
+    must not treat those as section boundaries (regression — script-package
+    needs the page headers preserved so global renumbering can find them)."""
+    from storyforge.pages import extract_panel_script
+    path = tmp_path / 's01-p1.md'
+    path.write_text(
+        "---\npage_id: s01-p1\n---\n\n"
+        "## Panel script\n\n"
+        "## Page 1 — SPLASH\n\n**Panel 1**\nWide.\n\n"
+        "## Image-generation workflow\n\nstops here\n"
+    )
+    result = extract_panel_script(str(path))
+    assert '## Page 1 — SPLASH' in result
+    assert 'Wide.' in result
+    assert 'stops here' not in result
