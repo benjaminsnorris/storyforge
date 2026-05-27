@@ -7299,6 +7299,108 @@ def test_gather_tier_lowest_axes_pitch_handles_empty_scores():
     assert 'pitch' not in out
 
 
+def test_tier_keys_module_load_invariants():
+    """TIER_KEYS / TIER_KEYS_SET / _PROJECT_DISPOSITION_THRESHOLD all
+    satisfy their module-load asserts. This test re-checks them at
+    import time as a forward-compatibility guard (if a future edit
+    breaks the invariants, the assert fires at module load before
+    tests even start; this test ensures the assert exists and is
+    correct)."""
+    from storyforge.scoring_story_power import (
+        TIER_KEYS, TIER_KEYS_SET, _PROJECT_DISPOSITION_THRESHOLD,
+    )
+    assert len(set(TIER_KEYS)) == len(TIER_KEYS), 'no duplicates'
+    assert TIER_KEYS_SET == set(TIER_KEYS)
+    assert 0 < _PROJECT_DISPOSITION_THRESHOLD <= len(TIER_KEYS)
+
+
+def test_extract_cross_tier_proposals_drops_malformed_targets(capsys):
+    """The proposal target must match scene:|spine_event:|tier:|axis:
+    prefix. Malformed targets are dropped at extraction so the
+    bare-string drift doesn't reach downstream writers. (PR #248
+    review TD-I-2.)"""
+    from storyforge.scoring_story_power import _extract_cross_tier_proposals
+    parsed = {
+        'proposals': [
+            {'target': 'tighten the midpoint', 'move': 'do the thing'},
+            {'target': 'unknown:s1', 'move': 'do something'},
+            {'target': 's1', 'move': 'no prefix'},
+            {'target': 'scene:s5', 'move': 'split it'},  # valid
+            {'target': 'spine_event:ev-3', 'move': 'sharpen'},  # valid
+            {'target': 'tier:architecture', 'move': 'revisit'},  # valid
+            {'target': 'axis:field_coherence', 'move': 'rethink'},  # valid
+        ],
+    }
+    out = _extract_cross_tier_proposals(parsed)
+    assert len(out) == 4
+    valid_targets = {p['target'] for p in out}
+    assert valid_targets == {
+        'scene:s5', 'spine_event:ev-3', 'tier:architecture',
+        'axis:field_coherence',
+    }
+    info = capsys.readouterr().out
+    assert 'malformed target' in info
+    # The three malformed targets were named in drops.
+    assert "'tighten the midpoint'" in info
+    assert "'unknown:s1'" in info
+    assert "'s1'" in info
+
+
+def test_extract_cross_tier_proposals_validates_consolidates_tiers(capsys):
+    """consolidates_tiers entries are validated against TIER_KEYS;
+    unknown tier names are dropped from the consolidates list (with
+    the dropped entries surfaced in the drop log). (PR #248 review
+    TD-I-1.)"""
+    from storyforge.scoring_story_power import _extract_cross_tier_proposals
+    parsed = {
+        'proposals': [
+            {'target': 'scene:s1', 'move': 'split it',
+             'consolidates_tiers': ['architecture', 'made_up_tier',
+                                       'briefs', 'typo_scene_maps']},
+        ],
+    }
+    out = _extract_cross_tier_proposals(parsed)
+    assert len(out) == 1
+    # The valid tier names survive, the unknown ones are filtered.
+    assert out[0]['consolidates_tiers'] == ['architecture', 'briefs']
+    info = capsys.readouterr().out
+    assert 'unknown tier name' in info
+    assert 'made_up_tier' in info
+    assert 'typo_scene_maps' in info
+
+
+def test_gather_tier_strengths_excludes_partial_extensions():
+    """Extensions with status='partial' are excluded from project_
+    disposition input — a partial extension might carry one int
+    score with everything else missing, which would skew the
+    average and the firing decision. (PR #248 review SF-I-2.)"""
+    from storyforge.scoring_story_power import _gather_tier_strengths
+    # Construct a result with a partial spine that has a single low
+    # score (which would average toward the threshold if not excluded).
+    result = {
+        'composite': 8.5,
+        'scores': {'specificity': 8},
+        'diagnostic': {},
+        'act_shape': None,
+        'spine': {'status': 'partial',
+                  'whole_spine_scores': {'function_coverage': 3},
+                  'spine_diagnostic': {}},
+        'architecture': {'status': 'ok',
+                          'whole_architecture_scores': {
+                              'action_sequel_rhythm': 8,
+                              'spine_coverage_balance': 9,
+                          },
+                          'architecture_diagnostic': {}},
+        'scene_map': None,
+        'briefs': None,
+    }
+    strengths = _gather_tier_strengths(result)  # type: ignore[arg-type]
+    # Pitch (8.5) + architecture (avg 8.5) — partial spine excluded.
+    assert 'pitch' in strengths
+    assert 'architecture' in strengths
+    assert 'spine' not in strengths
+
+
 def test_extract_cross_tier_proposals_logs_on_non_list_consolidates(capsys):
     """When the LLM returns consolidates_tiers as a non-list (e.g., a
     single string), log INFO with the type so a consistently-malformed

@@ -343,6 +343,29 @@ CROSS_TIER_PATTERN_KEYS: tuple[CrossTierPatternKey, ...] = (
 )
 
 
+# Tier names form a closed set duplicated in detectors, gatherers,
+# and prompt builders. Centralizing as a Literal + tuple catches
+# typos and rename drift; consumers of `consolidates_tiers` and
+# `affected_tiers` can narrow against it statically.
+TierKey = Literal[
+    'pitch', 'act_shape', 'spine', 'architecture',
+    'scene_map', 'briefs',
+]
+TIER_KEYS: tuple[TierKey, ...] = (
+    'pitch', 'act_shape', 'spine', 'architecture',
+    'scene_map', 'briefs',
+)
+TIER_KEYS_SET: frozenset[TierKey] = frozenset(TIER_KEYS)
+
+
+# CrossTierProposal.target uses a prefix-typed identifier
+# (e.g., 'scene:s10', 'spine_event:ev-3', 'tier:architecture',
+# 'axis:field_coherence'). The extractor validates against this
+# regex so an LLM that returns malformed targets surfaces in the
+# extraction-drop log rather than landing in the output unchecked.
+_TARGET_PREFIX_RE = re.compile(r'^(scene|spine_event|tier|axis):.+')
+
+
 class _CrossTierPatternRequired(TypedDict):
     pattern: CrossTierPatternKey
     description: str
@@ -6098,6 +6121,22 @@ _TIER_WEAK_THRESHOLD = 7.0
 # strength is the actionable signal, not any single tier.
 _PROJECT_DISPOSITION_THRESHOLD = 4
 
+# Module-load invariants. Catches typo-class drift at import time:
+# a future edit that sets the threshold to 0 (always-fire) or to
+# >6 (never-fire) would silently change behavior; the assert names
+# the constraint up front.
+assert 0 < _PROJECT_DISPOSITION_THRESHOLD <= len(TIER_KEYS), (
+    f'_PROJECT_DISPOSITION_THRESHOLD={_PROJECT_DISPOSITION_THRESHOLD} '
+    f'must be in [1, {len(TIER_KEYS)}] (one tier or more, at most '
+    'all tiers)'
+)
+assert len(set(TIER_KEYS)) == len(TIER_KEYS), (
+    'TIER_KEYS must contain no duplicates'
+)
+assert TIER_KEYS_SET == set(TIER_KEYS), (
+    'TIER_KEYS_SET must contain exactly the same elements as TIER_KEYS'
+)
+
 
 def _tokenize_axis_name(axis_name: str) -> set[str]:
     """Split an axis name into lowercase concept tokens for cross-tier
@@ -6333,7 +6372,15 @@ def _tier_composite_average(scores: dict[str, int] | None) -> float | None:
 
 def _gather_tier_strengths(result: StoryPowerResult) -> dict[str, float]:
     """Collect each tier's representative strength score (composite
-    for pitch, unweighted axis average for the others)."""
+    for pitch, unweighted axis average for the others).
+
+    Extensions with status != 'ok' are excluded — a 'partial'
+    extension might carry a single int score with everything else
+    missing, which would average toward a misleadingly low value
+    and skew project_disposition. The project-level disposition
+    detector should fire on real-aggregate-low-scores, not on
+    partial-extraction-noise.
+    """
     out: dict[str, float] = {}
     pitch_composite = result.get('composite')
     if isinstance(pitch_composite, (int, float)) and pitch_composite > 0:
@@ -6346,7 +6393,7 @@ def _gather_tier_strengths(result: StoryPowerResult) -> dict[str, float]:
         ('briefs', 'whole_briefs_scores'),
     ):
         ext = result.get(tier_key)  # type: ignore[misc]
-        if not ext:
+        if not ext or ext.get('status') != 'ok':
             continue
         avg = _tier_composite_average(ext.get(scores_key))
         if avg is not None:
@@ -6561,11 +6608,11 @@ Return a JSON object with this exact shape:
     "high_leverage_move": "one sentence: ONE action that would lift the most ground across tiers"
   }},
   "proposals": [
-    {{"target": "scene:<id> | spine_event:<id> | tier:<name>",
+    {{"target": "scene:<id> | spine_event:<id> | tier:<name> | axis:<name>  (MUST use one of these four prefixes)",
       "move": "one sentence: what to do",
       "rationale": "which axes this lifts and why",
       "expected_lift": "axis: was → now; axis: was → now",
-      "consolidates_tiers": ["architecture", "briefs"]
+      "consolidates_tiers": ["architecture", "briefs"]  (MUST be a list of tier names from: pitch, act_shape, spine, architecture, scene_map, briefs)
     }}
   ]
 }}
@@ -6605,8 +6652,15 @@ def _extract_cross_tier_diagnostic(parsed: dict) -> CrossTierDiagnostic:
 
 
 def _extract_cross_tier_proposals(parsed: dict) -> list[CrossTierProposal]:
-    """Pull LLM-proposed cross-tier moves. Required fields: target,
-    move. Drops rows missing either."""
+    """Pull LLM-proposed cross-tier moves. Required fields: target
+    (must match the `kind:value` prefix schema), move. Drops rows
+    missing either or with a malformed target.
+
+    `consolidates_tiers` entries are validated against `TIER_KEYS` —
+    unknown tier names (typos, hallucinated tier names) are dropped
+    from the consolidates list (with the dropped entries surfaced
+    via the drop log).
+    """
     out: list[CrossTierProposal] = []
     drops: list[str] = []
     for row in parsed.get('proposals') or []:
@@ -6617,6 +6671,12 @@ def _extract_cross_tier_proposals(parsed: dict) -> list[CrossTierProposal]:
         move = (row.get('move') or '').strip()
         if not target or not move:
             drops.append(f'incomplete row (target={target!r}, move={move!r})')
+            continue
+        if not _TARGET_PREFIX_RE.match(target):
+            drops.append(
+                f'malformed target {target!r} (must match '
+                f"'scene:|spine_event:|tier:|axis:' prefix)"
+            )
             continue
         proposal: CrossTierProposal = {
             'target': target,
@@ -6630,11 +6690,19 @@ def _extract_cross_tier_proposals(parsed: dict) -> list[CrossTierProposal]:
             proposal['expected_lift'] = expected
         consolidates_raw = row.get('consolidates_tiers')
         if isinstance(consolidates_raw, list):
-            consolidates = [
+            raw_tiers = [
                 str(c).strip() for c in consolidates_raw if str(c).strip()
             ]
-            if consolidates:
-                proposal['consolidates_tiers'] = consolidates
+            valid_tiers = [t for t in raw_tiers if t in TIER_KEYS_SET]
+            invalid_tiers = [t for t in raw_tiers if t not in TIER_KEYS_SET]
+            if invalid_tiers:
+                drops.append(
+                    f'consolidates_tiers for target={target!r} included '
+                    f'unknown tier name(s) {invalid_tiers!r} (valid: '
+                    f'{sorted(TIER_KEYS_SET)})'
+                )
+            if valid_tiers:
+                proposal['consolidates_tiers'] = valid_tiers
         elif consolidates_raw is not None:
             # The LLM returned consolidates_tiers but not as a list
             # (e.g., a single string like "architecture"). Per the
