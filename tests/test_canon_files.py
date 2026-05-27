@@ -8,6 +8,8 @@ import pytest
 
 from storyforge.canon import (
     CANON_DIR,
+    check_canon_drift,
+    find_canon_embeds,
     parse_canon_file,
     validate_canon_directory,
     validate_canon_file,
@@ -538,6 +540,175 @@ def test_validate_directory_aggregates_findings_across_files(tmp_path):
     # category='canon' downstream.
     for f in findings:
         assert 'category' not in f
+
+
+# ---------------------------------------------------------------------------
+# Canon embed convention + drift detection
+# ---------------------------------------------------------------------------
+
+def write_page(project_dir, filename, body):
+    """Write a minimal pages/<filename> file with the given body."""
+    pages_dir = os.path.join(project_dir, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+    path = os.path.join(pages_dir, filename)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(body)
+    return path
+
+
+def test_find_canon_embeds_returns_blocks_in_order():
+    body = textwrap.dedent("""\
+        ### Style Foundation
+        <!-- canon-embed: style-foundation -->
+        Warm earth tones, ink-and-wash medium.
+        <!-- /canon-embed -->
+
+        ### Lighting
+        <!-- canon-embed: lighting-laws -->
+        Single warm source, soft falloff.
+        <!-- /canon-embed -->
+    """)
+    embeds = find_canon_embeds(body)
+    assert [e['canon_id'] for e in embeds] == ['style-foundation', 'lighting-laws']
+    assert 'Warm earth tones' in embeds[0]['text']
+    assert 'Single warm source' in embeds[1]['text']
+
+
+def test_find_canon_embeds_handles_no_embeds():
+    assert find_canon_embeds('plain markdown body, no markers here') == []
+
+
+def test_check_canon_drift_no_pages_returns_empty(tmp_path):
+    """No pages/ directory means nothing to compare against."""
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    assert check_canon_drift(project) == []
+
+
+def test_check_canon_drift_no_canon_returns_empty(tmp_path):
+    """No canon/ directory means there's no source to drift from."""
+    project = str(tmp_path)
+    write_page(project, 's01-p1.md', 'body without embeds')
+    assert check_canon_drift(project) == []
+
+
+def test_check_canon_drift_clean_embed_no_findings(tmp_path):
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    # Match the VALID_BODY's embeddable-block content exactly.
+    page_body = (
+        '## Panel script\n\n'
+        '### Style Foundation\n'
+        '<!-- canon-embed: style-foundation -->\n'
+        'The verbatim canonical text.\n'
+        '<!-- /canon-embed -->\n'
+    )
+    write_page(project, 's01-p1.md', page_body)
+    findings = check_canon_drift(project)
+    assert findings == []
+
+
+def test_check_canon_drift_orphan_embed_flagged(tmp_path):
+    """An embed citing a non-existent canon_id is structurally broken
+    and must surface as canon_embed_orphan with severity=error."""
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    page_body = (
+        '<!-- canon-embed: does-not-exist -->\n'
+        'some text\n'
+        '<!-- /canon-embed -->\n'
+    )
+    write_page(project, 's01-p1.md', page_body)
+    findings = check_canon_drift(project)
+    assert len(findings) == 1
+    assert findings[0]['type'] == 'canon_embed_orphan'
+    assert findings[0]['severity'] == 'error'
+
+
+def test_check_canon_drift_diverged_text_flagged(tmp_path):
+    """When embed text differs from the source canon's Embeddable block
+    (beyond whitespace), emit canon_drift."""
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    page_body = (
+        '<!-- canon-embed: style-foundation -->\n'
+        'Drifted text that does NOT match the canon source.\n'
+        '<!-- /canon-embed -->\n'
+    )
+    write_page(project, 's01-p1.md', page_body)
+    findings = check_canon_drift(project)
+    types = [f['type'] for f in findings]
+    assert 'canon_drift' in types
+
+
+def test_check_canon_drift_tolerates_whitespace_shifts(tmp_path):
+    """An embed with cosmetic extra blank lines or trailing spaces should
+    NOT register as drift — authors copy/paste and editors mutate
+    whitespace, but the canonical text hasn't actually changed."""
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    page_body = (
+        '<!-- canon-embed: style-foundation -->\n'
+        '\n\n'
+        'The verbatim canonical text.   \n'
+        '\n'
+        '<!-- /canon-embed -->\n'
+    )
+    write_page(project, 's01-p1.md', page_body)
+    findings = check_canon_drift(project)
+    drift = [f for f in findings if f['type'] == 'canon_drift']
+    assert drift == []
+
+
+def test_check_canon_drift_canon_without_embeddable_section(tmp_path):
+    """A canon file missing its `## Embeddable block` section can't be
+    drift-compared. Emit a missing-section finding pointed at the canon
+    file (not the page file)."""
+    project = str(tmp_path)
+    # Canon file with frontmatter but no Embeddable block section.
+    body_no_embed = textwrap.dedent("""\
+
+        ## Clauses
+
+        - one
+
+        ## Related canon
+
+        - [[other]]
+
+        ## Iteration history
+
+        - 2026-05-27 — created
+    """)
+    write_canon(project, 'style-foundation.md', 'style-foundation',
+                body=body_no_embed)
+    page_body = (
+        '<!-- canon-embed: style-foundation -->\n'
+        'some text\n'
+        '<!-- /canon-embed -->\n'
+    )
+    write_page(project, 's01-p1.md', page_body)
+    findings = check_canon_drift(project)
+    missing = [f for f in findings if f['type'] == 'canon_missing_section']
+    assert missing
+    assert 'style-foundation.md' in missing[0]['file']
+
+
+def test_validate_canon_directory_runs_drift(tmp_path):
+    """validate_canon_directory should also run drift checks when both
+    canon/ and pages/ exist, so cleanup picks them up via the same
+    Canon Files report category."""
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    page_body = (
+        '<!-- canon-embed: style-foundation -->\n'
+        'Drifted text.\n'
+        '<!-- /canon-embed -->\n'
+    )
+    write_page(project, 's01-p1.md', page_body)
+    findings = validate_canon_directory(project)
+    types = [f['type'] for f in findings]
+    assert 'canon_drift' in types
 
 
 # ---------------------------------------------------------------------------

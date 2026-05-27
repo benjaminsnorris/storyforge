@@ -5,6 +5,22 @@ visual blocks that get embedded inline into per-panel prompts. Each
 file has YAML frontmatter (canon_id, canon_type, etc.) and four
 required H2 body sections: Embeddable block, Clauses, Related canon,
 Iteration history.
+
+## Inline-embed convention
+
+Per-page panel prompts embed canon blocks verbatim, marked by HTML
+comment delimiters that are inert in DALL-E/GPT inputs but easy to
+find programmatically:
+
+    ### Style Foundation
+    <!-- canon-embed: style-foundation -->
+    The verbatim Embeddable block text, copied from
+    reference/canon/style-foundation.md.
+    <!-- /canon-embed -->
+
+`find_canon_embeds()` extracts these blocks; `check_canon_drift()`
+walks every page file under `pages/` and compares each embed to its
+source canon's `## Embeddable block` section.
 """
 
 import os
@@ -79,6 +95,73 @@ ROOT_TYPES = {'foundation', 'vocabulary', 'rules'}
 _FRONTMATTER_RE = re.compile(r'\A---\s*\n(.*?\n)---\s*(?:\n|$)', re.DOTALL)
 _SECTION_RE = re.compile(r'^##\s+(.+?)\s*$', re.MULTILINE)
 _SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]*$')
+
+# Canon-embed markers: opener carries the canon_id, closer is fixed text.
+_CANON_EMBED_RE = re.compile(
+    r'<!--\s*canon-embed:\s*([a-z0-9][a-z0-9-]*)\s*-->'
+    r'(.*?)'
+    r'<!--\s*/canon-embed\s*-->',
+    re.DOTALL,
+)
+
+
+class CanonEmbed(TypedDict):
+    """One canon-embed block found in a page file body."""
+    canon_id: str
+    text: str          # raw text between the markers (with outer whitespace)
+    normalized: str    # whitespace-normalized text, used for drift comparison
+
+
+def _normalize_for_drift(text: str) -> str:
+    """Normalize text for drift comparison. Trims outer whitespace and
+    collapses internal blank-line runs so that cosmetic whitespace shifts
+    (a stray blank line, trailing-space drift) don't surface as drift."""
+    lines = [ln.rstrip() for ln in text.strip().splitlines()]
+    out: list[str] = []
+    blank = False
+    for ln in lines:
+        if not ln:
+            if not blank:
+                out.append('')
+            blank = True
+        else:
+            out.append(ln)
+            blank = False
+    return '\n'.join(out)
+
+
+def find_canon_embeds(text: str) -> list[CanonEmbed]:
+    """Return every canon-embed block found in `text`, in source order."""
+    embeds: list[CanonEmbed] = []
+    for match in _CANON_EMBED_RE.finditer(text):
+        canon_id = match.group(1)
+        raw = match.group(2)
+        embeds.append({
+            'canon_id': canon_id,
+            'text': raw,
+            'normalized': _normalize_for_drift(raw),
+        })
+    return embeds
+
+
+_EMBEDDABLE_BLOCK_RE = re.compile(
+    r'^##\s+Embeddable block\s*\n(.*?)(?=^##\s|\Z)',
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _embeddable_block_text(canon_path: str) -> str | None:
+    """Return the verbatim text of a canon file's `## Embeddable block`
+    section. None if the file is missing or has no such section.
+    """
+    parsed = parse_canon_file(canon_path)
+    if not parsed['exists']:
+        return None
+    body = parsed['body']
+    match = _EMBEDDABLE_BLOCK_RE.search(body)
+    if not match:
+        return None
+    return match.group(1)
 
 
 _TRUNCATED = object()
@@ -420,10 +503,96 @@ def _registry_findings(project_dir: str, files: list[str]) -> list[CanonFinding]
     return findings
 
 
+def _resolve_canon_path(project_dir: str, canon_id: str,
+                        index: dict[str, str]) -> str | None:
+    """Return the absolute path of a canon file by canon_id. Builds the
+    index lazily — caller maintains a single dict across one drift run."""
+    if canon_id in index:
+        return index[canon_id]
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return None
+    for path in _walk_canon_files(canon_dir):
+        slug = os.path.splitext(os.path.basename(path))[0]
+        index[slug] = path
+    return index.get(canon_id)
+
+
+def check_canon_drift(project_dir: str) -> list[CanonFinding]:
+    """Walk pages/*.md and compare each canon-embed to its source canon's
+    `## Embeddable block`. Emits two finding types:
+
+    - canon_drift (warning): the embed text differs from the source after
+      whitespace normalization. Author should re-embed.
+    - canon_embed_orphan (error): the embed cites a canon_id that does
+      not resolve to any canon file. The prompt is structurally broken.
+
+    Returns [] if there's no pages/ directory or no canon directory. Page
+    files without frontmatter are still scanned for embeds — the embed
+    convention works even outside the page-file schema.
+    """
+    from storyforge.pages import list_page_files
+
+    pages = list_page_files(project_dir)
+    if not pages:
+        return []
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return []
+
+    findings: list[CanonFinding] = []
+    canon_index: dict[str, str] = {}
+    source_cache: dict[str, str | None] = {}
+
+    for page_path in pages:
+        with open(page_path, encoding='utf-8') as f:
+            page_text = f.read()
+        embeds = find_canon_embeds(page_text)
+        rel_page = os.path.relpath(page_path, project_dir)
+        for embed in embeds:
+            cid = embed['canon_id']
+            canon_path = _resolve_canon_path(project_dir, cid, canon_index)
+            if canon_path is None:
+                findings.append(_finding(
+                    rel_page,
+                    f'canon-embed cites unknown canon_id `{cid}`',
+                    f'Add reference/canon/.../{cid}.md or fix the embed',
+                    'canon_embed_orphan',
+                    severity='error',
+                ))
+                continue
+            if cid not in source_cache:
+                source_cache[cid] = _embeddable_block_text(canon_path)
+            source = source_cache[cid]
+            if source is None:
+                rel_canon = os.path.relpath(canon_path, project_dir)
+                findings.append(_finding(
+                    rel_canon,
+                    'canon file has no `## Embeddable block` section to '
+                    'compare embeds against',
+                    'Add a `## Embeddable block` section with the verbatim '
+                    'canonical text',
+                    'canon_missing_section',
+                ))
+                continue
+            if _normalize_for_drift(source) != embed['normalized']:
+                findings.append(_finding(
+                    rel_page,
+                    f'canon-embed `{cid}` has drifted from '
+                    f'reference/canon/.../{cid}.md',
+                    f'Re-embed from the source canon file',
+                    'canon_drift',
+                ))
+    return findings
+
+
 def validate_canon_directory(project_dir: str) -> list[CanonFinding]:
     """Validate every canon file under reference/canon/. Returns [] when
     the canon directory is absent; callers decide whether absence is itself
-    a finding (cleanup's report_canon_files does for GN projects)."""
+    a finding (cleanup's report_canon_files does for GN projects).
+
+    Also runs drift detection against pages/*.md if both directories exist.
+    """
     canon_dir = os.path.join(project_dir, CANON_DIR)
     if not os.path.isdir(canon_dir):
         return []
@@ -433,4 +602,5 @@ def validate_canon_directory(project_dir: str) -> list[CanonFinding]:
     for path in files:
         findings.extend(validate_canon_file(path, project_dir))
     findings.extend(_registry_findings(project_dir, files))
+    findings.extend(check_canon_drift(project_dir))
     return findings
