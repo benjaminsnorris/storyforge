@@ -7167,6 +7167,188 @@ def test_cross_tier_strict_mode_extends_checklist(tmp_path):
     assert 'High-leverage move' in checklist
 
 
+def test_cross_tier_strict_mode_skips_llm_call(tmp_path, monkeypatch, capsys):
+    """Strict mode must NOT call the LLM for cross-tier synthesis —
+    strict doesn't produce diagnostic.md or coaching-brief.md, so the
+    writers would silently drop the output. Calling the LLM here
+    pays ~8K tokens for nothing. (PR #248 review FP-IND-1.)"""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+
+    call_count = {'cross_tier': 0, 'other': 0}
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-cross-tier' in log_file:
+            call_count['cross_tier'] += 1
+        else:
+            call_count['other'] += 1
+        # Strict mode shouldn't even reach here, but provide minimal
+        # response so the test doesn't crash if it does.
+        response = {
+            'content': [{'type': 'text',
+                         'text': json.dumps(_cross_tier_payload())}],
+            'usage': {'input_tokens': 100, 'output_tokens': 100,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'strict')
+    # Strict mode doesn't call the LLM at all (no -cross-tier and no
+    # tier extensions); both counters stay at 0.
+    assert call_count['cross_tier'] == 0
+    assert call_count['other'] == 0
+    out = capsys.readouterr().out
+    # When strict mode runs and the cross-tier orchestrator IS called
+    # (e.g., via _run_cross_tier_extension directly), it should log
+    # the skip. But strict mode skips the orchestrator at the
+    # score_story_power level too, so no log fires here. The test
+    # validates the no-LLM-call invariant — call-count of zero is
+    # sufficient.
+
+
+def test_cross_tier_strict_mode_via_direct_call_skips_llm(tmp_path, capsys):
+    """White-box test of the strict-mode gate inside
+    _run_cross_tier_extension itself. When called with coaching='strict'
+    (regardless of how that happens — direct call or future refactor),
+    skip the LLM call and return status='ok' with empty payloads."""
+    from storyforge.scoring_story_power import (
+        _run_cross_tier_extension,
+    )
+    # Build a minimal result that would normally trigger an LLM call
+    # (3 tiers present + pre-pass might fire).
+    result = {
+        'composite': 7.5, 'scores': {'specificity': 7},
+        'diagnostic': {}, 'act_shape': None,
+        'spine': {'status': 'ok',
+                  'whole_spine_scores': {'function_coverage': 8},
+                  'spine_diagnostic': {'lowest_axis': 'causal_handoff'}},
+        'architecture': {'status': 'ok',
+                          'whole_architecture_scores': {'action_sequel_rhythm': 8},
+                          'architecture_diagnostic': {'lowest_axis': 'field_coherence'},
+                          'field_findings': [],
+                          'proposed_field_updates': [],
+                          'proposed_scene_insertions': []},
+        'scene_map': None, 'briefs': None,
+    }
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError(
+            'strict-mode gate must skip the LLM call entirely'
+        )
+
+    log_dir = str(tmp_path / 'logs')
+    output_dir = str(tmp_path / 'out')
+    import os as _os
+    _os.makedirs(log_dir, exist_ok=True)
+    _os.makedirs(output_dir, exist_ok=True)
+    # Monkeypatch invoke_to_file to crash if called.
+    from storyforge import scoring_story_power
+    import unittest.mock as _mock
+    with _mock.patch.object(scoring_story_power, 'invoke_to_file',
+                              fail_if_called):
+        ext = _run_cross_tier_extension(
+            str(tmp_path), output_dir, log_dir, result,  # type: ignore[arg-type]
+            'rubric text', 'strict',
+        )
+    assert ext['status'] == 'ok'
+    assert ext['proposals'] == []
+    assert ext['cross_tier_diagnostic'] == {}
+    out = capsys.readouterr().out
+    assert 'cross-tier synthesis skipped' in out
+    assert 'strict mode' in out
+
+
+def test_gather_tier_lowest_axes_pitch_uses_scores_not_diagnostic():
+    """Pitch's lowest_axis is derived deterministically from scores,
+    not from the LLM-supplied diagnostic field (which pitch's prompt
+    doesn't populate). Without this, pitch silently never participates
+    in lowest_axis_recurrence detection. (PR #248 review SF-H-1.)"""
+    from storyforge.scoring_story_power import _gather_tier_lowest_axes
+    result = {
+        'composite': 7.0,
+        'scores': {
+            'specificity': 9, 'emotional_resonance': 7,
+            'character_identification': 6,  # lowest
+            'stakes_dilemma': 9,
+        },
+        'diagnostic': {},  # pitch diagnostic doesn't carry lowest_axis
+        'act_shape': None, 'spine': None, 'architecture': None,
+        'scene_map': None, 'briefs': None,
+    }
+    out = _gather_tier_lowest_axes(result)  # type: ignore[arg-type]
+    assert out.get('pitch') == 'character_identification'
+
+
+def test_gather_tier_lowest_axes_pitch_handles_empty_scores():
+    """When pitch has no scores (e.g., extraction failed entirely),
+    pitch is omitted from the result. No crash."""
+    from storyforge.scoring_story_power import _gather_tier_lowest_axes
+    result = {
+        'composite': 0.0, 'scores': {}, 'diagnostic': {},
+        'act_shape': None, 'spine': None, 'architecture': None,
+        'scene_map': None, 'briefs': None,
+    }
+    out = _gather_tier_lowest_axes(result)  # type: ignore[arg-type]
+    assert 'pitch' not in out
+
+
+def test_extract_cross_tier_proposals_logs_on_non_list_consolidates(capsys):
+    """When the LLM returns consolidates_tiers as a non-list (e.g., a
+    single string), log INFO with the type so a consistently-malformed
+    LLM is visible in one grep. (PR #248 review SF-H-2.)"""
+    from storyforge.scoring_story_power import _extract_cross_tier_proposals
+    parsed = {
+        'proposals': [
+            {'target': 'scene:s1', 'move': 'split it',
+             'consolidates_tiers': 'architecture'},  # string, not list
+        ],
+    }
+    out = _extract_cross_tier_proposals(parsed)
+    assert len(out) == 1
+    # The field is dropped (not in the result).
+    assert 'consolidates_tiers' not in out[0]
+    log_out = capsys.readouterr().out
+    assert 'consolidates_tiers' in log_out
+    assert 'not a list' in log_out
+    assert 'type=str' in log_out
+
+
+def test_cross_tier_paid_empty_with_patterns_logs_error(
+        tmp_path, monkeypatch, capsys):
+    """When the LLM returns an empty synthesis but the pre-pass had
+    patterns, the log level is ERROR not WARNING — that's the
+    silent-failure class PR #243 added the runtime assertion to
+    catch. (PR #248 review SF-I-1.)"""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    # Force pre-pass to find patterns by aligning act-shape + spine
+    # lowest_axis tokens.
+    act_payload = _act_shape_payload()
+    act_payload['structural_diagnostic']['lowest_axis'] = 'causal_integrity'
+    spine_payload = _spine_payload()
+    spine_payload['spine_diagnostic']['lowest_axis'] = 'causal_handoff'
+
+    fake = _septa_mock_llm(_full_payload(), act_payload, spine_payload,
+                              {}, {}, {}, _cross_tier_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out = capsys.readouterr().out
+    assert 'ERROR: cross-tier LLM returned no diagnostic content' in out
+    assert 'synthesis ignored the pre-pass signal' in out
+
+
 def test_cross_tier_full_mode_appends_to_diagnostic(tmp_path, monkeypatch):
     """Full coaching appends the cross-tier section to diagnostic.md
     with the synthesis prose + high-leverage move + proposals

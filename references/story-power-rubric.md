@@ -994,6 +994,16 @@ Cross-tier synthesis runs **independently of all other modes** — it
 fires whenever at least two of {pitch, act-shape, spine,
 architecture, scene-map, briefs} produced output.
 
+**Cost-discipline gate:** the LLM synthesis call is skipped when
+the deterministic pre-pass found zero patterns AND fewer than three
+tiers ran. With nothing structurally interesting to synthesize and
+only two tier outputs to compare, the LLM has insufficient
+substrate; the deterministic patterns alone are the load-bearing
+signal and the cost of the LLM call (~8K tokens) isn't worth the
+return. On strict-mode runs, the LLM call is skipped unconditionally
+— strict mode doesn't produce the markdown files the synthesis
+would append to, so the cost would be wasted.
+
 ### Deterministic pre-pass patterns
 
 Four high-confidence patterns the pre-pass detects from the

@@ -6115,12 +6115,25 @@ def _gather_tier_lowest_axes(result: StoryPowerResult) -> dict[str, str]:
     Keys are tier names ('pitch', 'act_shape', 'spine', 'architecture',
     'scene_map', 'briefs'); values are the axis names. Tiers without
     a populated lowest_axis are omitted.
+
+    Pitch's lowest_axis is derived deterministically from
+    `result['scores']` (numeric minimum) rather than the LLM-supplied
+    `diagnostic['lowest_axis']` — pitch's prompt schema doesn't
+    instruct the LLM to populate `lowest_axis`, so reading from
+    diagnostic would underweight pitch in cross-tier recurrence
+    detection. The numeric source matches what
+    _summarize_tier_for_prompt sends to the LLM, keeping the
+    detector and the prompt aligned.
     """
     out: dict[str, str] = {}
-    diag = result.get('diagnostic') or {}
-    pitch_lowest = (diag or {}).get('lowest_axis') if isinstance(diag, dict) else None
-    if isinstance(pitch_lowest, str) and pitch_lowest:
-        out['pitch'] = pitch_lowest
+    scores = result.get('scores') or {}
+    if isinstance(scores, dict) and scores:
+        try:
+            pitch_lowest = min(scores.items(), key=lambda kv: kv[1])[0]
+        except (TypeError, ValueError):
+            pitch_lowest = ''
+        if isinstance(pitch_lowest, str) and pitch_lowest:
+            out['pitch'] = pitch_lowest
 
     for tier_key, diag_key in (
         ('act_shape', 'structural_diagnostic'),
@@ -6622,6 +6635,17 @@ def _extract_cross_tier_proposals(parsed: dict) -> list[CrossTierProposal]:
             ]
             if consolidates:
                 proposal['consolidates_tiers'] = consolidates
+        elif consolidates_raw is not None:
+            # The LLM returned consolidates_tiers but not as a list
+            # (e.g., a single string like "architecture"). Per the
+            # prompt schema this should always be a list — log the
+            # type so a consistently-malformed LLM is visible in one
+            # grep instead of silently losing the signal forever.
+            log(f'INFO: consolidates_tiers for proposal target='
+                f'{target!r} was not a list (type='
+                f'{type(consolidates_raw).__name__}); field dropped. '
+                'Per the prompt schema, return as a list even when a '
+                'single tier is named.')
         out.append(proposal)
     _log_extraction_drops('cross_tier_proposals', drops)
     return out
@@ -6682,15 +6706,29 @@ def _run_cross_tier_extension(project_dir: str, output_dir: str,
     pre-pass. The pre-pass output is the load-bearing surface — on
     any LLM failure, the deterministic patterns still surface.
 
-    Gate: if the pre-pass found no patterns AND fewer than 3 tiers
-    ran successfully, skip the LLM call. With nothing structurally
-    interesting to synthesize and only 2 tier outputs to compare,
-    the LLM has insufficient substrate; paying ~8K tokens for an
-    empty synthesis isn't worth the cost. Returns status='ok' with
-    empty payloads (legitimate "nothing to synthesize" state).
+    Two gate conditions skip the LLM call:
+
+    1. coaching='strict': strict mode doesn't produce the markdown
+       files the synthesis appends to (no diagnostic.md, no
+       coaching-brief.md — only the static self-scoring-checklist.md
+       which is already populated by _write_strict_checklist).
+       Calling the LLM here would pay ~8K tokens for output the
+       writers would silently drop in the missing-file guard.
+
+    2. pre-pass found no patterns AND fewer than 3 tiers ran. With
+       nothing structurally interesting and only 2 tier outputs to
+       compare, the LLM has insufficient substrate.
+
+    Both skip paths return status='ok' with empty payloads — a
+    legitimate "nothing to synthesize / nowhere to write" state.
     """
     det_patterns = _check_cross_tier_deterministic(result)
     tier_count = _count_present_tiers(result)
+    if coaching == 'strict':
+        log('INFO: cross-tier synthesis skipped — strict mode does '
+            'not produce diagnostic.md / coaching-brief.md, so the '
+            'synthesis output would be dropped by the writers.')
+        return _empty_cross_tier_extension('ok', det_patterns)
     if not det_patterns and tier_count < 3:
         log(f'INFO: cross-tier synthesis skipped — pre-pass found no '
             f'patterns and only {tier_count} tier(s) ran; insufficient '
@@ -6735,7 +6773,11 @@ def _run_cross_tier_extension(project_dir: str, output_dir: str,
     #     (the cost was paid for no signal)
     status: StoryPowerStatus = 'ok'
     if not diag and not proposals and det_patterns:
-        log(f'WARNING: cross-tier LLM returned no diagnostic content '
+        # ERROR not WARNING: this is the silent-failure class PR #243
+        # added the runtime assertion to surface. The cost was paid
+        # in full but the LLM ignored real pre-pass signal — that's
+        # a billing/quality defect, not a benign condition.
+        log(f'ERROR: cross-tier LLM returned no diagnostic content '
             f'and no proposals despite {len(det_patterns)} '
             'deterministic pattern(s) firing — synthesis ignored '
             'the pre-pass signal.')
