@@ -23,6 +23,7 @@ walks every page file under `pages/` and compares each embed to its
 source canon's `## Embeddable block` section.
 """
 
+import enum
 import os
 import re
 from typing import Literal, TypedDict
@@ -32,9 +33,36 @@ from typing import Literal, TypedDict
 # typo on either side silently demotes a finding.
 Severity = Literal['info', 'warning', 'error']
 
+# Every distinct finding type this module (and report_canon_files) emits.
+# Narrowing to a Literal catches typos in `_finding(type_=...)` call sites
+# and in test assertions on f['type']. Same pattern as
+# pages.PageFindingKind and script_format.LayoutAntiPatternKind.
+CanonFindingKind = Literal[
+    'canon_missing_frontmatter',
+    'canon_truncated_frontmatter',
+    'canon_missing_key',
+    'canon_id_mismatch',
+    'canon_id_invalid',
+    'canon_type_invalid',
+    'canon_type_wrong_location',
+    'canon_unknown_subdir',
+    'canon_unexpected_nesting',
+    'canon_missing_section',
+    'canon_registry_unreadable',
+    'canon_missing_registry_entry',
+    'canon_embed_orphan',
+    'canon_embed_unclosed',
+    'canon_embed_invalid_id',
+    'canon_page_unreadable',
+    'canon_drift',
+    # Emitted by cmd_cleanup.report_canon_files, not canon.py — kept here
+    # so the enum is the single source of truth for canon-category types.
+    'canon_present_in_novel_project',
+]
+
 
 class _CanonFindingRequired(TypedDict):
-    type: str
+    type: CanonFindingKind
     file: str
     detail: str
     action: str
@@ -60,7 +88,14 @@ class ParsedCanonFile(TypedDict):
 
 CANON_DIR = os.path.join('reference', 'canon')
 
-CANON_TYPES = ('foundation', 'vocabulary', 'rules', 'character', 'location', 'motif')
+# Validated values authors write into the `canon_type` frontmatter field.
+CanonType = Literal[
+    'foundation', 'vocabulary', 'rules', 'character', 'location', 'motif',
+]
+
+CANON_TYPES: tuple[CanonType, ...] = (
+    'foundation', 'vocabulary', 'rules', 'character', 'location', 'motif',
+)
 
 REQUIRED_FRONTMATTER_KEYS = (
     'canon_id',
@@ -78,7 +113,7 @@ REQUIRED_SECTIONS = (
     'Iteration history',
 )
 
-SUBDIR_TYPE = {
+SUBDIR_TYPE: dict[str, CanonType] = {
     'characters': 'character',
     'locations': 'location',
     'motifs': 'motif',
@@ -90,7 +125,23 @@ SUBDIR_REGISTRY = {
     'motifs': 'motif-taxonomy.csv',
 }
 
-ROOT_TYPES = {'foundation', 'vocabulary', 'rules'}
+ROOT_TYPES: frozenset[CanonType] = frozenset(
+    {'foundation', 'vocabulary', 'rules'},
+)
+
+
+class _Sentinel(enum.Enum):
+    """Distinct sentinel values returned by parser helpers when the input
+    is malformed in a way that the caller needs to distinguish from a
+    normal result. Using an enum (rather than ad-hoc `object()` or string
+    sentinels) gives both narrow Literal types and stable `is` identity.
+    """
+    TRUNCATED = enum.auto()
+    REGISTRY_MALFORMED = enum.auto()
+
+
+_TRUNCATED = _Sentinel.TRUNCATED
+_REGISTRY_MALFORMED = _Sentinel.REGISTRY_MALFORMED
 
 _FRONTMATTER_RE = re.compile(r'\A---\s*\n(.*?\n)---\s*(?:\n|$)', re.DOTALL)
 _SECTION_RE = re.compile(r'^##\s+(.+?)\s*$', re.MULTILINE)
@@ -209,10 +260,9 @@ def _embeddable_block_text(canon_path: str) -> str | None:
     return match.group(1)
 
 
-_TRUNCATED = object()
-
-
-def _parse_frontmatter(text: str) -> tuple[dict[str, str] | None | object, str]:
+def _parse_frontmatter(
+    text: str,
+) -> tuple[dict[str, str] | None | Literal[_Sentinel.TRUNCATED], str]:
     """Extract YAML-style frontmatter as a flat dict.
 
     Returns:
@@ -284,11 +334,9 @@ def _expected_canon_id(path: str) -> str:
     return os.path.splitext(os.path.basename(path))[0]
 
 
-_REGISTRY_MALFORMED = 'malformed'
-
-
-def _read_registry_ids(project_dir: str, registry_filename: str
-                       ) -> set[str] | None | str:
+def _read_registry_ids(
+    project_dir: str, registry_filename: str,
+) -> set[str] | None | Literal[_Sentinel.REGISTRY_MALFORMED]:
     """Read the `id` column of a registry CSV.
 
     Returns:
@@ -324,7 +372,8 @@ def _read_registry_ids(project_dir: str, registry_filename: str
 
 
 def _finding(file_rel: str, detail: str, action: str,
-             type_: str, severity: Severity = 'warning') -> CanonFinding:
+             type_: CanonFindingKind,
+             severity: Severity = 'warning') -> CanonFinding:
     return {
         'type': type_,
         'file': file_rel,
@@ -497,7 +546,9 @@ def _registry_findings(project_dir: str, files: list[str]) -> list[CanonFinding]
     """
     canon_dir_abs = os.path.join(project_dir, CANON_DIR)
     findings: list[CanonFinding] = []
-    registry_cache: dict[str, set[str] | None | str] = {}
+    registry_cache: dict[
+        str, set[str] | None | Literal[_Sentinel.REGISTRY_MALFORMED],
+    ] = {}
     malformed_reported: set[str] = set()
 
     for path in files:

@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 
-from storyforge.canon import CANON_DIR, validate_canon_directory
+from storyforge.canon import CANON_DIR, CanonFinding, validate_canon_directory
 from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge.parsing import clean_scene_content, extract_single_scene
@@ -1122,7 +1122,7 @@ def _check_crlf(project_dir: str) -> list[dict]:
     return findings
 
 
-def report_canon_files(project_dir: str) -> list[dict]:
+def report_canon_files(project_dir: str) -> list[CanonFinding]:
     """Validate reference/canon/ for graphic-novel projects.
 
     Returns a list of canon-category findings. Canon validation only
@@ -1134,8 +1134,7 @@ def report_canon_files(project_dir: str) -> list[dict]:
     canon_dir_present = os.path.isdir(os.path.join(project_dir, CANON_DIR))
     if get_medium(project_dir) != 'graphic-novel':
         if canon_dir_present:
-            return [{
-                'category': 'canon',
+            finding: CanonFinding = {
                 'type': 'canon_present_in_novel_project',
                 'file': CANON_DIR + '/',
                 'detail': (
@@ -1148,7 +1147,9 @@ def report_canon_files(project_dir: str) -> list[dict]:
                     'an aborted migration)'
                 ),
                 'severity': 'warning',
-            }]
+                'category': 'canon',
+            }
+            return [finding]
         return []
     findings = validate_canon_directory(project_dir)
     for f in findings:
