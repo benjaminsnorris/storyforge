@@ -6735,6 +6735,184 @@ def test_detect_scene_id_overlap_skips_isolated_proposals():
     assert patterns == []
 
 
+def test_check_cross_tier_deterministic_bridges_id_namespaces():
+    """Architecture and scene-map have independent author-defined id
+    spaces (slugs, not prefixes). The only link is the
+    `architecture_scene` column on scenes.csv. Without the bridge,
+    architecture findings on `lucien-refusal` and scene-map findings
+    on `act3-portrait-vault` (linked to `lucien-refusal` via
+    architecture_scene) never overlap, structurally suppressing the
+    field_coherence_cascade detector. (Found on Ashes — the LLM
+    correctly identified the cascade, but the deterministic
+    pre-pass missed it because the ids don't share a string prefix.)
+    """
+    from storyforge.scoring_story_power import (
+        _check_cross_tier_deterministic, MappedScene,
+    )
+    # Slug-style ids — independent author conventions for the two
+    # artifacts, intentionally with no shared prefix.
+    scene_map_scenes = [
+        MappedScene(id='act3-portrait-vault', seq=1, title='', summary='vault',
+                    pov='', location='', timeline_day='', time_of_day='',
+                    scene_type='', word_count=0, target_words=0,
+                    architecture_scene='lucien-refusal'),
+        MappedScene(id='act3-aftermath', seq=2, title='', summary='aftermath',
+                    pov='', location='', timeline_day='', time_of_day='',
+                    scene_type='', word_count=0, target_words=0,
+                    architecture_scene='cascade'),
+    ]
+    # Architecture flags lucien-refusal; scene-map flags act3-portrait-vault
+    # (which links to lucien-refusal). The bridge should make these match.
+    result = {
+        'composite': 8.0, 'scores': {'specificity': 8}, 'diagnostic': {},
+        'act_shape': None, 'spine': None,
+        'architecture': {
+            'status': 'ok',
+            'whole_architecture_scores': {'action_sequel_rhythm': 8},
+            'architecture_diagnostic': {},
+            'field_findings': [
+                {'scene_id': 'lucien-refusal', 'field': 'turning_point',
+                 'issue': 'missing realization verb', 'severity': 'high'},
+            ],
+            'proposed_field_updates': [],
+            'proposed_scene_insertions': [],
+        },
+        'scene_map': {
+            'status': 'ok',
+            'per_scene_scores': {}, 'whole_scene_map_scores': {},
+            'scene_map_diagnostic': {},
+            'continuity_findings': [
+                {'scene_id': 'act3-portrait-vault', 'field': 'location',
+                 'issue': 'spatial oscillation', 'severity': 'medium'},
+            ],
+            'proposed_operations': [],
+        },
+        'briefs': None,
+    }
+    # Without arch_map: detector misses the overlap.
+    no_bridge = _check_cross_tier_deterministic(result)  # type: ignore[arg-type]
+    cascade_no_bridge = [
+        p for p in no_bridge if p['pattern'] == 'field_coherence_cascade'
+    ]
+    assert cascade_no_bridge == [], (
+        'without the bridge, slug-id cross-namespace findings cannot '
+        'overlap — confirms the bug existed'
+    )
+    # With arch_map: detector fires on the linked architecture id.
+    with_bridge = _check_cross_tier_deterministic(
+        result, scene_map_scenes=scene_map_scenes,  # type: ignore[arg-type]
+    )
+    cascade_with_bridge = [
+        p for p in with_bridge if p['pattern'] == 'field_coherence_cascade'
+    ]
+    assert len(cascade_with_bridge) == 1, (
+        f'with the bridge, cross-namespace findings should overlap; got '
+        f'{cascade_with_bridge}'
+    )
+    pattern = cascade_with_bridge[0]
+    assert set(pattern.get('affected_tiers', [])) == {
+        'architecture', 'scene_map',
+    }
+    # The overlap landed on the architecture id (the canonical id when
+    # bridging — scene-map's id maps TO the architecture id, not the
+    # other way around).
+    assert pattern['affected_ids'] == ['lucien-refusal']
+
+
+def test_check_cross_tier_deterministic_bridge_works_for_proposals():
+    """Same bridge logic applies to scene_id_overlap (proposals), not
+    just field_coherence_cascade (findings)."""
+    from storyforge.scoring_story_power import (
+        _check_cross_tier_deterministic, MappedScene,
+    )
+    scene_map_scenes = [
+        MappedScene(id='midpoint-revelation', seq=1, title='', summary='',
+                    pov='', location='', timeline_day='', time_of_day='',
+                    scene_type='', word_count=0, target_words=0,
+                    architecture_scene='midpoint'),
+    ]
+    result = {
+        'composite': 8.0, 'scores': {'specificity': 8}, 'diagnostic': {},
+        'act_shape': None, 'spine': None,
+        'architecture': {
+            'status': 'ok',
+            'whole_architecture_scores': {'action_sequel_rhythm': 8},
+            'architecture_diagnostic': {},
+            'field_findings': [],
+            'proposed_field_updates': [
+                {'scene_id': 'midpoint', 'field': 'turning_point',
+                 'proposed_value': 'revelation'},
+            ],
+            'proposed_scene_insertions': [],
+        },
+        'scene_map': {
+            'status': 'ok',
+            'per_scene_scores': {}, 'whole_scene_map_scores': {},
+            'scene_map_diagnostic': {},
+            'continuity_findings': [],
+            'proposed_operations': [
+                {'operation': 'split', 'scene_ids': ['midpoint-revelation'],
+                 'summary': 'split it'},
+            ],
+        },
+        'briefs': None,
+    }
+    patterns = _check_cross_tier_deterministic(
+        result, scene_map_scenes=scene_map_scenes,  # type: ignore[arg-type]
+    )
+    overlap = [p for p in patterns if p['pattern'] == 'scene_id_overlap']
+    assert len(overlap) == 1
+    assert overlap[0]['affected_ids'] == ['midpoint']
+
+
+def test_check_cross_tier_deterministic_bridge_skips_unmapped_scenes():
+    """Scenes without architecture_scene set (interstitials) don't get
+    bridged — they remain in the scene-map namespace and can still
+    overlap with briefs (same namespace) but not with architecture."""
+    from storyforge.scoring_story_power import (
+        _check_cross_tier_deterministic, MappedScene,
+    )
+    scene_map_scenes = [
+        # Interstitial — no architecture_scene set.
+        MappedScene(id='transition-beat', seq=1, title='', summary='',
+                    pov='', location='', timeline_day='', time_of_day='',
+                    scene_type='', word_count=0, target_words=0,
+                    architecture_scene=''),
+    ]
+    result = {
+        'composite': 8.0, 'scores': {'specificity': 8}, 'diagnostic': {},
+        'act_shape': None, 'spine': None,
+        'architecture': {
+            'status': 'ok',
+            'whole_architecture_scores': {'action_sequel_rhythm': 8},
+            'architecture_diagnostic': {},
+            'field_findings': [
+                {'scene_id': 'unrelated-scene', 'field': 'turning_point',
+                 'issue': 'x', 'severity': 'high'},
+            ],
+            'proposed_field_updates': [],
+            'proposed_scene_insertions': [],
+        },
+        'scene_map': {
+            'status': 'ok',
+            'per_scene_scores': {}, 'whole_scene_map_scores': {},
+            'scene_map_diagnostic': {},
+            'continuity_findings': [
+                {'scene_id': 'transition-beat', 'field': 'location',
+                 'issue': 'x', 'severity': 'medium'},
+            ],
+            'proposed_operations': [],
+        },
+        'briefs': None,
+    }
+    patterns = _check_cross_tier_deterministic(
+        result, scene_map_scenes=scene_map_scenes,  # type: ignore[arg-type]
+    )
+    # No overlap fires — the interstitial isn't linked to any arch id.
+    cascade = [p for p in patterns if p['pattern'] == 'field_coherence_cascade']
+    assert cascade == []
+
+
 def test_detect_field_coherence_cascade_uses_findings_not_proposals():
     """Cascade detector reads from findings lists (the upstream-fix
     surface), distinct from proposals (the downstream-recommendation

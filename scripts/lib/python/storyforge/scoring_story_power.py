@@ -1498,6 +1498,7 @@ def score_story_power(project_dir: str, coaching: CoachingLevel,
             f'{_count_present_tiers(provisional)} tier outputs.')
         cross_tier_extension = _run_cross_tier_extension(
             project_dir, output_dir, log_dir, provisional, rubric, coaching,
+            scene_map_scenes=scene_map_scenes,
         )
         if cross_tier_extension['status'] != 'ok':
             status = 'partial'
@@ -6224,9 +6225,27 @@ def _detect_lowest_axis_recurrence(
 
 def _gather_proposal_scene_ids(
         result: StoryPowerResult,
+        arch_map: dict[str, str] | None = None,
         ) -> dict[str, set[str]]:
-    """Collect each tier's scene-id proposal targets."""
+    """Collect each tier's scene-id proposal targets.
+
+    arch_map maps scenes.csv scene_ids to their architecture_scene
+    field value (when one is set). architecture.csv and scenes.csv
+    are independent artifacts with independent id spaces — the only
+    link between them is the `architecture_scene` column on
+    scenes.csv pointing at an architecture id. When arch_map is
+    provided, the scene-map and briefs ID sets are expanded to
+    include the linked architecture_scene id so the overlap detector
+    can match findings across the two artifact id spaces. Without
+    this bridge, an architecture finding and a scene-map finding
+    pointing at the same scene-line would never overlap — the
+    detector would structurally miss the most important cross-tier
+    signal on real elaboration-pipeline projects (id conventions are
+    author-defined, so prefix-matching would be wrong; this uses
+    the data-driven link explicitly).
+    """
     out: dict[str, set[str]] = {}
+    arch_map = arch_map or {}
     arch = result.get('architecture')
     if arch:
         arch_ids: set[str] = set()
@@ -6248,6 +6267,8 @@ def _gather_proposal_scene_ids(
                 sid = str(sid).strip()
                 if sid:
                     sm_ids.add(sid)
+                    if sid in arch_map:
+                        sm_ids.add(arch_map[sid])
         if sm_ids:
             out['scene_map'] = sm_ids
     br = result.get('briefs')
@@ -6257,6 +6278,8 @@ def _gather_proposal_scene_ids(
             sid = (u or {}).get('scene_id', '').strip()
             if sid:
                 br_ids.add(sid)
+                if sid in arch_map:
+                    br_ids.add(arch_map[sid])
         if br_ids:
             out['briefs'] = br_ids
     return out
@@ -6294,9 +6317,18 @@ def _detect_scene_id_overlap(
 
 def _gather_finding_scene_ids(
         result: StoryPowerResult,
+        arch_map: dict[str, str] | None = None,
         ) -> dict[str, set[str]]:
-    """Collect each tier's finding-list scene_ids."""
+    """Collect each tier's finding-list scene_ids.
+
+    Same architecture_scene bridge as _gather_proposal_scene_ids:
+    arch_map (scenes.csv id → architecture_scene) expands scene-map
+    and briefs id sets to include the linked architecture id when
+    one is set, enabling cross-namespace overlap detection without
+    relying on author-defined id conventions.
+    """
     out: dict[str, set[str]] = {}
+    arch_map = arch_map or {}
     arch = result.get('architecture')
     if arch:
         arch_ids = {
@@ -6308,20 +6340,24 @@ def _gather_finding_scene_ids(
             out['architecture'] = arch_ids
     sm = result.get('scene_map')
     if sm:
-        sm_ids = {
-            (f or {}).get('scene_id', '').strip()
-            for f in sm.get('continuity_findings') or []
-        }
-        sm_ids.discard('')
+        sm_ids: set[str] = set()
+        for f in sm.get('continuity_findings') or []:
+            sid = (f or {}).get('scene_id', '').strip()
+            if sid:
+                sm_ids.add(sid)
+                if sid in arch_map:
+                    sm_ids.add(arch_map[sid])
         if sm_ids:
             out['scene_map'] = sm_ids
     br = result.get('briefs')
     if br:
-        br_ids = {
-            (f or {}).get('scene_id', '').strip()
-            for f in br.get('brief_findings') or []
-        }
-        br_ids.discard('')
+        br_ids: set[str] = set()
+        for f in br.get('brief_findings') or []:
+            sid = (f or {}).get('scene_id', '').strip()
+            if sid:
+                br_ids.add(sid)
+                if sid in arch_map:
+                    br_ids.add(arch_map[sid])
         if br_ids:
             out['briefs'] = br_ids
     return out
@@ -6425,22 +6461,53 @@ def _detect_project_disposition(
     }]
 
 
+def _build_scene_to_arch_map(
+        scene_map_scenes: list[MappedScene] | None,
+        ) -> dict[str, str]:
+    """Build the scenes.csv id → architecture_scene id map used by the
+    cross-tier detectors to bridge the two artifact id spaces.
+
+    Architecture and scene-map ids are author-defined (typically
+    slugs); the only structural link between them is the
+    `architecture_scene` column on scenes.csv. Prefix-matching
+    (`a01`/`s01`) would be wrong; this is the explicit data-driven
+    bridge."""
+    if not scene_map_scenes:
+        return {}
+    return {
+        s.id: s.architecture_scene
+        for s in scene_map_scenes
+        if s.architecture_scene
+    }
+
+
 def _check_cross_tier_deterministic(
         result: StoryPowerResult,
+        scene_map_scenes: list[MappedScene] | None = None,
         ) -> list[CrossTierPattern]:
     """Run the four deterministic detectors against the in-memory
     tier outputs. Each detector is independent and emits zero or more
     patterns; the full list is returned to the LLM as ground-truth
-    signal."""
+    signal.
+
+    scene_map_scenes is the parsed scenes.csv (from parse_scene_map);
+    when provided, the scene-map / briefs id spaces are bridged to
+    the architecture id space via the architecture_scene column. On
+    real elaboration-pipeline projects this is the only way the
+    `scene_id_overlap` and `field_coherence_cascade` detectors can
+    fire — scene-map and architecture have independent id spaces by
+    design.
+    """
+    arch_map = _build_scene_to_arch_map(scene_map_scenes)
     findings: list[CrossTierPattern] = []
     findings.extend(_detect_lowest_axis_recurrence(
         _gather_tier_lowest_axes(result),
     ))
     findings.extend(_detect_scene_id_overlap(
-        _gather_proposal_scene_ids(result),
+        _gather_proposal_scene_ids(result, arch_map),
     ))
     findings.extend(_detect_field_coherence_cascade(
-        _gather_finding_scene_ids(result),
+        _gather_finding_scene_ids(result, arch_map),
     ))
     findings.extend(_detect_project_disposition(
         _gather_tier_strengths(result),
@@ -6762,6 +6829,7 @@ def _run_cross_tier_extension(project_dir: str, output_dir: str,
                                   log_dir: str, result: StoryPowerResult,
                                   rubric: str,
                                   coaching: CoachingLevel,
+                                  scene_map_scenes: list[MappedScene] | None = None,
                                   ) -> CrossTierExtension:
     """Run the cross-tier LLM synthesis after the deterministic
     pre-pass. The pre-pass output is the load-bearing surface — on
@@ -6783,7 +6851,9 @@ def _run_cross_tier_extension(project_dir: str, output_dir: str,
     Both skip paths return status='ok' with empty payloads — a
     legitimate "nothing to synthesize / nowhere to write" state.
     """
-    det_patterns = _check_cross_tier_deterministic(result)
+    det_patterns = _check_cross_tier_deterministic(
+        result, scene_map_scenes=scene_map_scenes,
+    )
     tier_count = _count_present_tiers(result)
     if coaching == 'strict':
         log('INFO: cross-tier synthesis skipped — strict mode does '
