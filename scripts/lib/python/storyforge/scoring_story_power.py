@@ -324,6 +324,92 @@ class BriefsExtension(TypedDict):
     status: StoryPowerStatus
 
 
+# Cross-tier meta-diagnostic — synthesizes patterns across the six
+# tier outputs. Distinct from any single tier; doesn't add axes (so
+# no entry in _AXIS_FAMILIES) — its output is diagnostic + action
+# prose, not numeric scores.
+
+CrossTierPatternKey = Literal[
+    'lowest_axis_recurrence',
+    'scene_id_overlap',
+    'field_coherence_cascade',
+    'project_disposition',
+]
+CROSS_TIER_PATTERN_KEYS: tuple[CrossTierPatternKey, ...] = (
+    'lowest_axis_recurrence',
+    'scene_id_overlap',
+    'field_coherence_cascade',
+    'project_disposition',
+)
+
+
+class _CrossTierPatternRequired(TypedDict):
+    pattern: CrossTierPatternKey
+    description: str
+    severity: Severity
+
+
+class CrossTierPattern(_CrossTierPatternRequired, total=False):
+    """A deterministic cross-tier pattern that fired in the pre-pass.
+
+    `affected_tiers` names which tier outputs the pattern touches
+    (e.g. ['architecture', 'briefs']); `affected_ids` names the
+    concrete axis names, scene ids, or substrings that triggered
+    the pattern. Both are optional because some patterns
+    (e.g. project_disposition) describe the whole result rather than
+    a specific axis/scene set."""
+    affected_tiers: list[str]
+    affected_ids: list[str]
+
+
+class _CrossTierProposalRequired(TypedDict):
+    target: str
+    move: str
+
+
+class CrossTierProposal(_CrossTierProposalRequired, total=False):
+    """One high-leverage cross-tier move the LLM proposes.
+
+    `target` is the locus the move acts on, formatted as a
+    typed identifier (e.g. 'spine_event:ev-3', 'scene:s10',
+    'tier:architecture'). `move` is a one-sentence action.
+
+    `expected_lift` names which axes should rise and by how much;
+    `consolidates_tiers` names tier-level proposals this supersedes
+    so the author knows which downstream proposals to defer until
+    after this move."""
+    rationale: str
+    expected_lift: str
+    consolidates_tiers: list[str]
+
+
+class CrossTierDiagnostic(TypedDict, total=False):
+    """LLM-provided cross-tier pattern synthesis.
+
+    All fields are optional because the LLM may omit any of them
+    when the cross-tier signal is weak (a perfectly-scoring project
+    has nothing to synthesize). The deterministic pre-pass output
+    (`deterministic_patterns`) is the load-bearing surface; this is
+    the narrative layer."""
+    synthesis: str
+    root_cause: str
+    project_disposition: str
+    high_leverage_move: str
+
+
+class CrossTierExtension(TypedDict):
+    """Cross-tier meta-diagnostic payload.
+
+    `deterministic_patterns` always carries whatever the pre-pass
+    detected (even when the LLM call fails); `proposals` and
+    `cross_tier_diagnostic` come from the LLM synthesis when
+    status='ok' or 'partial'."""
+    deterministic_patterns: list[CrossTierPattern]
+    proposals: list[CrossTierProposal]
+    cross_tier_diagnostic: CrossTierDiagnostic
+    status: StoryPowerStatus
+
+
 class StoryPowerResult(TypedDict):
     """Result of score_story_power. Coaching is the requested level; status
     is the outcome. Output_dir is the timestamped directory written to
@@ -334,6 +420,11 @@ class StoryPowerResult(TypedDict):
     spine.csv / architecture.csv / scenes.csv / scene-briefs.csv on
     disk) or the extension failed before producing usable data;
     otherwise they carry the payload from each Layer 1/2 scoring run.
+
+    cross_tier is None when fewer than 2 tier outputs are available
+    (single-tier projects have nothing to synthesize across) or the
+    deterministic pre-pass found nothing AND the LLM call failed.
+    Otherwise carries the synthesis payload.
     """
     coaching: CoachingLevel
     status: StoryPowerStatus
@@ -348,6 +439,7 @@ class StoryPowerResult(TypedDict):
     architecture: ArchitectureExtension | None
     scene_map: SceneMapExtension | None
     briefs: BriefsExtension | None
+    cross_tier: CrossTierExtension | None
 
 
 class Axis(NamedTuple):
@@ -1393,6 +1485,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
              architecture: ArchitectureExtension | None = None,
              scene_map: SceneMapExtension | None = None,
              briefs: BriefsExtension | None = None,
+             cross_tier: CrossTierExtension | None = None,
              ) -> StoryPowerResult:
     return {
         'coaching': coaching,
@@ -1408,6 +1501,7 @@ def _result(*, coaching: CoachingLevel, status: StoryPowerStatus,
         'architecture': architecture,
         'scene_map': scene_map,
         'briefs': briefs,
+        'cross_tier': cross_tier,
     }
 
 
