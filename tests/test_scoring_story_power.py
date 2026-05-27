@@ -6641,3 +6641,612 @@ def test_truncation_path_records_unparseable_target_in_ledger(
     assert 'story-power:architecture,' not in ledger
 
 
+# ---------------------------------------------------------------------------
+# Cross-tier meta-diagnostic
+# ---------------------------------------------------------------------------
+
+def test_tokenize_axis_name_drops_stopwords():
+    """Tokenizer drops shape-words like 'distribution', 'rhythm',
+    keeps concept-words like 'coherence', 'concreteness'."""
+    from storyforge.scoring_story_power import _tokenize_axis_name
+    assert _tokenize_axis_name('outcome_distribution') == {'outcome'}
+    assert _tokenize_axis_name('action_sequel_rhythm') == {'action', 'sequel'}
+    assert _tokenize_axis_name('field_coherence') == {'field', 'coherence'}
+    assert _tokenize_axis_name('Knowledge-flow continuity') == {
+        'knowledge', 'continuity',
+    }
+
+
+def test_detect_lowest_axis_recurrence_fires_on_shared_token():
+    """When two tiers' lowest_axis share a concept token, fires
+    a medium-severity pattern."""
+    from storyforge.scoring_story_power import _detect_lowest_axis_recurrence
+    patterns = _detect_lowest_axis_recurrence({
+        'architecture': 'field_coherence',
+        'scene_map': 'continuity_coherence',
+    })
+    assert len(patterns) == 1
+    assert patterns[0]['pattern'] == 'lowest_axis_recurrence'
+    assert patterns[0]['severity'] == 'medium'
+    assert 'coherence' in patterns[0]['description']
+    assert set(patterns[0].get('affected_tiers', [])) == {
+        'architecture', 'scene_map',
+    }
+
+
+def test_detect_lowest_axis_recurrence_high_severity_at_three_tiers():
+    """When ≥3 tiers' lowest_axis share a concept token, severity is
+    high."""
+    from storyforge.scoring_story_power import _detect_lowest_axis_recurrence
+    patterns = _detect_lowest_axis_recurrence({
+        'architecture': 'field_coherence',
+        'scene_map': 'continuity_coherence',
+        'briefs': 'thematic_coherence',  # hypothetical name w/ coherence
+    })
+    coherence = [p for p in patterns if 'coherence' in p['description']]
+    assert len(coherence) == 1
+    assert coherence[0]['severity'] == 'high'
+
+
+def test_detect_lowest_axis_recurrence_skips_single_tier():
+    """A single tier's lowest_axis can't be a cross-tier pattern."""
+    from storyforge.scoring_story_power import _detect_lowest_axis_recurrence
+    assert _detect_lowest_axis_recurrence({'architecture': 'coherence'}) == []
+
+
+def test_detect_lowest_axis_recurrence_skips_when_only_stopwords_match():
+    """If two tiers' lowest_axis share only stopword tokens, no
+    pattern fires."""
+    from storyforge.scoring_story_power import _detect_lowest_axis_recurrence
+    # 'distribution' is in stopwords; sharing it shouldn't fire.
+    patterns = _detect_lowest_axis_recurrence({
+        'briefs': 'outcome_distribution',
+        'pitch': 'pacing_distribution',
+    })
+    assert patterns == []
+
+
+def test_detect_scene_id_overlap_fires_on_shared_scene():
+    """When the same scene_id appears in proposals across ≥2 tiers,
+    fires a medium-severity pattern (high at ≥3 tiers)."""
+    from storyforge.scoring_story_power import _detect_scene_id_overlap
+    patterns = _detect_scene_id_overlap({
+        'architecture': {'s10', 's11'},
+        'scene_map': {'s10', 's12'},
+        'briefs': {'s10'},
+    })
+    # s10 in 3 tiers, s11 + s12 each in 1.
+    s10 = [p for p in patterns if 's10' in p['description']]
+    assert len(s10) == 1
+    assert s10[0]['severity'] == 'high'
+    assert set(s10[0].get('affected_tiers', [])) == {
+        'architecture', 'scene_map', 'briefs',
+    }
+
+
+def test_detect_scene_id_overlap_skips_isolated_proposals():
+    """A scene id appearing in only one tier's proposals is not a
+    cross-tier signal."""
+    from storyforge.scoring_story_power import _detect_scene_id_overlap
+    patterns = _detect_scene_id_overlap({
+        'architecture': {'s10'},
+        'scene_map': {'s11'},
+    })
+    assert patterns == []
+
+
+def test_detect_field_coherence_cascade_uses_findings_not_proposals():
+    """Cascade detector reads from findings lists (the upstream-fix
+    surface), distinct from proposals (the downstream-recommendation
+    surface)."""
+    from storyforge.scoring_story_power import _detect_field_coherence_cascade
+    patterns = _detect_field_coherence_cascade({
+        'architecture': {'s5', 's7'},
+        'briefs': {'s5'},
+    })
+    assert len(patterns) == 1
+    assert patterns[0]['pattern'] == 'field_coherence_cascade'
+    assert 's5' in patterns[0]['description']
+
+
+def test_detect_project_disposition_fires_at_four_weak_tiers():
+    """≥4 weak tiers → high-severity project_disposition pattern."""
+    from storyforge.scoring_story_power import _detect_project_disposition
+    patterns = _detect_project_disposition({
+        'pitch': 6.5,
+        'act_shape': 5.0,
+        'spine': 6.8,
+        'architecture': 6.2,
+        'scene_map': 8.0,  # strong
+        'briefs': 8.5,  # strong
+    })
+    assert len(patterns) == 1
+    assert patterns[0]['pattern'] == 'project_disposition'
+    assert patterns[0]['severity'] == 'high'
+    # The four weak tiers are named in affected_tiers.
+    assert set(patterns[0].get('affected_tiers', [])) == {
+        'pitch', 'act_shape', 'spine', 'architecture',
+    }
+
+
+def test_detect_project_disposition_skips_at_three_weak_tiers():
+    """3 weak tiers is below the threshold — no pattern fires."""
+    from storyforge.scoring_story_power import _detect_project_disposition
+    patterns = _detect_project_disposition({
+        'pitch': 6.5,
+        'act_shape': 5.0,
+        'spine': 6.8,
+        'architecture': 8.0,  # strong
+        'scene_map': 8.0,  # strong
+        'briefs': 8.5,  # strong
+    })
+    assert patterns == []
+
+
+def test_count_present_tiers_includes_pitch_when_composite_set():
+    """Pitch counts as a present tier when composite > 0."""
+    from storyforge.scoring_story_power import _count_present_tiers
+    result = {
+        'composite': 7.5, 'act_shape': None, 'spine': None,
+        'architecture': None, 'scene_map': None, 'briefs': None,
+    }
+    assert _count_present_tiers(result) == 1  # type: ignore[arg-type]
+
+
+def test_count_present_tiers_counts_each_present_extension():
+    from storyforge.scoring_story_power import _count_present_tiers
+    result = {
+        'composite': 7.5,
+        'act_shape': {'status': 'ok'},
+        'spine': {'status': 'partial'},  # partial still counts
+        'architecture': None,
+        'scene_map': {'status': 'ok'},
+        'briefs': None,
+    }
+    assert _count_present_tiers(result) == 4  # type: ignore[arg-type]
+
+
+def test_cross_tier_skipped_when_pre_pass_empty_and_two_tiers(
+        tmp_path, monkeypatch, capsys):
+    """Cost-discipline gate: when pre-pass found no patterns AND
+    fewer than 3 tiers ran, skip the LLM call entirely. Result is
+    status='ok' with empty payloads."""
+    _seed_summary(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    fake = _dual_mock_llm(_full_payload(), _act_shape_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result.get('cross_tier')
+    assert ext is not None
+    assert ext['status'] == 'ok'
+    assert ext['deterministic_patterns'] == []
+    assert ext['proposals'] == []
+    out = capsys.readouterr().out
+    # The skip-log fires when the LLM call is bypassed.
+    assert 'cross-tier synthesis skipped' in out
+
+
+def test_cross_tier_skipped_when_only_pitch_ran(tmp_path, monkeypatch):
+    """When pitch is the only tier present, cross-tier extension is
+    None (the gate at score_story_power requires ≥2 present tiers
+    before even calling the cross-tier orchestrator)."""
+    # Seed only the summary; no act-shape, no spine/arch/scene/briefs.
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'story-summary.md').write_text(
+        '## Logline\nA Test logline\n\n## Synopsis\nA test synopsis.\n'
+    )
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        # No -cross-tier route needed; the gate prevents the call.
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(_full_payload())}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result.get('cross_tier') is None
+
+
+def test_cross_tier_runs_when_pre_pass_has_patterns_with_two_tiers(
+        tmp_path, monkeypatch):
+    """When the deterministic pre-pass found ≥1 pattern, run the LLM
+    even on 2-tier projects — the pattern is real signal worth
+    synthesizing."""
+    _seed_summary(str(tmp_path))
+    # Architecture has structured fields and produces a lowest_axis;
+    # briefs (empty here) produces no extension; we'd want to force
+    # at least one pre-pass pattern. Easiest: act-shape's structural
+    # diagnostic's lowest_axis + something else. Use a constructed
+    # _spine_payload that shares a concept token with act-shape's
+    # structural diagnostic.
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    # Custom act-shape + spine payloads with shared 'causal' token.
+    act_payload = _act_shape_payload()
+    act_payload['structural_diagnostic']['lowest_axis'] = 'causal_integrity'
+    spine_payload = _spine_payload()
+    spine_payload['spine_diagnostic']['lowest_axis'] = 'causal_handoff'
+
+    # Custom cross-tier payload so we can assert it ran AND was used.
+    custom_cross_tier = {
+        'cross_tier_diagnostic': {
+            'synthesis': 'Causal weakness recurs across act-shape and spine.',
+            'high_leverage_move': 'Tighten the midpoint spine event.',
+        },
+        'proposals': [
+            {'target': 'spine_event:ev-3',
+             'move': 'Strengthen the midpoint event.',
+             'expected_lift': 'causal_integrity 5→8; causal_handoff 6→9'},
+        ],
+    }
+    fake = _septa_mock_llm(_full_payload(), act_payload, spine_payload,
+                              {}, {}, {}, custom_cross_tier)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result.get('cross_tier')
+    assert ext is not None
+    # Deterministic pre-pass should have found the 'causal' recurrence.
+    causal_patterns = [
+        p for p in ext['deterministic_patterns']
+        if 'causal' in p['description']
+    ]
+    assert len(causal_patterns) >= 1
+    # LLM synthesis surfaced.
+    assert 'Causal weakness' in ext['cross_tier_diagnostic'].get(
+        'synthesis', '',
+    )
+    assert len(ext['proposals']) == 1
+    assert ext['proposals'][0]['target'] == 'spine_event:ev-3'
+
+
+def test_cross_tier_llm_failure_preserves_deterministic_patterns(
+        tmp_path, monkeypatch):
+    """When the cross-tier LLM call raises, the deterministic patterns
+    still surface in ext['deterministic_patterns'] — the pre-pass
+    output is the load-bearing signal."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    # Set up payloads with a shared concept token so pre-pass fires.
+    act_payload = _act_shape_payload()
+    act_payload['structural_diagnostic']['lowest_axis'] = 'causal_integrity'
+    spine_payload = _spine_payload()
+    spine_payload['spine_diagnostic']['lowest_axis'] = 'causal_handoff'
+
+    def fake(prompt, model, log_file, **kwargs):
+        if '-cross-tier' in log_file:
+            raise RuntimeError('Anthropic 503')
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-spine' in log_file:
+            payload = spine_payload
+        elif '-act-shape' in log_file:
+            payload = act_payload
+        else:
+            payload = _full_payload()
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result.get('cross_tier')
+    assert ext is not None
+    assert ext['status'] == 'llm_error'
+    # Pre-pass patterns still surface despite the LLM exception.
+    causal_patterns = [
+        p for p in ext['deterministic_patterns']
+        if 'causal' in p['description']
+    ]
+    assert len(causal_patterns) >= 1
+
+
+def test_cross_tier_unparseable_response_tags_unparseable(
+        tmp_path, monkeypatch, capsys):
+    """A malformed cross-tier LLM response yields status='unparseable'
+    with deterministic patterns preserved."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    act_payload = _act_shape_payload()
+    act_payload['structural_diagnostic']['lowest_axis'] = 'causal_integrity'
+    spine_payload = _spine_payload()
+    spine_payload['spine_diagnostic']['lowest_axis'] = 'causal_handoff'
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-cross-tier' in log_file:
+            text = 'not json at all'
+        elif '-spine' in log_file:
+            text = json.dumps(spine_payload)
+        elif '-act-shape' in log_file:
+            text = json.dumps(act_payload)
+        else:
+            text = json.dumps(_full_payload())
+        response = {
+            'content': [{'type': 'text', 'text': text}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result.get('cross_tier')
+    assert ext is not None
+    assert ext['status'] == 'unparseable'
+    assert len(ext['deterministic_patterns']) >= 1
+    out = capsys.readouterr().out
+    assert 'cross-tier LLM response unparseable' in out
+
+
+def test_cross_tier_partial_when_llm_returns_empty_with_patterns(
+        tmp_path, monkeypatch, capsys):
+    """When the pre-pass found patterns but the LLM returned an
+    empty synthesis (no diagnostic, no proposals), status='partial' —
+    the cost was paid for no signal."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    act_payload = _act_shape_payload()
+    act_payload['structural_diagnostic']['lowest_axis'] = 'causal_integrity'
+    spine_payload = _spine_payload()
+    spine_payload['spine_diagnostic']['lowest_axis'] = 'causal_handoff'
+
+    fake = _septa_mock_llm(_full_payload(), act_payload, spine_payload,
+                              {}, {}, {}, _cross_tier_payload())
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result.get('cross_tier')
+    assert ext is not None
+    assert ext['status'] == 'partial'
+    out = capsys.readouterr().out
+    assert 'synthesis ignored the pre-pass signal' in out
+
+
+def test_cross_tier_proposals_extractor_drops_incomplete(capsys):
+    """Proposals require both target and move; rows missing either
+    are dropped."""
+    from storyforge.scoring_story_power import _extract_cross_tier_proposals
+    parsed = {
+        'proposals': [
+            {'target': '', 'move': 'a move'},
+            {'target': 'scene:s1', 'move': ''},
+            {'target': 'scene:s2', 'move': 'pull a beat from s3'},
+            'not a dict',
+        ],
+    }
+    out = _extract_cross_tier_proposals(parsed)
+    assert len(out) == 1
+    assert out[0]['target'] == 'scene:s2'
+    info = capsys.readouterr().out
+    assert 'cross_tier_proposals extraction dropped' in info
+
+
+def test_cross_tier_proposals_extractor_carries_optional_fields():
+    """Optional fields (rationale, expected_lift, consolidates_tiers)
+    surface when present and non-empty; absent fields don't appear
+    in the result dict (Required+Optional split semantics)."""
+    from storyforge.scoring_story_power import _extract_cross_tier_proposals
+    parsed = {
+        'proposals': [
+            {
+                'target': 'spine_event:ev-3',
+                'move': 'Tighten the midpoint event.',
+                'rationale': 'lifts causal axes across tiers',
+                'expected_lift': 'causal_integrity 5→8',
+                'consolidates_tiers': ['architecture', 'briefs'],
+            },
+            {
+                'target': 'scene:s10',
+                'move': 'Split into two scenes.',
+                # rationale + expected_lift + consolidates_tiers absent
+            },
+        ],
+    }
+    out = _extract_cross_tier_proposals(parsed)
+    assert len(out) == 2
+    first = out[0]
+    assert first['rationale'] == 'lifts causal axes across tiers'
+    assert first['expected_lift'] == 'causal_integrity 5→8'
+    assert first['consolidates_tiers'] == ['architecture', 'briefs']
+    second = out[1]
+    assert 'rationale' not in second
+    assert 'expected_lift' not in second
+    assert 'consolidates_tiers' not in second
+
+
+def test_parse_response_cross_tier_accepts_diagnostic_only():
+    """A response with only cross_tier_diagnostic (no proposals
+    list) still parses — diagnostic alone is actionable."""
+    from storyforge.scoring_story_power import _parse_response_cross_tier
+    text = json.dumps({
+        'cross_tier_diagnostic': {'synthesis': 'Everything coheres.'},
+    })
+    parsed = _parse_response_cross_tier(text)
+    assert parsed is not None
+    assert 'cross_tier_diagnostic' in parsed
+
+
+def test_parse_response_cross_tier_accepts_proposals_only():
+    """A response with only proposals (no diagnostic dict) parses —
+    proposals alone are actionable."""
+    from storyforge.scoring_story_power import _parse_response_cross_tier
+    text = json.dumps({
+        'proposals': [{'target': 'scene:s1', 'move': 'split it'}],
+    })
+    parsed = _parse_response_cross_tier(text)
+    assert parsed is not None
+    assert 'proposals' in parsed
+
+
+def test_parse_response_cross_tier_rejects_when_both_missing(capsys):
+    """If neither cross_tier_diagnostic nor proposals appears in the
+    JSON, the response is unparseable — there's nothing actionable."""
+    from storyforge.scoring_story_power import _parse_response_cross_tier
+    text = json.dumps({'unrelated': 'noise'})
+    parsed = _parse_response_cross_tier(text)
+    assert parsed is None
+    out = capsys.readouterr().out
+    assert 'cross_tier_diagnostic' in out or 'proposals' in out
+
+
+def test_cross_tier_strict_mode_extends_checklist(tmp_path):
+    """Strict mode adds a "Cross-tier patterns (self-check)" section
+    with the four pattern catalog prompts."""
+    _seed_summary(str(tmp_path))
+    from storyforge.scoring_story_power import score_story_power
+    result = score_story_power(str(tmp_path), 'strict')
+    checklist = open(os.path.join(result['output_dir'],
+                                     'self-scoring-checklist.md')).read()
+    assert '# Cross-tier patterns (self-check)' in checklist
+    # All four pattern names should appear as headings.
+    assert 'Lowest-axis recurrence' in checklist
+    assert 'Scene-id overlap' in checklist
+    assert 'Field-coherence cascade' in checklist
+    assert 'Project-level disposition' in checklist
+    assert 'High-leverage move' in checklist
+
+
+def test_cross_tier_full_mode_appends_to_diagnostic(tmp_path, monkeypatch):
+    """Full coaching appends the cross-tier section to diagnostic.md
+    with the synthesis prose + high-leverage move + proposals
+    rendered as markdown."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    act_payload = _act_shape_payload()
+    act_payload['structural_diagnostic']['lowest_axis'] = 'causal_integrity'
+    spine_payload = _spine_payload()
+    spine_payload['spine_diagnostic']['lowest_axis'] = 'causal_handoff'
+
+    cross_payload = {
+        'cross_tier_diagnostic': {
+            'synthesis': 'Causal weakness across act-shape and spine.',
+            'high_leverage_move': 'Tighten the midpoint event.',
+        },
+        'proposals': [
+            {'target': 'spine_event:ev-3',
+             'move': 'Strengthen the midpoint event.',
+             'expected_lift': 'causal_integrity 5→8'},
+        ],
+    }
+    fake = _septa_mock_llm(_full_payload(), act_payload, spine_payload,
+                              {}, {}, {}, cross_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    diag_path = os.path.join(result['output_dir'], 'diagnostic.md')
+    diag = open(diag_path).read()
+    assert '## Cross-tier diagnostic' in diag
+    assert 'Causal weakness across act-shape' in diag
+    assert 'Tighten the midpoint event' in diag
+    assert 'spine_event:ev-3' in diag
+    # Deterministic pattern surfaced too.
+    assert 'lowest_axis_recurrence' in diag
+
+
+def test_cross_tier_coach_mode_appends_to_brief(tmp_path, monkeypatch):
+    """Coach coaching appends to coaching-brief.md with the prelude
+    framing proposals as the author's decision."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    act_payload = _act_shape_payload()
+    act_payload['structural_diagnostic']['lowest_axis'] = 'causal_integrity'
+    spine_payload = _spine_payload()
+    spine_payload['spine_diagnostic']['lowest_axis'] = 'causal_handoff'
+
+    cross_payload = {
+        'cross_tier_diagnostic': {
+            'synthesis': 'Causal weakness pattern.',
+            'high_leverage_move': 'Tighten the spine.',
+        },
+        'proposals': [],
+    }
+    fake = _septa_mock_llm(_full_payload(), act_payload, spine_payload,
+                              {}, {}, {}, cross_payload)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'coach')
+    brief = open(os.path.join(result['output_dir'],
+                                 'coaching-brief.md')).read()
+    assert '# Cross-tier synthesis' in brief
+    assert 'not directives' in brief
+    assert 'Causal weakness pattern' in brief
+
+
+def test_cross_tier_runs_when_three_tiers_even_without_pre_pass(
+        tmp_path, monkeypatch):
+    """The cost-discipline gate allows LLM call when ≥3 tiers ran,
+    even if pre-pass found nothing — at 3+ tiers, the LLM might
+    find emergent insights the deterministic detectors can't."""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    # Use default payloads that share no lowest_axis tokens — pre-pass
+    # finds nothing. _seed_spine creates 4 events but no architecture
+    # / scene-map / briefs csvs → pitch + act-shape + spine = 3 tiers.
+    custom_cross = {
+        'cross_tier_diagnostic': {
+            'synthesis': 'The tiers cohere without cross-pattern.',
+        },
+        'proposals': [],
+    }
+    fake = _septa_mock_llm(_full_payload(), _act_shape_payload(),
+                              _spine_payload(), {}, {}, {}, custom_cross)
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ext = result.get('cross_tier')
+    assert ext is not None
+    # The LLM ran (pre-pass empty + 3 tiers ≥ 3 threshold).
+    assert 'cohere' in ext['cross_tier_diagnostic'].get('synthesis', '')
+
+
+
