@@ -262,3 +262,64 @@ class TestWriteReport:
         cmd_idx = REPORT_COLUMNS.index('command')
         assert cols[file_idx] == ''
         assert cols[cmd_idx] == ''
+
+
+class TestPagesDirectory:
+    """Cleanup integration for GN per-page files (issue #251)."""
+
+    def test_pages_dir_not_flagged_unexpected_in_gn(self, tmp_path):
+        """A pages/ directory in a GN project is recognized, not flagged."""
+        from storyforge.cmd_cleanup import report_unexpected_files
+        (tmp_path / 'pages').mkdir()
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: graphic-novel\n'
+        )
+        issues = report_unexpected_files(str(tmp_path))
+        assert not any(i == 'UNEXPECTED_DIR:pages' for i in issues)
+
+    def test_pages_dir_still_flagged_in_novel_mode(self, tmp_path):
+        """pages/ in a prose-novel project remains UNEXPECTED — it has no
+        meaning in novel mode and should be cleaned up."""
+        from storyforge.cmd_cleanup import report_unexpected_files
+        (tmp_path / 'pages').mkdir()
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: novel\n'
+        )
+        issues = report_unexpected_files(str(tmp_path))
+        assert any(i == 'UNEXPECTED_DIR:pages' for i in issues)
+
+    def test_invalid_page_file_surfaced_in_report(self, tmp_path):
+        """A page file missing required frontmatter surfaces a finding in
+        the structured report."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: graphic-novel\n'
+        )
+        pages = tmp_path / 'pages'
+        pages.mkdir()
+        (pages / 's01-p1.md').write_text('# No frontmatter\n')
+        report = build_cleanup_report(str(tmp_path))
+        page_findings = [f for f in report['findings']
+                         if f.get('category') == 'pages']
+        assert len(page_findings) >= 1
+        assert any(f['type'] == 'page_no_frontmatter' for f in page_findings)
+
+    def test_clean_page_file_no_findings(self, tmp_path):
+        """A valid page file produces no page-category findings."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: graphic-novel\n'
+        )
+        pages = tmp_path / 'pages'
+        pages.mkdir()
+        (pages / 's01-p1.md').write_text(
+            "---\n"
+            "page_id: s01-p1\n"
+            "scene_id: s01-studio-finalization\n"
+            "page_within_scene: 1\n"
+            "total_pages_in_scene: 5\n"
+            "panel_count: 2\n"
+            "---\n\nbody\n"
+        )
+        report = build_cleanup_report(str(tmp_path))
+        page_findings = [f for f in report['findings']
+                         if f.get('category') == 'pages']
+        assert page_findings == []
