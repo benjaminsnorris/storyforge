@@ -22,11 +22,15 @@ from storyforge.cmd_score import (
 )
 
 
+# The three signature-contract tests below pin the #205 fix from
+# regressing. All three private helpers must accept project_dir as a
+# parameter so the caller (which knows the correct value) can pass it
+# through. Re-deriving project_dir from cycle_dir was the original
+# bug; these tests catch param removal but not "keep the param and
+# ignore it" regressions — the wiring tests further down cover that.
+
+
 def test_score_batch_accepts_project_dir_param():
-    """_score_batch must accept project_dir as a parameter so the
-    caller (which knows the right value) can pass it through.
-    Re-deriving project_dir from cycle_dir was the #205 bug; this
-    test pins the signature change."""
     sig = inspect.signature(_score_batch)
     assert 'project_dir' in sig.parameters
 
