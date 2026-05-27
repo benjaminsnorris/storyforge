@@ -421,12 +421,10 @@ class CrossTierDiagnostic(TypedDict, total=False):
 
 
 class CrossTierExtension(TypedDict):
-    """Cross-tier meta-diagnostic payload.
-
-    `deterministic_patterns` always carries whatever the pre-pass
-    detected (even when the LLM call fails); `proposals` and
-    `cross_tier_diagnostic` come from the LLM synthesis when
-    status='ok' or 'partial'."""
+    """Cross-tier meta-diagnostic payload. `deterministic_patterns`
+    always carries whatever the pre-pass detected, including on LLM
+    failures. The status-discipline rules live at
+    _run_cross_tier_extension."""
     deterministic_patterns: list[CrossTierPattern]
     proposals: list[CrossTierProposal]
     cross_tier_diagnostic: CrossTierDiagnostic
@@ -2644,7 +2642,8 @@ def _write_strict_checklist(output_dir: str, artifacts: PitchArtifacts,
         '',
         '## 4. Project-level disposition',
         '',
-        'Are four or more tiers below 7? If yes, the '
+        'Are four or more tiers strictly below 7 (a score of 7 '
+        'exactly is NOT weak)? If yes, the '
         "project's structural-craft layer is underweight overall — "
         'consider returning to elaboration before continuing to '
         'drafting.',
@@ -6099,9 +6098,8 @@ def _append_briefs_coaching_brief(
 
 # Tokens to ignore when tokenizing lowest_axis names — they appear in
 # many tier-specific axis names but don't represent a *project-level*
-# craft dimension. 'distribution', 'rhythm', 'gradient', etc. are
-# axis-shape words; the meaningful tokens are concept-level
-# ('concreteness', 'coherence', 'causal', 'arc', 'coverage').
+# craft dimension. The set membership is the source of truth;
+# test_tokenize_stopword_membership_invariants pins specific tokens.
 _AXIS_TOKEN_STOPWORDS: frozenset[str] = frozenset({
     '', 'and', 'of', 'the', 'a', 'an',
     'distribution', 'rhythm', 'gradient', 'visibility',
@@ -6485,14 +6483,9 @@ def _empty_cross_tier_extension(
 
 
 def _summarize_tier_for_prompt(result: StoryPowerResult) -> str:
-    """Build a compact tier-by-tier summary for the LLM prompt.
-
-    Each tier present in the result contributes one block: its
-    composite (or representative strength), lowest_axis (when
-    present), and the diagnostic narrative. Pitch's structure is
-    different (composite at top level + diagnostic at top level);
-    extensions all have a *_diagnostic field inside their payload.
-    """
+    """Build a compact tier-by-tier summary for the LLM prompt. Each
+    present tier contributes one block; pitch is read from top-level
+    composite + scores, extensions from their *_diagnostic field."""
     blocks: list[str] = []
     # Pitch
     pitch_composite = result.get('composite')
@@ -6798,6 +6791,13 @@ def _run_cross_tier_extension(project_dir: str, output_dir: str,
             'synthesis output would be dropped by the writers.')
         return _empty_cross_tier_extension('ok', det_patterns)
     if not det_patterns and tier_count < 3:
+        # Considered: also skipping when det_patterns has a single
+        # 'medium' pattern on 2 tiers (the cheapest pattern, often
+        # describing two tiers sharing one concept token). Decided
+        # against — the LLM's synthesis adds meaningful value even on
+        # 1-pattern projects (it can name the underlying defect and
+        # propose a consolidation), and a `medium` pattern across
+        # tiers is real signal worth paying ~8K tokens to interpret.
         log(f'INFO: cross-tier synthesis skipped — pre-pass found no '
             f'patterns and only {tier_count} tier(s) ran; insufficient '
             'substrate for LLM synthesis.')
