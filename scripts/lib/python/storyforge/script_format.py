@@ -5,9 +5,16 @@ and verifies that the drafted script matches the brief's contract:
 dialogue lines, visual keywords, panel breakdown, page-turn beats.
 
 Script format reference: docs/superpowers/specs/2026-05-20-graphic-novel-mode-design.md
+Layout anti-patterns: references/gn-layout-vocabulary.md
 """
 
 import re
+from typing import Final, Literal, TypedDict
+
+# Severity Literal reused from scoring_story_power (the canonical
+# severity scale across the codebase). Imported lazily inside the
+# TypedDict context to avoid a circular import at module load.
+from storyforge.scoring_story_power import Severity
 
 # --- Regex patterns ---
 
@@ -296,11 +303,47 @@ def check_brief_fidelity(brief_row, script_text):
 # crisis (the reader can't scan comfortably). Tier convention: 2-4
 # panels in a single horizontal row; outside this band the token is
 # almost certainly mis-labeled.
-_PANEL_DENSITY_LIMIT = 13
-_TIER_PANEL_RANGE = (2, 4)
+_PANEL_DENSITY_LIMIT: Final[int] = 13
+_TIER_PANEL_RANGE: Final[tuple[int, int]] = (2, 4)
 
 
-def check_layout_anti_patterns(script_text, brief_row=None):
+# Closed set of layout anti-pattern kinds. Mirrors the
+# CrossTierPatternKey / StoryPowerStatus / BriefOutcome Literal+tuple
+# pattern from scoring_story_power.py — a consumer doing
+# `finding['kind'] == 'panel_density_excesive'` (typo) gets a static
+# mypy error instead of a silent false-negative.
+LayoutAntiPatternKind = Literal[
+    'page_turn_on_page_one',
+    'panel_density_excessive',
+    'tier_panel_count_unconventional',
+    'script_unparseable',
+]
+
+
+class _LayoutAntiPatternRequired(TypedDict):
+    kind: LayoutAntiPatternKind
+    detail: str
+    severity: Severity
+    expected: str
+
+
+class LayoutAntiPattern(_LayoutAntiPatternRequired, total=False):
+    """A deterministic layout anti-pattern surfaced by
+    check_layout_anti_patterns. `page` is set for page-anchored
+    findings (page_turn_on_page_one, panel_density_excessive,
+    tier_panel_count_unconventional); absent for script-wide
+    findings (script_unparseable).
+
+    Failure-shape Required+Optional split mirrors ContinuityFinding /
+    BriefFinding / FieldCoherenceFinding in scoring_story_power.py.
+    """
+    page: int
+
+
+def check_layout_anti_patterns(
+        script_text: str,
+        brief_row: dict | None = None,
+        ) -> list[LayoutAntiPattern]:
     """Return a list of failure dicts for deterministic layout
     anti-patterns documented in references/gn-layout-vocabulary.md.
 
@@ -325,7 +368,7 @@ def check_layout_anti_patterns(script_text, brief_row=None):
     available) page/expected fields for the revision prompt. Empty
     list when the script is clean.
     """
-    failures = []
+    failures: list[LayoutAntiPattern] = []
     parsed = parse_script(script_text)
     pages = parsed['pages']
 
