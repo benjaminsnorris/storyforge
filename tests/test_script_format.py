@@ -182,7 +182,7 @@ def test_dialogue_prefix_rejects_too_short_words():
 
 
 # ---------------------------------------------------------------------------
-# Layout anti-pattern detectors (issue #210)
+# Layout anti-pattern detectors
 # ---------------------------------------------------------------------------
 
 def test_layout_anti_patterns_clean_script_has_no_findings():

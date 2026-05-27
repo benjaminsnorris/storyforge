@@ -389,6 +389,9 @@ def check_layout_anti_patterns(
         return failures
 
     # 1. Page-turn marker on page 1.
+    # Defensive against malformed scripts with duplicate `## Page 1`
+    # headers (e.g. cross-chapter regenerated drafts); surface one
+    # finding rather than N when multiple match.
     for page in pages:
         if page['number'] == 1 and page['is_page_turn']:
             failures.append({
@@ -401,7 +404,7 @@ def check_layout_anti_patterns(
                 'severity': 'high',
                 'page': 1,
             })
-            break  # one finding is enough; the issue is the marker, not its count
+            break
 
     # 2. Panel-density ceiling.
     for page in pages:

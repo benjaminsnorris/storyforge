@@ -267,10 +267,12 @@ beyond its content.
 
 ### Kirby's splash logic
 
-Jack Kirby (Fantastic Four, New Gods, OMAC) used splashes as visual
-exclamation points. The principle: a splash earns its page when the
-moment is genuinely the *biggest* in the scene; using one elsewhere
-diminishes every subsequent splash's effect.
+"Splash logic" is in-house vocabulary in this document — not a
+named term Kirby used. The label captures the working principle
+visible in Kirby's pages: Jack Kirby (Fantastic Four, New Gods,
+OMAC) used splashes as visual exclamation points. A splash earns
+its page when the moment is genuinely the *biggest* in the scene;
+using one elsewhere diminishes every subsequent splash's effect.
 
 - **Implication for `panel_breakdown`:** count splashes per scene.
   More than one splash in a 4-page scene is usually one too many;
