@@ -5901,3 +5901,649 @@ def test_briefs_skipped_when_csv_contains_only_scaffold_rows(tmp_path,
     assert result['briefs'] is None
 
 
+# ---------------------------------------------------------------------------
+# max_tokens ceilings + truncation detection
+# ---------------------------------------------------------------------------
+
+def test_per_row_tier_max_tokens_constant_above_8k():
+    """The per-row-heavy tiers (architecture, scene-map, briefs) ship
+    with a max_tokens ceiling well above the 8K wall observed in
+    issue #245 (15-scene architecture + 43-scene scene-map both
+    truncated mid-JSON at 8192 output tokens)."""
+    from storyforge.scoring_story_power import (
+        _PER_ROW_TIER_MAX_TOKENS, _FIXED_PAYLOAD_TIER_MAX_TOKENS,
+        _PITCH_MAX_TOKENS,
+    )
+    assert _PER_ROW_TIER_MAX_TOKENS >= 16384, (
+        f'per-row tier ceiling must be at least 2× the observed 8K '
+        f'wall; got {_PER_ROW_TIER_MAX_TOKENS}'
+    )
+    # Bounded tiers (act-shape, spine) and pitch retain their lower
+    # ceilings — their payloads don't scale with project size.
+    assert _FIXED_PAYLOAD_TIER_MAX_TOKENS == 8192
+    assert _PITCH_MAX_TOKENS == 4096
+
+
+def test_per_row_tier_max_tokens_under_creative_model_cap():
+    """The per-row ceiling must fit under the creative model's output
+    cap (api.MODEL_MAX_OUTPUT is the source of truth). PR #247 review
+    caught a factual claim of '64K Opus output cap' — Opus 4.6
+    actually caps at 128K, but the lesson is that constants drift
+    from documentation. This test grounds the claim in the API
+    config so a future model change can't silently break it."""
+    from storyforge.scoring_story_power import (
+        _PER_ROW_TIER_MAX_TOKENS,
+    )
+    from storyforge.api import MODEL_MAX_OUTPUT
+    from storyforge.common import select_model
+    creative_model = select_model('creative')
+    model_cap = MODEL_MAX_OUTPUT.get(creative_model)
+    assert model_cap is not None, (
+        f'creative model {creative_model!r} is not in MODEL_MAX_OUTPUT; '
+        'add an entry or update select_model'
+    )
+    assert _PER_ROW_TIER_MAX_TOKENS <= model_cap, (
+        f'_PER_ROW_TIER_MAX_TOKENS={_PER_ROW_TIER_MAX_TOKENS} exceeds '
+        f'the creative model {creative_model!r} cap of {model_cap}; '
+        'the API would reject the request with HTTP 400'
+    )
+
+
+def test_architecture_passes_per_row_max_tokens(tmp_path, monkeypatch):
+    """Architecture mode calls invoke_to_file with the per-row tier
+    ceiling, not the old 8K wall."""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    seen_max_tokens: dict[str, int] = {}
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-architecture' in log_file:
+            seen_max_tokens['architecture'] = kwargs.get('max_tokens', -1)
+            payload = _architecture_payload()
+        elif '-spine' in log_file:
+            payload = _spine_payload()
+        elif '-act-shape' in log_file:
+            payload = _act_shape_payload()
+        else:
+            payload = _full_payload()
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert seen_max_tokens['architecture'] == (
+        scoring_story_power._PER_ROW_TIER_MAX_TOKENS
+    ), seen_max_tokens
+
+
+def test_scene_map_passes_per_row_max_tokens(tmp_path, monkeypatch):
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    _seed_scene_map(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    seen: dict[str, int] = {}
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-scene-map' in log_file:
+            seen['scene-map'] = kwargs.get('max_tokens', -1)
+            payload = _scene_map_payload()
+        elif '-architecture' in log_file:
+            payload = _architecture_payload()
+        elif '-spine' in log_file:
+            payload = _spine_payload()
+        elif '-act-shape' in log_file:
+            payload = _act_shape_payload()
+        else:
+            payload = _full_payload()
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert seen['scene-map'] == scoring_story_power._PER_ROW_TIER_MAX_TOKENS
+
+
+def test_briefs_passes_per_row_max_tokens(tmp_path, monkeypatch):
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    seen: dict[str, int] = {}
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-briefs' in log_file:
+            seen['briefs'] = kwargs.get('max_tokens', -1)
+            payload = _briefs_payload()
+        elif '-act-shape' in log_file:
+            payload = _act_shape_payload()
+        else:
+            payload = _full_payload()
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert seen['briefs'] == scoring_story_power._PER_ROW_TIER_MAX_TOKENS
+
+
+def test_all_tiers_pass_correct_max_tokens_constant(tmp_path, monkeypatch):
+    """Every tier (pitch, act-shape, spine, architecture, scene-map,
+    briefs) passes the *expected* per-tier ceiling to invoke_to_file.
+    Without this, a refactor that promotes spine to _PER_ROW (4×
+    cost regression) or demotes architecture to _FIXED_PAYLOAD
+    (reintroducing #245) would pass the existing per-tier tests
+    that only assert the value matches the expected constant for
+    that tier individually. This single test enforces the full
+    matrix in one place. (PR #247 review T-1.)"""
+    _seed_summary(str(tmp_path))
+    _seed_spine(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    _seed_scene_map(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    seen: dict[str, int] = {}
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-briefs' in log_file:
+            seen['briefs'] = kwargs.get('max_tokens', -1)
+            payload = _briefs_payload()
+        elif '-scene-map' in log_file:
+            seen['scene-map'] = kwargs.get('max_tokens', -1)
+            payload = _scene_map_payload()
+        elif '-architecture' in log_file:
+            seen['architecture'] = kwargs.get('max_tokens', -1)
+            payload = _architecture_payload()
+        elif '-spine' in log_file:
+            seen['spine'] = kwargs.get('max_tokens', -1)
+            payload = _spine_payload()
+        elif '-act-shape' in log_file:
+            seen['act-shape'] = kwargs.get('max_tokens', -1)
+            payload = _act_shape_payload()
+        else:
+            seen['pitch'] = kwargs.get('max_tokens', -1)
+            payload = _full_payload()
+        response = {
+            'content': [{'type': 'text', 'text': json.dumps(payload)}],
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    expected = {
+        'pitch': scoring_story_power._PITCH_MAX_TOKENS,
+        'act-shape': scoring_story_power._FIXED_PAYLOAD_TIER_MAX_TOKENS,
+        'spine': scoring_story_power._FIXED_PAYLOAD_TIER_MAX_TOKENS,
+        'architecture': scoring_story_power._PER_ROW_TIER_MAX_TOKENS,
+        'scene-map': scoring_story_power._PER_ROW_TIER_MAX_TOKENS,
+        'briefs': scoring_story_power._PER_ROW_TIER_MAX_TOKENS,
+    }
+    assert seen == expected, (
+        f'tier → max_tokens mismatch.\nexpected: {expected}\n'
+        f'actual:   {seen}'
+    )
+
+
+def test_read_stop_reason_returns_field_when_present(tmp_path):
+    """Reads the LLM's stop_reason from the raw response log."""
+    from storyforge.scoring_story_power import _read_stop_reason
+    log_file = str(tmp_path / 'resp.json')
+    with open(log_file, 'w') as f:
+        json.dump({
+            'content': [{'type': 'text', 'text': 'partial'}],
+            'stop_reason': 'max_tokens',
+            'usage': {'input_tokens': 500, 'output_tokens': 8192},
+        }, f)
+    assert _read_stop_reason(log_file) == 'max_tokens'
+
+
+def test_read_stop_reason_handles_missing_field(tmp_path):
+    """A response without stop_reason (common in mocks) yields ''."""
+    from storyforge.scoring_story_power import _read_stop_reason
+    log_file = str(tmp_path / 'resp.json')
+    with open(log_file, 'w') as f:
+        json.dump({'content': [{'type': 'text', 'text': 'x'}]}, f)
+    assert _read_stop_reason(log_file) == ''
+
+
+def test_read_stop_reason_handles_missing_file():
+    from storyforge.scoring_story_power import _read_stop_reason
+    assert _read_stop_reason('/nonexistent/path.json') == ''
+
+
+def test_truncation_hint_returns_descriptive_text_on_max_tokens(tmp_path):
+    """When stop_reason is max_tokens, the hint names the cause + the
+    ceiling so the user knows which knob to turn."""
+    from storyforge.scoring_story_power import _truncation_hint
+    log_file = str(tmp_path / 'resp.json')
+    with open(log_file, 'w') as f:
+        json.dump({
+            'content': [{'type': 'text', 'text': 'partial'}],
+            'stop_reason': 'max_tokens',
+        }, f)
+    hint = _truncation_hint(log_file, 32768)
+    assert hint != ''
+    assert 'max_tokens=32768' in hint
+    assert 'truncated' in hint
+
+
+def test_truncation_hint_returns_empty_for_genuine_parse_failure(tmp_path):
+    """When stop_reason is end_turn (or absent), the hint is empty —
+    the parse failure is genuine, not truncation, and the original
+    'unparseable' message stands alone."""
+    from storyforge.scoring_story_power import _truncation_hint
+    log_file = str(tmp_path / 'resp.json')
+    with open(log_file, 'w') as f:
+        json.dump({
+            'content': [{'type': 'text', 'text': 'not json'}],
+            'stop_reason': 'end_turn',
+        }, f)
+    assert _truncation_hint(log_file, 32768) == ''
+
+
+def test_architecture_unparseable_with_max_tokens_logs_truncation_hint(
+        tmp_path, monkeypatch, capsys):
+    """End-to-end: when architecture LLM truncates at max_tokens and
+    the response is therefore unparseable, the ERROR message names
+    truncation as the cause — not 'parse failed' alone."""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-architecture' in log_file:
+            # Truncated JSON + stop_reason=max_tokens — the real-world
+            # signature from the issue logs.
+            text = '{"per_scene": [{"scene_id": "a01", "scores":'
+            stop = 'max_tokens'
+        elif '-spine' in log_file:
+            text = json.dumps(_spine_payload())
+            stop = 'end_turn'
+        elif '-act-shape' in log_file:
+            text = json.dumps(_act_shape_payload())
+            stop = 'end_turn'
+        else:
+            text = json.dumps(_full_payload())
+            stop = 'end_turn'
+        response = {
+            'content': [{'type': 'text', 'text': text}],
+            'stop_reason': stop,
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['architecture']['status'] == 'unparseable'
+    out = capsys.readouterr().out
+    assert 'architecture LLM response unparseable' in out
+    assert 'truncated mid-JSON' in out
+    # The ceiling is named so the user knows the budget that hit the
+    # wall.
+    assert 'max_tokens=32768' in out
+
+
+def test_unparseable_without_truncation_omits_hint(tmp_path, monkeypatch,
+                                                      capsys):
+    """When the LLM returns malformed JSON but did NOT hit
+    max_tokens, the error message stays clean — no spurious
+    'truncated' suffix on what is actually a genuine parse failure."""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-architecture' in log_file:
+            text = 'this is not json'
+            stop = 'end_turn'
+        elif '-spine' in log_file:
+            text = json.dumps(_spine_payload())
+            stop = 'end_turn'
+        elif '-act-shape' in log_file:
+            text = json.dumps(_act_shape_payload())
+            stop = 'end_turn'
+        else:
+            text = json.dumps(_full_payload())
+            stop = 'end_turn'
+        response = {
+            'content': [{'type': 'text', 'text': text}],
+            'stop_reason': stop,
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    out = capsys.readouterr().out
+    assert 'architecture LLM response unparseable' in out
+    assert 'truncated mid-JSON' not in out
+
+
+def test_read_stop_reason_handles_non_dict_top_level(tmp_path):
+    """A JSON log whose top level is a list / string / number must not
+    crash _read_stop_reason — the .get call on a non-dict would
+    propagate AttributeError out of the diagnostic helper and
+    suppress the original unparseable-error message. (PR #247 review
+    SF-HIGH-1.)"""
+    from storyforge.scoring_story_power import _read_stop_reason
+    log_file = str(tmp_path / 'resp.json')
+    # Top-level list — has happened on partial writes where only the
+    # `content` array was flushed.
+    with open(log_file, 'w') as f:
+        json.dump(['partial', 'list'], f)
+    assert _read_stop_reason(log_file) == ''
+
+
+def test_read_stop_reason_handles_non_string_stop_reason(tmp_path):
+    """A response with a non-string stop_reason value (would not match
+    the API contract, but defensive against schema drift) returns ''
+    rather than crashing the comparison downstream."""
+    from storyforge.scoring_story_power import _read_stop_reason
+    log_file = str(tmp_path / 'resp.json')
+    with open(log_file, 'w') as f:
+        json.dump({'stop_reason': {'unexpected': 'shape'}}, f)
+    assert _read_stop_reason(log_file) == ''
+
+
+def test_read_stop_reason_logs_warning_on_oserror(tmp_path, capsys):
+    """OSError (file should exist but unreadable, or a missing
+    directory leading to FileNotFoundError) logs a WARNING so the
+    diagnostic itself doesn't fail silently. Mirrors
+    _read_response_text's behavior. (PR #247 review SF-MED-2.)"""
+    from storyforge.scoring_story_power import _read_stop_reason
+    # Nested non-existent directory raises FileNotFoundError, an
+    # OSError subclass.
+    _read_stop_reason(str(tmp_path / 'sub' / 'missing.json'))
+    out = capsys.readouterr().out
+    assert 'could not read story-power log' in out
+
+
+def test_read_stop_reason_decode_error_stays_quiet(tmp_path, capsys):
+    """A JSONDecodeError is expected on partial writes (file exists,
+    content incomplete) and stays quiet — that's the normal case
+    for a truncated invoke_to_file, not a diagnostic failure."""
+    from storyforge.scoring_story_power import _read_stop_reason
+    log_file = str(tmp_path / 'partial.json')
+    with open(log_file, 'w') as f:
+        f.write('{"partial":')  # incomplete
+    assert _read_stop_reason(log_file) == ''
+    out = capsys.readouterr().out
+    # The OSError WARNING must NOT fire on a parse failure.
+    assert 'could not read story-power log' not in out
+
+
+def test_read_stop_reason_logs_info_on_unrecognized_value(tmp_path, capsys):
+    """An unrecognized stop_reason value (Anthropic API schema drift)
+    logs an INFO so the codebase doesn't silently lose truncation
+    detection on a future API change. (PR #247 review SF-HIGH-2.)"""
+    from storyforge.scoring_story_power import _read_stop_reason
+    log_file = str(tmp_path / 'resp.json')
+    with open(log_file, 'w') as f:
+        json.dump({'stop_reason': 'budget_exhausted'}, f)
+    result = _read_stop_reason(log_file)
+    # The helper still returns the raw value so a downstream consumer
+    # can decide what to do; the INFO is a breadcrumb, not a block.
+    assert result == 'budget_exhausted'
+    out = capsys.readouterr().out
+    assert 'unrecognized stop_reason' in out
+    assert 'budget_exhausted' in out
+    assert 'KNOWN_STOP_REASONS' in out
+
+
+def test_read_stop_reason_known_values_stay_quiet(tmp_path, capsys):
+    """The documented stop_reason values do NOT log INFO — the
+    drift-detection breadcrumb should fire only on schema surprise."""
+    from storyforge.scoring_story_power import (
+        _read_stop_reason, KNOWN_STOP_REASONS,
+    )
+    log_file = str(tmp_path / 'resp.json')
+    for known in KNOWN_STOP_REASONS:
+        if not known:
+            continue  # '' sentinel covered by missing-field test
+        with open(log_file, 'w') as f:
+            json.dump({'stop_reason': known}, f)
+        _read_stop_reason(log_file)
+    out = capsys.readouterr().out
+    assert 'unrecognized stop_reason' not in out
+
+
+def test_max_tokens_constants_are_monotone():
+    """The module-load assert pins _PITCH <= _FIXED_PAYLOAD <=
+    _PER_ROW. This regression test exercises the actual values so a
+    future edit can't accidentally invert the ordering and rely on
+    the import-time assert never running. (PR #247 review TD-HIGH-1.)"""
+    from storyforge.scoring_story_power import (
+        _PITCH_MAX_TOKENS, _FIXED_PAYLOAD_TIER_MAX_TOKENS,
+        _PER_ROW_TIER_MAX_TOKENS,
+    )
+    assert _PITCH_MAX_TOKENS <= _FIXED_PAYLOAD_TIER_MAX_TOKENS
+    assert _FIXED_PAYLOAD_TIER_MAX_TOKENS <= _PER_ROW_TIER_MAX_TOKENS
+
+
+def test_known_stop_reasons_includes_max_tokens():
+    """KNOWN_STOP_REASONS must include 'max_tokens', otherwise the
+    drift-detection INFO would fire on every truncation and the
+    truncation hint would silently disable itself."""
+    from storyforge.scoring_story_power import KNOWN_STOP_REASONS
+    assert 'max_tokens' in KNOWN_STOP_REASONS
+    # The other documented values per Anthropic API docs.
+    assert 'end_turn' in KNOWN_STOP_REASONS
+    assert 'stop_sequence' in KNOWN_STOP_REASONS
+    assert 'tool_use' in KNOWN_STOP_REASONS
+
+
+def test_truncation_hint_uses_hedged_wording(tmp_path):
+    """The hint says 'likely truncated', not 'was truncated' —
+    stop_reason=max_tokens guarantees the LLM stopped at the budget
+    but doesn't *prove* the JSON was truncated mid-token. The hedge
+    prevents a future 'you said truncated but the JSON was complete'
+    confusion. (PR #247 review SF-MED-1.)"""
+    from storyforge.scoring_story_power import _truncation_hint
+    log_file = str(tmp_path / 'resp.json')
+    with open(log_file, 'w') as f:
+        json.dump({'stop_reason': 'max_tokens'}, f)
+    hint = _truncation_hint(log_file, 32768)
+    assert 'likely truncated' in hint
+    assert 'was truncated' not in hint
+
+
+def test_scene_map_unparseable_with_max_tokens_logs_truncation_hint(
+        tmp_path, monkeypatch, capsys):
+    """Scene-map mode mirrors the architecture truncation contract.
+    Without this test, a copy-paste regression that drops the
+    _truncation_hint call from scene-map's unparseable log site
+    would slip past architecture's coverage. (PR #247 review T-2.)"""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    _seed_scene_map(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-scene-map' in log_file:
+            text = '{"per_scene": [{"scene_id": "s1", "scores":'
+            stop = 'max_tokens'
+        elif '-architecture' in log_file:
+            text = json.dumps(_architecture_payload())
+            stop = 'end_turn'
+        elif '-spine' in log_file:
+            text = json.dumps(_spine_payload())
+            stop = 'end_turn'
+        elif '-act-shape' in log_file:
+            text = json.dumps(_act_shape_payload())
+            stop = 'end_turn'
+        else:
+            text = json.dumps(_full_payload())
+            stop = 'end_turn'
+        response = {
+            'content': [{'type': 'text', 'text': text}],
+            'stop_reason': stop,
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['scene_map']['status'] == 'unparseable'
+    out = capsys.readouterr().out
+    assert 'scene-map LLM response unparseable' in out
+    assert 'truncated mid-JSON' in out
+    assert 'max_tokens=32768' in out
+
+
+def test_briefs_unparseable_with_max_tokens_logs_truncation_hint(
+        tmp_path, monkeypatch, capsys):
+    """Briefs mode mirrors the architecture truncation contract.
+    (PR #247 review T-2.)"""
+    _seed_summary(str(tmp_path))
+    _seed_briefs(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-briefs' in log_file:
+            text = '{"per_brief": [{"scene_id": "s1", "scores":'
+            stop = 'max_tokens'
+        elif '-act-shape' in log_file:
+            text = json.dumps(_act_shape_payload())
+            stop = 'end_turn'
+        else:
+            text = json.dumps(_full_payload())
+            stop = 'end_turn'
+        response = {
+            'content': [{'type': 'text', 'text': text}],
+            'stop_reason': stop,
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    result = scoring_story_power.score_story_power(str(tmp_path), 'full')
+    assert result['briefs']['status'] == 'unparseable'
+    out = capsys.readouterr().out
+    assert 'briefs LLM response unparseable' in out
+    assert 'truncated mid-JSON' in out
+    assert 'max_tokens=32768' in out
+
+
+def test_truncation_path_records_unparseable_target_in_ledger(
+        tmp_path, monkeypatch):
+    """When architecture truncates and the parse fails, the cost
+    ledger MUST record the unparseable target (not the success
+    target). A regression that swapped the targets on the
+    truncation path would silently mis-bill — costs that look like
+    successful runs but actually delivered no diagnostic.
+    (PR #247 review T-3.)"""
+    _seed_summary(str(tmp_path))
+    _seed_architecture(str(tmp_path))
+    monkeypatch.chdir(str(tmp_path))
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def fake(prompt, model, log_file, **kwargs):
+        os.makedirs(os.path.dirname(log_file) or '.', exist_ok=True)
+        if '-architecture' in log_file:
+            text = '{"per_scene":'
+            stop = 'max_tokens'
+        elif '-spine' in log_file:
+            text = json.dumps(_spine_payload())
+            stop = 'end_turn'
+        elif '-act-shape' in log_file:
+            text = json.dumps(_act_shape_payload())
+            stop = 'end_turn'
+        else:
+            text = json.dumps(_full_payload())
+            stop = 'end_turn'
+        response = {
+            'content': [{'type': 'text', 'text': text}],
+            'stop_reason': stop,
+            'usage': {'input_tokens': 500, 'output_tokens': 400,
+                      'cache_read_input_tokens': 0,
+                      'cache_creation_input_tokens': 0},
+        }
+        with open(log_file, 'w') as f:
+            json.dump(response, f)
+        return response
+    from storyforge import api, scoring_story_power
+    monkeypatch.setattr(api, 'invoke_to_file', fake)
+    monkeypatch.setattr(scoring_story_power, 'invoke_to_file', fake)
+    scoring_story_power.score_story_power(str(tmp_path), 'full')
+    ledger_path = os.path.join(str(tmp_path), 'working', 'costs',
+                                  'ledger.csv')
+    assert os.path.isfile(ledger_path)
+    ledger = open(ledger_path).read()
+    # The architecture truncation path must record the unparseable
+    # target — not the success target.
+    assert 'story-power:architecture:unparseable' in ledger
+    # And it must NOT record the success target for the architecture
+    # call (separate from the success targets the other tiers
+    # legitimately produced).
+    assert 'story-power:architecture,' not in ledger
+
+

@@ -1469,7 +1469,8 @@ def _invoke_and_parse(project_dir: str, output_dir: str, log_file: str,
     model = select_model('creative')
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=4096)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_PITCH_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: story-power LLM call failed: {e}')
         return None, 'llm_error'
@@ -1477,7 +1478,8 @@ def _invoke_and_parse(project_dir: str, output_dir: str, log_file: str,
     parsed = _parse_response(text)
     if not parsed:
         _record_cost(project_dir, log_file, model, target='story-power:unparseable')
-        log(f'ERROR: story-power LLM response unparseable; raw at {log_file}')
+        log(f'ERROR: story-power LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _PITCH_MAX_TOKENS)}')
         return None, 'unparseable'
     _record_cost(project_dir, log_file, model)
     return parsed, 'ok'
@@ -1494,6 +1496,133 @@ def _read_response_text(log_file: str) -> str:
         if block.get('type') == 'text':
             return block.get('text', '')
     return ''
+
+
+# Output-token ceilings per tier. The pitch + act-shape + spine tiers
+# return bounded payloads (8 axes × ≤3 acts; 5-10 events × 3 axes); 4K
+# and 8K respectively are sufficient. The per-row-heavy tiers
+# (architecture, scene-map, briefs) emit per-scene / per-brief
+# rationales that scale with project size — at real-sized project
+# counts the 8K ceiling truncates the response mid-JSON, producing
+# parse failures (issue #245). 32K leaves substantial headroom over
+# the observed wall and remains well under the per-model output cap
+# (see api.MODEL_MAX_OUTPUT for the source of truth — Opus 4.6 caps
+# at 128K, Sonnet at 64K).
+_PITCH_MAX_TOKENS = 4096
+_FIXED_PAYLOAD_TIER_MAX_TOKENS = 8192
+_PER_ROW_TIER_MAX_TOKENS = 32768
+
+# Monotonic ordering is an implicit design invariant: smaller payload
+# ⇒ smaller budget. A typo-class swap (e.g. setting pitch to 40960
+# and per-row to 4096) would currently only surface at LLM-truncation
+# time on the per-row tiers; this assert catches it at import.
+assert (_PITCH_MAX_TOKENS
+        <= _FIXED_PAYLOAD_TIER_MAX_TOKENS
+        <= _PER_ROW_TIER_MAX_TOKENS), (
+    f'story-power tier ceilings must be monotone non-decreasing '
+    f'(pitch={_PITCH_MAX_TOKENS}, fixed-payload={_FIXED_PAYLOAD_TIER_MAX_TOKENS}, '
+    f'per-row={_PER_ROW_TIER_MAX_TOKENS})'
+)
+
+
+# Anthropic stop_reason values per
+# https://docs.anthropic.com/en/api/messages — a closed set. The
+# Literal narrows downstream comparisons statically; the companion
+# frozenset gives runtime membership for schema-drift detection
+# (mirrors the BriefOutcome / VALID_BRIEF_OUTCOMES pattern). The
+# empty-string sentinel covers missing-from-response / unreadable
+# log file (see _read_stop_reason).
+StopReason = Literal[
+    'end_turn',
+    'max_tokens',
+    'stop_sequence',
+    'tool_use',
+    'pause_turn',
+    'refusal',
+    '',
+]
+KNOWN_STOP_REASONS: frozenset[StopReason] = frozenset({
+    'end_turn', 'max_tokens', 'stop_sequence',
+    'tool_use', 'pause_turn', 'refusal', '',
+})
+# Module-load contract: the only stop_reason the truncation hint cares
+# about must be a recognized value, otherwise the helper silently
+# disables itself.
+assert 'max_tokens' in KNOWN_STOP_REASONS, (
+    '_truncation_hint compares against literal "max_tokens"; if that '
+    'value drops out of KNOWN_STOP_REASONS, truncation detection is '
+    'silently disabled'
+)
+
+
+def _read_stop_reason(log_file: str) -> str:
+    """Read the LLM's `stop_reason` from the raw log file. Returns an
+    empty string when the file is missing / unreadable / lacks the
+    field / has a non-dict top-level (e.g., partial write produced a
+    JSON list).
+
+    Used to distinguish truncation (`max_tokens`) from other
+    unparseable-response causes so the error message names the
+    actual cause rather than just 'parse failed'.
+
+    Logs an INFO with the unrecognized value when stop_reason is
+    present but not in KNOWN_STOP_REASONS — this surfaces Anthropic
+    API schema drift (a new value appearing) so the codebase doesn't
+    silently lose truncation detection on a future change.
+
+    Logs a WARNING on OSError (file should exist but couldn't be
+    read) so the diagnostic itself doesn't fail silently — mirrors
+    _read_response_text's behavior. A JSONDecodeError is *expected*
+    on partial writes (the file exists, content is partial) and
+    stays quiet.
+    """
+    try:
+        with open(log_file, encoding='utf-8') as f:
+            resp = json.load(f)
+    except OSError as e:
+        log(f'WARNING: could not read story-power log to extract '
+            f'stop_reason: {e}')
+        return ''
+    except json.JSONDecodeError:
+        return ''
+    if not isinstance(resp, dict):
+        # A non-dict top level (list / string / number) is malformed
+        # for an Anthropic response shape; .get would crash and
+        # propagate AttributeError through the f-string in the
+        # caller, suppressing the original unparseable-error message.
+        return ''
+    raw = resp.get('stop_reason', '')
+    if not isinstance(raw, str):
+        return ''
+    if raw and raw not in KNOWN_STOP_REASONS:
+        log(f'INFO: story-power LLM returned unrecognized '
+            f'stop_reason={raw!r}; truncation detection will not '
+            'fire on this value. If Anthropic added a new stop_reason '
+            'token, extend KNOWN_STOP_REASONS to match.')
+    return raw
+
+
+def _truncation_hint(log_file: str, max_tokens: int) -> str:
+    """Return a descriptive suffix when the LLM hit `max_tokens`.
+
+    Returns '' when stop_reason is anything else. The caller appends
+    this to the unparseable ERROR so the user sees the actual cause
+    without grepping the raw log.
+
+    The wording is hedged ("likely truncated") rather than asserting
+    truncation outright: stop_reason='max_tokens' guarantees the LLM
+    stopped at the budget, but the response could in principle land
+    on valid-but-incomplete JSON whose parse failure has a different
+    proximate cause. Truncation is overwhelmingly the most likely
+    explanation when both signals fire together."""
+    if _read_stop_reason(log_file) != 'max_tokens':
+        return ''
+    return (
+        f' (LLM hit max_tokens={max_tokens}; the response was likely '
+        'truncated mid-JSON. The tier output scales with project '
+        'size — consider reducing scope or raising the per-tier '
+        'ceiling.)'
+    )
 
 
 def _extract_scores(parsed: dict) -> dict[str, int]:
@@ -1853,7 +1982,8 @@ def _run_act_shape_extension(project_dir: str, output_dir: str,
                             os.path.basename(output_dir) + '-act-shape.json')
     os.makedirs(log_dir, exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_FIXED_PAYLOAD_TIER_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: act-shape LLM call failed: {e}. Pitch-mode scorecard '
             'still stands.')
@@ -1863,7 +1993,8 @@ def _run_act_shape_extension(project_dir: str, output_dir: str,
     if not parsed:
         _record_cost(project_dir, log_file, model,
                      target='story-power:act-shape:unparseable')
-        log(f'ERROR: act-shape LLM response unparseable; raw at {log_file}. '
+        log(f'ERROR: act-shape LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _FIXED_PAYLOAD_TIER_MAX_TOKENS)}. '
             'Pitch-mode scorecard still stands.')
         return _empty_extension('unparseable')
     _record_cost(project_dir, log_file, model, target='story-power:act-shape')
@@ -2909,7 +3040,8 @@ def _run_spine_extension(project_dir: str, output_dir: str, log_dir: str,
                             os.path.basename(output_dir) + '-spine.json')
     os.makedirs(log_dir, exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_FIXED_PAYLOAD_TIER_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: spine LLM call failed: {e}. Pitch result still stands.')
         return _empty_spine_extension('llm_error')
@@ -2918,7 +3050,8 @@ def _run_spine_extension(project_dir: str, output_dir: str, log_dir: str,
     if not parsed:
         _record_cost(project_dir, log_file, model,
                      target='story-power:spine:unparseable')
-        log(f'ERROR: spine LLM response unparseable; raw at {log_file}.')
+        log(f'ERROR: spine LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _FIXED_PAYLOAD_TIER_MAX_TOKENS)}.')
         return _empty_spine_extension('unparseable')
     _record_cost(project_dir, log_file, model, target='story-power:spine')
 
@@ -3675,7 +3808,8 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
                             os.path.basename(output_dir) + '-architecture.json')
     os.makedirs(log_dir, exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_PER_ROW_TIER_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: architecture LLM call failed: {e}. Pitch result still stands.')
         ext = _empty_architecture_extension('llm_error')
@@ -3686,7 +3820,8 @@ def _run_architecture_extension(project_dir: str, output_dir: str,
     if not parsed:
         _record_cost(project_dir, log_file, model,
                      target='story-power:architecture:unparseable')
-        log(f'ERROR: architecture LLM response unparseable; raw at {log_file}.')
+        log(f'ERROR: architecture LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _PER_ROW_TIER_MAX_TOKENS)}.')
         ext = _empty_architecture_extension('unparseable')
         ext['field_findings'] = det_findings
         return ext
@@ -4568,7 +4703,8 @@ def _run_scene_map_extension(project_dir: str, output_dir: str,
                             os.path.basename(output_dir) + '-scene-map.json')
     os.makedirs(log_dir, exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_PER_ROW_TIER_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: scene-map LLM call failed: {e}. Pitch result still stands.')
         ext = _empty_scene_map_extension('llm_error')
@@ -4579,7 +4715,8 @@ def _run_scene_map_extension(project_dir: str, output_dir: str,
     if not parsed:
         _record_cost(project_dir, log_file, model,
                      target='story-power:scene-map:unparseable')
-        log(f'ERROR: scene-map LLM response unparseable; raw at {log_file}.')
+        log(f'ERROR: scene-map LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _PER_ROW_TIER_MAX_TOKENS)}.')
         ext = _empty_scene_map_extension('unparseable')
         ext['continuity_findings'] = det_findings
         return ext
@@ -5445,7 +5582,8 @@ def _run_briefs_extension(project_dir: str, output_dir: str,
                             os.path.basename(output_dir) + '-briefs.json')
     os.makedirs(log_dir, exist_ok=True)
     try:
-        invoke_to_file(prompt, model, log_file, max_tokens=8192)
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_PER_ROW_TIER_MAX_TOKENS)
     except Exception as e:
         log(f'ERROR: briefs LLM call failed: {e}. Pitch result still stands.')
         ext = _empty_briefs_extension('llm_error')
@@ -5456,7 +5594,8 @@ def _run_briefs_extension(project_dir: str, output_dir: str,
     if not parsed:
         _record_cost(project_dir, log_file, model,
                      target='story-power:briefs:unparseable')
-        log(f'ERROR: briefs LLM response unparseable; raw at {log_file}.')
+        log(f'ERROR: briefs LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _PER_ROW_TIER_MAX_TOKENS)}.')
         ext = _empty_briefs_extension('unparseable')
         ext['brief_findings'] = det_findings
         return ext
