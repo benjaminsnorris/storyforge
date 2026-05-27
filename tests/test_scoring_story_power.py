@@ -5902,7 +5902,7 @@ def test_briefs_skipped_when_csv_contains_only_scaffold_rows(tmp_path,
 
 
 # ---------------------------------------------------------------------------
-# Issue #245 — max_tokens raised + truncation detection
+# max_tokens ceilings + truncation detection
 # ---------------------------------------------------------------------------
 
 def test_per_row_tier_max_tokens_constant_above_8k():
@@ -6120,8 +6120,7 @@ def test_architecture_unparseable_with_max_tokens_logs_truncation_hint(
         tmp_path, monkeypatch, capsys):
     """End-to-end: when architecture LLM truncates at max_tokens and
     the response is therefore unparseable, the ERROR message names
-    truncation as the cause — not 'parse failed' alone. (Issue #245
-    acceptance criterion 4.)"""
+    truncation as the cause — not 'parse failed' alone."""
     _seed_summary(str(tmp_path))
     _seed_architecture(str(tmp_path))
     monkeypatch.chdir(str(tmp_path))
