@@ -96,13 +96,11 @@ _FRONTMATTER_RE = re.compile(r'\A---\s*\n(.*?\n)---\s*(?:\n|$)', re.DOTALL)
 _SECTION_RE = re.compile(r'^##\s+(.+?)\s*$', re.MULTILINE)
 _SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]*$')
 
-# Canon-embed markers: opener carries the canon_id, closer is fixed text.
-_CANON_EMBED_RE = re.compile(
-    r'<!--\s*canon-embed:\s*([a-z0-9][a-z0-9-]*)\s*-->'
-    r'(.*?)'
-    r'<!--\s*/canon-embed\s*-->',
-    re.DOTALL,
-)
+# Canon-embed markers: opener captures a candidate id (permissive — we
+# validate slug shape after extraction so a typo surfaces as a finding
+# instead of silently disappearing). Closer is fixed text.
+_CANON_EMBED_OPEN_RE = re.compile(r'<!--\s*canon-embed:\s*([^\s>]+)\s*-->')
+_CANON_EMBED_CLOSE_RE = re.compile(r'<!--\s*/canon-embed\s*-->')
 
 
 class CanonEmbed(TypedDict):
@@ -112,11 +110,23 @@ class CanonEmbed(TypedDict):
     normalized: str    # whitespace-normalized text, used for drift comparison
 
 
+class _UnclosedEmbed(TypedDict):
+    """Opener with no following closer — needs an `unclosed` finding."""
+    canon_id: str
+
+
+class _InvalidIdEmbed(TypedDict):
+    """Closed block whose id failed slug validation."""
+    raw_id: str
+
+
 def _normalize_for_drift(text: str) -> str:
-    """Normalize text for drift comparison. Trims outer whitespace and
-    collapses internal blank-line runs so that cosmetic whitespace shifts
-    (a stray blank line, trailing-space drift) don't surface as drift."""
-    lines = [ln.rstrip() for ln in text.strip().splitlines()]
+    """Normalize text for drift comparison. Strips outer whitespace, strips
+    leading and trailing whitespace per line, and collapses internal
+    blank-line runs so cosmetic whitespace shifts (indentation drift from
+    a formatter, stray blank line, trailing-space drift) don't surface as
+    drift."""
+    lines = [ln.strip() for ln in text.strip().splitlines()]
     out: list[str] = []
     blank = False
     for ln in lines:
@@ -130,18 +140,53 @@ def _normalize_for_drift(text: str) -> str:
     return '\n'.join(out)
 
 
-def find_canon_embeds(text: str) -> list[CanonEmbed]:
-    """Return every canon-embed block found in `text`, in source order."""
+def find_canon_embeds(
+    text: str,
+) -> tuple[list[CanonEmbed], list[_UnclosedEmbed], list[_InvalidIdEmbed]]:
+    """Scan `text` for canon-embed blocks. Returns three lists:
+
+    - successfully-parsed embeds (well-formed open+close, valid slug id),
+      in source order
+    - unclosed openers (no matching closer before end of file or before
+      the next opener) — author forgot the closer
+    - closed blocks whose id is not a valid slug (uppercase, underscore,
+      etc.) — author typoed the id
+
+    The opener regex is permissive (`[^\\s>]+`) so a typoed id is captured
+    rather than skipped silently. Slug validation runs after extraction so
+    failures surface as findings, not silent misses.
+    """
     embeds: list[CanonEmbed] = []
-    for match in _CANON_EMBED_RE.finditer(text):
-        canon_id = match.group(1)
-        raw = match.group(2)
-        embeds.append({
-            'canon_id': canon_id,
-            'text': raw,
-            'normalized': _normalize_for_drift(raw),
-        })
-    return embeds
+    unclosed: list[_UnclosedEmbed] = []
+    invalid: list[_InvalidIdEmbed] = []
+    pos = 0
+    while True:
+        open_match = _CANON_EMBED_OPEN_RE.search(text, pos)
+        if not open_match:
+            break
+        raw_id = open_match.group(1)
+        block_start = open_match.end()
+        # The next closer must come before the NEXT opener — otherwise
+        # the inner opener proves the current one was never closed.
+        next_open = _CANON_EMBED_OPEN_RE.search(text, block_start)
+        next_close = _CANON_EMBED_CLOSE_RE.search(text, block_start)
+        if next_close is None or (
+            next_open is not None and next_open.start() < next_close.start()
+        ):
+            unclosed.append({'canon_id': raw_id})
+            pos = block_start
+            continue
+        block_text = text[block_start:next_close.start()]
+        if not _SLUG_RE.match(raw_id):
+            invalid.append({'raw_id': raw_id})
+        else:
+            embeds.append({
+                'canon_id': raw_id,
+                'text': block_text,
+                'normalized': _normalize_for_drift(block_text),
+            })
+        pos = next_close.end()
+    return embeds, unclosed, invalid
 
 
 _EMBEDDABLE_BLOCK_RE = re.compile(
@@ -520,16 +565,25 @@ def _resolve_canon_path(project_dir: str, canon_id: str,
 
 def check_canon_drift(project_dir: str) -> list[CanonFinding]:
     """Walk pages/*.md and compare each canon-embed to its source canon's
-    `## Embeddable block`. Emits two finding types:
+    `## Embeddable block`. Emits five finding types:
 
-    - canon_drift (warning): the embed text differs from the source after
+    - canon_drift (warning): embed text differs from the source after
       whitespace normalization. Author should re-embed.
     - canon_embed_orphan (error): the embed cites a canon_id that does
-      not resolve to any canon file. The prompt is structurally broken.
+      not resolve to any canon file.
+    - canon_embed_unclosed (error): an opener marker with no matching
+      closer — the embed body is structurally invalid.
+    - canon_embed_invalid_id (warning): the id captured by the opener
+      isn't a valid slug (uppercase, underscore, etc.). The embed is
+      not tracked for drift; author should fix the marker.
+    - canon_page_unreadable (warning): the page file couldn't be read
+      (binary content, broken encoding, permissions). The page is
+      skipped for drift; author should investigate.
 
-    Returns [] if there's no pages/ directory or no canon directory. Page
-    files without frontmatter are still scanned for embeds — the embed
-    convention works even outside the page-file schema.
+    Returns [] if there's no pages/ directory or no canon directory. The
+    canon-source side does not re-emit canon_missing_section findings —
+    validate_canon_file already covers that case, so a missing
+    Embeddable block surfaces exactly once per affected canon file.
     """
     from storyforge.pages import list_page_files
 
@@ -542,13 +596,44 @@ def check_canon_drift(project_dir: str) -> list[CanonFinding]:
 
     findings: list[CanonFinding] = []
     canon_index: dict[str, str] = {}
-    source_cache: dict[str, str | None] = {}
+    # Cache the NORMALIZED source text, not the raw source — avoids
+    # re-running _normalize_for_drift on every embed-of-the-same-canon hit.
+    normalized_source_cache: dict[str, str | None] = {}
 
     for page_path in pages:
-        with open(page_path, encoding='utf-8') as f:
-            page_text = f.read()
-        embeds = find_canon_embeds(page_text)
         rel_page = os.path.relpath(page_path, project_dir)
+        try:
+            with open(page_path, encoding='utf-8') as f:
+                page_text = f.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            # A single bad page file must not abort the cleanup pipeline.
+            findings.append(_finding(
+                rel_page,
+                f'could not read page file for canon-drift check: {exc}',
+                'Check the file for binary content, broken encoding, '
+                'or permission issues',
+                'canon_page_unreadable',
+            ))
+            continue
+        embeds, unclosed, invalid = find_canon_embeds(page_text)
+        for u in unclosed:
+            findings.append(_finding(
+                rel_page,
+                f'canon-embed opener `{u["canon_id"]}` has no matching '
+                '<!-- /canon-embed --> closer',
+                'Close the embed block with a `<!-- /canon-embed -->` '
+                'line before the next opener or end of file',
+                'canon_embed_unclosed',
+                severity='error',
+            ))
+        for inv in invalid:
+            findings.append(_finding(
+                rel_page,
+                f'canon-embed id `{inv["raw_id"]}` is not a valid slug '
+                '(lowercase letters/digits/dashes only)',
+                'Fix the id in the canon-embed opener',
+                'canon_embed_invalid_id',
+            ))
         for embed in embeds:
             cid = embed['canon_id']
             canon_path = _resolve_canon_path(project_dir, cid, canon_index)
@@ -561,21 +646,18 @@ def check_canon_drift(project_dir: str) -> list[CanonFinding]:
                     severity='error',
                 ))
                 continue
-            if cid not in source_cache:
-                source_cache[cid] = _embeddable_block_text(canon_path)
-            source = source_cache[cid]
-            if source is None:
-                rel_canon = os.path.relpath(canon_path, project_dir)
-                findings.append(_finding(
-                    rel_canon,
-                    'canon file has no `## Embeddable block` section to '
-                    'compare embeds against',
-                    'Add a `## Embeddable block` section with the verbatim '
-                    'canonical text',
-                    'canon_missing_section',
-                ))
+            if cid not in normalized_source_cache:
+                raw_source = _embeddable_block_text(canon_path)
+                normalized_source_cache[cid] = (
+                    _normalize_for_drift(raw_source)
+                    if raw_source is not None else None
+                )
+            normalized_source = normalized_source_cache[cid]
+            if normalized_source is None:
+                # validate_canon_file already emits canon_missing_section
+                # for this case — skip silently to avoid duplicate findings.
                 continue
-            if _normalize_for_drift(source) != embed['normalized']:
+            if normalized_source != embed['normalized']:
                 findings.append(_finding(
                     rel_page,
                     f'canon-embed `{cid}` has drifted from '

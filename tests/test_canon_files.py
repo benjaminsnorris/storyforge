@@ -568,14 +568,92 @@ def test_find_canon_embeds_returns_blocks_in_order():
         Single warm source, soft falloff.
         <!-- /canon-embed -->
     """)
-    embeds = find_canon_embeds(body)
+    embeds, unclosed, invalid = find_canon_embeds(body)
     assert [e['canon_id'] for e in embeds] == ['style-foundation', 'lighting-laws']
     assert 'Warm earth tones' in embeds[0]['text']
     assert 'Single warm source' in embeds[1]['text']
+    assert unclosed == []
+    assert invalid == []
 
 
 def test_find_canon_embeds_handles_no_embeds():
-    assert find_canon_embeds('plain markdown body, no markers here') == []
+    embeds, unclosed, invalid = find_canon_embeds(
+        'plain markdown body, no markers here',
+    )
+    assert embeds == [] and unclosed == [] and invalid == []
+
+
+def test_find_canon_embeds_detects_unclosed_opener_before_next_opener():
+    """CR2-1: an unclosed `b` opener followed by a well-formed `c` block
+    previously caused the regex to silently swallow `c` as the body of
+    `b`. The fix detects the unclosed opener and surfaces both `b` as
+    unclosed and `c` as a tracked embed.
+    """
+    body = textwrap.dedent("""\
+        <!-- canon-embed: a -->
+        first
+        <!-- /canon-embed -->
+
+        <!-- canon-embed: b -->
+        text without a closer here
+
+        <!-- canon-embed: c -->
+        third
+        <!-- /canon-embed -->
+    """)
+    embeds, unclosed, invalid = find_canon_embeds(body)
+    assert [e['canon_id'] for e in embeds] == ['a', 'c']
+    assert [u['canon_id'] for u in unclosed] == ['b']
+    assert invalid == []
+
+
+def test_find_canon_embeds_detects_unclosed_opener_at_eof():
+    body = '<!-- canon-embed: a -->\nno closer ever\n'
+    embeds, unclosed, invalid = find_canon_embeds(body)
+    assert embeds == []
+    assert [u['canon_id'] for u in unclosed] == ['a']
+
+
+def test_find_canon_embeds_flags_invalid_slug_id():
+    """CR2-2: a typoed canon_id (uppercase or underscore) previously
+    failed the embed regex and disappeared silently. Now the permissive
+    opener captures the id and we flag it as invalid."""
+    body = textwrap.dedent("""\
+        <!-- canon-embed: Style-Foundation -->
+        body
+        <!-- /canon-embed -->
+
+        <!-- canon-embed: style_foundation -->
+        more body
+        <!-- /canon-embed -->
+    """)
+    embeds, unclosed, invalid = find_canon_embeds(body)
+    assert embeds == []
+    assert unclosed == []
+    assert [i['raw_id'] for i in invalid] == [
+        'Style-Foundation', 'style_foundation',
+    ]
+
+
+def test_find_canon_embeds_duplicate_id_in_one_page():
+    """T2-1: the same canon block legitimately embeds in multiple panels
+    on one page. Each occurrence must surface as its own embed so drift
+    detection can compare each independently."""
+    body = textwrap.dedent("""\
+        <!-- canon-embed: style-foundation -->
+        clean copy
+        <!-- /canon-embed -->
+
+        <!-- canon-embed: style-foundation -->
+        drifted copy
+        <!-- /canon-embed -->
+    """)
+    embeds, _u, _i = find_canon_embeds(body)
+    assert [e['canon_id'] for e in embeds] == [
+        'style-foundation', 'style-foundation',
+    ]
+    assert 'clean copy' in embeds[0]['text']
+    assert 'drifted copy' in embeds[1]['text']
 
 
 def test_check_canon_drift_no_pages_returns_empty(tmp_path):
@@ -660,12 +738,12 @@ def test_check_canon_drift_tolerates_whitespace_shifts(tmp_path):
     assert drift == []
 
 
-def test_check_canon_drift_canon_without_embeddable_section(tmp_path):
-    """A canon file missing its `## Embeddable block` section can't be
-    drift-compared. Emit a missing-section finding pointed at the canon
-    file (not the page file)."""
+def test_check_canon_drift_canon_without_embeddable_section_no_duplicate(tmp_path):
+    """SF2-3: when a canon file is missing its `## Embeddable block`,
+    validate_canon_file already emits canon_missing_section. The drift
+    pass must NOT re-emit it (otherwise the same root cause shows up
+    twice in the report and inflates the finding count)."""
     project = str(tmp_path)
-    # Canon file with frontmatter but no Embeddable block section.
     body_no_embed = textwrap.dedent("""\
 
         ## Clauses
@@ -688,10 +766,87 @@ def test_check_canon_drift_canon_without_embeddable_section(tmp_path):
         '<!-- /canon-embed -->\n'
     )
     write_page(project, 's01-p1.md', page_body)
-    findings = check_canon_drift(project)
-    missing = [f for f in findings if f['type'] == 'canon_missing_section']
-    assert missing
+    # check_canon_drift in isolation must not emit canon_missing_section
+    drift_findings = check_canon_drift(project)
+    assert [f for f in drift_findings if f['type'] == 'canon_missing_section'] == []
+    # validate_canon_directory (which composes both checks) must produce
+    # exactly one canon_missing_section finding total.
+    all_findings = validate_canon_directory(project)
+    missing = [f for f in all_findings if f['type'] == 'canon_missing_section']
+    assert len(missing) == 1
     assert 'style-foundation.md' in missing[0]['file']
+
+
+def test_check_canon_drift_unreadable_page_flagged(tmp_path):
+    """SF2-1: a single page file with a decode error must not abort the
+    cleanup run. Emit canon_page_unreadable and continue to the next
+    page so authors get a triagable report."""
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    pages_dir = os.path.join(project, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+    # Write a page with invalid UTF-8 bytes.
+    bad_path = os.path.join(pages_dir, 's01-p1.md')
+    with open(bad_path, 'wb') as f:
+        f.write(b'\xff\xfeinvalid utf-8 bytes')
+    # And a perfectly good page with a clean embed.
+    good_page = (
+        '<!-- canon-embed: style-foundation -->\n'
+        'The verbatim canonical text.\n'
+        '<!-- /canon-embed -->\n'
+    )
+    write_page(project, 's02-p1.md', good_page)
+    findings = check_canon_drift(project)
+    types = [f['type'] for f in findings]
+    assert 'canon_page_unreadable' in types
+    assert 's01-p1.md' in next(
+        f['file'] for f in findings if f['type'] == 'canon_page_unreadable'
+    )
+
+
+def test_check_canon_drift_unclosed_in_page_flagged(tmp_path):
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    page_body = '<!-- canon-embed: style-foundation -->\nno closer\n'
+    write_page(project, 's01-p1.md', page_body)
+    findings = check_canon_drift(project)
+    types = [f['type'] for f in findings]
+    assert 'canon_embed_unclosed' in types
+    unclosed = next(f for f in findings if f['type'] == 'canon_embed_unclosed')
+    assert unclosed['severity'] == 'error'
+
+
+def test_check_canon_drift_invalid_id_in_page_flagged(tmp_path):
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    page_body = (
+        '<!-- canon-embed: Style_Foundation -->\n'
+        'body\n'
+        '<!-- /canon-embed -->\n'
+    )
+    write_page(project, 's01-p1.md', page_body)
+    findings = check_canon_drift(project)
+    types = [f['type'] for f in findings]
+    assert 'canon_embed_invalid_id' in types
+    # Drift comparison should NOT have fired for the invalid embed.
+    assert 'canon_drift' not in types
+
+
+def test_check_canon_drift_normalize_tolerates_indentation(tmp_path):
+    """CR2-5: a markdown formatter that re-indents the embed body must
+    not register as drift. _normalize_for_drift now lstrips per line."""
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    indented_page = (
+        '1. Step one\n\n'
+        '   <!-- canon-embed: style-foundation -->\n'
+        '   The verbatim canonical text.\n'
+        '   <!-- /canon-embed -->\n'
+    )
+    write_page(project, 's01-p1.md', indented_page)
+    findings = check_canon_drift(project)
+    drift = [f for f in findings if f['type'] == 'canon_drift']
+    assert drift == []
 
 
 def test_validate_canon_directory_runs_drift(tmp_path):
