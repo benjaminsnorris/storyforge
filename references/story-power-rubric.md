@@ -974,6 +974,132 @@ The LLM seeds its scene_engine_integrity, knowledge_flow_continuity,
 and outcome_distribution scoring with these findings. Higher-noise
 cases (subtext quality, crisis dilemma rigor) are left to the LLM.
 
+## Cross-tier synthesis: patterns across tiers
+
+When two or more story-power tiers ran successfully, the **cross-tier
+meta-diagnostic** runs. It synthesizes patterns the individual tiers
+cannot see — when two or more tiers flag related weaknesses, that's
+a single underlying defect surfacing at multiple resolutions, and
+the high-leverage move usually lives at the cross-tier level rather
+than in any one tier.
+
+Cross-tier synthesis is **not a new scoring layer.** It produces no
+new axes and no new numeric scores. Its output is two things: a list
+of deterministic patterns (the pre-pass found these), and an LLM
+synthesis with concrete proposals (one paragraph naming the root
+pattern + one high-leverage move + which downstream tier proposals
+the move consolidates).
+
+Cross-tier synthesis runs **independently of all other modes** — it
+fires whenever at least two of {pitch, act-shape, spine,
+architecture, scene-map, briefs} produced output.
+
+### Deterministic pre-pass patterns
+
+Four high-confidence patterns the pre-pass detects from the
+in-memory tier outputs:
+
+1. **Lowest-axis recurrence.** When two or more tiers'
+   `diagnostic['lowest_axis']` names share a common token
+   (`concreteness`, `causal`, `coherence`, `arc`, `coverage`), the
+   project's weakest dimension recurs at multiple resolutions. The
+   author should suspect a single underlying defect rather than
+   five independent symptoms. **Severity:** medium when 2 tiers
+   share a token, high when ≥3.
+
+2. **Scene-id overlap in proposals.** When multiple tiers'
+   proposed-fixes lists (architecture's `proposed_field_updates`
+   and `proposed_scene_insertions`, scene-map's
+   `proposed_operations`, briefs's `proposed_brief_updates`)
+   target the same `scene_id`, that scene is a multi-tier
+   leverage point. Fixing it once may close findings at multiple
+   resolutions. **Severity:** medium when a scene_id appears in
+   2 tiers, high when ≥3.
+
+3. **Field-coherence cascade.** When the architecture tier's
+   `field_findings` AND the briefs tier's `brief_findings` AND/or
+   the scene-map tier's `continuity_findings` all flag the same
+   `scene_id`, that scene's defects span multiple structural
+   layers. Fixing the upstream tier's row usually resolves the
+   downstream tier's symptom. **Severity:** medium when 2 tiers
+   flag the same id, high when ≥3.
+
+4. **Project-level disposition.** When ≥4 of the six tiers score
+   below their respective "strong" threshold (below 7 on the
+   weighted composite for tiers that produce a composite, or
+   below 7 on the lowest-axis average for those that don't), the
+   project's structural-craft layer is underweight overall. The
+   high-leverage move is to return to elaboration before
+   continuing to drafting. **Severity:** high (project-wide).
+
+These patterns are the load-bearing surface. They are detected
+deterministically (no LLM call required) and always populate the
+extension's `deterministic_patterns` field, even when the LLM
+synthesis call fails.
+
+### LLM synthesis
+
+The pre-pass output is then handed to the LLM along with each
+present tier's diagnostic (compact summary). The LLM produces:
+
+- A one-paragraph **synthesis** naming the root pattern across
+  tiers
+- An optional **project_disposition** (e.g. "the structural-craft
+  layer is consistently underweight; consider returning to
+  elaboration before continuing to drafting")
+- One **high_leverage_move** — the single action that would lift
+  the most ground across tiers
+- A list of **proposals**, each with a `target` (`scene:s10`,
+  `spine_event:ev-3`, `tier:architecture`), a one-sentence
+  `move`, optional `rationale` / `expected_lift` (e.g. "lifts
+  act-shape emotional_resonance 6→8 and architecture
+  field_coherence 7→9"), and optional `consolidates_tiers`
+  naming which downstream tier proposals this move supersedes
+
+### Cross-tier output
+
+**`full` coaching:**
+
+```
+working/scores/story-power/{timestamp}/
+├── scorecard.csv                              # pitch
+├── per-act-matrix.csv / structural-axes.csv     # act-shape
+├── per-event-matrix.csv / whole-spine-axes.csv  # spine
+├── per-scene-matrix.csv / whole-architecture-axes.csv  # architecture
+├── per-scene-map-matrix.csv / whole-scene-map-axes.csv # scene-map
+├── per-brief-matrix.csv / whole-briefs-axes.csv # briefs
+└── diagnostic.md                              # all six tiers + cross-tier synthesis at the END
+```
+
+**`coach` coaching:** Cross-tier section in `coaching-brief.md`,
+framed as questions (the author decides).
+**`strict` coaching:** Cross-tier patterns in
+`self-scoring-checklist.md` as deterministic data only — no LLM
+synthesis, no proposals.
+
+### Diagnostic-as-action
+
+The cross-tier diagnostic proposes **specific moves** with concrete
+targets, not just identifies the patterns. Each proposal names:
+
+- **Target** — a typed locus (`scene:s10`, `spine_event:ev-3`,
+  `tier:briefs`)
+- **Move** — one sentence: what to do
+- **Expected lift** — which axes should rise, by how much
+- **Consolidates** — which existing tier proposals this supersedes
+  so the author knows what NOT to do downstream
+
+A useful cross-tier diagnostic might read (illustrative): *"Three
+tiers flagged Act 2 weakness — act-shape emotional_resonance
+dropped 9 → 6, architecture scene_causal_chain held at 7, scene-map
+continuity_coherence dipped at the s10 → s15 region. The single
+root cause is most likely the spine's midpoint event being
+underspecified; downstream tiers are reporting the cascade. Move:
+return to spine.csv:ev-3 and tighten its function + summary. This
+consolidates 6 of the 9 proposed-fixes across architecture / scene-
+map / briefs in that region — defer those until the spine fix
+ships."*
+
 ## Scoring bands
 
 - **1-3:** Axis is essentially absent or actively damaged.
