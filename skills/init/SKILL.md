@@ -160,6 +160,23 @@ Use the **Glob tool** to discover available templates, then use the **Read tool*
 
 If no templates are found in the plugin directory, note this to the author and let them know they can add reference documents manually later.
 
+### Graphic-novel projects: also copy the canon tree
+
+If the author chose `medium: graphic-novel`, also copy `templates/reference/visual-style.md` and the entire `templates/reference/canon/` tree into the project. The canon tree has the following layout:
+
+```
+reference/canon/
+  style-foundation.md
+  lighting-laws.md
+  panel-registers.md
+  page-rhythm-rules.md
+  characters/_template.md
+  locations/_template.md
+  motifs/_template.md
+```
+
+Use the **Glob tool** to find every `.md` file under `templates/reference/canon/` and copy each into the project at the matching relative path. Preserve the subdirectory structure (the `_template.md` files in `characters/`, `locations/`, and `motifs/` document how to add new canon files and are skipped by the canon validator).
+
 ## Step 5: Create the Scene CSV Files
 
 The CSV files depend on which pipeline the author chose.

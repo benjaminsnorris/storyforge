@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 
+from storyforge.canon import validate_canon_directory
 from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge.parsing import clean_scene_content, extract_single_scene
@@ -1040,6 +1041,21 @@ def _check_crlf(project_dir: str) -> list[dict]:
     return findings
 
 
+def report_canon_files(project_dir: str) -> list[dict]:
+    """Validate reference/canon/ for graphic-novel projects.
+
+    Returns a list of canon-category findings. Canon validation only
+    runs when the project is in graphic-novel mode — the directory has
+    no meaning in novel mode and silently absent canon is not a finding.
+    """
+    if get_medium(project_dir) != 'graphic-novel':
+        return []
+    findings = validate_canon_directory(project_dir)
+    for f in findings:
+        f['category'] = 'canon'
+    return findings
+
+
 def build_cleanup_report(project_dir: str) -> dict:
     """Build a full structured cleanup report covering all checks.
 
@@ -1106,6 +1122,9 @@ def build_cleanup_report(project_dir: str) -> dict:
             finding['category'] = 'unexpected'
             all_findings.append(finding)
 
+    # --- Canon files (graphic-novel projects only) ---
+    all_findings.extend(report_canon_files(project_dir))
+
     # Set default status on all findings
     for f in all_findings:
         if 'status' not in f:
@@ -1138,6 +1157,7 @@ def _print_report(report: dict) -> None:
         ('schema', 'CSV Schema'),
         ('integrity', 'CSV Integrity'),
         ('unexpected', 'Unexpected Files'),
+        ('canon', 'Canon Files'),
     ]
     for category, heading in categories:
         group = [f for f in findings if f.get('category') == category]
