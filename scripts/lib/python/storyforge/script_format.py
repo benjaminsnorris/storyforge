@@ -279,3 +279,97 @@ def check_brief_fidelity(brief_row, script_text):
             })
 
     return failures
+
+
+# Density and tier conventions per references/gn-layout-vocabulary.md.
+# Density limit: 13+ panels on a single page becomes a legibility
+# crisis (the reader can't scan comfortably). Tier convention: 2-4
+# panels in a single horizontal row; outside this band the token is
+# almost certainly mis-labeled.
+_PANEL_DENSITY_LIMIT = 13
+_TIER_PANEL_RANGE = (2, 4)
+
+
+def check_layout_anti_patterns(script_text, brief_row=None):
+    """Return a list of failure dicts for deterministic layout
+    anti-patterns documented in references/gn-layout-vocabulary.md.
+
+    Three checks today:
+
+    1. `page_turn_on_page_one`: a script with the ⟵ PAGE-TURN REVEAL
+       marker on page 1. Impossible — there's no preceding page to
+       turn from. Severity high.
+
+    2. `panel_density_excessive`: any page with ≥13 panels. Legibility
+       crisis at this threshold; the reader can no longer scan the
+       panels comfortably. Severity medium.
+
+    3. `tier_panel_count_unconventional`: the brief's panel_breakdown
+       declares `pN:tier` but the script's page N has a panel count
+       outside {2, 3, 4}. A tier conventionally holds 2-4 panels;
+       outside this band it's almost certainly an N-grid mis-labeled,
+       or a splash mis-labeled as a tier. Severity low. Requires
+       brief_row (skipped when no brief is provided).
+
+    Each failure dict carries: kind, detail, severity, and (where
+    available) page/expected fields for the revision prompt. Empty
+    list when the script is clean.
+    """
+    failures = []
+    parsed = parse_script(script_text)
+    pages = parsed['pages']
+
+    # 1. Page-turn marker on page 1.
+    for page in pages:
+        if page['number'] == 1 and page['is_page_turn']:
+            failures.append({
+                'kind': 'page_turn_on_page_one',
+                'detail': 'page 1 carries the ⟵ PAGE-TURN REVEAL marker, '
+                          'but page 1 cannot be a page-turn (no preceding '
+                          'page to turn from)',
+                'expected': 'remove the marker from page 1, or move the '
+                            'reveal beat to a later page',
+                'severity': 'high',
+                'page': 1,
+            })
+            break  # one finding is enough; the issue is the marker, not its count
+
+    # 2. Panel-density ceiling.
+    for page in pages:
+        n = len(page['panels'])
+        if n >= _PANEL_DENSITY_LIMIT:
+            failures.append({
+                'kind': 'panel_density_excessive',
+                'detail': f'page {page["number"]}: {n} panels exceeds the '
+                          f'{_PANEL_DENSITY_LIMIT}-panel legibility '
+                          'ceiling',
+                'expected': f'≤{_PANEL_DENSITY_LIMIT - 1} panels per page',
+                'severity': 'medium',
+                'page': page['number'],
+            })
+
+    # 3. Tier-panel-count check against brief's panel_breakdown.
+    if brief_row:
+        breakdown_map = _parse_panel_breakdown(
+            brief_row.get('panel_breakdown') or ''
+        )
+        low, high = _TIER_PANEL_RANGE
+        for page in pages:
+            token = breakdown_map.get(page['number'])
+            if not token or token.strip().lower() != 'tier':
+                continue
+            n = len(page['panels'])
+            if not (low <= n <= high):
+                failures.append({
+                    'kind': 'tier_panel_count_unconventional',
+                    'detail': (
+                        f'page {page["number"]}: declared `tier` in '
+                        f'panel_breakdown but rendered with {n} panels '
+                        f'(convention is {low}-{high} panels per tier)'
+                    ),
+                    'expected': f'{low}-{high} panels on a tier page',
+                    'severity': 'low',
+                    'page': page['number'],
+                })
+
+    return failures

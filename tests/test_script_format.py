@@ -5,6 +5,7 @@ import pytest
 from storyforge.script_format import (
     parse_script, count_pages, count_panels,
     detect_page_turn_pages, check_brief_fidelity,
+    check_layout_anti_patterns,
 )
 
 
@@ -178,3 +179,246 @@ def test_dialogue_prefix_rejects_too_short_words():
     # whitelist. Document this and ensure 'A:' is filtered out.
     speakers = [d['prefix'] for d in panel['dialogue']]
     assert 'A' not in speakers, 'single-letter prefix should not match'
+
+
+# ---------------------------------------------------------------------------
+# Layout anti-pattern detectors (issue #210)
+# ---------------------------------------------------------------------------
+
+def test_layout_anti_patterns_clean_script_has_no_findings():
+    """A well-formed script with no anti-patterns produces no
+    findings."""
+    failures = check_layout_anti_patterns(SAMPLE_SCRIPT)
+    assert failures == []
+
+
+def test_layout_anti_patterns_flags_page_one_page_turn():
+    """A page-turn marker on page 1 is impossible (no preceding page
+    to turn from). Fires page_turn_on_page_one at high severity."""
+    bad_script = """\
+# Scene: opens-with-turn
+
+## Page 1 — SPLASH ⟵ PAGE-TURN REVEAL
+
+**Panel 1** (full bleed)
+A reveal panel.
+"""
+    failures = check_layout_anti_patterns(bad_script)
+    pt = [f for f in failures if f['kind'] == 'page_turn_on_page_one']
+    assert len(pt) == 1
+    assert pt[0]['severity'] == 'high'
+    assert pt[0]['page'] == 1
+    assert 'no preceding page' in pt[0]['detail']
+
+
+def test_layout_anti_patterns_page_turn_on_later_page_is_ok():
+    """A page-turn marker on page 2+ is the normal use case — fires no
+    finding."""
+    failures = check_layout_anti_patterns(SAMPLE_SCRIPT)
+    # SAMPLE_SCRIPT has the marker on page 2, which is correct.
+    pt = [f for f in failures if f['kind'] == 'page_turn_on_page_one']
+    assert pt == []
+
+
+def test_layout_anti_patterns_flags_excessive_density():
+    """A page with ≥13 panels fires panel_density_excessive (legibility
+    crisis threshold per references/gn-layout-vocabulary.md)."""
+    panels_block = '\n\n'.join(
+        f'**Panel {i}** (irregular)\nBeat {i}.'
+        for i in range(1, 14)  # 13 panels — at threshold
+    )
+    bad_script = f"""\
+# Scene: too-dense
+
+## Page 1 — IRREGULAR
+
+{panels_block}
+"""
+    failures = check_layout_anti_patterns(bad_script)
+    density = [f for f in failures if f['kind'] == 'panel_density_excessive']
+    assert len(density) == 1
+    assert density[0]['severity'] == 'medium'
+    assert density[0]['page'] == 1
+    assert '13 panels' in density[0]['detail']
+
+
+def test_layout_anti_patterns_density_below_threshold_is_ok():
+    """12 panels is at the upper end of legibility but acceptable —
+    no finding."""
+    panels_block = '\n\n'.join(
+        f'**Panel {i}** (irregular)\nBeat {i}.'
+        for i in range(1, 13)  # 12 panels — under threshold
+    )
+    script_12 = f"""\
+# Scene: dense-but-ok
+
+## Page 1 — IRREGULAR
+
+{panels_block}
+"""
+    failures = check_layout_anti_patterns(script_12)
+    density = [f for f in failures if f['kind'] == 'panel_density_excessive']
+    assert density == []
+
+
+def test_layout_anti_patterns_flags_tier_with_one_panel():
+    """A page declared `tier` in the brief but rendered with only 1
+    panel is mis-labeled (a 1-panel tier is a splash). Fires
+    tier_panel_count_unconventional at low severity."""
+    script = """\
+# Scene: tier-mislabel
+
+## Page 1 — TIER
+
+**Panel 1** (full width)
+A single full-width panel.
+"""
+    brief_row = {'panel_breakdown': 'p1:tier'}
+    failures = check_layout_anti_patterns(script, brief_row)
+    tier_findings = [
+        f for f in failures
+        if f['kind'] == 'tier_panel_count_unconventional'
+    ]
+    assert len(tier_findings) == 1
+    assert tier_findings[0]['severity'] == 'low'
+    assert tier_findings[0]['page'] == 1
+    assert '1 panels' in tier_findings[0]['detail']
+
+
+def test_layout_anti_patterns_flags_tier_with_five_panels():
+    """5 panels in a tier is mis-labeled (likely an N-grid). Fires
+    tier_panel_count_unconventional."""
+    panels = '\n\n'.join(
+        f'**Panel {i}** (tier slot {i})\nBeat {i}.'
+        for i in range(1, 6)
+    )
+    script = f"""\
+# Scene: tier-too-many
+
+## Page 1 — TIER
+
+{panels}
+"""
+    brief_row = {'panel_breakdown': 'p1:tier'}
+    failures = check_layout_anti_patterns(script, brief_row)
+    tier_findings = [
+        f for f in failures
+        if f['kind'] == 'tier_panel_count_unconventional'
+    ]
+    assert len(tier_findings) == 1
+
+
+def test_layout_anti_patterns_tier_with_three_panels_is_ok():
+    """3 panels on a tier-declared page is canonical — no finding."""
+    script = """\
+# Scene: tier-canonical
+
+## Page 1 — TIER
+
+**Panel 1** (left)
+Left beat.
+
+**Panel 2** (center)
+Center beat.
+
+**Panel 3** (right)
+Right beat.
+"""
+    brief_row = {'panel_breakdown': 'p1:tier'}
+    failures = check_layout_anti_patterns(script, brief_row)
+    tier_findings = [
+        f for f in failures
+        if f['kind'] == 'tier_panel_count_unconventional'
+    ]
+    assert tier_findings == []
+
+
+def test_layout_anti_patterns_tier_two_and_four_panels_are_ok():
+    """2 and 4 panels are also within the tier convention band."""
+    for n in (2, 4):
+        panels = '\n\n'.join(
+            f'**Panel {i}**\nBeat {i}.' for i in range(1, n + 1)
+        )
+        script = f"""\
+# Scene: tier-{n}
+
+## Page 1 — TIER
+
+{panels}
+"""
+        brief_row = {'panel_breakdown': 'p1:tier'}
+        failures = check_layout_anti_patterns(script, brief_row)
+        tier_findings = [
+            f for f in failures
+            if f['kind'] == 'tier_panel_count_unconventional'
+        ]
+        assert tier_findings == [], (
+            f'{n} panels should be acceptable on a tier page'
+        )
+
+
+def test_layout_anti_patterns_skips_tier_check_without_brief():
+    """When no brief is provided, tier-panel-count check is skipped
+    (we can't know what the author intended)."""
+    script = """\
+# Scene: no-brief
+
+## Page 1 — TIER
+
+**Panel 1** (full)
+A single panel.
+"""
+    failures = check_layout_anti_patterns(script)  # no brief_row
+    tier_findings = [
+        f for f in failures
+        if f['kind'] == 'tier_panel_count_unconventional'
+    ]
+    assert tier_findings == []
+
+
+def test_layout_anti_patterns_tier_check_skips_non_tier_pages():
+    """A page declared as `splash` or `6-grid` doesn't trigger tier
+    check even when its panel count is outside {2,3,4}."""
+    script = """\
+# Scene: splash-page
+
+## Page 1 — SPLASH
+
+**Panel 1** (full bleed)
+A single splash panel.
+"""
+    brief_row = {'panel_breakdown': 'p1:splash'}
+    failures = check_layout_anti_patterns(script, brief_row)
+    # No tier finding — splash is supposed to be 1 panel.
+    tier_findings = [
+        f for f in failures
+        if f['kind'] == 'tier_panel_count_unconventional'
+    ]
+    assert tier_findings == []
+
+
+def test_layout_anti_patterns_multiple_findings_on_different_pages():
+    """Multiple anti-patterns across pages all surface independently."""
+    # Page 1: page-turn marker (impossible) AND 13 panels (excessive)
+    # Page 2: tier with 1 panel (mis-labeled)
+    panels_p1 = '\n\n'.join(
+        f'**Panel {i}**\nBeat {i}.' for i in range(1, 14)
+    )
+    script = f"""\
+# Scene: multi-violation
+
+## Page 1 — IRREGULAR ⟵ PAGE-TURN REVEAL
+
+{panels_p1}
+
+## Page 2 — TIER
+
+**Panel 1** (full)
+Single panel.
+"""
+    brief_row = {'panel_breakdown': 'p1:irregular; p2:tier'}
+    failures = check_layout_anti_patterns(script, brief_row)
+    kinds = {f['kind'] for f in failures}
+    assert 'page_turn_on_page_one' in kinds
+    assert 'panel_density_excessive' in kinds
+    assert 'tier_panel_count_unconventional' in kinds
