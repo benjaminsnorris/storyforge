@@ -6266,9 +6266,14 @@ def _gather_proposal_scene_ids(
             for sid in (op or {}).get('scene_ids') or []:
                 sid = str(sid).strip()
                 if sid:
-                    sm_ids.add(sid)
-                    if sid in arch_map:
-                        sm_ids.add(arch_map[sid])
+                    # Canonicalize: when a scene-map id maps to an
+                    # architecture id, use the architecture id alone
+                    # (don't keep both). Aliasing would double-count
+                    # — a 3-tier scenario where the same s-id appears
+                    # in scene_map + briefs proposals would fire two
+                    # overlap patterns (one on the s-id, one on the
+                    # arch id) for what's actually a single signal.
+                    sm_ids.add(arch_map.get(sid, sid))
         if sm_ids:
             out['scene_map'] = sm_ids
     br = result.get('briefs')
@@ -6277,9 +6282,7 @@ def _gather_proposal_scene_ids(
         for u in br.get('proposed_brief_updates') or []:
             sid = (u or {}).get('scene_id', '').strip()
             if sid:
-                br_ids.add(sid)
-                if sid in arch_map:
-                    br_ids.add(arch_map[sid])
+                br_ids.add(arch_map.get(sid, sid))
         if br_ids:
             out['briefs'] = br_ids
     return out
@@ -6344,9 +6347,10 @@ def _gather_finding_scene_ids(
         for f in sm.get('continuity_findings') or []:
             sid = (f or {}).get('scene_id', '').strip()
             if sid:
-                sm_ids.add(sid)
-                if sid in arch_map:
-                    sm_ids.add(arch_map[sid])
+                # Canonicalize to the architecture id when one is
+                # linked — see _gather_proposal_scene_ids for the
+                # full rationale (avoids 3-tier double-counting noise).
+                sm_ids.add(arch_map.get(sid, sid))
         if sm_ids:
             out['scene_map'] = sm_ids
     br = result.get('briefs')
@@ -6355,9 +6359,7 @@ def _gather_finding_scene_ids(
         for f in br.get('brief_findings') or []:
             sid = (f or {}).get('scene_id', '').strip()
             if sid:
-                br_ids.add(sid)
-                if sid in arch_map:
-                    br_ids.add(arch_map[sid])
+                br_ids.add(arch_map.get(sid, sid))
         if br_ids:
             out['briefs'] = br_ids
     return out

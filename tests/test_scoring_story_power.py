@@ -6865,6 +6865,62 @@ def test_check_cross_tier_deterministic_bridge_works_for_proposals():
     assert overlap[0]['affected_ids'] == ['midpoint']
 
 
+def test_check_cross_tier_deterministic_bridge_canonicalizes_no_double_count():
+    """When both scene_map and briefs propose on the same scenes.csv id
+    (linked to an architecture row), the detector fires ONCE on the
+    canonical architecture id — not twice (once on the s-id, once on
+    the arch id). The earlier add-both approach would have produced
+    two overlap patterns for one underlying signal; canonicalization
+    (replace s-id with its arch id when linked) keeps it clean."""
+    from storyforge.scoring_story_power import (
+        _check_cross_tier_deterministic, MappedScene,
+    )
+    scene_map_scenes = [
+        MappedScene(id='midpoint-discovery', seq=1, title='', summary='',
+                    pov='', location='', timeline_day='', time_of_day='',
+                    scene_type='', word_count=0, target_words=0,
+                    architecture_scene='midpoint'),
+    ]
+    # Both scene-map and briefs propose on midpoint-discovery (linked
+    # to midpoint via architecture_scene). Architecture has no proposal.
+    result = {
+        'composite': 8.0, 'scores': {'specificity': 8}, 'diagnostic': {},
+        'act_shape': None, 'spine': None, 'architecture': None,
+        'scene_map': {
+            'status': 'ok',
+            'per_scene_scores': {}, 'whole_scene_map_scores': {},
+            'scene_map_diagnostic': {},
+            'continuity_findings': [],
+            'proposed_operations': [
+                {'operation': 'split',
+                 'scene_ids': ['midpoint-discovery'],
+                 'summary': 'split it'},
+            ],
+        },
+        'briefs': {
+            'status': 'ok',
+            'per_brief_scores': {}, 'whole_briefs_scores': {},
+            'briefs_diagnostic': {},
+            'brief_findings': [],
+            'proposed_brief_updates': [
+                {'scene_id': 'midpoint-discovery', 'field': 'crisis',
+                 'proposed_value': 'tighten it'},
+            ],
+        },
+    }
+    patterns = _check_cross_tier_deterministic(
+        result, scene_map_scenes=scene_map_scenes,  # type: ignore[arg-type]
+    )
+    overlaps = [p for p in patterns if p['pattern'] == 'scene_id_overlap']
+    # Exactly ONE pattern, on the canonical arch id (not two — one on
+    # the s-id and one on the arch id).
+    assert len(overlaps) == 1, (
+        f'expected one canonical overlap pattern; got '
+        f'{[p["affected_ids"] for p in overlaps]}'
+    )
+    assert overlaps[0]['affected_ids'] == ['midpoint']
+
+
 def test_check_cross_tier_deterministic_bridge_skips_unmapped_scenes():
     """Scenes without architecture_scene set (interstitials) don't get
     bridged — they remain in the scene-map namespace and can still
