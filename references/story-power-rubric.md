@@ -1013,7 +1013,8 @@ rationale that scales with project size. On real-sized manuscripts
 (25+ architecture scenes, 60+ scene-map rows, 30+ briefs), an 8K
 ceiling silently truncates the response mid-JSON; the parser then
 fails with a generic "unparseable" error. 32K leaves substantial
-headroom and is well under the 64K Claude Opus output cap.
+headroom and is well under the per-model output cap (Opus 4.6: 128K,
+Sonnet 4.6: 64K — see `api.MODEL_MAX_OUTPUT` for the source of truth).
 
 When the LLM truncates anyway (unusually large project, a future
 rubric that grew the prompt), the unparseable error message names

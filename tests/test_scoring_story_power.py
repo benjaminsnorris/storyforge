@@ -5924,6 +5924,31 @@ def test_per_row_tier_max_tokens_constant_above_8k():
     assert _PITCH_MAX_TOKENS == 4096
 
 
+def test_per_row_tier_max_tokens_under_creative_model_cap():
+    """The per-row ceiling must fit under the creative model's output
+    cap (api.MODEL_MAX_OUTPUT is the source of truth). PR #247 review
+    caught a factual claim of '64K Opus output cap' — Opus 4.6
+    actually caps at 128K, but the lesson is that constants drift
+    from documentation. This test grounds the claim in the API
+    config so a future model change can't silently break it."""
+    from storyforge.scoring_story_power import (
+        _PER_ROW_TIER_MAX_TOKENS,
+    )
+    from storyforge.api import MODEL_MAX_OUTPUT
+    from storyforge.common import select_model
+    creative_model = select_model('creative')
+    model_cap = MODEL_MAX_OUTPUT.get(creative_model)
+    assert model_cap is not None, (
+        f'creative model {creative_model!r} is not in MODEL_MAX_OUTPUT; '
+        'add an entry or update select_model'
+    )
+    assert _PER_ROW_TIER_MAX_TOKENS <= model_cap, (
+        f'_PER_ROW_TIER_MAX_TOKENS={_PER_ROW_TIER_MAX_TOKENS} exceeds '
+        f'the creative model {creative_model!r} cap of {model_cap}; '
+        'the API would reject the request with HTTP 400'
+    )
+
+
 def test_architecture_passes_per_row_max_tokens(tmp_path, monkeypatch):
     """Architecture mode calls invoke_to_file with the per-row tier
     ceiling, not the old 8K wall."""

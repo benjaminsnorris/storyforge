@@ -1516,11 +1516,12 @@ def _read_stop_reason(log_file: str) -> str:
 # return bounded payloads (8 axes × ≤3 acts; 5-10 events × 3 axes); 4K
 # and 8K respectively are sufficient. The per-row-heavy tiers
 # (architecture, scene-map, briefs) emit per-scene / per-brief
-# rationales that scale with project size — on a 25-scene
-# architecture or 60-scene scene map the 8K ceiling truncates the
-# response mid-JSON, producing parse failures (issue #245). 32K
-# leaves 4× headroom over the observed wall and is well below the
-# 64K Claude Opus output cap.
+# rationales that scale with project size — at real-sized project
+# counts the 8K ceiling truncates the response mid-JSON, producing
+# parse failures (issue #245). 32K leaves substantial headroom over
+# the observed wall and remains well under the per-model output cap
+# (see api.MODEL_MAX_OUTPUT for the source of truth — Opus 4.6 caps
+# at 128K, Sonnet at 64K).
 _PITCH_MAX_TOKENS = 4096
 _BOUNDED_TIER_MAX_TOKENS = 8192
 _PER_ROW_TIER_MAX_TOKENS = 32768
