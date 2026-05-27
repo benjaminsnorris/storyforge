@@ -398,12 +398,19 @@ Commit messages are descriptive and prefixed: `"Develop: ..."`, `"Voice: ..."`, 
 git add -A && git commit -m "Develop: {what was done}" && git push
 ```
 
-## Graphic-novel mode in v1
+## Graphic-novel mode
 
-The following commands and skills are NOT yet supported in graphic-novel mode:
-`write`, `evaluate`, `score`, `revise`, `assemble`, `publish`, `annotations`, `extract`.
+Graphic-novel projects can work at two granularities:
 
-The following ARE supported: `elaborate` (spine, architecture, scene-map, voice, briefs), `hone`, `validate`, `cleanup`.
+- **Scene level** — `scenes/<scene_id>.md` is the creative source of truth (function, page index, cross-page continuity notes).
+- **Page level** — `pages/<prefix>-pN.md` is the atomic working unit when a scene has multiple pages. Each page file carries the panel script, the page architecture (intent, hierarchy, book-level placement), and the image-generation prompts for that one book page.
+
+When orienting yourself in a GN project, check whether `pages/` exists:
+
+- **If `pages/` is populated:** recommend per-page work. Suggest extracting metadata after page edits — `./storyforge extract --from-pages` updates `scenes.csv` panel_count + page_count from the page files. Recommend the script-package skill once the page files are ready for handoff — it now assembles the artist bundle from page files when present, falling back to the inline scene file otherwise.
+- **If `pages/` is empty or absent:** the project is using scene-level files only. That's still supported. Suggest migrating to per-page files when a scene's panel-level content gets unwieldy (around 3+ pages with detailed image prompts).
+
+These commands and skills work in GN mode: `elaborate`, `hone`, `validate`, `cleanup`, `write`, `evaluate`, `score`, `revise`, `extract`, `script-package`. Not yet supported: `publish`, `annotations` (Bookshelf integration — tracked as #215).
 
 If the author asks for an unsupported action, explain the limit and offer to help with what is supported.
 

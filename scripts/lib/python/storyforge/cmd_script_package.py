@@ -102,9 +102,17 @@ def _renumber_pages(scene_text, start):
 def _assemble_script(project_dir, chapters, title):
     """Concatenate scenes in chapter order with global page numbering.
 
-    Returns the assembled markdown string.
+    For GN projects with per-page files (pages/<prefix>-pN.md), the panel
+    script content is assembled from the page files' '## Panel script'
+    sections, sorted by page_within_scene, and prepended with a synthetic
+    `# Scene: {sid}` header so the bundle stays navigable (page files
+    carry per-page headers, not scene-level ones). Scenes without page
+    files fall back to the inline scene-file body — that path uses the
+    file's existing header rather than synthesizing one. Returns the
+    assembled markdown string.
     """
     from storyforge.script_format import count_panels
+    from storyforge.pages import pages_for_scene, extract_panel_script
 
     global_page = 1
     total_panels = 0
@@ -113,12 +121,35 @@ def _assemble_script(project_dir, chapters, title):
     for chap in chapters:
         body_parts.append(f'\n# Chapter {chap["chapter"]} — {chap["title"]}\n')
         for sid in chap['scenes']:
-            scene_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
-            if not os.path.isfile(scene_path):
-                log(f'  WARNING: scene file not found: scenes/{sid}.md')
-                body_parts.append(f'\n*[scene {sid} not found]*\n')
-                continue
-            text = open(scene_path, encoding='utf-8').read()
+            page_files = pages_for_scene(project_dir, sid)
+            if page_files:
+                # Synthetic `# Scene: {sid}` header — the inline-scene-file
+                # path uses the file's existing header, but page files have
+                # their own (per-page) headers and need a scene-level wrapper
+                # so the artist bundle stays navigable.
+                scene_text_parts = [f'\n# Scene: {sid}\n']
+                pages_with_script = 0
+                for page in page_files:
+                    script_body = extract_panel_script(page['path'])
+                    if script_body:
+                        scene_text_parts.append('\n' + script_body + '\n')
+                        pages_with_script += 1
+                if pages_with_script == 0:
+                    log(f'  WARNING: scene {sid}: {len(page_files)} page '
+                        f'file(s) exist but none contain a `## Panel script` '
+                        f'section; artist bundle will have an empty scene')
+                elif pages_with_script < len(page_files):
+                    log(f'  WARNING: scene {sid}: {pages_with_script}/'
+                        f'{len(page_files)} page file(s) have a `## Panel '
+                        f'script` section; remaining pages produce no output')
+                text = ''.join(scene_text_parts)
+            else:
+                scene_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
+                if not os.path.isfile(scene_path):
+                    log(f'  WARNING: scene file not found: scenes/{sid}.md')
+                    body_parts.append(f'\n*[scene {sid} not found]*\n')
+                    continue
+                text = open(scene_path, encoding='utf-8').read()
             total_panels += count_panels(text)
             renumbered, global_page = _renumber_pages(text, global_page)
             body_parts.append(renumbered)
@@ -687,12 +718,18 @@ def main(argv=None):
         print('===== END DRY RUN =====')
         return
 
-    # Validate that every mapped scene has status=drafted
+    # Validate that every mapped scene has status=drafted (or has page files —
+    # a scene with at least one pages/<prefix>-pN.md is treated as drafted
+    # even when scenes.csv still shows briefed, since per-page work is the
+    # source of truth for those scenes).
     from storyforge.csv_cli import get_field
+    from storyforge.pages import pages_for_scene
     scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
     not_drafted = []
     for chap in chapters:
         for sid in chap['scenes']:
+            if pages_for_scene(project_dir, sid):
+                continue
             status = get_field(scenes_csv, sid, 'status') or ''
             if status != 'drafted':
                 not_drafted.append(f'{sid} (status={status or "unknown"})')
