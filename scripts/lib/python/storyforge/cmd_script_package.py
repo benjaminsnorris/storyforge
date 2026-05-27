@@ -250,6 +250,28 @@ def _render_chapter_map(chapters, title):
 
 
 # ---------------------------------------------------------------------------
+# Canon bundling
+# ---------------------------------------------------------------------------
+
+def _copy_canon_into_bundle(project_dir: str, bundle_dir: str) -> int:
+    """Mirror reference/canon/ into manuscript/canon/. Returns the number
+    of canon files copied (0 if there's no canon/ directory)."""
+    import shutil
+
+    src = os.path.join(project_dir, 'reference', 'canon')
+    if not os.path.isdir(src):
+        return 0
+    dst = os.path.join(bundle_dir, 'canon')
+    if os.path.isdir(dst):
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+    count = 0
+    for root, _dirs, files in os.walk(dst):
+        count += sum(1 for f in files if f.endswith('.md'))
+    return count
+
+
+# ---------------------------------------------------------------------------
 # Handoff README template
 # ---------------------------------------------------------------------------
 
@@ -262,7 +284,7 @@ This bundle contains everything you need to illustrate the graphic novel.
 
 - `script.md` — The complete panel-by-panel script. Pages are globally numbered.
 - `visual-references.md` — Character and location reference notes. Pin these up.
-- `chapter-map.md` — How scenes group into chapters/issues.
+- `chapter-map.md` — How scenes group into chapters/issues.{canon_line}
 
 ## Script format
 
@@ -767,8 +789,21 @@ def main(argv=None):
         f.write(cm)
     log('  manuscript/chapter-map.md')
 
+    # canon/ — copy reference/canon/ alongside the script so artists have
+    # the source-of-truth visual blocks in one place. The blocks are also
+    # embedded inline in panel prompts; this is the editable source.
+    canon_copied = _copy_canon_into_bundle(project_dir, bundle_dir)
+    canon_line = (
+        '\n- `canon/` — Source-of-truth visual canon (style foundation, '
+        'lighting laws, panel registers, page rhythm, plus per-character/'
+        'per-location/per-motif blocks). The same blocks are embedded inline '
+        'in panel prompts; this directory is the editable source.'
+    ) if canon_copied else ''
+    if canon_copied:
+        log(f'  manuscript/canon/ ({canon_copied} files)')
+
     # handoff-readme.md
-    readme = HANDOFF_README.format(title=title)
+    readme = HANDOFF_README.format(title=title, canon_line=canon_line)
     readme_path = os.path.join(bundle_dir, 'handoff-readme.md')
     with open(readme_path, 'w', encoding='utf-8') as f:
         f.write(readme)

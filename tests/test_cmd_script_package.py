@@ -629,3 +629,101 @@ def test_script_package_force_bypasses_status_check(project_dir_gn, monkeypatch)
     cmd_script_package.main(['--force'])
     bundle = os.path.join(project_dir_gn, 'manuscript')
     assert os.path.isfile(os.path.join(bundle, 'script.md'))
+
+
+# ---------------------------------------------------------------------------
+# Canon bundling — reference/canon/ ships into manuscript/canon/ (#254)
+# ---------------------------------------------------------------------------
+
+def _write_minimal_canon(project_dir):
+    """Drop a small canon tree into the project so script-package can copy it."""
+    canon_dir = os.path.join(project_dir, 'reference', 'canon')
+    os.makedirs(os.path.join(canon_dir, 'characters'), exist_ok=True)
+    fm = (
+        '---\n'
+        'canon_id: style-foundation\n'
+        'canon_type: foundation\n'
+        'canon_updated: 2026-05-27\n'
+        'appears_in: all panels\n'
+        'embeds_as: Style Foundation\n'
+        'first_appearance: n/a\n'
+        '---\n\n'
+        '## Embeddable block\n\ntext\n\n## Clauses\n\n- one\n\n'
+        '## Related canon\n\n- [[other]]\n\n## Iteration history\n\n- created\n'
+    )
+    with open(os.path.join(canon_dir, 'style-foundation.md'), 'w') as f:
+        f.write(fm)
+
+
+def test_script_package_copies_canon_tree(project_dir_gn, monkeypatch):
+    """Canon files in reference/canon/ ship into manuscript/canon/ so the
+    artist has the source-of-truth visual blocks alongside the script."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    _write_minimal_canon(project_dir_gn)
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    bundle_canon = os.path.join(project_dir_gn, 'manuscript', 'canon')
+    assert os.path.isdir(bundle_canon)
+    assert os.path.isfile(os.path.join(bundle_canon, 'style-foundation.md'))
+
+
+def test_script_package_handoff_readme_mentions_canon_when_copied(
+    project_dir_gn, monkeypatch,
+):
+    """The handoff-readme.md should reference the bundled canon/ tree so
+    artists know to use it. The mention is conditional — projects without
+    a canon dir don't get a phantom entry."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    _write_minimal_canon(project_dir_gn)
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    readme = open(os.path.join(project_dir_gn, 'manuscript', 'handoff-readme.md')).read()
+    assert '`canon/`' in readme
+
+
+def test_script_package_handoff_readme_omits_canon_when_no_canon_dir(
+    project_dir_gn, monkeypatch,
+):
+    """Without a canon dir, the readme must not mention canon — would be
+    a broken pointer."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    readme = open(os.path.join(project_dir_gn, 'manuscript', 'handoff-readme.md')).read()
+    assert '`canon/`' not in readme
+    assert not os.path.isdir(os.path.join(project_dir_gn, 'manuscript', 'canon'))
+
+
+def test_script_package_canon_copy_replaces_stale_bundle(
+    project_dir_gn, monkeypatch,
+):
+    """If manuscript/canon/ already exists from a prior bundle run, the
+    new copy fully replaces it — no stale files left behind."""
+    monkeypatch.chdir(project_dir_gn)
+    _setup_drafted_scenes(project_dir_gn)
+    _setup_chapter_map(project_dir_gn)
+    _write_minimal_canon(project_dir_gn)
+
+    # Seed an out-of-date file in the bundle that should be wiped.
+    bundle_canon = os.path.join(project_dir_gn, 'manuscript', 'canon')
+    os.makedirs(bundle_canon, exist_ok=True)
+    with open(os.path.join(bundle_canon, 'stale.md'), 'w') as f:
+        f.write('this should be removed')
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    assert not os.path.isfile(os.path.join(bundle_canon, 'stale.md'))
+    assert os.path.isfile(os.path.join(bundle_canon, 'style-foundation.md'))
