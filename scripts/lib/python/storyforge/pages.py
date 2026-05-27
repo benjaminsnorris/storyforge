@@ -154,3 +154,39 @@ def _parse_frontmatter(block: str) -> PageFile:
             page['extra'][key] = value
 
     return page
+
+
+def list_page_files(project_dir: str) -> list[str]:
+    """Return sorted absolute paths of pages/*.md, or [] if no pages dir."""
+    pages_dir = os.path.join(project_dir, 'pages')
+    if not os.path.isdir(pages_dir):
+        return []
+    return sorted(
+        os.path.join(pages_dir, f)
+        for f in os.listdir(pages_dir)
+        if f.endswith('.md') and not f.startswith('.')
+    )
+
+
+def pages_for_scene(project_dir: str, scene_id: str) -> list[PageFile]:
+    """Return parsed PageFile dicts for a scene, sorted by page_within_scene.
+
+    Pages are matched by filename prefix via page_id_prefix_for_scene.
+    This is the on-disk rule (prefix-based filenames) — not a match on
+    the scene_id frontmatter field — so the convention stays consistent
+    even if a page file's frontmatter scene_id drifts.
+    """
+    prefix = page_id_prefix_for_scene(scene_id)
+    pages_dir = os.path.join(project_dir, 'pages')
+    if not os.path.isdir(pages_dir):
+        return []
+    matched: list[PageFile] = []
+    name_re = re.compile(rf'^{re.escape(prefix)}-p\d+\.md$')
+    for fname in sorted(os.listdir(pages_dir)):
+        if not name_re.match(fname):
+            continue
+        parsed = parse_page_file(os.path.join(pages_dir, fname))
+        if parsed is not None:
+            matched.append(parsed)
+    matched.sort(key=lambda p: p.get('page_within_scene', 0))
+    return matched

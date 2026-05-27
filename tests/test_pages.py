@@ -146,3 +146,47 @@ def test_parse_frontmatter_handles_inline_comment(tmp_path):
         'reference/canon/a.md',
         'reference/canon/b.md',
     ]
+
+
+def _write_page(path, page_id, scene_id, within, total, panels):
+    path.write_text(
+        f"---\n"
+        f"page_id: {page_id}\n"
+        f"scene_id: {scene_id}\n"
+        f"page_within_scene: {within}\n"
+        f"total_pages_in_scene: {total}\n"
+        f"panel_count: {panels}\n"
+        f"---\n\nbody\n"
+    )
+
+
+def test_list_page_files_returns_empty_when_no_pages_dir(tmp_path):
+    from storyforge.pages import list_page_files
+    assert list_page_files(str(tmp_path)) == []
+
+
+def test_list_page_files_sorted_and_filters_non_md(tmp_path):
+    from storyforge.pages import list_page_files
+    pages = tmp_path / 'pages'
+    pages.mkdir()
+    (pages / 's01-p1.md').write_text('---\npage_id: s01-p1\n---\n')
+    (pages / 's01-p2.md').write_text('---\npage_id: s01-p2\n---\n')
+    (pages / 'readme.txt').write_text('skip me')
+    (pages / '.hidden.md').write_text('skip me too')
+    result = list_page_files(str(tmp_path))
+    assert [os.path.basename(p) for p in result] == ['s01-p1.md', 's01-p2.md']
+
+
+def test_pages_for_scene_groups_by_prefix(tmp_path):
+    """pages_for_scene returns parsed page files for one scene, sorted by
+    page_within_scene. Matches by the page_id_prefix_for_scene convention,
+    NOT by scene_id field — the prefix is the on-disk filename rule."""
+    from storyforge.pages import pages_for_scene
+    pages = tmp_path / 'pages'
+    pages.mkdir()
+    _write_page(pages / 's01-p2.md', 's01-p2', 's01-studio-finalization', 2, 3, 4)
+    _write_page(pages / 's01-p1.md', 's01-p1', 's01-studio-finalization', 1, 3, 2)
+    _write_page(pages / 's01-p3.md', 's01-p3', 's01-studio-finalization', 3, 3, 6)
+    _write_page(pages / 's02-p1.md', 's02-p1', 's02-other', 1, 1, 1)
+    result = pages_for_scene(str(tmp_path), 's01-studio-finalization')
+    assert [p['page_id'] for p in result] == ['s01-p1', 's01-p2', 's01-p3']
