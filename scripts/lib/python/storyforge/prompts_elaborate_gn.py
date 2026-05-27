@@ -19,9 +19,17 @@ For each scene, you will set:
   - location, pov, timeline_day, time_of_day, type
   - characters, on_stage, mice_threads
 
-Page counts are the unit of pacing in comics. A scene can be 1 page (a
-quick beat), 3-4 pages (a typical sequence), or 6-8+ pages (a major set
-piece). Most scenes are 2-4 pages.
+Page-count heuristics (contemporary GN tradition; see
+references/gn-layout-vocabulary.md "Scene-pace heuristics" for the
+full table):
+  - 1 page: single quiet beat (reaction, gesture, recognition)
+  - 2-3 pages: short dialogue or action exchange
+  - 4-6 pages: standard scene (setup, conflict, partial resolution)
+  - 8-12 pages: set-piece scene (extended action, major confrontation)
+  - 12-20 pages: decompressed climax (rare; only for the largest beats)
+A scene's target_pages should match its dramatic scope. If you set
+≥8 pages, the scene must genuinely be a set piece — otherwise
+compress.
 """
 
 BRIEFS_GN_PREAMBLE = """\
@@ -43,6 +51,23 @@ Additionally, populate these graphic-novel columns:
     Use semicolon-separated entries, one per page. Page tokens: splash,
     N-grid (e.g. 6-grid, 9-grid), double-spread, tier, irregular.
 
+    Each token names a recognizable page form with a recognizable
+    narrative effect — see references/gn-layout-vocabulary.md
+    "Layout tokens" for the full vocabulary. Quick reference:
+      - splash: one panel filling the page; biggest beat in the scene
+      - double-spread: image across two pages; biggest beat in the
+        manuscript (use sparingly — usually 0-2 per chapter)
+      - 9-grid: Watchmen discipline; equal-weight panels; slow attention
+      - 6-grid: standard contemporary grid; dialogue / mid-density action
+      - tier: single horizontal row (2-4 panels); filmic motion
+      - irregular: artist-designed page; reserve for moments breaking
+        the grid
+
+    Splash logic: every splash in a scene flattens the next splash's
+    emphasis. Most scenes need zero splashes; one splash is plenty
+    for most set pieces; two splashes in a 4-page scene is usually
+    one too many.
+
   - visual_keywords: visual beats that must appear in the panel art,
     semicolon-separated, e.g., "blank parchment close; trembling hand;
     shadow under door". These are story beats the artist must include.
@@ -51,9 +76,23 @@ Additionally, populate these graphic-novel columns:
     reveal). Semicolon-separated descriptions, each anchored to a panel
     in panel_breakdown. Used by the script-validation pass.
 
+    The page-turn is comics' most-load-bearing tool: the reader sees
+    a spread (verso + recto) at once, then turns to a new spread.
+    Anything on the next verso (left page after turning) is a reveal.
+    Strongest uses: cliffhanger setup on the prior recto, payoff
+    splash on the new verso. NEVER mark a page-turn beat on page 1
+    — there's no preceding page to turn from.
+
   - caption_strategy: narration style for this scene. Values:
     "minimal", "journal voiceover", "omniscient narration", "none",
     or a custom short phrase.
+
+Panel-to-panel transitions: when composing key_actions across panels,
+think in McCloud's six transition types (moment / action / subject /
+scene / aspect / non-sequitur — see references/gn-layout-vocabulary.md
+"Panel-to-panel transitions"). Action-to-action drives plot; moment-
+to-moment carries emotion; aspect-to-aspect sets atmosphere; scene-
+to-scene compresses. Match the transition to the beat.
 """
 
 
