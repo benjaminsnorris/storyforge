@@ -80,3 +80,95 @@ def test_from_pages_no_pages_dir_errors(tmp_path, monkeypatch):
     from storyforge.cmd_extract_gn import main
     with pytest.raises(SystemExit):
         main(['--from-pages'])
+
+
+def test_from_pages_errors_when_target_columns_missing(tmp_path, monkeypatch, capsys):
+    """Regression for CR-1/SF-5: csv_cli.update_field silently no-ops on a
+    missing column. _run_from_pages must fail loudly if panel_count or
+    page_count is not in scenes.csv, so projects that haven't run cleanup
+    don't get a false-success message while writing nothing."""
+    with open(tmp_path / 'storyforge.yaml', 'w') as f:
+        f.write('project:\n  title: Test\n  medium: graphic-novel\n')
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    # scenes.csv WITHOUT panel_count/page_count columns
+    (ref / 'scenes.csv').write_text('id|title|status\ns01-studio|S|briefed\n')
+    pages = tmp_path / 'pages'
+    pages.mkdir()
+    (pages / 's01-p1.md').write_text(
+        '---\npage_id: s01-p1\nscene_id: s01-studio\n'
+        'page_within_scene: 1\ntotal_pages_in_scene: 1\npanel_count: 2\n---\n'
+    )
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge.cmd_extract_gn import main
+    with pytest.raises(SystemExit):
+        main(['--from-pages'])
+    out = capsys.readouterr().out
+    assert 'panel_count' in out
+    assert 'page_count' in out
+
+
+def test_from_pages_warns_when_panel_count_missing(tmp_path, monkeypatch, capsys):
+    """SF-4: a page without panel_count is silently treated as 0; the
+    aggregator should surface this so authors notice partial sums."""
+    _seed_gn_project(str(tmp_path))
+    # Add a page with no panel_count
+    pages = tmp_path / 'pages'
+    (pages / 's01-p3.md').write_text(
+        '---\npage_id: s01-p3\nscene_id: s01-studio\n'
+        'page_within_scene: 3\ntotal_pages_in_scene: 3\n---\n\nbody\n'
+    )
+    # Update total_pages_in_scene in the other files
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge.cmd_extract_gn import main
+    main(['--from-pages'])
+    out = capsys.readouterr().out
+    assert 'lack a valid integer panel_count' in out
+    assert 's01-p3.md' in out
+
+
+def test_from_pages_warns_when_scene_id_missing(tmp_path, monkeypatch, capsys):
+    """T-6: page with no scene_id field surfaces a WARNING and is skipped."""
+    with open(tmp_path / 'storyforge.yaml', 'w') as f:
+        f.write('project:\n  title: Test\n  medium: graphic-novel\n')
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|title|status|panel_count|page_count\n'
+        's01-studio|S|briefed||\n'
+    )
+    pages = tmp_path / 'pages'
+    pages.mkdir()
+    (pages / 's01-p1.md').write_text(
+        '---\npage_id: s01-p1\n'  # no scene_id
+        'page_within_scene: 1\ntotal_pages_in_scene: 1\npanel_count: 2\n---\n'
+    )
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge.cmd_extract_gn import main
+    main(['--from-pages'])
+    out = capsys.readouterr().out
+    assert 'has no scene_id' in out
+
+
+def test_from_pages_warns_when_scene_id_unknown(tmp_path, monkeypatch, capsys):
+    """T-6: page references a scene_id not in scenes.csv → WARNING + skip."""
+    with open(tmp_path / 'storyforge.yaml', 'w') as f:
+        f.write('project:\n  title: Test\n  medium: graphic-novel\n')
+    ref = tmp_path / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|title|status|panel_count|page_count\n'
+        's01-studio|S|briefed||\n'
+    )
+    pages = tmp_path / 'pages'
+    pages.mkdir()
+    (pages / 's99-p1.md').write_text(
+        '---\npage_id: s99-p1\nscene_id: s99-ghost\n'
+        'page_within_scene: 1\ntotal_pages_in_scene: 1\npanel_count: 2\n---\n'
+    )
+    monkeypatch.chdir(str(tmp_path))
+    from storyforge.cmd_extract_gn import main
+    main(['--from-pages'])
+    out = capsys.readouterr().out
+    assert 's99-ghost' in out
+    assert 'not in' in out and 'scenes.csv' in out

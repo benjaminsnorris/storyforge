@@ -110,7 +110,15 @@ def main(argv=None):
 
 def _run_from_pages(project_dir: str, dry_run: bool) -> None:
     """Sum panel_count + page_count per scene from page files and write
-    those columns back to scenes.csv. Deterministic — no LLM call."""
+    those columns back to scenes.csv. Deterministic — no LLM call.
+
+    Fails loudly if scenes.csv lacks the panel_count or page_count columns
+    (GN-mode columns added in #251; pre-fix projects need `storyforge
+    cleanup` to add them first) — otherwise csv_cli.update_field silently
+    no-ops on a missing column and the run would falsely claim success.
+    Also tracks pages missing panel_count and reports partial sums so a
+    silent undercount is visible.
+    """
     from storyforge.pages import list_page_files, parse_page_file
     from storyforge.csv_cli import update_field, list_ids
 
@@ -119,7 +127,26 @@ def _run_from_pages(project_dir: str, dry_run: bool) -> None:
         log('ERROR: no pages/*.md files found. Create per-page files first.')
         sys.exit(1)
 
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(scenes_csv):
+        log(f'ERROR: scenes.csv not found at {scenes_csv}')
+        sys.exit(1)
+
+    # Verify the target columns exist BEFORE we sum — update_field silently
+    # returns on a missing column, so writing without this check would lie
+    # about success on projects that haven't run `storyforge cleanup` since
+    # the GN schema was extended.
+    with open(scenes_csv, encoding='utf-8') as f:
+        header = f.readline().strip().split('|')
+    missing_cols = [c for c in ('panel_count', 'page_count') if c not in header]
+    if missing_cols and not dry_run:
+        log(f'ERROR: scenes.csv is missing required column(s): '
+            f'{", ".join(missing_cols)}. Run `storyforge cleanup` to add '
+            f'the GN-mode columns before --from-pages.')
+        sys.exit(1)
+
     by_scene: dict[str, dict[str, int]] = {}
+    pages_missing_panel_count: dict[str, list[str]] = {}
     for p in page_paths:
         page = parse_page_file(p)
         if page is None:
@@ -130,13 +157,22 @@ def _run_from_pages(project_dir: str, dry_run: bool) -> None:
             log(f'  WARNING: {p} has no scene_id; skipping')
             continue
         bucket = by_scene.setdefault(sid, {'panels': 0, 'pages': 0})
-        bucket['panels'] += page.get('panel_count', 0) or 0
+        panel_count = page.get('panel_count')
+        if isinstance(panel_count, int):
+            bucket['panels'] += panel_count
+        else:
+            # Field absent or coerced to string by malformed frontmatter —
+            # don't silently treat as zero; surface so authors notice.
+            pages_missing_panel_count.setdefault(sid, []).append(
+                os.path.basename(p),
+            )
         bucket['pages'] += 1
 
-    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
-    if not os.path.isfile(scenes_csv):
-        log(f'ERROR: scenes.csv not found at {scenes_csv}')
-        sys.exit(1)
+    for sid, files in pages_missing_panel_count.items():
+        log(f'  WARNING: scene {sid}: {len(files)} page(s) lack a valid '
+            f'integer panel_count ({", ".join(files)}); panel_count sum '
+            f'is partial')
+
     known_ids = set(list_ids(scenes_csv))
 
     written = 0

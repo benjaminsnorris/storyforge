@@ -151,6 +151,107 @@ def test_script_package_prefers_page_files_when_present(project_dir_gn, monkeypa
     # The scene file's page-index section is not included
     assert '## Page index' not in script_md
 
+
+def test_script_package_warns_when_all_pages_empty(project_dir_gn, monkeypatch, capsys):
+    """Regression for CR-2/SF-1: a scene with page files that all lack a
+    `## Panel script` section silently produced an empty bundle scene.
+    Now must surface a WARNING so the artist isn't handed empty pages."""
+    monkeypatch.chdir(project_dir_gn)
+
+    scenes_dir = os.path.join(project_dir_gn, 'scenes')
+    os.makedirs(scenes_dir, exist_ok=True)
+    pages_dir = os.path.join(project_dir_gn, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+
+    # Two page files for s01-stub, both frontmatter-only (no Panel script)
+    for i in (1, 2):
+        with open(os.path.join(pages_dir, f's01-p{i}.md'), 'w') as f:
+            f.write(
+                f"---\npage_id: s01-p{i}\nscene_id: s01-stub\n"
+                f"page_within_scene: {i}\ntotal_pages_in_scene: 2\n"
+                f"panel_count: 1\n---\n\n# Heading only, no script section\n"
+            )
+
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    with open(scenes_csv) as f:
+        header = f.readline()
+    cols = header.strip().split('|')
+
+    def _row(sid, status='briefed'):
+        row = {c: '' for c in cols}
+        row['id'] = sid
+        row['status'] = status
+        row['title'] = sid
+        return '|'.join(row[c] for c in cols)
+
+    with open(scenes_csv, 'w') as f:
+        f.write(header)
+        f.write(_row('s01-stub') + '\n')
+
+    map_path = os.path.join(project_dir_gn, 'reference', 'chapter-map.csv')
+    with open(map_path, 'w') as f:
+        f.write('chapter|title|heading|scenes\n')
+        f.write('1|Opening|numbered-titled|s01-stub\n')
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    captured = capsys.readouterr().out
+    assert 's01-stub' in captured
+    assert 'none contain' in captured and '`## Panel script`' in captured
+
+
+def test_script_package_warns_on_partial_page_script_coverage(project_dir_gn,
+                                                              monkeypatch, capsys):
+    """SF-1 partial-coverage variant: when SOME but not all pages have a
+    Panel script section, log a partial-coverage warning so missing
+    content is visible."""
+    monkeypatch.chdir(project_dir_gn)
+
+    pages_dir = os.path.join(project_dir_gn, 'pages')
+    os.makedirs(pages_dir, exist_ok=True)
+
+    # Page 1 has a Panel script; page 2 does not.
+    with open(os.path.join(pages_dir, 's01-p1.md'), 'w') as f:
+        f.write(
+            "---\npage_id: s01-p1\nscene_id: s01-half\n"
+            "page_within_scene: 1\ntotal_pages_in_scene: 2\npanel_count: 1\n"
+            "---\n\n## Panel script\n\n## Page 1 — SPLASH\n\n**Panel 1**\nHi.\n"
+        )
+    with open(os.path.join(pages_dir, 's01-p2.md'), 'w') as f:
+        f.write(
+            "---\npage_id: s01-p2\nscene_id: s01-half\n"
+            "page_within_scene: 2\ntotal_pages_in_scene: 2\npanel_count: 1\n"
+            "---\n\n## Notes only\n\nNo script.\n"
+        )
+
+    scenes_csv = os.path.join(project_dir_gn, 'reference', 'scenes.csv')
+    with open(scenes_csv) as f:
+        header = f.readline()
+    cols = header.strip().split('|')
+
+    def _row(sid):
+        row = {c: '' for c in cols}
+        row['id'] = sid
+        row['status'] = 'briefed'
+        row['title'] = sid
+        return '|'.join(row[c] for c in cols)
+
+    with open(scenes_csv, 'w') as f:
+        f.write(header)
+        f.write(_row('s01-half') + '\n')
+
+    map_path = os.path.join(project_dir_gn, 'reference', 'chapter-map.csv')
+    with open(map_path, 'w') as f:
+        f.write('chapter|title|heading|scenes\n')
+        f.write('1|Opening|numbered-titled|s01-half\n')
+
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+
+    captured = capsys.readouterr().out
+    assert '1/2' in captured or '1 of 2' in captured.lower()
+
     bundle = os.path.join(project_dir_gn, 'manuscript')
     assert os.path.isfile(os.path.join(bundle, 'script.md'))
     assert os.path.isfile(os.path.join(bundle, 'visual-references.md'))

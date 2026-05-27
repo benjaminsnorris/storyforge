@@ -120,11 +120,25 @@ def _assemble_script(project_dir, chapters, title):
         for sid in chap['scenes']:
             page_files = pages_for_scene(project_dir, sid)
             if page_files:
+                # Synthetic `# Scene: {sid}` header — the inline-scene-file
+                # path uses the file's existing header, but page files have
+                # their own (per-page) headers and need a scene-level wrapper
+                # so the artist bundle stays navigable.
                 scene_text_parts = [f'\n# Scene: {sid}\n']
+                pages_with_script = 0
                 for page in page_files:
                     script_body = extract_panel_script(page['path'])
                     if script_body:
                         scene_text_parts.append('\n' + script_body + '\n')
+                        pages_with_script += 1
+                if pages_with_script == 0:
+                    log(f'  WARNING: scene {sid}: {len(page_files)} page '
+                        f'file(s) exist but none contain a `## Panel script` '
+                        f'section; artist bundle will have an empty scene')
+                elif pages_with_script < len(page_files):
+                    log(f'  WARNING: scene {sid}: {pages_with_script}/'
+                        f'{len(page_files)} page file(s) have a `## Panel '
+                        f'script` section; remaining pages produce no output')
                 text = ''.join(scene_text_parts)
             else:
                 scene_path = os.path.join(project_dir, 'scenes', f'{sid}.md')
