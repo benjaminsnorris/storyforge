@@ -175,7 +175,7 @@ reference/canon/
   motifs/_template.md
 ```
 
-Use the **Glob tool** to find every `.md` file under `templates/reference/canon/` and copy each into the project at the matching relative path. Preserve the subdirectory structure (the `_template.md` files in `characters/`, `locations/`, and `motifs/` document how to add new canon files and are skipped by the canon validator).
+Use the **Glob tool** to find every `.md` file under `templates/reference/canon/` and copy each into the project at the matching relative path. Preserve the subdirectory structure. The `_template.md` files document how authors add new character/location/motif canon; copy them verbatim.
 
 ## Step 5: Create the Scene CSV Files
 

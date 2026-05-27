@@ -13,8 +13,8 @@ named after the location's slug:
 
     cp _template.md archive-studio.md
 
-The filename must match `canon_id`, and the slug must exist as an `id`
-row in `reference/locations.csv`.
+The filename must match `canon_id`, and the location must exist as an
+`id` row in `reference/locations.csv`.
 
 Delete this comment from your copy.
 -->

@@ -1,17 +1,10 @@
 """Canon file parsing and validation for graphic-novel projects.
 
 Canon files live under `reference/canon/` and document the canonical
-visual blocks that get embedded inline into per-panel prompts. Each file
-has YAML frontmatter (canon_id, canon_type, etc.) and four required H2
-body sections: Embeddable block, Clauses, Related canon, Iteration
-history. See issue #254 for the full spec.
-
-This is the deterministic foundation. The following remain deferred
-until per-page files (#251) land:
-
-- Drift detection between canonical source and inline copies in pages/
-- Hone canon-id normalization against registries
-- script-package bundling of canon into the artist handoff
+visual blocks that get embedded inline into per-panel prompts. Each
+file has YAML frontmatter (canon_id, canon_type, etc.) and four
+required H2 body sections: Embeddable block, Clauses, Related canon,
+Iteration history.
 """
 
 import os
@@ -395,6 +388,7 @@ def _registry_findings(project_dir: str, files: list[str]) -> list[CanonFinding]
         registry_ids = registry_cache[registry_file]
         if registry_ids is None:
             continue
+
         if registry_ids is _REGISTRY_MALFORMED:
             if registry_file not in malformed_reported:
                 malformed_reported.add(registry_file)

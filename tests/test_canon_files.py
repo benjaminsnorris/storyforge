@@ -1,11 +1,5 @@
-"""Tests for canon file parsing and validation (issue #254).
-
-Canon files under `reference/canon/` are the source-of-truth for visual
-blocks that embed inline into per-panel prompts. These tests cover the
-deterministic foundation: parsing, structural validation, and registry
-cross-references. Drift detection between canonical source and inline
-copies is deferred until per-page files (#251) land.
-"""
+"""Tests for canon.py — parsing, structural validation, registry
+cross-references."""
 
 import os
 import textwrap

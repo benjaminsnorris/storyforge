@@ -13,10 +13,8 @@ place — copy it to a sibling file named after the character's slug:
 
     cp _template.md lucien-vey.md
 
-The filename must match `canon_id`. The canon validator (run by
-`storyforge cleanup --csv`) cross-references this slug against the
-`id` column of `reference/characters.csv`, so make sure the character
-exists in the registry first.
+The filename must match `canon_id`, and the character must exist as
+an `id` row in `reference/characters.csv`.
 
 Delete this comment from your copy.
 -->

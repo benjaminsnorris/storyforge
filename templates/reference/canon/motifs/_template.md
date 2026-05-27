@@ -13,8 +13,8 @@ named after the motif's slug:
 
     cp _template.md candle.md
 
-The filename must match `canon_id`, and the slug must exist as an `id`
-row in `reference/motif-taxonomy.csv`.
+The filename must match `canon_id`, and the motif must exist as an
+`id` row in `reference/motif-taxonomy.csv`.
 
 Motifs are concrete recurring visual vehicles (rear-wall portrait,
 candle, hand-gesture rhyme), distinct from themes (which are abstract

@@ -7,9 +7,9 @@ the map.
 The architecture is **canonical-source-with-inline-propagation**: each
 visual block lives in exactly one canon file, and per-page panel prompts
 embed verbatim copies of the blocks they need. The canon files are
-ground truth; the inline copies are working artifacts.
-
-See issue #254 for the architectural rationale.
+ground truth; the inline copies are working artifacts. Changing a canon
+block means re-propagating its embedded copies to every page that uses
+it.
 
 ## Canon files
 
