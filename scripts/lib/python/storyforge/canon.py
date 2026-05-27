@@ -19,8 +19,8 @@ find programmatically:
     <!-- /canon-embed -->
 
 `find_canon_embeds()` extracts these blocks; `check_canon_drift()`
-walks every page file under `pages/` and compares each embed to its
-source canon's `## Embeddable block` section.
+validates them against their source canon files (see its docstring
+for the emitted finding types).
 """
 
 import enum
@@ -648,18 +648,33 @@ def _registry_findings(project_dir: str, files: list[str]) -> list[CanonFinding]
     return findings
 
 
+# Sentinel key used in the canon-path index to record that the directory
+# has already been walked. Prevents re-walks on subsequent orphan lookups
+# (which would otherwise re-iterate the entire canon tree once per
+# unresolvable embed).
+_INDEX_WALKED_SENTINEL = '__walked__'
+
+
 def _resolve_canon_path(project_dir: str, canon_id: str,
                         index: dict[str, str]) -> str | None:
     """Return the absolute path of a canon file by canon_id. Builds the
-    index lazily — caller maintains a single dict across one drift run."""
+    index lazily — caller maintains a single dict across one drift run.
+
+    The full canon-dir walk runs at most once per drift run; subsequent
+    lookups for unresolvable canon_ids return None from the populated
+    index rather than re-walking.
+    """
     if canon_id in index:
         return index[canon_id]
+    if _INDEX_WALKED_SENTINEL in index:
+        return None  # already walked; canon_id is genuinely orphan
     canon_dir = os.path.join(project_dir, CANON_DIR)
     if not os.path.isdir(canon_dir):
         return None
     for path in _walk_canon_files(canon_dir):
         slug = os.path.splitext(os.path.basename(path))[0]
         index[slug] = path
+    index[_INDEX_WALKED_SENTINEL] = ''
     return index.get(canon_id)
 
 

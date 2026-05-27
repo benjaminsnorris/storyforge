@@ -28,4 +28,4 @@ unlit except after dark.
 
 ## Iteration history
 
-- 2026-05-27 — initial location canon for fixture.
+- 2026-05-27 — initial location canon.

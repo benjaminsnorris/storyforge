@@ -16,7 +16,7 @@ import shutil
 import sys
 from datetime import datetime
 
-from storyforge.common import detect_project_root, get_medium, log
+from storyforge.common import detect_project_root, get_medium, get_plugin_dir, log
 from storyforge.git import commit_and_push, ensure_on_branch
 
 
@@ -448,10 +448,6 @@ def step8b_scaffold_canon_tree(
 
     Returns list of project-relative paths that were created.
     """
-    import shutil
-
-    from storyforge.common import get_plugin_dir
-
     created: list[str] = []
     plugin_dir = get_plugin_dir()
     src_canon = os.path.join(plugin_dir, 'templates', 'reference', 'canon')
@@ -461,18 +457,26 @@ def step8b_scaffold_canon_tree(
     dst_canon = os.path.join(project_dir, 'reference', 'canon')
     dst_visual = os.path.join(project_dir, 'reference', 'visual-style.md')
 
-    if not os.path.isdir(dst_canon) and os.path.isdir(src_canon):
-        if not dry_run:
-            shutil.copytree(src_canon, dst_canon)
-        created.append('reference/canon/')
-        log('  reference/canon/: scaffolded from templates')
+    if not os.path.isdir(dst_canon):
+        if os.path.isdir(src_canon):
+            if not dry_run:
+                shutil.copytree(src_canon, dst_canon)
+            created.append('reference/canon/')
+            log('  reference/canon/: scaffolded from templates')
+        else:
+            log(f'  WARNING: plugin templates not found at {src_canon}; '
+                'canon tree not scaffolded — manual setup required')
 
-    if not os.path.isfile(dst_visual) and os.path.isfile(src_visual):
-        if not dry_run:
-            os.makedirs(os.path.dirname(dst_visual), exist_ok=True)
-            shutil.copy2(src_visual, dst_visual)
-        created.append('reference/visual-style.md')
-        log('  reference/visual-style.md: scaffolded from template')
+    if not os.path.isfile(dst_visual):
+        if os.path.isfile(src_visual):
+            if not dry_run:
+                os.makedirs(os.path.dirname(dst_visual), exist_ok=True)
+                shutil.copy2(src_visual, dst_visual)
+            created.append('reference/visual-style.md')
+            log('  reference/visual-style.md: scaffolded from template')
+        else:
+            log(f'  WARNING: plugin template not found at {src_visual}; '
+                'visual-style.md not scaffolded — manual setup required')
 
     return created
 

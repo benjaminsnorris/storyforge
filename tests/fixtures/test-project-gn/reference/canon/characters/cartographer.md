@@ -29,4 +29,4 @@ something.
 
 ## Iteration history
 
-- 2026-05-27 — initial character canon for fixture.
+- 2026-05-27 — initial character canon.

@@ -77,31 +77,31 @@ prompts.
    <!-- /canon-embed -->
    ```
 
-   The markers are inert in DALL-E/GPT inputs but allow
-   `storyforge cleanup` to detect drift between the embedded copy and
-   the canon source.
+   The markers are inert in chat-style image-generation inputs but
+   allow `storyforge cleanup` to detect drift between the embedded copy
+   and the canon source.
 4. Add panel-specific action, blocking, and dialogue around each
    embedded block.
 
-## ChatGPT projects upload pattern
+## Upload pattern for LLM image workflows
 
-If you generate panels with ChatGPT + DALL-E, the canon tree fits the
-two upload surfaces cleanly:
+If you generate panels with an LLM image workflow that has a long-lived
+project context (ChatGPT projects, Claude projects, etc.), the canon
+tree fits the two upload surfaces cleanly:
 
 - **Project context (long-lived):** upload every `canon/**.md` file
-  into the ChatGPT project. The model gets architectural awareness of
-  the style foundation, lighting laws, panel registers, page rhythm,
-  and every character/location/motif before any specific page is
+  into the project. The model gets architectural awareness of the
+  style foundation, lighting laws, panel registers, page rhythm, and
+  every character/location/motif before any specific page is
   discussed.
 - **Per-conversation (one page at a time):** upload the relevant page
   file from `pages/`. Because the canon blocks are embedded inline
-  (via the canon-embed markers), the page file is self-contained for
-  DALL-E — the model doesn't need to resolve references.
+  (via the canon-embed markers), the page file is self-contained —
+  your image model doesn't need to resolve references.
 
 When a canon block changes, re-upload the affected canon file to the
 project context and re-embed the block into every page file that
-cites it. `storyforge cleanup` flags the second step as `canon_drift`
-findings.
+cites it. `storyforge cleanup` surfaces stale embeds as drift findings.
 
 ## Validating canon
 

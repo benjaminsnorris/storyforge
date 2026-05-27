@@ -28,4 +28,4 @@ readability prioritized at page scale.
 
 ## Iteration history
 
-- 2026-05-27 — initial draft of style foundation for fixture.
+- 2026-05-27 — initial draft of style foundation.

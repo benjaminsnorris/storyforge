@@ -27,4 +27,4 @@ never tinted, never shadowed. Slightly curled at one corner.
 
 ## Iteration history
 
-- 2026-05-27 — initial motif canon for fixture.
+- 2026-05-27 — initial motif canon.
