@@ -5911,7 +5911,7 @@ def test_per_row_tier_max_tokens_constant_above_8k():
     issue #245 (15-scene architecture + 43-scene scene-map both
     truncated mid-JSON at 8192 output tokens)."""
     from storyforge.scoring_story_power import (
-        _PER_ROW_TIER_MAX_TOKENS, _BOUNDED_TIER_MAX_TOKENS,
+        _PER_ROW_TIER_MAX_TOKENS, _FIXED_PAYLOAD_TIER_MAX_TOKENS,
         _PITCH_MAX_TOKENS,
     )
     assert _PER_ROW_TIER_MAX_TOKENS >= 16384, (
@@ -5920,7 +5920,7 @@ def test_per_row_tier_max_tokens_constant_above_8k():
     )
     # Bounded tiers (act-shape, spine) and pitch retain their lower
     # ceilings — their payloads don't scale with project size.
-    assert _BOUNDED_TIER_MAX_TOKENS == 8192
+    assert _FIXED_PAYLOAD_TIER_MAX_TOKENS == 8192
     assert _PITCH_MAX_TOKENS == 4096
 
 
@@ -6207,5 +6207,133 @@ def test_unparseable_without_truncation_omits_hint(tmp_path, monkeypatch,
     out = capsys.readouterr().out
     assert 'architecture LLM response unparseable' in out
     assert 'truncated mid-JSON' not in out
+
+
+def test_read_stop_reason_handles_non_dict_top_level(tmp_path):
+    """A JSON log whose top level is a list / string / number must not
+    crash _read_stop_reason — the .get call on a non-dict would
+    propagate AttributeError out of the diagnostic helper and
+    suppress the original unparseable-error message. (PR #247 review
+    SF-HIGH-1.)"""
+    from storyforge.scoring_story_power import _read_stop_reason
+    log_file = str(tmp_path / 'resp.json')
+    # Top-level list — has happened on partial writes where only the
+    # `content` array was flushed.
+    with open(log_file, 'w') as f:
+        json.dump(['partial', 'list'], f)
+    assert _read_stop_reason(log_file) == ''
+
+
+def test_read_stop_reason_handles_non_string_stop_reason(tmp_path):
+    """A response with a non-string stop_reason value (would not match
+    the API contract, but defensive against schema drift) returns ''
+    rather than crashing the comparison downstream."""
+    from storyforge.scoring_story_power import _read_stop_reason
+    log_file = str(tmp_path / 'resp.json')
+    with open(log_file, 'w') as f:
+        json.dump({'stop_reason': {'unexpected': 'shape'}}, f)
+    assert _read_stop_reason(log_file) == ''
+
+
+def test_read_stop_reason_logs_warning_on_oserror(tmp_path, capsys):
+    """OSError (file should exist but unreadable, or a missing
+    directory leading to FileNotFoundError) logs a WARNING so the
+    diagnostic itself doesn't fail silently. Mirrors
+    _read_response_text's behavior. (PR #247 review SF-MED-2.)"""
+    from storyforge.scoring_story_power import _read_stop_reason
+    # Nested non-existent directory raises FileNotFoundError, an
+    # OSError subclass.
+    _read_stop_reason(str(tmp_path / 'sub' / 'missing.json'))
+    out = capsys.readouterr().out
+    assert 'could not read story-power log' in out
+
+
+def test_read_stop_reason_decode_error_stays_quiet(tmp_path, capsys):
+    """A JSONDecodeError is expected on partial writes (file exists,
+    content incomplete) and stays quiet — that's the normal case
+    for a truncated invoke_to_file, not a diagnostic failure."""
+    from storyforge.scoring_story_power import _read_stop_reason
+    log_file = str(tmp_path / 'partial.json')
+    with open(log_file, 'w') as f:
+        f.write('{"partial":')  # incomplete
+    assert _read_stop_reason(log_file) == ''
+    out = capsys.readouterr().out
+    # The OSError WARNING must NOT fire on a parse failure.
+    assert 'could not read story-power log' not in out
+
+
+def test_read_stop_reason_logs_info_on_unrecognized_value(tmp_path, capsys):
+    """An unrecognized stop_reason value (Anthropic API schema drift)
+    logs an INFO so the codebase doesn't silently lose truncation
+    detection on a future API change. (PR #247 review SF-HIGH-2.)"""
+    from storyforge.scoring_story_power import _read_stop_reason
+    log_file = str(tmp_path / 'resp.json')
+    with open(log_file, 'w') as f:
+        json.dump({'stop_reason': 'budget_exhausted'}, f)
+    result = _read_stop_reason(log_file)
+    # The helper still returns the raw value so a downstream consumer
+    # can decide what to do; the INFO is a breadcrumb, not a block.
+    assert result == 'budget_exhausted'
+    out = capsys.readouterr().out
+    assert 'unrecognized stop_reason' in out
+    assert 'budget_exhausted' in out
+    assert 'KNOWN_STOP_REASONS' in out
+
+
+def test_read_stop_reason_known_values_stay_quiet(tmp_path, capsys):
+    """The documented stop_reason values do NOT log INFO — the
+    drift-detection breadcrumb should fire only on schema surprise."""
+    from storyforge.scoring_story_power import (
+        _read_stop_reason, KNOWN_STOP_REASONS,
+    )
+    log_file = str(tmp_path / 'resp.json')
+    for known in KNOWN_STOP_REASONS:
+        if not known:
+            continue  # '' sentinel covered by missing-field test
+        with open(log_file, 'w') as f:
+            json.dump({'stop_reason': known}, f)
+        _read_stop_reason(log_file)
+    out = capsys.readouterr().out
+    assert 'unrecognized stop_reason' not in out
+
+
+def test_max_tokens_constants_are_monotone():
+    """The module-load assert pins _PITCH <= _FIXED_PAYLOAD <=
+    _PER_ROW. This regression test exercises the actual values so a
+    future edit can't accidentally invert the ordering and rely on
+    the import-time assert never running. (PR #247 review TD-HIGH-1.)"""
+    from storyforge.scoring_story_power import (
+        _PITCH_MAX_TOKENS, _FIXED_PAYLOAD_TIER_MAX_TOKENS,
+        _PER_ROW_TIER_MAX_TOKENS,
+    )
+    assert _PITCH_MAX_TOKENS <= _FIXED_PAYLOAD_TIER_MAX_TOKENS
+    assert _FIXED_PAYLOAD_TIER_MAX_TOKENS <= _PER_ROW_TIER_MAX_TOKENS
+
+
+def test_known_stop_reasons_includes_max_tokens():
+    """KNOWN_STOP_REASONS must include 'max_tokens', otherwise the
+    drift-detection INFO would fire on every truncation and the
+    truncation hint would silently disable itself."""
+    from storyforge.scoring_story_power import KNOWN_STOP_REASONS
+    assert 'max_tokens' in KNOWN_STOP_REASONS
+    # The other documented values per Anthropic API docs.
+    assert 'end_turn' in KNOWN_STOP_REASONS
+    assert 'stop_sequence' in KNOWN_STOP_REASONS
+    assert 'tool_use' in KNOWN_STOP_REASONS
+
+
+def test_truncation_hint_uses_hedged_wording(tmp_path):
+    """The hint says 'likely truncated', not 'was truncated' —
+    stop_reason=max_tokens guarantees the LLM stopped at the budget
+    but doesn't *prove* the JSON was truncated mid-token. The hedge
+    prevents a future 'you said truncated but the JSON was complete'
+    confusion. (PR #247 review SF-MED-1.)"""
+    from storyforge.scoring_story_power import _truncation_hint
+    log_file = str(tmp_path / 'resp.json')
+    with open(log_file, 'w') as f:
+        json.dump({'stop_reason': 'max_tokens'}, f)
+    hint = _truncation_hint(log_file, 32768)
+    assert 'likely truncated' in hint
+    assert 'was truncated' not in hint
 
 
