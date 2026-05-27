@@ -25,6 +25,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from typing import TypedDict
 
 from storyforge.api import (
     invoke_to_file, calculate_cost_from_usage, extract_usage,
@@ -108,6 +109,11 @@ def main(argv=None):
 # --from-pages: deterministic metadata sync
 # ---------------------------------------------------------------------------
 
+class _SceneCounts(TypedDict):
+    panels: int
+    pages: int
+
+
 def _run_from_pages(project_dir: str, dry_run: bool) -> None:
     """Sum panel_count + page_count per scene from page files and write
     those columns back to scenes.csv. Deterministic — no LLM call.
@@ -145,7 +151,7 @@ def _run_from_pages(project_dir: str, dry_run: bool) -> None:
             f'the GN-mode columns before --from-pages.')
         sys.exit(1)
 
-    by_scene: dict[str, dict[str, int]] = {}
+    by_scene: dict[str, _SceneCounts] = {}
     pages_missing_panel_count: dict[str, list[str]] = {}
     for p in page_paths:
         page = parse_page_file(p)

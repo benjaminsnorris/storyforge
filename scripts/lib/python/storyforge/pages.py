@@ -11,7 +11,7 @@ extract, script-package, and cleanup.
 
 import os
 import re
-from typing import Final, TypedDict
+from typing import Final, Literal, TypedDict
 
 
 # Frontmatter: open with `---\n`, capture everything (possibly empty) up to
@@ -35,9 +35,18 @@ _INTEGER_FIELDS: Final[set[str]] = {
 _LIST_FIELDS: Final[set[str]] = {'characters_present'}
 
 
-class PageFile(TypedDict, total=False):
+# A successful parse always populates path/body/extra/extra_lists; the
+# frontmatter fields are optional because validation, not parsing,
+# enforces required-ness. Required+Optional split per the codebase
+# convention (see script_format.py::LayoutAntiPattern).
+class _PageFileRequired(TypedDict):
     path: str
     body: str
+    extra: dict[str, str]
+    extra_lists: dict[str, list[str]]
+
+
+class PageFile(_PageFileRequired, total=False):
     page_id: str
     scene_id: str
     page_within_scene: int
@@ -47,8 +56,6 @@ class PageFile(TypedDict, total=False):
     characters_present: list[str]
     location: str
     timeline: str
-    extra: dict[str, str]
-    extra_lists: dict[str, list[str]]
 
 
 def page_id_prefix_for_scene(scene_id: str) -> str:
@@ -225,11 +232,28 @@ def pages_for_scene(project_dir: str, scene_id: str) -> list[PageFile]:
     return matched
 
 
-class PageFinding(TypedDict, total=False):
-    kind: str
+# Closed set of validation finding kinds. Using a Literal+Required split
+# (see script_format.py::LayoutAntiPatternKind for the pattern) so a
+# `kind` typo in cmd_cleanup.py's elif chain is caught statically rather
+# than silently dropping the finding.
+PageFindingKind = Literal[
+    'missing_file',
+    'no_frontmatter',
+    'missing_field',
+    'bad_integer_field',
+    'filename_page_id_mismatch',
+    'page_within_scene_out_of_range',
+]
+
+
+class _PageFindingRequired(TypedDict):
+    kind: PageFindingKind
     path: str
-    field: str
-    detail: str
+
+
+class PageFinding(_PageFindingRequired, total=False):
+    field: str   # set for missing_field and bad_integer_field
+    detail: str  # set on all kinds except missing_file / no_frontmatter
 
 
 def validate_page_file(path: str) -> list[PageFinding]:

@@ -1030,7 +1030,16 @@ def _check_page_files(project_dir: str) -> list[dict]:
         for issue in validate_page_file(page_path):
             rel_path = os.path.relpath(page_path, project_dir)
             kind = issue['kind']
-            if kind == 'no_frontmatter':
+            if kind == 'missing_file':
+                # Defensive: list_page_files only returns existing files,
+                # so this is a TOCTOU race (file deleted mid-scan).
+                findings.append({
+                    'type': 'page_missing_file', 'file': rel_path,
+                    'detail': f'{rel_path} disappeared during validation',
+                    'action': 'Re-run cleanup',
+                    'severity': 'warning',
+                })
+            elif kind == 'no_frontmatter':
                 findings.append({
                     'type': 'page_no_frontmatter', 'file': rel_path,
                     'detail': f'{rel_path} has no YAML frontmatter',
@@ -1047,6 +1056,15 @@ def _check_page_files(project_dir: str) -> list[dict]:
                     'action': f'Add `{issue["field"]}: ...` to the frontmatter',
                     'severity': 'warning',
                 })
+            elif kind == 'bad_integer_field':
+                findings.append({
+                    'type': 'page_bad_integer_field', 'file': rel_path,
+                    'detail': f'{rel_path} field {issue["field"]!r} is '
+                              f'not an integer',
+                    'action': f'Replace the {issue["field"]} value with '
+                              f'an integer',
+                    'severity': 'warning',
+                })
             elif kind == 'filename_page_id_mismatch':
                 findings.append({
                     'type': 'page_filename_mismatch', 'file': rel_path,
@@ -1061,6 +1079,17 @@ def _check_page_files(project_dir: str) -> list[dict]:
                     'detail': issue['detail'],
                     'action': 'Correct page_within_scene or '
                               'total_pages_in_scene to be consistent',
+                    'severity': 'warning',
+                })
+            else:
+                # Catches future PageFindingKind values that nobody wires
+                # up here — silent drop would re-introduce SF-6.
+                findings.append({
+                    'type': 'page_unknown_finding', 'file': rel_path,
+                    'detail': f'{rel_path}: unhandled validator kind '
+                              f'{kind!r} ({issue.get("detail", "")})',
+                    'action': 'File a bug — cmd_cleanup needs a branch '
+                              'for this PageFindingKind',
                     'severity': 'warning',
                 })
     return findings
