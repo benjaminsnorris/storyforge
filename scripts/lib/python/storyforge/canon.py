@@ -48,6 +48,7 @@ CanonFindingKind = Literal[
     'canon_unknown_subdir',
     'canon_unexpected_nesting',
     'canon_missing_section',
+    'canon_unfilled_template',
     'canon_registry_unreadable',
     'canon_missing_registry_entry',
     'canon_embed_orphan',
@@ -244,6 +245,34 @@ _EMBEDDABLE_BLOCK_RE = re.compile(
     r'^##\s+Embeddable block\s*\n(.*?)(?=^##\s|\Z)',
     re.MULTILINE | re.DOTALL,
 )
+
+_SECTION_BODY_RE = re.compile(
+    r'^##\s+(.+?)\s*\n(.*?)(?=^##\s|\Z)',
+    re.MULTILINE | re.DOTALL,
+)
+
+# Lines that mark a section as unfilled scaffolding. Stripped of leading
+# `<!--` HTML-comment fragments and surrounding whitespace, a section
+# body that starts with one of these strings is considered placeholder.
+_PLACEHOLDER_PREFIXES = ('TODO', 'TODO —', 'TODO -', 'TODO.', 'TODO:')
+
+
+def _section_body_is_placeholder(body: str) -> bool:
+    """Return True if the section body looks like an unfilled template.
+
+    Strips leading HTML comments (the starter templates wrap orienting
+    comments in `<!-- ... -->`) and checks whether the first non-blank
+    line begins with a TODO marker. False positives are unlikely:
+    authors using TODO as an inline note typically place it mid-text,
+    not as the first content line of a required section.
+    """
+    text = re.sub(r'^\s*<!--.*?-->\s*', '', body, flags=re.DOTALL)
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        return any(stripped.startswith(p) for p in _PLACEHOLDER_PREFIXES)
+    return False
 
 
 def _embeddable_block_text(canon_path: str) -> str | None:
@@ -511,6 +540,26 @@ def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
                 f'Add a `## {section}` section to the body',
                 'canon_missing_section',
             ))
+
+    # Unfilled-template check: scan section bodies for TODO placeholders
+    # left over from the shipped starter templates. Surfaces as a single
+    # finding per canon file (not per section) to keep the report
+    # actionable — author opens the file and fills in the placeholders.
+    placeholder_sections: list[str] = []
+    for match in _SECTION_BODY_RE.finditer(parsed['body']):
+        section_name = match.group(1).strip()
+        body = match.group(2)
+        if _section_body_is_placeholder(body):
+            placeholder_sections.append(section_name)
+    if placeholder_sections:
+        sections_str = ', '.join(placeholder_sections)
+        findings.append(_finding(
+            rel,
+            f'canon file has unfilled TODO placeholders in: {sections_str}',
+            'Replace the TODO scaffolding with the actual canonical text',
+            'canon_unfilled_template',
+            severity='info',
+        ))
 
     return findings
 

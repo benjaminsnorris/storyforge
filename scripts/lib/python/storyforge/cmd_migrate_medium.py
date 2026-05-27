@@ -440,16 +440,11 @@ def step8b_scaffold_canon_tree(
 ) -> list[str]:
     """Copy templates/reference/canon/ and visual-style.md into the project.
 
-    Authors converting from novel to graphic-novel need the canon
-    architecture from issue #254 to start authoring visual blocks. This
-    step copies the shipped starter templates so the migration leaves the
-    project ready for `storyforge cleanup --csv` to validate canon work
-    as it gets filled in.
-
     Idempotent: if reference/canon/ already exists, no files are copied
     or overwritten — the author may have started canon work between
-    migration runs and we don't want to clobber it. The visual-style.md
-    is copied only when it's absent for the same reason.
+    migration runs and we should leave it alone. Same rule for
+    visual-style.md, which authors often hand-edit with cross-references
+    and project-wide iteration notes.
 
     Returns list of project-relative paths that were created.
     """

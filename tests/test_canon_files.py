@@ -472,6 +472,57 @@ def test_build_cleanup_report_round_trips_canon_findings(tmp_path):
         )
 
 
+def test_validate_unfilled_template_flagged(tmp_path):
+    """CR2-6 / SF2-10: canon files that still have TODO placeholders in
+    section bodies surface a canon_unfilled_template info finding so the
+    forge skill can recommend filling them. One finding per file (not
+    per section) keeps the report actionable."""
+    project = str(tmp_path)
+    body_with_todos = textwrap.dedent("""\
+
+        ## Embeddable block
+
+        TODO — fill this in.
+
+        ## Clauses
+
+        TODO — one bullet per clause.
+
+        ## Related canon
+
+        - [[other]]
+
+        ## Iteration history
+
+        TODO — record changes here.
+    """)
+    write_canon(project, 'style-foundation.md', 'style-foundation',
+                body=body_with_todos)
+    findings = validate_canon_file(
+        os.path.join(project, CANON_DIR, 'style-foundation.md'), project,
+    )
+    unfilled = [f for f in findings if f['type'] == 'canon_unfilled_template']
+    assert len(unfilled) == 1
+    assert unfilled[0]['severity'] == 'info'
+    # Three sections have TODOs (Related canon has real content).
+    assert 'Embeddable block' in unfilled[0]['detail']
+    assert 'Clauses' in unfilled[0]['detail']
+    assert 'Iteration history' in unfilled[0]['detail']
+    assert 'Related canon' not in unfilled[0]['detail']
+
+
+def test_validate_filled_canon_no_unfilled_finding(tmp_path):
+    """A canon file with real content in every section must not register
+    as unfilled — the placeholder check looks only at the first non-blank
+    line of each section body."""
+    project = str(tmp_path)
+    write_canon(project, 'style-foundation.md', 'style-foundation')
+    findings = validate_canon_file(
+        os.path.join(project, CANON_DIR, 'style-foundation.md'), project,
+    )
+    assert [f for f in findings if f['type'] == 'canon_unfilled_template'] == []
+
+
 def test_validate_directory_skips_template_files(tmp_path):
     project = str(tmp_path)
     canon_dir = os.path.join(project, CANON_DIR, 'characters')
@@ -940,17 +991,26 @@ def test_gn_fixture_canon_tree_is_clean(fixture_dir_gn):
     assert findings == [], f'GN fixture canon has findings: {findings}'
 
 
-def test_shipped_templates_pass_validation(plugin_dir, tmp_path):
-    """The starter canon files in templates/reference/canon/ are author-facing
-    scaffolding; they should pass structural validation as-is (the TODO
-    markers live in body sections, not in fields the validator inspects)."""
+def test_shipped_templates_pass_structural_validation(plugin_dir, tmp_path):
+    """The starter canon files in templates/reference/canon/ are author-
+    facing scaffolding. Structurally they must be valid (no missing
+    sections, no frontmatter errors), but they DO carry TODO placeholders
+    which surface as info-severity canon_unfilled_template findings —
+    that's intentional, the forge skill consumes those findings to
+    recommend filling them in. Assert no error/warning findings; info
+    is allowed and expected on shipped templates."""
     import shutil
     src = os.path.join(plugin_dir, 'templates', 'reference', 'canon')
     project = str(tmp_path)
     dst = os.path.join(project, 'reference', 'canon')
     shutil.copytree(src, dst)
     findings = validate_canon_directory(project)
-    # SF-7: assert directly on the empty list rather than filtering by
-    # severity; the filter would silently widen if info-level findings
-    # were added in future.
-    assert findings == [], f'shipped templates failed validation: {findings}'
+    blocking = [f for f in findings if f['severity'] != 'info']
+    assert blocking == [], f'shipped templates have blocking findings: {blocking}'
+    # And: every root file SHOULD have an unfilled-template info finding,
+    # because every shipped template has TODO placeholders.
+    unfilled = [f for f in findings if f['type'] == 'canon_unfilled_template']
+    assert len(unfilled) == 4, (
+        f'expected 4 unfilled-template findings (one per shipped root '
+        f'canon), got {len(unfilled)}: {unfilled}'
+    )

@@ -415,8 +415,8 @@ When orienting yourself in a GN project, check whether `pages/` exists:
 Check whether `reference/canon/` exists in the project. The canon tree is the source-of-truth for visual blocks (Style Foundation, Lighting Laws, Panel Registers, Page Rhythm, plus one file per character/location/motif) that get embedded inline into per-panel prompts.
 
 - **If `reference/canon/` is absent:** recommend scaffolding it before serious panel-prompt work begins. Authors who skip canon end up with drift across panels (one scene's "Lucien" doesn't match the next). The starter templates live at `templates/reference/canon/` in the plugin; the cleanest path is to copy them in.
-- **If `reference/canon/` exists but the four root files (`style-foundation.md`, `lighting-laws.md`, `panel-registers.md`, `page-rhythm-rules.md`) still contain `TODO` placeholders:** suggest filling them before drafting panel scripts. The root canon embeds into every panel; placeholders mean every panel ships with the same hole.
-- **If `pages/` has page files that reference canon (look for `<!-- canon-embed: ... -->` markers) and `storyforge cleanup --csv` reports `canon_drift` or `canon_embed_orphan` findings:** the author needs to re-embed the affected blocks. Drift means a canon block changed but its inline copies are stale.
+- **If `reference/canon/` exists but `storyforge cleanup --csv` reports unfilled-template findings on the four root files (`style-foundation.md`, `lighting-laws.md`, `panel-registers.md`, `page-rhythm-rules.md`):** suggest filling them before drafting panel scripts. The root canon embeds into every panel; placeholders mean every panel ships with the same hole.
+- **If `pages/` has page files that reference canon (look for `<!-- canon-embed: ... -->` markers) and `storyforge cleanup --csv` reports canon drift or embed findings:** the author needs to re-embed the affected blocks. Drift means a canon block changed but its inline copies are stale; the cleanup report's "Canon Files" section names the specific page and source canon to look at.
 
 The canon-embed convention is documented in `reference/visual-style.md` (also scaffolded when the canon tree is set up).
 
