@@ -6327,3 +6327,446 @@ def _count_present_tiers(result: StoryPowerResult) -> int:
         if result.get(tier_key) is not None:  # type: ignore[misc]
             count += 1
     return count
+
+
+def _empty_cross_tier_extension(
+        status: StoryPowerStatus,
+        det_patterns: list[CrossTierPattern] | None = None,
+        ) -> CrossTierExtension:
+    """Placeholder CrossTierExtension for an LLM failure or partial
+    result. Carries the deterministic patterns (which always run
+    successfully) so the author still gets the pre-pass signal even
+    when the LLM call failed."""
+    return {
+        'deterministic_patterns': list(det_patterns or []),
+        'proposals': [],
+        'cross_tier_diagnostic': {},
+        'status': status,
+    }
+
+
+def _summarize_tier_for_prompt(result: StoryPowerResult) -> str:
+    """Build a compact tier-by-tier summary for the LLM prompt.
+
+    Each tier present in the result contributes one block: its
+    composite (or representative strength), lowest_axis (when
+    present), and the diagnostic narrative. Pitch's structure is
+    different (composite at top level + diagnostic at top level);
+    extensions all have a *_diagnostic field inside their payload.
+    """
+    blocks: list[str] = []
+    # Pitch
+    pitch_composite = result.get('composite')
+    if isinstance(pitch_composite, (int, float)) and pitch_composite > 0:
+        diag = result.get('diagnostic') or {}
+        scores = result.get('scores') or {}
+        lowest = ''
+        if scores:
+            try:
+                lowest = min(scores.items(), key=lambda kv: kv[1])[0]
+            except (TypeError, ValueError):
+                lowest = ''
+        blocks.append('\n'.join([
+            f'### Pitch (composite={pitch_composite})',
+            (f'- lowest scoring axis: {lowest}' if lowest else ''),
+            (f'- cross-axis root cause: {diag.get("cross_axis_root_cause", "")}'
+             if isinstance(diag, dict) and diag.get('cross_axis_root_cause') else ''),
+            (f'- high-leverage move: {diag.get("high_leverage_move", "")}'
+             if isinstance(diag, dict) and diag.get('high_leverage_move') else ''),
+        ]).strip())
+
+    tier_specs = (
+        ('act_shape', 'Act-shape', 'structural_axis_scores', 'structural_diagnostic'),
+        ('spine', 'Spine', 'whole_spine_scores', 'spine_diagnostic'),
+        ('architecture', 'Architecture', 'whole_architecture_scores',
+         'architecture_diagnostic'),
+        ('scene_map', 'Scene-map', 'whole_scene_map_scores', 'scene_map_diagnostic'),
+        ('briefs', 'Briefs', 'whole_briefs_scores', 'briefs_diagnostic'),
+    )
+    for tier_key, label, scores_key, diag_key in tier_specs:
+        ext = result.get(tier_key)  # type: ignore[misc]
+        if not ext:
+            continue
+        strength = _tier_composite_average(ext.get(scores_key))
+        diag = ext.get(diag_key) or {}
+        lines = [f'### {label}'
+                 + (f' (axis avg={strength:.1f})' if strength is not None else '')]
+        if isinstance(diag, dict):
+            for label_text, diag_field in (
+                ('lowest axis', 'lowest_axis'),
+                ('summary', 'summary'),
+                ('high-leverage move', 'high_leverage_move'),
+            ):
+                val = diag.get(diag_field)
+                if val:
+                    lines.append(f'- {label_text}: {val}')
+        blocks.append('\n'.join(lines))
+    if not blocks:
+        return '(no tier output available)'
+    return '\n\n'.join(blocks)
+
+
+def _build_cross_tier_prompt(result: StoryPowerResult,
+                                det_patterns: list[CrossTierPattern],
+                                rubric: str) -> str:
+    """Assemble the cross-tier synthesis LLM prompt."""
+    tier_block = _summarize_tier_for_prompt(result)
+    if det_patterns:
+        det_block = '\n'.join(
+            f'- {p["pattern"]} [{p["severity"]}]: {p["description"]}'
+            for p in det_patterns
+        )
+    else:
+        det_block = (
+            '(no deterministic patterns fired — synthesis is LLM-only; '
+            'feel free to return an empty proposals list if no '
+            'cross-tier signal exists)'
+        )
+
+    return f"""You are synthesizing the cross-tier meta-diagnostic for a
+story-power scorecard. The six individual tiers (pitch, act-shape,
+spine, architecture, scene-map, briefs) have each produced their own
+diagnostic; your job is to find the patterns those tiers cannot see
+in isolation — defects that surface at multiple resolutions
+because they share a single underlying cause.
+
+You do NOT produce numeric scores. You DO produce:
+
+1. A one-paragraph **synthesis** naming the cross-tier pattern.
+2. A single **high_leverage_move** — the action that lifts the most
+   ground across tiers.
+3. A list of **proposals** with typed targets (`scene:s10`,
+   `spine_event:ev-3`, `tier:architecture`), each with a one-sentence
+   move, expected lift, and which downstream tier proposals it
+   consolidates (so the author knows what to defer).
+
+The deterministic pre-pass already detected the patterns below —
+treat these as ground-truth signal. Your synthesis should explain
+WHY they cohere (or note when they don't) and propose moves at the
+resolution where the root cause lives.
+
+# Rubric
+
+{rubric}
+
+# Tier diagnostics (compact)
+
+{tier_block}
+
+# Deterministic cross-tier patterns (pre-pass)
+
+{det_block}
+
+# Task
+
+Return a JSON object with this exact shape:
+
+{{
+  "cross_tier_diagnostic": {{
+    "synthesis": "one paragraph: what the cross-tier pattern is and what it means",
+    "root_cause": "one sentence: the single underlying defect the tiers are reporting from different angles",
+    "project_disposition": "one sentence: optional — only when ≥4 tiers are weak or the project's overall structural-craft state is the actionable signal",
+    "high_leverage_move": "one sentence: ONE action that would lift the most ground across tiers"
+  }},
+  "proposals": [
+    {{"target": "scene:<id> | spine_event:<id> | tier:<name>",
+      "move": "one sentence: what to do",
+      "rationale": "which axes this lifts and why",
+      "expected_lift": "axis: was → now; axis: was → now",
+      "consolidates_tiers": ["architecture", "briefs"]
+    }}
+  ]
+}}
+
+Be specific and grounded — quote the tier diagnostics. Reserve
+high-leverage moves for cases where lifting one upstream tier
+genuinely supersedes multiple downstream proposals; don't over-
+consolidate.  Return ONLY the JSON object.
+"""
+
+
+def _extract_cross_tier_diagnostic(parsed: dict) -> CrossTierDiagnostic:
+    """Pull the LLM's cross_tier_diagnostic dict (all fields
+    optional)."""
+    raw = parsed.get('cross_tier_diagnostic')
+    if not isinstance(raw, dict):
+        return {}
+    out: CrossTierDiagnostic = {}
+    for key in ('synthesis', 'root_cause', 'project_disposition',
+                'high_leverage_move'):
+        val = raw.get(key)
+        if isinstance(val, str) and val.strip():
+            out[key] = val.strip()  # type: ignore[literal-required]
+    return out
+
+
+def _extract_cross_tier_proposals(parsed: dict) -> list[CrossTierProposal]:
+    """Pull LLM-proposed cross-tier moves. Required fields: target,
+    move. Drops rows missing either."""
+    out: list[CrossTierProposal] = []
+    drops: list[str] = []
+    for row in parsed.get('proposals') or []:
+        if not isinstance(row, dict):
+            drops.append(f'non-dict row: {row!r}')
+            continue
+        target = (row.get('target') or '').strip()
+        move = (row.get('move') or '').strip()
+        if not target or not move:
+            drops.append(f'incomplete row (target={target!r}, move={move!r})')
+            continue
+        proposal: CrossTierProposal = {
+            'target': target,
+            'move': move,
+        }
+        rationale = (row.get('rationale') or '').strip()
+        if rationale:
+            proposal['rationale'] = rationale
+        expected = (row.get('expected_lift') or '').strip()
+        if expected:
+            proposal['expected_lift'] = expected
+        consolidates_raw = row.get('consolidates_tiers')
+        if isinstance(consolidates_raw, list):
+            consolidates = [
+                str(c).strip() for c in consolidates_raw if str(c).strip()
+            ]
+            if consolidates:
+                proposal['consolidates_tiers'] = consolidates
+        out.append(proposal)
+    _log_extraction_drops('cross_tier_proposals', drops)
+    return out
+
+
+def _parse_response_cross_tier(text: str) -> dict | None:
+    """Tolerant parse for the cross-tier LLM response. Required
+    top-level fields: cross_tier_diagnostic (dict) or proposals
+    (list) — at least one must be present, since either can carry
+    actionable output on its own."""
+    missing_fields: list[str] = []
+
+    def _take(obj):
+        if not isinstance(obj, dict):
+            return None
+        diag = obj.get('cross_tier_diagnostic')
+        proposals = obj.get('proposals')
+        diag_ok = isinstance(diag, dict)
+        proposals_ok = isinstance(proposals, list)
+        if not diag_ok and not proposals_ok:
+            missing_fields[:] = ['cross_tier_diagnostic', 'proposals']
+            return None
+        return obj
+    try:
+        out = _take(json.loads(text))
+        if out is not None:
+            return out
+    except json.JSONDecodeError:
+        pass
+    m = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+    if m:
+        try:
+            out = _take(json.loads(m.group(1).strip()))
+            if out is not None:
+                return out
+        except json.JSONDecodeError:
+            pass
+    m = re.search(r'\{.*\}', text, re.DOTALL)
+    if m:
+        try:
+            out = _take(json.loads(m.group(0)))
+            if out is not None:
+                return out
+        except json.JSONDecodeError:
+            pass
+    if missing_fields:
+        log(f'WARNING: cross-tier LLM returned valid JSON but missing '
+            f'required field(s): {", ".join(missing_fields)}.')
+    return None
+
+
+def _run_cross_tier_extension(project_dir: str, output_dir: str,
+                                  log_dir: str, result: StoryPowerResult,
+                                  rubric: str,
+                                  coaching: CoachingLevel,
+                                  ) -> CrossTierExtension:
+    """Run the cross-tier LLM synthesis after the deterministic
+    pre-pass. The pre-pass output is the load-bearing surface — on
+    any LLM failure, the deterministic patterns still surface."""
+    det_patterns = _check_cross_tier_deterministic(result)
+
+    prompt = _build_cross_tier_prompt(result, det_patterns, rubric)
+    model = select_model('creative')
+    log_file = os.path.join(log_dir,
+                            os.path.basename(output_dir) + '-cross-tier.json')
+    os.makedirs(log_dir, exist_ok=True)
+    try:
+        invoke_to_file(prompt, model, log_file,
+                       max_tokens=_FIXED_PAYLOAD_TIER_MAX_TOKENS)
+    except Exception as e:
+        log(f'ERROR: cross-tier LLM call failed: {e}. Deterministic '
+            f'pre-pass patterns ({len(det_patterns)}) still surface.')
+        return _empty_cross_tier_extension('llm_error', det_patterns)
+    text = _read_response_text(log_file)
+    parsed = _parse_response_cross_tier(text)
+    if not parsed:
+        _record_cost(project_dir, log_file, model,
+                     target='story-power:cross-tier:unparseable')
+        log(f'ERROR: cross-tier LLM response unparseable; raw at '
+            f'{log_file}{_truncation_hint(log_file, _FIXED_PAYLOAD_TIER_MAX_TOKENS)}. '
+            f'Deterministic pre-pass patterns ({len(det_patterns)}) '
+            'still surface.')
+        return _empty_cross_tier_extension('unparseable', det_patterns)
+    _record_cost(project_dir, log_file, model,
+                 target='story-power:cross-tier')
+
+    diag = _extract_cross_tier_diagnostic(parsed)
+    proposals = _extract_cross_tier_proposals(parsed)
+
+    # Status discipline: the LLM may genuinely have nothing to add
+    # (a perfectly-scoring project produces no synthesis). That is
+    # NOT a partial result — it's a legitimate empty narrative.
+    # 'partial' fires only when the LLM returned malformed/missing
+    # data the parser could not extract.
+    status: StoryPowerStatus = 'ok'
+    # If the LLM returned but neither diag nor proposals carry any
+    # content, tag partial — the call cost was paid for no signal.
+    if not diag and not proposals:
+        log('WARNING: cross-tier LLM returned no diagnostic content '
+            'and no proposals — synthesis surface is empty. The '
+            'deterministic pre-pass output still stands.')
+        status = 'partial'
+
+    if coaching == 'full':
+        _append_cross_tier_diagnostic(
+            output_dir, det_patterns, proposals, diag,
+        )
+    else:
+        _append_cross_tier_coaching_brief(
+            output_dir, det_patterns, proposals, diag,
+            recover_hint=log_file,
+        )
+
+    return {
+        'deterministic_patterns': det_patterns,
+        'proposals': proposals,
+        'cross_tier_diagnostic': diag,
+        'status': status,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Cross-tier writers
+# ---------------------------------------------------------------------------
+
+def _cross_tier_section(
+        det_patterns: list[CrossTierPattern],
+        proposals: list[CrossTierProposal],
+        diag: CrossTierDiagnostic,
+        ) -> list[str]:
+    """Shared cross-tier markdown section."""
+    out: list[str] = ['## Cross-tier diagnostic', '']
+    if diag.get('synthesis'):
+        out.extend([f'**Synthesis:** {diag["synthesis"]}', ''])
+    if diag.get('root_cause'):
+        out.extend([f'**Root cause:** {diag["root_cause"]}', ''])
+    if diag.get('project_disposition'):
+        out.extend([
+            f'**Project disposition:** {diag["project_disposition"]}',
+            '',
+        ])
+    if diag.get('high_leverage_move'):
+        out.extend([
+            f'**High-leverage move:** {diag["high_leverage_move"]}',
+            '',
+        ])
+
+    if det_patterns:
+        out.extend(['### Deterministic patterns', ''])
+        for p in det_patterns:
+            out.append(f'- [{p["severity"]}] **{p["pattern"]}**: {p["description"]}')
+        out.append('')
+
+    if proposals:
+        out.extend(['### Cross-tier proposals', ''])
+        for p in proposals:
+            out.extend([f'#### {p["target"]}', '',
+                         f'**Move:** {p["move"]}', ''])
+            if p.get('rationale'):
+                out.extend([f'**Rationale:** {p["rationale"]}', ''])
+            if p.get('expected_lift'):
+                out.extend([f'**Expected lift:** {p["expected_lift"]}', ''])
+            if p.get('consolidates_tiers'):
+                out.extend([
+                    f'**Consolidates downstream proposals in:** '
+                    f'{", ".join(p["consolidates_tiers"])}',
+                    '',
+                ])
+    if not det_patterns and not proposals and not diag:
+        out.extend([
+            '_(No cross-tier patterns detected by the pre-pass and the '
+            'LLM synthesis returned no content — the tiers cohere '
+            'or there is insufficient cross-tier signal at this '
+            'project state.)_',
+            '',
+        ])
+    return out
+
+
+def _append_cross_tier_diagnostic(
+        output_dir: str,
+        det_patterns: list[CrossTierPattern],
+        proposals: list[CrossTierProposal],
+        diag: CrossTierDiagnostic,
+        ) -> None:
+    """Append the cross-tier section to diagnostic.md (full coaching)."""
+    md_path = os.path.join(output_dir, 'diagnostic.md')
+    if not os.path.isfile(md_path):
+        log(f'WARNING: cross-tier diagnostic could not be appended — '
+            f'{md_path} does not exist (upstream pitch-diagnostic write '
+            'likely failed). Cross-tier synthesis was computed but its '
+            'narrative is lost.')
+        return
+    try:
+        with open(md_path, encoding='utf-8') as f:
+            existing = f.read()
+    except OSError as e:
+        log(f'WARNING: could not append cross-tier diagnostic to {md_path}: {e}')
+        return
+    section = _cross_tier_section(det_patterns, proposals, diag)
+    _safe_write(md_path, existing + '\n' + '\n'.join(section) + '\n')
+
+
+def _append_cross_tier_coaching_brief(
+        output_dir: str,
+        det_patterns: list[CrossTierPattern],
+        proposals: list[CrossTierProposal],
+        diag: CrossTierDiagnostic, *,
+        recover_hint: str = '',
+        ) -> None:
+    """Append the cross-tier section to coaching-brief.md (coach
+    coaching), framed as questions rather than directives."""
+    md_path = os.path.join(output_dir, 'coaching-brief.md')
+    if not os.path.isfile(md_path):
+        log(f'WARNING: cross-tier coaching brief could not be appended — '
+            f'{md_path} does not exist (upstream coach-brief write likely '
+            'failed). Cross-tier synthesis was computed but is not '
+            'captured in the brief.')
+        return
+    try:
+        with open(md_path, encoding='utf-8') as f:
+            existing = f.read()
+    except OSError as e:
+        log(f'WARNING: could not append cross-tier coaching brief to {md_path}: {e}')
+        return
+    section = _cross_tier_section(det_patterns, proposals, diag)
+    prelude = [
+        '# Cross-tier synthesis (LLM proposals — author confirms)',
+        '',
+        'Cross-tier patterns surface defects that appear at multiple '
+        'resolutions. The proposals below name where the root cause '
+        'most likely lives — they are not directives. The author '
+        'decides whether to fix at the proposed locus or to address '
+        'each downstream symptom independently.',
+        '',
+    ]
+    _safe_write(md_path,
+                existing + '\n' + '\n'.join(prelude + section) + '\n',
+                recover_hint=recover_hint)
