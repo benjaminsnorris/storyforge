@@ -291,3 +291,84 @@ def test_extract_panel_script_keeps_page_headers(tmp_path):
     assert '## Page 1 — SPLASH' in result
     assert 'Wide.' in result
     assert 'stops here' not in result
+
+
+def test_extract_panel_script_returns_only_first_section(tmp_path):
+    """T-3: when multiple `## Panel script` sections exist, only the
+    first is returned. Document the behavior so a future change is
+    a deliberate decision rather than accidental drift."""
+    from storyforge.pages import extract_panel_script
+    path = tmp_path / 's01-p1.md'
+    path.write_text(
+        "---\npage_id: s01-p1\n---\n\n"
+        "## Panel script\n\nFirst section.\n\n"
+        "## Image-generation prompts\n\nimg\n\n"
+        "## Panel script\n\nSecond section.\n"
+    )
+    result = extract_panel_script(str(path))
+    assert 'First section.' in result
+    assert 'Second section.' not in result
+
+
+def test_parse_page_file_normalizes_crlf(tmp_path):
+    """CR-3 regression: CRLF line endings (Windows / pasted clipboard)
+    must not trip the frontmatter regex."""
+    from storyforge.pages import parse_page_file
+    path = tmp_path / 's01-p1.md'
+    path.write_bytes(
+        b'---\r\npage_id: s01-p1\r\nscene_id: s01\r\n'
+        b'page_within_scene: 1\r\ntotal_pages_in_scene: 1\r\n'
+        b'panel_count: 2\r\n---\r\n\r\nbody\r\n'
+    )
+    page = parse_page_file(str(path))
+    assert page is not None
+    assert page['page_id'] == 's01-p1'
+    assert page['panel_count'] == 2
+
+
+def test_validate_surfaces_bad_integer_field(tmp_path):
+    """CR-5/SF-3 regression: an int field with non-int value (`panel_count:
+    foo`) must surface a bad_integer_field finding — NOT silently coerce
+    to string and let downstream range checks ignore it."""
+    from storyforge.pages import validate_page_file
+    path = tmp_path / 's01-p1.md'
+    path.write_text(
+        '---\npage_id: s01-p1\nscene_id: s01\n'
+        'page_within_scene: 1\ntotal_pages_in_scene: 1\n'
+        'panel_count: bananas\n---\n\nbody\n'
+    )
+    findings = validate_page_file(str(path))
+    bad = [f for f in findings if f['kind'] == 'bad_integer_field']
+    assert len(bad) == 1
+    assert bad[0]['field'] == 'panel_count'
+
+
+def test_pages_for_scene_disambiguates_by_frontmatter_scene_id(tmp_path):
+    """CR-4 regression: two scenes sharing an sN- prefix (s01-alpha and
+    s01-bravo) used to claim each other's pages. The frontmatter
+    scene_id now disambiguates."""
+    from storyforge.pages import pages_for_scene
+    pages = tmp_path / 'pages'
+    pages.mkdir()
+    _write_page(pages / 's01-p1.md', 's01-p1', 's01-alpha', 1, 1, 2)
+    _write_page(pages / 's01-p2.md', 's01-p2', 's01-bravo', 1, 1, 3)
+    alpha = pages_for_scene(str(tmp_path), 's01-alpha')
+    bravo = pages_for_scene(str(tmp_path), 's01-bravo')
+    assert [p['page_id'] for p in alpha] == ['s01-p1']
+    assert [p['page_id'] for p in bravo] == ['s01-p2']
+
+
+def test_pages_for_scene_works_with_non_s_prefix(tmp_path):
+    """T-7: scenes without an `sN-` prefix use the full id as the page
+    file prefix. Ensure pages_for_scene matches correctly."""
+    from storyforge.pages import pages_for_scene
+    pages = tmp_path / 'pages'
+    pages.mkdir()
+    _write_page(pages / 'the-blank-page-p1.md', 'the-blank-page-p1',
+                'the-blank-page', 1, 2, 2)
+    _write_page(pages / 'the-blank-page-p2.md', 'the-blank-page-p2',
+                'the-blank-page', 2, 2, 4)
+    result = pages_for_scene(str(tmp_path), 'the-blank-page')
+    assert [p['page_id'] for p in result] == [
+        'the-blank-page-p1', 'the-blank-page-p2',
+    ]

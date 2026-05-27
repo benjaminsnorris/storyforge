@@ -14,7 +14,10 @@ import re
 from typing import Final, TypedDict
 
 
-FRONTMATTER_RE = re.compile(r'\A---\n(.*?)\n---\n(.*)', re.DOTALL)
+# Frontmatter: open with `---\n`, capture everything (possibly empty) up to
+# the next `---\n` line, capture the body. `(?:\n|$)` allows the closing
+# `---` to be followed by either a newline or EOF.
+FRONTMATTER_RE = re.compile(r'\A---\n(.*?)---(?:\n|$)(.*)', re.DOTALL)
 
 REQUIRED_FIELDS: Final[tuple[str, ...]] = (
     'page_id', 'scene_id', 'page_within_scene',
@@ -67,11 +70,18 @@ def page_filename_for(scene_id: str, page_num: int) -> str:
 
 def parse_page_file(path: str) -> PageFile | None:
     """Parse a single page file. Returns None if the file is missing or
-    has no YAML frontmatter."""
+    has no YAML frontmatter.
+
+    CRLF line endings are normalized to LF before regex matching — page
+    files authored on Windows or pasted from a clipboard with CRLF would
+    otherwise fail the frontmatter regex and surface as `no_frontmatter`
+    even when the structure is correct.
+    """
     if not os.path.isfile(path):
         return None
     with open(path, encoding='utf-8') as f:
         text = f.read()
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
     m = FRONTMATTER_RE.match(text)
     if not m:
         return None
@@ -91,10 +101,16 @@ def _parse_frontmatter(block: str) -> PageFile:
           - item
 
     Trailing `# comment` on list items is stripped. Integer coercion is
-    applied to fields in `_INTEGER_FIELDS`. Unknown scalars go into
-    `extra`; unknown block lists go into `extra_lists`. This is a
-    deliberate subset of YAML — we don't depend on PyYAML elsewhere and
-    don't want to start here.
+    applied to fields in `_INTEGER_FIELDS`; values that fail coercion are
+    recorded in `extra['_bad_integer_fields']` so validate_page_file can
+    surface them as findings (NOT silently stored as strings under an
+    integer-typed key). Unknown scalars go into `extra`; unknown block
+    lists go into `extra_lists`. This is a deliberate subset of YAML —
+    we don't depend on PyYAML elsewhere and don't want to start here.
+
+    Limitations: inline-list items must not contain unescaped commas
+    (the parser splits on `,`). For multi-word list items, use the
+    block form.
     """
     page: PageFile = {'extra': {}, 'extra_lists': {}}
     current_list_key: str | None = None
@@ -146,7 +162,16 @@ def _parse_frontmatter(block: str) -> PageFile:
                 page[key] = int(value)
                 continue
             except ValueError:
-                pass
+                # Don't silently stash a string under an integer-typed key:
+                # downstream validators gate on isinstance(...int), so a
+                # non-int value would defeat range checks. Track the bad
+                # field so validate_page_file can surface it.
+                page['extra'].setdefault('_bad_integer_fields', '')
+                bad = page['extra']['_bad_integer_fields']
+                page['extra']['_bad_integer_fields'] = (
+                    f'{bad};{key}' if bad else key
+                )
+                continue
 
         if key in REQUIRED_FIELDS or key in RECOMMENDED_FIELDS:
             page[key] = value
@@ -171,10 +196,14 @@ def list_page_files(project_dir: str) -> list[str]:
 def pages_for_scene(project_dir: str, scene_id: str) -> list[PageFile]:
     """Return parsed PageFile dicts for a scene, sorted by page_within_scene.
 
-    Pages are matched by filename prefix via page_id_prefix_for_scene.
-    This is the on-disk rule (prefix-based filenames) — not a match on
-    the scene_id frontmatter field — so the convention stays consistent
-    even if a page file's frontmatter scene_id drifts.
+    Pages are matched first by filename prefix via page_id_prefix_for_scene,
+    then (when the page file's frontmatter carries a `scene_id`) by exact
+    `scene_id` match. The double-filter guards against the sN-prefix
+    collision case: if two scenes are `s01-alpha` and `s01-bravo`, both
+    would share the `s01-` filename prefix; the frontmatter scene_id is
+    what disambiguates them. Pages without a frontmatter scene_id are
+    accepted on prefix alone (backwards-compatible with files that
+    predate this guard).
     """
     prefix = page_id_prefix_for_scene(scene_id)
     pages_dir = os.path.join(project_dir, 'pages')
@@ -186,8 +215,12 @@ def pages_for_scene(project_dir: str, scene_id: str) -> list[PageFile]:
         if not name_re.match(fname):
             continue
         parsed = parse_page_file(os.path.join(pages_dir, fname))
-        if parsed is not None:
-            matched.append(parsed)
+        if parsed is None:
+            continue
+        fm_scene_id = parsed.get('scene_id')
+        if fm_scene_id and fm_scene_id != scene_id:
+            continue
+        matched.append(parsed)
     matched.sort(key=lambda p: p.get('page_within_scene', 0))
     return matched
 
@@ -206,6 +239,7 @@ def validate_page_file(path: str) -> list[PageFinding]:
       - missing_file: file does not exist
       - no_frontmatter: file has no YAML frontmatter
       - missing_field: a REQUIRED_FIELDS key is absent
+      - bad_integer_field: an _INTEGER_FIELDS value failed int coercion
       - filename_page_id_mismatch: filename stem != page_id
       - page_within_scene_out_of_range: not in [1, total_pages_in_scene]
     """
@@ -223,6 +257,18 @@ def validate_page_file(path: str) -> list[PageFinding]:
                 'kind': 'missing_field', 'path': path, 'field': field,
                 'detail': f'required frontmatter field {field!r} is missing',
             })
+
+    # Surface integer-coercion failures captured by _parse_frontmatter — the
+    # bad value is dropped from the page dict so validation would otherwise
+    # report missing_field, hiding the real cause.
+    bad_int = page.get('extra', {}).get('_bad_integer_fields', '')
+    for field in (bad_int.split(';') if bad_int else []):
+        if not field:
+            continue
+        findings.append({
+            'kind': 'bad_integer_field', 'path': path, 'field': field,
+            'detail': f'{field!r} value is not an integer',
+        })
 
     stem = os.path.splitext(os.path.basename(path))[0]
     page_id = page.get('page_id')
@@ -250,8 +296,15 @@ _PANEL_SCRIPT_HEADER = re.compile(
 # Match the NEXT page-file section (## Image-generation..., ## Page-specific
 # notes, etc.) but NOT page-script headers (## Page N — LAYOUT), since
 # those are part of the script and must remain inside the extracted body.
+#
+# Convention assumption: page headers use em-dash (U+2014). A regular
+# hyphen or en-dash would NOT match the lookahead and would silently
+# terminate extraction at the first page header — see CR-3/C-3 in the
+# PR #255 review for context. Authors should standardize on em-dash;
+# the lookahead also covers en-dash (U+2013) and hyphen-minus as a
+# safety net.
 _NEXT_SECTION_HEADER = re.compile(
-    r'^##\s+(?!Page\s+\d+\s+—)\S', re.MULTILINE,
+    r'^##\s+(?!Page\s+\d+\s*[—–-])\S', re.MULTILINE,
 )
 
 
@@ -260,7 +313,15 @@ def extract_panel_script(path: str) -> str:
 
     Used by script-package to assemble the artist bundle from page files.
     Output is the section body — strips the '## Panel script' heading
-    itself but keeps everything until the next ## heading or EOF.
+    itself but keeps everything until the next page-file section heading
+    (e.g. '## Image-generation prompts' or '## Page-specific notes') or
+    EOF. `## Page N — LAYOUT` headers are NOT treated as section
+    boundaries; they are part of the script body and remain in the output
+    so script-package's global page renumbering can find them.
+
+    If multiple `## Panel script` headers are present, only the FIRST
+    section is returned (current page-file convention assumes one
+    script section per page).
     """
     page = parse_page_file(path)
     if page is None:
