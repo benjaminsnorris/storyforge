@@ -16,6 +16,38 @@ until per-page files (#251) land:
 
 import os
 import re
+from typing import Literal, TypedDict
+
+# Severity is part of the cleanup-report contract — build_cleanup_report
+# filters action items by != 'info' and counts errors/warnings/info. A
+# typo on either side silently demotes a finding.
+Severity = Literal['info', 'warning', 'error']
+
+
+class _CanonFindingRequired(TypedDict):
+    type: str
+    file: str
+    detail: str
+    action: str
+    severity: Severity
+
+
+class CanonFinding(_CanonFindingRequired, total=False):
+    # `category` is set by cmd_cleanup.report_canon_files after construction;
+    # this module doesn't know about it. Future fields follow the same
+    # Required+Optional pattern.
+    category: Literal['canon']
+
+
+class ParsedCanonFile(TypedDict):
+    """One parsed canon .md file. When `exists` is False the other fields
+    are zero-initialized so callers can read uniformly."""
+    path: str
+    exists: bool
+    frontmatter: dict[str, str] | None
+    sections: set[str]
+    body: str
+
 
 CANON_DIR = os.path.join('reference', 'canon')
 
@@ -93,18 +125,8 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, str] | None | object, str]:
     return data, body
 
 
-def parse_canon_file(path: str) -> dict:
-    """Read a canon file from disk and return a parsed representation.
-
-    Returns:
-        {
-          'path': absolute file path,
-          'exists': bool,
-          'frontmatter': dict | None,   # None if missing
-          'sections': set[str],          # H2 headings found in the body
-          'body': str,                   # text after the frontmatter
-        }
-    """
+def parse_canon_file(path: str) -> ParsedCanonFile:
+    """Read a canon file from disk and return its parsed structure."""
     if not os.path.isfile(path):
         return {
             'path': path,
@@ -181,7 +203,7 @@ def _read_registry_ids(project_dir: str, registry_filename: str
 
 
 def _finding(file_rel: str, detail: str, action: str,
-             type_: str, severity: str = 'warning') -> dict:
+             type_: str, severity: Severity = 'warning') -> CanonFinding:
     return {
         'type': type_,
         'file': file_rel,
@@ -191,37 +213,38 @@ def _finding(file_rel: str, detail: str, action: str,
     }
 
 
-def validate_canon_file(path: str, project_root: str) -> list[dict]:
-    """Validate a single canon file. Returns a list of finding dicts.
-
-    Findings are returned with paths relative to project_root so they
-    display the way authors think about files. Subdir-based rules
-    (canon_type must be 'character' under characters/, etc.) are applied
-    here so that misfiled canon is caught.
-    """
+def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
+    """Validate one canon file. Finding paths are project-root-relative so
+    they display the way authors think about files."""
     rel = os.path.relpath(path, project_root)
     parsed = parse_canon_file(path)
-    findings: list[dict] = []
+    findings: list[CanonFinding] = []
 
     if not parsed['exists']:
         return findings  # callers handle missing files at the directory level
 
     fm = parsed['frontmatter']
     if fm is _TRUNCATED:
+        # 'error' severity: prompt-embedders can't read frontmatter from a
+        # truncated file. Blocks downstream canon resolution.
         findings.append(_finding(
             rel,
             'canon file opens a frontmatter block with `---` but does not close it',
             'Close the frontmatter with a `---` line before the body',
             'canon_truncated_frontmatter',
+            severity='error',
         ))
         return findings  # nothing else to check — frontmatter is unparseable
     if fm is None:
+        # 'error' severity: a file without frontmatter can't be resolved by
+        # canon_id; embedders rely on the YAML block.
         findings.append(_finding(
             rel,
             'canon file is missing YAML frontmatter',
             'Add a --- delimited YAML block with canon_id, canon_type, '
             'canon_updated, appears_in, embeds_as, first_appearance',
             'canon_missing_frontmatter',
+            severity='error',
         ))
         return findings  # nothing else to check without frontmatter
 
@@ -237,11 +260,14 @@ def validate_canon_file(path: str, project_root: str) -> list[dict]:
     canon_id = fm.get('canon_id', '')
     expected_id = _expected_canon_id(path)
     if canon_id and canon_id != expected_id:
+        # 'error' severity: embedders resolve canon by canon_id; a mismatch
+        # means lookups fail at prompt-assembly time.
         findings.append(_finding(
             rel,
             f'canon_id `{canon_id}` does not match filename slug `{expected_id}`',
             f'Set canon_id to `{expected_id}` or rename the file',
             'canon_id_mismatch',
+            severity='error',
         ))
     if canon_id and not _SLUG_RE.match(canon_id):
         findings.append(_finding(
@@ -337,7 +363,7 @@ def _walk_canon_files(canon_dir: str) -> list[str]:
     return found
 
 
-def _registry_findings(project_dir: str, files: list[str]) -> list[dict]:
+def _registry_findings(project_dir: str, files: list[str]) -> list[CanonFinding]:
     """Cross-reference canon files in characters/, locations/, motifs/ subdirs
     against their corresponding registry CSVs.
 
@@ -349,7 +375,7 @@ def _registry_findings(project_dir: str, files: list[str]) -> list[dict]:
     an orphan; the misdirection would point authors at the wrong fix.
     """
     canon_dir_abs = os.path.join(project_dir, CANON_DIR)
-    findings: list[dict] = []
+    findings: list[CanonFinding] = []
     registry_cache: dict[str, set[str] | None | str] = {}
     malformed_reported: set[str] = set()
 
@@ -372,6 +398,8 @@ def _registry_findings(project_dir: str, files: list[str]) -> list[dict]:
         if registry_ids is _REGISTRY_MALFORMED:
             if registry_file not in malformed_reported:
                 malformed_reported.add(registry_file)
+                # 'error' severity: the registry is structurally broken;
+                # canon validation can't run until it's repaired.
                 findings.append(_finding(
                     os.path.join('reference', registry_file),
                     f'reference/{registry_file} is missing the `id` column '
@@ -380,6 +408,7 @@ def _registry_findings(project_dir: str, files: list[str]) -> list[dict]:
                     f'Repair reference/{registry_file} so the header includes '
                     '`id`',
                     'canon_registry_unreadable',
+                    severity='error',
                 ))
             continue
         slug = os.path.splitext(filename)[0]
@@ -397,19 +426,15 @@ def _registry_findings(project_dir: str, files: list[str]) -> list[dict]:
     return findings
 
 
-def validate_canon_directory(project_dir: str) -> list[dict]:
-    """Validate every canon file under reference/canon/.
-
-    Returns an empty list if the canon directory does not exist (no
-    finding) — projects without canon are not necessarily broken, this
-    foundation is opt-in. Callers in cleanup decide whether absence is
-    itself a finding (it currently is not — see report_canon_files).
-    """
+def validate_canon_directory(project_dir: str) -> list[CanonFinding]:
+    """Validate every canon file under reference/canon/. Returns [] when
+    the canon directory is absent; callers decide whether absence is itself
+    a finding (cleanup's report_canon_files does for GN projects)."""
     canon_dir = os.path.join(project_dir, CANON_DIR)
     if not os.path.isdir(canon_dir):
         return []
 
-    findings: list[dict] = []
+    findings: list[CanonFinding] = []
     files = _walk_canon_files(canon_dir)
     for path in files:
         findings.extend(validate_canon_file(path, project_dir))
