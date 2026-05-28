@@ -226,6 +226,26 @@ Graphic-novel briefs populate five additional columns alongside the standard one
 
 All standard brief columns still apply with full meaning. `key_actions` reads as a panel-beat list; `key_dialogue` becomes the word-balloon contract; `continuity_deps` covers visual continuity too.
 
+### Page architecture (graphic-novel only)
+
+**Stage:** `--stage page-architecture` (or `--page-architecture`)
+**Purpose:** Lock page-level rhythm and panel geometry before any per-panel image rendering.
+**Output:** `## Page architecture` + `## Page-blocking prompt` sections in each page file under `pages/`.
+**Preconditions:** scene brief has `panel_breakdown`; `reference/canon/panel-registers.md` and `reference/canon/page-rhythm-rules.md` are populated (not TODO).
+
+**Flags:**
+- `--page <page_id>` — single page only
+- `--scene <scene_id>` — every page of one scene
+- `--force` — overwrite existing sections
+- `--dry-run` — print one prompt, no API calls
+
+**Coaching modes:**
+- **full** — LLM drafts both sections directly into the page file
+- **coach** — writes a markdown brief to `working/coaching/page-architecture-<page_id>.md` asking the right questions; no mutation of the page file
+- **strict** — stamps a deterministic TODO template into the page file; no API call
+
+**When to run:** after `briefs` in graphic-novel projects, before drafting per-panel image prompts.
+
 ### Voice Stage (Interactive)
 
 Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point.
