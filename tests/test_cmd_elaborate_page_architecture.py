@@ -567,3 +567,67 @@ def test_full_mode_bad_llm_response_does_not_mutate_page(tmp_path, monkeypatch):
     )
     page_text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
     assert '## Page architecture' not in page_text
+
+
+# ============================================================================
+# Regression tests for PR #258 review findings — Commit 3
+# (SF-2, SF-5, SF-6, SF-7)
+# ============================================================================
+
+
+def test_precondition_better_message_when_scenes_csv_missing(tmp_path):
+    """SF-7: missing reference/scenes.csv produces a clear message
+    pointing at the fix, not 'scene X not in scenes.csv'."""
+    from storyforge.cmd_elaborate import _precondition_check_page
+    proj = _make_gn_project(tmp_path)
+    os.remove(os.path.join(proj, 'reference', 'scenes.csv'))
+    ok, reason = _precondition_check_page(proj, 's01-p1', 's01-studio')
+    assert ok is False
+    assert 'scenes.csv is missing' in reason
+    assert 'elaborate --stage map' in reason
+
+
+def test_handler_logs_note_when_optional_canon_missing(tmp_path, monkeypatch, capsys):
+    """SF-6: missing optional canon (style-foundation, lighting-laws) is
+    logged as a NOTE so the author knows the prompt was built without it."""
+    from storyforge.cmd_elaborate import _run_page_architecture_handler_gn
+    proj = _make_gn_project(tmp_path)
+    # Remove lighting-laws (optional)
+    os.remove(os.path.join(proj, 'reference', 'canon', 'lighting-laws.md'))
+    monkeypatch.setattr(
+        'storyforge.api.invoke_api',
+        lambda *a, **kw: (
+            '## Page architecture\n\nIntent.\n\n'
+            '## Page-blocking prompt\n\nStoryboard.\n'
+        ),
+    )
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    _run_page_architecture_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    captured = capsys.readouterr()
+    # The log() function may write to stdout, stderr, or a log file.
+    # Combine both streams to make the test resilient to that choice.
+    output = captured.out + captured.err
+    assert 'lighting-laws' in output
+    assert 'NOTE' in output or 'absent' in output
+
+
+def test_handler_end_of_run_summary_for_llm_skipped(tmp_path, monkeypatch, capsys):
+    """SF-5: end-of-run summary tells the author how many pages were
+    skipped due to LLM/API failures and how to retry."""
+    from storyforge.cmd_elaborate import _run_page_architecture_handler_gn
+    proj = _make_gn_project(tmp_path)
+    monkeypatch.setattr('storyforge.api.invoke_api', lambda *a, **kw: '')
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    _run_page_architecture_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert 'page(s) skipped' in output
+    assert '--force --page' in output  # retry hint

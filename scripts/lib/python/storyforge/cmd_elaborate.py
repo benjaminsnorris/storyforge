@@ -728,6 +728,8 @@ def _precondition_check_page(project_dir: str, page_id: str,
     from storyforge.canon import is_canon_block_populated
 
     scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(scenes_csv):
+        return False, 'reference/scenes.csv is missing — run elaborate --stage map first'
     if not get_field(scenes_csv, scene_id, 'id'):
         return False, f'scene {scene_id} not in scenes.csv'
 
@@ -977,6 +979,14 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
             for cid in ('panel-registers', 'page-rhythm-rules',
                         'style-foundation', 'lighting-laws')
         }
+        # SF-6: surface missing optional canon so authors know the prompt
+        # was built without it. panel-registers and page-rhythm-rules
+        # are required (gated by the precondition check above); the other
+        # two are optional but produce degraded prompts when absent.
+        for cid in ('style-foundation', 'lighting-laws'):
+            if not canon_blocks.get(cid):
+                log(f'  NOTE {page_id}: optional canon block {cid!r} absent — '
+                    f'prompt will be built without it')
 
         if coaching == 'coach':
             brief = render_coach_brief(
@@ -1039,11 +1049,20 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
                 project_dir, 'elaborate-page-architecture-gn',
                 stage_model, 0, 0, 0.0, target=page_id,
             )
-        except Exception:
-            pass
+        except OSError as e:
+            log(f'  WARN {page_id}: cost ledger write failed ({e}); '
+                f'check working/costs/ permissions. Page sections were written.')
         log(f'  {page_id}: full sections written')
         processed += 1
 
+    if skipped_llm > 0:
+        log(f'page-architecture: {skipped_llm} page(s) skipped due to LLM/API '
+            f'failures. Re-run with --force --page <page_id> to retry individual '
+            f'pages.')
+    if skipped_precondition > 0:
+        log(f'page-architecture: {skipped_precondition} page(s) skipped due to '
+            f'unmet preconditions (missing scene brief panel_breakdown, or '
+            f'TODO canon blocks). Populate the inputs and re-run.')
     if processed == 0 and (skipped_precondition > 0 or skipped_llm > 0):
         return 1
     return 0
