@@ -802,6 +802,25 @@ def is_canon_block_populated(project_dir: str, canon_id: str) -> bool:
     return not _section_body_is_placeholder(block_text)
 
 
+def get_canon_embeddable_block(project_dir: str, canon_id: str) -> str:
+    """Return the embeddable block text for canon_id, or '' if absent
+    or unparseable.
+
+    Used by elaborate --stage page-architecture and other consumers
+    that need to embed canon blocks into LLM prompts. The returned
+    string is stripped; '' indicates either the canon file does not
+    exist, has no '## Embeddable block' section, or the section body
+    is empty.
+
+    See also: is_canon_block_populated, which is the precondition
+    check that gates whether the block should be used.
+    """
+    path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
+    if not os.path.isfile(path):
+        return ''
+    return (_embeddable_block_text(path) or '').strip()
+
+
 def validate_canon_directory(project_dir: str) -> list[CanonFinding]:
     """Validate every canon file under reference/canon/. Returns [] when
     the canon directory is absent; callers decide whether absence is itself

@@ -901,7 +901,7 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
     from storyforge.prompts_page_architecture import (
         render_strict_template, render_coach_brief, build_full_prompt,
     )
-    from storyforge.canon import _embeddable_block_text as _block_text
+    from storyforge.canon import get_canon_embeddable_block
     from storyforge.elaborate import _read_csv_as_map
 
     targets = _select_pages_for_architecture(project_dir, page, scene, force)
@@ -923,10 +923,9 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
 
     def _canon(canon_id: str) -> str:
         if canon_id not in canon_block_cache:
-            path = os.path.join(project_dir, 'reference', 'canon',
-                                f'{canon_id}.md')
-            text = _block_text(path) if os.path.isfile(path) else None
-            canon_block_cache[canon_id] = (text or '').strip()
+            canon_block_cache[canon_id] = get_canon_embeddable_block(
+                project_dir, canon_id,
+            )
         return canon_block_cache[canon_id]
 
     processed = 0
