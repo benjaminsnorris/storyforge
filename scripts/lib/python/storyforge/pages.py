@@ -268,6 +268,8 @@ def validate_page_file(path: str) -> list[PageFinding]:
       - bad_integer_field: an _INTEGER_FIELDS value failed int coercion
       - filename_page_id_mismatch: filename stem != page_id
       - page_within_scene_out_of_range: not in [1, total_pages_in_scene]
+      - missing_page_architecture: "## Page architecture" section is missing or empty
+      - missing_blocking_prompt: "## Page-blocking prompt" section is missing or empty
     """
     page = parse_page_file(path)
     if page is None:
@@ -313,16 +315,18 @@ def validate_page_file(path: str) -> list[PageFinding]:
                 'detail': f'page_within_scene={within} not in [1, {total}]',
             })
 
-    # Body-section checks (issue #252). Use the extractors so the
-    # "header present but body empty" half-edited state fires the same
-    # finding as a fully-missing section — both signal a gap the
+    # Body-section checks (issue #252). Use _extract_section_from_body with
+    # the already-parsed body so the file is not read a second and third
+    # time. The "header present but body empty" half-edited state fires the
+    # same finding as a fully-missing section — both signal a gap the
     # author should fill via `elaborate --stage page-architecture`.
-    if not extract_page_architecture(path).strip():
+    body = page.get('body', '')
+    if not _extract_section_from_body(body, _PAGE_ARCHITECTURE_HEADER).strip():
         findings.append({
             'kind': 'missing_page_architecture', 'path': path,
             'detail': '"## Page architecture" section is missing or empty',
         })
-    if not extract_blocking_prompt(path).strip():
+    if not _extract_section_from_body(body, _BLOCKING_PROMPT_HEADER).strip():
         findings.append({
             'kind': 'missing_blocking_prompt', 'path': path,
             'detail': '"## Page-blocking prompt" section is missing or empty',
@@ -358,18 +362,14 @@ _BLOCKING_PROMPT_HEADER = re.compile(
 )
 
 
-def _extract_section(path: str, header_re: re.Pattern) -> str:
-    """Shared implementation for body-section extractors.
+def _extract_section_from_body(body: str, header_re: re.Pattern) -> str:
+    """Extract a section from an already-parsed body string.
 
     Returns the body of the section (header stripped) up to the next
     page-file section heading (`## ...`, but not `## Page N — …` page
     headers, which are part of the panel-script body). Returns '' when
-    the page file is missing, has no frontmatter, or lacks the section.
+    the section is absent.
     """
-    page = parse_page_file(path)
-    if page is None:
-        return ''
-    body = page.get('body', '')
     m = header_re.search(body)
     if not m:
         return ''
@@ -378,6 +378,19 @@ def _extract_section(path: str, header_re: re.Pattern) -> str:
     next_m = _NEXT_SECTION_HEADER.search(rest)
     end = next_m.start() if next_m else len(rest)
     return rest[:end].strip('\n')
+
+
+def _extract_section(path: str, header_re: re.Pattern) -> str:
+    """Shared implementation for body-section extractors.
+
+    Parses the page file at *path* then delegates to
+    `_extract_section_from_body`. Returns '' when the page file is
+    missing, has no frontmatter, or lacks the section.
+    """
+    page = parse_page_file(path)
+    if page is None:
+        return ''
+    return _extract_section_from_body(page.get('body', ''), header_re)
 
 
 def extract_page_architecture(path: str) -> str:
