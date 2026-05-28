@@ -34,6 +34,25 @@ _INTEGER_FIELDS: Final[set[str]] = {
 
 _LIST_FIELDS: Final[set[str]] = {'characters_present'}
 
+# Canonical order of the 13 panel-prompt sections (issue #253).
+# Each panel under `### Panel N` MUST contain `#### M. <Title>` subsections
+# in this order. The titles are fixed strings; bodies vary.
+PANEL_SECTION_TITLES: Final[tuple[str, ...]] = (
+    'Style foundation',
+    'Lighting laws',
+    'Pacing role',
+    'Shot grammar',
+    'Stage geography',
+    'Character block',
+    'In this panel',
+    'Focal objects + render priorities',
+    'Lighting logic',
+    'Symbolic detail (low weight)',
+    'Action',
+    'Emotional subtext (low weight)',
+    'Negative constraints',
+)
+
 
 # A successful parse always populates path/body/extra/extra_lists; the
 # frontmatter fields are optional because validation, not parsing,
@@ -406,6 +425,53 @@ def extract_blocking_prompt(path: str) -> str:
     non-hyphenated form get the same extraction behavior.
     """
     return _extract_section(path, _BLOCKING_PROMPT_HEADER)
+
+
+_IMAGE_GEN_PROMPTS_HEADER = re.compile(
+    r'^##\s+Image[- ]generation\s+prompts\s*$', re.MULTILINE | re.IGNORECASE,
+)
+
+_PANEL_HEADER_RE = re.compile(
+    r'^###\s+Panel\s+(\d+)\s*$', re.MULTILINE | re.IGNORECASE,
+)
+
+
+def extract_panel_prompts(path: str) -> dict[int, str]:
+    """Return {panel_index: panel_body} for the ## Image-generation prompts
+    section's ### Panel N subsections.
+
+    Body is everything AFTER the ### Panel N header up to the next
+    ### Panel M header, the next ## ... header, or EOF — header line
+    stripped, body whitespace-trimmed. Returns {} when the page file
+    is missing, has no frontmatter, lacks the ## Image-generation prompts
+    section, or has the section but no ### Panel N subsections.
+    """
+    page = parse_page_file(path)
+    if page is None:
+        return {}
+    body = page.get('body', '')
+    sec_match = _IMAGE_GEN_PROMPTS_HEADER.search(body)
+    if not sec_match:
+        return {}
+    # Limit scan to the body of ## Image-generation prompts
+    section_start = sec_match.end()
+    rest = body[section_start:]
+    next_section = _NEXT_SECTION_HEADER.search(rest)
+    section_end = next_section.start() if next_section else len(rest)
+    section_body = rest[:section_end]
+
+    result: dict[int, str] = {}
+    # Collect all ### Panel N positions inside the section body
+    panel_matches = list(_PANEL_HEADER_RE.finditer(section_body))
+    for i, m in enumerate(panel_matches):
+        panel_index = int(m.group(1))
+        body_start = m.end()
+        body_end = (panel_matches[i + 1].start()
+                    if i + 1 < len(panel_matches)
+                    else len(section_body))
+        panel_body = section_body[body_start:body_end].strip('\n').strip()
+        result[panel_index] = panel_body
+    return result
 
 
 def extract_panel_script(path: str) -> str:
