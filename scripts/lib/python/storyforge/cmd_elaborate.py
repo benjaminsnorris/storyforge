@@ -43,7 +43,8 @@ def _python_lib():
     return str(Path(__file__).resolve().parent.parent)
 
 
-VALID_STAGES = {'spine', 'architecture', 'map', 'briefs', 'gap-fill', 'mice-fill'}
+VALID_STAGES = {'spine', 'architecture', 'map', 'briefs',
+                'gap-fill', 'mice-fill', 'page-architecture'}
 
 
 # ============================================================================
@@ -56,7 +57,9 @@ def parse_args(argv):
         description='Run an elaboration stage.',
     )
     parser.add_argument('--stage', type=str, default=None,
-                        help='Which elaboration stage to run (spine|architecture|map|briefs|gap-fill|mice-fill)')
+                        help='Which elaboration stage to run '
+                             '(spine|architecture|map|briefs|gap-fill|'
+                             'mice-fill|page-architecture)')
     # Accept stages as direct flags (e.g. --mice-fill, --gap-fill, --briefs)
     for stage in sorted(VALID_STAGES):
         parser.add_argument(f'--{stage}', action='store_true', dest=f'stage_{stage.replace("-", "_")}',
@@ -70,6 +73,17 @@ def parse_args(argv):
     parser.add_argument('--coaching', type=str, default=None,
                         choices=['full', 'coach', 'strict'],
                         help='Override coaching level')
+    # --- page-architecture stage flags (issue #252) ---
+    # --page and --scene are mutually exclusive scope filters; argparse
+    # enforces this via a mutually_exclusive_group so a misuse fails
+    # before the handler is invoked.
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument('--page', type=str, default=None,
+                       help='Run page-architecture for a single page (by page_id)')
+    scope.add_argument('--scene', type=str, default=None,
+                       help='Run page-architecture for every page of one scene (by scene_id)')
+    parser.add_argument('--force', action='store_true',
+                        help='Overwrite existing page-architecture / blocking-prompt sections')
     args = parser.parse_args(argv)
 
     # Resolve stage from direct flags if --stage not given
