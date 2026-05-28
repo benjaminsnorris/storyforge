@@ -97,3 +97,75 @@ def render_strict_template(*, page_id: str, panel_count: int,
             parts.append('')
             parts.append(body)
     return '\n'.join(parts) + '\n'
+
+
+def render_coach_brief(*, page_id: str, panel_count: int,
+                       scene_title: str, page_architecture: str,
+                       scene_brief: dict, canon_blocks: dict[str, str]) -> str:
+    """Coach-mode markdown brief written to working/coaching/.
+
+    Embeds canon vocabulary inline so the author can decide without
+    flipping files. Lists the 13 sections with one or two prompting
+    questions per section. Does NOT mutate the page file.
+    """
+    lines = [
+        f'# Panel-prompts brief: {page_id}',
+        '',
+        f'**Scene:** {scene_title}  ',
+        f'**Panels on this page:** {panel_count} panel{"s" if panel_count != 1 else ""}',
+        '',
+        '## Page architecture (from page-architecture stage)',
+        '',
+        page_architecture.strip() if page_architecture else '(none — run elaborate --stage page-architecture first)',
+        '',
+        '## Brief inputs',
+        '',
+    ]
+    for key in ('panel_breakdown', 'visual_keywords', 'key_actions',
+                'key_dialogue', 'motifs', 'emotions'):
+        val = scene_brief.get(key, '')
+        lines.append(f'- **{key}:** {val or "(empty)"}')
+    lines += ['', '## Canon embeds (paste verbatim into sections 1, 2, 5, 6, 10)', '']
+    for canon_id in ('style-foundation', 'lighting-laws',
+                     'panel-registers'):
+        block = canon_blocks.get(canon_id, '').strip()
+        if block:
+            lines += [f'### {canon_id}', '', block, '']
+    lines += [
+        '## What to write per panel',
+        '',
+        'Write `### Panel N` blocks (one per panel) into the '
+        '`## Image-generation prompts` section of:',
+        '',
+        f'`pages/{page_id}.md`',
+        '',
+        'Each panel must contain these 13 sections in order:',
+        '',
+    ]
+    questions_by_section: dict[int, str] = {
+        1: 'Paste the style-foundation embeddable block verbatim.',
+        2: 'Paste the lighting-laws embeddable block verbatim.',
+        3: 'Cite the register from page architecture (dominant / transitional / '
+           'rhythmic / climactic / orientation / atmospheric). State this panel\'s '
+           'relative weight on the page.',
+        4: 'Camera distance, framing, angle. What\'s the shot grammar?',
+        5: 'Paste the location embeddable block, then add panel-specific positioning '
+           '(who\'s where in the frame).',
+        6: 'Paste the character embeddable block for each on-frame character.',
+        7: 'What is each character doing in THIS beat? What\'s the body language?',
+        8: 'What receives detail (the inkpot, the hand)? What dissolves (background)?',
+        9: 'Which side catches the light? Where do shadows fall?',
+        10: 'If a motif is on-frame, paste its canon block. Label it "(low weight)".',
+        11: 'Declarative procedural action ("lowers the inkpot"). NOT narrative '
+            '("the room cooling around the act").',
+        12: 'One brief sentence. Label "(low weight)". Emotional subtext only — '
+            'no description of how it manifests visually.',
+        13: 'What should the renderer NOT produce? Exclusions specific to this '
+            'panel + motif reinforcements.',
+    }
+    for n in range(1, 14):
+        title = PANEL_SECTION_TITLES[n - 1]
+        lines.append(f'#### {n}. {title}')
+        lines.append(f'  — {questions_by_section[n]}')
+        lines.append('')
+    return '\n'.join(lines) + '\n'
