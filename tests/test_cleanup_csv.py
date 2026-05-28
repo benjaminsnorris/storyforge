@@ -317,7 +317,10 @@ class TestPagesDirectory:
             "page_within_scene: 1\n"
             "total_pages_in_scene: 5\n"
             "panel_count: 2\n"
-            "---\n\nbody\n"
+            "---\n\n"
+            "## Page architecture\n\nIntent.\n\n"
+            "## Page-blocking prompt\n\nStoryboard prompt.\n\n"
+            "## Panel script\n\n**Panel 1.** Wide.\n"
         )
         report = build_cleanup_report(str(tmp_path))
         page_findings = [f for f in report['findings']

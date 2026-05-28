@@ -6,7 +6,7 @@ docs/superpowers/plans/2026-05-27-gn-per-page-files.md for the schema.
 
 The scene file (scenes/<scene_id>.md) remains the creative source of
 truth; page files are the atomic per-page working units consumed by
-extract, script-package, and cleanup.
+other storyforge commands.
 """
 
 import os
@@ -243,6 +243,8 @@ PageFindingKind = Literal[
     'bad_integer_field',
     'filename_page_id_mismatch',
     'page_within_scene_out_of_range',
+    'missing_page_architecture',
+    'missing_blocking_prompt',
 ]
 
 
@@ -266,6 +268,8 @@ def validate_page_file(path: str) -> list[PageFinding]:
       - bad_integer_field: an _INTEGER_FIELDS value failed int coercion
       - filename_page_id_mismatch: filename stem != page_id
       - page_within_scene_out_of_range: not in [1, total_pages_in_scene]
+      - missing_page_architecture: "## Page architecture" section is missing or empty
+      - missing_blocking_prompt: "## Page-blocking prompt" section is missing or empty
     """
     page = parse_page_file(path)
     if page is None:
@@ -311,6 +315,23 @@ def validate_page_file(path: str) -> list[PageFinding]:
                 'detail': f'page_within_scene={within} not in [1, {total}]',
             })
 
+    # Body-section checks (issue #252). Use _extract_section_from_body with
+    # the already-parsed body so the file is not read a second and third
+    # time. The "header present but body empty" half-edited state fires the
+    # same finding as a fully-missing section — both signal a gap the
+    # author should fill via `elaborate --stage page-architecture`.
+    body = page.get('body', '')
+    if not _extract_section_from_body(body, _PAGE_ARCHITECTURE_HEADER).strip():
+        findings.append({
+            'kind': 'missing_page_architecture', 'path': path,
+            'detail': '"## Page architecture" section is missing or empty',
+        })
+    if not _extract_section_from_body(body, _BLOCKING_PROMPT_HEADER).strip():
+        findings.append({
+            'kind': 'missing_blocking_prompt', 'path': path,
+            'detail': '"## Page-blocking prompt" section is missing or empty',
+        })
+
     return findings
 
 
@@ -332,26 +353,24 @@ _NEXT_SECTION_HEADER = re.compile(
 )
 
 
-def extract_panel_script(path: str) -> str:
-    """Return the contents of the '## Panel script' section, or '' if absent.
+_PAGE_ARCHITECTURE_HEADER = re.compile(
+    r'^##\s+Page\s+architecture\s*$', re.MULTILINE | re.IGNORECASE,
+)
 
-    Used by script-package to assemble the artist bundle from page files.
-    Output is the section body — strips the '## Panel script' heading
-    itself but keeps everything until the next page-file section heading
-    (e.g. '## Image-generation prompts' or '## Page-specific notes') or
-    EOF. `## Page N — LAYOUT` headers are NOT treated as section
-    boundaries; they are part of the script body and remain in the output
-    so script-package's global page renumbering can find them.
+_BLOCKING_PROMPT_HEADER = re.compile(
+    r'^##\s+Page[- ]blocking\s+prompt\s*$', re.MULTILINE | re.IGNORECASE,
+)
 
-    If multiple `## Panel script` headers are present, only the FIRST
-    section is returned (current page-file convention assumes one
-    script section per page).
+
+def _extract_section_from_body(body: str, header_re: re.Pattern) -> str:
+    """Extract a section from an already-parsed body string.
+
+    Returns the body of the section (header stripped) up to the next
+    page-file section heading (`## ...`, but not `## Page N — …` page
+    headers, which are part of the panel-script body). Returns '' when
+    the section is absent.
     """
-    page = parse_page_file(path)
-    if page is None:
-        return ''
-    body = page.get('body', '')
-    m = _PANEL_SCRIPT_HEADER.search(body)
+    m = header_re.search(body)
     if not m:
         return ''
     start = m.end()
@@ -359,3 +378,49 @@ def extract_panel_script(path: str) -> str:
     next_m = _NEXT_SECTION_HEADER.search(rest)
     end = next_m.start() if next_m else len(rest)
     return rest[:end].strip('\n')
+
+
+def _extract_section(path: str, header_re: re.Pattern) -> str:
+    """Shared implementation for body-section extractors.
+
+    Parses the page file at *path* then delegates to
+    `_extract_section_from_body`. Returns '' when the page file is
+    missing, has no frontmatter, or lacks the section.
+    """
+    page = parse_page_file(path)
+    if page is None:
+        return ''
+    return _extract_section_from_body(page.get('body', ''), header_re)
+
+
+def extract_page_architecture(path: str) -> str:
+    """Return the contents of the '## Page architecture' section, or ''."""
+    return _extract_section(path, _PAGE_ARCHITECTURE_HEADER)
+
+
+def extract_blocking_prompt(path: str) -> str:
+    """Return the contents of the '## Page-blocking prompt' section, or ''.
+
+    The header regex accepts both 'Page-blocking prompt' (preferred) and
+    'Page blocking prompt' (space variant) so authors who type the
+    non-hyphenated form get the same extraction behavior.
+    """
+    return _extract_section(path, _BLOCKING_PROMPT_HEADER)
+
+
+def extract_panel_script(path: str) -> str:
+    """Return the contents of the '## Panel script' section, or '' if absent.
+
+    Used by script-package to assemble the artist bundle from page files.
+    Output is the section body — strips the '## Panel script' heading
+    itself but keeps everything until the next page-file section heading
+    (e.g. '## Image-generation prompts' or '## Page-specific notes') or
+    EOF. '## Page N — LAYOUT' headers are NOT treated as section
+    boundaries; they are part of the script body and remain in the output
+    so script-package's global page renumbering can find them.
+
+    If multiple '## Panel script' headers are present, only the FIRST
+    section is returned (current page-file convention assumes one
+    script section per page).
+    """
+    return _extract_section(path, _PANEL_SCRIPT_HEADER)

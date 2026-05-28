@@ -724,7 +724,7 @@ def test_handoff_readme_placeholders_all_supplied():
     # Single-brace placeholders only; `{{...}}` are doubled-literal escapes.
     single_brace_re = re.compile(r'(?<!\{)\{(\w+)\}(?!\})')
     placeholders = set(single_brace_re.findall(HANDOFF_README))
-    supplied = {'title', 'canon_line'}
+    supplied = {'title', 'canon_line', 'blocking_line'}
     assert placeholders == supplied, (
         f'HANDOFF_README placeholders {placeholders} differ from supplied '
         f'{supplied}; .format() will KeyError at runtime'

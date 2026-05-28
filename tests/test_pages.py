@@ -156,7 +156,9 @@ def _write_page(path, page_id, scene_id, within, total, panels):
         f"page_within_scene: {within}\n"
         f"total_pages_in_scene: {total}\n"
         f"panel_count: {panels}\n"
-        f"---\n\nbody\n"
+        f"---\n\n"
+        f"## Page architecture\n\nArchitecture content.\n\n"
+        f"## Page-blocking prompt\n\nBlocking prompt content.\n"
     )
 
 

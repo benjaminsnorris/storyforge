@@ -454,7 +454,7 @@ def test_build_cleanup_report_clean_canon_plus_pages_zero_findings(
         project, 'characters', 'cartographer.md',
     )
     pages_dir = os.path.join(project, 'pages')
-    os.makedirs(pages_dir)
+    os.makedirs(pages_dir, exist_ok=True)
     with open(os.path.join(pages_dir, 's01-p1.md'), 'w') as f:
         f.write(
             '<!-- canon-embed: cartographer -->\n'

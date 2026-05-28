@@ -783,6 +783,49 @@ def check_canon_drift(project_dir: str) -> list[CanonFinding]:
     return findings
 
 
+def is_canon_block_populated(project_dir: str, canon_id: str) -> bool:
+    """Return True if reference/canon/<canon_id>.md exists, has an
+    "## Embeddable block" section, and that section's body is NOT
+    placeholder TODO text.
+
+    Used by elaborate --stage page-architecture as a precondition:
+    if the canon vocabulary the prompt depends on (panel-registers,
+    page-rhythm-rules) is still TODO, the LLM can't reliably cite
+    the registers, so the stage refuses to run.
+
+    Note: an empty embeddable-block body (the header exists but no content
+    follows) is treated as populated, not placeholder. If an empty block
+    causes problems, populate it or add a TODO line to trigger the
+    canon_unfilled_template finding.
+    """
+    path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
+    if not os.path.isfile(path):
+        return False
+    block_text = _embeddable_block_text(path)
+    if block_text is None:
+        return False
+    return not _section_body_is_placeholder(block_text)
+
+
+def get_canon_embeddable_block(project_dir: str, canon_id: str) -> str:
+    """Return the embeddable block text for canon_id, or '' if absent
+    or unparseable.
+
+    Used by elaborate --stage page-architecture and other consumers
+    that need to embed canon blocks into LLM prompts. The returned
+    string is stripped; '' indicates either the canon file does not
+    exist, has no '## Embeddable block' section, or the section body
+    is empty.
+
+    See also: is_canon_block_populated, which is the precondition
+    check that gates whether the block should be used.
+    """
+    path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
+    if not os.path.isfile(path):
+        return ''
+    return (_embeddable_block_text(path) or '').strip()
+
+
 def validate_canon_directory(project_dir: str) -> list[CanonFinding]:
     """Validate every canon file under reference/canon/. Returns [] when
     the canon directory is absent; callers decide whether absence is itself

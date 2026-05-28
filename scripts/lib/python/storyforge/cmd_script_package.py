@@ -165,6 +165,56 @@ def _assemble_script(project_dir, chapters, title):
 
 
 # ---------------------------------------------------------------------------
+# Blocking-prompt assembly
+# ---------------------------------------------------------------------------
+
+def _assemble_blocking_prompts(project_dir: str, chapters: list[dict]) -> str:
+    """Concatenate per-page blocking prompts in global page order.
+
+    Iterates chapters → scenes → page files (sorted by page_within_scene),
+    pulls the `## Page-blocking prompt` section out of each, and emits
+    a per-page header carrying the same global page number that
+    _assemble_script's renumberer assigns.
+
+    Returns '' when no page in the bundle has a blocking-prompt
+    section (so the caller can skip writing the file entirely).
+    """
+    from storyforge.pages import pages_for_scene, extract_blocking_prompt
+    from storyforge.csv_cli import get_field
+
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    sections: list[str] = []
+    global_page = 0
+    for chap in chapters:
+        for sid in chap['scenes']:
+            scene_title = get_field(scenes_csv, sid, 'title') or sid
+            siblings = pages_for_scene(project_dir, sid)
+            total = len(siblings)
+            for i, page in enumerate(siblings, start=1):
+                global_page += 1
+                body = extract_blocking_prompt(page['path']).strip()
+                if not body:
+                    continue
+                page_id = page.get('page_id', '?')
+                sections.append(
+                    f'## Global page {global_page} ({page_id}) — '
+                    f'{scene_title}, page {i}/{total}\n\n{body}\n'
+                )
+    return '\n'.join(sections)
+
+
+_BLOCKING_PROMPTS_INVENTORY_LINE = (
+    '\n- `page-blocking-prompts.md` — Page-level blocking prompts to '
+    'render BEFORE per-panel art. Each prompt locks panel geometry, '
+    'panel weights, and eye flow as a monochrome storyboard thumbnail. '
+    'Render the blocking image for each page first, then iterate on '
+    'per-panel prompts against the locked geometry. This prevents the '
+    '"every panel is a feature image" failure mode that uniform '
+    'per-panel rendering produces.'
+)
+
+
+# ---------------------------------------------------------------------------
 # Visual reference extraction
 # ---------------------------------------------------------------------------
 
@@ -318,7 +368,7 @@ This bundle contains everything you need to illustrate the graphic novel.
 
 - `script.md` — The complete panel-by-panel script. Pages are globally numbered.
 - `visual-references.md` — Character and location reference notes. Pin these up.
-- `chapter-map.md` — How scenes group into chapters/issues.{canon_line}
+- `chapter-map.md` — How scenes group into chapters/issues.{canon_line}{blocking_line}
 
 ## Script format
 
@@ -836,8 +886,21 @@ def main(argv=None):
     if canon_copied:
         log(f'  manuscript/canon/ ({canon_copied} files)')
 
+    # page-blocking-prompts.md (issue #252) — emit only when any page
+    # in the bundle has a blocking prompt
+    blocking_md = _assemble_blocking_prompts(project_dir, chapters)
+    blocking_line = ''
+    if blocking_md:
+        blocking_path = os.path.join(bundle_dir, 'page-blocking-prompts.md')
+        with open(blocking_path, 'w', encoding='utf-8') as f:
+            f.write(blocking_md)
+        log('  manuscript/page-blocking-prompts.md')
+        blocking_line = _BLOCKING_PROMPTS_INVENTORY_LINE
+
     # handoff-readme.md
-    readme = HANDOFF_README.format(title=title, canon_line=canon_line)
+    readme = HANDOFF_README.format(
+        title=title, canon_line=canon_line, blocking_line=blocking_line,
+    )
     readme_path = os.path.join(bundle_dir, 'handoff-readme.md')
     with open(readme_path, 'w', encoding='utf-8') as f:
         f.write(readme)
