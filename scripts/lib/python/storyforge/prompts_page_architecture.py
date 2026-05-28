@@ -36,6 +36,14 @@ TODO — monochrome storyboard thumbnail. Must:
 """
 
 
+def _format_neighbor(label: str, page: dict | None) -> str:
+    if not page:
+        return f'- {label}: (none — this page is at the scene edge)'
+    pid = page.get('page_id', '?')
+    spread = page.get('spread_position', '?')
+    return f'- {label}: {pid} (spread_position: {spread})'
+
+
 def render_strict_template(*, page_id: str, panel_count: int) -> str:
     """Deterministic strict-mode template. No LLM call.
 
@@ -50,3 +58,78 @@ def render_strict_template(*, page_id: str, panel_count: int) -> str:
         for i in range(1, bullets + 1)
     ) + '\n'
     return _STRICT_TEMPLATE_HEADER + hierarchy + _STRICT_TEMPLATE_TAIL
+
+
+def render_coach_brief(*,
+                       page_id: str,
+                       scene_title: str,
+                       panel_count: int,
+                       scene_brief: dict,
+                       prev_page: dict | None,
+                       next_page: dict | None,
+                       canon_blocks: dict) -> str:
+    """Coach-mode markdown brief written to working/coaching/.
+
+    No file mutation of the page file. The brief asks the right
+    questions and embeds the canon vocabulary inline so the author
+    can decide without flipping files.
+    """
+    lines = [
+        f'# Page architecture brief: {page_id}',
+        '',
+        f'**Scene:** {scene_title}  ',
+        f'**Panels on this page:** {panel_count}',
+        '',
+        '## What you need to decide',
+        '',
+        '- Which panel is this page\'s emotional fulcrum (the dominant register)?',
+        '- Which panels are transitional / rhythmic / atmospheric?',
+        '- Is there a page-turn beat? What reveals on the turn?',
+        '- What\'s the spread context (this page\'s relationship to its facing page)?',
+        '- Dominant motif on this page (cite from motif canon)?',
+        '',
+        '## Canon vocabulary to use',
+        '',
+    ]
+    for canon_id in ('panel-registers', 'page-rhythm-rules'):
+        block = canon_blocks.get(canon_id, '').strip()
+        if block:
+            lines += [f'### {canon_id}', '', block, '']
+    lines += ['## Brief inputs', '']
+    for key in ('panel_breakdown', 'visual_keywords', 'page_turn_beats',
+                'page_layout', 'caption_strategy'):
+        val = scene_brief.get(key, '')
+        lines.append(f'- **{key}:** {val or "(empty)"}')
+    lines += ['', '## Sibling pages', '']
+    lines.append(_format_neighbor('Previous page', prev_page))
+    lines.append(_format_neighbor('Next page', next_page))
+    lines += [
+        '',
+        '## Write your sections into the page file at:',
+        '',
+        f'`pages/{page_id}.md` — insert both sections between '
+        '`## Scene context` and `## Panel script`.',
+        '',
+        'Section headers:',
+        '',
+        '```',
+        '## Page architecture',
+        '',
+        '### Intent',
+        '...',
+        '',
+        '### Panel hierarchy',
+        '- Panel 1 — <register>: <one-line role>',
+        '...',
+        '',
+        '### Book-level placement',
+        '- Spread context: ...',
+        '- Page-turn beat: ...',
+        '',
+        '## Page-blocking prompt',
+        '',
+        '<monochrome storyboard thumbnail; cite registers by name;',
+        ' specify geometry, eye flow; no surface texture, no faces>',
+        '```',
+    ]
+    return '\n'.join(lines) + '\n'
