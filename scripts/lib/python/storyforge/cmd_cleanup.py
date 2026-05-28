@@ -1082,6 +1082,26 @@ def _check_page_files(project_dir: str) -> list[dict]:
                               'total_pages_in_scene to be consistent',
                     'severity': 'warning',
                 })
+            elif kind == 'missing_page_architecture':
+                findings.append({
+                    'type': 'page_missing_page_architecture', 'file': rel_path,
+                    'detail': issue['detail'],
+                    'action': 'Run `storyforge elaborate --stage '
+                              'page-architecture --page '
+                              f'{os.path.splitext(os.path.basename(page_path))[0]}` '
+                              'to populate (or write the section by hand)',
+                    'severity': 'warning',
+                })
+            elif kind == 'missing_blocking_prompt':
+                findings.append({
+                    'type': 'page_missing_blocking_prompt', 'file': rel_path,
+                    'detail': issue['detail'],
+                    'action': 'Run `storyforge elaborate --stage '
+                              'page-architecture --page '
+                              f'{os.path.splitext(os.path.basename(page_path))[0]}` '
+                              'to populate (or write the section by hand)',
+                    'severity': 'warning',
+                })
             else:
                 # Catches future PageFindingKind values that nobody wires
                 # up here — silent drop would re-introduce SF-6.

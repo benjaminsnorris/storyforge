@@ -104,3 +104,36 @@ def test_finding_kinds_are_in_literal_type():
     from storyforge.pages import PageFindingKind  # noqa: F401
     # Existence of the import is the assertion; type-check happens at
     # mypy / pyright time, not runtime.
+
+
+def test_cleanup_check_page_files_surfaces_new_findings(tmp_path, monkeypatch):
+    """End-to-end through cmd_cleanup._check_page_files."""
+    import os
+    # Set up a minimal GN-mode project
+    project = tmp_path / 'proj'
+    project.mkdir()
+    (project / 'storyforge.yaml').write_text(
+        'project:\n  medium: graphic-novel\n'
+    )
+    pages = project / 'pages'
+    pages.mkdir()
+    (pages / 's01-p1.md').write_text(
+        '---\n'
+        'page_id: s01-p1\n'
+        'scene_id: s01-studio\n'
+        'page_within_scene: 1\n'
+        'total_pages_in_scene: 1\n'
+        'panel_count: 1\n'
+        '---\n\n'
+        '## Scene context\n\nContext only — no architecture, no blocking.\n'
+    )
+    from storyforge.cmd_cleanup import _check_page_files
+    findings = _check_page_files(str(project))
+    types = {f['type'] for f in findings}
+    assert 'page_missing_page_architecture' in types
+    assert 'page_missing_blocking_prompt' in types
+    # Both are warnings (cleanup remains exit-0 over these)
+    for f in findings:
+        if f['type'] in ('page_missing_page_architecture',
+                         'page_missing_blocking_prompt'):
+            assert f['severity'] == 'warning'
