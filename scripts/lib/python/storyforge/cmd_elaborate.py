@@ -25,13 +25,13 @@ import time
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, select_model,
     install_signal_handlers, get_plugin_dir, build_shared_context,
-    get_medium,
+    get_medium, get_coaching_level,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
     update_pr_task, commit_and_push, run_review_phase,
 )
-from storyforge.costs import print_summary
+from storyforge.costs import print_summary, log_operation
 
 
 # ============================================================================
@@ -737,14 +737,332 @@ def _precondition_check_page(project_dir: str, page_id: str,
     return True, ''
 
 
+def _validate_architecture_response(text: str) -> tuple[bool, str]:
+    """Parse and validate an LLM response for the page-architecture stage.
+
+    Returns (ok, sections_block). The sections_block is the unwrapped
+    text with any ```markdown fence stripped; suitable to splice
+    directly into a page file. Returns (False, '') when the response
+    lacks either required top-level header.
+    """
+    body = text.strip()
+    # Strip optional ```markdown fence
+    if body.startswith('```'):
+        lines = body.splitlines()
+        if lines and lines[0].startswith('```'):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == '```':
+            lines = lines[:-1]
+        body = '\n'.join(lines).strip()
+
+    if '## Page architecture' not in body:
+        return False, ''
+    if '## Page-blocking prompt' not in body:
+        return False, ''
+    return True, body
+
+
+_PAGE_ARCH_HEADER_RE = re.compile(
+    r'^##\s+Page\s+architecture\s*$', re.MULTILINE | re.IGNORECASE,
+)
+_BLOCKING_PROMPT_HEADER_RE = re.compile(
+    r'^##\s+Page[- ]blocking\s+prompt\s*$', re.MULTILINE | re.IGNORECASE,
+)
+_PANEL_SCRIPT_HEADER_RE = re.compile(
+    r'^##\s+Panel\s+script\s*$', re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _add_canonical_blocks_embedded(text: str, canon_ids: list[str]) -> str:
+    """Add or extend the canonical_blocks_embedded block-list in
+    the frontmatter. Preserves any existing entries; appends new ones
+    that aren't already present.
+    """
+    fm_match = re.match(r'\A---\n(.*?)---\n(.*)', text, re.DOTALL)
+    if not fm_match:
+        return text
+    fm = fm_match.group(1)
+    body = fm_match.group(2)
+
+    new_items = [f'reference/canon/{cid}.md' for cid in canon_ids]
+
+    # If the key exists, find and extend its block list
+    key_re = re.compile(r'^canonical_blocks_embedded:\s*$', re.MULTILINE)
+    km = key_re.search(fm)
+    if km:
+        after = fm[km.end():]
+        existing = []
+        consumed = 0
+        for line in after.splitlines(keepends=True):
+            if line.startswith('  - '):
+                existing.append(line[4:].split('#', 1)[0].strip())
+                consumed += len(line)
+            else:
+                break
+        existing_set = set(existing)
+        to_add = [n for n in new_items if n not in existing_set]
+        if not to_add:
+            return text
+        block_end = km.end() + consumed
+        addition = ''.join(f'  - {n}\n' for n in to_add)
+        new_fm = fm[:block_end] + addition + fm[block_end:]
+    else:
+        # Append the key + list at end of frontmatter
+        addition = 'canonical_blocks_embedded:\n' + \
+                   ''.join(f'  - {n}\n' for n in new_items)
+        new_fm = fm.rstrip('\n') + '\n' + addition
+
+    return f'---\n{new_fm}---\n{body}'
+
+
+def _splice_page_architecture(page_path: str, sections_block: str,
+                              canon_ids: list[str]) -> None:
+    """Write the two new sections into the page file.
+
+    - If both sections already exist, replace them (force mode).
+    - Otherwise insert between '## Scene context' (if present) and
+      '## Panel script' (if present), or at the end of the body.
+    - Append a `canonical_blocks_embedded:` block-list to the
+      frontmatter listing reference/canon/<canon_id>.md for each
+      canon_id (skipping any that are already listed).
+    """
+    with open(page_path, encoding='utf-8') as f:
+        text = f.read()
+
+    # 1. Update frontmatter to record canonical_blocks_embedded
+    if canon_ids:
+        text = _add_canonical_blocks_embedded(text, canon_ids)
+
+    # 2. Splice the sections into the body
+    fm_match = re.match(r'\A(---\n.*?---\n)(.*)', text, re.DOTALL)
+    if fm_match:
+        fm_text = fm_match.group(1)
+        body = fm_match.group(2)
+    else:
+        fm_text, body = '', text
+
+    arch_match = _PAGE_ARCH_HEADER_RE.search(body)
+    block_match = _BLOCKING_PROMPT_HEADER_RE.search(body)
+    if arch_match and block_match:
+        # Replace existing sections — find end of blocking-prompt section
+        after_block = body[block_match.end():]
+        next_h = re.search(r'^##\s+\S', after_block, re.MULTILINE)
+        end = block_match.end() + (next_h.start() if next_h else len(after_block))
+        new_body = (
+            body[:arch_match.start()]
+            + sections_block.strip()
+            + '\n\n'
+            + body[end:].lstrip('\n')
+        )
+    else:
+        # Insert: prefer between Scene context and Panel script
+        ps_match = _PANEL_SCRIPT_HEADER_RE.search(body)
+        if ps_match:
+            insert_at = ps_match.start()
+            prefix = body[:insert_at].rstrip('\n')
+            suffix = body[insert_at:]
+            new_body = prefix + '\n\n' + sections_block.strip() + '\n\n' + suffix
+        else:
+            new_body = body.rstrip('\n') + '\n\n' + sections_block.strip() + '\n'
+
+    with open(page_path, 'w', encoding='utf-8') as f:
+        f.write(fm_text + new_body)
+
+
+def _run_page_architecture_handler_gn(project_dir: str, *,
+                                      dry_run: bool, coaching: str,
+                                      page: str | None, scene: str | None,
+                                      force: bool) -> int:
+    """Dispatcher for the page-architecture stage.
+
+    Coaching modes:
+      - full: LLM drafts both sections, splices into page file
+      - coach: writes a brief to working/coaching/, no page mutation
+      - strict: stamps a TODO template into the page file, no API call
+
+    Returns the number of pages successfully processed. The caller
+    can use this to decide exit code (0 for success or no-op, 1 for
+    zero-processed-due-to-precondition-failure).
+    """
+    from storyforge.pages import (
+        pages_for_scene as _pages_for_scene,
+    )
+    from storyforge.prompts_page_architecture import (
+        render_strict_template, render_coach_brief, build_full_prompt,
+    )
+    from storyforge.canon import _embeddable_block_text as _block_text
+    from storyforge.elaborate import _read_csv_as_map
+
+    targets = _select_pages_for_architecture(project_dir, page, scene, force)
+    if not targets:
+        log('No pages need page-architecture (use --force to redo).')
+        return 0
+
+    log(f'page-architecture: {len(targets)} page(s) to process '
+        f'(coaching={coaching})')
+
+    scenes_map = _read_csv_as_map(
+        os.path.join(project_dir, 'reference', 'scenes.csv'))
+    briefs_map = _read_csv_as_map(
+        os.path.join(project_dir, 'reference', 'scene-briefs.csv'))
+    intent_map = _read_csv_as_map(
+        os.path.join(project_dir, 'reference', 'scene-intent.csv'))
+
+    canon_block_cache: dict[str, str] = {}
+
+    def _canon(canon_id: str) -> str:
+        if canon_id not in canon_block_cache:
+            path = os.path.join(project_dir, 'reference', 'canon',
+                                f'{canon_id}.md')
+            text = _block_text(path) if os.path.isfile(path) else None
+            canon_block_cache[canon_id] = (text or '').strip()
+        return canon_block_cache[canon_id]
+
+    processed = 0
+    skipped_precondition = 0
+    for parsed in targets:
+        page_id = parsed.get('page_id', '')
+        scene_id = parsed.get('scene_id', '')
+        page_path = parsed['path']
+
+        ok, reason = _precondition_check_page(project_dir, page_id, scene_id)
+        if not ok:
+            log(f'  WARN skip {page_id}: {reason}')
+            skipped_precondition += 1
+            continue
+
+        scene_row = scenes_map.get(scene_id, {})
+        scene_title = scene_row.get('title') or scene_id
+        scene_brief = briefs_map.get(scene_id, {})
+        scene_intent = intent_map.get(scene_id, {})
+
+        # Neighbors (for spread context)
+        siblings = _pages_for_scene(project_dir, scene_id)
+        prev_page = next_page = None
+        for i, sib in enumerate(siblings):
+            if sib.get('page_id') == page_id:
+                if i > 0:
+                    prev_page = siblings[i - 1]
+                if i + 1 < len(siblings):
+                    next_page = siblings[i + 1]
+                break
+
+        # Coaching dispatch
+        if coaching == 'strict':
+            template = render_strict_template(
+                page_id=page_id,
+                panel_count=parsed.get('panel_count', 0) or 0,
+            )
+            if dry_run:
+                print(f'===== DRY RUN: strict template for {page_id} =====')
+                print(template)
+                continue
+            _splice_page_architecture(page_path, template, canon_ids=[])
+            log(f'  {page_id}: strict template written')
+            processed += 1
+            continue
+
+        canon_blocks = {
+            cid: _canon(cid)
+            for cid in ('panel-registers', 'page-rhythm-rules',
+                        'style-foundation', 'lighting-laws')
+        }
+
+        if coaching == 'coach':
+            brief = render_coach_brief(
+                page_id=page_id, scene_title=scene_title,
+                panel_count=parsed.get('panel_count', 0) or 0,
+                scene_brief=scene_brief,
+                prev_page=prev_page, next_page=next_page,
+                canon_blocks=canon_blocks,
+            )
+            if dry_run:
+                print(f'===== DRY RUN: coach brief for {page_id} =====')
+                print(brief)
+                continue
+            coaching_dir = os.path.join(project_dir, 'working', 'coaching')
+            os.makedirs(coaching_dir, exist_ok=True)
+            brief_path = os.path.join(
+                coaching_dir, f'page-architecture-{page_id}.md',
+            )
+            with open(brief_path, 'w', encoding='utf-8') as f:
+                f.write(brief)
+            log(f'  {page_id}: coach brief written to {brief_path}')
+            processed += 1
+            continue
+
+        # Full mode
+        prompt = build_full_prompt(
+            page_id=page_id, page_frontmatter=parsed,
+            scene_title=scene_title, scene_brief=scene_brief,
+            scene_intent=scene_intent,
+            prev_page=prev_page, next_page=next_page,
+            canon_blocks=canon_blocks,
+        )
+        if dry_run:
+            print(f'===== DRY RUN: full prompt for {page_id} =====')
+            print(prompt)
+            continue
+
+        from storyforge.api import invoke_api
+        stage_model = select_model('drafting')
+        response = invoke_api(prompt, stage_model, max_tokens=2048)
+        ok, sections = _validate_architecture_response(response)
+        if not ok:
+            log(f'  WARN {page_id}: LLM response missing required headers; '
+                f'skipped')
+            continue
+        canon_ids_used = [
+            cid for cid in ('panel-registers', 'page-rhythm-rules',
+                            'style-foundation', 'lighting-laws')
+            if canon_blocks.get(cid)
+        ]
+        _splice_page_architecture(page_path, sections, canon_ids_used)
+        try:
+            log_operation(
+                project_dir, 'elaborate-page-architecture-gn',
+                stage_model, 0, 0, 0.0, target=page_id,
+            )
+        except Exception:
+            pass
+        log(f'  {page_id}: full sections written')
+        processed += 1
+
+    if processed == 0 and skipped_precondition > 0:
+        return 1
+    return processed
+
+
 # ============================================================================
 # Main stage execution (spine/architecture/map/briefs)
 # ============================================================================
 
 def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
                     dry_run: bool, interactive: bool, seed: str,
+                    args=None,
                     session_start: str | None = None) -> None:
     """Run a standard elaboration stage (spine/architecture/map/briefs)."""
+    medium = get_medium(project_dir)
+
+    # Page-architecture is graphic-novel-only and has its own dispatcher
+    # (per-page LLM calls with splice + canon embed). Short-circuit
+    # before any of the standard branch / PR / single-prompt scaffolding.
+    if stage == 'page-architecture':
+        if medium != 'graphic-novel':
+            log('ERROR: page-architecture stage is graphic-novel-only.')
+            sys.exit(1)
+        coaching = (
+            getattr(args, 'coaching', None)
+            or get_coaching_level(project_dir)
+        )
+        rc = _run_page_architecture_handler_gn(
+            project_dir, dry_run=dry_run, coaching=coaching,
+            page=getattr(args, 'page', None),
+            scene=getattr(args, 'scene', None),
+            force=getattr(args, 'force', False),
+        )
+        sys.exit(rc)
+
     plugin_dir = get_plugin_dir()
     log_dir = os.path.join(project_dir, 'working', 'logs')
     os.makedirs(log_dir, exist_ok=True)
@@ -770,7 +1088,6 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
     stage_model = select_model('drafting')  # Opus for creative work
     system = build_shared_context(project_dir, model=stage_model)
 
-    medium = get_medium(project_dir)
     has_system = bool(system)
 
     if stage == 'spine':
@@ -1170,4 +1487,5 @@ def main(argv=None):
     else:
         _run_main_stage(args.stage, project_dir, ref_dir,
                         args.dry_run, args.interactive, args.seed,
+                        args=args,
                         session_start=session_start)
