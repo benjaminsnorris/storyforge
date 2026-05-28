@@ -502,3 +502,68 @@ def test_validate_response_rejects_inline_header(tmp_path):
     resp = 'preamble ## Page architecture suffix\n## Page-blocking prompt\n\nSB.\n'
     ok, _ = _validate_architecture_response(resp)
     assert ok is False
+
+
+# ============================================================================
+# Regression tests for PR #258 review findings — Commit 1
+# (SF-1, CR-1, CR-2, T-3, TD-3, C-1, SF-3, SF-4)
+# ============================================================================
+
+
+def test_validate_response_rejects_wrong_section_order():
+    """SF-4: Page architecture must precede Page-blocking prompt."""
+    from storyforge.cmd_elaborate import _validate_architecture_response
+    resp = (
+        '## Page-blocking prompt\n\nStoryboard.\n\n'
+        '## Page architecture\n\nIntent.\n'
+    )
+    ok, _ = _validate_architecture_response(resp)
+    assert ok is False
+
+
+def test_handler_returns_one_when_all_pages_fail_llm_validation(tmp_path, monkeypatch):
+    """SF-1/CR-2: when every page's LLM response is empty (API failure),
+    the handler must return 1, NOT 0 — otherwise CI sees false success."""
+    from storyforge.cmd_elaborate import _run_page_architecture_handler_gn
+    proj = _make_gn_project(tmp_path)
+    monkeypatch.setattr('storyforge.api.invoke_api', lambda *a, **kw: '')
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    rc = _run_page_architecture_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 1
+
+
+def test_handler_returns_one_when_all_pages_fail_llm_structural_validation(tmp_path, monkeypatch):
+    """SF-1/CR-2: when every page's LLM response is non-empty but missing
+    required headers, the handler must return 1 (distinct from API failure
+    but same exit-code semantics)."""
+    from storyforge.cmd_elaborate import _run_page_architecture_handler_gn
+    proj = _make_gn_project(tmp_path)
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: 'Sorry I cannot help with that')
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    rc = _run_page_architecture_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 1
+
+
+def test_full_mode_bad_llm_response_does_not_mutate_page(tmp_path, monkeypatch):
+    """T-3: page file must be untouched when LLM response fails validation."""
+    from storyforge.cmd_elaborate import _run_page_architecture_handler_gn
+    proj = _make_gn_project(tmp_path)
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: 'malformed response')
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    _run_page_architecture_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    page_text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
+    assert '## Page architecture' not in page_text

@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import time
+from typing import Literal
 
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, select_model,
@@ -751,10 +752,11 @@ _PANEL_SCRIPT_HEADER_RE = re.compile(
 def _validate_architecture_response(text: str) -> tuple[bool, str]:
     """Parse and validate an LLM response for the page-architecture stage.
 
-    Returns (ok, sections_block). The sections_block is the unwrapped
-    text with any ```markdown fence stripped; suitable to splice
-    directly into a page file. Returns (False, '') when the response
-    lacks either required top-level header.
+    Returns (ok, sections_block). On ok=True, sections_block is the
+    fence-stripped markdown containing both required headers in the
+    correct order (Page architecture before Page-blocking prompt).
+    Returns (False, '') on any failure: missing header, wrong order,
+    or substring-only (mid-line) match.
 
     Uses the same line-anchored regexes as _splice_page_architecture so
     the validator and splicer share a single contract for what counts as
@@ -770,9 +772,11 @@ def _validate_architecture_response(text: str) -> tuple[bool, str]:
             lines = lines[:-1]
         body = '\n'.join(lines).strip()
 
-    if not _PAGE_ARCH_HEADER_RE.search(body):
+    arch_match = _PAGE_ARCH_HEADER_RE.search(body)
+    block_match = _BLOCKING_PROMPT_HEADER_RE.search(body)
+    if not arch_match or not block_match:
         return False, ''
-    if not _BLOCKING_PROMPT_HEADER_RE.search(body):
+    if block_match.start() < arch_match.start():
         return False, ''
     return True, body
 
@@ -881,7 +885,7 @@ def _splice_page_architecture(page_path: str, sections_block: str,
 def _run_page_architecture_handler_gn(project_dir: str, *,
                                       dry_run: bool, coaching: str,
                                       page: str | None, scene: str | None,
-                                      force: bool) -> int:
+                                      force: bool) -> Literal[0, 1]:
     """Dispatcher for the page-architecture stage.
 
     Coaching modes:
@@ -889,9 +893,9 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
       - coach: writes a brief to working/coaching/, no page mutation
       - strict: stamps a TODO template into the page file, no API call
 
-    Returns the number of pages successfully processed. The caller
-    can use this to decide exit code (0 for success or no-op, 1 for
-    zero-processed-due-to-precondition-failure).
+    Returns 0 on success or no-op; 1 when every candidate page was skipped
+    due to a precondition failure or an LLM/API failure (so CI surfaces
+    the unmet conditions).
     """
     from storyforge.pages import (
         pages_for_scene as _pages_for_scene,
@@ -929,6 +933,7 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
 
     processed = 0
     skipped_precondition = 0
+    skipped_llm = 0
     for parsed in targets:
         page_id = parsed.get('page_id', '')
         scene_id = parsed.get('scene_id', '')
@@ -1016,10 +1021,16 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
         from storyforge.api import invoke_api
         stage_model = select_model('drafting')
         response = invoke_api(prompt, stage_model, max_tokens=2048)
+        if not response:
+            log(f'  WARN {page_id}: API call returned empty response '
+                f'(network/auth error?); skipped')
+            skipped_llm += 1
+            continue
         ok, sections = _validate_architecture_response(response)
         if not ok:
-            log(f'  WARN {page_id}: LLM response missing required headers; '
-                f'skipped')
+            log(f'  WARN {page_id}: LLM response present but missing required '
+                f'headers or wrong order; skipped')
+            skipped_llm += 1
             continue
         canon_ids_used = [
             cid for cid in ('panel-registers', 'page-rhythm-rules',
@@ -1037,7 +1048,7 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
         log(f'  {page_id}: full sections written')
         processed += 1
 
-    if processed == 0 and skipped_precondition > 0:
+    if processed == 0 and (skipped_precondition > 0 or skipped_llm > 0):
         return 1
     return 0
 
