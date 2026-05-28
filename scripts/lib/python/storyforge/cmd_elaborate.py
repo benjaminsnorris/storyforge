@@ -737,6 +737,17 @@ def _precondition_check_page(project_dir: str, page_id: str,
     return True, ''
 
 
+_PAGE_ARCH_HEADER_RE = re.compile(
+    r'^##\s+Page\s+architecture\s*$', re.MULTILINE | re.IGNORECASE,
+)
+_BLOCKING_PROMPT_HEADER_RE = re.compile(
+    r'^##\s+Page[- ]blocking\s+prompt\s*$', re.MULTILINE | re.IGNORECASE,
+)
+_PANEL_SCRIPT_HEADER_RE = re.compile(
+    r'^##\s+Panel\s+script\s*$', re.MULTILINE | re.IGNORECASE,
+)
+
+
 def _validate_architecture_response(text: str) -> tuple[bool, str]:
     """Parse and validate an LLM response for the page-architecture stage.
 
@@ -744,6 +755,10 @@ def _validate_architecture_response(text: str) -> tuple[bool, str]:
     text with any ```markdown fence stripped; suitable to splice
     directly into a page file. Returns (False, '') when the response
     lacks either required top-level header.
+
+    Uses the same line-anchored regexes as _splice_page_architecture so
+    the validator and splicer share a single contract for what counts as
+    a valid header (case-insensitive, anchored to line start).
     """
     body = text.strip()
     # Strip optional ```markdown fence
@@ -755,22 +770,11 @@ def _validate_architecture_response(text: str) -> tuple[bool, str]:
             lines = lines[:-1]
         body = '\n'.join(lines).strip()
 
-    if '## Page architecture' not in body:
+    if not _PAGE_ARCH_HEADER_RE.search(body):
         return False, ''
-    if '## Page-blocking prompt' not in body:
+    if not _BLOCKING_PROMPT_HEADER_RE.search(body):
         return False, ''
     return True, body
-
-
-_PAGE_ARCH_HEADER_RE = re.compile(
-    r'^##\s+Page\s+architecture\s*$', re.MULTILINE | re.IGNORECASE,
-)
-_BLOCKING_PROMPT_HEADER_RE = re.compile(
-    r'^##\s+Page[- ]blocking\s+prompt\s*$', re.MULTILINE | re.IGNORECASE,
-)
-_PANEL_SCRIPT_HEADER_RE = re.compile(
-    r'^##\s+Panel\s+script\s*$', re.MULTILINE | re.IGNORECASE,
-)
 
 
 def _add_canonical_blocks_embedded(text: str, canon_ids: list[str]) -> str:
@@ -790,9 +794,14 @@ def _add_canonical_blocks_embedded(text: str, canon_ids: list[str]) -> str:
     key_re = re.compile(r'^canonical_blocks_embedded:\s*$', re.MULTILINE)
     km = key_re.search(fm)
     if km:
-        after = fm[km.end():]
+        after_raw = fm[km.end():]
+        # km.end() lands before the trailing newline of the key line.
+        # Skip that newline so the first list item line is the first
+        # thing we see; track it in consumed so block_end stays correct.
+        newline_skip = 1 if after_raw.startswith('\n') else 0
+        after = after_raw[newline_skip:]
         existing = []
-        consumed = 0
+        consumed = newline_skip
         for line in after.splitlines(keepends=True):
             if line.startswith('  - '):
                 existing.append(line[4:].split('#', 1)[0].strip())
@@ -1030,7 +1039,7 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
 
     if processed == 0 and skipped_precondition > 0:
         return 1
-    return processed
+    return 0
 
 
 # ============================================================================

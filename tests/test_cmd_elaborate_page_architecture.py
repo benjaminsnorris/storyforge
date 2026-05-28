@@ -306,6 +306,9 @@ def test_run_page_architecture_end_to_end_with_mocked_api(tmp_path, monkeypatch)
     assert 'Mocked intent' in text
     assert '## Page-blocking prompt' in text
     assert 'Monochrome storyboard' in text
+    # Frontmatter audit trail: full mode populates canonical_blocks_embedded
+    assert 'canonical_blocks_embedded:' in text
+    assert 'reference/canon/panel-registers.md' in text
 
 
 def test_dry_run_prints_prompt_and_does_not_write(tmp_path, capsys):
@@ -365,3 +368,137 @@ def test_coach_mode_writes_brief_to_coaching_dir_no_page_mutation(tmp_path, monk
     assert os.path.isfile(brief_path)
     brief = open(brief_path).read()
     assert 'Which panel' in brief
+
+
+# ============================================================================
+# Regression tests for PR review findings (commit 85c85b1)
+# ============================================================================
+
+
+def test_splice_extends_existing_canonical_blocks_embedded_list(tmp_path):
+    """When canonical_blocks_embedded: already has entries, splice must
+    extend the list correctly (not collapse onto the key line, which
+    would produce invalid YAML)."""
+    from storyforge.cmd_elaborate import _splice_page_architecture
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\n"
+        "page_id: s01-p1\n"
+        "scene_id: s01\n"
+        "page_within_scene: 1\n"
+        "total_pages_in_scene: 1\n"
+        "panel_count: 1\n"
+        "canonical_blocks_embedded:\n"
+        "  - reference/canon/style-foundation.md\n"
+        "---\n\n"
+        "## Scene context\n\nBeat.\n\n"
+        "## Panel script\n\n**Panel 1.**\n"
+    )
+    _splice_page_architecture(
+        str(page_path),
+        '## Page architecture\n\nIntent.\n\n## Page-blocking prompt\n\nSB.\n',
+        canon_ids=['panel-registers'],
+    )
+    text = page_path.read_text()
+    # The original entry must still be in the list
+    assert 'reference/canon/style-foundation.md' in text
+    # The new entry must be added
+    assert 'reference/canon/panel-registers.md' in text
+    # Key must remain alone on its line (no entry collapsed onto it)
+    assert 'canonical_blocks_embedded:  -' not in text
+    assert 'canonical_blocks_embedded:\n' in text
+    # Both entries should appear as proper block-list items
+    assert '  - reference/canon/style-foundation.md\n' in text
+    assert '  - reference/canon/panel-registers.md\n' in text
+
+
+def test_splice_skips_duplicate_canonical_blocks(tmp_path):
+    """If a canon_id is already in canonical_blocks_embedded:, it's not added twice."""
+    from storyforge.cmd_elaborate import _splice_page_architecture
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\n"
+        "page_id: s01-p1\n"
+        "scene_id: s01\n"
+        "page_within_scene: 1\n"
+        "total_pages_in_scene: 1\n"
+        "panel_count: 1\n"
+        "canonical_blocks_embedded:\n"
+        "  - reference/canon/panel-registers.md\n"
+        "---\n\n"
+        "## Scene context\n\nBeat.\n\n"
+        "## Panel script\n\n**Panel 1.**\n"
+    )
+    _splice_page_architecture(
+        str(page_path),
+        '## Page architecture\n\nIntent.\n\n## Page-blocking prompt\n\nSB.\n',
+        canon_ids=['panel-registers'],  # already present
+    )
+    text = page_path.read_text()
+    # Only one occurrence — no duplication
+    assert text.count('reference/canon/panel-registers.md') == 1
+
+
+def test_handler_returns_zero_for_successful_run(tmp_path, monkeypatch):
+    """A successful run that processes N pages must return 0, not N
+    (sys.exit(N) for N >= 1 is treated as failure by Unix tools)."""
+    from storyforge.cmd_elaborate import _run_page_architecture_handler_gn
+    proj = _make_gn_project(tmp_path)
+    # Strict mode — no API call needed; should process exactly 1 page
+    rc = _run_page_architecture_handler_gn(
+        proj, dry_run=False, coaching='strict',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 0  # NOT 1 (would otherwise collide with precondition-failure code)
+
+
+def test_handler_returns_one_when_all_pages_skipped_on_precondition(tmp_path):
+    """When every page is skipped due to a precondition failure (and zero
+    are processed), the handler returns 1 so CI surfaces the unmet preconditions."""
+    from storyforge.cmd_elaborate import _run_page_architecture_handler_gn
+    proj = _make_gn_project(tmp_path)
+    # Wipe panel_breakdown so the precondition fails
+    briefs = os.path.join(proj, 'reference', 'scene-briefs.csv')
+    with open(briefs) as f:
+        text = f.read()
+    text = text.replace('p1: 2-panel', '')
+    with open(briefs, 'w') as f:
+        f.write(text)
+    rc = _run_page_architecture_handler_gn(
+        proj, dry_run=False, coaching='strict',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 1
+
+
+def test_handler_returns_zero_when_no_pages_to_process(tmp_path):
+    """No-op (zero targets, zero precondition skips) is success — exit 0."""
+    from storyforge.cmd_elaborate import _run_page_architecture_handler_gn
+    proj = _make_gn_project(tmp_path)
+    # Pre-populate the only page so default filter excludes it
+    page_path = os.path.join(proj, 'pages', 's01-p1.md')
+    with open(page_path) as f:
+        body = f.read()
+    body = body.replace(
+        '## Scene context\n\nOpening beat.\n\n',
+        '## Scene context\n\nOpening beat.\n\n'
+        '## Page architecture\n\nintent.\n\n'
+        '## Page-blocking prompt\n\nstoryboard.\n\n',
+    )
+    with open(page_path, 'w') as f:
+        f.write(body)
+    rc = _run_page_architecture_handler_gn(
+        proj, dry_run=False, coaching='strict',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 0
+
+
+def test_validate_response_rejects_inline_header(tmp_path):
+    """A '## Page architecture' substring buried mid-line should NOT pass
+    validation (the splicer requires it to be a line-anchored header)."""
+    from storyforge.cmd_elaborate import _validate_architecture_response
+    # Header mid-line — substring contains but is not a real heading
+    resp = 'preamble ## Page architecture suffix\n## Page-blocking prompt\n\nSB.\n'
+    ok, _ = _validate_architecture_response(resp)
+    assert ok is False
