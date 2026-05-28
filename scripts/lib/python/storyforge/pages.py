@@ -243,6 +243,8 @@ PageFindingKind = Literal[
     'bad_integer_field',
     'filename_page_id_mismatch',
     'page_within_scene_out_of_range',
+    'missing_page_architecture',
+    'missing_blocking_prompt',
 ]
 
 
@@ -310,6 +312,21 @@ def validate_page_file(path: str) -> list[PageFinding]:
                 'kind': 'page_within_scene_out_of_range', 'path': path,
                 'detail': f'page_within_scene={within} not in [1, {total}]',
             })
+
+    # Body-section checks (issue #252). Use the extractors so the
+    # "header present but body empty" half-edited state fires the same
+    # finding as a fully-missing section — both signal a gap the
+    # author should fill via `elaborate --stage page-architecture`.
+    if not extract_page_architecture(path).strip():
+        findings.append({
+            'kind': 'missing_page_architecture', 'path': path,
+            'detail': '"## Page architecture" section is missing or empty',
+        })
+    if not extract_blocking_prompt(path).strip():
+        findings.append({
+            'kind': 'missing_blocking_prompt', 'path': path,
+            'detail': '"## Page-blocking prompt" section is missing or empty',
+        })
 
     return findings
 
