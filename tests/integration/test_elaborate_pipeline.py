@@ -60,7 +60,8 @@ class TestElaborateValidStages:
     """Verify stage name validation."""
 
     def test_valid_stages_set(self):
-        expected = {'spine', 'architecture', 'map', 'briefs', 'gap-fill', 'mice-fill'}
+        expected = {'spine', 'architecture', 'map', 'briefs',
+                    'gap-fill', 'mice-fill', 'page-architecture'}
         assert VALID_STAGES == expected
 
     def test_unknown_stage_exits(self, project_dir, mock_api, mock_git, monkeypatch):
