@@ -385,23 +385,12 @@ def extract_panel_script(path: str) -> str:
     Output is the section body — strips the '## Panel script' heading
     itself but keeps everything until the next page-file section heading
     (e.g. '## Image-generation prompts' or '## Page-specific notes') or
-    EOF. `## Page N — LAYOUT` headers are NOT treated as section
+    EOF. '## Page N — LAYOUT' headers are NOT treated as section
     boundaries; they are part of the script body and remain in the output
     so script-package's global page renumbering can find them.
 
-    If multiple `## Panel script` headers are present, only the FIRST
+    If multiple '## Panel script' headers are present, only the FIRST
     section is returned (current page-file convention assumes one
     script section per page).
     """
-    page = parse_page_file(path)
-    if page is None:
-        return ''
-    body = page.get('body', '')
-    m = _PANEL_SCRIPT_HEADER.search(body)
-    if not m:
-        return ''
-    start = m.end()
-    rest = body[start:]
-    next_m = _NEXT_SECTION_HEADER.search(rest)
-    end = next_m.start() if next_m else len(rest)
-    return rest[:end].strip('\n')
+    return _extract_section(path, _PANEL_SCRIPT_HEADER)
