@@ -39,6 +39,7 @@ from storyforge.pages import (
     _PANEL_SCRIPT_HEADER as _PANEL_SCRIPT_HEADER_RE,
     _IMAGE_GEN_PROMPTS_HEADER,
     _PANEL_HEADER_RE,
+    _PANEL_SECTION_HEADER_RE,
 )
 
 
@@ -890,10 +891,14 @@ def _validate_panel_prompts_response(text: str,
 
     Returns (ok, block). The block is the unwrapped (fence-stripped)
     text containing the '## Image-generation prompts' section and its
-    ### Panel N subsections. Returns (False, '') when the section
-    header is absent, when the number of ### Panel N subsections
-    doesn't match expected_panel_count, or when sections appear in the
-    wrong order.
+    ### Panel N subsections. Returns (False, '') when:
+      - the section header is absent
+      - the number of ### Panel N subsections doesn't match
+        expected_panel_count
+      - any panel has #### N. <Title> sections in non-canonical order
+        (e.g., section 3 before section 2 within the same panel)
+    Tolerates ```markdown, ``` (plain), and any-language-tagged code
+    fence wrappers.
     """
     body = text.strip()
     if body.startswith('```'):
@@ -910,6 +915,20 @@ def _validate_panel_prompts_response(text: str,
                      for m in _PANEL_HEADER_RE.finditer(body)]
     if len(panel_indices) != expected_panel_count:
         return False, ''
+
+    # Section order check inside each panel (matches the
+    # panel_prompt_wrong_section_order cleanup finding so the LLM-response
+    # gate is as strict as the cleanup-time validator).
+    panel_matches = list(_PANEL_HEADER_RE.finditer(body))
+    for i, m in enumerate(panel_matches):
+        start = m.end()
+        end = panel_matches[i + 1].start() if i + 1 < len(panel_matches) else len(body)
+        panel_body = body[start:end]
+        parse_order = [int(sm.group(1))
+                       for sm in _PANEL_SECTION_HEADER_RE.finditer(panel_body)]
+        if parse_order and parse_order != sorted(parse_order):
+            return False, ''
+
     return True, body
 
 

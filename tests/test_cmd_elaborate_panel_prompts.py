@@ -363,3 +363,51 @@ def test_main_stage_exits_one_when_medium_is_novel(tmp_path):
         _run_main_stage('panel-prompts', str(proj), str(proj / 'reference'),
                         dry_run=False, interactive=False, seed='', args=args)
     assert exc.value.code == 1
+
+
+def test_validate_panel_prompts_response_rejects_wrong_section_order_in_panel():
+    """CRITICAL: validator must reject responses with sections out of
+    canonical order within a panel. Without this, malformed LLM output
+    would be spliced into the page file and only surfaced later by
+    cleanup."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 3. Pacing role\n\nregister: dominant\n\n'  # OUT OF ORDER
+        '#### 1. Style foundation\n\nfoundation\n\n'
+        '#### 2. Lighting laws\n\nlighting\n'
+    )
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_rejects_wrong_order_in_one_of_multiple_panels():
+    """Wrong order in panel 2 must reject even if panel 1 is well-formed."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 1. Style foundation\n\nx\n\n'
+        '#### 2. Lighting laws\n\ny\n\n'
+        '### Panel 2\n\n'
+        '#### 13. Negative constraints\n\nz\n\n'  # OUT OF ORDER
+        '#### 1. Style foundation\n\nw\n'
+    )
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=2)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_accepts_canonical_order():
+    """Sanity check: in-order response with all subsections passes."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 1. Style foundation\n\na\n\n'
+        '#### 2. Lighting laws\n\nb\n\n'
+        '#### 3. Pacing role\n\nc\n'
+    )
+    ok, block = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is True
+    assert '#### 1. Style foundation' in block
