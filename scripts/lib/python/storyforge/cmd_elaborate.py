@@ -666,6 +666,78 @@ def _briefs_handler_gn(project_dir: str, ref_dir: str,
 
 
 # ============================================================================
+# Page-architecture helpers (issue #252)
+# ============================================================================
+
+def _select_pages_for_architecture(project_dir: str, page: str | None,
+                                   scene: str | None, force: bool) -> list[dict]:
+    """Return the list of parsed page-file dicts to process this run.
+
+    Filtering rules (applied in order):
+      1. --page <page_id> → exactly that page (or empty if not found)
+      2. --scene <scene_id> → all pages whose scene_id matches
+      3. neither → every page file in pages/
+    Then (unless --force): drop pages that already have a non-empty
+    `## Page architecture` section.
+
+    Returns parsed page dicts (with 'path' key set) so callers can
+    inspect frontmatter without re-parsing.
+    """
+    from storyforge.pages import (
+        list_page_files, parse_page_file, extract_page_architecture,
+    )
+    all_pages = []
+    for p in list_page_files(project_dir):
+        parsed = parse_page_file(p)
+        if parsed is None:
+            continue
+        all_pages.append(parsed)
+
+    if page:
+        filtered = [p for p in all_pages if p.get('page_id') == page]
+    elif scene:
+        filtered = [p for p in all_pages if p.get('scene_id') == scene]
+    else:
+        filtered = all_pages
+
+    if force:
+        return filtered
+    return [p for p in filtered
+            if not extract_page_architecture(p['path']).strip()]
+
+
+def _precondition_check_page(project_dir: str, page_id: str,
+                             scene_id: str) -> tuple[bool, str]:
+    """Return (ok, reason). ok=False means skip with WARN.
+
+    Checks:
+      - scene_id exists in scenes.csv
+      - scene's brief has non-empty panel_breakdown
+      - canon vocabulary blocks are populated (not TODO):
+        panel-registers, page-rhythm-rules
+    """
+    from storyforge.csv_cli import get_field
+    from storyforge.canon import is_canon_block_populated
+
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not get_field(scenes_csv, scene_id, 'id'):
+        return False, f'scene {scene_id} not in scenes.csv'
+
+    briefs_csv = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    pb = get_field(briefs_csv, scene_id, 'panel_breakdown') or ''
+    if not pb.strip():
+        return False, f'scene {scene_id} brief has empty panel_breakdown'
+
+    for canon_id in ('panel-registers', 'page-rhythm-rules'):
+        if not is_canon_block_populated(project_dir, canon_id):
+            return False, (
+                f'canon block {canon_id!r} is missing or TODO — '
+                f'populate reference/canon/{canon_id}.md first'
+            )
+    return True, ''
+
+
+# ============================================================================
 # Main stage execution (spine/architecture/map/briefs)
 # ============================================================================
 
