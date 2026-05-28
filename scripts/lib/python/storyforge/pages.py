@@ -474,6 +474,35 @@ def extract_panel_prompts(path: str) -> dict[int, str]:
     return result
 
 
+_PANEL_SECTION_HEADER_RE = re.compile(
+    r'^####\s+(\d+)\.\s+([^\n]+?)\s*$', re.MULTILINE,
+)
+
+
+def extract_panel_sections(panel_body: str) -> dict[int, str]:
+    """Parse one panel's body into {section_index: section_body}.
+
+    Operates on the body string returned by extract_panel_prompts for a
+    single panel. Section index is the integer parsed from
+    #### N. <Title>. Body is everything AFTER the #### header up to the
+    next #### M. header or EOF — header stripped, body whitespace-trimmed.
+    Returns {} when no section headers are found.
+    """
+    matches = list(_PANEL_SECTION_HEADER_RE.finditer(panel_body))
+    if not matches:
+        return {}
+    result: dict[int, str] = {}
+    for i, m in enumerate(matches):
+        section_index = int(m.group(1))
+        body_start = m.end()
+        body_end = (matches[i + 1].start()
+                    if i + 1 < len(matches)
+                    else len(panel_body))
+        section_body = panel_body[body_start:body_end].strip()
+        result[section_index] = section_body
+    return result
+
+
 def extract_panel_script(path: str) -> str:
     """Return the contents of the '## Panel script' section, or '' if absent.
 

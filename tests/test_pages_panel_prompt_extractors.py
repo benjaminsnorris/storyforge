@@ -111,3 +111,64 @@ def test_extract_panel_prompts_handles_double_digit_panel_index(tmp_path):
     )
     result = extract_panel_prompts(_write_page(tmp_path, body))
     assert set(result.keys()) == {10, 11}
+
+
+def test_extract_panel_sections_all_13_present():
+    from storyforge.pages import extract_panel_sections
+    body = (
+        '#### 1. Style foundation\n\nfoundation\n\n'
+        '#### 2. Lighting laws\n\nlighting\n\n'
+        '#### 3. Pacing role\n\nregister: dominant\n\n'
+        '#### 4. Shot grammar\n\nshot\n\n'
+        '#### 5. Stage geography\n\ngeography\n\n'
+        '#### 6. Character block\n\ncharacters\n\n'
+        '#### 7. In this panel\n\nin-panel\n\n'
+        '#### 8. Focal objects + render priorities\n\nfocal\n\n'
+        '#### 9. Lighting logic\n\nlight logic\n\n'
+        '#### 10. Symbolic detail (low weight)\n\nmotif (low weight)\n\n'
+        '#### 11. Action\n\naction\n\n'
+        '#### 12. Emotional subtext (low weight)\n\nsubtext (low weight)\n\n'
+        '#### 13. Negative constraints\n\nexclusions\n'
+    )
+    result = extract_panel_sections(body)
+    assert set(result.keys()) == set(range(1, 14))
+    assert result[1] == 'foundation'
+    assert result[3] == 'register: dominant'
+    assert result[13] == 'exclusions'
+
+
+def test_extract_panel_sections_some_missing():
+    """A partially populated panel body returns only the present sections."""
+    from storyforge.pages import extract_panel_sections
+    body = (
+        '#### 1. Style foundation\n\nfoundation\n\n'
+        '#### 3. Pacing role\n\nregister: dominant\n\n'
+        '#### 13. Negative constraints\n\nexclusions\n'
+    )
+    result = extract_panel_sections(body)
+    assert set(result.keys()) == {1, 3, 13}
+    assert 2 not in result
+
+
+def test_extract_panel_sections_handles_empty_body():
+    from storyforge.pages import extract_panel_sections
+    assert extract_panel_sections('') == {}
+
+
+def test_extract_panel_sections_handles_no_section_headers():
+    """A body with prose but no #### headers returns empty."""
+    from storyforge.pages import extract_panel_sections
+    assert extract_panel_sections('just prose with no headers') == {}
+
+
+def test_extract_panel_sections_strips_body_whitespace():
+    from storyforge.pages import extract_panel_sections
+    body = (
+        '#### 1. Style foundation\n\n\n\n'
+        '   foundation with leading whitespace   \n\n\n\n'
+        '#### 2. Lighting laws\n\nlighting\n'
+    )
+    result = extract_panel_sections(body)
+    # Body is stripped (no leading/trailing whitespace)
+    assert result[1].startswith('foundation') or result[1].startswith('   foundation')
+    assert not result[1].endswith('\n\n')
