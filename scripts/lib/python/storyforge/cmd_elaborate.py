@@ -751,7 +751,7 @@ def _validate_architecture_response(text: str) -> tuple[bool, str]:
     """Parse and validate an LLM response for the page-architecture stage.
 
     Returns (ok, sections_block). On ok=True, sections_block is the
-    fence-stripped markdown containing both required headers in the
+    code-fence-stripped markdown containing both required headers in the
     correct order (Page architecture before Page-blocking prompt).
     Returns (False, '') on any failure: missing header, wrong order,
     or substring-only (mid-line) match.
@@ -761,7 +761,7 @@ def _validate_architecture_response(text: str) -> tuple[bool, str]:
     a valid header (case-insensitive, anchored to line start).
     """
     body = text.strip()
-    # Strip optional ```markdown fence
+    # Strip optional code fence (```markdown, ``` plain, or any language hint)
     if body.startswith('```'):
         lines = body.splitlines()
         if lines and lines[0].startswith('```'):
@@ -831,8 +831,8 @@ def _splice_page_architecture(page_path: str, sections_block: str,
     """Write the two new sections into the page file.
 
     - If both sections already exist, replace them (force mode).
-    - Otherwise insert between '## Scene context' (if present) and
-      '## Panel script' (if present), or at the end of the body.
+    - Otherwise insert immediately before '## Panel script' (if present),
+      or at end of body.
     - Append a `canonical_blocks_embedded:` block-list to the
       frontmatter listing reference/canon/<canon_id>.md for each
       canon_id (skipping any that are already listed).
@@ -866,7 +866,7 @@ def _splice_page_architecture(page_path: str, sections_block: str,
             + body[end:].lstrip('\n')
         )
     else:
-        # Insert: prefer between Scene context and Panel script
+        # Insert before Panel script if present, otherwise append
         ps_match = _PANEL_SCRIPT_HEADER_RE.search(body)
         if ps_match:
             insert_at = ps_match.start()

@@ -3,9 +3,10 @@
 Three coaching modes share this module so they can reuse helpers
 (panel-hierarchy formatting, neighbor-page rendering, canon-block
 loaders). render_strict_template emits a TODO scaffold with no LLM
-call. render_coach_brief writes a question-driven brief for the
-author. build_full_prompt assembles the full LLM prompt with canon
-embeds + scene brief + neighbor pages.
+call. render_coach_brief builds a question-driven brief for the
+author (the handler writes it to working/coaching/). build_full_prompt
+assembles the full LLM prompt with canon embeds + scene brief +
+neighbor pages.
 """
 
 from storyforge.pages import PageFile
@@ -187,9 +188,8 @@ def build_full_prompt(*,
     """Full-mode LLM prompt for one page.
 
     The handler is responsible for collecting canon_blocks (panel-registers,
-    page-rhythm-rules, style-foundation, lighting-laws, plus per-character
-    and per-location blocks) and the neighbor pages. This builder just
-    assembles the prompt deterministically — no I/O.
+    page-rhythm-rules, style-foundation, lighting-laws) and the neighbor
+    pages. This builder just assembles the prompt deterministically — no I/O.
 
     Output contract for the LLM: a single markdown block containing
     exactly two top-level sections — `## Page architecture` and

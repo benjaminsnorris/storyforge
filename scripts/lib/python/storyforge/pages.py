@@ -6,7 +6,7 @@ docs/superpowers/plans/2026-05-27-gn-per-page-files.md for the schema.
 
 The scene file (scenes/<scene_id>.md) remains the creative source of
 truth; page files are the atomic per-page working units consumed by
-extract, script-package, and cleanup.
+other storyforge commands.
 """
 
 import os

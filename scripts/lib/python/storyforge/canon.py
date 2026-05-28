@@ -792,6 +792,11 @@ def is_canon_block_populated(project_dir: str, canon_id: str) -> bool:
     if the canon vocabulary the prompt depends on (panel-registers,
     page-rhythm-rules) is still TODO, the LLM can't reliably cite
     the registers, so the stage refuses to run.
+
+    Note: an empty embeddable-block body (the header exists but no content
+    follows) is treated as populated, not placeholder. If an empty block
+    causes problems, populate it or add a TODO line to trigger the
+    canon_unfilled_template finding.
     """
     path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
     if not os.path.isfile(path):
