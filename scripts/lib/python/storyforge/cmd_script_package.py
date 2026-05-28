@@ -250,6 +250,62 @@ def _render_chapter_map(chapters, title):
 
 
 # ---------------------------------------------------------------------------
+# Canon bundling
+# ---------------------------------------------------------------------------
+
+def _copy_canon_into_bundle(project_dir: str, bundle_dir: str) -> int:
+    """Mirror reference/canon/ into manuscript/canon/. Returns the number
+    of canon .md files in the SOURCE tree (0 when canon/ is absent or
+    contains no .md files).
+
+    Uses `dirs_exist_ok=True` for idempotent merge-copy, then prunes any
+    file or directory in the destination that no longer exists in the
+    source. The two-step pattern beats rmtree+copytree because a partial
+    failure during the copy phase leaves the bundle equal to or better
+    than the prior state, not strictly worse. The return value comes from
+    the source tree so the caller's readme decision is honest regardless
+    of partial-copy outcomes.
+    """
+    import shutil
+
+    src = os.path.join(project_dir, 'reference', 'canon')
+    if not os.path.isdir(src):
+        return 0
+    source_count = 0
+    for root, _dirs, files in os.walk(src):
+        source_count += sum(1 for f in files if f.endswith('.md'))
+    if source_count == 0:
+        return 0
+    dst = os.path.join(bundle_dir, 'canon')
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+    _prune_orphans(src, dst)
+    return source_count
+
+
+def _prune_orphans(src: str, dst: str) -> None:
+    """Delete files/dirs under dst that have no counterpart under src.
+
+    Walks dst top-down. For each entry, computes the equivalent path in
+    src; if the source path is missing, the entry is removed. Keeps the
+    bundle as an exact mirror of the canon source even when authors
+    rename or delete canon files between runs.
+    """
+    import shutil
+
+    for root, dirs, files in os.walk(dst, topdown=False):
+        rel = os.path.relpath(root, dst)
+        src_root = src if rel == '.' else os.path.join(src, rel)
+        for name in files:
+            if not os.path.exists(os.path.join(src_root, name)):
+                os.remove(os.path.join(root, name))
+        for name in dirs:
+            src_subdir = os.path.join(src_root, name)
+            dst_subdir = os.path.join(root, name)
+            if not os.path.isdir(src_subdir) and os.path.isdir(dst_subdir):
+                shutil.rmtree(dst_subdir)
+
+
+# ---------------------------------------------------------------------------
 # Handoff README template
 # ---------------------------------------------------------------------------
 
@@ -262,7 +318,7 @@ This bundle contains everything you need to illustrate the graphic novel.
 
 - `script.md` — The complete panel-by-panel script. Pages are globally numbered.
 - `visual-references.md` — Character and location reference notes. Pin these up.
-- `chapter-map.md` — How scenes group into chapters/issues.
+- `chapter-map.md` — How scenes group into chapters/issues.{canon_line}
 
 ## Script format
 
@@ -767,8 +823,21 @@ def main(argv=None):
         f.write(cm)
     log('  manuscript/chapter-map.md')
 
+    # canon/ — copy reference/canon/ alongside the script so artists have
+    # the source-of-truth visual blocks in one place. The blocks are also
+    # embedded inline in panel prompts; this is the editable source.
+    canon_copied = _copy_canon_into_bundle(project_dir, bundle_dir)
+    canon_line = (
+        '\n- `canon/` — Source-of-truth visual canon (style foundation, '
+        'lighting laws, panel registers, page rhythm, plus per-character/'
+        'per-location/per-motif blocks). The same blocks are embedded inline '
+        'in panel prompts; this directory is the editable source.'
+    ) if canon_copied else ''
+    if canon_copied:
+        log(f'  manuscript/canon/ ({canon_copied} files)')
+
     # handoff-readme.md
-    readme = HANDOFF_README.format(title=title)
+    readme = HANDOFF_README.format(title=title, canon_line=canon_line)
     readme_path = os.path.join(bundle_dir, 'handoff-readme.md')
     with open(readme_path, 'w', encoding='utf-8') as f:
         f.write(readme)
