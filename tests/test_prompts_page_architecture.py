@@ -78,3 +78,70 @@ def test_coach_brief_handles_missing_neighbor_pages():
     )
     # Doesn't crash; mentions absence
     assert 's01-p1' in out
+
+
+def test_full_prompt_embeds_canon_and_brief():
+    from storyforge.prompts_page_architecture import build_full_prompt
+    prompt = build_full_prompt(
+        page_id='s01-p1',
+        page_frontmatter={
+            'page_id': 's01-p1', 'scene_id': 's01-studio',
+            'page_within_scene': 1, 'total_pages_in_scene': 3,
+            'panel_count': 2, 'spread_position': 'opening recto',
+            'characters_present': ['lucien-vey'], 'location': 'archive',
+            'timeline': 'day 1, evening',
+        },
+        scene_title='Studio finalization',
+        scene_brief={
+            'panel_breakdown': 'p1: 2-panel; p2: 3-panel; p3: splash',
+            'visual_keywords': 'inkpot; trembling hand',
+            'page_turn_beats': 'p3 reveal',
+            'page_layout': '3-page scene; splash on p3',
+            'caption_strategy': 'minimal',
+        },
+        scene_intent={
+            'function': 'opening', 'emotional_arc': 'apprehension to focus',
+            'value_at_stake': 'control', 'value_shift': 'positive',
+        },
+        prev_page=None,
+        next_page={'page_id': 's01-p2', 'spread_position': 'verso'},
+        canon_blocks={
+            'panel-registers': 'Dominant: emotional fulcrum.',
+            'page-rhythm-rules': 'One dominant per page maximum.',
+            'style-foundation': 'Chiaroscuro; muted palette.',
+            'lighting-laws': 'Single source; no supernatural luminosity.',
+        },
+    )
+    # Page identity
+    assert 's01-p1' in prompt
+    assert 'Studio finalization' in prompt
+    # Brief context
+    assert '2-panel; p2: 3-panel' in prompt or 'panel_breakdown' in prompt
+    assert 'inkpot' in prompt
+    # Intent context
+    assert 'apprehension to focus' in prompt
+    # Canon embedded inline
+    assert 'emotional fulcrum' in prompt
+    assert 'One dominant per page' in prompt
+    assert 'Chiaroscuro' in prompt
+    # Neighbor for spread context
+    assert 's01-p2' in prompt
+    # Output contract: both section headers requested
+    assert '## Page architecture' in prompt
+    assert '## Page-blocking prompt' in prompt
+    # Constraint: blocking prompt must cite registers + be monochrome
+    assert 'monochrome' in prompt.lower()
+    assert 'cite' in prompt.lower() and 'register' in prompt.lower()
+
+
+def test_full_prompt_when_no_neighbor_pages():
+    from storyforge.prompts_page_architecture import build_full_prompt
+    prompt = build_full_prompt(
+        page_id='solo-p1',
+        page_frontmatter={'page_id': 'solo-p1', 'panel_count': 1},
+        scene_title='Solo', scene_brief={}, scene_intent={},
+        prev_page=None, next_page=None,
+        canon_blocks={'panel-registers': 'Dominant: emotional fulcrum.'},
+    )
+    # Doesn't crash; mentions absence of neighbors so the LLM knows
+    assert 'solo-p1' in prompt
