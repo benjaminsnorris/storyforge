@@ -37,6 +37,8 @@ from storyforge.pages import (
     _PAGE_ARCHITECTURE_HEADER as _PAGE_ARCH_HEADER_RE,
     _BLOCKING_PROMPT_HEADER as _BLOCKING_PROMPT_HEADER_RE,
     _PANEL_SCRIPT_HEADER as _PANEL_SCRIPT_HEADER_RE,
+    _IMAGE_GEN_PROMPTS_HEADER,
+    _PANEL_HEADER_RE,
 )
 
 
@@ -876,6 +878,86 @@ def _splice_page_architecture(page_path: str, sections_block: str,
             new_body = prefix + '\n\n' + sections_block.strip() + '\n\n' + suffix
         else:
             new_body = body.rstrip('\n') + '\n\n' + sections_block.strip() + '\n'
+
+    with open(page_path, 'w', encoding='utf-8') as f:
+        f.write(fm_text + new_body)
+
+
+def _validate_panel_prompts_response(text: str,
+                                     expected_panel_count: int,
+                                     ) -> tuple[bool, str]:
+    """Parse and validate an LLM response for the panel-prompts stage.
+
+    Returns (ok, block). The block is the unwrapped (fence-stripped)
+    text containing the '## Image-generation prompts' section and its
+    ### Panel N subsections. Returns (False, '') when the section
+    header is absent, when the number of ### Panel N subsections
+    doesn't match expected_panel_count, or when sections appear in the
+    wrong order.
+    """
+    body = text.strip()
+    if body.startswith('```'):
+        lines = body.splitlines()
+        if lines and lines[0].startswith('```'):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == '```':
+            lines = lines[:-1]
+        body = '\n'.join(lines).strip()
+
+    if not _IMAGE_GEN_PROMPTS_HEADER.search(body):
+        return False, ''
+    panel_indices = [int(m.group(1))
+                     for m in _PANEL_HEADER_RE.finditer(body)]
+    if len(panel_indices) != expected_panel_count:
+        return False, ''
+    return True, body
+
+
+def _splice_panel_prompts(page_path: str, panel_prompts_block: str,
+                          canon_ids: list[str]) -> None:
+    """Write the ## Image-generation prompts section into the page file.
+
+    - If the section already exists, replace it.
+    - Otherwise insert immediately before ## Panel script (if present),
+      or at end of body.
+    - Append canon_ids to the canonical_blocks_embedded frontmatter
+      list (preserves existing entries, skips duplicates).
+    """
+    with open(page_path, encoding='utf-8') as f:
+        text = f.read()
+
+    if canon_ids:
+        text = _add_canonical_blocks_embedded(text, canon_ids)
+
+    fm_match = re.match(r'\A(---\n.*?---\n)(.*)', text, re.DOTALL)
+    if fm_match:
+        fm_text = fm_match.group(1)
+        body = fm_match.group(2)
+    else:
+        fm_text, body = '', text
+
+    img_match = _IMAGE_GEN_PROMPTS_HEADER.search(body)
+    if img_match:
+        # Replace existing section — find end (next ## header or EOF)
+        after = body[img_match.end():]
+        next_h = re.search(r'^##\s+\S', after, re.MULTILINE)
+        end = img_match.end() + (next_h.start() if next_h else len(after))
+        new_body = (body[:img_match.start()]
+                    + panel_prompts_block.strip() + '\n\n'
+                    + body[end:].lstrip('\n'))
+    else:
+        # Insert before ## Panel script if present, else append
+        ps_match = _PANEL_SCRIPT_HEADER_RE.search(body)
+        if ps_match:
+            insert_at = ps_match.start()
+            prefix = body[:insert_at].rstrip('\n')
+            suffix = body[insert_at:]
+            new_body = (prefix + '\n\n'
+                        + panel_prompts_block.strip() + '\n\n'
+                        + suffix)
+        else:
+            new_body = (body.rstrip('\n') + '\n\n'
+                        + panel_prompts_block.strip() + '\n')
 
     with open(page_path, 'w', encoding='utf-8') as f:
         f.write(fm_text + new_body)

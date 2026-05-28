@@ -141,3 +141,110 @@ def test_precondition_fails_when_canon_unfilled(tmp_path):
     ok, reason = _precondition_check_panel_prompts(proj, 's01-p1', 's01-studio')
     assert ok is False
     assert 'style-foundation' in reason
+
+
+def test_splice_inserts_image_generation_section_when_absent(tmp_path):
+    from storyforge.cmd_elaborate import _splice_panel_prompts
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\n"
+        "page_id: s01-p1\n"
+        "scene_id: s01\n"
+        "page_within_scene: 1\n"
+        "total_pages_in_scene: 1\n"
+        "panel_count: 1\n"
+        "---\n\n"
+        "## Scene context\n\nBeat.\n\n"
+        "## Page architecture\n\nArch.\n\n"
+        "## Page-blocking prompt\n\nstoryboard.\n\n"
+        "## Panel script\n\n**Panel 1.**\n"
+    )
+    panel_block = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 1. Style foundation\n\nfoundation\n'
+    )
+    _splice_panel_prompts(str(page_path), panel_block,
+                          canon_ids=['style-foundation'])
+    text = page_path.read_text()
+    assert '## Image-generation prompts' in text
+    assert '### Panel 1' in text
+    # Inserted BEFORE Panel script
+    assert text.index('## Image-generation prompts') < text.index('## Panel script')
+    # canonical_blocks_embedded frontmatter audit trail
+    assert 'canonical_blocks_embedded:' in text
+    assert 'reference/canon/style-foundation.md' in text
+
+
+def test_splice_replaces_existing_image_generation_section_when_force(tmp_path):
+    from storyforge.cmd_elaborate import _splice_panel_prompts
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\n"
+        "page_id: s01-p1\n"
+        "scene_id: s01\n"
+        "page_within_scene: 1\n"
+        "total_pages_in_scene: 1\n"
+        "panel_count: 1\n"
+        "---\n\n"
+        "## Page architecture\n\nArch.\n\n"
+        "## Image-generation prompts\n\n"
+        "### Panel 1\n\nOLD panel 1 content\n\n"
+        "## Panel script\n\n**Panel 1.**\n"
+    )
+    new_block = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\nNEW panel 1 content\n'
+    )
+    _splice_panel_prompts(str(page_path), new_block, canon_ids=[])
+    text = page_path.read_text()
+    assert 'NEW panel 1 content' in text
+    assert 'OLD panel 1 content' not in text
+    assert text.count('## Image-generation prompts') == 1
+    # Panel script survives
+    assert '## Panel script' in text
+    assert '**Panel 1.**' in text
+
+
+def test_validate_panel_prompts_response_accepts_well_formed():
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 1. Style foundation\n\nx\n'
+    )
+    ok, block = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is True
+    assert '## Image-generation prompts' in block
+
+
+def test_validate_panel_prompts_response_rejects_missing_section_header():
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    # No '## Image-generation prompts' header
+    resp = '### Panel 1\n\n#### 1. Style foundation\n\nx\n'
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_rejects_wrong_panel_count():
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    # Only one ### Panel header but expected_panel_count=2
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\nx\n'
+    )
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=2)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_strips_fence():
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '```markdown\n'
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\nx\n'
+        '```\n'
+    )
+    ok, block = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is True
+    assert '```' not in block
