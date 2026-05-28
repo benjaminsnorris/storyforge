@@ -783,6 +783,25 @@ def check_canon_drift(project_dir: str) -> list[CanonFinding]:
     return findings
 
 
+def is_canon_block_populated(project_dir: str, canon_id: str) -> bool:
+    """Return True if reference/canon/<canon_id>.md exists, has an
+    "## Embeddable block" section, and that section's body is NOT
+    placeholder TODO text.
+
+    Used by elaborate --stage page-architecture as a precondition:
+    if the canon vocabulary the prompt depends on (panel-registers,
+    page-rhythm-rules) is still TODO, the LLM can't reliably cite
+    the registers, so the stage refuses to run.
+    """
+    path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
+    if not os.path.isfile(path):
+        return False
+    block_text = _embeddable_block_text(path)
+    if block_text is None:
+        return False
+    return not _section_body_is_placeholder(block_text)
+
+
 def validate_canon_directory(project_dir: str) -> list[CanonFinding]:
     """Validate every canon file under reference/canon/. Returns [] when
     the canon directory is absent; callers decide whether absence is itself
