@@ -411,3 +411,121 @@ def test_validate_panel_prompts_response_accepts_canonical_order():
     ok, block = _validate_panel_prompts_response(resp, expected_panel_count=1)
     assert ok is True
     assert '#### 1. Style foundation' in block
+
+
+def test_validate_panel_prompts_response_rejects_non_contiguous_indices():
+    """SF-C1: LLM emits ### Panel 1, 3, 5 for expected=3 — must reject."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\nx\n\n'
+        '### Panel 3\n\n#### 1. Style foundation\n\ny\n\n'
+        '### Panel 5\n\n#### 1. Style foundation\n\nz\n'
+    )
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=3)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_rejects_panels_out_of_order():
+    """SF-C1: ### Panel 2 before ### Panel 1 with correct count — must reject."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 2\n\n#### 1. Style foundation\n\nx\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\ny\n'
+    )
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=2)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_ignores_panel_headers_in_inner_fence():
+    """SF-I1: ### Panel N inside an inner fenced code block must not inflate count."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        'Here is an example of the structure:\n\n'
+        '```\n### Panel 99\n#### 1. Style foundation\n```\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\nbody\n'
+    )
+    ok, block = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is True
+    # The example fence content was stripped; only the real panel survives
+    assert 'Panel 99' not in block
+
+
+def test_handler_skips_pages_with_zero_panel_count(tmp_path, monkeypatch):
+    """SF-I3: panel_count=0 must skip with WARN, not flow into the LLM call."""
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    proj = _make_gn_project(tmp_path)
+    # Edit the page frontmatter to set panel_count: 0
+    page_path = os.path.join(proj, 'pages', 's01-p1.md')
+    with open(page_path) as f:
+        text = f.read()
+    text = text.replace('panel_count: 2', 'panel_count: 0')
+    with open(page_path, 'w') as f:
+        f.write(text)
+    call_count = {'n': 0}
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: (call_count.__setitem__('n', call_count['n'] + 1) or ''))
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert call_count['n'] == 0  # API never invoked for zero-panel page
+    # Page file unchanged (no Image-generation prompts section written)
+    with open(page_path) as f:
+        new_text = f.read()
+    assert '## Image-generation prompts' not in new_text
+    assert rc == 1  # all (1) candidate skipped on precondition
+
+
+def test_handler_skips_when_required_canon_body_is_empty(tmp_path, monkeypatch):
+    """SF-I4: precondition is_canon_block_populated accepts empty embeddable
+    bodies. The handler must catch this BEFORE the LLM call (or strict template
+    render) which would produce TODO output with no signal."""
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    proj = _make_gn_project(tmp_path)
+    # Replace style-foundation with header-only (empty body, no TODO)
+    pr = os.path.join(proj, 'reference', 'canon', 'style-foundation.md')
+    with open(pr, 'w') as f:
+        f.write('---\ncanon_id: style-foundation\n---\n\n'
+                '## Embeddable block\n\n\n')
+    call_count = {'n': 0}
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: (call_count.__setitem__('n', call_count['n'] + 1) or ''))
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert call_count['n'] == 0  # API never invoked when required canon body is empty
+    assert rc == 1
+
+
+def test_handler_warn_distinguishes_validator_failure_modes(tmp_path, monkeypatch, capsys):
+    """SF-I5: validator-failure WARN must distinguish missing-header vs
+    wrong-count vs wrong-order."""
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    proj = _make_gn_project(tmp_path)
+    # Mock API to return a response with wrong panel count (1 instead of 2)
+    monkeypatch.setattr(
+        'storyforge.api.invoke_api',
+        lambda *a, **kw: (
+            '## Image-generation prompts\n\n'
+            '### Panel 1\n\n#### 1. Style foundation\n\nx\n'
+        ),
+    )
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    # The specific reason should be in the output (mentions expected vs got)
+    assert ('expected' in output.lower() or 'got' in output.lower()
+            or 'panel sequence' in output.lower())

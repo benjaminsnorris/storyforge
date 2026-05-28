@@ -893,12 +893,17 @@ def _validate_panel_prompts_response(text: str,
     text containing the '## Image-generation prompts' section and its
     ### Panel N subsections. Returns (False, '') when:
       - the section header is absent
-      - the number of ### Panel N subsections doesn't match
-        expected_panel_count
+      - the number/sequence of ### Panel N subsections doesn't match
+        the expected ``1..expected_panel_count`` (catches both wrong
+        count AND non-contiguous OR out-of-order indices, e.g.,
+        ### Panel 1, ### Panel 3, ### Panel 5 for expected=3, or
+        ### Panel 2 before ### Panel 1 for expected=2)
       - any panel has #### N. <Title> sections in non-canonical order
         (e.g., section 3 before section 2 within the same panel)
     Tolerates ```markdown, ``` (plain), and any-language-tagged code
-    fence wrappers.
+    fence wrappers. Inner fenced code blocks (LLM schema illustrations)
+    are stripped before counting so example ### Panel N lines inside
+    them are not counted.
     """
     body = text.strip()
     if body.startswith('```'):
@@ -911,9 +916,15 @@ def _validate_panel_prompts_response(text: str,
 
     if not _IMAGE_GEN_PROMPTS_HEADER.search(body):
         return False, ''
+
+    # Strip inner fenced code blocks so example '### Panel N' lines inside
+    # code-block illustrations don't inflate the panel count.
+    body = re.sub(r'```.*?```', '', body, flags=re.DOTALL)
+
     panel_indices = [int(m.group(1))
                      for m in _PANEL_HEADER_RE.finditer(body)]
-    if len(panel_indices) != expected_panel_count:
+    expected_indices = list(range(1, expected_panel_count + 1))
+    if panel_indices != expected_indices:
         return False, ''
 
     # Section order check inside each panel (matches the
@@ -1323,6 +1334,12 @@ def _run_panel_prompts_handler_gn(project_dir: str, *,
             skipped_precondition += 1
             continue
 
+        if not panel_count:
+            log(f'  WARN skip {page_id}: panel_count is 0 or unset — set '
+                f'panel_count in the page frontmatter first')
+            skipped_precondition += 1
+            continue
+
         scene_row = scenes_map.get(scene_id, {})
         scene_title = scene_row.get('title') or scene_id
         scene_brief = briefs_map.get(scene_id, {})
@@ -1345,6 +1362,20 @@ def _run_panel_prompts_handler_gn(project_dir: str, *,
             canon_keys.append(f'motifs/{motif_id}')
 
         canon_blocks = {cid: _canon(cid) for cid in canon_keys}
+
+        # SF-I4: precondition uses is_canon_block_populated which accepts
+        # an empty (but non-TODO) embeddable body. get_canon_embeddable_block
+        # returns '' for that case. Catch this BEFORE building the LLM prompt
+        # or the strict template — both would produce TODO output without
+        # any signal to the author.
+        empty_required = [cid for cid in ('style-foundation', 'lighting-laws')
+                          if not canon_blocks.get(cid, '').strip()]
+        if empty_required:
+            log(f'  WARN skip {page_id}: required canon block(s) '
+                f'{", ".join(repr(c) for c in empty_required)} have empty '
+                f'embeddable bodies — populate them and re-run')
+            skipped_precondition += 1
+            continue
 
         # Surface missing optional canon (NOTE level) — only those that
         # are NOT in the required gate (style-foundation, lighting-laws
@@ -1424,8 +1455,21 @@ def _run_panel_prompts_handler_gn(project_dir: str, *,
             response, expected_panel_count=panel_count,
         )
         if not ok:
-            log(f'  WARN {page_id}: LLM response missing section header or '
-                f'wrong panel count; skipped')
+            # Provide a specific reason so authors can debug without
+            # re-instrumenting (SF-I5).
+            if '## Image-generation prompts' not in response:
+                reason = 'missing "## Image-generation prompts" section header'
+            else:
+                got_indices = [int(m.group(1))
+                               for m in _PANEL_HEADER_RE.finditer(response)]
+                expected_indices = list(range(1, panel_count + 1))
+                if got_indices != expected_indices:
+                    reason = (f'panel sequence got {got_indices}, '
+                              f'expected {expected_indices}')
+                else:
+                    reason = 'sections within a panel are out of canonical order'
+            log(f'  WARN {page_id}: LLM response validation failed — '
+                f'{reason}; skipped')
             skipped_llm += 1
             continue
         canon_ids_used = [cid for cid in canon_keys if canon_blocks.get(cid)]
