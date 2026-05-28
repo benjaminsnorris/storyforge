@@ -264,6 +264,9 @@ PageFindingKind = Literal[
     'page_within_scene_out_of_range',
     'missing_page_architecture',
     'missing_blocking_prompt',
+    'missing_panel_prompts',
+    'panel_prompt_section_missing',
+    'panel_prompt_wrong_section_order',
 ]
 
 
@@ -350,6 +353,41 @@ def validate_page_file(path: str) -> list[PageFinding]:
             'kind': 'missing_blocking_prompt', 'path': path,
             'detail': '"## Page-blocking prompt" section is missing or empty',
         })
+
+    # Panel-prompt body checks (issue #253). Use the extractors so the
+    # "section header present but no panels" half-edited state fires
+    # missing_panel_prompts (extractor returns {} for that case).
+    panels = extract_panel_prompts(path)
+    if not panels:
+        findings.append({
+            'kind': 'missing_panel_prompts', 'path': path,
+            'detail': '"## Image-generation prompts" section is missing or has '
+                      'no "### Panel N" subsections',
+        })
+    else:
+        for panel_index in sorted(panels.keys()):
+            panel_body = panels[panel_index]
+            sections = extract_panel_sections(panel_body)
+            present_indices = sorted(sections.keys())
+            expected_indices = list(range(1, 14))
+            missing = [i for i in expected_indices if i not in sections]
+            if missing:
+                findings.append({
+                    'kind': 'panel_prompt_section_missing', 'path': path,
+                    'detail': f'Panel {panel_index} is missing section(s): '
+                              f'{", ".join(str(i) for i in missing)}',
+                })
+            # Real wrong-order detection: re-parse the panel body in the
+            # order headers appear and compare to canonical order.
+            parse_order = []
+            for m in _PANEL_SECTION_HEADER_RE.finditer(panel_body):
+                parse_order.append(int(m.group(1)))
+            if parse_order and parse_order != sorted(parse_order):
+                findings.append({
+                    'kind': 'panel_prompt_wrong_section_order', 'path': path,
+                    'detail': f'Panel {panel_index} sections appear in order '
+                              f'{parse_order} instead of canonical 1..13',
+                })
 
     return findings
 
