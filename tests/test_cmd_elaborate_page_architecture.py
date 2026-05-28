@@ -631,3 +631,114 @@ def test_handler_end_of_run_summary_for_llm_skipped(tmp_path, monkeypatch, capsy
     output = captured.out + captured.err
     assert 'page(s) skipped' in output
     assert '--force --page' in output  # retry hint
+
+
+# ============================================================================
+# Regression tests for PR #258 review findings — Commit 5
+# (T-1, T-2, T-4, T-5, T-6)
+# ============================================================================
+
+
+def test_splice_appends_to_end_when_no_panel_script_header(tmp_path):
+    """T-1: when the page body has no '## Panel script' section,
+    _splice_page_architecture must append the new sections to the end
+    of the body. Regression: this third branch was previously untested,
+    so a change that elided the append-to-end fallback would have gone
+    undetected."""
+    from storyforge.cmd_elaborate import _splice_page_architecture
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\n"
+        "page_id: s01-p1\n"
+        "scene_id: s01\n"
+        "page_within_scene: 1\n"
+        "total_pages_in_scene: 1\n"
+        "panel_count: 1\n"
+        "---\n\n"
+        "## Scene context\n\nBeat.\n"
+        # deliberately no ## Panel script
+    )
+    sections = (
+        '## Page architecture\n\n### Intent\nQuiet.\n\n'
+        '## Page-blocking prompt\n\nMonochrome storyboard.\n'
+    )
+    _splice_page_architecture(str(page_path), sections, canon_ids=[])
+    text = page_path.read_text()
+    assert '## Page architecture' in text
+    assert '## Page-blocking prompt' in text
+    assert '## Scene context' in text          # original content preserved
+    assert 'Monochrome storyboard' in text
+    # Sections must appear AFTER scene context
+    assert text.index('## Scene context') < text.index('## Page architecture')
+
+
+def test_page_architecture_stage_exits_on_novel_medium(tmp_path):
+    """T-2: page-architecture is GN-only. Running it on a novel-mode
+    project must exit with code 1 and log an error — not crash or
+    silently proceed into the standard stage scaffolding."""
+    import pytest
+    import argparse
+    from storyforge.cmd_elaborate import _run_main_stage
+    proj = tmp_path / 'novel'
+    proj.mkdir()
+    (proj / 'storyforge.yaml').write_text(
+        'project:\n  medium: novel\n  title: Test\n'
+    )
+    args = argparse.Namespace(page=None, scene=None, force=False, coaching=None)
+    with pytest.raises(SystemExit) as exc:
+        _run_main_stage('page-architecture', str(proj), str(proj / 'reference'),
+                        dry_run=False, interactive=False, seed='', args=args)
+    assert exc.value.code == 1
+
+
+def test_validate_response_strips_plain_triple_backtick_fence():
+    """T-4: validator must strip a plain ``` fence (not just ```markdown)."""
+    from storyforge.cmd_elaborate import _validate_architecture_response
+    resp = (
+        '```\n'
+        '## Page architecture\n\nIntent.\n\n'
+        '## Page-blocking prompt\n\nStoryboard.\n'
+        '```\n'
+    )
+    ok, sections = _validate_architecture_response(resp)
+    assert ok is True
+    assert '```' not in sections
+
+
+def test_splice_replaces_existing_sections_panel_script_survives(tmp_path):
+    """T-5: panel-script content after the blocking-prompt section must
+    survive the force-replace (regression: the replace branch's 'end'
+    calculation could otherwise consume trailing content)."""
+    from storyforge.cmd_elaborate import _splice_page_architecture
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\n"
+        "page_id: s01-p1\n"
+        "scene_id: s01\n"
+        "page_within_scene: 1\n"
+        "total_pages_in_scene: 1\n"
+        "panel_count: 1\n"
+        "---\n\n"
+        "## Scene context\n\nBeat.\n\n"
+        "## Page architecture\n\nOLD architecture.\n\n"
+        "## Page-blocking prompt\n\nOLD blocking.\n\n"
+        "## Panel script\n\n**Panel 1.**\n"
+    )
+    new_sections = (
+        '## Page architecture\n\nNEW arch.\n\n'
+        '## Page-blocking prompt\n\nNEW blocking.\n'
+    )
+    _splice_page_architecture(str(page_path), new_sections, canon_ids=[])
+    text = page_path.read_text()
+    assert 'NEW arch' in text
+    assert 'OLD architecture' not in text
+    assert 'NEW blocking' in text
+    assert 'OLD blocking' not in text
+    # Only ONE occurrence of each header (no duplication)
+    assert text.count('## Page architecture') == 1
+    assert text.count('## Page-blocking prompt') == 1
+    # T-5: panel-script content after the blocking-prompt section
+    # must survive the force-replace (regression: the replace branch's
+    # 'end' calculation could otherwise consume trailing content)
+    assert '## Panel script' in text
+    assert '**Panel 1.**' in text

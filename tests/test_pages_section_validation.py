@@ -137,3 +137,11 @@ def test_cleanup_check_page_files_surfaces_new_findings(tmp_path, monkeypatch):
         if f['type'] in ('page_missing_page_architecture',
                          'page_missing_blocking_prompt'):
             assert f['severity'] == 'warning'
+    # T-6: action message must include the exact command + correct page_id
+    for f in findings:
+        if f['type'] == 'page_missing_page_architecture':
+            assert 'storyforge elaborate --stage page-architecture' in f['action']
+            assert '--page s01-p1' in f['action']
+        if f['type'] == 'page_missing_blocking_prompt':
+            assert 'storyforge elaborate --stage page-architecture' in f['action']
+            assert '--page s01-p1' in f['action']
