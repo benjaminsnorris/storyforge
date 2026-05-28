@@ -246,6 +246,41 @@ All standard brief columns still apply with full meaning. `key_actions` reads as
 
 **When to run:** after `briefs` in graphic-novel projects, before drafting per-panel image prompts.
 
+### Panel prompts (graphic-novel only)
+
+**Stage:** `--stage panel-prompts` (or `--panel-prompts`)
+**Purpose:** Generate 13-section image-generation prompts per panel using the schema validated in Ashes PR #8.
+**Output:** `## Image-generation prompts` section in each page file, containing `### Panel N` blocks with all 13 `#### M. <Title>` subsections.
+**Preconditions:** scene brief has `panel_breakdown`; page has populated `## Page architecture` (run `--stage page-architecture` first); `reference/canon/style-foundation.md` and `reference/canon/lighting-laws.md` are populated (not TODO).
+
+**Flags:**
+- `--page <page_id>` — single page only
+- `--scene <scene_id>` — every page of one scene
+- `--force` — overwrite existing panel prompts
+- `--dry-run` — print one prompt, no API calls
+
+**Coaching modes:**
+- **full** — Opus drafts all panels for the page in one API call; splices into the page file
+- **coach** — writes a brief to `working/coaching/panel-prompts-<page_id>.md` with the 13 sections and focused questions per section; embeds canon inline; no page mutation
+- **strict** — stamps a deterministic 13-section template per panel; canon is embedded verbatim in sections 1, 2, 5, 6, 10; sections 3, 4, 7, 8, 9, 11, 12, 13 are TODO scaffolding; no API call
+
+**When to run:** after `page-architecture` in graphic-novel projects; the per-panel register hierarchy from page architecture is cited by section 3 of every panel prompt.
+
+**The 13 sections** (canonical order; titles fixed):
+1. Style foundation (canon embed)
+2. Lighting laws (canon embed)
+3. Pacing role (cites register from page architecture)
+4. Shot grammar
+5. Stage geography (canon embed + panel positioning)
+6. Character block (canon embed per on-frame character)
+7. In this panel
+8. Focal objects + render priorities
+9. Lighting logic
+10. Symbolic detail (low weight) (canon embed when motif on-frame)
+11. Action
+12. Emotional subtext (low weight)
+13. Negative constraints
+
 ### Voice Stage (Interactive)
 
 Voice development typically happens after architecture (you know your POV characters and scene types) and before briefs (the briefs need voice rules). Can also run standalone at any point.

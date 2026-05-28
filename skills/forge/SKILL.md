@@ -409,6 +409,7 @@ When orienting yourself in a GN project, check whether `pages/` exists:
 
 - **If `pages/` is populated:** recommend per-page work. Suggest extracting metadata after page edits — `./storyforge extract --from-pages` updates `scenes.csv` panel_count + page_count from the page files. Recommend the script-package skill once the page files are ready for handoff — it now assembles the artist bundle from page files when present, falling back to the inline scene file otherwise.
 - **After briefs (GN mode):** Run `storyforge elaborate --stage page-architecture` to lock page-level rhythm and panel geometry before per-panel rendering. Requires `reference/canon/panel-registers.md` and `reference/canon/page-rhythm-rules.md` to be populated.
+- **After page-architecture (GN mode):** Run `storyforge elaborate --stage panel-prompts` to generate 13-section image-generation prompts per panel. Sections 1, 2, 5, 6, 10 embed canon verbatim; section 3 cites the register from page architecture. Requires `reference/canon/style-foundation.md` and `reference/canon/lighting-laws.md` to be populated.
 - **If `pages/` is empty or absent:** the project is using scene-level files only. That's still supported. Suggest migrating to per-page files when a scene's panel-level content gets unwieldy (around 3+ pages with detailed image prompts).
 
 ### Visual canon (`reference/canon/`)
