@@ -116,3 +116,36 @@ def test_panel_prompt_wrong_section_order_when_sections_swapped(tmp_path):
 def test_finding_kinds_in_literal_type():
     """Static-type guard — the three new values must be in the PageFindingKind Literal."""
     from storyforge.pages import PageFindingKind  # noqa: F401
+
+
+def test_cleanup_surfaces_panel_prompt_findings(tmp_path):
+    """End-to-end through cmd_cleanup._check_page_files."""
+    import os
+    project = tmp_path / 'proj'
+    project.mkdir()
+    (project / 'storyforge.yaml').write_text(
+        'project:\n  medium: graphic-novel\n'
+    )
+    pages = project / 'pages'
+    pages.mkdir()
+    (pages / 's01-p1.md').write_text(
+        '---\n'
+        'page_id: s01-p1\n'
+        'scene_id: s01-studio\n'
+        'page_within_scene: 1\n'
+        'total_pages_in_scene: 1\n'
+        'panel_count: 1\n'
+        '---\n\n'
+        '## Page architecture\n\nIntent.\n\n'
+        '## Page-blocking prompt\n\nstoryboard.\n\n'
+        # No ## Image-generation prompts section — triggers missing_panel_prompts
+        '## Panel script\n\n**Panel 1.**\n'
+    )
+    from storyforge.cmd_cleanup import _check_page_files
+    findings = _check_page_files(str(project))
+    types = {f['type'] for f in findings}
+    assert 'page_missing_panel_prompts' in types
+    for f in findings:
+        if f['type'] == 'page_missing_panel_prompts':
+            assert f['severity'] == 'warning'
+            assert 'storyforge elaborate --stage panel-prompts' in f['action']

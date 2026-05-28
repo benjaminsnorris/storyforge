@@ -304,7 +304,11 @@ class TestPagesDirectory:
         assert any(f['type'] == 'page_no_frontmatter' for f in page_findings)
 
     def test_clean_page_file_no_findings(self, tmp_path):
-        """A valid page file produces no page-category findings."""
+        """A valid page file (through page-blocking-prompt stage) produces no
+        page-category findings beyond the new panel-prompts warnings.
+        Panel-prompts findings are filtered here because the fixture predates
+        the panel-prompts stage — they're expected for files that haven't
+        run elaborate --stage panel-prompts yet."""
         (tmp_path / 'storyforge.yaml').write_text(
             'project:\n  title: Test\n  medium: graphic-novel\n'
         )
@@ -323,8 +327,14 @@ class TestPagesDirectory:
             "## Panel script\n\n**Panel 1.** Wide.\n"
         )
         report = build_cleanup_report(str(tmp_path))
+        _panel_prompt_types = {
+            'page_missing_panel_prompts',
+            'page_panel_prompt_section_missing',
+            'page_panel_prompt_wrong_section_order',
+        }
         page_findings = [f for f in report['findings']
-                         if f.get('category') == 'pages']
+                         if f.get('category') == 'pages'
+                         and f.get('type') not in _panel_prompt_types]
         assert page_findings == []
 
     def test_missing_field_finding_surfaced(self, tmp_path):

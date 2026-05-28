@@ -1102,6 +1102,36 @@ def _check_page_files(project_dir: str) -> list[dict]:
                               'to populate (or write the section by hand)',
                     'severity': 'warning',
                 })
+            elif kind == 'missing_panel_prompts':
+                findings.append({
+                    'type': 'page_missing_panel_prompts', 'file': rel_path,
+                    'detail': issue['detail'],
+                    'action': 'Run `storyforge elaborate --stage '
+                              'panel-prompts --page '
+                              f'{os.path.splitext(os.path.basename(page_path))[0]}` '
+                              'to populate (or write the section by hand)',
+                    'severity': 'warning',
+                })
+            elif kind == 'panel_prompt_section_missing':
+                findings.append({
+                    'type': 'page_panel_prompt_section_missing', 'file': rel_path,
+                    'detail': issue['detail'],
+                    'action': 'Re-run `storyforge elaborate --stage '
+                              'panel-prompts --force --page '
+                              f'{os.path.splitext(os.path.basename(page_path))[0]}` '
+                              'to fill missing sections (or add them by hand)',
+                    'severity': 'warning',
+                })
+            elif kind == 'panel_prompt_wrong_section_order':
+                findings.append({
+                    'type': 'page_panel_prompt_wrong_section_order', 'file': rel_path,
+                    'detail': issue['detail'],
+                    'action': 'Reorder the #### N. sections so they appear in '
+                              'canonical 1..13 order, or re-run `storyforge '
+                              'elaborate --stage panel-prompts --force --page '
+                              f'{os.path.splitext(os.path.basename(page_path))[0]}`',
+                    'severity': 'warning',
+                })
             else:
                 # Catches future PageFindingKind values that nobody wires
                 # up here — silent drop would re-introduce SF-6.
