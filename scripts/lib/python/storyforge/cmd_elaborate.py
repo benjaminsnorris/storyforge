@@ -1233,6 +1233,207 @@ def _precondition_check_panel_prompts(project_dir: str, page_id: str,
     return True, ''
 
 
+def _run_panel_prompts_handler_gn(project_dir: str, *,
+                                  dry_run: bool, coaching: CoachingLevel,
+                                  page: str | None, scene: str | None,
+                                  force: bool) -> Literal[0, 1]:
+    """Dispatcher for the panel-prompts stage.
+
+    Coaching modes:
+      - full: LLM drafts all panels per page, splices into page file
+      - coach: writes a brief to working/coaching/, no page mutation
+      - strict: stamps a 13-section template per panel (canon embedded
+        verbatim in sections 1, 2, 5, 6, 10; TODO scaffolding elsewhere).
+        No API call.
+
+    Returns 0 on success or no-op; 1 when every candidate page was
+    skipped due to a precondition failure or an LLM/API failure.
+    """
+    from storyforge.pages import extract_page_architecture
+    from storyforge.prompts_panel_prompts import (
+        render_strict_template, render_coach_brief, build_full_prompt,
+    )
+    from storyforge.canon import get_canon_embeddable_block
+    from storyforge.elaborate import _read_csv_as_map
+
+    targets = _select_pages_for_panel_prompts(project_dir, page, scene, force)
+    if not targets:
+        log('No pages need panel-prompts (use --force to redo).')
+        return 0
+
+    log(f'panel-prompts: {len(targets)} page(s) to process (coaching={coaching})')
+
+    scenes_map = _read_csv_as_map(
+        os.path.join(project_dir, 'reference', 'scenes.csv'))
+    briefs_map = _read_csv_as_map(
+        os.path.join(project_dir, 'reference', 'scene-briefs.csv'))
+    intent_map = _read_csv_as_map(
+        os.path.join(project_dir, 'reference', 'scene-intent.csv'))
+
+    canon_block_cache: dict[str, str] = {}
+
+    def _canon(canon_id: str) -> str:
+        if canon_id not in canon_block_cache:
+            canon_block_cache[canon_id] = get_canon_embeddable_block(
+                project_dir, canon_id,
+            )
+        return canon_block_cache[canon_id]
+
+    def _extract_panel_registers(arch_body: str) -> dict[int, str]:
+        """Parse '- Panel N — register: role' lines from the page architecture
+        body to map panel index to register name."""
+        result: dict[int, str] = {}
+        for line in arch_body.splitlines():
+            m = re.match(r'^\s*-\s*Panel\s+(\d+)\s*[—–-]\s*(\w+)', line, re.IGNORECASE)
+            if m:
+                result[int(m.group(1))] = m.group(2)
+        return result
+
+    processed = 0
+    skipped_precondition = 0
+    skipped_llm = 0
+    for parsed in targets:
+        page_id = parsed.get('page_id', '')
+        scene_id = parsed.get('scene_id', '')
+        page_path = parsed['path']
+        panel_count = parsed.get('panel_count', 0) or 0
+
+        ok, reason = _precondition_check_panel_prompts(project_dir, page_id, scene_id)
+        if not ok:
+            log(f'  WARN skip {page_id}: {reason}')
+            skipped_precondition += 1
+            continue
+
+        scene_row = scenes_map.get(scene_id, {})
+        scene_title = scene_row.get('title') or scene_id
+        scene_brief = briefs_map.get(scene_id, {})
+        scene_intent = intent_map.get(scene_id, {})
+        arch_body = extract_page_architecture(page_path)
+        panel_registers = _extract_panel_registers(arch_body)
+
+        # Always-embedded canon for the universal sections
+        canon_keys = ['style-foundation', 'lighting-laws', 'panel-registers']
+        # Add location and characters (frontmatter-driven)
+        location = parsed.get('location', '') or ''
+        if location:
+            canon_keys.append(f'locations/{location}')
+        characters = parsed.get('characters_present', []) or []
+        for char_id in characters:
+            canon_keys.append(f'characters/{char_id}')
+        # Motifs: pull from scene brief's motifs cell (semicolon-separated)
+        motifs_str = scene_brief.get('motifs', '') or ''
+        for motif_id in (m.strip() for m in motifs_str.split(';') if m.strip()):
+            canon_keys.append(f'motifs/{motif_id}')
+
+        canon_blocks = {cid: _canon(cid) for cid in canon_keys}
+
+        # Surface missing optional canon (NOTE level) — only those that
+        # are NOT in the required gate (style-foundation, lighting-laws
+        # are gated; the rest are NOTE-on-absence)
+        for cid in canon_keys:
+            if cid in ('style-foundation', 'lighting-laws'):
+                continue
+            if not canon_blocks.get(cid):
+                log(f'  NOTE {page_id}: optional canon block {cid!r} '
+                    f'absent — prompt will be built without it')
+
+        # Coaching dispatch
+        if coaching == 'strict':
+            template = render_strict_template(
+                page_id=page_id, panel_count=panel_count,
+                canon_blocks=canon_blocks, panel_registers=panel_registers,
+            )
+            if dry_run:
+                print(f'===== DRY RUN: strict template for {page_id} =====')
+                print(template)
+                continue
+            canon_ids_used = [
+                cid for cid in canon_keys if canon_blocks.get(cid)
+            ]
+            _splice_panel_prompts(page_path, template,
+                                  canon_ids=canon_ids_used)
+            log(f'  {page_id}: strict template written')
+            processed += 1
+            continue
+
+        if coaching == 'coach':
+            brief = render_coach_brief(
+                page_id=page_id, panel_count=panel_count,
+                scene_title=scene_title,
+                page_architecture=arch_body,
+                scene_brief=scene_brief,
+                canon_blocks=canon_blocks,
+            )
+            if dry_run:
+                print(f'===== DRY RUN: coach brief for {page_id} =====')
+                print(brief)
+                continue
+            coaching_dir = os.path.join(project_dir, 'working', 'coaching')
+            os.makedirs(coaching_dir, exist_ok=True)
+            brief_path = os.path.join(
+                coaching_dir, f'panel-prompts-{page_id}.md',
+            )
+            with open(brief_path, 'w', encoding='utf-8') as f:
+                f.write(brief)
+            log(f'  {page_id}: coach brief written to {brief_path}')
+            processed += 1
+            continue
+
+        # Full mode
+        prompt = build_full_prompt(
+            page_id=page_id, panel_count=panel_count,
+            scene_title=scene_title,
+            page_frontmatter=parsed,
+            page_architecture=arch_body,
+            scene_brief=scene_brief,
+            scene_intent=scene_intent,
+            canon_blocks=canon_blocks,
+        )
+        if dry_run:
+            print(f'===== DRY RUN: full prompt for {page_id} =====')
+            print(prompt)
+            continue
+
+        from storyforge.api import invoke_api
+        stage_model = select_model('drafting')
+        response = invoke_api(prompt, stage_model, max_tokens=4096)
+        if not response:
+            log(f'  WARN {page_id}: API call returned empty response; skipped')
+            skipped_llm += 1
+            continue
+        ok, block = _validate_panel_prompts_response(
+            response, expected_panel_count=panel_count,
+        )
+        if not ok:
+            log(f'  WARN {page_id}: LLM response missing section header or '
+                f'wrong panel count; skipped')
+            skipped_llm += 1
+            continue
+        canon_ids_used = [cid for cid in canon_keys if canon_blocks.get(cid)]
+        _splice_panel_prompts(page_path, block, canon_ids=canon_ids_used)
+        try:
+            log_operation(
+                project_dir, 'elaborate-panel-prompts-gn',
+                stage_model, 0, 0, 0.0, target=page_id,
+            )
+        except OSError as e:
+            log(f'  WARN {page_id}: cost ledger write failed ({e}); '
+                f'check working/costs/ permissions. Page sections were written.')
+        log(f'  {page_id}: full panel prompts written')
+        processed += 1
+
+    if skipped_llm > 0:
+        log(f'panel-prompts: {skipped_llm} page(s) skipped due to LLM/API '
+            f'failures. Re-run with --force --page <page_id> to retry.')
+    if skipped_precondition > 0:
+        log(f'panel-prompts: {skipped_precondition} page(s) skipped due to '
+            f'unmet preconditions.')
+
+    if processed == 0 and (skipped_precondition > 0 or skipped_llm > 0):
+        return 1
+    return 0
+
+
 # ============================================================================
 # Main stage execution (spine/architecture/map/briefs)
 # ============================================================================
@@ -1256,6 +1457,22 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
             or get_coaching_level(project_dir)
         )
         rc = _run_page_architecture_handler_gn(
+            project_dir, dry_run=dry_run, coaching=coaching,
+            page=getattr(args, 'page', None),
+            scene=getattr(args, 'scene', None),
+            force=getattr(args, 'force', False),
+        )
+        sys.exit(rc)
+
+    if stage == 'panel-prompts':
+        if medium != 'graphic-novel':
+            log('ERROR: panel-prompts stage is graphic-novel-only.')
+            sys.exit(1)
+        coaching = (
+            getattr(args, 'coaching', None)
+            or get_coaching_level(project_dir)
+        )
+        rc = _run_panel_prompts_handler_gn(
             project_dir, dry_run=dry_run, coaching=coaching,
             page=getattr(args, 'page', None),
             scene=getattr(args, 'scene', None),

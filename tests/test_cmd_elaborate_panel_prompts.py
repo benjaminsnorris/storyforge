@@ -248,3 +248,118 @@ def test_validate_panel_prompts_response_strips_fence():
     ok, block = _validate_panel_prompts_response(resp, expected_panel_count=1)
     assert ok is True
     assert '```' not in block
+
+
+def test_strict_mode_writes_template_no_api_call(tmp_path, monkeypatch):
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    call_count = {'n': 0}
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: (call_count.__setitem__('n', call_count['n'] + 1) or ''))
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    proj = _make_gn_project(tmp_path)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='strict',
+        page=None, scene=None, force=False,
+    )
+    assert call_count['n'] == 0
+    assert rc == 0
+    text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
+    assert '## Image-generation prompts' in text
+    assert '### Panel 1' in text
+    assert '### Panel 2' in text
+    # Section 1 has style-foundation embed (Chiaroscuro), not TODO
+    assert 'Chiaroscuro' in text
+    # Section 3 has the panel-registers-derived register
+    assert 'dominant' in text.lower()
+
+
+def test_coach_mode_writes_brief_no_page_mutation(tmp_path, monkeypatch):
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: 'should not be called')
+    proj = _make_gn_project(tmp_path)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='coach',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 0
+    page_text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
+    assert '## Image-generation prompts' not in page_text
+    brief_path = os.path.join(proj, 'working', 'coaching',
+                              'panel-prompts-s01-p1.md')
+    assert os.path.isfile(brief_path)
+    brief = open(brief_path).read()
+    # Lists all 13 sections
+    for n in range(1, 14):
+        assert f'#### {n}. ' in brief
+
+
+def test_full_mode_with_mocked_api_splices_panel_prompts(tmp_path, monkeypatch):
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+
+    def fake_response_for_two_panels():
+        sections = [
+            'Style foundation', 'Lighting laws', 'Pacing role',
+            'Shot grammar', 'Stage geography', 'Character block',
+            'In this panel', 'Focal objects + render priorities',
+            'Lighting logic', 'Symbolic detail (low weight)',
+            'Action', 'Emotional subtext (low weight)',
+            'Negative constraints',
+        ]
+        def one_panel(idx):
+            lines = [f'### Panel {idx}', '']
+            for i, title in enumerate(sections, start=1):
+                lines.append(f'#### {i}. {title}')
+                lines.append('')
+                lines.append(f'mocked panel-{idx} section-{i} body')
+                lines.append('')
+            return '\n'.join(lines)
+        return '## Image-generation prompts\n\n' + one_panel(1) + '\n' + one_panel(2) + '\n'
+
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: fake_response_for_two_panels())
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    proj = _make_gn_project(tmp_path)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 0
+    text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
+    assert '## Image-generation prompts' in text
+    assert '### Panel 1' in text
+    assert '### Panel 2' in text
+    assert 'mocked panel-1 section-1 body' in text
+    assert 'mocked panel-2 section-13 body' in text
+    assert 'canonical_blocks_embedded:' in text
+
+
+def test_handler_returns_one_when_all_pages_fail_llm_validation(tmp_path, monkeypatch):
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    proj = _make_gn_project(tmp_path)
+    monkeypatch.setattr('storyforge.api.invoke_api', lambda *a, **kw: '')
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 1
+
+
+def test_main_stage_exits_one_when_medium_is_novel(tmp_path):
+    import argparse
+    import pytest
+    from storyforge.cmd_elaborate import _run_main_stage
+    proj = tmp_path / 'novel'
+    proj.mkdir()
+    (proj / 'storyforge.yaml').write_text(
+        'project:\n  medium: novel\n  title: Test\n'
+    )
+    args = argparse.Namespace(page=None, scene=None, force=False, coaching=None)
+    with pytest.raises(SystemExit) as exc:
+        _run_main_stage('panel-prompts', str(proj), str(proj / 'reference'),
+                        dry_run=False, interactive=False, seed='', args=args)
+    assert exc.value.code == 1
