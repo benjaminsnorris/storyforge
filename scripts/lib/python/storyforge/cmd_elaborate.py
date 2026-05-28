@@ -52,6 +52,7 @@ def _python_lib():
 VALID_STAGES: Final[set[str]] = {
     'spine', 'architecture', 'map', 'briefs',
     'gap-fill', 'mice-fill', 'page-architecture',
+    'panel-prompts',
 }
 
 
@@ -1065,6 +1066,89 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
     if processed == 0 and (skipped_precondition > 0 or skipped_llm > 0):
         return 1
     return 0
+
+
+def _select_pages_for_panel_prompts(project_dir: str, page: str | None,
+                                    scene: str | None, force: bool) -> list[dict]:
+    """Return the list of parsed page-file dicts to process for the
+    panel-prompts stage.
+
+    Filtering rules mirror _select_pages_for_architecture: --page,
+    --scene, or all pages. Then (unless --force): drop pages that
+    already have ### Panel N subsections in ## Image-generation prompts.
+    """
+    from storyforge.pages import (
+        list_page_files, parse_page_file, extract_panel_prompts,
+    )
+    all_pages = []
+    for p in list_page_files(project_dir):
+        parsed = parse_page_file(p)
+        if parsed is None:
+            continue
+        all_pages.append(parsed)
+
+    if page:
+        filtered = [p for p in all_pages if p.get('page_id') == page]
+    elif scene:
+        filtered = [p for p in all_pages if p.get('scene_id') == scene]
+    else:
+        filtered = all_pages
+
+    if force:
+        return filtered
+    return [p for p in filtered if not extract_panel_prompts(p['path'])]
+
+
+def _precondition_check_panel_prompts(project_dir: str, page_id: str,
+                                      scene_id: str) -> tuple[bool, str]:
+    """Return (ok, reason). ok=False means skip with WARN.
+
+    Checks:
+      - scenes.csv exists and has scene_id
+      - scene's brief has non-empty panel_breakdown
+      - page file has populated ## Page architecture body
+      - required canon vocabulary blocks are populated:
+        style-foundation, lighting-laws
+    """
+    from storyforge.csv_cli import get_field
+    from storyforge.canon import is_canon_block_populated
+    from storyforge.pages import (
+        list_page_files, parse_page_file, extract_page_architecture,
+    )
+
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(scenes_csv):
+        return False, 'reference/scenes.csv is missing — run elaborate --stage map first'
+    if not get_field(scenes_csv, scene_id, 'id'):
+        return False, f'scene {scene_id} not in scenes.csv'
+
+    briefs_csv = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    pb = get_field(briefs_csv, scene_id, 'panel_breakdown') or ''
+    if not pb.strip():
+        return False, f'scene {scene_id} brief has empty panel_breakdown'
+
+    # Find the page file
+    matching_page_path = None
+    for p in list_page_files(project_dir):
+        parsed = parse_page_file(p)
+        if parsed and parsed.get('page_id') == page_id:
+            matching_page_path = p
+            break
+    if not matching_page_path:
+        return False, f'page {page_id} file not found'
+
+    arch_body = extract_page_architecture(matching_page_path).strip()
+    if not arch_body:
+        return False, (f'page {page_id} has empty Page architecture — run '
+                       f'elaborate --stage page-architecture first')
+
+    for canon_id in ('style-foundation', 'lighting-laws'):
+        if not is_canon_block_populated(project_dir, canon_id):
+            return False, (
+                f'canon block {canon_id!r} is missing or TODO — '
+                f'populate reference/canon/{canon_id}.md first'
+            )
+    return True, ''
 
 
 # ============================================================================

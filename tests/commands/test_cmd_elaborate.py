@@ -139,7 +139,8 @@ class TestValidStages:
 
     def test_contains_all_expected(self):
         expected = {'spine', 'architecture', 'map', 'briefs',
-                    'gap-fill', 'mice-fill', 'page-architecture'}
+                    'gap-fill', 'mice-fill', 'page-architecture',
+                    'panel-prompts'}
         assert VALID_STAGES == expected
 
     def test_is_set(self):
