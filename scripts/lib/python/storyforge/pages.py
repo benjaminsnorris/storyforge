@@ -332,6 +332,52 @@ _NEXT_SECTION_HEADER = re.compile(
 )
 
 
+_PAGE_ARCHITECTURE_HEADER = re.compile(
+    r'^##\s+Page\s+architecture\s*$', re.MULTILINE | re.IGNORECASE,
+)
+
+_BLOCKING_PROMPT_HEADER = re.compile(
+    r'^##\s+Page[- ]blocking\s+prompt\s*$', re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _extract_section(path: str, header_re: re.Pattern) -> str:
+    """Shared implementation for body-section extractors.
+
+    Returns the body of the section (header stripped) up to the next
+    page-file section heading (`## ...`, but not `## Page N — …` page
+    headers, which are part of the panel-script body). Returns '' when
+    the page file is missing, has no frontmatter, or lacks the section.
+    """
+    page = parse_page_file(path)
+    if page is None:
+        return ''
+    body = page.get('body', '')
+    m = header_re.search(body)
+    if not m:
+        return ''
+    start = m.end()
+    rest = body[start:]
+    next_m = _NEXT_SECTION_HEADER.search(rest)
+    end = next_m.start() if next_m else len(rest)
+    return rest[:end].strip('\n')
+
+
+def extract_page_architecture(path: str) -> str:
+    """Return the contents of the '## Page architecture' section, or ''."""
+    return _extract_section(path, _PAGE_ARCHITECTURE_HEADER)
+
+
+def extract_blocking_prompt(path: str) -> str:
+    """Return the contents of the '## Page-blocking prompt' section, or ''.
+
+    The header regex accepts both 'Page-blocking prompt' (preferred) and
+    'Page blocking prompt' (space variant) so authors who type the
+    non-hyphenated form get the same extraction behavior.
+    """
+    return _extract_section(path, _BLOCKING_PROMPT_HEADER)
+
+
 def extract_panel_script(path: str) -> str:
     """Return the contents of the '## Panel script' section, or '' if absent.
 
