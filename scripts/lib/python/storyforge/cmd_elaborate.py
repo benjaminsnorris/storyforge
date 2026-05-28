@@ -21,18 +21,23 @@ import re
 import subprocess
 import sys
 import time
-from typing import Literal
+from typing import Final, Literal
 
 from storyforge.common import (
     detect_project_root, log, read_yaml_field, select_model,
     install_signal_handlers, get_plugin_dir, build_shared_context,
-    get_medium, get_coaching_level,
+    get_medium, get_coaching_level, CoachingLevel,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr,
     update_pr_task, commit_and_push, run_review_phase,
 )
 from storyforge.costs import print_summary, log_operation
+from storyforge.pages import (
+    _PAGE_ARCHITECTURE_HEADER as _PAGE_ARCH_HEADER_RE,
+    _BLOCKING_PROMPT_HEADER as _BLOCKING_PROMPT_HEADER_RE,
+    _PANEL_SCRIPT_HEADER as _PANEL_SCRIPT_HEADER_RE,
+)
 
 
 # ============================================================================
@@ -44,8 +49,10 @@ def _python_lib():
     return str(Path(__file__).resolve().parent.parent)
 
 
-VALID_STAGES = {'spine', 'architecture', 'map', 'briefs',
-                'gap-fill', 'mice-fill', 'page-architecture'}
+VALID_STAGES: Final[set[str]] = {
+    'spine', 'architecture', 'map', 'briefs',
+    'gap-fill', 'mice-fill', 'page-architecture',
+}
 
 
 # ============================================================================
@@ -738,17 +745,6 @@ def _precondition_check_page(project_dir: str, page_id: str,
     return True, ''
 
 
-_PAGE_ARCH_HEADER_RE = re.compile(
-    r'^##\s+Page\s+architecture\s*$', re.MULTILINE | re.IGNORECASE,
-)
-_BLOCKING_PROMPT_HEADER_RE = re.compile(
-    r'^##\s+Page[- ]blocking\s+prompt\s*$', re.MULTILINE | re.IGNORECASE,
-)
-_PANEL_SCRIPT_HEADER_RE = re.compile(
-    r'^##\s+Panel\s+script\s*$', re.MULTILINE | re.IGNORECASE,
-)
-
-
 def _validate_architecture_response(text: str) -> tuple[bool, str]:
     """Parse and validate an LLM response for the page-architecture stage.
 
@@ -883,7 +879,7 @@ def _splice_page_architecture(page_path: str, sections_block: str,
 
 
 def _run_page_architecture_handler_gn(project_dir: str, *,
-                                      dry_run: bool, coaching: str,
+                                      dry_run: bool, coaching: CoachingLevel,
                                       page: str | None, scene: str | None,
                                       force: bool) -> Literal[0, 1]:
     """Dispatcher for the page-architecture stage.

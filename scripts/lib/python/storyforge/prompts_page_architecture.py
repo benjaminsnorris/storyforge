@@ -8,6 +8,8 @@ author. build_full_prompt assembles the full LLM prompt with canon
 embeds + scene brief + neighbor pages.
 """
 
+from storyforge.pages import PageFile
+
 
 _STRICT_TEMPLATE_HEADER = """\
 ## Page architecture
@@ -36,7 +38,7 @@ TODO — monochrome storyboard thumbnail. Must:
 """
 
 
-def _format_neighbor(label: str, page: dict | None) -> str:
+def _format_neighbor(label: str, page: PageFile | None) -> str:
     if not page:
         return f'- {label}: (none — this page is at the scene edge)'
     pid = page.get('page_id', '?')
@@ -64,10 +66,10 @@ def render_coach_brief(*,
                        page_id: str,
                        scene_title: str,
                        panel_count: int,
-                       scene_brief: dict,
-                       prev_page: dict | None,
-                       next_page: dict | None,
-                       canon_blocks: dict) -> str:
+                       scene_brief: dict[str, str],
+                       prev_page: PageFile | None,
+                       next_page: PageFile | None,
+                       canon_blocks: dict[str, str]) -> str:
     """Coach-mode markdown brief written to working/coaching/.
 
     No file mutation of the page file. The brief asks the right
@@ -175,13 +177,13 @@ def _format_intent(intent: dict) -> str:
 
 def build_full_prompt(*,
                       page_id: str,
-                      page_frontmatter: dict,
+                      page_frontmatter: PageFile,
                       scene_title: str,
-                      scene_brief: dict,
-                      scene_intent: dict,
-                      prev_page: dict | None,
-                      next_page: dict | None,
-                      canon_blocks: dict) -> str:
+                      scene_brief: dict[str, str],
+                      scene_intent: dict[str, str],
+                      prev_page: PageFile | None,
+                      next_page: PageFile | None,
+                      canon_blocks: dict[str, str]) -> str:
     """Full-mode LLM prompt for one page.
 
     The handler is responsible for collecting canon_blocks (panel-registers,
