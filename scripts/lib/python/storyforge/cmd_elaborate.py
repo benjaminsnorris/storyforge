@@ -71,7 +71,7 @@ def parse_args(argv):
     parser.add_argument('--stage', type=str, default=None,
                         help='Which elaboration stage to run '
                              '(spine|architecture|map|briefs|gap-fill|'
-                             'mice-fill|page-architecture)')
+                             'mice-fill|page-architecture|panel-prompts)')
     # Accept stages as direct flags (e.g. --mice-fill, --gap-fill, --briefs)
     for stage in sorted(VALID_STAGES):
         parser.add_argument(f'--{stage}', action='store_true', dest=f'stage_{stage.replace("-", "_")}',
@@ -1211,6 +1211,28 @@ def _select_pages_for_panel_prompts(project_dir: str, page: str | None,
     return [p for p in filtered if not extract_panel_prompts(p['path'])]
 
 
+def _extract_panel_registers(arch_body: str) -> dict[int, str]:
+    """Parse ``- Panel N — <register>: <role>`` lines from the page
+    architecture body, returning {panel_index: register_name}.
+
+    Only the register name (the text between the em-dash and the
+    optional colon, or end-of-line) is captured.  Multi-word registers
+    like "low atmospheric" are preserved.  The captured value is
+    lowercased and stripped so capitalisation variants in the source
+    text don't produce different keys in section 3 of the strict
+    template.
+    """
+    result: dict[int, str] = {}
+    for line in arch_body.splitlines():
+        m = re.match(
+            r'^\s*-\s*Panel\s+(\d+)\s*[—–-]\s*([^:\n]+?)(?:\s*:.*)?$',
+            line, re.IGNORECASE,
+        )
+        if m:
+            result[int(m.group(1))] = m.group(2).strip().lower()
+    return result
+
+
 def _precondition_check_panel_prompts(project_dir: str, page_id: str,
                                       scene_id: str) -> tuple[bool, str]:
     """Return (ok, reason). ok=False means skip with WARN.
@@ -1235,6 +1257,8 @@ def _precondition_check_panel_prompts(project_dir: str, page_id: str,
         return False, f'scene {scene_id} not in scenes.csv'
 
     briefs_csv = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    if not os.path.isfile(briefs_csv):
+        return False, 'reference/scene-briefs.csv is missing — run elaborate --stage briefs first'
     pb = get_field(briefs_csv, scene_id, 'panel_breakdown') or ''
     if not pb.strip():
         return False, f'scene {scene_id} brief has empty panel_breakdown'
@@ -1308,16 +1332,6 @@ def _run_panel_prompts_handler_gn(project_dir: str, *,
                 project_dir, canon_id,
             )
         return canon_block_cache[canon_id]
-
-    def _extract_panel_registers(arch_body: str) -> dict[int, str]:
-        """Parse '- Panel N — register: role' lines from the page architecture
-        body to map panel index to register name."""
-        result: dict[int, str] = {}
-        for line in arch_body.splitlines():
-            m = re.match(r'^\s*-\s*Panel\s+(\d+)\s*[—–-]\s*(\w+)', line, re.IGNORECASE)
-            if m:
-                result[int(m.group(1))] = m.group(2)
-        return result
 
     processed = 0
     skipped_precondition = 0

@@ -13,7 +13,7 @@ from storyforge.pages import PageFile, PANEL_SECTION_TITLES
 
 _TODO_BY_SECTION_INDEX: dict[int, str] = {
     3: 'TODO — register (dominant | transitional | rhythmic | climactic | '
-       'atmospheric) and relative weight on the page.',
+       'orientation | atmospheric) and relative weight on the page.',
     4: 'TODO — camera, framing, angle.',
     7: 'TODO — character framing in this beat (what each character is doing).',
     8: 'TODO — what receives detail vs. what dissolves.',

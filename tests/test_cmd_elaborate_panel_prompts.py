@@ -529,3 +529,97 @@ def test_handler_warn_distinguishes_validator_failure_modes(tmp_path, monkeypatc
     # The specific reason should be in the output (mentions expected vs got)
     assert ('expected' in output.lower() or 'got' in output.lower()
             or 'panel sequence' in output.lower())
+
+
+# ============================================================================
+# HV-1: _extract_panel_registers hoisted to module level + multi-word regex
+# ============================================================================
+
+def test_extract_panel_registers_module_level_with_single_word():
+    """HV-1: single-word register is captured correctly (regression check)."""
+    from storyforge.cmd_elaborate import _extract_panel_registers
+    arch = '### Panel hierarchy\n- Panel 1 — dominant: focus\n- Panel 2 — atmospheric: ambience\n'
+    result = _extract_panel_registers(arch)
+    assert result == {1: 'dominant', 2: 'atmospheric'}
+
+
+def test_extract_panel_registers_captures_multi_word_register():
+    """HV-1: compound register like 'low atmospheric' must not be truncated."""
+    from storyforge.cmd_elaborate import _extract_panel_registers
+    arch = '- Panel 1 — low atmospheric: ambience\n- Panel 2 — page-turn climactic: reveal\n'
+    result = _extract_panel_registers(arch)
+    assert result[1] == 'low atmospheric'
+    assert result[2] == 'page-turn climactic'
+
+
+def test_extract_panel_registers_normalizes_capitalization():
+    """HV-1: 'Dominant' and 'dominant' must produce the same key value."""
+    from storyforge.cmd_elaborate import _extract_panel_registers
+    arch = '- Panel 1 — Dominant: focus\n- Panel 2 — DOMINANT: focus\n'
+    result = _extract_panel_registers(arch)
+    assert result[1] == 'dominant'
+    assert result[2] == 'dominant'
+
+
+def test_extract_panel_registers_handles_no_colon():
+    """HV-1: register without trailing ': role' still parses."""
+    from storyforge.cmd_elaborate import _extract_panel_registers
+    arch = '- Panel 1 — dominant\n'
+    result = _extract_panel_registers(arch)
+    assert result == {1: 'dominant'}
+
+
+# ============================================================================
+# HV-2: _precondition_check_panel_prompts — missing scene-briefs.csv message
+# ============================================================================
+
+def test_precondition_misleading_message_when_scene_briefs_csv_missing(tmp_path):
+    """HV-2: missing reference/scene-briefs.csv must produce a clear message
+    pointing at the fix, not 'empty panel_breakdown'."""
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    import os
+    proj = _make_gn_project(tmp_path)
+    os.remove(os.path.join(proj, 'reference', 'scene-briefs.csv'))
+    ok, reason = _precondition_check_panel_prompts(proj, 's01-p1', 's01-studio')
+    assert ok is False
+    assert 'scene-briefs.csv is missing' in reason
+    assert 'elaborate --stage briefs' in reason
+
+
+# ============================================================================
+# --stage help string includes panel-prompts
+# ============================================================================
+
+def test_parse_args_help_lists_panel_prompts():
+    """--stage help string must list panel-prompts."""
+    import io
+    import contextlib
+    from storyforge.cmd_elaborate import parse_args
+    buf = io.StringIO()
+    with contextlib.suppress(SystemExit):
+        with contextlib.redirect_stdout(buf):
+            try:
+                parse_args(['--help'])
+            except SystemExit:
+                pass
+    help_text = buf.getvalue()
+    assert 'panel-prompts' in help_text
+
+
+# ============================================================================
+# MC-3: strict template section 3 TODO must list 'orientation'
+# ============================================================================
+
+def test_strict_template_section_3_TODO_lists_orientation():
+    """MC-3: the strict-mode TODO for section 3 must list 'orientation'
+    alongside the other registers (consistency with coach and full)."""
+    from storyforge.prompts_panel_prompts import render_strict_template
+    out = render_strict_template(
+        page_id='s01-p1', panel_count=1,
+        canon_blocks={}, panel_registers={},  # No register, so falls to TODO
+    )
+    # Find section 3 body
+    sec3_start = out.index('#### 3. Pacing role')
+    sec4_start = out.index('#### 4. Shot grammar')
+    sec3_body = out[sec3_start:sec4_start]
+    assert 'orientation' in sec3_body
