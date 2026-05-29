@@ -25,7 +25,8 @@ def test_strict_template_renders_all_13_sections_for_each_panel():
 
 
 def test_strict_template_embeds_canon_in_sections_1_2():
-    """Sections 1 and 2 must contain canon embeds verbatim, not TODO."""
+    """TG-6: Sections 1 and 2 must contain canon embeds verbatim in the
+    correct section body — not just somewhere in the output."""
     from storyforge.prompts_panel_prompts import render_strict_template
     canon_blocks = {
         'style-foundation': 'STYLE_BLOCK_TEXT',
@@ -35,9 +36,18 @@ def test_strict_template_embeds_canon_in_sections_1_2():
         page_id='s01-p1', panel_count=1,
         canon_blocks=canon_blocks, panel_registers={1: 'dominant'},
     )
-    # Section 1 has the embed
-    assert 'STYLE_BLOCK_TEXT' in out
-    assert 'LIGHTING_BLOCK_TEXT' in out
+    # Bound section 1 body: from '#### 1. ' to '#### 2. '
+    sec1_start = out.index('#### 1. Style foundation')
+    sec2_start = out.index('#### 2. Lighting laws')
+    sec3_start = out.index('#### 3. Pacing role')
+    section_1_body = out[sec1_start:sec2_start]
+    section_2_body = out[sec2_start:sec3_start]
+    # Canon embed is in the correct section body, not just anywhere in the output
+    assert 'STYLE_BLOCK_TEXT' in section_1_body
+    assert 'LIGHTING_BLOCK_TEXT' in section_2_body
+    # Cross-check: each embed is NOT in the wrong section body
+    assert 'LIGHTING_BLOCK_TEXT' not in section_1_body
+    assert 'STYLE_BLOCK_TEXT' not in section_2_body
 
 
 def test_strict_template_cites_register_in_section_3():
@@ -69,13 +79,15 @@ def test_strict_template_uses_todo_in_panel_specific_sections():
 
 
 def test_strict_template_panel_count_zero_falls_back_to_one():
-    """Edge case: page file has panel_count=0. Render at least one panel."""
+    """TG-7: page file has panel_count=0. Render exactly one panel placeholder,
+    not two — confirms the fallback produces Panel 1 only."""
     from storyforge.prompts_panel_prompts import render_strict_template
     out = render_strict_template(
         page_id='s01-p1', panel_count=0,
         canon_blocks={}, panel_registers={},
     )
     assert '### Panel 1' in out
+    assert '### Panel 2' not in out
 
 
 def test_strict_template_is_deterministic():

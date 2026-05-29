@@ -149,3 +149,79 @@ def test_cleanup_surfaces_panel_prompt_findings(tmp_path):
         if f['type'] == 'page_missing_panel_prompts':
             assert f['severity'] == 'warning'
             assert 'storyforge elaborate --stage panel-prompts' in f['action']
+
+
+def test_cleanup_surfaces_panel_prompt_section_missing_finding(tmp_path):
+    """TG-2: page_panel_prompt_section_missing must flow through
+    cmd_cleanup._check_page_files with correct type, severity, and action."""
+    import os
+    project = tmp_path / 'proj'
+    project.mkdir()
+    (project / 'storyforge.yaml').write_text('project:\n  medium: graphic-novel\n')
+    pages = project / 'pages'
+    pages.mkdir()
+    (pages / 's01-p1.md').write_text(
+        '---\npage_id: s01-p1\nscene_id: s01-studio\n'
+        'page_within_scene: 1\ntotal_pages_in_scene: 1\npanel_count: 1\n---\n\n'
+        '## Page architecture\n\nIntent.\n\n'
+        '## Page-blocking prompt\n\nstoryboard.\n\n'
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 1. Style foundation\n\nfoundation\n\n'
+        # Sections 2-13 absent — triggers panel_prompt_section_missing
+        '## Panel script\n\n**Panel 1.**\n'
+    )
+    from storyforge.cmd_cleanup import _check_page_files
+    findings = _check_page_files(str(project))
+    types = {f['type'] for f in findings}
+    assert 'page_panel_prompt_section_missing' in types
+    for f in findings:
+        if f['type'] == 'page_panel_prompt_section_missing':
+            assert f['severity'] == 'warning'
+            assert 'storyforge elaborate --stage panel-prompts' in f['action']
+            assert '--force' in f['action']
+            assert 's01-p1' in f['action']
+
+
+def test_cleanup_surfaces_panel_prompt_wrong_section_order_finding(tmp_path):
+    """TG-2: page_panel_prompt_wrong_section_order must flow through
+    cmd_cleanup._check_page_files with correct type, severity, and action."""
+    import os
+    project = tmp_path / 'proj'
+    project.mkdir()
+    (project / 'storyforge.yaml').write_text('project:\n  medium: graphic-novel\n')
+    pages = project / 'pages'
+    pages.mkdir()
+    # Build a page with all 13 sections present but in wrong order (3 before 2)
+    sections_lines = []
+    sections_lines.append('#### 1. Style foundation\n\nfoundation\n\n')
+    sections_lines.append('#### 3. Pacing role\n\nregister\n\n')  # OUT OF ORDER
+    sections_lines.append('#### 2. Lighting laws\n\nlighting\n\n')
+    for i, title in enumerate(
+        ['Shot grammar', 'Stage geography', 'Character block',
+         'In this panel', 'Focal objects + render priorities',
+         'Lighting logic', 'Symbolic detail (low weight)', 'Action',
+         'Emotional subtext (low weight)', 'Negative constraints'],
+        start=4,
+    ):
+        sections_lines.append(f'#### {i}. {title}\n\nbody\n\n')
+    panel_body = ''.join(sections_lines)
+    (pages / 's01-p1.md').write_text(
+        '---\npage_id: s01-p1\nscene_id: s01-studio\n'
+        'page_within_scene: 1\ntotal_pages_in_scene: 1\npanel_count: 1\n---\n\n'
+        '## Page architecture\n\nIntent.\n\n'
+        '## Page-blocking prompt\n\nstoryboard.\n\n'
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        + panel_body +
+        '## Panel script\n\n**Panel 1.**\n'
+    )
+    from storyforge.cmd_cleanup import _check_page_files
+    findings = _check_page_files(str(project))
+    types = {f['type'] for f in findings}
+    assert 'page_panel_prompt_wrong_section_order' in types
+    for f in findings:
+        if f['type'] == 'page_panel_prompt_wrong_section_order':
+            assert f['severity'] == 'warning'
+            assert 'panel-prompts' in f['action']
+            assert 's01-p1' in f['action']

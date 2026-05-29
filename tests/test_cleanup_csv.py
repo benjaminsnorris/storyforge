@@ -304,16 +304,35 @@ class TestPagesDirectory:
         assert any(f['type'] == 'page_no_frontmatter' for f in page_findings)
 
     def test_clean_page_file_no_findings(self, tmp_path):
-        """A valid page file (through page-blocking-prompt stage) produces no
-        page-category findings beyond the new panel-prompts warnings.
-        Panel-prompts findings are filtered here because the fixture predates
-        the panel-prompts stage — they're expected for files that haven't
-        run elaborate --stage panel-prompts yet."""
+        """M-1: A fully-populated page file (including a well-formed
+        ## Image-generation prompts section with all 13 subsections per
+        panel) produces zero page-category findings. No panel-prompt type
+        filtering — the fixture itself must be clean."""
         (tmp_path / 'storyforge.yaml').write_text(
             'project:\n  title: Test\n  medium: graphic-novel\n'
         )
         pages = tmp_path / 'pages'
         pages.mkdir()
+        _panel_section_titles = [
+            'Style foundation', 'Lighting laws', 'Pacing role',
+            'Shot grammar', 'Stage geography', 'Character block',
+            'In this panel', 'Focal objects + render priorities',
+            'Lighting logic', 'Symbolic detail (low weight)',
+            'Action', 'Emotional subtext (low weight)',
+            'Negative constraints',
+        ]
+
+        def _well_formed_panel(panel_idx: int) -> str:
+            lines = [f'### Panel {panel_idx}', '']
+            for i, title in enumerate(_panel_section_titles, start=1):
+                lines += [f'#### {i}. {title}', '', f'Panel {panel_idx} section {i} body.', '']
+            return '\n'.join(lines)
+
+        image_gen_section = (
+            '## Image-generation prompts\n\n'
+            + _well_formed_panel(1) + '\n'
+            + _well_formed_panel(2) + '\n'
+        )
         (pages / 's01-p1.md').write_text(
             "---\n"
             "page_id: s01-p1\n"
@@ -324,17 +343,12 @@ class TestPagesDirectory:
             "---\n\n"
             "## Page architecture\n\nIntent.\n\n"
             "## Page-blocking prompt\n\nStoryboard prompt.\n\n"
-            "## Panel script\n\n**Panel 1.** Wide.\n"
+            + image_gen_section
+            + "## Panel script\n\n**Panel 1.** Wide.\n"
         )
         report = build_cleanup_report(str(tmp_path))
-        _panel_prompt_types = {
-            'page_missing_panel_prompts',
-            'page_panel_prompt_section_missing',
-            'page_panel_prompt_wrong_section_order',
-        }
         page_findings = [f for f in report['findings']
-                         if f.get('category') == 'pages'
-                         and f.get('type') not in _panel_prompt_types]
+                         if f.get('category') == 'pages']
         assert page_findings == []
 
     def test_missing_field_finding_surfaced(self, tmp_path):

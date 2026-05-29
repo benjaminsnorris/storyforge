@@ -610,6 +610,122 @@ def test_parse_args_help_lists_panel_prompts():
 # MC-3: strict template section 3 TODO must list 'orientation'
 # ============================================================================
 
+def test_splice_panel_prompts_appends_to_end_when_no_panel_script_header(tmp_path):
+    """TG-1: when the page has no '## Panel script' header, _splice_panel_prompts
+    must append the new section to the end of the body. Regression: this third
+    branch was previously untested."""
+    from storyforge.cmd_elaborate import _splice_panel_prompts
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\npage_id: s01-p1\nscene_id: s01\n"
+        "page_within_scene: 1\ntotal_pages_in_scene: 1\npanel_count: 1\n---\n\n"
+        "## Scene context\n\nBeat.\n\n"
+        "## Page architecture\n\nArch.\n"
+        # deliberately no ## Panel script
+    )
+    block = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\nfoundation\n'
+    )
+    _splice_panel_prompts(str(page_path), block, canon_ids=[])
+    text = page_path.read_text()
+    assert '## Image-generation prompts' in text
+    # No Panel script header should be present — confirms append-to-end branch
+    assert '## Panel script' not in text
+    # Original content survives + new section appended
+    assert '## Scene context' in text
+    assert '## Page architecture' in text
+    # Sections appear AFTER existing content
+    assert text.index('## Page architecture') < text.index('## Image-generation prompts')
+
+
+def test_precondition_message_when_scenes_csv_missing(tmp_path):
+    """TG-3: missing reference/scenes.csv produces a clear message."""
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    import os
+    proj = _make_gn_project(tmp_path)
+    os.remove(os.path.join(proj, 'reference', 'scenes.csv'))
+    ok, reason = _precondition_check_panel_prompts(proj, 's01-p1', 's01-studio')
+    assert ok is False
+    assert 'scenes.csv is missing' in reason
+
+
+def test_precondition_fails_when_scene_not_in_scenes_csv(tmp_path):
+    """TG-3: scene_id absent from scenes.csv produces the right message."""
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    ok, reason = _precondition_check_panel_prompts(proj, 's99-p1', 's99-nonexistent')
+    assert ok is False
+    assert 's99-nonexistent' in reason and 'not in scenes.csv' in reason
+
+
+def test_precondition_fails_when_panel_breakdown_empty(tmp_path):
+    """TG-3: empty panel_breakdown produces the right message."""
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    import os
+    proj = _make_gn_project(tmp_path)
+    briefs = os.path.join(proj, 'reference', 'scene-briefs.csv')
+    with open(briefs) as f:
+        text = f.read()
+    text = text.replace('p1: 2-panel', '')
+    with open(briefs, 'w') as f:
+        f.write(text)
+    ok, reason = _precondition_check_panel_prompts(proj, 's01-p1', 's01-studio')
+    assert ok is False
+    assert 'panel_breakdown' in reason
+
+
+def test_select_pages_by_page_id(tmp_path):
+    """TG-4: --page filter returns exactly the requested page."""
+    from storyforge.cmd_elaborate import _select_pages_for_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    result = _select_pages_for_panel_prompts(proj, page='s01-p1', scene=None, force=False)
+    assert len(result) == 1
+    assert result[0]['page_id'] == 's01-p1'
+
+
+def test_select_pages_by_scene_id(tmp_path):
+    """TG-4: --scene filter returns all pages of that scene."""
+    from storyforge.cmd_elaborate import _select_pages_for_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    result = _select_pages_for_panel_prompts(proj, page=None, scene='s01-studio', force=False)
+    assert len(result) >= 1
+    assert all(p['scene_id'] == 's01-studio' for p in result)
+
+
+def test_select_pages_unknown_page_returns_empty(tmp_path):
+    """TG-4: --page with unknown id returns empty list, doesn't error."""
+    from storyforge.cmd_elaborate import _select_pages_for_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    result = _select_pages_for_panel_prompts(proj, page='nonexistent-p99', scene=None, force=False)
+    assert result == []
+
+
+def test_handler_returns_one_when_all_pages_fail_precondition(tmp_path, monkeypatch):
+    """TG-8: rc=1 path triggered by precondition failures, not LLM failures."""
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    import os
+    proj = _make_gn_project(tmp_path)
+    # Strip panel_breakdown so precondition fails on the page
+    briefs = os.path.join(proj, 'reference', 'scene-briefs.csv')
+    with open(briefs) as f:
+        text = f.read()
+    text = text.replace('p1: 2-panel', '')
+    with open(briefs, 'w') as f:
+        f.write(text)
+    # Make sure invoke_api would error if called — to prove it isn't
+    def fail_api(*a, **kw):
+        raise AssertionError('API must not be called when precondition fails')
+    monkeypatch.setattr('storyforge.api.invoke_api', fail_api)
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 1
+
+
 def test_strict_template_section_3_TODO_lists_orientation():
     """MC-3: the strict-mode TODO for section 3 must list 'orientation'
     alongside the other registers (consistency with coach and full)."""
