@@ -52,6 +52,10 @@ PANEL_SECTION_TITLES: Final[tuple[str, ...]] = (
     'Emotional subtext (low weight)',
     'Negative constraints',
 )
+assert len(PANEL_SECTION_TITLES) == 13, (
+    'PANEL_SECTION_TITLES must have exactly 13 entries '
+    '(canonical panel-prompt schema, issue #253)'
+)
 
 
 # A successful parse always populates path/body/extra/extra_lists; the
@@ -368,7 +372,6 @@ def validate_page_file(path: str) -> list[PageFinding]:
         for panel_index in sorted(panels.keys()):
             panel_body = panels[panel_index]
             sections = extract_panel_sections(panel_body)
-            present_indices = sorted(sections.keys())
             expected_indices = list(range(1, 14))
             missing = [i for i in expected_indices if i not in sections]
             if missing:

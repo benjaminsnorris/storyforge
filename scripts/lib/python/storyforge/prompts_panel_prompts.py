@@ -8,10 +8,12 @@ schema introduced by issue #253. render_strict_template emits the
 assembles the LLM prompt for full coaching mode.
 """
 
+from typing import Final
+
 from storyforge.pages import PageFile, PANEL_SECTION_TITLES
 
 
-_TODO_BY_SECTION_INDEX: dict[int, str] = {
+_TODO_BY_SECTION_INDEX: Final[dict[int, str]] = {
     3: 'TODO — register (dominant | transitional | rhythmic | climactic | '
        'orientation | atmospheric) and relative weight on the page.',
     4: 'TODO — camera, framing, angle.',
@@ -101,7 +103,7 @@ def render_strict_template(*, page_id: str, panel_count: int,
 
 def render_coach_brief(*, page_id: str, panel_count: int,
                        scene_title: str, page_architecture: str,
-                       scene_brief: dict, canon_blocks: dict[str, str]) -> str:
+                       scene_brief: dict[str, str], canon_blocks: dict[str, str]) -> str:
     """Coach-mode markdown brief written to working/coaching/.
 
     Embeds canon vocabulary inline so the author can decide without

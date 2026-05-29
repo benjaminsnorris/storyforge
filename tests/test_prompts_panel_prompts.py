@@ -195,3 +195,17 @@ def test_full_prompt_skips_empty_canon_blocks():
     # (we don't enforce exactly how, just that LIGHTING_BLOCK is in and
     # there's no spurious '### style-foundation' followed by blank content)
     assert 'LIGHTING_BLOCK' in prompt
+
+
+def test_render_coach_brief_accepts_typed_dict():
+    """TD-1: render_coach_brief's scene_brief is dict[str, str]
+    (regression check — previously was bare dict)."""
+    from storyforge.prompts_panel_prompts import render_coach_brief
+    scene_brief: dict[str, str] = {'panel_breakdown': 'p1: 2-panel'}
+    canon_blocks: dict[str, str] = {}
+    out = render_coach_brief(
+        page_id='s01-p1', panel_count=1, scene_title='Test',
+        page_architecture='', scene_brief=scene_brief,
+        canon_blocks=canon_blocks,
+    )
+    assert 's01-p1' in out  # smoke check — call succeeds with typed dicts

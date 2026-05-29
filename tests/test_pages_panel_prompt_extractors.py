@@ -172,3 +172,11 @@ def test_extract_panel_sections_strips_body_whitespace():
     # Body is stripped (no leading/trailing whitespace)
     assert result[1].startswith('foundation') or result[1].startswith('   foundation')
     assert not result[1].endswith('\n\n')
+
+
+def test_panel_section_titles_length_assertion_holds():
+    """TD-2: PANEL_SECTION_TITLES must have exactly 13 entries —
+    the module-level assertion catches edits that add/remove without
+    updating consumers."""
+    from storyforge.pages import PANEL_SECTION_TITLES
+    assert len(PANEL_SECTION_TITLES) == 13
