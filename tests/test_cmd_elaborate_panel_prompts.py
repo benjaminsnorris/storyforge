@@ -1,0 +1,741 @@
+"""Tests for the panel-prompts stage in cmd_elaborate (#253)."""
+
+import os
+import pytest
+
+
+def test_panel_prompts_stage_in_valid_stages():
+    from storyforge.cmd_elaborate import VALID_STAGES
+    assert 'panel-prompts' in VALID_STAGES
+
+
+def test_panel_prompts_direct_flag_resolves_to_stage():
+    from storyforge.cmd_elaborate import parse_args
+    args = parse_args(['--panel-prompts'])
+    assert args.stage == 'panel-prompts'
+
+
+def _make_gn_project(tmp_path):
+    """GN project with one scene, one brief, one page that has
+    populated ## Page architecture (needed for panel-prompts precondition)
+    but no ## Image-generation prompts."""
+    proj = tmp_path / 'proj'
+    proj.mkdir()
+    (proj / 'storyforge.yaml').write_text(
+        'project:\n  medium: graphic-novel\n  title: Test\n'
+    )
+    ref = proj / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|status|target_pages|panel_count|page_count\n'
+        's01-studio|1|Studio|briefed|3|2|1\n'
+    )
+    (ref / 'scene-briefs.csv').write_text(
+        'id|goal|conflict|outcome|panel_breakdown|visual_keywords|'
+        'key_actions|motifs|page_turn_beats|page_layout|caption_strategy\n'
+        's01-studio|focus|distraction|focus regained|p1: 2-panel|'
+        'inkpot; hand|lowers the inkpot|inkpot|none|3-page scene|minimal\n'
+    )
+    (ref / 'scene-intent.csv').write_text(
+        'id|function|emotional_arc|value_at_stake|value_shift|on_stage\n'
+        's01-studio|opening|tense to calm|control|positive|lucien-vey\n'
+    )
+    canon = ref / 'canon'
+    canon.mkdir()
+    for canon_id, block in (
+        ('style-foundation', 'Chiaroscuro palette.'),
+        ('lighting-laws', 'Single light source.'),
+        ('panel-registers', 'Dominant: fulcrum.\nAtmospheric: pause.'),
+        ('page-rhythm-rules', 'One dominant per page max.'),
+    ):
+        (canon / f'{canon_id}.md').write_text(
+            f'---\ncanon_id: {canon_id}\n---\n\n'
+            f'## Embeddable block\n\n{block}\n'
+        )
+    pages = proj / 'pages'
+    pages.mkdir()
+    (pages / 's01-p1.md').write_text(
+        "---\n"
+        "page_id: s01-p1\n"
+        "scene_id: s01-studio\n"
+        "page_within_scene: 1\n"
+        "total_pages_in_scene: 1\n"
+        "panel_count: 2\n"
+        "characters_present: [lucien-vey]\n"
+        "location: archive-studio\n"
+        "---\n\n"
+        "## Scene context\n\nOpening beat.\n\n"
+        "## Page architecture\n\n"
+        "### Intent\nQuiet tension.\n\n"
+        "### Panel hierarchy\n- Panel 1 — dominant: focus\n- Panel 2 — atmospheric: ambience\n\n"
+        "### Book-level placement\n- Spread context: opening recto\n\n"
+        "## Page-blocking prompt\n\nMonochrome storyboard.\n\n"
+        "## Panel script\n\n**Panel 1.** Wide.\n"
+    )
+    return str(proj)
+
+
+def test_select_pages_for_panel_prompts_default_picks_pages_without_prompts(tmp_path):
+    from storyforge.cmd_elaborate import _select_pages_for_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    targets = _select_pages_for_panel_prompts(proj, page=None, scene=None, force=False)
+    assert len(targets) == 1
+    assert targets[0]['page_id'] == 's01-p1'
+
+
+def test_select_pages_with_existing_prompts_excluded_by_default(tmp_path):
+    from storyforge.cmd_elaborate import _select_pages_for_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    # Populate the section so default mode excludes the page
+    page_path = os.path.join(proj, 'pages', 's01-p1.md')
+    with open(page_path) as f:
+        body = f.read()
+    body = body.replace(
+        '## Panel script\n\n**Panel 1.** Wide.\n',
+        '## Image-generation prompts\n\n### Panel 1\n\nfoo\n\n## Panel script\n\n**Panel 1.** Wide.\n',
+    )
+    with open(page_path, 'w') as f:
+        f.write(body)
+    assert _select_pages_for_panel_prompts(proj, page=None, scene=None, force=False) == []
+    forced = _select_pages_for_panel_prompts(proj, page=None, scene=None, force=True)
+    assert len(forced) == 1
+
+
+def test_precondition_passes_when_page_architecture_and_canon_ready(tmp_path):
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    ok, reason = _precondition_check_panel_prompts(proj, 's01-p1', 's01-studio')
+    assert ok is True
+    assert reason == ''
+
+
+def test_precondition_fails_when_page_architecture_empty(tmp_path):
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    # Strip the Page architecture body
+    page_path = os.path.join(proj, 'pages', 's01-p1.md')
+    with open(page_path) as f:
+        body = f.read()
+    body = body.replace(
+        '## Page architecture\n\n'
+        '### Intent\nQuiet tension.\n\n'
+        '### Panel hierarchy\n- Panel 1 — dominant: focus\n- Panel 2 — atmospheric: ambience\n\n'
+        '### Book-level placement\n- Spread context: opening recto\n\n',
+        '## Page architecture\n\n\n',
+    )
+    with open(page_path, 'w') as f:
+        f.write(body)
+    ok, reason = _precondition_check_panel_prompts(proj, 's01-p1', 's01-studio')
+    assert ok is False
+    assert 'page architecture' in reason.lower()
+
+
+def test_precondition_fails_when_canon_unfilled(tmp_path):
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    # Replace style-foundation with TODO
+    pr = os.path.join(proj, 'reference', 'canon', 'style-foundation.md')
+    with open(pr, 'w') as f:
+        f.write('---\ncanon_id: style-foundation\n---\n\n'
+                '## Embeddable block\n\nTODO — fill it in.\n')
+    ok, reason = _precondition_check_panel_prompts(proj, 's01-p1', 's01-studio')
+    assert ok is False
+    assert 'style-foundation' in reason
+
+
+def test_splice_inserts_image_generation_section_when_absent(tmp_path):
+    from storyforge.cmd_elaborate import _splice_panel_prompts
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\n"
+        "page_id: s01-p1\n"
+        "scene_id: s01\n"
+        "page_within_scene: 1\n"
+        "total_pages_in_scene: 1\n"
+        "panel_count: 1\n"
+        "---\n\n"
+        "## Scene context\n\nBeat.\n\n"
+        "## Page architecture\n\nArch.\n\n"
+        "## Page-blocking prompt\n\nstoryboard.\n\n"
+        "## Panel script\n\n**Panel 1.**\n"
+    )
+    panel_block = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 1. Style foundation\n\nfoundation\n'
+    )
+    _splice_panel_prompts(str(page_path), panel_block,
+                          canon_ids=['style-foundation'])
+    text = page_path.read_text()
+    assert '## Image-generation prompts' in text
+    assert '### Panel 1' in text
+    # Inserted BEFORE Panel script
+    assert text.index('## Image-generation prompts') < text.index('## Panel script')
+    # canonical_blocks_embedded frontmatter audit trail
+    assert 'canonical_blocks_embedded:' in text
+    assert 'reference/canon/style-foundation.md' in text
+
+
+def test_splice_replaces_existing_image_generation_section_when_force(tmp_path):
+    from storyforge.cmd_elaborate import _splice_panel_prompts
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\n"
+        "page_id: s01-p1\n"
+        "scene_id: s01\n"
+        "page_within_scene: 1\n"
+        "total_pages_in_scene: 1\n"
+        "panel_count: 1\n"
+        "---\n\n"
+        "## Page architecture\n\nArch.\n\n"
+        "## Image-generation prompts\n\n"
+        "### Panel 1\n\nOLD panel 1 content\n\n"
+        "## Panel script\n\n**Panel 1.**\n"
+    )
+    new_block = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\nNEW panel 1 content\n'
+    )
+    _splice_panel_prompts(str(page_path), new_block, canon_ids=[])
+    text = page_path.read_text()
+    assert 'NEW panel 1 content' in text
+    assert 'OLD panel 1 content' not in text
+    assert text.count('## Image-generation prompts') == 1
+    # Panel script survives
+    assert '## Panel script' in text
+    assert '**Panel 1.**' in text
+
+
+def test_validate_panel_prompts_response_accepts_well_formed():
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 1. Style foundation\n\nx\n'
+    )
+    ok, block = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is True
+    assert '## Image-generation prompts' in block
+
+
+def test_validate_panel_prompts_response_rejects_missing_section_header():
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    # No '## Image-generation prompts' header
+    resp = '### Panel 1\n\n#### 1. Style foundation\n\nx\n'
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_rejects_wrong_panel_count():
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    # Only one ### Panel header but expected_panel_count=2
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\nx\n'
+    )
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=2)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_strips_fence():
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '```markdown\n'
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\nx\n'
+        '```\n'
+    )
+    ok, block = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is True
+    assert '```' not in block
+
+
+def test_strict_mode_writes_template_no_api_call(tmp_path, monkeypatch):
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    call_count = {'n': 0}
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: (call_count.__setitem__('n', call_count['n'] + 1) or ''))
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    proj = _make_gn_project(tmp_path)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='strict',
+        page=None, scene=None, force=False,
+    )
+    assert call_count['n'] == 0
+    assert rc == 0
+    text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
+    assert '## Image-generation prompts' in text
+    assert '### Panel 1' in text
+    assert '### Panel 2' in text
+    # Section 1 has style-foundation embed (Chiaroscuro), not TODO
+    assert 'Chiaroscuro' in text
+    # Section 3 has the panel-registers-derived register
+    assert 'dominant' in text.lower()
+
+
+def test_coach_mode_writes_brief_no_page_mutation(tmp_path, monkeypatch):
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: 'should not be called')
+    proj = _make_gn_project(tmp_path)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='coach',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 0
+    page_text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
+    assert '## Image-generation prompts' not in page_text
+    brief_path = os.path.join(proj, 'working', 'coaching',
+                              'panel-prompts-s01-p1.md')
+    assert os.path.isfile(brief_path)
+    brief = open(brief_path).read()
+    # Lists all 13 sections
+    for n in range(1, 14):
+        assert f'#### {n}. ' in brief
+
+
+def test_full_mode_with_mocked_api_splices_panel_prompts(tmp_path, monkeypatch):
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+
+    def fake_response_for_two_panels():
+        sections = [
+            'Style foundation', 'Lighting laws', 'Pacing role',
+            'Shot grammar', 'Stage geography', 'Character block',
+            'In this panel', 'Focal objects + render priorities',
+            'Lighting logic', 'Symbolic detail (low weight)',
+            'Action', 'Emotional subtext (low weight)',
+            'Negative constraints',
+        ]
+        def one_panel(idx):
+            lines = [f'### Panel {idx}', '']
+            for i, title in enumerate(sections, start=1):
+                lines.append(f'#### {i}. {title}')
+                lines.append('')
+                lines.append(f'mocked panel-{idx} section-{i} body')
+                lines.append('')
+            return '\n'.join(lines)
+        return '## Image-generation prompts\n\n' + one_panel(1) + '\n' + one_panel(2) + '\n'
+
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: fake_response_for_two_panels())
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    proj = _make_gn_project(tmp_path)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 0
+    text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
+    assert '## Image-generation prompts' in text
+    assert '### Panel 1' in text
+    assert '### Panel 2' in text
+    assert 'mocked panel-1 section-1 body' in text
+    assert 'mocked panel-2 section-13 body' in text
+    assert 'canonical_blocks_embedded:' in text
+
+
+def test_handler_returns_one_when_all_pages_fail_llm_validation(tmp_path, monkeypatch):
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    proj = _make_gn_project(tmp_path)
+    monkeypatch.setattr('storyforge.api.invoke_api', lambda *a, **kw: '')
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 1
+
+
+def test_main_stage_exits_one_when_medium_is_novel(tmp_path):
+    import argparse
+    import pytest
+    from storyforge.cmd_elaborate import _run_main_stage
+    proj = tmp_path / 'novel'
+    proj.mkdir()
+    (proj / 'storyforge.yaml').write_text(
+        'project:\n  medium: novel\n  title: Test\n'
+    )
+    args = argparse.Namespace(page=None, scene=None, force=False, coaching=None)
+    with pytest.raises(SystemExit) as exc:
+        _run_main_stage('panel-prompts', str(proj), str(proj / 'reference'),
+                        dry_run=False, interactive=False, seed='', args=args)
+    assert exc.value.code == 1
+
+
+def test_validate_panel_prompts_response_rejects_wrong_section_order_in_panel():
+    """CRITICAL: validator must reject responses with sections out of
+    canonical order within a panel. Without this, malformed LLM output
+    would be spliced into the page file and only surfaced later by
+    cleanup."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 3. Pacing role\n\nregister: dominant\n\n'  # OUT OF ORDER
+        '#### 1. Style foundation\n\nfoundation\n\n'
+        '#### 2. Lighting laws\n\nlighting\n'
+    )
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_rejects_wrong_order_in_one_of_multiple_panels():
+    """Wrong order in panel 2 must reject even if panel 1 is well-formed."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 1. Style foundation\n\nx\n\n'
+        '#### 2. Lighting laws\n\ny\n\n'
+        '### Panel 2\n\n'
+        '#### 13. Negative constraints\n\nz\n\n'  # OUT OF ORDER
+        '#### 1. Style foundation\n\nw\n'
+    )
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=2)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_accepts_canonical_order():
+    """Sanity check: in-order response with all subsections passes."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n'
+        '#### 1. Style foundation\n\na\n\n'
+        '#### 2. Lighting laws\n\nb\n\n'
+        '#### 3. Pacing role\n\nc\n'
+    )
+    ok, block = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is True
+    assert '#### 1. Style foundation' in block
+
+
+def test_validate_panel_prompts_response_rejects_non_contiguous_indices():
+    """SF-C1: LLM emits ### Panel 1, 3, 5 for expected=3 — must reject."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\nx\n\n'
+        '### Panel 3\n\n#### 1. Style foundation\n\ny\n\n'
+        '### Panel 5\n\n#### 1. Style foundation\n\nz\n'
+    )
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=3)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_rejects_panels_out_of_order():
+    """SF-C1: ### Panel 2 before ### Panel 1 with correct count — must reject."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        '### Panel 2\n\n#### 1. Style foundation\n\nx\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\ny\n'
+    )
+    ok, _ = _validate_panel_prompts_response(resp, expected_panel_count=2)
+    assert ok is False
+
+
+def test_validate_panel_prompts_response_ignores_panel_headers_in_inner_fence():
+    """SF-I1: ### Panel N inside an inner fenced code block must not inflate count."""
+    from storyforge.cmd_elaborate import _validate_panel_prompts_response
+    resp = (
+        '## Image-generation prompts\n\n'
+        'Here is an example of the structure:\n\n'
+        '```\n### Panel 99\n#### 1. Style foundation\n```\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\nbody\n'
+    )
+    ok, block = _validate_panel_prompts_response(resp, expected_panel_count=1)
+    assert ok is True
+    # The example fence content was stripped; only the real panel survives
+    assert 'Panel 99' not in block
+
+
+def test_handler_skips_pages_with_zero_panel_count(tmp_path, monkeypatch):
+    """SF-I3: panel_count=0 must skip with WARN, not flow into the LLM call."""
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    proj = _make_gn_project(tmp_path)
+    # Edit the page frontmatter to set panel_count: 0
+    page_path = os.path.join(proj, 'pages', 's01-p1.md')
+    with open(page_path) as f:
+        text = f.read()
+    text = text.replace('panel_count: 2', 'panel_count: 0')
+    with open(page_path, 'w') as f:
+        f.write(text)
+    call_count = {'n': 0}
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: (call_count.__setitem__('n', call_count['n'] + 1) or ''))
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert call_count['n'] == 0  # API never invoked for zero-panel page
+    # Page file unchanged (no Image-generation prompts section written)
+    with open(page_path) as f:
+        new_text = f.read()
+    assert '## Image-generation prompts' not in new_text
+    assert rc == 1  # all (1) candidate skipped on precondition
+
+
+def test_handler_skips_when_required_canon_body_is_empty(tmp_path, monkeypatch):
+    """SF-I4: precondition is_canon_block_populated accepts empty embeddable
+    bodies. The handler must catch this BEFORE the LLM call (or strict template
+    render) which would produce TODO output with no signal."""
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    proj = _make_gn_project(tmp_path)
+    # Replace style-foundation with header-only (empty body, no TODO)
+    pr = os.path.join(proj, 'reference', 'canon', 'style-foundation.md')
+    with open(pr, 'w') as f:
+        f.write('---\ncanon_id: style-foundation\n---\n\n'
+                '## Embeddable block\n\n\n')
+    call_count = {'n': 0}
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: (call_count.__setitem__('n', call_count['n'] + 1) or ''))
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert call_count['n'] == 0  # API never invoked when required canon body is empty
+    assert rc == 1
+
+
+def test_handler_warn_distinguishes_validator_failure_modes(tmp_path, monkeypatch, capsys):
+    """SF-I5: validator-failure WARN must distinguish missing-header vs
+    wrong-count vs wrong-order."""
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    proj = _make_gn_project(tmp_path)
+    # Mock API to return a response with wrong panel count (1 instead of 2)
+    monkeypatch.setattr(
+        'storyforge.api.invoke_api',
+        lambda *a, **kw: (
+            '## Image-generation prompts\n\n'
+            '### Panel 1\n\n#### 1. Style foundation\n\nx\n'
+        ),
+    )
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    # The specific reason should be in the output (mentions expected vs got)
+    assert ('expected' in output.lower() or 'got' in output.lower()
+            or 'panel sequence' in output.lower())
+
+
+# ============================================================================
+# HV-1: _extract_panel_registers hoisted to module level + multi-word regex
+# ============================================================================
+
+def test_extract_panel_registers_module_level_with_single_word():
+    """HV-1: single-word register is captured correctly (regression check)."""
+    from storyforge.cmd_elaborate import _extract_panel_registers
+    arch = '### Panel hierarchy\n- Panel 1 — dominant: focus\n- Panel 2 — atmospheric: ambience\n'
+    result = _extract_panel_registers(arch)
+    assert result == {1: 'dominant', 2: 'atmospheric'}
+
+
+def test_extract_panel_registers_captures_multi_word_register():
+    """HV-1: compound register like 'low atmospheric' must not be truncated."""
+    from storyforge.cmd_elaborate import _extract_panel_registers
+    arch = '- Panel 1 — low atmospheric: ambience\n- Panel 2 — page-turn climactic: reveal\n'
+    result = _extract_panel_registers(arch)
+    assert result[1] == 'low atmospheric'
+    assert result[2] == 'page-turn climactic'
+
+
+def test_extract_panel_registers_normalizes_capitalization():
+    """HV-1: 'Dominant' and 'dominant' must produce the same key value."""
+    from storyforge.cmd_elaborate import _extract_panel_registers
+    arch = '- Panel 1 — Dominant: focus\n- Panel 2 — DOMINANT: focus\n'
+    result = _extract_panel_registers(arch)
+    assert result[1] == 'dominant'
+    assert result[2] == 'dominant'
+
+
+def test_extract_panel_registers_handles_no_colon():
+    """HV-1: register without trailing ': role' still parses."""
+    from storyforge.cmd_elaborate import _extract_panel_registers
+    arch = '- Panel 1 — dominant\n'
+    result = _extract_panel_registers(arch)
+    assert result == {1: 'dominant'}
+
+
+# ============================================================================
+# HV-2: _precondition_check_panel_prompts — missing scene-briefs.csv message
+# ============================================================================
+
+def test_precondition_misleading_message_when_scene_briefs_csv_missing(tmp_path):
+    """HV-2: missing reference/scene-briefs.csv must produce a clear message
+    pointing at the fix, not 'empty panel_breakdown'."""
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    import os
+    proj = _make_gn_project(tmp_path)
+    os.remove(os.path.join(proj, 'reference', 'scene-briefs.csv'))
+    ok, reason = _precondition_check_panel_prompts(proj, 's01-p1', 's01-studio')
+    assert ok is False
+    assert 'scene-briefs.csv is missing' in reason
+    assert 'elaborate --stage briefs' in reason
+
+
+# ============================================================================
+# --stage help string includes panel-prompts
+# ============================================================================
+
+def test_parse_args_help_lists_panel_prompts():
+    """--stage help string must list panel-prompts."""
+    import io
+    import contextlib
+    from storyforge.cmd_elaborate import parse_args
+    buf = io.StringIO()
+    with contextlib.suppress(SystemExit):
+        with contextlib.redirect_stdout(buf):
+            try:
+                parse_args(['--help'])
+            except SystemExit:
+                pass
+    help_text = buf.getvalue()
+    assert 'panel-prompts' in help_text
+
+
+# ============================================================================
+# MC-3: strict template section 3 TODO must list 'orientation'
+# ============================================================================
+
+def test_splice_panel_prompts_appends_to_end_when_no_panel_script_header(tmp_path):
+    """TG-1: when the page has no '## Panel script' header, _splice_panel_prompts
+    must append the new section to the end of the body. Regression: this third
+    branch was previously untested."""
+    from storyforge.cmd_elaborate import _splice_panel_prompts
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\npage_id: s01-p1\nscene_id: s01\n"
+        "page_within_scene: 1\ntotal_pages_in_scene: 1\npanel_count: 1\n---\n\n"
+        "## Scene context\n\nBeat.\n\n"
+        "## Page architecture\n\nArch.\n"
+        # deliberately no ## Panel script
+    )
+    block = (
+        '## Image-generation prompts\n\n'
+        '### Panel 1\n\n#### 1. Style foundation\n\nfoundation\n'
+    )
+    _splice_panel_prompts(str(page_path), block, canon_ids=[])
+    text = page_path.read_text()
+    assert '## Image-generation prompts' in text
+    # No Panel script header should be present — confirms append-to-end branch
+    assert '## Panel script' not in text
+    # Original content survives + new section appended
+    assert '## Scene context' in text
+    assert '## Page architecture' in text
+    # Sections appear AFTER existing content
+    assert text.index('## Page architecture') < text.index('## Image-generation prompts')
+
+
+def test_precondition_message_when_scenes_csv_missing(tmp_path):
+    """TG-3: missing reference/scenes.csv produces a clear message."""
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    import os
+    proj = _make_gn_project(tmp_path)
+    os.remove(os.path.join(proj, 'reference', 'scenes.csv'))
+    ok, reason = _precondition_check_panel_prompts(proj, 's01-p1', 's01-studio')
+    assert ok is False
+    assert 'scenes.csv is missing' in reason
+
+
+def test_precondition_fails_when_scene_not_in_scenes_csv(tmp_path):
+    """TG-3: scene_id absent from scenes.csv produces the right message."""
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    ok, reason = _precondition_check_panel_prompts(proj, 's99-p1', 's99-nonexistent')
+    assert ok is False
+    assert 's99-nonexistent' in reason and 'not in scenes.csv' in reason
+
+
+def test_precondition_fails_when_panel_breakdown_empty(tmp_path):
+    """TG-3: empty panel_breakdown produces the right message."""
+    from storyforge.cmd_elaborate import _precondition_check_panel_prompts
+    import os
+    proj = _make_gn_project(tmp_path)
+    briefs = os.path.join(proj, 'reference', 'scene-briefs.csv')
+    with open(briefs) as f:
+        text = f.read()
+    text = text.replace('p1: 2-panel', '')
+    with open(briefs, 'w') as f:
+        f.write(text)
+    ok, reason = _precondition_check_panel_prompts(proj, 's01-p1', 's01-studio')
+    assert ok is False
+    assert 'panel_breakdown' in reason
+
+
+def test_select_pages_by_page_id(tmp_path):
+    """TG-4: --page filter returns exactly the requested page."""
+    from storyforge.cmd_elaborate import _select_pages_for_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    result = _select_pages_for_panel_prompts(proj, page='s01-p1', scene=None, force=False)
+    assert len(result) == 1
+    assert result[0]['page_id'] == 's01-p1'
+
+
+def test_select_pages_by_scene_id(tmp_path):
+    """TG-4: --scene filter returns all pages of that scene."""
+    from storyforge.cmd_elaborate import _select_pages_for_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    result = _select_pages_for_panel_prompts(proj, page=None, scene='s01-studio', force=False)
+    assert len(result) >= 1
+    assert all(p['scene_id'] == 's01-studio' for p in result)
+
+
+def test_select_pages_unknown_page_returns_empty(tmp_path):
+    """TG-4: --page with unknown id returns empty list, doesn't error."""
+    from storyforge.cmd_elaborate import _select_pages_for_panel_prompts
+    proj = _make_gn_project(tmp_path)
+    result = _select_pages_for_panel_prompts(proj, page='nonexistent-p99', scene=None, force=False)
+    assert result == []
+
+
+def test_handler_returns_one_when_all_pages_fail_precondition(tmp_path, monkeypatch):
+    """TG-8: rc=1 path triggered by precondition failures, not LLM failures."""
+    from storyforge.cmd_elaborate import _run_panel_prompts_handler_gn
+    import os
+    proj = _make_gn_project(tmp_path)
+    # Strip panel_breakdown so precondition fails on the page
+    briefs = os.path.join(proj, 'reference', 'scene-briefs.csv')
+    with open(briefs) as f:
+        text = f.read()
+    text = text.replace('p1: 2-panel', '')
+    with open(briefs, 'w') as f:
+        f.write(text)
+    # Make sure invoke_api would error if called — to prove it isn't
+    def fail_api(*a, **kw):
+        raise AssertionError('API must not be called when precondition fails')
+    monkeypatch.setattr('storyforge.api.invoke_api', fail_api)
+    monkeypatch.setattr('storyforge.cmd_elaborate.log_operation',
+                        lambda *a, **kw: None, raising=False)
+    rc = _run_panel_prompts_handler_gn(
+        proj, dry_run=False, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 1
+
+
+def test_strict_template_section_3_TODO_lists_orientation():
+    """MC-3: the strict-mode TODO for section 3 must list 'orientation'
+    alongside the other registers (consistency with coach and full)."""
+    from storyforge.prompts_panel_prompts import render_strict_template
+    out = render_strict_template(
+        page_id='s01-p1', panel_count=1,
+        canon_blocks={}, panel_registers={},  # No register, so falls to TODO
+    )
+    # Find section 3 body
+    sec3_start = out.index('#### 3. Pacing role')
+    sec4_start = out.index('#### 4. Shot grammar')
+    sec3_body = out[sec3_start:sec4_start]
+    assert 'orientation' in sec3_body

@@ -148,7 +148,31 @@ def test_parse_frontmatter_handles_inline_comment(tmp_path):
     ]
 
 
+_SECTION_TITLES_FOR_TEST = (
+    'Style foundation', 'Lighting laws', 'Pacing role',
+    'Shot grammar', 'Stage geography', 'Character block',
+    'In this panel', 'Focal objects + render priorities',
+    'Lighting logic', 'Symbolic detail (low weight)',
+    'Action', 'Emotional subtext (low weight)',
+    'Negative constraints',
+)
+
+
+def _well_formed_panel_block(panel_index: int) -> str:
+    """Return a ### Panel N block with all 13 canonical #### subsections."""
+    sections = '\n\n'.join(
+        f'#### {i + 1}. {title}\n\nbody'
+        for i, title in enumerate(_SECTION_TITLES_FOR_TEST)
+    )
+    return f'### Panel {panel_index}\n\n{sections}\n\n'
+
+
 def _write_page(path, page_id, scene_id, within, total, panels):
+    # Build a ## Image-generation prompts section with all 13 #### subsections
+    # per panel so validate_page_file returns no findings (#253).
+    panel_blocks = ''.join(
+        _well_formed_panel_block(i) for i in range(1, panels + 1)
+    )
     path.write_text(
         f"---\n"
         f"page_id: {page_id}\n"
@@ -158,7 +182,10 @@ def _write_page(path, page_id, scene_id, within, total, panels):
         f"panel_count: {panels}\n"
         f"---\n\n"
         f"## Page architecture\n\nArchitecture content.\n\n"
-        f"## Page-blocking prompt\n\nBlocking prompt content.\n"
+        f"## Page-blocking prompt\n\nBlocking prompt content.\n\n"
+        f"## Image-generation prompts\n\n"
+        + panel_blocks +
+        f"## Panel script\n\n**Panel 1.**\n"
     )
 
 

@@ -34,6 +34,29 @@ _INTEGER_FIELDS: Final[set[str]] = {
 
 _LIST_FIELDS: Final[set[str]] = {'characters_present'}
 
+# Canonical order of the 13 panel-prompt sections (issue #253).
+# Each panel under `### Panel N` MUST contain `#### M. <Title>` subsections
+# in this order. The titles are fixed strings; bodies vary.
+PANEL_SECTION_TITLES: Final[tuple[str, ...]] = (
+    'Style foundation',
+    'Lighting laws',
+    'Pacing role',
+    'Shot grammar',
+    'Stage geography',
+    'Character block',
+    'In this panel',
+    'Focal objects + render priorities',
+    'Lighting logic',
+    'Symbolic detail (low weight)',
+    'Action',
+    'Emotional subtext (low weight)',
+    'Negative constraints',
+)
+assert len(PANEL_SECTION_TITLES) == 13, (
+    'PANEL_SECTION_TITLES must have exactly 13 entries '
+    '(canonical panel-prompt schema, issue #253)'
+)
+
 
 # A successful parse always populates path/body/extra/extra_lists; the
 # frontmatter fields are optional because validation, not parsing,
@@ -245,6 +268,9 @@ PageFindingKind = Literal[
     'page_within_scene_out_of_range',
     'missing_page_architecture',
     'missing_blocking_prompt',
+    'missing_panel_prompts',
+    'panel_prompt_section_missing',
+    'panel_prompt_wrong_section_order',
 ]
 
 
@@ -332,6 +358,40 @@ def validate_page_file(path: str) -> list[PageFinding]:
             'detail': '"## Page-blocking prompt" section is missing or empty',
         })
 
+    # Panel-prompt body checks (issue #253). Use the extractors so the
+    # "section header present but no panels" half-edited state fires
+    # missing_panel_prompts (extractor returns {} for that case).
+    panels = extract_panel_prompts(path)
+    if not panels:
+        findings.append({
+            'kind': 'missing_panel_prompts', 'path': path,
+            'detail': '"## Image-generation prompts" section is missing or has '
+                      'no "### Panel N" subsections',
+        })
+    else:
+        for panel_index in sorted(panels.keys()):
+            panel_body = panels[panel_index]
+            sections = extract_panel_sections(panel_body)
+            expected_indices = list(range(1, 14))
+            missing = [i for i in expected_indices if i not in sections]
+            if missing:
+                findings.append({
+                    'kind': 'panel_prompt_section_missing', 'path': path,
+                    'detail': f'Panel {panel_index} is missing section(s): '
+                              f'{", ".join(str(i) for i in missing)}',
+                })
+            # Real wrong-order detection: re-parse the panel body in the
+            # order headers appear and compare to canonical order.
+            parse_order = []
+            for m in _PANEL_SECTION_HEADER_RE.finditer(panel_body):
+                parse_order.append(int(m.group(1)))
+            if parse_order and parse_order != sorted(parse_order):
+                findings.append({
+                    'kind': 'panel_prompt_wrong_section_order', 'path': path,
+                    'detail': f'Panel {panel_index} sections appear in order '
+                              f'{parse_order} instead of canonical 1..13',
+                })
+
     return findings
 
 
@@ -406,6 +466,82 @@ def extract_blocking_prompt(path: str) -> str:
     non-hyphenated form get the same extraction behavior.
     """
     return _extract_section(path, _BLOCKING_PROMPT_HEADER)
+
+
+_IMAGE_GEN_PROMPTS_HEADER = re.compile(
+    r'^##\s+Image[- ]generation\s+prompts\s*$', re.MULTILINE | re.IGNORECASE,
+)
+
+_PANEL_HEADER_RE = re.compile(
+    r'^###\s+Panel\s+(\d+)\s*$', re.MULTILINE | re.IGNORECASE,
+)
+
+
+def extract_panel_prompts(path: str) -> dict[int, str]:
+    """Return {panel_index: panel_body} for the ## Image-generation prompts
+    section's ### Panel N subsections.
+
+    Body is everything AFTER the ### Panel N header up to the next
+    ### Panel M header, the next ## ... header, or EOF — header line
+    stripped, body whitespace-trimmed. Returns {} when the page file
+    is missing, has no frontmatter, lacks the ## Image-generation prompts
+    section, or has the section but no ### Panel N subsections.
+    """
+    page = parse_page_file(path)
+    if page is None:
+        return {}
+    body = page.get('body', '')
+    sec_match = _IMAGE_GEN_PROMPTS_HEADER.search(body)
+    if not sec_match:
+        return {}
+    # Limit scan to the body of ## Image-generation prompts
+    section_start = sec_match.end()
+    rest = body[section_start:]
+    next_section = _NEXT_SECTION_HEADER.search(rest)
+    section_end = next_section.start() if next_section else len(rest)
+    section_body = rest[:section_end]
+
+    result: dict[int, str] = {}
+    # Collect all ### Panel N positions inside the section body
+    panel_matches = list(_PANEL_HEADER_RE.finditer(section_body))
+    for i, m in enumerate(panel_matches):
+        panel_index = int(m.group(1))
+        body_start = m.end()
+        body_end = (panel_matches[i + 1].start()
+                    if i + 1 < len(panel_matches)
+                    else len(section_body))
+        panel_body = section_body[body_start:body_end].strip('\n').strip()
+        result[panel_index] = panel_body
+    return result
+
+
+_PANEL_SECTION_HEADER_RE = re.compile(
+    r'^####\s+(\d+)\.\s+([^\n]+?)\s*$', re.MULTILINE,
+)
+
+
+def extract_panel_sections(panel_body: str) -> dict[int, str]:
+    """Parse one panel's body into {section_index: section_body}.
+
+    Operates on the body string returned by extract_panel_prompts for a
+    single panel. Section index is the integer parsed from
+    #### N. <Title>. Body is everything AFTER the #### header up to the
+    next #### M. header or EOF — header stripped, body whitespace-trimmed.
+    Returns {} when no section headers are found.
+    """
+    matches = list(_PANEL_SECTION_HEADER_RE.finditer(panel_body))
+    if not matches:
+        return {}
+    result: dict[int, str] = {}
+    for i, m in enumerate(matches):
+        section_index = int(m.group(1))
+        body_start = m.end()
+        body_end = (matches[i + 1].start()
+                    if i + 1 < len(matches)
+                    else len(panel_body))
+        section_body = panel_body[body_start:body_end].strip()
+        result[section_index] = section_body
+    return result
 
 
 def extract_panel_script(path: str) -> str:

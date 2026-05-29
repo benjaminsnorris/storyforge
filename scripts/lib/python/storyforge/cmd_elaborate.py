@@ -37,6 +37,9 @@ from storyforge.pages import (
     _PAGE_ARCHITECTURE_HEADER as _PAGE_ARCH_HEADER_RE,
     _BLOCKING_PROMPT_HEADER as _BLOCKING_PROMPT_HEADER_RE,
     _PANEL_SCRIPT_HEADER as _PANEL_SCRIPT_HEADER_RE,
+    _IMAGE_GEN_PROMPTS_HEADER,
+    _PANEL_HEADER_RE,
+    _PANEL_SECTION_HEADER_RE,
 )
 
 
@@ -52,6 +55,7 @@ def _python_lib():
 VALID_STAGES: Final[set[str]] = {
     'spine', 'architecture', 'map', 'briefs',
     'gap-fill', 'mice-fill', 'page-architecture',
+    'panel-prompts',
 }
 
 
@@ -67,7 +71,7 @@ def parse_args(argv):
     parser.add_argument('--stage', type=str, default=None,
                         help='Which elaboration stage to run '
                              '(spine|architecture|map|briefs|gap-fill|'
-                             'mice-fill|page-architecture)')
+                             'mice-fill|page-architecture|panel-prompts)')
     # Accept stages as direct flags (e.g. --mice-fill, --gap-fill, --briefs)
     for stage in sorted(VALID_STAGES):
         parser.add_argument(f'--{stage}', action='store_true', dest=f'stage_{stage.replace("-", "_")}',
@@ -880,6 +884,115 @@ def _splice_page_architecture(page_path: str, sections_block: str,
         f.write(fm_text + new_body)
 
 
+def _validate_panel_prompts_response(text: str,
+                                     expected_panel_count: int,
+                                     ) -> tuple[bool, str]:
+    """Parse and validate an LLM response for the panel-prompts stage.
+
+    Returns (ok, block). The block is the unwrapped (fence-stripped)
+    text containing the '## Image-generation prompts' section and its
+    ### Panel N subsections. Returns (False, '') when:
+      - the section header is absent
+      - the number/sequence of ### Panel N subsections doesn't match
+        the expected ``1..expected_panel_count`` (catches both wrong
+        count AND non-contiguous OR out-of-order indices, e.g.,
+        ### Panel 1, ### Panel 3, ### Panel 5 for expected=3, or
+        ### Panel 2 before ### Panel 1 for expected=2)
+      - any panel has #### N. <Title> sections in non-canonical order
+        (e.g., section 3 before section 2 within the same panel)
+    Tolerates ```markdown, ``` (plain), and any-language-tagged code
+    fence wrappers. Inner fenced code blocks (LLM schema illustrations)
+    are stripped before counting so example ### Panel N lines inside
+    them are not counted.
+    """
+    body = text.strip()
+    if body.startswith('```'):
+        lines = body.splitlines()
+        if lines and lines[0].startswith('```'):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == '```':
+            lines = lines[:-1]
+        body = '\n'.join(lines).strip()
+
+    if not _IMAGE_GEN_PROMPTS_HEADER.search(body):
+        return False, ''
+
+    # Strip inner fenced code blocks so example '### Panel N' lines inside
+    # code-block illustrations don't inflate the panel count.
+    body = re.sub(r'```.*?```', '', body, flags=re.DOTALL)
+
+    panel_indices = [int(m.group(1))
+                     for m in _PANEL_HEADER_RE.finditer(body)]
+    expected_indices = list(range(1, expected_panel_count + 1))
+    if panel_indices != expected_indices:
+        return False, ''
+
+    # Section order check inside each panel (matches the
+    # panel_prompt_wrong_section_order cleanup finding so the LLM-response
+    # gate is as strict as the cleanup-time validator).
+    panel_matches = list(_PANEL_HEADER_RE.finditer(body))
+    for i, m in enumerate(panel_matches):
+        start = m.end()
+        end = panel_matches[i + 1].start() if i + 1 < len(panel_matches) else len(body)
+        panel_body = body[start:end]
+        parse_order = [int(sm.group(1))
+                       for sm in _PANEL_SECTION_HEADER_RE.finditer(panel_body)]
+        if parse_order and parse_order != sorted(parse_order):
+            return False, ''
+
+    return True, body
+
+
+def _splice_panel_prompts(page_path: str, panel_prompts_block: str,
+                          canon_ids: list[str]) -> None:
+    """Write the ## Image-generation prompts section into the page file.
+
+    - If the section already exists, replace it.
+    - Otherwise insert immediately before ## Panel script (if present),
+      or at end of body.
+    - Append canon_ids to the canonical_blocks_embedded frontmatter
+      list (preserves existing entries, skips duplicates).
+    """
+    with open(page_path, encoding='utf-8') as f:
+        text = f.read()
+
+    if canon_ids:
+        text = _add_canonical_blocks_embedded(text, canon_ids)
+
+    fm_match = re.match(r'\A(---\n.*?---\n)(.*)', text, re.DOTALL)
+    if fm_match:
+        fm_text = fm_match.group(1)
+        body = fm_match.group(2)
+    else:
+        fm_text, body = '', text
+
+    img_match = _IMAGE_GEN_PROMPTS_HEADER.search(body)
+    if img_match:
+        # Replace existing section — find end (next ## header or EOF)
+        after = body[img_match.end():]
+        next_h = re.search(r'^##\s+\S', after, re.MULTILINE)
+        end = img_match.end() + (next_h.start() if next_h else len(after))
+        new_body = (body[:img_match.start()]
+                    + panel_prompts_block.strip() + '\n\n'
+                    + body[end:].lstrip('\n'))
+    else:
+        # Insert before ## Panel script if present, else append
+        ps_match = _PANEL_SCRIPT_HEADER_RE.search(body)
+        if ps_match:
+            insert_at = ps_match.start()
+            prefix = body[:insert_at].rstrip('\n')
+            suffix = body[insert_at:]
+            new_body = (prefix + '\n\n'
+                        + panel_prompts_block.strip() + '\n\n'
+                        + suffix)
+        else:
+            new_body = (body.rstrip('\n') + '\n\n'
+                        + panel_prompts_block.strip() + '\n')
+
+    with open(page_path, 'w', encoding='utf-8') as f:
+        f.write(fm_text + new_body)
+
+
 def _run_page_architecture_handler_gn(project_dir: str, *,
                                       dry_run: bool, coaching: CoachingLevel,
                                       page: str | None, scene: str | None,
@@ -1067,6 +1180,336 @@ def _run_page_architecture_handler_gn(project_dir: str, *,
     return 0
 
 
+def _select_pages_for_panel_prompts(project_dir: str, page: str | None,
+                                    scene: str | None, force: bool) -> list[dict]:
+    """Return the list of parsed page-file dicts to process for the
+    panel-prompts stage.
+
+    Filtering rules mirror _select_pages_for_architecture: --page,
+    --scene, or all pages. Then (unless --force): drop pages that
+    already have ### Panel N subsections in ## Image-generation prompts.
+    """
+    from storyforge.pages import (
+        list_page_files, parse_page_file, extract_panel_prompts,
+    )
+    all_pages = []
+    for p in list_page_files(project_dir):
+        parsed = parse_page_file(p)
+        if parsed is None:
+            continue
+        all_pages.append(parsed)
+
+    if page:
+        filtered = [p for p in all_pages if p.get('page_id') == page]
+    elif scene:
+        filtered = [p for p in all_pages if p.get('scene_id') == scene]
+    else:
+        filtered = all_pages
+
+    if force:
+        return filtered
+    return [p for p in filtered if not extract_panel_prompts(p['path'])]
+
+
+def _extract_panel_registers(arch_body: str) -> dict[int, str]:
+    """Parse `- Panel N — <register>: <role>` lines from the page architecture
+    body, returning {panel_index: register_name}. Only the register name
+    (the text between the em-dash and the optional colon, or end-of-line)
+    is captured and stripped+lowercased. Multi-word registers like
+    "low atmospheric" are preserved.
+    """
+    result: dict[int, str] = {}
+    for line in arch_body.splitlines():
+        m = re.match(
+            r'^\s*-\s*Panel\s+(\d+)\s*[—–-]\s*([^:\n]+?)(?:\s*:.*)?$',
+            line, re.IGNORECASE,
+        )
+        if m:
+            result[int(m.group(1))] = m.group(2).strip().lower()
+    return result
+
+
+def _precondition_check_panel_prompts(project_dir: str, page_id: str,
+                                      scene_id: str) -> tuple[bool, str]:
+    """Return (ok, reason). ok=False means skip with WARN.
+
+    Checks:
+      - scenes.csv exists and has scene_id
+      - scene's brief has non-empty panel_breakdown
+      - page file has populated ## Page architecture body
+      - required canon vocabulary blocks are populated:
+        style-foundation, lighting-laws
+    """
+    from storyforge.csv_cli import get_field
+    from storyforge.canon import is_canon_block_populated
+    from storyforge.pages import (
+        list_page_files, parse_page_file, extract_page_architecture,
+    )
+
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    if not os.path.isfile(scenes_csv):
+        return False, 'reference/scenes.csv is missing — run elaborate --stage map first'
+    if not get_field(scenes_csv, scene_id, 'id'):
+        return False, f'scene {scene_id} not in scenes.csv'
+
+    briefs_csv = os.path.join(project_dir, 'reference', 'scene-briefs.csv')
+    if not os.path.isfile(briefs_csv):
+        return False, 'reference/scene-briefs.csv is missing — run elaborate --stage briefs first'
+    pb = get_field(briefs_csv, scene_id, 'panel_breakdown') or ''
+    if not pb.strip():
+        return False, f'scene {scene_id} brief has empty panel_breakdown'
+
+    # Find the page file
+    matching_page_path = None
+    for p in list_page_files(project_dir):
+        parsed = parse_page_file(p)
+        if parsed and parsed.get('page_id') == page_id:
+            matching_page_path = p
+            break
+    if not matching_page_path:
+        return False, f'page {page_id} file not found'
+
+    arch_body = extract_page_architecture(matching_page_path).strip()
+    if not arch_body:
+        return False, (f'page {page_id} has empty Page architecture — run '
+                       f'elaborate --stage page-architecture first')
+
+    for canon_id in ('style-foundation', 'lighting-laws'):
+        if not is_canon_block_populated(project_dir, canon_id):
+            return False, (
+                f'canon block {canon_id!r} is missing or TODO — '
+                f'populate reference/canon/{canon_id}.md first'
+            )
+    return True, ''
+
+
+def _run_panel_prompts_handler_gn(project_dir: str, *,
+                                  dry_run: bool, coaching: CoachingLevel,
+                                  page: str | None, scene: str | None,
+                                  force: bool) -> Literal[0, 1]:
+    """Dispatcher for the panel-prompts stage.
+
+    Coaching modes:
+      - full: LLM drafts all panels per page, splices into page file
+      - coach: writes a brief to working/coaching/, no page mutation
+      - strict: stamps a 13-section template per panel (canon embedded
+        verbatim in sections 1, 2, 5, 6, 10; TODO scaffolding elsewhere).
+        No API call.
+
+    Returns 0 on success or no-op; 1 when every candidate page was
+    skipped due to a precondition failure or an LLM/API failure.
+    """
+    from storyforge.pages import extract_page_architecture
+    from storyforge.prompts_panel_prompts import (
+        render_strict_template, render_coach_brief, build_full_prompt,
+    )
+    from storyforge.canon import get_canon_embeddable_block
+    from storyforge.elaborate import _read_csv_as_map
+
+    targets = _select_pages_for_panel_prompts(project_dir, page, scene, force)
+    if not targets:
+        log('No pages need panel-prompts (use --force to redo).')
+        return 0
+
+    log(f'panel-prompts: {len(targets)} page(s) to process (coaching={coaching})')
+
+    scenes_map = _read_csv_as_map(
+        os.path.join(project_dir, 'reference', 'scenes.csv'))
+    briefs_map = _read_csv_as_map(
+        os.path.join(project_dir, 'reference', 'scene-briefs.csv'))
+    intent_map = _read_csv_as_map(
+        os.path.join(project_dir, 'reference', 'scene-intent.csv'))
+
+    # Per-invocation cache: lives only for the duration of this handler call.
+    # Safe across pages within one run since canon blocks are read-only files
+    # and don't change mid-run. Not a process-level cache.
+    canon_block_cache: dict[str, str] = {}
+
+    def _canon(canon_id: str) -> str:
+        if canon_id not in canon_block_cache:
+            canon_block_cache[canon_id] = get_canon_embeddable_block(
+                project_dir, canon_id,
+            )
+        return canon_block_cache[canon_id]
+
+    processed = 0
+    skipped_precondition = 0
+    skipped_llm = 0
+    for parsed in targets:
+        page_id = parsed.get('page_id', '')
+        scene_id = parsed.get('scene_id', '')
+        page_path = parsed['path']
+        panel_count = parsed.get('panel_count', 0) or 0
+
+        ok, reason = _precondition_check_panel_prompts(project_dir, page_id, scene_id)
+        if not ok:
+            log(f'  WARN skip {page_id}: {reason}')
+            skipped_precondition += 1
+            continue
+
+        if not panel_count:
+            log(f'  WARN skip {page_id}: panel_count is 0 or unset — set '
+                f'panel_count in the page frontmatter first')
+            skipped_precondition += 1
+            continue
+
+        scene_row = scenes_map.get(scene_id, {})
+        scene_title = scene_row.get('title') or scene_id
+        scene_brief = briefs_map.get(scene_id, {})
+        scene_intent = intent_map.get(scene_id, {})
+        arch_body = extract_page_architecture(page_path)
+        panel_registers = _extract_panel_registers(arch_body)
+
+        # Always-embedded canon for the universal sections
+        canon_keys = ['style-foundation', 'lighting-laws', 'panel-registers']
+        # Add location and characters (frontmatter-driven)
+        location = parsed.get('location', '') or ''
+        if location:
+            canon_keys.append(f'locations/{location}')
+        characters = parsed.get('characters_present', []) or []
+        for char_id in characters:
+            canon_keys.append(f'characters/{char_id}')
+        # Motifs: pull from scene brief's motifs cell (semicolon-separated)
+        motifs_str = scene_brief.get('motifs', '') or ''
+        for motif_id in (m.strip() for m in motifs_str.split(';') if m.strip()):
+            canon_keys.append(f'motifs/{motif_id}')
+
+        canon_blocks = {cid: _canon(cid) for cid in canon_keys}
+
+        # SF-I4: precondition uses is_canon_block_populated which accepts
+        # an empty (but non-TODO) embeddable body. get_canon_embeddable_block
+        # returns '' for that case. Catch this BEFORE building the LLM prompt
+        # or the strict template — both would produce TODO output without
+        # any signal to the author.
+        empty_required = [cid for cid in ('style-foundation', 'lighting-laws')
+                          if not canon_blocks.get(cid, '').strip()]
+        if empty_required:
+            log(f'  WARN skip {page_id}: required canon block(s) '
+                f'{", ".join(repr(c) for c in empty_required)} have empty '
+                f'embeddable bodies — populate them and re-run')
+            skipped_precondition += 1
+            continue
+
+        # Surface missing optional canon (NOTE level) — only those that
+        # are NOT in the required gate (style-foundation, lighting-laws
+        # are gated; the rest are NOTE-on-absence)
+        for cid in canon_keys:
+            if cid in ('style-foundation', 'lighting-laws'):
+                continue
+            if not canon_blocks.get(cid):
+                log(f'  NOTE {page_id}: optional canon block {cid!r} '
+                    f'absent — prompt will be built without it')
+
+        # Coaching dispatch
+        if coaching == 'strict':
+            template = render_strict_template(
+                page_id=page_id, panel_count=panel_count,
+                canon_blocks=canon_blocks, panel_registers=panel_registers,
+            )
+            if dry_run:
+                print(f'===== DRY RUN: strict template for {page_id} =====')
+                print(template)
+                continue
+            canon_ids_used = [
+                cid for cid in canon_keys if canon_blocks.get(cid)
+            ]
+            _splice_panel_prompts(page_path, template,
+                                  canon_ids=canon_ids_used)
+            log(f'  {page_id}: strict template written')
+            processed += 1
+            continue
+
+        if coaching == 'coach':
+            brief = render_coach_brief(
+                page_id=page_id, panel_count=panel_count,
+                scene_title=scene_title,
+                page_architecture=arch_body,
+                scene_brief=scene_brief,
+                canon_blocks=canon_blocks,
+            )
+            if dry_run:
+                print(f'===== DRY RUN: coach brief for {page_id} =====')
+                print(brief)
+                continue
+            coaching_dir = os.path.join(project_dir, 'working', 'coaching')
+            os.makedirs(coaching_dir, exist_ok=True)
+            brief_path = os.path.join(
+                coaching_dir, f'panel-prompts-{page_id}.md',
+            )
+            with open(brief_path, 'w', encoding='utf-8') as f:
+                f.write(brief)
+            log(f'  {page_id}: coach brief written to {brief_path}')
+            processed += 1
+            continue
+
+        # Full mode
+        prompt = build_full_prompt(
+            page_id=page_id, panel_count=panel_count,
+            scene_title=scene_title,
+            page_frontmatter=parsed,
+            page_architecture=arch_body,
+            scene_brief=scene_brief,
+            scene_intent=scene_intent,
+            canon_blocks=canon_blocks,
+        )
+        if dry_run:
+            print(f'===== DRY RUN: full prompt for {page_id} =====')
+            print(prompt)
+            continue
+
+        from storyforge.api import invoke_api
+        stage_model = select_model('drafting')
+        response = invoke_api(prompt, stage_model, max_tokens=4096)
+        if not response:
+            log(f'  WARN {page_id}: API call returned empty response; skipped')
+            skipped_llm += 1
+            continue
+        ok, block = _validate_panel_prompts_response(
+            response, expected_panel_count=panel_count,
+        )
+        if not ok:
+            # Provide a specific reason so authors can debug without
+            # re-instrumenting (SF-I5).
+            if '## Image-generation prompts' not in response:
+                reason = 'missing "## Image-generation prompts" section header'
+            else:
+                got_indices = [int(m.group(1))
+                               for m in _PANEL_HEADER_RE.finditer(response)]
+                expected_indices = list(range(1, panel_count + 1))
+                if got_indices != expected_indices:
+                    reason = (f'panel sequence got {got_indices}, '
+                              f'expected {expected_indices}')
+                else:
+                    reason = 'sections within a panel are out of canonical order'
+            log(f'  WARN {page_id}: LLM response validation failed — '
+                f'{reason}; skipped')
+            skipped_llm += 1
+            continue
+        canon_ids_used = [cid for cid in canon_keys if canon_blocks.get(cid)]
+        _splice_panel_prompts(page_path, block, canon_ids=canon_ids_used)
+        try:
+            log_operation(
+                project_dir, 'elaborate-panel-prompts-gn',
+                stage_model, 0, 0, 0.0, target=page_id,
+            )
+        except OSError as e:
+            log(f'  WARN {page_id}: cost ledger write failed ({e}); '
+                f'check working/costs/ permissions. Page sections were written.')
+        log(f'  {page_id}: full panel prompts written')
+        processed += 1
+
+    if skipped_llm > 0:
+        log(f'panel-prompts: {skipped_llm} page(s) skipped due to LLM/API '
+            f'failures. Re-run with --force --page <page_id> to retry.')
+    if skipped_precondition > 0:
+        log(f'panel-prompts: {skipped_precondition} page(s) skipped due to '
+            f'unmet preconditions.')
+
+    if processed == 0 and (skipped_precondition > 0 or skipped_llm > 0):
+        return 1
+    return 0
+
+
 # ============================================================================
 # Main stage execution (spine/architecture/map/briefs)
 # ============================================================================
@@ -1090,6 +1533,22 @@ def _run_main_stage(stage: str, project_dir: str, ref_dir: str,
             or get_coaching_level(project_dir)
         )
         rc = _run_page_architecture_handler_gn(
+            project_dir, dry_run=dry_run, coaching=coaching,
+            page=getattr(args, 'page', None),
+            scene=getattr(args, 'scene', None),
+            force=getattr(args, 'force', False),
+        )
+        sys.exit(rc)
+
+    if stage == 'panel-prompts':
+        if medium != 'graphic-novel':
+            log('ERROR: panel-prompts stage is graphic-novel-only.')
+            sys.exit(1)
+        coaching = (
+            getattr(args, 'coaching', None)
+            or get_coaching_level(project_dir)
+        )
+        rc = _run_panel_prompts_handler_gn(
             project_dir, dry_run=dry_run, coaching=coaching,
             page=getattr(args, 'page', None),
             scene=getattr(args, 'scene', None),
