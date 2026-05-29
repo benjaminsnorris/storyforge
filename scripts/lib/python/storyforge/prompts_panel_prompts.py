@@ -4,7 +4,8 @@ Mirrors prompts_page_architecture.py for the 13-section panel-prompt
 schema introduced by issue #253. render_strict_template emits the
 13-section template per panel with canon blocks embedded into sections
 1, 2, 5, 6, 10 and TODO scaffolding in sections 3, 4, 7, 8, 9, 11, 12,
-13. render_coach_brief writes a per-page brief; build_full_prompt
+13. render_coach_brief builds the markdown for a per-page coaching
+brief (the handler writes it to working/coaching/); build_full_prompt
 assembles the LLM prompt for full coaching mode.
 """
 
@@ -77,9 +78,9 @@ def render_strict_template(*, page_id: str, panel_count: int,
 
     Emits ### Panel N blocks (one per panel), each containing #### M.
     <Title> subsections in canonical 1..13 order. Sections 1, 2, 5, 6,
-    10 embed canon blocks when present in canon_blocks; sections 3, 4,
-    7, 8, 9, 11, 12, 13 are TODO scaffolding. Section 3 cites the
-    register from panel_registers when present.
+    10 embed canon blocks when present in canon_blocks; section 3 cites
+    the register from panel_registers when present, otherwise TODO;
+    sections 4, 7, 8, 9, 11, 12, 13 are TODO scaffolding.
 
     canon_blocks keys: 'style-foundation', 'lighting-laws',
     'locations/<id>', 'characters/<id>', 'motifs/<id>'. Missing keys
@@ -127,7 +128,8 @@ def render_coach_brief(*, page_id: str, panel_count: int,
                 'key_dialogue', 'motifs', 'emotions'):
         val = scene_brief.get(key, '')
         lines.append(f'- **{key}:** {val or "(empty)"}')
-    lines += ['', '## Canon embeds (paste verbatim into sections 1, 2, 5, 6, 10)', '']
+    lines += ['', '## Canon embeds (style-foundation -> §1, lighting-laws -> §2, '
+              'sections 5, 6, 10; panel-registers is reference vocabulary for §3)', '']
     for canon_id in ('style-foundation', 'lighting-laws',
                      'panel-registers'):
         block = canon_blocks.get(canon_id, '').strip()
@@ -228,7 +230,10 @@ def build_full_prompt(*, page_id: str, panel_count: int,
     Output contract: the LLM emits ### Panel 1 .. ### Panel N markdown,
     each containing #### M. <Title> subsections in canonical 1..13 order.
     Sections 1, 2, 5, 6, 10 contain the canon embeds verbatim; sections
-    3, 4, 7, 8, 9, 11, 12, 13 are panel-specific prose.
+    3, 4, 7, 8, 9, 11, 12, 13 are panel-specific prose. Sections 10 and
+    12 must end with the literal text "(low weight)" — the Constraints
+    block in the prompt enforces this. Without it, diffusion models render
+    symbolic / emotional prose as visual intensity.
     """
     parts: list[str] = []
     parts.append(

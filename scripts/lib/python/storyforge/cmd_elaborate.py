@@ -1212,15 +1212,11 @@ def _select_pages_for_panel_prompts(project_dir: str, page: str | None,
 
 
 def _extract_panel_registers(arch_body: str) -> dict[int, str]:
-    """Parse ``- Panel N — <register>: <role>`` lines from the page
-    architecture body, returning {panel_index: register_name}.
-
-    Only the register name (the text between the em-dash and the
-    optional colon, or end-of-line) is captured.  Multi-word registers
-    like "low atmospheric" are preserved.  The captured value is
-    lowercased and stripped so capitalisation variants in the source
-    text don't produce different keys in section 3 of the strict
-    template.
+    """Parse `- Panel N — <register>: <role>` lines from the page architecture
+    body, returning {panel_index: register_name}. Only the register name
+    (the text between the em-dash and the optional colon, or end-of-line)
+    is captured and stripped+lowercased. Multi-word registers like
+    "low atmospheric" are preserved.
     """
     result: dict[int, str] = {}
     for line in arch_body.splitlines():
@@ -1324,6 +1320,9 @@ def _run_panel_prompts_handler_gn(project_dir: str, *,
     intent_map = _read_csv_as_map(
         os.path.join(project_dir, 'reference', 'scene-intent.csv'))
 
+    # Per-invocation cache: lives only for the duration of this handler call.
+    # Safe across pages within one run since canon blocks are read-only files
+    # and don't change mid-run. Not a process-level cache.
     canon_block_cache: dict[str, str] = {}
 
     def _canon(canon_id: str) -> str:
