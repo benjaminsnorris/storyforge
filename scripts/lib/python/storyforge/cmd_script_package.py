@@ -264,6 +264,13 @@ _REFERENCE_IMAGES_INVENTORY_LINE = (
     'checklist to gather them once.'
 )
 
+_RENDERED_PAGES_INVENTORY_LINE = (
+    '\n- `pages/` — The rendered page images, one PNG per book page '
+    '(`pages/<page_id>.png`), names matching the page files 1:1. '
+    '{n} of {total} pages are rendered; each PNG is the current canonical '
+    'render of that page (iteration history lives in git).'
+)
+
 
 # ---------------------------------------------------------------------------
 # Visual reference extraction
@@ -419,7 +426,7 @@ This bundle contains everything you need to illustrate the graphic novel.
 
 - `script.md` — The complete panel-by-panel script. Pages are globally numbered.
 - `visual-references.md` — Character and location reference notes. Pin these up.
-- `chapter-map.md` — How scenes group into chapters/issues.{canon_line}{prompts_line}
+- `chapter-map.md` — How scenes group into chapters/issues.{canon_line}{prompts_line}{pages_line}
 
 ## Script format
 
@@ -985,9 +992,33 @@ def main(argv=None):
         log('  NOTE: no page declares `references_required` in its '
             'frontmatter — skipping reference-images.md')
 
+    # pages/ — rendered page images (issue #261) already live in
+    # manuscript/pages/<page_id>.png (this bundle dir). Report progress and
+    # inventory them; the files are not copied (they're already here).
+    pages_line = ''
+    if has_page_files:
+        from storyforge.pages import page_render_report
+        render = page_render_report(project_dir)
+        total = len(render['rendered']) + len(render['unrendered'])
+        n_rendered = len(render['rendered'])
+        if render['rendered']:
+            pages_line = _RENDERED_PAGES_INVENTORY_LINE.format(
+                n=n_rendered, total=total,
+            )
+            log(f'  manuscript/pages/ ({n_rendered}/{total} pages rendered)')
+        elif total:
+            log(f'  NOTE: 0/{total} pages rendered — save renders to '
+                f'manuscript/pages/<page_id>.png as you generate them')
+        if render['orphans']:
+            log(f'  WARNING: {len(render["orphans"])} orphan render(s) in '
+                f'manuscript/pages/ with no matching page file: '
+                f'{", ".join(render["orphans"][:5])}'
+                f'{"..." if len(render["orphans"]) > 5 else ""}')
+
     # handoff-readme.md
     readme = HANDOFF_README.format(
         title=title, canon_line=canon_line, prompts_line=prompts_line,
+        pages_line=pages_line,
     )
     readme_path = os.path.join(bundle_dir, 'handoff-readme.md')
     with open(readme_path, 'w', encoding='utf-8') as f:

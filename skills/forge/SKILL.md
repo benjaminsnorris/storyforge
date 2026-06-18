@@ -411,7 +411,7 @@ The author should never have to remember stage order. Detect where the project i
 
 ```
 spine → architecture → scene-map → voice → briefs
-  → (per page) page-architecture → write → prompts
+  → (per page) page-architecture → write → prompts → render
   → script-package  (artist handoff bundle)
 ```
 
@@ -423,9 +423,12 @@ spine → architecture → scene-map → voice → briefs
 4. **Page missing `## Page architecture`** → recommend `storyforge elaborate --stage page-architecture` (lock panel hierarchy + layout as authoring context).
 5. **Page missing `## Panel script`** (not yet drafted) → recommend `storyforge write` for that scene.
 6. **Page has architecture + script but no `## Image-generation workflow`** → recommend `storyforge elaborate --stage prompts` (author the whole-page GPT Image 2 prompt). Remind the author to list reference images in the page's `references_required` frontmatter — references carry style + character likeness.
-7. **All pages have workflows** → recommend the `script-package` skill to assemble the artist bundle (`manuscript/page-prompts.md` + `manuscript/reference-images.md` + script + canon).
+7. **Page has a workflow but no rendered image** (`manuscript/pages/<page_id>.png` missing) → this is the **render** step, done by the author in ChatGPT: paste the page prompt + upload the reference images, then save the result to `manuscript/pages/<page_id>.png` (filename matching the page_id 1:1). Point them at the next unrendered page (see render-status below). Re-rendering replaces the PNG; git keeps the iteration trail.
+8. **All pages have workflows AND renders** → recommend the `script-package` skill to assemble the artist bundle (`manuscript/page-prompts.md` + `manuscript/reference-images.md` + the rendered `manuscript/pages/` PNGs + script + canon).
 
-`storyforge cleanup` surfaces the same gaps as findings (e.g. `page_missing_page_architecture`, `page_missing_image_workflow`) with the exact command to fix each — run it to get a per-page punch list. After page edits, `./storyforge extract --from-pages` syncs `scenes.csv` panel_count + page_count from the page files.
+**Render status (GN progress signal).** Rendered pages live at `manuscript/pages/<page_id>.png`, one PNG per page file, names matching 1:1 (issue #261). Report progress as "N of M pages rendered" and name the next unrendered page (a page that has an `## Image-generation workflow` but no PNG). As pages render, downstream pages can list earlier renders (`manuscript/pages/sN-pX.png`) in their `references_required` frontmatter for style + continuity anchoring — so the render order is also the dependency order.
+
+`storyforge cleanup` surfaces the gaps as findings (e.g. `page_missing_page_architecture`, `page_missing_image_workflow`, and `page_render_orphan` for a PNG with no matching page file) with the exact fix for each — run it to get a per-page punch list. An *unrendered* page is valid in-flight state, not a finding. After page edits, `./storyforge extract --from-pages` syncs `scenes.csv` panel_count + page_count from the page files.
 
 **The image-generation prompt approach (GPT Image 2 / ChatGPT Images 2.0):** one prompt renders the whole page (no per-panel/blocking/composition passes); reference images carry style + character likeness so the prompt prose stays short (~250-400 words); use OpenAI's 5-section template; the character anchor is the IDENTICAL string in every panel; positive framing only (negated keywords leak into the image).
 

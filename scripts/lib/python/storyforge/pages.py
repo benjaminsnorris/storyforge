@@ -471,3 +471,71 @@ def extract_panel_script(path: str) -> str:
     script section per page).
     """
     return _extract_section(path, _PANEL_SCRIPT_HEADER)
+
+
+# ---------------------------------------------------------------------------
+# Rendered page images (issue #261)
+# ---------------------------------------------------------------------------
+
+# Canonical home for rendered page images: manuscript/pages/<page_id>.png,
+# one PNG per page file, names matching the page-file IDs 1:1. The PNG is
+# the *current* canonical render of that page; iteration history lives in git.
+RENDERED_PAGES_SUBDIR: Final[str] = os.path.join('manuscript', 'pages')
+
+
+def rendered_pages_dir(project_dir: str) -> str:
+    """Return the absolute path to the rendered-pages directory."""
+    return os.path.join(project_dir, RENDERED_PAGES_SUBDIR)
+
+
+def rendered_page_path(project_dir: str, page_id: str) -> str:
+    """Return the expected PNG path for a page_id (may not exist)."""
+    return os.path.join(rendered_pages_dir(project_dir), f'{page_id}.png')
+
+
+def list_rendered_pages(project_dir: str) -> list[str]:
+    """Return sorted absolute paths of manuscript/pages/*.png, or [] if the
+    directory is absent."""
+    d = rendered_pages_dir(project_dir)
+    if not os.path.isdir(d):
+        return []
+    return sorted(
+        os.path.join(d, f)
+        for f in os.listdir(d)
+        if f.endswith('.png') and not f.startswith('.')
+    )
+
+
+class PageRenderReport(TypedDict):
+    rendered: list[str]    # page_ids that have a matching PNG
+    unrendered: list[str]  # page_ids (with frontmatter) that lack a PNG
+    orphans: list[str]     # PNG basenames with no matching page file
+
+
+def page_render_report(project_dir: str) -> PageRenderReport:
+    """Reconcile page files (pages/) against rendered images (manuscript/pages/).
+
+    A PNG corresponds to a page file when its filename stem equals a page
+    file's `page_id` (the 1:1 convention, issue #261). Page files without a
+    `page_id` in frontmatter are skipped for the rendered/unrendered split
+    (they can't be matched), but a PNG whose stem matches no page file is an
+    orphan regardless. Results are sorted for determinism.
+    """
+    page_ids: list[str] = []
+    for p in list_page_files(project_dir):
+        parsed = parse_page_file(p)
+        pid = parsed.get('page_id') if parsed else None
+        if pid:
+            page_ids.append(pid)
+    page_id_set = set(page_ids)
+
+    rendered_stems = {
+        os.path.splitext(os.path.basename(png))[0]
+        for png in list_rendered_pages(project_dir)
+    }
+
+    rendered = sorted(pid for pid in page_id_set if pid in rendered_stems)
+    unrendered = sorted(pid for pid in page_id_set if pid not in rendered_stems)
+    orphans = sorted(f'{stem}.png' for stem in rendered_stems
+                     if stem not in page_id_set)
+    return {'rendered': rendered, 'unrendered': unrendered, 'orphans': orphans}

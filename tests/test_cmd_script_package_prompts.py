@@ -205,6 +205,59 @@ def test_skip_notes_logged_when_page_files_present(tmp_path, monkeypatch, capsys
     assert not os.path.isfile(os.path.join(manuscript, 'reference-images.md'))
 
 
+def test_rendered_pages_inventory_and_count(tmp_path, monkeypatch, capsys):
+    """#261: script-package reports an N/M rendered count and adds a
+    manuscript/pages/ inventory line to the README when renders exist."""
+    proj = _setup_project(tmp_path, {
+        's01-p1': ('', '## Panel script\n\n**Panel 1.** Wide.\n'),
+    })
+    import os
+    rdir = os.path.join(proj, 'manuscript', 'pages')
+    os.makedirs(rdir)
+    open(os.path.join(rdir, 's01-p1.png'), 'wb').write(b'\x89PNG')
+    monkeypatch.chdir(proj)
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    out = capsys.readouterr().out
+    assert '1/1 pages rendered' in out
+    readme = open(os.path.join(proj, 'manuscript', 'handoff-readme.md')).read()
+    assert '`pages/`' in readme
+    assert '1 of 1 pages are rendered' in readme
+
+
+def test_orphan_render_warned_by_script_package(tmp_path, monkeypatch, capsys):
+    """#261: an orphan PNG (no matching page file) triggers a WARNING."""
+    proj = _setup_project(tmp_path, {
+        's01-p1': ('', '## Panel script\n\n**Panel 1.** Wide.\n'),
+    })
+    import os
+    rdir = os.path.join(proj, 'manuscript', 'pages')
+    os.makedirs(rdir)
+    open(os.path.join(rdir, 's09-p9.png'), 'wb').write(b'\x89PNG')
+    monkeypatch.chdir(proj)
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    out = capsys.readouterr().out
+    assert 'orphan render' in out
+    assert 's09-p9.png' in out
+
+
+def test_no_renders_notes_progress(tmp_path, monkeypatch, capsys):
+    """#261: with page files but zero renders, a 0/M NOTE is logged and no
+    pages inventory line appears in the README."""
+    proj = _setup_project(tmp_path, {
+        's01-p1': ('', '## Panel script\n\n**Panel 1.** Wide.\n'),
+    })
+    monkeypatch.chdir(proj)
+    import os
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    out = capsys.readouterr().out
+    assert '0/1 pages rendered' in out
+    readme = open(os.path.join(proj, 'manuscript', 'handoff-readme.md')).read()
+    assert '`pages/`' not in readme
+
+
 def test_both_files_and_inventory_when_workflow_and_refs_present(tmp_path, monkeypatch):
     """Happy path: workflow + references present → both files written and
     the README names both."""
