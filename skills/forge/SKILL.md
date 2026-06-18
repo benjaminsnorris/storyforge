@@ -403,24 +403,39 @@ git add -A && git commit -m "Develop: {what was done}" && git push
 Graphic-novel projects can work at two granularities:
 
 - **Scene level** — `scenes/<scene_id>.md` is the creative source of truth (function, page index, cross-page continuity notes).
-- **Page level** — `pages/<prefix>-pN.md` is the atomic working unit when a scene has multiple pages. Each page file carries the panel script, the page architecture (intent, hierarchy, book-level placement), and the image-generation prompts for that one book page.
+- **Page level** — `pages/<prefix>-pN.md` is the atomic working unit when a scene has multiple pages. Each page file carries the page architecture (intent, hierarchy, layout), the panel script, and the whole-page image-generation workflow (prompt + reference list) for that one book page.
 
-When orienting yourself in a GN project, check whether `pages/` exists:
+### The GN page pipeline — route the author, don't make them memorize it
 
-- **If `pages/` is populated:** recommend per-page work. Suggest extracting metadata after page edits — `./storyforge extract --from-pages` updates `scenes.csv` panel_count + page_count from the page files. Recommend the script-package skill once the page files are ready for handoff — it now assembles the artist bundle from page files when present, falling back to the inline scene file otherwise.
-- **After briefs (GN mode):** Run `storyforge elaborate --stage page-architecture` to lock page-level rhythm and panel geometry before per-panel rendering. Requires `reference/canon/panel-registers.md` and `reference/canon/page-rhythm-rules.md` to be populated.
-- **After page-architecture (GN mode):** Run `storyforge elaborate --stage panel-prompts` to generate 13-section image-generation prompts per panel. Sections 1, 2, 5, 6, 10 embed canon verbatim; section 3 cites the register from page architecture. Requires `reference/canon/style-foundation.md` and `reference/canon/lighting-laws.md` to be populated.
-- **If `pages/` is empty or absent:** the project is using scene-level files only. That's still supported. Suggest migrating to per-page files when a scene's panel-level content gets unwieldy (around 3+ pages with detailed image prompts).
+The author should never have to remember stage order. Detect where the project is and recommend the single next action. The ordered pipeline is:
+
+```
+spine → architecture → scene-map → voice → briefs
+  → (per page) page-architecture → write → prompts
+  → script-package  (artist handoff bundle)
+```
+
+**How to detect the current step and what to recommend next** (check in this order; recommend the first unmet step):
+
+1. **Canon not scaffolded/filled** (`reference/canon/` missing, or `storyforge cleanup --csv` reports unfilled-template findings on the four root files) → recommend filling canon first. `page-architecture` needs `panel-registers.md` + `page-rhythm-rules.md`; the `prompts` stage reads `style-foundation.md` + `lighting-laws.md` to inform the prompt (but no longer requires them).
+2. **Briefs incomplete** (scene briefs lack `panel_breakdown`) → recommend `storyforge elaborate --stage briefs`.
+3. **`pages/` empty or absent** → the project is scene-level only (still supported). Suggest creating per-page files when a scene's panel content gets unwieldy (≈3+ pages).
+4. **Page missing `## Page architecture`** → recommend `storyforge elaborate --stage page-architecture` (lock panel hierarchy + layout as authoring context).
+5. **Page missing `## Panel script`** (not yet drafted) → recommend `storyforge write` for that scene.
+6. **Page has architecture + script but no `## Image-generation workflow`** → recommend `storyforge elaborate --stage prompts` (author the whole-page GPT Image 2 prompt). Remind the author to list reference images in the page's `references_required` frontmatter — references carry style + character likeness.
+7. **All pages have workflows** → recommend the `script-package` skill to assemble the artist bundle (`manuscript/page-prompts.md` + `manuscript/reference-images.md` + script + canon).
+
+`storyforge cleanup` surfaces the same gaps as findings (e.g. `page_missing_page_architecture`, `page_missing_image_workflow`) with the exact command to fix each — run it to get a per-page punch list. After page edits, `./storyforge extract --from-pages` syncs `scenes.csv` panel_count + page_count from the page files.
+
+**The image-generation prompt approach (GPT Image 2 / ChatGPT Images 2.0):** one prompt renders the whole page (no per-panel/blocking/composition passes); reference images carry style + character likeness so the prompt prose stays short (~250-400 words); use OpenAI's 5-section template; the character anchor is the IDENTICAL string in every panel; positive framing only (negated keywords leak into the image).
 
 ### Visual canon (`reference/canon/`)
 
-Check whether `reference/canon/` exists in the project. The canon tree is the source-of-truth for visual blocks (Style Foundation, Lighting Laws, Panel Registers, Page Rhythm, plus one file per character/location/motif) that get embedded inline into per-panel prompts.
+Check whether `reference/canon/` exists in the project. The canon tree is the source-of-truth for visual blocks (Style Foundation, Lighting Laws, Panel Registers, Page Rhythm, plus one file per character/location/motif). Canon *informs* the page architecture and the image-generation prompt and anchors the reference images — it is the author's consistency reference, no longer pasted verbatim into prompts (issue #260).
 
-- **If `reference/canon/` is absent:** recommend scaffolding it before serious panel-prompt work begins. Authors who skip canon end up with drift across panels (one scene's "Lucien" doesn't match the next). The starter templates live at `templates/reference/canon/` in the plugin; the cleanest path is to copy them in.
-- **If `reference/canon/` exists but `storyforge cleanup --csv` reports unfilled-template findings on the four root files (`style-foundation.md`, `lighting-laws.md`, `panel-registers.md`, `page-rhythm-rules.md`):** suggest filling them before drafting panel scripts. The root canon embeds into every panel; placeholders mean every panel ships with the same hole.
-- **If `pages/` has page files that reference canon (look for `<!-- canon-embed: ... -->` markers) and `storyforge cleanup --csv` reports canon drift or embed findings:** the author needs to re-embed the affected blocks. Drift means a canon block changed but its inline copies are stale; the cleanup report's "Canon Files" section names the specific page and source canon to look at.
-
-The canon-embed convention is documented in `reference/visual-style.md` (also scaffolded when the canon tree is set up).
+- **If `reference/canon/` is absent:** recommend scaffolding it before serious prompt work begins. Authors who skip canon end up with drift across pages (one page's "Lucien" doesn't match the next), and consistency across panels depends most on the reference images the canon describes. The starter templates live at `templates/reference/canon/` in the plugin; the cleanest path is to copy them in.
+- **If `reference/canon/` exists but `storyforge cleanup --csv` reports unfilled-template findings on the four root files (`style-foundation.md`, `lighting-laws.md`, `panel-registers.md`, `page-rhythm-rules.md`):** suggest filling them. `page-architecture` needs panel-registers + page-rhythm; the `prompts` stage distills style-foundation + lighting-laws into the page prompt.
+- **If `storyforge cleanup --csv` reports canon drift findings:** a canon block changed; refresh the reference images it describes (and any `canon_referenced` page frontmatter) so the rendered pages stay consistent. The cleanup report's "Canon Files" section names the specific canon to look at.
 
 These commands and skills work in GN mode: `elaborate`, `hone`, `validate`, `cleanup`, `write`, `evaluate`, `score`, `revise`, `extract`, `script-package`. Not yet supported: `publish`, `annotations` (Bookshelf integration — tracked as #215).
 
