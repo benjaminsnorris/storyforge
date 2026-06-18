@@ -107,8 +107,7 @@ def assemble_workflow_section(*, page_prompt_body: str,
     )
 
 
-def _strict_prompt_body(*, page_id: str, panel_count: int,
-                        scene_title: str) -> str:
+def _strict_prompt_body(*, page_id: str, panel_count: int) -> str:
     """TODO scaffold for the 5-section page-prompt body (no LLM)."""
     page_label = page_id.split('-p')[-1] if '-p' in page_id else page_id
     panels = max(panel_count, 1)
@@ -155,11 +154,11 @@ def render_strict_template(*, page_id: str, panel_count: int,
     """Deterministic strict-mode `## Image-generation workflow` section.
 
     No LLM call. Emits the approach note, reference list, and a 5-section
-    page-prompt TODO scaffold the author fills in.
+    page-prompt TODO scaffold the author fills in. (`scene_title` is accepted
+    for call-site symmetry with the coach/full builders; the strict scaffold
+    is title-agnostic.)
     """
-    body = _strict_prompt_body(
-        page_id=page_id, panel_count=panel_count, scene_title=scene_title,
-    )
+    body = _strict_prompt_body(page_id=page_id, panel_count=panel_count)
     return assemble_workflow_section(
         page_prompt_body=body, references_required=references_required,
     )

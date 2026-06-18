@@ -461,7 +461,7 @@ def extract_panel_script(path: str) -> str:
     Used by script-package to assemble the artist bundle from page files.
     Output is the section body — strips the '## Panel script' heading
     itself but keeps everything until the next page-file section heading
-    (e.g. '## Image-generation prompts' or '## Page-specific notes') or
+    (e.g. '## Image-generation workflow' or '## Page-specific notes') or
     EOF. '## Page N — LAYOUT' headers are NOT treated as section
     boundaries; they are part of the script body and remain in the output
     so script-package's global page renumbering can find them.

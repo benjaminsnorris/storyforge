@@ -245,14 +245,20 @@ def _assemble_reference_manifest(project_dir: str, chapters: list[dict]) -> str:
     return '\n'.join(gather) + '\n\n' + '\n\n'.join(per_page) + '\n'
 
 
+# Two separate inventory lines so the README documents only the files that
+# were actually written (page-prompts.md and reference-images.md are emitted
+# independently — see SF-1/CR-1 review findings).
 _PAGE_PROMPTS_INVENTORY_LINE = (
     '\n- `page-prompts.md` — One whole-page image-generation prompt per '
     'book page, tuned for GPT Image 2 (ChatGPT Images 2.0). Each prompt '
     'follows OpenAI’s 5-section template (Scene / Subject / Important '
     'details / Use case / Constraints) with per-panel beats. Paste a page '
-    'prompt into ChatGPT alongside that page’s reference images (see '
-    '`reference-images.md`) to render the whole page in one shot. Adjust '
-    'the reference images, not the prose, to fix style/character drift.'
+    'prompt into ChatGPT alongside that page’s reference images to render '
+    'the whole page in one shot. Adjust the reference images, not the prose, '
+    'to fix style/character drift.'
+)
+
+_REFERENCE_IMAGES_INVENTORY_LINE = (
     '\n- `reference-images.md` — The reference images each page needs, '
     'labeled by role (character / paper-tone / prior page), plus a deduped '
     'checklist to gather them once.'
@@ -919,8 +925,9 @@ def main(argv=None):
     log('  manuscript/chapter-map.md')
 
     # canon/ — copy reference/canon/ alongside the script so artists have
-    # the source-of-truth visual blocks in one place. The blocks are also
-    # embedded inline in panel prompts; this is the editable source.
+    # the source-of-truth visual blocks in one place. Canon informs the page
+    # prompts and the reference images but is no longer embedded inline
+    # (issue #260); this directory is the editable source artists work from.
     canon_copied = _copy_canon_into_bundle(project_dir, bundle_dir)
     canon_line = (
         '\n- `canon/` — Source-of-truth visual canon (style foundation, '
@@ -932,9 +939,17 @@ def main(argv=None):
     if canon_copied:
         log(f'  manuscript/canon/ ({canon_copied} files)')
 
-    # page-prompts.md + reference-images.md (issue #260) — emit only when
-    # any page in the bundle has an image-generation workflow section.
+    # page-prompts.md and reference-images.md (issue #260) are emitted
+    # INDEPENDENTLY: a page may declare references_required before the
+    # prompts stage authors its workflow section, so the manifest must not
+    # be gated on the page prompts existing (SF-1). Each file's README
+    # inventory line is added only when that file is actually written (CR-1).
+    # Skip-NOTEs fire only when per-page work is underway (pages/ populated)
+    # so prose-only GN bundles stay quiet (SF-2).
+    from storyforge.pages import list_page_files
+    has_page_files = bool(list_page_files(project_dir))
     prompts_line = ''
+
     page_prompts_md = _assemble_page_prompts(project_dir, chapters)
     if page_prompts_md:
         header = (
@@ -946,21 +961,29 @@ def main(argv=None):
                   encoding='utf-8') as f:
             f.write(header + page_prompts_md)
         log('  manuscript/page-prompts.md')
-        prompts_line = _PAGE_PROMPTS_INVENTORY_LINE
+        prompts_line += _PAGE_PROMPTS_INVENTORY_LINE
+    elif has_page_files:
+        log('  NOTE: no page has an "## Image-generation workflow" section '
+            'yet — skipping page-prompts.md (run `storyforge elaborate '
+            '--stage prompts`)')
 
-        manifest_md = _assemble_reference_manifest(project_dir, chapters)
-        if manifest_md:
-            m_header = (
-                f'# {title} — Reference Images\n\n'
-                '_Upload the listed images alongside each page prompt, labeled '
-                'by role. Reference images carry style + character likeness in '
-                'GPT Image 2 — keep the prompt prose short and iterate on these '
-                'instead._\n\n'
-            )
-            with open(os.path.join(bundle_dir, 'reference-images.md'), 'w',
-                      encoding='utf-8') as f:
-                f.write(m_header + manifest_md)
-            log('  manuscript/reference-images.md')
+    manifest_md = _assemble_reference_manifest(project_dir, chapters)
+    if manifest_md:
+        m_header = (
+            f'# {title} — Reference Images\n\n'
+            '_Upload the listed images alongside each page prompt, labeled '
+            'by role. Reference images carry style + character likeness in '
+            'GPT Image 2 — keep the prompt prose short and iterate on these '
+            'instead._\n\n'
+        )
+        with open(os.path.join(bundle_dir, 'reference-images.md'), 'w',
+                  encoding='utf-8') as f:
+            f.write(m_header + manifest_md)
+        log('  manuscript/reference-images.md')
+        prompts_line += _REFERENCE_IMAGES_INVENTORY_LINE
+    elif has_page_files:
+        log('  NOTE: no page declares `references_required` in its '
+            'frontmatter — skipping reference-images.md')
 
     # handoff-readme.md
     readme = HANDOFF_README.format(

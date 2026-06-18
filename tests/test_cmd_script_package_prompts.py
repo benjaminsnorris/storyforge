@@ -113,9 +113,115 @@ def test_assemble_reference_manifest_empty_when_no_references(tmp_path):
     assert _assemble_reference_manifest(str(tmp_path), _chapters()) == ''
 
 
-def test_readme_includes_page_prompts_inventory_when_emitted():
-    """The page-prompts inventory line names both new bundle files."""
-    from storyforge.cmd_script_package import _PAGE_PROMPTS_INVENTORY_LINE
+def test_inventory_lines_are_split_per_file():
+    """SF-1/CR-1: page-prompts.md and reference-images.md have independent
+    inventory lines so the README documents only files actually written."""
+    from storyforge.cmd_script_package import (
+        _PAGE_PROMPTS_INVENTORY_LINE, _REFERENCE_IMAGES_INVENTORY_LINE,
+    )
     assert 'page-prompts.md' in _PAGE_PROMPTS_INVENTORY_LINE
-    assert 'reference-images.md' in _PAGE_PROMPTS_INVENTORY_LINE
+    assert 'reference-images.md' not in _PAGE_PROMPTS_INVENTORY_LINE
     assert 'GPT Image 2' in _PAGE_PROMPTS_INVENTORY_LINE
+    assert 'reference-images.md' in _REFERENCE_IMAGES_INVENTORY_LINE
+    assert 'page-prompts.md' not in _REFERENCE_IMAGES_INVENTORY_LINE
+
+
+# ---------------------------------------------------------------------------
+# main() wiring — SF-1 / SF-2 / CR-1 regressions
+# ---------------------------------------------------------------------------
+
+def _setup_project(tmp_path, page_bodies):
+    """Build a minimal GN project. page_bodies maps page_id -> (frontmatter
+    extra lines, body). Returns the project dir."""
+    proj = tmp_path / 'proj'
+    proj.mkdir()
+    (proj / 'storyforge.yaml').write_text(
+        'project:\n  medium: graphic-novel\n  title: Test\n'
+    )
+    ref = proj / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|status\ns01-studio|1|Studio|briefed\n'
+    )
+    (ref / 'chapter-map.csv').write_text(
+        'chapter|title|heading|scenes\n1|One|numbered|s01-studio\n'
+    )
+    pages = proj / 'pages'
+    pages.mkdir()
+    for page_id, (fm_extra, body) in page_bodies.items():
+        (pages / f'{page_id}.md').write_text(
+            "---\n"
+            f"page_id: {page_id}\n"
+            "scene_id: s01-studio\n"
+            "page_within_scene: 1\n"
+            "total_pages_in_scene: 1\n"
+            "panel_count: 1\n"
+            + fm_extra +
+            "---\n\n"
+            + body
+        )
+    return str(proj)
+
+
+def test_reference_manifest_written_even_without_workflow(tmp_path, monkeypatch):
+    """SF-1: a page that declares references_required but has no
+    `## Image-generation workflow` section yet must still get
+    reference-images.md — and page-prompts.md must NOT be written."""
+    proj = _setup_project(tmp_path, {
+        's01-p1': (
+            'references_required:\n  - ref/char.png\n  - ref/tone.png\n',
+            '## Panel script\n\n**Panel 1.** Wide.\n',
+        ),
+    })
+    monkeypatch.chdir(proj)
+    import os
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    manuscript = os.path.join(proj, 'manuscript')
+    assert os.path.isfile(os.path.join(manuscript, 'reference-images.md'))
+    assert 'ref/char.png' in open(os.path.join(manuscript, 'reference-images.md')).read()
+    assert not os.path.isfile(os.path.join(manuscript, 'page-prompts.md'))
+    # README documents reference-images.md but NOT page-prompts.md
+    readme = open(os.path.join(manuscript, 'handoff-readme.md')).read()
+    assert 'reference-images.md' in readme
+    assert 'page-prompts.md' not in readme
+
+
+def test_skip_notes_logged_when_page_files_present(tmp_path, monkeypatch, capsys):
+    """SF-2: when pages exist but no workflow/no references, main() logs a
+    NOTE for each skipped artifact instead of silently omitting it."""
+    proj = _setup_project(tmp_path, {
+        's01-p1': ('', '## Panel script\n\n**Panel 1.** Wide.\n'),
+    })
+    monkeypatch.chdir(proj)
+    import os
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    out = capsys.readouterr().out + capsys.readouterr().err
+    assert 'skipping page-prompts.md' in out
+    assert 'skipping reference-images.md' in out
+    manuscript = os.path.join(proj, 'manuscript')
+    assert not os.path.isfile(os.path.join(manuscript, 'page-prompts.md'))
+    assert not os.path.isfile(os.path.join(manuscript, 'reference-images.md'))
+
+
+def test_both_files_and_inventory_when_workflow_and_refs_present(tmp_path, monkeypatch):
+    """Happy path: workflow + references present → both files written and
+    the README names both."""
+    proj = _setup_project(tmp_path, {
+        's01-p1': (
+            'references_required:\n  - ref/char.png\n',
+            '## Panel script\n\n**Panel 1.** Wide.\n\n'
+            '## Image-generation workflow\n\n**Approach:** whole page.\n',
+        ),
+    })
+    monkeypatch.chdir(proj)
+    import os
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    manuscript = os.path.join(proj, 'manuscript')
+    assert os.path.isfile(os.path.join(manuscript, 'page-prompts.md'))
+    assert os.path.isfile(os.path.join(manuscript, 'reference-images.md'))
+    readme = open(os.path.join(manuscript, 'handoff-readme.md')).read()
+    assert 'page-prompts.md' in readme
+    assert 'reference-images.md' in readme

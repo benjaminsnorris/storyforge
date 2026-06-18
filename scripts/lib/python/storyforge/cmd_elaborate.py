@@ -88,9 +88,11 @@ def parse_args(argv):
     # before the handler is invoked.
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument('--page', type=str, default=None,
-                       help='Run page-architecture for a single page (by page_id)')
+                       help='Limit a per-page stage (page-architecture, prompts) '
+                            'to a single page (by page_id)')
     scope.add_argument('--scene', type=str, default=None,
-                       help='Run page-architecture for every page of one scene (by scene_id)')
+                       help='Limit a per-page stage (page-architecture, prompts) '
+                            'to every page of one scene (by scene_id)')
     parser.add_argument('--force', action='store_true',
                         help='Overwrite existing page-architecture / image-workflow sections')
     args = parser.parse_args(argv)
@@ -882,11 +884,13 @@ def _splice_page_architecture(page_path: str, section_block: str,
 
 
 # The five OpenAI template labels, anchored as bold markdown labels, plus
-# the Panels list. Used to validate the LLM page-prompt body.
+# the Panels list. Used to validate the LLM page-prompt body. The label set
+# is single-sourced from PAGE_PROMPT_SECTIONS so the validator, the builder,
+# and the diagnostic below can't drift apart.
+from storyforge.prompts_page_prompt import PAGE_PROMPT_SECTIONS as _PAGE_PROMPT_SECTIONS
 _PAGE_PROMPT_LABEL_RES: Final[tuple[re.Pattern, ...]] = tuple(
     re.compile(rf'\*\*{re.escape(label)}\s*:', re.IGNORECASE)
-    for label in ('Scene', 'Subject', 'Important details', 'Use case',
-                  'Constraints')
+    for label in _PAGE_PROMPT_SECTIONS
 )
 _PANELS_LABEL_RE = re.compile(r'\*\*Panels\s*:', re.IGNORECASE)
 _NUMBERED_BEAT_RE = re.compile(r'^\s*\d+\.\s+\S', re.MULTILINE)
@@ -1358,10 +1362,20 @@ def _run_page_prompt_handler_gn(project_dir: str, *,
         for motif_id in (m.strip() for m in motifs_str.split(';') if m.strip()):
             canon_keys.append(f'motifs/{motif_id}')
 
+        from storyforge.canon import is_canon_block_populated
         canon_blocks = {cid: _canon(cid) for cid in canon_keys}
         for cid in canon_keys:
             if not canon_blocks.get(cid):
-                log(f'  NOTE {page_id}: canon block {cid!r} absent — prompt '
+                # An empty embeddable body counts as "populated" to
+                # is_canon_block_populated but still yields '' here, so
+                # distinguish "file exists but its block is empty" from
+                # "file missing" — the author isn't told to create a file
+                # that already exists. (A TODO-placeholder body returns
+                # non-empty text and never reaches this branch.)
+                state = ('present but its "## Embeddable block" is empty'
+                         if is_canon_block_populated(project_dir, cid)
+                         else 'absent')
+                log(f'  NOTE {page_id}: canon block {cid!r} {state}; prompt '
                     f'will be built without it (references carry the style)')
 
         # Coaching dispatch
@@ -1433,8 +1447,7 @@ def _run_page_prompt_handler_gn(project_dir: str, *,
         if not ok:
             # Specific reason so authors can debug without re-instrumenting.
             missing = [label for label, lr in zip(
-                ('Scene', 'Subject', 'Important details', 'Use case',
-                 'Constraints'), _PAGE_PROMPT_LABEL_RES)
+                _PAGE_PROMPT_SECTIONS, _PAGE_PROMPT_LABEL_RES)
                 if not lr.search(response)]
             if missing:
                 reason = f'missing section label(s): {", ".join(missing)}'

@@ -15,10 +15,12 @@ removed: GPT Image 2 plans layout and renders the whole page from a
 single prompt, so there is no blocking pass to author.
 """
 
+from typing import Final
+
 from storyforge.pages import PageFile
 
 
-_STRICT_TEMPLATE_HEADER = """\
+_STRICT_TEMPLATE_HEADER: Final[str] = """\
 ## Page architecture
 
 ### Intent
@@ -27,7 +29,7 @@ TODO — narrative purpose, emotional arc, visual rhythm, dominant motif.
 ### Panel hierarchy
 """
 
-_STRICT_TEMPLATE_TAIL = """\
+_STRICT_TEMPLATE_TAIL: Final[str] = """\
 
 ### Layout
 TODO — grid/splash/irregular, row × column geometry, eye flow
