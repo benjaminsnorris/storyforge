@@ -5,14 +5,22 @@ Three coaching modes share this module so they can reuse helpers
 loaders). render_strict_template emits a TODO scaffold with no LLM
 call. render_coach_brief builds a question-driven brief for the
 author (the handler writes it to working/coaching/). build_full_prompt
-assembles the full LLM prompt with canon embeds + scene brief +
+assembles the full LLM prompt with canon vocabulary + scene brief +
 neighbor pages.
+
+Issue #260: page architecture is now pure *authoring context* — the
+panel hierarchy, eye-flow, and pacing intent that inform the artist and
+the page prompt. The separate monochrome "page-blocking prompt" was
+removed: GPT Image 2 plans layout and renders the whole page from a
+single prompt, so there is no blocking pass to author.
 """
+
+from typing import Final
 
 from storyforge.pages import PageFile
 
 
-_STRICT_TEMPLATE_HEADER = """\
+_STRICT_TEMPLATE_HEADER: Final[str] = """\
 ## Page architecture
 
 ### Intent
@@ -21,21 +29,12 @@ TODO — narrative purpose, emotional arc, visual rhythm, dominant motif.
 ### Panel hierarchy
 """
 
-_STRICT_TEMPLATE_TAIL = """\
+_STRICT_TEMPLATE_TAIL: Final[str] = """\
 
-### Book-level placement
-- Spread context: TODO (verso of N–N+1 | recto of N–1–N | opening recto | closing verso)
-- Page-turn beat: TODO (yes/no — what reveals on the turn)
-
-## Page-blocking prompt
-
-TODO — monochrome storyboard thumbnail. Must:
-- Cite panel registers by name (dominant | transitional | rhythmic |
-  climactic | atmospheric — see reference/canon/panel-registers.md)
-- Specify panel geometry (grid? splash? irregular? tier count?)
-- Specify eye flow (left-to-right, Z, F, vertical)
-- Be pure compositional blocking — no surface texture, no faces,
-  no fine line work
+### Layout
+TODO — grid/splash/irregular, row × column geometry, eye flow
+(left-to-right, Z, F, vertical), and spread context (verso of N–N+1 |
+recto of N–1–N | opening recto | closing verso). Note any page-turn beat.
 """
 
 
@@ -50,9 +49,9 @@ def _format_neighbor(label: str, page: PageFile | None) -> str:
 def render_strict_template(*, page_id: str, panel_count: int) -> str:
     """Deterministic strict-mode template. No LLM call.
 
-    Emits both new body sections with TODO scaffolding. The panel
-    hierarchy enumerates one bullet per panel (using panel_count from
-    the page-file frontmatter). When panel_count is 0 (unknown) we
+    Emits the `## Page architecture` section with TODO scaffolding. The
+    panel hierarchy enumerates one bullet per panel (using panel_count
+    from the page-file frontmatter). When panel_count is 0 (unknown) we
     still render one bullet so the author has a starting point.
     """
     bullets = max(panel_count, 1)
@@ -90,6 +89,7 @@ def render_coach_brief(*,
         '- Is there a page-turn beat? What reveals on the turn?',
         '- What\'s the spread context (this page\'s relationship to its facing page)?',
         '- Dominant motif on this page (cite from motif canon)?',
+        '- The page layout — grid/splash/irregular, geometry, and eye flow?',
         '',
         '## Canon vocabulary to use',
         '',
@@ -108,12 +108,12 @@ def render_coach_brief(*,
     lines.append(_format_neighbor('Next page', next_page))
     lines += [
         '',
-        '## Write your sections into the page file at:',
+        '## Write your section into the page file at:',
         '',
-        f'`pages/{page_id}.md` — insert both sections between '
+        f'`pages/{page_id}.md` — insert the section between '
         '`## Scene context` and `## Panel script`.',
         '',
-        'Section headers:',
+        'Section header:',
         '',
         '```',
         '## Page architecture',
@@ -125,14 +125,9 @@ def render_coach_brief(*,
         '- Panel 1 — <register>: <one-line role>',
         '...',
         '',
-        '### Book-level placement',
-        '- Spread context: ...',
-        '- Page-turn beat: ...',
-        '',
-        '## Page-blocking prompt',
-        '',
-        '<monochrome storyboard thumbnail; cite registers by name;',
-        ' specify geometry, eye flow; no surface texture, no faces>',
+        '### Layout',
+        '<grid/splash/irregular; row × column geometry; eye flow;',
+        ' spread context; page-turn beat>',
         '```',
     ]
     return '\n'.join(lines) + '\n'
@@ -191,19 +186,20 @@ def build_full_prompt(*,
     page-rhythm-rules, style-foundation, lighting-laws) and the neighbor
     pages. This builder just assembles the prompt deterministically — no I/O.
 
-    Output contract for the LLM: a single markdown block containing
-    exactly two top-level sections — `## Page architecture` and
-    `## Page-blocking prompt` — and nothing else. The handler parses
-    that block, asserts both headers are present, and splices it
-    into the page file.
+    Output contract for the LLM: a single markdown block containing exactly
+    one top-level section — `## Page architecture` — with three subsections
+    (Intent, Panel hierarchy, Layout) and nothing else. The handler parses
+    that block, asserts the header is present, and splices it into the page
+    file.
     """
     parts: list[str] = []
     parts.append(
-        f'You are writing the page architecture and page-blocking prompt '
-        f'for one page of a graphic novel.'
+        'You are writing the page architecture — the authoring context that '
+        'captures panel hierarchy, eye flow, and pacing intent — for one '
+        'page of a graphic novel.'
     )
     parts.append('')
-    parts.append(f'## Page identity')
+    parts.append('## Page identity')
     parts.append('')
     parts.append(f'- page_id: {page_id}')
     parts.append(f'- scene: {scene_title}')
@@ -225,7 +221,7 @@ def build_full_prompt(*,
     parts.append(_format_neighbor('Previous page', prev_page))
     parts.append(_format_neighbor('Next page', next_page))
     parts.append('')
-    parts.append('## Canon vocabulary (embed verbatim — cite by name)')
+    parts.append('## Canon vocabulary (cite registers by name)')
     parts.append('')
     for canon_id, block in canon_blocks.items():
         if not block or not block.strip():
@@ -237,8 +233,8 @@ def build_full_prompt(*,
     parts.append('## Output contract')
     parts.append('')
     parts.append(
-        'Produce exactly two markdown sections, in this order, with no '
-        'other text before or after:'
+        'Produce exactly one markdown section, with no other text before '
+        'or after:'
     )
     parts.append('')
     parts.append('```')
@@ -250,29 +246,20 @@ def build_full_prompt(*,
     parts.append('### Panel hierarchy')
     parts.append('- Panel 1 — <register>: <one-line role>')
     parts.append('- Panel 2 — <register>: <one-line role>')
-    parts.append('  (one bullet per panel; every panel MUST cite a register '
+    parts.append('  (one bullet per panel; every panel cites a register '
                  'from panel-registers above)')
     parts.append('')
-    parts.append('### Book-level placement')
-    parts.append('- Spread context: <verso of N–N+1 | recto of N–1–N | '
-                 'opening recto | closing verso>')
-    parts.append('- Page-turn beat: <yes/no — what reveals on the turn>')
-    parts.append('')
-    parts.append('## Page-blocking prompt')
-    parts.append('')
-    parts.append('<monochrome storyboard thumbnail prompt — locks panel '
-                 'geometry, panel weights, eye flow. Cite registers by '
-                 'name. Specify geometry (grid/splash/irregular/tier) and '
-                 'eye flow. Pure compositional blocking — no surface '
-                 'texture, no rendered detail, no faces, no fine line '
-                 'work.>')
+    parts.append('### Layout')
+    parts.append('<grid/splash/irregular; row × column geometry; eye flow '
+                 '(left-to-right, Z, F, vertical); spread context (verso of '
+                 'N–N+1 | recto of N–1–N | opening recto | closing verso); '
+                 'and any page-turn beat>')
     parts.append('```')
     parts.append('')
-    parts.append(
-        'Constraints (the page-blocking prompt MUST satisfy):'
-    )
-    parts.append('- Cite at least one register by name from panel-registers')
-    parts.append('- Specify panel geometry explicitly')
-    parts.append('- Describe eye flow (e.g. left-to-right, Z-pattern, vertical)')
-    parts.append('- Be monochrome / storyboard-style only — no rendered detail')
+    parts.append('Constraints:')
+    parts.append('- Every panel in the hierarchy cites a register by name '
+                 'from panel-registers above.')
+    parts.append('- This is authoring context, not a render prompt: describe '
+                 'composition and pacing intent, not lighting or surface '
+                 'detail (those live in the image-generation prompt).')
     return '\n'.join(parts) + '\n'

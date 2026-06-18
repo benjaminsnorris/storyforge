@@ -7,16 +7,14 @@ import textwrap
 def test_strict_template_renders_panel_hierarchy_for_each_panel():
     from storyforge.prompts_page_architecture import render_strict_template
     out = render_strict_template(page_id='s01-p1', panel_count=3)
-    # Both new sections present
+    # Single authoring-context section (no blocking prompt in v3)
     assert '## Page architecture' in out
-    assert '## Page-blocking prompt' in out
+    assert 'Page-blocking prompt' not in out
     # Panel hierarchy enumerates each panel (panel_count=3 → 3 bullets)
     assert out.count('TODO register: TODO role') == 3
-    # Required intent / placement / blocking constraints documented
+    # Intent + Layout subsections present
     assert '### Intent' in out
-    assert '### Book-level placement' in out
-    assert 'panel-registers.md' in out
-    assert 'monochrome' in out.lower()
+    assert '### Layout' in out
 
 
 def test_strict_template_panel_count_one():
@@ -108,8 +106,6 @@ def test_full_prompt_embeds_canon_and_brief():
         canon_blocks={
             'panel-registers': 'Dominant: emotional fulcrum.',
             'page-rhythm-rules': 'One dominant per page maximum.',
-            'style-foundation': 'Chiaroscuro; muted palette.',
-            'lighting-laws': 'Single source; no supernatural luminosity.',
         },
     )
     # Page identity
@@ -120,18 +116,16 @@ def test_full_prompt_embeds_canon_and_brief():
     assert 'inkpot' in prompt
     # Intent context
     assert 'apprehension to focus' in prompt
-    # Canon embedded inline
+    # Canon vocabulary cited
     assert 'emotional fulcrum' in prompt
     assert 'One dominant per page' in prompt
-    assert 'Chiaroscuro' in prompt
     # Neighbor for spread context
     assert 's01-p2' in prompt
-    # Output contract: both section headers requested
+    # Output contract: single section header requested, no blocking prompt
     assert '## Page architecture' in prompt
-    assert '## Page-blocking prompt' in prompt
-    # Constraint: blocking prompt must cite registers + be monochrome
-    assert 'monochrome' in prompt.lower()
-    assert 'cite' in prompt.lower() and 'register' in prompt.lower()
+    assert 'Page-blocking prompt' not in prompt
+    # Constraint: hierarchy cites registers by name
+    assert 'register' in prompt.lower()
 
 
 def test_full_prompt_when_no_neighbor_pages():

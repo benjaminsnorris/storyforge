@@ -168,18 +168,18 @@ def _assemble_script(project_dir, chapters, title):
 # Blocking-prompt assembly
 # ---------------------------------------------------------------------------
 
-def _assemble_blocking_prompts(project_dir: str, chapters: list[dict]) -> str:
-    """Concatenate per-page blocking prompts in global page order.
+def _assemble_page_prompts(project_dir: str, chapters: list[dict]) -> str:
+    """Concatenate per-page image-generation workflows in global page order.
 
     Iterates chapters → scenes → page files (sorted by page_within_scene),
-    pulls the `## Page-blocking prompt` section out of each, and emits
-    a per-page header carrying the same global page number that
-    _assemble_script's renumberer assigns.
+    pulls the `## Image-generation workflow` section out of each (the
+    whole-page GPT Image 2 prompt + reference list), and emits a per-page
+    header carrying a global page number.
 
-    Returns '' when no page in the bundle has a blocking-prompt
-    section (so the caller can skip writing the file entirely).
+    Returns '' when no page in the bundle has a workflow section (so the
+    caller can skip writing the file entirely).
     """
-    from storyforge.pages import pages_for_scene, extract_blocking_prompt
+    from storyforge.pages import pages_for_scene, extract_image_workflow
     from storyforge.csv_cli import get_field
 
     scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
@@ -192,25 +192,76 @@ def _assemble_blocking_prompts(project_dir: str, chapters: list[dict]) -> str:
             total = len(siblings)
             for i, page in enumerate(siblings, start=1):
                 global_page += 1
-                body = extract_blocking_prompt(page['path']).strip()
+                body = extract_image_workflow(page['path']).strip()
                 if not body:
                     continue
                 page_id = page.get('page_id', '?')
                 sections.append(
-                    f'## Global page {global_page} ({page_id}) — '
+                    f'# Global page {global_page} ({page_id}) — '
                     f'{scene_title}, page {i}/{total}\n\n{body}\n'
                 )
     return '\n'.join(sections)
 
 
-_BLOCKING_PROMPTS_INVENTORY_LINE = (
-    '\n- `page-blocking-prompts.md` — Page-level blocking prompts to '
-    'render BEFORE per-panel art. Each prompt locks panel geometry, '
-    'panel weights, and eye flow as a monochrome storyboard thumbnail. '
-    'Render the blocking image for each page first, then iterate on '
-    'per-panel prompts against the locked geometry. This prevents the '
-    '"every panel is a feature image" failure mode that uniform '
-    'per-panel rendering produces.'
+def _assemble_reference_manifest(project_dir: str, chapters: list[dict]) -> str:
+    """Build the reference-image manifest for the artist bundle.
+
+    Two parts: a deduped "gather these once" checklist of every distinct
+    reference image across the book, then a per-page list of the
+    `references_required` each page needs (in upload order). Returns ''
+    when no page declares any references.
+    """
+    from storyforge.pages import pages_for_scene
+    from storyforge.csv_cli import get_field
+
+    scenes_csv = os.path.join(project_dir, 'reference', 'scenes.csv')
+    per_page: list[str] = []
+    all_refs: list[str] = []
+    seen: set[str] = set()
+    global_page = 0
+    for chap in chapters:
+        for sid in chap['scenes']:
+            scene_title = get_field(scenes_csv, sid, 'title') or sid
+            siblings = pages_for_scene(project_dir, sid)
+            total = len(siblings)
+            for i, page in enumerate(siblings, start=1):
+                global_page += 1
+                refs = page.get('references_required', []) or []
+                if not refs:
+                    continue
+                page_id = page.get('page_id', '?')
+                lines = [f'## Global page {global_page} ({page_id}) — '
+                         f'{scene_title}, page {i}/{total}', '']
+                for n, ref in enumerate(refs, start=1):
+                    lines.append(f'- **Image {n}:** {ref}')
+                    if ref not in seen:
+                        seen.add(ref)
+                        all_refs.append(ref)
+                per_page.append('\n'.join(lines))
+    if not per_page:
+        return ''
+    gather = ['## All reference images (gather these once)', '']
+    gather += [f'- {r}' for r in all_refs]
+    return '\n'.join(gather) + '\n\n' + '\n\n'.join(per_page) + '\n'
+
+
+# Two separate inventory lines so the README documents only the files that
+# were actually written (page-prompts.md and reference-images.md are emitted
+# independently — see SF-1/CR-1 review findings).
+_PAGE_PROMPTS_INVENTORY_LINE = (
+    '\n- `page-prompts.md` — One whole-page image-generation prompt per '
+    'book page, tuned for GPT Image 2 (ChatGPT Images 2.0). Each prompt '
+    'follows OpenAI’s 5-section template (Scene / Subject / Important '
+    'details / Use case / Constraints) with per-panel beats. Paste a page '
+    'prompt into ChatGPT alongside that page’s reference images to render '
+    'the whole page in one shot. Adjust the reference images, not the prose, '
+    'to fix style/character drift.'
+)
+
+_REFERENCE_IMAGES_INVENTORY_LINE = (
+    '\n- `reference-images.md` — The reference images each page needs, '
+    'labeled by role (character / paper-tone / prior page), plus a deduped '
+    'checklist to gather them once.'
 )
 
 
@@ -368,7 +419,7 @@ This bundle contains everything you need to illustrate the graphic novel.
 
 - `script.md` — The complete panel-by-panel script. Pages are globally numbered.
 - `visual-references.md` — Character and location reference notes. Pin these up.
-- `chapter-map.md` — How scenes group into chapters/issues.{canon_line}{blocking_line}
+- `chapter-map.md` — How scenes group into chapters/issues.{canon_line}{prompts_line}
 
 ## Script format
 
@@ -874,32 +925,69 @@ def main(argv=None):
     log('  manuscript/chapter-map.md')
 
     # canon/ — copy reference/canon/ alongside the script so artists have
-    # the source-of-truth visual blocks in one place. The blocks are also
-    # embedded inline in panel prompts; this is the editable source.
+    # the source-of-truth visual blocks in one place. Canon informs the page
+    # prompts and the reference images but is no longer embedded inline
+    # (issue #260); this directory is the editable source artists work from.
     canon_copied = _copy_canon_into_bundle(project_dir, bundle_dir)
     canon_line = (
         '\n- `canon/` — Source-of-truth visual canon (style foundation, '
         'lighting laws, panel registers, page rhythm, plus per-character/'
-        'per-location/per-motif blocks). The same blocks are embedded inline '
-        'in panel prompts; this directory is the editable source.'
+        'per-location/per-motif blocks). Canon *informs* the page prompts and '
+        'reference images; it is no longer pasted inline. This directory is '
+        'the editable source.'
     ) if canon_copied else ''
     if canon_copied:
         log(f'  manuscript/canon/ ({canon_copied} files)')
 
-    # page-blocking-prompts.md (issue #252) — emit only when any page
-    # in the bundle has a blocking prompt
-    blocking_md = _assemble_blocking_prompts(project_dir, chapters)
-    blocking_line = ''
-    if blocking_md:
-        blocking_path = os.path.join(bundle_dir, 'page-blocking-prompts.md')
-        with open(blocking_path, 'w', encoding='utf-8') as f:
-            f.write(blocking_md)
-        log('  manuscript/page-blocking-prompts.md')
-        blocking_line = _BLOCKING_PROMPTS_INVENTORY_LINE
+    # page-prompts.md and reference-images.md (issue #260) are emitted
+    # INDEPENDENTLY: a page may declare references_required before the
+    # prompts stage authors its workflow section, so the manifest must not
+    # be gated on the page prompts existing (SF-1). Each file's README
+    # inventory line is added only when that file is actually written (CR-1).
+    # Skip-NOTEs fire only when per-page work is underway (pages/ populated)
+    # so prose-only GN bundles stay quiet (SF-2).
+    from storyforge.pages import list_page_files
+    has_page_files = bool(list_page_files(project_dir))
+    prompts_line = ''
+
+    page_prompts_md = _assemble_page_prompts(project_dir, chapters)
+    if page_prompts_md:
+        header = (
+            f'# {title} — Page Prompts (GPT Image 2)\n\n'
+            '_One whole-page prompt per book page. Paste each into ChatGPT '
+            'alongside that page’s reference images (see reference-images.md)._\n\n'
+        )
+        with open(os.path.join(bundle_dir, 'page-prompts.md'), 'w',
+                  encoding='utf-8') as f:
+            f.write(header + page_prompts_md)
+        log('  manuscript/page-prompts.md')
+        prompts_line += _PAGE_PROMPTS_INVENTORY_LINE
+    elif has_page_files:
+        log('  NOTE: no page has an "## Image-generation workflow" section '
+            'yet — skipping page-prompts.md (run `storyforge elaborate '
+            '--stage prompts`)')
+
+    manifest_md = _assemble_reference_manifest(project_dir, chapters)
+    if manifest_md:
+        m_header = (
+            f'# {title} — Reference Images\n\n'
+            '_Upload the listed images alongside each page prompt, labeled '
+            'by role. Reference images carry style + character likeness in '
+            'GPT Image 2 — keep the prompt prose short and iterate on these '
+            'instead._\n\n'
+        )
+        with open(os.path.join(bundle_dir, 'reference-images.md'), 'w',
+                  encoding='utf-8') as f:
+            f.write(m_header + manifest_md)
+        log('  manuscript/reference-images.md')
+        prompts_line += _REFERENCE_IMAGES_INVENTORY_LINE
+    elif has_page_files:
+        log('  NOTE: no page declares `references_required` in its '
+            'frontmatter — skipping reference-images.md')
 
     # handoff-readme.md
     readme = HANDOFF_README.format(
-        title=title, canon_line=canon_line, blocking_line=blocking_line,
+        title=title, canon_line=canon_line, prompts_line=prompts_line,
     )
     readme_path = os.path.join(bundle_dir, 'handoff-readme.md')
     with open(readme_path, 'w', encoding='utf-8') as f:

@@ -1,4 +1,4 @@
-"""Tests for pages.extract_page_architecture and pages.extract_blocking_prompt."""
+"""Tests for pages.extract_page_architecture and pages.extract_image_workflow."""
 
 import textwrap
 
@@ -37,13 +37,8 @@ def test_extract_page_architecture_basic(tmp_path):
         - Panel 1 — atmospheric: establishing
         - Panel 2 — dominant: the inkpot
 
-        ### Book-level placement
-        - Spread context: opening recto
-        - Page-turn beat: no
-
-        ## Page-blocking prompt
-
-        Monochrome storyboard.
+        ### Layout
+        Two-row grid, eye flow left-to-right.
 
         ## Panel script
 
@@ -52,33 +47,46 @@ def test_extract_page_architecture_basic(tmp_path):
     result = extract_page_architecture(_write_page(tmp_path, body))
     assert '### Intent' in result
     assert 'Panel 1 — atmospheric' in result
-    assert '### Book-level placement' in result
-    assert 'Monochrome storyboard' not in result  # belongs to next section
+    assert '### Layout' in result
+    assert 'Panel 1.** Wide' not in result  # belongs to next section
+
+
+def test_extract_page_architecture_tolerates_parenthetical(tmp_path):
+    """The v3 hand-authored convention uses '## Page architecture (authoring
+    context)'; the extractor must match it as well as the plain header."""
+    from storyforge.pages import extract_page_architecture
+    body = ('## Page architecture (authoring context)\n\n'
+            '### Intent\nThe work begins.\n\n'
+            '## Panel script\n\n**Panel 1.** Wide.\n')
+    result = extract_page_architecture(_write_page(tmp_path, body))
+    assert 'The work begins.' in result
     assert 'Panel 1.** Wide' not in result
 
 
-def test_extract_blocking_prompt_basic(tmp_path):
-    from storyforge.pages import extract_blocking_prompt
+def test_extract_image_workflow_basic(tmp_path):
+    from storyforge.pages import extract_image_workflow
     body = textwrap.dedent("""\
-        ## Page architecture
-
-        Intent stuff.
-
-        ## Page-blocking prompt
-
-        Monochrome storyboard. Two panels.
-        Top: wide establishing — atmospheric register.
-        Bottom: dominant — the inkpot.
-
         ## Panel script
 
         **Panel 1.** Wide.
+
+        ## Image-generation workflow
+
+        **Approach (GPT Image 2):** Whole-page generation.
+
+        ### Page prompt (paste into ChatGPT alongside the references)
+
+        > **Scene:** A studio at dusk.
+
+        ## Page-specific notes for the artist
+
+        - note
         """)
-    result = extract_blocking_prompt(_write_page(tmp_path, body))
-    assert 'Monochrome storyboard' in result
-    assert 'atmospheric register' in result
-    assert 'Intent stuff' not in result
-    assert 'Panel 1.** Wide' not in result
+    result = extract_image_workflow(_write_page(tmp_path, body))
+    assert 'Whole-page generation' in result
+    assert '**Scene:** A studio at dusk.' in result
+    assert 'Panel 1.** Wide' not in result  # prior section
+    assert '- note' not in result  # next section
 
 
 def test_extract_page_architecture_missing_section(tmp_path):
@@ -87,20 +95,13 @@ def test_extract_page_architecture_missing_section(tmp_path):
     assert extract_page_architecture(_write_page(tmp_path, body)) == ''
 
 
-def test_extract_blocking_prompt_missing_section(tmp_path):
-    from storyforge.pages import extract_blocking_prompt
+def test_extract_image_workflow_missing_section(tmp_path):
+    from storyforge.pages import extract_image_workflow
     body = '## Page architecture\n\nIntent.\n\n## Panel script\n\n**Panel 1.** Wide.\n'
-    assert extract_blocking_prompt(_write_page(tmp_path, body)) == ''
+    assert extract_image_workflow(_write_page(tmp_path, body)) == ''
 
 
-def test_extract_handles_page_n_em_dash_subheader(tmp_path):
-    """The `## Page N — LAYOUT` headers used in panel scripts must NOT be
-    treated as section terminators when they appear AFTER our target
-    sections — but the lookahead in pages.py only kicks in for terminators
-    that follow the target section, so the panel-script `## Page N —`
-    headers can't accidentally extend the page-architecture extraction.
-    Sanity-check that em-dash content inside the page-architecture body
-    parses correctly when no `##` follows."""
+def test_extract_handles_em_dash_in_body(tmp_path):
     from storyforge.pages import extract_page_architecture
     body = '## Page architecture\n\n### Intent\nLine — with em-dash.\n'
     result = extract_page_architecture(_write_page(tmp_path, body))
@@ -108,14 +109,14 @@ def test_extract_handles_page_n_em_dash_subheader(tmp_path):
 
 
 def test_extract_missing_file_returns_empty(tmp_path):
-    from storyforge.pages import extract_page_architecture, extract_blocking_prompt
+    from storyforge.pages import extract_page_architecture, extract_image_workflow
     assert extract_page_architecture(str(tmp_path / 'nope.md')) == ''
-    assert extract_blocking_prompt(str(tmp_path / 'nope.md')) == ''
+    assert extract_image_workflow(str(tmp_path / 'nope.md')) == ''
 
 
 def test_extract_no_frontmatter_returns_empty(tmp_path):
-    from storyforge.pages import extract_page_architecture, extract_blocking_prompt
+    from storyforge.pages import extract_page_architecture, extract_image_workflow
     path = tmp_path / 'no-fm.md'
     path.write_text('## Page architecture\n\nBody.\n')
     assert extract_page_architecture(str(path)) == ''
-    assert extract_blocking_prompt(str(path)) == ''
+    assert extract_image_workflow(str(path)) == ''
