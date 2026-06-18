@@ -304,35 +304,14 @@ class TestPagesDirectory:
         assert any(f['type'] == 'page_no_frontmatter' for f in page_findings)
 
     def test_clean_page_file_no_findings(self, tmp_path):
-        """M-1: A fully-populated page file (including a well-formed
-        ## Image-generation prompts section with all 13 subsections per
-        panel) produces zero page-category findings. No panel-prompt type
-        filtering — the fixture itself must be clean."""
+        """A fully-populated v3 page file (## Page architecture +
+        ## Image-generation workflow + ## Panel script) produces zero
+        page-category findings."""
         (tmp_path / 'storyforge.yaml').write_text(
             'project:\n  title: Test\n  medium: graphic-novel\n'
         )
         pages = tmp_path / 'pages'
         pages.mkdir()
-        _panel_section_titles = [
-            'Style foundation', 'Lighting laws', 'Pacing role',
-            'Shot grammar', 'Stage geography', 'Character block',
-            'In this panel', 'Focal objects + render priorities',
-            'Lighting logic', 'Symbolic detail (low weight)',
-            'Action', 'Emotional subtext (low weight)',
-            'Negative constraints',
-        ]
-
-        def _well_formed_panel(panel_idx: int) -> str:
-            lines = [f'### Panel {panel_idx}', '']
-            for i, title in enumerate(_panel_section_titles, start=1):
-                lines += [f'#### {i}. {title}', '', f'Panel {panel_idx} section {i} body.', '']
-            return '\n'.join(lines)
-
-        image_gen_section = (
-            '## Image-generation prompts\n\n'
-            + _well_formed_panel(1) + '\n'
-            + _well_formed_panel(2) + '\n'
-        )
         (pages / 's01-p1.md').write_text(
             "---\n"
             "page_id: s01-p1\n"
@@ -342,9 +321,9 @@ class TestPagesDirectory:
             "panel_count: 2\n"
             "---\n\n"
             "## Page architecture\n\nIntent.\n\n"
-            "## Page-blocking prompt\n\nStoryboard prompt.\n\n"
-            + image_gen_section
-            + "## Panel script\n\n**Panel 1.** Wide.\n"
+            "## Panel script\n\n**Panel 1.** Wide.\n\n"
+            "## Image-generation workflow\n\n"
+            "**Approach:** Whole-page generation.\n"
         )
         report = build_cleanup_report(str(tmp_path))
         page_findings = [f for f in report['findings']

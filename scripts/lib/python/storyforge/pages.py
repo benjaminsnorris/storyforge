@@ -19,6 +19,12 @@ from typing import Final, Literal, TypedDict
 # `---` to be followed by either a newline or EOF.
 FRONTMATTER_RE = re.compile(r'\A---\n(.*?)---(?:\n|$)(.*)', re.DOTALL)
 
+# Current page-file schema version (issue #260). v3 is the GPT Image 2
+# paradigm: a single whole-page image-generation prompt (OpenAI's
+# 5-section template) anchored by reference images, replacing v2's
+# per-panel blocking + 13-section panel schema.
+SCHEMA_VERSION: Final[int] = 3
+
 REQUIRED_FIELDS: Final[tuple[str, ...]] = (
     'page_id', 'scene_id', 'page_within_scene',
     'total_pages_in_scene', 'panel_count',
@@ -28,34 +34,27 @@ RECOMMENDED_FIELDS: Final[tuple[str, ...]] = (
     'spread_position', 'characters_present', 'location', 'timeline',
 )
 
+# v3 frontmatter additions (issue #260). Recognized as typed page-dict
+# keys rather than dumped into `extra` so callers can read them directly.
+# `references_required` is the labeled list of reference images uploaded
+# alongside the page prompt; `target_model` records the image model the
+# prompt is tuned for (e.g. gpt-image-2).
+_OPTIONAL_SCALAR_FIELDS: Final[tuple[str, ...]] = (
+    'scene_title', 'target_model',
+)
+
 _INTEGER_FIELDS: Final[set[str]] = {
     'page_within_scene', 'total_pages_in_scene', 'panel_count',
+    'schema_version', 'prompt_iteration',
 }
 
-_LIST_FIELDS: Final[set[str]] = {'characters_present'}
-
-# Canonical order of the 13 panel-prompt sections (issue #253).
-# Each panel under `### Panel N` MUST contain `#### M. <Title>` subsections
-# in this order. The titles are fixed strings; bodies vary.
-PANEL_SECTION_TITLES: Final[tuple[str, ...]] = (
-    'Style foundation',
-    'Lighting laws',
-    'Pacing role',
-    'Shot grammar',
-    'Stage geography',
-    'Character block',
-    'In this panel',
-    'Focal objects + render priorities',
-    'Lighting logic',
-    'Symbolic detail (low weight)',
-    'Action',
-    'Emotional subtext (low weight)',
-    'Negative constraints',
-)
-assert len(PANEL_SECTION_TITLES) == 13, (
-    'PANEL_SECTION_TITLES must have exactly 13 entries '
-    '(canonical panel-prompt schema, issue #253)'
-)
+# `references_required` and `canon_referenced` are block lists in the
+# frontmatter. canon_referenced supersedes v2's canonical_blocks_embedded:
+# in the GPT Image 2 paradigm canon *informs* the prompt but is no longer
+# embedded inline, so the field name reflects "referenced, not embedded".
+_LIST_FIELDS: Final[set[str]] = {
+    'characters_present', 'references_required', 'canon_referenced',
+}
 
 
 # A successful parse always populates path/body/extra/extra_lists; the
@@ -79,6 +78,13 @@ class PageFile(_PageFileRequired, total=False):
     characters_present: list[str]
     location: str
     timeline: str
+    # v3 (issue #260)
+    scene_title: str
+    target_model: str
+    schema_version: int
+    prompt_iteration: int
+    references_required: list[str]
+    canon_referenced: list[str]
 
 
 def page_id_prefix_for_scene(scene_id: str) -> str:
@@ -171,6 +177,12 @@ def _parse_frontmatter(block: str) -> PageFile:
         value = value.strip()
         current_list_key = None
 
+        # A comment-only value (`key:  # note`) is treated as no value, so
+        # block-list keys like `references_required:  # upload these` still
+        # open a list rather than capturing the comment as a scalar.
+        if value.startswith('#'):
+            value = ''
+
         if not value:
             current_list_key = key
             if key in _LIST_FIELDS:
@@ -203,7 +215,8 @@ def _parse_frontmatter(block: str) -> PageFile:
                 )
                 continue
 
-        if key in REQUIRED_FIELDS or key in RECOMMENDED_FIELDS:
+        if (key in REQUIRED_FIELDS or key in RECOMMENDED_FIELDS
+                or key in _OPTIONAL_SCALAR_FIELDS):
             page[key] = value
         else:
             page['extra'][key] = value
@@ -267,10 +280,7 @@ PageFindingKind = Literal[
     'filename_page_id_mismatch',
     'page_within_scene_out_of_range',
     'missing_page_architecture',
-    'missing_blocking_prompt',
-    'missing_panel_prompts',
-    'panel_prompt_section_missing',
-    'panel_prompt_wrong_section_order',
+    'missing_image_workflow',
 ]
 
 
@@ -295,7 +305,7 @@ def validate_page_file(path: str) -> list[PageFinding]:
       - filename_page_id_mismatch: filename stem != page_id
       - page_within_scene_out_of_range: not in [1, total_pages_in_scene]
       - missing_page_architecture: "## Page architecture" section is missing or empty
-      - missing_blocking_prompt: "## Page-blocking prompt" section is missing or empty
+      - missing_image_workflow: "## Image-generation workflow" section is missing or empty
     """
     page = parse_page_file(path)
     if page is None:
@@ -341,56 +351,24 @@ def validate_page_file(path: str) -> list[PageFinding]:
                 'detail': f'page_within_scene={within} not in [1, {total}]',
             })
 
-    # Body-section checks (issue #252). Use _extract_section_from_body with
-    # the already-parsed body so the file is not read a second and third
-    # time. The "header present but body empty" half-edited state fires the
-    # same finding as a fully-missing section — both signal a gap the
-    # author should fill via `elaborate --stage page-architecture`.
+    # Body-section checks (issues #252, #260). Use _extract_section_from_body
+    # with the already-parsed body so the file is not read a second time.
+    # The "header present but body empty" half-edited state fires the same
+    # finding as a fully-missing section — both signal a gap the author
+    # should fill via the corresponding elaborate stage. The blocking-prompt
+    # and per-panel checks were removed in v3: GPT Image 2 generates the
+    # whole page from a single prompt, so the workflow section replaces them.
     body = page.get('body', '')
     if not _extract_section_from_body(body, _PAGE_ARCHITECTURE_HEADER).strip():
         findings.append({
             'kind': 'missing_page_architecture', 'path': path,
             'detail': '"## Page architecture" section is missing or empty',
         })
-    if not _extract_section_from_body(body, _BLOCKING_PROMPT_HEADER).strip():
+    if not _extract_section_from_body(body, _IMAGE_GEN_WORKFLOW_HEADER).strip():
         findings.append({
-            'kind': 'missing_blocking_prompt', 'path': path,
-            'detail': '"## Page-blocking prompt" section is missing or empty',
+            'kind': 'missing_image_workflow', 'path': path,
+            'detail': '"## Image-generation workflow" section is missing or empty',
         })
-
-    # Panel-prompt body checks (issue #253). Use the extractors so the
-    # "section header present but no panels" half-edited state fires
-    # missing_panel_prompts (extractor returns {} for that case).
-    panels = extract_panel_prompts(path)
-    if not panels:
-        findings.append({
-            'kind': 'missing_panel_prompts', 'path': path,
-            'detail': '"## Image-generation prompts" section is missing or has '
-                      'no "### Panel N" subsections',
-        })
-    else:
-        for panel_index in sorted(panels.keys()):
-            panel_body = panels[panel_index]
-            sections = extract_panel_sections(panel_body)
-            expected_indices = list(range(1, 14))
-            missing = [i for i in expected_indices if i not in sections]
-            if missing:
-                findings.append({
-                    'kind': 'panel_prompt_section_missing', 'path': path,
-                    'detail': f'Panel {panel_index} is missing section(s): '
-                              f'{", ".join(str(i) for i in missing)}',
-                })
-            # Real wrong-order detection: re-parse the panel body in the
-            # order headers appear and compare to canonical order.
-            parse_order = []
-            for m in _PANEL_SECTION_HEADER_RE.finditer(panel_body):
-                parse_order.append(int(m.group(1)))
-            if parse_order and parse_order != sorted(parse_order):
-                findings.append({
-                    'kind': 'panel_prompt_wrong_section_order', 'path': path,
-                    'detail': f'Panel {panel_index} sections appear in order '
-                              f'{parse_order} instead of canonical 1..13',
-                })
 
     return findings
 
@@ -413,12 +391,11 @@ _NEXT_SECTION_HEADER = re.compile(
 )
 
 
+# Tolerates a trailing parenthetical so both `## Page architecture` (what
+# storyforge generates) and `## Page architecture (authoring context)`
+# (hand-authored v3 convention) match.
 _PAGE_ARCHITECTURE_HEADER = re.compile(
-    r'^##\s+Page\s+architecture\s*$', re.MULTILINE | re.IGNORECASE,
-)
-
-_BLOCKING_PROMPT_HEADER = re.compile(
-    r'^##\s+Page[- ]blocking\s+prompt\s*$', re.MULTILINE | re.IGNORECASE,
+    r'^##\s+Page\s+architecture\b.*$', re.MULTILINE | re.IGNORECASE,
 )
 
 
@@ -458,90 +435,24 @@ def extract_page_architecture(path: str) -> str:
     return _extract_section(path, _PAGE_ARCHITECTURE_HEADER)
 
 
-def extract_blocking_prompt(path: str) -> str:
-    """Return the contents of the '## Page-blocking prompt' section, or ''.
-
-    The header regex accepts both 'Page-blocking prompt' (preferred) and
-    'Page blocking prompt' (space variant) so authors who type the
-    non-hyphenated form get the same extraction behavior.
-    """
-    return _extract_section(path, _BLOCKING_PROMPT_HEADER)
-
-
-_IMAGE_GEN_PROMPTS_HEADER = re.compile(
-    r'^##\s+Image[- ]generation\s+prompts\s*$', re.MULTILINE | re.IGNORECASE,
-)
-
-_PANEL_HEADER_RE = re.compile(
-    r'^###\s+Panel\s+(\d+)\s*$', re.MULTILINE | re.IGNORECASE,
+# Tolerates both 'Image-generation workflow' (hyphen) and 'Image generation
+# workflow' (space). This is the v3 (issue #260) section that holds the
+# single whole-page prompt + reference-image list, replacing v2's
+# '## Image-generation prompts' (per-panel) section.
+_IMAGE_GEN_WORKFLOW_HEADER = re.compile(
+    r'^##\s+Image[- ]generation\s+workflow\s*$', re.MULTILINE | re.IGNORECASE,
 )
 
 
-def extract_panel_prompts(path: str) -> dict[int, str]:
-    """Return {panel_index: panel_body} for the ## Image-generation prompts
-    section's ### Panel N subsections.
+def extract_image_workflow(path: str) -> str:
+    """Return the contents of the '## Image-generation workflow' section, or ''.
 
-    Body is everything AFTER the ### Panel N header up to the next
-    ### Panel M header, the next ## ... header, or EOF — header line
-    stripped, body whitespace-trimmed. Returns {} when the page file
-    is missing, has no frontmatter, lacks the ## Image-generation prompts
-    section, or has the section but no ### Panel N subsections.
+    This section (issue #260) holds the whole-page image-generation prompt
+    (OpenAI's 5-section template), the labeled reference-image list, and the
+    approach note. Used by script-package to assemble the artist bundle's
+    per-page prompts.
     """
-    page = parse_page_file(path)
-    if page is None:
-        return {}
-    body = page.get('body', '')
-    sec_match = _IMAGE_GEN_PROMPTS_HEADER.search(body)
-    if not sec_match:
-        return {}
-    # Limit scan to the body of ## Image-generation prompts
-    section_start = sec_match.end()
-    rest = body[section_start:]
-    next_section = _NEXT_SECTION_HEADER.search(rest)
-    section_end = next_section.start() if next_section else len(rest)
-    section_body = rest[:section_end]
-
-    result: dict[int, str] = {}
-    # Collect all ### Panel N positions inside the section body
-    panel_matches = list(_PANEL_HEADER_RE.finditer(section_body))
-    for i, m in enumerate(panel_matches):
-        panel_index = int(m.group(1))
-        body_start = m.end()
-        body_end = (panel_matches[i + 1].start()
-                    if i + 1 < len(panel_matches)
-                    else len(section_body))
-        panel_body = section_body[body_start:body_end].strip('\n').strip()
-        result[panel_index] = panel_body
-    return result
-
-
-_PANEL_SECTION_HEADER_RE = re.compile(
-    r'^####\s+(\d+)\.\s+([^\n]+?)\s*$', re.MULTILINE,
-)
-
-
-def extract_panel_sections(panel_body: str) -> dict[int, str]:
-    """Parse one panel's body into {section_index: section_body}.
-
-    Operates on the body string returned by extract_panel_prompts for a
-    single panel. Section index is the integer parsed from
-    #### N. <Title>. Body is everything AFTER the #### header up to the
-    next #### M. header or EOF — header stripped, body whitespace-trimmed.
-    Returns {} when no section headers are found.
-    """
-    matches = list(_PANEL_SECTION_HEADER_RE.finditer(panel_body))
-    if not matches:
-        return {}
-    result: dict[int, str] = {}
-    for i, m in enumerate(matches):
-        section_index = int(m.group(1))
-        body_start = m.end()
-        body_end = (matches[i + 1].start()
-                    if i + 1 < len(matches)
-                    else len(panel_body))
-        section_body = panel_body[body_start:body_end].strip()
-        result[section_index] = section_body
-    return result
+    return _extract_section(path, _IMAGE_GEN_WORKFLOW_HEADER)
 
 
 def extract_panel_script(path: str) -> str:

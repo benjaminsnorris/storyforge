@@ -41,11 +41,15 @@ panel_count: 2
 characters_present: [lucien-vey, mirelle-ash]
 location: archive-studio
 timeline: day 1, evening
-canonical_blocks_embedded:
+references_required:  # upload these alongside the prompt
+  - reference/visual/lucien-character-sheet.png
+  - reference/visual/sepia-paper-tone.png
+canon_referenced:
   - reference/canon/style-foundation.md
   - reference/canon/lighting-laws.md
-prompt_iteration: 6
-schema_version: 2
+prompt_iteration: 7
+schema_version: 3
+target_model: gpt-image-2
 ---
 
 # Page s01-p1 — Studio Finalization, page 1 of 5
@@ -87,26 +91,33 @@ def test_parse_frontmatter_recommended_fields(tmp_path):
     assert page['timeline'] == 'day 1, evening'
 
 
-def test_parse_frontmatter_extras_collected(tmp_path):
-    """Unknown keys go into the 'extra' dict — forward-compatible with
-    canonical-blocks and modular-prompt sibling issues."""
+def test_parse_frontmatter_v3_typed_fields(tmp_path):
+    """v3 (issue #260) recognizes scene_title/target_model as scalar keys
+    and schema_version/prompt_iteration as integers — typed page-dict keys,
+    not dumped into 'extra'."""
     from storyforge.pages import parse_page_file
     path = tmp_path / 's01-p1.md'
     path.write_text(SAMPLE_FRONTMATTER)
     page = parse_page_file(str(path))
-    assert page['extra']['scene_title'] == 'Studio Finalization'
-    assert page['extra']['prompt_iteration'] == '6'
-    assert page['extra']['schema_version'] == '2'
+    assert page['scene_title'] == 'Studio Finalization'
+    assert page['target_model'] == 'gpt-image-2'
+    assert page['prompt_iteration'] == 7
+    assert page['schema_version'] == 3
 
 
 def test_parse_frontmatter_block_list(tmp_path):
-    """Block-style lists (key:\\n  - item) parse into Python lists."""
+    """Block-style lists (key:\\n  - item) parse into Python lists. v3 list
+    fields (references_required, canon_referenced) are typed page-dict keys,
+    and a comment-only value on the key line still opens a block list."""
     from storyforge.pages import parse_page_file
     path = tmp_path / 's01-p1.md'
     path.write_text(SAMPLE_FRONTMATTER)
     page = parse_page_file(str(path))
-    assert 'canonical_blocks_embedded' in page['extra_lists']
-    assert page['extra_lists']['canonical_blocks_embedded'] == [
+    assert page['references_required'] == [
+        'reference/visual/lucien-character-sheet.png',
+        'reference/visual/sepia-paper-tone.png',
+    ]
+    assert page['canon_referenced'] == [
         'reference/canon/style-foundation.md',
         'reference/canon/lighting-laws.md',
     ]
@@ -125,8 +136,8 @@ def test_parse_page_file_missing_file_returns_none(tmp_path):
 
 
 def test_parse_frontmatter_handles_inline_comment(tmp_path):
-    """Trailing # comments on list items are stripped (matches the
-    ashes-PR-8 example: '  - path/to/x.md  # in page-blocking prompt only')."""
+    """Trailing # comments on list items are stripped, and a comment-only
+    value on a list key line still opens a block list (v3 convention)."""
     from storyforge.pages import parse_page_file
     path = tmp_path / 's01-p1.md'
     path.write_text(
@@ -136,43 +147,21 @@ def test_parse_frontmatter_handles_inline_comment(tmp_path):
         "page_within_scene: 1\n"
         "total_pages_in_scene: 1\n"
         "panel_count: 1\n"
-        "canonical_blocks_embedded:\n"
-        "  - reference/canon/a.md  # used in blocking prompt only\n"
+        "canon_referenced:  # informed the page; not embedded inline\n"
+        "  - reference/canon/a.md  # style only\n"
         "  - reference/canon/b.md\n"
         "---\n\nbody\n"
     )
     page = parse_page_file(str(path))
-    assert page['extra_lists']['canonical_blocks_embedded'] == [
+    assert page['canon_referenced'] == [
         'reference/canon/a.md',
         'reference/canon/b.md',
     ]
 
 
-_SECTION_TITLES_FOR_TEST = (
-    'Style foundation', 'Lighting laws', 'Pacing role',
-    'Shot grammar', 'Stage geography', 'Character block',
-    'In this panel', 'Focal objects + render priorities',
-    'Lighting logic', 'Symbolic detail (low weight)',
-    'Action', 'Emotional subtext (low weight)',
-    'Negative constraints',
-)
-
-
-def _well_formed_panel_block(panel_index: int) -> str:
-    """Return a ### Panel N block with all 13 canonical #### subsections."""
-    sections = '\n\n'.join(
-        f'#### {i + 1}. {title}\n\nbody'
-        for i, title in enumerate(_SECTION_TITLES_FOR_TEST)
-    )
-    return f'### Panel {panel_index}\n\n{sections}\n\n'
-
-
 def _write_page(path, page_id, scene_id, within, total, panels):
-    # Build a ## Image-generation prompts section with all 13 #### subsections
-    # per panel so validate_page_file returns no findings (#253).
-    panel_blocks = ''.join(
-        _well_formed_panel_block(i) for i in range(1, panels + 1)
-    )
+    # Build the v3 sections (## Page architecture + ## Image-generation
+    # workflow + ## Panel script) so validate_page_file returns no findings.
     path.write_text(
         f"---\n"
         f"page_id: {page_id}\n"
@@ -182,10 +171,9 @@ def _write_page(path, page_id, scene_id, within, total, panels):
         f"panel_count: {panels}\n"
         f"---\n\n"
         f"## Page architecture\n\nArchitecture content.\n\n"
-        f"## Page-blocking prompt\n\nBlocking prompt content.\n\n"
-        f"## Image-generation prompts\n\n"
-        + panel_blocks +
-        f"## Panel script\n\n**Panel 1.**\n"
+        f"## Panel script\n\n**Panel 1.**\n\n"
+        f"## Image-generation workflow\n\n"
+        f"**Approach:** Whole-page generation.\n"
     )
 
 
