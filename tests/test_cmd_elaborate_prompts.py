@@ -6,7 +6,7 @@ import os
 
 
 def _make_gn_project(tmp_path, *, with_arch=True, with_script=True,
-                     references=True):
+                     references=True, panel_count=2):
     proj = tmp_path / 'proj'
     proj.mkdir()
     (proj / 'storyforge.yaml').write_text(
@@ -57,7 +57,7 @@ def _make_gn_project(tmp_path, *, with_arch=True, with_script=True,
         "scene_id: s01-studio\n"
         "page_within_scene: 1\n"
         "total_pages_in_scene: 1\n"
-        "panel_count: 2\n"
+        f"panel_count: {panel_count}\n"
         + fm_refs +
         "---\n\n"
         + body
@@ -339,3 +339,183 @@ def test_parse_args_accepts_prompts_stage():
     from storyforge.cmd_elaborate import parse_args
     args = parse_args(['--stage', 'prompts'])
     assert args.stage == 'prompts'
+
+
+# ---------------------------------------------------------------------------
+# Exit-code / skip-accounting gaps carried over from the deleted v2 suite
+# ---------------------------------------------------------------------------
+
+def test_handler_returns_one_when_all_pages_skipped_on_precondition(tmp_path):
+    """TG-1: every page skipped on a precondition (no Panel script) → rc 1,
+    page left unmutated. This is the CI-signal branch."""
+    from storyforge.cmd_elaborate import _run_page_prompt_handler_gn
+    proj = _make_gn_project(tmp_path, with_script=False)
+    rc = _run_page_prompt_handler_gn(
+        proj, dry_run=False, coaching='strict',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 1
+    assert '## Image-generation workflow' not in open(
+        os.path.join(proj, 'pages', 's01-p1.md')).read()
+
+
+def test_handler_skips_zero_panel_count(tmp_path, capsys):
+    """TG-2: a page with panel_count=0 is skipped as a precondition failure
+    (specific WARN), even in strict mode where no API call happens."""
+    from storyforge.cmd_elaborate import _run_page_prompt_handler_gn
+    proj = _make_gn_project(tmp_path, panel_count=0)
+    rc = _run_page_prompt_handler_gn(
+        proj, dry_run=False, coaching='strict',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 1
+    out = capsys.readouterr().out + capsys.readouterr().err
+    assert 'panel_count' in out
+    assert '## Image-generation workflow' not in open(
+        os.path.join(proj, 'pages', 's01-p1.md')).read()
+
+
+def test_handler_no_targets_is_noop_rc_zero(tmp_path):
+    """TG-6: when every page already has a workflow and --force is off,
+    the handler is a no-op returning 0."""
+    from storyforge.cmd_elaborate import _run_page_prompt_handler_gn
+    proj = _make_gn_project(tmp_path)
+    page_path = os.path.join(proj, 'pages', 's01-p1.md')
+    with open(page_path, 'a') as f:
+        f.write('\n## Image-generation workflow\n\n**Approach:** done.\n')
+    rc = _run_page_prompt_handler_gn(
+        proj, dry_run=False, coaching='strict',
+        page=None, scene=None, force=False,
+    )
+    assert rc == 0
+
+
+# ---------------------------------------------------------------------------
+# Selection + precondition message gaps
+# ---------------------------------------------------------------------------
+
+def test_select_by_page_and_unknown(tmp_path):
+    """TG-6: --page selects exactly that page; an unknown page → []."""
+    from storyforge.cmd_elaborate import _select_pages_for_prompts
+    proj = _make_gn_project(tmp_path)
+    assert [t['page_id'] for t in _select_pages_for_prompts(
+        proj, page='s01-p1', scene=None, force=False)] == ['s01-p1']
+    assert _select_pages_for_prompts(
+        proj, page='nope-p9', scene=None, force=False) == []
+
+
+def test_select_by_scene(tmp_path):
+    """TG-6: --scene selects every page of one scene."""
+    from storyforge.cmd_elaborate import _select_pages_for_prompts
+    proj = _make_gn_project(tmp_path)
+    assert [t['page_id'] for t in _select_pages_for_prompts(
+        proj, page=None, scene='s01-studio', force=False)] == ['s01-p1']
+
+
+def test_precondition_message_when_scenes_csv_missing(tmp_path):
+    """TG-6: missing scenes.csv yields a clear, actionable reason."""
+    from storyforge.cmd_elaborate import _precondition_check_prompts
+    proj = _make_gn_project(tmp_path)
+    os.remove(os.path.join(proj, 'reference', 'scenes.csv'))
+    ok, reason = _precondition_check_prompts(proj, 's01-p1', 's01-studio')
+    assert ok is False
+    assert 'scenes.csv is missing' in reason
+    assert 'elaborate --stage map' in reason
+
+
+def test_precondition_fails_when_scene_not_in_csv(tmp_path):
+    from storyforge.cmd_elaborate import _precondition_check_prompts
+    proj = _make_gn_project(tmp_path)
+    ok, reason = _precondition_check_prompts(proj, 's01-p1', 'ghost-scene')
+    assert ok is False
+    assert 'ghost-scene' in reason
+
+
+# ---------------------------------------------------------------------------
+# Splice append-at-end branch
+# ---------------------------------------------------------------------------
+
+def test_splice_appends_at_end_when_no_notes_header(tmp_path):
+    """TG-3: with no '## Page-specific notes' header, the workflow is
+    appended at the end, after the panel script, preserving prior content."""
+    from storyforge.cmd_elaborate import _splice_image_workflow
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\npage_id: s01-p1\nscene_id: s01\npage_within_scene: 1\n"
+        "total_pages_in_scene: 1\npanel_count: 1\n---\n\n"
+        "## Page architecture\n\nIntent.\n\n"
+        "## Panel script\n\n### Panel 1\nMid.\n"
+    )
+    _splice_image_workflow(
+        str(page_path), '## Image-generation workflow\n\n**Approach:** x.\n',
+        canon_ids=[],
+    )
+    text = page_path.read_text()
+    assert '## Page architecture' in text
+    assert '## Panel script' in text
+    assert text.index('## Panel script') < text.index('## Image-generation workflow')
+
+
+def test_splice_extends_existing_canon_referenced(tmp_path):
+    """TG-4: the workflow splicer also extends a pre-existing canon_referenced
+    block (dedup preserved) via the shared _add_canon_referenced helper."""
+    from storyforge.cmd_elaborate import _splice_image_workflow
+    page_path = tmp_path / 's01-p1.md'
+    page_path.write_text(
+        "---\npage_id: s01-p1\nscene_id: s01\npage_within_scene: 1\n"
+        "total_pages_in_scene: 1\npanel_count: 1\n"
+        "canon_referenced:\n  - reference/canon/style-foundation.md\n---\n\n"
+        "## Panel script\n\n### Panel 1\nMid.\n"
+    )
+    _splice_image_workflow(
+        str(page_path), '## Image-generation workflow\n\nx.\n',
+        canon_ids=['style-foundation', 'lighting-laws'],
+    )
+    text = page_path.read_text()
+    assert text.count('reference/canon/style-foundation.md') == 1  # deduped
+    assert 'reference/canon/lighting-laws.md' in text
+
+
+# ---------------------------------------------------------------------------
+# Dry-run paths
+# ---------------------------------------------------------------------------
+
+def test_dry_run_strict_prints_and_does_not_write(tmp_path, capsys):
+    """TG-5: strict dry-run prints the template, leaves the page unchanged."""
+    from storyforge.cmd_elaborate import _run_page_prompt_handler_gn
+    proj = _make_gn_project(tmp_path)
+    _run_page_prompt_handler_gn(
+        proj, dry_run=True, coaching='strict',
+        page=None, scene=None, force=False,
+    )
+    assert 'DRY RUN' in capsys.readouterr().out
+    assert '## Image-generation workflow' not in open(
+        os.path.join(proj, 'pages', 's01-p1.md')).read()
+
+
+def test_dry_run_full_makes_no_api_call(tmp_path, monkeypatch, capsys):
+    """TG-5: full dry-run prints the prompt and never calls the API."""
+    from storyforge.cmd_elaborate import _run_page_prompt_handler_gn
+    calls = {'n': 0}
+    monkeypatch.setattr('storyforge.api.invoke_api',
+                        lambda *a, **kw: calls.__setitem__('n', calls['n'] + 1) or '')
+    proj = _make_gn_project(tmp_path)
+    _run_page_prompt_handler_gn(
+        proj, dry_run=True, coaching='full',
+        page=None, scene=None, force=False,
+    )
+    assert calls['n'] == 0
+    assert 'DRY RUN' in capsys.readouterr().out
+    assert '## Image-generation workflow' not in open(
+        os.path.join(proj, 'pages', 's01-p1.md')).read()
+
+
+# ---------------------------------------------------------------------------
+# Validator — beat-count high case
+# ---------------------------------------------------------------------------
+
+def test_validate_rejects_too_many_beats(tmp_path):
+    """TG: more beats than panel_count is rejected (not just fewer)."""
+    from storyforge.cmd_elaborate import _validate_page_prompt_response
+    ok, _ = _validate_page_prompt_response(_GOOD_BODY, expected_panel_count=1)
+    assert ok is False  # _GOOD_BODY has 2 beats

@@ -25,6 +25,15 @@ def test_render_references_block_empty_emits_todo_scaffold():
     assert 'essential' in out.lower()
 
 
+def test_blockquote_preserves_blank_lines_without_trailing_space():
+    """TG-7: a blank line becomes a bare '>' (no trailing space), and
+    content lines are prefixed with '> '."""
+    from storyforge.prompts_page_prompt import _blockquote
+    assert _blockquote('a\n\nb') == '> a\n>\n> b'
+    # No trailing-whitespace blockquote lines anywhere
+    assert '> \n' not in _blockquote('a\n\nb') + '\n'
+
+
 def test_assemble_workflow_section_blockquotes_prompt():
     from storyforge.prompts_page_prompt import assemble_workflow_section
     out = assemble_workflow_section(
@@ -35,9 +44,9 @@ def test_assemble_workflow_section_blockquotes_prompt():
     assert 'Approach' in out
     assert '### References to upload' in out
     assert '### Page prompt' in out
-    # The prompt body is rendered as a blockquote
+    # The prompt body is rendered as a blockquote, blank lines preserved
     assert '> **Scene:** A studio.' in out
-    assert '>' in out  # blank lines preserved as bare '>'
+    assert '\n>\n' in out
 
 
 def test_strict_template_has_five_sections_and_panels():
@@ -120,3 +129,22 @@ def test_build_full_prompt_encodes_rules_and_contract():
                   '**Use case:**', '**Constraints:**', '**Panels:**'):
         assert label in prompt, label
     assert 'exactly 6' in prompt or '6 numbered' in prompt
+
+
+def test_build_full_prompt_handles_empty_inputs():
+    """TG-8: the handler legitimately calls build_full_prompt with empty
+    references (the NOTE-don't-block path) and may have empty arch/script.
+    The empty-input fallbacks are on a live code path."""
+    from storyforge.prompts_page_prompt import build_full_prompt
+    prompt = build_full_prompt(
+        page_id='s01-p1', panel_count=2, scene_title='Studio',
+        page_frontmatter={'page_id': 's01-p1', 'panel_count': 2},
+        page_architecture='', panel_script='',
+        scene_brief={}, references_required=[], canon_blocks={},
+    )
+    # Empty references → the "assume a character reference…" fallback
+    assert 'assume a character reference' in prompt
+    # Empty architecture / panel script render as (none)
+    assert '(none)' in prompt
+    # Empty brief renders as (empty)
+    assert '(empty)' in prompt
