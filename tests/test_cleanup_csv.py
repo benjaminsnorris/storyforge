@@ -370,8 +370,25 @@ class TestPagesDirectory:
         assert 'page_render_orphan' in types
         orphan = next(f for f in page_findings
                       if f['type'] == 'page_render_orphan')
-        assert 's09-p9.png' in orphan['file']
+        # Exact relpath under manuscript/pages/, not just a substring
+        assert orphan['file'] == os.path.join('manuscript', 'pages', 's09-p9.png')
         assert orphan['severity'] == 'warning'
+        # Action text follows the file's convention and points at both fixes
+        assert 'pages/s09-p9.md' in orphan['detail']
+        assert 'rename' in orphan['action'].lower()
+
+    def test_render_orphan_not_flagged_in_novel_mode(self, tmp_path):
+        """TG-1: the orphan check is GN-gated — a novel project with a stray
+        manuscript/pages/ PNG produces no page_render_orphan finding."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: novel\n'
+        )
+        rdir = tmp_path / 'manuscript' / 'pages'
+        rdir.mkdir(parents=True)
+        (rdir / 's09-p9.png').write_bytes(b'\x89PNG')
+        report = build_cleanup_report(str(tmp_path))
+        types = {f['type'] for f in report['findings']}
+        assert 'page_render_orphan' not in types
 
     def test_unrendered_page_is_not_a_finding(self, tmp_path):
         """#261: a complete page file with no PNG is valid in-flight state."""

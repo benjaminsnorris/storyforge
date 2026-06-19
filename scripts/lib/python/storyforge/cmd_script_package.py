@@ -992,13 +992,15 @@ def main(argv=None):
         log('  NOTE: no page declares `references_required` in its '
             'frontmatter — skipping reference-images.md')
 
-    # pages/ — rendered page images (issue #261) already live in
-    # manuscript/pages/<page_id>.png (this bundle dir). Report progress and
-    # inventory them; the files are not copied (they're already here).
+    # pages/ — rendered page images (issue #261) already live under the bundle
+    # dir at manuscript/pages/<page_id>.png, so the files are not copied
+    # (they're already inside the handoff tree). Report progress + inventory.
     pages_line = ''
+    from storyforge.pages import page_render_report
+    render = page_render_report(project_dir)
+    # Progress count / inventory line is gated on page files existing, so a
+    # prose-only GN bundle stays quiet.
     if has_page_files:
-        from storyforge.pages import page_render_report
-        render = page_render_report(project_dir)
         total = len(render['rendered']) + len(render['unrendered'])
         n_rendered = len(render['rendered'])
         if render['rendered']:
@@ -1009,11 +1011,14 @@ def main(argv=None):
         elif total:
             log(f'  NOTE: 0/{total} pages rendered — save renders to '
                 f'manuscript/pages/<page_id>.png as you generate them')
-        if render['orphans']:
-            log(f'  WARNING: {len(render["orphans"])} orphan render(s) in '
-                f'manuscript/pages/ with no matching page file: '
-                f'{", ".join(render["orphans"][:5])}'
-                f'{"..." if len(render["orphans"]) > 5 else ""}')
+    # Orphan renders are a problem regardless of whether pages/ exists (a PNG
+    # with no page file is "what is this render?") — never gate the WARNING on
+    # has_page_files (SF-1).
+    if render['orphans']:
+        log(f'  WARNING: {len(render["orphans"])} orphan render(s) in '
+            f'manuscript/pages/ with no matching page file: '
+            f'{", ".join(render["orphans"][:5])}'
+            f'{"..." if len(render["orphans"]) > 5 else ""}')
 
     # handoff-readme.md
     readme = HANDOFF_README.format(

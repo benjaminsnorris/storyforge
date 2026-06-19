@@ -495,34 +495,60 @@ def rendered_page_path(project_dir: str, page_id: str) -> str:
 
 def list_rendered_pages(project_dir: str) -> list[str]:
     """Return sorted absolute paths of manuscript/pages/*.png, or [] if the
-    directory is absent."""
+    directory is absent.
+
+    The `.png` match is case-insensitive so a render saved as `.PNG` is still
+    recognized (rather than silently read as an unrendered page).
+    """
     d = rendered_pages_dir(project_dir)
     if not os.path.isdir(d):
         return []
     return sorted(
         os.path.join(d, f)
         for f in os.listdir(d)
-        if f.endswith('.png') and not f.startswith('.')
+        if f.lower().endswith('.png') and not f.startswith('.')
     )
 
 
 class PageRenderReport(TypedDict):
+    # NOTE the field-shape asymmetry (issue #261): `rendered` and `unrendered`
+    # hold page_ids (e.g. "s01-p1"); `orphans` holds PNG basenames (e.g.
+    # "s09-p9.png"). They look alike but are different domains — splitext an
+    # orphan before deriving a path; use rendered/unrendered ids raw.
     rendered: list[str]    # page_ids that have a matching PNG
     unrendered: list[str]  # page_ids (with frontmatter) that lack a PNG
-    orphans: list[str]     # PNG basenames with no matching page file
+    orphans: list[str]     # PNG basenames with no matching page FILE
 
 
 def page_render_report(project_dir: str) -> PageRenderReport:
     """Reconcile page files (pages/) against rendered images (manuscript/pages/).
 
-    A PNG corresponds to a page file when its filename stem equals a page
-    file's `page_id` (the 1:1 convention, issue #261). Page files without a
-    `page_id` in frontmatter are skipped for the rendered/unrendered split
-    (they can't be matched), but a PNG whose stem matches no page file is an
-    orphan regardless. Results are sorted for determinism.
+    A PNG corresponds to a page file when its filename stem equals the page
+    file's id (the 1:1 convention, issue #261).
+
+    Field shapes differ by design (see PageRenderReport):
+      - `rendered` / `unrendered` are **page_ids**, split by whether
+        manuscript/pages/<page_id>.png exists. Page files that don't parse or
+        lack a `page_id` are skipped here (they can't be matched), and
+        duplicate page_ids collapse to one entry (a duplicate would already
+        trip the filename↔page_id mismatch check in cleanup, since two files
+        in pages/ can't share a name).
+      - `orphans` are **PNG basenames** whose stem has no matching page FILE
+        in pages/ (`pages/<stem>.md`). Keying orphans on file existence — not
+        on the parsed page_id — means a PNG for a malformed/`page_id`-less
+        page file is NOT mis-blamed as an orphan; that page file gets its own
+        validation finding instead.
+
+    All three lists are sorted for determinism.
     """
+    page_files = list_page_files(project_dir)
+    # Orphan detection keys on filename stems (robust to parse failure);
+    # rendered/unrendered keys on parsed page_ids.
+    page_file_stems = {
+        os.path.splitext(os.path.basename(p))[0] for p in page_files
+    }
     page_ids: list[str] = []
-    for p in list_page_files(project_dir):
+    for p in page_files:
         parsed = parse_page_file(p)
         pid = parsed.get('page_id') if parsed else None
         if pid:
@@ -537,5 +563,5 @@ def page_render_report(project_dir: str) -> PageRenderReport:
     rendered = sorted(pid for pid in page_id_set if pid in rendered_stems)
     unrendered = sorted(pid for pid in page_id_set if pid not in rendered_stems)
     orphans = sorted(f'{stem}.png' for stem in rendered_stems
-                     if stem not in page_id_set)
+                     if stem not in page_file_stems)
     return {'rendered': rendered, 'unrendered': unrendered, 'orphans': orphans}

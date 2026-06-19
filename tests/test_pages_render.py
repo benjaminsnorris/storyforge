@@ -73,3 +73,56 @@ def test_render_report_no_manuscript_dir(tmp_path):
     assert r['rendered'] == []
     assert r['unrendered'] == ['s01-p1']
     assert r['orphans'] == []
+
+
+def test_render_report_case_insensitive_png(tmp_path):
+    """A render saved as .PNG is recognized, not read as unrendered."""
+    from storyforge.pages import page_render_report
+    proj = _setup(tmp_path, ['s01-p1'], ['s01-p1.PNG'])
+    r = page_render_report(proj)
+    assert r['rendered'] == ['s01-p1']
+    assert r['unrendered'] == []
+
+
+def test_malformed_page_file_does_not_orphan_its_png(tmp_path):
+    """SF-3: a page file present on disk but missing page_id (or unparseable)
+    must NOT make its same-stem PNG look like an orphan — orphans key on
+    page-FILE existence, not the parsed page_id."""
+    from storyforge.pages import page_render_report
+    proj = tmp_path / 'proj'
+    pages = proj / 'pages'
+    pages.mkdir(parents=True)
+    rdir = proj / 'manuscript' / 'pages'
+    rdir.mkdir(parents=True)
+    # page file exists but has no page_id in frontmatter
+    (pages / 's01-p1.md').write_text(
+        "---\nscene_id: s01\npage_within_scene: 1\n"
+        "total_pages_in_scene: 1\npanel_count: 1\n---\n\nbody\n"
+    )
+    (rdir / 's01-p1.png').write_bytes(b'\x89PNG')
+    r = page_render_report(str(proj))
+    # Not an orphan (the page file exists); excluded from rendered/unrendered
+    # because it has no page_id to match.
+    assert r['orphans'] == []
+    assert r['rendered'] == []
+    assert r['unrendered'] == []
+
+
+def test_page_file_without_page_id_excluded_from_split(tmp_path):
+    """TG-5: a parseable page file lacking page_id is excluded from
+    rendered/unrendered; a PNG of a *different* stem is still an orphan."""
+    from storyforge.pages import page_render_report
+    proj = tmp_path / 'proj'
+    pages = proj / 'pages'
+    pages.mkdir(parents=True)
+    rdir = proj / 'manuscript' / 'pages'
+    rdir.mkdir(parents=True)
+    (pages / 's01-p1.md').write_text(
+        "---\nscene_id: s01\npage_within_scene: 1\n"
+        "total_pages_in_scene: 1\npanel_count: 1\n---\n\nbody\n"
+    )
+    (rdir / 's09-p9.png').write_bytes(b'\x89PNG')  # different stem → orphan
+    r = page_render_report(str(proj))
+    assert r['rendered'] == []
+    assert r['unrendered'] == []
+    assert r['orphans'] == ['s09-p9.png']
