@@ -519,3 +519,73 @@ def test_validate_rejects_too_many_beats(tmp_path):
     from storyforge.cmd_elaborate import _validate_page_prompt_response
     ok, _ = _validate_page_prompt_response(_GOOD_BODY, expected_panel_count=1)
     assert ok is False  # _GOOD_BODY has 2 beats
+
+
+# ---------------------------------------------------------------------------
+# Portrait default + panel differentiation through the handler (issue #263)
+# ---------------------------------------------------------------------------
+
+def _set_page(proj, *, frontmatter_extra='', panel_script=None):
+    """Rewrite the fixture page file with optional frontmatter + panel script."""
+    import os
+    script = panel_script or '### Panel 1\nMid shot of Lucien.\n'
+    path = os.path.join(proj, 'pages', 's01-p1.md')
+    open(path, 'w').write(
+        "---\npage_id: s01-p1\nscene_id: s01-studio\npage_within_scene: 1\n"
+        "total_pages_in_scene: 1\npanel_count: 6\n" + frontmatter_extra + "---\n\n"
+        "## Page architecture\n\n### Intent\nx.\n\n"
+        "## Panel script\n\n" + script
+    )
+    return path
+
+
+def test_strict_emits_portrait_by_default(tmp_path):
+    from storyforge.cmd_elaborate import _run_page_prompt_handler_gn
+    proj = _make_gn_project(tmp_path)
+    rc = _run_page_prompt_handler_gn(proj, dry_run=False, coaching='strict',
+                                     page=None, scene=None, force=False)
+    assert rc == 0
+    import os
+    text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
+    assert text.count('PORTRAIT orientation') == 2
+
+
+def test_strict_respects_page_aspect_optout(tmp_path):
+    from storyforge.cmd_elaborate import _run_page_prompt_handler_gn
+    proj = _make_gn_project(tmp_path)
+    _set_page(proj, frontmatter_extra='page_aspect: landscape\n')
+    _run_page_prompt_handler_gn(proj, dry_run=False, coaching='strict',
+                                page=None, scene=None, force=True)
+    import os
+    text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
+    assert 'LANDSCAPE orientation' in text
+    assert 'PORTRAIT' not in text
+
+
+def test_strict_differentiates_converging_closeups(tmp_path, capsys):
+    from storyforge.cmd_elaborate import _run_page_prompt_handler_gn
+    from storyforge.pages import has_differentiation_language
+    proj = _make_gn_project(tmp_path)
+    _set_page(proj, panel_script=(
+        '### Panel 1 — Close on the portrait\nClose on the portrait mouth.\n'
+        '### Panel 2 — Close on the portrait\nClose on the portrait eyes.\n'
+    ))
+    _run_page_prompt_handler_gn(proj, dry_run=False, coaching='strict',
+                                page=None, scene=None, force=True)
+    import os
+    text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
+    assert has_differentiation_language(text)
+    out = capsys.readouterr().out
+    assert 'same-subject close-ups' in out
+
+
+def test_full_flow_emits_portrait_directive(tmp_path, capsys):
+    """The full-mode dry-run prints a prompt instructing portrait in both
+    the Use case and Constraints."""
+    from storyforge.cmd_elaborate import _run_page_prompt_handler_gn
+    proj = _make_gn_project(tmp_path)
+    _run_page_prompt_handler_gn(proj, dry_run=True, coaching='full',
+                                page=None, scene=None, force=False)
+    out = capsys.readouterr().out
+    assert 'BOTH the Use case' in out
+    assert 'PORTRAIT orientation' in out

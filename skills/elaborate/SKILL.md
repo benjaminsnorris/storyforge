@@ -273,6 +273,10 @@ All standard brief columns still apply with full meaning. `key_actions` reads as
 4. The **character anchor is the IDENTICAL string** in every panel that shows that character — not paraphrased.
 5. **Positive framing** replaces negation — state what IS present (negated keywords leak into the image).
 
+**Two quirk defaults baked in (issue #263):**
+- **Portrait orientation** is emitted in both the Use case and Constraints by default — GPT Image 2 drifts to landscape otherwise. Set `page_aspect: portrait | landscape | square` (default portrait) in the page frontmatter to opt out for a spread or special page; a non-portrait value should carry a trailing `# justification` comment or `cleanup` will flag it. (Orientation is the one place the prompt uses explicit negation — "do not render as landscape or square" — distinct from the content positive-framing rule.)
+- **Panel differentiation** — when the panel script has ≥2 close-ups of the same subject, the prompt automatically emits a differentiation directive (subject-in-isolation / act-of-interaction at the contact point / different scale or angle) so the renders don't converge into one image. `cleanup` warns if a page prompt has same-subject close-ups but no differentiation language.
+
 Reference images upload alongside the prompt, labeled by role: **Image 1** character reference, **Image 2** paper-tone reference, **Image 3+** prior rendered pages. List them in the page frontmatter's `references_required`.
 
 ### Voice Stage (Interactive)

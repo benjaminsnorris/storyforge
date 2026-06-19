@@ -148,3 +148,66 @@ def test_build_full_prompt_handles_empty_inputs():
     assert '(none)' in prompt
     # Empty brief renders as (empty)
     assert '(empty)' in prompt
+
+
+# ---------------------------------------------------------------------------
+# Portrait orientation + panel differentiation (issue #263)
+# ---------------------------------------------------------------------------
+
+def test_orientation_clause_per_aspect():
+    from storyforge.prompts_page_prompt import orientation_clause
+    assert orientation_clause().startswith('Render in PORTRAIT')
+    assert 'do not render as landscape or square' in orientation_clause().lower()
+    assert orientation_clause('landscape').startswith('Render in LANDSCAPE')
+    assert orientation_clause('square').startswith('Render in SQUARE')
+
+
+def test_differentiation_clause_empty_and_populated():
+    from storyforge.prompts_page_prompt import differentiation_clause
+    assert differentiation_clause(None) == ''
+    assert differentiation_clause([]) == ''
+    c = differentiation_clause([[3, 6]])
+    assert 'panels 3, 6' in c
+    assert 'isolation' in c and 'contact point' in c
+
+
+def test_strict_template_emits_portrait_in_use_case_and_constraints():
+    from storyforge.prompts_page_prompt import render_strict_template
+    out = render_strict_template(page_id='s01-p2', panel_count=3,
+                                 scene_title='S', references_required=[])
+    assert out.count('PORTRAIT orientation') == 2
+
+
+def test_strict_template_aspect_optout():
+    from storyforge.prompts_page_prompt import render_strict_template
+    for aspect, word in (('landscape', 'LANDSCAPE'), ('square', 'SQUARE')):
+        out = render_strict_template(page_id='s01-p2', panel_count=2,
+                                     scene_title='S', references_required=[],
+                                     page_aspect=aspect)
+        assert word in out
+        assert 'PORTRAIT' not in out
+
+
+def test_strict_template_differentiation_when_convergence():
+    from storyforge.prompts_page_prompt import render_strict_template
+    from storyforge.pages import has_differentiation_language
+    out = render_strict_template(page_id='s01-p2', panel_count=6,
+                                 scene_title='S', references_required=[],
+                                 convergence=[[3, 6]])
+    assert has_differentiation_language(out)
+    assert 'panels 3, 6' in out
+
+
+def test_full_prompt_requires_orientation_in_both_sections():
+    from storyforge.prompts_page_prompt import build_full_prompt
+    prompt = build_full_prompt(
+        page_id='s01-p2', panel_count=6, scene_title='S',
+        page_frontmatter={'page_id': 's01-p2'}, page_architecture='a',
+        panel_script='s', scene_brief={}, references_required=['r'],
+        canon_blocks={}, convergence=[[3, 6]],
+    )
+    assert 'BOTH the Use case' in prompt
+    from storyforge.pages import has_differentiation_language
+    assert has_differentiation_language(prompt)
+    # orientation directive present in the rules + both template slots
+    assert prompt.count('PORTRAIT orientation') >= 3
