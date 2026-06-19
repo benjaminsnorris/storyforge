@@ -1020,8 +1020,9 @@ def _check_stale_ledger(project_dir: str) -> list[dict]:
 
 def _check_page_files(project_dir: str) -> list[dict]:
     """Validate page files under pages/ for GN projects. Returns finding dicts
-    in cleanup-report shape. Returns [] for non-GN projects or when pages/
-    is absent/empty."""
+    in cleanup-report shape. Returns [] for non-GN projects. For GN projects
+    it can still return findings when pages/ is empty — e.g. an orphan render
+    in manuscript/pages/ with no matching page file (issue #261)."""
     if get_medium(project_dir) != 'graphic-novel':
         return []
     from storyforge.pages import list_page_files, validate_page_file
@@ -1114,6 +1115,25 @@ def _check_page_files(project_dir: str) -> list[dict]:
                               'for this PageFindingKind',
                     'severity': 'warning',
                 })
+
+    # Rendered-page correspondence (issue #261): a PNG in manuscript/pages/
+    # with no matching page file is an orphan. A page file without a PNG is
+    # valid in-flight state (unrendered), so it is NOT a finding here.
+    # Function-local import: pages is otherwise only needed on the GN path,
+    # and keeping it here mirrors the deferred-import style used for the
+    # per-page-file validators above.
+    from storyforge.pages import page_render_report, RENDERED_PAGES_SUBDIR
+    orphans = page_render_report(project_dir)['orphans']
+    for png in orphans:
+        rel = os.path.join(RENDERED_PAGES_SUBDIR, png)
+        findings.append({
+            'type': 'page_render_orphan', 'file': rel,
+            'detail': f'{rel} has no matching page file in pages/ '
+                      f'(expected pages/{os.path.splitext(png)[0]}.md)',
+            'action': 'Remove the orphan render, or add/rename the page file '
+                      'so its page_id matches the PNG stem',
+            'severity': 'warning',
+        })
     return findings
 
 

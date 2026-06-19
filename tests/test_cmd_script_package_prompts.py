@@ -205,6 +205,116 @@ def test_skip_notes_logged_when_page_files_present(tmp_path, monkeypatch, capsys
     assert not os.path.isfile(os.path.join(manuscript, 'reference-images.md'))
 
 
+def test_rendered_pages_inventory_and_count(tmp_path, monkeypatch, capsys):
+    """#261: script-package reports an N/M rendered count and adds a
+    manuscript/pages/ inventory line to the README when renders exist."""
+    proj = _setup_project(tmp_path, {
+        's01-p1': ('', '## Panel script\n\n**Panel 1.** Wide.\n'),
+    })
+    import os
+    rdir = os.path.join(proj, 'manuscript', 'pages')
+    os.makedirs(rdir)
+    open(os.path.join(rdir, 's01-p1.png'), 'wb').write(b'\x89PNG')
+    monkeypatch.chdir(proj)
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    out = capsys.readouterr().out
+    assert '1/1 pages rendered' in out
+    readme = open(os.path.join(proj, 'manuscript', 'handoff-readme.md')).read()
+    assert '`pages/`' in readme
+    assert '1 of 1 pages are rendered' in readme
+
+
+def test_orphan_render_warned_by_script_package(tmp_path, monkeypatch, capsys):
+    """#261: an orphan PNG (no matching page file) triggers a WARNING."""
+    proj = _setup_project(tmp_path, {
+        's01-p1': ('', '## Panel script\n\n**Panel 1.** Wide.\n'),
+    })
+    import os
+    rdir = os.path.join(proj, 'manuscript', 'pages')
+    os.makedirs(rdir)
+    open(os.path.join(rdir, 's09-p9.png'), 'wb').write(b'\x89PNG')
+    monkeypatch.chdir(proj)
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    out = capsys.readouterr().out
+    assert 'orphan render' in out
+    assert 's09-p9.png' in out
+
+
+def test_orphan_warned_even_when_pages_dir_absent(tmp_path, monkeypatch, capsys):
+    """SF-1: orphan renders must surface even when there is no pages/ dir
+    (so the bundle and cleanup don't disagree on identical state). The scene
+    is mapped via a scene file, not page files."""
+    import os
+    proj = tmp_path / 'proj'
+    proj.mkdir()
+    (proj / 'storyforge.yaml').write_text(
+        'project:\n  medium: graphic-novel\n  title: Test\n'
+    )
+    ref = proj / 'reference'
+    ref.mkdir()
+    (ref / 'scenes.csv').write_text(
+        'id|seq|title|status\ns01-studio|1|Studio|drafted\n'
+    )
+    (ref / 'chapter-map.csv').write_text(
+        'chapter|title|heading|scenes\n1|One|numbered|s01-studio\n'
+    )
+    scenes = proj / 'scenes'
+    scenes.mkdir()
+    (scenes / 's01-studio.md').write_text(
+        '## Page 1 — SPLASH\n\n**Panel 1**\nInline.\n'
+    )
+    # Orphan render, NO pages/ directory at all
+    rdir = proj / 'manuscript' / 'pages'
+    rdir.mkdir(parents=True)
+    (rdir / 's09-p9.png').write_bytes(b'\x89PNG')
+    monkeypatch.chdir(str(proj))
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    out = capsys.readouterr().out
+    assert 'orphan render' in out
+    assert 's09-p9.png' in out
+
+
+def test_partial_render_count_uses_both_format_slots(tmp_path, monkeypatch, capsys):
+    """TG-2: with 2 pages and 1 render, the count is '1 of 2' / '1/2' — the
+    only case that distinguishes the n and total format slots."""
+    import os
+    proj = _setup_project(tmp_path, {
+        's01-p1': ('', '## Panel script\n\n**Panel 1.** Wide.\n'),
+        's01-p2': ('', '## Panel script\n\n**Panel 1.** Wide.\n'),
+    })
+    # scenes.csv / chapter-map from _setup_project map only s01-studio; both
+    # pages belong to it (page_id_prefix s01). Render only p1.
+    rdir = os.path.join(proj, 'manuscript', 'pages')
+    os.makedirs(rdir)
+    open(os.path.join(rdir, 's01-p1.png'), 'wb').write(b'\x89PNG')
+    monkeypatch.chdir(proj)
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    out = capsys.readouterr().out
+    assert '1/2 pages rendered' in out
+    readme = open(os.path.join(proj, 'manuscript', 'handoff-readme.md')).read()
+    assert '1 of 2 pages are rendered' in readme
+
+
+def test_no_renders_notes_progress(tmp_path, monkeypatch, capsys):
+    """#261: with page files but zero renders, a 0/M NOTE is logged and no
+    pages inventory line appears in the README."""
+    proj = _setup_project(tmp_path, {
+        's01-p1': ('', '## Panel script\n\n**Panel 1.** Wide.\n'),
+    })
+    monkeypatch.chdir(proj)
+    import os
+    from storyforge import cmd_script_package
+    cmd_script_package.main([])
+    out = capsys.readouterr().out
+    assert '0/1 pages rendered' in out
+    readme = open(os.path.join(proj, 'manuscript', 'handoff-readme.md')).read()
+    assert '`pages/`' not in readme
+
+
 def test_both_files_and_inventory_when_workflow_and_refs_present(tmp_path, monkeypatch):
     """Happy path: workflow + references present → both files written and
     the README names both."""

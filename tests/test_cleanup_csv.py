@@ -346,6 +346,68 @@ class TestPagesDirectory:
                  if f.get('category') == 'pages'}
         assert 'page_missing_field' in types
 
+    def test_render_orphan_finding_surfaced(self, tmp_path):
+        """#261: a PNG in manuscript/pages/ with no matching page file
+        surfaces as page_render_orphan; an unrendered page does NOT."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: graphic-novel\n'
+        )
+        pages = tmp_path / 'pages'
+        pages.mkdir()
+        (pages / 's01-p1.md').write_text(
+            "---\npage_id: s01-p1\nscene_id: s01\npage_within_scene: 1\n"
+            "total_pages_in_scene: 1\npanel_count: 1\n---\n\n"
+            "## Page architecture\n\nx.\n\n## Image-generation workflow\n\nx.\n"
+        )
+        rdir = tmp_path / 'manuscript' / 'pages'
+        rdir.mkdir(parents=True)
+        (rdir / 's09-p9.png').write_bytes(b'\x89PNG')  # orphan
+        # s01-p1 is intentionally NOT rendered (valid in-flight state)
+        report = build_cleanup_report(str(tmp_path))
+        page_findings = [f for f in report['findings']
+                         if f.get('category') == 'pages']
+        types = {f['type'] for f in page_findings}
+        assert 'page_render_orphan' in types
+        orphan = next(f for f in page_findings
+                      if f['type'] == 'page_render_orphan')
+        # Exact relpath under manuscript/pages/, not just a substring
+        assert orphan['file'] == os.path.join('manuscript', 'pages', 's09-p9.png')
+        assert orphan['severity'] == 'warning'
+        # Action text follows the file's convention and points at both fixes
+        assert 'pages/s09-p9.md' in orphan['detail']
+        assert 'rename' in orphan['action'].lower()
+
+    def test_render_orphan_not_flagged_in_novel_mode(self, tmp_path):
+        """TG-1: the orphan check is GN-gated — a novel project with a stray
+        manuscript/pages/ PNG produces no page_render_orphan finding."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: novel\n'
+        )
+        rdir = tmp_path / 'manuscript' / 'pages'
+        rdir.mkdir(parents=True)
+        (rdir / 's09-p9.png').write_bytes(b'\x89PNG')
+        report = build_cleanup_report(str(tmp_path))
+        types = {f['type'] for f in report['findings']}
+        assert 'page_render_orphan' not in types
+
+    def test_unrendered_page_is_not_a_finding(self, tmp_path):
+        """#261: a complete page file with no PNG is valid in-flight state."""
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: graphic-novel\n'
+        )
+        pages = tmp_path / 'pages'
+        pages.mkdir()
+        (pages / 's01-p1.md').write_text(
+            "---\npage_id: s01-p1\nscene_id: s01\npage_within_scene: 1\n"
+            "total_pages_in_scene: 1\npanel_count: 1\n---\n\n"
+            "## Page architecture\n\nx.\n\n## Panel script\n\n**Panel 1.**\n\n"
+            "## Image-generation workflow\n\nx.\n"
+        )
+        report = build_cleanup_report(str(tmp_path))
+        types = {f['type'] for f in report['findings']
+                 if f.get('category') == 'pages'}
+        assert 'page_render_orphan' not in types
+
     def test_filename_mismatch_finding_surfaced(self, tmp_path):
         """T-9: filename != page_id surfaces as page_filename_mismatch."""
         (tmp_path / 'storyforge.yaml').write_text(
