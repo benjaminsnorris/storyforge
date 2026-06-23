@@ -22,7 +22,7 @@ labeled reference list into the final page-file section.
 
 from typing import Final
 
-from storyforge.pages import PageFile, DEFAULT_PAGE_ASPECT
+from storyforge.pages import ConvergenceGroups, PageFile, DEFAULT_PAGE_ASPECT
 
 
 # The five OpenAI template section labels, in order. Used by the LLM
@@ -73,7 +73,7 @@ def orientation_clause(page_aspect: str = DEFAULT_PAGE_ASPECT) -> str:
             'ratio. Do not render as landscape or square.')
 
 
-def differentiation_clause(convergence: list[list[int]] | None) -> str:
+def differentiation_clause(convergence: ConvergenceGroups | None) -> str:
     """Return the panel-differentiation directive for converging close-ups.
 
     `convergence` is the output of pages.detect_closeup_convergence — groups
@@ -149,7 +149,7 @@ def assemble_workflow_section(*, page_prompt_body: str,
 
 def _strict_prompt_body(*, page_id: str, panel_count: int,
                         page_aspect: str = DEFAULT_PAGE_ASPECT,
-                        convergence: list[list[int]] | None = None) -> str:
+                        convergence: ConvergenceGroups | None = None) -> str:
     """TODO scaffold for the 5-section page-prompt body (no LLM)."""
     page_label = page_id.split('-p')[-1] if '-p' in page_id else page_id
     panels = max(panel_count, 1)
@@ -198,7 +198,7 @@ def render_strict_template(*, page_id: str, panel_count: int,
                            scene_title: str,
                            references_required: list[str],
                            page_aspect: str = DEFAULT_PAGE_ASPECT,
-                           convergence: list[list[int]] | None = None) -> str:
+                           convergence: ConvergenceGroups | None = None) -> str:
     """Deterministic strict-mode `## Image-generation workflow` section.
 
     No LLM call. Emits the approach note, reference list, and a 5-section
@@ -224,7 +224,7 @@ def render_coach_brief(*, page_id: str, panel_count: int,
                        references_required: list[str],
                        canon_blocks: dict[str, str],
                        page_aspect: str = DEFAULT_PAGE_ASPECT,
-                       convergence: list[list[int]] | None = None) -> str:
+                       convergence: ConvergenceGroups | None = None) -> str:
     """Coach-mode markdown brief written to working/coaching/.
 
     Surfaces the inputs (page architecture, panel script, brief, canon
@@ -329,7 +329,7 @@ def build_full_prompt(*, page_id: str, panel_count: int,
                       references_required: list[str],
                       canon_blocks: dict[str, str],
                       page_aspect: str = DEFAULT_PAGE_ASPECT,
-                      convergence: list[list[int]] | None = None) -> str:
+                      convergence: ConvergenceGroups | None = None) -> str:
     """Full-mode LLM prompt that authors the page-prompt body.
 
     The handler collects the page architecture, panel script, brief, the

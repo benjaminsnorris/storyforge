@@ -11,7 +11,7 @@ other storyforge commands.
 
 import os
 import re
-from typing import Final, Literal, TypedDict
+from typing import Final, Literal, TypeAlias, TypedDict
 
 
 # Frontmatter: open with `---\n`, capture everything (possibly empty) up to
@@ -37,8 +37,9 @@ RECOMMENDED_FIELDS: Final[tuple[str, ...]] = (
 # Valid page_aspect values (issue #263). Portrait is the default — GPT
 # Image 2 drifts to landscape without an explicit directive, so every page
 # prompt asserts portrait unless the author opts out per page.
-PAGE_ASPECTS: Final[tuple[str, ...]] = ('portrait', 'landscape', 'square')
-DEFAULT_PAGE_ASPECT: Final[str] = 'portrait'
+PageAspect: TypeAlias = Literal['portrait', 'landscape', 'square']
+PAGE_ASPECTS: Final[tuple[PageAspect, ...]] = ('portrait', 'landscape', 'square')
+DEFAULT_PAGE_ASPECT: PageAspect = 'portrait'
 
 # v3 frontmatter additions (issue #260). Recognized as typed page-dict
 # keys rather than dumped into `extra` so callers can read them directly.
@@ -652,6 +653,11 @@ def page_aspect_of(page: PageFile) -> str:
 # Panel-differentiation heuristic (issue #263)
 # ---------------------------------------------------------------------------
 
+# A convergence "group" is a sorted list of panel indices (len >= 2) that are
+# all close-ups of the same subject. detect_closeup_convergence returns a
+# sorted list of these.
+ConvergenceGroups: TypeAlias = list[list[int]]
+
 # Framing cues that mark a panel as a close-up. GPT Image 2 converges on
 # near-identical compositions when several close-ups share a subject, so the
 # prompt must differentiate their framing.
@@ -748,7 +754,7 @@ def _subject_signature(block: str) -> frozenset[str]:
     )
 
 
-def detect_closeup_convergence(panel_script: str) -> list[list[int]]:
+def detect_closeup_convergence(panel_script: str) -> ConvergenceGroups:
     """Detect groups of panels that are close-ups of the same subject.
 
     Returns a sorted list of panel-index groups (each of size >= 2) that
