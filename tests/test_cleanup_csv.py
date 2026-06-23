@@ -377,6 +377,56 @@ class TestPagesDirectory:
         assert 'pages/s09-p9.md' in orphan['detail']
         assert 'rename' in orphan['action'].lower()
 
+    def _gn_page(self, tmp_path, fm_extra='', body=''):
+        (tmp_path / 'storyforge.yaml').write_text(
+            'project:\n  title: Test\n  medium: graphic-novel\n'
+        )
+        pages = tmp_path / 'pages'
+        pages.mkdir()
+        (pages / 's01-p1.md').write_text(
+            "---\npage_id: s01-p1\nscene_id: s01\npage_within_scene: 1\n"
+            "total_pages_in_scene: 1\npanel_count: 6\n" + fm_extra + "---\n\n"
+            "## Page architecture\nx\n\n## Image-generation workflow\nx\n" + body
+        )
+
+    def test_non_portrait_aspect_warning(self, tmp_path):
+        """#263: a non-portrait page_aspect without justification warns."""
+        self._gn_page(tmp_path, 'page_aspect: landscape\n')
+        report = build_cleanup_report(str(tmp_path))
+        page = [f for f in report['findings'] if f.get('category') == 'pages']
+        types = {f['type'] for f in page}
+        assert 'page_non_portrait_aspect' in types
+        f = next(x for x in page if x['type'] == 'page_non_portrait_aspect')
+        assert f['severity'] == 'warning'
+        assert 'justification' in f['action'].lower()
+
+    def test_non_portrait_aspect_with_justification_no_warning(self, tmp_path):
+        self._gn_page(tmp_path, 'page_aspect: landscape  # double spread\n')
+        report = build_cleanup_report(str(tmp_path))
+        types = {f['type'] for f in report['findings'] if f.get('category') == 'pages'}
+        assert 'page_non_portrait_aspect' not in types
+
+    def test_invalid_aspect_warning(self, tmp_path):
+        self._gn_page(tmp_path, 'page_aspect: widescreen\n')
+        types = {f['type'] for f in build_cleanup_report(str(tmp_path))['findings']
+                 if f.get('category') == 'pages'}
+        assert 'page_invalid_aspect' in types
+
+    def test_undifferentiated_closeups_warning(self, tmp_path):
+        body = (
+            '\n## Panel script\n\n'
+            '### Panel 1 — Close on the portrait\nClose on the portrait mouth.\n'
+            '### Panel 2 — Close on the portrait\nClose on the portrait eyes.\n'
+        )
+        # workflow body has no differentiation cues
+        self._gn_page(tmp_path, body=body)
+        page = [f for f in build_cleanup_report(str(tmp_path))['findings']
+                if f.get('category') == 'pages']
+        types = {f['type'] for f in page}
+        assert 'page_undifferentiated_closeups' in types
+        f = next(x for x in page if x['type'] == 'page_undifferentiated_closeups')
+        assert 'elaborate --stage prompts' in f['action']
+
     def test_render_orphan_not_flagged_in_novel_mode(self, tmp_path):
         """TG-1: the orphan check is GN-gated — a novel project with a stray
         manuscript/pages/ PNG produces no page_render_orphan finding."""

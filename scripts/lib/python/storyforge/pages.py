@@ -11,7 +11,7 @@ other storyforge commands.
 
 import os
 import re
-from typing import Final, Literal, TypedDict
+from typing import Final, Literal, TypeAlias, TypedDict
 
 
 # Frontmatter: open with `---\n`, capture everything (possibly empty) up to
@@ -34,13 +34,21 @@ RECOMMENDED_FIELDS: Final[tuple[str, ...]] = (
     'spread_position', 'characters_present', 'location', 'timeline',
 )
 
+# Valid page_aspect values (issue #263). Portrait is the default — GPT
+# Image 2 drifts to landscape without an explicit directive, so every page
+# prompt asserts portrait unless the author opts out per page.
+PageAspect: TypeAlias = Literal['portrait', 'landscape', 'square']
+PAGE_ASPECTS: Final[tuple[PageAspect, ...]] = ('portrait', 'landscape', 'square')
+DEFAULT_PAGE_ASPECT: PageAspect = 'portrait'
+
 # v3 frontmatter additions (issue #260). Recognized as typed page-dict
 # keys rather than dumped into `extra` so callers can read them directly.
 # `references_required` is the labeled list of reference images uploaded
 # alongside the page prompt; `target_model` records the image model the
-# prompt is tuned for (e.g. gpt-image-2).
+# prompt is tuned for (e.g. gpt-image-2). `page_aspect` (issue #263)
+# overrides the default portrait orientation for special pages.
 _OPTIONAL_SCALAR_FIELDS: Final[tuple[str, ...]] = (
-    'scene_title', 'target_model',
+    'scene_title', 'target_model', 'page_aspect',
 )
 
 _INTEGER_FIELDS: Final[set[str]] = {
@@ -85,6 +93,8 @@ class PageFile(_PageFileRequired, total=False):
     prompt_iteration: int
     references_required: list[str]
     canon_referenced: list[str]
+    # issue #263
+    page_aspect: str
 
 
 def page_id_prefix_for_scene(scene_id: str) -> str:
@@ -182,6 +192,22 @@ def _parse_frontmatter(block: str) -> PageFile:
         # open a list rather than capturing the comment as a scalar.
         if value.startswith('#'):
             value = ''
+        else:
+            # Strip a trailing inline comment (` value  # note`) so the
+            # lived-in format (`schema_version: 3  # paradigm shift`,
+            # `page_aspect: landscape  # double-spread`) parses cleanly.
+            # The comment must be preceded by whitespace, so a value like
+            # `#fff` is untouched. Keys that carried a justification comment
+            # are recorded so validators (e.g. non-portrait page_aspect) can
+            # treat the comment as the author's explicit justification.
+            cm = re.match(r'^(.*\S)\s+#', value)
+            if cm:
+                page['extra'].setdefault('_commented_fields', '')
+                cf = page['extra']['_commented_fields']
+                page['extra']['_commented_fields'] = (
+                    f'{cf};{key}' if cf else key
+                )
+                value = cm.group(1)
 
         if not value:
             current_list_key = key
@@ -281,6 +307,9 @@ PageFindingKind = Literal[
     'page_within_scene_out_of_range',
     'missing_page_architecture',
     'missing_image_workflow',
+    'invalid_page_aspect',
+    'non_portrait_page_aspect',
+    'undifferentiated_closeups',
 ]
 
 
@@ -306,6 +335,11 @@ def validate_page_file(path: str) -> list[PageFinding]:
       - page_within_scene_out_of_range: not in [1, total_pages_in_scene]
       - missing_page_architecture: "## Page architecture" section is missing or empty
       - missing_image_workflow: "## Image-generation workflow" section is missing or empty
+      - invalid_page_aspect: page_aspect not in {portrait, landscape, square}
+      - non_portrait_page_aspect: a non-portrait page_aspect with no justification comment
+      - undifferentiated_closeups: same-subject close-ups with no differentiation language
+
+    The PageFindingKind Literal is the authoritative list; keep it in sync.
     """
     page = parse_page_file(path)
     if page is None:
@@ -369,6 +403,49 @@ def validate_page_file(path: str) -> list[PageFinding]:
             'kind': 'missing_image_workflow', 'path': path,
             'detail': '"## Image-generation workflow" section is missing or empty',
         })
+
+    # page_aspect validation (issue #263). An unrecognized value is an error;
+    # a non-portrait value without a justification comment is a soft review
+    # warning (intentional landscape/square pages are valid, e.g. spreads).
+    aspect_raw = page.get('page_aspect')
+    if aspect_raw is not None:
+        aspect = aspect_raw.strip().lower()
+        commented = page.get('extra', {}).get('_commented_fields', '')
+        justified = 'page_aspect' in (commented.split(';') if commented else [])
+        if aspect not in PAGE_ASPECTS:
+            findings.append({
+                'kind': 'invalid_page_aspect', 'path': path,
+                'field': 'page_aspect',
+                'detail': f'page_aspect={aspect_raw!r} is not one of '
+                          f'{", ".join(PAGE_ASPECTS)}',
+            })
+        elif aspect != DEFAULT_PAGE_ASPECT and not justified:
+            findings.append({
+                'kind': 'non_portrait_page_aspect', 'path': path,
+                'field': 'page_aspect',
+                'detail': f'page_aspect={aspect!r} is non-portrait; confirm it '
+                          f'is intentional (add a trailing # justification '
+                          f'comment to silence)',
+            })
+
+    # Undifferentiated multi-close-up panels (issue #263). When the panel
+    # script has >=2 close-ups of the same subject AND the page prompt is
+    # authored but carries no differentiation language, GPT Image 2 will
+    # converge their compositions. Only warn once the workflow exists (an
+    # un-prompted page is just in-flight).
+    panel_script_body = _extract_section_from_body(body, _PANEL_SCRIPT_HEADER)
+    workflow_body = _extract_section_from_body(body, _IMAGE_GEN_WORKFLOW_HEADER)
+    if panel_script_body.strip() and workflow_body.strip():
+        groups = detect_closeup_convergence(panel_script_body)
+        if groups and not has_differentiation_language(workflow_body):
+            pretty = '; '.join('panels ' + ', '.join(str(i) for i in g)
+                               for g in groups)
+            findings.append({
+                'kind': 'undifferentiated_closeups', 'path': path,
+                'detail': f'page prompt has same-subject close-ups ({pretty}) '
+                          f'but no differentiated framing language — GPT Image '
+                          f'2 will converge their compositions',
+            })
 
     return findings
 
@@ -565,3 +642,158 @@ def page_render_report(project_dir: str) -> PageRenderReport:
     orphans = sorted(f'{stem}.png' for stem in rendered_stems
                      if stem not in page_file_stems)
     return {'rendered': rendered, 'unrendered': unrendered, 'orphans': orphans}
+
+
+def page_aspect_of(page: PageFile) -> str:
+    """Return the page's aspect (issue #263), defaulting to portrait.
+
+    An unrecognized value is returned as-is so validators can flag it;
+    callers that only branch on portrait-vs-not should compare against
+    DEFAULT_PAGE_ASPECT.
+    """
+    return (page.get('page_aspect') or DEFAULT_PAGE_ASPECT).strip().lower()
+
+
+# ---------------------------------------------------------------------------
+# Panel-differentiation heuristic (issue #263)
+# ---------------------------------------------------------------------------
+
+# A convergence "group" is a sorted list of panel indices (len >= 2) that are
+# all close-ups of the same subject. detect_closeup_convergence returns a
+# sorted list of these.
+ConvergenceGroups: TypeAlias = list[list[int]]
+
+# Framing cues that mark a panel as a close-up. GPT Image 2 converges on
+# near-identical compositions when several close-ups share a subject, so the
+# prompt must differentiate their framing.
+# `\bclose\b` covers the bare shot tags panel scripts use — "Close,",
+# "Close.", "Close on", "close-up" (the hyphen is a word boundary) — without
+# matching "closes"/"closed" (the verb forms keep `close` non-boundaried).
+_CLOSEUP_RE = re.compile(
+    r'\b(?:close|tight\s+(?:shot|on)|macro|detail\s+(?:shot|of|on))\b',
+    re.IGNORECASE,
+)
+
+# `**Panel N**` bold markers — the canonical format `storyforge write` emits
+# (see script_format.py:PANEL_HEADER and prompts_gn.py). Lenient on what
+# follows the number so it matches both the block form (`**Panel 1** (full
+# bleed)`, content below) and the inline form (`**Panel 1.** Wide. The
+# studio.`) seen in real panel scripts.
+_PANEL_BOLD_RE = re.compile(r'^\s*\*\*Panel\s+(\d+)', re.MULTILINE | re.IGNORECASE)
+# `### Panel N` subsection headers within a `## Panel script` section.
+_PANEL_SUBHEADER_RE = re.compile(r'^###\s+Panel\s+(\d+)\b', re.MULTILINE | re.IGNORECASE)
+# Fallback: numbered beats (`1. ...`) when no panel-marker headers exist.
+_NUMBERED_BEAT_RE2 = re.compile(r'^\s*(\d+)\.\s', re.MULTILINE)
+
+# Vocabulary the differentiation directive uses AND the cleanup detector
+# looks for — single-sourced so a generated page and the validator agree on
+# what "differentiated framing language" looks like.
+DIFFERENTIATION_CUES: Final[tuple[str, ...]] = (
+    'in isolation', 'isolated', 'contact point', 'act of', 'different scale',
+    'different angle', 'differentiate', 'vary the framing', 'varied framing',
+    'distinct framing',
+)
+
+# Words dropped when reducing a close-up beat to a subject signature: framing
+# vocabulary, articles/possessives, and generic filler. What remains are the
+# content words that stand in for the subject — a coarse proxy, not true
+# noun extraction, so two beats can share an incidental content word.
+_SUBJECT_STOPWORDS: Final[frozenset[str]] = frozenset({
+    'close', 'closeup', 'up', 'on', 'of', 'the', 'a', 'an', 'shot', 'panel',
+    'mid', 'wide', 'extreme', 'macro', 'tight', 'detail', 'his', 'her', 'its',
+    'their', 'and', 'to', 'in', 'at', 'with', 'from', 'view', 'image',
+    'angle', 'scale', 'frame', 'framing',
+})
+
+
+def _split_panel_blocks(panel_script: str) -> list[tuple[int, str]]:
+    """Split a `## Panel script` body into (panel_index, block_text).
+
+    Prefers `**Panel N**` bold markers (the format `storyforge write`
+    emits), then `### Panel N` subsection headers, then numbered beats.
+    The header line is included in the block so a framing cue stated in the
+    header (`**Panel 2.** Close, hand uncapping…`) is captured.
+    """
+    headers = list(_PANEL_BOLD_RE.finditer(panel_script))
+    if not headers:
+        headers = list(_PANEL_SUBHEADER_RE.finditer(panel_script))
+    if not headers:
+        headers = list(_NUMBERED_BEAT_RE2.finditer(panel_script))
+    blocks: list[tuple[int, str]] = []
+    for i, m in enumerate(headers):
+        start = m.start()
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(panel_script)
+        blocks.append((int(m.group(1)), panel_script[start:end]))
+    return blocks
+
+
+def _singularize(word: str) -> str:
+    """Strip a trailing possessive/plural suffix for loose subject matching.
+
+    A small stemmer, not `str.rstrip("'s")` — which removed EVERY trailing
+    `'`/`s` character (`glass`→`gla`, `canvas`→`canva`), breaking
+    same-subject grouping. Here:
+      - possessive `'s` is dropped (`portrait's`→`portrait`);
+      - sibilant `-es` plurals collapse (`glasses`→`glass`, `boxes`→`box`);
+      - `-ies`→`-y` (`bodies`→`body`);
+      - a plain `-s` plural is dropped (`candles`→`candle`) EXCEPT for
+        singular nouns ending in `ss`/`us`/`is`/`as`/`os` (`glass`,
+        `canvas`, `iris`, `focus`), which are left intact.
+    """
+    if word.endswith("'s"):
+        return word[:-2]
+    if word.endswith('es') and word[:-2].endswith(('s', 'x', 'z', 'ch', 'sh')):
+        return word[:-2]
+    if word.endswith('ies') and len(word) > 4:
+        return word[:-3] + 'y'
+    if word.endswith('s') and not word.endswith(('ss', 'us', 'is', 'as', 'os')):
+        return word[:-1]
+    return word
+
+
+def _subject_signature(block: str) -> frozenset[str]:
+    """Reduce a close-up panel block to its subject content-word signature."""
+    words = re.findall(r"[a-z][a-z']*", block.lower())
+    return frozenset(
+        _singularize(w) for w in words
+        if w not in _SUBJECT_STOPWORDS and len(w) > 2
+    )
+
+
+def detect_closeup_convergence(panel_script: str) -> ConvergenceGroups:
+    """Detect groups of panels that are close-ups of the same subject.
+
+    Returns a sorted list of panel-index groups (each of size >= 2) that
+    share a subject content-word and are all framed as close-ups — the
+    composition-convergence risk GPT Image 2 exhibits (issue #263). Panels
+    whose close-up subjects differ (hand vs. candle vs. portrait) do NOT
+    group, avoiding false positives. Returns [] when fewer than two
+    same-subject close-ups are present.
+    """
+    closeups: list[tuple[int, frozenset[str]]] = []
+    for idx, block in _split_panel_blocks(panel_script):
+        if _CLOSEUP_RE.search(block):
+            closeups.append((idx, _subject_signature(block)))
+
+    groups: list[list[int]] = []
+    used: set[int] = set()
+    for i, (idx, sig) in enumerate(closeups):
+        if idx in used:
+            continue
+        group = [idx]
+        for jdx, jsig in closeups[i + 1:]:
+            if jdx in used:
+                continue
+            if sig & jsig:  # share at least one content word
+                group.append(jdx)
+                used.add(jdx)
+        if len(group) >= 2:
+            used.add(idx)
+            groups.append(sorted(group))
+    return sorted(groups)
+
+
+def has_differentiation_language(text: str) -> bool:
+    """True if *text* contains any panel-differentiation cue (issue #263)."""
+    low = text.lower()
+    return any(cue in low for cue in DIFFERENTIATION_CUES)

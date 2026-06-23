@@ -1350,6 +1350,18 @@ def _run_page_prompt_handler_gn(project_dir: str, *,
         arch_body = extract_page_architecture(page_path)
         panel_script = extract_panel_script(page_path)
 
+        # Issue #263: portrait-orientation default (page_aspect opt-out) and
+        # panel-differentiation when the panel script has same-subject
+        # close-ups GPT Image 2 would otherwise converge.
+        from storyforge.pages import page_aspect_of, detect_closeup_convergence
+        aspect = page_aspect_of(parsed)
+        convergence = detect_closeup_convergence(panel_script)
+        if convergence:
+            pretty = '; '.join('panels ' + ', '.join(str(i) for i in g)
+                               for g in convergence)
+            log(f'  NOTE {page_id}: same-subject close-ups ({pretty}) — '
+                f'emitting panel-differentiation directive')
+
         # Canon informs (does not embed). Gather what's available; absence is
         # a NOTE, not a skip.
         canon_keys = ['style-foundation', 'lighting-laws']
@@ -1384,6 +1396,7 @@ def _run_page_prompt_handler_gn(project_dir: str, *,
                 page_id=page_id, panel_count=panel_count,
                 scene_title=scene_title,
                 references_required=references_required,
+                page_aspect=aspect, convergence=convergence,
             )
             if dry_run:
                 print(f'===== DRY RUN: strict template for {page_id} =====')
@@ -1404,6 +1417,7 @@ def _run_page_prompt_handler_gn(project_dir: str, *,
                 scene_brief=scene_brief,
                 references_required=references_required,
                 canon_blocks=canon_blocks,
+                page_aspect=aspect, convergence=convergence,
             )
             if dry_run:
                 print(f'===== DRY RUN: coach brief for {page_id} =====')
@@ -1428,6 +1442,7 @@ def _run_page_prompt_handler_gn(project_dir: str, *,
             scene_brief=scene_brief,
             references_required=references_required,
             canon_blocks=canon_blocks,
+            page_aspect=aspect, convergence=convergence,
         )
         if dry_run:
             print(f'===== DRY RUN: full prompt for {page_id} =====')

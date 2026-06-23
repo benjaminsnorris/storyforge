@@ -22,7 +22,7 @@ labeled reference list into the final page-file section.
 
 from typing import Final
 
-from storyforge.pages import PageFile
+from storyforge.pages import ConvergenceGroups, PageFile, DEFAULT_PAGE_ASPECT
 
 
 # The five OpenAI template section labels, in order. Used by the LLM
@@ -53,6 +53,49 @@ _DEFAULT_REFERENCE_ROLES: Final[tuple[str, ...]] = (
     'paper-tone reference (page background / canvas color)',
     'prior rendered page (anchors style + continuity)',
 )
+
+
+def orientation_clause(page_aspect: str = DEFAULT_PAGE_ASPECT) -> str:
+    """Return the one-line orientation directive for a page aspect (#263).
+
+    GPT Image 2 drifts to landscape without an explicit directive, so the
+    portrait clause asserts the target aspect AND negates the wrong ones —
+    the one place orientation negation proved necessary in lived iteration
+    (benjaminsnorris/ashes PR #9), distinct from the content-negation the
+    rest of the prompt avoids.
+    """
+    a = (page_aspect or DEFAULT_PAGE_ASPECT).strip().lower()
+    if a == 'landscape':
+        return 'Render in LANDSCAPE orientation — wider than tall (~3:2 aspect ratio).'
+    if a == 'square':
+        return 'Render in SQUARE orientation — 1:1 aspect ratio.'
+    # Intentional negation — see docstring. This is the ONE place the prompt
+    # negates; do not "fix" it to positive-only framing (the rest of the
+    # prompt avoids negation, but orientation drift needs the explicit "not").
+    return ('Render in PORTRAIT orientation — taller than wide, ~2:3 aspect '
+            'ratio. Do not render as landscape or square.')
+
+
+def differentiation_clause(convergence: ConvergenceGroups | None) -> str:
+    """Return the panel-differentiation directive for converging close-ups.
+
+    `convergence` is the output of pages.detect_closeup_convergence — groups
+    of panel indices that are close-ups of the same subject. Returns '' when
+    there is nothing to differentiate. The wording embeds the differentiation
+    cues pages.has_differentiation_language looks for, so a generated page
+    won't trip the undifferentiated-close-ups warning.
+    """
+    if not convergence:
+        return ''
+    groups = '; '.join(
+        'panels ' + ', '.join(str(i) for i in g) for g in convergence
+    )
+    return (
+        f'Differentiate the framing of the same-subject close-ups ({groups}) '
+        f'so they do not converge into one image: render one panel with the '
+        f'subject in isolation, one as the act of interaction at the contact '
+        f'point, and one at a different scale or angle.'
+    )
 
 
 def _blockquote(text: str) -> str:
@@ -107,10 +150,14 @@ def assemble_workflow_section(*, page_prompt_body: str,
     )
 
 
-def _strict_prompt_body(*, page_id: str, panel_count: int) -> str:
+def _strict_prompt_body(*, page_id: str, panel_count: int,
+                        page_aspect: str = DEFAULT_PAGE_ASPECT,
+                        convergence: ConvergenceGroups | None = None) -> str:
     """TODO scaffold for the 5-section page-prompt body (no LLM)."""
     page_label = page_id.split('-p')[-1] if '-p' in page_id else page_id
     panels = max(panel_count, 1)
+    orient = orientation_clause(page_aspect)
+    differ = differentiation_clause(convergence)
     lines = [
         f'**Page {page_label} — graphic novel page ({panels} '
         f'panel{"s" if panels != 1 else ""}).**',
@@ -128,8 +175,8 @@ def _strict_prompt_body(*, page_id: str, panel_count: int) -> str:
         'Use positive specification (state what IS present), not negation.',
         '',
         f'**Use case:** A single graphic novel page laid out as {panels} '
-        'panel(s) in a TODO grid, read left-to-right, top-to-bottom. '
-        'Continuous with the attached reference page(s).',
+        f'panel(s) in a TODO grid, read left-to-right, top-to-bottom. '
+        f'{orient} Continuous with the attached reference page(s).',
         '',
         '**Panels:**',
         '',
@@ -138,27 +185,37 @@ def _strict_prompt_body(*, page_id: str, panel_count: int) -> str:
         lines.append(f'{i}. TODO — concrete, action-focused beat (1-2 '
                      'sentences). Repeat the character anchor for any '
                      'character shown.')
-    lines += [
-        '',
+    constraints = (
         '**Constraints:** TODO — keep the layout exactly; keep each '
         'character identical to the reference across every panel; positive '
         'constraints only (e.g. "eyes left as raw unpainted canvas", not '
-        '"no glow").',
-    ]
+        f'"no glow"). {orient}'
+    )
+    if differ:
+        constraints += f' {differ}'
+    lines += ['', constraints]
     return '\n'.join(lines)
 
 
 def render_strict_template(*, page_id: str, panel_count: int,
                            scene_title: str,
-                           references_required: list[str]) -> str:
+                           references_required: list[str],
+                           page_aspect: str = DEFAULT_PAGE_ASPECT,
+                           convergence: ConvergenceGroups | None = None) -> str:
     """Deterministic strict-mode `## Image-generation workflow` section.
 
     No LLM call. Emits the approach note, reference list, and a 5-section
-    page-prompt TODO scaffold the author fills in. (`scene_title` is accepted
-    for call-site symmetry with the coach/full builders; the strict scaffold
-    is title-agnostic.)
+    page-prompt TODO scaffold the author fills in, with the orientation
+    directive (page_aspect, default portrait) baked into the Use case and
+    Constraints and a panel-differentiation directive when `convergence`
+    flags same-subject close-ups. (`scene_title` is accepted for call-site
+    symmetry with the coach/full builders; the strict scaffold is
+    title-agnostic.)
     """
-    body = _strict_prompt_body(page_id=page_id, panel_count=panel_count)
+    body = _strict_prompt_body(
+        page_id=page_id, panel_count=panel_count,
+        page_aspect=page_aspect, convergence=convergence,
+    )
     return assemble_workflow_section(
         page_prompt_body=body, references_required=references_required,
     )
@@ -168,13 +225,17 @@ def render_coach_brief(*, page_id: str, panel_count: int,
                        scene_title: str, page_architecture: str,
                        panel_script: str, scene_brief: dict[str, str],
                        references_required: list[str],
-                       canon_blocks: dict[str, str]) -> str:
+                       canon_blocks: dict[str, str],
+                       page_aspect: str = DEFAULT_PAGE_ASPECT,
+                       convergence: ConvergenceGroups | None = None) -> str:
     """Coach-mode markdown brief written to working/coaching/.
 
     Surfaces the inputs (page architecture, panel script, brief, canon
-    vocabulary) and the GPT Image 2 prompting rules so the author can
-    write the page prompt themselves. Does NOT mutate the page file.
+    vocabulary) and the GPT Image 2 prompting rules — including the
+    orientation directive and any panel-differentiation directive — so the
+    author can write the page prompt themselves. Does NOT mutate the page file.
     """
+    differ = differentiation_clause(convergence)
     lines = [
         f'# Page-prompt brief: {page_id}',
         '',
@@ -193,6 +254,12 @@ def render_coach_brief(*, page_id: str, panel_count: int,
         'panel showing that character — not paraphrased.',
         '- **Positive framing only.** Negated keywords ("no glow") leak into '
         'the image; specify what IS present instead.',
+        f'- **Orientation:** put this in BOTH the Use case and Constraints — '
+        f'{orientation_clause(page_aspect)}',
+    ]
+    if differ:
+        lines.append(f'- **Panel differentiation:** {differ}')
+    lines += [
         '',
         '## References to upload',
         '',
@@ -263,7 +330,9 @@ def build_full_prompt(*, page_id: str, panel_count: int,
                       panel_script: str,
                       scene_brief: dict[str, str],
                       references_required: list[str],
-                      canon_blocks: dict[str, str]) -> str:
+                      canon_blocks: dict[str, str],
+                      page_aspect: str = DEFAULT_PAGE_ASPECT,
+                      convergence: ConvergenceGroups | None = None) -> str:
     """Full-mode LLM prompt that authors the page-prompt body.
 
     The handler collects the page architecture, panel script, brief, the
@@ -274,8 +343,13 @@ def build_full_prompt(*, page_id: str, panel_count: int,
     (Scene / Subject / Important details / Use case / Constraints + a
     numbered Panels list), in markdown, WITHOUT blockquote markers and
     without the surrounding workflow scaffolding. The handler wraps it
-    with the approach note and reference list.
+    with the approach note and reference list. The orientation directive
+    (page_aspect, default portrait) goes in BOTH Use case and Constraints,
+    and same-subject close-ups flagged by `convergence` get differentiated
+    framing (issue #263).
     """
+    orient = orientation_clause(page_aspect)
+    differ = differentiation_clause(convergence)
     page_label = page_id.split('-p')[-1] if '-p' in page_id else page_id
     refs = ('\n'.join(f'- Image {i}: {r}'
                       for i, r in enumerate(references_required, start=1))
@@ -306,6 +380,12 @@ def build_full_prompt(*, page_id: str, panel_count: int,
                  'canvas", not "no glowing eyes").')
     parts.append('- Reference the attached images by role ("see attached '
                  'character reference", "match the attached page style").')
+    parts.append(f'- Orientation: GPT Image 2 drifts to landscape unless told '
+                 f'otherwise. Put this directive in BOTH the Use case and the '
+                 f'Constraints, verbatim: "{orient}"')
+    if differ:
+        parts.append('- Same-subject close-ups converge into one image unless '
+                     'differentiated. ' + differ)
     parts.append('')
     parts.append('## Page identity')
     parts.append('')
@@ -370,8 +450,8 @@ def build_full_prompt(*, page_id: str, panel_count: int,
     parts.append('')
     parts.append(f'**Use case:** A single graphic novel page laid out as '
                  f'{panel_count} panels in a <grid geometry>, read '
-                 'left-to-right, top-to-bottom. Continuous with the attached '
-                 'reference page(s).')
+                 f'left-to-right, top-to-bottom. {orient} Continuous with the '
+                 'attached reference page(s).')
     parts.append('')
     parts.append('**Panels:**')
     parts.append('')
@@ -380,9 +460,10 @@ def build_full_prompt(*, page_id: str, panel_count: int,
     parts.append(f'(... one numbered beat per panel, through panel '
                  f'{panel_count})')
     parts.append('')
-    parts.append('**Constraints:** <keep the layout exactly; keep each '
-                 'character identical to the reference across every panel; '
-                 'positive constraints only>')
+    parts.append(f'**Constraints:** <keep the layout exactly; keep each '
+                 f'character identical to the reference across every panel; '
+                 f'positive constraints only>. {orient}'
+                 + (f' {differ}' if differ else ''))
     parts.append('```')
     parts.append('')
     parts.append('Hard requirements:')
@@ -391,7 +472,13 @@ def build_full_prompt(*, page_id: str, panel_count: int,
                  'and a **Panels:** list.')
     parts.append(f'- The Panels list has exactly {panel_count} numbered '
                  'beats.')
+    parts.append(f'- The orientation directive appears in BOTH Use case and '
+                 f'Constraints: "{orient}"')
+    if differ:
+        parts.append('- Differentiate the flagged same-subject close-ups so '
+                     'they do not converge.')
     parts.append('- Total length ~250-400 words. Shorter is better than '
                  'padded.')
-    parts.append('- No negation anywhere. Positive specification only.')
+    parts.append('- Use positive specification for content; the only allowed '
+                 'negation is the orientation directive above.')
     return '\n'.join(parts) + '\n'

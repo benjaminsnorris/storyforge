@@ -1104,6 +1104,34 @@ def _check_page_files(project_dir: str) -> list[dict]:
                               'the section by hand)',
                     'severity': 'warning',
                 })
+            elif kind == 'invalid_page_aspect':
+                findings.append({
+                    'type': 'page_invalid_aspect', 'file': rel_path,
+                    'detail': issue['detail'],
+                    'action': 'Set page_aspect to one of portrait | landscape '
+                              '| square (default portrait)',
+                    'severity': 'warning',
+                })
+            elif kind == 'non_portrait_page_aspect':
+                findings.append({
+                    'type': 'page_non_portrait_aspect', 'file': rel_path,
+                    'detail': issue['detail'],
+                    'action': 'Confirm the non-portrait orientation is '
+                              'intentional; add a trailing `# justification` '
+                              'comment on the page_aspect line to silence',
+                    'severity': 'warning',
+                })
+            elif kind == 'undifferentiated_closeups':
+                findings.append({
+                    'type': 'page_undifferentiated_closeups', 'file': rel_path,
+                    'detail': issue['detail'],
+                    'action': 'Re-run `storyforge elaborate --stage prompts '
+                              '--force --page '
+                              f'{os.path.splitext(os.path.basename(page_path))[0]}` '
+                              'to regenerate with differentiated framing, or '
+                              'vary each close-up\'s framing by hand',
+                    'severity': 'warning',
+                })
             else:
                 # Catches future PageFindingKind values that nobody wires
                 # up here — silent drop would re-introduce SF-6.
