@@ -127,6 +127,25 @@ def test_detect_convergence_numbered_beats_fallback():
     assert detect_closeup_convergence(script) == [[1, 2]]
 
 
+def test_detect_convergence_bold_panel_inline_format():
+    # SF-1: `**Panel N.** <inline composition>` is the format the GN fixtures
+    # and per-page files use; the detector must recognize it, not just
+    # `### Panel N` / numbered beats. Regression for the no-op-on-real-data bug.
+    from storyforge.pages import detect_closeup_convergence
+    script = ("**Panel 1.** Close. The portrait's mouth, half-finished.\n\n"
+              "**Panel 2.** Close. The portrait's eyes, just added.\n")
+    assert detect_closeup_convergence(script) == [[1, 2]]
+
+
+def test_detect_convergence_bold_panel_block_format():
+    # SF-1: the block form `**Panel N** (size hint)` with composition on the
+    # following line — the canonical `storyforge write` output (prompts_gn.py).
+    from storyforge.pages import detect_closeup_convergence
+    script = ("**Panel 1** (inset)\nClose on the portrait. The mouth.\n\n"
+              "**Panel 2** (inset)\nClose on the portrait. The eyes.\n")
+    assert detect_closeup_convergence(script) == [[1, 2]]
+
+
 def test_has_differentiation_language():
     from storyforge.pages import has_differentiation_language
     assert has_differentiation_language('one panel in isolation, one at the contact point')

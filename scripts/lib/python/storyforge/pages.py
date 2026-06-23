@@ -663,9 +663,15 @@ _CLOSEUP_RE = re.compile(
     re.IGNORECASE,
 )
 
+# `**Panel N**` bold markers — the canonical format `storyforge write` emits
+# (see script_format.py:PANEL_HEADER and prompts_gn.py). Lenient on what
+# follows the number so it matches both the block form (`**Panel 1** (full
+# bleed)`, content below) and the inline form (`**Panel 1.** Wide. The
+# studio.`) seen in real panel scripts.
+_PANEL_BOLD_RE = re.compile(r'^\s*\*\*Panel\s+(\d+)', re.MULTILINE | re.IGNORECASE)
 # `### Panel N` subsection headers within a `## Panel script` section.
 _PANEL_SUBHEADER_RE = re.compile(r'^###\s+Panel\s+(\d+)\b', re.MULTILINE | re.IGNORECASE)
-# Fallback: numbered beats (`1. ...`) when no `### Panel N` headers exist.
+# Fallback: numbered beats (`1. ...`) when no panel-marker headers exist.
 _NUMBERED_BEAT_RE2 = re.compile(r'^\s*(\d+)\.\s', re.MULTILINE)
 
 # Vocabulary the differentiation directive uses AND the cleanup detector
@@ -691,11 +697,14 @@ _SUBJECT_STOPWORDS: Final[frozenset[str]] = frozenset({
 def _split_panel_blocks(panel_script: str) -> list[tuple[int, str]]:
     """Split a `## Panel script` body into (panel_index, block_text).
 
-    Prefers `### Panel N` subsection headers; falls back to numbered beats.
+    Prefers `**Panel N**` bold markers (the format `storyforge write`
+    emits), then `### Panel N` subsection headers, then numbered beats.
     The header line is included in the block so a framing cue stated in the
-    header (`### Panel 2 — Close, hand uncapping…`) is captured.
+    header (`**Panel 2.** Close, hand uncapping…`) is captured.
     """
-    headers = list(_PANEL_SUBHEADER_RE.finditer(panel_script))
+    headers = list(_PANEL_BOLD_RE.finditer(panel_script))
+    if not headers:
+        headers = list(_PANEL_SUBHEADER_RE.finditer(panel_script))
     if not headers:
         headers = list(_NUMBERED_BEAT_RE2.finditer(panel_script))
     blocks: list[tuple[int, str]] = []
