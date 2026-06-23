@@ -313,10 +313,14 @@ def test_handler_notes_missing_references(tmp_path, monkeypatch, capsys):
         proj, dry_run=False, coaching='strict',
         page=None, scene=None, force=False,
     )
-    output = capsys.readouterr().out + capsys.readouterr().err
-    # Strict still writes, but a NOTE warns references are recommended
+    # readouterr() drains the buffer, so capture it ONCE (calling it twice
+    # left the second read empty and the NOTE assertion was never made).
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    # Strict still writes, but a NOTE warns references are recommended.
     text = open(os.path.join(proj, 'pages', 's01-p1.md')).read()
     assert '## Image-generation workflow' in text
+    assert 'no references_required' in output
 
 
 def test_prompts_stage_exits_on_novel_medium(tmp_path):

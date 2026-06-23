@@ -174,6 +174,31 @@ def test_detect_convergence_groups_singular_and_plural():
     assert detect_closeup_convergence(script) == [[1, 2]]
 
 
+def test_detect_convergence_single_closeup_no_trigger():
+    # T-1: a lone close-up has nothing to converge with — no group.
+    from storyforge.pages import detect_closeup_convergence
+    script = ("**Panel 1.** Wide. The studio.\n\n"
+              "**Panel 2.** Close on the portrait.\n")
+    assert detect_closeup_convergence(script) == []
+
+
+def test_detect_convergence_non_closeup_same_subject_no_trigger():
+    # T-2: convergence risk is specific to close-ups; wide/establishing
+    # shots of the same subject must NOT group.
+    from storyforge.pages import detect_closeup_convergence
+    script = ("**Panel 1.** Wide shot of the portrait.\n\n"
+              "**Panel 2.** Establishing shot of the portrait.\n")
+    assert detect_closeup_convergence(script) == []
+
+
+def test_detect_convergence_exact_two_same_subject():
+    # T-3: the >=2 boundary — exactly two same-subject close-ups group.
+    from storyforge.pages import detect_closeup_convergence
+    script = ("**Panel 1.** Close on the portrait's mouth.\n\n"
+              "**Panel 2.** Close on the portrait's eyes.\n")
+    assert detect_closeup_convergence(script) == [[1, 2]]
+
+
 def test_has_differentiation_language():
     from storyforge.pages import has_differentiation_language
     assert has_differentiation_language('one panel in isolation, one at the contact point')
