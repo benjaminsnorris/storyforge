@@ -335,6 +335,11 @@ def validate_page_file(path: str) -> list[PageFinding]:
       - page_within_scene_out_of_range: not in [1, total_pages_in_scene]
       - missing_page_architecture: "## Page architecture" section is missing or empty
       - missing_image_workflow: "## Image-generation workflow" section is missing or empty
+      - invalid_page_aspect: page_aspect not in {portrait, landscape, square}
+      - non_portrait_page_aspect: a non-portrait page_aspect with no justification comment
+      - undifferentiated_closeups: same-subject close-ups with no differentiation language
+
+    The PageFindingKind Literal is the authoritative list; keep it in sync.
     """
     page = parse_page_file(path)
     if page is None:
@@ -691,12 +696,13 @@ DIFFERENTIATION_CUES: Final[tuple[str, ...]] = (
 
 # Words dropped when reducing a close-up beat to a subject signature: framing
 # vocabulary, articles/possessives, and generic filler. What remains are the
-# content nouns that identify the subject.
+# content words that stand in for the subject — a coarse proxy, not true
+# noun extraction, so two beats can share an incidental content word.
 _SUBJECT_STOPWORDS: Final[frozenset[str]] = frozenset({
     'close', 'closeup', 'up', 'on', 'of', 'the', 'a', 'an', 'shot', 'panel',
     'mid', 'wide', 'extreme', 'macro', 'tight', 'detail', 'his', 'her', 'its',
     'their', 'and', 'to', 'in', 'at', 'with', 'from', 'view', 'image',
-    'extreme', 'angle', 'scale', 'frame', 'framing',
+    'angle', 'scale', 'frame', 'framing',
 })
 
 
@@ -778,7 +784,7 @@ def detect_closeup_convergence(panel_script: str) -> ConvergenceGroups:
         for jdx, jsig in closeups[i + 1:]:
             if jdx in used:
                 continue
-            if sig & jsig:  # share at least one content noun
+            if sig & jsig:  # share at least one content word
                 group.append(jdx)
                 used.add(jdx)
         if len(group) >= 2:

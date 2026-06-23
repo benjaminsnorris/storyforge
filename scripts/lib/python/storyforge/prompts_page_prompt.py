@@ -69,6 +69,9 @@ def orientation_clause(page_aspect: str = DEFAULT_PAGE_ASPECT) -> str:
         return 'Render in LANDSCAPE orientation — wider than tall (~3:2 aspect ratio).'
     if a == 'square':
         return 'Render in SQUARE orientation — 1:1 aspect ratio.'
+    # Intentional negation — see docstring. This is the ONE place the prompt
+    # negates; do not "fix" it to positive-only framing (the rest of the
+    # prompt avoids negation, but orientation drift needs the explicit "not").
     return ('Render in PORTRAIT orientation — taller than wide, ~2:3 aspect '
             'ratio. Do not render as landscape or square.')
 
