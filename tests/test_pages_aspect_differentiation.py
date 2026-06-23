@@ -146,6 +146,34 @@ def test_detect_convergence_bold_panel_block_format():
     assert detect_closeup_convergence(script) == [[1, 2]]
 
 
+def test_singularize_preserves_singular_nouns_ending_in_s():
+    # CR-1: str.rstrip("'s") mangled singular nouns (glass->gla, canvas->canva).
+    from storyforge.pages import _singularize
+    assert _singularize('glass') == 'glass'
+    assert _singularize('canvas') == 'canvas'
+    assert _singularize('iris') == 'iris'
+    assert _singularize('focus') == 'focus'
+
+
+def test_singularize_normalizes_plurals():
+    # CR-1: singular and plural of the same noun must collapse to one token.
+    from storyforge.pages import _singularize
+    assert _singularize('candles') == _singularize('candle') == 'candle'
+    assert _singularize('hands') == _singularize('hand') == 'hand'
+    assert _singularize('glasses') == _singularize('glass') == 'glass'
+    assert _singularize("portrait's") == 'portrait'
+    assert _singularize('eyes') == 'eye'
+
+
+def test_detect_convergence_groups_singular_and_plural():
+    # CR-1: two close-ups of the same subject in singular vs plural forms
+    # must still group (they didn't when the noun was over-stripped).
+    from storyforge.pages import detect_closeup_convergence
+    script = ("**Panel 1.** Close on the glass.\n\n"
+              "**Panel 2.** Close on the glasses.\n")
+    assert detect_closeup_convergence(script) == [[1, 2]]
+
+
 def test_has_differentiation_language():
     from storyforge.pages import has_differentiation_language
     assert has_differentiation_language('one panel in isolation, one at the contact point')

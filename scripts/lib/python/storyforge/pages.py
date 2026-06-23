@@ -715,11 +715,35 @@ def _split_panel_blocks(panel_script: str) -> list[tuple[int, str]]:
     return blocks
 
 
+def _singularize(word: str) -> str:
+    """Strip a trailing possessive/plural suffix for loose subject matching.
+
+    A small stemmer, not `str.rstrip("'s")` — which removed EVERY trailing
+    `'`/`s` character (`glass`→`gla`, `canvas`→`canva`), breaking
+    same-subject grouping. Here:
+      - possessive `'s` is dropped (`portrait's`→`portrait`);
+      - sibilant `-es` plurals collapse (`glasses`→`glass`, `boxes`→`box`);
+      - `-ies`→`-y` (`bodies`→`body`);
+      - a plain `-s` plural is dropped (`candles`→`candle`) EXCEPT for
+        singular nouns ending in `ss`/`us`/`is`/`as`/`os` (`glass`,
+        `canvas`, `iris`, `focus`), which are left intact.
+    """
+    if word.endswith("'s"):
+        return word[:-2]
+    if word.endswith('es') and word[:-2].endswith(('s', 'x', 'z', 'ch', 'sh')):
+        return word[:-2]
+    if word.endswith('ies') and len(word) > 4:
+        return word[:-3] + 'y'
+    if word.endswith('s') and not word.endswith(('ss', 'us', 'is', 'as', 'os')):
+        return word[:-1]
+    return word
+
+
 def _subject_signature(block: str) -> frozenset[str]:
     """Reduce a close-up panel block to its subject content-word signature."""
     words = re.findall(r"[a-z][a-z']*", block.lower())
     return frozenset(
-        w.rstrip("'s") for w in words
+        _singularize(w) for w in words
         if w not in _SUBJECT_STOPWORDS and len(w) > 2
     )
 
