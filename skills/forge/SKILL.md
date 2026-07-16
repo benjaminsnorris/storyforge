@@ -25,8 +25,10 @@ Before doing anything else, orient yourself:
    next* — prefer it over inferring phase from `storyforge.yaml` by hand. Key
    fields:
    - `next.stage` — the stable routing key. Route on this, not on prose.
-   - `next.command` — the concrete command to recommend/run (may be empty for
-     prose-tier steps that route to the `elaborate` skill).
+   - `next.command` — the concrete command to recommend/run; it is always a
+     real, non-empty command. For prose-tier rungs it's the deterministic
+     floor check (`storyforge score --level N`) — the section itself is
+     developed via the `elaborate` skill, not by this command.
    - `blockers` — coverage/consistency mismatches and any phase/yaml
      disagreement; surface these before advancing.
    - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout.
@@ -67,7 +69,9 @@ Read the `phase` field from `storyforge.yaml`. If it is one of: `spine`, `archit
     (pressure-tests logline/synopsis/act-shape before any spine work)
   - `storyforge score --compare <a> <b> [--level N]` — compare candidate
     loglines/synopses when the author is exploring options
-- **If `next.stage` is `story-power`**, recommend running
+- **If `then.stage` is `story-power`** (the paired follow-up `status` reports
+  while `next.stage` is still a prose-tier rung), that confirms the bullet
+  above: once the section's floor check passes, recommend running
   `storyforge score --story-power` to validate narrative design before the spine.
 - Route to the `elaborate` skill for most requests (scene work, drafting prep, "what's next", structural planning)
 - The `develop`, `voice`, `scenes`, and `plan-revision` skills are not used during elaboration — their work is integrated into the elaborate pipeline
