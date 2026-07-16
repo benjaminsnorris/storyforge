@@ -572,7 +572,6 @@ def render_human(verdict: dict) -> str:
 
 
 def main(argv=None):
-    parse_args(argv or [])  # validates flags
     args = parse_args(argv or [])
     project_dir = detect_project_root()
     medium = get_medium(project_dir) or 'novel'
