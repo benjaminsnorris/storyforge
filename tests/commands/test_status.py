@@ -122,3 +122,27 @@ def test_draft_stage_excludes_cut_merged(tmp_path):
 def test_collect_blockers_empty_project_has_none(tmp_path):
     # No artifacts present → every coverage/consistency level is skipped.
     assert status.collect_blockers(str(tmp_path)) == []
+
+
+from storyforge import cmd_status
+
+
+def test_render_human_contains_ladder_and_next(tmp_path):
+    v = status.build_status(str(tmp_path))
+    text = cmd_status.render_human(v)
+    assert 'PHASE:' in text
+    assert 'L0 logline' in text
+    assert 'NEXT:' in text
+    assert 'storyforge score --level 0' in text
+
+
+def test_main_json_output(tmp_path, capsys, monkeypatch):
+    import json as _json
+    monkeypatch.setattr(cmd_status, 'detect_project_root',
+                        lambda: str(tmp_path))
+    monkeypatch.setattr(cmd_status, 'get_medium', lambda pd: 'novel')
+    cmd_status.main(['--json'])
+    out = capsys.readouterr().out
+    data = _json.loads(out)
+    assert data['phase'] == 'logline'
+    assert data['next']['stage'] == 'logline'

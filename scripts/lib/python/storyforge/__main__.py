@@ -64,6 +64,7 @@ COMMANDS = {
     'scenes-export': 'storyforge.cmd_scenes_export',
     'scenes-import': 'storyforge.cmd_scenes_import',
     'sync': 'storyforge.cmd_sync',
+    'status': 'storyforge.cmd_status',
     'publish': 'storyforge.cmd_publish',
     'propose-summaries': 'storyforge.cmd_propose_summaries',
 }
