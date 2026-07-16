@@ -10,8 +10,6 @@ No LLM, no writes. Pure over project files.
 import os
 
 from storyforge.scoring_levels import score_all_levels, LEVEL_NAMES
-from storyforge.scoring_consistency import score_consistency_all_levels
-from storyforge.scoring_coverage import score_coverage_all_levels
 from storyforge.common import parse_story_summary
 
 LADDER_LEVELS = [0, 1, 2, 3, 4, 5, 6]

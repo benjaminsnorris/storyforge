@@ -33,3 +33,23 @@ def test_ladder_states_empty_project(tmp_path):
     assert [r['level'] for r in ladder] == [0, 1, 2, 3, 4, 5, 6]
     assert all(r['state'] == 'not_started' for r in ladder)
     assert ladder[0]['name'] == 'logline'
+
+
+def test_ladder_states_prose_solid_and_thin(tmp_path):
+    pd = str(tmp_path)
+    # A short, well-formed logline passes the L0 floor → solid.
+    _write(os.path.join(pd, 'reference', 'story-summary.md'),
+           "## Logline\nA cartographer who cannot lie must forge a map.\n\n"
+           "## Synopsis\n\n## Act-shape\n\n## Theme\n")
+    by_level = {r['level']: r for r in status.ladder_states(pd)}
+    assert by_level[0]['state'] == 'solid'
+    assert by_level[1]['state'] == 'not_started'   # synopsis empty
+
+    # A logline well over the 35-word floor is present but fails → thin,
+    # with a non-empty detail explaining the failure.
+    long_logline = ' '.join(['word'] * 60)
+    _write(os.path.join(pd, 'reference', 'story-summary.md'),
+           f"## Logline\n{long_logline}.\n\n## Synopsis\n\n## Act-shape\n\n## Theme\n")
+    l0 = {r['level']: r for r in status.ladder_states(pd)}[0]
+    assert l0['state'] == 'thin'
+    assert l0['detail']   # non-empty explanation
