@@ -90,13 +90,29 @@ def test_build_status_prose_solid_points_to_spine(tmp_path):
     assert v['next']['command'] == 'storyforge elaborate --stage spine'
 
 
-def test_phase_mismatch_is_reported(tmp_path):
+def test_fresh_project_no_spurious_phase_blocker(tmp_path):
+    # New projects default to phase: spine but nothing is built. The declared
+    # phase is intent, not an overclaim → no phase blocker, matches=True.
     pd = str(tmp_path)
-    _write(os.path.join(pd, 'storyforge.yaml'), "phase: architecture\n")
+    _write(os.path.join(pd, 'storyforge.yaml'), "phase: spine\n")
     v = status.build_status(pd)
-    assert v['phase_declared'] == 'architecture'
-    assert v['phase'] == 'logline'          # nothing built yet
-    assert v['phase_matches_yaml'] is False
+    assert v['phase'] == 'logline'
+    assert v['phase_declared'] == 'spine'
+    assert v['phase_matches_yaml'] is True
+    assert not any(b['source'] == 'phase' for b in v['blockers'])
+
+
+def test_phase_mismatch_reported_when_work_exists(tmp_path):
+    # A built logline means the ladder is NOT all-not_started, so a declared
+    # phase that diverges from the computed rung IS a real mismatch.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'story-summary.md'),
+           "## Logline\nA cartographer who cannot lie must forge a map.\n\n"
+           "## Synopsis\n\n## Act-shape\n\n## Theme\n")
+    _write(os.path.join(pd, 'storyforge.yaml'), "phase: briefs\n")
+    v = status.build_status(pd)
+    assert v['phase'] == 'synopsis'           # logline solid → synopsis is next
+    assert v['phase_matches_yaml'] is False    # declared 'briefs' != computed
     assert any(b['source'] == 'phase' for b in v['blockers'])
 
 
@@ -122,6 +138,41 @@ def test_draft_stage_excludes_cut_merged(tmp_path):
 def test_collect_blockers_empty_project_has_none(tmp_path):
     # No artifacts present → every coverage/consistency level is skipped.
     assert status.collect_blockers(str(tmp_path)) == []
+
+
+def test_recommend_structural_stage_mapping():
+    for stage, elab, then_stage in [
+        ('spine', 'spine', 'architecture'),
+        ('architecture', 'architecture', 'scene-map'),
+        ('scene-map', 'map', 'briefs'),
+        ('briefs', 'briefs', 'draft'),
+    ]:
+        nxt, then = status._recommend(stage)
+        assert nxt['stage'] == stage
+        assert nxt['command'] == f'storyforge elaborate --stage {elab}'
+        assert nxt['command']            # always non-empty
+        assert then['stage'] == then_stage
+
+
+def test_recommend_prose_and_terminal_stages():
+    for stage, level in [('logline', 0), ('synopsis', 1), ('act-shape', 2)]:
+        nxt, then = status._recommend(stage)
+        assert nxt['stage'] == stage
+        assert nxt['command'] == f'storyforge score --level {level}'
+        assert then['stage'] == 'story-power'   # story-power is then-only
+    nxt, then = status._recommend('draft')
+    assert nxt['command'] == 'storyforge write'
+    assert then['stage'] == 'evaluate'
+    nxt, then = status._recommend('evaluate')
+    assert nxt['command'] == 'storyforge evaluate'
+    assert then is None
+
+
+def test_collect_blockers_positive_on_fixture(project_dir):
+    blockers = status.collect_blockers(project_dir)
+    assert blockers                                    # fixture has real issues
+    assert all(set(b) == {'source', 'level', 'detail'} for b in blockers)
+    assert any(b['source'] in ('coverage', 'consistency') for b in blockers)
 
 
 from storyforge import cmd_status

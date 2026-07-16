@@ -116,7 +116,14 @@ def collect_blockers(project_dir: str) -> list[dict]:
                 if not c['passed'] and not c.get('accepted'):
                     blockers.append({'source': source, 'level': level,
                                      'detail': c['detail'] or c['check']})
-    return blockers
+    seen = set()
+    deduped = []
+    for b in blockers:
+        key = (b['source'], b['level'], b['detail'])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(b)
+    return deduped
 
 
 def _read_scene_statuses(project_dir: str) -> list[str]:
@@ -195,11 +202,14 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
 
     declared = (read_yaml_field('phase', project_dir) or '').strip()
     normalized = _PHASE_ALIASES.get(declared, declared)
-    # Only compare when the declared phase maps onto a ladder phase we track.
-    # Unrecognized / pre-spine legacy phases (development, scene-design, '')
-    # aren't comparable to a ladder rung, so treat them as matching rather
-    # than emitting a spurious phase blocker.
-    if not declared or normalized not in _LADDER_PHASE_NAMES:
+    # A declared phase on a project where NOTHING is built yet is author
+    # intent (new projects default to phase: spine), not an overclaim — so an
+    # all-not_started ladder counts as matching. Otherwise only compare when
+    # the declared phase maps onto a ladder phase we track; unrecognized /
+    # pre-spine legacy phases (development, scene-design, '') are not
+    # comparable to a ladder rung.
+    all_not_started = all(r['state'] == 'not_started' for r in ladder)
+    if not declared or all_not_started or normalized not in _LADDER_PHASE_NAMES:
         matches = True
     else:
         matches = (normalized == phase)
