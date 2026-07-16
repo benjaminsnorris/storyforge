@@ -98,3 +98,27 @@ def test_phase_mismatch_is_reported(tmp_path):
     assert v['phase'] == 'logline'          # nothing built yet
     assert v['phase_matches_yaml'] is False
     assert any(b['source'] == 'phase' for b in v['blockers'])
+
+
+def test_unrecognized_legacy_phase_not_flagged(tmp_path):
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'storyforge.yaml'), "phase: development\n")
+    v = status.build_status(pd)
+    assert v['phase'] == 'logline'
+    assert v['phase_matches_yaml'] is True          # legacy/unknown → not compared
+    assert not any(b['source'] == 'phase' for b in v['blockers'])
+
+
+def test_draft_stage_excludes_cut_merged(tmp_path):
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'scenes.csv'),
+           "id|seq|status\ns1|1|drafted\ns2|2|briefed\ns3|3|cut\n")
+    assert status.draft_stage(pd) == ('draft', 1, 2)   # cut excluded, not all drafted
+    _write(os.path.join(pd, 'reference', 'scenes.csv'),
+           "id|seq|status\ns1|1|drafted\ns2|2|polished\ns3|3|merged\n")
+    assert status.draft_stage(pd) == ('evaluate', 2, 2)  # merged excluded, all drafted+
+
+
+def test_collect_blockers_empty_project_has_none(tmp_path):
+    # No artifacts present → every coverage/consistency level is skipped.
+    assert status.collect_blockers(str(tmp_path)) == []

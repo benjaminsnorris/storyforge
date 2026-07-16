@@ -13,6 +13,7 @@ from storyforge.scoring_levels import score_all_levels, LEVEL_NAMES
 from storyforge.scoring_consistency import score_consistency_all_levels
 from storyforge.scoring_coverage import score_coverage_all_levels
 from storyforge.common import parse_story_summary, read_yaml_field
+from storyforge.csv_cli import get_column
 
 LADDER_LEVELS = [0, 1, 2, 3, 4, 5, 6]
 PROSE_STAGES = ('logline', 'synopsis', 'act-shape')
@@ -85,6 +86,20 @@ def ladder_states(project_dir: str, medium: str = 'novel') -> list[dict]:
 _DRAFTED_STATUSES = {'drafted', 'polished'}
 _EXCLUDED_STATUSES = {'cut', 'merged'}
 
+# yaml / legacy phase names normalized onto the post-briefs ladder phases.
+_PHASE_ALIASES = {
+    'drafting': 'draft',
+    'evaluation': 'evaluate',
+    'revision': 'evaluate',
+    'review': 'evaluate',
+    'polish': 'evaluate',
+    'production': 'evaluate',
+    'complete': 'evaluate',
+}
+
+# Every phase name build_status can compute: ladder rungs + draft/evaluate.
+_LADDER_PHASE_NAMES = set(LEVEL_NAMES.values()) | {'draft', 'evaluate'}
+
 
 def collect_blockers(project_dir: str) -> list[dict]:
     """Coverage + consistency failures for rungs whose artifact is present."""
@@ -105,23 +120,7 @@ def collect_blockers(project_dir: str) -> list[dict]:
 
 
 def _read_scene_statuses(project_dir: str) -> list[str]:
-    path = os.path.join(project_dir, 'reference', 'scenes.csv')
-    if not os.path.isfile(path):
-        return []
-    with open(path, encoding='utf-8') as f:
-        lines = [ln for ln in f.read().splitlines() if ln.strip()]
-    if len(lines) < 2:
-        return []
-    header = lines[0].split('|')
-    try:
-        idx = header.index('status')
-    except ValueError:
-        return []
-    out = []
-    for ln in lines[1:]:
-        cells = ln.split('|')
-        out.append(cells[idx] if idx < len(cells) else '')
-    return out
+    return get_column(os.path.join(project_dir, 'reference', 'scenes.csv'), 'status')
 
 
 def draft_stage(project_dir: str) -> tuple[str, int, int]:
@@ -153,7 +152,7 @@ def _recommend(stage: str) -> tuple[dict, dict | None]:
                 'reason': 'Validate narrative design before building the spine'}
         return nxt, then
     if stage in ELABORATE_STAGE:
-        order = ['spine', 'architecture', 'scene-map', 'briefs']
+        order = list(ELABORATE_STAGE)
         nxt = {'stage': stage,
                'action': f'Develop the {stage}',
                'command': f'storyforge elaborate --stage {ELABORATE_STAGE[stage]}',
@@ -195,9 +194,15 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
         phase, _drafted, _total = draft_stage(project_dir)
 
     declared = (read_yaml_field('phase', project_dir) or '').strip()
-    # yaml phases use 'scene-map' spelled 'scene-map'; declared legacy phases
-    # (drafting/evaluation/etc.) simply won't match a ladder rung name.
-    matches = (declared == phase) if declared else True
+    normalized = _PHASE_ALIASES.get(declared, declared)
+    # Only compare when the declared phase maps onto a ladder phase we track.
+    # Unrecognized / pre-spine legacy phases (development, scene-design, '')
+    # aren't comparable to a ladder rung, so treat them as matching rather
+    # than emitting a spurious phase blocker.
+    if not declared or normalized not in _LADDER_PHASE_NAMES:
+        matches = True
+    else:
+        matches = (normalized == phase)
 
     blockers = collect_blockers(project_dir)
     if declared and not matches:
