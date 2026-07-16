@@ -55,15 +55,23 @@ L3 spine → L4 architecture → L5 scene-map → L6 briefs   (structural tier)
 
 Each rung's state is exactly one of:
 
-- `solid` — floor check passes AND no coverage mismatch against the tier above
-- `thin` / `incomplete` — floor check fails, or a required field/row is missing
+- `solid` — the artifact exists and its floor check passes (no non-accepted
+  failures)
+- `thin` — the artifact exists but a floor check fails
 - `not_started` — the underlying artifact does not exist yet
 
-State is derived **purely** from the existing results:
+Rung state is derived **only** from the floor check (`scoring_levels`). This
+is deliberate: coverage checks look *downstream* (act-shape→spine,
+spine→architecture, architecture→scenes), so folding them into a rung's own
+solidity would wrongly keep act-shape `thin` until the spine exists. Coverage
+and consistency mismatches are surfaced separately as **blockers** (see The
+verdict), counted only for rungs that are present.
 
-- floor: `scoring_levels.score_level` / `score_all_levels` (L0–L6)
-- registry consistency: `scoring_consistency` (L3–L6)
-- cross-tier coverage/mismatch: `scoring_coverage` (L2–L4)
+Inputs:
+
+- floor (rung state): `scoring_levels.score_all_levels` (L0–L6)
+- registry consistency (blockers): `scoring_consistency.score_consistency_all_levels` (L3–L6)
+- cross-tier coverage/mismatch (blockers): `scoring_coverage.score_coverage_all_levels` (L2–L4)
 
 Draft and evaluate/polish state come from the scene `status` column in
 `reference/scenes.csv` (e.g. all scenes `drafted` → past the draft rung).
@@ -76,8 +84,13 @@ From the ladder walk, `status` computes:
   `storyforge.yaml:phase`. A mismatch between the walked position and the
   declared phase is itself a reported finding (e.g. "phase says
   `architecture` but spine L3 is thin").
-- **next** — the single recommended command for the current rung. This is a
-  static mapping from rung → action:
+- **next** — the recommended step for the current rung, as a structured
+  object `{stage, action, command, reason}`. `stage` is a **stable enum**
+  (`logline|synopsis|act-shape|spine|architecture|scene-map|briefs|
+  story-power|draft|evaluate`) that forge routes on — robust against prose
+  drift, which is the core of #267. `action` is the human phrasing, `command`
+  the concrete shell command to run where one exists (`""` for pure-develop
+  steps that route to a skill). Static mapping from rung → step:
   - L0/L1/L2 thin → `elaborate --stage <prose stage>` (then a
     `score --story-power` read; `--compare` when exploring candidates)
   - L3–L6 thin → `elaborate --stage <spine|architecture|scene-map|briefs>`
@@ -124,9 +137,12 @@ prose-scraping):
     {"level": 4, "name": "architecture", "state": "thin",
      "detail": "2 rows missing summary"}
   ],
-  "next": {"action": "elaborate --stage architecture", "reason": "..."},
-  "then": {"action": "score --story-power", "reason": "..."},
-  "blockers": []
+  "next": {"stage": "architecture", "action": "Develop the architecture",
+           "command": "storyforge elaborate --stage architecture", "reason": "..."},
+  "then": {"stage": "scene-map", "action": "Develop the scene map",
+           "command": "storyforge elaborate --stage map", "reason": "..."},
+  "blockers": [{"source": "coverage", "level": 4,
+                "detail": "2 architecture rows have no scene"}]
 }
 ```
 
