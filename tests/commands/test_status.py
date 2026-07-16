@@ -53,3 +53,48 @@ def test_ladder_states_prose_solid_and_thin(tmp_path):
     l0 = {r['level']: r for r in status.ladder_states(pd)}[0]
     assert l0['state'] == 'thin'
     assert l0['detail']   # non-empty explanation
+
+
+def test_build_status_empty_project_points_to_logline(tmp_path):
+    v = status.build_status(str(tmp_path))
+    assert v['phase'] == 'logline'
+    assert v['next']['stage'] == 'logline'
+    assert v['next']['command'] == 'storyforge score --level 0'
+    assert v['then']['stage'] == 'story-power'
+    assert v['blockers'] == []
+
+
+def test_build_status_prose_solid_points_to_spine(tmp_path):
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'story-summary.md'),
+           "## Logline\n"
+           "A cartographer who cannot draw a false line is ordered to forge "
+           "a map that will start a war.\n\n"
+           "## Synopsis\n"
+           "She takes the commission. She learns the war it will start. She "
+           "must choose between the guild that made her and the truth only "
+           "she can draw. In the end she draws the true map and burns the "
+           "guild's copy.\n\n"
+           "## Act-shape\n"
+           "### Act 1\nShe accepts the forbidden commission.\n"
+           "### Act 2\nShe uncovers the war it will trigger and is trapped.\n"
+           "### Act 3\nShe draws the truth and pays for it.\n\n"
+           "## Theme\nTruth has a cost; someone must pay it.\n")
+    v = status.build_status(pd)
+    # All three prose rungs solid → phase advances to spine.
+    prose = {r['name']: r['state'] for r in v['ladder'] if r['level'] < 3}
+    assert prose == {'logline': 'solid', 'synopsis': 'solid',
+                     'act-shape': 'solid'}
+    assert v['phase'] == 'spine'
+    assert v['next']['stage'] == 'spine'
+    assert v['next']['command'] == 'storyforge elaborate --stage spine'
+
+
+def test_phase_mismatch_is_reported(tmp_path):
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'storyforge.yaml'), "phase: architecture\n")
+    v = status.build_status(pd)
+    assert v['phase_declared'] == 'architecture'
+    assert v['phase'] == 'logline'          # nothing built yet
+    assert v['phase_matches_yaml'] is False
+    assert any(b['source'] == 'phase' for b in v['blockers'])
