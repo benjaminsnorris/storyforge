@@ -307,8 +307,10 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 New projects use the elaboration pipeline: progressive structural development before drafting.
 
 ```
-Seed → Spine → Architecture → Scene Map → Briefs → Validate/Diagnose → Draft → Evaluate → Polish → Produce
+Seed → Pitch (Logline → Synopsis → Act-shape) → Spine → Architecture → Scene Map → Briefs → Validate/Diagnose → Draft → Evaluate → Polish → Produce
 ```
+
+The pitch/prose tier (`reference/story-summary.md`) comes first: `storyforge status` reports the ladder position and won't consider a project ready for the spine until the prose-tier rungs read `solid` (floor checks `score --level 0/1/2`, pressure-tested by `score --story-power`).
 
 Each stage populates columns in the three-file CSV model. Validation gates between stages catch structural issues before they become prose problems. Evaluation findings route back to the appropriate CSV (brief/intent/structural) for upstream fixes rather than prose revision.
 

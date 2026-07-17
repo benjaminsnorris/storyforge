@@ -1,9 +1,9 @@
+import os
 from typing import get_args
 
 import pytest
 
-import os
-from storyforge import status
+from storyforge import cmd_status, status
 
 
 def _write(path, text):
@@ -177,9 +177,6 @@ def test_collect_blockers_positive_on_fixture(project_dir):
     assert blockers                                    # fixture has real issues
     assert all(set(b) == {'source', 'level', 'detail'} for b in blockers)
     assert any(b['source'] in ('coverage', 'consistency') for b in blockers)
-
-
-from storyforge import cmd_status
 
 
 def test_render_human_contains_ladder_and_next(tmp_path):
