@@ -201,6 +201,12 @@ def test_main_json_output(tmp_path, capsys, monkeypatch):
     data = _json.loads(out)
     assert data['phase'] == 'logline'
     assert data['next']['stage'] == 'logline'
+    # Full verdict contract forge/elaborate route on — lock the whole shape.
+    assert set(data) == {'phase', 'phase_declared', 'phase_matches_yaml',
+                         'ladder', 'next', 'then', 'blockers'}
+    assert isinstance(data['ladder'], list) and len(data['ladder']) == 7
+    assert set(data['next']) == {'stage', 'action', 'command', 'reason'}
+    assert isinstance(data['blockers'], list)
 
 
 def test_draft_stage_keeps_short_rows(tmp_path):
@@ -304,3 +310,65 @@ def test_stage_and_rungstate_literals_are_complete():
     assert set(status.LEVEL_NAMES.values()) <= stages
     assert {'story-power', 'draft', 'evaluate'} <= stages
     assert set(get_args(status.RungState)) == {'solid', 'thin', 'not_started'}
+
+
+def test_collect_blockers_skips_accepted_and_gates_absent(tmp_path, monkeypatch):
+    # A present artifact's real failure surfaces; an accepted failure is
+    # skipped; a failure on an absent-artifact level is gated out.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'architecture.csv'),
+           "id|seq|title\na1|1|X\n")           # level 4 present
+    def fake_coverage(pd_):
+        return [
+            {'level': 4, 'checks': [
+                {'check': 'r', 'passed': False, 'detail': 'real fail', 'accepted': False},
+                {'check': 'w', 'passed': False, 'detail': 'waived fail', 'accepted': True},
+            ]},
+            {'level': 3, 'checks': [          # spine.csv absent → gated
+                {'check': 'g', 'passed': False, 'detail': 'gated fail', 'accepted': False},
+            ]},
+        ]
+    monkeypatch.setattr(status, 'score_coverage_all_levels', fake_coverage)
+    monkeypatch.setattr(status, 'score_consistency_all_levels', lambda pd_: [])
+    details = [b['detail'] for b in status.collect_blockers(pd)]
+    assert 'real fail' in details
+    assert 'waived fail' not in details      # accepted → skipped
+    assert 'gated fail' not in details       # absent artifact → gated
+
+
+def test_draft_stage_no_scenes_file(tmp_path):
+    # Missing scenes.csv must not raise, and must not read as "all drafted".
+    assert status.draft_stage(str(tmp_path)) == ('draft', 0, 0)
+
+
+def test_render_human_terminal_verdict_no_then_no_blockers():
+    verdict = {
+        'phase': 'evaluate', 'phase_declared': 'drafting',
+        'phase_matches_yaml': True,
+        'ladder': [{'level': 0, 'name': 'logline', 'state': 'solid', 'detail': ''}],
+        'next': {'stage': 'evaluate', 'action': 'Evaluate and polish',
+                 'command': 'storyforge evaluate', 'reason': 'All scenes are drafted'},
+        'then': None,
+        'blockers': [],
+    }
+    text = cmd_status.render_human(verdict)
+    assert 'THEN:' not in text                    # then is None → no THEN line
+    assert 'BLOCKERS: none' in text
+    assert 'matches storyforge.yaml' in text      # declared-phase suffix
+
+
+def test_render_human_shows_declared_phase_name_on_mismatch():
+    verdict = {
+        'phase': 'spine', 'phase_declared': 'architecture',
+        'phase_matches_yaml': False,
+        'ladder': [{'level': 3, 'name': 'spine', 'state': 'thin', 'detail': 'x'}],
+        'next': {'stage': 'spine', 'action': 'Develop the spine',
+                 'command': 'storyforge elaborate --stage spine', 'reason': 'r'},
+        'then': {'stage': 'architecture', 'action': 'Develop the architecture',
+                 'command': 'storyforge elaborate --stage architecture', 'reason': ''},
+        'blockers': [{'source': 'phase', 'level': -1, 'detail': 'upstream not solid'}],
+    }
+    text = cmd_status.render_human(verdict)
+    assert "declared 'architecture'" in text
+    assert 'THEN:' in text
+    assert '[phase] upstream not solid' in text
