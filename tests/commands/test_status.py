@@ -1,3 +1,7 @@
+from typing import get_args
+
+import pytest
+
 import os
 from storyforge import status
 
@@ -280,3 +284,23 @@ def test_phase_blocker_when_prereq_unmet(tmp_path, monkeypatch):
     assert v['phase_matches_yaml'] is False
     phase_blockers = [b for b in v['blockers'] if b['source'] == 'phase']
     assert phase_blockers and 'spine' in phase_blockers[0]['detail']
+
+
+def test_recommend_raises_on_unknown_stage():
+    # Fail loud rather than silently returning a "go evaluate" verdict.
+    with pytest.raises(ValueError):
+        status._recommend('bogus-stage')
+
+
+def test_elaborate_stage_values_are_valid_cli_stages():
+    # status.ELABORATE_STAGE bridges to the elaborate CLI (scene-map → map);
+    # this pins the hand-mirrored mapping so a rename in either file fails CI.
+    from storyforge.cmd_elaborate import VALID_STAGES
+    assert set(status.ELABORATE_STAGE.values()) <= VALID_STAGES
+
+
+def test_stage_and_rungstate_literals_are_complete():
+    stages = set(get_args(status.Stage))
+    assert set(status.LEVEL_NAMES.values()) <= stages
+    assert {'story-power', 'draft', 'evaluate'} <= stages
+    assert set(get_args(status.RungState)) == {'solid', 'thin', 'not_started'}

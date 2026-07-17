@@ -8,6 +8,7 @@ No LLM, no writes. Pure over project files.
 """
 
 import os
+from typing import Literal
 
 from storyforge.scoring_levels import score_all_levels, LEVEL_NAMES
 from storyforge.scoring_consistency import score_consistency_all_levels
@@ -17,6 +18,12 @@ from storyforge.elaborate import _read_csv
 
 LADDER_LEVELS = [0, 1, 2, 3, 4, 5, 6]
 PROSE_STAGES = ('logline', 'synopsis', 'act-shape')
+
+# Closed sets, mirrored in the skill/CLI docs — express them as Literals (as
+# scoring_levels.py does for its result shapes) so drift is visible in-type.
+RungState = Literal['solid', 'thin', 'not_started']
+Stage = Literal['logline', 'synopsis', 'act-shape', 'spine', 'architecture',
+                'scene-map', 'briefs', 'story-power', 'draft', 'evaluate']
 
 # Rung name -> `elaborate --stage` argument (only rungs with a command stage).
 ELABORATE_STAGE = {
@@ -197,9 +204,15 @@ def _recommend(stage: str) -> tuple[dict, dict | None]:
                  'reason': 'Briefs are complete; scenes are ready to draft'},
                 {'stage': 'evaluate', 'action': 'Evaluate drafted scenes',
                  'command': 'storyforge evaluate', 'reason': ''})
-    return ({'stage': 'evaluate', 'action': 'Evaluate and polish',
-             'command': 'storyforge evaluate',
-             'reason': 'All scenes are drafted'}, None)
+    if stage == 'evaluate':
+        return ({'stage': 'evaluate', 'action': 'Evaluate and polish',
+                 'command': 'storyforge evaluate',
+                 'reason': 'All scenes are drafted'}, None)
+    # Fail loud rather than silently returning "go evaluate" for an unknown
+    # stage — guards the PROSE_STAGES / ELABORATE_STAGE / LEVEL_NAMES invariant
+    # (which is mirrored by hand and could drift, e.g. the scene-map↔map
+    # spelling) instead of shipping a wrong verdict.
+    raise ValueError(f'_recommend: unrecognized stage {stage!r}')
 
 
 def build_status(project_dir: str, medium: str = 'novel') -> dict:
