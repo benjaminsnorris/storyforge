@@ -56,6 +56,7 @@ Based on the project state, identify where the author is:
 
 | Phase in YAML | scenes.csv rows | Intent depth | Briefs | Validation | Current stage |
 |---------------|----------------|--------------|--------|------------|---------------|
+| any | 0 | — | — | `storyforge status` next.stage ∈ {logline, synopsis, act-shape} (story-summary.md missing or thin) | Needs prose tier / Start at Stage 0 |
 | spine | 0 | — | — | — | Needs spine |
 | spine | 5-10 | function only | — | — | Spine done, ready for architecture |
 | architecture | 15-25 | has value_shift | — | — | Architecture done, ready for map |
@@ -70,7 +71,7 @@ Based on the author's request, determine the mode:
 
 ### Specific requests (always honored, bypass auto-advance):
 
-- **"Start a new novel"** / **"Let's begin"** → Start at spine. Ask for the seed (logline, genre, characters, themes, constraints). Whatever they give you is the seed.
+- **"Start a new novel"** / **"Let's begin"** → Start at Stage 0, the pitch/prose tier. Ask for the seed (logline, genre, characters, themes, constraints) and develop it through `reference/story-summary.md`: logline → synopsis → act-shape, gating each with `storyforge score --level 0|1|2` and pressure-testing the whole pitch with `storyforge score --story-power`. Only build the spine once `storyforge status` shows the prose tier rungs `solid`.
 - **"Work on the spine/architecture/map/briefs"** → Go to that specific stage.
 - **"Develop the voice"** / **"Voice guide"** / **"Style"** → Voice development (see Voice Stage below). Typically happens after architecture and before briefs.
 - **"Deepen characters"** / **"Work on [character name]"** → Character development. During elaboration, this deepens the character bible entries. The spine creates seed entries; this mode enriches them with wound/lie/need structure, voice fingerprints, and relationship dynamics.
@@ -87,6 +88,7 @@ When the author doesn't specify a mode, detect the current stage from Step 2 and
 
 | Detected State | Action |
 |---|---|
+| `storyforge status` next.stage ∈ {logline, synopsis, act-shape} (story-summary.md missing or thin) | Needs prose tier / Start at Stage 0 |
 | No scenes.csv (or 0 rows) | Start spine |
 | Spine done (5-10 rows, function only) | Run architecture |
 | Architecture done (has value_shift) | Run scene map |
@@ -160,6 +162,32 @@ Wait for the author's choice. If they choose Option A, work through the stage in
 6. Commit and push
 
 If they choose Option B, provide the full command and end.
+
+### Stage 0 — Pitch / Prose Tier (Interactive)
+
+Before building the spine, solidify the pitch in `reference/story-summary.md`:
+logline → synopsis → act-shape, in that order. This is the loop the
+story-power scorecard was built for — skipping it means building structure on
+an unvalidated premise.
+
+For each section, in order:
+1. Develop or refine the section with the author (logline first, then
+   synopsis, then act-shape).
+2. Run `storyforge score --level 0|1|2` — the deterministic floor check
+   (length, presence, shape) for that section.
+3. Run `storyforge score --story-power` — the 8-axis pitch-tier scorecard;
+   pressure-tests specificity, emotional resonance, stakes, and the rest of
+   the pitch's craft.
+4. When exploring alternatives, run `storyforge score --compare <a> <b> --level N`
+   to compare candidate loglines or synopses side by side.
+5. Write the section to `reference/story-summary.md`. Its `_updated`
+   frontmatter timestamp feeds cascade drift detection, so let the write
+   update it rather than hand-editing the timestamp.
+6. Commit: `git add -A && git commit -m "Elaborate: prose tier" && git push`
+
+Advance to the spine stage only when the prose tier reads `solid` in
+`storyforge status` and the story-power scorecard is acceptable to the
+author.
 
 ### Spine Stage (Interactive)
 
@@ -453,6 +481,12 @@ If registries are missing or thematic concentration is low, recommend reconcilia
 ```bash
 cd [project_dir] && [plugin_path]/scripts/storyforge-reconcile
 ```
+
+Also confirm the pitch tier still holds under the added structure:
+- `storyforge score --story-power` — re-run the pitch-tier scorecard to
+  confirm the structure still serves the premise after elaboration.
+- `storyforge status` — confirm the ladder shows the expected rung as
+  `solid` and surfaces no blockers before advancing.
 
 Report results to the author. Blocking validation failures must be fixed before advancing. Structural scoring findings are advisory but strongly recommended before drafting.
 

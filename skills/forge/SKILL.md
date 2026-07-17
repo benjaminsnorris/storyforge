@@ -20,8 +20,20 @@ Store this resolved plugin path for use throughout the session.
 Before doing anything else, orient yourself:
 
 1. **Read `storyforge.yaml`** in the current project directory. This tells you the title, genre, target word count, logline, current phase, and status.
-2. **Read the project `CLAUDE.md`**. This contains orientation and any standing instructions from the author.
-3. **Scan for key artifacts** — check for the existence of:
+2. **Run `storyforge status --json`** and parse the verdict. This is the
+   deterministic source of truth for *where the project is and what to do
+   next* — prefer it over inferring phase from `storyforge.yaml` by hand. Key
+   fields:
+   - `next.stage` — the stable routing key. Route on this, not on prose.
+   - `next.command` — the concrete command to recommend/run; it is always a
+     real, non-empty command. For prose-tier rungs it's the deterministic
+     floor check (`storyforge score --level N`) — the section itself is
+     developed via the `elaborate` skill, not by this command.
+   - `blockers` — coverage/consistency mismatches and any phase/yaml
+     disagreement; surface these before advancing.
+   - `ladder` — per-rung `solid`/`thin`/`not_started` for the status readout.
+3. **Read the project `CLAUDE.md`**. This contains orientation and any standing instructions from the author.
+4. **Scan for key artifacts** — check for the existence of:
    - `reference/character-bible.md`
    - `reference/world-bible.md`
    - `reference/story-summary.md` (logline / synopsis / act-shape / theme — canonical prose tier)
@@ -40,7 +52,7 @@ Before doing anything else, orient yourself:
    - `working/annotations.csv` (reader annotations from Bookshelf, if present)
    - The `scenes/` directory (any `.md` files = drafted scenes)
    - **Medium**: Read `project.medium` from storyforge.yaml. If `graphic-novel`, prefix any status summary with "Graphic novel project" and recommend graphic-novel-mode actions (e.g., elaborate stages, hone, validate — drafting and production are Plan 2).
-4. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
+5. **Read the key decisions file** — check the `key_decisions` artifact path in `storyforge.yaml` (typically `reference/key-decisions.md`). If it exists, read it in full. This file contains settled author decisions. **You must never re-ask a question that is already answered in this file.**
 
 Do not present this information unless the author asks for a status check. This is your internal orientation.
 
@@ -49,6 +61,18 @@ Do not present this information unless the author asks for a status check. This 
 Read the `phase` field from `storyforge.yaml`. If it is one of: `spine`, `architecture`, `scene-map`, `briefs`, this project uses the elaboration pipeline.
 
 **If the project is in an elaboration phase:**
+- **If `status` reports `next.stage` is `logline`, `synopsis`, or `act-shape`**
+  (the pitch/prose tier), the project has not solidified its pitch. Route to
+  the `elaborate` skill's prose-tier stage to develop that section, then:
+  - `storyforge score --level 0|1|2` — deterministic floor check on the section
+  - `storyforge score --story-power` — the 8-axis pitch-tier scorecard
+    (pressure-tests logline/synopsis/act-shape before any spine work)
+  - `storyforge score --compare <a> <b> [--level N]` — compare candidate
+    loglines/synopses when the author is exploring options
+- **If `then.stage` is `story-power`** (the paired follow-up `status` reports
+  while `next.stage` is still a prose-tier rung), that confirms the bullet
+  above: once the section's floor check passes, recommend running
+  `storyforge score --story-power` to validate narrative design before the spine.
 - Route to the `elaborate` skill for most requests (scene work, drafting prep, "what's next", structural planning)
 - The `develop`, `voice`, `scenes`, and `plan-revision` skills are not used during elaboration — their work is integrated into the elaborate pipeline
 - Skills that still apply normally: `visualize`, `title`, `cover`, `press-kit`, `produce`, `score`, `publish`
@@ -93,6 +117,11 @@ For polish-only: `./storyforge revise --polish`
 
 **"Score" / "Score my scenes":**
 Invoke the `score` skill.
+- **Pitch/prose tier:** `storyforge score --story-power` (8-axis pitch
+  scorecard), `storyforge score --level 0|1|2` (logline/synopsis/act-shape
+  floor checks), `storyforge score --compare <candidates> --level N` (compare
+  prose candidates). Use these before/independent of the structural
+  `--level 3-5` tiers.
 
 **"Publish" / "Push to bookshelf" / "Generate dashboard":**
 Invoke the `publish` skill. This assembles the web book, generates the dashboard, and pushes to bookshelf.
