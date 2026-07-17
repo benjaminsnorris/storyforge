@@ -150,7 +150,7 @@ gaps = detect_gaps(scenes, intent, briefs)
 Present results:
 - Number of gaps by file (scene-intent.csv vs scene-briefs.csv)
 - Which scenes have the most gaps
-- Recommend `storyforge-elaborate --gap-fill` to fill them
+- Recommend `storyforge elaborate --stage gap-fill` to fill them
 
 ### Voice Profile Validation
 
@@ -332,7 +332,7 @@ git add -A && git commit -m "Hone: briefs (coach) — [summary of what changed]"
 
 **5. Script delegation in coach mode** — When offering the script command, include `--coaching coach`:
 ```bash
-cd [project_dir] && [plugin_path]/scripts/storyforge-hone --domain briefs --act [N] --coaching coach
+cd [project_dir] && [plugin_path]/storyforge hone --domain briefs --act [N] --coaching coach
 ```
 The script will save proposals to `working/hone/` without modifying CSVs. You can then walk through the proposals with the author interactively in this conversation.
 
