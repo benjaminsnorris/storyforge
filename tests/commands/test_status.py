@@ -197,3 +197,29 @@ def test_main_json_output(tmp_path, capsys, monkeypatch):
     data = _json.loads(out)
     assert data['phase'] == 'logline'
     assert data['next']['stage'] == 'logline'
+
+
+def test_draft_stage_keeps_short_rows(tmp_path):
+    # A row too short to reach the status column must NOT vanish from the
+    # count. Regression: reading via csv_cli.get_column silently dropped such
+    # rows, so an all-drafted count could be reported when a scene was missing.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'scenes.csv'),
+           "id|seq|title|status\n"
+           "s1|1|One|drafted\n"
+           "s2|2|Two|drafted\n"
+           "s3|3\n")                       # short row: no status field
+    stage, drafted, total = status.draft_stage(pd)
+    assert total == 3                       # the short row is still counted
+    assert drafted == 2
+    assert stage == 'draft'                 # NOT 'evaluate' — not all drafted
+
+
+def test_artifact_present_rejects_blank_data_row(tmp_path):
+    # A delimiter-only / whitespace-only data row is not real content.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'spine.csv'), "id|seq|title\n|||\n")
+    assert status.artifact_present(pd, 3) is False
+    _write(os.path.join(pd, 'reference', 'spine.csv'),
+           "id|seq|title\ne1|1|Opening\n")
+    assert status.artifact_present(pd, 3) is True

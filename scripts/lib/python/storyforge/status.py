@@ -13,7 +13,7 @@ from storyforge.scoring_levels import score_all_levels, LEVEL_NAMES
 from storyforge.scoring_consistency import score_consistency_all_levels
 from storyforge.scoring_coverage import score_coverage_all_levels
 from storyforge.common import parse_story_summary, read_yaml_field
-from storyforge.csv_cli import get_column
+from storyforge.elaborate import _read_csv
 
 LADDER_LEVELS = [0, 1, 2, 3, 4, 5, 6]
 PROSE_STAGES = ('logline', 'synopsis', 'act-shape')
@@ -46,11 +46,16 @@ def artifact_present(project_dir: str, level: int) -> bool:
             return False
         return bool(parsed.get(_PROSE_KEY[level], '').strip())
     path = os.path.join(project_dir, 'reference', _LEVEL_CSV[level])
-    if not os.path.isfile(path):
-        return False
-    with open(path, encoding='utf-8') as f:
-        rows = [ln for ln in f.read().splitlines() if ln.strip()]
-    return len(rows) > 1  # header + at least one data row
+    # Presence means "at least one data row with real content" — read through
+    # the same DictReader-backed parser the floor checks use so a short/ragged
+    # row is counted (not silently dropped) and a delimiter-only blank row
+    # ("|||") does not masquerade as content. Missing file → [] → False.
+    rows = _read_csv(path)
+    # Guard `isinstance(v, str)`: a ragged row with more fields than headers
+    # lands the overflow under DictReader's None restkey as a list, which we
+    # must not .strip() (and which never counts as real content anyway).
+    return any(isinstance(v, str) and v.strip()
+               for row in rows for v in row.values())
 
 
 def _real_failed(floor: dict) -> int:
@@ -127,7 +132,15 @@ def collect_blockers(project_dir: str) -> list[dict]:
 
 
 def _read_scene_statuses(project_dir: str) -> list[str]:
-    return get_column(os.path.join(project_dir, 'reference', 'scenes.csv'), 'status')
+    """Scene `status` values from scenes.csv (missing file/rows → []).
+
+    Uses the DictReader-backed reader (not a raw split) so a row too short to
+    reach the `status` column is kept with an empty status rather than
+    silently dropped — otherwise draft_stage would undercount scenes and could
+    report a false "all drafted" verdict.
+    """
+    rows = _read_csv(os.path.join(project_dir, 'reference', 'scenes.csv'))
+    return [r.get('status', '') for r in rows]
 
 
 def draft_stage(project_dir: str) -> tuple[str, int, int]:
