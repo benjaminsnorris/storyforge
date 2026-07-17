@@ -102,8 +102,11 @@ _PHASE_ALIASES = {
     'complete': 'evaluate',
 }
 
-# Every phase name build_status can compute: ladder rungs + draft/evaluate.
-_LADDER_PHASE_NAMES = set(LEVEL_NAMES.values()) | {'draft', 'evaluate'}
+# Ladder index for each comparable phase name. Rungs keep their level (0-6);
+# draft/evaluate both sit past briefs, so both require rungs 0-6 to be solid.
+_PHASE_INDEX = {name: level for level, name in LEVEL_NAMES.items()}
+_PHASE_INDEX['draft'] = 7
+_PHASE_INDEX['evaluate'] = 7
 
 
 def collect_blockers(project_dir: str) -> list[dict]:
@@ -215,24 +218,33 @@ def build_status(project_dir: str, medium: str = 'novel') -> dict:
 
     declared = (read_yaml_field('phase', project_dir) or '').strip()
     normalized = _PHASE_ALIASES.get(declared, declared)
-    # A declared phase on a project where NOTHING is built yet is author
-    # intent (new projects default to phase: spine), not an overclaim — so an
-    # all-not_started ladder counts as matching. Otherwise only compare when
-    # the declared phase maps onto a ladder phase we track; unrecognized /
-    # pre-spine legacy phases (development, scene-design, '') are not
-    # comparable to a ladder rung.
+    # The declared yaml phase is a coarse milestone that legitimately LAGS the
+    # fine-grained ladder — by convention `phase: drafting` stays put through
+    # evaluation and revision, and no command advances it past `drafting`. So
+    # we do NOT require declared == computed (that would fire a spurious
+    # blocker on every post-drafting project). We flag only a real
+    # contradiction: the declared phase claims progress whose prerequisites
+    # aren't met — some ladder rung UPSTREAM of the declared phase is not solid
+    # (e.g. "phase: architecture" while spine is still thin). A declared phase
+    # on an all-not_started project is init intent (new projects default to
+    # phase: spine), and an unrecognized/pre-spine phase (development,
+    # scene-design, '') isn't comparable — both count as matching.
+    declared_idx = _PHASE_INDEX.get(normalized)
     all_not_started = all(r['state'] == 'not_started' for r in ladder)
-    if not declared or all_not_started or normalized not in _LADDER_PHASE_NAMES:
-        matches = True
+    if not declared or all_not_started or declared_idx is None:
+        matches, unmet = True, []
     else:
-        matches = (normalized == phase)
+        unmet = [r for r in ladder
+                 if r['level'] < declared_idx and r['state'] != 'solid']
+        matches = not unmet
 
     blockers = collect_blockers(project_dir)
     if declared and not matches:
+        names = ', '.join(r['name'] for r in unmet)
         blockers.insert(0, {
-            'source': 'phase', 'level': -1,
-            'detail': (f"storyforge.yaml phase is '{declared}' but the ladder "
-                       f"puts the project at '{phase}'"),
+            'source': 'phase', 'level': -1,  # sentinel: not a ladder rung
+            'detail': (f"storyforge.yaml phase is '{declared}' but upstream "
+                       f"rung(s) not yet solid: {names}"),
         })
 
     nxt, then = _recommend(phase)

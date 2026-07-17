@@ -223,3 +223,60 @@ def test_artifact_present_rejects_blank_data_row(tmp_path):
     _write(os.path.join(pd, 'reference', 'spine.csv'),
            "id|seq|title\ne1|1|Opening\n")
     assert status.artifact_present(pd, 3) is True
+
+
+def _all_solid_ladder():
+    return [{'level': lvl, 'name': name, 'state': 'solid', 'detail': ''}
+            for lvl, name in status.LEVEL_NAMES.items()]
+
+
+def test_no_phase_blocker_when_prereqs_met(tmp_path, monkeypatch):
+    # All ladder rungs solid + declared legacy 'drafting' (which no command
+    # advances past): declared normalizes to 'draft', computed phase is
+    # 'evaluate' (all scenes drafted). They differ, but every prerequisite
+    # rung is solid, so this must NOT flag. Regression for the permanent
+    # post-drafting phase blocker. Also exercises build_status's all-solid →
+    # draft_stage composition path.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'storyforge.yaml'), "phase: drafting\n")
+    _write(os.path.join(pd, 'reference', 'scenes.csv'),
+           "id|seq|status\ns1|1|drafted\ns2|2|polished\n")
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['phase'] == 'evaluate'
+    assert v['next']['command'] == 'storyforge evaluate'
+    assert v['then'] is None
+    assert v['phase_matches_yaml'] is True
+    assert not any(b['source'] == 'phase' for b in v['blockers'])
+
+
+def test_all_solid_some_drafted_recommends_draft(tmp_path, monkeypatch):
+    # All structure solid but not every scene drafted → phase 'draft'.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'scenes.csv'),
+           "id|seq|status\ns1|1|drafted\ns2|2|briefed\n")
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['phase'] == 'draft'
+    assert v['next']['command'] == 'storyforge write'
+    assert v['then']['stage'] == 'evaluate'
+
+
+def test_phase_blocker_when_prereq_unmet(tmp_path, monkeypatch):
+    # Declared 'architecture' but an upstream rung (spine) is thin → real
+    # overclaim, flagged (the spec's motivating example).
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'storyforge.yaml'), "phase: architecture\n")
+    ladder = [{'level': lvl, 'name': name,
+               'state': ('solid' if lvl < 3 else
+                         'thin' if lvl == 3 else 'not_started'),
+               'detail': ''}
+              for lvl, name in status.LEVEL_NAMES.items()]
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': ladder)
+    v = status.build_status(pd)
+    assert v['phase_matches_yaml'] is False
+    phase_blockers = [b for b in v['blockers'] if b['source'] == 'phase']
+    assert phase_blockers and 'spine' in phase_blockers[0]['detail']
