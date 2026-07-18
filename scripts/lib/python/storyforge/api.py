@@ -25,7 +25,7 @@ API_RETRIES = 2  # retry transient failures (timeouts, 5xx)
 # Model output token limits — the API returns HTTP 400 if max_tokens exceeds these.
 # You only pay for tokens actually generated, so requesting the max is safe cost-wise.
 MODEL_MAX_OUTPUT = {
-    'claude-opus-4-6': 128000,
+    'claude-opus-4-8': 128000,
     'claude-sonnet-4-6': 64000,
     'claude-haiku-4-5-20251001': 16384,
 }
@@ -114,7 +114,7 @@ def invoke(prompt: str, model: str, max_tokens: int = 4096, label: str = '',
 
     Args:
         prompt: The user message text.
-        model: Model ID (e.g., 'claude-opus-4-6').
+        model: Model ID (e.g., 'claude-opus-4-8').
         max_tokens: Maximum output tokens.
         label: Optional label for heartbeat messages (e.g., 'revision pass 3').
         timeout: Socket timeout in seconds (default API_TIMEOUT).

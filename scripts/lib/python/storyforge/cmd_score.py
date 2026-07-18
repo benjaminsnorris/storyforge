@@ -505,7 +505,7 @@ def main(argv=None):
 
     # Model selection
     sonnet_model = select_model('evaluation')
-    opus_model = 'claude-opus-4-6'
+    opus_model = 'claude-opus-4-8'
 
     if score_mode == 'batch':
         eval_model = opus_model
