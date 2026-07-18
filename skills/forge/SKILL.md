@@ -62,8 +62,14 @@ Read the `phase` field from `storyforge.yaml`. If it is one of: `spine`, `archit
 
 **If the project is in an elaboration phase:**
 - **If `status` reports `next.stage` is `logline`, `synopsis`, or `act-shape`**
-  (the pitch/prose tier), the project has not solidified its pitch. Route to
-  the `elaborate` skill's prose-tier stage to develop that section, then:
+  (the pitch/prose tier), the prose tier isn't solid yet. Usually that means
+  the pitch hasn't been developed — but for a legacy/migrated project it can
+  also mean the section exists in prose under a heading `story-summary.md`
+  couldn't parse, or a migration left the logline deliberately blank while
+  downstream tiers are fully built (check the `ladder`: if spine/architecture/
+  briefs read `solid`, confirm with the author before treating the pitch as
+  un-started). Once confirmed, route to the `elaborate` skill's prose-tier
+  stage to develop that section, then:
   - `storyforge score --level 0|1|2` — deterministic floor check on the section
   - `storyforge score --story-power` — the 8-axis pitch-tier scorecard
     (pressure-tests logline/synopsis/act-shape before any spine work)
@@ -283,14 +289,19 @@ On approval, execute immediately by invoking the appropriate skill.
 
 ### Status Mode
 
-The author wants to see where things stand. Present a clean summary:
+The author wants to see where things stand. Lead with the deterministic
+verdict from `storyforge status --json` (already gathered in Step 1) — it is
+the source of truth for position and next step:
 
-- **Phase:** spine / architecture / scene-map / briefs / drafting / evaluation / revision / polish / production
+- **Ladder:** render the `ladder` rungs (`solid` / `thin` / `not_started`) so the author sees exactly where the project sits on logline → briefs → draft → evaluate.
+- **Next / then:** present the verdict's `next` (and `then`) step verbatim rather than re-deriving guidance by hand.
+- **Blockers:** surface `blockers` (coverage/consistency mismatches, phase/yaml disagreement) — these are what to resolve before advancing.
+
+Then add the context the verdict doesn't carry:
+
 - **Coaching level:** full / coach / strict
-- **Elaboration depth:** How many scenes at each status (spine/architecture/mapped/briefed/drafted/polished)
-- **Outline state:** If `reference/outline.md` exists, mention it as the reading view of the expanding outline (spine + architecture + scenes summary columns + brief promises). If any summary cells are empty at the current tier, flag the count.
+- **Outline state:** If `reference/outline.md` exists, mention it as the reading view of the expanding outline. If any summary cells are empty at the current tier, flag the count.
 - **Word count:** current vs. target
-- **Validation:** pass/fail counts if validation has run
 - **Pipeline cycle:** current cycle status (evaluating/planning/revising/reviewing)
 - **Recent activity:** what was worked on last
 

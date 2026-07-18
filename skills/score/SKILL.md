@@ -168,7 +168,7 @@ If the author has provided scores:
 When the author says "run scoring" or "score my scenes":
 
 1. Confirm the mode and scope:
-   - **Mode:** default (Haiku screen + Sonnet deep dive for deficits), `--quick` (Haiku screen only, fast), or `--deep` (Haiku screen + Sonnet deep dive for all principles)
+   - **Mode:** default (Haiku screen + Sonnet deep dive for deficits) or `--deep` (Haiku screen + Sonnet deep dive for all principles)
    - **Scope:** all scenes (default), `--scenes ID,ID` for specific scenes, `--act N` for a specific act
    - **Principles:** `--principles NAMES` for targeted scoring of specific craft principles (comma-separated). For deterministic principles like `prose_repetition`, this skips the LLM pipeline entirely — no API calls, no cost, instant results.
 
@@ -180,7 +180,7 @@ When the author says "run scoring" or "score my scenes":
    > **Option B: Run it yourself**
    > Copy this command and run it in a separate terminal:
    > ```bash
-   > cd [project_dir] && [plugin_path]/scripts/storyforge-score --quick
+   > cd [project_dir] && [plugin_path]/storyforge score
    > ```
    > Add `--dry-run` to preview the cost first. Add `--scenes ID,ID` or `--act N` to limit scope.
 
@@ -190,11 +190,11 @@ When the author says "run scoring" or "score my scenes":
 
    Show the dry-run first:
    ```bash
-   unset CLAUDECODE && [plugin_path]/scripts/storyforge-score --quick --dry-run
+   unset CLAUDECODE && [plugin_path]/storyforge score --dry-run
    ```
    If the author approves, run:
    ```bash
-   unset CLAUDECODE && [plugin_path]/scripts/storyforge-score --quick
+   unset CLAUDECODE && [plugin_path]/storyforge score
    ```
 
 ### If Option B:

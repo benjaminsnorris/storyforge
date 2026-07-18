@@ -51,7 +51,7 @@ Based on project state:
 Provide the command for the author to run:
 
 ```bash
-cd [project_dir] && [plugin_path]/scripts/storyforge-extract [options]
+cd [project_dir] && [plugin_path]/storyforge extract [options]
 ```
 
 Options:

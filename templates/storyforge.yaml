@@ -165,7 +165,7 @@ phase: spine
 # Production
 # ----------------------------------------------------------------------------
 # Controls formatting, metadata, and output for manuscript assembly.
-# These settings are used by storyforge-assemble and the produce skill.
+# These settings are used by `storyforge assemble` and the produce skill.
 #
 # production:
 #   author: ""

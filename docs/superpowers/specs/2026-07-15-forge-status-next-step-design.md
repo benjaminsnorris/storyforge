@@ -88,9 +88,13 @@ From the ladder walk, `status` computes:
   object `{stage, action, command, reason}`. `stage` is a **stable enum**
   (`logline|synopsis|act-shape|spine|architecture|scene-map|briefs|
   story-power|draft|evaluate`) that forge routes on — robust against prose
-  drift, which is the core of #267. `action` is the human phrasing, `command`
-  the concrete shell command to run where one exists (`""` for pure-develop
-  steps that route to a skill). Static mapping from rung → step:
+  drift, which is the core of #267. Note `story-power` only ever appears as a
+  `then.stage` (it is a recommended follow-up during the prose tier, never a
+  ladder rung), so `next.stage` never takes that value. `action` is the human
+  phrasing; `command` is always a concrete shell command — for prose-tier
+  rungs it is the deterministic floor check (`storyforge score --level N`)
+  while the section itself is developed via the elaborate skill. Static
+  mapping from rung → step:
   - L0/L1/L2 thin → `elaborate --stage <prose stage>` (then a
     `score --story-power` read; `--compare` when exploring candidates)
   - L3–L6 thin → `elaborate --stage <spine|architecture|scene-map|briefs>`

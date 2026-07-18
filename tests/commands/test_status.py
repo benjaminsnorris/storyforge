@@ -1,5 +1,9 @@
 import os
-from storyforge import status
+from typing import get_args
+
+import pytest
+
+from storyforge import cmd_status, status
 
 
 def _write(path, text):
@@ -175,9 +179,6 @@ def test_collect_blockers_positive_on_fixture(project_dir):
     assert any(b['source'] in ('coverage', 'consistency') for b in blockers)
 
 
-from storyforge import cmd_status
-
-
 def test_render_human_contains_ladder_and_next(tmp_path):
     v = status.build_status(str(tmp_path))
     text = cmd_status.render_human(v)
@@ -197,3 +198,174 @@ def test_main_json_output(tmp_path, capsys, monkeypatch):
     data = _json.loads(out)
     assert data['phase'] == 'logline'
     assert data['next']['stage'] == 'logline'
+    # Full verdict contract forge/elaborate route on — lock the whole shape.
+    assert set(data) == {'phase', 'phase_declared', 'phase_matches_yaml',
+                         'ladder', 'next', 'then', 'blockers'}
+    assert isinstance(data['ladder'], list) and len(data['ladder']) == 7
+    assert set(data['next']) == {'stage', 'action', 'command', 'reason'}
+    assert isinstance(data['blockers'], list)
+
+
+def test_draft_stage_keeps_short_rows(tmp_path):
+    # A row too short to reach the status column must NOT vanish from the
+    # count. Regression: reading via csv_cli.get_column silently dropped such
+    # rows, so an all-drafted count could be reported when a scene was missing.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'scenes.csv'),
+           "id|seq|title|status\n"
+           "s1|1|One|drafted\n"
+           "s2|2|Two|drafted\n"
+           "s3|3\n")                       # short row: no status field
+    stage, drafted, total = status.draft_stage(pd)
+    assert total == 3                       # the short row is still counted
+    assert drafted == 2
+    assert stage == 'draft'                 # NOT 'evaluate' — not all drafted
+
+
+def test_artifact_present_rejects_blank_data_row(tmp_path):
+    # A delimiter-only / whitespace-only data row is not real content.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'spine.csv'), "id|seq|title\n|||\n")
+    assert status.artifact_present(pd, 3) is False
+    _write(os.path.join(pd, 'reference', 'spine.csv'),
+           "id|seq|title\ne1|1|Opening\n")
+    assert status.artifact_present(pd, 3) is True
+
+
+def _all_solid_ladder():
+    return [{'level': lvl, 'name': name, 'state': 'solid', 'detail': ''}
+            for lvl, name in status.LEVEL_NAMES.items()]
+
+
+def test_no_phase_blocker_when_prereqs_met(tmp_path, monkeypatch):
+    # All ladder rungs solid + declared legacy 'drafting' (which no command
+    # advances past): declared normalizes to 'draft', computed phase is
+    # 'evaluate' (all scenes drafted). They differ, but every prerequisite
+    # rung is solid, so this must NOT flag. Regression for the permanent
+    # post-drafting phase blocker. Also exercises build_status's all-solid →
+    # draft_stage composition path.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'storyforge.yaml'), "phase: drafting\n")
+    _write(os.path.join(pd, 'reference', 'scenes.csv'),
+           "id|seq|status\ns1|1|drafted\ns2|2|polished\n")
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['phase'] == 'evaluate'
+    assert v['next']['command'] == 'storyforge evaluate'
+    assert v['then'] is None
+    assert v['phase_matches_yaml'] is True
+    assert not any(b['source'] == 'phase' for b in v['blockers'])
+
+
+def test_all_solid_some_drafted_recommends_draft(tmp_path, monkeypatch):
+    # All structure solid but not every scene drafted → phase 'draft'.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'scenes.csv'),
+           "id|seq|status\ns1|1|drafted\ns2|2|briefed\n")
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': _all_solid_ladder())
+    v = status.build_status(pd)
+    assert v['phase'] == 'draft'
+    assert v['next']['command'] == 'storyforge write'
+    assert v['then']['stage'] == 'evaluate'
+
+
+def test_phase_blocker_when_prereq_unmet(tmp_path, monkeypatch):
+    # Declared 'architecture' but an upstream rung (spine) is thin → real
+    # overclaim, flagged (the spec's motivating example).
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'storyforge.yaml'), "phase: architecture\n")
+    ladder = [{'level': lvl, 'name': name,
+               'state': ('solid' if lvl < 3 else
+                         'thin' if lvl == 3 else 'not_started'),
+               'detail': ''}
+              for lvl, name in status.LEVEL_NAMES.items()]
+    monkeypatch.setattr(status, 'ladder_states',
+                        lambda pd_, medium='novel': ladder)
+    v = status.build_status(pd)
+    assert v['phase_matches_yaml'] is False
+    phase_blockers = [b for b in v['blockers'] if b['source'] == 'phase']
+    assert phase_blockers and 'spine' in phase_blockers[0]['detail']
+
+
+def test_recommend_raises_on_unknown_stage():
+    # Fail loud rather than silently returning a "go evaluate" verdict.
+    with pytest.raises(ValueError):
+        status._recommend('bogus-stage')
+
+
+def test_elaborate_stage_values_are_valid_cli_stages():
+    # status.ELABORATE_STAGE bridges to the elaborate CLI (scene-map → map);
+    # this pins the hand-mirrored mapping so a rename in either file fails CI.
+    from storyforge.cmd_elaborate import VALID_STAGES
+    assert set(status.ELABORATE_STAGE.values()) <= VALID_STAGES
+
+
+def test_stage_and_rungstate_literals_are_complete():
+    stages = set(get_args(status.Stage))
+    assert set(status.LEVEL_NAMES.values()) <= stages
+    assert {'story-power', 'draft', 'evaluate'} <= stages
+    assert set(get_args(status.RungState)) == {'solid', 'thin', 'not_started'}
+
+
+def test_collect_blockers_skips_accepted_and_gates_absent(tmp_path, monkeypatch):
+    # A present artifact's real failure surfaces; an accepted failure is
+    # skipped; a failure on an absent-artifact level is gated out.
+    pd = str(tmp_path)
+    _write(os.path.join(pd, 'reference', 'architecture.csv'),
+           "id|seq|title\na1|1|X\n")           # level 4 present
+    def fake_coverage(pd_):
+        return [
+            {'level': 4, 'checks': [
+                {'check': 'r', 'passed': False, 'detail': 'real fail', 'accepted': False},
+                {'check': 'w', 'passed': False, 'detail': 'waived fail', 'accepted': True},
+            ]},
+            {'level': 3, 'checks': [          # spine.csv absent → gated
+                {'check': 'g', 'passed': False, 'detail': 'gated fail', 'accepted': False},
+            ]},
+        ]
+    monkeypatch.setattr(status, 'score_coverage_all_levels', fake_coverage)
+    monkeypatch.setattr(status, 'score_consistency_all_levels', lambda pd_: [])
+    details = [b['detail'] for b in status.collect_blockers(pd)]
+    assert 'real fail' in details
+    assert 'waived fail' not in details      # accepted → skipped
+    assert 'gated fail' not in details       # absent artifact → gated
+
+
+def test_draft_stage_no_scenes_file(tmp_path):
+    # Missing scenes.csv must not raise, and must not read as "all drafted".
+    assert status.draft_stage(str(tmp_path)) == ('draft', 0, 0)
+
+
+def test_render_human_terminal_verdict_no_then_no_blockers():
+    verdict = {
+        'phase': 'evaluate', 'phase_declared': 'drafting',
+        'phase_matches_yaml': True,
+        'ladder': [{'level': 0, 'name': 'logline', 'state': 'solid', 'detail': ''}],
+        'next': {'stage': 'evaluate', 'action': 'Evaluate and polish',
+                 'command': 'storyforge evaluate', 'reason': 'All scenes are drafted'},
+        'then': None,
+        'blockers': [],
+    }
+    text = cmd_status.render_human(verdict)
+    assert 'THEN:' not in text                    # then is None → no THEN line
+    assert 'BLOCKERS: none' in text
+    assert 'matches storyforge.yaml' in text      # declared-phase suffix
+
+
+def test_render_human_shows_declared_phase_name_on_mismatch():
+    verdict = {
+        'phase': 'spine', 'phase_declared': 'architecture',
+        'phase_matches_yaml': False,
+        'ladder': [{'level': 3, 'name': 'spine', 'state': 'thin', 'detail': 'x'}],
+        'next': {'stage': 'spine', 'action': 'Develop the spine',
+                 'command': 'storyforge elaborate --stage spine', 'reason': 'r'},
+        'then': {'stage': 'architecture', 'action': 'Develop the architecture',
+                 'command': 'storyforge elaborate --stage architecture', 'reason': ''},
+        'blockers': [{'source': 'phase', 'level': -1, 'detail': 'upstream not solid'}],
+    }
+    text = cmd_status.render_human(verdict)
+    assert "declared 'architecture'" in text
+    assert 'THEN:' in text
+    assert '[phase] upstream not solid' in text

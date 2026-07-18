@@ -148,7 +148,7 @@ For each stage, offer two options:
 > **Option B: Run it autonomously**
 > Copy this command and run it in a separate terminal:
 > ```bash
-> cd [project_dir] && [plugin_path]/scripts/storyforge-elaborate --stage [stage]
+> cd [project_dir] && [plugin_path]/storyforge elaborate --stage [stage]
 > ```
 > This creates a branch, runs the stage, validates, and opens a PR.
 
@@ -375,7 +375,7 @@ This mode activates when post-extraction data has validation gaps. Run `analyze_
 > **Option B: Run it autonomously**
 > Copy this command and run it in a separate terminal:
 > ```bash
-> cd [project_dir] && [plugin_path]/scripts/storyforge-elaborate --stage gap-fill
+> cd [project_dir] && [plugin_path]/storyforge elaborate --stage gap-fill
 > ```
 > This creates a branch, fills gaps via batch API, validates, and opens a PR.
 
@@ -462,13 +462,13 @@ This mode activates when Scene Function Variety is below target — typically on
 After any stage completes, run validation:
 
 ```bash
-cd [project_dir] && [plugin_path]/scripts/storyforge-validate
+cd [project_dir] && [plugin_path]/storyforge validate
 ```
 
 After briefs are complete (before drafting), also run structural scoring:
 
 ```bash
-cd [project_dir] && [plugin_path]/scripts/storyforge-validate --structural
+cd [project_dir] && [plugin_path]/storyforge validate --structural
 ```
 
 This scores 8 dimensions of story quality from CSV data (deterministic, free, instant):
@@ -479,7 +479,7 @@ If any dimension is below target, review the diagnosis (which includes craft-gro
 
 If registries are missing or thematic concentration is low, recommend reconciliation:
 ```bash
-cd [project_dir] && [plugin_path]/scripts/storyforge-reconcile
+cd [project_dir] && [plugin_path]/storyforge reconcile
 ```
 
 Also confirm the pitch tier still holds under the added structure:
