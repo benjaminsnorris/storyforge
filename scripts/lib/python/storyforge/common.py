@@ -212,29 +212,47 @@ def check_file_exists(filepath: str, label: str | None = None,
 # Model selection
 # ============================================================================
 
-_MODEL_MAP = {
-    'drafting': 'claude-opus-4-8',
-    'revision': 'claude-opus-4-8',
-    'mechanical': 'claude-sonnet-4-6',
-    'evaluation': 'claude-sonnet-4-6',
-    'extraction': 'claude-haiku-4-5-20251001',
-    'synthesis': 'claude-opus-4-8',
-    'review': 'claude-sonnet-4-6',
+# Single source of truth: the concrete model ID currently used for each
+# capability tier. The Anthropic API requires an exact model ID (there is no
+# floating "latest"/"opus" alias — a bare tier name 404s), so when a newer
+# model ships, bump the ID here — in this one place — and every dispatch site
+# below follows, because they all refer to the tier, never a version string.
+LATEST_MODELS = {
+    'opus':   'claude-opus-4-8',
+    'sonnet': 'claude-sonnet-4-6',
+    'haiku':  'claude-haiku-4-5-20251001',
+}
+
+# Which capability tier each task type dispatches to.
+_TASK_TIER = {
+    'drafting': 'opus',
+    'revision': 'opus',
+    'mechanical': 'sonnet',
+    'evaluation': 'sonnet',
+    'extraction': 'haiku',
+    'synthesis': 'opus',
+    'review': 'sonnet',
     # creative: synthesis-style work that needs strong judgment but isn't
     # full-scene drafting (style guides, summary proposals, prose adaptation).
-    'creative': 'claude-opus-4-8',
+    'creative': 'opus',
 }
+
+
+def model_for_tier(tier: str) -> str:
+    """Return the current concrete model ID for a capability tier."""
+    return LATEST_MODELS[tier]
 
 
 def select_model(task_type: str) -> str:
     """Select the appropriate model for a task type.
 
-    STORYFORGE_MODEL env var overrides all.
+    Resolves the task's tier through LATEST_MODELS; unknown tasks default to
+    the opus tier. STORYFORGE_MODEL env var overrides all.
     """
     override = os.environ.get('STORYFORGE_MODEL')
     if override:
         return override
-    return _MODEL_MAP.get(task_type, 'claude-opus-4-8')
+    return LATEST_MODELS[_TASK_TIER.get(task_type, 'opus')]
 
 
 def select_revision_model(pass_name: str, purpose: str = '') -> str:
@@ -248,8 +266,8 @@ def select_revision_model(pass_name: str, purpose: str = '') -> str:
 
     key = f'{pass_name} {purpose}'.lower()
     if re.search(r'continuity|timeline|fact.check|thread.track', key):
-        return 'claude-sonnet-4-6'
-    return 'claude-opus-4-8'
+        return LATEST_MODELS['sonnet']
+    return LATEST_MODELS['opus']
 
 
 # ============================================================================
