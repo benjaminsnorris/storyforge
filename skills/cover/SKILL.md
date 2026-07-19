@@ -268,7 +268,7 @@ with open("manuscript/assets/cover-illustration.png", "wb") as f:
 
 The response handler checks for an API error **before** opening the output file, so a failed generation exits non-zero with a clean message and never truncates an existing illustration. `curl -sS` stays quiet on progress but still surfaces transport errors. Building the JSON with `python3 -c` keeps the prompt's quotes and newlines from breaking the shell. Supported sizes: `1024x1024`, `1024x1536` (portrait, best for covers), `1536x1024`. Quality: `low` / `medium` / `high`.
 
-**For Flux (BFL):** the BFL API is submit-then-poll — POST the prompt to `https://api.bfl.ml/v1/flux-pro-1.1` with header `x-key: $BFL_API_KEY`, then GET the returned polling URL until `status` is `Ready` and download `result.sample`.
+**For Flux (BFL):** the BFL API is submit-then-poll — POST the prompt to `https://api.bfl.ai/v1/flux-pro-1.1` with header `x-key: $BFL_API_KEY`, then GET the returned polling URL. Poll while `status` is `Pending`; once `status` is `Ready`, download `result.sample`. Treat any other terminal status (`Error`, `Content Moderated`, `Request Moderated`, `Task not found`) as a failure — print the status and any message field and stop, rather than looping. Bound the poll loop (e.g. ~60 attempts) so a stuck request can't spin forever.
 
 **After generating, verify the file is a non-empty PNG before showing it to the author:**
 ```bash
@@ -301,7 +301,7 @@ Format:
 > no typography" constraint.
 ```
 
-This file is committed alongside the illustration at Step T2.6.
+This file is committed alongside the illustration at Step T2.7.
 
 ### Step T2.5: Author Picks Favorite
 

@@ -49,3 +49,25 @@ def test_openai_handler_fails_safe_before_opening_file(cover_skill):
     (SF-1). Guard against the old fragile `print(...) or open(...)` one-liner."""
     assert "print(d.get('error','')) or open(" not in cover_skill
     assert '"data" not in d' in cover_skill
+
+
+def test_commit_cross_reference_points_to_the_commit_step(cover_skill):
+    """The 'committed ... at Step T2.N' reference must name the step whose
+    heading is 'Update Configuration and Commit' (CR-1/C-1 renumbering drift)."""
+    ref = re.search(r'committed alongside the illustration at Step (T2\.\d)', cover_skill)
+    assert ref, "missing 'committed ... at Step T2.N' cross-reference"
+    referenced_step = ref.group(1)
+    commit_heading = re.search(
+        r'### Step (T2\.\d): Update Configuration and Commit', cover_skill)
+    assert commit_heading, "missing 'Update Configuration and Commit' step heading"
+    assert referenced_step == commit_heading.group(1), (
+        f"cross-reference points to {referenced_step} but the commit step is "
+        f"{commit_heading.group(1)}")
+
+
+def test_bfl_uses_current_host_and_handles_failure(cover_skill):
+    """BFL host must be the current domain, and non-Ready terminal statuses
+    must be handled rather than polled forever (SF-2)."""
+    assert 'api.bfl.ai' in cover_skill
+    assert 'api.bfl.ml' not in cover_skill
+    assert 'Content Moderated' in cover_skill
