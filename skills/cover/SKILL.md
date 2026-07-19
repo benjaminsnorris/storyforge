@@ -247,27 +247,59 @@ Present the full prompt to the author before spending API credits. This is their
 
 ### Step T2.3: Generate the Image
 
-Use the helper functions from the plugin's `scripts/lib/cover-api.sh`:
+The plugin does not ship an AI-generation helper — `storyforge cover` only produces typographic SVG covers. Call the image API directly with the Bash tool. `manuscript/assets/` must exist first (`mkdir -p manuscript/assets`).
 
-**For OpenAI:**
+**For OpenAI (`gpt-image-1`):**
 ```bash
-source "${PLUGIN_DIR}/scripts/lib/cover-api.sh"
-openai_generate_image "the full prompt" "manuscript/assets/cover-illustration.png" "1024x1536"
+curl -s https://api.openai.com/v1/images/generations \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$(python3 -c 'import json,sys; print(json.dumps({"model":"gpt-image-1","prompt":sys.argv[1],"size":"1024x1536","quality":"high","n":1}))' "the full prompt text")" \
+  | python3 -c "import sys,json,base64; d=json.load(sys.stdin); print(d.get('error','')) or open('manuscript/assets/cover-illustration.png','wb').write(base64.b64decode(d['data'][0]['b64_json']))"
 ```
 
-**For Flux (BFL):**
+Building the JSON with `python3 -c` keeps the prompt's quotes and newlines from breaking the shell. Supported sizes: `1024x1024`, `1024x1536` (portrait, best for covers), `1536x1024`. Quality: `low` / `medium` / `high`.
+
+**For Flux (BFL):** the BFL API is submit-then-poll — POST the prompt to `https://api.bfl.ml/v1/flux-pro-1.1` with header `x-key: $BFL_API_KEY`, then GET the returned polling URL until `status` is `Ready` and download `result.sample`.
+
+**After generating, verify the file is a non-empty PNG before showing it to the author:**
 ```bash
-source "${PLUGIN_DIR}/scripts/lib/cover-api.sh"
-bfl_generate_image "the full prompt" "manuscript/assets/cover-illustration.png" "1024x1536"
+if [[ ! -s manuscript/assets/cover-illustration.png ]]; then
+    echo "ERROR: Image generation produced an empty or missing file. Check the API error above."
+    exit 1
+fi
 ```
 
 If the first result isn't right, offer to generate additional variations with adjusted prompts. Save as `cover-illustration-1.png`, `cover-illustration-2.png`, etc.
 
-### Step T2.4: Author Picks Favorite
+### Step T2.4: Record the Prompt (all coaching modes)
 
-Present the file paths. The author opens them to review and picks one.
+**Do this in every coaching mode, including `full`.** The generation prompt is the reproducible seed for the art — it must survive the session. After each image is generated, append an entry to `manuscript/assets/cover-prompt.md` (create it on the first generation) using the Write/Edit tool. Capture, per variation:
 
-### Step T2.5: Text Compositing Decision
+- the **full prompt text** (verbatim)
+- **model** (e.g. `gpt-image-1`), **size** (e.g. `1024x1536`), **quality**, and **n**
+- the **output file** it produced (e.g. `cover-illustration-2.png`)
+- **status** — `selected` or `superseded`, with a one-line reason (fill this in at Step T2.5 once the author chooses)
+
+Format:
+```markdown
+# Cover Prompt Log — {title}
+
+## Variation 2 — cover-illustration-2.png
+- **Status:** selected — author preferred the warmer palette
+- **Model:** gpt-image-1 · **Size:** 1024x1536 · **Quality:** high · **n:** 1
+
+> Full prompt text, verbatim, including the "no text, no letters, no words,
+> no typography" constraint.
+```
+
+This file is committed alongside the illustration at Step T2.6.
+
+### Step T2.5: Author Picks Favorite
+
+Present the file paths. The author opens them to review and picks one. Update `manuscript/assets/cover-prompt.md` — mark the chosen variation `selected` and the others `superseded`, each with a brief reason.
+
+### Step T2.6: Text Compositing Decision
 
 Ask: "Would you like me to add title and author text as a crisp overlay (recommended — AI text rendering is unreliable), or use this illustration as the complete cover?"
 
@@ -317,9 +349,9 @@ echo "Cover PNG verified: $(wc -c < manuscript/assets/cover.png) bytes"
 
 Copy the chosen illustration to `manuscript/assets/cover.png` and update configuration.
 
-### Step T2.6: Update Configuration and Commit
+### Step T2.7: Update Configuration and Commit
 
-Same as Tier 1 Step T1.6. Commit message: `"Cover: generate AI illustration for {title}"` or `"Cover: generate AI illustration with text compositing for {title}"`.
+Same as Tier 1 Step T1.6, plus **commit `manuscript/assets/cover-prompt.md` alongside the illustration** so the generation prompt is tracked. Commit message: `"Cover: generate AI illustration for {title}"` or `"Cover: generate AI illustration with text compositing for {title}"`.
 
 ## Coaching Level Behavior
 
@@ -368,7 +400,7 @@ git rev-parse --abbrev-ref HEAD
 
 Every artifact gets its own commit:
 - Saved the SVG cover? Commit and push.
-- Generated an AI illustration? Commit and push.
+- Generated an AI illustration? Commit and push — including `manuscript/assets/cover-prompt.md` (the prompt log, tracked in all coaching modes).
 - Completed text compositing? Commit and push.
 - Updated production configuration? Commit and push.
 
