@@ -156,7 +156,8 @@ class TestExtractUsage:
 class TestMaxOutputTokens:
     def test_known_model(self):
         from storyforge.api import max_output_tokens
-        assert max_output_tokens('claude-opus-4-8') == 128000
+        from storyforge.common import LATEST_MODELS
+        assert max_output_tokens(LATEST_MODELS['opus']) == 128000
 
     def test_unknown_model_returns_default(self):
         from storyforge.api import max_output_tokens, _DEFAULT_MAX_OUTPUT

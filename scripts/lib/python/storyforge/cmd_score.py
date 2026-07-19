@@ -25,8 +25,8 @@ import time
 
 from storyforge.common import (
     detect_project_root, log, set_log_file, read_yaml_field, select_model,
-    get_coaching_level, get_current_cycle, install_signal_handlers,
-    get_plugin_dir, build_shared_context,
+    model_for_tier, get_coaching_level, get_current_cycle,
+    install_signal_handlers, get_plugin_dir, build_shared_context,
 )
 from storyforge.git import (
     create_branch, ensure_branch_pushed, create_draft_pr, commit_and_push,
@@ -505,7 +505,7 @@ def main(argv=None):
 
     # Model selection
     sonnet_model = select_model('evaluation')
-    opus_model = 'claude-opus-4-8'
+    opus_model = model_for_tier('opus')
 
     if score_mode == 'batch':
         eval_model = opus_model

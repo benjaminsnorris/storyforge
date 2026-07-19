@@ -12,6 +12,7 @@ import threading
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
+from storyforge.common import LATEST_MODELS
 from storyforge.costs import PRICING, calculate_cost, log_operation
 
 
@@ -24,10 +25,12 @@ API_RETRIES = 2  # retry transient failures (timeouts, 5xx)
 
 # Model output token limits — the API returns HTTP 400 if max_tokens exceeds these.
 # You only pay for tokens actually generated, so requesting the max is safe cost-wise.
+# Keyed off the tier map so a model bump in common.LATEST_MODELS flows through
+# here with no separate version string to update.
 MODEL_MAX_OUTPUT = {
-    'claude-opus-4-8': 128000,
-    'claude-sonnet-4-6': 64000,
-    'claude-haiku-4-5-20251001': 16384,
+    LATEST_MODELS['opus']:   128000,
+    LATEST_MODELS['sonnet']: 64000,
+    LATEST_MODELS['haiku']:  16384,
 }
 _DEFAULT_MAX_OUTPUT = 32768
 

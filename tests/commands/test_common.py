@@ -192,12 +192,18 @@ class TestSelectModel:
         result = select_model('unknown_task')
         assert 'opus' in result
 
-    def test_opus_tasks_use_latest_opus(self):
-        # Pin the exact latest Opus so dispatch can't silently drift back to an
-        # older Opus (regression for #270 — was claude-opus-4-6).
+    def test_opus_tasks_resolve_through_tier_map(self):
+        # Opus-tier tasks resolve to the current opus model via LATEST_MODELS,
+        # so a version bump there is the only change needed — no per-site IDs.
+        from storyforge.common import LATEST_MODELS
         for task in ('drafting', 'revision', 'synthesis', 'creative'):
-            assert select_model(task) == 'claude-opus-4-8'
-        assert select_model('unknown_task') == 'claude-opus-4-8'
+            assert select_model(task) == LATEST_MODELS['opus']
+        assert select_model('unknown_task') == LATEST_MODELS['opus']
+
+    def test_model_for_tier(self):
+        from storyforge.common import model_for_tier, LATEST_MODELS
+        for tier in ('opus', 'sonnet', 'haiku'):
+            assert model_for_tier(tier) == LATEST_MODELS[tier]
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv('STORYFORGE_MODEL', 'custom-model-123')

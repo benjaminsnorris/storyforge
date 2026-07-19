@@ -17,9 +17,21 @@ from datetime import datetime
 # ============================================================================
 
 PRICING = {
-    'opus':   {'input': 15.00, 'output': 75.00, 'cache_read': 1.50, 'cache_create': 18.75},
+    'opus':   {'input': 5.00,  'output': 25.00, 'cache_read': 0.50, 'cache_create': 6.25},
     'sonnet': {'input': 3.00,  'output': 15.00, 'cache_read': 0.30, 'cache_create': 3.75},
-    'haiku':  {'input': 0.80,  'output': 4.00,  'cache_read': 0.08, 'cache_create': 1.00},
+    'haiku':  {'input': 1.00,  'output': 5.00,  'cache_read': 0.10, 'cache_create': 1.25},
+}
+
+# The exact model ID each tier's PRICING above was last verified against.
+# Pricing is tier-based, but a new model version can reprice — so whenever
+# common.LATEST_MODELS bumps a tier to a new model, re-check the rates at
+# platform.claude.com/pricing, update PRICING if they changed, then bump the
+# ID here. A test asserts this matches LATEST_MODELS, so a version change that
+# skips the pricing review fails CI (see tests/commands/test_costs.py).
+PRICING_VERIFIED_FOR = {
+    'opus':   'claude-opus-4-8',
+    'sonnet': 'claude-sonnet-4-6',
+    'haiku':  'claude-haiku-4-5-20251001',
 }
 
 LEDGER_HEADER = 'timestamp|operation|target|model|input_tokens|output_tokens|cache_read|cache_create|cost_usd|duration_s'
