@@ -16,7 +16,7 @@ import os
 class TestMaxOutputTokens:
     def test_opus_returns_128k(self):
         from storyforge.api import max_output_tokens
-        assert max_output_tokens('claude-opus-4-6') == 128000
+        assert max_output_tokens('claude-opus-4-8') == 128000
 
     def test_sonnet_returns_64k(self):
         from storyforge.api import max_output_tokens

@@ -192,6 +192,13 @@ class TestSelectModel:
         result = select_model('unknown_task')
         assert 'opus' in result
 
+    def test_opus_tasks_use_latest_opus(self):
+        # Pin the exact latest Opus so dispatch can't silently drift back to an
+        # older Opus (regression for #270 — was claude-opus-4-6).
+        for task in ('drafting', 'revision', 'synthesis', 'creative'):
+            assert select_model(task) == 'claude-opus-4-8'
+        assert select_model('unknown_task') == 'claude-opus-4-8'
+
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv('STORYFORGE_MODEL', 'custom-model-123')
         result = select_model('drafting')

@@ -213,16 +213,16 @@ def check_file_exists(filepath: str, label: str | None = None,
 # ============================================================================
 
 _MODEL_MAP = {
-    'drafting': 'claude-opus-4-6',
-    'revision': 'claude-opus-4-6',
+    'drafting': 'claude-opus-4-8',
+    'revision': 'claude-opus-4-8',
     'mechanical': 'claude-sonnet-4-6',
     'evaluation': 'claude-sonnet-4-6',
     'extraction': 'claude-haiku-4-5-20251001',
-    'synthesis': 'claude-opus-4-6',
+    'synthesis': 'claude-opus-4-8',
     'review': 'claude-sonnet-4-6',
     # creative: synthesis-style work that needs strong judgment but isn't
     # full-scene drafting (style guides, summary proposals, prose adaptation).
-    'creative': 'claude-opus-4-6',
+    'creative': 'claude-opus-4-8',
 }
 
 
@@ -234,7 +234,7 @@ def select_model(task_type: str) -> str:
     override = os.environ.get('STORYFORGE_MODEL')
     if override:
         return override
-    return _MODEL_MAP.get(task_type, 'claude-opus-4-6')
+    return _MODEL_MAP.get(task_type, 'claude-opus-4-8')
 
 
 def select_revision_model(pass_name: str, purpose: str = '') -> str:
@@ -249,7 +249,7 @@ def select_revision_model(pass_name: str, purpose: str = '') -> str:
     key = f'{pass_name} {purpose}'.lower()
     if re.search(r'continuity|timeline|fact.check|thread.track', key):
         return 'claude-sonnet-4-6'
-    return 'claude-opus-4-6'
+    return 'claude-opus-4-8'
 
 
 # ============================================================================
