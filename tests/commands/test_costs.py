@@ -391,3 +391,20 @@ class TestGetPrice:
         monkeypatch.delenv('PRICING_SONNET_INPUT', raising=False)
         price = _get_price('claude-sonnet-4-6', 'input')
         assert price == PRICING['sonnet']['input']
+
+
+class TestPricingVerifiedForCurrentModels:
+    """Guard: pricing must be re-verified whenever a model version changes."""
+
+    def test_pricing_verified_for_matches_latest_models(self):
+        from storyforge.common import LATEST_MODELS
+        from storyforge.costs import PRICING_VERIFIED_FOR
+        # If this fails after a LATEST_MODELS bump: re-check the rates at
+        # platform.claude.com/pricing, update PRICING if they changed, then
+        # bump PRICING_VERIFIED_FOR to the new model ID(s).
+        assert PRICING_VERIFIED_FOR == LATEST_MODELS
+
+    def test_every_tier_has_pricing(self):
+        from storyforge.common import LATEST_MODELS
+        for tier in LATEST_MODELS:
+            assert tier in PRICING

@@ -6,16 +6,16 @@ from storyforge.costs import calculate_cost, estimate_cost, format_duration, log
 
 class TestPricing:
     def test_opus_input(self):
-        assert PRICING['opus']['input'] == 15.00
+        assert PRICING['opus']['input'] == 5.00
 
     def test_opus_output(self):
-        assert PRICING['opus']['output'] == 75.00
+        assert PRICING['opus']['output'] == 25.00
 
     def test_opus_cache_read(self):
-        assert PRICING['opus']['cache_read'] == 1.50
+        assert PRICING['opus']['cache_read'] == 0.50
 
     def test_opus_cache_create(self):
-        assert PRICING['opus']['cache_create'] == 18.75
+        assert PRICING['opus']['cache_create'] == 6.25
 
     def test_sonnet_input(self):
         assert PRICING['sonnet']['input'] == 3.00
@@ -30,16 +30,16 @@ class TestPricing:
         assert PRICING['sonnet']['cache_create'] == 3.75
 
     def test_haiku_input(self):
-        assert PRICING['haiku']['input'] == 0.80
+        assert PRICING['haiku']['input'] == 1.00
 
     def test_haiku_output(self):
-        assert PRICING['haiku']['output'] == 4.00
+        assert PRICING['haiku']['output'] == 5.00
 
     def test_haiku_cache_read(self):
-        assert PRICING['haiku']['cache_read'] == 0.08
+        assert PRICING['haiku']['cache_read'] == 0.10
 
     def test_haiku_cache_create(self):
-        assert PRICING['haiku']['cache_create'] == 1.00
+        assert PRICING['haiku']['cache_create'] == 1.25
 
 
 class TestCalculateCost:
