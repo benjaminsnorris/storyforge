@@ -251,14 +251,22 @@ The plugin does not ship an AI-generation helper — `storyforge cover` only pro
 
 **For OpenAI (`gpt-image-1`):**
 ```bash
-curl -s https://api.openai.com/v1/images/generations \
+curl -sS https://api.openai.com/v1/images/generations \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$(python3 -c 'import json,sys; print(json.dumps({"model":"gpt-image-1","prompt":sys.argv[1],"size":"1024x1536","quality":"high","n":1}))' "the full prompt text")" \
-  | python3 -c "import sys,json,base64; d=json.load(sys.stdin); print(d.get('error','')) or open('manuscript/assets/cover-illustration.png','wb').write(base64.b64decode(d['data'][0]['b64_json']))"
+  | python3 -c '
+import sys, json, base64
+d = json.load(sys.stdin)
+if "error" in d or "data" not in d:
+    sys.stderr.write("OpenAI image API error: " + json.dumps(d.get("error", d)) + "\n")
+    sys.exit(1)
+with open("manuscript/assets/cover-illustration.png", "wb") as f:
+    f.write(base64.b64decode(d["data"][0]["b64_json"]))
+'
 ```
 
-Building the JSON with `python3 -c` keeps the prompt's quotes and newlines from breaking the shell. Supported sizes: `1024x1024`, `1024x1536` (portrait, best for covers), `1536x1024`. Quality: `low` / `medium` / `high`.
+The response handler checks for an API error **before** opening the output file, so a failed generation exits non-zero with a clean message and never truncates an existing illustration. `curl -sS` stays quiet on progress but still surfaces transport errors. Building the JSON with `python3 -c` keeps the prompt's quotes and newlines from breaking the shell. Supported sizes: `1024x1024`, `1024x1536` (portrait, best for covers), `1536x1024`. Quality: `low` / `medium` / `high`.
 
 **For Flux (BFL):** the BFL API is submit-then-poll — POST the prompt to `https://api.bfl.ml/v1/flux-pro-1.1` with header `x-key: $BFL_API_KEY`, then GET the returned polling URL until `status` is `Ready` and download `result.sample`.
 
@@ -351,7 +359,18 @@ Copy the chosen illustration to `manuscript/assets/cover.png` and update configu
 
 ### Step T2.7: Update Configuration and Commit
 
-Same as Tier 1 Step T1.6, plus **commit `manuscript/assets/cover-prompt.md` alongside the illustration** so the generation prompt is tracked. Commit message: `"Cover: generate AI illustration for {title}"` or `"Cover: generate AI illustration with text compositing for {title}"`.
+Same as Tier 1 Step T1.6, plus **commit `manuscript/assets/cover-prompt.md` alongside the illustration** so the generation prompt is tracked.
+
+Before committing, confirm the prompt log was actually written (Step T2.4) — this guard catches the exact regression this step exists to prevent:
+```bash
+if [[ ! -s manuscript/assets/cover-prompt.md ]]; then
+    echo "ERROR: cover-prompt.md is missing or empty — the generation prompt was not recorded (Step T2.4)."
+    echo "The prompt is the reproducible seed for the art. Write it before committing."
+    exit 1
+fi
+```
+
+Commit message: `"Cover: generate AI illustration for {title}"` or `"Cover: generate AI illustration with text compositing for {title}"`.
 
 ## Coaching Level Behavior
 
