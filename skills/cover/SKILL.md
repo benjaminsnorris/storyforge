@@ -285,9 +285,9 @@ If the first result isn't right, offer to generate additional variations with ad
 **Do this in every coaching mode, including `full`.** The generation prompt is the reproducible seed for the art — it must survive the session. After each image is generated, append an entry to `manuscript/assets/cover-prompt.md` (create it on the first generation) using the Write/Edit tool. Capture, per variation:
 
 - the **full prompt text** (verbatim)
-- **model** (e.g. `gpt-image-1`), **size** (e.g. `1024x1536`), **quality**, and **n**
+- **model** (e.g. `gpt-image-1`), **size** (one of `1024x1024` / `1024x1536` / `1536x1024`), **quality** (`low` / `medium` / `high`), and **n**
 - the **output file** it produced (e.g. `cover-illustration-2.png`)
-- **status** — `selected` or `superseded`, with a one-line reason (fill this in at Step T2.5 once the author chooses)
+- **status** — exactly `selected` or `superseded`, with a one-line reason (fill this in at Step T2.5 once the author chooses)
 
 Format:
 ```markdown
