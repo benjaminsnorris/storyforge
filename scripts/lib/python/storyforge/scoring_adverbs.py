@@ -4,6 +4,7 @@ Detects dialogue-tag adverbs, weak verb+adverb pairs, and redundant
 adverbs.  Scores per 1000 words to normalize across scene lengths.
 """
 
+from storyforge.illustrations import strip_markers
 from storyforge.prose_analysis import detect_adverbs
 
 
@@ -13,6 +14,7 @@ def score_avoid_adverbs(scene_text: str) -> dict:
     Returns {'score': int, 'markers': dict, 'details': str}.
     Score 1-5.  Markers: aa-1 (dialogue_tag), aa-2 (weak_verb), aa-3 (redundant).
     """
+    scene_text = strip_markers(scene_text)
     markers = {'aa-1': 0, 'aa-2': 0, 'aa-3': 0}
 
     words = scene_text.split()

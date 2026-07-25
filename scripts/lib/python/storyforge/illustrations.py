@@ -805,6 +805,27 @@ class IllustrationFinding(TypedDict, total=False):
     file: str
 
 
+# Findings that make the plan incoherent — the book cannot be published or
+# assembled correctly while they stand, so `validate` fails on them.
+BLOCKING_FINDINGS: frozenset[str] = frozenset({
+    'duplicate_id', 'invalid_id', 'invalid_status', 'invalid_placement',
+    'missing_scene', 'unknown_scene', 'missing_file', 'missing_digest',
+    'duplicate_marker', 'orphan_marker',
+})
+
+# Findings that need author attention but leave a valid book. An anchor that
+# drifted after a revision is normal in-flight state; a file nobody claims is
+# usually a rename in progress.
+WARNING_FINDINGS: frozenset[str] = frozenset({
+    'anchor_drift', 'anchor_ambiguous', 'orphan_file',
+})
+
+
+def severity_of(kind: str) -> str:
+    """Return 'error' or 'warning' for a finding kind."""
+    return 'warning' if kind in WARNING_FINDINGS else 'error'
+
+
 def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     """Check the plan, the markers, and the files against each other.
 

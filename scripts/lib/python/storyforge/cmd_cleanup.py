@@ -1165,6 +1165,61 @@ def _check_page_files(project_dir: str) -> list[dict]:
     return findings
 
 
+#: Per-finding remediation text for the illustration plan (#278). Keyed by the
+#: `kind` illustrations.validate_plan emits.
+_ILLUSTRATION_ACTIONS: dict[str, str] = {
+    'duplicate_id': 'Give each illustration a unique id in '
+                    'reference/illustration-plan.csv',
+    'invalid_id': 'Rename the id to a lowercase kebab-case slug',
+    'invalid_status': 'Set status to planned, prompted, rendered, ingested, '
+                      'or superseded',
+    'invalid_placement': 'Set placement to before_anchor, after_anchor, '
+                         'scene_open, or scene_close',
+    'missing_scene': 'Set scene_id to the scene this illustration belongs to',
+    'unknown_scene': 'Fix scene_id, or add the missing scene file',
+    'missing_file': 'Run storyforge illustrate --ingest <path>, or set the '
+                    'row back to status=planned',
+    'missing_digest': 'Re-ingest the file so its sha256 is recorded — '
+                      'publishing is content-addressed and needs it',
+    'duplicate_marker': 'Remove the repeated ![[illus:…]] line from the scene',
+    'orphan_marker': 'Add the plan row, or remove the marker from the scene',
+    'anchor_drift': 'Update the anchor to a phrase that appears in the '
+                    'revised prose, then re-run '
+                    'storyforge illustrate --embed',
+    'anchor_ambiguous': 'Lengthen the anchor until it is unique within '
+                        'the scene',
+    'orphan_file': 'Reference the file from a plan row, or delete it',
+}
+
+
+def _check_illustrations(project_dir: str) -> list[dict]:
+    """Check the illustration plan against markers and files (#278).
+
+    An unrendered plan row is valid in-flight state, not a finding — the same
+    posture as unrendered GN pages. What is reported is genuine incoherence
+    between the plan, the scene markers, and the files on disk.
+    """
+    from storyforge import illustrations as ill
+
+    findings: list[dict] = []
+    for finding in ill.validate_plan(project_dir):
+        kind = finding['kind']
+        target = finding.get('file') or (
+            f'scenes/{finding["scene_id"]}.md' if finding.get('scene_id')
+            else f'reference/{ill.PLAN_FILENAME}'
+        )
+        findings.append({
+            'type': f'illus_{kind}',
+            'file': target,
+            'detail': finding['detail'],
+            'action': _ILLUSTRATION_ACTIONS.get(
+                kind, 'Review the illustration plan'),
+            'severity': ('warning' if ill.severity_of(kind) == 'warning'
+                         else 'error'),
+        })
+    return findings
+
+
 def _check_crlf(project_dir: str) -> list[dict]:
     """Check CSV files for CRLF line endings."""
     findings: list[dict] = []
@@ -1274,6 +1329,11 @@ def build_cleanup_report(project_dir: str) -> dict:
         finding['category'] = 'pages'
         all_findings.append(finding)
 
+    # --- Interior illustrations (prose-only) ---
+    for finding in _check_illustrations(project_dir):
+        finding['category'] = 'illustrations'
+        all_findings.append(finding)
+
     # --- CSV schema ---
     schema_issues = report_csv_schema(project_dir)
     rename_pairs = _detect_rename_pairs(schema_issues)
@@ -1330,6 +1390,7 @@ def _print_report(report: dict) -> None:
         ('structure', 'Project Structure'),
         ('scenes', 'Scene Files'),
         ('pages', 'Page Files'),
+        ('illustrations', 'Interior Illustrations'),
         ('schema', 'CSV Schema'),
         ('integrity', 'CSV Integrity'),
         ('unexpected', 'Unexpected Files'),

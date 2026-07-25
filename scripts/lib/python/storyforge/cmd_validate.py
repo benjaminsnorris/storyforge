@@ -57,6 +57,21 @@ def main(argv=None):
     elif vp_result['has_project_row']:
         log(f'Voice profile: valid ({vp_result["character_count"]} characters)')
 
+    from storyforge.schema import validate_illustration_plan
+    illus_result = validate_illustration_plan(project_dir)
+    if illus_result['row_count'] or illus_result['errors']:
+        if illus_result['errors']:
+            log(f'Illustration plan: {len(illus_result["errors"])} error(s)')
+            for err in illus_result['errors']:
+                log(f'  {err["row"]}: {err["message"]}')
+        if illus_result['warnings']:
+            log(f'Illustration plan: {len(illus_result["warnings"])} warning(s)')
+            for warn in illus_result['warnings']:
+                log(f'  {warn["row"]}: {warn["message"]}')
+        if not illus_result['errors'] and not illus_result['warnings']:
+            log(f'Illustration plan: valid '
+                f'({illus_result["row_count"]} illustrations)')
+
     structural_scores = None
     scores_previous = None
     if args.structural:
@@ -73,6 +88,7 @@ def main(argv=None):
         'structural': structural,
         'schema': schema,
         'knowledge': knowledge,
+        'illustrations': illus_result,
         'scores': structural_scores,
         'scores_previous': scores_previous,
     }
@@ -85,7 +101,8 @@ def main(argv=None):
     # Exit code
     structural_ok = structural['passed']
     schema_ok = schema is None or schema['failed'] == 0
-    sys.exit(0 if structural_ok and schema_ok else 1)
+    illustrations_ok = not illus_result['errors']
+    sys.exit(0 if structural_ok and schema_ok and illustrations_ok else 1)
 
 
 def _print_human_readable(combined):

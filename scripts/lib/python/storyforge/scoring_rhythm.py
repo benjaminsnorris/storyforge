@@ -5,6 +5,7 @@ Reuses split_sentences() and compute_rhythm_signature() from exemplars.py.
 """
 
 from storyforge.exemplars import split_sentences, compute_rhythm_signature
+from storyforge.illustrations import strip_markers
 
 
 def _detect_monotonous_runs(sentence_lengths: list[int],
@@ -44,6 +45,7 @@ def score_sentence_as_thought(scene_text: str) -> dict:
     Score 1-5.  Markers: sat-1 (low variance), sat-2 (monotonous run),
     sat-3 (no short sentences), sat-4 (no long sentences).
     """
+    scene_text = strip_markers(scene_text)
     markers = {'sat-1': 0, 'sat-2': 0, 'sat-3': 0, 'sat-4': 0}
 
     sig = compute_rhythm_signature(scene_text)

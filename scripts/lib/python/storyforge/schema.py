@@ -934,3 +934,66 @@ def validate_voice_profile(project_dir: str) -> dict:
         'character_count': character_count,
         'errors': errors,
     }
+
+
+ILLUSTRATION_PLAN_COLUMNS = [
+    'id', 'scene_id', 'anchor', 'placement', 'beat', 'rationale',
+    'subject', 'composition', 'palette', 'mood', 'motifs', 'canon_refs',
+    'status', 'asset_file', 'prompt_file', 'sha256', 'width', 'height',
+]
+
+
+def validate_illustration_plan(project_dir: str) -> dict:
+    """Validate reference/illustration-plan.csv and its scene markers.
+
+    Header shape is checked here; the cross-referential checks (marker ↔ row ↔
+    file, anchor drift, duplicates) live in illustrations.validate_plan, which
+    needs the scene files and the assets directory as well as the CSV.
+
+    Args:
+        project_dir: Path to the book project root.
+
+    Returns:
+        Dict with row_count, errors, and warnings. Both lists hold dicts with
+        'row' and 'message' keys, matching validate_voice_profile. Warnings do
+        not fail validation — a drifted anchor is normal after a revision.
+    """
+    from storyforge import illustrations as ill
+
+    path = ill.plan_path(project_dir)
+    if not os.path.isfile(path):
+        return {'row_count': 0, 'errors': [], 'warnings': []}
+
+    with open(path, encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    lines = [line for line in raw.splitlines() if line.strip()]
+    if not lines:
+        return {'row_count': 0, 'errors': [], 'warnings': []}
+
+    header = lines[0].split('|')
+    missing = [c for c in ILLUSTRATION_PLAN_COLUMNS if c not in header]
+    if missing:
+        return {
+            'row_count': 0,
+            'errors': [{
+                'row': 'header',
+                'message': f'Illustration plan is missing columns: '
+                           f'{", ".join(missing)}',
+            }],
+            'warnings': [],
+        }
+
+    errors: list[dict] = []
+    warnings: list[dict] = []
+    for finding in ill.validate_plan(project_dir):
+        entry = {
+            'row': finding.get('id') or finding.get('file') or '(plan)',
+            'message': f'[{finding["kind"]}] {finding["detail"]}',
+        }
+        if ill.severity_of(finding['kind']) == 'warning':
+            warnings.append(entry)
+        else:
+            errors.append(entry)
+
+    return {'row_count': len(lines) - 1, 'errors': errors,
+            'warnings': warnings}

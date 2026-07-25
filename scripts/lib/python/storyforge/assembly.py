@@ -340,7 +340,14 @@ def assemble_chapter(chapter_num: int, project_dir: str,
         parts.append('')
         parts.append(extract_scene_prose(scene_file))
 
-    return '\n'.join(parts)
+    # Interior illustrations (#278). Markers become markdown images with
+    # project-relative paths; the pandoc calls pass --resource-path so the path
+    # resolves the same whether the markdown lives in manuscript/ or
+    # manuscript/chapters/. Emitting absolute paths instead would put
+    # machine-specific strings into git-tracked chapter files.
+    from storyforge import illustrations as _ill
+    return _ill.resolve_for_local(project_dir, '\n'.join(parts),
+                                  relative_to=project_dir)
 
 
 # ============================================================================
@@ -700,6 +707,8 @@ def generate_epub(project_dir: str, manuscript_file: str,
         '--css', css_file,
         '--toc', '--toc-depth=1',
         '--epub-chapter-level=1',
+        # Interior illustration paths are project-relative (#278).
+        '--resource-path', project_dir,
     ]
 
     # Add cover image if available
@@ -728,6 +737,8 @@ def generate_html(project_dir: str, manuscript_file: str,
         '--css', css_file,
         '--toc', '--toc-depth=1',
         f'--metadata=title:{title}',
+        # Interior illustration paths are project-relative (#278).
+        '--resource-path', project_dir,
     ]
     subprocess.run(cmd, check=True)
 
@@ -748,6 +759,8 @@ def generate_pdf(project_dir: str, manuscript_file: str,
         '--pdf-engine=weasyprint',
         '--css', css_file,
         f'--metadata=title:{title}',
+        # Interior illustration paths are project-relative (#278).
+        '--resource-path', project_dir,
     ]
     r = subprocess.run(cmd, capture_output=True)
     if r.returncode != 0:
@@ -757,6 +770,7 @@ def generate_pdf(project_dir: str, manuscript_file: str,
             '-o', pdf_file,
             f'--metadata=title:{title}',
             '-V', 'geometry:margin=1in',
+            '--resource-path', project_dir,
         ]
         subprocess.run(cmd, check=True)
 
@@ -791,6 +805,41 @@ def _md_to_html(markdown_text: str) -> str:
     if r.returncode != 0:
         raise RuntimeError(f'pandoc failed: {r.stderr[:300]}')
     return r.stdout
+
+
+#: Where illustrations land inside the generated web book, relative to its root.
+_WEB_ILLUSTRATIONS_SUBDIR = 'illustrations'
+
+
+def _localize_illustrations(chapter_html: str, project_dir: str,
+                            web_dir: str) -> str:
+    """Copy referenced illustrations into the web book and rewrite their src.
+
+    ``assemble_chapter`` emits project-relative paths so the markdown stays
+    portable, but chapter pages live at ``output/web/chapters/``, so those
+    paths have to be rewritten and the files copied alongside (#278).
+    """
+    import shutil
+    from storyforge.illustrations import ILLUSTRATIONS_SUBDIR
+
+    prefix = ILLUSTRATIONS_SUBDIR.replace(os.sep, '/') + '/'
+    if prefix not in chapter_html:
+        return chapter_html
+
+    dest_dir = os.path.join(web_dir, _WEB_ILLUSTRATIONS_SUBDIR)
+
+    def repl(match: re.Match) -> str:
+        filename = match.group(2)
+        src = os.path.join(project_dir, ILLUSTRATIONS_SUBDIR, filename)
+        if not os.path.isfile(src):
+            return match.group(0)
+        os.makedirs(dest_dir, exist_ok=True)
+        shutil.copy2(src, os.path.join(dest_dir, filename))
+        return (f'{match.group(1)}../{_WEB_ILLUSTRATIONS_SUBDIR}/'
+                f'{filename}{match.group(3)}')
+
+    return re.sub(
+        r'(src=")' + re.escape(prefix) + r'([^"/]+)(")', repl, chapter_html)
 
 
 def generate_web_book(project_dir: str, plugin_dir: str,
@@ -939,6 +988,8 @@ def generate_web_book(project_dir: str, plugin_dir: str,
             # Assemble chapter markdown and convert to HTML
             chapter_md = assemble_chapter(ch_num, project_dir, break_style)
             chapter_html = _md_to_html(chapter_md)
+            chapter_html = _localize_illustrations(chapter_html, project_dir,
+                                                  web_dir)
 
             # Part label if this chapter starts a new part
             part_label = ''
@@ -1161,6 +1212,7 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
     """
     import base64
     import json
+    from storyforge import illustrations as _ill
     from storyforge.common import (check_chapter_map_freshness,
                                    read_yaml_field as _common_read_yaml_field)
 
@@ -1180,6 +1232,10 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
 
     scenes_dir = os.path.join(project_dir, 'scenes')
     total_chapters = count_chapters(project_dir)
+
+    # Illustration keys actually placed in a scene. Only these are declared as
+    # assets — a plan row whose marker never landed has nowhere to render.
+    used_illustrations: set[str] = set()
 
     chapters = []
     for ch_num in range(1, total_chapters + 1):
@@ -1201,15 +1257,29 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
                 if end != -1:
                     md = md[end + 3:].strip()
 
-            html = _md_to_html(md)
-            word_count = len(md.split())
+            # Interior illustrations (#278) are carried as structured
+            # placements, NOT as markup inside content_html. Bookshelf derives
+            # highlight offsets from the scene's visible text, so injecting
+            # anything visible here would shift every downstream offset and
+            # silently re-anchor or orphan real reader highlights. Stripping
+            # the marker keeps content_html byte-identical to the un-illustrated
+            # book. See benjaminsnorris/bookshelf#11.
+            placements = _ill.scene_placements(md, _md_to_html)
+            prose = _ill.strip_markers(md)
 
-            scenes.append({
+            html = _md_to_html(prose)
+            word_count = len(prose.split())
+
+            scene_entry = {
                 'slug': scene_id,
                 'content_html': html.strip(),
                 'word_count': word_count,
                 'sort_order': sort_idx,
-            })
+            }
+            if placements:
+                scene_entry['illustrations'] = placements
+                used_illustrations.update(p['key'] for p in placements)
+            scenes.append(scene_entry)
 
         chapters.append({
             'number': ch_num,
@@ -1233,6 +1303,19 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
         'metadata': metadata,
         'chapters': chapters,
     }
+
+    # Illustration assets — metadata only, no bytes. The bytes go straight to
+    # storage via a content-addressed digest diff (benjaminsnorris/bookshelf#11).
+    if used_illustrations:
+        assets = _ill.manifest_assets(project_dir, used_illustrations)
+        if assets:
+            manifest['assets'] = assets
+        undeclared = used_illustrations - {a['key'] for a in assets}
+        if undeclared:
+            from storyforge.common import log as _log
+            _log(f'WARNING: {len(undeclared)} illustration(s) are marked in '
+                 f'scenes but not ingested, so they will not publish: '
+                 f'{", ".join(sorted(undeclared))}')
 
     # Embed dashboard HTML if requested
     if include_dashboard:

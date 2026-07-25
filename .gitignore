@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 .coverage
 .worktrees/
+
+# Local agent state (worktrees here are embedded git repos)
+.claude/
