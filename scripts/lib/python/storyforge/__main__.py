@@ -10,6 +10,10 @@ import sys
 # Commands that don't yet support graphic-novel mode (Plan 1 boundary).
 # When a project's medium is graphic-novel, these commands return a clear
 # error instead of silently running novel-mode logic on the wrong data.
+#
+# `illustrate` is prose-only too, but self-guards in cmd_illustrate.main so it
+# can name the graphic-novel equivalent (`elaborate --stage prompts`) instead
+# of the generic unsupported message.
 GN_UNSUPPORTED_COMMANDS = frozenset({
     'publish', 'annotations', 'repetition', 'enrich',
 })
@@ -58,6 +62,7 @@ COMMANDS = {
     'assemble': 'storyforge.cmd_assemble',
     'cleanup': 'storyforge.cmd_cleanup',
     'cover': 'storyforge.cmd_cover',
+    'illustrate': 'storyforge.cmd_illustrate',
     'migrate': 'storyforge.cmd_migrate',
     'migrate-medium': 'storyforge.cmd_migrate_medium',
     'scenes-setup': 'storyforge.cmd_scenes_setup',
