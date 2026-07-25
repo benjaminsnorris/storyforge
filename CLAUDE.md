@@ -193,6 +193,7 @@ All structured data uses pipe-delimited CSV:
 - `reference/scenes.csv` — structural identity (id, seq, title, summary, part, pov, location, timeline_day, time_of_day, duration, type, status, word_count, target_words, target_pages, panel_count, page_count, architecture_scene). `summary` is a single sentence describing what happens; `architecture_scene` is optional and references `architecture.csv:id` (empty for purely interstitial scenes).
 - `reference/scene-intent.csv` — narrative dynamics (id, function, action_sequel, emotional_arc, value_at_stake, value_shift, turning_point, characters, on_stage, mice_threads, theme_threads). `theme_threads` references `themes.csv:id`.
 - `reference/scene-briefs.csv` — drafting contracts (id, goal, conflict, outcome, crisis, decision, knowledge_in, knowledge_out, key_actions, key_dialogue, emotions, motifs, continuity_deps, has_overflow)
+- `reference/illustration-plan.csv` — one row per interior illustration (id, scene_id, anchor, placement, beat, rationale, subject, composition, palette, mood, motifs, canon_refs, status, asset_file, prompt_file, sha256, width, height). `id` is the scene-marker key and the Bookshelf asset key; `anchor` is a verbatim quote from the scene, which is what lets a plan row survive revision. Prose books only.
 - `reference/voice-profile.csv` — structured voice constraints (_project row for banned words/register, per-character rows for preferred words/metaphor families/rhythm/dialogue style)
 
 **Cross-cutting registries:**
@@ -272,8 +273,9 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `storyforge assemble` | `cmd_assemble.py` | Chapter assembly + epub/PDF/HTML generation |
 | `storyforge visualize` | `cmd_visualize.py` | Multi-page manuscript dashboard |
 | `storyforge timeline` | `cmd_timeline.py` | Timeline construction |
-| `storyforge cleanup` | `cmd_cleanup.py` | Project structure cleanup. `--scenes` strips writing-agent artifacts from scene files. `--csv` runs only the CSV integrity report (schema + row checks). |
+| `storyforge cleanup` | `cmd_cleanup.py` | Project structure cleanup. `--scenes` strips writing-agent artifacts from scene files. `--csv` runs only the CSV integrity report (schema + row checks). Also validates the illustration plan against its markers and files. |
 | `storyforge cover` | `cmd_cover.py` | Cover design |
+| `storyforge illustrate` | `cmd_illustrate.py` | Interior illustrations (prose only). `--plan` proposes moments (deterministic pre-pass over spine/architecture/motifs/chapter distribution, then an LLM pass that argues against those findings); `--prompts` writes GPT Image 2 art direction per illustration; `--ingest PATH` brings rendered files in, records sha256 + dimensions, and embeds markers; `--embed` re-inserts markers from the plan; `--diagnose` is a read-only health report. Coaching-aware. Refuses to run on graphic-novel projects (they use the page pipeline). |
 | `storyforge scenes-setup` | `cmd_scenes_setup.py` | Scene file and metadata setup |
 | `storyforge scenes-export` | `cmd_scenes_export.py` | Export scenes to `reference/scenes-review.md` (header-driven; round-trips every column present in the CSVs, including GN additions) |
 | `storyforge scenes-import` | `cmd_scenes_import.py` | Import edited `scenes-review.md` back into scene CSVs |
@@ -297,6 +299,7 @@ Run: `./tests/run-tests.sh` or `python3 -m pytest tests/` or `pytest tests/test_
 | `produce` | Epub, PDF, print formats |
 | `init`† | New project initialization |
 | `cover` | Cover design |
+| `illustrate` | Interior illustrations — decide where they belong, art-direct them, ingest the renders, embed the references |
 | `title` | Title development |
 | `press-kit` | Marketing materials |
 
@@ -361,6 +364,8 @@ Key principles:
 | `revision.py` | Revision prompt builders |
 | `timeline.py` | Timeline construction |
 | `cover.py` | Cover generation |
+| `illustrations.py` | Illustration plan I/O, the `![[illus:id]]` marker (parse/insert/strip), anchor matching, per-target resolution, selection pre-pass, plan validation |
+| `prompts_illustrate.py` | Illustration selection + art-direction prompt builders, character anchors, coach brief, strict checklist |
 | `scenes.py` | Scene file management |
 | `exemplars.py` | Prose exemplar validation |
 | `prose_analysis.py` | Shared text analysis: passive voice, dialogue extraction, adverbs, fillers, AI-tell vocabulary |
@@ -409,6 +414,34 @@ Set `project.medium: graphic-novel` in storyforge.yaml at init time to switch a 
 **Rendered page images (issue #261):** rendered pages have a canonical home at `manuscript/pages/<page_id>.png` — one PNG per page file, filenames matching the page IDs 1:1 (scene + page-within-scene naming, stable across scene reordering; book-wide page numbers stay derived from the chapter map). Each PNG is the *current* canonical render of that page; iteration history lives in git (no separate `drafts/` directory — re-render replaces the PNG and commit). `references_required` in a page's frontmatter can point at `manuscript/pages/*.png` for prior-page style/continuity anchors, so render order is also dependency order. `cleanup` flags an orphan PNG (no matching page file) as `page_render_orphan`; an *unrendered* page (page file with no PNG) is valid in-flight state, not a finding. `script-package` logs an "N of M pages rendered" count and, once at least one page is rendered, adds a `manuscript/pages/` inventory line to the handoff readme (before any render it logs 0-of-M progress to stdout only); orphan renders always log a WARNING. The PNGs already live under the bundle dir, so they are not copied. `forge` reports render status in GN mode and names the next unrendered page. `pages.page_render_report(project_dir)` returns `{rendered, unrendered, orphans}` (by `page_id`).
 
 See the design spec: `docs/superpowers/specs/2026-05-20-graphic-novel-mode-design.md`.
+
+## Interior Illustrations (prose books)
+
+`storyforge illustrate` handles interior art for prose books — distinct from the cover, and distinct from GN mode's page pipeline (which it refuses to run on). See `docs`/issue #278.
+
+**The plan** — `reference/illustration-plan.csv`, one row per illustration. `id` doubles as the scene-marker key and the Bookshelf asset key. `anchor` is a short verbatim quote from the scene; matching is whitespace-tolerant so an anchor survives reflow, and a drifted or ambiguous anchor is *reported* rather than placing art at a guessed offset. `placement` is `before_anchor` | `after_anchor` | `scene_open` | `scene_close`, always relative to the whole paragraph containing the anchor — an illustration never splits a paragraph.
+
+**The marker** — `![[illus:{id}]]` on its own line in `scenes/{scene_id}.md`. Deliberately *not* a markdown image: one marker resolves three ways, and a literal `![](path)` would be right for exactly one target.
+
+| Target | Resolution |
+|--------|------------|
+| epub / PDF / HTML | Markdown image with a **project-relative** path; every pandoc call passes `--resource-path <project_dir>`. Relative rather than absolute so git-tracked chapter files stay portable. |
+| Web book | Files copied to `output/web/illustrations/`, `src` rewritten. |
+| Bookshelf manifest | Marker **stripped** from `content_html`; emitted instead as per-scene `illustrations: [{key, after_paragraph}]` plus a book-level `assets` array (metadata only, no bytes). |
+
+**The load-bearing invariant:** illustrations must never add anything to `content_html`. Bookshelf derives highlight offsets from the scene's visible text (`htmlToVisibleText`), so any visible insertion — a `<figcaption>` is the obvious temptation — shifts every downstream offset in that scene and silently re-anchors or orphans real reader highlights. Captions live in asset metadata and the reader renders them. `tests/test_illustrate_cmd.py::test_manifest_content_html_is_unchanged_by_illustrations` is the regression test; do not weaken it.
+
+**`after_paragraph` counts top-level `<p>` elements only** — a paragraph nested in a blockquote is not a placement boundary, because the reader walks the scene container's direct children.
+
+**Markers are never prose.** They are stripped at every deterministic scorer entry (`scoring_passive/adverbs/weather/rhythm/economy`), in every `prose_analysis` detector, at the scene loads feeding evaluator and fidelity prompts, and from `word_count`. A marker scored as a sentence perturbs rhythm variance; a marker a revision pass can see is a marker it can delete.
+
+**Art direction** reuses the five GPT Image 2 principles from #260/#263 verbatim: the 5-section OpenAI template, reference images carrying style and likeness (cover art plus prior ingested illustrations — that chain is what makes a book's art cohere), an **identical** character-anchor string everywhere a character appears (persisted in `manuscript/assets/illustrations/character-anchors.md`, never overwritten once used), positive framing over negation, and an explicit orientation directive. Aspect defaults to portrait and is read from the row's `composition` field.
+
+**Rendering happens outside Storyforge.** The command emits prompts; the author renders and `--ingest` brings files back. Files match plan rows by filename stem — an unmatched file is reported, never guessed at.
+
+**Unrendered is valid in-flight state**, not a finding — same posture as GN page renders (#261). `cleanup` reports genuine incoherence under "Interior Illustrations" (`illus_orphan_marker`, `illus_missing_file`, `illus_orphan_file`, `illus_anchor_drift`, `illus_duplicate_marker`, plus row-level schema problems); `validate` fails on the blocking ones and warns on drift.
+
+**Bookshelf side:** benjaminsnorris/bookshelf#11 (content-addressed `book_assets` + digest-diff upload; the cover migrates onto it) and #12 (reading experience). The `assets` / `illustrations` manifest shape is the interface between the repos — keep them in sync.
 
 ## PR Review Workflow — MANDATORY
 
