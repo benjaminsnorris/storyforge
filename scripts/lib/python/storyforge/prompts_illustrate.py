@@ -34,9 +34,11 @@ ANCHORS_FILENAME: Final[str] = 'character-anchors.md'
 DEFAULT_ASPECT: Final[str] = 'portrait'
 VALID_ASPECTS: Final[tuple[str, ...]] = ('portrait', 'square', 'landscape')
 
+# Phrasing matches the cover skill's Step T2.1 constraint verbatim — image
+# models render text unreliably, and the two prompt families should not drift
+# apart on the one constraint they share.
 _NO_TEXT_CONSTRAINT: Final[str] = (
-    'Render no text, no letters, no words, and no typography anywhere in the '
-    'image.'
+    'no text, no letters, no words, no typography anywhere in the image.'
 )
 
 
@@ -430,7 +432,7 @@ def render_prompt_file(*, row: dict[str, str], body: str,
         '### Constraints',
         '',
         f'- {orientation}',
-        f'- {_NO_TEXT_CONSTRAINT}',
+        f'- Render {_NO_TEXT_CONSTRAINT}',
         '- Match the style, palette, and line quality of the reference images.',
         '- Keep every character consistent with their anchor description above.',
         '',

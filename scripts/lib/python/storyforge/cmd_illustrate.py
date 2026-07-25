@@ -114,10 +114,15 @@ def main(argv=None):
 
 
 def _id_filter(raw: str | None) -> set[str] | None:
-    """Parse a --ids value into a set, or None when unfiltered."""
+    """Parse a --ids value into a set, or None when unfiltered.
+
+    An all-whitespace or all-commas value yields no ids, which must mean
+    "unfiltered" rather than "match nothing" — an empty set would silently
+    filter every row away and report success having done nothing.
+    """
     if not raw:
         return None
-    return {part.strip() for part in raw.split(',') if part.strip()}
+    return {part.strip() for part in raw.split(',') if part.strip()} or None
 
 
 # ============================================================================
@@ -241,6 +246,11 @@ def _merge_proposals(project_dir: str, proposals: list[dict]) -> int:
     for proposal in proposals:
         row = ill.blank_row(_slugify(str(proposal.get('id', ''))))
         for col in ill.PLAN_COLUMNS:
+            # `id` is already slugified above — copying the raw proposal value
+            # over it would let a title-cased id like "Lantern Vigil" through,
+            # and the id is the marker key and the Bookshelf asset key.
+            if col == 'id':
+                continue
             val = proposal.get(col)
             if val:
                 row[col] = _sanitize_cell(str(val))
@@ -568,29 +578,47 @@ def run_embed(project_dir: str, ids: set[str] | None, dry_run: bool) -> int:
     return 1 if skipped and not embedded else 0
 
 
+#: Words too common to signal that a line is the revised anchor.
+_HINT_STOPWORDS = frozenset({
+    'the', 'and', 'but', 'for', 'her', 'his', 'she', 'him', 'they', 'them',
+    'that', 'this', 'with', 'from', 'into', 'was', 'were', 'had', 'has',
+    'not', 'you', 'your', 'its', 'their', 'been', 'then', 'than', 'when',
+    'what', 'who', 'how', 'all', 'one', 'out', 'off', 'own', 'too',
+})
+
+
 def _nearest_anchor_hint(scene_text: str, row: dict[str, str]) -> str:
     """Suggest the closest line to a failed anchor, to speed up re-anchoring.
 
-    Overlap on content words rather than edit distance — after a revision the
-    surviving phrase usually shares nouns with the anchor even when the
-    wording changed.
+    Content-word overlap rather than edit distance — after a revision the
+    surviving phrase usually keeps the anchor's nouns even when the wording
+    around them changed. Substring hits count, because the revision that broke
+    the anchor is often a compound ("sill" becoming "windowsill").
     """
     anchor = (row.get('anchor') or '').strip()
     if not anchor:
         return ''
-    wanted = {w.lower().strip('.,;:!?"\'') for w in anchor.split() if len(w) > 3}
+    wanted = {w.lower().strip('.,;:!?"\'—')
+              for w in anchor.split() if len(w) > 2}
+    wanted -= _HINT_STOPWORDS
     if not wanted:
         return ''
+
+    # A short anchor has few content words to match on, so requiring two hits
+    # would suppress the hint exactly when the author most needs it.
+    threshold = 1 if len(wanted) <= 2 else 2
 
     best, best_score = '', 0
     for line in ill.strip_markers(scene_text).splitlines():
         if not line.strip():
             continue
-        words = {w.lower().strip('.,;:!?"\'') for w in line.split()}
-        score = len(wanted & words)
+        lowered = line.lower()
+        words = {w.strip('.,;:!?"\'—') for w in lowered.split()}
+        score = sum(1 for w in wanted
+                    if w in words or (len(w) > 3 and w in lowered))
         if score > best_score:
             best, best_score = line.strip(), score
-    if best_score < 2:
+    if best_score < threshold:
         return ''
     return best[:120]
 
