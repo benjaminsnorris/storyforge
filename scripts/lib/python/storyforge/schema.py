@@ -936,15 +936,6 @@ def validate_voice_profile(project_dir: str) -> dict:
     }
 
 
-#: Mirrors illustrations.PLAN_COLUMNS. Kept as its own list so the schema layer
-#: does not import the module just to know the header shape.
-ILLUSTRATION_PLAN_COLUMNS = [
-    'id', 'scene_id', 'anchor', 'placement', 'layout', 'beat', 'rationale',
-    'subject', 'composition', 'palette', 'mood', 'motifs', 'canon_refs',
-    'status', 'asset_file', 'prompt_file', 'sha256', 'width', 'height',
-]
-
-
 def validate_illustration_plan(project_dir: str) -> dict:
     """Validate reference/illustration-plan.csv and its scene markers.
 
@@ -962,6 +953,12 @@ def validate_illustration_plan(project_dir: str) -> dict:
     """
     from storyforge import illustrations as ill
 
+    # PLAN_COLUMNS is read from the module rather than duplicated here: the
+    # copy this replaced was justified by "so the schema layer does not import
+    # the module", but this function imports it unconditionally three lines up,
+    # and nothing kept the two 19-element lists in agreement.
+    expected_columns = ill.PLAN_COLUMNS
+
     path = ill.plan_path(project_dir)
     if not os.path.isfile(path):
         return {'row_count': 0, 'errors': [], 'warnings': []}
@@ -973,7 +970,7 @@ def validate_illustration_plan(project_dir: str) -> dict:
         return {'row_count': 0, 'errors': [], 'warnings': []}
 
     header = lines[0].split('|')
-    missing = [c for c in ILLUSTRATION_PLAN_COLUMNS if c not in header]
+    missing = [c for c in expected_columns if c not in header]
     if missing:
         return {
             'row_count': 0,

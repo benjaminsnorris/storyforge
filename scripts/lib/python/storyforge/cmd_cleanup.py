@@ -22,6 +22,7 @@ import sys
 import tempfile
 
 from storyforge.canon import CANON_DIR, CanonFinding, validate_canon_directory
+from storyforge.illustrations import IllustrationFindingKind
 from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge.parsing import clean_scene_content, extract_single_scene
@@ -1167,7 +1168,7 @@ def _check_page_files(project_dir: str) -> list[dict]:
 
 #: Per-finding remediation text for the illustration plan (#278). Keyed by the
 #: `kind` illustrations.validate_plan emits.
-_ILLUSTRATION_ACTIONS: dict[str, str] = {
+_ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
     'duplicate_id': 'Give each illustration a unique id in '
                     'reference/illustration-plan.csv',
     'invalid_id': 'Rename the id to a lowercase kebab-case slug',
@@ -1191,6 +1192,16 @@ _ILLUSTRATION_ACTIONS: dict[str, str] = {
     'anchor_ambiguous': 'Lengthen the anchor until it is unique within '
                         'the scene',
     'orphan_file': 'Reference the file from a plan row, or delete it',
+    'inline_marker': 'Move the marker to its own line — run '
+                     'storyforge illustrate --embed rather than placing it '
+                     'by hand',
+    'marker_lost': 'A rewrite dropped the marker. Re-anchor the plan row if '
+                   'the prose changed, then run '
+                   'storyforge illustrate --embed',
+    'unembedded_ingested': 'Run storyforge illustrate --embed — the art exists '
+                           'but nothing in the prose points at it',
+    'shattered_row': 'Replace the "|" in the offending cell with "/" — the '
+                     'plan is pipe-delimited and unquoted',
 }
 
 
@@ -1216,8 +1227,7 @@ def _check_illustrations(project_dir: str) -> list[dict]:
             'detail': finding['detail'],
             'action': _ILLUSTRATION_ACTIONS.get(
                 kind, 'Review the illustration plan'),
-            'severity': ('warning' if ill.severity_of(kind) == 'warning'
-                         else 'error'),
+            'severity': ill.severity_of(kind),
         })
     return findings
 

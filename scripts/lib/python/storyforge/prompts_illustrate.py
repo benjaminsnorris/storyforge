@@ -21,15 +21,19 @@ See benjaminsnorris/storyforge#278.
 import json
 import os
 import re
-from typing import Final
+from typing import Final, Literal
 
 from storyforge.illustrations import (
     ANCHORS_SECTION, DIRECTION_SECTIONS, PrepassFindings, RenderStep,
     VALID_PLACEMENTS, find_section, read_continuity_anchors, read_direction,
 )
 
-DEFAULT_ASPECT: Final[str] = 'portrait'
-VALID_ASPECTS: Final[tuple[str, ...]] = ('portrait', 'square', 'landscape')
+#: Aspect is derived from author-written prose (layout, then composition) and
+#: consumed by orientation_clause, which silently falls back to portrait for an
+#: unrecognized value — so the domain is worth naming. Mirrors pages.PageAspect.
+Aspect = Literal['portrait', 'square', 'landscape']
+ASPECTS: Final[tuple[Aspect, ...]] = ('portrait', 'square', 'landscape')
+DEFAULT_ASPECT: Final[Aspect] = 'portrait'
 
 # Phrasing matches the cover skill's Step T2.1 constraint verbatim — image
 # models render text unreliably, and the two prompt families should not drift
@@ -43,7 +47,7 @@ _NO_TEXT_CONSTRAINT: Final[str] = (
 # Orientation
 # ============================================================================
 
-def aspect_for_row(row: dict[str, str]) -> str:
+def aspect_for_row(row: dict[str, str]) -> Aspect:
     """Determine an illustration's aspect from its layout, then its composition.
 
     Layout decides first because it is a physical fact about the page: a
@@ -63,7 +67,7 @@ def aspect_for_row(row: dict[str, str]) -> str:
     return DEFAULT_ASPECT
 
 
-def orientation_clause(aspect: str = DEFAULT_ASPECT) -> str:
+def orientation_clause(aspect: Aspect = DEFAULT_ASPECT) -> str:
     """Return the explicit orientation directive for an aspect.
 
     GPT Image 2 returns landscape unless told otherwise (#263), so every
@@ -489,7 +493,8 @@ def render_references_block(
 
 
 def render_prompt_file(*, row: dict[str, str], body: str,
-                       references: list[str], aspect: str = DEFAULT_ASPECT,
+                       references: list[str] | list[tuple[str, str]],
+                       aspect: Aspect = DEFAULT_ASPECT,
                        model: str = 'gpt-image-2') -> str:
     """Assemble an illustration's prompt file.
 

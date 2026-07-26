@@ -24,8 +24,9 @@ import hashlib
 import os
 import re
 import struct
+import sys
 from html.parser import HTMLParser
-from typing import Callable, TypedDict
+from typing import Callable, Literal, TypedDict
 
 DELIMITER = '|'
 ARRAY_DELIMITER = ';'
@@ -841,7 +842,7 @@ def resolve_for_local(project_dir: str, scene_text: str,
 
 class ScenePlacement(TypedDict):
     """An illustration's position inside one scene's converted HTML."""
-    key: str
+    key: str            #: normalized via asset_key — never a raw plan id
     after_paragraph: int
 
 
@@ -919,12 +920,16 @@ def scene_placements(scene_md: str,
     return placements
 
 
-class ManifestAsset(TypedDict, total=False):
-    """One asset entry for the Bookshelf publish manifest."""
-    key: str
-    role: str
+class _ManifestAssetRequired(TypedDict):
+    """Fields every published asset carries."""
+    key: str          #: normalized via asset_key — never a raw plan id
+    role: Literal['illustration']
     sha256: str
     extension: str
+
+
+class ManifestAsset(_ManifestAssetRequired, total=False):
+    """One asset entry for the Bookshelf publish manifest."""
     width: int
     height: int
     alt_text: str
@@ -938,10 +943,15 @@ def manifest_assets(project_dir: str,
     contract is content-addressed, so an asset with no sha256 has nowhere to
     live (see benjaminsnorris/bookshelf#11).
     """
+    # Normalize defensively: asset_key is idempotent, and a caller passing plan
+    # ids (author casing) would otherwise silently get zero assets — and then a
+    # misleading "not ingested" warning from generate_publish_manifest.
+    wanted = None if used_keys is None else {asset_key(k) for k in used_keys}
+
     assets: list[ManifestAsset] = []
     for row in read_plan(project_dir):
         key = asset_key(row['id'])
-        if used_keys is not None and key not in used_keys:
+        if wanted is not None and key not in wanted:
             continue
         if row.get('status', '').strip() != 'ingested':
             continue
@@ -954,10 +964,16 @@ def manifest_assets(project_dir: str,
             'key': key, 'role': 'illustration',
             'sha256': digest, 'extension': ext,
         }
-        for field in ('width', 'height'):
-            val = (row.get(field) or '').strip()
-            if val.isdigit():
-                asset[field] = int(val)  # type: ignore[literal-required]
+        # Assigned individually rather than in a loop: a TypedDict subscript
+        # needs a literal key, and the loop form only compiled behind a
+        # `# type: ignore[literal-required]` that nothing in this repo can
+        # verify is still needed.
+        width = (row.get('width') or '').strip()
+        if width.isdigit():
+            asset['width'] = int(width)
+        height = (row.get('height') or '').strip()
+        if height.isdigit():
+            asset['height'] = int(height)
         alt = (row.get('beat') or '').strip()
         if alt:
             asset['alt_text'] = alt
@@ -1222,6 +1238,25 @@ def _split_array(value: str) -> list[str]:
     return [p.strip() for p in (value or '').split(ARRAY_DELIMITER) if p.strip()]
 
 
+#: Sort key for a scene with no known position — missing from the chapter map,
+#: or a scenes.csv row whose `seq` cell is not a number. Both mean "after
+#: everything known", never a real position.
+_SORTS_LAST = sys.maxsize
+
+
+def _chapter_sort_key(row: dict[str, str]) -> tuple[int, str]:
+    """Order a chapter-map row by its chapter number.
+
+    Falls back to `seq` (the alternate key column assembly supports) and then
+    to sorting last, so a malformed row cannot silently reorder the book.
+    """
+    for column in ('chapter', 'seq', 'number'):
+        raw = (row.get(column) or '').strip()
+        if raw.isdigit():
+            return (int(raw), raw)
+    return (_SORTS_LAST, str(row.get('scenes', '')))
+
+
 def _scene_order(project_dir: str) -> dict[str, int]:
     """Map scene id → reading position, from the chapter map then scenes.csv.
 
@@ -1231,7 +1266,14 @@ def _scene_order(project_dir: str) -> dict[str, int]:
     """
     order: dict[str, int] = {}
     position = 0
-    for row in _read_ref_csv(project_dir, 'chapter-map.csv'):
+
+    # Sort by chapter number, not by physical row order. Every other consumer
+    # addresses chapters by number — assembly looks up str(chapter_num) and
+    # loops range(1, total + 1) — so the book's reading order is numeric
+    # regardless of how the rows sit in the file. Trusting row order put the
+    # visual key in chapter 3 on an out-of-order map.
+    chapter_rows = _read_ref_csv(project_dir, 'chapter-map.csv')
+    for row in sorted(chapter_rows, key=_chapter_sort_key):
         for scene_id in _split_array(row.get('scenes', '')):
             if scene_id not in order:
                 order[scene_id] = position
@@ -1242,7 +1284,7 @@ def _scene_order(project_dir: str) -> dict[str, int]:
     rows = _read_ref_csv(project_dir, 'scenes.csv')
     def seq_of(row: dict[str, str]) -> int:
         raw = (row.get('seq') or '').strip()
-        return int(raw) if raw.isdigit() else 10 ** 6
+        return int(raw) if raw.isdigit() else _SORTS_LAST
     for pos, row in enumerate(sorted(rows, key=seq_of)):
         scene_id = (row.get('id') or '').strip()
         if scene_id:
@@ -1256,13 +1298,17 @@ VISUAL_KEY_HORIZON_DIVISOR = 3
 VISUAL_KEY_MIN_CANDIDATES = 3
 
 
+PlanStatus = Literal['planned', 'prompted', 'rendered', 'ingested',
+                     'superseded']
+
+
 class RenderStep(TypedDict):
     """One illustration's position in the recommended render order."""
     id: str
     scene_id: str
     is_visual_key: bool
     locks: list[str]
-    status: str
+    status: PlanStatus
 
 
 def render_order(project_dir: str) -> list[RenderStep]:
@@ -1288,7 +1334,8 @@ def render_order(project_dir: str) -> list[RenderStep]:
     order = _scene_order(project_dir)
 
     def position(row: dict[str, str]) -> int:
-        return order.get((row.get('scene_id') or '').strip(), 10 ** 6)
+        return order.get((row.get('scene_id') or '').strip(),
+                         _SORTS_LAST)
 
     in_story_order = sorted(rows, key=lambda r: (position(r), r['id'].strip()))
 
@@ -1341,18 +1388,35 @@ def next_to_render(project_dir: str) -> str:
 # Validation
 # ============================================================================
 
-class IllustrationFinding(TypedDict, total=False):
-    """One problem with the illustration plan or its markers."""
-    kind: str
-    id: str
-    scene_id: str
+#: Closed set of finding kinds. Literal + Required split per pages.PageFinding:
+#: a typo at an emit site would otherwise become a *blocking* finding, because
+#: severity_of defaults anything unrecognized to 'error', and its remediation
+#: text in cmd_cleanup would silently fall back to a generic one.
+IllustrationFindingKind = Literal[
+    'duplicate_id', 'invalid_id', 'invalid_status', 'invalid_placement',
+    'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
+    'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
+    'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
+    'unembedded_ingested', 'shattered_row',
+]
+
+
+class _IllustrationFindingRequired(TypedDict):
+    """Keys every finding carries. Consumers read both unconditionally."""
+    kind: IllustrationFindingKind
     detail: str
-    file: str
+
+
+class IllustrationFinding(_IllustrationFindingRequired, total=False):
+    """One problem with the illustration plan or its markers."""
+    id: str        #: every finding except orphan_file
+    scene_id: str  #: set when the finding is locatable in a scene
+    file: str      #: set for orphan_file and missing_file
 
 
 # Findings that make the plan incoherent — the book cannot be published or
 # assembled correctly while they stand, so `validate` fails on them.
-BLOCKING_FINDINGS: frozenset[str] = frozenset({
+BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'duplicate_id', 'invalid_id', 'invalid_status', 'invalid_placement',
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
@@ -1361,14 +1425,23 @@ BLOCKING_FINDINGS: frozenset[str] = frozenset({
 # Findings that need author attention but leave a valid book. An anchor that
 # drifted after a revision is normal in-flight state; a file nobody claims is
 # usually a rename in progress.
-WARNING_FINDINGS: frozenset[str] = frozenset({
+WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
     'unembedded_ingested', 'shattered_row',
 })
 
+Severity = Literal['error', 'warning']
 
-def severity_of(kind: str) -> str:
-    """Return 'error' or 'warning' for a finding kind."""
+
+def severity_of(kind: IllustrationFindingKind) -> Severity:
+    """Return 'error' or 'warning' for a finding kind.
+
+    Anything not explicitly a warning is an error — a kind nobody triaged
+    should block rather than pass silently. BLOCKING_FINDINGS is the documented
+    other half of the partition; it is kept honest by the partition test rather
+    than read here, because reading both would let an unclassified kind fall
+    through to neither.
+    """
     return 'warning' if kind in WARNING_FINDINGS else 'error'
 
 

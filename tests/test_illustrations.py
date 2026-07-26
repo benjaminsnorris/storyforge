@@ -1105,13 +1105,16 @@ def test_placement_and_asset_keys_agree(project_dir):
     assert assets[0]['key'] == 'lf-01'
 
 
-def test_used_keys_filter_works_in_normalized_space(project_dir):
+def test_used_keys_accepts_either_namespace(project_dir):
+    """Passing plan ids used to silently yield zero assets — and then a
+    misleading "not ingested" warning from generate_publish_manifest."""
     ill.write_plan(project_dir, [plan_row(
         id='LF-01', status='ingested', sha256='a' * 64,
         asset_file=ill.default_asset_rel('LF-01'),
     )])
     assert len(ill.manifest_assets(project_dir, used_keys={'lf-01'})) == 1
-    assert ill.manifest_assets(project_dir, used_keys={'LF-01'}) == []
+    assert len(ill.manifest_assets(project_dir, used_keys={'LF-01'})) == 1
+    assert ill.manifest_assets(project_dir, used_keys={'other'}) == []
 
 
 def test_ids_differing_only_in_case_are_a_duplicate(project_dir):
@@ -1688,3 +1691,86 @@ def test_validate_reports_a_shattered_row(project_dir):
                 if f['kind'] == 'shattered_row']
     assert len(findings) == 1
     assert 'unescaped' in findings[0]['detail']
+
+
+# ============================================================================
+# The finding-kind domain, enforced
+# ============================================================================
+
+def test_finding_kinds_are_partitioned_by_severity():
+    """BLOCKING_FINDINGS is documentation unless something checks it. Without
+    this, a new kind silently becomes blocking and the two sets drift."""
+    from typing import get_args
+    kinds = set(get_args(ill.IllustrationFindingKind))
+    assert ill.BLOCKING_FINDINGS | ill.WARNING_FINDINGS == kinds
+    assert not (ill.BLOCKING_FINDINGS & ill.WARNING_FINDINGS)
+
+
+def test_every_finding_kind_has_a_cleanup_action():
+    """A kind with no action falls back to generic remediation text."""
+    from typing import get_args
+    from storyforge.cmd_cleanup import _ILLUSTRATION_ACTIONS
+    assert set(_ILLUSTRATION_ACTIONS) == set(
+        get_args(ill.IllustrationFindingKind))
+
+
+def test_every_kind_validate_can_emit_is_in_the_domain(project_dir):
+    """Drive validate_plan into as many findings as one project can hold and
+    assert every kind it produced is declared."""
+    from typing import get_args
+    declared = set(get_args(ill.IllustrationFindingKind))
+
+    write_scene(project_dir, 'vigil', 'Rewritten.\n\n![[illus:ghost]]\n')
+    make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR, 'stray.png'),
+             8, 8)
+    ill.write_plan(project_dir, [
+        plan_row(status='ingested', layout='bad', placement='sideways',
+                 asset_file=ill.default_asset_rel('lantern-vigil')),
+        plan_row(id='Bad Id', scene_id='nowhere', status='nonsense'),
+        plan_row(id='no-scene', scene_id=''),
+    ])
+    emitted = {f['kind'] for f in ill.validate_plan(project_dir)}
+    assert emitted            # the fixture really did produce findings
+    assert emitted <= declared
+
+
+def test_schema_reads_plan_columns_from_the_module():
+    """The duplicate list had no enforcing test and its justification was
+    refuted by an unconditional import three lines below it."""
+    import storyforge.schema as schema
+    assert not hasattr(schema, 'ILLUSTRATION_PLAN_COLUMNS')
+
+
+# ============================================================================
+# Chapter ordering
+# ============================================================================
+
+def test_render_order_follows_the_chapter_number_not_the_row_order(project_dir):
+    """Regression: _scene_order trusted physical row order, so an out-of-order
+    chapter map put the visual key in chapter 3 with four earlier-chapter
+    illustrations after it. Every other consumer addresses chapters by number."""
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|title|heading|part|scenes',
+              ['3|C|numbered|1|s3', '1|A|numbered|1|s1', '2|B|numbered|1|s2'])
+    ill.write_plan(project_dir, [
+        dict(plan_row(id='i3', scene_id='s3'), canon_refs='X'),
+        dict(plan_row(id='i1', scene_id='s1'), canon_refs='X'),
+        dict(plan_row(id='i2', scene_id='s2'), canon_refs='X'),
+    ])
+
+    assert ill._scene_order(project_dir) == {'s1': 0, 's2': 1, 's3': 2}
+    steps = ill.render_order(project_dir)
+    assert [s['id'] for s in steps] == ['i1', 'i2', 'i3']
+    assert steps[0]['is_visual_key'] is True
+
+
+def test_chapter_sort_key_falls_back_and_never_reorders_silently():
+    assert ill._chapter_sort_key({'chapter': '7'})[0] == 7
+    assert ill._chapter_sort_key({'seq': '3'})[0] == 3
+    # A malformed row sorts last rather than landing at position zero.
+    assert ill._chapter_sort_key({'chapter': 'nine'})[0] == ill._SORTS_LAST
+
+
+def test_a_seq_only_chapter_map_still_orders_correctly(project_dir):
+    write_csv(project_dir, 'chapter-map.csv', 'seq|title|scenes',
+              ['2|B|s2', '1|A|s1'])
+    assert ill._scene_order(project_dir) == {'s1': 0, 's2': 1}
