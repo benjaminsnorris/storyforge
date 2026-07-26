@@ -14,8 +14,9 @@ import pytest
 from storyforge import cmd_illustrate
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
-from tests.test_illustrations import (
-    SCENE, make_png, plan_row, write_csv, write_scene,
+from illustration_helpers import (
+    SAMPLE_DIRECTION, SCENE, SCENE_ADVERSARIAL, make_png, plan_row,
+    truncated_png, write_csv, write_direction_file, write_scene,
 )
 
 
@@ -240,7 +241,7 @@ def test_ingest_dry_run_writes_nothing(in_project, tmp_path, capsys):
 
 
 def test_ingest_preserves_a_non_png_extension(in_project, tmp_path):
-    from tests.test_illustrations import make_webp
+    from illustration_helpers import make_webp
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [plan_row()])
     renders = tmp_path / 'renders'
@@ -801,7 +802,11 @@ def test_schema_validation_splits_errors_from_warnings(project_dir):
     assert any('anchor_drift' in w['message'] for w in result['warnings'])
 
 
-def test_validate_command_fails_on_a_blocking_finding(project_dir, monkeypatch):
+def test_validate_reports_a_blocking_illustration_finding(project_dir,
+                                                          monkeypatch, capsys):
+    """Asserting only the exit code proved nothing: the fixture project already
+    exits 1 on structural validation independently, so this test passed with the
+    illustration wiring reverted entirely."""
     from storyforge import cmd_validate
     monkeypatch.chdir(project_dir)
     write_scene(project_dir, 'vigil', 'One.\n\n![[illus:ghost]]\n\nTwo.\n')
@@ -810,6 +815,21 @@ def test_validate_command_fails_on_a_blocking_finding(project_dir, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cmd_validate.main(['--quiet'])
     assert exc.value.code == 1
+    # The illustration error is what must be surfaced, not merely a non-zero exit.
+    out = capsys.readouterr().out
+    assert 'Illustration plan' in out
+    assert 'orphan_marker' in out
+
+
+def test_validate_illustration_gate_is_wired(project_dir):
+    """Directly assert the gate, independent of any other validation result."""
+    from storyforge.schema import validate_illustration_plan
+    write_scene(project_dir, 'vigil', 'One.\n\n![[illus:ghost]]\n\nTwo.\n')
+    ill.write_plan(project_dir, [plan_row(status='planned')])
+
+    result = validate_illustration_plan(project_dir)
+    assert result['errors']
+    assert not all(result[k] == [] for k in ('errors', 'warnings'))
 
 
 # ============================================================================
@@ -872,7 +892,11 @@ def test_cleanup_does_not_flag_an_unrendered_row(project_dir):
 # Prose-analysis integration — a marker must never be scored
 # ============================================================================
 
-MARKED = ill.insert_marker(SCENE, plan_row())['text']
+#: Marked copies of the adversarial fixture, in the two placements that put a
+#: marker where it could actually perturb an analysis.
+MARKED = ill.insert_marker(SCENE_ADVERSARIAL, plan_row())['text']
+MARKED_AT_OPEN = ill.insert_marker(
+    SCENE_ADVERSARIAL, plan_row(placement='scene_open', anchor=''))['text']
 
 
 @pytest.mark.parametrize('module,func', [
@@ -881,37 +905,67 @@ MARKED = ill.insert_marker(SCENE, plan_row())['text']
     ('scoring_weather', 'score_no_weather_dreams'),
     ('scoring_rhythm', 'score_sentence_as_thought'),
 ])
-def test_deterministic_scorers_ignore_markers(module, func):
+@pytest.mark.parametrize('marked', [MARKED, MARKED_AT_OPEN])
+def test_deterministic_scorers_ignore_markers(module, func, marked):
+    """Asserted on SCENE_ADVERSARIAL: on a clean fixture every density is 0/N
+    and stays 0 whether the marker is counted, so these passed even with
+    stripping fully reverted."""
     import importlib
     scorer = getattr(importlib.import_module(f'storyforge.{module}'), func)
-    assert scorer(MARKED) == scorer(SCENE)
+    assert scorer(marked) == scorer(SCENE_ADVERSARIAL)
+
+
+def test_the_adversarial_fixture_actually_produces_findings():
+    """Tripwire: if the fixture ever goes clean, the assertions above go
+    vacuous silently."""
+    from storyforge.prose_analysis import (
+        detect_adverbs, detect_filler_phrases, detect_passive_voice,
+        extract_dialogue,
+    )
+    assert detect_passive_voice(SCENE_ADVERSARIAL)
+    assert detect_adverbs(SCENE_ADVERSARIAL)
+    assert detect_filler_phrases(SCENE_ADVERSARIAL)
+    assert extract_dialogue(SCENE_ADVERSARIAL)[0].strip()
 
 
 def test_economy_scorer_ignores_markers():
     from storyforge.scoring_economy import score_economy_clarity
-    assert score_economy_clarity(MARKED) == score_economy_clarity(SCENE)
+    assert score_economy_clarity(MARKED) == \
+        score_economy_clarity(SCENE_ADVERSARIAL)
 
 
 @pytest.mark.parametrize('detector', [
     'detect_passive_voice', 'detect_adverbs', 'detect_filler_phrases',
 ])
-def test_prose_detectors_ignore_markers(detector):
+@pytest.mark.parametrize('marked', [MARKED, MARKED_AT_OPEN])
+def test_prose_detectors_ignore_markers(detector, marked):
+    """Both placements: these detectors return character positions, and a
+    marker only shifts them for content that follows it — so a marker in the
+    middle leaves anything earlier in the scene unmoved."""
     from storyforge import prose_analysis
     fn = getattr(prose_analysis, detector)
-    assert fn(MARKED) == fn(SCENE)
+    assert fn(marked) == fn(SCENE_ADVERSARIAL)
 
 
-def test_dialogue_extraction_ignores_markers():
+@pytest.mark.parametrize('marked', [MARKED, MARKED_AT_OPEN])
+def test_dialogue_extraction_ignores_markers(marked):
     from storyforge.prose_analysis import extract_dialogue
-    assert extract_dialogue(MARKED) == extract_dialogue(SCENE)
+    assert extract_dialogue(marked) == extract_dialogue(SCENE_ADVERSARIAL)
 
 
-def test_a_marker_does_not_read_as_a_weather_opening():
-    """scene_open placement puts a marker on line 1 — it must not be the opening."""
+def test_a_marker_cannot_mask_a_real_weather_opening():
+    """The dangerous direction, which the old test did not cover: _get_opening
+    takes the first 80 whitespace-split words, so a marker consumes one and can
+    push a weather word out of the window — suppressing a real craft finding."""
     from storyforge.scoring_weather import score_no_weather_dreams
-    opened = ill.insert_marker(SCENE, plan_row(placement='scene_open',
+
+    scene = ' '.join(['word'] * 78) + ' rain sky.\n\nShe waited.\n'
+    marked = ill.insert_marker(scene, plan_row(placement='scene_open',
                                               anchor=''))['text']
-    assert score_no_weather_dreams(opened) == score_no_weather_dreams(SCENE)
+
+    baseline = score_no_weather_dreams(scene)
+    assert baseline['markers']['nwd-1'] == 1        # the finding is real
+    assert score_no_weather_dreams(marked) == baseline
 
 
 # ============================================================================
@@ -965,24 +1019,41 @@ def illustrated_project(project_dir):
     return project_dir
 
 
-def test_manifest_content_html_is_unchanged_by_illustrations(project_dir):
+@pytest.mark.parametrize('placement,anchor', [
+    ('after_anchor', 'brass calipers'),
+    ('before_anchor', 'brass calipers'),
+    ('scene_open', ''),
+    ('scene_close', ''),
+])
+def test_manifest_content_html_is_unchanged_by_illustrations(project_dir,
+                                                             placement, anchor):
     """The regression test for the whole design.
 
     Bookshelf derives highlight offsets from the scene's visible text. If an
     illustration changed content_html, every downstream highlight in that scene
     would silently re-anchor or orphan.
+
+    Parametrized over all four placements: covering only after_anchor is how the
+    scene_open frontmatter bug hid — it left content_html matching (pandoc eats a
+    leading `---…---` as metadata) while leaking the whole YAML block into the
+    epub and inflating word_count by 21.
     """
     before = build_manifest(project_dir)
 
     scene_path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
     with open(scene_path) as f:
         original = f.read()
-    row = plan_row(scene_id='act1-sc01', anchor='brass calipers',
+    row = plan_row(scene_id='act1-sc01', anchor=anchor, placement=placement,
                    status='ingested', sha256='a' * 64,
                    asset_file=ill.default_asset_rel('lantern-vigil'))
     ill.write_plan(project_dir, [row])
+    result = ill.insert_marker(original, row)
+    # Tripwire: without this the anchor could drift on a fixture edit, both
+    # builds would be illustration-free, and the most important invariant in
+    # the PR would be green forever while unguarded.
+    assert result['changed'], result['error']
     with open(scene_path, 'w') as f:
-        f.write(ill.insert_marker(original, row)['text'])
+        f.write(result['text'])
 
     after = build_manifest(project_dir)
 
@@ -990,8 +1061,29 @@ def test_manifest_content_html_is_unchanged_by_illustrations(project_dir):
         return next(s for ch in manifest['chapters'] for s in ch['scenes']
                     if s['slug'] == 'act1-sc01')
 
+    # The placement really did land in this build, so the comparison is real.
+    assert scene_of(after)['illustrations']
     assert scene_of(after)['content_html'] == scene_of(before)['content_html']
     assert scene_of(after)['word_count'] == scene_of(before)['word_count']
+
+
+def test_assembled_chapter_never_leaks_frontmatter(project_dir):
+    """content_html matching is not sufficient — the frontmatter leak was
+    invisible to it."""
+    from storyforge.assembly import assemble_chapter
+
+    scene_path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+    with open(scene_path) as f:
+        original = f.read()
+    assert 'drafted_at' in original          # the fixture has frontmatter
+    row = plan_row(scene_id='act1-sc01', placement='scene_open', anchor='',
+                   status='ingested', sha256='a' * 64,
+                   asset_file=ill.default_asset_rel('lantern-vigil'))
+    ill.write_plan(project_dir, [row])
+    with open(scene_path, 'w') as f:
+        f.write(ill.insert_marker(original, row)['text'])
+
+    assert 'drafted_at' not in assemble_chapter(1, project_dir)
 
 
 def test_manifest_carries_placements_and_assets(illustrated_project):
@@ -1159,7 +1251,6 @@ def test_direction_reports_incomplete_sections(in_project, monkeypatch, capsys):
 
 
 def test_direction_does_not_clobber_a_complete_document(in_project, capsys):
-    from tests.test_illustrations import SAMPLE_DIRECTION, write_direction_file
     write_direction_file(in_project, SAMPLE_DIRECTION)
 
     assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
@@ -1169,7 +1260,6 @@ def test_direction_does_not_clobber_a_complete_document(in_project, capsys):
 
 
 def test_direction_reports_gaps_in_an_existing_document(in_project, capsys):
-    from tests.test_illustrations import write_direction_file
     write_direction_file(in_project, '# D\n\n## Format\n\nPhotorealism.\n')
 
     assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
@@ -1190,7 +1280,6 @@ def test_direction_dry_run_writes_nothing(in_project, capsys):
 
 def test_direction_reaches_the_art_direction_prompt(in_project, monkeypatch):
     """The whole point of the document: every prompt carries it."""
-    from tests.test_illustrations import SAMPLE_DIRECTION, write_direction_file
     write_direction_file(in_project, SAMPLE_DIRECTION)
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [plan_row(canon_refs='Leo')])
@@ -1215,7 +1304,6 @@ def test_direction_reaches_the_art_direction_prompt(in_project, monkeypatch):
 
 def test_prompts_narrow_anchors_to_what_the_illustration_shows(in_project,
                                                               monkeypatch):
-    from tests.test_illustrations import SAMPLE_DIRECTION, write_direction_file
     write_direction_file(in_project, SAMPLE_DIRECTION)
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [plan_row(canon_refs='Murkwolves')])
@@ -1248,7 +1336,6 @@ def test_relevant_anchors_falls_back_when_nothing_matches():
 # ============================================================================
 
 def test_review_writes_the_sequence_checklist(in_project):
-    from tests.test_illustrations import SAMPLE_DIRECTION, write_direction_file
     write_direction_file(in_project, SAMPLE_DIRECTION)
     write_csv(in_project, 'chapter-map.csv', 'chapter|scenes', ['1|s1;s2'])
     ill.write_plan(in_project, [
@@ -1530,8 +1617,6 @@ def test_ingest_refuses_a_truncated_render_and_preserves_the_good_one(
     """Regression (cover class, commit 33487b7): a header-valid stub — what an
     aborted download leaves — overwrote a good render, recorded its digest, and
     exited 0. The previous file is not recoverable once replaced."""
-    from tests.test_illustrations import truncated_png
-
     write_scene(in_project, 'vigil', SCENE)
     good = make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
                                 'lantern-vigil.png'), 800, 1200)
@@ -1695,7 +1780,6 @@ def test_anchors_section_is_read_case_insensitively(project_dir):
     """A model asked for `## Continuity anchors` sometimes writes
     `## Continuity Anchors`; a case-sensitive lookup silently returned nothing,
     so the author's anchors were invisible to every prompt."""
-    from tests.test_illustrations import write_direction_file
     write_direction_file(project_dir,
                          '# D\n\n## Continuity Anchors\n\n### Mara\n\n'
                          'Eleven years old, black braid.\n')
@@ -1709,7 +1793,6 @@ def test_append_does_not_create_a_second_anchors_section(project_dir):
     section, permanently orphaning everything under the first — and the
     missing-sections warning that would have caught it disappeared, because the
     new section was non-empty."""
-    from tests.test_illustrations import write_direction_file
     write_direction_file(project_dir,
                          '# D\n\n## Continuity Anchors\n\n### Mara\n\n'
                          'Eleven years old.\n')
@@ -1725,7 +1808,6 @@ def test_the_anchors_phrase_in_prose_does_not_satisfy_the_section_check(
     """A substring test matched the phrase in ordinary prose, so the stubs were
     appended into whatever section came last — and fed to the image model as,
     say, a content limit."""
-    from tests.test_illustrations import write_direction_file
     write_direction_file(
         project_dir,
         '# D\n\n## Format\n\nSee the Continuity anchors below for the cast.\n')

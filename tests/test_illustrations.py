@@ -6,104 +6,21 @@ the selection pre-pass, image inspection, and plan validation.
 
 import os
 import struct
-import subprocess
-import zlib
 
 import pytest
 
+from illustration_helpers import (
+    SAMPLE_DIRECTION, SCENE, SCENE_ADVERSARIAL, SCENE_WITH_FRONTMATTER,
+    make_jpeg, make_png, make_webp, make_webp_vp8, make_webp_vp8l, pandoc_html,
+    plan_row, truncated_png, write_csv, write_direction_file,
+    write_scene,
+)
 from storyforge import illustrations as ill
 
 
 # ============================================================================
 # Helpers
 # ============================================================================
-
-def make_png(path: str, width: int, height: int) -> str:
-    """Write a real minimal PNG of the given dimensions."""
-    def chunk(typ: bytes, data: bytes) -> bytes:
-        body = typ + data
-        return (struct.pack('>I', len(data)) + body
-                + struct.pack('>I', zlib.crc32(body)))
-
-    ihdr = struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)
-    raw = b''.join(b'\x00' + b'\x00\x00\x00' * width for _ in range(height))
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'wb') as f:
-        f.write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr)
-                + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
-    return path
-
-
-def make_jpeg(path: str, width: int, height: int) -> str:
-    """Write a minimal JPEG with an APP0 segment before the SOF0.
-
-    The APP0 is deliberate: it exercises the segment walk skipping a
-    payload-bearing marker before reaching the dimensions.
-    """
-    app0 = b'\xff\xe0' + struct.pack('>H', 16) + b'JFIF\x00' + b'\x00' * 9
-    sof0 = (b'\xff\xc0' + struct.pack('>H', 17) + b'\x08'
-            + struct.pack('>HH', height, width) + b'\x03' + b'\x00' * 9)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'wb') as f:
-        f.write(b'\xff\xd8' + app0 + sof0 + b'\xff\xd9')
-    return path
-
-
-def make_webp(path: str, width: int, height: int) -> str:
-    """Write a minimal VP8X-form WebP."""
-    payload = (b'VP8X' + struct.pack('<I', 10) + b'\x00' * 4
-               + (width - 1).to_bytes(3, 'little')
-               + (height - 1).to_bytes(3, 'little'))
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'wb') as f:
-        f.write(b'RIFF' + struct.pack('<I', 4 + len(payload)) + b'WEBP'
-                + payload)
-    return path
-
-
-def write_scene(project_dir: str, scene_id: str, text: str) -> str:
-    """Write a scene file and return its path."""
-    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(text)
-    return path
-
-
-def pandoc_html(markdown: str) -> str:
-    """Convert markdown to HTML the same way the manifest builder does."""
-    result = subprocess.run(
-        ['pandoc', '-f', 'markdown', '-t', 'html', '--no-highlight'],
-        input=markdown, capture_output=True, text=True,
-    )
-    return result.stdout
-
-
-SCENE = (
-    'The lantern guttered once and held.\n'
-    '\n'
-    'She set it on the sill and waited for the street to answer.\n'
-    '\n'
-    'Nothing came. The cold worked up through the floorboards.\n'
-    '\n'
-    'By morning she had decided.\n'
-)
-
-
-def plan_row(**overrides) -> dict[str, str]:
-    """A complete plan row with sane defaults."""
-    row = ill.blank_row('lantern-vigil')
-    row.update({
-        'scene_id': 'vigil',
-        'anchor': 'She set it on the sill',
-        'placement': 'after_anchor',
-        'beat': 'A woman waits at a lit window',
-        'rationale': 'The image holds the waiting the prose spends three '
-                     'paragraphs on',
-    })
-    row.update(overrides)
-    return row
-
 
 # ============================================================================
 # Plan CSV
@@ -789,16 +706,6 @@ def test_severity_of(kind, severity):
 # Selection pre-pass
 # ============================================================================
 
-def write_csv(project_dir: str, name: str, header: str, rows: list[str]) -> None:
-    """Write a pipe-delimited CSV under reference/."""
-    path = os.path.join(project_dir, 'reference', name)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w') as f:
-        f.write(header + '\n')
-        for row in rows:
-            f.write(row + '\n')
-
-
 def test_prepass_reports_uncovered_spine_events(project_dir):
     write_csv(project_dir, 'spine.csv', 'id|seq|title|summary|function|part', [
         'e1|1|The Assignment|A crown order arrives.|inciting|1',
@@ -931,50 +838,6 @@ def test_prepass_is_not_empty_when_a_gap_exists(project_dir):
 # ============================================================================
 # Art-direction document
 # ============================================================================
-
-def write_direction_file(project_dir: str, body: str) -> str:
-    """Write a raw direction document."""
-    path = ill.direction_path(project_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(body)
-    return path
-
-
-SAMPLE_DIRECTION = """# The Lantern Folk — Illustration Plan
-
-## Format
-
-Full-color, cinematic photorealistic storybook imagery for ages 6-8.
-
-## Visual promise
-
-The ordinary world should feel completely real.
-
-## Recurring visual language
-
-- Warm amber and gold for the Lantern Folk.
-- Cool moonlit blue for the woods.
-
-## Content limits
-
-Never horror imagery. No blood or gore.
-
-## Continuity anchors
-
-### Leo
-
-Ten years old; tall and lean for his age; warm light-brown skin.
-
-### Murkwolves
-
-Large wolf-shaped concentrations of cold shadow and blue-gray mist.
-
-### The village and Great Lamp
-
-The village sits among the enormous exposed roots of the Old Oak.
-"""
-
 
 def test_read_direction_parses_every_section(project_dir):
     write_direction_file(project_dir, SAMPLE_DIRECTION)
@@ -1312,26 +1175,6 @@ def test_visual_key_horizon_scales_with_plan_length(project_dir):
 # Data-destruction regressions
 # ============================================================================
 
-def truncated_png(path: str, width: int, height: int) -> str:
-    """Write a header-valid PNG with no IDAT and no IEND.
-
-    This is what an aborted render download leaves behind: `image_dimensions`
-    reads 32 bytes and reports plausible dimensions, so every naive guard
-    passes it.
-    """
-    def chunk(typ: bytes, data: bytes) -> bytes:
-        body = typ + data
-        return (struct.pack('>I', len(data)) + body
-                + struct.pack('>I', zlib.crc32(body)))
-
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'wb') as f:
-        f.write(b'\x89PNG\r\n\x1a\n'
-                + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height,
-                                             8, 2, 0, 0, 0)))
-    return path
-
-
 def test_upsert_collapses_a_duplicate_id_without_aliasing():
     """Regression: two comprehensions disagreed — the dict collapsed duplicates
     and the list did not — so the result held the same dict object twice and
@@ -1486,17 +1329,6 @@ def test_sanitize_cell():
 # ============================================================================
 # Marker integrity
 # ============================================================================
-
-SCENE_WITH_FRONTMATTER = (
-    '---\n'
-    'id: "vigil"\n'
-    'status: "drafted"\n'
-    'drafted_at: "2026-02-28T14:30:00Z"\n'
-    '---\n'
-    '\n'
-    + SCENE
-)
-
 
 @pytest.mark.parametrize('placement,anchor', [
     ('scene_open', ''),
@@ -1833,30 +1665,6 @@ def test_truncated_vp8l_is_not_read_as_one_by_one(tmp_path):
     assert ill.image_dimensions(str(path)) is None
 
 
-def make_webp_vp8(path: str, width: int, height: int) -> str:
-    """Write a lossy VP8 WebP — what plain `cwebp` emits."""
-    body = (b'\x00\x00\x00' + b'\x9d\x01\x2a'
-            + struct.pack('<HH', width, height) + b'\x00' * 8)
-    payload = b'VP8 ' + struct.pack('<I', len(body)) + body
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'wb') as f:
-        f.write(b'RIFF' + struct.pack('<I', 4 + len(payload)) + b'WEBP'
-                + payload)
-    return path
-
-
-def make_webp_vp8l(path: str, width: int, height: int) -> str:
-    """Write a lossless VP8L WebP."""
-    body = b'\x2f' + struct.pack('<I', (width - 1) | ((height - 1) << 14)) \
-        + b'\x00' * 4
-    payload = b'VP8L' + struct.pack('<I', len(body)) + body
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'wb') as f:
-        f.write(b'RIFF' + struct.pack('<I', 4 + len(payload)) + b'WEBP'
-                + payload)
-    return path
-
-
 def test_vp8_webp_dimensions(tmp_path):
     """The form plain cwebp emits — VP8X is only for alpha/animation/EXIF."""
     assert ill.image_dimensions(
@@ -1927,3 +1735,19 @@ def test_resolve_reports_drops_when_there_is_no_plan(project_dir):
     ill.resolve_for_local(project_dir, 'a\n\n![[illus:x]]\n\nb\n',
                           dropped=dropped)
     assert dropped == ['x']
+
+
+@pytest.mark.parametrize('placement,anchor', [
+    ('scene_open', ''),
+    ('scene_close', ''),
+    ('after_anchor', 'She set it on the sill'),
+    ('before_anchor', 'She set it on the sill'),
+])
+def test_strip_is_byte_identical_for_every_placement(placement, anchor):
+    """A marker removed from the very start or end used to leave the blank line
+    that separated it from the prose, shifting every character offset the
+    detectors report by two."""
+    marked = ill.insert_marker(SCENE_ADVERSARIAL,
+                               plan_row(placement=placement, anchor=anchor))
+    assert marked['changed'], marked['error']
+    assert ill.strip_markers(marked['text']) == SCENE_ADVERSARIAL

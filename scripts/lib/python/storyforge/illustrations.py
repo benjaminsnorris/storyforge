@@ -505,8 +505,8 @@ def strip_markers(text: str) -> str:
     """Remove every illustration marker from *text*.
 
     Own-line markers are removed with their line; inline markers are removed
-    in place. Runs of blank lines left behind collapse back to one, so the
-    stripped text is what the prose would have been before the marker landed.
+    in place. The result is byte-identical to the prose before the marker
+    landed, for every placement.
 
     Every prose consumer — word counts, deterministic scorers, revision
     prompts — must go through this. A marker scored as a sentence perturbs
@@ -514,12 +514,21 @@ def strip_markers(text: str) -> str:
     """
     if '![[illus:' not in text:
         return text
+
     lines = text.split('\n')
     kept = [ln for ln in lines if not MARKER_LINE_RE.fullmatch(ln)]
     out = '\n'.join(kept)
     out = MARKER_ANY_RE.sub('', out)
     out = re.sub(r'\n{3,}', '\n\n', out)
-    return out
+
+    # A marker removed from the very start or end leaves behind the blank line
+    # that separated it from the prose, which shifted every character offset
+    # the detectors report by two. Restoring the original's leading and
+    # trailing newline counts makes the result byte-identical whatever the
+    # placement — which is what the scorer-equality assertions depend on.
+    leading = len(text) - len(text.lstrip('\n'))
+    trailing = len(text) - len(text.rstrip('\n'))
+    return '\n' * leading + out.strip('\n') + '\n' * trailing
 
 
 def count_prose_words(text: str) -> int:
