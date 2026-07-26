@@ -588,28 +588,35 @@ def _strict_prompt_scaffold(row: dict[str, str]) -> str:
     ])
 
 
-def _references_for(project_dir: str, illus_id: str) -> list[str]:
+#: Reference images sent per prompt. Enough to anchor style and likeness; more
+#: than this and the model starts averaging them.
+_MAX_REFERENCES = 4
+
+
+def _references_for(project_dir: str,
+                    illus_id: str) -> list[tuple[str, str]]:
     """Build the labeled reference list for an illustration.
 
     Prior ingested illustrations plus the cover are what hold a book's art
-    together visually — a prompt with no style reference produces an image
-    that belongs to no book in particular.
+    together visually — a prompt with no style reference produces an image that
+    belongs to no book in particular. Earlier illustrations come first, so the
+    references follow the render order that produced them.
     """
-    references: list[str] = []
+    references: list[tuple[str, str]] = []
     cover = os.path.join('manuscript', 'assets', 'cover-illustration.png')
     if os.path.isfile(os.path.join(project_dir, cover)):
-        references.append(f'{cover}  — cover art (sets the house style)')
+        references.append((cover, 'cover art (sets the house style)'))
 
     for row in ill.read_plan(project_dir):
+        if len(references) >= _MAX_REFERENCES:
+            break
         if row['id'].strip() == illus_id:
             continue
         if (row.get('status') or '').strip() != 'ingested':
             continue
         rel = (row.get('asset_file') or '').strip()
         if rel and os.path.isfile(os.path.join(project_dir, rel)):
-            references.append(f'{rel}  — prior illustration (style continuity)')
-        if len(references) >= 4:
-            break
+            references.append((rel, 'prior illustration (style continuity)'))
 
     return references
 

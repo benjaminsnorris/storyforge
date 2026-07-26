@@ -529,11 +529,36 @@ def test_prompts_references_prior_illustrations_for_style(in_project):
     ])
 
     refs = cmd_illustrate._references_for(in_project, 'lantern-vigil')
-    joined = '\n'.join(refs)
-    assert 'cover-illustration.png' in joined
-    assert 'earlier.png' in joined
+    paths = [path for path, _label in refs]
+    assert any('cover-illustration.png' in p for p in paths)
+    assert any('earlier.png' in p for p in paths)
     # An illustration never references itself.
-    assert 'lantern-vigil.png' not in joined
+    assert not any('lantern-vigil.png' in p for p in paths)
+    # Every reference is labeled with what it is for.
+    assert all(label for _path, label in refs)
+
+
+def test_references_render_with_the_label_outside_the_code_span():
+    block = pi.render_references_block([('a/b.png', 'cover art')])
+    assert '1. `a/b.png` — cover art' in block
+
+
+def test_references_accept_bare_paths():
+    assert '1. `a/b.png`' in pi.render_references_block(['a/b.png'])
+
+
+def test_references_are_capped(in_project):
+    """More than a handful and the model starts averaging them."""
+    rows = []
+    for i in range(8):
+        make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
+                              f'prior-{i}.png'), 8, 8)
+        rows.append(plan_row(id=f'prior-{i}', status='ingested',
+                             asset_file=ill.default_asset_rel(f'prior-{i}')))
+    ill.write_plan(in_project, rows + [plan_row()])
+
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil')
+    assert len(refs) == cmd_illustrate._MAX_REFERENCES
 
 
 def test_scene_excerpt_strips_markers(in_project):

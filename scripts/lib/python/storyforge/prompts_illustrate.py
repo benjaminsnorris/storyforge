@@ -408,18 +408,23 @@ def split_anchor_block(body: str) -> tuple[str, dict[str, str]]:
     return body[:m.start()].strip(), anchors
 
 
-def render_references_block(references: list[str]) -> str:
+def render_references_block(
+        references: list[str] | list[tuple[str, str]]) -> str:
     """Render the labeled reference-image list.
 
-    Reference images do the heavy lifting on style and likeness, so the list
-    is explicit about what each one is for — an unlabeled pile of images gets
+    Reference images do the heavy lifting on style and likeness, so the list is
+    explicit about what each one is for — an unlabeled pile of images gets
     uploaded in the wrong order and the style anchor stops working.
+
+    Accepts `(path, label)` pairs, or bare paths for a list with no labels.
     """
     if not references:
         return ('_No reference images yet. The first illustration establishes '
                 'the house style; every later one should reference it._')
     lines = ['Upload these, in this order:', '']
-    lines.extend(f'{i}. `{ref}`' for i, ref in enumerate(references, 1))
+    for i, ref in enumerate(references, 1):
+        path, label = ref if isinstance(ref, tuple) else (ref, '')
+        lines.append(f'{i}. `{path}`' + (f' — {label}' if label else ''))
     return '\n'.join(lines)
 
 
