@@ -1347,3 +1347,145 @@ def test_cleanup_reports_an_invalid_layout(project_dir):
     findings = {f['type']: f for f in _check_illustrations(project_dir)}
     assert 'illus_invalid_layout' in findings
     assert 'full_page' in findings['illus_invalid_layout']['action']
+
+
+# ============================================================================
+# Exit-code propagation and partial-failure semantics
+# ============================================================================
+
+def run_cli(project_dir, *args):
+    """Invoke the real CLI entry point, returning (exit_code, output)."""
+    import subprocess
+    env = dict(os.environ)
+    env['PYTHONPATH'] = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'scripts', 'lib', 'python')
+    env.pop('ANTHROPIC_API_KEY', None)
+    env.pop('STORYFORGE_COACHING', None)
+    proc = subprocess.run(
+        ['python3', '-m', 'storyforge', 'illustrate', *args],
+        cwd=project_dir, env=env, capture_output=True, text=True)
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def test_a_nonzero_return_reaches_the_shell(project_dir):
+    """Regression: the dispatcher discarded main()'s return, so every error
+    path in this command exited 0 — the GN guard, the missing-API-key errors,
+    and --diagnose's findings signal all reported success."""
+    code, out = run_cli(project_dir, '--ingest', '/nonexistent/path')
+    assert code == 1
+    assert 'no image files found' in out
+
+
+def test_no_phase_flag_exits_nonzero_through_the_cli(project_dir):
+    code, out = run_cli(project_dir)
+    assert code == 1
+    assert 'Nothing to do' in out
+
+
+def test_a_zero_return_still_exits_zero(project_dir):
+    code, out = run_cli(project_dir, '--diagnose')
+    assert code == 0
+    assert 'No illustration plan yet' in out
+
+
+def test_diagnose_exits_zero_on_warning_only_findings(in_project, capsys):
+    """A drifted anchor is documented in-flight state, not a failure."""
+    write_scene(in_project, 'vigil', 'Entirely rewritten prose.\n')
+    make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR, 'stray.png'),
+             8, 8)
+    ill.write_plan(in_project, [plan_row(status='planned')])
+
+    assert cmd_illustrate.main(['--diagnose']) == 0
+    out = capsys.readouterr().out
+    assert '0 blocking' in out
+    assert 'WARNING: [anchor_drift]' in out
+
+
+def test_diagnose_exits_nonzero_on_a_blocking_finding(in_project, capsys):
+    write_scene(in_project, 'vigil', 'One.\n\n![[illus:ghost]]\n\nTwo.\n')
+    ill.write_plan(in_project, [plan_row(anchor='', status='planned')])
+    assert cmd_illustrate.main(['--diagnose']) == 1
+    assert 'blocking' in capsys.readouterr().out
+
+
+def test_prompts_partial_failure_exits_nonzero(in_project, monkeypatch, capsys):
+    """2 of 3 succeeding must not report success — the skill commits on zero."""
+    for sid in ('s1', 's2', 's3'):
+        write_scene(in_project, sid, SCENE)
+    ill.write_plan(in_project, [
+        plan_row(id='a', scene_id='s1'),
+        plan_row(id='b', scene_id='s2'),
+        plan_row(id='c', scene_id='s3'),
+    ])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    calls = {'n': 0}
+
+    def flaky(*a, **k):
+        calls['n'] += 1
+        return '' if calls['n'] == 2 else '### Scene\n\nA street.\n'
+
+    monkeypatch.setattr(cmd_illustrate, '_invoke', flaky)
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 1
+    out = capsys.readouterr().out
+    assert '2 of 3 illustration(s) completed' in out
+    assert 'before committing' in out
+
+
+def test_embed_partial_failure_exits_nonzero(in_project, capsys):
+    write_scene(in_project, 'good', SCENE)
+    write_scene(in_project, 'drifted', 'Entirely different prose.\n')
+    ill.write_plan(in_project, [
+        plan_row(id='a', scene_id='good'),
+        plan_row(id='b', scene_id='drifted'),
+    ])
+
+    assert cmd_illustrate.main(['--embed']) == 1
+    assert 'will not appear in the book' in capsys.readouterr().out
+
+
+def test_ingest_propagates_an_embed_failure(in_project, tmp_path, capsys):
+    """Ingest used to discard run_embed's return, so a drifted anchor during
+    ingest reported success while --embed alone reported failure."""
+    write_scene(in_project, 'vigil', 'Entirely rewritten prose.\n')
+    ill.write_plan(in_project, [plan_row()])
+    renders = tmp_path / 'renders'
+    make_png(str(renders / 'lantern-vigil.png'), 8, 8)
+
+    assert cmd_illustrate.main(['--ingest', str(renders)]) == 1
+    out = capsys.readouterr().out
+    assert 'Ingested 1 illustration' in out
+    assert 'anchor not found' in out
+
+
+def test_ingest_exits_nonzero_when_every_file_is_rejected(in_project, tmp_path,
+                                                         capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    renders = tmp_path / 'renders'
+    renders.mkdir()
+    (renders / 'lantern-vigil.png').write_bytes(b'')
+
+    assert cmd_illustrate.main(['--ingest', str(renders)]) == 1
+    assert 'Ingested 0 illustration' in capsys.readouterr().out
+
+
+def test_ingest_only_embeds_what_it_actually_ingested(in_project, tmp_path):
+    """A rejected file has no art for a marker to point at."""
+    write_scene(in_project, 'good', SCENE)
+    write_scene(in_project, 'bad', SCENE)
+    ill.write_plan(in_project, [
+        plan_row(id='good-one', scene_id='good'),
+        plan_row(id='bad-one', scene_id='bad'),
+    ])
+    renders = tmp_path / 'renders'
+    make_png(str(renders / 'good-one.png'), 8, 8)
+    renders.joinpath('bad-one.png').write_bytes(b'not an image')
+
+    cmd_illustrate.main(['--ingest', str(renders)])
+
+    with open(os.path.join(in_project, 'scenes', 'good.md')) as f:
+        assert ill.marker_ids(f.read()) == ['good-one']
+    with open(os.path.join(in_project, 'scenes', 'bad.md')) as f:
+        assert ill.marker_ids(f.read()) == []

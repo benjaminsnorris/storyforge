@@ -138,14 +138,30 @@ def main():
         if project_medium == 'graphic-novel' and not is_elaboration_score:
             sys.argv = [f'storyforge {cmd}'] + sys.argv[2:]
             module = importlib.import_module(GN_ROUTED_COMMANDS[cmd])
-            module.main(sys.argv[1:])
+            _dispatch(module)
             return
 
     # Remove 'storyforge' and command from argv so the module sees its own args
     sys.argv = [f'storyforge {cmd}'] + sys.argv[2:]
 
     module = importlib.import_module(COMMANDS[cmd])
-    module.main(sys.argv[1:])
+    _dispatch(module)
+
+
+def _dispatch(module) -> None:
+    """Run a command module, propagating a non-zero return as the exit status.
+
+    Most command modules call ``sys.exit()`` themselves. Those that signal by
+    *returning* an int (``cmd_illustrate``, ``cmd_elaborate``) had that value
+    silently discarded here, so every one of their error paths reported success
+    to the shell — including guards that exist specifically to stop a run.
+
+    Only a non-zero code exits: returning normally on success keeps this
+    callable in-process, which the dispatcher tests rely on.
+    """
+    code = module.main(sys.argv[1:])
+    if code:
+        sys.exit(code)
 
 
 if __name__ == '__main__':

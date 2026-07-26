@@ -175,11 +175,17 @@ def run_diagnose(project_dir: str) -> int:
         log('No problems found.')
         return 0
 
-    log(f'{len(findings)} finding(s):')
+    errors = [f for f in findings if ill.severity_of(f['kind']) == 'error']
+    log(f'{len(findings)} finding(s), {len(errors)} blocking:')
     for finding in findings:
         target = finding.get('id') or finding.get('file') or ''
-        log(f'  [{finding["kind"]}] {target}: {finding["detail"]}')
-    return 1
+        prefix = 'WARNING: ' if ill.severity_of(finding['kind']) == 'warning' else ''
+        log(f'  {prefix}[{finding["kind"]}] {target}: {finding["detail"]}')
+
+    # Warning-only findings are normal in-flight state (a drifted anchor after a
+    # revision, a file mid-rename), so they must not fail the command — matching
+    # how cmd_validate gates on `errors` alone.
+    return 1 if errors else 0
 
 
 # ============================================================================
@@ -561,13 +567,19 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         written += 1
 
     log(f'Wrote {written} prompt file(s) to {ill.PROMPTS_SUBDIR}/')
-    if failed:
-        log(f'WARNING: {len(failed)} illustration(s) produced no art '
-            f'direction: {", ".join(failed)}')
     if written:
         log('Render each prompt with your image model, then bring the files '
             'back with: storyforge illustrate --ingest <dir>')
-    return 1 if failed and not written else 0
+    if failed:
+        # A partial run is a failure. Reporting success on 2-of-5 leaves the
+        # author to notice the gap themselves, and the skill commits after a
+        # zero exit.
+        log(f'WARNING: {written} of {written + len(failed)} illustration(s) '
+            f'completed; {len(failed)} produced no art direction: '
+            f'{", ".join(failed)}. Re-run --prompts for those before '
+            f'committing.')
+        return 1
+    return 0
 
 
 def _strict_prompt_scaffold(row: dict[str, str]) -> str:
@@ -678,6 +690,7 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
 
     os.makedirs(ill.illustrations_dir(project_dir), exist_ok=True)
     ingested = 0
+    ingested_ids: set[str] = set()
     for illus_id, src in matched:
         if dry_run:
             log(f'[dry-run] would ingest {src} → '
@@ -707,14 +720,23 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
         log(f'  {illus_id} → {rel} ({dims[0]}×{dims[1]}, '
             f'sha256 {digest[:12]}…)')
         ingested += 1
+        ingested_ids.add(illus_id)
 
     if dry_run:
         return 0
 
     log(f'Ingested {ingested} illustration(s)')
+    if ingested < len(matched):
+        log(f'WARNING: {len(matched) - ingested} of {len(matched)} matched '
+            f'file(s) were rejected. Nothing was recorded for them.')
+
+    exit_code = 0 if ingested else 1
     if ingested:
-        run_embed(project_dir, {i for i, _ in matched}, dry_run=False)
-    return 0
+        # Embed only what was actually ingested — a rejected file has no art to
+        # point a marker at. And propagate embed's status: a drifted anchor
+        # during ingest is exactly as bad as one during --embed.
+        exit_code = run_embed(project_dir, ingested_ids, dry_run=False) or exit_code
+    return exit_code
 
 
 def _collect_candidates(source: str) -> list[str]:
@@ -783,7 +805,12 @@ def run_embed(project_dir: str, ids: set[str] | None, dry_run: bool) -> int:
 
     log(f'Embedded {embedded} marker(s)'
         + (f'; {skipped} skipped' if skipped else ''))
-    return 1 if skipped and not embedded else 0
+    if skipped:
+        log(f'WARNING: {skipped} illustration(s) were not embedded and will '
+            f'not appear in the book. Fix the reported anchors, then re-run '
+            f'--embed.')
+        return 1
+    return 0
 
 
 #: Words too common to signal that a line is the revised anchor.
