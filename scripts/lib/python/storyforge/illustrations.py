@@ -813,17 +813,30 @@ def resolve_to_markdown(scene_text: str, plan: dict[str, dict[str, str]],
 
 
 def resolve_for_local(project_dir: str, scene_text: str,
-                      relative_to: str | None = None) -> str:
+                      relative_to: str | None = None,
+                      dropped: list[str] | None = None) -> str:
     """Resolve markers to on-disk image paths for epub/PDF assembly.
 
     Only rows whose file actually exists resolve; a planned-but-unrendered
     illustration drops out, so assembly of an in-flight book still succeeds.
+
+    Pass ``dropped`` to collect the ids that did not resolve — an author who
+    planned eight illustrations and got five should be told which three, rather
+    than counting images in the finished epub.
     """
     plan = read_plan_as_map(project_dir)
     if not plan:
+        if dropped is not None:
+            dropped.extend(dict.fromkeys(all_marker_ids(scene_text)))
         return strip_markers(scene_text)
 
     def path_for(illus_id: str, row: dict[str, str]) -> str | None:
+        result = _local_path_for(illus_id, row)
+        if result is None and dropped is not None:
+            dropped.append(illus_id)
+        return result
+
+    def _local_path_for(illus_id: str, row: dict[str, str]) -> str | None:
         # A superseded illustration must not render. Filtering on file
         # existence alone shipped retired art in the epub while
         # manifest_assets correctly excluded it, so the two targets disagreed —
@@ -837,7 +850,13 @@ def resolve_for_local(project_dir: str, scene_text: str,
             return os.path.relpath(abs_path, relative_to)
         return abs_path
 
-    return resolve_to_markdown(scene_text, plan, path_for)
+    resolved = resolve_to_markdown(scene_text, plan, path_for)
+    if dropped is not None:
+        # Markers with no plan row at all never reach path_for.
+        known = set(plan)
+        dropped.extend(i for i in dict.fromkeys(all_marker_ids(scene_text))
+                       if i not in known)
+    return resolved
 
 
 class ScenePlacement(TypedDict):
@@ -994,6 +1013,75 @@ def sha256_of(path: str) -> str:
     return h.hexdigest()
 
 
+class ImageProbe(TypedDict):
+    """Result of inspecting an image file."""
+    dimensions: tuple[int, int] | None
+    reason: str
+
+
+def probe_image(path: str) -> ImageProbe:
+    """Read an image's dimensions, naming the failure when it cannot.
+
+    `image_dimensions` collapses "unreadable", "unrecognized format",
+    "truncated", and "WebP variant this parser does not cover" into one None,
+    and ingest rendered all of them as "not a readable PNG, JPEG, or WebP" —
+    which tells an author with a perfectly valid progressive JPEG that their
+    file is broken. They re-export, see the same message, and conclude the tool
+    is broken.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if not os.path.exists(path):
+        return {'dimensions': None, 'reason': 'the file does not exist'}
+    try:
+        size = os.path.getsize(path)
+    except OSError as exc:
+        return {'dimensions': None,
+                'reason': f'could not be read ({exc.strerror or exc})'}
+    if size == 0:
+        return {'dimensions': None, 'reason': 'the file is empty'}
+    if ext not in VALID_IMAGE_EXTENSIONS:
+        return {'dimensions': None,
+                'reason': f'{ext or "no extension"} is not a supported format '
+                          f'(expected one of '
+                          f'{", ".join(VALID_IMAGE_EXTENSIONS)})'}
+
+    dims = image_dimensions(path)
+    if dims is not None:
+        return {'dimensions': dims, 'reason': ''}
+
+    try:
+        with open(path, 'rb') as f:
+            head = f.read(16)
+    except OSError as exc:
+        return {'dimensions': None,
+                'reason': f'could not be read ({exc.strerror or exc})'}
+
+    if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+        raw_fourcc = head[12:16]
+        fourcc = raw_fourcc.decode('latin-1').strip()
+        if raw_fourcc in (b'VP8 ', b'VP8L', b'VP8X'):
+            # A chunk we do read, so the payload is malformed rather than the
+            # variant being unsupported. Saying "unsupported" would send the
+            # author to re-export a file that is simply incomplete.
+            return {'dimensions': None,
+                    'reason': f'is a WebP whose {fourcc} chunk is malformed or '
+                              f'truncated ({size} bytes) — re-download it'}
+        return {'dimensions': None,
+                'reason': f'is a WebP whose {fourcc!r} chunk this parser does '
+                          f'not read (VP8, VP8L, and VP8X only). The file may '
+                          f'be valid — re-export it as PNG'}
+    if head[:2] == b'\xff\xd8':
+        return {'dimensions': None,
+                'reason': f'is a JPEG whose data ends before a start-of-frame '
+                          f'marker ({size} bytes) — it looks truncated'}
+    if head[:8] == b'\x89PNG\r\n\x1a\n':
+        return {'dimensions': None,
+                'reason': f'is a PNG with an unreadable header ({size} bytes)'}
+    return {'dimensions': None,
+            'reason': f'does not begin with PNG, JPEG, or WebP magic bytes '
+                      f'despite its {ext} extension'}
+
+
 def image_dimensions(path: str) -> tuple[int, int] | None:
     """Return (width, height) for a PNG, JPEG, or WebP file.
 
@@ -1079,6 +1167,11 @@ def _webp_dimensions(f, head: bytes) -> tuple[int, int] | None:
     if fourcc == b'VP8L':
         data = f.read(5)
         if len(data) < 5:
+            return None
+        # Without this check a truncated VP8L of all-zero bytes reads as a
+        # valid 1x1 image, and those dimensions get written to the plan and
+        # published as the reader's layout hint.
+        if data[0] != 0x2F:
             return None
         bits = int.from_bytes(data[1:5], 'little')
         w = (bits & 0x3FFF) + 1

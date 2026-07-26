@@ -346,8 +346,16 @@ def assemble_chapter(chapter_num: int, project_dir: str,
     # manuscript/chapters/. Emitting absolute paths instead would put
     # machine-specific strings into git-tracked chapter files.
     from storyforge import illustrations as _ill
-    return _ill.resolve_for_local(project_dir, '\n'.join(parts),
-                                  relative_to=project_dir)
+    dropped: list[str] = []
+    resolved = _ill.resolve_for_local(project_dir, '\n'.join(parts),
+                                      relative_to=project_dir,
+                                      dropped=dropped)
+    if dropped:
+        from storyforge.common import log as _log
+        _log(f'WARNING: chapter {chapter_num}: {len(dropped)} illustration(s) '
+             f'dropped — not yet rendered, or no plan row: '
+             f'{", ".join(dict.fromkeys(dropped))}')
+    return resolved
 
 
 # ============================================================================
@@ -820,6 +828,7 @@ def _localize_illustrations(chapter_html: str, project_dir: str,
     paths have to be rewritten and the files copied alongside (#278).
     """
     import shutil
+    import urllib.parse
     from storyforge.illustrations import ILLUSTRATIONS_SUBDIR
 
     prefix = ILLUSTRATIONS_SUBDIR.replace(os.sep, '/') + '/'
@@ -829,17 +838,28 @@ def _localize_illustrations(chapter_html: str, project_dir: str,
     dest_dir = os.path.join(web_dir, _WEB_ILLUSTRATIONS_SUBDIR)
 
     def repl(match: re.Match) -> str:
-        filename = match.group(2)
+        # Pandoc percent-encodes paths, so a file named `lf 01.png` arrives as
+        # `lf%2001.png` and os.path.isfile fails on the encoded name — leaving
+        # the un-rewritten src in place and a 404 in the published web book.
+        encoded = match.group(2)
+        filename = urllib.parse.unquote(encoded)
         src = os.path.join(project_dir, ILLUSTRATIONS_SUBDIR, filename)
         if not os.path.isfile(src):
+            from storyforge.common import log as _log
+            _log(f'WARNING: web book: {prefix}{encoded} has no file at {src} — '
+                 f'the chapter page will show a broken image. Re-ingest, or '
+                 f'fix asset_file in the illustration plan.')
             return match.group(0)
+        flat = os.path.basename(filename)
         os.makedirs(dest_dir, exist_ok=True)
-        shutil.copy2(src, os.path.join(dest_dir, filename))
+        shutil.copy2(src, os.path.join(dest_dir, flat))
         return (f'{match.group(1)}../{_WEB_ILLUSTRATIONS_SUBDIR}/'
-                f'{filename}{match.group(3)}')
+                f'{urllib.parse.quote(flat)}{match.group(3)}')
 
+    # `[^"]+` rather than `[^"/]+` so a file in a subdirectory under the
+    # illustrations dir is matched instead of silently skipped.
     return re.sub(
-        r'(src=")' + re.escape(prefix) + r'([^"/]+)(")', repl, chapter_html)
+        r'(src=")' + re.escape(prefix) + r'([^"]+)(")', repl, chapter_html)
 
 
 def generate_web_book(project_dir: str, plugin_dir: str,

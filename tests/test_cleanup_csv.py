@@ -3,6 +3,7 @@
 import os
 
 from storyforge.cmd_cleanup import (
+    ALWAYS_OPTIONAL_CSV_FILES,
     EXPECTED_CSV_SCHEMAS,
     REPORT_COLUMNS,
     report_csv_schema,
@@ -28,10 +29,29 @@ class TestReportCsvSchema:
     """Tests for the report_csv_schema function."""
 
     def test_missing_csv_reported(self, tmp_path):
-        """Missing CSV files are reported."""
+        """Every *required* CSV is reported when absent.
+
+        Files in ALWAYS_OPTIONAL_CSV_FILES are registered for header checking
+        but never required to exist — most books have no illustration plan, so
+        its absence must not be a finding.
+        """
         issues = report_csv_schema(str(tmp_path))
-        missing = [i for i in issues if i.startswith('MISSING_CSV:')]
-        assert len(missing) == len(EXPECTED_CSV_SCHEMAS)
+        missing = {i.split(':', 1)[1]
+                   for i in issues if i.startswith('MISSING_CSV:')}
+        required = set(EXPECTED_CSV_SCHEMAS) - ALWAYS_OPTIONAL_CSV_FILES
+        assert missing == required
+
+    def test_an_always_optional_csv_is_not_reported_when_absent(self, tmp_path):
+        issues = report_csv_schema(str(tmp_path))
+        for rel_path in ALWAYS_OPTIONAL_CSV_FILES:
+            assert f'MISSING_CSV:{rel_path}' not in issues
+
+    def test_an_always_optional_csv_is_still_header_checked(self, tmp_path):
+        """Optional means "may be absent", not "unchecked"."""
+        for rel_path in ALWAYS_OPTIONAL_CSV_FILES:
+            _write_csv(str(tmp_path), rel_path, 'id|wrong_column')
+        issues = report_csv_schema(str(tmp_path))
+        assert any(i.startswith('MISSING_COLUMN:') for i in issues)
 
     def test_all_present_no_issues(self, tmp_path):
         """All CSVs present with correct headers produce no issues."""

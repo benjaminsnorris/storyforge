@@ -1774,3 +1774,156 @@ def test_a_seq_only_chapter_map_still_orders_correctly(project_dir):
     write_csv(project_dir, 'chapter-map.csv', 'seq|title|scenes',
               ['2|B|s2', '1|A|s1'])
     assert ill._scene_order(project_dir) == {'s1': 0, 's2': 1}
+
+
+# ============================================================================
+# Actionable image-probe reasons
+# ============================================================================
+
+def test_probe_names_a_complete_image(tmp_path):
+    probe = ill.probe_image(make_png(str(tmp_path / 'ok.png'), 40, 60))
+    assert probe == {'dimensions': (40, 60), 'reason': ''}
+
+
+@pytest.mark.parametrize('name,body,fragment', [
+    ('missing.png', None, 'does not exist'),
+    ('empty.png', b'', 'empty'),
+    ('art.gif', b'GIF89a', 'not a supported format'),
+    ('mislabeled.png', b'this is plain text', 'magic bytes'),
+    ('stub.jpg', b'\xff\xd8' + b'\x00' * 30, 'truncated'),
+])
+def test_probe_reasons_are_specific(tmp_path, name, body, fragment):
+    """Collapsing every failure into "not a readable PNG, JPEG, or WebP" tells
+    an author with a valid file that it is broken; they re-export, see the same
+    message, and conclude the tool is broken."""
+    path = tmp_path / name
+    if body is not None:
+        path.write_bytes(body)
+    probe = ill.probe_image(str(path))
+    assert probe['dimensions'] is None
+    assert fragment in probe['reason']
+
+
+def test_probe_distinguishes_an_unsupported_webp_variant(tmp_path):
+    path = tmp_path / 'alpha.webp'
+    payload = b'ALPH' + struct.pack('<I', 4) + b'\x00' * 4
+    path.write_bytes(b'RIFF' + struct.pack('<I', 4 + len(payload)) + b'WEBP'
+                     + payload)
+    reason = ill.probe_image(str(path))['reason']
+    assert 'does not read' in reason
+    assert 're-export' in reason
+
+
+def test_probe_distinguishes_a_malformed_known_webp_chunk(tmp_path):
+    """A chunk we *do* read that is truncated must not be reported as an
+    unsupported variant — that sends the author to re-export a valid file."""
+    path = tmp_path / 'trunc.webp'
+    path.write_bytes(b'RIFF' + struct.pack('<I', 20) + b'WEBP'
+                     + b'VP8L' + struct.pack('<I', 9) + b'\x00' * 9)
+    reason = ill.probe_image(str(path))['reason']
+    assert 'malformed or truncated' in reason
+
+
+def test_truncated_vp8l_is_not_read_as_one_by_one(tmp_path):
+    """Without the 0x2F signature check, an all-zero VP8L payload reads as a
+    valid 1x1 image, and those dimensions get published as the layout hint."""
+    path = tmp_path / 'trunc.webp'
+    path.write_bytes(b'RIFF' + struct.pack('<I', 20) + b'WEBP'
+                     + b'VP8L' + struct.pack('<I', 9) + b'\x00' * 9)
+    assert ill.image_dimensions(str(path)) is None
+
+
+def make_webp_vp8(path: str, width: int, height: int) -> str:
+    """Write a lossy VP8 WebP — what plain `cwebp` emits."""
+    body = (b'\x00\x00\x00' + b'\x9d\x01\x2a'
+            + struct.pack('<HH', width, height) + b'\x00' * 8)
+    payload = b'VP8 ' + struct.pack('<I', len(body)) + body
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(b'RIFF' + struct.pack('<I', 4 + len(payload)) + b'WEBP'
+                + payload)
+    return path
+
+
+def make_webp_vp8l(path: str, width: int, height: int) -> str:
+    """Write a lossless VP8L WebP."""
+    body = b'\x2f' + struct.pack('<I', (width - 1) | ((height - 1) << 14)) \
+        + b'\x00' * 4
+    payload = b'VP8L' + struct.pack('<I', len(body)) + body
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(b'RIFF' + struct.pack('<I', 4 + len(payload)) + b'WEBP'
+                + payload)
+    return path
+
+
+def test_vp8_webp_dimensions(tmp_path):
+    """The form plain cwebp emits — VP8X is only for alpha/animation/EXIF."""
+    assert ill.image_dimensions(
+        make_webp_vp8(str(tmp_path / 'a.webp'), 100, 200)) == (100, 200)
+
+
+def test_vp8l_webp_dimensions(tmp_path):
+    assert ill.image_dimensions(
+        make_webp_vp8l(str(tmp_path / 'a.webp'), 100, 200)) == (100, 200)
+
+
+@pytest.mark.parametrize('body', [
+    b'\xff\xd8\xff\xe0\x00',                                  # short length
+    b'\xff\xd8\xff\xc0' + struct.pack('>H', 17) + b'\x08\x00',  # short SOF
+    b'\xff\xd8\xff\xe0' + struct.pack('>H', 1) + b'\x00' * 20,  # length < 2
+])
+def test_jpeg_failure_branches_return_none(tmp_path, body):
+    """The length<2 branch is the only thing stopping a malformed JPEG from
+    seeking backwards forever."""
+    path = tmp_path / 'x.jpg'
+    path.write_bytes(body)
+    assert ill.image_dimensions(str(path)) is None
+
+
+def test_jpeg_skips_a_standalone_marker_before_the_sof(tmp_path):
+    path = tmp_path / 'x.jpg'
+    app0 = b'\xff\xe0' + struct.pack('>H', 16) + b'JFIF\x00' + b'\x00' * 9
+    sof0 = (b'\xff\xc0' + struct.pack('>H', 17) + b'\x08'
+            + struct.pack('>HH', 48, 64) + b'\x03' + b'\x00' * 9)
+    path.write_bytes(b'\xff\xd8' + b'\xff\x01' + app0 + sof0 + b'\xff\xd9')
+    assert ill.image_dimensions(str(path)) == (64, 48)
+
+
+def test_jpeg_with_no_sof_before_eof(tmp_path):
+    path = tmp_path / 'x.jpg'
+    app0 = b'\xff\xe0' + struct.pack('>H', 16) + b'JFIF\x00' + b'\x00' * 9
+    path.write_bytes(b'\xff\xd8' + app0 + b'\xff\xd9')
+    assert ill.image_dimensions(str(path)) is None
+
+
+# ============================================================================
+# Dropped-illustration reporting
+# ============================================================================
+
+def test_resolve_reports_what_it_dropped(project_dir):
+    """An author who planned eight and got five should be told which three,
+    not left to count images in the finished epub."""
+    ill.write_plan(project_dir, [
+        plan_row(id='rendered', status='ingested',
+                 asset_file=ill.default_asset_rel('rendered')),
+        plan_row(id='unrendered', status='planned'),
+    ])
+    make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
+                          'rendered.png'), 8, 8)
+    text = ('One.\n\n![[illus:rendered]]\n\nTwo.\n\n'
+            '![[illus:unrendered]]\n\nThree.\n\n![[illus:ghost]]\n')
+
+    dropped: list[str] = []
+    resolved = ill.resolve_for_local(project_dir, text,
+                                     relative_to=project_dir, dropped=dropped)
+    assert sorted(dropped) == ['ghost', 'unrendered']
+    assert 'rendered.png' in resolved
+    assert '![[illus:' not in resolved
+
+
+def test_resolve_reports_drops_when_there_is_no_plan(project_dir):
+    dropped: list[str] = []
+    ill.resolve_for_local(project_dir, 'a\n\n![[illus:x]]\n\nb\n',
+                          dropped=dropped)
+    assert dropped == ['x']

@@ -725,10 +725,10 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
                 f'existing render is untouched. Re-download it.')
             continue
 
-        dims = ill.image_dimensions(src)
+        probe = ill.probe_image(src)
+        dims = probe['dimensions']
         if dims is None:
-            log(f'WARNING: {src} is not a readable PNG, JPEG, or WebP — '
-                f'skipping {illus_id}')
+            log(f'WARNING: {src} {probe["reason"]} — skipping {illus_id}')
             continue
 
         rel = ill.default_asset_rel(illus_id, os.path.splitext(src)[1])

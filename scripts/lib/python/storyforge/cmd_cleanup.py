@@ -22,7 +22,9 @@ import sys
 import tempfile
 
 from storyforge.canon import CANON_DIR, CanonFinding, validate_canon_directory
-from storyforge.illustrations import IllustrationFindingKind
+from storyforge.illustrations import (
+    PLAN_COLUMNS, IllustrationFindingKind,
+)
 from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge.parsing import clean_scene_content, extract_single_scene
@@ -109,6 +111,16 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     'working/scores/score-history.csv': [
         'cycle', 'scene_id', 'principle', 'score',
     ],
+    # Registered so `cleanup --csv` can see a malformed header; the
+    # cross-referential checks live in _check_illustrations. Listed in
+    # ALWAYS_OPTIONAL_CSV_FILES — most books have no illustrations, so its
+    # absence is not a finding.
+    'reference/illustration-plan.csv': list(PLAN_COLUMNS),
+}
+
+#: Registered for header checking but never required to exist, in any medium.
+ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
+    'reference/illustration-plan.csv',
 }
 EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
@@ -495,10 +507,10 @@ def report_csv_schema(project_dir: str) -> list[str]:
 
     # Build the effective schema for this project: start with base, apply GN overrides
     effective_schemas = dict(EXPECTED_CSV_SCHEMAS)
-    optional_files: set[str] = set()
+    optional_files: set[str] = set(ALWAYS_OPTIONAL_CSV_FILES)
     if is_gn:
         effective_schemas.update(GN_CSV_SCHEMA_OVERRIDES)
-        optional_files = GN_OPTIONAL_CSV_FILES
+        optional_files |= GN_OPTIONAL_CSV_FILES
 
     issues = []
 

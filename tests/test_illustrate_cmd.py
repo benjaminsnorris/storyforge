@@ -207,7 +207,10 @@ def test_ingest_rejects_an_unreadable_image(in_project, tmp_path, capsys):
     (renders / 'lantern-vigil.png').write_bytes(b'not really a png at all')
 
     cmd_illustrate.main(['--ingest', str(renders)])
-    assert 'not a readable PNG' in capsys.readouterr().out
+    # The message names *why*, not just that it failed — a valid file the parser
+    # doesn't cover and a corrupt one need different actions from the author.
+    out = capsys.readouterr().out
+    assert 'does not begin with PNG, JPEG, or WebP magic bytes' in out
     assert read_plan_map(in_project)['lantern-vigil']['status'] == 'planned'
 
 
