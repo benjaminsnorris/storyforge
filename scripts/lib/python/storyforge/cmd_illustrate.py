@@ -24,7 +24,6 @@ See benjaminsnorris/storyforge#278.
 import argparse
 import os
 import re
-import shutil
 import sys
 import time
 
@@ -697,8 +696,13 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
                 f'{ill.default_asset_rel(illus_id, os.path.splitext(src)[1])}')
             continue
 
-        if os.path.getsize(src) == 0:
-            log(f'WARNING: {src} is empty — skipping {illus_id}')
+        # Truncation is checked before anything is written. An aborted render
+        # download leaves a header-valid stub whose dimensions parse fine, and
+        # overwriting good art with it is unrecoverable.
+        incomplete = ill.incomplete_image_reason(src)
+        if incomplete:
+            log(f'WARNING: {src} {incomplete}. Skipping {illus_id}; any '
+                f'existing render is untouched. Re-download it.')
             continue
 
         dims = ill.image_dimensions(src)
@@ -710,7 +714,11 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
         rel = ill.default_asset_rel(illus_id, os.path.splitext(src)[1])
         dest = os.path.join(project_dir, rel)
         if os.path.abspath(src) != os.path.abspath(dest):
-            shutil.copy2(src, dest)
+            previous = _existing_render(project_dir, illus_id, dest)
+            ill.replace_file(src, dest)
+            if previous:
+                log(f'  replacing {illus_id}: {previous} → '
+                    f'{dims[0]}×{dims[1]}')
 
         digest = ill.sha256_of(dest)
         _update_row(project_dir, illus_id, {
@@ -737,6 +745,20 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
         # during ingest is exactly as bad as one during --embed.
         exit_code = run_embed(project_dir, ingested_ids, dry_run=False) or exit_code
     return exit_code
+
+
+def _existing_render(project_dir: str, illus_id: str, dest: str) -> str:
+    """Describe the render about to be replaced, for the log. '' if none.
+
+    Overwriting art is legitimate — re-rendering is the normal loop — but it
+    should never be silent, because the previous file is not recoverable from
+    the working tree once replaced.
+    """
+    if not os.path.isfile(dest):
+        return ''
+    dims = ill.image_dimensions(dest)
+    shape = f'{dims[0]}×{dims[1]}' if dims else 'unreadable'
+    return f'{shape}, sha256 {ill.sha256_of(dest)[:12]}…'
 
 
 def _collect_candidates(source: str) -> list[str]:
@@ -863,14 +885,24 @@ def _nearest_anchor_hint(scene_text: str, row: dict[str, str]) -> str:
 # ============================================================================
 
 def _update_row(project_dir: str, illus_id: str,
-                updates: dict[str, str]) -> None:
-    """Apply updates to one plan row and rewrite the CSV."""
+                updates: dict[str, str]) -> bool:
+    """Apply updates to one plan row and rewrite the CSV.
+
+    Returns False when no such row exists — which is reachable if the plan is
+    edited while a multi-illustration run is in flight. Previously this rewrote
+    the file unchanged and returned normally, so a prompt file or a copied
+    render would land on disk while its status update evaporated.
+    """
     rows = ill.read_plan(project_dir)
     for row in rows:
         if row['id'].strip() == illus_id:
             row.update(updates)
-            break
-    ill.write_plan(project_dir, rows)
+            ill.write_plan(project_dir, rows)
+            return True
+    log(f'WARNING: {illus_id} is no longer in the illustration plan — its '
+        f'file was written but the plan could not record it. The plan may '
+        f'have been edited mid-run.')
+    return False
 
 
 def _sanitize_cell(value: str) -> str:

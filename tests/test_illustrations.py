@@ -1303,3 +1303,178 @@ def test_visual_key_horizon_scales_with_plan_length(project_dir):
     steps = ill.render_order(project_dir)
     assert steps[0]['id'] == 'i01'
     assert steps[0]['is_visual_key'] is True
+
+
+# ============================================================================
+# Data-destruction regressions
+# ============================================================================
+
+def truncated_png(path: str, width: int, height: int) -> str:
+    """Write a header-valid PNG with no IDAT and no IEND.
+
+    This is what an aborted render download leaves behind: `image_dimensions`
+    reads 32 bytes and reports plausible dimensions, so every naive guard
+    passes it.
+    """
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        body = typ + data
+        return (struct.pack('>I', len(data)) + body
+                + struct.pack('>I', zlib.crc32(body)))
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(b'\x89PNG\r\n\x1a\n'
+                + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height,
+                                             8, 2, 0, 0, 0)))
+    return path
+
+
+def test_upsert_collapses_a_duplicate_id_without_aliasing():
+    """Regression: two comprehensions disagreed — the dict collapsed duplicates
+    and the list did not — so the result held the same dict object twice and
+    silently replaced the first row's cells with the duplicate's."""
+    existing = [dict(plan_row(), beat='author wrote this'),
+                dict(plan_row(id='other'), beat='second'),
+                dict(plan_row(), beat='a later duplicate')]
+
+    out = ill.upsert_rows(existing, [dict(plan_row(id='new'), beat='new')])
+
+    assert [r['id'] for r in out] == ['lantern-vigil', 'other', 'new']
+    # First row wins, matching read_plan_as_map.
+    assert out[0]['beat'] == 'author wrote this'
+    # No two entries are the same object.
+    assert len({id(r) for r in out}) == len(out)
+
+
+def test_incomplete_image_reason_detects_a_truncated_png(tmp_path):
+    path = truncated_png(str(tmp_path / 'stub.png'), 800, 1200)
+    # The naive guards both pass it — that is the whole problem.
+    assert os.path.getsize(path) > 0
+    assert ill.image_dimensions(path) == (800, 1200)
+    reason = ill.incomplete_image_reason(path)
+    assert reason is not None
+    assert 'IEND' in reason
+
+
+def test_incomplete_image_reason_accepts_a_complete_png(tmp_path):
+    assert ill.incomplete_image_reason(
+        make_png(str(tmp_path / 'ok.png'), 8, 8)) is None
+
+
+def test_incomplete_image_reason_accepts_a_complete_jpeg(tmp_path):
+    assert ill.incomplete_image_reason(
+        make_jpeg(str(tmp_path / 'ok.jpg'), 8, 8)) is None
+
+
+def test_incomplete_image_reason_detects_a_truncated_jpeg(tmp_path):
+    path = tmp_path / 'stub.jpg'
+    path.write_bytes(b'\xff\xd8' + b'\x00' * 40)   # SOI, no EOI
+    reason = ill.incomplete_image_reason(str(path))
+    assert reason is not None and 'EOI' in reason
+
+
+@pytest.mark.parametrize('body,expected_fragment', [
+    (b'', 'empty'),
+    (b'\x89PNG\r\n\x1a\n', 'truncated'),
+])
+def test_incomplete_image_reason_edge_cases(tmp_path, body, expected_fragment):
+    path = tmp_path / 'x.png'
+    path.write_bytes(body)
+    reason = ill.incomplete_image_reason(str(path))
+    assert reason is not None and expected_fragment in reason
+
+
+def test_incomplete_image_reason_on_a_missing_file(tmp_path):
+    reason = ill.incomplete_image_reason(str(tmp_path / 'nope.png'))
+    assert reason is not None
+
+
+def test_replace_file_is_atomic_on_failure(tmp_path):
+    """An interrupted copy must not truncate the destination."""
+    dest = make_png(str(tmp_path / 'dest.png'), 40, 60)
+    original = open(dest, 'rb').read()
+
+    with pytest.raises(FileNotFoundError):
+        ill.replace_file(str(tmp_path / 'does-not-exist.png'), dest)
+
+    assert open(dest, 'rb').read() == original
+    # No temp files left behind.
+    assert not [p for p in os.listdir(tmp_path) if p.endswith('.part')]
+
+
+def test_replace_file_replaces_on_success(tmp_path):
+    dest = make_png(str(tmp_path / 'dest.png'), 40, 60)
+    src = make_png(str(tmp_path / 'src.png'), 10, 20)
+    ill.replace_file(src, dest)
+    assert ill.image_dimensions(dest) == (10, 20)
+
+
+# ============================================================================
+# write_plan / read_plan fidelity
+# ============================================================================
+
+def test_write_plan_preserves_author_added_columns(project_dir):
+    """The plan is a file authors are told to hand-edit."""
+    path = ill.plan_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    header = '|'.join(ill.PLAN_COLUMNS + ['author_note'])
+    with open(path, 'w') as f:
+        f.write(header + '\n')
+        f.write('lantern-vigil' + '|' * (len(ill.PLAN_COLUMNS) - 1)
+                + '|keep me\n')
+
+    rows = ill.read_plan(project_dir)
+    assert rows[0]['author_note'] == 'keep me'
+
+    ill.write_plan(project_dir, rows)          # a round-trip must not drop it
+    assert ill.read_plan(project_dir)[0]['author_note'] == 'keep me'
+    with open(path) as f:
+        assert 'author_note' in f.readline()
+
+
+def test_write_plan_sanitizes_pipes_and_newlines(project_dir):
+    """An unescaped pipe shatters the row and its overflow is dropped on read."""
+    ill.write_plan(project_dir, [plan_row(beat='a beat with | a pipe',
+                                         rationale='line one\nline two')])
+    with open(ill.plan_path(project_dir)) as f:
+        lines = [ln for ln in f.read().splitlines() if ln.strip()]
+
+    assert len(lines) == 2                     # header + exactly one data row
+    assert '"' not in lines[1]                 # no RFC-4180 quoting
+    for line in lines:
+        assert line.count('|') == len(ill.PLAN_COLUMNS) - 1
+
+    row = ill.read_plan(project_dir)[0]
+    assert row['beat'] == 'a beat with / a pipe'
+    assert row['rationale'] == 'line one line two'
+
+
+def test_read_plan_flags_a_shattered_row(project_dir):
+    path = ill.plan_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write('|'.join(ill.PLAN_COLUMNS) + '\n')
+        f.write('lantern-vigil|vigil|anchor'
+                + '|' * (len(ill.PLAN_COLUMNS) - 3) + '|one extra\n')
+
+    rows = ill.read_plan(project_dir)
+    assert rows[0][ill._SHATTERED_FLAG] == '1'
+
+
+def test_the_shattered_flag_never_becomes_a_column(project_dir):
+    path = ill.plan_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write('|'.join(ill.PLAN_COLUMNS) + '\n')
+        f.write('lantern-vigil' + '|' * (len(ill.PLAN_COLUMNS) - 1)
+                + '|extra\n')
+
+    ill.write_plan(project_dir, ill.read_plan(project_dir))
+    with open(ill.plan_path(project_dir)) as f:
+        assert ill._SHATTERED_FLAG not in f.readline()
+
+
+def test_sanitize_cell():
+    assert ill.sanitize_cell('a|b') == 'a/b'
+    assert ill.sanitize_cell('a\nb\r') == 'a b'
+    assert ill.sanitize_cell('  spaced  ') == 'spaced'

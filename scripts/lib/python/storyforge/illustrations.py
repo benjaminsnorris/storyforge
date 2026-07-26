@@ -68,6 +68,11 @@ PROMPTS_SUBDIR = os.path.join(ILLUSTRATIONS_SUBDIR, 'prompts')
 
 VALID_IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp')
 
+#: In-memory marker for a row whose field count exceeded the header. Never
+#: written back — write_plan's fieldnames come from PLAN_COLUMNS plus author
+#: columns, and this key is filtered out explicitly.
+_SHATTERED_FLAG = '_shattered'
+
 # Ids must match exactly what the marker regex accepts, so that a plan row an
 # author wrote by hand (`LF-01`) is never rejected by validation while its
 # marker parses fine. Case is preserved in the plan and in prose; only the
@@ -280,10 +285,17 @@ def read_plan(project_dir: str) -> list[dict[str, str]]:
     reader = csv.DictReader(raw.splitlines(), delimiter=DELIMITER)
     rows = []
     for row in reader:
+        # A None key means the row had more fields than the header — an
+        # unescaped `|` shattered it. Recorded so validate_plan can report the
+        # row rather than letting it through with shifted columns.
+        shattered = None in row
         clean = {k: (v if v is not None else '') for k, v in row.items()
                  if k is not None}
-        if (clean.get('id') or '').strip():
-            rows.append(clean)
+        if not (clean.get('id') or '').strip():
+            continue
+        if shattered:
+            clean[_SHATTERED_FLAG] = '1'
+        rows.append(clean)
     return rows
 
 
@@ -300,16 +312,48 @@ def read_plan_as_map(project_dir: str) -> dict[str, dict[str, str]]:
     return out
 
 
+def sanitize_cell(value: str) -> str:
+    """Make a value safe for a pipe-delimited, unquoted CSV.
+
+    A stray ``|`` shatters the row on write and its overflow is then silently
+    discarded on read, shifting every column after it. Newlines split one row
+    into two. Sanitizing here rather than at each call site means no writer can
+    forget — the project's CSV format has no quoting to fall back on.
+    """
+    if not isinstance(value, str):
+        value = str(value)
+    return value.replace('|', '/').replace('\n', ' ').replace('\r', '').strip()
+
+
 def write_plan(project_dir: str, rows: list[dict[str, str]]) -> str:
-    """Write the illustration plan, preserving PLAN_COLUMNS order."""
+    """Write the illustration plan, preserving PLAN_COLUMNS order.
+
+    Columns the author added beyond PLAN_COLUMNS are preserved, appended after
+    the known ones. The plan is a file authors are told to hand-edit, so
+    silently dropping their column on the next ``--prompts`` run would be a
+    data loss they never asked for — the same courtesy read_direction extends
+    to author-added sections.
+    """
     path = plan_path(project_dir)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    extras = [col for row in rows for col in row
+              if col not in PLAN_COLUMNS and col is not None
+              and col != _SHATTERED_FLAG]
+    fieldnames = PLAN_COLUMNS + list(dict.fromkeys(extras))
+
     with open(path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=PLAN_COLUMNS,
-                                delimiter=DELIMITER, extrasaction='ignore')
+        # QUOTE_NONE with no escapechar: the format is unquoted by definition,
+        # so a value that still needs escaping after sanitize_cell must raise
+        # rather than silently switch the file to RFC-4180 quoting.
+        writer = csv.DictWriter(f, fieldnames=fieldnames,
+                                delimiter=DELIMITER, extrasaction='ignore',
+                                quoting=csv.QUOTE_NONE, escapechar=None,
+                                quotechar=None)
         writer.writeheader()
         for row in rows:
-            writer.writerow({col: row.get(col, '') for col in PLAN_COLUMNS})
+            writer.writerow({col: sanitize_cell(row.get(col, ''))
+                             for col in fieldnames})
     return path
 
 
@@ -329,8 +373,21 @@ def upsert_rows(existing: list[dict[str, str]],
     the plan rather than overwriting author edits. Incoming values only fill
     blanks or land in columns the existing row left empty.
     """
-    by_id = {r['id'].strip(): dict(r) for r in existing if r.get('id', '').strip()}
-    order = [r['id'].strip() for r in existing if r.get('id', '').strip()]
+    # One pass builds both structures, which is what keeps them agreeing. The
+    # two comprehensions this replaced disagreed: the dict collapsed duplicate
+    # ids (last wins) while the list did not, so the result held the same dict
+    # object twice AND silently replaced the first row's cells with the
+    # duplicate's — the exact overwrite this function promises not to do.
+    # First row wins, matching read_plan_as_map.
+    by_id: dict[str, dict[str, str]] = {}
+    order: list[str] = []
+    for row in existing:
+        rid = (row.get('id') or '').strip()
+        if not rid or rid in by_id:
+            continue
+        by_id[rid] = dict(row)
+        order.append(rid)
+
     for row in incoming:
         rid = (row.get('id') or '').strip()
         if not rid:
@@ -877,6 +934,70 @@ def _webp_dimensions(f, head: bytes) -> tuple[int, int] | None:
 def is_supported_image(path: str) -> bool:
     """True when the extension is one the publish pipeline accepts."""
     return os.path.splitext(path)[1].lower() in VALID_IMAGE_EXTENSIONS
+
+
+#: Trailing bytes that prove a container closed properly, by magic prefix.
+#: A header-valid but truncated file — what an aborted download leaves — passes
+#: every dimension check, so the end of the container is the only thing that
+#: distinguishes a complete render from a fragment.
+_CONTAINER_END = (
+    (b'\x89PNG\r\n\x1a\n', b'IEND\xaeB`\x82', 'PNG', 'an IEND chunk'),
+    (b'\xff\xd8', b'\xff\xd9', 'JPEG', 'an EOI marker'),
+)
+
+
+def incomplete_image_reason(path: str) -> str | None:
+    """Return why an image looks truncated, or None when it looks complete.
+
+    Guards the one path that overwrites an existing render. `image_dimensions`
+    reads 32 bytes and returns, so a 33-byte PNG stub reports plausible
+    dimensions — and ingest would then record its digest and replace good art
+    with the fragment, which is the failure commit 33487b7 fixed for the cover.
+    """
+    try:
+        size = os.path.getsize(path)
+        if size == 0:
+            return 'the file is empty'
+        with open(path, 'rb') as f:
+            head = f.read(12)
+            for magic, tail, label, what in _CONTAINER_END:
+                if not head.startswith(magic):
+                    continue
+                if size < len(magic) + len(tail):
+                    return f'{label} data is only {size} bytes — truncated'
+                f.seek(-len(tail), os.SEEK_END)
+                if f.read(len(tail)) != tail:
+                    return (f'{label} data ends without {what} '
+                            f'({size} bytes) — the file is truncated')
+                return None
+    except OSError as exc:
+        return f'could not be read ({exc.strerror or exc})'
+    # WebP carries its payload length in the RIFF header rather than a
+    # terminator; dimension parsing already validates the chunk it needs.
+    return None
+
+
+def replace_file(src: str, dest: str) -> None:
+    """Copy *src* over *dest* without ever leaving *dest* half-written.
+
+    Copies to a sibling temp file first, then renames. A `shutil.copy2`
+    straight onto the destination truncates it on open, so an interrupted copy
+    destroys the previous render rather than leaving it intact.
+    """
+    import shutil
+    import tempfile
+
+    dest_dir = os.path.dirname(os.path.abspath(dest)) or '.'
+    os.makedirs(dest_dir, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=dest_dir, suffix='.part')
+    os.close(fd)
+    try:
+        shutil.copy2(src, tmp)
+        os.replace(tmp, dest)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 # ============================================================================

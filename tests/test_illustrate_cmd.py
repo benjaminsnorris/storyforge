@@ -1489,3 +1489,100 @@ def test_ingest_only_embeds_what_it_actually_ingested(in_project, tmp_path):
         assert ill.marker_ids(f.read()) == ['good-one']
     with open(os.path.join(in_project, 'scenes', 'bad.md')) as f:
         assert ill.marker_ids(f.read()) == []
+
+
+def test_ingest_refuses_a_truncated_render_and_preserves_the_good_one(
+        in_project, tmp_path, capsys):
+    """Regression (cover class, commit 33487b7): a header-valid stub — what an
+    aborted download leaves — overwrote a good render, recorded its digest, and
+    exited 0. The previous file is not recoverable once replaced."""
+    from tests.test_illustrations import truncated_png
+
+    write_scene(in_project, 'vigil', SCENE)
+    good = make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
+                                'lantern-vigil.png'), 800, 1200)
+    good_bytes = open(good, 'rb').read()
+    good_digest = ill.sha256_of(good)
+    ill.write_plan(in_project, [plan_row(
+        status='ingested', sha256=good_digest,
+        asset_file=ill.default_asset_rel('lantern-vigil'),
+    )])
+
+    renders = tmp_path / 'renders'
+    truncated_png(str(renders / 'lantern-vigil.png'), 800, 1200)
+
+    assert cmd_illustrate.main(['--ingest', str(renders)]) == 1
+
+    assert open(good, 'rb').read() == good_bytes
+    assert read_plan_map(in_project)['lantern-vigil']['sha256'] == good_digest
+    out = capsys.readouterr().out
+    assert 'truncated' in out
+    assert 'existing render is untouched' in out
+
+
+def test_ingest_logs_a_replacement(in_project, tmp_path, capsys):
+    """Re-rendering is the normal loop, but it must never be silent."""
+    write_scene(in_project, 'vigil', SCENE)
+    make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
+                          'lantern-vigil.png'), 800, 1200)
+    ill.write_plan(in_project, [plan_row(
+        status='ingested', sha256='a' * 64,
+        asset_file=ill.default_asset_rel('lantern-vigil'),
+    )])
+    renders = tmp_path / 'renders'
+    make_png(str(renders / 'lantern-vigil.png'), 100, 150)
+
+    cmd_illustrate.main(['--ingest', str(renders)])
+    out = capsys.readouterr().out
+    assert 'replacing lantern-vigil' in out
+    assert '800×1200' in out and '100×150' in out
+
+
+def test_ingest_of_a_file_already_in_place(in_project):
+    """Rendering straight into the canonical directory must not raise."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    dest = make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
+                                'lantern-vigil.png'), 40, 60)
+
+    assert cmd_illustrate.main(['--ingest', dest]) == 0
+    row = read_plan_map(in_project)['lantern-vigil']
+    assert row['status'] == 'ingested'
+    assert row['sha256'] == ill.sha256_of(dest)
+
+
+def test_update_row_warns_when_the_id_is_gone(in_project, capsys):
+    """Reachable when the plan is edited mid-run: the file lands on disk while
+    the status update evaporates."""
+    ill.write_plan(in_project, [plan_row()])
+    assert cmd_illustrate._update_row(in_project, 'not-in-plan',
+                                     {'status': 'prompted'}) is False
+    assert 'no longer in the illustration plan' in capsys.readouterr().out
+
+
+def test_update_row_updates_a_middle_row(in_project):
+    ill.write_plan(in_project, [plan_row(id='a'), plan_row(id='b'),
+                                plan_row(id='c')])
+    assert cmd_illustrate._update_row(in_project, 'b',
+                                     {'status': 'prompted'}) is True
+    plan = read_plan_map(in_project)
+    assert plan['b']['status'] == 'prompted'
+    assert plan['a']['status'] == 'planned'
+    assert plan['c']['status'] == 'planned'
+
+
+def test_prompts_does_not_destroy_author_columns(in_project):
+    """A --prompts run rewrites the plan once per illustration."""
+    path = ill.plan_path(in_project)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write('|'.join(ill.PLAN_COLUMNS + ['author_note']) + '\n')
+        f.write('lantern-vigil|vigil|She set it on the sill|after_anchor'
+                + '|' * (len(ill.PLAN_COLUMNS) - 4) + '|keep me\n')
+    write_scene(in_project, 'vigil', SCENE)
+
+    cmd_illustrate.main(['--prompts', '--coaching', 'strict'])
+
+    row = read_plan_map(in_project)['lantern-vigil']
+    assert row['status'] == 'prompted'
+    assert row['author_note'] == 'keep me'
