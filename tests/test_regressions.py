@@ -416,3 +416,56 @@ class TestSkipInitialScoreFlag:
             __import__('storyforge.cmd_revise', fromlist=['_run_polish_loop'])._run_polish_loop
         )
         assert 'skip_initial_score' in sig.parameters
+
+
+# ============================================================================
+# v1.46.x — test-suite importability (#278)
+# ============================================================================
+
+class TestSuiteIsImportableUnderEveryInvocation:
+    """CLAUDE.md documents three ways to run the suite:
+
+        ./tests/run-tests.sh
+        python3 -m pytest tests/
+        pytest tests/test_thing.py
+
+    A `from tests.…` import in a test module resolves only under the second —
+    under the third it raises at *collection* time, which does not merely skip
+    that file, it aborts the whole run. Two modules had one, so bare
+    `pytest tests/` collected nothing at all.
+    """
+
+    def _test_modules(self):
+        tests_dir = os.path.dirname(os.path.abspath(__file__))
+        for root, _dirs, files in os.walk(tests_dir):
+            if '__pycache__' in root:
+                continue
+            for name in files:
+                if name.startswith('test_') and name.endswith('.py'):
+                    yield os.path.join(root, name)
+
+    def test_no_module_imports_the_tests_package(self):
+        """`tests/` has no __init__.py, so `tests.…` is not an importable
+        package under the bare-pytest invocation."""
+        offenders = []
+        for path in self._test_modules():
+            with open(path) as f:
+                for lineno, line in enumerate(f, 1):
+                    stripped = line.strip()
+                    if (stripped.startswith('from tests.')
+                            or stripped.startswith('import tests.')
+                            or stripped == 'import tests'):
+                        rel = os.path.relpath(path, os.path.dirname(
+                            os.path.dirname(os.path.abspath(__file__))))
+                        offenders.append(f'{rel}:{lineno}: {stripped}')
+        assert offenders == [], (
+            'These imports break `pytest <file>` at collection time, which '
+            'aborts the entire run:\n  ' + '\n  '.join(offenders)
+        )
+
+    def test_shared_illustration_helpers_are_a_plain_module(self):
+        """The #278 helpers live in a module both test files can import without
+        a package path."""
+        tests_dir = os.path.dirname(os.path.abspath(__file__))
+        assert os.path.isfile(
+            os.path.join(tests_dir, 'illustration_helpers.py'))

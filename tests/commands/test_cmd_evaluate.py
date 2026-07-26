@@ -22,7 +22,7 @@ from storyforge.cmd_evaluate import (
     _build_synthesis_prompt,
 )
 
-from tests.commands.conftest import (
+from commands.conftest import (
     load_api_response,
     load_api_response_text,
     TESTS_DIR,
