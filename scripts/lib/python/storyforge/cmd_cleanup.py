@@ -1175,6 +1175,8 @@ _ILLUSTRATION_ACTIONS: dict[str, str] = {
                       'or superseded',
     'invalid_placement': 'Set placement to before_anchor, after_anchor, '
                          'scene_open, or scene_close',
+    'invalid_layout': 'Set layout to full_page, half_page, double_page, '
+                      'or inline',
     'missing_scene': 'Set scene_id to the scene this illustration belongs to',
     'unknown_scene': 'Fix scene_id, or add the missing scene file',
     'missing_file': 'Run storyforge illustrate --ingest <path>, or set the '

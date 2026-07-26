@@ -1,13 +1,17 @@
 """storyforge illustrate — plan, art-direct, ingest, and embed interior illustrations.
 
-Five phases, each its own flag:
+Seven phases, each its own flag:
 
+  --direction  Write the book-level art direction: format, visual promise,
+               recurring visual language, content limits, continuity anchors.
+               Authored once; constrains every illustration.
   --plan       Decide where illustrations belong. Deterministic pre-pass, then
                an LLM pass that argues against those findings.
   --prompts    Turn planned rows into image-generation prompts.
   --ingest     Bring rendered files in, record digests, embed markers.
   --embed      (Re)insert markers from the plan, without ingesting.
-  --diagnose   Read-only plan health report.
+  --diagnose   Read-only plan health report, with the recommended render order.
+  --review     Whole-sequence continuity checklist for the rendered set.
 
 The command emits art direction; the author renders externally and ingests.
 That split is deliberate — image generation is iterative and visual, and a
@@ -46,6 +50,8 @@ def parse_args(argv):
         description='Plan, art-direct, ingest, and embed interior illustrations.',
     )
     phase = parser.add_argument_group('phases')
+    phase.add_argument('--direction', action='store_true',
+                       help='Write the book-level art-direction document')
     phase.add_argument('--plan', action='store_true',
                        help='Propose illustration moments into the plan CSV')
     phase.add_argument('--prompts', action='store_true',
@@ -56,7 +62,9 @@ def parse_args(argv):
     phase.add_argument('--embed', action='store_true',
                        help='(Re)insert markers into scene files from the plan')
     phase.add_argument('--diagnose', action='store_true',
-                       help='Read-only plan health report')
+                       help='Read-only plan health report + render order')
+    phase.add_argument('--review', action='store_true',
+                       help='Write the whole-sequence continuity checklist')
 
     parser.add_argument('--count', type=int, default=None,
                         help='Target illustration count for --plan '
@@ -87,17 +95,20 @@ def main(argv=None):
 
     coaching = args.coaching or get_coaching_level(project_dir)
 
-    phases = [args.plan, args.prompts, bool(args.ingest), args.embed,
-              args.diagnose]
+    phases = [args.direction, args.plan, args.prompts, bool(args.ingest),
+              args.embed, args.diagnose, args.review]
     if not any(phases):
-        log('Nothing to do. Pick a phase: --plan, --prompts, --ingest PATH, '
-            '--embed, or --diagnose.')
+        log('Nothing to do. Pick a phase: --direction, --plan, --prompts, '
+            '--ingest PATH, --embed, --diagnose, or --review.')
         return 1
 
     if args.diagnose:
         return run_diagnose(project_dir)
 
     exit_code = 0
+    if args.direction:
+        exit_code = run_direction(project_dir, coaching,
+                                  args.dry_run) or exit_code
     if args.plan:
         exit_code = run_plan(project_dir, coaching, args.count,
                              args.dry_run) or exit_code
@@ -110,6 +121,8 @@ def main(argv=None):
     if args.embed:
         exit_code = run_embed(project_dir, _id_filter(args.ids),
                               args.dry_run) or exit_code
+    if args.review:
+        exit_code = run_review(project_dir, args.dry_run) or exit_code
     return exit_code
 
 
@@ -147,6 +160,16 @@ def run_diagnose(project_dir: str) -> int:
     if report['next_unrendered']:
         log(f'  next to render: {report["next_unrendered"]}')
 
+    steps = ill.render_order(project_dir)
+    if steps:
+        log('Recommended render order:')
+        for i, step in enumerate(steps, 1):
+            mark = '*' if step['status'] == 'ingested' else ' '
+            key = '  <- visual key' if step['is_visual_key'] else ''
+            locks = (f'  locks: {", ".join(step["locks"])}'
+                     if step['locks'] else '')
+            log(f'  {mark} {i:2}. {step["id"]}{key}{locks}')
+
     findings = ill.validate_plan(project_dir)
     if not findings:
         log('No problems found.')
@@ -157,6 +180,153 @@ def run_diagnose(project_dir: str) -> int:
         target = finding.get('id') or finding.get('file') or ''
         log(f'  [{finding["kind"]}] {target}: {finding["detail"]}')
     return 1
+
+
+# ============================================================================
+# --direction
+# ============================================================================
+
+def run_direction(project_dir: str, coaching: CoachingLevel,
+                  dry_run: bool) -> int:
+    """Write the book-level art-direction document.
+
+    Authored once, and it constrains every illustration — which makes it the
+    highest-leverage artifact in the flow. A per-illustration prompt can be
+    re-rolled cheaply; a book whose images disagree with each other has to be
+    re-rendered wholesale.
+    """
+    path = ill.direction_path(project_dir)
+    rel = os.path.relpath(path, project_dir)
+    entities = _anchor_candidates(project_dir)
+
+    if ill.has_direction(project_dir):
+        missing = ill.missing_direction_sections(project_dir)
+        if not missing:
+            log(f'{rel} is already written. Edit it directly, or delete it to '
+                f'start over.')
+            return 0
+        log(f'{rel} exists but these sections are empty or still placeholder: '
+            f'{", ".join(missing)}')
+        log('Fill them in, or delete the file to regenerate it.')
+        return 0
+
+    title = read_yaml_field('project.title', project_dir) or 'Untitled'
+
+    if coaching in ('coach', 'strict'):
+        content = pi.render_direction_template(
+            title=title, coaching=coaching, entities=entities)
+        return _write_direction(project_dir, content, rel, dry_run,
+                               entities, coaching)
+
+    if dry_run:
+        log(f'[dry-run] would draft {rel} '
+            f'({len(entities)} continuity anchor(s))')
+        return 0
+
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        log('ERROR: ANTHROPIC_API_KEY is not set. Drafting art direction in '
+            'full coaching requires an API key. Set it and re-run, or use '
+            '--coaching coach for a template to fill in yourself.')
+        return 1
+
+    prompt = pi.build_direction_request(
+        title=title,
+        genre=read_yaml_field('project.genre', project_dir) or '',
+        audience=read_yaml_field('project.audience', project_dir) or '',
+        canon_context=_canon_context(project_dir),
+        story_context=_story_context(project_dir),
+        entities=entities,
+    )
+    body = _invoke(project_dir, prompt, 'illustrate-direction',
+                   task_type='synthesis', max_tokens=8192)
+    if not body:
+        log('ERROR: no response from the API.')
+        return 1
+
+    content = f'# Illustration art direction — {title}\n\n{body.strip()}\n'
+    return _write_direction(project_dir, content, rel, dry_run, entities,
+                            coaching)
+
+
+def _write_direction(project_dir: str, content: str, rel: str, dry_run: bool,
+                     entities: list[str], coaching: CoachingLevel) -> int:
+    """Write the direction document and report what still needs the author."""
+    if dry_run:
+        log(f'[dry-run] would write {rel}')
+        return 0
+
+    path = ill.direction_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    log(f'Wrote {rel}')
+
+    anchors = ill.read_continuity_anchors(project_dir)
+    log(f'  continuity anchors: {len(anchors)}')
+    missing = ill.missing_direction_sections(project_dir)
+    if missing:
+        log(f'  needs your input: {", ".join(missing)}')
+    if coaching == 'full':
+        log('Read it before running --prompts — every illustration inherits '
+            'whatever is in there, including anything it got wrong.')
+    return 0
+
+
+def _anchor_candidates(project_dir: str) -> list[str]:
+    """Suggest what needs a continuity anchor, from the project's registries.
+
+    Characters and locations come from their registries; both matter because
+    art has to keep a place consistent as much as a face. The author adds
+    creatures and signature props the registries don't model.
+    """
+    names: list[str] = []
+    for filename, limit in (('characters.csv', 12), ('locations.csv', 6)):
+        rows = ill._read_ref_csv(project_dir, filename)
+        for row in rows[:limit]:
+            name = (row.get('name') or row.get('id') or '').strip()
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
+# ============================================================================
+# --review
+# ============================================================================
+
+def run_review(project_dir: str, dry_run: bool) -> int:
+    """Write the whole-sequence continuity review checklist.
+
+    Per-illustration validation cannot see drift: each image is individually
+    fine and the set is still inconsistent. This is the pass that looks at all
+    of them together.
+    """
+    steps = ill.render_order(project_dir)
+    if not steps:
+        log('No illustration plan to review. Run `--plan` first.')
+        return 1
+
+    rel = os.path.join('working', 'illustration-sequence-review.md')
+    if dry_run:
+        log(f'[dry-run] would write {rel} ({len(steps)} illustration(s))')
+        return 0
+
+    content = pi.render_sequence_review(
+        title=read_yaml_field('project.title', project_dir) or 'Untitled',
+        steps=steps,
+        anchors=ill.read_continuity_anchors(project_dir),
+        direction=ill.read_direction(project_dir),
+    )
+    path = os.path.join(project_dir, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+    rendered = sum(1 for s in steps if s['status'] == 'ingested')
+    log(f'Wrote {rel} — {rendered} of {len(steps)} rendered')
+    if rendered < len(steps):
+        log('Reviewing before the set is complete is the cheap moment: every '
+            'later illustration references the earlier ones.')
+    return 0
 
 
 # ============================================================================
@@ -310,6 +480,18 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
 
     log(f'Writing art direction for {len(rows)} illustration(s)')
 
+    direction = ill.read_direction(project_dir)
+    if not direction:
+        log(f'WARNING: no {ill.DIRECTION_FILENAME} — these prompts will carry '
+            f'no house style, and the illustrations will not look like they '
+            f'belong to one book. Run `storyforge illustrate --direction` '
+            f'first.')
+    else:
+        missing = ill.missing_direction_sections(project_dir)
+        if missing:
+            log(f'WARNING: {ill.DIRECTION_FILENAME} is missing: '
+                f'{", ".join(missing)}')
+
     if coaching == 'strict':
         log('Coaching is strict — art direction is creative work. Writing the '
             'prompt scaffold with your constraints; fill in the five sections '
@@ -336,7 +518,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
 
     for row in rows:
         illus_id = row['id'].strip()
-        anchors = pi.read_character_anchors(project_dir)
+        anchors = pi.anchors_for_prompt(project_dir)
         references = _references_for(project_dir, illus_id)
         aspect = pi.aspect_for_row(row)
 
@@ -344,7 +526,8 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             request = pi.build_art_direction_request(
                 row=row,
                 scene_excerpt=_scene_excerpt(project_dir, row),
-                character_anchors=anchors, canon_context=canon,
+                character_anchors=_relevant_anchors(anchors, row),
+                canon_context=canon, direction=direction,
                 style_note=style_note,
             )
             body = _invoke(project_dir, request, 'illustrate-prompt',
@@ -357,8 +540,11 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
                 continue
             body, new_anchors = pi.split_anchor_block(body)
             if new_anchors:
-                pi.write_character_anchors(project_dir, new_anchors)
-                log(f'  recorded {len(new_anchors)} character anchor(s)')
+                added = pi.append_anchor_stubs(project_dir, new_anchors)
+                if added:
+                    log(f'  appended {len(added)} anchor(s) to '
+                        f'{ill.DIRECTION_FILENAME} for review: '
+                        f'{", ".join(added)}')
         else:
             body = _strict_prompt_scaffold(row)
 
@@ -425,10 +611,25 @@ def _references_for(project_dir: str, illus_id: str) -> list[str]:
         if len(references) >= 4:
             break
 
-    anchors_rel = os.path.join(ill.ILLUSTRATIONS_SUBDIR, pi.ANCHORS_FILENAME)
-    if os.path.isfile(os.path.join(project_dir, anchors_rel)):
-        references.append(f'{anchors_rel}  — character anchors (text, for reference)')
     return references
+
+
+def _relevant_anchors(anchors: dict[str, str],
+                      row: dict[str, str]) -> dict[str, str]:
+    """Narrow the anchor set to what this illustration actually shows.
+
+    Sending every anchor in the book would spend tokens on a cast that isn't in
+    the frame, and invites the model to include them. Falls back to all anchors
+    when the row names none, since an unfiltered anchor set is a smaller
+    failure than a missing one.
+    """
+    named = {n.strip().lower()
+             for n in ill._split_array(row.get('canon_refs', ''))}
+    if not named:
+        return anchors
+    matched = {name: text for name, text in anchors.items()
+               if name.strip().lower() in named}
+    return matched or anchors
 
 
 # ============================================================================

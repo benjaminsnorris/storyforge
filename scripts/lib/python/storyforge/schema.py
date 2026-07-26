@@ -936,8 +936,10 @@ def validate_voice_profile(project_dir: str) -> dict:
     }
 
 
+#: Mirrors illustrations.PLAN_COLUMNS. Kept as its own list so the schema layer
+#: does not import the module just to know the header shape.
 ILLUSTRATION_PLAN_COLUMNS = [
-    'id', 'scene_id', 'anchor', 'placement', 'beat', 'rationale',
+    'id', 'scene_id', 'anchor', 'placement', 'layout', 'beat', 'rationale',
     'subject', 'composition', 'palette', 'mood', 'motifs', 'canon_refs',
     'status', 'asset_file', 'prompt_file', 'sha256', 'width', 'height',
 ]

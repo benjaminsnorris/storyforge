@@ -24,12 +24,10 @@ import re
 from typing import Final
 
 from storyforge.illustrations import (
-    ILLUSTRATIONS_SUBDIR, PrepassFindings, VALID_PLACEMENTS,
+    ANCHORS_SECTION, DEFAULT_LAYOUT, DIRECTION_FILENAME, DIRECTION_SECTIONS,
+    PrepassFindings, RenderStep, VALID_LAYOUTS, VALID_PLACEMENTS,
+    read_continuity_anchors, read_direction,
 )
-
-# Anchors live beside the art so every later illustration can reuse the exact
-# strings — principle 4 only works if the string is literally identical.
-ANCHORS_FILENAME: Final[str] = 'character-anchors.md'
 
 DEFAULT_ASPECT: Final[str] = 'portrait'
 VALID_ASPECTS: Final[tuple[str, ...]] = ('portrait', 'square', 'landscape')
@@ -47,13 +45,18 @@ _NO_TEXT_CONSTRAINT: Final[str] = (
 # ============================================================================
 
 def aspect_for_row(row: dict[str, str]) -> str:
-    """Determine an illustration's aspect from its composition field.
+    """Determine an illustration's aspect from its layout, then its composition.
 
-    There is no dedicated aspect column — an interior illustration's shape is
-    a compositional decision, so it is read out of `composition` when the
-    author states one there. Portrait is the default because it matches the
-    page it sits on.
+    Layout decides first because it is a physical fact about the page: a
+    double-page spread is wider than tall no matter what the composition note
+    says. Failing that, an interior illustration's shape is a compositional
+    decision, so it is read out of `composition` when the author states one
+    there. Portrait is the default because it matches the page it sits on.
     """
+    layout = (row.get('layout') or '').strip().lower()
+    if layout == 'double_page':
+        return 'landscape'
+
     text = (row.get('composition') or '').lower()
     for aspect in ('landscape', 'square'):
         if re.search(rf'\b{aspect}\b', text):
@@ -82,61 +85,58 @@ def orientation_clause(aspect: str = DEFAULT_ASPECT) -> str:
 
 
 # ============================================================================
-# Character anchors
+# Continuity anchors
 # ============================================================================
 
-def anchors_path(project_dir: str) -> str:
-    """Path to the shared character-anchor file."""
-    return os.path.join(project_dir, ILLUSTRATIONS_SUBDIR, ANCHORS_FILENAME)
+def anchors_for_prompt(project_dir: str) -> dict[str, str]:
+    """Return the continuity anchors from the direction document.
 
-
-def read_character_anchors(project_dir: str) -> dict[str, str]:
-    """Read the persisted character-anchor strings.
-
-    Format is one ``- **Name** — anchor string`` bullet per character. Kept as
-    markdown rather than CSV so the author can read and edit it directly; the
-    anchor is a sentence of prose, not structured data.
+    Anchors are authored up front in `reference/illustration-direction.md`, not
+    accumulated as a side effect of prompting. That ordering is the point: an
+    anchor is an input to the art, and the reason it works is that every prompt
+    reuses the identical string. A description invented on the fly by whichever
+    illustration happened to be rendered first is not an anchor, it is a
+    coincidence.
     """
-    path = anchors_path(project_dir)
-    if not os.path.isfile(path):
-        return {}
-    anchors: dict[str, str] = {}
-    with open(path, encoding='utf-8') as f:
-        for line in f:
-            m = re.match(r'^\s*[-*]\s*\*\*(.+?)\*\*\s*[—:-]\s*(.+?)\s*$', line)
-            if m:
-                anchors[m.group(1).strip()] = m.group(2).strip()
-    return anchors
+    return read_continuity_anchors(project_dir)
 
 
-def write_character_anchors(project_dir: str, anchors: dict[str, str]) -> str:
-    """Write the character-anchor file, merging with what is already there.
+def append_anchor_stubs(project_dir: str, anchors: dict[str, str]) -> list[str]:
+    """Append newly-proposed anchors to the direction document.
 
-    Existing anchors are never overwritten: an anchor's whole value is that it
-    stays byte-identical across every illustration, so revising one silently
-    would break likeness continuity in the art already rendered.
+    Returns the names actually added. Existing anchors are never touched: their
+    whole value is staying byte-identical across every illustration, so revising
+    one silently would break likeness continuity in art already rendered.
+
+    New anchors are appended rather than merged in place so the author sees them
+    as additions to review, in the one document that holds the book's whole
+    visual contract.
     """
-    merged = read_character_anchors(project_dir)
-    for name, anchor in anchors.items():
-        merged.setdefault(name.strip(), anchor.strip())
+    from storyforge.illustrations import direction_path
 
-    path = anchors_path(project_dir)
+    existing = {name.lower() for name in read_continuity_anchors(project_dir)}
+    fresh = {name.strip(): desc.strip() for name, desc in anchors.items()
+             if name.strip() and desc.strip()
+             and name.strip().lower() not in existing}
+    if not fresh:
+        return []
+
+    path = direction_path(project_dir)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    lines = [
-        '# Character anchors',
-        '',
-        'One fixed description per character, reused **verbatim** in every',
-        'illustration prompt that features them. Identical strings are what',
-        'keep a character recognizable across separately generated images —',
-        'paraphrasing an anchor defeats its purpose.',
-        '',
-    ]
-    for name in sorted(merged):
-        lines.append(f'- **{name}** — {merged[name]}')
-    lines.append('')
+
+    if os.path.isfile(path):
+        with open(path, encoding='utf-8') as f:
+            current = f.read()
+    else:
+        current = f'# Illustration art direction\n\n## {ANCHORS_SECTION}\n'
+    if ANCHORS_SECTION not in current:
+        current = current.rstrip('\n') + f'\n\n## {ANCHORS_SECTION}\n'
+
+    addition = '\n'.join(
+        f'### {name}\n\n{fresh[name]}\n' for name in sorted(fresh))
     with open(path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(lines))
-    return path
+        f.write(current.rstrip('\n') + '\n\n' + addition)
+    return sorted(fresh)
 
 
 # ============================================================================
@@ -278,9 +278,31 @@ def _json_candidates(text: str):
 # Art direction
 # ============================================================================
 
+def render_direction_block(direction: dict[str, str]) -> str:
+    """Render the book-level art direction for inclusion in a prompt.
+
+    Every section of the author's document is passed through, in the canonical
+    order first and then anything they added of their own. The anchors section
+    is excluded — it is rendered separately, because anchors must be reused
+    verbatim rather than summarized alongside the rest of the direction.
+    """
+    if not direction:
+        return ''
+    ordered = [name for name in DIRECTION_SECTIONS if name != ANCHORS_SECTION]
+    ordered += [name for name in direction
+                if name not in DIRECTION_SECTIONS]
+    parts = []
+    for name in ordered:
+        body = direction.get(name, '').strip()
+        if body:
+            parts.append(f'### {name}\n\n{body}')
+    return '\n\n'.join(parts)
+
+
 def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
                                 character_anchors: dict[str, str],
                                 canon_context: str,
+                                direction: dict[str, str] | None = None,
                                 style_note: str = '') -> str:
     """Build the prompt that writes one illustration's image prompt.
 
@@ -291,19 +313,25 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
     """
     anchors_block = '\n'.join(
         f'- **{name}** — {anchor}' for name, anchor in sorted(character_anchors.items())
-    ) or '(none recorded yet — propose one for each character who appears)'
+    ) or '(none recorded yet — propose one for each character or creature who appears)'
 
     fields = '\n'.join(
         f'- **{key}**: {row.get(key, "").strip()}'
-        for key in ('beat', 'subject', 'composition', 'palette', 'mood',
-                    'motifs', 'canon_refs')
+        for key in ('beat', 'subject', 'layout', 'composition', 'palette',
+                    'mood', 'motifs', 'canon_refs')
         if (row.get(key) or '').strip()
     )
+
+    direction_text = render_direction_block(direction or {})
+    house = (f'\n## Book-level art direction\n\nEvery illustration in this '
+             f'book obeys this. It is not background — a prompt that departs '
+             f'from it produces an image that does not belong to the '
+             f'book.\n\n{direction_text}\n' if direction_text else '')
 
     style = f'\n## House style\n\n{style_note}\n' if style_note.strip() else ''
 
     return f"""Write an image-generation prompt for one interior illustration.
-
+{house}
 ## The illustration
 
 {fields}
@@ -617,6 +645,267 @@ def render_strict_checklist(*, prepass: PrepassFindings,
         'storyforge illustrate --ingest DIR  # bring rendered files in',
         'storyforge illustrate --diagnose    # plan health report',
         '```',
+        '',
+    ]
+    return '\n'.join(lines)
+
+
+# ============================================================================
+# Art-direction document
+# ============================================================================
+
+#: What each expected section of the direction document has to answer. Used by
+#: every coaching level: as instructions to the model, as questions to the
+#: author, and as a checklist.
+DIRECTION_BRIEF: Final[dict[str, str]] = {
+    'Format': 'The medium, rendering style, and intended audience in one or '
+              'two sentences. "Full-color cinematic photorealism for a '
+              'read-aloud fantasy novel, ages 6-8" tells an image model more '
+              'than three paragraphs of adjectives.',
+    'Visual promise': 'What every image in this book must deliver — the thing '
+                      'a reader would notice missing. Usually a relationship '
+                      'between two registers: how the ordinary world reads, '
+                      'and how the extraordinary appears inside it.',
+    'Recurring visual language': 'The rules that repeat: palette split by '
+                                 'faction or mood, camera height, depth of '
+                                 'field, materials rendered naturalistically, '
+                                 'and the standing no-text rule.',
+    'Content limits': 'What the art must never do, stated as limits rather '
+                      'than as prompt text — intensity ceilings, imagery to '
+                      'stay away from, anything the audience age rules out.',
+    ANCHORS_SECTION: 'One `### Name` subsection per thing the art must keep '
+                     'consistent: characters, creatures, key locations, '
+                     'signature props. Each body is a fixed description, '
+                     'reused verbatim in every prompt that features it. '
+                     'Include measurable facts — height, age, exact colors — '
+                     'because those are what drift.',
+}
+
+
+def build_direction_request(*, title: str, genre: str, audience: str,
+                            canon_context: str, story_context: str,
+                            entities: list[str]) -> str:
+    """Build the prompt that drafts the book-level art-direction document.
+
+    This document is authored once and constrains every illustration, which
+    makes it the highest-leverage artifact in the flow — a per-illustration
+    prompt can be re-rolled cheaply, but a book whose images disagree with each
+    other has to be re-rendered wholesale.
+    """
+    briefs = '\n\n'.join(
+        f'### {name}\n\n{brief}' for name, brief in DIRECTION_BRIEF.items())
+    entity_list = '\n'.join(f'- {name}' for name in entities) or \
+        '(derive them from the bibles below)'
+
+    return f"""Write the book-level illustration art direction for a novel.
+
+**Title:** {title}{f' · **Genre:** {genre}' if genre else ''}\
+{f' · **Audience:** {audience}' if audience else ''}
+
+This single document governs every interior illustration in the book. A
+per-illustration prompt can be re-rolled cheaply; a book whose images disagree
+with each other has to be re-rendered wholesale. Be specific and be decisive.
+
+## Story context
+
+{story_context}
+
+## Canon
+
+{canon_context}
+
+## Things the art must keep consistent
+
+Write a continuity anchor for each of these, plus any others the canon makes
+necessary:
+
+{entity_list}
+
+## Sections to write
+
+Use these exact `##` headings, in this order.
+
+{briefs}
+
+## How to write it
+
+- **Concrete over evocative.** "Warm amber and gold for the lantern-folk; cool
+  moonlit blue and charcoal for the woods" is usable. "A magical palette" is
+  not.
+- **Name real materials.** Bark, moss, wax, leaded glass, waxed thread. Image
+  models render named materials well and abstractions badly.
+- **Put measurable facts in the anchors.** Height in centimeters, age in years,
+  exact hair and eye color, specific garments. These are the details that drift
+  between separately generated images, and the only defence is stating them.
+- **Anchors are descriptions, not scenes.** What the thing *is*, always — not
+  what it does in any one illustration.
+- State the standing no-text rule in the recurring visual language.
+
+Return the document as markdown, starting at the first `##` heading. No
+preamble, no commentary.
+"""
+
+
+def render_direction_template(*, title: str, coaching: str,
+                              entities: list[str]) -> str:
+    """Render the direction-document template for coach or strict coaching.
+
+    `coach` frames each section as a question the author answers; `strict`
+    reduces it to the requirement plus a blank. Neither writes any creative
+    content, which is the whole distinction from the `full` path.
+    """
+    lines = [f'# Illustration art direction — {title}', '']
+    if coaching == 'coach':
+        lines += [
+            'This document governs every interior illustration in the book.',
+            'Answer each section in your own words — what you write here is',
+            'what every prompt will carry.',
+            '',
+        ]
+    else:
+        lines += [
+            'This document governs every interior illustration in the book.',
+            'Each section below lists what it must contain. Fill them in.',
+            '',
+        ]
+
+    for name, brief in DIRECTION_BRIEF.items():
+        lines.append(f'## {name}')
+        lines.append('')
+        if coaching == 'coach':
+            lines.append(f'_{_as_question(name, brief)}_')
+        else:
+            lines.append(f'_Required: {brief}_')
+        lines.append('')
+        if name == ANCHORS_SECTION:
+            for entity in entities:
+                lines.append(f'### {entity}')
+                lines.append('')
+                lines.append('_(fill this in — include height, age, exact '
+                             'colors, and specific garments)_')
+                lines.append('')
+            if not entities:
+                lines.append('### Name')
+                lines.append('')
+                lines.append('_(fill this in)_')
+                lines.append('')
+        else:
+            lines.append('_(fill this in)_')
+            lines.append('')
+    return '\n'.join(lines)
+
+
+#: Coach-mode phrasings, so the template asks rather than instructs.
+_DIRECTION_QUESTIONS: Final[dict[str, str]] = {
+    'Format': 'What is someone holding when they hold this book — what medium, '
+              'what rendering style, for what reader?',
+    'Visual promise': 'What would a reader notice missing if one illustration '
+                      'failed to deliver it?',
+    'Recurring visual language': 'What repeats across every image — palette, '
+                                 'camera height, level of detail? What makes '
+                                 'two of these images obviously from the same '
+                                 'book?',
+    'Content limits': 'What must the art never do? What would be too much for '
+                      'your reader?',
+    ANCHORS_SECTION: 'What must look the same every time it appears — which '
+                     'characters, creatures, places, objects? Describe each one '
+                     'the way you would to someone who has to draw it without '
+                     'reading the book.',
+}
+
+
+def _as_question(name: str, brief: str) -> str:
+    """Return the coach-mode question for a section, falling back to its brief."""
+    return _DIRECTION_QUESTIONS.get(name, brief)
+
+
+# ============================================================================
+# Sequence review
+# ============================================================================
+
+def render_sequence_review(*, title: str, steps: list[RenderStep],
+                           anchors: dict[str, str],
+                           direction: dict[str, str]) -> str:
+    """Render the whole-sequence continuity review checklist.
+
+    Per-illustration validation cannot catch continuity drift: each image is
+    individually fine and the set is still inconsistent. This is the pass that
+    looks at all of them together, which is the only place a character who
+    gained an inch of height across ten renders becomes visible.
+    """
+    rendered = [s for s in steps if s['status'] == 'ingested']
+    pending = [s for s in steps if s['status'] != 'ingested']
+
+    lines = [
+        f'# Illustration sequence review — {title}',
+        '',
+        f'{len(rendered)} of {len(steps)} illustrations rendered.',
+        '',
+        'Review the sequence **as a set**, in render order. Per-illustration '
+        'checks pass on images that are individually fine and collectively '
+        'inconsistent; this pass is the only one that catches drift.',
+        '',
+        '## Cross-sequence checks',
+        '',
+    ]
+
+    checks = [
+        ('Identity', 'Is every character recognizably the same person in every '
+                     'image they appear in?'),
+        ('Scale', 'Are size relationships consistent — between characters, and '
+                  'between characters and their world?'),
+        ('Costume', 'Does clothing match the anchor, and change only where the '
+                    'story changes it?'),
+        ('Geography', 'Do recurring locations have a stable layout across '
+                      'images?'),
+        ('Light progression', 'Does the light track the story — brightening and '
+                             'darkening where it should, and nowhere else?'),
+        ('Palette', 'Does the palette split hold, image to image?'),
+        ('Intensity', 'Is every image within the limits set in Content limits?'),
+        ('Text', 'Is every image free of lettering, captions, borders, and '
+                 'watermarks?'),
+    ]
+    for name, question in checks:
+        lines.append(f'- [ ] **{name}** — {question}')
+    lines.append('')
+
+    if anchors:
+        lines += ['## Anchors to check against', '']
+        for name in sorted(anchors):
+            lines.append(f'- [ ] **{name}** — {anchors[name]}')
+        lines.append('')
+
+    limits = direction.get('Content limits', '').strip()
+    if limits:
+        lines += ['## Content limits', '', limits, '']
+
+    lines += ['## Render order', '']
+    for i, step in enumerate(steps, 1):
+        mark = 'x' if step['status'] == 'ingested' else ' '
+        key = ' — **visual key**' if step['is_visual_key'] else ''
+        locks = (f' · locks: {", ".join(step["locks"])}'
+                 if step['locks'] else '')
+        lines.append(f'{i}. [{mark}] `{step["id"]}`{key}{locks}')
+    lines.append('')
+
+    if pending:
+        lines += [
+            '## Still to render',
+            '',
+            'Continuity drift is cheapest to fix before the rest are rendered, '
+            'because every later image references the earlier ones.',
+            '',
+        ]
+        for step in pending:
+            lines.append(f'- `{step["id"]}` ({step["status"]})')
+        lines.append('')
+
+    lines += [
+        '## Before final layout',
+        '',
+        '- [ ] Correct any drift found above, re-rendering from the anchor '
+        'rather than patching the image.',
+        '- [ ] Re-run `storyforge illustrate --diagnose` after re-ingesting.',
         '',
     ]
     return '\n'.join(lines)

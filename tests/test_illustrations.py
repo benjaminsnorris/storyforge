@@ -926,3 +926,380 @@ def test_prepass_is_not_empty_when_chapters_lack_illustrations(project_dir):
 def test_prepass_is_not_empty_when_a_gap_exists(project_dir):
     write_csv(project_dir, 'spine.csv', 'id|title|summary', ['e1|One|x'])
     assert ill.prepass_is_empty(ill.selection_prepass(project_dir)) is False
+
+
+# ============================================================================
+# Art-direction document
+# ============================================================================
+
+def write_direction_file(project_dir: str, body: str) -> str:
+    """Write a raw direction document."""
+    path = ill.direction_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(body)
+    return path
+
+
+SAMPLE_DIRECTION = """# The Lantern Folk — Illustration Plan
+
+## Format
+
+Full-color, cinematic photorealistic storybook imagery for ages 6-8.
+
+## Visual promise
+
+The ordinary world should feel completely real.
+
+## Recurring visual language
+
+- Warm amber and gold for the Lantern Folk.
+- Cool moonlit blue for the woods.
+
+## Content limits
+
+Never horror imagery. No blood or gore.
+
+## Continuity anchors
+
+### Leo
+
+Ten years old; tall and lean for his age; warm light-brown skin.
+
+### Murkwolves
+
+Large wolf-shaped concentrations of cold shadow and blue-gray mist.
+
+### The village and Great Lamp
+
+The village sits among the enormous exposed roots of the Old Oak.
+"""
+
+
+def test_read_direction_parses_every_section(project_dir):
+    write_direction_file(project_dir, SAMPLE_DIRECTION)
+    direction = ill.read_direction(project_dir)
+    assert set(direction) == set(ill.DIRECTION_SECTIONS)
+    assert direction['Format'].startswith('Full-color, cinematic')
+    assert 'Never horror imagery' in direction['Content limits']
+
+
+def test_read_direction_keeps_author_added_sections(project_dir):
+    write_direction_file(project_dir, SAMPLE_DIRECTION
+                         + '\n## Endpaper treatment\n\nMarbled paper.\n')
+    assert ill.read_direction(project_dir)['Endpaper treatment'] == \
+        'Marbled paper.'
+
+
+def test_read_direction_with_no_file(project_dir):
+    assert ill.read_direction(project_dir) == {}
+    assert ill.has_direction(project_dir) is False
+
+
+def test_anchors_cover_characters_creatures_and_locations(project_dir):
+    """The sample plan anchors a creature and a location, not just a cast."""
+    write_direction_file(project_dir, SAMPLE_DIRECTION)
+    anchors = ill.read_continuity_anchors(project_dir)
+    assert set(anchors) == {'Leo', 'Murkwolves', 'The village and Great Lamp'}
+    assert anchors['Murkwolves'].startswith('Large wolf-shaped')
+
+
+def test_missing_direction_sections_when_absent(project_dir):
+    assert ill.missing_direction_sections(project_dir) == \
+        list(ill.DIRECTION_SECTIONS)
+
+
+def test_missing_direction_sections_when_complete(project_dir):
+    write_direction_file(project_dir, SAMPLE_DIRECTION)
+    assert ill.missing_direction_sections(project_dir) == []
+
+
+def test_missing_direction_sections_reports_empty_ones(project_dir):
+    write_direction_file(project_dir,
+                         '# D\n\n## Format\n\nPhotoreal.\n\n'
+                         '## Visual promise\n\n')
+    missing = ill.missing_direction_sections(project_dir)
+    assert 'Format' not in missing
+    assert 'Visual promise' in missing
+    assert ill.ANCHORS_SECTION in missing
+
+
+@pytest.mark.parametrize('body', [
+    '_(fill this in)_', 'TBD', 'todo', '_Required: describe the palette_',
+    '(you fill this in)',
+])
+def test_placeholder_sections_count_as_missing(project_dir, body):
+    """A scaffold left unfilled must not be fed to an image model as direction."""
+    write_direction_file(project_dir, f'# D\n\n## Format\n\n{body}\n')
+    assert 'Format' in ill.missing_direction_sections(project_dir)
+
+
+def test_real_prose_is_not_mistaken_for_a_placeholder(project_dir):
+    write_direction_file(
+        project_dir,
+        '# D\n\n## Format\n\nDescribed in full color, photorealistic.\n')
+    assert 'Format' not in ill.missing_direction_sections(project_dir)
+
+
+# ============================================================================
+# Layout and the published asset key
+# ============================================================================
+
+@pytest.mark.parametrize('layout,valid', [
+    ('full_page', True), ('half_page', True), ('double_page', True),
+    ('inline', True), ('quarter_page', False),
+])
+def test_layout_validation(project_dir, layout, valid):
+    write_scene(project_dir, 'vigil', SCENE)
+    ill.write_plan(project_dir, [plan_row(layout=layout, status='planned')])
+    kinds = {f['kind'] for f in ill.validate_plan(project_dir)}
+    assert ('invalid_layout' in kinds) is (not valid)
+
+
+def test_empty_layout_is_allowed(project_dir):
+    write_scene(project_dir, 'vigil', SCENE)
+    ill.write_plan(project_dir, [plan_row(layout='', status='planned')])
+    assert ill.validate_plan(project_dir) == []
+
+
+@pytest.mark.parametrize('illus_id', ['LF-01', 'lf-01', 'the-first-lantern',
+                                      'LF_01', 'A1'])
+def test_ids_the_marker_accepts_also_validate(project_dir, illus_id):
+    """The sample plan uses `LF-01`; validation must not reject what parses."""
+    write_scene(project_dir, 'vigil', SCENE)
+    ill.write_plan(project_dir, [plan_row(id=illus_id, status='planned')])
+    kinds = {f['kind'] for f in ill.validate_plan(project_dir)}
+    assert 'invalid_id' not in kinds
+    assert ill.MARKER_LINE_RE.fullmatch(ill.marker_for(illus_id)) is not None
+
+
+@pytest.mark.parametrize('illus_id', ['Lantern Vigil', 'lantern.vigil',
+                                      '-leading-dash', ''])
+def test_ids_the_marker_rejects_are_flagged(project_dir, illus_id):
+    write_scene(project_dir, 'vigil', SCENE)
+    ill.write_plan(project_dir, [plan_row(id=illus_id, status='planned')])
+    rows = ill.read_plan(project_dir)
+    if not rows:           # an empty id is dropped at read time
+        return
+    assert 'invalid_id' in {f['kind'] for f in ill.validate_plan(project_dir)}
+
+
+def test_asset_key_lowercases_but_the_plan_keeps_case():
+    assert ill.asset_key('LF-01') == 'lf-01'
+    assert ill.asset_key('  LF-01 ') == 'lf-01'
+
+
+def test_placement_and_asset_keys_agree(project_dir):
+    """A mismatch here would publish a placement pointing at no asset."""
+    make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR, 'LF-01.png'),
+             8, 8)
+    ill.write_plan(project_dir, [plan_row(
+        id='LF-01', status='ingested', sha256='a' * 64,
+        asset_file=ill.default_asset_rel('LF-01'),
+    )])
+    marked = ill.insert_marker(SCENE, plan_row(id='LF-01'))['text']
+
+    placements = ill.scene_placements(marked, pandoc_html)
+    assets = ill.manifest_assets(project_dir)
+    assert placements[0]['key'] == 'lf-01'
+    assert assets[0]['key'] == 'lf-01'
+
+
+def test_used_keys_filter_works_in_normalized_space(project_dir):
+    ill.write_plan(project_dir, [plan_row(
+        id='LF-01', status='ingested', sha256='a' * 64,
+        asset_file=ill.default_asset_rel('LF-01'),
+    )])
+    assert len(ill.manifest_assets(project_dir, used_keys={'lf-01'})) == 1
+    assert ill.manifest_assets(project_dir, used_keys={'LF-01'}) == []
+
+
+def test_ids_differing_only_in_case_are_a_duplicate(project_dir):
+    """Both would publish to the same asset key."""
+    write_scene(project_dir, 'vigil', SCENE)
+    ill.write_plan(project_dir, [plan_row(id='LF-01', anchor=''),
+                                 plan_row(id='lf-01', anchor='')])
+    findings = [f for f in ill.validate_plan(project_dir)
+                if f['kind'] == 'duplicate_id']
+    assert len(findings) == 1
+    assert 'only in case' in findings[0]['detail']
+
+
+# ============================================================================
+# Render order
+# ============================================================================
+
+def test_render_order_follows_the_chapter_map(project_dir):
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes',
+              ['1|s1;s2', '2|s3'])
+    ill.write_plan(project_dir, [
+        plan_row(id='third', scene_id='s3'),
+        plan_row(id='first', scene_id='s1'),
+        plan_row(id='second', scene_id='s2'),
+    ])
+    assert [s['id'] for s in ill.render_order(project_dir)] == \
+        ['first', 'second', 'third']
+
+
+def test_render_order_falls_back_to_scene_seq(project_dir):
+    os.remove(os.path.join(project_dir, 'reference', 'chapter-map.csv'))
+    write_csv(project_dir, 'scenes.csv', 'id|seq|title',
+              ['b|2|Second', 'a|1|First'])
+    ill.write_plan(project_dir, [plan_row(id='i2', scene_id='b'),
+                                 plan_row(id='i1', scene_id='a')])
+    assert [s['id'] for s in ill.render_order(project_dir)] == ['i1', 'i2']
+
+
+def test_visual_key_establishes_the_most_and_renders_first(project_dir):
+    """The sample plan renders LF-03 first because it establishes the most."""
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes',
+              ['1|s1', '2|s2', '3|s3'])
+    ill.write_plan(project_dir, [
+        plan_row(id='LF-01', scene_id='s1', canon_refs='Nora'),
+        plan_row(id='LF-02', scene_id='s2', canon_refs='Leo;Nora'),
+        plan_row(id='LF-03', scene_id='s3',
+                 canon_refs='Leo;Nora;Old Oak;village'),
+    ])
+    steps = ill.render_order(project_dir)
+
+    assert steps[0]['id'] == 'LF-03'
+    assert steps[0]['is_visual_key'] is True
+    assert sum(1 for s in steps if s['is_visual_key']) == 1
+    # Everything after the key stays in story order.
+    assert [s['id'] for s in steps[1:]] == ['LF-01', 'LF-02']
+
+
+def test_visual_key_tie_breaks_to_the_earlier_illustration(project_dir):
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes',
+              ['1|s1', '2|s2'])
+    ill.write_plan(project_dir, [
+        plan_row(id='early', scene_id='s1', canon_refs='Leo;Nora'),
+        plan_row(id='late', scene_id='s2', canon_refs='Leo;Nora'),
+    ])
+    assert ill.render_order(project_dir)[0]['id'] == 'early'
+
+
+def test_render_order_reports_what_each_illustration_locks(project_dir):
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes',
+              ['1|s1', '2|s2'])
+    ill.write_plan(project_dir, [
+        plan_row(id='LF-01', scene_id='s1', canon_refs='Leo;Nora'),
+        plan_row(id='LF-02', scene_id='s2', canon_refs='Nora;Murkwolves'),
+    ])
+    steps = {s['id']: s for s in ill.render_order(project_dir)}
+    # Each entity is locked by its first appearance only.
+    assert steps['LF-01']['locks'] == ['Leo', 'Nora']
+    assert steps['LF-02']['locks'] == ['Murkwolves']
+
+
+def test_render_order_locks_are_case_insensitive(project_dir):
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes', ['1|s1;s2'])
+    ill.write_plan(project_dir, [
+        plan_row(id='a', scene_id='s1', canon_refs='Leo'),
+        plan_row(id='b', scene_id='s2', canon_refs='leo'),
+    ])
+    steps = {s['id']: s for s in ill.render_order(project_dir)}
+    assert steps['b']['locks'] == []
+
+
+def test_render_order_with_no_canon_refs_has_no_visual_key(project_dir):
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes', ['1|s1;s2'])
+    ill.write_plan(project_dir, [plan_row(id='a', scene_id='s1'),
+                                 plan_row(id='b', scene_id='s2')])
+    steps = ill.render_order(project_dir)
+    assert [s['id'] for s in steps] == ['a', 'b']
+    assert not any(s['is_visual_key'] for s in steps)
+
+
+def test_render_order_skips_superseded(project_dir):
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes', ['1|s1;s2'])
+    ill.write_plan(project_dir, [
+        plan_row(id='keep', scene_id='s1'),
+        plan_row(id='dropped', scene_id='s2', status='superseded'),
+    ])
+    assert [s['id'] for s in ill.render_order(project_dir)] == ['keep']
+
+
+def test_render_order_is_empty_without_a_plan(project_dir):
+    assert ill.render_order(project_dir) == []
+    assert ill.next_to_render(project_dir) == ''
+
+
+def test_next_to_render_follows_the_render_order(project_dir):
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes',
+              ['1|s1', '2|s2', '3|s3'])
+    ill.write_plan(project_dir, [
+        plan_row(id='LF-01', scene_id='s1', canon_refs='Nora',
+                 status='ingested'),
+        plan_row(id='LF-02', scene_id='s2'),
+        plan_row(id='LF-03', scene_id='s3', canon_refs='Leo;Nora;Oak'),
+    ])
+    # The visual key comes first and is unrendered, so it is next.
+    assert ill.next_to_render(project_dir) == 'LF-03'
+
+
+def test_next_to_render_is_empty_when_all_are_ingested(project_dir):
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes', ['1|s1'])
+    ill.write_plan(project_dir, [plan_row(scene_id='s1', status='ingested')])
+    assert ill.next_to_render(project_dir) == ''
+
+
+def test_illustration_with_an_unmapped_scene_sorts_last(project_dir):
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes', ['1|s1'])
+    ill.write_plan(project_dir, [plan_row(id='orphan', scene_id='unmapped'),
+                                 plan_row(id='mapped', scene_id='s1')])
+    assert [s['id'] for s in ill.render_order(project_dir)] == \
+        ['mapped', 'orphan']
+
+
+def test_visual_key_is_never_the_climax(project_dir):
+    """The biggest establisher is usually the climax; the key must still be early.
+
+    Regression from the real lantern-folk plan: the double-page climax names
+    the most entities because it is where everyone converges, and the first
+    implementation picked it. Rendering the payoff before anything is
+    established is backwards — the key exists so later images can reference it.
+    """
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes',
+              [f'{i}|s{i}' for i in range(1, 13)])
+    rows = [plan_row(id=f'LF-{i:02}', scene_id=f's{i}', canon_refs='Nora')
+            for i in range(1, 13)]
+    rows[2]['canon_refs'] = 'Leo;Nora;Oak'          # early establisher
+    rows[10]['canon_refs'] = 'Leo;Nora;Oak;Ember;Wick;Murkwolves'  # climax
+
+    ill.write_plan(project_dir, rows)
+    steps = ill.render_order(project_dir)
+
+    assert steps[0]['id'] == 'LF-03'
+    assert steps[0]['is_visual_key'] is True
+    climax = next(s for s in steps if s['id'] == 'LF-11')
+    assert climax['is_visual_key'] is False
+
+
+def test_visual_key_horizon_still_chooses_on_a_short_plan(project_dir):
+    """A three-illustration plan has no 'first third' worth the name."""
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes',
+              ['1|s1', '2|s2', '3|s3'])
+    ill.write_plan(project_dir, [
+        plan_row(id='a', scene_id='s1', canon_refs='Nora'),
+        plan_row(id='b', scene_id='s2', canon_refs='Leo;Nora;Oak'),
+        plan_row(id='c', scene_id='s3', canon_refs='Leo'),
+    ])
+    steps = ill.render_order(project_dir)
+    assert steps[0]['id'] == 'b'
+    assert steps[0]['is_visual_key'] is True
+
+
+def test_visual_key_horizon_scales_with_plan_length(project_dir):
+    """A late establisher outside the horizon is not eligible."""
+    write_csv(project_dir, 'chapter-map.csv', 'chapter|scenes',
+              [f'{i}|s{i}' for i in range(1, 31)])
+    rows = [plan_row(id=f'i{i:02}', scene_id=f's{i}')
+            for i in range(1, 31)]
+    rows[0]['canon_refs'] = 'Leo'
+    rows[29]['canon_refs'] = 'Leo;Nora;Oak;Ember'
+
+    ill.write_plan(project_dir, rows)
+    steps = ill.render_order(project_dir)
+    assert steps[0]['id'] == 'i01'
+    assert steps[0]['is_visual_key'] is True

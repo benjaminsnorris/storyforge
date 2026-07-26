@@ -7,7 +7,7 @@ description: Plan, art-direct, and embed interior illustrations for a prose book
 
 You are art-directing the interior illustrations for a prose book. This is not the cover — the cover sells the book, and illustrations deepen it. A good illustration arrives at a beat the reader is already leaning into and shows them something the sentences could only deliver one at a time.
 
-The flow is: **decide where** → **art-direct** → the author renders externally → **ingest and embed** → produce.
+The flow is: **set the art direction** → **decide where** → **art-direct each one** → the author renders externally → **ingest and embed** → **review the sequence** → produce.
 
 ## Locating the Storyforge Plugin
 
@@ -21,8 +21,9 @@ Store this resolved plugin path for use throughout the session.
 
 1. **`storyforge.yaml`** — title, genre, medium, coaching level, `production.cover_image`.
    - If `project.medium` is `graphic-novel`, **stop**. GN projects have their own page pipeline: `storyforge elaborate --stage page-architecture` and `--stage prompts`. Tell the author that and route them there.
-2. **`reference/illustration-plan.csv`** — the plan, if one exists. This tells you which mode you are in.
-3. **Structural context** — read what exists:
+2. **`reference/illustration-direction.md`** — the book-level art direction, if it exists. This is the document that governs every illustration; read it before anything else about the art.
+3. **`reference/illustration-plan.csv`** — the plan, if one exists. Together with the direction document, this tells you which mode you are in.
+4. **Structural context** — read what exists:
    - `reference/story-summary.md` — logline, synopsis, act shape, theme
    - `reference/spine.csv` — the irreducible events
    - `reference/architecture.csv` — turning points, value shifts
@@ -30,20 +31,52 @@ Store this resolved plugin path for use throughout the session.
    - `reference/motif-taxonomy.csv` — the concrete recurring vehicles
    - `reference/themes.csv` — what the story argues
    - `reference/chapter-map.csv` — distribution
-4. **Visual context** — `reference/character-bible.md`, `reference/world-bible.md`, `reference/voice-guide.md`.
-5. **Existing art** — `manuscript/assets/` for the cover and `cover-prompt.md` (the best available statement of the book's visual register), and `manuscript/assets/illustrations/` for anything already ingested.
+5. **Visual context** — `reference/character-bible.md`, `reference/world-bible.md`, `reference/voice-guide.md`.
+6. **Existing art** — `manuscript/assets/` for the cover and `cover-prompt.md` (the best available statement of the book's visual register), and `manuscript/assets/illustrations/` for anything already ingested.
 
 ## Step 2: Determine Mode
 
 | State | Mode |
 |-------|------|
-| No plan | **Plan** — decide where illustrations belong |
+| No direction document | **Direct** — set the book's visual contract first |
+| Direction exists, no plan | **Plan** — decide where illustrations belong |
 | Plan exists, rows at `status=planned` | **Art-direct** — write the prompts |
 | Author has rendered files | **Ingest** — bring them in and embed |
 | An illustration isn't working | **Revise** — supersede and re-direct |
+| All or most are rendered | **Review** — check the sequence for continuity drift |
 | Author asks how things stand | **Diagnose** — `storyforge illustrate --diagnose` |
 
 Announce the mode you're in and why before doing anything.
+
+---
+
+## Mode: Direct
+
+Before deciding where illustrations go, settle what they look like. `reference/illustration-direction.md` is the book's visual contract — one document, authored once, that every illustration inherits.
+
+This is the highest-leverage artifact in the flow. A per-illustration prompt can be re-rolled for a few cents. A book whose fifteen images disagree with each other has to be re-rendered wholesale.
+
+```bash
+[plugin_path]/storyforge illustrate --direction
+```
+
+Five sections:
+
+- **Format** — medium, rendering style, audience, in a sentence or two. "Full-color cinematic photorealism for a read-aloud fantasy novel, ages 6–8" tells an image model more than three paragraphs of adjectives.
+- **Visual promise** — what every image must deliver. Usually a relationship between two registers: how the ordinary world reads, and how the extraordinary appears inside it.
+- **Recurring visual language** — the rules that repeat. Palette split by faction or mood, camera height, depth of field, materials rendered naturalistically, the standing no-text rule.
+- **Content limits** — what the art must never do. Intensity ceilings, imagery to stay away from, anything the audience age rules out. State these as limits, not as prompt text.
+- **Continuity anchors** — one `### Name` subsection per thing that must look the same every time. Not just characters: creatures, key locations, signature props. Each body is a fixed description reused **verbatim** in every prompt that features it.
+
+### Anchors are inputs, not residue
+
+An anchor works only because every prompt uses the identical string. So it has to be written *before* the art, not derived from whichever illustration happened to be rendered first.
+
+Put measurable facts in them — height in centimeters, age in years, exact hair and eye color, specific garments. Those are precisely what drifts between separately generated images, and stating them is the only defence.
+
+**Never revise an anchor a rendered illustration already used.** If it's wrong, the fix is re-rendering from the corrected anchor, not editing the string and leaving the old art in place. If the model proposes a new anchor while writing a prompt, the command appends it to the direction document for you to review rather than treating it as settled.
+
+`--diagnose` and `validate` report sections left empty or still holding template text — a scaffold fed to an image model as though it were direction is worse than no document at all.
 
 ---
 
@@ -87,6 +120,21 @@ Every plan row carries an `anchor` — a short verbatim quote from its scene mar
 
 An anchor must be **unique within its scene**. A generic phrase that recurs is worse than useless — the command refuses to insert on an ambiguous anchor. If the planning pass produces one, lengthen it.
 
+### Placement and layout are different things
+
+`placement` is *where in the prose* — `before_anchor`, `after_anchor`, `scene_open`, `scene_close`. `layout` is *how much page* — `full_page`, `half_page`, `double_page`, `inline`. "Full-page opener" is a `full_page` layout at a `scene_open` placement.
+
+Layout is a production decision worth making deliberately. A double-page spread is a promise; spend it on the climax, not on the third-best image. And it drives aspect: a spread renders landscape whatever the composition note says.
+
+### Render order
+
+`--diagnose` prints the recommended order:
+
+- **The visual key renders first.** One early illustration establishes the most shared vocabulary at once — the cast, the central location, the scale relationship, the palette. The command picks the one whose `canon_refs` cover the most ground, earliest. Render it first and every later image has something real to reference instead of a description.
+- **Everything else goes in story order**, which automatically locks each entity's design in the earliest image it appears in.
+
+The order also reports what each illustration `locks` — the anchors it is the first to show. Those are the renders you cannot afford to get wrong, because everything downstream references them.
+
 ---
 
 ## Mode: Art-direct
@@ -107,9 +155,11 @@ These come from lived iteration (benjaminsnorris/ashes PR #9, tracked as #260 an
 
 1. **Five-section template** — Scene / Subject / Important details / Use case / Constraints. Structure beats brevity.
 2. **Reference images carry style and likeness**, so prompt prose stays short (~250–400 words). The references are the cover art plus prior ingested illustrations — that chain is what keeps a book's interior art visually of a piece instead of fifteen unrelated pictures.
-3. **The character anchor is the identical string every time.** Anchors persist in `manuscript/assets/illustrations/character-anchors.md`. Never revise an anchor a rendered illustration already used — likeness continuity depends on the string being byte-identical.
+3. **The continuity anchor is the identical string every time.** Anchors live in the `## Continuity anchors` section of `reference/illustration-direction.md`. Only the anchors an illustration actually shows are sent, narrowed by its `canon_refs`. Never revise an anchor a rendered illustration already used — likeness continuity depends on the string being byte-identical.
 4. **Positive framing, not negation.** Negated keywords leak into the image. "A bare sill," not "no clutter on the sill."
-5. **Explicit orientation, in two places.** GPT Image 2 returns landscape unless told otherwise. Portrait is the default; put `landscape` or `square` in the row's `composition` field to change it.
+5. **Explicit orientation, in two places.** GPT Image 2 returns landscape unless told otherwise. Aspect comes from `layout` first — a `double_page` spread is landscape because that is a fact about the page — then from the row's `composition` field, which can say `landscape` or `square`. Portrait otherwise.
+
+The whole book-level direction goes into every prompt too, which is why the command warns loudly when the direction document is missing: without it the prompts carry no house style, and the images won't look like they belong to one book.
 
 Plus: no text, no letters, no words, no typography. Image models render text unreliably, and an illustration doesn't need any.
 
@@ -163,13 +213,31 @@ Keep the superseded row. It records what was tried and why it didn't land, which
 
 ---
 
+## Mode: Review
+
+Once most illustrations are rendered, check the sequence **as a set**.
+
+```bash
+[plugin_path]/storyforge illustrate --review
+```
+
+Writes `working/illustration-sequence-review.md`: cross-sequence checks, the anchors to check each image against, the content limits, and the render order with what's done and what's pending.
+
+This catches what nothing else can. Per-illustration validation passes on images that are individually fine and collectively inconsistent — a character an inch taller in image nine, a location whose layout quietly rearranged, light that brightens where the story darkens. Each render looks correct on its own; only the set shows the drift.
+
+Review **before the set is complete**. Every later illustration references the earlier ones, so drift caught at image five costs one re-render and drift caught at image fifteen costs ten.
+
+When you find drift, fix it by re-rendering from the anchor — not by patching the image and not by editing the anchor to match what was rendered. Then re-ingest and re-run `--diagnose`.
+
+---
+
 ## Mode: Diagnose
 
 ```bash
 [plugin_path]/storyforge illustrate --diagnose
 ```
 
-Read-only. Reports plan counts by status, what's embedded, what's next to render, and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers.
+Read-only. Reports plan counts by status, what's embedded, the recommended render order with the visual key marked, what's next to render, and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers, invalid layouts.
 
 An unrendered plan row is **valid in-flight state**, not a problem. Don't report it as one.
 
@@ -181,7 +249,7 @@ An unrendered plan row is **valid in-flight state**, not a problem. Don't report
 
 Once illustrations are ingested and embedded, the rest of the pipeline handles them:
 
-- **epub / PDF / HTML** — `storyforge assemble` resolves markers to project-relative image paths; the pandoc calls pass `--resource-path` so they resolve.
+- **epub / PDF / HTML** — `storyforge assemble` resolves markers to project-relative image paths; the pandoc calls pass `--resource-path` so they resolve. `layout` is recorded on the plan for print production; honoring full-page and double-page treatment in the PDF is not yet automated.
 - **Web book** — illustrations are copied into `output/web/illustrations/`.
 - **Bookshelf** — `storyforge publish` strips markers out of `content_html` and sends structured placements plus an asset manifest. Scene HTML stays byte-identical to the un-illustrated book, which is what keeps existing reader highlights from re-anchoring when art lands.
 
@@ -193,11 +261,13 @@ Read `project.coaching_level` from `storyforge.yaml`.
 
 ### `full` (default)
 
-Propose the illustration set with conviction and argue each moment's rationale. Write the art direction. Ingest and embed. You know what an image can do that prose can't — say so. If a moment the author wants would spoil a reveal, tell them plainly and offer the beat two paragraphs later instead.
+Draft the direction document from the bibles, then read it back and say what you committed to and why. Propose the illustration set with conviction and argue each moment's rationale. Write the per-illustration art direction. Ingest and embed. You know what an image can do that prose can't — say so. If a moment the author wants would spoil a reveal, tell them plainly and offer the beat two paragraphs later instead.
 
 ### `coach`
 
-Help the author find their own illustration set. The command writes a brief to `working/coaching/illustration-brief.md` with the structural findings framed as questions. Work through them:
+The direction document arrives as a template of questions, one per section. Work through those with the author first — the visual contract is theirs to set.
+
+Then help them find their own illustration set. The command writes a brief to `working/coaching/illustration-brief.md` with the structural findings framed as questions:
 
 - "What's the one image someone would remember from this book?"
 - "Your lantern motif pays off three times and none are illustrated — which one carries the most weight?"
@@ -208,7 +278,7 @@ Don't pick the moments. When the author has decided, record their choices and ex
 
 ### `strict`
 
-No creative proposals. The command writes `working/coaching/illustration-checklist.md` — structural data and per-column requirements, nothing interpreted. The author supplies every moment, subject, palette, and composition. Ingest, embed, and validation are structural work and stay available; `--prompts` produces a five-section scaffold with the author's own constraint values and empty prose sections.
+No creative proposals. The direction document arrives as a blank template listing what each section must contain; the author writes all of it. The command writes `working/coaching/illustration-checklist.md` — structural data and per-column requirements, nothing interpreted. The author supplies every moment, subject, palette, and composition. Ingest, embed, and validation are structural work and stay available; `--prompts` produces a five-section scaffold with the author's own constraint values and empty prose sections.
 
 ## Ensure Feature Branch
 
@@ -226,10 +296,12 @@ git rev-parse --abbrev-ref HEAD
 
 Every artifact gets its own commit:
 
+- Wrote or edited the direction document? Commit and push — it governs everything after it.
 - Wrote or extended the plan? Commit and push.
-- Wrote prompt files? Commit and push — including `character-anchors.md`.
+- Wrote prompt files? Commit and push — including any anchors appended to the direction document.
 - Ingested illustrations? Commit and push the files, the updated plan, and the scene files together, so the marker and the art it points at land in the same commit.
 - Superseded an illustration? Commit and push.
+- Ran a sequence review? Commit the checklist, then commit each drift fix separately.
 
 ```bash
 git add -A && git commit -m "Illustrate: {what was done}" && git push
@@ -241,4 +313,4 @@ Illustrations are an argument about what matters in the book. Fifteen of them sa
 
 Set expectations on resolution: this is screen and epub quality, not print at 300 DPI. And on iteration: the first render is rarely the final one, which is why the prompt log exists.
 
-The house style matters more than any single image. A book whose illustrations agree with each other — palette, framing, level of abstraction — looks made. One where each image was generated fresh looks assembled. That's what the reference chain in the prompts is for.
+The direction document is where you earn the coherence. The house style matters more than any single image. A book whose illustrations agree with each other — palette, framing, level of abstraction — looks made. One where each image was generated fresh looks assembled. That's what the reference chain in the prompts is for.

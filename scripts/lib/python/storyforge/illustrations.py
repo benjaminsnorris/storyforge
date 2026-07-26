@@ -31,9 +31,10 @@ DELIMITER = '|'
 ARRAY_DELIMITER = ';'
 
 PLAN_FILENAME = 'illustration-plan.csv'
+DIRECTION_FILENAME = 'illustration-direction.md'
 
 PLAN_COLUMNS: list[str] = [
-    'id', 'scene_id', 'anchor', 'placement', 'beat', 'rationale',
+    'id', 'scene_id', 'anchor', 'placement', 'layout', 'beat', 'rationale',
     'subject', 'composition', 'palette', 'mood', 'motifs', 'canon_refs',
     'status', 'asset_file', 'prompt_file', 'sha256', 'width', 'height',
 ]
@@ -43,6 +44,14 @@ PLAN_COLUMNS: list[str] = [
 VALID_PLACEMENTS = frozenset({
     'before_anchor', 'after_anchor', 'scene_open', 'scene_close',
 })
+
+# Print page treatment. Orthogonal to `placement`: "full-page opener" is a
+# layout of full_page at a placement of scene_open. A double-page spread is
+# inherently landscape, which is why aspect derives from layout first.
+VALID_LAYOUTS = frozenset({
+    'full_page', 'half_page', 'double_page', 'inline',
+})
+DEFAULT_LAYOUT = 'full_page'
 
 # Placements that need no anchor text.
 ANCHORLESS_PLACEMENTS = frozenset({'scene_open', 'scene_close'})
@@ -59,7 +68,11 @@ PROMPTS_SUBDIR = os.path.join(ILLUSTRATIONS_SUBDIR, 'prompts')
 
 VALID_IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp')
 
-_ID_RE = re.compile(r'\A[a-z0-9][a-z0-9-]*\Z')
+# Ids must match exactly what the marker regex accepts, so that a plan row an
+# author wrote by hand (`LF-01`) is never rejected by validation while its
+# marker parses fine. Case is preserved in the plan and in prose; only the
+# published asset key is normalized (see asset_key).
+_ID_RE = re.compile(r'\A[A-Za-z0-9][A-Za-z0-9_-]*\Z')
 
 # Marker on its own line — the canonical form, and what insert_marker writes.
 MARKER_LINE_RE = re.compile(
@@ -77,6 +90,19 @@ def marker_for(illus_id: str) -> str:
     return f'![[illus:{illus_id}]]'
 
 
+def asset_key(illus_id: str) -> str:
+    """Normalize a plan id into its published asset key.
+
+    Ids keep the author's casing in the plan and in the prose marker — `LF-01`
+    reads better than `lf-01` in a production document. Storage keys are
+    lowercased because they land in a content-addressed path and a database
+    unique constraint, where two ids differing only in case would collide
+    confusingly. Both the manifest's `assets` array and its per-scene
+    `illustrations` placements go through here, so the two always agree.
+    """
+    return illus_id.strip().lower()
+
+
 # ============================================================================
 # Paths
 # ============================================================================
@@ -84,6 +110,11 @@ def marker_for(illus_id: str) -> str:
 def plan_path(project_dir: str) -> str:
     """Path to the illustration plan CSV."""
     return os.path.join(project_dir, 'reference', PLAN_FILENAME)
+
+
+def direction_path(project_dir: str) -> str:
+    """Path to the book-level illustration art-direction document."""
+    return os.path.join(project_dir, 'reference', DIRECTION_FILENAME)
 
 
 def illustrations_dir(project_dir: str) -> str:
@@ -113,6 +144,120 @@ def default_asset_rel(illus_id: str, extension: str = '.png') -> str:
 def default_prompt_rel(illus_id: str) -> str:
     """Canonical project-relative path for an illustration's prompt file."""
     return os.path.join(PROMPTS_SUBDIR, f'{illus_id}.md')
+
+
+# ============================================================================
+# Art-direction document
+# ============================================================================
+
+#: Sections the direction document is expected to carry. `Continuity anchors`
+#: is parsed structurally; the rest are passed to the prompt builder as prose.
+DIRECTION_SECTIONS: tuple[str, ...] = (
+    'Format', 'Visual promise', 'Recurring visual language',
+    'Content limits', 'Continuity anchors',
+)
+
+ANCHORS_SECTION = 'Continuity anchors'
+
+_H2_RE = re.compile(r'^##[ \t]+(.+?)[ \t]*$', re.MULTILINE)
+_H3_RE = re.compile(r'^###[ \t]+(.+?)[ \t]*$', re.MULTILINE)
+
+
+def read_direction(project_dir: str) -> dict[str, str]:
+    """Parse the direction document into `{section heading: body}`.
+
+    Returns {} when the document does not exist. Headings are kept verbatim so
+    an author can add sections of their own and still have them reach the
+    prompt builder — the document is theirs, not a fixed form.
+    """
+    path = direction_path(project_dir)
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding='utf-8') as f:
+        text = f.read().replace('\r\n', '\n').replace('\r', '')
+
+    sections: dict[str, str] = {}
+    matches = list(_H2_RE.finditer(text))
+    for i, match in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        sections[match.group(1).strip()] = text[match.end():end].strip()
+    return sections
+
+
+def read_continuity_anchors(project_dir: str) -> dict[str, str]:
+    """Parse the `## Continuity anchors` section into `{name: description}`.
+
+    Each anchor is an ``### Name`` subsection whose body is the fixed
+    description — a paragraph, not a phrase, because that is what a character
+    or creature actually needs to stay recognizable. Anchors cover whatever the
+    art must keep consistent: characters, creatures, locations, props.
+    """
+    body = read_direction(project_dir).get(ANCHORS_SECTION, '')
+    if not body:
+        return {}
+
+    anchors: dict[str, str] = {}
+    matches = list(_H3_RE.finditer(body))
+    for i, match in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        name = match.group(1).strip()
+        description = ' '.join(body[match.end():end].split())
+        if name and description:
+            anchors[name] = description
+    return anchors
+
+
+def has_direction(project_dir: str) -> bool:
+    """True when a non-empty direction document exists."""
+    return bool(read_direction(project_dir))
+
+
+def missing_direction_sections(project_dir: str) -> list[str]:
+    """Return the expected sections a direction document is missing or left empty."""
+    sections = read_direction(project_dir)
+    if not sections:
+        return list(DIRECTION_SECTIONS)
+    return [name for name in DIRECTION_SECTIONS
+            if not sections.get(name, '').strip()
+            or _is_placeholder(sections.get(name, ''))]
+
+
+#: A line wholly wrapped in markdown emphasis. Both the coach and strict
+#: templates emit their instructions this way, so a section made of nothing but
+#: emphasized lines is boilerplate by construction.
+_EMPHASIZED_LINE_RE = re.compile(r'\A[_*]{1,2}.*[_*]{1,2}\Z')
+
+# Unemphasized placeholders an author might type by hand. The templates always
+# emphasize theirs, so this is a courtesy net, not the primary test.
+_BARE_PLACEHOLDER_RE = re.compile(
+    r'\A\(?\s*(tbd|todo|n/?a|(you )?fill (this )?in)\b', re.IGNORECASE,
+)
+
+
+def _is_placeholder(body: str) -> bool:
+    """True when a section body is still template boilerplate.
+
+    A scaffolded document with every section left as a prompt-to-the-author is
+    worse than no document, because it would be fed to the image model as
+    though it were direction.
+
+    The test is structural rather than a keyword list: strip the emphasized
+    instruction lines the templates emit, and if nothing substantive remains,
+    the author has not written this section yet. `### Name` subsection headings
+    do not count as content either — an anchor heading with no description
+    under it is an unfilled anchor.
+    """
+    substantive = []
+    for line in body.strip().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        if _EMPHASIZED_LINE_RE.match(stripped):
+            continue
+        if _BARE_PLACEHOLDER_RE.match(stripped):
+            continue
+        substantive.append(stripped)
+    return not substantive
 
 
 # ============================================================================
@@ -567,10 +712,11 @@ def scene_placements(scene_md: str,
     for hit in find_markers(scene_md):
         prefix = strip_markers(scene_md[:hit['start']])
         if not prefix.strip():
-            placements.append({'key': hit['id'], 'after_paragraph': 0})
+            placements.append({'key': asset_key(hit['id']),
+                               'after_paragraph': 0})
             continue
         placements.append({
-            'key': hit['id'],
+            'key': asset_key(hit['id']),
             'after_paragraph': count_top_level_paragraphs(md_to_html(prefix)),
         })
     return placements
@@ -597,7 +743,7 @@ def manifest_assets(project_dir: str,
     """
     assets: list[ManifestAsset] = []
     for row in read_plan(project_dir):
-        key = row['id'].strip()
+        key = asset_key(row['id'])
         if used_keys is not None and key not in used_keys:
             continue
         if row.get('status', '').strip() != 'ingested':
@@ -776,7 +922,9 @@ def plan_report(project_dir: str) -> IllustrationReport:
     return {
         'total': len(rows), 'by_status': by_status, 'ingested': ingested,
         'awaiting_render': awaiting,
-        'next_unrendered': awaiting[0] if awaiting else '',
+        # Follows the recommended render order (visual key first), not plan
+        # order — the point of the order is that it is what to render next.
+        'next_unrendered': next_to_render(project_dir),
         'embedded': embedded, 'unembedded': unembedded,
     }
 
@@ -790,6 +938,142 @@ def _read_scene(project_dir: str, scene_id: str) -> str | None:
         return None
     with open(path, encoding='utf-8') as f:
         return f.read()
+
+
+# ============================================================================
+# Render order
+# ============================================================================
+
+def _read_ref_csv(project_dir: str, filename: str) -> list[dict[str, str]]:
+    """Read a pipe-delimited CSV from reference/, or [] when absent."""
+    path = os.path.join(project_dir, 'reference', filename)
+    if not os.path.isfile(path):
+        return []
+    with open(path, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    reader = csv.DictReader(raw.splitlines(), delimiter=DELIMITER)
+    return [{k: (v if v is not None else '') for k, v in row.items()
+             if k is not None} for row in reader]
+
+
+def _split_array(value: str) -> list[str]:
+    """Split a ``;``-delimited array cell."""
+    return [p.strip() for p in (value or '').split(ARRAY_DELIMITER) if p.strip()]
+
+
+def _scene_order(project_dir: str) -> dict[str, int]:
+    """Map scene id → reading position, from the chapter map then scenes.csv.
+
+    The chapter map is preferred because it is the production order the book
+    actually ships in; scenes.csv `seq` is the fallback for a project that has
+    not been chaptered yet.
+    """
+    order: dict[str, int] = {}
+    position = 0
+    for row in _read_ref_csv(project_dir, 'chapter-map.csv'):
+        for scene_id in _split_array(row.get('scenes', '')):
+            if scene_id not in order:
+                order[scene_id] = position
+                position += 1
+    if order:
+        return order
+
+    rows = _read_ref_csv(project_dir, 'scenes.csv')
+    def seq_of(row: dict[str, str]) -> int:
+        raw = (row.get('seq') or '').strip()
+        return int(raw) if raw.isdigit() else 10 ** 6
+    for pos, row in enumerate(sorted(rows, key=seq_of)):
+        scene_id = (row.get('id') or '').strip()
+        if scene_id:
+            order.setdefault(scene_id, pos)
+    return order
+
+
+#: The visual key is picked from the first 1/Nth of the sequence, so that most
+#: illustrations can reference it. A short plan still gets a real choice.
+VISUAL_KEY_HORIZON_DIVISOR = 3
+VISUAL_KEY_MIN_CANDIDATES = 3
+
+
+class RenderStep(TypedDict):
+    """One illustration's position in the recommended render order."""
+    id: str
+    scene_id: str
+    is_visual_key: bool
+    locks: list[str]
+    status: str
+
+
+def render_order(project_dir: str) -> list[RenderStep]:
+    """Return the recommended render order, visual key first.
+
+    Two rules, both from how illustrated books are actually produced:
+
+    1. **The visual key renders first.** One early illustration establishes the
+       most shared vocabulary at once — the cast, the central location, the
+       scale relationship, the palette. Rendering it first means every later
+       image has something real to reference instead of a description.
+    2. **Everything else goes in story order**, which automatically means each
+       entity's design is locked by the earliest image it appears in.
+
+    `locks` names the anchors an illustration is the first to show, so the
+    author knows which renders they cannot afford to get wrong.
+    """
+    rows = [r for r in read_plan(project_dir)
+            if (r.get('status') or '').strip() != 'superseded']
+    if not rows:
+        return []
+
+    order = _scene_order(project_dir)
+
+    def position(row: dict[str, str]) -> int:
+        return order.get((row.get('scene_id') or '').strip(), 10 ** 6)
+
+    in_story_order = sorted(rows, key=lambda r: (position(r), r['id'].strip()))
+
+    # The visual key is the biggest establisher among the *early*
+    # illustrations, not the biggest establisher overall. The climax usually
+    # names the most entities — it is where everyone converges — but rendering
+    # the payoff first is backwards: the key exists so that everything after it
+    # has something real to reference, which only works if most illustrations
+    # come after it. Ties break earlier.
+    def establishes(row: dict[str, str]) -> int:
+        return len(_split_array(row.get('canon_refs', '')))
+
+    horizon = max(VISUAL_KEY_MIN_CANDIDATES,
+                  len(in_story_order) // VISUAL_KEY_HORIZON_DIVISOR)
+    candidates = in_story_order[:horizon]
+
+    key_id = ''
+    if any(establishes(r) for r in candidates):
+        key_row = max(candidates, key=lambda r: (establishes(r), -position(r)))
+        key_id = key_row['id'].strip()
+
+    sequence = ([r for r in in_story_order if r['id'].strip() == key_id]
+                + [r for r in in_story_order if r['id'].strip() != key_id])
+
+    seen: set[str] = set()
+    steps: list[RenderStep] = []
+    for row in sequence:
+        anchors = _split_array(row.get('canon_refs', ''))
+        locks = [a for a in anchors if a.lower() not in seen]
+        seen.update(a.lower() for a in anchors)
+        steps.append({
+            'id': row['id'].strip(),
+            'scene_id': (row.get('scene_id') or '').strip(),
+            'is_visual_key': row['id'].strip() == key_id,
+            'locks': locks,
+            'status': (row.get('status') or 'planned').strip() or 'planned',
+        })
+    return steps
+
+
+def next_to_render(project_dir: str) -> str:
+    """The next illustration to render, following the recommended order."""
+    for step in render_order(project_dir):
+        if step['status'] != 'ingested':
+            return step['id']
+    return ''
 
 
 # ============================================================================
@@ -809,8 +1093,8 @@ class IllustrationFinding(TypedDict, total=False):
 # assembled correctly while they stand, so `validate` fails on them.
 BLOCKING_FINDINGS: frozenset[str] = frozenset({
     'duplicate_id', 'invalid_id', 'invalid_status', 'invalid_placement',
-    'missing_scene', 'unknown_scene', 'missing_file', 'missing_digest',
-    'duplicate_marker', 'orphan_marker',
+    'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
+    'missing_digest', 'duplicate_marker', 'orphan_marker',
 })
 
 # Findings that need author attention but leave a valid book. An anchor that
@@ -851,6 +1135,14 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
             findings.append({'kind': 'duplicate_id', 'id': rid,
                              'detail': f'illustration id {rid!r} appears more than once'})
             continue
+        if asset_key(rid) in {asset_key(s) for s in seen_ids}:
+            findings.append({
+                'kind': 'duplicate_id', 'id': rid,
+                'detail': f'illustration id {rid!r} differs from an earlier row '
+                          f'only in case; both would publish as '
+                          f'{asset_key(rid)!r}',
+            })
+            continue
         seen_ids.add(rid)
 
         if not _ID_RE.match(rid):
@@ -868,6 +1160,12 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
             findings.append({'kind': 'invalid_placement', 'id': rid,
                              'detail': f'placement {placement!r} is not one of '
                                        f'{sorted(VALID_PLACEMENTS)}'})
+
+        layout = (row.get('layout') or '').strip()
+        if layout and layout not in VALID_LAYOUTS:
+            findings.append({'kind': 'invalid_layout', 'id': rid,
+                             'detail': f'layout {layout!r} is not one of '
+                                       f'{sorted(VALID_LAYOUTS)}'})
 
         if not scene_id:
             findings.append({'kind': 'missing_scene', 'id': rid,
@@ -953,23 +1251,6 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
 # ============================================================================
 # Selection pre-pass
 # ============================================================================
-
-def _read_ref_csv(project_dir: str, filename: str) -> list[dict[str, str]]:
-    """Read a pipe-delimited CSV from reference/, or [] when absent."""
-    path = os.path.join(project_dir, 'reference', filename)
-    if not os.path.isfile(path):
-        return []
-    with open(path, newline='', encoding='utf-8') as f:
-        raw = f.read().replace('\r\n', '\n').replace('\r', '')
-    reader = csv.DictReader(raw.splitlines(), delimiter=DELIMITER)
-    return [{k: (v if v is not None else '') for k, v in row.items()
-             if k is not None} for row in reader]
-
-
-def _split_array(value: str) -> list[str]:
-    """Split a ``;``-delimited array cell."""
-    return [p.strip() for p in (value or '').split(ARRAY_DELIMITER) if p.strip()]
-
 
 class PrepassFindings(TypedDict):
     """Deterministic candidates and gaps, computed before any LLM call."""

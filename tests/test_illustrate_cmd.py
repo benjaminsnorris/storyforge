@@ -42,6 +42,17 @@ def read_plan_map(project_dir):
     return ill.read_plan_as_map(project_dir)
 
 
+def write_direction(project_dir, sections):
+    """Write a direction document from {heading: body}."""
+    path = ill.direction_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    body = '\n\n'.join(f'## {name}\n\n{text}'
+                       for name, text in sections.items())
+    with open(path, 'w') as f:
+        f.write(f'# Illustration art direction\n\n{body}\n')
+    return path
+
+
 # ============================================================================
 # Dispatch and guards
 # ============================================================================
@@ -461,7 +472,7 @@ def test_prompts_full_without_an_api_key_fails(in_project, capsys):
     assert 'ANTHROPIC_API_KEY is not set' in capsys.readouterr().out
 
 
-def test_prompts_full_writes_body_and_persists_anchors(in_project, monkeypatch):
+def test_prompts_full_writes_body_and_appends_new_anchors(in_project, monkeypatch):
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [plan_row()])
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
@@ -479,7 +490,8 @@ def test_prompts_full_writes_body_and_persists_anchors(in_project, monkeypatch):
     assert 'A cold street at night' in content
     # The anchor block is lifted out of the body, not left in the prompt.
     assert 'ANCHORS' not in content
-    anchors = pi.read_character_anchors(in_project)
+    # A proposed anchor lands in the direction document for the author to review.
+    anchors = ill.read_continuity_anchors(in_project)
     assert anchors['Dorren Hayle'] == 'a spare woman of fifty in a grey coat'
 
 
@@ -601,24 +613,65 @@ def test_split_anchor_block_parses_multiple_anchors():
     }
 
 
-def test_character_anchors_round_trip(project_dir):
-    pi.write_character_anchors(project_dir, {'Dorren': 'a spare woman in grey'})
-    assert pi.read_character_anchors(project_dir) == {
+def test_continuity_anchors_round_trip(project_dir):
+    write_direction(project_dir, {
+        ill.ANCHORS_SECTION: '### Dorren\n\na spare woman in grey',
+    })
+    assert ill.read_continuity_anchors(project_dir) == {
         'Dorren': 'a spare woman in grey'}
 
 
-def test_character_anchors_never_overwrite_an_existing_string(project_dir):
+def test_continuity_anchors_collapse_multi_paragraph_bodies(project_dir):
+    """A real anchor is a paragraph, not a phrase."""
+    write_direction(project_dir, {
+        ill.ANCHORS_SECTION: (
+            '### Dorren\n\nTen years old; tall for her age.\n\n'
+            'Navy pyjamas on the first night.\n\n'
+            '### Vell\n\nA boy with ink-stained cuffs.'
+        ),
+    })
+    anchors = ill.read_continuity_anchors(project_dir)
+    assert anchors['Dorren'] == (
+        'Ten years old; tall for her age. Navy pyjamas on the first night.')
+    assert anchors['Vell'] == 'A boy with ink-stained cuffs.'
+
+
+def test_append_anchor_stubs_never_overwrites_an_existing_anchor(project_dir):
     """Likeness continuity depends on the anchor staying byte-identical."""
-    pi.write_character_anchors(project_dir, {'Dorren': 'original description'})
-    pi.write_character_anchors(project_dir, {'Dorren': 'revised description',
-                                            'Vell': 'a boy'})
-    anchors = pi.read_character_anchors(project_dir)
+    pi.append_anchor_stubs(project_dir, {'Dorren': 'original description'})
+    added = pi.append_anchor_stubs(project_dir, {
+        'Dorren': 'revised description', 'Vell': 'a boy'})
+
+    assert added == ['Vell']
+    anchors = ill.read_continuity_anchors(project_dir)
     assert anchors['Dorren'] == 'original description'
     assert anchors['Vell'] == 'a boy'
 
 
-def test_read_character_anchors_with_no_file(project_dir):
-    assert pi.read_character_anchors(project_dir) == {}
+def test_append_anchor_stubs_is_case_insensitive(project_dir):
+    pi.append_anchor_stubs(project_dir, {'Dorren': 'original'})
+    assert pi.append_anchor_stubs(project_dir, {'dorren': 'again'}) == []
+
+
+def test_append_anchor_stubs_skips_empty_values(project_dir):
+    assert pi.append_anchor_stubs(project_dir, {'Nameless': '', '': 'x'}) == []
+
+
+def test_append_anchor_stubs_preserves_other_sections(project_dir):
+    write_direction(project_dir, {
+        'Format': 'Full-color photorealism.',
+        ill.ANCHORS_SECTION: '### Dorren\n\na spare woman in grey',
+    })
+    pi.append_anchor_stubs(project_dir, {'Vell': 'a boy'})
+
+    direction = ill.read_direction(project_dir)
+    assert direction['Format'] == 'Full-color photorealism.'
+    assert set(ill.read_continuity_anchors(project_dir)) == {'Dorren', 'Vell'}
+
+
+def test_read_continuity_anchors_with_no_document(project_dir):
+    assert ill.read_continuity_anchors(project_dir) == {}
+    assert pi.anchors_for_prompt(project_dir) == {}
 
 
 def test_selection_prompt_embeds_the_prepass_findings(project_dir):
@@ -971,3 +1024,301 @@ def test_assemble_chapter_without_illustrations_is_unchanged(project_dir):
     chapter = assemble_chapter(1, project_dir)
     assert '![' not in chapter
     assert 'Dorren Hayle' in chapter
+
+
+# ============================================================================
+# --direction
+# ============================================================================
+
+def test_direction_strict_writes_a_template_without_an_api_key(in_project):
+    assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
+
+    path = ill.direction_path(in_project)
+    assert os.path.isfile(path)
+    with open(path) as f:
+        content = f.read()
+    for section in ill.DIRECTION_SECTIONS:
+        assert f'## {section}' in content
+    assert '_Required:' in content
+    # A strict scaffold proposes nothing, so every section still needs the author.
+    assert ill.missing_direction_sections(in_project) == \
+        list(ill.DIRECTION_SECTIONS)
+
+
+def test_direction_coach_template_asks_questions(in_project):
+    assert cmd_illustrate.main(['--direction', '--coaching', 'coach']) == 0
+    with open(ill.direction_path(in_project)) as f:
+        content = f.read()
+    assert 'notice missing' in content          # visual-promise question
+    assert 'obviously from the same' in content  # recurring-language question
+    assert '_Required:' not in content
+
+
+def test_direction_template_stubs_an_anchor_per_registry_entry(in_project):
+    assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
+    with open(ill.direction_path(in_project)) as f:
+        content = f.read()
+    # The fixture has characters and locations; both need anchors.
+    assert '### Dorren Hayle' in content
+    assert 'height, age, exact colors' in content
+
+
+def test_direction_full_without_an_api_key_fails(in_project, capsys):
+    assert cmd_illustrate.main(['--direction', '--coaching', 'full']) == 1
+    out = capsys.readouterr().out
+    assert 'ANTHROPIC_API_KEY is not set' in out
+    assert '--coaching coach' in out       # names the offline alternative
+
+
+def test_direction_full_writes_the_model_output(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '## Format\n\nFull-color photorealism for ages 6-8.\n\n'
+        '## Visual promise\n\nThe ordinary world feels real.\n\n'
+        '## Recurring visual language\n\nWarm amber against cool blue.\n\n'
+        '## Content limits\n\nNever horror imagery.\n\n'
+        '## Continuity anchors\n\n### Leo\n\nTen years old; tall for his age.\n'
+    ))
+
+    assert cmd_illustrate.main(['--direction', '--coaching', 'full']) == 0
+
+    assert ill.missing_direction_sections(in_project) == []
+    assert ill.read_continuity_anchors(in_project) == {
+        'Leo': 'Ten years old; tall for his age.'}
+    out = capsys.readouterr().out
+    assert 'continuity anchors: 1' in out
+    assert 'Read it before running --prompts' in out
+
+
+def test_direction_reports_incomplete_sections(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k:
+                        '## Format\n\nPhotorealism.\n')
+
+    cmd_illustrate.main(['--direction', '--coaching', 'full'])
+    assert 'needs your input' in capsys.readouterr().out
+
+
+def test_direction_does_not_clobber_a_complete_document(in_project, capsys):
+    from tests.test_illustrations import SAMPLE_DIRECTION, write_direction_file
+    write_direction_file(in_project, SAMPLE_DIRECTION)
+
+    assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
+    assert 'already written' in capsys.readouterr().out
+    with open(ill.direction_path(in_project)) as f:
+        assert 'cinematic photorealistic' in f.read()
+
+
+def test_direction_reports_gaps_in_an_existing_document(in_project, capsys):
+    from tests.test_illustrations import write_direction_file
+    write_direction_file(in_project, '# D\n\n## Format\n\nPhotorealism.\n')
+
+    assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
+    out = capsys.readouterr().out
+    assert 'sections are empty or still placeholder' in out
+    assert 'Continuity anchors' in out
+    # And it must not overwrite what is there.
+    with open(ill.direction_path(in_project)) as f:
+        assert 'Photorealism.' in f.read()
+
+
+def test_direction_dry_run_writes_nothing(in_project, capsys):
+    assert cmd_illustrate.main(['--direction', '--dry-run',
+                                '--coaching', 'strict']) == 0
+    assert '[dry-run] would write' in capsys.readouterr().out
+    assert not os.path.isfile(ill.direction_path(in_project))
+
+
+def test_direction_reaches_the_art_direction_prompt(in_project, monkeypatch):
+    """The whole point of the document: every prompt carries it."""
+    from tests.test_illustrations import SAMPLE_DIRECTION, write_direction_file
+    write_direction_file(in_project, SAMPLE_DIRECTION)
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(canon_refs='Leo')])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    seen = {}
+
+    def capture(project_dir, prompt, operation, **kwargs):
+        seen['prompt'] = prompt
+        return '### Scene\n\nA street.\n'
+
+    monkeypatch.setattr(cmd_illustrate, '_invoke', capture)
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+
+    prompt = seen['prompt']
+    assert 'Book-level art direction' in prompt
+    assert 'cinematic photorealistic' in prompt
+    assert 'Never horror imagery' in prompt
+    # Anchors are rendered separately from the rest of the direction.
+    assert 'Ten years old' in prompt
+
+
+def test_prompts_narrow_anchors_to_what_the_illustration_shows(in_project,
+                                                              monkeypatch):
+    from tests.test_illustrations import SAMPLE_DIRECTION, write_direction_file
+    write_direction_file(in_project, SAMPLE_DIRECTION)
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(canon_refs='Murkwolves')])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    seen = {}
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda pd, prompt, op, **kw: (
+                            seen.update(prompt=prompt) or '### Scene\n\nX.\n'))
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+
+    anchors_block = seen['prompt'].split('## Character anchors')[1]
+    assert 'Murkwolves' in anchors_block
+    assert 'Ten years old' not in anchors_block   # Leo is not in this frame
+
+
+def test_relevant_anchors_falls_back_to_all_when_none_named():
+    anchors = {'Leo': 'a boy', 'Nora': 'a girl'}
+    assert cmd_illustrate._relevant_anchors(anchors, plan_row()) == anchors
+
+
+def test_relevant_anchors_falls_back_when_nothing_matches():
+    anchors = {'Leo': 'a boy'}
+    row = plan_row(canon_refs='Someone Unrecorded')
+    assert cmd_illustrate._relevant_anchors(anchors, row) == anchors
+
+
+# ============================================================================
+# --review
+# ============================================================================
+
+def test_review_writes_the_sequence_checklist(in_project):
+    from tests.test_illustrations import SAMPLE_DIRECTION, write_direction_file
+    write_direction_file(in_project, SAMPLE_DIRECTION)
+    write_csv(in_project, 'chapter-map.csv', 'chapter|scenes', ['1|s1;s2'])
+    ill.write_plan(in_project, [
+        plan_row(id='LF-01', scene_id='s1', canon_refs='Leo;Murkwolves',
+                 status='ingested'),
+        plan_row(id='LF-02', scene_id='s2', status='planned'),
+    ])
+
+    assert cmd_illustrate.main(['--review']) == 0
+
+    path = os.path.join(in_project, 'working',
+                        'illustration-sequence-review.md')
+    with open(path) as f:
+        content = f.read()
+    assert '1 of 2 illustrations rendered' in content
+    assert '**Identity**' in content
+    assert '**Light progression**' in content
+    assert 'Never horror imagery' in content       # content limits carried over
+    assert '- [ ] **Leo**' in content              # anchors to check against
+    assert '1. [x] `LF-01`' in content             # rendered
+    assert '2. [ ] `LF-02`' in content             # pending
+    assert 'locks: Leo, Murkwolves' in content
+
+
+def test_review_marks_the_visual_key(in_project):
+    write_csv(in_project, 'chapter-map.csv', 'chapter|scenes', ['1|s1;s2'])
+    ill.write_plan(in_project, [
+        plan_row(id='LF-01', scene_id='s1', canon_refs='Nora'),
+        plan_row(id='LF-02', scene_id='s2', canon_refs='Leo;Nora;Oak'),
+    ])
+    cmd_illustrate.main(['--review'])
+    with open(os.path.join(in_project, 'working',
+                           'illustration-sequence-review.md')) as f:
+        assert '`LF-02` — **visual key**' in f.read()
+
+
+def test_review_without_a_plan_fails(in_project, capsys):
+    assert cmd_illustrate.main(['--review']) == 1
+    assert 'No illustration plan to review' in capsys.readouterr().out
+
+
+def test_review_dry_run_writes_nothing(in_project, capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    assert cmd_illustrate.main(['--review', '--dry-run']) == 0
+    assert '[dry-run] would write' in capsys.readouterr().out
+    assert not os.path.isfile(os.path.join(
+        in_project, 'working', 'illustration-sequence-review.md'))
+
+
+def test_review_prompts_early_review_while_renders_remain(in_project, capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    cmd_illustrate.main(['--review'])
+    assert 'cheap moment' in capsys.readouterr().out
+
+
+# ============================================================================
+# --diagnose render order
+# ============================================================================
+
+def test_diagnose_prints_the_render_order_and_visual_key(in_project, capsys):
+    write_scene(in_project, 's1', SCENE)
+    write_scene(in_project, 's2', SCENE)
+    write_csv(in_project, 'chapter-map.csv', 'chapter|scenes', ['1|s1;s2'])
+    ill.write_plan(in_project, [
+        plan_row(id='LF-01', scene_id='s1', canon_refs='Nora', anchor=''),
+        plan_row(id='LF-02', scene_id='s2', canon_refs='Leo;Nora;Oak',
+                 anchor=''),
+    ])
+
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'Recommended render order' in out
+    assert '<- visual key' in out
+    assert 'locks: Leo, Nora, Oak' in out
+    assert 'next to render: LF-02' in out
+
+
+# ============================================================================
+# Layout
+# ============================================================================
+
+@pytest.mark.parametrize('layout,aspect', [
+    ('double_page', 'landscape'),
+    ('full_page', 'portrait'),
+    ('half_page', 'portrait'),
+    ('', 'portrait'),
+])
+def test_layout_drives_aspect(layout, aspect):
+    assert pi.aspect_for_row(plan_row(layout=layout)) == aspect
+
+
+def test_layout_beats_a_conflicting_composition_note():
+    """A double-page spread is wider than tall whatever the note says."""
+    row = plan_row(layout='double_page', composition='a tight square crop')
+    assert pi.aspect_for_row(row) == 'landscape'
+
+
+def test_layout_appears_in_the_prompt_file():
+    content = pi.render_prompt_file(
+        row=plan_row(layout='double_page'), body='### Scene\n\nA street.\n',
+        references=[], aspect=pi.aspect_for_row(plan_row(layout='double_page')),
+    )
+    assert 'LANDSCAPE orientation' in content
+
+
+def test_layout_reaches_the_art_direction_prompt():
+    prompt = pi.build_art_direction_request(
+        row=plan_row(layout='double_page'), scene_excerpt='x',
+        character_anchors={}, canon_context='x',
+    )
+    assert 'double_page' in prompt
+
+
+def test_schema_accepts_the_layout_column(project_dir):
+    from storyforge.schema import validate_illustration_plan
+    write_scene(project_dir, 'vigil', ill.insert_marker(SCENE, plan_row())['text'])
+    ill.write_plan(project_dir, [plan_row(layout='full_page', status='planned')])
+
+    result = validate_illustration_plan(project_dir)
+    assert result['errors'] == []
+
+
+def test_cleanup_reports_an_invalid_layout(project_dir):
+    from storyforge.cmd_cleanup import _check_illustrations
+    write_scene(project_dir, 'vigil', SCENE)
+    ill.write_plan(project_dir, [plan_row(layout='quarter_page',
+                                         status='planned')])
+    findings = {f['type']: f for f in _check_illustrations(project_dir)}
+    assert 'illus_invalid_layout' in findings
+    assert 'full_page' in findings['illus_invalid_layout']['action']
