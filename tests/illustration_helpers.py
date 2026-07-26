@@ -13,6 +13,7 @@ fixtures pytest injects.
 
 import os
 import struct
+import subprocess
 import zlib
 
 from storyforge import illustrations as ill
