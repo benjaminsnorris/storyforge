@@ -189,6 +189,32 @@ def read_direction(project_dir: str) -> dict[str, str]:
     return sections
 
 
+def find_section(sections: dict[str, str], wanted: str) -> str | None:
+    """Return the heading in *sections* matching *wanted*, ignoring case.
+
+    Section bodies are looked up by heading text, and a model asked to write
+    ``## Continuity anchors`` will sometimes write ``## Continuity Anchors``. A
+    case-sensitive lookup silently returned nothing, so the author's anchors
+    were invisible to every prompt.
+    """
+    target = wanted.strip().lower()
+    for name in sections:
+        if name.strip().lower() == target:
+            return name
+    return None
+
+
+def anchors_section_headings(project_dir: str) -> list[str]:
+    """Every heading in the document that reads as the anchors section.
+
+    More than one means the document has been split — usually by an append that
+    could not find an existing differently-cased heading — and anchors under
+    all but one of them reach nothing.
+    """
+    return [name for name in read_direction(project_dir)
+            if name.strip().lower() == ANCHORS_SECTION.lower()]
+
+
 def read_continuity_anchors(project_dir: str) -> dict[str, str]:
     """Parse the `## Continuity anchors` section into `{name: description}`.
 
@@ -197,7 +223,12 @@ def read_continuity_anchors(project_dir: str) -> dict[str, str]:
     or creature actually needs to stay recognizable. Anchors cover whatever the
     art must keep consistent: characters, creatures, locations, props.
     """
-    body = read_direction(project_dir).get(ANCHORS_SECTION, '')
+    sections = read_direction(project_dir)
+    # Every heading that reads as the anchors section contributes, so a
+    # differently-cased duplicate does not silently orphan the anchors under it.
+    bodies = [text for name, text in sections.items()
+              if name.strip().lower() == ANCHORS_SECTION.lower()]
+    body = '\n\n'.join(b for b in bodies if b.strip())
     if not body:
         return {}
 
@@ -222,9 +253,14 @@ def missing_direction_sections(project_dir: str) -> list[str]:
     sections = read_direction(project_dir)
     if not sections:
         return list(DIRECTION_SECTIONS)
-    return [name for name in DIRECTION_SECTIONS
-            if not sections.get(name, '').strip()
-            or _is_placeholder(sections.get(name, ''))]
+
+    missing = []
+    for name in DIRECTION_SECTIONS:
+        actual = find_section(sections, name)
+        body = sections.get(actual, '') if actual else ''
+        if not body.strip() or _is_placeholder(body):
+            missing.append(name)
+    return missing
 
 
 #: A line wholly wrapped in markdown emphasis. Both the coach and strict

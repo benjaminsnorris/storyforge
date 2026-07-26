@@ -1617,3 +1617,228 @@ def test_prompts_does_not_destroy_author_columns(in_project):
     row = read_plan_map(in_project)['lantern-vigil']
     assert row['status'] == 'prompted'
     assert row['author_note'] == 'keep me'
+
+
+# ============================================================================
+# Anchor parsing and the direction document
+# ============================================================================
+
+@pytest.mark.parametrize('line,expected', [
+    ('- Jean-Luc — a boy of 9, 130 cm',
+     {'Jean-Luc': 'a boy of 9, 130 cm'}),
+    ('- Marie-Claire – a woman of 40', {'Marie-Claire': 'a woman of 40'}),
+    ('- Ember: an elderly Lantern woman',
+     {'Ember': 'an elderly Lantern woman'}),
+    ('- Leo - ten years old', {'Leo': 'ten years old'}),
+    ('- **Wick** — a copper-haired Lantern child',
+     {'Wick': 'a copper-haired Lantern child'}),
+])
+def test_anchor_lines_with_hyphenated_names_parse_whole(line, expected):
+    """Regression: the separator class included a bare hyphen, so `Jean-Luc`
+    became {'Jean': 'Luc — …'}. The mangled name was then written into the
+    direction document as canonical, never revised, and stopped matching
+    canon_refs — so the anchor silently left every prompt."""
+    _, anchors = pi.split_anchor_block(f'### Scene\n\nA room.\n\nANCHORS\n{line}\n')
+    assert anchors == expected
+
+
+@pytest.mark.parametrize('marker', ['ANCHORS', 'ANCHORS:', '**ANCHORS**'])
+def test_anchor_block_marker_variants(marker):
+    """A decorated marker used to lose every anchor AND leave the block in the
+    prompt body, which the author pastes into the image model."""
+    body, anchors = pi.split_anchor_block(
+        f'### Scene\n\nA room.\n\n{marker}\n- Wick — a grey tabby\n')
+    assert anchors == {'Wick': 'a grey tabby'}
+    assert 'ANCHORS' not in body
+
+
+def test_split_anchor_block_removes_a_dangling_code_fence():
+    """The request demonstrates the block inside a fence, so the model emits
+    one; cutting at the ANCHORS line left the opening fence behind and
+    corrupted every following section of the prompt file."""
+    body, anchors = pi.split_anchor_block(
+        '### Scene\n\nA dark room.\n\n```\nANCHORS\n- Wick — a cat\n```\n')
+    assert anchors == {'Wick': 'a cat'}
+    assert '```' not in body
+    assert body.endswith('A dark room.')
+
+
+def test_unparsed_anchor_lines_are_reported():
+    body_text = ('### Scene\n\nA room.\n\nANCHORS\n'
+                 '- Wick — a grey tabby\n'
+                 '- just a name with no description\n'
+                 '- Nameless — \n')
+    assert pi.split_anchor_block(body_text)[1] == {'Wick': 'a grey tabby'}
+    # Lines are reported verbatim, bullet included, so the author can find them.
+    unparsed = pi.unparsed_anchor_lines(body_text)
+    assert len(unparsed) == 2
+    assert any('just a name with no description' in line for line in unparsed)
+    assert any('Nameless' in line for line in unparsed)
+
+
+def test_prompts_warns_about_mangled_anchor_lines(in_project, monkeypatch,
+                                                  capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '### Scene\n\nA room.\n\nANCHORS\n- no separator here at all\n'))
+
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+    assert 'did not parse as' in capsys.readouterr().out
+
+
+def test_anchors_section_is_read_case_insensitively(project_dir):
+    """A model asked for `## Continuity anchors` sometimes writes
+    `## Continuity Anchors`; a case-sensitive lookup silently returned nothing,
+    so the author's anchors were invisible to every prompt."""
+    from tests.test_illustrations import write_direction_file
+    write_direction_file(project_dir,
+                         '# D\n\n## Continuity Anchors\n\n### Mara\n\n'
+                         'Eleven years old, black braid.\n')
+    assert ill.read_continuity_anchors(project_dir) == {
+        'Mara': 'Eleven years old, black braid.'}
+    assert ill.ANCHORS_SECTION not in ill.missing_direction_sections(project_dir)
+
+
+def test_append_does_not_create_a_second_anchors_section(project_dir):
+    """Appending under a differently-cased heading used to add a *second*
+    section, permanently orphaning everything under the first — and the
+    missing-sections warning that would have caught it disappeared, because the
+    new section was non-empty."""
+    from tests.test_illustrations import write_direction_file
+    write_direction_file(project_dir,
+                         '# D\n\n## Continuity Anchors\n\n### Mara\n\n'
+                         'Eleven years old.\n')
+
+    pi.append_anchor_stubs(project_dir, {'Wick': 'a grey tabby cat'})
+
+    assert len(ill.anchors_section_headings(project_dir)) == 1
+    assert sorted(ill.read_continuity_anchors(project_dir)) == ['Mara', 'Wick']
+
+
+def test_the_anchors_phrase_in_prose_does_not_satisfy_the_section_check(
+        project_dir):
+    """A substring test matched the phrase in ordinary prose, so the stubs were
+    appended into whatever section came last — and fed to the image model as,
+    say, a content limit."""
+    from tests.test_illustrations import write_direction_file
+    write_direction_file(
+        project_dir,
+        '# D\n\n## Format\n\nSee the Continuity anchors below for the cast.\n')
+
+    pi.append_anchor_stubs(project_dir, {'Wick': 'a grey tabby cat'})
+
+    assert ill.read_continuity_anchors(project_dir) == {
+        'Wick': 'a grey tabby cat'}
+    assert ill.read_direction(project_dir)['Format'].startswith('See the')
+
+
+def test_find_section_is_case_insensitive():
+    sections = {'Continuity Anchors': 'a', 'Format': 'b'}
+    assert ill.find_section(sections, 'continuity anchors') == \
+        'Continuity Anchors'
+    assert ill.find_section(sections, 'Nope') is None
+
+
+# ============================================================================
+# --ids re-prompt, and truncated responses
+# ============================================================================
+
+def test_ids_can_reprompt_an_already_prompted_illustration(in_project,
+                                                           monkeypatch):
+    """Regression: the status filter ran before the id filter, so an
+    already-prompted row was unreachable and the hint advised the exact flag
+    that had just been used."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(
+        status='prompted', prompt_file=ill.default_prompt_rel('lantern-vigil'))])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '### Scene\n\nA revised room.\n')
+
+    assert cmd_illustrate.main(
+        ['--prompts', '--ids', 'lantern-vigil', '--coaching', 'full']) == 0
+
+    rel = read_plan_map(in_project)['lantern-vigil']['prompt_file']
+    with open(os.path.join(in_project, rel)) as f:
+        assert 'A revised room' in f.read()
+
+
+def test_ids_warns_about_an_unknown_id(in_project, capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+
+    cmd_illustrate.main(['--prompts', '--ids', 'lantern-vigil,typo',
+                         '--coaching', 'strict'])
+    assert 'no plan row: typo' in capsys.readouterr().out
+
+
+def test_ids_matching_nothing_exits_nonzero(in_project, capsys):
+    ill.write_plan(in_project, [plan_row()])
+    assert cmd_illustrate.main(['--prompts', '--ids', 'nope']) == 1
+    assert 'None of the named ids' in capsys.readouterr().out
+
+
+def test_ids_does_not_reprompt_a_superseded_row(in_project, capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(status='superseded')])
+    assert cmd_illustrate.main(['--prompts', '--ids', 'lantern-vigil']) == 1
+
+
+def test_invoke_discards_a_truncated_response(in_project, monkeypatch, capsys):
+    """A prompt cut off at max_tokens loses its Constraints section — the
+    orientation directive and the no-text rule."""
+    monkeypatch.setattr(cmd_illustrate, 'invoke', lambda *a, **k: {
+        'content': [{'type': 'text', 'text': '### Scene\n\nA room.'}],
+        'usage': {'input_tokens': 10, 'output_tokens': 2048},
+        'stop_reason': 'max_tokens',
+    })
+    result = cmd_illustrate._invoke(in_project, 'p', 'illustrate-prompt',
+                                    task_type='creative', max_tokens=2048)
+    assert result == ''
+    assert 'cut off at max_tokens' in capsys.readouterr().out
+
+
+def test_invoke_logs_an_empty_response(in_project, monkeypatch, capsys):
+    monkeypatch.setattr(cmd_illustrate, 'invoke', lambda *a, **k: {})
+    assert cmd_illustrate._invoke(in_project, 'p', 'op',
+                                  task_type='creative', max_tokens=100) == ''
+    assert 'empty response' in capsys.readouterr().out
+
+
+def test_invoke_logs_an_error_response_without_billing_it(in_project,
+                                                          monkeypatch, capsys):
+    monkeypatch.setattr(cmd_illustrate, 'invoke', lambda *a, **k: {
+        'error': {'type': 'rate_limit_error', 'message': 'slow down'}})
+    assert cmd_illustrate._invoke(in_project, 'p', 'op',
+                                  task_type='creative', max_tokens=100) == ''
+    out = capsys.readouterr().out
+    assert 'rate' in out or 'slow down' in out
+    assert 'Not recording a cost entry' in out
+    assert not os.path.isfile(
+        os.path.join(in_project, 'working', 'costs', 'ledger.csv'))
+
+
+def test_invoke_records_a_cost_entry_on_success(in_project, monkeypatch):
+    monkeypatch.setattr(cmd_illustrate, 'invoke', lambda *a, **k: {
+        'content': [{'type': 'text', 'text': 'body'}],
+        'usage': {'input_tokens': 100, 'output_tokens': 50},
+        'stop_reason': 'end_turn',
+    })
+    assert cmd_illustrate._invoke(in_project, 'p', 'illustrate-prompt',
+                                  task_type='creative', max_tokens=100,
+                                  target='lf-01') == 'body'
+    ledger = os.path.join(in_project, 'working', 'costs', 'ledger.csv')
+    with open(ledger) as f:
+        assert 'illustrate-prompt' in f.read()
+
+
+def test_invoke_returns_empty_on_an_exception(in_project, monkeypatch, capsys):
+    def boom(*a, **k):
+        raise OSError('network is down')
+
+    monkeypatch.setattr(cmd_illustrate, 'invoke', boom)
+    assert cmd_illustrate._invoke(in_project, 'p', 'op',
+                                  task_type='creative', max_tokens=100) == ''
+    assert 'network is down' in capsys.readouterr().out

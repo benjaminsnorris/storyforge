@@ -473,12 +473,27 @@ def _format_proposals(proposals: list[dict]) -> str:
 def run_prompts(project_dir: str, coaching: CoachingLevel,
                 ids: set[str] | None, dry_run: bool) -> int:
     """Write an art-direction prompt file per planned illustration."""
-    rows = [r for r in ill.read_plan(project_dir)
-            if (r.get('status') or '').strip() in ('', 'planned')]
+    plan = ill.read_plan(project_dir)
     if ids is not None:
-        rows = [r for r in rows if r['id'].strip() in ids]
+        # An explicit id list means "re-prompt these", which is what the skill
+        # and the --ids help text both promise. Applying the status filter first
+        # made an already-prompted row unreachable, so the hint told the author
+        # to use the exact flag they had just used.
+        rows = [r for r in plan if r['id'].strip() in ids
+                and (r.get('status') or '').strip() != 'superseded']
+        unknown = ids - {r['id'].strip() for r in plan}
+        if unknown:
+            log(f'WARNING: --ids named {len(unknown)} illustration(s) with no '
+                f'plan row: {", ".join(sorted(unknown))}. Nothing was written '
+                f'for them.')
+    else:
+        rows = [r for r in plan
+                if (r.get('status') or '').strip() in ('', 'planned')]
 
     if not rows:
+        if ids is not None:
+            log('None of the named ids match a plan row that can be prompted.')
+            return 1
         log('No rows at status=planned need prompts. '
             '(Use --ids to re-prompt a specific illustration.)')
         return 0
@@ -543,7 +558,12 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
                     f'skipping (status stays `planned`)')
                 failed.append(illus_id)
                 continue
+            unparsed = pi.unparsed_anchor_lines(body)
             body, new_anchors = pi.split_anchor_block(body)
+            if unparsed:
+                log(f'  WARNING: {len(unparsed)} line(s) in the proposed '
+                    f'ANCHORS block did not parse as "Name — description" and '
+                    f'were discarded: {unparsed!r}')
             if new_anchors:
                 added = pi.append_anchor_stubs(project_dir, new_anchors)
                 if added:
@@ -938,7 +958,13 @@ def _write_coaching_file(project_dir: str, filename: str, content: str,
 
 def _invoke(project_dir: str, prompt: str, operation: str, *,
             task_type: str, max_tokens: int, target: str = '') -> str:
-    """Call the API, log the cost, and return the text (or '' on failure)."""
+    """Call the API, log the cost, and return the text (or '' on failure).
+
+    A truncated response counts as a failure. An art-direction prompt cut off
+    at max_tokens loses its Constraints section — the orientation directive and
+    the no-text rule, the two things render_prompt_file exists to guarantee —
+    and would otherwise be written to disk and marked `prompted`.
+    """
     model = select_model(task_type)
     started = time.time()
     try:
@@ -947,6 +973,14 @@ def _invoke(project_dir: str, prompt: str, operation: str, *,
         log(f'WARNING: API call failed for {operation}: {exc}')
         return ''
     if not response:
+        log(f'WARNING: API returned an empty response for {operation} '
+            f'(model={model}). Nothing was written.')
+        return ''
+    if isinstance(response, dict) and response.get('error'):
+        err = response['error']
+        detail = err.get('message', err) if isinstance(err, dict) else err
+        log(f'WARNING: API returned an error for {operation}: {detail}. '
+            f'Not recording a cost entry.')
         return ''
 
     usage = extract_usage(response)
@@ -958,6 +992,12 @@ def _invoke(project_dir: str, prompt: str, operation: str, *,
         cache_read=usage.get('cache_read', 0),
         cache_create=usage.get('cache_create', 0),
     )
+
+    if response.get('stop_reason') == 'max_tokens':
+        log(f'WARNING: {operation} was cut off at max_tokens '
+            f'({usage["output_tokens"]} output tokens){f" for {target}" if target else ""} '
+            f'— the response is incomplete and was discarded.')
+        return ''
     return extract_text(response).strip()
 
 

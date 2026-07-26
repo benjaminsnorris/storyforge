@@ -24,9 +24,8 @@ import re
 from typing import Final
 
 from storyforge.illustrations import (
-    ANCHORS_SECTION, DEFAULT_LAYOUT, DIRECTION_FILENAME, DIRECTION_SECTIONS,
-    PrepassFindings, RenderStep, VALID_LAYOUTS, VALID_PLACEMENTS,
-    read_continuity_anchors, read_direction,
+    ANCHORS_SECTION, DIRECTION_SECTIONS, PrepassFindings, RenderStep,
+    VALID_PLACEMENTS, find_section, read_continuity_anchors, read_direction,
 )
 
 DEFAULT_ASPECT: Final[str] = 'portrait'
@@ -129,7 +128,14 @@ def append_anchor_stubs(project_dir: str, anchors: dict[str, str]) -> list[str]:
             current = f.read()
     else:
         current = f'# Illustration art direction\n\n## {ANCHORS_SECTION}\n'
-    if ANCHORS_SECTION not in current:
+
+    # Detect the heading structurally and case-insensitively. A substring test
+    # over the whole document matched the phrase appearing in ordinary prose
+    # (appending the stubs into some other section's body, where they were fed
+    # to the image model as, say, a content limit) and missed a
+    # differently-cased real heading (appending a *second* anchors section,
+    # permanently orphaning everything under the first).
+    if find_section(read_direction(project_dir), ANCHORS_SECTION) is None:
         current = current.rstrip('\n') + f'\n\n## {ANCHORS_SECTION}\n'
 
     addition = '\n'.join(
@@ -386,26 +392,80 @@ ANCHORS
 """
 
 
+# Tolerates `ANCHORS`, `ANCHORS:`, and `**ANCHORS**` — a model that decorates
+# the marker would otherwise lose every anchor AND leave the block in the prompt
+# body, which the author then pastes into the image model as prompt text.
 ANCHOR_BLOCK_RE = re.compile(
-    r'^ANCHORS\s*$(.*)\Z', re.MULTILINE | re.DOTALL,
+    r'^[ \t]*(?:\*\*)?ANCHORS(?:\*\*)?[ \t]*:?[ \t]*$(.*)\Z',
+    re.MULTILINE | re.DOTALL,
 )
+
+# `Name — description`. The separator is an em/en dash, or a colon, or a hyphen
+# *surrounded by whitespace* — never a bare hyphen, which would sever every
+# hyphenated name ("Jean-Luc" became {'Jean': 'Luc — …'}). The mangled name was
+# then written into the direction document as canonical and, because
+# append_anchor_stubs never revises an existing anchor, stayed corrupt — and
+# stopped matching canon_refs, so the anchor silently left every prompt.
+_ANCHOR_LINE_RE = re.compile(
+    r'^[ \t]*[-*][ \t]*(?P<name>.+?)[ \t]*(?:[—–]|:|(?<=\s)-(?=\s))[ \t]*'
+    r'(?P<desc>.+?)[ \t]*$'
+)
+
+#: Trailing code fence left behind when the ANCHORS block was inside one.
+_TRAILING_FENCE_RE = re.compile(r'\n[ \t]*`{3,}[ \t]*\Z')
 
 
 def split_anchor_block(body: str) -> tuple[str, dict[str, str]]:
     """Split a model's prompt body from any trailing ANCHORS block.
 
-    Returns (body_without_anchors, anchors). Anchors proposed inline are
-    lifted out so they can be persisted once and reused verbatim.
+    Returns (body_without_anchors, anchors). Anchors proposed inline are lifted
+    out so they can be persisted once and reused verbatim.
+
+    Lines in the block that do not parse as ``Name — description`` are reported
+    by :func:`unparsed_anchor_lines` rather than silently dropped.
     """
     m = ANCHOR_BLOCK_RE.search(body)
     if not m:
-        return body.strip(), {}
+        return _strip_trailing_fence(body), {}
+
     anchors: dict[str, str] = {}
     for line in m.group(1).splitlines():
-        am = re.match(r'^\s*[-*]\s*(.+?)\s*[—:-]\s*(.+?)\s*$', line)
+        am = _ANCHOR_LINE_RE.match(line)
         if am:
-            anchors[am.group(1).strip().strip('*')] = am.group(2).strip()
-    return body[:m.start()].strip(), anchors
+            name = am.group('name').strip().strip('*').strip()
+            desc = am.group('desc').strip()
+            if name and desc:
+                anchors[name] = desc
+    # The request demonstrates the block inside a code fence, so the model
+    # usually emits one; cutting at the ANCHORS line leaves the opening fence
+    # behind, which corrupts every following section of the prompt file.
+    return _strip_trailing_fence(body[:m.start()]), anchors
+
+
+def unparsed_anchor_lines(body: str) -> list[str]:
+    """Lines in a model's ANCHORS block that did not parse as an anchor.
+
+    Surfaced so a mangled proposal is a warning the author can act on rather
+    than an anchor that quietly never existed.
+    """
+    m = ANCHOR_BLOCK_RE.search(body)
+    if not m:
+        return []
+    unparsed = []
+    for line in m.group(1).splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('```'):
+            continue
+        am = _ANCHOR_LINE_RE.match(line)
+        if not am or not am.group('name').strip().strip('*').strip() \
+                or not am.group('desc').strip():
+            unparsed.append(stripped)
+    return unparsed
+
+
+def _strip_trailing_fence(text: str) -> str:
+    """Remove an unterminated trailing code fence."""
+    return _TRAILING_FENCE_RE.sub('', text.rstrip()).strip()
 
 
 def render_references_block(
