@@ -1183,7 +1183,8 @@ def _check_page_files(project_dir: str) -> list[dict]:
 _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
     'duplicate_id': 'Give each illustration a unique id in '
                     'reference/illustration-plan.csv',
-    'invalid_id': 'Rename the id to a lowercase kebab-case slug',
+    'invalid_id': 'Rename the id to start with a letter or digit, using '
+                  'only letters, digits, hyphens, and underscores',
     'invalid_status': 'Set status to planned, prompted, rendered, ingested, '
                       'or superseded',
     'invalid_placement': 'Set placement to before_anchor, after_anchor, '

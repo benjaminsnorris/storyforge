@@ -1927,3 +1927,40 @@ def test_invoke_returns_empty_on_an_exception(in_project, monkeypatch, capsys):
     assert cmd_illustrate._invoke(in_project, 'p', 'op',
                                   task_type='creative', max_tokens=100) == ''
     assert 'network is down' in capsys.readouterr().out
+
+
+def test_embed_removes_the_marker_of_a_superseded_row(in_project, capsys):
+    """Retiring an illustration must remove its marker, not merely skip the row —
+    a marker left behind keeps pointing at art that must not render. This is
+    also what gives remove_marker a caller."""
+    write_scene(in_project, 'vigil',
+                ill.insert_marker(SCENE, plan_row())['text'])
+    ill.write_plan(in_project, [plan_row(status='superseded')])
+
+    assert cmd_illustrate.main(['--embed']) == 0
+
+    with open(os.path.join(in_project, 'scenes', 'vigil.md')) as f:
+        text = f.read()
+    assert ill.marker_ids(text) == []
+    assert 'She set it on the sill' in text
+    assert 'removed superseded marker' in capsys.readouterr().out
+
+
+def test_embed_dry_run_does_not_remove_a_superseded_marker(in_project, capsys):
+    write_scene(in_project, 'vigil',
+                ill.insert_marker(SCENE, plan_row())['text'])
+    ill.write_plan(in_project, [plan_row(status='superseded')])
+
+    cmd_illustrate.main(['--embed', '--dry-run'])
+    assert '[dry-run] would remove' in capsys.readouterr().out
+    with open(os.path.join(in_project, 'scenes', 'vigil.md')) as f:
+        assert ill.marker_ids(f.read()) == ['lantern-vigil']
+
+
+def test_enrich_word_count_excludes_markers(tmp_path):
+    from storyforge.cmd_enrich import _word_count
+    plain = tmp_path / 'plain.md'
+    plain.write_text(SCENE)
+    marked = tmp_path / 'marked.md'
+    marked.write_text(ill.insert_marker(SCENE, plan_row())['text'])
+    assert _word_count(str(marked)) == _word_count(str(plain))

@@ -56,9 +56,15 @@ Before deciding where illustrations go, settle what they look like. `reference/i
 
 This is the highest-leverage artifact in the flow. A per-illustration prompt can be re-rolled for a few cents. A book whose fifteen images disagree with each other has to be re-rendered wholesale.
 
-```bash
-[plugin_path]/storyforge illustrate --direction
-```
+> **Option A: Run it here**
+> I'll draft the direction document in this conversation.
+>
+> **Option B: Run it yourself**
+> ```bash
+> cd [project_dir] && [plugin_path]/storyforge illustrate --direction
+> ```
+
+Wait for the author's choice; if Option B, give them the command and stop. In `full` coaching this is an Opus synthesis call, so it costs real money.
 
 Five sections:
 
@@ -76,7 +82,7 @@ Put measurable facts in them — height in centimeters, age in years, exact hair
 
 **Never revise an anchor a rendered illustration already used.** If it's wrong, the fix is re-rendering from the corrected anchor, not editing the string and leaving the old art in place. If the model proposes a new anchor while writing a prompt, the command appends it to the direction document for you to review rather than treating it as settled.
 
-`--diagnose` and `validate` report sections left empty or still holding template text — a scaffold fed to an image model as though it were direction is worse than no document at all.
+`--direction` reports sections left empty or still holding template text when the document already exists, and `--prompts` warns before it spends anything — a scaffold fed to an image model as though it were direction is worse than no document at all.
 
 ---
 
@@ -141,11 +147,17 @@ The order also reports what each illustration `locks` — the anchors it is the 
 
 Turn planned rows into prompts the author can paste into an image model.
 
-```bash
-[plugin_path]/storyforge illustrate --prompts
-```
+> **Option A: Run it here**
+> I'll write the art direction in this conversation.
+>
+> **Option B: Run it yourself**
+> ```bash
+> cd [project_dir] && [plugin_path]/storyforge illustrate --prompts
+> ```
 
-Add `--ids one,two` to limit it to specific illustrations.
+Wait for the author's choice. This is **one creative API call per illustration**, so it is the most expensive phase in the flow — a fifteen-illustration book means fifteen calls.
+
+Add `--ids one,two` to limit it to specific illustrations, or to re-prompt ones already written after editing their plan row.
 
 This writes `manuscript/assets/illustrations/prompts/{id}.md` per illustration, and sets `status=prompted`. Each prompt file carries the reference list, the prompt body in OpenAI's five-section template, the constraints, and a log table.
 
@@ -155,8 +167,8 @@ These come from lived iteration (benjaminsnorris/ashes PR #9, tracked as #260 an
 
 1. **Five-section template** — Scene / Subject / Important details / Use case / Constraints. Structure beats brevity.
 2. **Reference images carry style and likeness**, so prompt prose stays short (~250–400 words). The references are the cover art plus prior ingested illustrations — that chain is what keeps a book's interior art visually of a piece instead of fifteen unrelated pictures.
-3. **The continuity anchor is the identical string every time.** Anchors live in the `## Continuity anchors` section of `reference/illustration-direction.md`. Only the anchors an illustration actually shows are sent, narrowed by its `canon_refs`. Never revise an anchor a rendered illustration already used — likeness continuity depends on the string being byte-identical.
-4. **Positive framing, not negation.** Negated keywords leak into the image. "A bare sill," not "no clutter on the sill."
+3. **The continuity anchor is the identical string every time.** Anchors live in the `## Continuity anchors` section of `reference/illustration-direction.md`. Only the anchors an illustration actually shows are sent, narrowed by matching its `canon_refs` against the anchor names. If `canon_refs` is empty, or if none of its entries match an anchor name, the full set is sent instead — an unfiltered anchor set is a smaller failure than a missing one, but it means a mismatch between `canon_refs` wording and your `### Name` headings shows up as an over-broad prompt rather than an error. Never revise an anchor a rendered illustration already used — likeness continuity depends on the string being byte-identical.
+4. **Positive framing for content, not negation.** Negated content keywords leak into the image. "A bare sill," not "no clutter on the sill." Orientation and the no-text rule are the two deliberate exceptions — both are failure modes positive phrasing has not been observed to prevent.
 5. **Explicit orientation, in two places.** GPT Image 2 returns landscape unless told otherwise. Aspect comes from `layout` first — a `double_page` spread is landscape because that is a fact about the page — then from the row's `composition` field, which can say `landscape` or `square`. Portrait otherwise.
 
 The whole book-level direction goes into every prompt too, which is why the command warns loudly when the direction document is missing: without it the prompts carry no house style, and the images won't look like they belong to one book.
@@ -181,9 +193,13 @@ The author has rendered files. Bring them in.
 [plugin_path]/storyforge illustrate --ingest path/to/renders/
 ```
 
+_(No API calls — safe to run here without asking.)_
+
 Files are matched to plan rows **by filename stem** — `lantern-vigil.png` matches the row with id `lantern-vigil`. A file matching nothing is reported and skipped, never guessed at. If the author's filenames don't match, have them rename, or ingest one file at a time.
 
-Ingest normalizes each file to `manuscript/assets/illustrations/{id}.png`, records `sha256` / `width` / `height`, sets `status=ingested`, and then embeds the marker in the scene file.
+Ingest copies each file to `manuscript/assets/illustrations/{id}{.ext}`, keeping the source extension (png, jpg, jpeg, or webp), records `sha256` / `width` / `height`, sets `status=ingested`, and then embeds the marker in the scene file.
+
+A truncated file is refused before anything is written — an aborted render download leaves a header-valid stub whose dimensions parse fine, and overwriting good art with it is unrecoverable. A legitimate replacement is logged with both shapes.
 
 Empty files and unreadable images are rejected with a warning rather than recorded.
 
@@ -206,7 +222,7 @@ Commit after ingest.
 An illustration isn't working.
 
 1. Set its `status` to `superseded` in the plan.
-2. Remove its marker from the scene (or run `--embed` after, which skips superseded rows).
+2. Run `--embed`, which removes the markers of superseded rows. A superseded illustration also stops rendering into the epub, PDF, and web book even if its file is still on disk.
 3. Add a fresh row with a new id, or re-prompt the existing one with `--ids`.
 
 Keep the superseded row. It records what was tried and why it didn't land, which is exactly what you want when the third attempt is also not working.
@@ -220,6 +236,8 @@ Once most illustrations are rendered, check the sequence **as a set**.
 ```bash
 [plugin_path]/storyforge illustrate --review
 ```
+
+_(No API calls — safe to run here without asking.)_
 
 Writes `working/illustration-sequence-review.md`: cross-sequence checks, the anchors to check each image against, the content limits, and the render order with what's done and what's pending.
 
@@ -236,6 +254,8 @@ When you find drift, fix it by re-rendering from the anchor — not by patching 
 ```bash
 [plugin_path]/storyforge illustrate --diagnose
 ```
+
+_(No API calls — safe to run here without asking.)_
 
 Read-only. Reports plan counts by status, what's embedded, the recommended render order with the visual key marked, what's next to render, and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers, invalid layouts.
 

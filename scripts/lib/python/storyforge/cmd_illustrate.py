@@ -10,7 +10,8 @@ Seven phases, each its own flag:
   --prompts    Turn planned rows into image-generation prompts.
   --ingest     Bring rendered files in, record digests, embed markers.
   --embed      (Re)insert markers from the plan, without ingesting.
-  --diagnose   Read-only plan health report, with the recommended render order.
+  --diagnose   Read-only plan health report, with the recommended render
+               order. Exclusive — when passed, no other phase runs.
   --review     Whole-sequence continuity checklist for the rendered set.
 
 The command emits art direction; the author renders externally and ingests.
@@ -193,13 +194,7 @@ def run_diagnose(project_dir: str) -> int:
 
 def run_direction(project_dir: str, coaching: CoachingLevel,
                   dry_run: bool) -> int:
-    """Write the book-level art-direction document.
-
-    Authored once, and it constrains every illustration — which makes it the
-    highest-leverage artifact in the flow. A per-illustration prompt can be
-    re-rolled cheaply; a book whose images disagree with each other has to be
-    re-rendered wholesale.
-    """
+    """Write the book-level art-direction document."""
     path = ill.direction_path(project_dir)
     rel = os.path.relpath(path, project_dir)
     entities = _anchor_candidates(project_dir)
@@ -299,12 +294,7 @@ def _anchor_candidates(project_dir: str) -> list[str]:
 # ============================================================================
 
 def run_review(project_dir: str, dry_run: bool) -> int:
-    """Write the whole-sequence continuity review checklist.
-
-    Per-illustration validation cannot see drift: each image is individually
-    fine and the set is still inconsistent. This is the pass that looks at all
-    of them together.
-    """
+    """Write the whole-sequence continuity review checklist."""
     steps = ill.render_order(project_dir)
     if not steps:
         log('No illustration plan to review. Run `--plan` first.')
@@ -630,8 +620,9 @@ def _references_for(project_dir: str,
 
     Prior ingested illustrations plus the cover are what hold a book's art
     together visually — a prompt with no style reference produces an image that
-    belongs to no book in particular. Earlier illustrations come first, so the
-    references follow the render order that produced them.
+    belongs to no book in particular. Walked in plan order, which is usually but
+    not necessarily render order — the chain only needs *some* prior art to
+    anchor style, not a specific one.
     """
     references: list[tuple[str, str]] = []
     cover = os.path.join('manuscript', 'assets', 'cover-illustration.png')
@@ -799,13 +790,22 @@ def _collect_candidates(source: str) -> list[str]:
 
 def run_embed(project_dir: str, ids: set[str] | None, dry_run: bool) -> int:
     """Insert markers into scene files from the plan."""
-    rows = ill.read_plan(project_dir)
+    all_rows = ill.read_plan(project_dir)
     if ids is not None:
-        rows = [r for r in rows if r['id'].strip() in ids]
-    rows = [r for r in rows
+        all_rows = [r for r in all_rows if r['id'].strip() in ids]
+
+    superseded = [r for r in all_rows
+                  if (r.get('status') or '').strip() == 'superseded']
+    rows = [r for r in all_rows
             if (r.get('status') or '').strip() != 'superseded']
 
+    # Retiring an illustration has to remove its marker, not merely skip the
+    # row: a marker left behind keeps pointing at art that must not render.
+    unembedded = _unembed_superseded(project_dir, superseded, dry_run)
+
     if not rows:
+        if unembedded:
+            return 0
         log('No plan rows to embed.')
         return 0
 
@@ -862,6 +862,33 @@ _HINT_STOPWORDS = frozenset({
     'not', 'you', 'your', 'its', 'their', 'been', 'then', 'than', 'when',
     'what', 'who', 'how', 'all', 'one', 'out', 'off', 'own', 'too',
 })
+
+
+def _unembed_superseded(project_dir: str, rows: list[dict[str, str]],
+                        dry_run: bool) -> int:
+    """Remove markers for superseded plan rows. Returns how many were removed."""
+    removed = 0
+    for row in rows:
+        illus_id = row['id'].strip()
+        scene_id = (row.get('scene_id') or '').strip()
+        scene_path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+        if not os.path.isfile(scene_path):
+            continue
+        with open(scene_path, encoding='utf-8') as f:
+            original = f.read()
+        text, changed = ill.remove_marker(original, illus_id)
+        if not changed:
+            continue
+        if dry_run:
+            log(f'[dry-run] would remove the superseded marker {illus_id} '
+                f'from {scene_id}')
+        else:
+            with open(scene_path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            log(f'  removed superseded marker {illus_id} from '
+                f'scenes/{scene_id}.md')
+        removed += 1
+    return removed
 
 
 def _nearest_anchor_hint(scene_text: str, row: dict[str, str]) -> str:

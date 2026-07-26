@@ -6,10 +6,13 @@ mechanics behind them:
   - ``reference/illustration-plan.csv`` — one row per illustration, holding
     the narrative justification, the art-direction fields, and (after ingest)
     the file digest and dimensions.
-  - The scene marker ``![[illus:{id}]]`` — a single line in ``scenes/{id}.md``
-    marking where the illustration lands in the prose.
+  - ``reference/illustration-direction.md`` — the book-level art-direction
+    document and the continuity anchors inside it.
+  - The scene marker ``![[illus:{id}]]`` — insertion at a whitespace-tolerant
+    prose anchor, parsing, and stripping.
   - Resolution — one marker, three output targets (epub/PDF, web book,
     Bookshelf publish manifest), each rendering it its own way.
+  - The selection pre-pass, the recommended render order, and plan validation.
 
 The marker is deliberately *not* a markdown image. A raw ``![](path)`` would
 resolve correctly for exactly one target and be wrong for the other two, and
@@ -878,9 +881,11 @@ class _TopLevelParagraphCounter(HTMLParser):
     """Count ``<p>`` elements at the top level of a fragment.
 
     Nesting depth is tracked so a paragraph inside a ``<blockquote>`` does not
-    count. That matches how the reader composes: it walks the scene
-    container's direct children and inserts a figure after the Nth top-level
-    paragraph, so a nested paragraph is not a placement boundary there either.
+    count. This is the producer half of a contract with the Bookshelf reader
+    (benjaminsnorris/bookshelf#12, not yet implemented): the reader must walk
+    the scene container's direct children, so a nested paragraph must not be a
+    placement boundary on either side. If that repo counts descendants instead,
+    this class is wrong and every ``after_paragraph`` shifts.
     """
 
     #: Elements that never nest and so never open a level.
@@ -930,9 +935,10 @@ def scene_placements(scene_md: str,
     against — a markdown block can be a heading, a blockquote, or a scene
     divider, none of which is a ``<p>``.
 
-    This is the contract the Bookshelf reader consumes
-    (benjaminsnorris/bookshelf#12): place the figure after the Nth top-level
-    paragraph of the scene, counting from zero.
+    This is the contract ``after_paragraph`` defines for the Bookshelf reader
+    (benjaminsnorris/bookshelf#12, not yet built): the value is the *count* of
+    top-level paragraphs preceding the marker, so a figure with
+    ``after_paragraph: 1`` renders after the first one.
     """
     placements: list[ScenePlacement] = []
     for hit in find_markers(scene_md):
@@ -1584,7 +1590,9 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
 
         if not _ID_RE.match(rid):
             findings.append({'kind': 'invalid_id', 'id': rid,
-                             'detail': f'id {rid!r} is not a lowercase kebab-case slug'})
+                             'detail': f'id {rid!r} must start with a letter or digit '
+                                       f'and contain only letters, digits, '
+                                       f'hyphens, and underscores'})
 
         status = (row.get('status') or '').strip()
         if status and status not in VALID_PLAN_STATUSES:

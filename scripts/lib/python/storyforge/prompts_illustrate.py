@@ -1,11 +1,18 @@
 """Prompt builders for interior illustrations.
 
-Two prompt families live here:
+Three prompt families live here:
 
   - **Selection** — asks the model which narrative moments earn an
     illustration, given the deterministic pre-pass findings.
-  - **Art direction** — turns one plan row into an image-generation prompt the
-    author can paste into GPT Image 2.
+  - **Art direction (book level)** — the one document every illustration
+    inherits: format, visual promise, recurring visual language, content
+    limits, continuity anchors.
+  - **Art direction (per illustration)** — turns one plan row into an
+    image-generation prompt the author can paste into GPT Image 2.
+
+Plus the author-facing renderers for the non-``full`` coaching levels (planning
+brief, constraint checklist, direction template) and the whole-sequence
+continuity review — documents, not prompts.
 
 The art-direction prompts reuse the five principles validated on
 benjaminsnorris/ashes PR #9 and encoded for graphic-novel pages in #260/#263:
@@ -72,9 +79,14 @@ def orientation_clause(aspect: Aspect = DEFAULT_ASPECT) -> str:
 
     GPT Image 2 returns landscape unless told otherwise (#263), so every
     prompt states its orientation in both the Use case and the Constraints.
-    This is the one place the prompt negates — the content rules below use
-    positive framing only, because negated content keywords leak into the
-    image, but orientation drift needs the explicit "not".
+
+    Orientation and the standing no-text rule are the two constraints stated as
+    explicit negations. Everything describing image *content* uses positive
+    framing only, because negated content keywords leak into the render;
+    orientation drift and stray lettering are both failure modes positive
+    phrasing has not been observed to prevent. (The GN version of this claim in
+    #263 says "the one place" because GN prompts do not carry the no-text rule —
+    prose prompts do.)
     """
     a = (aspect or DEFAULT_ASPECT).strip().lower()
     if a == 'landscape':
@@ -692,7 +704,8 @@ def render_strict_checklist(*, prepass: PrepassFindings,
         '',
         '| Column | Requirement |',
         '|--------|-------------|',
-        '| `id` | Lowercase kebab-case slug, unique across the plan. |',
+        '| `id` | Letters, digits, `-`, `_`; must start with a letter or '
+        'digit. Unique across the plan, case-insensitively. |',
         '| `scene_id` | Must match an id in `reference/scenes.csv`. |',
         '| `anchor` | A phrase appearing verbatim and exactly once in that '
         'scene file. |',
@@ -755,13 +768,7 @@ DIRECTION_BRIEF: Final[dict[str, str]] = {
 def build_direction_request(*, title: str, genre: str, audience: str,
                             canon_context: str, story_context: str,
                             entities: list[str]) -> str:
-    """Build the prompt that drafts the book-level art-direction document.
-
-    This document is authored once and constrains every illustration, which
-    makes it the highest-leverage artifact in the flow — a per-illustration
-    prompt can be re-rolled cheaply, but a book whose images disagree with each
-    other has to be re-rendered wholesale.
-    """
+    """Build the prompt that drafts the book-level art-direction document."""
     briefs = '\n\n'.join(
         f'### {name}\n\n{brief}' for name, brief in DIRECTION_BRIEF.items())
     entity_list = '\n'.join(f'- {name}' for name in entities) or \
@@ -898,10 +905,8 @@ def render_sequence_review(*, title: str, steps: list[RenderStep],
                            direction: dict[str, str]) -> str:
     """Render the whole-sequence continuity review checklist.
 
-    Per-illustration validation cannot catch continuity drift: each image is
-    individually fine and the set is still inconsistent. This is the pass that
-    looks at all of them together, which is the only place a character who
-    gained an inch of height across ten renders becomes visible.
+    The rendered output explains to the author why a set-level pass exists; this
+    docstring does not repeat it.
     """
     rendered = [s for s in steps if s['status'] == 'ingested']
     pending = [s for s in steps if s['status'] != 'ingested']
