@@ -1307,15 +1307,46 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
     # Illustration assets — metadata only, no bytes. The bytes go straight to
     # storage via a content-addressed digest diff (benjaminsnorris/bookshelf#11).
     if used_illustrations:
+        from storyforge.common import log as _log
+
         assets = _ill.manifest_assets(project_dir, used_illustrations)
+        declared = {a['key'] for a in assets}
         if assets:
             manifest['assets'] = assets
-        undeclared = used_illustrations - {a['key'] for a in assets}
+
+        undeclared = used_illustrations - declared
         if undeclared:
-            from storyforge.common import log as _log
-            _log(f'WARNING: {len(undeclared)} illustration(s) are marked in '
-                 f'scenes but not ingested, so they will not publish: '
-                 f'{", ".join(sorted(undeclared))}')
+            # A placement referencing an asset the manifest does not declare is
+            # a dangling reference handed to the reader app. Drop it: a
+            # self-consistent manifest missing an illustration is strictly
+            # better than an inconsistent one.
+            for chapter in chapters:
+                for scene in chapter['scenes']:
+                    kept = [p for p in scene.get('illustrations', [])
+                            if p['key'] in declared]
+                    if kept:
+                        scene['illustrations'] = kept
+                    else:
+                        scene.pop('illustrations', None)
+            _log(f'WARNING: dropped {len(undeclared)} illustration '
+                 f'placement(s) with no publishable asset: '
+                 f'{", ".join(sorted(undeclared))}. The manifest stays '
+                 f'self-consistent; the art will not appear. Cause per '
+                 f'illustration:')
+            plan = _ill.read_plan_as_map(project_dir)
+            for key in sorted(undeclared):
+                row = next((r for r in plan.values()
+                            if _ill.asset_key(r['id']) == key), None)
+                if row is None:
+                    _log(f'  {key}: no plan row')
+                elif (row.get('status') or '').strip() != 'ingested':
+                    _log(f'  {key}: status={row.get("status") or "planned"} '
+                         f'— not yet ingested')
+                else:
+                    _log(f'  {key}: ingested but sha256 is missing — '
+                         f're-ingest to record it')
+        if assets:
+            _log(f'Manifest: {len(assets)} illustration(s) declared')
 
     # Embed dashboard HTML if requested
     if include_dashboard:

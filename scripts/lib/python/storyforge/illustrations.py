@@ -434,9 +434,34 @@ def marker_ids(text: str) -> list[str]:
     return [h['id'] for h in find_markers(text)]
 
 
+def all_marker_ids(text: str) -> list[str]:
+    """Every marked id in *text*, including markers placed mid-paragraph.
+
+    ``marker_ids`` is deliberately line-only because an own-line marker is the
+    canonical form that feeds paragraph placements. This is the wider view,
+    used where *any* occurrence matters — idempotence checks and validation.
+    """
+    return [m.group(1) for m in MARKER_ANY_RE.finditer(text)]
+
+
+def inline_marker_ids(text: str) -> list[str]:
+    """Ids marked mid-paragraph rather than on their own line."""
+    line_ids = marker_ids(text)
+    inline = list(all_marker_ids(text))
+    for illus_id in line_ids:
+        if illus_id in inline:
+            inline.remove(illus_id)
+    return inline
+
+
 def has_marker(text: str, illus_id: str) -> bool:
-    """True when *text* already carries the marker for *illus_id*."""
-    return illus_id in marker_ids(text)
+    """True when *text* already carries the marker for *illus_id*.
+
+    Checks any position, not just own-line: a hand-placed inline marker must
+    still make insertion a no-op, or ``--embed`` would add a second marker for
+    the same illustration and the book would show it twice.
+    """
+    return illus_id in all_marker_ids(text)
 
 
 def strip_markers(text: str) -> str:
@@ -572,6 +597,22 @@ class InsertResult(TypedDict):
     error: str
 
 
+def _split_frontmatter(text: str) -> tuple[str, str]:
+    """Split leading YAML frontmatter from the prose after it.
+
+    Returns ``(frontmatter_including_trailing_blank_line, body)``, or
+    ``('', text)`` when there is none. Scene files are documented as having no
+    frontmatter, but older projects still do, and a marker inserted above it
+    breaks every ``startswith('---')`` stripper downstream.
+    """
+    if not text.startswith('---'):
+        return '', text
+    match = re.match(r'\A---[ \t]*\n.*?\n---[ \t]*\n', text, re.DOTALL)
+    if not match:
+        return '', text
+    return match.group(0), text[match.end():].lstrip('\n')
+
+
 def insert_marker(scene_text: str, row: dict[str, str]) -> InsertResult:
     """Insert a plan row's marker into scene text at its anchor.
 
@@ -595,12 +636,18 @@ def insert_marker(scene_text: str, row: dict[str, str]) -> InsertResult:
         return {'text': scene_text, 'changed': False,
                 'error': f'invalid placement {placement!r}'}
 
-    body = scene_text.rstrip('\n')
+    # Legacy scene files can still carry YAML frontmatter. Inserting above it
+    # would make the file no longer *start* with `---`, and every frontmatter
+    # stripper in the pipeline tests exactly that — so the whole YAML block
+    # would land in the epub and inflate word_count.
+    frontmatter, body = _split_frontmatter(scene_text.rstrip('\n'))
 
     if placement == 'scene_open':
-        return {'text': f'{marker}\n\n{body}\n', 'changed': True, 'error': ''}
+        return {'text': f'{frontmatter}{marker}\n\n{body}\n',
+                'changed': True, 'error': ''}
     if placement == 'scene_close':
-        return {'text': f'{body}\n\n{marker}\n', 'changed': True, 'error': ''}
+        return {'text': f'{frontmatter}{body}\n\n{marker}\n',
+                'changed': True, 'error': ''}
 
     anchor = (row.get('anchor') or '').strip()
     if not anchor:
@@ -630,7 +677,53 @@ def insert_marker(scene_text: str, row: dict[str, str]) -> InsertResult:
     # A marker at the very start or very end of a scene has prose on one side
     # only; joining unconditionally would leave leading or trailing blanks.
     parts = [p for p in (head, marker, tail) if p]
-    return {'text': '\n\n'.join(parts) + '\n', 'changed': True, 'error': ''}
+    return {'text': frontmatter + '\n\n'.join(parts) + '\n',
+            'changed': True, 'error': ''}
+
+
+class PreserveResult(TypedDict):
+    """Outcome of restoring markers a rewrite dropped."""
+    text: str
+    restored: list[str]
+    lost: list[str]
+
+
+def preserve_markers(project_dir: str, original: str,
+                     rewritten: str) -> PreserveResult:
+    """Restore markers present in *original* but missing from *rewritten*.
+
+    A revision or re-draft pass sends prose to a model and writes the response
+    over the scene file. The model has no reason to reproduce a marker, so the
+    illustration silently disappears — and nothing downstream notices, because
+    an unembedded plan row is indistinguishable from one that was never
+    embedded. Restoring here means a polish pass cannot cost the author an
+    illustration.
+
+    ``lost`` names markers that could not be restored because the row's anchor
+    no longer matches the rewritten prose; those need author attention.
+    """
+    was_marked = dict.fromkeys(all_marker_ids(original))
+    if not was_marked:
+        return {'text': rewritten, 'restored': [], 'lost': []}
+
+    plan = read_plan_as_map(project_dir)
+    text = rewritten
+    restored: list[str] = []
+    lost: list[str] = []
+    for illus_id in was_marked:
+        if has_marker(text, illus_id):
+            continue
+        row = plan.get(illus_id)
+        if row is None:
+            lost.append(illus_id)
+            continue
+        result = insert_marker(text, row)
+        if result['changed']:
+            text = result['text']
+            restored.append(illus_id)
+        else:
+            lost.append(illus_id)
+    return {'text': text, 'restored': restored, 'lost': lost}
 
 
 def remove_marker(scene_text: str, illus_id: str) -> tuple[str, bool]:
@@ -674,7 +767,12 @@ def resolve_to_markdown(scene_text: str, plan: dict[str, dict[str, str]],
         alt = alt.replace('[', '(').replace(']', ')')
         return f'![{alt}]({path})'
 
-    return MARKER_LINE_RE.sub(repl, scene_text)
+    resolved = MARKER_LINE_RE.sub(repl, scene_text)
+    # Own-line markers become images; anything left is a marker placed
+    # mid-paragraph, where a block image cannot go. Strip it rather than let it
+    # through — the docstring's rule is that no marker syntax reaches an output
+    # artifact, and MARKER_LINE_RE alone left inline ones as literal text.
+    return MARKER_ANY_RE.sub('', resolved)
 
 
 def resolve_for_local(project_dir: str, scene_text: str,
@@ -689,6 +787,12 @@ def resolve_for_local(project_dir: str, scene_text: str,
         return strip_markers(scene_text)
 
     def path_for(illus_id: str, row: dict[str, str]) -> str | None:
+        # A superseded illustration must not render. Filtering on file
+        # existence alone shipped retired art in the epub while
+        # manifest_assets correctly excluded it, so the two targets disagreed —
+        # which is the whole thing the single-marker design exists to prevent.
+        if (row.get('status') or '').strip() == 'superseded':
+            return None
         abs_path = asset_path(project_dir, row)
         if not abs_path or not os.path.isfile(abs_path):
             return None
@@ -1215,14 +1319,15 @@ class IllustrationFinding(TypedDict, total=False):
 BLOCKING_FINDINGS: frozenset[str] = frozenset({
     'duplicate_id', 'invalid_id', 'invalid_status', 'invalid_placement',
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
-    'missing_digest', 'duplicate_marker', 'orphan_marker',
+    'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
 })
 
 # Findings that need author attention but leave a valid book. An anchor that
 # drifted after a revision is normal in-flight state; a file nobody claims is
 # usually a rename in progress.
 WARNING_FINDINGS: frozenset[str] = frozenset({
-    'anchor_drift', 'anchor_ambiguous', 'orphan_file',
+    'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
+    'unembedded_ingested', 'shattered_row',
 })
 
 
@@ -1317,6 +1422,26 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
                 findings.append({'kind': 'missing_digest', 'id': rid, 'file': rel,
                                  'detail': 'ingested row has no sha256 — publish needs it'})
 
+        if row.get(_SHATTERED_FLAG):
+            findings.append({
+                'kind': 'shattered_row', 'id': rid,
+                'detail': 'row has more fields than the header — an unescaped '
+                          '"|" split it, so columns after that point are '
+                          'shifted. Replace the pipe with "/"',
+            })
+
+        # An ingested illustration with no marker anywhere is not in-flight
+        # state: the art exists and the plan points at it, so the marker was
+        # either never embedded or was dropped by a rewrite. Either way the
+        # illustration will not appear in the book.
+        if status == 'ingested' and rel and not has_marker(scene_text, rid):
+            findings.append({
+                'kind': 'unembedded_ingested', 'id': rid, 'scene_id': scene_id,
+                'detail': f'{rid!r} is ingested but has no marker in '
+                          f'{scene_id} — it will not appear in the book. Run '
+                          f'`storyforge illustrate --embed`',
+            })
+
         anchor = (row.get('anchor') or '').strip()
         if placement not in ANCHORLESS_PLACEMENTS and anchor:
             match = find_anchor(scene_text, anchor)
@@ -1337,7 +1462,17 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
                 continue
             with open(os.path.join(scenes_dir, name), encoding='utf-8') as f:
                 text = f.read()
-            ids = marker_ids(text)
+            for mid in sorted(set(inline_marker_ids(text))):
+                findings.append({
+                    'kind': 'inline_marker', 'id': mid, 'scene_id': name[:-3],
+                    'detail': f'marker for {mid!r} in {name} is mid-paragraph, '
+                              f'not on its own line. Illustrations land at '
+                              f'paragraph boundaries, so it is dropped from '
+                              f'every output — run --embed instead of placing '
+                              f'it by hand',
+                })
+
+            ids = all_marker_ids(text)
             for mid in sorted(set(ids)):
                 if ids.count(mid) > 1:
                     findings.append({

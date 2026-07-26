@@ -1014,20 +1014,51 @@ def test_manifest_omits_assets_when_no_scene_is_illustrated(project_dir):
                for ch in manifest['chapters'] for s in ch['scenes'])
 
 
-def test_manifest_warns_about_a_marked_but_unrendered_illustration(project_dir,
-                                                                   capsys):
+def test_manifest_drops_a_placement_with_no_publishable_asset(project_dir,
+                                                              capsys):
+    """A placement referencing an asset the manifest doesn't declare is a
+    dangling reference handed to the reader app. A self-consistent manifest
+    missing an illustration is strictly better than an inconsistent one."""
     scene_path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
     with open(scene_path) as f:
         original = f.read()
     row = plan_row(scene_id='act1-sc01', anchor='brass calipers',
                    status='planned')
     ill.write_plan(project_dir, [row])
+    result = ill.insert_marker(original, row)
+    assert result['changed'], result['error']
+    with open(scene_path, 'w') as f:
+        f.write(result['text'])
+
+    manifest = build_manifest(project_dir)
+
+    assert 'assets' not in manifest
+    # The dangling placement is gone, not merely warned about.
+    assert all('illustrations' not in s
+               for ch in manifest['chapters'] for s in ch['scenes'])
+    out = capsys.readouterr().out
+    assert 'dropped 1 illustration placement' in out
+    # And the cause is named, not left for the author to guess.
+    assert 'status=planned' in out
+
+
+def test_manifest_names_a_missing_digest_as_the_cause(project_dir, capsys):
+    """An ingested row with no sha256 is fully ingested — the old warning said
+    'not ingested', sending the author to look in the wrong place."""
+    scene_path = os.path.join(project_dir, 'scenes', 'act1-sc01.md')
+    with open(scene_path) as f:
+        original = f.read()
+    row = plan_row(scene_id='act1-sc01', anchor='brass calipers',
+                   status='ingested',
+                   asset_file=ill.default_asset_rel('lantern-vigil'))
+    make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
+                          'lantern-vigil.png'), 8, 8)
+    ill.write_plan(project_dir, [row])
     with open(scene_path, 'w') as f:
         f.write(ill.insert_marker(original, row)['text'])
 
-    manifest = build_manifest(project_dir)
-    assert 'assets' not in manifest
-    assert 'will not publish' in capsys.readouterr().out
+    build_manifest(project_dir)
+    assert 'sha256 is missing' in capsys.readouterr().out
 
 
 # ============================================================================

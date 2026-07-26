@@ -1478,3 +1478,213 @@ def test_sanitize_cell():
     assert ill.sanitize_cell('a|b') == 'a/b'
     assert ill.sanitize_cell('a\nb\r') == 'a b'
     assert ill.sanitize_cell('  spaced  ') == 'spaced'
+
+
+# ============================================================================
+# Marker integrity
+# ============================================================================
+
+SCENE_WITH_FRONTMATTER = (
+    '---\n'
+    'id: "vigil"\n'
+    'status: "drafted"\n'
+    'drafted_at: "2026-02-28T14:30:00Z"\n'
+    '---\n'
+    '\n'
+    + SCENE
+)
+
+
+@pytest.mark.parametrize('placement,anchor', [
+    ('scene_open', ''),
+    ('scene_close', ''),
+    ('after_anchor', 'She set it on the sill'),
+    ('before_anchor', 'She set it on the sill'),
+])
+def test_insert_never_lands_above_yaml_frontmatter(placement, anchor):
+    """Regression: a scene_open marker went above the frontmatter, so the file
+    no longer started with `---`. Every frontmatter stripper tests exactly
+    that, so the whole YAML block landed in the epub and inflated word_count."""
+    result = ill.insert_marker(SCENE_WITH_FRONTMATTER,
+                               plan_row(placement=placement, anchor=anchor))
+    assert result['changed'], result['error']
+    assert result['text'].startswith('---\n')
+    assert 'drafted_at' in result['text']          # frontmatter intact
+    # And the marker is in the prose, not inside the frontmatter block.
+    _, body = ill._split_frontmatter(result['text'])
+    assert ill.marker_ids(body) == ['lantern-vigil']
+
+
+def test_frontmatter_scene_prose_has_no_yaml_after_insertion(tmp_path):
+    from storyforge.assembly import extract_scene_prose
+    path = tmp_path / 's.md'
+    path.write_text(ill.insert_marker(
+        SCENE_WITH_FRONTMATTER, plan_row(placement='scene_open',
+                                        anchor=''))['text'])
+    prose = extract_scene_prose(str(path))
+    assert 'drafted_at' not in prose
+    assert 'The lantern guttered' in prose
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('no frontmatter here\n', ('', 'no frontmatter here\n')),
+    ('---\na: 1\n---\nbody\n', ('---\na: 1\n---\n', 'body\n')),
+    ('---\nunterminated\n', ('', '---\nunterminated\n')),
+])
+def test_split_frontmatter(text, expected):
+    assert ill._split_frontmatter(text) == expected
+
+
+def test_has_marker_sees_an_inline_marker(project_dir):
+    """Otherwise --embed adds a second marker and the book shows it twice."""
+    text = 'She waited ![[illus:lantern-vigil]] a long time.\n'
+    assert ill.has_marker(text, 'lantern-vigil') is True
+    assert ill.insert_marker(text, plan_row())['changed'] is False
+
+
+def test_inline_marker_ids_excludes_own_line_markers():
+    text = ('One ![[illus:inline-one]] here.\n\n'
+            '![[illus:on-its-own-line]]\n\nTwo.\n')
+    assert ill.inline_marker_ids(text) == ['inline-one']
+    assert ill.marker_ids(text) == ['on-its-own-line']
+    assert sorted(ill.all_marker_ids(text)) == ['inline-one',
+                                                'on-its-own-line']
+
+
+def test_resolve_strips_an_inline_marker_rather_than_leaking_it(project_dir):
+    """A literal ![[illus:x]] in an epub is the visible defect the resolver
+    exists to prevent — but it only substituted own-line markers."""
+    make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
+                          'lantern-vigil.png'), 8, 8)
+    ill.write_plan(project_dir, [plan_row(
+        status='ingested', asset_file=ill.default_asset_rel('lantern-vigil'))])
+
+    resolved = ill.resolve_for_local(
+        project_dir, 'She waited ![[illus:lantern-vigil]] a long time.\n',
+        relative_to=project_dir)
+    assert '![[illus:' not in resolved
+    assert 'She waited' in resolved
+
+
+def test_superseded_illustrations_do_not_render(project_dir):
+    """The epub shipped retired art while manifest_assets excluded it, so the
+    two targets disagreed — the thing the single-marker design prevents."""
+    make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
+                          'lantern-vigil.png'), 8, 8)
+    ill.write_plan(project_dir, [plan_row(
+        status='superseded', sha256='a' * 64,
+        asset_file=ill.default_asset_rel('lantern-vigil'))])
+    marked = ill.insert_marker(SCENE, plan_row())['text']
+
+    resolved = ill.resolve_for_local(project_dir, marked,
+                                     relative_to=project_dir)
+    assert 'lantern-vigil.png' not in resolved
+    assert '![[illus:' not in resolved
+    # And the manifest agrees.
+    assert ill.manifest_assets(project_dir) == []
+
+
+# ============================================================================
+# preserve_markers
+# ============================================================================
+
+def test_preserve_restores_a_marker_a_rewrite_dropped(project_dir):
+    """A polish pass sends prose to a model and writes the response back. The
+    model has no reason to reproduce a marker, and nothing downstream could
+    tell the difference between dropped and never-embedded."""
+    ill.write_plan(project_dir, [plan_row()])
+    original = ill.insert_marker(SCENE, plan_row())['text']
+    rewritten = SCENE                       # the model omitted the marker
+
+    result = ill.preserve_markers(project_dir, original, rewritten)
+    assert result['restored'] == ['lantern-vigil']
+    assert result['lost'] == []
+    assert ill.marker_ids(result['text']) == ['lantern-vigil']
+
+
+def test_preserve_is_a_noop_when_the_marker_survived(project_dir):
+    ill.write_plan(project_dir, [plan_row()])
+    original = ill.insert_marker(SCENE, plan_row())['text']
+
+    result = ill.preserve_markers(project_dir, original, original)
+    assert result == {'text': original, 'restored': [], 'lost': []}
+
+
+def test_preserve_reports_a_marker_it_cannot_restore(project_dir):
+    """The rewrite dropped the marker AND changed the anchor prose."""
+    ill.write_plan(project_dir, [plan_row()])
+    original = ill.insert_marker(SCENE, plan_row())['text']
+
+    result = ill.preserve_markers(project_dir, original,
+                                  'Entirely rewritten prose.\n')
+    assert result['restored'] == []
+    assert result['lost'] == ['lantern-vigil']
+    assert '![[illus:' not in result['text']
+
+
+def test_preserve_reports_a_marker_with_no_plan_row(project_dir):
+    result = ill.preserve_markers(project_dir,
+                                  'a\n\n![[illus:ghost]]\n\nb\n', 'a\n\nb\n')
+    assert result['lost'] == ['ghost']
+
+
+def test_preserve_on_a_scene_with_no_markers(project_dir):
+    result = ill.preserve_markers(project_dir, SCENE, 'rewritten\n')
+    assert result == {'text': 'rewritten\n', 'restored': [], 'lost': []}
+
+
+# ============================================================================
+# New findings
+# ============================================================================
+
+def test_validate_reports_an_inline_marker(project_dir):
+    write_scene(project_dir, 'vigil',
+                'She waited ![[illus:lantern-vigil]] a long time.\n')
+    ill.write_plan(project_dir, [plan_row(anchor='', status='planned')])
+
+    findings = [f for f in ill.validate_plan(project_dir)
+                if f['kind'] == 'inline_marker']
+    assert len(findings) == 1
+    assert 'own line' in findings[0]['detail']
+    assert ill.severity_of('inline_marker') == 'warning'
+
+
+def test_validate_reports_an_ingested_illustration_with_no_marker(project_dir):
+    """The art exists and the plan points at it, so this is not in-flight
+    state — the marker was never embedded or a rewrite dropped it."""
+    write_scene(project_dir, 'vigil', SCENE)
+    make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
+                          'lantern-vigil.png'), 8, 8)
+    ill.write_plan(project_dir, [plan_row(
+        status='ingested', sha256='a' * 64,
+        asset_file=ill.default_asset_rel('lantern-vigil'))])
+
+    findings = [f for f in ill.validate_plan(project_dir)
+                if f['kind'] == 'unembedded_ingested']
+    assert len(findings) == 1
+    assert 'will not appear in the book' in findings[0]['detail']
+
+
+def test_an_embedded_ingested_illustration_is_not_flagged(project_dir):
+    write_scene(project_dir, 'vigil',
+                ill.insert_marker(SCENE, plan_row())['text'])
+    make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
+                          'lantern-vigil.png'), 8, 8)
+    ill.write_plan(project_dir, [plan_row(
+        status='ingested', sha256='a' * 64,
+        asset_file=ill.default_asset_rel('lantern-vigil'))])
+    assert ill.validate_plan(project_dir) == []
+
+
+def test_validate_reports_a_shattered_row(project_dir):
+    write_scene(project_dir, 'vigil', SCENE)
+    path = ill.plan_path(project_dir)
+    with open(path, 'w') as f:
+        f.write('|'.join(ill.PLAN_COLUMNS) + '\n')
+        f.write('lantern-vigil|vigil|She set it on the sill|after_anchor'
+                + '|' * (len(ill.PLAN_COLUMNS) - 4) + '|overflow\n')
+
+    findings = [f for f in ill.validate_plan(project_dir)
+                if f['kind'] == 'shattered_row']
+    assert len(findings) == 1
+    assert 'unescaped' in findings[0]['detail']

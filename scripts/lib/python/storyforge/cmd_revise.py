@@ -1279,6 +1279,8 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
             continue
 
         log(f'  Re-drafting scene: {scene_id}')
+        with open(scene_file, encoding='utf-8') as f:
+            original_prose = f.read()
         try:
             prompt = build_scene_prompt(scene_id, project_dir,
                                         coaching_level=coaching_level, api_mode=True,
@@ -1294,8 +1296,25 @@ def _redraft_scenes(project_dir: str, scene_ids: list[str]) -> int:
             continue
 
         extracted = extract_single_scene(response)
+        revised = extracted if extracted else response
+
+        # A model has no reason to reproduce an illustration marker, and losing
+        # one silently costs the author an illustration that nothing downstream
+        # would flag (#278). Restore what the rewrite dropped.
+        from storyforge.illustrations import preserve_markers
+        preserved = preserve_markers(project_dir, original_prose, revised)
+        if preserved['restored']:
+            log(f'  restored {len(preserved["restored"])} illustration '
+                f'marker(s) the rewrite dropped: '
+                f'{", ".join(preserved["restored"])}')
+        for lost in preserved['lost']:
+            log(f'  WARNING: illustration marker {lost!r} was in {scene_id} '
+                f'and the rewrite dropped it; its anchor no longer matches the '
+                f'revised prose, so it could not be restored. Re-anchor the '
+                f'plan row and run `storyforge illustrate --embed`')
+
         with open(scene_file, 'w', encoding='utf-8') as f:
-            f.write(extracted if extracted else response)
+            f.write(preserved['text'])
 
         count += 1
         log(f'  Re-drafted {scene_id}')
@@ -2435,7 +2454,9 @@ Rules:
             for scene_id in list_ids(metadata_csv):
                 scene_file = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
                 if os.path.isfile(scene_file):
-                    new_wc = str(len(open(scene_file).read().split()))
+                    from storyforge.illustrations import count_prose_words
+                    with open(scene_file, encoding='utf-8') as f:
+                        new_wc = str(count_prose_words(f.read()))
                     update_field(metadata_csv, scene_id, 'word_count', new_wc)
 
         # Update annotation status for revised scenes
