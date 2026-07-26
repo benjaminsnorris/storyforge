@@ -5,6 +5,7 @@ or waking-up openings — the three most common lazy scene openers.
 """
 
 import re
+from storyforge.illustrations import strip_markers
 
 
 _WEATHER_WORDS = frozenset({
@@ -72,6 +73,7 @@ def score_no_weather_dreams(scene_text: str) -> dict:
     Returns {'score': int, 'markers': dict, 'details': str}.
     Score 1-5.  Markers: nwd-1 (weather), nwd-2 (dream), nwd-3 (waking).
     """
+    scene_text = strip_markers(scene_text)
     markers = {'nwd-1': 0, 'nwd-2': 0, 'nwd-3': 0}
 
     if not scene_text.strip():

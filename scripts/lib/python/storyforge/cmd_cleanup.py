@@ -22,6 +22,9 @@ import sys
 import tempfile
 
 from storyforge.canon import CANON_DIR, CanonFinding, validate_canon_directory
+from storyforge.illustrations import (
+    PLAN_COLUMNS, IllustrationFindingKind,
+)
 from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge.parsing import clean_scene_content, extract_single_scene
@@ -108,6 +111,16 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     'working/scores/score-history.csv': [
         'cycle', 'scene_id', 'principle', 'score',
     ],
+    # Registered so `cleanup --csv` can see a malformed header; the
+    # cross-referential checks live in _check_illustrations. Listed in
+    # ALWAYS_OPTIONAL_CSV_FILES — most books have no illustrations, so its
+    # absence is not a finding.
+    'reference/illustration-plan.csv': list(PLAN_COLUMNS),
+}
+
+#: Registered for header checking but never required to exist, in any medium.
+ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
+    'reference/illustration-plan.csv',
 }
 EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
@@ -494,10 +507,10 @@ def report_csv_schema(project_dir: str) -> list[str]:
 
     # Build the effective schema for this project: start with base, apply GN overrides
     effective_schemas = dict(EXPECTED_CSV_SCHEMAS)
-    optional_files: set[str] = set()
+    optional_files: set[str] = set(ALWAYS_OPTIONAL_CSV_FILES)
     if is_gn:
         effective_schemas.update(GN_CSV_SCHEMA_OVERRIDES)
-        optional_files = GN_OPTIONAL_CSV_FILES
+        optional_files |= GN_OPTIONAL_CSV_FILES
 
     issues = []
 
@@ -1165,6 +1178,73 @@ def _check_page_files(project_dir: str) -> list[dict]:
     return findings
 
 
+#: Per-finding remediation text for the illustration plan (#278). Keyed by the
+#: `kind` illustrations.validate_plan emits.
+_ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
+    'duplicate_id': 'Give each illustration a unique id in '
+                    'reference/illustration-plan.csv',
+    'invalid_id': 'Rename the id to start with a letter or digit, using '
+                  'only letters, digits, hyphens, and underscores',
+    'invalid_status': 'Set status to planned, prompted, rendered, ingested, '
+                      'or superseded',
+    'invalid_placement': 'Set placement to before_anchor, after_anchor, '
+                         'scene_open, or scene_close',
+    'invalid_layout': 'Set layout to full_page, half_page, double_page, '
+                      'or inline',
+    'missing_scene': 'Set scene_id to the scene this illustration belongs to',
+    'unknown_scene': 'Fix scene_id, or add the missing scene file',
+    'missing_file': 'Run storyforge illustrate --ingest <path>, or set the '
+                    'row back to status=planned',
+    'missing_digest': 'Re-ingest the file so its sha256 is recorded — '
+                      'publishing is content-addressed and needs it',
+    'duplicate_marker': 'Remove the repeated ![[illus:…]] line from the scene',
+    'orphan_marker': 'Add the plan row, or remove the marker from the scene',
+    'anchor_drift': 'Update the anchor to a phrase that appears in the '
+                    'revised prose, then re-run '
+                    'storyforge illustrate --embed',
+    'anchor_ambiguous': 'Lengthen the anchor until it is unique within '
+                        'the scene',
+    'orphan_file': 'Reference the file from a plan row, or delete it',
+    'inline_marker': 'Move the marker to its own line — run '
+                     'storyforge illustrate --embed rather than placing it '
+                     'by hand',
+    'marker_lost': 'A rewrite dropped the marker. Re-anchor the plan row if '
+                   'the prose changed, then run '
+                   'storyforge illustrate --embed',
+    'unembedded_ingested': 'Run storyforge illustrate --embed — the art exists '
+                           'but nothing in the prose points at it',
+    'shattered_row': 'Replace the "|" in the offending cell with "/" — the '
+                     'plan is pipe-delimited and unquoted',
+}
+
+
+def _check_illustrations(project_dir: str) -> list[dict]:
+    """Check the illustration plan against markers and files (#278).
+
+    An unrendered plan row is valid in-flight state, not a finding — the same
+    posture as unrendered GN pages. What is reported is genuine incoherence
+    between the plan, the scene markers, and the files on disk.
+    """
+    from storyforge import illustrations as ill
+
+    findings: list[dict] = []
+    for finding in ill.validate_plan(project_dir):
+        kind = finding['kind']
+        target = finding.get('file') or (
+            f'scenes/{finding["scene_id"]}.md' if finding.get('scene_id')
+            else f'reference/{ill.PLAN_FILENAME}'
+        )
+        findings.append({
+            'type': f'illus_{kind}',
+            'file': target,
+            'detail': finding['detail'],
+            'action': _ILLUSTRATION_ACTIONS.get(
+                kind, 'Review the illustration plan'),
+            'severity': ill.severity_of(kind),
+        })
+    return findings
+
+
 def _check_crlf(project_dir: str) -> list[dict]:
     """Check CSV files for CRLF line endings."""
     findings: list[dict] = []
@@ -1274,6 +1354,11 @@ def build_cleanup_report(project_dir: str) -> dict:
         finding['category'] = 'pages'
         all_findings.append(finding)
 
+    # --- Interior illustrations (prose-only) ---
+    for finding in _check_illustrations(project_dir):
+        finding['category'] = 'illustrations'
+        all_findings.append(finding)
+
     # --- CSV schema ---
     schema_issues = report_csv_schema(project_dir)
     rename_pairs = _detect_rename_pairs(schema_issues)
@@ -1330,6 +1415,7 @@ def _print_report(report: dict) -> None:
         ('structure', 'Project Structure'),
         ('scenes', 'Scene Files'),
         ('pages', 'Page Files'),
+        ('illustrations', 'Interior Illustrations'),
         ('schema', 'CSV Schema'),
         ('integrity', 'CSV Integrity'),
         ('unexpected', 'Unexpected Files'),

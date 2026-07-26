@@ -3,10 +3,17 @@
 Provides passive voice detection, dialogue extraction, adverb detection,
 filler phrase scanning, and AI-tell vocabulary matching.  Pure stdlib —
 no API calls, no external dependencies.
+
+Every public detector strips interior-illustration markers first (#278). This
+module is the chokepoint every deterministic scorer routes through, so
+stripping here is what guarantees a marker is never scored as a sentence,
+never perturbs sentence-length variance, and never counts as a word.
 """
 
 import os
 import re
+
+from storyforge.illustrations import strip_markers
 
 
 # ============================================================================
@@ -64,6 +71,7 @@ def detect_passive_voice(text: str) -> list[dict]:
 
     Returns list of {'match': str, 'position': int} dicts.
     """
+    text = strip_markers(text)
     hits = []
     prog_positions = set()
 
@@ -99,6 +107,7 @@ def extract_dialogue(text: str) -> tuple[str, str]:
 
     Returns (dialogue_text, narration_text).
     """
+    text = strip_markers(text)
     dialogue_parts = []
     narration = text
     for m in _DIALOGUE_RE.finditer(text):
@@ -172,6 +181,7 @@ def detect_adverbs(text: str) -> list[dict]:
     Returns list of {'match': str, 'category': str, 'position': int} dicts.
     Categories: 'dialogue_tag', 'weak_verb', 'redundant'
     """
+    text = strip_markers(text)
     hits = []
     seen_positions = set()
 
@@ -250,6 +260,7 @@ def detect_filler_phrases(text: str) -> list[dict]:
 
     Returns list of {'match': str, 'position': int} dicts.
     """
+    text = strip_markers(text)
     return [
         {'match': m.group(0), 'position': m.start()}
         for m in _FILLER_RE.finditer(text)
@@ -289,6 +300,7 @@ def detect_ai_tell_hits(text: str, ai_tell_words: list[dict]) -> list[dict]:
 
     Returns list of {'word': str, 'category': str, 'severity': str, 'count': int}.
     """
+    text = strip_markers(text)
     text_lower = text.lower()
     hits = []
     for entry in ai_tell_words:

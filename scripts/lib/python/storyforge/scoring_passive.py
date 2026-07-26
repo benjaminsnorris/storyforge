@@ -5,6 +5,7 @@ clusters (3+ in a paragraph) indicate a problem.
 """
 
 from storyforge.exemplars import split_sentences
+from storyforge.illustrations import strip_markers
 from storyforge.prose_analysis import detect_passive_voice
 
 
@@ -14,6 +15,7 @@ def score_avoid_passive(scene_text: str) -> dict:
     Returns {'score': int, 'markers': dict, 'details': str}.
     Score 1-5.  Markers: ap-1 (cluster), ap-2 (density).
     """
+    scene_text = strip_markers(scene_text)
     markers = {'ap-1': 0, 'ap-2': 0}
 
     sentences = split_sentences(scene_text)

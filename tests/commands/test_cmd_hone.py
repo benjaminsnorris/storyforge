@@ -22,7 +22,7 @@ from storyforge.cmd_hone import (
     _resolve_scene_filter,
 )
 
-from tests.commands.conftest import (
+from commands.conftest import (
     load_api_response,
     load_api_response_text,
 )

@@ -5,6 +5,7 @@ AI-tell vocabulary, and weak verb+adverb density.
 """
 
 from storyforge.common import get_plugin_dir
+from storyforge.illustrations import strip_markers
 from storyforge.prose_analysis import (
     detect_passive_voice,
     detect_filler_phrases,
@@ -51,6 +52,7 @@ def score_economy_clarity(scene_text: str,
     Score 1-5.  Markers: ec-1 (filler), ec-2 (ai-tell), ec-3 (passive),
     ec-4 (weak adverbs).
     """
+    scene_text = strip_markers(scene_text)
     markers = {'ec-1': 0, 'ec-2': 0, 'ec-3': 0, 'ec-4': 0}
 
     words = scene_text.split()

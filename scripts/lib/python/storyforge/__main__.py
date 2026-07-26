@@ -10,6 +10,10 @@ import sys
 # Commands that don't yet support graphic-novel mode (Plan 1 boundary).
 # When a project's medium is graphic-novel, these commands return a clear
 # error instead of silently running novel-mode logic on the wrong data.
+#
+# `illustrate` is prose-only too, but self-guards in cmd_illustrate.main so it
+# can name the graphic-novel equivalent (`elaborate --stage prompts`) instead
+# of the generic unsupported message.
 GN_UNSUPPORTED_COMMANDS = frozenset({
     'publish', 'annotations', 'repetition', 'enrich',
 })
@@ -58,6 +62,7 @@ COMMANDS = {
     'assemble': 'storyforge.cmd_assemble',
     'cleanup': 'storyforge.cmd_cleanup',
     'cover': 'storyforge.cmd_cover',
+    'illustrate': 'storyforge.cmd_illustrate',
     'migrate': 'storyforge.cmd_migrate',
     'migrate-medium': 'storyforge.cmd_migrate_medium',
     'scenes-setup': 'storyforge.cmd_scenes_setup',
@@ -133,14 +138,30 @@ def main():
         if project_medium == 'graphic-novel' and not is_elaboration_score:
             sys.argv = [f'storyforge {cmd}'] + sys.argv[2:]
             module = importlib.import_module(GN_ROUTED_COMMANDS[cmd])
-            module.main(sys.argv[1:])
+            _dispatch(module)
             return
 
     # Remove 'storyforge' and command from argv so the module sees its own args
     sys.argv = [f'storyforge {cmd}'] + sys.argv[2:]
 
     module = importlib.import_module(COMMANDS[cmd])
-    module.main(sys.argv[1:])
+    _dispatch(module)
+
+
+def _dispatch(module) -> None:
+    """Run a command module, propagating a non-zero return as the exit status.
+
+    Most command modules call ``sys.exit()`` themselves. Those that signal by
+    *returning* an int (``cmd_illustrate``, ``cmd_elaborate``) had that value
+    silently discarded here, so every one of their error paths reported success
+    to the shell — including guards that exist specifically to stop a run.
+
+    Only a non-zero code exits: returning normally on success keeps this
+    callable in-process, which the dispatcher tests rely on.
+    """
+    code = module.main(sys.argv[1:])
+    if code:
+        sys.exit(code)
 
 
 if __name__ == '__main__':
