@@ -865,30 +865,34 @@ def anchor_texts(project_dir: str) -> dict[str, str]:
     Skips files whose Embeddable block is missing or still placeholder text:
     a scaffold sent to an image model as though it were direction is worse
     than sending nothing, because it reads as a deliberate instruction.
+
+    Walks via `_walk_canon_files` (not a hand-rolled `os.walk`) so this
+    accessor shares two guarantees with every other reader of the canon
+    tree: starter templates (`_template.md`) are excluded — their
+    Embeddable block is instructional prose, not a TODO stub, so the
+    placeholder check alone would not catch them — and traversal order is
+    deterministic (sorted by full path) so a duplicate `canon_id` across
+    directories resolves to the same winner on every machine.
     """
     canon_dir = os.path.join(project_dir, CANON_DIR)
     if not os.path.isdir(canon_dir):
         return {}
 
     anchors: dict[str, str] = {}
-    for root, _dirs, files in os.walk(canon_dir):
-        for filename in sorted(files):
-            if not filename.endswith('.md'):
-                continue
-            path = os.path.join(root, filename)
-            parsed = parse_canon_file(path)
-            fm = parsed['frontmatter']
-            if not isinstance(fm, dict):
-                continue
-            if fm.get('canon_type') not in ENTITY_CANON_TYPES:
-                continue
-            canon_id = (fm.get('canon_id') or '').strip()
-            if not canon_id:
-                continue
-            body = embeddable_block_text(path)
-            if body is None or _section_body_is_placeholder(body):
-                continue
-            anchors[canon_id] = body.strip()
+    for path in _walk_canon_files(canon_dir):
+        parsed = parse_canon_file(path)
+        fm = parsed['frontmatter']
+        if not isinstance(fm, dict):
+            continue
+        if fm.get('canon_type') not in ENTITY_CANON_TYPES:
+            continue
+        canon_id = (fm.get('canon_id') or '').strip()
+        if not canon_id:
+            continue
+        body = embeddable_block_text(path)
+        if body is None or _section_body_is_placeholder(body):
+            continue
+        anchors[canon_id] = body.strip()
     return anchors
 
 

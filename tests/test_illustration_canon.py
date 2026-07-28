@@ -188,3 +188,67 @@ def test_resolve_canon_path_finds_root_and_subdir(project_dir):
     assert resolve_canon_path(project_dir, 'visual-foundation').endswith(
         'visual-foundation.md')
     assert resolve_canon_path(project_dir, 'nobody') is None
+
+
+def test_anchor_texts_excludes_starter_templates(project_dir, plugin_dir):
+    """`skills/init/SKILL.md` copies templates/reference/canon/ into every
+    new project, so characters/_template.md is present and permanent in
+    normal projects. Its Embeddable block is instructional prose (not a
+    TODO stub), so only a template guard — not the placeholder check —
+    keeps it out of anchor_texts. Regression for the round-1 review
+    finding: a hand-rolled os.walk without _walk_canon_files's
+    _is_template_file guard let this scaffold through as a real anchor
+    keyed by the literal string '<character-slug>'."""
+    from storyforge.canon import anchor_texts
+    _set_medium(project_dir, 'novel')
+    template_path = os.path.join(
+        plugin_dir, 'templates', 'reference', 'canon', 'characters',
+        '_template.md',
+    )
+    with open(template_path, encoding='utf-8') as f:
+        template_body = f.read()
+    _write_canon(
+        project_dir, os.path.join('characters', '_template.md'),
+        body=template_body,
+    )
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'))
+
+    anchors = anchor_texts(project_dir)
+
+    assert set(anchors) == {'nora'}
+    assert '<character-slug>' not in anchors
+
+
+def test_anchor_texts_deterministic_on_duplicate_canon_id(project_dir):
+    """Nothing currently validates against a duplicate canon_id across
+    directories, so anchor_texts must resolve collisions the same way on
+    every machine rather than depend on os.walk's filesystem-dependent
+    directory order. _walk_canon_files sorts by full path, so of two
+    entity files sharing a canon_id under characters/ and locations/,
+    'characters/...' sorts before 'locations/...' and is processed
+    first — the locations file is written second and wins."""
+    from storyforge.canon import anchor_texts
+    _set_medium(project_dir, 'novel')
+    _write_canon(
+        project_dir, os.path.join('characters', 'dup.md'),
+        body=CANON_BODY.replace('canon_id: nora', 'canon_id: dup').replace(
+            'Nora, 9 years old, 132 cm, dark brown hair in a short bob, '
+            'grey-green eyes.',
+            'Character-canon version of dup.',
+        ),
+    )
+    _write_canon(
+        project_dir, os.path.join('locations', 'dup.md'),
+        body=CANON_BODY
+        .replace('canon_id: nora', 'canon_id: dup')
+        .replace('canon_type: character', 'canon_type: location')
+        .replace(
+            'Nora, 9 years old, 132 cm, dark brown hair in a short bob, '
+            'grey-green eyes.',
+            'Location-canon version of dup.',
+        ),
+    )
+
+    anchors = anchor_texts(project_dir)
+
+    assert anchors['dup'] == 'Location-canon version of dup.'
