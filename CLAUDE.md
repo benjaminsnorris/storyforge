@@ -182,7 +182,7 @@ All structured data uses pipe-delimited CSV:
 ### Key CSV Files
 
 **Prose tier — story summary at progressive granularity:**
-- `reference/story-summary.md` — four sections: `## Logline` (1 sentence), `## Synopsis` (1 paragraph), `## Act-shape` (3 paragraphs, one `### Act N` each), `## Theme` (2-4 sentences). Per-section `_updated` timestamps in YAML frontmatter feed cascade drift detection. `## Logline` is canonical; `storyforge.yaml:project.logline` is deprecated as an input.
+- `reference/story-summary.md` — four sections: `## Logline` (1 sentence), `## Synopsis` (1 paragraph), `## Act-shape` (3 paragraphs, one `### Act N` each), `## Theme` (2-4 sentences). Per-section `_updated` timestamps in YAML frontmatter are written and parsed (`common.py`) but **nothing consumes them** — there is no cascade drift detection. See the staleness-unification issue. `## Logline` is canonical; `storyforge.yaml:project.logline` is deprecated as an input.
 - `reference/outline.md` — read-only render of the expanding outline. Three numbered sections (Spine / Architecture / Scenes), each populated from the `summary` column of the corresponding CSV. Sync regenerates this file on every commit; authors edit summaries in the CSVs.
 
 **Structural-anchor tier — each its own discrete CSV:**
