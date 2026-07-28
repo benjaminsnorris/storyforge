@@ -63,6 +63,7 @@ canon_id: nora
 canon_type: character
 canon_updated: 2026-07-28
 appears_in: village-reveal
+embeds_as: Character
 first_appearance: village-reveal
 ---
 
@@ -259,7 +260,7 @@ def test_embeds_as_still_required_for_graphic_novel(project_dir):
         f'embeds_as must stay required for GN: {findings}'
 ```
 
-Note the fixture body above omits `embeds_as` — the `CANON_BODY` constant in Task 1 also omits it, which is why Task 1's tests pass only after this task for GN fixtures. If Task 1's tests are run against a `graphic-novel` medium anywhere, add `embeds_as: nora` to that fixture.
+`CANON_NO_EMBEDS_AS` above is `CANON_BODY` minus the `embeds_as` line. Task 1's `CANON_BODY` deliberately **carries** `embeds_as: Character`, so Task 1 tests only what it is about — that validation runs at all for novel projects — and this task's fixture is the one that exercises the key requirement. Keep both constants; do not collapse them.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -413,7 +414,7 @@ Run: `python3 -m pytest tests/test_illustration_canon.py -k "anchor_texts or res
 
 Expected: FAIL with `ImportError: cannot import name 'anchor_texts'`.
 
-- [ ] **Step 3: Rename the private reader and keep an alias**
+- [ ] **Step 3: Rename the private reader and update its one call site**
 
 ```python
 # canon.py — rename _embeddable_block_text
@@ -427,10 +428,14 @@ def embeddable_block_text(canon_path: str) -> str | None:
     Returns None when the file or the section is absent.
     """
     # ... existing body, unchanged
+```
 
+Do **not** leave a `_embeddable_block_text = embeddable_block_text` alias. There is
+exactly one call site, inside `check_canon_drift`; update it. An alias kept for a
+single caller is dead code a reviewer will flag, and rightly.
 
-#: Retained so check_canon_drift's existing call site keeps working.
-_embeddable_block_text = embeddable_block_text
+```bash
+grep -rn "_embeddable_block_text" scripts/ tests/ | grep -v worktrees
 ```
 
 - [ ] **Step 4: Add the public path resolver**
@@ -591,11 +596,31 @@ Expected: PASS.
 
 `append_anchor_stubs` currently appends a model-proposed anchor to the direction document. It must write a canon file stub instead. Do **not** create the registry row — `canon_missing_registry_entry` already nags for that, and inventing registry rows silently is how a typo becomes canonical.
 
+The anchor block the model emits gains a type field, so a stub lands in the right
+subdirectory. Update the request text in `build_art_direction_request` to ask for
+`Name | type — description`, where type is one of `character`, `location`, `motif`.
+
 ```python
 # prompts_illustrate.py — replace append_anchor_stubs
+
+#: Canon subdirectory per proposed anchor type. A type outside this map (or
+#: absent) falls back to 'character' with a WARNING rather than guessing
+#: silently — a stub filed under the wrong registry tells the author to add a
+#: character row for a location, which is a confusing way to learn about a
+#: parse failure.
+_ANCHOR_TYPE_SUBDIR: dict[str, str] = {
+    'character': 'characters',
+    'location': 'locations',
+    'motif': 'motifs',
+}
+_ANCHOR_TYPE_FALLBACK = 'character'
+
+
 def append_anchor_stubs(project_dir: str,
-                        anchors: dict[str, str]) -> list[str]:
+                        anchors: dict[str, tuple[str, str]]) -> list[str]:
     """Persist model-proposed anchors as canon file stubs.
+
+    `anchors` maps display name -> (canon_type, anchor_text).
 
     Returns the canon_ids written. An anchor that already resolves is left
     alone: append_anchor_stubs never revises an existing anchor, because a
@@ -607,17 +632,29 @@ def append_anchor_stubs(project_dir: str,
     """
     import os
     from storyforge import canon
+    from storyforge.common import log
 
     written: list[str] = []
-    for name, text in sorted(anchors.items()):
+    for name, (raw_type, text) in sorted(anchors.items()):
         canon_id = _slugify(name)
+        if not canon_id:
+            log(f'WARNING: proposed anchor {name!r} has no usable slug; skipped')
+            continue
         if canon.resolve_canon_path(project_dir, canon_id) is not None:
             continue
-        path = os.path.join(project_dir, canon.CANON_DIR, 'characters',
+        canon_type = (raw_type or '').strip().lower()
+        if canon_type not in _ANCHOR_TYPE_SUBDIR:
+            log(f'WARNING: proposed anchor {name!r} has type {raw_type!r}; '
+                f'filing as {_ANCHOR_TYPE_FALLBACK} — move the file and its '
+                f'registry row if that is wrong')
+            canon_type = _ANCHOR_TYPE_FALLBACK
+        subdir = _ANCHOR_TYPE_SUBDIR[canon_type]
+        path = os.path.join(project_dir, canon.CANON_DIR, subdir,
                             f'{canon_id}.md')
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
-            f.write(_canon_stub(canon_id=canon_id, anchor=text))
+            f.write(_canon_stub(canon_id=canon_id, canon_type=canon_type,
+                                anchor=text))
         written.append(canon_id)
     return written
 
@@ -628,7 +665,7 @@ def _slugify(name: str) -> str:
     return re.sub(r'[^a-z0-9]+', '-', name.strip().lower()).strip('-')
 
 
-def _canon_stub(*, canon_id: str, anchor: str) -> str:
+def _canon_stub(*, canon_id: str, canon_type: str, anchor: str) -> str:
     """A minimal valid canon file carrying one anchor.
 
     `appears_in` and `first_appearance` are left empty rather than guessed:
@@ -638,7 +675,7 @@ def _canon_stub(*, canon_id: str, anchor: str) -> str:
     return (
         '---\n'
         f'canon_id: {canon_id}\n'
-        'canon_type: character\n'
+        f'canon_type: {canon_type}\n'
         'canon_updated:\n'
         'appears_in:\n'
         'first_appearance:\n'
@@ -656,19 +693,51 @@ def _canon_stub(*, canon_id: str, anchor: str) -> str:
     )
 ```
 
+`split_anchor_block` must parse the new `Name | type — description` shape and return
+`dict[str, tuple[str, str]]`. Keep its existing tolerance for a decorated `ANCHORS`
+marker and for em-dash / en-dash / colon separators. An entry with no `|` yields
+`('', text)`, which routes to the fallback with a WARNING — a model that forgets the
+type still gets its anchor persisted.
+
+`_ANCHOR_LINE_RE`'s current guard against splitting hyphenated names must survive:
+`Jean-Luc | character — description` has to yield name `Jean-Luc`, not `Jean`.
+
 - [ ] **Step 6: Write the test for stub persistence**
 
 ```python
 # tests/test_illustration_canon.py — append
 
-def test_append_anchor_stubs_writes_canon_file(project_dir):
+def test_append_anchor_stubs_routes_by_type(project_dir):
     from storyforge.prompts_illustrate import append_anchor_stubs
-    from storyforge.canon import anchor_texts
+    from storyforge.canon import anchor_texts, resolve_canon_path
 
-    written = append_anchor_stubs(project_dir, {'Great Lamp': 'A bronze bowl.'})
+    written = append_anchor_stubs(project_dir, {
+        'Nora': ('character', 'A nine-year-old in a green cardigan.'),
+        'Old Oak': ('location', 'A hollow oak whose roots form streets.'),
+        'Great Lamp': ('motif', 'A bronze bowl with several wicks.'),
+    })
 
-    assert written == ['great-lamp']
-    assert anchor_texts(project_dir)['great-lamp'] == 'A bronze bowl.'
+    assert sorted(written) == ['great-lamp', 'nora', 'old-oak']
+    assert resolve_canon_path(project_dir, 'nora').endswith(
+        os.path.join('characters', 'nora.md'))
+    assert resolve_canon_path(project_dir, 'old-oak').endswith(
+        os.path.join('locations', 'old-oak.md'))
+    assert resolve_canon_path(project_dir, 'great-lamp').endswith(
+        os.path.join('motifs', 'great-lamp.md'))
+    assert anchor_texts(project_dir)['great-lamp'] == (
+        'A bronze bowl with several wicks.')
+
+
+def test_append_anchor_stubs_unknown_type_falls_back_to_character(project_dir):
+    from storyforge.prompts_illustrate import append_anchor_stubs
+    from storyforge.canon import resolve_canon_path
+
+    written = append_anchor_stubs(project_dir,
+                                  {'Murkwolf': ('creature', 'Cold blue mist.')})
+
+    assert written == ['murkwolf']
+    assert resolve_canon_path(project_dir, 'murkwolf').endswith(
+        os.path.join('characters', 'murkwolf.md'))
 
 
 def test_append_anchor_stubs_never_revises_existing(project_dir):
@@ -677,10 +746,28 @@ def test_append_anchor_stubs_never_revises_existing(project_dir):
     _write_canon(project_dir, os.path.join('characters', 'nora.md'))
     original = anchor_texts(project_dir)['nora']
 
-    written = append_anchor_stubs(project_dir, {'Nora': 'Something different.'})
+    written = append_anchor_stubs(
+        project_dir, {'Nora': ('character', 'Something different.')})
 
     assert written == []
     assert anchor_texts(project_dir)['nora'] == original
+
+
+def test_split_anchor_block_parses_type_and_keeps_hyphenated_names():
+    from storyforge.prompts_illustrate import split_anchor_block
+
+    body, anchors = split_anchor_block(
+        'Prompt text here.\n\n'
+        'ANCHORS\n'
+        '- Jean-Luc | character — a tall man in a grey coat\n'
+        '- Old Oak | location — a hollow oak\n'
+        '- Untyped Thing — no type given\n'
+    )
+
+    assert body.strip() == 'Prompt text here.'
+    assert anchors['Jean-Luc'] == ('character', 'a tall man in a grey coat')
+    assert anchors['Old Oak'] == ('location', 'a hollow oak')
+    assert anchors['Untyped Thing'] == ('', 'no type given')
 ```
 
 - [ ] **Step 7: Run the suite**
