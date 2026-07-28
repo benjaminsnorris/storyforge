@@ -95,13 +95,24 @@ CANON_TYPES: tuple[CanonType, ...] = (
     'foundation', 'vocabulary', 'rules', 'character', 'location', 'motif',
 )
 
-REQUIRED_FRONTMATTER_KEYS = (
+#: Keys every canon file needs regardless of medium.
+ALWAYS_REQUIRED_FRONTMATTER_KEYS = (
     'canon_id',
     'canon_type',
     'canon_updated',
     'appears_in',
-    'embeds_as',
     'first_appearance',
+)
+
+#: `embeds_as` serves the inline-embed convention, which only the
+#: graphic-novel page pipeline uses. Requiring it of a prose project would
+#: make it write-only. Its long-term fate is decided by the
+#: staleness-unification issue.
+GN_ONLY_FRONTMATTER_KEYS = ('embeds_as',)
+
+#: Retained for importers that predate the split.
+REQUIRED_FRONTMATTER_KEYS = (
+    ALWAYS_REQUIRED_FRONTMATTER_KEYS + GN_ONLY_FRONTMATTER_KEYS
 )
 
 REQUIRED_SECTIONS = (
@@ -444,7 +455,12 @@ def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
         ))
         return findings  # nothing else to check without frontmatter
 
-    for key in REQUIRED_FRONTMATTER_KEYS:
+    from storyforge.common import get_medium
+    required = ALWAYS_REQUIRED_FRONTMATTER_KEYS
+    if get_medium(project_root) == 'graphic-novel':
+        required = required + GN_ONLY_FRONTMATTER_KEYS
+
+    for key in required:
         if not fm.get(key):
             findings.append(_finding(
                 rel,

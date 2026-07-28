@@ -83,3 +83,54 @@ def test_novel_project_canon_errors_are_reported(project_dir):
 
     assert 'canon_present_in_novel_project' not in kinds
     assert 'canon_missing_frontmatter' in kinds
+
+
+CANON_NO_EMBEDS_AS = """---
+canon_id: nora
+canon_type: character
+canon_updated: 2026-07-28
+appears_in: village-reveal
+first_appearance: village-reveal
+---
+
+## Embeddable block
+
+Nora, 9 years old, 132 cm, dark brown hair in a short bob, grey-green eyes.
+
+## Clauses
+
+- Always barefoot indoors.
+
+## Related canon
+
+- leo
+
+## Iteration history
+
+- 2026-07-28 initial
+"""
+
+
+def test_embeds_as_not_required_for_novel(project_dir):
+    from storyforge.canon import validate_canon_file
+    _set_medium(project_dir, 'novel')
+    path = _write_canon(project_dir, os.path.join('characters', 'nora.md'),
+                        body=CANON_NO_EMBEDS_AS)
+
+    findings = validate_canon_file(path, project_dir)
+    missing = [f for f in findings if f['type'] == 'canon_missing_key']
+
+    assert missing == [], f'embeds_as should be optional for novel: {missing}'
+
+
+def test_embeds_as_still_required_for_graphic_novel(project_dir):
+    from storyforge.canon import validate_canon_file
+    _set_medium(project_dir, 'graphic-novel')
+    path = _write_canon(project_dir, os.path.join('characters', 'nora.md'),
+                        body=CANON_NO_EMBEDS_AS)
+
+    findings = validate_canon_file(path, project_dir)
+    details = [f['detail'] for f in findings if f['type'] == 'canon_missing_key']
+
+    assert any('embeds_as' in d for d in details), \
+        f'embeds_as must stay required for GN: {findings}'
