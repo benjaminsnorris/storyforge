@@ -997,10 +997,10 @@ def test_cleanup_report_skips_canon_for_novel_medium_without_canon_dir(tmp_path)
     assert findings == []
 
 
-def test_cleanup_report_warns_when_canon_dir_in_novel_project(tmp_path):
-    """SF-4: canon/ present but medium isn't graphic-novel should warn rather
-    than silently skip — otherwise a deleted-yaml or misconfigured-medium
-    project ships with unvalidated canon and a green cleanup report.
+def test_cleanup_report_validates_canon_in_novel_project(tmp_path):
+    """SF-4: canon/ present in a novel project is validated the same as a
+    graphic-novel project's — a broken file surfaces its real structural
+    finding rather than being skipped wholesale.
     """
     from storyforge.cmd_cleanup import report_canon_files
 
@@ -1011,21 +1011,21 @@ def test_cleanup_report_warns_when_canon_dir_in_novel_project(tmp_path):
     write_canon(project, 'style-foundation.md', 'mismatched-id')
     findings = report_canon_files(project)
     assert len(findings) == 1
-    assert findings[0]['type'] == 'canon_present_in_novel_project'
+    assert findings[0]['type'] == 'canon_id_mismatch'
     assert findings[0]['category'] == 'canon'
 
 
-def test_cleanup_report_warns_when_canon_dir_present_no_yaml(tmp_path):
-    """SF-4: missing storyforge.yaml causes get_medium → 'novel' fallback. If
-    canon/ is populated, we surface a finding rather than silently skipping.
+def test_cleanup_report_validates_canon_when_no_yaml(tmp_path):
+    """SF-4: missing storyforge.yaml causes get_medium → 'novel' fallback.
+    Canon validation still runs normally, so a well-formed canon file
+    produces no findings even without a storyforge.yaml.
     """
     from storyforge.cmd_cleanup import report_canon_files
 
     project = str(tmp_path)
     write_canon(project, 'style-foundation.md', 'style-foundation')
     findings = report_canon_files(project)
-    assert len(findings) == 1
-    assert findings[0]['type'] == 'canon_present_in_novel_project'
+    assert findings == []
 
 
 # ---------------------------------------------------------------------------

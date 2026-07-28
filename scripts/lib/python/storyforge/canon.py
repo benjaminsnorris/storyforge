@@ -56,9 +56,6 @@ CanonFindingKind = Literal[
     'canon_embed_invalid_id',
     'canon_page_unreadable',
     'canon_drift',
-    # Emitted by cmd_cleanup.report_canon_files, not canon.py — kept here
-    # so the enum is the single source of truth for canon-category types.
-    'canon_present_in_novel_project',
 ]
 
 
