@@ -348,3 +348,81 @@ def test_split_anchor_block_parses_type_and_keeps_hyphenated_names():
     assert anchors['Jean-Luc'] == ('character', 'a tall man in a grey coat')
     assert anchors['Old Oak'] == ('location', 'a hollow oak')
     assert anchors['Untyped Thing'] == ('', 'no type given')
+
+
+# ============================================================================
+# Fix round 1: existence check must key on canon_id, not filename stem (C-1,
+# C-2). resolve_canon_path (and its underlying index) keys on the filename
+# stem, which is only right when a file's declared canon_id matches its own
+# name — canon_id_mismatch and canon_id_invalid merely warn about that, they
+# don't block. append_anchor_stubs must not trust the stem.
+# ============================================================================
+
+def test_append_anchor_stubs_never_touches_a_case_differing_existing_file(
+        project_dir):
+    """C-1: characters/Nora.md declares canon_id: nora. The stem-keyed
+    resolve_canon_path index stores it under key 'Nora', not 'nora', so
+    resolve_canon_path(project_dir, 'nora') returned None — "no such file" —
+    and append_anchor_stubs then wrote characters/nora.md to "add" the
+    anchor. On a case-insensitive filesystem that path IS Nora.md, so
+    open(path, 'w') truncated the author's file in place with no warning at
+    all. The fix must key existence on the canon_id declared in frontmatter,
+    case-insensitively, so this is caught regardless of filesystem case
+    sensitivity. Asserting only `written == []` would pass even if the file
+    had been clobbered first — this reads bytes before and after and
+    compares them exactly."""
+    from storyforge.prompts_illustrate import append_anchor_stubs
+    path = _write_canon(project_dir, os.path.join('characters', 'Nora.md'))
+    with open(path, 'rb') as f:
+        before = f.read()
+
+    written = append_anchor_stubs(
+        project_dir, {'Nora': ('character', 'A totally different girl.')})
+
+    with open(path, 'rb') as f:
+        after = f.read()
+    assert written == []
+    assert after == before
+
+
+def test_append_anchor_stubs_never_shadows_a_differently_stemmed_file(
+        project_dir):
+    """C-2: characters/nora-smith.md declares canon_id: nora — a stem that
+    doesn't match its own id. The stem-keyed existence check looked for a
+    file literally named nora.md, found none, and append_anchor_stubs wrote
+    one alongside the original. anchor_texts's last-sorted-path tie-break
+    ('nora-smith.md' sorts before 'nora.md') then let the model's guess
+    shadow the author's real anchor. The fix must recognize the existing
+    canon_id regardless of the stem it lives under, so no second file gets
+    written and the author's text keeps resolving."""
+    from storyforge.prompts_illustrate import append_anchor_stubs
+    from storyforge.canon import anchor_texts
+    _write_canon(project_dir, os.path.join('characters', 'nora-smith.md'),
+                body=CANON_BODY.replace(
+                    'Nora, 9 years old, 132 cm, dark brown hair in a short '
+                    'bob, grey-green eyes.',
+                    'AUTHOR ORIGINAL: Nora, 9 years old, 132 cm.',
+                ))
+
+    written = append_anchor_stubs(
+        project_dir, {'Nora': ('character', 'MODEL GUESS text.')})
+
+    assert written == []
+    assert not os.path.isfile(os.path.join(
+        project_dir, 'reference', 'canon', 'characters', 'nora.md'))
+    assert anchor_texts(project_dir)['nora'] == (
+        'AUTHOR ORIGINAL: Nora, 9 years old, 132 cm.')
+
+
+def test_canon_id_index_is_case_insensitive_and_keys_on_frontmatter(
+        project_dir):
+    """canon_id_index must answer 'nora' from a file's declared canon_id
+    even when the filename stem is differently cased or doesn't match at
+    all — the two shapes append_anchor_stubs has to guard against."""
+    from storyforge.canon import canon_id_index
+    _write_canon(project_dir, os.path.join('characters', 'Nora.md'))
+
+    index = canon_id_index(project_dir)
+
+    assert index['nora'] == os.path.join(
+        'reference', 'canon', 'characters', 'Nora.md')

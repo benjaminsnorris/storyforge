@@ -711,6 +711,42 @@ def resolve_canon_path(project_dir: str, canon_id: str) -> str | None:
     return _resolve_canon_path(project_dir, canon_id, {})
 
 
+def canon_id_index(project_dir: str) -> dict[str, str]:
+    """Map every canon file's declared `canon_id` (lowercased) to its path,
+    relative to project_dir.
+
+    This is deliberately NOT the same index `resolve_canon_path` builds:
+    that one keys on the filename stem, which is only ever right when the
+    file's `canon_id` matches its own filename — an assumption
+    `canon_id_mismatch` and `canon_id_invalid` merely warn about rather than
+    block. A caller that needs to know "does this id already exist
+    anywhere" (an existence check before creating a new file, say) has to
+    key on the id actually declared in frontmatter, or a mismatched or
+    differently-cased stem lets a same-id file get written right past an
+    existing one — silently truncating it in place on a case-insensitive
+    filesystem, or shadowing it under a second path.
+
+    Lowercased so a merely-differently-cased id still collides. On a
+    genuine duplicate id, last-sorted-path wins — the same tie-break
+    `anchor_texts` uses — so this index answers consistently with what
+    `anchor_texts` would actually resolve for that id.
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return {}
+    index: dict[str, str] = {}
+    for path in _walk_canon_files(canon_dir):
+        parsed = parse_canon_file(path)
+        fm = parsed['frontmatter']
+        if not isinstance(fm, dict):
+            continue
+        canon_id = (fm.get('canon_id') or '').strip().lower()
+        if not canon_id:
+            continue
+        index[canon_id] = os.path.relpath(path, project_dir)
+    return index
+
+
 def check_canon_drift(project_dir: str) -> list[CanonFinding]:
     """Walk pages/*.md and compare each canon-embed to its source canon's
     `## Embeddable block`. Emits five finding types:

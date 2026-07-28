@@ -695,10 +695,16 @@ def test_append_anchor_stubs_is_case_insensitive(project_dir):
     assert canon.anchor_texts(project_dir)['dorren'] == 'original'
 
 
-def test_append_anchor_stubs_skips_empty_values(project_dir):
+def test_append_anchor_stubs_skips_empty_values(project_dir, capsys):
+    """Regression (fix round 1, I-1): a bare `continue` used to drop a
+    blank-name or blank-text proposal with no trace. Both branches must log a
+    WARNING naming what was dropped, not vanish silently."""
     assert pi.append_anchor_stubs(project_dir, {
         'Nameless': ('character', ''), '': ('character', 'x'),
     }) == []
+    out = capsys.readouterr().out
+    assert "WARNING: proposed anchor 'Nameless' has no anchor text" in out
+    assert "WARNING: proposed anchor '' has no usable slug" in out
 
 
 def test_read_continuity_anchors_with_no_document(project_dir):
@@ -1369,6 +1375,29 @@ def test_relevant_anchors_falls_back_when_nothing_matches():
     assert cmd_illustrate._relevant_anchors(anchors, row) == anchors
 
 
+def test_relevant_anchors_warns_on_the_unmatched_fallback(capsys):
+    """Regression (fix round 1, I-2): anchor keys became canon_ids (task 4),
+    so a plan row still carrying a pre-canon display name in canon_refs
+    (e.g. a leftover "The village and Great Lamp") matches nothing and used
+    to fall back to the full cast with no sign anything was wrong — token
+    cost, plus the model invited to include off-frame characters. The
+    fallback must log a WARNING naming the unmatched canon_refs value."""
+    anchors = {'Leo': 'a boy'}
+    row = plan_row(canon_refs='The village and Great Lamp')
+    assert cmd_illustrate._relevant_anchors(anchors, row) == anchors
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'the village and great lamp' in out
+
+
+def test_relevant_anchors_no_warning_when_canon_refs_is_simply_empty(capsys):
+    """The fallback is unremarkable when the row named nothing at all — only
+    a named-but-unmatched canon_refs value is the sign something drifted."""
+    anchors = {'Leo': 'a boy', 'Nora': 'a girl'}
+    cmd_illustrate._relevant_anchors(anchors, plan_row())
+    assert 'WARNING' not in capsys.readouterr().out
+
+
 # ============================================================================
 # --review
 # ============================================================================
@@ -1814,7 +1843,11 @@ def test_prompts_warns_about_mangled_anchor_lines(in_project, monkeypatch,
         '### Scene\n\nA room.\n\nANCHORS\n- no separator here at all\n'))
 
     cmd_illustrate.main(['--prompts', '--coaching', 'full'])
-    assert 'did not parse as' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert 'did not parse as' in out
+    # Regression (fix round 1, M-4): the message quoted the pre-task-4 format
+    # after the request text had already moved to "Name | type — description".
+    assert 'Name | type — description' in out
 
 
 def test_anchors_section_is_read_case_insensitively(project_dir):

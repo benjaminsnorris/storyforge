@@ -133,9 +133,23 @@ def append_anchor_stubs(project_dir: str,
 
     `anchors` maps display name -> (canon_type, anchor_text).
 
-    Returns the canon_ids written. An anchor that already resolves is left
-    alone: append_anchor_stubs never revises an existing anchor, because a
-    rendered illustration may already depend on its exact text.
+    Returns the canon_ids written. An anchor whose canon_id already exists
+    anywhere in reference/canon/ is left alone: append_anchor_stubs never
+    revises an existing anchor, because a rendered illustration may already
+    depend on its exact text.
+
+    The existence check keys on canon.canon_id_index — the declared
+    `canon_id` in each file's frontmatter, lowercased — never on the
+    filename stem a candidate path would have. Keying on the stem instead
+    let a case-differing or otherwise mismatched existing file (a warning,
+    not a block, in validate_canon_file) go undetected: writing
+    `characters/nora.md` to "add" an anchor already at `characters/Nora.md`
+    truncated that file in place on a case-insensitive filesystem, and
+    writing it to "add" an anchor already at `characters/nora-smith.md`
+    created a second file that then shadowed the original in
+    anchor_texts's last-sorted-path tie-break. Both are silent corruption
+    of an anchor a rendered illustration may already depend on being
+    byte-identical.
 
     The registry row is deliberately NOT created. canon_missing_registry_entry
     reports the gap, and an author confirming the name is cheaper than
@@ -144,17 +158,22 @@ def append_anchor_stubs(project_dir: str,
     from storyforge import canon
     from storyforge.common import log
 
+    existing = canon.canon_id_index(project_dir)
     written: list[str] = []
     for name, (raw_type, text) in sorted(anchors.items()):
         name = name.strip()
         text = (text or '').strip()
-        if not name or not text:
+        if not text:
+            log(f'WARNING: proposed anchor {name!r} has no anchor text; skipped')
             continue
         canon_id = _slugify(name)
         if not canon_id:
             log(f'WARNING: proposed anchor {name!r} has no usable slug; skipped')
             continue
-        if canon.resolve_canon_path(project_dir, canon_id) is not None:
+        if canon_id in existing:
+            log(f'WARNING: proposed anchor {name!r} (canon_id {canon_id!r}) '
+                f'already exists at {existing[canon_id]}; left alone rather '
+                f'than risk overwriting or shadowing it')
             continue
         canon_type = (raw_type or '').strip().lower()
         if canon_type not in _ANCHOR_TYPE_SUBDIR:
@@ -163,12 +182,16 @@ def append_anchor_stubs(project_dir: str,
                 f'registry row if that is wrong')
             canon_type = _ANCHOR_TYPE_FALLBACK
         subdir = _ANCHOR_TYPE_SUBDIR[canon_type]
-        path = os.path.join(project_dir, canon.CANON_DIR, subdir,
-                            f'{canon_id}.md')
+        rel_path = os.path.join(canon.CANON_DIR, subdir, f'{canon_id}.md')
+        path = os.path.join(project_dir, rel_path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
             f.write(_canon_stub(canon_id=canon_id, canon_type=canon_type,
                                 anchor=text))
+        # Keep the index current within this call too — a second proposal in
+        # the same batch that collides with one just written must skip it for
+        # the same reason, not race it.
+        existing[canon_id] = rel_path
         written.append(canon_id)
     return written
 
