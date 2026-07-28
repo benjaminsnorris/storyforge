@@ -104,13 +104,27 @@ which is what `render_order()`'s `locks` computes today by walking `canon_refs`)
    Staleness below), so for prose it would be write-only. Make it optional rather than
    required when medium is `novel`, and let the staleness issue decide its fate.
 
-### Migration
+### No migration mechanism
 
-`illustration-direction.md` is not hand-migrated. `storyforge migrate` gains a step that
-splits it into canon files by section, preserving anchor bodies **byte-identical** — an
-anchor whose string changes during migration invalidates every illustration already
-rendered from it. The old file is left in place and reported as superseded rather than
-deleted, so a project mid-flight can be checked against it.
+Exactly one project has an `illustration-direction.md`, and it is hand-edited into canon
+files rather than migrated by code. A `storyforge migrate` step for a population of one is
+not worth building or maintaining.
+
+Consequences, stated because nothing enforces them:
+
+- **The code reads canon files only.** `illustration-direction.md` stops being an input;
+  there is no dual-path fallback. The hand-edit is a prerequisite for the new flow, not an
+  optional upgrade. `--diagnose` reports the direction document's presence alongside absent
+  canon files so the situation is legible rather than silent.
+- **Anchor bodies must be copied byte-identically.** An anchor whose string changes during
+  the hand-edit invalidates every illustration already rendered from it — likeness
+  continuity depends on the string, not on its meaning. This is the one part of the hand-edit
+  that cannot be eyeballed, so `--diagnose` warns when a canon file's `## Embeddable block`
+  differs from a same-named `### Name` section in a still-present direction document. That
+  check is cheap, catches the only unrecoverable mistake, and costs nothing once the old file
+  is deleted.
+
+The section-to-canon mapping above is the guide for that hand-edit.
 
 ## Artifacts
 
@@ -402,9 +416,9 @@ plan row stays valid in-flight state and is not a finding, unchanged from today.
 - **Canon adoption** — canon validation runs for `novel` projects and
   `canon_present_in_novel_project` no longer fires; creature-under-`characters/` and
   prop-under-`motifs/` resolve their registries; `embeds_as` absent is valid for `novel`.
-- **Migration** — `illustration-direction.md` splits into canon files with anchor bodies
-  byte-identical to the source; the old file is reported superseded, not deleted; the step is
-  idempotent.
+- **Hand-edit safety net** — `--diagnose` warns when a canon file's `## Embeddable block`
+  differs from a same-named `### Name` section in a still-present `illustration-direction.md`,
+  and stays silent once that file is gone. No migration code to test.
 - **State resolution** — forward walk; boundary case where the illustration's scene *is* the
   transition scene; no-transition case; transition naming a cut scene.
 - **Granularity** — `{canon_id}-{aspect}` tracks resolve independently; a bare `canon_id`
