@@ -134,3 +134,57 @@ def test_embeds_as_still_required_for_graphic_novel(project_dir):
 
     assert any('embeds_as' in d for d in details), \
         f'embeds_as must stay required for GN: {findings}'
+
+
+def test_anchor_texts_returns_entity_anchors_verbatim(project_dir):
+    from storyforge.canon import anchor_texts
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'))
+
+    anchors = anchor_texts(project_dir)
+
+    assert set(anchors) == {'nora'}
+    assert anchors['nora'] == (
+        'Nora, 9 years old, 132 cm, dark brown hair in a short bob, '
+        'grey-green eyes.'
+    )
+
+
+def test_anchor_texts_omits_placeholder_blocks(project_dir):
+    from storyforge.canon import anchor_texts
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, os.path.join('characters', 'ghost.md'),
+                 body=CANON_BODY.replace(
+                     'Nora, 9 years old, 132 cm, dark brown hair in a short '
+                     'bob, grey-green eyes.',
+                     'TODO: describe this character',
+                 ).replace('canon_id: nora', 'canon_id: ghost'))
+
+    assert 'ghost' not in anchor_texts(project_dir)
+
+
+def test_anchor_texts_excludes_non_entity_types(project_dir):
+    from storyforge.canon import anchor_texts
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, 'visual-foundation.md',
+                 body=CANON_BODY
+                 .replace('canon_id: nora', 'canon_id: visual-foundation')
+                 .replace('canon_type: character', 'canon_type: foundation'))
+
+    assert anchor_texts(project_dir) == {}
+
+
+def test_resolve_canon_path_finds_root_and_subdir(project_dir):
+    from storyforge.canon import resolve_canon_path
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'))
+    _write_canon(project_dir, 'visual-foundation.md',
+                 body=CANON_BODY
+                 .replace('canon_id: nora', 'canon_id: visual-foundation')
+                 .replace('canon_type: character', 'canon_type: foundation'))
+
+    assert resolve_canon_path(project_dir, 'nora').endswith(
+        os.path.join('characters', 'nora.md'))
+    assert resolve_canon_path(project_dir, 'visual-foundation').endswith(
+        'visual-foundation.md')
+    assert resolve_canon_path(project_dir, 'nobody') is None

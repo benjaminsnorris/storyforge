@@ -138,6 +138,12 @@ ROOT_TYPES: frozenset[CanonType] = frozenset(
     {'foundation', 'vocabulary', 'rules'},
 )
 
+#: Canon types that describe one entity whose look must stay fixed. The
+#: foundation/vocabulary/rules types describe the book, not a thing in it,
+#: so they are house style rather than per-entity anchors.
+ENTITY_CANON_TYPES: frozenset[CanonType] = frozenset(
+    {'character', 'location', 'motif'})
+
 
 class _Sentinel(enum.Enum):
     """Distinct sentinel values returned by parser helpers when the input
@@ -283,9 +289,14 @@ def _section_body_is_placeholder(body: str) -> bool:
     return False
 
 
-def _embeddable_block_text(canon_path: str) -> str | None:
-    """Return the verbatim text of a canon file's `## Embeddable block`
-    section. None if the file is missing or has no such section.
+def embeddable_block_text(canon_path: str) -> str | None:
+    """Return the verbatim text of a canon file's `## Embeddable block`.
+
+    Verbatim is the whole point: an anchor works only because every prompt
+    that uses it sends a byte-identical string. Never normalize here —
+    normalization belongs at comparison time, in the caller.
+
+    Returns None when the file or the section is absent.
     """
     parsed = parse_canon_file(canon_path)
     if not parsed['exists']:
@@ -691,6 +702,15 @@ def _resolve_canon_path(project_dir: str, canon_id: str,
     return index.get(canon_id)
 
 
+def resolve_canon_path(project_dir: str, canon_id: str) -> str | None:
+    """Resolve a canon_id to its file path, root or subdirectory.
+
+    Thin public wrapper over the cached internal resolver, for callers that
+    look up one id and do not hold an index.
+    """
+    return _resolve_canon_path(project_dir, canon_id, {})
+
+
 def check_canon_drift(project_dir: str) -> list[CanonFinding]:
     """Walk pages/*.md and compare each canon-embed to its source canon's
     `## Embeddable block`. Emits five finding types:
@@ -775,7 +795,7 @@ def check_canon_drift(project_dir: str) -> list[CanonFinding]:
                 ))
                 continue
             if cid not in normalized_source_cache:
-                raw_source = _embeddable_block_text(canon_path)
+                raw_source = embeddable_block_text(canon_path)
                 normalized_source_cache[cid] = (
                     _normalize_for_drift(raw_source)
                     if raw_source is not None else None
@@ -814,7 +834,7 @@ def is_canon_block_populated(project_dir: str, canon_id: str) -> bool:
     path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
     if not os.path.isfile(path):
         return False
-    block_text = _embeddable_block_text(path)
+    block_text = embeddable_block_text(path)
     if block_text is None:
         return False
     return not _section_body_is_placeholder(block_text)
@@ -836,7 +856,40 @@ def get_canon_embeddable_block(project_dir: str, canon_id: str) -> str:
     path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
     if not os.path.isfile(path):
         return ''
-    return (_embeddable_block_text(path) or '').strip()
+    return (embeddable_block_text(path) or '').strip()
+
+
+def anchor_texts(project_dir: str) -> dict[str, str]:
+    """Map canon_id -> verbatim anchor text for every entity canon file.
+
+    Skips files whose Embeddable block is missing or still placeholder text:
+    a scaffold sent to an image model as though it were direction is worse
+    than sending nothing, because it reads as a deliberate instruction.
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return {}
+
+    anchors: dict[str, str] = {}
+    for root, _dirs, files in os.walk(canon_dir):
+        for filename in sorted(files):
+            if not filename.endswith('.md'):
+                continue
+            path = os.path.join(root, filename)
+            parsed = parse_canon_file(path)
+            fm = parsed['frontmatter']
+            if not isinstance(fm, dict):
+                continue
+            if fm.get('canon_type') not in ENTITY_CANON_TYPES:
+                continue
+            canon_id = (fm.get('canon_id') or '').strip()
+            if not canon_id:
+                continue
+            body = embeddable_block_text(path)
+            if body is None or _section_body_is_placeholder(body):
+                continue
+            anchors[canon_id] = body.strip()
+    return anchors
 
 
 def validate_canon_directory(project_dir: str) -> list[CanonFinding]:
