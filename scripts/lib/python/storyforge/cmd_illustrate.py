@@ -557,8 +557,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             if new_anchors:
                 added = pi.append_anchor_stubs(project_dir, new_anchors)
                 if added:
-                    log(f'  appended {len(added)} anchor(s) to '
-                        f'{ill.DIRECTION_FILENAME} for review: '
+                    log(f'  wrote {len(added)} new canon stub(s) for review: '
                         f'{", ".join(added)}')
         else:
             body = _strict_prompt_scaffold(row)

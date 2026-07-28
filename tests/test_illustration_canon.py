@@ -252,3 +252,99 @@ def test_anchor_texts_deterministic_on_duplicate_canon_id(project_dir):
     anchors = anchor_texts(project_dir)
 
     assert anchors['dup'] == 'Location-canon version of dup.'
+
+
+# ============================================================================
+# Task 4: --prompts reads and writes canon anchors
+# ============================================================================
+
+def test_prompts_anchors_come_from_canon(project_dir):
+    from storyforge.prompts_illustrate import anchors_for_prompt
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'))
+
+    anchors = anchors_for_prompt(project_dir)
+
+    assert anchors['nora'].startswith('Nora, 9 years old, 132 cm')
+
+
+def test_relevant_anchors_matches_canon_ids(project_dir):
+    from storyforge.cmd_illustrate import _relevant_anchors
+    anchors = {'nora': 'Nora anchor', 'leo': 'Leo anchor',
+               'great-lamp': 'Lamp anchor'}
+
+    row = {'canon_refs': 'nora;great-lamp'}
+    assert set(_relevant_anchors(anchors, row)) == {'nora', 'great-lamp'}
+
+
+def test_relevant_anchors_falls_back_when_nothing_matches(project_dir):
+    """An unfiltered anchor set is a smaller failure than a missing one, so a
+    canon_refs value that matches no canon_id sends everything."""
+    from storyforge.cmd_illustrate import _relevant_anchors
+    anchors = {'nora': 'Nora anchor', 'leo': 'Leo anchor'}
+
+    row = {'canon_refs': 'somebody-else'}
+    assert set(_relevant_anchors(anchors, row)) == {'nora', 'leo'}
+
+
+def test_append_anchor_stubs_routes_by_type(project_dir):
+    from storyforge.prompts_illustrate import append_anchor_stubs
+    from storyforge.canon import anchor_texts, resolve_canon_path
+
+    written = append_anchor_stubs(project_dir, {
+        'Nora': ('character', 'A nine-year-old in a green cardigan.'),
+        'Old Oak': ('location', 'A hollow oak whose roots form streets.'),
+        'Great Lamp': ('motif', 'A bronze bowl with several wicks.'),
+    })
+
+    assert sorted(written) == ['great-lamp', 'nora', 'old-oak']
+    assert resolve_canon_path(project_dir, 'nora').endswith(
+        os.path.join('characters', 'nora.md'))
+    assert resolve_canon_path(project_dir, 'old-oak').endswith(
+        os.path.join('locations', 'old-oak.md'))
+    assert resolve_canon_path(project_dir, 'great-lamp').endswith(
+        os.path.join('motifs', 'great-lamp.md'))
+    assert anchor_texts(project_dir)['great-lamp'] == (
+        'A bronze bowl with several wicks.')
+
+
+def test_append_anchor_stubs_unknown_type_falls_back_to_character(project_dir):
+    from storyforge.prompts_illustrate import append_anchor_stubs
+    from storyforge.canon import resolve_canon_path
+
+    written = append_anchor_stubs(project_dir,
+                                  {'Murkwolf': ('creature', 'Cold blue mist.')})
+
+    assert written == ['murkwolf']
+    assert resolve_canon_path(project_dir, 'murkwolf').endswith(
+        os.path.join('characters', 'murkwolf.md'))
+
+
+def test_append_anchor_stubs_never_revises_existing(project_dir):
+    from storyforge.prompts_illustrate import append_anchor_stubs
+    from storyforge.canon import anchor_texts
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'))
+    original = anchor_texts(project_dir)['nora']
+
+    written = append_anchor_stubs(
+        project_dir, {'Nora': ('character', 'Something different.')})
+
+    assert written == []
+    assert anchor_texts(project_dir)['nora'] == original
+
+
+def test_split_anchor_block_parses_type_and_keeps_hyphenated_names():
+    from storyforge.prompts_illustrate import split_anchor_block
+
+    body, anchors = split_anchor_block(
+        'Prompt text here.\n\n'
+        'ANCHORS\n'
+        '- Jean-Luc | character — a tall man in a grey coat\n'
+        '- Old Oak | location — a hollow oak\n'
+        '- Untyped Thing — no type given\n'
+    )
+
+    assert body.strip() == 'Prompt text here.'
+    assert anchors['Jean-Luc'] == ('character', 'a tall man in a grey coat')
+    assert anchors['Old Oak'] == ('location', 'a hollow oak')
+    assert anchors['Untyped Thing'] == ('', 'no type given')

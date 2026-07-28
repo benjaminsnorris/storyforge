@@ -483,7 +483,8 @@ def test_prompts_full_writes_body_and_appends_new_anchors(in_project, monkeypatc
     monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
         '### Scene\n\nA cold street at night.\n\n'
         '### Subject\n\nA woman at a lit sill.\n\n'
-        'ANCHORS\n- Dorren Hayle — a spare woman of fifty in a grey coat\n'
+        'ANCHORS\n- Dorren Hayle | character — a spare woman of fifty in a '
+        'grey coat\n'
     ))
 
     assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
@@ -494,9 +495,12 @@ def test_prompts_full_writes_body_and_appends_new_anchors(in_project, monkeypatc
     assert 'A cold street at night' in content
     # The anchor block is lifted out of the body, not left in the prompt.
     assert 'ANCHORS' not in content
-    # A proposed anchor lands in the direction document for the author to review.
-    anchors = ill.read_continuity_anchors(in_project)
-    assert anchors['Dorren Hayle'] == 'a spare woman of fifty in a grey coat'
+    # A proposed anchor persists as a canon file stub for the author to review.
+    from storyforge import canon
+    assert canon.anchor_texts(in_project)['dorren-hayle'] == (
+        'a spare woman of fifty in a grey coat')
+    assert canon.resolve_canon_path(in_project, 'dorren-hayle').endswith(
+        os.path.join('characters', 'dorren-hayle.md'))
 
 
 def test_prompts_skips_a_row_when_the_api_returns_nothing(in_project, monkeypatch,
@@ -633,12 +637,12 @@ def test_split_anchor_block_parses_multiple_anchors():
     body, anchors = pi.split_anchor_block(
         '### Scene\n\nA street.\n\nANCHORS\n'
         '- Dorren Hayle — a spare woman in grey\n'
-        '- **Vell** — a boy with ink-stained cuffs\n'
+        '- **Vell** | character — a boy with ink-stained cuffs\n'
     )
     assert 'ANCHORS' not in body
     assert anchors == {
-        'Dorren Hayle': 'a spare woman in grey',
-        'Vell': 'a boy with ink-stained cuffs',
+        'Dorren Hayle': ('', 'a spare woman in grey'),
+        'Vell': ('character', 'a boy with ink-stained cuffs'),
     }
 
 
@@ -667,35 +671,34 @@ def test_continuity_anchors_collapse_multi_paragraph_bodies(project_dir):
 
 def test_append_anchor_stubs_never_overwrites_an_existing_anchor(project_dir):
     """Likeness continuity depends on the anchor staying byte-identical."""
-    pi.append_anchor_stubs(project_dir, {'Dorren': 'original description'})
+    from storyforge import canon
+    pi.append_anchor_stubs(
+        project_dir, {'Dorren': ('character', 'original description')})
     added = pi.append_anchor_stubs(project_dir, {
-        'Dorren': 'revised description', 'Vell': 'a boy'})
+        'Dorren': ('character', 'revised description'),
+        'Vell': ('character', 'a boy'),
+    })
 
-    assert added == ['Vell']
-    anchors = ill.read_continuity_anchors(project_dir)
-    assert anchors['Dorren'] == 'original description'
-    assert anchors['Vell'] == 'a boy'
+    assert added == ['vell']
+    anchors = canon.anchor_texts(project_dir)
+    assert anchors['dorren'] == 'original description'
+    assert anchors['vell'] == 'a boy'
 
 
 def test_append_anchor_stubs_is_case_insensitive(project_dir):
-    pi.append_anchor_stubs(project_dir, {'Dorren': 'original'})
-    assert pi.append_anchor_stubs(project_dir, {'dorren': 'again'}) == []
+    """Both display names slugify to the same canon_id, so the second call
+    resolves an existing file rather than writing a sibling."""
+    from storyforge import canon
+    pi.append_anchor_stubs(project_dir, {'Dorren': ('character', 'original')})
+    assert pi.append_anchor_stubs(
+        project_dir, {'dorren': ('character', 'again')}) == []
+    assert canon.anchor_texts(project_dir)['dorren'] == 'original'
 
 
 def test_append_anchor_stubs_skips_empty_values(project_dir):
-    assert pi.append_anchor_stubs(project_dir, {'Nameless': '', '': 'x'}) == []
-
-
-def test_append_anchor_stubs_preserves_other_sections(project_dir):
-    write_direction(project_dir, {
-        'Format': 'Full-color photorealism.',
-        ill.ANCHORS_SECTION: '### Dorren\n\na spare woman in grey',
-    })
-    pi.append_anchor_stubs(project_dir, {'Vell': 'a boy'})
-
-    direction = ill.read_direction(project_dir)
-    assert direction['Format'] == 'Full-color photorealism.'
-    assert set(ill.read_continuity_anchors(project_dir)) == {'Dorren', 'Vell'}
+    assert pi.append_anchor_stubs(project_dir, {
+        'Nameless': ('character', ''), '': ('character', 'x'),
+    }) == []
 
 
 def test_read_continuity_anchors_with_no_document(project_dir):
@@ -1278,11 +1281,41 @@ def test_direction_dry_run_writes_nothing(in_project, capsys):
     assert not os.path.isfile(ill.direction_path(in_project))
 
 
+def _write_entity_canon(project_dir, subdir, canon_id, anchor_text,
+                        canon_type=None):
+    """Minimal entity canon file for prompt-anchor tests. Anchors now come
+    from reference/canon/, not the direction document's Continuity anchors
+    section (task 4) — this is the canon-side equivalent of write_direction's
+    old anchor headings."""
+    canon_type = canon_type or {
+        'characters': 'character', 'locations': 'location',
+        'motifs': 'motif',
+    }[subdir]
+    path = os.path.join(project_dir, 'reference', 'canon', subdir,
+                        f'{canon_id}.md')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(
+            '---\n'
+            f'canon_id: {canon_id}\n'
+            f'canon_type: {canon_type}\n'
+            'canon_updated: 2026-07-28\n'
+            'appears_in: vigil\n'
+            'first_appearance: vigil\n'
+            '---\n\n'
+            '## Embeddable block\n\n'
+            f'{anchor_text}\n\n'
+            '## Clauses\n\n## Related canon\n\n## Iteration history\n'
+        )
+
+
 def test_direction_reaches_the_art_direction_prompt(in_project, monkeypatch):
     """The whole point of the document: every prompt carries it."""
     write_direction_file(in_project, SAMPLE_DIRECTION)
     write_scene(in_project, 'vigil', SCENE)
-    ill.write_plan(in_project, [plan_row(canon_refs='Leo')])
+    _write_entity_canon(in_project, 'characters', 'leo',
+                        'Ten years old; tall and lean for his age.')
+    ill.write_plan(in_project, [plan_row(canon_refs='leo')])
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
 
     seen = {}
@@ -1298,7 +1331,8 @@ def test_direction_reaches_the_art_direction_prompt(in_project, monkeypatch):
     assert 'Book-level art direction' in prompt
     assert 'cinematic photorealistic' in prompt
     assert 'Never horror imagery' in prompt
-    # Anchors are rendered separately from the rest of the direction.
+    # Anchors come from canon, rendered separately from the rest of the
+    # direction document.
     assert 'Ten years old' in prompt
 
 
@@ -1306,7 +1340,11 @@ def test_prompts_narrow_anchors_to_what_the_illustration_shows(in_project,
                                                               monkeypatch):
     write_direction_file(in_project, SAMPLE_DIRECTION)
     write_scene(in_project, 'vigil', SCENE)
-    ill.write_plan(in_project, [plan_row(canon_refs='Murkwolves')])
+    _write_entity_canon(in_project, 'characters', 'leo',
+                        'Ten years old; tall and lean for his age.')
+    _write_entity_canon(in_project, 'motifs', 'murkwolves',
+                        'Large wolf-shaped concentrations of cold shadow.')
+    ill.write_plan(in_project, [plan_row(canon_refs='murkwolves')])
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
 
     seen = {}
@@ -1316,8 +1354,8 @@ def test_prompts_narrow_anchors_to_what_the_illustration_shows(in_project,
     cmd_illustrate.main(['--prompts', '--coaching', 'full'])
 
     anchors_block = seen['prompt'].split('## Character anchors')[1]
-    assert 'Murkwolves' in anchors_block
-    assert 'Ten years old' not in anchors_block   # Leo is not in this frame
+    assert 'murkwolves' in anchors_block
+    assert 'Ten years old' not in anchors_block   # leo is not in this frame
 
 
 def test_relevant_anchors_falls_back_to_all_when_none_named():
@@ -1713,19 +1751,22 @@ def test_prompts_does_not_destroy_author_columns(in_project):
 
 @pytest.mark.parametrize('line,expected', [
     ('- Jean-Luc — a boy of 9, 130 cm',
-     {'Jean-Luc': 'a boy of 9, 130 cm'}),
-    ('- Marie-Claire – a woman of 40', {'Marie-Claire': 'a woman of 40'}),
+     {'Jean-Luc': ('', 'a boy of 9, 130 cm')}),
+    ('- Marie-Claire – a woman of 40', {'Marie-Claire': ('', 'a woman of 40')}),
     ('- Ember: an elderly Lantern woman',
-     {'Ember': 'an elderly Lantern woman'}),
-    ('- Leo - ten years old', {'Leo': 'ten years old'}),
+     {'Ember': ('', 'an elderly Lantern woman')}),
+    ('- Leo - ten years old', {'Leo': ('', 'ten years old')}),
     ('- **Wick** — a copper-haired Lantern child',
-     {'Wick': 'a copper-haired Lantern child'}),
+     {'Wick': ('', 'a copper-haired Lantern child')}),
+    ('- Jean-Luc | character — a boy of 9, 130 cm',
+     {'Jean-Luc': ('character', 'a boy of 9, 130 cm')}),
 ])
 def test_anchor_lines_with_hyphenated_names_parse_whole(line, expected):
     """Regression: the separator class included a bare hyphen, so `Jean-Luc`
     became {'Jean': 'Luc — …'}. The mangled name was then written into the
     direction document as canonical, never revised, and stopped matching
-    canon_refs — so the anchor silently left every prompt."""
+    canon_refs — so the anchor silently left every prompt. The added
+    `| type` group (task 4) must not reopen that hole."""
     _, anchors = pi.split_anchor_block(f'### Scene\n\nA room.\n\nANCHORS\n{line}\n')
     assert anchors == expected
 
@@ -1736,7 +1777,7 @@ def test_anchor_block_marker_variants(marker):
     prompt body, which the author pastes into the image model."""
     body, anchors = pi.split_anchor_block(
         f'### Scene\n\nA room.\n\n{marker}\n- Wick — a grey tabby\n')
-    assert anchors == {'Wick': 'a grey tabby'}
+    assert anchors == {'Wick': ('', 'a grey tabby')}
     assert 'ANCHORS' not in body
 
 
@@ -1746,7 +1787,7 @@ def test_split_anchor_block_removes_a_dangling_code_fence():
     corrupted every following section of the prompt file."""
     body, anchors = pi.split_anchor_block(
         '### Scene\n\nA dark room.\n\n```\nANCHORS\n- Wick — a cat\n```\n')
-    assert anchors == {'Wick': 'a cat'}
+    assert anchors == {'Wick': ('', 'a cat')}
     assert '```' not in body
     assert body.endswith('A dark room.')
 
@@ -1756,7 +1797,7 @@ def test_unparsed_anchor_lines_are_reported():
                  '- Wick — a grey tabby\n'
                  '- just a name with no description\n'
                  '- Nameless — \n')
-    assert pi.split_anchor_block(body_text)[1] == {'Wick': 'a grey tabby'}
+    assert pi.split_anchor_block(body_text)[1] == {'Wick': ('', 'a grey tabby')}
     # Lines are reported verbatim, bullet included, so the author can find them.
     unparsed = pi.unparsed_anchor_lines(body_text)
     assert len(unparsed) == 2
@@ -1786,37 +1827,6 @@ def test_anchors_section_is_read_case_insensitively(project_dir):
     assert ill.read_continuity_anchors(project_dir) == {
         'Mara': 'Eleven years old, black braid.'}
     assert ill.ANCHORS_SECTION not in ill.missing_direction_sections(project_dir)
-
-
-def test_append_does_not_create_a_second_anchors_section(project_dir):
-    """Appending under a differently-cased heading used to add a *second*
-    section, permanently orphaning everything under the first — and the
-    missing-sections warning that would have caught it disappeared, because the
-    new section was non-empty."""
-    write_direction_file(project_dir,
-                         '# D\n\n## Continuity Anchors\n\n### Mara\n\n'
-                         'Eleven years old.\n')
-
-    pi.append_anchor_stubs(project_dir, {'Wick': 'a grey tabby cat'})
-
-    assert len(ill.anchors_section_headings(project_dir)) == 1
-    assert sorted(ill.read_continuity_anchors(project_dir)) == ['Mara', 'Wick']
-
-
-def test_the_anchors_phrase_in_prose_does_not_satisfy_the_section_check(
-        project_dir):
-    """A substring test matched the phrase in ordinary prose, so the stubs were
-    appended into whatever section came last — and fed to the image model as,
-    say, a content limit."""
-    write_direction_file(
-        project_dir,
-        '# D\n\n## Format\n\nSee the Continuity anchors below for the cast.\n')
-
-    pi.append_anchor_stubs(project_dir, {'Wick': 'a grey tabby cat'})
-
-    assert ill.read_continuity_anchors(project_dir) == {
-        'Wick': 'a grey tabby cat'}
-    assert ill.read_direction(project_dir)['Format'].startswith('See the')
 
 
 def test_find_section_is_case_insensitive():

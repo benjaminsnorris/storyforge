@@ -32,7 +32,7 @@ from typing import Final, Literal
 
 from storyforge.illustrations import (
     ANCHORS_SECTION, DIRECTION_SECTIONS, PrepassFindings, RenderStep,
-    VALID_PLACEMENTS, find_section, read_continuity_anchors, read_direction,
+    VALID_PLACEMENTS,
 )
 
 #: Aspect is derived from author-written prose (layout, then composition) and
@@ -104,61 +104,106 @@ def orientation_clause(aspect: Aspect = DEFAULT_ASPECT) -> str:
 # ============================================================================
 
 def anchors_for_prompt(project_dir: str) -> dict[str, str]:
-    """Return the continuity anchors from the direction document.
+    """Anchors available to an illustration prompt, keyed by canon_id.
 
-    Anchors are authored up front in `reference/illustration-direction.md`, not
-    accumulated as a side effect of prompting. That ordering is the point: an
-    anchor is an input to the art, and the reason it works is that every prompt
-    reuses the identical string. A description invented on the fly by whichever
-    illustration happened to be rendered first is not an anchor, it is a
-    coincidence.
+    Reads reference/canon/ entity files. The strings are verbatim and must
+    stay that way: likeness continuity across separately generated images
+    depends on every prompt sending byte-identical text.
     """
-    return read_continuity_anchors(project_dir)
+    from storyforge import canon
+    return canon.anchor_texts(project_dir)
 
 
-def append_anchor_stubs(project_dir: str, anchors: dict[str, str]) -> list[str]:
-    """Append newly-proposed anchors to the direction document.
+#: Canon subdirectory per proposed anchor type. A type outside this map (or
+#: absent) falls back to 'character' with a WARNING rather than guessing
+#: silently — a stub filed under the wrong registry tells the author to add a
+#: character row for a location, which is a confusing way to learn about a
+#: parse failure.
+_ANCHOR_TYPE_SUBDIR: Final[dict[str, str]] = {
+    'character': 'characters',
+    'location': 'locations',
+    'motif': 'motifs',
+}
+_ANCHOR_TYPE_FALLBACK: Final[str] = 'character'
 
-    Returns the names actually added. Existing anchors are never touched: their
-    whole value is staying byte-identical across every illustration, so revising
-    one silently would break likeness continuity in art already rendered.
 
-    New anchors are appended rather than merged in place so the author sees them
-    as additions to review, in the one document that holds the book's whole
-    visual contract.
+def append_anchor_stubs(project_dir: str,
+                        anchors: dict[str, tuple[str, str]]) -> list[str]:
+    """Persist model-proposed anchors as canon file stubs.
+
+    `anchors` maps display name -> (canon_type, anchor_text).
+
+    Returns the canon_ids written. An anchor that already resolves is left
+    alone: append_anchor_stubs never revises an existing anchor, because a
+    rendered illustration may already depend on its exact text.
+
+    The registry row is deliberately NOT created. canon_missing_registry_entry
+    reports the gap, and an author confirming the name is cheaper than
+    silently making a model's guess canonical.
     """
-    from storyforge.illustrations import direction_path
+    from storyforge import canon
+    from storyforge.common import log
 
-    existing = {name.lower() for name in read_continuity_anchors(project_dir)}
-    fresh = {name.strip(): desc.strip() for name, desc in anchors.items()
-             if name.strip() and desc.strip()
-             and name.strip().lower() not in existing}
-    if not fresh:
-        return []
+    written: list[str] = []
+    for name, (raw_type, text) in sorted(anchors.items()):
+        name = name.strip()
+        text = (text or '').strip()
+        if not name or not text:
+            continue
+        canon_id = _slugify(name)
+        if not canon_id:
+            log(f'WARNING: proposed anchor {name!r} has no usable slug; skipped')
+            continue
+        if canon.resolve_canon_path(project_dir, canon_id) is not None:
+            continue
+        canon_type = (raw_type or '').strip().lower()
+        if canon_type not in _ANCHOR_TYPE_SUBDIR:
+            log(f'WARNING: proposed anchor {name!r} has type {raw_type!r}; '
+                f'filing as {_ANCHOR_TYPE_FALLBACK} — move the file and its '
+                f'registry row if that is wrong')
+            canon_type = _ANCHOR_TYPE_FALLBACK
+        subdir = _ANCHOR_TYPE_SUBDIR[canon_type]
+        path = os.path.join(project_dir, canon.CANON_DIR, subdir,
+                            f'{canon_id}.md')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(_canon_stub(canon_id=canon_id, canon_type=canon_type,
+                                anchor=text))
+        written.append(canon_id)
+    return written
 
-    path = direction_path(project_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    if os.path.isfile(path):
-        with open(path, encoding='utf-8') as f:
-            current = f.read()
-    else:
-        current = f'# Illustration art direction\n\n## {ANCHORS_SECTION}\n'
+def _slugify(name: str) -> str:
+    """Lowercase kebab-case slug, matching canon's id validation."""
+    return re.sub(r'[^a-z0-9]+', '-', name.strip().lower()).strip('-')
 
-    # Detect the heading structurally and case-insensitively. A substring test
-    # over the whole document matched the phrase appearing in ordinary prose
-    # (appending the stubs into some other section's body, where they were fed
-    # to the image model as, say, a content limit) and missed a
-    # differently-cased real heading (appending a *second* anchors section,
-    # permanently orphaning everything under the first).
-    if find_section(read_direction(project_dir), ANCHORS_SECTION) is None:
-        current = current.rstrip('\n') + f'\n\n## {ANCHORS_SECTION}\n'
 
-    addition = '\n'.join(
-        f'### {name}\n\n{fresh[name]}\n' for name in sorted(fresh))
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(current.rstrip('\n') + '\n\n' + addition)
-    return sorted(fresh)
+def _canon_stub(*, canon_id: str, canon_type: str, anchor: str) -> str:
+    """A minimal valid canon file carrying one anchor.
+
+    `appears_in` and `first_appearance` are left empty rather than guessed:
+    a wrong first_appearance would misorder the render sequence, and
+    canon_missing_key reports the omission.
+    """
+    return (
+        '---\n'
+        f'canon_id: {canon_id}\n'
+        f'canon_type: {canon_type}\n'
+        'canon_updated:\n'
+        'appears_in:\n'
+        'first_appearance:\n'
+        '---\n'
+        '\n'
+        '## Embeddable block\n'
+        '\n'
+        f'{anchor}\n'
+        '\n'
+        '## Clauses\n'
+        '\n'
+        '## Related canon\n'
+        '\n'
+        '## Iteration history\n'
+    )
 
 
 # ============================================================================
@@ -399,12 +444,15 @@ Rules:
 
 Return the five sections as markdown. No preamble, no commentary.
 
-If you propose any new character anchor, append it at the very end as:
+If you propose any new anchor — a character, location, or motif with no
+anchor yet — append it at the very end as:
 
 ```
 ANCHORS
-- Name — the anchor string
+- Name | type — the anchor string
 ```
+
+`type` must be one of `character`, `location`, or `motif`.
 """
 
 
@@ -416,14 +464,21 @@ ANCHOR_BLOCK_RE = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 
-# `Name — description`. The separator is an em/en dash, or a colon, or a hyphen
-# *surrounded by whitespace* — never a bare hyphen, which would sever every
-# hyphenated name ("Jean-Luc" became {'Jean': 'Luc — …'}). The mangled name was
-# then written into the direction document as canonical and, because
-# append_anchor_stubs never revises an existing anchor, stayed corrupt — and
-# stopped matching canon_refs, so the anchor silently left every prompt.
+# `Name | type — description`, with `| type` optional. The separator before
+# the description is an em/en dash, or a colon, or a hyphen *surrounded by
+# whitespace* — never a bare hyphen, which would sever every hyphenated name
+# ("Jean-Luc" became {'Jean': 'Luc — …'}). The mangled name was then written
+# into the direction document as canonical and, because append_anchor_stubs
+# never revises an existing anchor, stayed corrupt — and stopped matching
+# canon_refs, so the anchor silently left every prompt. That guard is
+# unchanged by the added `| type` group: the optional pipe segment is tried
+# and abandoned at every candidate split point before the separator
+# alternation runs, so it cannot turn a hyphenated name's internal `-` into a
+# false separator either.
 _ANCHOR_LINE_RE = re.compile(
-    r'^[ \t]*[-*][ \t]*(?P<name>.+?)[ \t]*(?:[—–]|:|(?<=\s)-(?=\s))[ \t]*'
+    r'^[ \t]*[-*][ \t]*(?P<name>.+?)[ \t]*'
+    r'(?:\|[ \t]*(?P<type>[a-zA-Z]+)[ \t]*)?'
+    r'(?:[—–]|:|(?<=\s)-(?=\s))[ \t]*'
     r'(?P<desc>.+?)[ \t]*$'
 )
 
@@ -431,27 +486,33 @@ _ANCHOR_LINE_RE = re.compile(
 _TRAILING_FENCE_RE = re.compile(r'\n[ \t]*`{3,}[ \t]*\Z')
 
 
-def split_anchor_block(body: str) -> tuple[str, dict[str, str]]:
+def split_anchor_block(body: str) -> tuple[str, dict[str, tuple[str, str]]]:
     """Split a model's prompt body from any trailing ANCHORS block.
 
-    Returns (body_without_anchors, anchors). Anchors proposed inline are lifted
-    out so they can be persisted once and reused verbatim.
+    Returns (body_without_anchors, anchors), where anchors maps display name
+    -> (canon_type, anchor_text). Anchors proposed inline are lifted out so
+    they can be persisted once and reused verbatim. `canon_type` is the raw,
+    unvalidated string the model wrote (possibly '' when no `| type` was
+    given) — append_anchor_stubs is what falls back to 'character' with a
+    warning.
 
-    Lines in the block that do not parse as ``Name — description`` are reported
-    by :func:`unparsed_anchor_lines` rather than silently dropped.
+    Lines in the block that do not parse as ``Name [| type] — description``
+    are reported by :func:`unparsed_anchor_lines` rather than silently
+    dropped.
     """
     m = ANCHOR_BLOCK_RE.search(body)
     if not m:
         return _strip_trailing_fence(body), {}
 
-    anchors: dict[str, str] = {}
+    anchors: dict[str, tuple[str, str]] = {}
     for line in m.group(1).splitlines():
         am = _ANCHOR_LINE_RE.match(line)
         if am:
             name = am.group('name').strip().strip('*').strip()
             desc = am.group('desc').strip()
+            raw_type = (am.group('type') or '').strip()
             if name and desc:
-                anchors[name] = desc
+                anchors[name] = (raw_type, desc)
     # The request demonstrates the block inside a code fence, so the model
     # usually emits one; cutting at the ANCHORS line leaves the opening fence
     # behind, which corrupts every following section of the prompt file.
