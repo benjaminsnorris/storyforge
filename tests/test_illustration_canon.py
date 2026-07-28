@@ -4,6 +4,8 @@ task-1-brief.md."""
 
 import os
 
+import pytest
+
 from storyforge.cmd_cleanup import report_canon_files
 
 CANON_BODY = """---
@@ -426,3 +428,39 @@ def test_canon_id_index_is_case_insensitive_and_keys_on_frontmatter(
 
     assert index['nora'] == os.path.join(
         'reference', 'canon', 'characters', 'Nora.md')
+
+
+@pytest.mark.parametrize('label,body', [
+    ('no frontmatter', 'Just some prose, no frontmatter block at all.\n'),
+    ('truncated frontmatter',
+     '---\ncanon_id: nora\ncanon_type: character\n'),
+    ('no canon_id key',
+     '---\ncanon_type: character\ncanon_updated: 2026-07-28\n'
+     'appears_in: vigil\nfirst_appearance: vigil\n---\n\n'
+     '## Embeddable block\n\nSomething.\n'),
+])
+def test_append_anchor_stubs_never_touches_a_malformed_file_at_the_candidate_path(
+        project_dir, label, body):
+    """Regression (fix round 2): canon_id_index only sees files whose
+    frontmatter it can parse a canon_id out of. A file sitting at the exact
+    path a proposal's slug would candidate — no frontmatter, truncated
+    frontmatter, or frontmatter missing the canon_id key — is invisible to
+    that index alone, so append_anchor_stubs truncated a real (if malformed)
+    file the moment 'Nora' slugified to a path that already existed. The old
+    stem-keyed resolve_canon_path saw every .md file regardless of whether
+    its frontmatter parsed, and correctly skipped all three shapes; the fix
+    restores that guarantee with a plain path-exists check ahead of the
+    write, alongside (not instead of) the canon_id_index check."""
+    path = _write_canon(project_dir, os.path.join('characters', 'nora.md'),
+                        body=body)
+    with open(path, 'rb') as f:
+        before = f.read()
+
+    from storyforge.prompts_illustrate import append_anchor_stubs
+    written = append_anchor_stubs(
+        project_dir, {'Nora': ('character', 'A totally different girl.')})
+
+    with open(path, 'rb') as f:
+        after = f.read()
+    assert written == [], label
+    assert after == before, label

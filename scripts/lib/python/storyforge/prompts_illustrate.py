@@ -138,18 +138,28 @@ def append_anchor_stubs(project_dir: str,
     revises an existing anchor, because a rendered illustration may already
     depend on its exact text.
 
-    The existence check keys on canon.canon_id_index — the declared
-    `canon_id` in each file's frontmatter, lowercased — never on the
-    filename stem a candidate path would have. Keying on the stem instead
-    let a case-differing or otherwise mismatched existing file (a warning,
-    not a block, in validate_canon_file) go undetected: writing
-    `characters/nora.md` to "add" an anchor already at `characters/Nora.md`
-    truncated that file in place on a case-insensitive filesystem, and
-    writing it to "add" an anchor already at `characters/nora-smith.md`
-    created a second file that then shadowed the original in
-    anchor_texts's last-sorted-path tie-break. Both are silent corruption
-    of an anchor a rendered illustration may already depend on being
-    byte-identical.
+    Two independent existence checks guard the write, and neither subsumes
+    the other:
+
+    - canon.canon_id_index — the declared `canon_id` in each *parseable*
+      file's frontmatter, lowercased — catches an existing anchor whose
+      filename stem differs from its own canon_id (a warning, not a block,
+      in validate_canon_file). Keying on the stem instead let
+      `characters/nora.md` get written to "add" an anchor already at
+      `characters/Nora.md` (truncating it in place on a case-insensitive
+      filesystem) or already at `characters/nora-smith.md` (creating a
+      second file that then shadowed the original in anchor_texts's
+      last-sorted-path tie-break).
+    - a plain `os.path.exists` on the exact candidate path catches a file
+      sitting at that path whose frontmatter canon_id_index can't read at
+      all — absent, truncated, or missing the `canon_id` key. Those files
+      are invisible to canon_id_index (it only indexes what it can parse a
+      canon_id out of), so relying on canon_id_index alone would silently
+      truncate a malformed-but-real file the moment a proposal's slug
+      happened to match its path.
+
+    Either check firing skips the write and logs a WARNING; the anchor is
+    left for the author to sort out rather than risking any of the above.
 
     The registry row is deliberately NOT created. canon_missing_registry_entry
     reports the gap, and an author confirming the name is cheaper than
@@ -184,6 +194,15 @@ def append_anchor_stubs(project_dir: str,
         subdir = _ANCHOR_TYPE_SUBDIR[canon_type]
         rel_path = os.path.join(canon.CANON_DIR, subdir, f'{canon_id}.md')
         path = os.path.join(project_dir, rel_path)
+        if os.path.exists(path):
+            # canon_id_index only sees files whose frontmatter it could
+            # parse a canon_id out of — a file at this exact path with no
+            # frontmatter, truncated frontmatter, or no canon_id key is
+            # invisible to it, so it would otherwise be silently
+            # overwritten here.
+            log(f'WARNING: proposed anchor {name!r} would write {rel_path}, '
+                f'which already exists; left alone rather than overwrite it')
+            continue
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
             f.write(_canon_stub(canon_id=canon_id, canon_type=canon_type,
