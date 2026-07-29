@@ -9,7 +9,16 @@ Ledger format (pipe-delimited):
 
 import os
 import sys
+import threading
 from datetime import datetime
+
+#: Serializes ledger writes. Commands that fan API calls out across a thread
+#: pool (`runner.run_parallel` — cmd_illustrate --prompts, cmd_write_gn,
+#: cmd_scenes_setup) reach log_operation concurrently, and the
+#: create-header-then-append sequence is not atomic: two threads finding no
+#: ledger both write the header, leaving a second header line mid-file that
+#: every ledger reader then parses as a malformed row.
+_LEDGER_LOCK = threading.Lock()
 
 
 # ============================================================================
@@ -105,15 +114,15 @@ def log_operation(project_dir: str, operation: str, model: str,
     ledger_file = os.path.join(project_dir, 'working', 'costs', 'ledger.csv')
     os.makedirs(os.path.dirname(ledger_file), exist_ok=True)
 
-    if not os.path.exists(ledger_file):
-        with open(ledger_file, 'w') as f:
-            f.write(LEDGER_HEADER + '\n')
-
     timestamp = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     row = f"{timestamp}|{operation}|{target}|{model}|{input_tokens}|{output_tokens}|{cache_read}|{cache_create}|{cost:.6f}|{duration_s}"
 
-    with open(ledger_file, 'a') as f:
-        f.write(row + '\n')
+    with _LEDGER_LOCK:
+        if not os.path.exists(ledger_file):
+            with open(ledger_file, 'w') as f:
+                f.write(LEDGER_HEADER + '\n')
+        with open(ledger_file, 'a') as f:
+            f.write(row + '\n')
 
 
 def estimate_cost(operation: str, scope_count: int, avg_words: int,
