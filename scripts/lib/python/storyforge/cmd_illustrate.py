@@ -12,6 +12,9 @@ Nine phases, each its own flag:
   --audit      Read the prose against that matrix and report contradictions.
                Read-only with respect to the prose and the log.
   --prompts    Turn planned rows into image-generation prompts.
+  --package    Assemble manuscript/illustration-packet/ — one bundle a
+               long-running generation session works through, instead of
+               fifteen separate prompt pastes. Assembly only, no API calls.
   --ingest     Bring rendered files in, record digests, embed markers.
   --embed      (Re)insert markers from the plan, without ingesting.
   --diagnose   Read-only plan health report, with the recommended render
@@ -43,7 +46,9 @@ from storyforge.common import (
 )
 from storyforge.costs import log_operation
 from storyforge import illustrations as ill
+from storyforge import packet
 from storyforge import prompts_illustrate as pi
+from storyforge import prompts_packet as pp
 from storyforge import visual_state as vs
 
 # Excerpt handed to the art-direction prompt. Enough to establish the beat and
@@ -63,6 +68,9 @@ def parse_args(argv):
                        help='Propose illustration moments into the plan CSV')
     phase.add_argument('--prompts', action='store_true',
                        help='Write art-direction prompts for planned rows')
+    phase.add_argument('--package', action='store_true',
+                       help='Assemble the handoff packet in '
+                            'manuscript/illustration-packet/ (no API calls)')
     phase.add_argument('--ingest', metavar='PATH', default=None,
                        help='Ingest rendered illustration file(s) from a file '
                             'or directory')
@@ -115,11 +123,12 @@ def main(argv=None):
     coaching = args.coaching or get_coaching_level(project_dir)
 
     phases = [args.direction, args.plan, args.prompts, bool(args.ingest),
-              args.embed, args.diagnose, args.review, args.state, args.audit]
+              args.embed, args.diagnose, args.review, args.state, args.audit,
+              args.package]
     if not any(phases):
         log('Nothing to do. Pick a phase: --direction, --plan, --prompts, '
-            '--ingest PATH, --embed, --state, --audit, --diagnose, or '
-            '--review.')
+            '--package, --ingest PATH, --embed, --state, --audit, --diagnose, '
+            'or --review.')
         return 1
 
     if args.diagnose:
@@ -136,6 +145,8 @@ def main(argv=None):
         exit_code = run_prompts(project_dir, coaching, _id_filter(args.ids),
                                 args.dry_run,
                                 no_prior_refs=args.no_prior_refs) or exit_code
+    if args.package:
+        exit_code = run_package(project_dir, args.dry_run) or exit_code
     if args.ingest:
         exit_code = run_ingest(project_dir, args.ingest,
                                args.dry_run) or exit_code
@@ -1310,6 +1321,81 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             f'{", ".join(failed)}. Re-run --prompts for those before '
             f'committing.')
         return 1
+    return 0
+
+
+# ============================================================================
+# --package
+# ============================================================================
+
+def run_package(project_dir: str, dry_run: bool) -> int:
+    """Assemble `manuscript/illustration-packet/` — six files, no API calls.
+
+    Regenerated wholesale, so the packet is a render and never hand-edited: the
+    author's edits belong in the plan, the transition log, or the canon files,
+    all of which this reads.
+
+    Nothing here blocks. A warning the author has considered is theirs to
+    override, and refusing to build the packet over a never-run audit would
+    strand them behind a check they may have a reason to skip — so every gap is
+    logged as a WARNING *and* written into README.md, which is the copy they
+    will still have in front of them an hour later.
+    """
+    contents = packet.resolve(project_dir)
+    grid = packet.state_grid(project_dir)
+    title = read_yaml_field('project.title', project_dir) or '(untitled)'
+
+    illustrated: dict[str, list[str]] = {}
+    for entry in contents['entries']:
+        if entry['scene_id']:
+            illustrated.setdefault(entry['scene_id'], []).append(entry['id'])
+
+    # Every aspect the set actually uses, in the canonical order, so
+    # acceptance.md states the orientation rule for those and no others.
+    used = {entry['aspect'] for entry in contents['entries']}
+    aspects = [a for a in pi.ASPECTS if a in used] or [pi.DEFAULT_ASPECT]
+
+    files = {
+        'README.md': pp.render_readme(
+            title=title, contents=contents,
+            entry_count=len(contents['entries'])),
+        'canon.md': pp.render_canon(
+            book_level=contents['book_level'], anchors=contents['anchors'],
+            labels=_anchor_labels(project_dir)),
+        'visual-state.md': pp.render_visual_state(
+            grid=grid, illustrated=illustrated),
+        'illustrations.md': pp.render_illustrations(
+            entries=contents['entries']),
+        'reference-images.md': pp.render_reference_images(
+            references=contents['references']),
+        'acceptance.md': pp.render_acceptance(aspects=aspects),
+    }
+
+    if dry_run:
+        for name in packet.PACKET_FILES:
+            log(f'[dry-run] would write '
+                f'{os.path.join(packet.PACKET_DIR, name)}')
+        for gap in contents['gaps']:
+            log(f'[dry-run] WARNING: {gap}')
+        return 0
+
+    os.makedirs(packet.packet_dir(project_dir), exist_ok=True)
+    for name in packet.PACKET_FILES:
+        with open(packet.packet_file(project_dir, name), 'w',
+                  encoding='utf-8') as f:
+            f.write(files[name])
+
+    log(f'Wrote {len(packet.PACKET_FILES)} file(s) to '
+        f'{packet.PACKET_DIR}/ — {len(contents["entries"])} illustration(s), '
+        f'{len(contents["anchors"])} continuity anchor(s)')
+    for gap in contents['gaps']:
+        log(f'  WARNING: {gap}')
+    if contents['gaps']:
+        log(f'  {len(contents["gaps"])} gap(s) above are also written into '
+            f'{os.path.join(packet.PACKET_DIR, "README.md")}, so the packet '
+            f'says what it cannot tell you.')
+    log('Render and approve a first batch, ingest those, then re-run '
+        '--package so the rest can reference real images.')
     return 0
 
 

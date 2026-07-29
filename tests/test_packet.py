@@ -240,6 +240,51 @@ def test_an_author_absent_column_is_carried_into_the_entry(packet_project):
     assert entries['the-blank-page']['absent'] == ''
 
 
+def test_an_author_contrast_note_is_appended_not_replaced(packet_project):
+    rows = ill.read_plan(packet_project)
+    rows[1]['contrast'] = 'Much wider than the one before it.'
+    ill.write_plan(packet_project, rows)
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    contrast = entries['the-blank-page']['contrast']
+    assert 'Much wider than the one before it.' in contrast
+    assert 'darkest' in contrast
+
+
+def test_a_row_with_no_scene_id_is_reported_not_silently_stateless(
+        packet_project):
+    rows = ill.read_plan(packet_project)
+    rows[0]['scene_id'] = ''
+    ill.write_plan(packet_project, rows)
+    gaps = packet.resolve(packet_project)['gaps']
+    assert any('no scene_id' in g and rows[0]['id'] in g for g in gaps)
+
+
+def test_an_override_for_an_unnamed_entity_still_reaches_the_entry(
+        packet_project):
+    """An override is written for one image specifically. Dropping it because
+    `canon_refs` does not repeat the entity would be the silent filtering the
+    gaps list exists to prevent."""
+    rows = ill.read_plan(packet_project)
+    rows[1]['state_override'] = 'village:half its roofs already gone'
+    ill.write_plan(packet_project, rows)
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    assert 'half its roofs already gone' in entries['the-blank-page']['state']
+
+
+def test_an_aspect_track_is_labeled_with_its_aspect(packet_project):
+    """`{canon_id}-{aspect}` is the granularity convention — one track per
+    independently-changing aspect. It should not read as a slug."""
+    from storyforge import visual_state as vs
+    rows = vs.read_transitions(packet_project)
+    rows.append({'entity': 'dorren-hayle-clothing', 'from_scene': 'act1-sc01',
+                 'state': 'a mourning band on her left sleeve',
+                 'evidence': 'held her breath'})
+    vs.write_transitions(packet_project, rows)
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    state = entries['the-finest-cartographer']['state']
+    assert 'Dorren Hayle (clothing): a mourning band' in state
+
+
 def test_the_composition_note_becomes_the_image_specific_note(packet_project):
     entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
     assert 'lamp behind her' in entries['the-finest-cartographer']['notes']
@@ -376,6 +421,19 @@ def test_an_invalid_anchor_marker_id_is_reported(packet_project):
                              'canon-embed: Dorren_Hayle', 1))
     findings = packet.anchor_copy_drift(packet_project)
     assert any('not a valid canon id' in f['detail'] for f in findings)
+
+
+def test_a_partial_packet_is_still_checked_for_drift(packet_project):
+    """A missing file is skipped; the files that ARE there are still read."""
+    _write_packet(packet_project)
+    os.remove(packet.packet_file(packet_project, 'acceptance.md'))
+    path = packet.packet_file(packet_project, 'canon.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    original = next(iter(canon.anchor_texts(packet_project).values()))
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace(original, original.replace('.', '!', 1)))
+    assert packet.anchor_copy_drift(packet_project)
 
 
 def test_an_unreadable_packet_file_is_reported_not_skipped(packet_project):
