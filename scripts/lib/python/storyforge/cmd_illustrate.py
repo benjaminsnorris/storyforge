@@ -833,10 +833,15 @@ def _warn_unanchored_rows(rows: list[dict[str, str]],
             f'and then prompt.')
     if unnarrowed:
         log(f'WARNING: {len(unnarrowed)} row(s) have no canon_refs '
-            f'({", ".join(sorted(unnarrowed))}), so every anchor in the book '
-            f'is sent and nothing can check whether their actual cast is '
-            f'anchored. Fill canon_refs so a missing anchor is caught before '
-            f'you pay for the prompt.')
+            f'({", ".join(sorted(unnarrowed))}), so narrowing is off entirely: '
+            f'every anchor in the book is sent to those prompts, which costs '
+            f'tokens on a cast that is not in the frame and invites the model '
+            f'to put off-frame characters in it. Nothing can check whether '
+            f'their actual cast is anchored either, and a model-proposed '
+            f'anchor is written after the calls and does NOT reach the other '
+            f'rows in this run. Run `storyforge illustrate --direction` to '
+            f'author the anchors, then fill canon_refs so each prompt gets '
+            f'only the cast it shows.')
 
 
 #: Statuses a written prompt may set to `prompted`. Everything else is art that

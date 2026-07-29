@@ -2901,7 +2901,15 @@ def test_preflight_warns_about_the_unnarrowed_fallback(in_project, monkeypatch,
                                                        capsys):
     """An empty canon_refs sends the whole cast, so nothing can check whether
     this row's actual cast is anchored. Only worth saying when the book has
-    entity canon at all."""
+    entity canon at all.
+
+    This is a WARNING rather than a plain log because narrowing is off
+    entirely — the token cost and the off-frame-character risk are the
+    consequence that justifies the severity, so the message has to carry them
+    (an author reading it should learn why it matters, not only what the
+    condition is). Both branches of the gate must also state the
+    non-propagation rule and point at `--direction`; the missing-anchor branch
+    had them from the start and this one did not."""
     write_scene(in_project, 'vigil', SCENE)
     _write_entity_canon(in_project, 'characters', 'dorren-hayle',
                         'A spare woman of fifty.')
@@ -2909,8 +2917,16 @@ def test_preflight_warns_about_the_unnarrowed_fallback(in_project, monkeypatch,
 
     assert _prompt_one(in_project, monkeypatch) == 0
     out = capsys.readouterr().out
-    assert 'have no canon_refs' in out
-    assert 'lantern-vigil' in out
+    warning = next(line for line in out.splitlines()
+                   if 'have no canon_refs' in line)
+    assert 'WARNING' in warning
+    assert 'lantern-vigil' in warning
+    # The consequence that justifies the severity.
+    assert 'costs tokens' in warning
+    assert 'off-frame characters' in warning
+    # The two statements the fix requires of BOTH branches.
+    assert 'does NOT reach the other rows in this run' in warning
+    assert '--direction' in warning
 
 
 def test_preflight_says_nothing_when_the_book_has_no_entity_canon(in_project,
