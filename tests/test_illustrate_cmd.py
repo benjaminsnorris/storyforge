@@ -2673,8 +2673,13 @@ def test_the_strict_scaffold_carries_no_constraints_section(in_project):
     assert cmd_illustrate.main(['--prompts', '--coaching', 'strict']) == 0
     with open(os.path.join(in_project,
                            ill.default_prompt_rel('lantern-vigil'))) as f:
-        body = f.read()
-    assert body.count('Constraints') == 1
+        lines = f.read().splitlines()
+    # Heading-level check, matching the --coaching full sibling: counting the
+    # bare word would also match prose mentioning constraints, and would miss
+    # the actual defect (two headings of the same name at different levels).
+    headings = [line for line in lines
+                if line.lstrip('#').strip() == 'Constraints']
+    assert headings == ['### Constraints']
 
 
 # ============================================================================
@@ -2757,27 +2762,42 @@ def test_prompting_a_rendered_row_keeps_its_status(in_project, monkeypatch,
 def test_prompting_an_ingested_row_keeps_it_publishable(in_project, monkeypatch,
                                                         capsys):
     """The consequence that actually bit: the publishable set must be identical
-    before and after. manifest_assets is the cheapest proof — it skips any row
-    whose status is not `ingested`."""
-    write_scene(in_project, 'vigil', SCENE)
-    make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
-                          'lantern-vigil.png'), 8, 8)
-    ill.write_plan(in_project, [plan_row(
+    before and after, and the marker must still resolve into the local build.
+
+    manifest_assets proves the publish side and never touches disk, so the file
+    and its real digest are here for the resolution half — `resolve_for_local`
+    only resolves a marker whose row is `ingested` AND whose file exists, which
+    is the epub / PDF / web-book consequence."""
+    art = make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
+                               'lantern-vigil.png'), 8, 8)
+    row_in = plan_row(
         status='ingested', asset_file=ill.default_asset_rel('lantern-vigil'),
-        sha256='a' * 64, width='8', height='8',
-        ingested_at='2026-07-28')])
+        sha256=ill.sha256_of(art), width='8', height='8',
+        ingested_at='2026-07-28')
+    write_scene(in_project, 'vigil', ill.insert_marker(SCENE, row_in)['text'])
+    ill.write_plan(in_project, [row_in])
+
     before = ill.manifest_assets(in_project)
     assert [a['key'] for a in before] == ['lantern-vigil']
+    with open(os.path.join(in_project, 'scenes', 'vigil.md')) as f:
+        scene_text = f.read()
+    assert 'lantern-vigil.png' in ill.resolve_for_local(in_project, scene_text)
 
     assert _prompt_one(in_project, monkeypatch, ids='lantern-vigil') == 0
 
     row = read_plan_map(in_project)['lantern-vigil']
     assert row['status'] == 'ingested'
     assert row['prompt_file'] == ill.default_prompt_rel('lantern-vigil')
-    # Digest, dimensions, and the file record are untouched.
-    assert row['sha256'] == 'a' * 64
+    # Digest, dimensions, the file record, and the ingest date are untouched —
+    # a re-prompt is new art direction, not a new ingest.
+    assert row['sha256'] == ill.sha256_of(art)
     assert row['asset_file'] == ill.default_asset_rel('lantern-vigil')
+    assert row['ingested_at'] == '2026-07-28'
     assert ill.manifest_assets(in_project) == before
+    dropped: list[str] = []
+    assert 'lantern-vigil.png' in ill.resolve_for_local(
+        in_project, scene_text, dropped=dropped)
+    assert dropped == []
     out = capsys.readouterr().out
     assert 'already-ingested art' in out
 
@@ -2823,3 +2843,146 @@ def test_cleanup_does_not_flag_a_freshly_written_plan(in_project):
     ill.write_plan(in_project, [plan_row()])
     assert [f for f in _check_crlf(in_project)
             if 'illustration-plan' in f['file']] == []
+
+
+# ============================================================================
+# Anchors are inputs, not residue (fix round: item 1 regression)
+#
+# The per-illustration loop used to re-read the anchor set per row, so a canon
+# stub written for row 1 reached rows 2..N verbatim. Building every request
+# before the first call ended that: N rows with no anchor for a character now
+# each invent their own description, the first stub wins the canon file, and the
+# other N-1 prompt files disagree with it — the exact likeness drift the
+# identical-string mechanism exists to prevent. Nothing downstream can repair
+# it, so the check has to run before the calls are paid for.
+# ============================================================================
+
+def test_preflight_warns_when_canon_refs_names_a_missing_anchor(in_project,
+                                                                monkeypatch,
+                                                                capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    _write_entity_canon(in_project, 'characters', 'dorren-hayle',
+                        'A spare woman of fifty.')
+    ill.write_plan(in_project, [
+        plan_row(id='lf-01', scene_id='vigil',
+                 canon_refs='dorren-hayle;great-lamp'),
+        plan_row(id='lf-02', scene_id='vigil', canon_refs='dorren-hayle'),
+    ])
+
+    assert _prompt_one(in_project, monkeypatch) == 0
+    out = capsys.readouterr().out
+    warning = next(line for line in out.splitlines()
+                   if 'no continuity anchor' in line)
+    assert 'WARNING' in warning
+    assert '1 row(s)' in warning
+    assert 'lf-01 → great-lamp' in warning
+    # lf-02's only canon_ref resolves, so it is not part of this finding.
+    assert 'lf-02' not in warning
+    # Actionable, and names the mechanism that makes it unrecoverable later.
+    assert 'does NOT reach the other rows in this run' in warning
+    assert '--direction' in warning
+
+
+def test_preflight_is_silent_when_every_named_anchor_resolves(in_project,
+                                                              monkeypatch,
+                                                              capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    _write_entity_canon(in_project, 'characters', 'dorren-hayle',
+                        'A spare woman of fifty.')
+    ill.write_plan(in_project, [plan_row(canon_refs='dorren-hayle')])
+
+    assert _prompt_one(in_project, monkeypatch) == 0
+    out = capsys.readouterr().out
+    assert 'no continuity anchor' not in out
+    assert 'have no canon_refs' not in out
+
+
+def test_preflight_warns_about_the_unnarrowed_fallback(in_project, monkeypatch,
+                                                       capsys):
+    """An empty canon_refs sends the whole cast, so nothing can check whether
+    this row's actual cast is anchored. Only worth saying when the book has
+    entity canon at all."""
+    write_scene(in_project, 'vigil', SCENE)
+    _write_entity_canon(in_project, 'characters', 'dorren-hayle',
+                        'A spare woman of fifty.')
+    ill.write_plan(in_project, [plan_row(canon_refs='')])
+
+    assert _prompt_one(in_project, monkeypatch) == 0
+    out = capsys.readouterr().out
+    assert 'have no canon_refs' in out
+    assert 'lantern-vigil' in out
+
+
+def test_preflight_says_nothing_when_the_book_has_no_entity_canon(in_project,
+                                                                  monkeypatch,
+                                                                  capsys):
+    """With no anchors at all there is no narrowing to fall back from, and
+    _reference_tier_gaps already covers the missing reference tier — a second
+    warning about the same absence is noise."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(canon_refs='')])
+
+    assert _prompt_one(in_project, monkeypatch) == 0
+    assert 'have no canon_refs' not in capsys.readouterr().out
+
+
+def test_new_stubs_name_the_rerun_for_the_other_rows(in_project, monkeypatch,
+                                                     capsys):
+    """The stub is written after every request was built, so the other prompts
+    in this run cannot contain it. Saying so without naming the re-run leaves
+    the author to work out the remedy."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [
+        plan_row(id='lf-01', scene_id='vigil'),
+        plan_row(id='lf-02', scene_id='vigil'),
+    ])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    bodies = {
+        'lf-01': '### Scene\n\nA.\n\nANCHORS\n- Dorren Hayle | character — '
+                 'a spare woman of fifty\n',
+        'lf-02': '### Scene\n\nB.\n',
+    }
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda pd, prompt, op, **kw: bodies[kw['target']])
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+    out = capsys.readouterr().out
+    assert 'wrote 1 new canon stub(s)' in out
+    assert 'built before these stubs existed' in out
+    assert '--prompts --ids lf-02' in out
+    # And the claim is true: lf-02's prompt file cannot carry the new anchor.
+    with open(os.path.join(in_project, ill.default_prompt_rel('lf-02'))) as f:
+        assert 'spare woman of fifty' not in f.read()
+
+
+def test_a_failed_row_reports_its_real_status(in_project, monkeypatch, capsys):
+    """Hardcoding `planned` told an author whose re-prompt of finished art
+    failed that it had been demoted — in the one area item 6 exists to fix."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(status='ingested')])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: '')
+
+    assert cmd_illustrate.main(['--prompts', '--ids', 'lantern-vigil']) == 1
+    out = capsys.readouterr().out
+    assert 'status stays `ingested`' in out
+    assert 'status stays `planned`' not in out
+    assert read_plan_map(in_project)['lantern-vigil']['status'] == 'ingested'
+
+
+def test_ingesting_over_a_superseded_row_says_it_un_retires_it(in_project,
+                                                               capsys):
+    """Ingest is the documented revival endpoint, so the transition is right —
+    but a stale leftover file would otherwise change the publishable set with
+    nothing said, which is the class of silent change item 6 closed."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(status='superseded')])
+    src = make_png(os.path.join(in_project, 'incoming', 'lantern-vigil.png'),
+                   8, 8)
+
+    assert cmd_illustrate.main(['--ingest', os.path.dirname(src)]) == 0
+    out = capsys.readouterr().out
+    assert 'was retired (status=superseded)' in out
+    assert 'un-retires it' in out
+    assert read_plan_map(in_project)['lantern-vigil']['status'] == 'ingested'
+    assert ill.manifest_assets(in_project) != []

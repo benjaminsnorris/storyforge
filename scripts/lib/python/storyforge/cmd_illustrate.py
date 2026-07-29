@@ -651,8 +651,14 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     os.makedirs(ill.prompts_dir(project_dir), exist_ok=True)
     canon_ctx = _canon_context(project_dir)
     style_note = _style_note(project_dir)
+    # Read once for the whole run. Every request is built before any call is
+    # made, so a stub a later row's response proposes cannot reach the others
+    # — which is exactly why _warn_unanchored_rows runs first, while the author
+    # can still fix it for free.
     anchors = pi.anchors_for_prompt(project_dir)
     labels = _anchor_labels(project_dir)
+    if needs_api:
+        _warn_unanchored_rows(rows, anchors)
     cutoff = _reference_cutoff(project_dir, no_prior_refs)
     written = 0
     failed: list[str] = []
@@ -693,8 +699,14 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         if needs_api:
             body = bodies.get(illus_id, '')
             if not body:
+                # The actual status, not a hardcoded `planned`: via --ids this
+                # row can be ingested, rendered, prompted, or superseded, and
+                # telling an author their finished art is at `planned` is the
+                # same confusion the status guard below exists to prevent.
+                held = (row.get('status') or '').strip()
                 log(f'WARNING: no art direction returned for {illus_id} — '
-                    f'skipping (status stays `planned`)')
+                    f'skipping (status stays '
+                    f'`{held or "planned (its status cell is empty)"}`)')
                 failed.append(illus_id)
                 continue
             unparsed = pi.unparsed_anchor_lines(body)
@@ -708,6 +720,17 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
                 if added:
                     log(f'  wrote {len(added)} new canon stub(s) for review: '
                         f'{", ".join(added)}')
+                    others = [j['id'] for j in jobs if j['id'] != illus_id]
+                    if others:
+                        # Every request in this run was built before these
+                        # stubs existed, so no other prompt file uses them.
+                        # Naming the re-run is the difference between a note
+                        # and an action.
+                        log(f'         the other prompt(s) in this run were '
+                            f'built before these stubs existed and do not use '
+                            f'them. Review the stub text, then re-run: '
+                            f'storyforge illustrate --prompts --ids '
+                            f'{",".join(others)}')
         else:
             body = _strict_prompt_scaffold(row)
 
@@ -756,6 +779,64 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             f'committing.')
         return 1
     return 0
+
+
+def _warn_unanchored_rows(rows: list[dict[str, str]],
+                          anchors: dict[str, str]) -> None:
+    """Warn, before any call is paid for, about rows with no usable anchor.
+
+    Anchors are *inputs* to the art, not residue from it: `append_anchor_stubs`
+    is a fallback for canon that does not exist yet, never the intended path.
+    That distinction became load-bearing when the calls started fanning out.
+    Previously the anchor set was re-read per row, so a stub written for row 1
+    reached rows 2..N verbatim — the identical-string mechanism working by
+    accident. Now every request is built before the first call, so N rows with
+    no anchor for a character each invent their own description, the first stub
+    wins the file, and the other N-1 prompt files disagree with it. That is the
+    exact likeness drift the anchor mechanism exists to prevent.
+
+    Nothing downstream can repair that, so the only useful moment is here.
+    Two shapes of gap:
+
+    - `canon_refs` naming an id with no anchor — the row asked for an anchor
+      that does not exist.
+    - `canon_refs` empty while the book *does* have entity canon — the
+      full-set fallback is in play (see `_relevant_anchors`), so nothing checks
+      whether this row's actual cast is anchored.
+    """
+    known = {key.strip().lower() for key in anchors}
+    missing: dict[str, list[str]] = {}
+    unnarrowed: list[str] = []
+    for row in rows:
+        rid = (row.get('id') or '').strip() or '(no id)'
+        named = {n.strip().lower()
+                 for n in ill._split_array(row.get('canon_refs', ''))}
+        if not named:
+            if anchors:
+                unnarrowed.append(rid)
+            continue
+        gaps = sorted(named - known)
+        if gaps:
+            missing[rid] = gaps
+
+    if missing:
+        detail = '; '.join(f'{rid} → {", ".join(ids)}'
+                           for rid, ids in sorted(missing.items()))
+        log(f'WARNING: {len(missing)} row(s) name canon_refs with no '
+            f'continuity anchor: {detail}. Those entities will be '
+            f'art-directed with nothing holding their look fixed, and each '
+            f'prompt will invent its own description — a model-proposed '
+            f'anchor is written after the calls and does NOT reach the other '
+            f'rows in this run, so the first one wins the canon file and the '
+            f'rest disagree with it. Anchors are inputs, not residue: run '
+            f'`storyforge illustrate --direction`, fill the new canon files, '
+            f'and then prompt.')
+    if unnarrowed:
+        log(f'WARNING: {len(unnarrowed)} row(s) have no canon_refs '
+            f'({", ".join(sorted(unnarrowed))}), so every anchor in the book '
+            f'is sent and nothing can check whether their actual cast is '
+            f'anchored. Fill canon_refs so a missing anchor is caught before '
+            f'you pay for the prompt.')
 
 
 #: Statuses a written prompt may set to `prompted`. Everything else is art that
@@ -1104,6 +1185,8 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
         return 1
 
     os.makedirs(ill.illustrations_dir(project_dir), exist_ok=True)
+    status_before = {r['id'].strip(): (r.get('status') or '').strip()
+                     for r in plan}
     ingested = 0
     ingested_ids: set[str] = set()
     for illus_id, src in matched:
@@ -1137,6 +1220,16 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
                     f'{dims[0]}×{dims[1]}')
 
         digest = ill.sha256_of(dest)
+        # Ingest is the documented revival endpoint for a retired row, so
+        # superseded → ingested is correct — but it changes the publishable set,
+        # and a stale leftover file in the ingest directory would otherwise
+        # un-retire an illustration with nothing said. Same class of silent
+        # change the --prompts status guard closes.
+        if status_before.get(illus_id) == 'superseded':
+            log(f'  {illus_id} was retired (status=superseded); this render '
+                f'un-retires it — status superseded → ingested, its marker is '
+                f're-embedded, and it ships again. If that was not intended, '
+                f'set status back to superseded and re-run --embed.')
         # `ingested_at` is what lets --prompts tell a render directed by the
         # current canon from one that predates it. Stamped on every ingest,
         # including a re-ingest of the same id, because a replacement render is
