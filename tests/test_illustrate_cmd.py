@@ -3002,3 +3002,261 @@ def test_ingesting_over_a_superseded_row_says_it_un_retires_it(in_project,
     assert 'un-retires it' in out
     assert read_plan_map(in_project)['lantern-vigil']['status'] == 'ingested'
     assert ill.manifest_assets(in_project) != []
+
+
+# ============================================================================
+# --state (#278 phase 2)
+# ============================================================================
+
+def test_state_strict_writes_a_template_and_makes_no_api_call(in_project, monkeypatch):
+    """The key must be set or the missing-key guard fires before the trap and
+    this test passes vacuously."""
+    from storyforge import visual_state as vs
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def _boom(*a, **k):
+        raise AssertionError('strict coaching must not call the API')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
+
+    assert cmd_illustrate.main(['--state', '--coaching', 'strict']) == 0
+    assert os.path.isfile(os.path.join(in_project, 'reference',
+                                       'visual-state.csv'))
+    checklist = os.path.join(in_project, 'working', 'coaching',
+                             'visual-state-checklist.md')
+    assert os.path.isfile(checklist)
+    with open(checklist, encoding='utf-8') as f:
+        body = f.read()
+    assert 'proposes nothing' in body
+    # The two rows the fixture ships must survive the strict write.
+    assert len(vs.read_transitions(in_project)) == 2
+
+
+def test_state_coach_writes_questions_and_makes_no_api_call(in_project, monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def _boom(*a, **k):
+        raise AssertionError('coach coaching must not call the API')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
+
+    assert cmd_illustrate.main(['--state', '--coaching', 'coach']) == 0
+    brief = os.path.join(in_project, 'working', 'coaching',
+                         'visual-state-brief.md')
+    with open(brief, encoding='utf-8') as f:
+        body = f.read()
+    assert 'Questions to settle' in body
+    # The two rules with tests pinning them must both be stated.
+    assert 'at** its own scene' in body
+    assert '{canon_id}-{aspect}' in body
+
+
+def test_state_full_writes_proposed_transitions(in_project, monkeypatch):
+    from storyforge import visual_state as vs
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '{"transitions": [{"entity": "nora-clothing", '
+        '"from_scene": "act1-sc01", "state": "nightclothes, barefoot", '
+        '"evidence": "held her breath"}]}'
+    ))
+    assert cmd_illustrate.main(['--state', '--coaching', 'full']) == 0
+    transitions = vs.read_transitions(in_project)
+    assert any(t['entity'] == 'nora-clothing' for t in transitions)
+
+
+def test_state_full_never_revises_an_existing_transition(in_project, monkeypatch):
+    from storyforge import visual_state as vs
+    vs.write_transitions(in_project, [{
+        'entity': 'nora-clothing', 'from_scene': 'act1-sc01',
+        'state': 'AUTHOR ORIGINAL', 'evidence': 'held her breath'}])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '{"transitions": [{"entity": "nora-clothing", '
+        '"from_scene": "act1-sc01", "state": "MODEL GUESS", '
+        '"evidence": "held her breath"}]}'
+    ))
+    assert cmd_illustrate.main(['--state', '--coaching', 'full']) == 0
+    kept = [t for t in vs.read_transitions(in_project)
+            if t['entity'] == 'nora-clothing' and t['from_scene'] == 'act1-sc01']
+    assert len(kept) == 1
+    assert kept[0]['state'] == 'AUTHOR ORIGINAL'
+
+
+def test_state_full_reports_the_proposal_it_discarded(in_project, monkeypatch, capsys):
+    from storyforge import visual_state as vs
+    vs.write_transitions(in_project, [{
+        'entity': 'nora-clothing', 'from_scene': 'act1-sc01',
+        'state': 'AUTHOR ORIGINAL', 'evidence': 'held her breath'}])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '{"transitions": [{"entity": "nora-clothing", '
+        '"from_scene": "act1-sc01", "state": "MODEL GUESS", '
+        '"evidence": "held her breath"}]}'
+    ))
+    cmd_illustrate.main(['--state', '--coaching', 'full'])
+    assert 'the proposal was discarded' in capsys.readouterr().out
+
+
+def test_state_full_appends_a_second_track_for_the_same_entity(in_project, monkeypatch):
+    """The preserve key is (entity, from_scene), not entity — an entity that
+    changes twice needs both rows."""
+    from storyforge import visual_state as vs
+    vs.write_transitions(in_project, [{
+        'entity': 'nora-clothing', 'from_scene': 'act1-sc01',
+        'state': 'nightclothes', 'evidence': 'held her breath'}])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '{"transitions": [{"entity": "nora-clothing", '
+        '"from_scene": "act2-sc01", "state": "travel coat", '
+        '"evidence": "She checked her compass"}]}'
+    ))
+    assert cmd_illustrate.main(['--state', '--coaching', 'full']) == 0
+    assert len(vs.read_transitions(in_project)) == 2
+
+
+def test_state_full_without_a_key_is_an_error_not_a_silent_skip(in_project, capsys):
+    assert cmd_illustrate.main(['--state', '--coaching', 'full']) == 1
+    assert 'ANTHROPIC_API_KEY is not set' in capsys.readouterr().out
+
+
+def test_state_dry_run_writes_nothing(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def _boom(*a, **k):
+        raise AssertionError('--dry-run must not call the API')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
+    before = open(os.path.join(in_project, 'reference', 'visual-state.csv'),
+                  'rb').read()
+    assert cmd_illustrate.main(['--state', '--coaching', 'full',
+                               '--dry-run']) == 0
+    assert '[dry-run]' in capsys.readouterr().out
+    after = open(os.path.join(in_project, 'reference', 'visual-state.csv'),
+                 'rb').read()
+    assert before == after
+
+
+def test_state_full_reports_an_unparseable_response(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: 'not json at all')
+    assert cmd_illustrate.main(['--state', '--coaching', 'full']) == 1
+    assert 'could not parse transitions' in capsys.readouterr().out
+
+
+def test_state_full_warns_when_a_proposal_cannot_be_checked(in_project, monkeypatch, capsys):
+    """A model that invents an evidence quote must be caught, not trusted."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '{"transitions": [{"entity": "lamp", "from_scene": "act1-sc01", '
+        '"state": "lit", "evidence": "a sentence the book does not contain"}]}'
+    ))
+    assert cmd_illustrate.main(['--state', '--coaching', 'full']) == 0
+    assert 'evidence_not_found' in capsys.readouterr().out
+
+
+def test_state_writes_lf_only(in_project, monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '{"transitions": [{"entity": "lamp", "from_scene": "act1-sc01", '
+        '"state": "lit", "evidence": "held her breath"}]}'
+    ))
+    cmd_illustrate.main(['--state', '--coaching', 'full'])
+    with open(os.path.join(in_project, 'reference', 'visual-state.csv'),
+              'rb') as f:
+        assert b'\r' not in f.read()
+
+
+def test_state_entity_hints_prefer_canon_then_registries(in_project):
+    hints = cmd_illustrate._state_entity_hints(in_project)
+    sources = {h['source'] for h in hints}
+    assert 'characters.csv' in sources
+    ids = [h['canon_id'] for h in hints]
+    assert len(ids) == len(set(ids)), 'a hint must not appear twice'
+
+
+def test_state_prose_skips_undrafted_scenes_loudly(in_project, capsys):
+    os.remove(os.path.join(in_project, 'scenes', 'act2-sc01.md'))
+    prose, found = cmd_illustrate._state_scene_prose(
+        in_project, ['act1-sc01', 'act2-sc01'])
+    assert found == 1
+    assert 'act2-sc01' not in prose
+    assert 'has no file in scenes/' in capsys.readouterr().out
+
+
+def test_state_prose_strips_markers(in_project):
+    path = os.path.join(in_project, 'scenes', 'act1-sc01.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text + '\n' + ill.marker_for('lantern-vigil') + '\n')
+    prose, _found = cmd_illustrate._state_scene_prose(in_project, ['act1-sc01'])
+    assert '![[illus:' not in prose
+
+
+def test_parse_state_response_drops_rows_missing_a_field():
+    rows, status = pi.parse_state_response(json.dumps({'transitions': [
+        {'entity': 'a', 'from_scene': 's1', 'state': 'x', 'evidence': 'q'},
+        {'entity': 'b', 'from_scene': 's1', 'state': 'x'},
+    ]}))
+    assert status == 'ok'
+    assert [r['entity'] for r in rows] == ['a']
+
+
+def test_parse_state_response_distinguishes_no_json_from_no_key():
+    assert pi.parse_state_response('nope')[1] == 'no_json'
+    assert pi.parse_state_response('{"other": []}')[1] == 'no_transitions_key'
+
+
+def test_state_full_with_no_drafted_prose_is_an_error(in_project, monkeypatch, capsys):
+    """Transitions are extracted from prose. With none, saying "0 added" would
+    read as "nothing changes in this book"."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def _boom(*a, **k):
+        raise AssertionError('no prose means no call')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
+    for name in os.listdir(os.path.join(in_project, 'scenes')):
+        os.remove(os.path.join(in_project, 'scenes', name))
+
+    assert cmd_illustrate.main(['--state', '--coaching', 'full']) == 1
+    assert 'No drafted scenes to read' in capsys.readouterr().out
+
+
+def test_state_full_reports_an_empty_api_response(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: '')
+    assert cmd_illustrate.main(['--state', '--coaching', 'full']) == 1
+    assert 'no response from the API' in capsys.readouterr().out
+
+
+def test_state_entity_hints_dedupe_canon_against_the_registry(in_project):
+    """A canon file and a registry row for one entity must yield one hint, and
+    the canon file wins — its canon_id is the slug the log must match."""
+    from test_canon_files import write_canon
+    write_canon(in_project, 'characters/dorren-hayle.md', 'dorren-hayle',
+                canon_type='character')
+    hints = cmd_illustrate._state_entity_hints(in_project)
+    matching = [h for h in hints if h['canon_id'] == 'dorren-hayle']
+    assert len(matching) == 1
+    assert matching[0]['source'] == 'canon'
+
+
+def test_state_renderers_say_so_when_there_is_nothing_to_seed_from():
+    """An empty table is worse than a sentence: it reads as "no candidates
+    exist" rather than "nothing has been recorded yet"."""
+    brief = pi.render_state_brief(hints=[], existing=[], scene_ids=[])
+    assert 'Name the' in brief
+    assert 'No transitions recorded yet' in brief
+    assert 'No scenes in reading order yet' in brief
+    checklist = pi.render_state_checklist(hints=[], existing=[], scene_ids=[])
+    assert 'No transitions recorded yet' in checklist
+
+
+def test_parse_state_response_ignores_non_dict_rows_and_wrong_shapes():
+    assert pi.parse_state_response('[1, 2, 3]')[1] == 'no_transitions_key'
+    assert pi.parse_state_response('{"transitions": "nope"}')[1] == (
+        'no_transitions_key')
+    rows, status = pi.parse_state_response(json.dumps({'transitions': [
+        'a string, not a row',
+        {'entity': 'a', 'from_scene': 's1', 'state': 'x', 'evidence': 'q'},
+    ]}))
+    assert status == 'ok'
+    assert [r['entity'] for r in rows] == ['a']

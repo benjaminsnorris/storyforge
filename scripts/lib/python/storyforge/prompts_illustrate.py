@@ -31,7 +31,7 @@ import json
 import os
 import re
 from datetime import date
-from typing import Final, Literal
+from typing import Final, Literal, TypedDict
 
 from storyforge.illustrations import PrepassFindings, RenderStep, VALID_PLACEMENTS
 
@@ -1208,6 +1208,321 @@ def render_sequence_review(*, title: str, steps: list[RenderStep],
         '- [ ] Correct any drift found above, re-rendering from the anchor '
         'rather than patching the image.',
         '- [ ] Re-run `storyforge illustrate --diagnose` after re-ingesting.',
+        '',
+    ]
+    return '\n'.join(lines)
+
+
+# ============================================================================
+# Visual state — the transition log (#278 phase 2)
+# ============================================================================
+
+class EntityHint(TypedDict):
+    """One candidate for a tracked state entity, and where it came from."""
+    canon_id: str
+    label: str
+    source: str
+
+
+#: Reused in all three coaching outputs, so the rule the author reads in a
+#: strict checklist is the rule the model was given in full.
+_GRANULARITY_RULE: Final[str] = (
+    'One track per independently-changing aspect, not one per entity. '
+    '`nora-clothing` rather than `nora`, because clothing and injury change on '
+    'different schedules and a single track would force restating one to change '
+    'the other. The convention is `{canon_id}-{aspect}` where an entity has '
+    'several tracks and a bare `canon_id` where it has one.'
+)
+
+#: The distinction the whole artifact rests on, and the one authors get wrong.
+_STATE_VS_CANON_RULE: Final[str] = (
+    'Canon files record what must **never** change — a face, a lamp\'s '
+    'construction. This log records what changes **on schedule** — wardrobe by '
+    'chapter, a lamp lit or dark, how many village lights are still burning. '
+    'The two overlap: the Great Lamp has both an invariant design and a '
+    'changing lit/dark state.'
+)
+
+
+def render_entity_hint_table(hints: list[EntityHint]) -> str:
+    """Render the candidate-entity table shared by the coach and strict files."""
+    if not hints:
+        return ('*No canon files or registry rows to seed from. Name the '
+                'entities yourself.*\n')
+    lines = ['| Candidate `canon_id` | Name | From |',
+             '|---|---|---|']
+    for hint in hints:
+        lines.append(f'| `{hint["canon_id"]}` | {hint["label"]} '
+                     f'| {hint["source"]} |')
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def _render_existing_transitions(existing: list[dict[str, str]]) -> str:
+    """Render the log as it stands, for a human-facing document."""
+    if not existing:
+        return '*No transitions recorded yet.*\n'
+    lines = ['| Entity | From scene | State | Evidence |', '|---|---|---|---|']
+    for row in existing:
+        lines.append(f'| `{row["entity"]}` | `{row["from_scene"]}` '
+                     f'| {row["state"]} | {row["evidence"]} |')
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def build_state_request(*, story_context: str, scene_prose: str,
+                        hints: list[EntityHint],
+                        existing: list[dict[str, str]],
+                        coaching: str = 'full') -> str:
+    """Build the prompt that proposes visual-state transitions from the prose.
+
+    The existing log goes in so the model can extend it rather than restate it —
+    and because a transition the author wrote is the authority on that entity's
+    naming, which nothing else in the prompt establishes as firmly.
+    """
+    hint_lines = '\n'.join(f'- `{h["canon_id"]}` — {h["label"]} ({h["source"]})'
+                           for h in hints) or '- (none recorded)'
+    existing_lines = '\n'.join(
+        f'- `{r["entity"]}` from `{r["from_scene"]}`: {r["state"]}'
+        for r in existing) or '- (none)'
+    ask = ('Record the transitions.' if coaching == 'full'
+           else 'Propose candidate transitions for the author to confirm.')
+
+    return f"""You are building a visual-state matrix for an illustrated novel.
+
+{ask}
+
+## What a transition is
+
+A row records the moment a tracked entity's *visible* state **changes**. The
+state persists forward until the next transition for that entity, so you record
+changes, not every scene.
+
+{_STATE_VS_CANON_RULE}
+
+{_GRANULARITY_RULE}
+
+A transition takes effect **at** its own scene, not after it. If a character
+arrives dressed for travel in the scene where the journey starts, the transition
+is keyed to that scene.
+
+## Story context
+
+{story_context}
+
+## Entities with canon files or registry rows
+
+These are candidates, not a requirement. Track an entity only if its visible
+state actually changes somewhere in the book, and ignore any whose state is
+constant.
+
+{hint_lines}
+
+## Transitions already recorded
+
+Do not restate these and do not revise them. Extend the log.
+
+{existing_lines}
+
+## The prose
+
+{scene_prose}
+
+## Output
+
+Return JSON only, in this exact shape:
+
+```json
+{{
+  "transitions": [
+    {{
+      "entity": "kebab-case-slug, `{{canon_id}}-{{aspect}}` where it has several tracks",
+      "from_scene": "the scene id where this state becomes true",
+      "state": "one short phrase describing what is visibly true",
+      "evidence": "a short verbatim quote from that scene's prose establishing it"
+    }}
+  ]
+}}
+```
+
+Every field is required. `evidence` must appear **verbatim** in `from_scene`'s
+prose — it is what lets the row be checked against the manuscript later, so an
+invented or paraphrased quote is worse than omitting the row. If you cannot
+quote the prose for a state, do not propose it.
+"""
+
+
+def parse_state_response(text: str) -> tuple[list[dict[str, str]], str]:
+    """Extract the ``transitions`` list from a state-proposal response.
+
+    Returns `(transitions, status)` where status is 'ok', 'no_transitions_key',
+    or 'no_json' — the same shape as `parse_selection_response`, so the caller
+    can tell "the model proposed nothing" from "the response was unparseable".
+    A row missing any of the four fields is dropped, because every one of them
+    is load-bearing: an entity with no `from_scene` cannot be positioned and a
+    state with no `evidence` cannot be checked.
+    """
+    required = ('entity', 'from_scene', 'state', 'evidence')
+
+    def _take(obj) -> list[dict[str, str]] | None:
+        if not isinstance(obj, dict):
+            return None
+        inner = obj.get('transitions')
+        if not isinstance(inner, list):
+            return None
+        out: list[dict[str, str]] = []
+        for item in inner:
+            if not isinstance(item, dict):
+                continue
+            row = {key: str(item.get(key, '')).strip() for key in required}
+            if all(row[key] for key in required):
+                out.append(row)
+        return out
+
+    parsed_any = False
+    for candidate in _json_candidates(text):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        parsed_any = True
+        out = _take(parsed)
+        if out:
+            return out, 'ok'
+    return [], 'no_transitions_key' if parsed_any else 'no_json'
+
+
+def render_state_brief(*, hints: list[EntityHint],
+                       existing: list[dict[str, str]],
+                       scene_ids: list[str]) -> str:
+    """Render the coach-mode visual-state brief.
+
+    Questions per entity, no proposals. Deciding that a character changes clothes
+    in chapter four is an authorial decision about the book, not an extraction
+    from it, so coach mode makes no API call — unlike `--plan`'s coach brief,
+    which surfaces candidates the model generated. There is nothing to surface
+    here that would not be the creative work itself.
+    """
+    lines = [
+        '# Visual state — brief',
+        '',
+        'Your illustrations already have canon files for what must never '
+        'change. This is the other half: what changes *on schedule*.',
+        '',
+        _STATE_VS_CANON_RULE,
+        '',
+        '## How the log works',
+        '',
+        '- A row records the moment an entity\'s visible state **changes**.',
+        '- The state persists forward until the next row for that entity.',
+        '- A transition takes effect **at** its own scene, not after it.',
+        f'- {_GRANULARITY_RULE}',
+        '',
+        '## Where the log stands',
+        '',
+        _render_existing_transitions(existing),
+        '## Candidates to consider',
+        '',
+        render_entity_hint_table(hints),
+        '## Questions to settle, per entity',
+        '',
+        '1. Does this entity\'s appearance actually change in the book, or did '
+        'you only picture it changing?',
+        '2. Which scene is the *first* one where the new state is visible? '
+        'That scene is the `from_scene`, not the one after it.',
+        '3. Can you quote a sentence from that scene that shows the change? If '
+        'not, either the prose does not establish it — which an illustration '
+        'would then contradict — or the change belongs in a different scene.',
+        '4. Does the entity need more than one track? Clothing and injury '
+        'change on different schedules.',
+        '5. Is there a state that is true in one image only — a tear-streaked '
+        'face, arms raised against a light? That is not a transition. Put it '
+        'in `state_override` on the plan row.',
+        '',
+        '## Reading order',
+        '',
+        ('- ' + '\n- '.join(f'`{sid}`' for sid in scene_ids)
+         if scene_ids else '*No scenes in reading order yet.*'),
+        '',
+        '## When you have decided',
+        '',
+        'Add a row per transition to `reference/visual-state.csv`, or tell me '
+        'the changes and I will record them. Then run '
+        '`storyforge illustrate --audit` to read the prose against the log.',
+        '',
+    ]
+    return '\n'.join(lines)
+
+
+def render_state_checklist(*, hints: list[EntityHint],
+                           existing: list[dict[str, str]],
+                           scene_ids: list[str]) -> str:
+    """Render the strict-mode visual-state constraint checklist.
+
+    Requirements and data only. Proposes no entity, no state, and no scene.
+    """
+    lines = [
+        '# Visual state — constraint checklist',
+        '',
+        'Generated for `coaching=strict`. This file reports what each row of '
+        '`reference/visual-state.csv` requires. It proposes nothing.',
+        '',
+        '## Counts',
+        '',
+        f'- Transitions currently recorded: {len(existing)}',
+        f'- Entities currently tracked: '
+        f'{len({r["entity"] for r in existing})}',
+        f'- Scenes in reading order: {len(scene_ids)}',
+        f'- Candidate entities from canon and the registries: {len(hints)}',
+        '',
+        '## Required per row',
+        '',
+        '| Column | Requirement |',
+        '|--------|-------------|',
+        '| `entity` | Kebab-case slug. `{canon_id}-{aspect}` where the entity '
+        'has several independently-changing aspects; a bare `canon_id` where it '
+        'has one. Where a canon file exists, the slug must match its '
+        '`canon_id`. |',
+        '| `from_scene` | Must match an active id in `reference/scenes.csv` and '
+        'appear in `reference/chapter-map.csv`. The transition takes effect '
+        '**at** this scene. |',
+        '| `state` | One short phrase. What is visibly true, not why. |',
+        '| `evidence` | A phrase appearing verbatim in `from_scene`\'s prose. '
+        'Whitespace-tolerant, so a reflow does not break it. |',
+        '',
+        '## Rules the validator enforces',
+        '',
+        '- A `from_scene` that is not an active scene is an **error** '
+        '(`illus_state_unknown_scene`): the transition never applies, so every '
+        'scene after it resolves to the previous state.',
+        '- A `from_scene` that exists but is absent from the chapter map is a '
+        'warning (`illus_state_unmapped_scene`): the row is fine, the map is '
+        'incomplete.',
+        '- An `evidence` quote absent from the prose is a warning '
+        '(`illus_evidence_not_found`).',
+        '- An illustration whose `canon_refs` names an entity with no resolved '
+        'state at its scene is a warning (`illus_state_unspecified`). A '
+        '`state_override` on the plan row satisfies it.',
+        '',
+        '## Data',
+        '',
+        '### Transitions recorded',
+        '',
+        _render_existing_transitions(existing),
+        '### Candidate entities',
+        '',
+        render_entity_hint_table(hints),
+        '### Reading order',
+        '',
+        ('- ' + '\n- '.join(f'`{sid}`' for sid in scene_ids)
+         if scene_ids else '*No scenes in reading order yet.*'),
+        '',
+        '## Next commands',
+        '',
+        '```bash',
+        'storyforge illustrate --audit     # read the prose against the log',
+        'storyforge illustrate --diagnose  # plan and state health report',
+        '```',
         '',
     ]
     return '\n'.join(lines)
