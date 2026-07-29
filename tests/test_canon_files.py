@@ -683,6 +683,88 @@ def test_detector_agrees_with_the_extractor_on_a_final_bare_hash(tmp_path):
     assert _truncations(validate_canon_file(path, project)) == []
 
 
+def test_duplicate_embeddable_block_heading_is_reported(tmp_path):
+    """Round-2 CRITICAL. `EMBEDDABLE_SECTION` is `REQUIRED_SECTIONS[0]`, so
+    breaking the window on the whole tuple made a *duplicated*
+    `## Embeddable block` read as a clean terminator. The extractor stops there
+    too (`.search` takes the first), so the anchor was silently halved and
+    validation returned zero findings — the exact failure class #289 exists to
+    close, reached through its own fix. `parsed['sections']` is a set, so no
+    duplicate-heading check catches it either."""
+    from storyforge.canon import anchor_texts
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            'A dark braid over one shoulder.\n\n'
+            '## Embeddable block\n\n'
+            'A grey wool coat, two buttons missing.'
+        )),
+    )
+    assert anchor_texts(project)['nora'] == 'A dark braid over one shoulder.'
+    truncated = _truncations(validate_canon_file(path, project))
+    assert len(truncated) == 1, 'a duplicated heading halves the anchor silently'
+    assert '## Embeddable block' in truncated[0]['detail']
+
+
+def test_truncation_detail_has_no_pipe(tmp_path):
+    """Round-2 CRITICAL. This is the first finding to interpolate a verbatim
+    line of author markdown into a `detail`, and `working/cleanup-report.csv`
+    is unquoted pipe-delimited — a `|` in the heading shifts every later field
+    one column right, emptying the trailing `status` cell that
+    `build_cleanup_report` sets to `pending` and `skills/forge/SKILL.md` scans
+    for. The error-severity finding would silence itself in its only durable
+    artifact. Mirrors test_illustration_canon.py's
+    test_mismatch_detail_has_no_newline_or_pipe for the sibling finding that
+    also quotes author prose."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            'A dark braid.\n\n## Wardrobe | winter\n\nA grey wool coat.'
+        )),
+    )
+    finding = _truncations(validate_canon_file(path, project))[0]
+    assert '|' not in finding['detail']
+    assert '\n' not in finding['detail']
+    assert 'Wardrobe' in finding['detail'], 'the heading must still be named'
+
+
+def test_truncation_reported_even_without_frontmatter(tmp_path):
+    """Round-2 CRITICAL. `validate_canon_file` returns early when frontmatter
+    is missing or unclosed, but `embeddable_block_text`,
+    `get_canon_embeddable_block`, `is_canon_block_populated` and
+    `prompts_illustrate.book_level_direction` never read frontmatter — so a
+    root canon file's truncated house style was still shipped to every prompt
+    while the truncation went unreported. The check reads only the body and
+    must run before those returns."""
+    from storyforge.canon import embeddable_block_text
+    project = str(tmp_path)
+    body = _anchor_body(block_lines=(
+        'Palette: muted greens.\n\n## Camera\n\nAt child height.'
+    ))
+    path = write_canon(project, 'visual-vocabulary.md', 'visual-vocabulary',
+                       canon_type='vocabulary', frontmatter='', body=body)
+    kinds = [f['type'] for f in validate_canon_file(path, project)]
+    assert 'canon_missing_frontmatter' in kinds
+    assert 'canon_truncated_embeddable_block' in kinds
+    # The truncated value really is still readable — that is why it must report.
+    assert embeddable_block_text(path).strip() == 'Palette: muted greens.'
+
+
+def test_truncation_reported_when_frontmatter_is_unclosed(tmp_path):
+    """Same early-return gap via the other branch: an unclosed `---` block."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'visual-vocabulary.md', 'visual-vocabulary',
+        canon_type='vocabulary', frontmatter='---\ncanon_id: x\n',
+        body=_anchor_body(block_lines='Palette.\n\n## Camera\n\nLow.'),
+    )
+    kinds = [f['type'] for f in validate_canon_file(path, project)]
+    assert 'canon_truncated_frontmatter' in kinds
+    assert 'canon_truncated_embeddable_block' in kinds
+
+
 def test_well_formed_canon_file_has_no_truncation_finding(tmp_path):
     project = str(tmp_path)
     path = write_canon(project, 'style-foundation.md', 'style-foundation')

@@ -28,7 +28,7 @@ import os
 import re
 from typing import Literal, TypedDict
 
-from storyforge.common import log, normalize_for_comparison
+from storyforge.common import csv_safe, log, normalize_for_comparison
 
 # Severity is part of the cleanup-report contract — build_cleanup_report
 # filters action items by != 'info' and counts errors/warnings/info. A
@@ -265,6 +265,20 @@ EMBEDDABLE_SECTION = 'Embeddable block'
 #: usually the line's own newline, which splitlines() would have removed.
 _BLOCK_TERMINATOR_RE = re.compile(r'^##\s', re.MULTILINE)
 
+#: The required sections that legitimately *follow* the anchor, and so close
+#: the truncation window. Deliberately not `REQUIRED_SECTIONS`, which contains
+#: the section we are inside: `EMBEDDABLE_SECTION` is `REQUIRED_SECTIONS[0]`,
+#: so breaking on the whole tuple made a *duplicated* `## Embeddable block`
+#: read as a clean terminator. The extractor stops there too (`.search` takes
+#: the first block), so the anchor was silently halved and `validate_canon_file`
+#: returned zero findings — the exact failure class #289 exists to close,
+#: reached through its own fix. `parsed['sections']` is a set, so no
+#: duplicate-heading check catches it either. An author who sub-heads their
+#: anchor and one who pastes the heading twice are making the same mistake.
+_SECTIONS_AFTER_ANCHOR = tuple(
+    s for s in REQUIRED_SECTIONS if s != EMBEDDABLE_SECTION
+)
+
 
 def embeddable_block_truncations(body: str) -> list[tuple[int, str]]:
     """Every `##` heading that cuts the `## Embeddable block` short.
@@ -283,10 +297,10 @@ def embeddable_block_truncations(body: str) -> list[tuple[int, str]]:
     though it were description, so the truncation stays and is reported
     (issue #289).
 
-    The window closes at the first `REQUIRED_SECTIONS` heading after the
-    Embeddable block: past that point a non-schema heading is somebody's extra
-    section, not lost anchor text. A second `## Embeddable block` closes it
-    too, matching `_EMBEDDABLE_BLOCK_RE.search`, which takes the first.
+    The window closes at the first `_SECTIONS_AFTER_ANCHOR` heading: past that
+    point a non-schema heading is somebody's extra section, not lost anchor
+    text. A second `## Embeddable block` is an offender like any other — see
+    that constant for why it must not close the window.
     """
     offenders: list[tuple[int, str]] = []
     started = False
@@ -299,7 +313,7 @@ def embeddable_block_truncations(body: str) -> list[tuple[int, str]]:
         if not started:
             started = name == EMBEDDABLE_SECTION
             continue
-        if name in REQUIRED_SECTIONS:
+        if name in _SECTIONS_AFTER_ANCHOR:
             break
         offenders.append((body.count('\n', 0, start) + 1, line))
     return offenders
@@ -535,6 +549,59 @@ def _finding(file_rel: str, detail: str, action: str,
     }
 
 
+#: Longest quoted heading in a `detail`, so one pathological line cannot make
+#: a CSV cell unreadable. The line number is what the author navigates by; the
+#: quote is only there to confirm they are looking at the right line.
+_MAX_QUOTED_HEADING = 60
+
+
+def _truncated_block_findings(
+    rel: str, parsed: ParsedCanonFile,
+) -> list[CanonFinding]:
+    """The `canon_truncated_embeddable_block` finding, or nothing.
+
+    'error' severity, the same class as `canon_id_mismatch`: both break prompt
+    assembly at the point the anchor is consumed. The failure modes differ, and
+    truncation's is the worse of the two — a `canon_id` mismatch fails the
+    lookup and surfaces as an unanchored row that `_warn_unanchored_rows`
+    announces, whereas a truncation hands every consumer a shorter string that
+    they all accept, and once art exists the only repair is a re-render.
+
+    Only `cleanup` surfaces this; nothing exits non-zero on it (see the
+    follow-up in CLAUDE.md).
+    """
+    truncations = embeddable_block_truncations(parsed['body'])
+    if not truncations:
+        return []
+    offset = parsed['body_line_offset']
+    # csv_safe because the quoted heading is verbatim author markdown — a `|`
+    # in it shifts every later column of the cleanup-report row, emptying the
+    # trailing `status` cell that `forge` scans for `pending`. The finding
+    # would then silence itself. Newlines are already impossible (the line is
+    # cut at the first `\n` and rstripped), so `|` is the whole exposure.
+    where = ', '.join(
+        f'line {offset + body_line}: `{csv_safe(heading)[:_MAX_QUOTED_HEADING]}`'
+        for body_line, heading in truncations
+    )
+    # One finding per file listing every offender, matching the adjacent
+    # unfilled-template check: the author opens the file once and fixes them
+    # together. Reporting only the first would make an error-severity finding
+    # into an N-round loop on the file where several sub-heads are likeliest.
+    return [_finding(
+        rel,
+        f'## {EMBEDDABLE_SECTION} is ended early by a `##` heading inside it '
+        f'({where}; the anchor stops at the first). If that heading was meant '
+        'to be part of the anchor, every word below it is missing from the '
+        'string each prompt embeds',
+        'Demote the heading to `###` so it stays inside the anchor; if it was '
+        'meant to be its own section, move it below the four required '
+        'sections; if it is a second `## Embeddable block`, merge it into the '
+        'first. A `##` inside a fenced code block ends the section too',
+        'canon_truncated_embeddable_block',
+        severity='error',
+    )]
+
+
 def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
     """Validate one canon file. Finding paths are project-root-relative so
     they display the way authors think about files."""
@@ -544,6 +611,16 @@ def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
 
     if not parsed['exists']:
         return findings  # callers handle missing files at the directory level
+
+    # Runs BEFORE the two frontmatter early returns below, and must stay there.
+    # It reads only `parsed['body']`, and so do the accessors that consume a
+    # truncated anchor: `embeddable_block_text`, `get_canon_embeddable_block`,
+    # `is_canon_block_populated`, and `prompts_illustrate.book_level_direction`
+    # never look at frontmatter. Returning early past this check therefore
+    # converted a reported truncation into an unreported one while the short
+    # value was still being shipped to every prompt — a swallowed finding, not
+    # deferred triage.
+    findings.extend(_truncated_block_findings(rel, parsed))
 
     fm = parsed['frontmatter']
     if fm is _TRUNCATED:
@@ -670,29 +747,6 @@ def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
                 f'Add a `## {section}` section to the body',
                 'canon_missing_section',
             ))
-
-    # Truncated-anchor check: a `##` heading inside the Embeddable block ends
-    # it, so the anchor every prompt embeds is quietly short. 'error' severity
-    # for the same reason canon_id_mismatch is one — downstream consumers get
-    # wrong data with no other sign, and here the only repair once art exists
-    # is a re-render.
-    truncations = embeddable_block_truncations(parsed['body'])
-    if truncations:
-        offset = parsed['body_line_offset']
-        where = ', '.join(
-            f'line {offset + lineno}: `{text}`' for lineno, text in truncations
-        )
-        findings.append(_finding(
-            rel,
-            f'## {EMBEDDABLE_SECTION} is cut short by a `##` heading in its '
-            f'own body ({where}); the anchor every prompt embeds stops above '
-            'it, so the rest is silently dropped',
-            'Demote the heading to `###` so it stays inside the anchor, or — '
-            'if it was meant to be its own section — move it below the four '
-            'required sections',
-            'canon_truncated_embeddable_block',
-            severity='error',
-        ))
 
     # Unfilled-template check: scan section bodies for TODO placeholders
     # left over from the shipped starter templates. Surfaces as a single

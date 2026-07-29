@@ -1951,13 +1951,12 @@ def _direction_anchor_mismatches(project_dir: str) -> list[IllustrationFinding]:
 def _csv_safe(text: str) -> str:
     """Collapse *text* onto one physical line with no `|`.
 
-    Finding `detail` strings land in the unquoted pipe-delimited
-    `working/cleanup-report.csv` (`cmd_cleanup._write_report`), one row per
-    newline and one column per `|`. Free-form prose — anchor text here — can
-    contain either, so anything interpolated into a `detail` from prose must
-    pass through this first.
+    Retained as the illustration-side name for `common.csv_safe`, which is
+    where the implementation now lives so `canon` can reach it too (see that
+    docstring for why a stray `|` silences the finding it appears in).
     """
-    return ' '.join(text.split()).replace('|', '/')
+    from storyforge.common import csv_safe
+    return csv_safe(text)
 
 
 # ============================================================================
