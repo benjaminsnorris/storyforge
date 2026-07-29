@@ -7,7 +7,7 @@ description: Plan, art-direct, and embed interior illustrations for a prose book
 
 You are art-directing the interior illustrations for a prose book. This is not the cover — the cover sells the book, and illustrations deepen it. A good illustration arrives at a beat the reader is already leaning into and shows them something the sentences could only deliver one at a time.
 
-The flow is: **set the art direction** → **decide where** → **art-direct each one** → the author renders externally → **ingest and embed** → **review the sequence** → produce.
+The flow is: **set the art direction** → **decide where** → **record what changes** → **audit the prose against it** → **art-direct each one** → the author renders externally → **ingest and embed** → **review the sequence** → produce.
 
 ## Locating the Storyforge Plugin
 
@@ -23,7 +23,8 @@ Store this resolved plugin path for use throughout the session.
    - If `project.medium` is `graphic-novel`, **stop**. GN projects have their own page pipeline: `storyforge elaborate --stage page-architecture` and `--stage prompts`. Tell the author that and route them there.
 2. **`reference/canon/`** — the reference tier that governs every illustration; read it before anything else about the art. Three book-level files at the root (`visual-foundation.md`, `visual-vocabulary.md`, `content-limits.md`) plus one per-entity file per character/creature/location/prop under `characters/`, `locations/`, `motifs/`. If `reference/illustration-direction.md` still exists too, it's the pre-canon document one project hand-edited from — read it only to spot a transcription slip against the canon anchors (`illus_direction_anchor_mismatch` reports these in `cleanup`); it is not itself an input to a prompt anymore.
 3. **`reference/illustration-plan.csv`** — the plan, if one exists. Together with the reference tier, this tells you which mode you are in.
-4. **Structural context** — read what exists:
+4. **`reference/visual-state.csv`** — the visual-state transition log, if one exists: what changes on schedule, as opposed to the canon tier for what must never change. `working/illustration-audit-provenance.csv` records which scenes the contradiction audit has read.
+5. **Structural context** — read what exists:
    - `reference/story-summary.md` — logline, synopsis, act shape, theme
    - `reference/spine.csv` — the irreducible events
    - `reference/architecture.csv` — turning points, value shifts
@@ -31,8 +32,8 @@ Store this resolved plugin path for use throughout the session.
    - `reference/motif-taxonomy.csv` — the concrete recurring vehicles
    - `reference/themes.csv` — what the story argues
    - `reference/chapter-map.csv` — distribution
-5. **Visual context** — `reference/character-bible.md`, `reference/world-bible.md`, `reference/voice-guide.md`.
-6. **Existing art** — `manuscript/assets/` for the cover and `cover-prompt.md` (the best available statement of the book's visual register), and `manuscript/assets/illustrations/` for anything already ingested.
+6. **Visual context** — `reference/character-bible.md`, `reference/world-bible.md`, `reference/voice-guide.md`.
+7. **Existing art** — `manuscript/assets/` for the cover and `cover-prompt.md` (the best available statement of the book's visual register), and `manuscript/assets/illustrations/` for anything already ingested.
 
 ## Step 2: Determine Mode
 
@@ -40,6 +41,8 @@ Store this resolved plugin path for use throughout the session.
 |-------|------|
 | Reference tier missing or incomplete | **Direct** — set the book's visual contract first |
 | Reference tier complete, no plan | **Plan** — decide where illustrations belong |
+| Plan exists, no state matrix | **State** — record what changes on schedule |
+| Matrix exists, audit unrun or stale | **Audit** — read the prose against the matrix |
 | Plan exists, rows at `status=planned` | **Art-direct** — write the prompts |
 | Author has rendered files | **Ingest** — bring them in and embed |
 | An illustration isn't working | **Revise** — supersede and re-direct |
@@ -248,6 +251,60 @@ Keep the superseded row. It records what was tried and why it didn't land, which
 
 ---
 
+## Mode: State
+
+`reference/canon/` says what must **never** change. Nothing in the flow said what changes **on schedule** — wardrobe by chapter, a lamp lit or dark, how many village lights are still burning. Four of ten real findings on a real illustrated book traced to that gap.
+
+`reference/visual-state.csv` is a **sparse transition log**. A row records the moment a tracked entity's visible state changes; the state persists forward until the next row for that entity, so the state at any scene is a forward walk.
+
+Three things about it are non-obvious and each has a test pinning it:
+
+- **A transition takes effect at its own scene, not after it.** If a character arrives dressed for travel in the scene where the journey begins, the transition is keyed to *that* scene.
+- **One track per independently-changing aspect, not one per entity.** `nora-clothing`, not `nora` — clothing and injury change on different schedules, and a single track would force restating one to change the other. The convention is `{canon_id}-{aspect}` where an entity has several tracks and a bare `canon_id` where it has one. A bare `canon_refs` of `nora` on a plan row is satisfied by any `nora-*` track.
+- **A state true in one image only is not a transition.** A tear-streaked face, arms raised against a light — those go in `state_override` on the plan row, because a pure log would have to record a change and then a change back.
+
+Every row needs an `evidence` quote: a short verbatim phrase from `from_scene`'s prose that establishes the state. That is what makes the row checkable against the manuscript later. A state the prose does not establish is a state an illustration would be inventing.
+
+> **Option A: Run it here**
+> I'll propose the transitions in this conversation. This requires unsetting CLAUDECODE.
+>
+> **Option B: Run it yourself**
+> ```bash
+> cd [project_dir] && [plugin_path]/storyforge illustrate --state
+> ```
+
+Existing rows are **never revised** — a transition the author wrote is an authorial decision about the book. Proposals that collide with one on `(entity, from_scene)` are discarded and reported, as is any proposal naming a scene that is not active in `scenes.csv`: that row is the model's, not the author's, so nothing protects it. A model that proposes nothing at all is answering, not failing — the run says so and writes nothing.
+
+---
+
+## Mode: Audit
+
+Once the matrix exists, read the prose against it before any art is paid for.
+
+> **Option A: Run it here**
+> I'll run the contradiction pass in this conversation. This requires unsetting CLAUDECODE.
+>
+> **Option B: Run it yourself**
+> ```bash
+> cd [project_dir] && [plugin_path]/storyforge illustrate --audit
+> ```
+
+Read-only with respect to the prose and the log. Writes `working/illustration-contradictions.md` and `working/illustration-audit-provenance.csv`.
+
+**Why a model is needed here at all**, which is worth explaining to the author: two transitions never disagree with each other, because things are allowed to change. Village lights dark at chapter ten and four still burning at chapter thirteen is a story, not an error. The contradiction is a scene *between* them asserting a state the span cannot support. Only reading prose against the resolved matrix finds it.
+
+A deterministic pre-pass runs first and narrows the read to the scenes that mention a tracked entity inside its span. When the pre-pass finds no problems **and** no candidate scenes, no model is called and the report says so — a clean report that skipped the pass is not the same as a clean pass.
+
+**Read the report's Coverage section before you trust its findings.** It names every gap: scenes with no prose yet, scenes long enough that only part was sent to the model, and scenes that are drafted and active in `scenes.csv` but absent from `reference/chapter-map.csv` — those have no reading position, so nothing in this pass ever looks at them. Any gap downgrades the result to "None found in the prose that was read". If the report names unexamined scenes, add them to the chapter map and re-run before believing anything.
+
+**`--audit` always exits 0 when it produces a report, even over a broken log.** It is a report, not a gate — `--diagnose` and `storyforge validate` are the gates, and they exit 1 on the same finding. So if the report's Deterministic findings section contains `state_unknown_scene`, the log is broken: that transition names a scene that does not exist, never applies, and every scene after it resolves to the wrong state — which means the contradiction pass read the prose against a matrix that is wrong, and its conclusions are unreliable until you fix it. Tell the author that plainly. A zero exit code from `--audit` is not a pass.
+
+A contradiction is usually a **missing transition**, not bad prose: the book changed something the log never recorded. Where the prose is wrong instead, fix the prose — the audit records a digest per scene it read, so a revised scene reports as stale on the next `--diagnose`.
+
+Never revise a transition an already-rendered illustration used. Correct the log and re-render from the corrected state.
+
+---
+
 ## Mode: Review
 
 Once most illustrations are rendered, check the sequence **as a set**.
@@ -276,7 +333,7 @@ When you find drift, fix it by re-rendering from the anchor — not by patching 
 
 _(No API calls — safe to run here without asking.)_
 
-Read-only. Reports plan counts by status, what's embedded, the recommended render order with the visual key marked, what's next to render, and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers, invalid layouts.
+Read-only. Reports plan counts by status, what's embedded, the recommended render order with the visual key marked, what's next to render, the visual-state rung (whether the transition log exists, how many entities it tracks, and whether the audit is unrun, current, or stale), and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers, invalid layouts.
 
 An unrendered plan row is **valid in-flight state**, not a problem. Don't report it as one.
 
@@ -300,7 +357,7 @@ Read `project.coaching_level` from `storyforge.yaml`.
 
 ### `full` (default)
 
-Write the canon files from the bibles, then read them back and say what you committed to and why. Propose the illustration set with conviction and argue each moment's rationale. Write the per-illustration art direction. Ingest and embed. You know what an image can do that prose can't — say so. If a moment the author wants would spoil a reveal, tell them plainly and offer the beat two paragraphs later instead.
+Write the canon files from the bibles, then read them back and say what you committed to and why. Propose the illustration set with conviction and argue each moment's rationale. Propose the visual-state transitions from the prose, each with its evidence quote. Write the per-illustration art direction. Ingest and embed. You know what an image can do that prose can't — say so. If a moment the author wants would spoil a reveal, tell them plainly and offer the beat two paragraphs later instead.
 
 ### `coach`
 
@@ -315,9 +372,11 @@ Then help them find their own illustration set. The command writes a brief to `w
 
 Don't pick the moments. When the author has decided, record their choices and execute the technical work.
 
+`--state` writes `working/coaching/visual-state-brief.md` and makes **no API call** in this mode. Deciding that a character changes clothes in chapter four is a decision about the book, not an extraction from it, so the brief asks per-entity questions instead of proposing transitions. `--audit` is unchanged at every level — it reports contradictions, it never decides anything.
+
 ### `strict`
 
-No creative proposals. Every canon file `--direction` writes arrives as a bare `TODO` line under the required section skeleton (`## Embeddable block`, `## Clauses`, `## Related canon`, `## Iteration history`); the author writes all of it. The command writes `working/coaching/illustration-checklist.md` — structural data and per-column requirements, nothing interpreted. The author supplies every moment, subject, palette, and composition. Ingest, embed, and validation are structural work and stay available; `--prompts` produces a four-section scaffold (Scene / Subject / Important details / Use case) with the author's own constraint values and empty prose sections; the Constraints block is appended deterministically.
+No creative proposals. Every canon file `--direction` writes arrives as a bare `TODO` line under the required section skeleton (`## Embeddable block`, `## Clauses`, `## Related canon`, `## Iteration history`); the author writes all of it. The command writes `working/coaching/illustration-checklist.md` — structural data and per-column requirements, nothing interpreted. `--state` writes `working/coaching/visual-state-checklist.md` plus `reference/visual-state.csv` itself (header and any existing rows, so the author has the file the checklist describes) and makes no API call. The author supplies every moment, subject, palette, composition, entity, and state. Ingest, embed, and validation are structural work and stay available; `--prompts` produces a four-section scaffold (Scene / Subject / Important details / Use case) with the author's own constraint values and empty prose sections; the Constraints block is appended deterministically.
 
 ## Ensure Feature Branch
 
@@ -337,6 +396,8 @@ Every artifact gets its own commit:
 
 - Wrote or edited canon files? Commit and push — they govern everything after them.
 - Wrote or extended the plan? Commit and push.
+- Wrote or extended the visual-state log? Commit and push — every later prompt reads it.
+- Ran the contradiction audit? Commit the report and the provenance file, then commit each transition or prose fix separately.
 - Wrote prompt files? Commit and push — including any new canon anchor stubs the model proposed while writing them.
 - Ingested illustrations? Commit and push the files, the updated plan, and the scene files together, so the marker and the art it points at land in the same commit.
 - Superseded an illustration? Commit and push.

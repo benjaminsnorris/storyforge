@@ -44,7 +44,7 @@ PLAN_COLUMNS: list[str] = [
     'id', 'scene_id', 'anchor', 'placement', 'layout', 'beat', 'rationale',
     'subject', 'composition', 'palette', 'mood', 'motifs', 'canon_refs',
     'status', 'asset_file', 'prompt_file', 'sha256', 'width', 'height',
-    'ingested_at',
+    'ingested_at', 'state_override', 'register', 'scene_digest',
 ]
 
 #: Columns added after the plan schema shipped. They are in PLAN_COLUMNS, so
@@ -55,7 +55,17 @@ PLAN_COLUMNS: list[str] = [
 #: cope with, and failing its schema check would block the very run that fixes
 #: it. Empty is meaningful, not missing: `cmd_illustrate._references_for`
 #: reads an empty `ingested_at` as "predates the current canon".
-OPTIONAL_PLAN_COLUMNS: frozenset[str] = frozenset({'ingested_at'})
+#:
+#: `state_override`, `register`, and `scene_digest` join it for the same reason
+#: (#278 phase 2): a plan written before the visual-state matrix existed is
+#: legal, and the first write to it upgrades the header.
+OPTIONAL_PLAN_COLUMNS: frozenset[str] = frozenset({
+    'ingested_at', 'state_override', 'register', 'scene_digest',
+})
+
+#: The book's lighting extremes, marked on the plan so the anchor batch can
+#: bracket them. Optional — most illustrations are neither.
+VALID_REGISTERS: frozenset[str] = frozenset({'darkest', 'brightest'})
 
 # Placement is relative to the *paragraph* containing the anchor, not to the
 # anchor's character offset — an illustration never splits a paragraph.
@@ -524,6 +534,26 @@ def strip_markers(text: str) -> str:
 def count_prose_words(text: str) -> int:
     """Word count for scene text, excluding illustration markers."""
     return len(strip_markers(text).split())
+
+
+def prose_digest(text: str) -> str:
+    """A digest of scene prose, stable under cosmetic whitespace edits.
+
+    Markers come out first (a marker is not prose, and embedding one must not
+    read as a revision), then `normalize_for_comparison`, so a reflow or a
+    trailing-space change does not surface as staleness while a real rewrite
+    does. This is what `illustration-plan.csv:scene_digest` records at ingest and
+    what the audit's provenance file records per scene it read.
+    """
+    from storyforge.common import normalize_for_comparison
+    normalized = normalize_for_comparison(strip_markers(text))
+    return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
+
+def scene_prose_digest(project_dir: str, scene_id: str) -> str:
+    """`prose_digest` of a scene on disk, or '' when the scene has no file."""
+    text = _read_scene(project_dir, scene_id)
+    return prose_digest(text) if text is not None else ''
 
 
 # ============================================================================
@@ -1542,6 +1572,10 @@ IllustrationFindingKind = Literal[
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
     'unembedded_ingested', 'shattered_row', 'direction_anchor_mismatch',
+    # The visual-state matrix and the contradiction audit (#278 phase 2).
+    # Bare, like every kind above: cmd_cleanup renders `illus_{kind}`.
+    'state_unknown_scene', 'state_unmapped_scene', 'evidence_not_found',
+    'state_unspecified', 'prose_changed', 'audit_stale',
 ]
 
 
@@ -1555,7 +1589,11 @@ class IllustrationFinding(_IllustrationFindingRequired, total=False):
     """One problem with the illustration plan or its markers."""
     id: str        #: every finding except orphan_file
     scene_id: str  #: set when the finding is locatable in a scene
-    file: str      #: set for orphan_file, missing_file, and direction_anchor_mismatch
+    #: The file the fix belongs in, when that is not the plan CSV or the scene:
+    #: orphan_file, missing_file, direction_anchor_mismatch, and the
+    #: visual-state kinds, whose fix is an edit to reference/visual-state.csv
+    #: even though the finding is *about* a scene.
+    file: str
 
 
 # Findings that make the plan incoherent — the book cannot be published or
@@ -1565,6 +1603,13 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'invalid_placement',
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
+    # A transition keyed to a scene that no longer exists silently stops
+    # applying, and every scene downstream of it resolves to the wrong state.
+    # This is the one failure a dense grid could not have, and the price the
+    # sparse log pays — so it blocks. Note its sibling `state_unmapped_scene`
+    # is only a warning: a scene the chapter map omits still exists, so the
+    # transition row is fine and the map is what needs fixing.
+    'state_unknown_scene',
 })
 
 # Findings that need author attention but leave a valid book. An anchor that
@@ -1573,6 +1618,13 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
 WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
     'unembedded_ingested', 'shattered_row', 'direction_anchor_mismatch',
+    # Visual state (#278 phase 2). All five leave a publishable book: a
+    # transition the chapter map cannot position yet, an evidence quote that
+    # drifted, an entity nobody stated, prose revised under a render, and an
+    # audit older than the prose are each information the author acts on before
+    # paying for art, not a broken manuscript.
+    'state_unmapped_scene', 'evidence_not_found', 'state_unspecified',
+    'prose_changed', 'audit_stale',
 })
 
 Severity = Literal['error', 'warning']
@@ -1598,8 +1650,24 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     incoherence: a marker with no row, a row claiming a file that isn't
     there, a file no row claims, an anchor that no longer matches the prose,
     and a marker repeated in one scene.
+
+    Also folds in `visual_state.prepass`, whose findings are about the
+    transition log: a transition keyed to a scene that no longer exists, an
+    evidence quote the prose no longer contains, and an illustration naming an
+    entity whose visible state nobody stated at that point — plus
+    `visual_state.digest_drift`, for prose that moved after the audit read it or
+    after an illustration was rendered from it.
     """
+    from storyforge import visual_state
+
     findings: list[IllustrationFinding] = []
+
+    # The visual-state pre-pass runs first and unconditionally: two of its three
+    # checks are about the transition log alone, and a log can be wrong before a
+    # single illustration has been planned.
+    findings.extend(visual_state.prepass(project_dir)['findings'])
+    findings.extend(visual_state.digest_drift(project_dir))
+
     rows = read_plan(project_dir)
     if not rows and not os.path.isdir(illustrations_dir(project_dir)):
         # No plan and no ingested files — but the hand-edit safety net still

@@ -936,6 +936,22 @@ def validate_voice_profile(project_dir: str) -> dict:
     }
 
 
+#: What an absent optional plan column costs, stated per column. Keyed by the
+#: members of illustrations.OPTIONAL_PLAN_COLUMNS; a column with no entry gets
+#: the bare "the next write adds it" warning rather than another column's
+#: consequence.
+_OPTIONAL_PLAN_COLUMN_COST: dict[str, str] = {
+    'ingested_at': 'every ingested illustration reads as predating the current '
+                   'canon, so --prompts stops offering them as references.',
+    'state_override': 'an illustration cannot record visual state true in that '
+                      'image only, and the audit reports its entities as '
+                      'unstated.',
+    'register': 'the plan cannot mark the book\'s lighting extremes.',
+    'scene_digest': 'prose revised under an already-rendered illustration is '
+                    'not detectable.',
+}
+
+
 def validate_illustration_plan(project_dir: str) -> dict:
     """Validate reference/illustration-plan.csv and its scene markers.
 
@@ -988,16 +1004,17 @@ def validate_illustration_plan(project_dir: str) -> dict:
 
     # An absent optional column is a warning, not an error: the plan predates
     # the column and still validates, but the author should know what the gap
-    # costs them (every prior render reads as pre-canon, so --prompts stops
-    # using them as references) and that the next plan write closes it.
+    # costs them and that the next plan write closes it. The cost is
+    # per-column, so it is stated per-column rather than asserting
+    # `ingested_at`'s consequence about every optional column.
     for col in [c for c in expected_columns
                 if c in ill.OPTIONAL_PLAN_COLUMNS and c not in header]:
+        consequence = _OPTIONAL_PLAN_COLUMN_COST.get(col, '')
         warnings.append({
             'row': 'header',
             'message': f'Illustration plan has no `{col}` column (it predates '
-                       f'the column). The next write to the plan adds it; '
-                       f'until then every ingested illustration reads as '
-                       f'predating the current canon.',
+                       f'the column). The next write to the plan adds it.'
+                       + (f' Until then, {consequence}' if consequence else ''),
         })
     for finding in ill.validate_plan(project_dir):
         entry = {

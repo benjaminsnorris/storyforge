@@ -28,6 +28,7 @@ from storyforge.illustrations import (
 from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge.parsing import clean_scene_content, extract_single_scene
+from storyforge.visual_state import STATE_COLUMNS
 
 
 # ============================================================================
@@ -116,11 +117,18 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     # ALWAYS_OPTIONAL_CSV_FILES — most books have no illustrations, so its
     # absence is not a finding.
     'reference/illustration-plan.csv': list(PLAN_COLUMNS),
+    # The visual-state transition log. Registered so a malformed header and
+    # CRLF endings are caught; the cross-referential checks (does `from_scene`
+    # resolve, does `evidence` still appear in the prose) live in
+    # visual_state.prepass. Also always optional — most books track no
+    # changing visual state.
+    'reference/visual-state.csv': list(STATE_COLUMNS),
 }
 
 #: Registered for header checking but never required to exist, in any medium.
 ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
     'reference/illustration-plan.csv',
+    'reference/visual-state.csv',
 }
 
 #: Columns a registered CSV may legally lack — schema additions that older
@@ -1234,6 +1242,26 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
         'reference/illustration-direction.md. If the old text is right, '
         'restore it into the canon file and re-render nothing — the existing '
         'art already matches it',
+    'state_unknown_scene':
+        'In reference/visual-state.csv, point from_scene at an active scene in '
+        'scenes.csv, or delete the row — a transition keyed to a cut scene never '
+        'applies, so every scene after it resolves to the wrong state',
+    'state_unmapped_scene':
+        'Add the scene to reference/chapter-map.csv — the transition row is '
+        'fine, but it cannot be positioned until the map lists the scene',
+    'evidence_not_found':
+        'Re-quote evidence from the current prose of from_scene, or move the '
+        'transition to the scene that now establishes it',
+    'state_unspecified':
+        'Add a transition for the entity in reference/visual-state.csv, or set '
+        'state_override on the plan row if the state is true in this image only',
+    'prose_changed':
+        'The scene was revised after this illustration was rendered. Confirm '
+        'the art still matches, then re-run storyforge illustrate --ingest to '
+        'record the new scene_digest — or re-render',
+    'audit_stale':
+        'Re-run storyforge illustrate --audit — the prose has changed since the '
+        'last contradiction pass',
 }
 
 

@@ -31,7 +31,7 @@ import json
 import os
 import re
 from datetime import date
-from typing import Final, Literal
+from typing import Final, Literal, TypedDict
 
 from storyforge.illustrations import PrepassFindings, RenderStep, VALID_PLACEMENTS
 
@@ -1211,3 +1211,706 @@ def render_sequence_review(*, title: str, steps: list[RenderStep],
         '',
     ]
     return '\n'.join(lines)
+
+
+# ============================================================================
+# Visual state — the transition log (#278 phase 2)
+# ============================================================================
+
+class EntityHint(TypedDict):
+    """One candidate for a tracked state entity, and where it came from."""
+    canon_id: str
+    label: str
+    source: str
+
+
+#: Reused in all three coaching outputs, so the rule the author reads in a
+#: strict checklist is the rule the model was given in full.
+_GRANULARITY_RULE: Final[str] = (
+    'One track per independently-changing aspect, not one per entity. '
+    '`nora-clothing` rather than `nora`, because clothing and injury change on '
+    'different schedules and a single track would force restating one to change '
+    'the other. The convention is `{canon_id}-{aspect}` where an entity has '
+    'several tracks and a bare `canon_id` where it has one.'
+)
+
+#: The distinction the whole artifact rests on, and the one authors get wrong.
+_STATE_VS_CANON_RULE: Final[str] = (
+    'Canon files record what must **never** change — a face, a lamp\'s '
+    'construction. This log records what changes **on schedule** — wardrobe by '
+    'chapter, a lamp lit or dark, how many village lights are still burning. '
+    'The two overlap: the Great Lamp has both an invariant design and a '
+    'changing lit/dark state.'
+)
+
+
+def render_entity_hint_table(hints: list[EntityHint]) -> str:
+    """Render the candidate-entity table shared by the coach and strict files."""
+    if not hints:
+        return ('*No canon files or registry rows to seed from. Name the '
+                'entities yourself.*\n')
+    lines = ['| Candidate `canon_id` | Name | From |',
+             '|---|---|---|']
+    for hint in hints:
+        lines.append(f'| `{hint["canon_id"]}` | {hint["label"]} '
+                     f'| {hint["source"]} |')
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def _render_existing_transitions(existing: list[dict[str, str]]) -> str:
+    """Render the log as it stands, for a human-facing document."""
+    if not existing:
+        return '*No transitions recorded yet.*\n'
+    lines = ['| Entity | From scene | State | Evidence |', '|---|---|---|---|']
+    for row in existing:
+        lines.append(f'| `{row["entity"]}` | `{row["from_scene"]}` '
+                     f'| {row["state"]} | {row["evidence"]} |')
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def build_state_request(*, story_context: str, scene_prose: str,
+                        hints: list[EntityHint],
+                        existing: list[dict[str, str]],
+                        coaching: str = 'full') -> str:
+    """Build the prompt that proposes visual-state transitions from the prose.
+
+    The existing log goes in so the model can extend it rather than restate it —
+    and because a transition the author wrote is the authority on that entity's
+    naming, which nothing else in the prompt establishes as firmly.
+    """
+    hint_lines = '\n'.join(f'- `{h["canon_id"]}` — {h["label"]} ({h["source"]})'
+                           for h in hints) or '- (none recorded)'
+    existing_lines = '\n'.join(
+        f'- `{r["entity"]}` from `{r["from_scene"]}`: {r["state"]}'
+        for r in existing) or '- (none)'
+    ask = ('Record the transitions.' if coaching == 'full'
+           else 'Propose candidate transitions for the author to confirm.')
+
+    return f"""You are building a visual-state matrix for an illustrated novel.
+
+{ask}
+
+## What a transition is
+
+A row records the moment a tracked entity's *visible* state **changes**. The
+state persists forward until the next transition for that entity, so you record
+changes, not every scene.
+
+{_STATE_VS_CANON_RULE}
+
+{_GRANULARITY_RULE}
+
+A transition takes effect **at** its own scene, not after it. If a character
+arrives dressed for travel in the scene where the journey starts, the transition
+is keyed to that scene.
+
+## Story context
+
+{story_context}
+
+## Entities with canon files or registry rows
+
+These are candidates, not a requirement. Track an entity only if its visible
+state actually changes somewhere in the book, and ignore any whose state is
+constant.
+
+{hint_lines}
+
+## Transitions already recorded
+
+Do not restate these and do not revise them. Extend the log.
+
+{existing_lines}
+
+## The prose
+
+{scene_prose}
+
+## Output
+
+Return JSON only, in this exact shape:
+
+```json
+{{
+  "transitions": [
+    {{
+      "entity": "kebab-case-slug, `{{canon_id}}-{{aspect}}` where it has several tracks",
+      "from_scene": "the scene id where this state becomes true",
+      "state": "one short phrase describing what is visibly true",
+      "evidence": "a short verbatim quote from that scene's prose establishing it"
+    }}
+  ]
+}}
+```
+
+Every field is required. `evidence` must appear **verbatim** in `from_scene`'s
+prose — it is what lets the row be checked against the manuscript later, so an
+invented or paraphrased quote is worse than omitting the row. If you cannot
+quote the prose for a state, do not propose it.
+"""
+
+
+def parse_state_response(text: str) -> tuple[list[dict[str, str]], str]:
+    """Extract the ``transitions`` list from a state-proposal response.
+
+    Returns `(transitions, status)`:
+
+    - `'ok'` — at least one usable row.
+    - `'empty'` — the key was present and the list was empty. A model that read
+      the book and found nothing whose visible state changes is giving a real
+      answer, not failing; treating it as a parse error told the author their
+      response was unreadable and exited non-zero.
+    - `'unusable'` — rows were present and every one was dropped.
+    - `'no_transitions_key'` — JSON parsed, but nothing shaped like a
+      `transitions` list. The model answered a different question.
+    - `'no_json'` — nothing parseable.
+
+    A row missing any of the four fields is dropped **with a log line**, because
+    every one of them is load-bearing: an entity with no `from_scene` cannot be
+    positioned and a state with no `evidence` cannot be checked.
+    """
+    from storyforge.common import log
+
+    required = ('entity', 'from_scene', 'state', 'evidence')
+
+    parsed_any = False
+    for candidate in _json_candidates(text):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        parsed_any = True
+        if not isinstance(parsed, dict):
+            continue
+        inner = parsed.get('transitions')
+        if not isinstance(inner, list):
+            continue
+
+        out: list[dict[str, str]] = []
+        dropped = 0
+        for index, item in enumerate(inner, start=1):
+            if not isinstance(item, dict):
+                dropped += 1
+                log(f'WARNING: state response row {index} is not an object '
+                    f'({type(item).__name__}) — dropped')
+                continue
+            row = {key: str(item.get(key, '')).strip() for key in required}
+            missing = [key for key in required if not row[key]]
+            if missing:
+                dropped += 1
+                log(f'WARNING: state response row {index} is missing '
+                    f'{", ".join(missing)} — dropped')
+                continue
+            out.append(row)
+
+        if out:
+            return out, 'ok'
+        return [], 'unusable' if dropped else 'empty'
+    return [], 'no_transitions_key' if parsed_any else 'no_json'
+
+
+def render_state_brief(*, hints: list[EntityHint],
+                       existing: list[dict[str, str]],
+                       scene_ids: list[str]) -> str:
+    """Render the coach-mode visual-state brief.
+
+    Questions per entity, no proposals. Deciding that a character changes clothes
+    in chapter four is an authorial decision about the book, not an extraction
+    from it, so coach mode makes no API call — unlike `--plan`'s coach brief,
+    which surfaces candidates the model generated. There is nothing to surface
+    here that would not be the creative work itself.
+    """
+    lines = [
+        '# Visual state — brief',
+        '',
+        'Your illustrations already have canon files for what must never '
+        'change. This is the other half: what changes *on schedule*.',
+        '',
+        _STATE_VS_CANON_RULE,
+        '',
+        '## How the log works',
+        '',
+        '- A row records the moment an entity\'s visible state **changes**.',
+        '- The state persists forward until the next row for that entity.',
+        '- A transition takes effect **at** its own scene, not after it.',
+        f'- {_GRANULARITY_RULE}',
+        '',
+        '## Where the log stands',
+        '',
+        _render_existing_transitions(existing),
+        '## Candidates to consider',
+        '',
+        render_entity_hint_table(hints),
+        '## Questions to settle, per entity',
+        '',
+        '1. Does this entity\'s appearance actually change in the book, or did '
+        'you only picture it changing?',
+        '2. Which scene is the *first* one where the new state is visible? '
+        'That scene is the `from_scene`, not the one after it.',
+        '3. Can you quote a sentence from that scene that shows the change? If '
+        'not, either the prose does not establish it — which an illustration '
+        'would then contradict — or the change belongs in a different scene.',
+        '4. Does the entity need more than one track? Clothing and injury '
+        'change on different schedules.',
+        '5. Is there a state that is true in one image only — a tear-streaked '
+        'face, arms raised against a light? That is not a transition. Put it '
+        'in `state_override` on the plan row.',
+        '',
+        '## Reading order',
+        '',
+        ('- ' + '\n- '.join(f'`{sid}`' for sid in scene_ids)
+         if scene_ids else '*No scenes in reading order yet.*'),
+        '',
+        '## When you have decided',
+        '',
+        'Add a row per transition to `reference/visual-state.csv`, or tell me '
+        'the changes and I will record them. Then run '
+        '`storyforge illustrate --audit` to read the prose against the log.',
+        '',
+    ]
+    return '\n'.join(lines)
+
+
+def render_state_checklist(*, hints: list[EntityHint],
+                           existing: list[dict[str, str]],
+                           scene_ids: list[str]) -> str:
+    """Render the strict-mode visual-state constraint checklist.
+
+    Requirements and data only. Proposes no entity, no state, and no scene.
+    """
+    lines = [
+        '# Visual state — constraint checklist',
+        '',
+        'Generated for `coaching=strict`. This file reports what each row of '
+        '`reference/visual-state.csv` requires. It proposes nothing.',
+        '',
+        '## Counts',
+        '',
+        f'- Transitions currently recorded: {len(existing)}',
+        f'- Entities currently tracked: '
+        f'{len({r["entity"] for r in existing})}',
+        f'- Scenes in reading order: {len(scene_ids)}',
+        f'- Candidate entities from canon and the registries: {len(hints)}',
+        '',
+        '## Required per row',
+        '',
+        '| Column | Requirement |',
+        '|--------|-------------|',
+        '| `entity` | Kebab-case slug. `{canon_id}-{aspect}` where the entity '
+        'has several independently-changing aspects; a bare `canon_id` where it '
+        'has one. Where a canon file exists, the slug must match its '
+        '`canon_id`. |',
+        '| `from_scene` | Must match an active id in `reference/scenes.csv` and '
+        'appear in `reference/chapter-map.csv`. The transition takes effect '
+        '**at** this scene. |',
+        '| `state` | One short phrase. What is visibly true, not why. |',
+        '| `evidence` | A phrase appearing verbatim in `from_scene`\'s prose. '
+        'Whitespace-tolerant, so a reflow does not break it. |',
+        '',
+        '## Rules the validator enforces',
+        '',
+        '- A `from_scene` that is not an active scene is an **error** '
+        '(`illus_state_unknown_scene`): the transition never applies, so every '
+        'scene after it resolves to the previous state.',
+        '- A `from_scene` that exists but is absent from the chapter map is a '
+        'warning (`illus_state_unmapped_scene`): the row is fine, the map is '
+        'incomplete.',
+        '- An `evidence` quote absent from the prose is a warning '
+        '(`illus_evidence_not_found`).',
+        '- An illustration whose `canon_refs` names an entity with no resolved '
+        'state at its scene is a warning (`illus_state_unspecified`). A '
+        '`state_override` on the plan row satisfies it.',
+        '',
+        '## Data',
+        '',
+        '### Transitions recorded',
+        '',
+        _render_existing_transitions(existing),
+        '### Candidate entities',
+        '',
+        render_entity_hint_table(hints),
+        '### Reading order',
+        '',
+        ('- ' + '\n- '.join(f'`{sid}`' for sid in scene_ids)
+         if scene_ids else '*No scenes in reading order yet.*'),
+        '',
+        '## Next commands',
+        '',
+        '```bash',
+        'storyforge illustrate --audit     # read the prose against the log',
+        'storyforge illustrate --diagnose  # plan and state health report',
+        '```',
+        '',
+    ]
+    return '\n'.join(lines)
+
+
+# ============================================================================
+# The contradiction audit (#278 phase 2)
+# ============================================================================
+
+#: Why an LLM pass is needed at all. Stated in the report itself, not only here:
+#: an author looking at a contradiction report has to understand what it can and
+#: cannot see, or they will read a clean report as proof of consistency.
+_WHY_THE_LLM_PASS: Final[str] = (
+    'Two transitions never disagree with each other, because things are allowed '
+    'to change: village lights dark at chapter ten and four still burning at '
+    'chapter thirteen is a story, not an error. The contradiction is a scene '
+    '*between* them asserting a state the span cannot support. Nothing '
+    'deterministic finds that — it takes reading the prose against the matrix, '
+    'which is what this pass does.'
+)
+
+
+def render_state_matrix(rows: list[dict[str, str]]) -> str:
+    """Render the transition log as a table, for the audit prompt and report."""
+    if not rows:
+        return '*No transitions recorded.*\n'
+    lines = ['| Entity | From scene | State | Evidence |', '|---|---|---|---|']
+    for row in rows:
+        lines.append(f'| `{row["entity"]}` | `{row["from_scene"]}` '
+                     f'| {row["state"]} | {row["evidence"]} |')
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def build_audit_request(*, story_context: str,
+                        transitions: list[dict[str, str]],
+                        resolved_by_scene: list[tuple[str, dict[str, str]]],
+                        scene_prose: str) -> str:
+    """Build the contradiction-audit prompt.
+
+    `resolved_by_scene` is the forward walk already done — the state in effect at
+    each candidate scene — so the model is checking prose against a resolved
+    matrix rather than being asked to re-derive resolution, which it would get
+    wrong at the `<=` boundary.
+    """
+    walked = []
+    for scene_id, state in resolved_by_scene:
+        if state:
+            body = '; '.join(f'{entity} = {value}'
+                             for entity, value in sorted(state.items()))
+        else:
+            body = '(nothing tracked is established yet at this point)'
+        walked.append(f'- `{scene_id}`: {body}')
+    walked_block = '\n'.join(walked) or '- (no candidate scenes)'
+
+    return f"""You are auditing an illustrated novel's prose against its
+visual-state matrix, before any art is paid for.
+
+## What you are looking for
+
+{_WHY_THE_LLM_PASS}
+
+Report only contradictions you can quote. A scene that simply does not mention a
+tracked entity is not a contradiction — the state persists silently, which is the
+whole point of a sparse log. What counts is prose that asserts something
+incompatible with the state in effect there.
+
+## Story context
+
+{story_context}
+
+## The transition log
+
+{render_state_matrix(transitions)}
+
+## State in effect at each scene you are reading
+
+This is the resolved forward walk. A transition takes effect **at** its own
+scene, and these lines already account for that — do not re-derive them.
+
+{walked_block}
+
+## The prose
+
+{scene_prose}
+
+## Output
+
+Return JSON only, in this exact shape:
+
+```json
+{{
+  "contradictions": [
+    {{
+      "scene_id": "the scene whose prose disagrees",
+      "entity": "the tracked entity, as spelled in the log",
+      "quote": "a short verbatim quote from that scene asserting the conflicting state",
+      "log_says": "the state the matrix has in effect at that scene",
+      "prose_says": "what the quoted prose asserts instead",
+      "resolution": "which to change and why — a missing transition, a wrong from_scene, or prose that contradicts a deliberate decision"
+    }}
+  ]
+}}
+```
+
+`quote` must appear **verbatim** in the named scene. Return an empty
+`contradictions` list if the prose and the matrix agree — a fabricated finding
+costs more than a missed one, because it sends the author to re-read a scene that
+was fine.
+"""
+
+
+def parse_audit_response(text: str) -> tuple[list[dict[str, str]], str, int]:
+    """Extract the ``contradictions`` list from an audit response.
+
+    Returns `(contradictions, status, dropped)`. `dropped` is how many rows the
+    model emitted that this pass could not read — carried out rather than left in
+    the log because the *report* has to disclose it. A findings list showing N
+    survivors of N+M rows looks complete, and the skill tells the author to read
+    the report first.
+
+    Statuses:
+
+    - `'ok'` — at least one usable row.
+    - `'empty'` — the key was present and the list was empty. The model said the
+      prose agrees, which is a real answer. `parse_selection_response` conflates
+      this with failure; here it must not, because "no contradictions" is the
+      outcome the author most wants to be able to trust.
+    - `'unusable'` — rows were present and **every one** was dropped. Distinct
+      from `'empty'` because the model found contradictions and we cannot read
+      them; reporting agreement would be the exact opposite of the truth. The
+      caller must refuse to write a report.
+    - `'no_json'` — nothing parseable.
+
+    Every dropped row is logged with what it was missing. A silently dropped
+    finding is a contradiction the author never hears about.
+    """
+    from storyforge.common import log
+
+    required = ('scene_id', 'entity', 'quote')
+    optional = ('log_says', 'prose_says', 'resolution')
+
+    for candidate in _json_candidates(text):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        inner = parsed.get('contradictions')
+        if not isinstance(inner, list):
+            continue
+
+        out: list[dict[str, str]] = []
+        dropped = 0
+        for index, item in enumerate(inner, start=1):
+            if not isinstance(item, dict):
+                dropped += 1
+                log(f'WARNING: audit response row {index} is not an object '
+                    f'({type(item).__name__}) — dropped')
+                continue
+            row = {key: str(item.get(key, '')).strip()
+                   for key in (*required, *optional)}
+            # `evidence` is accepted as an alias for `quote`. It is the word the
+            # transition log uses for the same thing, so a model that has just
+            # been shown the log reaches for it — and dropping three real
+            # contradictions over a key name is not a trade worth making.
+            if not row['quote']:
+                row['quote'] = str(item.get('evidence', '')).strip()
+            missing = [key for key in required if not row[key]]
+            if missing:
+                dropped += 1
+                log(f'WARNING: audit response row {index} is missing '
+                    f'{", ".join(missing)} — dropped. Present: '
+                    f'{", ".join(sorted(k for k in item if item.get(k))) or "nothing"}')
+                continue
+            out.append(row)
+
+        if out:
+            return out, 'ok', dropped
+        if dropped:
+            log(f'ERROR: all {dropped} row(s) in the audit response were '
+                f'unusable. Treating this as a failed pass, not as agreement.')
+            return [], 'unusable', dropped
+        return [], 'empty', 0
+    return [], 'no_json', 0
+
+
+def render_audit_report(*, title: str, transitions: list[dict[str, str]],
+                        findings: list[dict[str, str]],
+                        contradictions: list[dict[str, str]],
+                        scenes_read: list[str], scene_count: int,
+                        tracked_entities: list[str],
+                        undrafted_scenes: list[str],
+                        llm_skipped_reason: str,
+                        truncated_scenes: list[str] | None = None,
+                        unmapped_scenes: list[str] | None = None,
+                        dropped_rows: int = 0) -> str:
+    """Render `working/illustration-contradictions.md`.
+
+    Read-only output. The report states what it read and what it could not see,
+    because a clean report is only as trustworthy as its coverage — and the only
+    product of this pass is trust. Every gap in coverage is named: a scene with
+    no prose, a scene whose prose was cut at the character cap, a drafted scene
+    the chapter map cannot position (which the narrowing never looks at), and any
+    row the model emitted that could not be read.
+    """
+    truncated = truncated_scenes or []
+    unmapped = unmapped_scenes or []
+    partial = bool(truncated or unmapped or dropped_rows)
+
+    lines = [
+        f'# Illustration contradiction audit — {title}',
+        '',
+        f'Generated {date.today().isoformat()}. Read-only: this pass reports, '
+        'it never edits the prose or the log.',
+        '',
+        '## Why this pass exists',
+        '',
+        _WHY_THE_LLM_PASS,
+        '',
+        '## Coverage',
+        '',
+        f'- Scenes in reading order: {scene_count}',
+        f'- Scenes read: {len(scenes_read)}'
+        + (f' — {", ".join(f"`{s}`" for s in scenes_read)}'
+           if scenes_read else ''),
+        f'- Entities tracked: {len(tracked_entities)}'
+        + (f' — {", ".join(f"`{e}`" for e in tracked_entities)}'
+           if tracked_entities else ''),
+    ]
+    if undrafted_scenes:
+        lines.append(
+            f'- Not read (no file in `scenes/`): '
+            f'{", ".join(f"`{s}`" for s in undrafted_scenes)}')
+    if truncated:
+        lines.append(
+            f'- **Read only in part** (prose exceeded the per-scene character '
+            f'cap, so the tail was not sent): '
+            f'{", ".join(f"`{s}`" for s in truncated)}')
+    if unmapped:
+        lines.append(
+            f'- **Not examined at all** (drafted and active in `scenes.csv`, '
+            f'but absent from `reference/chapter-map.csv`, so it has no reading '
+            f'position and the narrowing never looks at it): '
+            f'{", ".join(f"`{s}`" for s in unmapped)}')
+    if dropped_rows:
+        lines.append(
+            f'- **{dropped_rows} finding(s) the model reported could not be '
+            f'read** and are not listed below — the rows were missing a scene, '
+            f'an entity, or a quote. The Contradictions section is therefore '
+            f'incomplete, not a full account of what the pass found.')
+    lines.extend([
+        '',
+        'A scene is read when it mentions a tracked entity at or after that '
+        'entity\'s first transition. A scene outside every tracked span, or one '
+        'the log says nothing about, is not covered by this report.',
+        '',
+    ])
+    if partial:
+        lines.extend([
+            '> **Coverage is incomplete.** The findings below are only about the '
+            'prose actually read. Do not read a clean result as agreement across '
+            'the book.',
+            '',
+        ])
+        if unmapped:
+            lines.extend([
+                'Add the unexamined scenes to `reference/chapter-map.csv` and '
+                're-run — they hold prose nothing in this pass has looked at.',
+                '',
+            ])
+        if truncated:
+            lines.extend([
+                'A partly-read scene is **not** recorded in the audit '
+                'provenance, so it will not report as "audited" later. Split it, '
+                'or accept that its tail is unchecked.',
+                '',
+            ])
+
+    if llm_skipped_reason:
+        lines.extend([
+            '## No contradiction pass was run',
+            '',
+            llm_skipped_reason,
+            '',
+        ])
+
+    lines.extend(['## Deterministic findings', ''])
+    if findings:
+        lines.append('These were computed without a model — each one is certain.')
+        lines.append('')
+        for finding in findings:
+            lines.append(f'- **`{finding["kind"]}`** '
+                         f'{finding.get("id", "")} — {finding["detail"]}')
+        lines.append('')
+    else:
+        lines.extend(['None. The log resolves cleanly and every evidence quote '
+                      'is still in the prose.', ''])
+
+    lines.extend(['## Contradictions', ''])
+    if contradictions and dropped_rows:
+        lines.extend([
+            f'**Incomplete.** {len(contradictions)} of '
+            f'{len(contradictions) + dropped_rows} rows the model returned could '
+            f'be read; the rest are described under Coverage. Re-run to see them.',
+            '',
+        ])
+    if contradictions:
+        for item in contradictions:
+            lines.extend([
+                f'### `{item["scene_id"]}` — `{item["entity"]}`',
+                '',
+                f'> {item["quote"]}',
+                '',
+                f'- **The matrix says:** {item.get("log_says") or "(not stated)"}',
+                f'- **The prose asserts:** '
+                f'{item.get("prose_says") or "(not stated)"}',
+                f'- **Resolution:** '
+                f'{item.get("resolution") or "(none proposed)"}',
+                '',
+            ])
+    elif llm_skipped_reason:
+        lines.extend(['Not assessed — no contradiction pass was run.', ''])
+    elif partial:
+        lines.extend(['None found **in the prose that was read** — see the '
+                      'Coverage gaps above. This is not a clean bill of health '
+                      'for the book.', ''])
+    else:
+        lines.extend(['None found. The prose and the matrix agree across every '
+                      'scene read.', ''])
+
+    lines.extend([
+        '## What to do next',
+        '',
+        '- A contradiction is usually a **missing transition**, not bad prose: '
+        'the book changed something the log never recorded.',
+        '- Where the prose is wrong instead, fix the prose and re-run — the '
+        'audit records a digest per scene it read, so a revised scene reports '
+        'as stale.',
+        '- Never revise a transition an already-rendered illustration used. '
+        'Correct the log and re-render from the corrected state.',
+        '',
+        '```bash',
+        'storyforge illustrate --state     # record a missing transition',
+        'storyforge illustrate --audit     # re-run this pass',
+        '```',
+        '',
+    ])
+    return '\n'.join(lines)
+
+
+def render_audit_failure(reason: str) -> str:
+    """The stub that replaces the report when a pass fails.
+
+    Writing nothing on failure is right — an empty report reads as a clean audit
+    — but *leaving the previous report in place* is the same lie with a date on
+    it: an author who re-runs after a failure and then opens the file reads a
+    stale "None found". The artifact must never assert a result the latest run did
+    not produce, so the file is truncated to this.
+    """
+    return (
+        f'# Illustration contradiction audit — failed\n'
+        f'\n'
+        f'{date.today().isoformat()}: the contradiction pass did not complete, '
+        f'so there are no results. {reason}\n'
+        f'\n'
+        f'Any previous report was removed rather than left in place — it would '
+        f'have described an earlier run while looking like this one.\n'
+        f'\n'
+        f'Re-run `storyforge illustrate --audit`.\n'
+    )

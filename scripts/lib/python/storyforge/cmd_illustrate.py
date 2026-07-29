@@ -1,12 +1,16 @@
 """storyforge illustrate — plan, art-direct, ingest, and embed interior illustrations.
 
-Seven phases, each its own flag:
+Nine phases, each its own flag:
 
   --direction  Write the book-level art direction: format, visual promise,
                recurring visual language, content limits, continuity anchors.
                Authored once; constrains every illustration.
   --plan       Decide where illustrations belong. Deterministic pre-pass, then
                an LLM pass that argues against those findings.
+  --state      Write the visual-state transition log: what changes on schedule,
+               as opposed to the canon tier for what must never change.
+  --audit      Read the prose against that matrix and report contradictions.
+               Read-only with respect to the prose and the log.
   --prompts    Turn planned rows into image-generation prompts.
   --ingest     Bring rendered files in, record digests, embed markers.
   --embed      (Re)insert markers from the plan, without ingesting.
@@ -40,6 +44,7 @@ from storyforge.common import (
 from storyforge.costs import log_operation
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
+from storyforge import visual_state as vs
 
 # Excerpt handed to the art-direction prompt. Enough to establish the beat and
 # its immediate surroundings without paying to re-send the whole scene.
@@ -67,6 +72,13 @@ def parse_args(argv):
                        help='Read-only plan health report + render order')
     phase.add_argument('--review', action='store_true',
                        help='Write the whole-sequence continuity checklist')
+    phase.add_argument('--state', action='store_true',
+                       help='Write the visual-state transition log — what '
+                            'changes on schedule, as opposed to the canon tier '
+                            'for what must never change')
+    phase.add_argument('--audit', action='store_true',
+                       help='Read the prose against the state matrix and report '
+                            'contradictions. Read-only.')
 
     parser.add_argument('--count', type=int, default=None,
                         help='Target illustration count for --plan '
@@ -103,10 +115,11 @@ def main(argv=None):
     coaching = args.coaching or get_coaching_level(project_dir)
 
     phases = [args.direction, args.plan, args.prompts, bool(args.ingest),
-              args.embed, args.diagnose, args.review]
+              args.embed, args.diagnose, args.review, args.state, args.audit]
     if not any(phases):
         log('Nothing to do. Pick a phase: --direction, --plan, --prompts, '
-            '--ingest PATH, --embed, --diagnose, or --review.')
+            '--ingest PATH, --embed, --state, --audit, --diagnose, or '
+            '--review.')
         return 1
 
     if args.diagnose:
@@ -129,6 +142,10 @@ def main(argv=None):
     if args.embed:
         exit_code = run_embed(project_dir, _id_filter(args.ids),
                               args.dry_run) or exit_code
+    if args.state:
+        exit_code = run_state(project_dir, coaching, args.dry_run) or exit_code
+    if args.audit:
+        exit_code = run_audit(project_dir, args.dry_run) or exit_code
     if args.review:
         exit_code = run_review(project_dir, args.dry_run) or exit_code
     return exit_code
@@ -176,7 +193,13 @@ def run_diagnose(project_dir: str) -> int:
     if not rows:
         log('No illustration plan yet. Run `storyforge illustrate --plan` to '
             'propose one.')
-        return 0
+        # The state rung *and its findings* are reported even with no plan: the
+        # transition log is about the book, not about the illustrations, and the
+        # skill now tells authors to build it before the plan. Returning 0 here
+        # hid a `state_unknown_scene` error entirely.
+        findings = ill.validate_plan(project_dir)
+        _report_state_rung(project_dir, findings)
+        return _report_findings(findings)
 
     report = ill.plan_report(project_dir)
     log(f'Illustration plan: {report["total"]} rows')
@@ -211,6 +234,17 @@ def run_diagnose(project_dir: str) -> int:
             log(f'  {mark} {i:2}. {step["id"]}{key}{locks}')
 
     findings = ill.validate_plan(project_dir)
+    _report_state_rung(project_dir, findings)
+    return _report_findings(findings)
+
+
+def _report_findings(findings: list[ill.IllustrationFinding]) -> int:
+    """Log every finding and return the exit code. 1 iff any is blocking.
+
+    Warning-only findings are normal in-flight state (a drifted anchor after a
+    revision, a file mid-rename), so they must not fail the command — matching
+    how cmd_validate gates on `errors` alone.
+    """
     if not findings:
         log('No problems found.')
         return 0
@@ -221,11 +255,47 @@ def run_diagnose(project_dir: str) -> int:
         target = finding.get('id') or finding.get('file') or ''
         prefix = 'WARNING: ' if ill.severity_of(finding['kind']) == 'warning' else ''
         log(f'  {prefix}[{finding["kind"]}] {target}: {finding["detail"]}')
-
-    # Warning-only findings are normal in-flight state (a drifted anchor after a
-    # revision, a file mid-rename), so they must not fail the command — matching
-    # how cmd_validate gates on `errors` alone.
     return 1 if errors else 0
+
+
+def _report_state_rung(project_dir: str,
+                       findings: list[ill.IllustrationFinding]) -> None:
+    """Log the visual-state and audit rungs, for `--diagnose`.
+
+    Three questions, in the order the author acts on them: does the transition
+    log exist, how much does it track, and does the audit still cover the prose.
+
+    Staleness is read off *findings* rather than by calling `digest_drift` again:
+    `validate_plan` has already run it, and hashing every audited scene twice per
+    diagnose also printed each of its WARNING lines twice.
+    """
+    transitions = vs.read_transitions(project_dir)
+    if not transitions:
+        log('Visual state: no transition log. Run '
+            '`storyforge illustrate --state` — canon covers what must never '
+            'change, this covers what changes on schedule.')
+        return
+
+    tracked = sorted({t['entity'] for t in transitions})
+    log(f'Visual state: {len(transitions)} transition(s) across '
+        f'{len(tracked)} entity(ies) — {", ".join(tracked)}')
+
+    provenance = vs.read_provenance(project_dir)
+    if not provenance:
+        log('  audit: never run. Run `storyforge illustrate --audit` to read '
+            'the prose against the matrix.')
+        return
+
+    stale = [f['scene_id'] for f in findings if f['kind'] == 'audit_stale']
+    last = max((p['audited_at'] for p in provenance if p['audited_at']),
+               default='')
+    covered = f'{len(provenance)} scene(s)'
+    if stale:
+        log(f'  audit: stale — last run {last or "(date not recorded)"} over '
+            f'{covered}; {len(stale)} since revised: {", ".join(sorted(stale))}')
+    else:
+        log(f'  audit: current — last run {last or "(date not recorded)"} over '
+            f'{covered}')
 
 
 # ============================================================================
@@ -437,6 +507,468 @@ def run_review(project_dir: str, dry_run: bool) -> int:
         log('Reviewing before the set is complete is the cheap moment: every '
             'later illustration references the earlier ones.')
     return 0
+
+
+# ============================================================================
+# --state
+# ============================================================================
+
+#: Per-scene prose cap for the state-proposal prompt. The pass reads the whole
+#: book once, so the cap is what keeps a 90-scene novel inside one call.
+_STATE_SCENE_CHARS = 3000
+
+
+def run_state(project_dir: str, coaching: CoachingLevel,
+              dry_run: bool) -> int:
+    """Write the visual-state transition log. Output depends on coaching level.
+
+    - `full` — one LLM call proposes transitions from the prose, each with its
+      evidence quote. Written to the CSV with **existing rows preserved**: a
+      transition the author wrote is an authorial decision about the book, and
+      the model has no standing to revise it.
+    - `coach` — a brief of per-entity questions. No API call; see
+      `pi.render_state_brief` for why proposing here would be the creative work
+      itself rather than a surfacing of it.
+    - `strict` — a constraint checklist plus the CSV itself (header, existing
+      rows), so the author has a file to fill in. No API call.
+    """
+    existing = vs.read_transitions(project_dir)
+    hints = _state_entity_hints(project_dir)
+    order = ill._scene_order(project_dir)
+    scene_ids = [sid for sid, _pos in sorted(order.items(),
+                                             key=lambda kv: (kv[1], kv[0]))]
+
+    log(f'Visual state: {len(existing)} transition(s) across '
+        f'{len({r["entity"] for r in existing})} entity(ies); '
+        f'{len(scene_ids)} scene(s) in reading order; '
+        f'{len(hints)} candidate entity(ies) from canon and the registries')
+
+    if coaching == 'strict':
+        # Strict may do structural and file work — it may not propose content, and
+        # it must not touch a file the author is already keeping. Writing the
+        # header only when the log does not exist gives the author the file the
+        # checklist describes; rewriting an existing one through read/write would
+        # silently drop any row with an empty `entity` and any column the author
+        # added beyond STATE_COLUMNS.
+        if not dry_run and not os.path.isfile(vs.state_path(project_dir)):
+            vs.write_transitions(project_dir, [])
+            log(f'Wrote {vs.STATE_FILE} (header only — fill it in)')
+        elif not dry_run:
+            log(f'{vs.STATE_FILE} already exists ({len(existing)} row(s)) — '
+                f'left untouched')
+        return _write_coaching_file(
+            project_dir, 'visual-state-checklist.md',
+            pi.render_state_checklist(hints=hints, existing=existing,
+                                      scene_ids=scene_ids),
+            dry_run,
+        )
+
+    if coaching == 'coach':
+        return _write_coaching_file(
+            project_dir, 'visual-state-brief.md',
+            pi.render_state_brief(hints=hints, existing=existing,
+                                  scene_ids=scene_ids),
+            dry_run,
+        )
+
+    if dry_run:
+        log(f'[dry-run] would propose transitions from {len(scene_ids)} scene(s) '
+            f'(coaching={coaching})')
+        return 0
+
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        log('ERROR: ANTHROPIC_API_KEY is not set. Proposing transitions in '
+            f'{coaching} coaching requires an API key. Set it and re-run, or '
+            'use --dry-run / --coaching coach / --coaching strict.')
+        return 1
+
+    prose, read_count = _state_scene_prose(project_dir, scene_ids)
+    if not read_count:
+        log('No drafted scenes to read. Transitions are extracted from prose, '
+            'so there is nothing to propose yet.')
+        return 1
+    log(f'Reading {read_count} of {len(scene_ids)} scene(s), capped at '
+        f'{_STATE_SCENE_CHARS} characters each')
+
+    prompt = pi.build_state_request(
+        story_context=_story_context(project_dir), scene_prose=prose,
+        hints=hints, existing=existing, coaching=coaching,
+    )
+    text = _invoke(project_dir, prompt, 'illustrate-state',
+                   task_type='synthesis', max_tokens=8192)
+    if not text:
+        log('ERROR: no response from the API.')
+        return 1
+
+    proposed, status = pi.parse_state_response(text)
+    if status == 'empty':
+        # A model that read the book and found nothing whose visible state
+        # changes is answering, not failing. Reporting it as a parse error told
+        # the author their response was unreadable and exited non-zero.
+        log('The model proposed no transitions — it found nothing whose visible '
+            'state changes. Nothing was written.')
+        return 0
+    if status != 'ok':
+        log(f'ERROR: could not parse transitions from the response ({status}).')
+        return 1
+    log(f'Received {len(proposed)} proposed transition(s)')
+
+    merged, added = _merge_transitions(project_dir, existing, proposed)
+    vs.write_transitions(project_dir, merged)
+    log(f'Wrote {vs.STATE_FILE} — {len(existing)} kept, {added} added')
+
+    findings = [f for f in vs.prepass(project_dir)['findings']
+                if f['kind'] in ('state_unknown_scene', 'state_unmapped_scene',
+                                 'evidence_not_found')]
+    if findings:
+        log(f'WARNING: {len(findings)} transition(s) need attention:')
+        for finding in findings:
+            log(f'  [{finding["kind"]}] {finding.get("id", "")}: '
+                f'{finding["detail"]}')
+    return 0
+
+
+def _merge_transitions(
+    project_dir: str,
+    existing: list[vs.Transition],
+    proposed: list[dict[str, str]],
+) -> tuple[list[vs.Transition], int]:
+    """Append proposals the log does not already cover, preserving every row.
+
+    Keyed on `(entity, from_scene)`. Existing rows keep their order and their
+    text — never revise a transition the author wrote — and new rows are
+    appended after them. Row order is not resolution order (that comes from the
+    chapter map), but it *is* the tiebreak between two transitions at one scene,
+    so appending rather than interleaving keeps existing resolutions stable.
+
+    A proposal naming a scene that does not exist is **refused**, not written and
+    then warned about. That row is the model's, not the author's, so the
+    never-revise-author-text rule does not protect it — and writing it would put
+    a `state_unknown_scene` error into the log on purpose, which this command
+    then reports and exits 0 on.
+    """
+    known = vs.known_scene_ids(project_dir)
+    seen = {(row['entity'], row['from_scene']) for row in existing}
+    merged: list[vs.Transition] = list(existing)
+    added = 0
+    for row in proposed:
+        key = (row['entity'], row['from_scene'])
+        if key in seen:
+            log(f'  keeping the recorded state for {row["entity"]!r} at '
+                f'{row["from_scene"]} — the proposal was discarded')
+            continue
+        if row['from_scene'] not in known:
+            log(f'WARNING: discarding the proposal for {row["entity"]!r} — '
+                f'from_scene {row["from_scene"]!r} is not an active scene in '
+                f'scenes.csv, so the transition would never apply')
+            continue
+        seen.add(key)
+        merged.append({
+            'entity': _sanitize_cell(row['entity']),
+            'from_scene': _sanitize_cell(row['from_scene']),
+            'state': _sanitize_cell(row['state']),
+            'evidence': _sanitize_cell(row['evidence']),
+        })
+        added += 1
+    return merged, added
+
+
+def _state_entity_hints(project_dir: str) -> list[pi.EntityHint]:
+    """Candidate tracked entities, from the canon tier then the registries.
+
+    Canon first because a canon file is the strongest statement that an entity
+    matters to the art, and because its `canon_id` is the slug the log must
+    match. Registry rows fill in entities that have no canon file yet.
+    """
+    from storyforge import canon as canon_mod
+
+    hints: list[pi.EntityHint] = []
+    seen: set[str] = set()
+
+    for canon_id, label in sorted(
+            canon_mod.anchor_display_names(project_dir).items()):
+        seen.add(canon_id)
+        hints.append({'canon_id': canon_id, 'label': label['label'],
+                      'source': 'canon'})
+
+    for filename, source in (('characters.csv', 'characters.csv'),
+                             ('locations.csv', 'locations.csv'),
+                             ('motif-taxonomy.csv', 'motif-taxonomy.csv')):
+        for row in ill._read_ref_csv(project_dir, filename):
+            canon_id = (row.get('id') or '').strip()
+            if not canon_id or canon_id in seen:
+                continue
+            seen.add(canon_id)
+            hints.append({'canon_id': canon_id,
+                          'label': (row.get('name') or canon_id).strip(),
+                          'source': source})
+    return hints
+
+
+def _state_scene_prose(project_dir: str,
+                       scene_ids: list[str]) -> tuple[str, int]:
+    """Assemble the prose the state pass reads, and how many scenes it found.
+
+    Markers are stripped — a marker is not prose, and the model would otherwise
+    be invited to quote one as evidence. An undrafted scene is skipped with a log
+    line rather than sent as an empty block, which would read to the model as a
+    scene in which nothing is visible.
+    """
+    blocks: list[str] = []
+    found = 0
+    for scene_id in scene_ids:
+        text = ill._read_scene(project_dir, scene_id)
+        if text is None:
+            log(f'  {scene_id} has no file in scenes/ — not read')
+            continue
+        found += 1
+        prose = ill.strip_markers(text).strip()[:_STATE_SCENE_CHARS]
+        blocks.append(f'### `{scene_id}`\n\n{prose}')
+    return '\n\n'.join(blocks), found
+
+
+# ============================================================================
+# --audit
+# ============================================================================
+
+#: Per-scene prose cap for the audit prompt. A contradiction can sit anywhere in
+#: a scene, so truncating is how a real finding gets missed — which is why this
+#: is well above any plausible scene (the templates target 80,000 words at
+#: 1,500-2,000 words per scene, so ~7,000-11,000 characters is typical and 24,000
+#: covers a 4,000-word outlier) and why a scene that still exceeds it is named in
+#: the report and kept out of the provenance file. Silent truncation would let
+#: the report claim coverage it does not have, and the only product of this pass
+#: is trust.
+_AUDIT_SCENE_CHARS = 24000
+
+AUDIT_REPORT_FILE = os.path.join('working', 'illustration-contradictions.md')
+
+
+def run_audit(project_dir: str, dry_run: bool) -> int:
+    """Read the prose against the state matrix and report contradictions.
+
+    Read-only with respect to the prose and the log: it writes a report and a
+    provenance file, and nothing else. An audit that edits prose is a far worse
+    bug than one that misses a contradiction.
+
+    Cost discipline: no deterministic findings **and** no candidate scenes means
+    no LLM call, and the report says so rather than implying a clean pass.
+    """
+    prepass = vs.prepass(project_dir)
+    findings = prepass['findings']
+    candidates = prepass['candidate_scenes']
+    transitions = vs.read_transitions(project_dir)
+
+    log(f'Audit pre-pass: selected {len(candidates)} of '
+        f'{prepass["scene_count"]} scenes as candidates across '
+        f'{len(prepass["tracked_entities"])} tracked entities; '
+        f'{len(findings)} deterministic finding(s)')
+    for entity, terms in sorted(prepass['search_terms'].items()):
+        log(f'  {entity}: matched on {", ".join(repr(t) for t in terms)}')
+    if prepass['undrafted_scenes']:
+        log(f'  {len(prepass["undrafted_scenes"])} scene(s) have no file in '
+            f'scenes/ and were not read: '
+            f'{", ".join(prepass["undrafted_scenes"])}')
+    if prepass['unmapped_scenes']:
+        log(f'WARNING: {len(prepass["unmapped_scenes"])} drafted scene(s) are '
+            f'absent from the chapter map, so they have no reading position and '
+            f'this audit never examines them: '
+            f'{", ".join(prepass["unmapped_scenes"])}. Add them to '
+            f'reference/chapter-map.csv and re-run.')
+
+    if dry_run:
+        log(f'[dry-run] would audit {len(candidates)} scene(s) and write '
+            f'{AUDIT_REPORT_FILE}')
+        return 0
+
+    contradictions: list[dict[str, str]] = []
+    skipped = _audit_skip_reason(transitions, findings, candidates)
+    scenes_read: list[str] = []
+    truncated: list[str] = []
+    dropped = 0
+
+    if skipped:
+        log(f'No contradiction pass: {skipped}')
+    else:
+        prose, scenes_read, truncated = _audit_scene_prose(project_dir,
+                                                           candidates)
+        if not scenes_read:
+            skipped = ('Every candidate scene turned out to have no file in '
+                       '`scenes/`, so there was no prose to read.')
+            log(f'No contradiction pass: {skipped}')
+        elif not os.environ.get('ANTHROPIC_API_KEY'):
+            log('ERROR: ANTHROPIC_API_KEY is not set. The contradiction pass '
+                'needs it. Set it and re-run, or use --dry-run.')
+            return 1
+        else:
+            contradictions, skipped, dropped = _audit_llm_pass(
+                project_dir, transitions, scenes_read, prose)
+            if skipped == '__error__':
+                return _write_audit_failure(
+                    project_dir,
+                    'The model\'s response could not be read, so no findings '
+                    'were recorded.')
+
+    report = pi.render_audit_report(
+        title=read_yaml_field('project.title', project_dir) or 'Untitled',
+        transitions=transitions, findings=findings,
+        contradictions=contradictions, scenes_read=scenes_read,
+        scene_count=prepass['scene_count'],
+        tracked_entities=prepass['tracked_entities'],
+        undrafted_scenes=prepass['undrafted_scenes'],
+        llm_skipped_reason=skipped,
+        truncated_scenes=truncated,
+        unmapped_scenes=prepass['unmapped_scenes'],
+        dropped_rows=dropped,
+    )
+    path = os.path.join(project_dir, AUDIT_REPORT_FILE)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(report)
+    log(f'Wrote {AUDIT_REPORT_FILE} — {len(contradictions)} contradiction(s), '
+        f'{len(findings)} deterministic finding(s)')
+    if dropped:
+        log(f'WARNING: {dropped} row(s) the model returned could not be read '
+            f'and are not in the report\'s findings list — the report says so '
+            f'under Coverage.')
+
+    # Provenance covers exactly the scenes whose prose was read **in full**.
+    # Recording a scene the pass never read would make a later run report it as
+    # audited; recording a *truncated* one is the same lie with a longer fuse,
+    # because the digest covers the whole scene, so the unread tail could never
+    # come back as `audit_stale`.
+    fully_read = [s for s in scenes_read if s not in set(truncated)]
+    if fully_read:
+        today = date.today().isoformat()
+        vs.write_provenance(project_dir, [
+            {'scene_id': scene_id,
+             'digest': ill.scene_prose_digest(project_dir, scene_id),
+             'audited_at': today}
+            for scene_id in fully_read
+        ])
+        log(f'Wrote {vs.PROVENANCE_FILE} — {len(fully_read)} scene(s)')
+    if truncated:
+        log(f'WARNING: {len(truncated)} scene(s) were read only in part and are '
+            f'not recorded as audited: {", ".join(truncated)}')
+    return 0
+
+
+def _audit_skip_reason(transitions: list[vs.Transition],
+                       findings: list[dict],
+                       candidates: list[str]) -> str:
+    """Why no LLM call is warranted, or '' when one is. Author-facing prose.
+
+    Every branch must be true of the run it describes. Having deterministic
+    findings does not give a model anything to read, so the no-candidates case is
+    a skip either way — it just reports differently, because "we found problems
+    and called nothing" and "we found nothing at all" are different states.
+    """
+    if not transitions:
+        return ('There is no visual-state log yet, so there is nothing for the '
+                'prose to contradict. Run `storyforge illustrate --state` '
+                'first.')
+    if not candidates:
+        if findings:
+            return (f'No scene sits inside a tracked entity\'s span while '
+                    f'mentioning it, so there was no prose for a model to read. '
+                    f'The {len(findings)} deterministic finding(s) below still '
+                    f'stand — fix those and re-run.')
+        return ('The pre-pass found no problems and no scene sits inside a '
+                'tracked entity\'s span while mentioning it, so no scene could '
+                'disagree with the log. No model was called.')
+    return ''
+
+
+def _write_audit_failure(project_dir: str, reason: str) -> int:
+    """Replace the report with a failure stub and return exit code 1.
+
+    Not "write nothing": a report left over from an earlier run would say
+    "None found" under a stale date while looking like the latest result.
+    """
+    path = os.path.join(project_dir, AUDIT_REPORT_FILE)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    existed = os.path.isfile(path)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(pi.render_audit_failure(reason))
+    log(f'{"Replaced" if existed else "Wrote"} {AUDIT_REPORT_FILE} with a '
+        f'failure stub — no findings were recorded'
+        + (', and the previous report was removed so it cannot be read as this '
+           'run\'s result' if existed else ''))
+    return 1
+
+
+def _audit_llm_pass(project_dir: str, transitions: list[vs.Transition],
+                    scenes_read: list[str],
+                    prose: str) -> tuple[list[dict[str, str]], str, int]:
+    """Run the one contradiction call.
+
+    Returns `(contradictions, skip_reason, dropped)`. A skip reason of
+    `'__error__'` means the caller must fail rather than write a report that
+    would read as a clean pass; `dropped` counts rows the model returned that
+    could not be read, which the *report* has to disclose — stdout is not enough
+    when the skill tells the author to read the report first. Sonnet, not Opus:
+    this is analytical reading against a table, not creative work.
+    """
+    order = ill._scene_order(project_dir)
+    resolved = [(scene_id, vs._resolve(order, transitions, order[scene_id]))
+                for scene_id in scenes_read if scene_id in order]
+
+    prompt = pi.build_audit_request(
+        story_context=_story_context(project_dir),
+        transitions=transitions, resolved_by_scene=resolved, scene_prose=prose,
+    )
+    text = _invoke(project_dir, prompt, 'illustrate-audit',
+                   task_type='evaluator', max_tokens=8192)
+    if not text:
+        log('ERROR: no response from the API. No findings were recorded — an '
+            'empty report would read as a clean audit.')
+        return [], '__error__', 0
+
+    contradictions, status, dropped = pi.parse_audit_response(text)
+    if status in ('no_json', 'unusable'):
+        # 'unusable' means the model *did* find contradictions and every row was
+        # malformed. Writing a report then would affirm agreement, which is the
+        # exact opposite of what the response said.
+        log(f'ERROR: the audit response could not be used ({status}). No '
+            f'findings were recorded — an empty report would read as a clean '
+            f'audit.')
+        return [], '__error__', dropped
+    log(f'Contradiction pass returned {len(contradictions)} finding(s)'
+        + (f'; {dropped} further row(s) could not be read' if dropped else ''))
+    return contradictions, '', dropped
+
+
+def _audit_scene_prose(
+    project_dir: str, scene_ids: list[str],
+) -> tuple[str, list[str], list[str]]:
+    """Assemble the candidate prose, the scenes read, and the ones cut short.
+
+    Markers are stripped: the model is asked to quote the scene verbatim, and a
+    marker is not prose the author can find by searching the manuscript.
+
+    Truncation is reported, never silent. The scene text is what the whole pass
+    is checking, so a cap that quietly removes the second half of a scene turns
+    "no contradictions found" into a claim the run cannot support.
+    """
+    blocks: list[str] = []
+    read: list[str] = []
+    truncated: list[str] = []
+    for scene_id in scene_ids:
+        text = ill._read_scene(project_dir, scene_id)
+        if text is None:
+            log(f'  {scene_id} has no file in scenes/ — not read')
+            continue
+        read.append(scene_id)
+        prose = ill.strip_markers(text).strip()
+        if len(prose) > _AUDIT_SCENE_CHARS:
+            truncated.append(scene_id)
+            log(f'WARNING: {scene_id} is {len(prose)} characters; only the '
+                f'first {_AUDIT_SCENE_CHARS} were sent. A contradiction in the '
+                f'remaining {len(prose) - _AUDIT_SCENE_CHARS} will not be '
+                f'found, and the scene is not recorded as audited.')
+            prose = prose[:_AUDIT_SCENE_CHARS]
+        blocks.append(f'### `{scene_id}`\n\n{prose}')
+    return '\n\n'.join(blocks), read, truncated
 
 
 # ============================================================================
@@ -1239,10 +1771,23 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
         # current canon from one that predates it. Stamped on every ingest,
         # including a re-ingest of the same id, because a replacement render is
         # exactly the event that makes the old date wrong.
+        #
+        # `scene_digest` is the same idea one level down: the prose this render
+        # was made from, so "the prose changed under this image" becomes
+        # detectable (`prose_changed`). Empty when the scene has no file, which
+        # is a legitimate state for a row whose scene is not drafted.
+        row_scene = next((r.get('scene_id', '').strip() for r in plan
+                          if r['id'].strip() == illus_id), '')
+        scene_digest = ill.scene_prose_digest(project_dir, row_scene)
+        if row_scene and not scene_digest:
+            log(f'  {illus_id}: scene {row_scene} has no file, so no '
+                f'scene_digest was recorded — prose drift under this render '
+                f'will not be detectable until it does')
         _update_row(project_dir, illus_id, {
             'asset_file': rel, 'sha256': digest, 'status': 'ingested',
             'width': str(dims[0]), 'height': str(dims[1]),
             'ingested_at': date.today().isoformat(),
+            'scene_digest': scene_digest,
         })
         log(f'  {illus_id} → {rel} ({dims[0]}×{dims[1]}, '
             f'sha256 {digest[:12]}…)')
