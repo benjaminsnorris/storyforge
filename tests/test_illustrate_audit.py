@@ -497,3 +497,72 @@ def test_the_audit_log_names_the_scenes_it_could_not_read(in_project, monkeypatc
     cmd_illustrate.main(['--audit'])
     out = capsys.readouterr().out
     assert 'scene(s) have no file in scenes/ and were not read: act2-sc01' in out
+
+
+# ============================================================================
+# --diagnose reports the state and audit rungs
+# ============================================================================
+
+def test_diagnose_reports_no_state_log(in_project, capsys):
+    os.remove(os.path.join(in_project, STATE_PATH))
+    assert cmd_illustrate.main(['--diagnose']) == 0
+    out = capsys.readouterr().out
+    assert 'no transition log' in out
+    assert '--state' in out
+
+
+def test_diagnose_reports_the_state_rung_with_no_plan(in_project, capsys):
+    """The log is about the book, not the illustrations — worth building first."""
+    assert not ill.read_plan(in_project)
+    assert cmd_illustrate.main(['--diagnose']) == 0
+    out = capsys.readouterr().out
+    assert 'No illustration plan yet' in out
+    assert 'dorren-clothing' in out
+
+
+def test_diagnose_counts_entities_and_transitions(in_project, capsys):
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert '2 transition(s) across 2 entity(ies)' in out
+
+
+def test_diagnose_reports_an_unrun_audit(in_project, capsys):
+    cmd_illustrate.main(['--diagnose'])
+    assert 'audit: never run' in capsys.readouterr().out
+
+
+def test_diagnose_reports_a_current_audit(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    cmd_illustrate.main(['--audit'])
+    capsys.readouterr()
+    monkeypatch.delenv('ANTHROPIC_API_KEY')
+    cmd_illustrate.main(['--diagnose'])
+    assert 'audit: current' in capsys.readouterr().out
+
+
+def test_diagnose_reports_a_stale_audit(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    cmd_illustrate.main(['--audit'])
+    audited = vs.read_provenance(in_project)[0]['scene_id']
+    with open(os.path.join(in_project, 'scenes', f'{audited}.md'), 'a',
+              encoding='utf-8') as f:
+        f.write('\nRevised after the audit ran.\n')
+    capsys.readouterr()
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'audit: stale' in out
+    assert audited in out
+
+
+def test_diagnose_reports_the_state_rung_alongside_a_plan(in_project, capsys):
+    from illustration_helpers import plan_row
+    ill.write_plan(in_project, [plan_row(scene_id='act1-sc01',
+                                         placement='scene_open', anchor='')])
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'Illustration plan: 1 rows' in out
+    assert 'Visual state:' in out

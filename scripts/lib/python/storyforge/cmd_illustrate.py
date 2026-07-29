@@ -193,6 +193,10 @@ def run_diagnose(project_dir: str) -> int:
     if not rows:
         log('No illustration plan yet. Run `storyforge illustrate --plan` to '
             'propose one.')
+        # The state rung is reported even with no plan: the transition log is
+        # about the book, not about the illustrations, and it is worth building
+        # before the plan rather than after.
+        _report_state_rung(project_dir)
         return 0
 
     report = ill.plan_report(project_dir)
@@ -227,6 +231,8 @@ def run_diagnose(project_dir: str) -> int:
                      if step['locks'] else '')
             log(f'  {mark} {i:2}. {step["id"]}{key}{locks}')
 
+    _report_state_rung(project_dir)
+
     findings = ill.validate_plan(project_dir)
     if not findings:
         log('No problems found.')
@@ -243,6 +249,42 @@ def run_diagnose(project_dir: str) -> int:
     # revision, a file mid-rename), so they must not fail the command — matching
     # how cmd_validate gates on `errors` alone.
     return 1 if errors else 0
+
+
+def _report_state_rung(project_dir: str) -> None:
+    """Log the visual-state and audit rungs, for `--diagnose`.
+
+    Three questions, in the order the author acts on them: does the transition
+    log exist, how much does it track, and does the audit still cover the prose.
+    """
+    transitions = vs.read_transitions(project_dir)
+    if not transitions:
+        log('Visual state: no transition log. Run '
+            '`storyforge illustrate --state` — canon covers what must never '
+            'change, this covers what changes on schedule.')
+        return
+
+    tracked = sorted({t['entity'] for t in transitions})
+    log(f'Visual state: {len(transitions)} transition(s) across '
+        f'{len(tracked)} entity(ies) — {", ".join(tracked)}')
+
+    provenance = vs.read_provenance(project_dir)
+    if not provenance:
+        log('  audit: never run. Run `storyforge illustrate --audit` to read '
+            'the prose against the matrix.')
+        return
+
+    stale = [f['scene_id'] for f in vs.digest_drift(project_dir)
+             if f['kind'] == 'audit_stale']
+    last = max((p['audited_at'] for p in provenance if p['audited_at']),
+               default='')
+    covered = f'{len(provenance)} scene(s)'
+    if stale:
+        log(f'  audit: stale — last run {last or "(date not recorded)"} over '
+            f'{covered}; {len(stale)} since revised: {", ".join(sorted(stale))}')
+    else:
+        log(f'  audit: current — last run {last or "(date not recorded)"} over '
+            f'{covered}')
 
 
 # ============================================================================
