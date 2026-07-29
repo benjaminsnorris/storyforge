@@ -201,13 +201,76 @@ def test_the_entries_do_not_restate_the_reference_tier(in_project):
     assert 'Camera at standing eye height' not in entries
 
 
+#: The spec's own worked example, `lamp-relit`, as plan cells. Every field the
+#: renderer can emit is populated, at the length the spec shows — which is the
+#: only way the 80–120 word budget is actually tested. Against the fixture's
+#: short cells an entry renders around 60 words and the assertion cannot fail.
+_SPEC_EXAMPLE = {
+    'beat': 'The Great Lamp catches and the light drives outward through the '
+            'woods.',
+    'subject': 'Wide elevated view of the village. The Lamp blowing out the '
+               'centre of the frame as the light source. Gold visibly '
+               'travelling between the trunks. Both children small and '
+               'together, arms up against the glare.',
+    'composition': 'Faces and Lamp clear of the centre gutter.',
+    'layout': 'double_page',
+    'register': 'brightest',
+    'canon_refs': 'dorren-hayle;maps',
+    'absent': 'Ember. A second Great Lamp.',
+    'treatment': 'very wide, high, environmental, night, subjects small in '
+                 'frame',
+    'state_override': 'dorren-hayle:filthy moss-green cardigan, brown ankle '
+                      'boots;maps:erupting, gold',
+}
+
+
 def test_entries_stay_within_the_word_budget(in_project):
-    """80–120 words is the point of the packet: the shared sections carry the
-    rest. This guards the renderer's own overhead, on plan cells that are
-    already short."""
-    cmd_illustrate.main(['--package'])
-    for entry in packet.resolve(in_project)['entries']:
-        assert len(pp.render_entry(entry).split()) <= 120
+    """80–120 words is this phase's stated design constraint: thin entries are
+    the whole reason the packet exists. Asserted against the spec's own worked
+    example with every field populated, including a treatment."""
+    rows = ill.read_plan(in_project)
+    rows[1].update(_SPEC_EXAMPLE)
+    ill.write_plan(in_project, rows)
+    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    rendered = pp.render_entry(entries['the-blank-page'])
+    words = len(rendered.split())
+    assert words <= 120, f'{words} words:\n{rendered}'
+
+
+def test_the_rendered_marker_costs_only_the_marker(in_project):
+    """The budget governs what a generation session is asked to read and act on.
+    A rendered entry is the opposite — it exists to be skipped — so its marker
+    is allowed to push the count past 120, but only by the marker: it must add
+    no other prose, and every body line must be byte-identical."""
+    rows = ill.read_plan(in_project)
+    rows[1].update(_SPEC_EXAMPLE)
+    ill.write_plan(in_project, rows)
+    pending = pp.render_entry(
+        {e['id']: e for e in packet.resolve(in_project)['entries']}
+        ['the-blank-page'])
+    _ingest(in_project, 1)
+    rendered = pp.render_entry(
+        {e['id']: e for e in packet.resolve(in_project)['entries']}
+        ['the-blank-page'])
+
+    cost = len(rendered.split()) - len(pending.split())
+    assert cost <= 10, f'the rendered marker costs {cost} words'
+    # The marker touches the heading and the metadata line and nothing else:
+    # every content line below them is byte-identical.
+    assert rendered.split('\n')[3:] == pending.split('\n')[3:]
+
+
+def test_contrast_is_one_derived_sentence(in_project):
+    """Three stacked sentences spent a tenth of the budget restating two facts."""
+    rows = ill.read_plan(in_project)
+    rows[1]['contrast'] = 'Much wider than the one before it.'
+    ill.write_plan(in_project, rows)
+    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    contrast = entries['the-blank-page']['contrast']
+    derived = contrast.replace('Much wider than the one before it.', '').strip()
+    assert derived.count('.') == 1, derived
+    assert 'darkest' in derived and 'the-finest-cartographer' in derived
+    assert 'Much wider than the one before it.' in contrast
 
 
 def test_state_appears_in_the_entry_because_it_resolves_the_matrix(in_project):
@@ -227,6 +290,149 @@ def test_reference_images_are_pathed_not_copied(in_project):
     # Nothing was copied in beside the markdown.
     assert sorted(os.listdir(packet.packet_dir(in_project))) == \
         sorted(packet.PACKET_FILES)
+
+
+def _ingest(project_dir, index, **cells):
+    """Mark a seeded row ingested with a real file on disk."""
+    from illustration_helpers import make_png
+    rows = ill.read_plan(project_dir)
+    rel = ill.default_asset_rel(rows[index]['id'].strip())
+    make_png(os.path.join(project_dir, rel), 8, 12)
+    rows[index].update({'status': 'ingested', 'asset_file': rel,
+                        'ingested_at': '2026-07-28'})
+    rows[index].update(cells)
+    ill.write_plan(project_dir, rows)
+    return rows[index]['id'].strip()
+
+
+def test_a_canon_excluded_render_is_named_in_reference_images(in_project):
+    """The H1 case: every prior render excluded as pre-canon, and the list
+    silently shrinks to the cover — which reads as "nothing is ingested yet"."""
+    from illustration_helpers import make_png
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 12)
+    # Ingested before the canon was last touched (canon_updated: 2026-07-28).
+    _ingest(in_project, 0, ingested_at='2026-01-01')
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'reference-images.md')
+    assert 'What is not in that list' in body
+    assert 'the-finest-cartographer' in body
+    assert 'before the canon was last updated' in body
+    assert 'cover-only' in body
+
+
+def test_a_cover_only_chain_with_ingested_art_is_a_readme_gap(in_project):
+    from illustration_helpers import make_png
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 12)
+    _ingest(in_project, 0, ingested_at='2026-01-01')
+    cmd_illustrate.main(['--package'])
+    readme = _read(in_project, 'README.md')
+    assert 'cover-only or empty even though this book has ingested' in readme
+
+
+def test_a_healthy_reference_list_has_no_exclusion_section(in_project):
+    from illustration_helpers import make_png
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 12)
+    _ingest(in_project, 0, ingested_at='2026-07-29')
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'reference-images.md')
+    assert 'What is not in that list' not in body
+    assert ill.default_asset_rel('the-finest-cartographer') in body
+
+
+def test_a_missing_cover_is_disclosed(in_project):
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'reference-images.md')
+    assert 'no cover artwork' in body
+
+
+def test_the_four_image_cap_is_disclosed(in_project):
+    """L4: the list stops at four with a silent `break` today."""
+    from illustration_helpers import make_png
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 12)
+    rows = ill.read_plan(in_project)
+    for index in range(6):
+        row = ill.blank_row(f'extra-{index}')
+        rel = ill.default_asset_rel(row['id'])
+        make_png(os.path.join(in_project, rel), 8, 12)
+        row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open',
+                    'status': 'ingested', 'asset_file': rel,
+                    'ingested_at': '2026-07-29', 'beat': 'b', 'subject': 's'})
+        rows.append(row)
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'reference-images.md')
+    assert 'the list stops at 4 images' in body
+
+
+def test_an_excluded_render_past_the_cap_is_still_disclosed(in_project):
+    """The exclusion check must run before the cap, or a stale render past the
+    fourth reference is dropped under a cap that is not why it went."""
+    from illustration_helpers import make_png
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 12)
+    rows = ill.read_plan(in_project)
+    for index in range(5):
+        row = ill.blank_row(f'fresh-{index}')
+        rel = ill.default_asset_rel(row['id'])
+        make_png(os.path.join(in_project, rel), 8, 12)
+        row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open',
+                    'status': 'ingested', 'asset_file': rel,
+                    'ingested_at': '2026-07-29', 'beat': 'b', 'subject': 's'})
+        rows.append(row)
+    stale = ill.blank_row('stale-one')
+    stale_rel = ill.default_asset_rel('stale-one')
+    make_png(os.path.join(in_project, stale_rel), 8, 12)
+    stale.update({'scene_id': 'act1-sc01', 'placement': 'scene_open',
+                  'status': 'ingested', 'asset_file': stale_rel,
+                  'ingested_at': '2026-01-01', 'beat': 'b', 'subject': 's'})
+    rows.append(stale)
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'reference-images.md')
+    assert 'stale-one' in body
+    assert 'before the canon was last updated' in body
+
+
+# ============================================================================
+# Rendered entries must not look like pending ones (H2)
+# ============================================================================
+
+def test_an_ingested_entry_is_marked_as_already_rendered(in_project):
+    _ingest(in_project, 0)
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'illustrations.md')
+    assert f'### the-finest-cartographer{pp.DONE_MARK}' in body
+    assert 'ingested — do not regenerate' in body
+    # The pending one is untouched.
+    assert '### the-blank-page\n' in body
+
+
+def test_a_prompted_entry_is_not_marked_as_rendered(in_project):
+    rows = ill.read_plan(in_project)
+    rows[0]['status'] = 'prompted'
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    assert pp.DONE_MARK not in _read(in_project, 'illustrations.md')
+
+
+def test_a_treatment_on_ingested_art_is_reported_as_possibly_late(in_project):
+    _ingest(in_project, 0, treatment='wide, high, environmental, dusk')
+    cmd_illustrate.main(['--package'])
+    readme = _read(in_project, 'README.md')
+    assert 'already ingested and carries a treatment' in readme
+    assert 'cannot tell which came first' in readme
+
+
+def test_a_treatment_on_pending_art_is_not_reported(in_project):
+    rows = ill.read_plan(in_project)
+    rows[0]['treatment'] = 'wide, high, environmental, dusk'
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    assert 'carries a treatment' not in _read(in_project, 'README.md')
 
 
 def test_the_sequence_rules_are_in_the_packet(in_project):
@@ -280,6 +486,21 @@ def test_an_unfilled_slot_reads_as_unfilled_not_as_the_first_row(in_project):
     assert 'later-state exemplar | _unfilled' in body
 
 
+def test_the_disclosure_count_counts_notes_not_slots(in_project):
+    """L3: `fallback` also carries the "brackets nothing" observation, which is
+    about the batch as a whole and would overstate a slot count."""
+    rows = ill.read_plan(in_project)
+    rows[0]['register'] = ''
+    rows[1]['register'] = 'darkest'
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'README.md')
+    batch = packet.anchor_batch(in_project)
+    assert 'brackets nothing' in body
+    assert f'{len(batch["fallback"])} note(s) on how it was chosen' in body
+    assert 'slot(s) are guessed' not in body
+
+
 def test_diagnose_reports_the_anchor_batch(in_project, capsys):
     cmd_illustrate.main(['--diagnose'])
     out = capsys.readouterr().out
@@ -331,7 +552,7 @@ def test_diagnose_reports_a_drifted_anchor_copy(in_project, capsys):
 
 
 def test_diagnose_says_when_the_packet_is_ready_to_hand_over(in_project,
-                                                            capsys, staged):
+                                                            capsys):
     """Every anchor-batch row ingested is the Churn rung."""
     from illustration_helpers import make_png
     rows = ill.read_plan(in_project)
@@ -505,6 +726,36 @@ def test_a_json_response_with_no_treatments_key_is_reported(in_project, staged,
 def test_an_empty_response_is_an_error(in_project, staged):
     staged('')
     assert cmd_illustrate.main(['--sequence']) == 1
+
+
+def test_a_run_that_changes_nothing_does_not_touch_the_plan(in_project, staged):
+    """L1: rewriting identical bytes bumps the mtime, and an existing packet
+    then reports `packet_stale` over a run that changed nothing."""
+    rows = ill.read_plan(in_project)
+    for row in rows:
+        row['treatment'] = 'wide, high, environmental, dusk'
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    before = os.path.getmtime(ill.plan_path(in_project))
+
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night')))
+    assert cmd_illustrate.main(['--sequence']) == 0
+    assert os.path.getmtime(ill.plan_path(in_project)) == before
+    assert packet.packet_stale(in_project) == []
+
+
+def test_coach_mode_still_reports_duplicate_treatments(in_project, staged,
+                                                       capsys):
+    """L2: the author is about to hand-copy these, and a repeat defeats the
+    pass whichever hand writes it."""
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night'),
+        ('the-blank-page', 'close, low, interior, night')))
+    assert cmd_illustrate.main(['--sequence', '--coaching', 'coach']) == 0
+    out = capsys.readouterr().out
+    assert 'share one treatment in this brief' in out
+    assert 'the-blank-page' in out
 
 
 def test_a_fenced_response_is_parsed(in_project, staged):

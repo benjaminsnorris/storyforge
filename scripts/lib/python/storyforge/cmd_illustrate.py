@@ -1475,6 +1475,16 @@ def run_sequence(project_dir: str, coaching: CoachingLevel,
     log(f'Received {len(proposed)} usable treatment(s)')
 
     if coaching == 'coach':
+        # Duplicates are reported here too, over what the *brief* proposes. The
+        # author is about to hand-copy these into the plan, and a repeat defeats
+        # the pass whichever hand writes it — reporting only on the write path
+        # meant coach mode never got the one warning this pass exists to give.
+        _report_duplicate_treatments([
+            {'id': row['id'].strip(),
+             'treatment': (row.get('treatment') or '').strip()
+                          or proposed.get(row['id'].strip(), '')}
+            for row in rows
+        ], where='in this brief')
         return _write_coaching_file(
             project_dir, 'illustration-sequence-brief.md',
             pp.render_sequence_brief(rows=rows, proposed=proposed), dry_run)
@@ -1482,11 +1492,23 @@ def run_sequence(project_dir: str, coaching: CoachingLevel,
     return _apply_treatments(project_dir, proposed)
 
 
+def _report_duplicate_treatments(rows: list[dict[str, str]], *,
+                                 where: str) -> None:
+    """Warn about any treatment shared by more than one row."""
+    for treatment, ids in sorted(pp.duplicate_treatments(rows).items()):
+        log(f'WARNING: {len(ids)} illustrations share one treatment {where} '
+            f'({treatment!r}): {", ".join(sorted(ids))}. Variety is the whole '
+            f'point of this pass — give them different staging, or say in one '
+            f'of them that the echo is deliberate.')
+
+
 def _apply_treatments(project_dir: str, proposed: dict[str, str]) -> int:
     """Write proposed treatments, never over an author's, and report repeats.
 
     Reads and writes the *whole* plan, not the reading-order subset, so a
-    superseded row keeps its cells.
+    superseded row keeps its cells. The write is skipped entirely when nothing
+    changed: rewriting identical bytes still bumps the plan's mtime, which makes
+    an existing packet report `packet_stale` over a run that changed nothing.
     """
     plan = ill.read_plan(project_dir)
     written = 0
@@ -1503,15 +1525,16 @@ def _apply_treatments(project_dir: str, proposed: dict[str, str]) -> int:
             continue
         row['treatment'] = proposed[illus_id]
         written += 1
-    ill.write_plan(project_dir, plan)
-    log(f'Wrote {written} treatment(s) to reference/{ill.PLAN_FILENAME}')
+    if written:
+        ill.write_plan(project_dir, plan)
+        log(f'Wrote {written} treatment(s) to reference/{ill.PLAN_FILENAME}')
+    else:
+        log(f'No new treatment(s) to write — reference/{ill.PLAN_FILENAME} was '
+            f'left untouched, so an existing packet does not become stale over '
+            f'a run that changed nothing.')
 
-    duplicates = pp.duplicate_treatments(packet.rows_in_reading_order(project_dir))
-    for treatment, ids in sorted(duplicates.items()):
-        log(f'WARNING: {len(ids)} illustrations share one treatment '
-            f'({treatment!r}): {", ".join(sorted(ids))}. Variety is the whole '
-            f'point of this pass — give them different staging, or say in one '
-            f'of them that the echo is deliberate.')
+    _report_duplicate_treatments(packet.rows_in_reading_order(project_dir),
+                                 where='in the plan')
     if written:
         log('Re-run `storyforge illustrate --package` to carry the staging '
             'into the packet, and --prompts to carry it into the prompts.')
@@ -1564,7 +1587,8 @@ def run_package(project_dir: str, dry_run: bool) -> int:
         'illustrations.md': pp.render_illustrations(
             entries=contents['entries']),
         'reference-images.md': pp.render_reference_images(
-            references=contents['references']),
+            references=contents['references'],
+            notes=contents['reference_notes']),
         'acceptance.md': pp.render_acceptance(aspects=aspects),
     }
 
@@ -1846,7 +1870,8 @@ _MAX_REFERENCES = 4
 def _references_for(project_dir: str, illus_id: str, *,
                     plan: list[dict[str, str]] | None = None,
                     canon_cutoff: str = '',
-                    no_prior_refs: bool = False) -> list[tuple[str, str]]:
+                    no_prior_refs: bool = False,
+                    notes: list[str] | None = None) -> list[tuple[str, str]]:
     """Build the labeled reference list for an illustration.
 
     Prior ingested illustrations plus the cover are what hold a book's art
@@ -1874,17 +1899,33 @@ def _references_for(project_dir: str, illus_id: str, *,
     Every exclusion is logged. Silent staleness is what made the original bug
     hard to notice — the prompts looked fine, they just referenced the wrong
     images.
+
+    `notes` is an optional out-list the same disclosures are appended to, in
+    prose, for a caller that has to *render* them rather than log them. The
+    packet's `reference-images.md` is that caller: a log line the author read
+    twenty minutes ago is not a substitute for the file whose only job is
+    telling them what to upload, and a list that silently shrank to the cover
+    reads as "nothing is ingested yet". Threaded through this function rather
+    than recomputed beside it so the two can never disagree about which
+    references were dropped and why.
     """
+    def note(text: str) -> None:
+        if notes is not None:
+            notes.append(text)
+
     references: list[tuple[str, str]] = []
     cover = os.path.join('manuscript', 'assets', 'cover-illustration.png')
     if os.path.isfile(os.path.join(project_dir, cover)):
         references.append((cover, 'cover art (sets the house style)'))
+    else:
+        note('There is no cover artwork at manuscript/assets/'
+             'cover-illustration.png, so nothing sets the house style from '
+             'outside this set.')
 
     rows = plan if plan is not None else ill.read_plan(project_dir)
     skipped_stale = 0
+    capped = 0
     for row in rows:
-        if len(references) >= _MAX_REFERENCES:
-            break
         if row['id'].strip() == illus_id:
             continue
         if (row.get('status') or '').strip() != 'ingested':
@@ -1894,6 +1935,8 @@ def _references_for(project_dir: str, illus_id: str, *,
             continue
         if no_prior_refs:
             skipped_stale += 1
+            note(f'`{rel}` is not listed because --no-prior-refs was passed: '
+                 f'this build inherits nothing from the existing art.')
             continue
         if canon_cutoff:
             stale_reason = _stale_reference_reason(row, canon_cutoff)
@@ -1904,8 +1947,28 @@ def _references_for(project_dir: str, illus_id: str, *,
                     f'order), or pass --no-prior-refs to build this prompt '
                     f'from the cover alone.')
                 skipped_stale += 1
+                note(f'`{rel}` is **not** listed — {stale_reason}. It was '
+                     f'directed by canon that has since been rewritten, so '
+                     f'using it would teach the new render the drift the new '
+                     f'canon exists to remove. Re-render it from the current '
+                     f'canon (`storyforge illustrate --diagnose` gives the '
+                     f'order), then re-run --package.')
                 continue
+        # The cap is checked *after* the exclusion checks so that a skipped
+        # render is still disclosed: breaking out of the loop early would hide
+        # every stale render past the fourth reference behind a cap that is not
+        # why they were dropped.
+        if len(references) >= _MAX_REFERENCES:
+            capped += 1
+            continue
         references.append((rel, 'prior illustration (style continuity)'))
+
+    if capped:
+        log(f'  {illus_id}: {capped} further ingested illustration(s) were not '
+            f'listed — the reference list stops at {_MAX_REFERENCES}.')
+        note(f'{capped} further ingested illustration(s) are eligible but not '
+             f'listed: the list stops at {_MAX_REFERENCES} images, because past '
+             f'that a model starts averaging them rather than matching them.')
 
     prior = [r for r in references if r[0] != cover]
     if not prior:
@@ -1914,12 +1977,25 @@ def _references_for(project_dir: str, illus_id: str, *,
                 + (f' ({skipped_stale} prior illustration(s) excluded)'
                    if skipped_stale else
                    ' (no prior illustration is ingested yet)') + '.')
+            note('This list is **cover-only**. '
+                 + (f'{skipped_stale} ingested illustration(s) exist and were '
+                    f'excluded for the reasons above — that is not the same as '
+                    f'having nothing to reference.'
+                    if skipped_stale else
+                    'No illustration has been ingested yet, so the first '
+                    'renders establish the look for everything after them.'))
         else:
             log(f'  {illus_id}: no reference images at all'
                 + (f' ({skipped_stale} prior illustration(s) excluded)'
                    if skipped_stale else '')
                 + ' — nothing anchors this prompt\'s style, so it establishes '
                   'the look for everything that references it.')
+            note('There are **no reference images at all**'
+                 + (f', and {skipped_stale} ingested illustration(s) were '
+                    f'excluded for the reasons above'
+                    if skipped_stale else '')
+                 + '. Nothing anchors style or likeness, so whatever is '
+                   'rendered first sets the look for the whole book.')
     return references
 
 

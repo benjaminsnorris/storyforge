@@ -115,6 +115,28 @@ def test_an_entity_with_no_state_at_its_scene_is_a_gap(packet_project):
                for g in gaps)
 
 
+def test_a_blank_state_cell_is_a_gap_not_a_suppressed_one(packet_project):
+    """Half-filling the matrix is strictly worse than not filling it: an empty
+    `state` cell *matches*, so it silences the "nobody stated this" gap and then
+    renders as nothing."""
+    from storyforge import visual_state as vs
+    rows = vs.read_transitions(packet_project)
+    rows.append({'entity': 'cartography-office', 'from_scene': 'act1-sc01',
+                 'state': '', 'evidence': 'held her breath'})
+    vs.write_transitions(packet_project, rows)
+    contents = packet.resolve(packet_project)
+    gaps = contents['gaps']
+    assert any('cartography-office' in g and 'empty `state` cell' in g
+               for g in gaps)
+    # And the old gap no longer fires for it, which is exactly why the new one
+    # has to.
+    assert not any('cartography-office' in g and 'no transition states' in g
+                   for g in gaps)
+    entry = next(e for e in contents['entries']
+                 if e['id'] == 'the-finest-cartographer')
+    assert 'cartography-office' not in entry['state']
+
+
 def test_an_unpositioned_scene_is_reported_as_such(packet_project):
     """`new-x1` is active in scenes.csv but absent from the chapter map, so no
     state resolves for it — which is a different problem from an unstated

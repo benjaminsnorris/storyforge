@@ -72,9 +72,13 @@ def _render_batch(batch: AnchorBatch, unrendered: list[str]) -> str:
     body = '\n'.join(lines)
     if batch['fallback']:
         disclosure = '\n'.join(f'- {note}' for note in batch['fallback'])
+        # Counted as notes, not as slots: `fallback` also carries the
+        # "brackets nothing" observation, which is about the batch as a whole
+        # and would overstate a slot count by one.
         body += (f'\n\n**Read this before rendering the batch.** '
-                 f'{len(batch["fallback"])} slot(s) are guessed or '
-                 f'unfilled:\n\n{disclosure}')
+                 f'{len(batch["fallback"])} note(s) on how it was chosen — a '
+                 f'guessed or unfilled slot is a decision waiting on you, not '
+                 f'one already made:\n\n{disclosure}')
     return body
 
 def render_readme(*, title: str, contents: PacketContents,
@@ -273,8 +277,28 @@ def render_visual_state(*, grid: StateGrid,
 # illustrations.md
 # ============================================================================
 
+#: Appended to the heading of an entry whose art already exists. The batch table
+#: in README.md has always said which rows are rendered; the entries did not, and
+#: an author told to work the file "top to bottom" would re-render finished art.
+DONE_MARK: Final[str] = ' — already rendered'
+
+#: Statuses that mean the art does not exist yet. Everything else — `rendered`,
+#: `ingested` — means a file was made from this entry. `superseded` never reaches
+#: an entry (`rows_in_reading_order` drops it).
+_PENDING_STATUSES: Final[frozenset[str]] = frozenset({'', 'planned', 'prompted'})
+
+
+def _is_rendered(entry: Entry) -> bool:
+    """Whether this entry's art already exists."""
+    return entry['status'] not in _PENDING_STATUSES
+
+
 def render_entry(entry: Entry) -> str:
     """One illustration's entry — only what is specific to this image.
+
+    An entry whose art exists is marked in two places (the heading and the
+    metadata line) rather than one, because the heading is what a session
+    skimming for the next thing to do actually reads.
 
     Sections with nothing in them are omitted rather than rendered empty,
     except `Beat` and `In frame`, which carry `packet.NOT_RECORDED` from
@@ -292,10 +316,12 @@ def render_entry(entry: Entry) -> str:
     other two exceptions.
     """
     lines = [
-        f'### {entry["id"]}',
+        f'### {entry["id"]}{DONE_MARK if _is_rendered(entry) else ""}',
         '',
         f'- Scene: `{entry["scene_id"] or "—"}` · Layout: '
-        f'{entry["layout"]} · Aspect: {entry["aspect"]}',
+        f'{entry["layout"]} · Aspect: {entry["aspect"]}'
+        + (f' · **{entry["status"]} — do not regenerate**'
+           if _is_rendered(entry) else ''),
         '',
         f'**Beat.** {entry["beat"]}',
         '',
@@ -340,15 +366,22 @@ def render_illustrations(*, entries: list[Entry]) -> str:
 # reference-images.md
 # ============================================================================
 
-def render_reference_images(*, references: list[tuple[str, str]]) -> str:
-    """What to upload, in what order, and what each one is for.
+def render_reference_images(*, references: list[tuple[str, str]],
+                            notes: list[str]) -> str:
+    """What to upload, in what order, what each one is for, and what is missing.
 
     The files are **not copied** into the packet. Paths are project-relative
     from the project root, and the author uploads from disk — a copy inside the
     packet would be a second thing to invalidate every time a render is
     replaced.
+
+    `notes` is load-bearing, not decoration. A list that silently shrank to the
+    cover — every prior render excluded as pre-canon, say — reads exactly like a
+    book where nothing has been rendered yet, and the author then uploads the
+    cover alone and generates the rest of the set with no likeness reference.
+    That is the drift this file exists to prevent.
     """
-    return '\n'.join([
+    parts = [
         '# Reference images',
         '',
         'These files are not copied into the packet. The paths below are '
@@ -358,6 +391,18 @@ def render_reference_images(*, references: list[tuple[str, str]]) -> str:
         '',
         pi.render_references_block(references),
         '',
+    ]
+    if notes:
+        parts.extend([
+            '## What is not in that list',
+            '',
+            'Read this before you upload. A short list is not the same as '
+            'having little to reference.',
+            '',
+            '\n'.join(f'- {note}' for note in notes),
+            '',
+        ])
+    parts.extend([
         'Reference images carry style and likeness, which is why the entries '
         'in `illustrations.md` do not re-describe either. As illustrations are '
         'ingested they become references for the ones after them, so re-run '
@@ -365,6 +410,7 @@ def render_reference_images(*, references: list[tuple[str, str]]) -> str:
         'up the new ones.',
         '',
     ])
+    return '\n'.join(parts)
 
 
 # ============================================================================

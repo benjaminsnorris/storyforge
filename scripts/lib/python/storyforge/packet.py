@@ -62,6 +62,11 @@ class Entry(TypedDict):
     """
     id: str
     scene_id: str
+    #: The plan row's status. Carried so an entry for finished art cannot look
+    #: identical to one for pending work: the documented flow renders the anchor
+    #: batch, ingests it, and regenerates, so the normal mid-flight packet mixes
+    #: the two, and README tells the author to work the file top to bottom.
+    status: str
     layout: str
     aspect: str
     beat: str
@@ -82,6 +87,13 @@ class PacketContents(TypedDict):
     anchors: dict[str, str]
     entries: list[Entry]
     references: list[tuple[str, str]]
+    #: Why the reference list is shorter than the ingested art suggests —
+    #: canon-excluded renders, `--no-prior-refs`, the four-image cap, and a
+    #: cover-only or empty chain. Rendered beneath the list in
+    #: `reference-images.md`, because a list that silently shrank to the cover
+    #: reads as "nothing is ingested yet" and the author then uploads the cover
+    #: alone.
+    reference_notes: list[str]
     gaps: list[str]
 
 
@@ -188,13 +200,32 @@ def resolve(project_dir: str) -> PacketContents:
 
     gaps.extend(_audit_gaps(project_dir))
 
+    references, reference_notes = _packet_references(project_dir, rows)
+    if reference_notes and _has_ingested_art(rows) and len(references) <= 1:
+        # The dangerous shape: renders exist on disk and none of them reached
+        # the list. The detail is in reference-images.md; this is the line that
+        # gets it into README.md, which is where the author looks first.
+        gaps.append(
+            'the reference-image list is cover-only or empty even though this '
+            'book has ingested illustrations — see reference-images.md for '
+            'which were excluded and why. Uploading only what is listed means '
+            'the next renders carry no likeness reference, which is the drift '
+            'the reference chain exists to prevent.')
+
     return {
         'book_level': book_level,
         'anchors': anchors,
         'entries': entries,
-        'references': _packet_references(project_dir, rows),
+        'references': references,
+        'reference_notes': reference_notes,
         'gaps': gaps,
     }
+
+
+def _has_ingested_art(rows: list[dict[str, str]]) -> bool:
+    """Whether any live plan row claims a rendered file."""
+    return any((row.get('status') or '').strip() == 'ingested'
+               and (row.get('asset_file') or '').strip() for row in rows)
 
 
 def _book_level_gaps(project_dir: str) -> list[str]:
@@ -249,9 +280,22 @@ def _entry_for(row: dict[str, str], *, project_dir: str,
         order=order, known=known, transitions=transitions)
     gaps.extend(state_gaps)
 
+    status = (row.get('status') or '').strip() or 'planned'
+    treatment = (row.get('treatment') or '').strip()
+    if status == 'ingested' and treatment:
+        # `--sequence` stages every live row, including finished art, and does
+        # not record when it did so. If the staging was assigned after the
+        # render, the render does not follow it — and nothing else would say so.
+        gaps.append(
+            f'illustration `{illus_id}` is already ingested and carries a '
+            f'treatment. If the staging was assigned after the render — which '
+            f'nothing records — the finished art does not follow it. The packet '
+            f'cannot tell which came first, so confirm before you re-render.')
+
     entry: Entry = {
         'id': illus_id,
         'scene_id': scene_id,
+        'status': status,
         'layout': (row.get('layout') or ill.DEFAULT_LAYOUT).strip()
                   or ill.DEFAULT_LAYOUT,
         'aspect': pi.aspect_for_row(row),
@@ -267,7 +311,7 @@ def _entry_for(row: dict[str, str], *, project_dir: str,
         'absent': (row.get('absent') or '').strip(),
         'contrast': _contrast_for(row, previous_id),
         'notes': (row.get('composition') or '').strip(),
-        'treatment': (row.get('treatment') or '').strip(),
+        'treatment': treatment,
     }
     return entry, gaps
 
@@ -349,6 +393,21 @@ def _state_for(row: dict[str, str], *, project_dir: str,
             claimed.add(key.lower())
             parts.append((key, value))
 
+    # A transition with an empty `state` cell is admitted by `read_transitions`
+    # (it only requires `entity`), and it *matches* — which means it suppresses
+    # the "no transition states its visual state there" gap above and then
+    # renders as nothing. Half-filling the matrix would therefore be strictly
+    # worse than not filling it, because it deletes the warning that says to
+    # finish. Recorded rather than filtered.
+    for key, value in parts:
+        if not value:
+            gaps.append(
+                f'illustration `{illus_id}` shows `{key}`, whose governing '
+                f'transition at or before `{scene_id}` has an empty `state` '
+                f'cell — so the entry says nothing about it, and the row is '
+                f'suppressing the gap that would have told you to state it. '
+                f'Fill the state in {vs.STATE_FILE}, or delete the row.')
+
     return '; '.join(f'{_entity_label(key, labels)}: {value}'
                      for key, value in parts if value), gaps
 
@@ -379,20 +438,28 @@ def _contrast_for(row: dict[str, str], previous_id: str) -> str:
     generation calls cannot
     see each other, which is how a set ends up with four images of the same
     two children kneeling around the same lamp.
+
+    **One derived sentence, not three.** The entry exists to be thin, and three
+    stacked sentences here spent a tenth of the 80–120 word budget restating two
+    facts. The author's own note, if any, follows it untouched.
     """
-    parts: list[str] = []
     register = (row.get('register') or '').strip().lower()
-    if register == 'darkest':
-        parts.append('This is the darkest image in the book.')
-    elif register == 'brightest':
-        parts.append('This is the brightest image in the book.')
-    if previous_id:
-        parts.append(f'It follows `{previous_id}` in the reading order and '
-                     f'must not repeat its staging.')
+    extreme = (f'The {register} image in the book'
+               if register in ill.VALID_REGISTERS else '')
+    follows = (f'follows `{previous_id}` and must not repeat its staging'
+               if previous_id else '')
+
+    if extreme and follows:
+        derived = f'{extreme}; it {follows}.'
+    elif extreme:
+        derived = f'{extreme}.'
+    elif follows:
+        derived = f'{follows[0].upper()}{follows[1:]}.'
+    else:
+        derived = ''
+
     author = (row.get('contrast') or '').strip()
-    if author:
-        parts.append(author)
-    return ' '.join(parts)
+    return ' '.join(part for part in (derived, author) if part)
 
 
 def _audit_gaps(project_dir: str) -> list[str]:
@@ -414,9 +481,10 @@ def _audit_gaps(project_dir: str) -> list[str]:
     return gaps
 
 
-def _packet_references(project_dir: str,
-                       rows: list[dict[str, str]]) -> list[tuple[str, str]]:
-    """The labeled reference-image list for the whole packet.
+def _packet_references(
+        project_dir: str, rows: list[dict[str, str]],
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """The labeled reference-image list for the whole packet, and why it is short.
 
     Reuses `--prompts`' per-illustration builder rather than a second one, so
     the packet inherits its two exclusions: the cover art is the *artwork* and
@@ -426,11 +494,17 @@ def _packet_references(project_dir: str,
 
     Files are never copied into the packet — `reference-images.md` carries
     project-relative paths, because a copy is a second thing to invalidate.
+
+    The second element is the exclusion record. `--prompts` only logs those, and
+    for a prompt file that is enough because the author is watching the run; the
+    packet is read hours later, so the reasons have to be *in* it.
     """
     from storyforge import cmd_illustrate
-    return cmd_illustrate._references_for(
+    notes: list[str] = []
+    references = cmd_illustrate._references_for(
         project_dir, 'the packet', plan=rows,
-        canon_cutoff=canon.newest_canon_updated(project_dir))
+        canon_cutoff=canon.newest_canon_updated(project_dir), notes=notes)
+    return references, notes
 
 
 def state_grid(project_dir: str) -> StateGrid:
