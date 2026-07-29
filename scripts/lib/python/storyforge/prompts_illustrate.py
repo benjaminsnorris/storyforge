@@ -1355,29 +1355,25 @@ quote the prose for a state, do not propose it.
 def parse_state_response(text: str) -> tuple[list[dict[str, str]], str]:
     """Extract the ``transitions`` list from a state-proposal response.
 
-    Returns `(transitions, status)` where status is 'ok', 'no_transitions_key',
-    or 'no_json' — the same shape as `parse_selection_response`, so the caller
-    can tell "the model proposed nothing" from "the response was unparseable".
-    A row missing any of the four fields is dropped, because every one of them
-    is load-bearing: an entity with no `from_scene` cannot be positioned and a
-    state with no `evidence` cannot be checked.
-    """
-    required = ('entity', 'from_scene', 'state', 'evidence')
+    Returns `(transitions, status)`:
 
-    def _take(obj) -> list[dict[str, str]] | None:
-        if not isinstance(obj, dict):
-            return None
-        inner = obj.get('transitions')
-        if not isinstance(inner, list):
-            return None
-        out: list[dict[str, str]] = []
-        for item in inner:
-            if not isinstance(item, dict):
-                continue
-            row = {key: str(item.get(key, '')).strip() for key in required}
-            if all(row[key] for key in required):
-                out.append(row)
-        return out
+    - `'ok'` — at least one usable row.
+    - `'empty'` — the key was present and the list was empty. A model that read
+      the book and found nothing whose visible state changes is giving a real
+      answer, not failing; treating it as a parse error told the author their
+      response was unreadable and exited non-zero.
+    - `'unusable'` — rows were present and every one was dropped.
+    - `'no_transitions_key'` — JSON parsed, but nothing shaped like a
+      `transitions` list. The model answered a different question.
+    - `'no_json'` — nothing parseable.
+
+    A row missing any of the four fields is dropped **with a log line**, because
+    every one of them is load-bearing: an entity with no `from_scene` cannot be
+    positioned and a state with no `evidence` cannot be checked.
+    """
+    from storyforge.common import log
+
+    required = ('entity', 'from_scene', 'state', 'evidence')
 
     parsed_any = False
     for candidate in _json_candidates(text):
@@ -1386,9 +1382,32 @@ def parse_state_response(text: str) -> tuple[list[dict[str, str]], str]:
         except json.JSONDecodeError:
             continue
         parsed_any = True
-        out = _take(parsed)
+        if not isinstance(parsed, dict):
+            continue
+        inner = parsed.get('transitions')
+        if not isinstance(inner, list):
+            continue
+
+        out: list[dict[str, str]] = []
+        dropped = 0
+        for index, item in enumerate(inner, start=1):
+            if not isinstance(item, dict):
+                dropped += 1
+                log(f'WARNING: state response row {index} is not an object '
+                    f'({type(item).__name__}) — dropped')
+                continue
+            row = {key: str(item.get(key, '')).strip() for key in required}
+            missing = [key for key in required if not row[key]]
+            if missing:
+                dropped += 1
+                log(f'WARNING: state response row {index} is missing '
+                    f'{", ".join(missing)} — dropped')
+                continue
+            out.append(row)
+
         if out:
             return out, 'ok'
+        return [], 'unusable' if dropped else 'empty'
     return [], 'no_transitions_key' if parsed_any else 'no_json'
 
 
@@ -1638,13 +1657,26 @@ was fine.
 def parse_audit_response(text: str) -> tuple[list[dict[str, str]], str]:
     """Extract the ``contradictions`` list from an audit response.
 
-    Returns `(contradictions, status)` where status is 'ok', 'empty' (the key was
-    present and the list was empty — the model said the prose agrees, which is a
-    real answer), or 'no_json'. `parse_selection_response` conflates the middle
-    case with failure; here it must not, because "no contradictions" is the
-    outcome the author most wants to be able to trust.
+    Returns `(contradictions, status)`:
+
+    - `'ok'` — at least one usable row.
+    - `'empty'` — the key was present and the list was empty. The model said the
+      prose agrees, which is a real answer. `parse_selection_response` conflates
+      this with failure; here it must not, because "no contradictions" is the
+      outcome the author most wants to be able to trust.
+    - `'unusable'` — rows were present and **every one** was dropped. Distinct
+      from `'empty'` because the model found contradictions and we cannot read
+      them; reporting agreement would be the exact opposite of the truth. The
+      caller must refuse to write a report.
+    - `'no_json'` — nothing parseable.
+
+    Every dropped row is logged with what it was missing. A silently dropped
+    finding is a contradiction the author never hears about.
     """
+    from storyforge.common import log
+
     required = ('scene_id', 'entity', 'quote')
+    optional = ('log_says', 'prose_says', 'resolution')
 
     for candidate in _json_candidates(text):
         try:
@@ -1656,16 +1688,39 @@ def parse_audit_response(text: str) -> tuple[list[dict[str, str]], str]:
         inner = parsed.get('contradictions')
         if not isinstance(inner, list):
             continue
+
         out: list[dict[str, str]] = []
-        for item in inner:
+        dropped = 0
+        for index, item in enumerate(inner, start=1):
             if not isinstance(item, dict):
+                dropped += 1
+                log(f'WARNING: audit response row {index} is not an object '
+                    f'({type(item).__name__}) — dropped')
                 continue
             row = {key: str(item.get(key, '')).strip()
-                   for key in (*required, 'log_says', 'prose_says',
-                               'resolution')}
-            if all(row[key] for key in required):
-                out.append(row)
-        return out, 'ok' if out else 'empty'
+                   for key in (*required, *optional)}
+            # `evidence` is accepted as an alias for `quote`. It is the word the
+            # transition log uses for the same thing, so a model that has just
+            # been shown the log reaches for it — and dropping three real
+            # contradictions over a key name is not a trade worth making.
+            if not row['quote']:
+                row['quote'] = str(item.get('evidence', '')).strip()
+            missing = [key for key in required if not row[key]]
+            if missing:
+                dropped += 1
+                log(f'WARNING: audit response row {index} is missing '
+                    f'{", ".join(missing)} — dropped. Present: '
+                    f'{", ".join(sorted(k for k in item if item.get(k))) or "nothing"}')
+                continue
+            out.append(row)
+
+        if out:
+            return out, 'ok'
+        if dropped:
+            log(f'ERROR: all {dropped} row(s) in the audit response were '
+                f'unusable. Treating this as a failed pass, not as agreement.')
+            return [], 'unusable'
+        return [], 'empty'
     return [], 'no_json'
 
 
@@ -1675,12 +1730,21 @@ def render_audit_report(*, title: str, transitions: list[dict[str, str]],
                         scenes_read: list[str], scene_count: int,
                         tracked_entities: list[str],
                         undrafted_scenes: list[str],
-                        llm_skipped_reason: str) -> str:
+                        llm_skipped_reason: str,
+                        truncated_scenes: list[str] | None = None,
+                        unmapped_scenes: list[str] | None = None) -> str:
     """Render `working/illustration-contradictions.md`.
 
     Read-only output. The report states what it read and what it could not see,
-    because a clean report is only as trustworthy as its coverage.
+    because a clean report is only as trustworthy as its coverage — and the only
+    product of this pass is trust. Every gap in coverage is named: a scene with
+    no prose, a scene whose prose was cut at the character cap, and a drafted
+    scene the chapter map cannot position (which the narrowing never looks at).
     """
+    truncated = truncated_scenes or []
+    unmapped = unmapped_scenes or []
+    partial = bool(truncated or unmapped)
+
     lines = [
         f'# Illustration contradiction audit — {title}',
         '',
@@ -1705,14 +1769,44 @@ def render_audit_report(*, title: str, transitions: list[dict[str, str]],
         lines.append(
             f'- Not read (no file in `scenes/`): '
             f'{", ".join(f"`{s}`" for s in undrafted_scenes)}')
+    if truncated:
+        lines.append(
+            f'- **Read only in part** (prose exceeded the per-scene character '
+            f'cap, so the tail was not sent): '
+            f'{", ".join(f"`{s}`" for s in truncated)}')
+    if unmapped:
+        lines.append(
+            f'- **Not examined at all** (drafted and active in `scenes.csv`, '
+            f'but absent from `reference/chapter-map.csv`, so it has no reading '
+            f'position and the narrowing never looks at it): '
+            f'{", ".join(f"`{s}`" for s in unmapped)}')
     lines.extend([
         '',
         'A scene is read when it mentions a tracked entity at or after that '
-        'entity\'s first transition. Scenes outside that span cannot contradict '
-        'the log, so they are not read — and a scene the log says nothing about '
-        'is not covered by this report.',
+        'entity\'s first transition. A scene outside every tracked span, or one '
+        'the log says nothing about, is not covered by this report.',
         '',
     ])
+    if partial:
+        lines.extend([
+            '> **Coverage is incomplete.** The findings below are only about the '
+            'prose actually read. Do not read a clean result as agreement across '
+            'the book.',
+            '',
+        ])
+        if unmapped:
+            lines.extend([
+                'Add the unexamined scenes to `reference/chapter-map.csv` and '
+                're-run — they hold prose nothing in this pass has looked at.',
+                '',
+            ])
+        if truncated:
+            lines.extend([
+                'A partly-read scene is **not** recorded in the audit '
+                'provenance, so it will not report as "audited" later. Split it, '
+                'or accept that its tail is unchecked.',
+                '',
+            ])
 
     if llm_skipped_reason:
         lines.extend([
@@ -1751,6 +1845,10 @@ def render_audit_report(*, title: str, transitions: list[dict[str, str]],
             ])
     elif llm_skipped_reason:
         lines.extend(['Not assessed — no contradiction pass was run.', ''])
+    elif partial:
+        lines.extend(['None found **in the prose that was read** — see the '
+                      'Coverage gaps above. This is not a clean bill of health '
+                      'for the book.', ''])
     else:
         lines.extend(['None found. The prose and the matrix agree across every '
                       'scene read.', ''])

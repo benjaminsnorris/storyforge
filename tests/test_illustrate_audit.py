@@ -60,11 +60,10 @@ def _snapshot(project_dir):
 
 _ONE_CONTRADICTION = json.dumps({'contradictions': [{
     'scene_id': 'act1-sc02',
-    'entity': 'dorren-clothing',
-    'quote': 'Dorren sat at her desk',
-    'log_says': 'office dress, brass calipers in hand',
-    'prose_says': 'she is described in the travel coat she does not put on '
-                  'until act2-sc01',
+    'entity': 'village',
+    'quote': 'Blank parchment',
+    'log_says': 'drawn on the master survey, four hundred and twelve souls',
+    'prose_says': 'the village is already gone from the map',
     'resolution': 'the log is missing a transition at act1-sc02',
 }]})
 
@@ -132,12 +131,23 @@ def test_no_provenance_is_written_when_nothing_was_read(in_project, monkeypatch)
 
 def test_audit_never_edits_the_log_or_the_prose(in_project, monkeypatch):
     """The important test. An audit that edits prose is a far worse bug than one
-    that misses a contradiction."""
+    that misses a contradiction.
+
+    Asserts the pass actually *ran* — without that, a change to the narrowing
+    that stops selecting any scene would make this test pass by doing nothing.
+    """
+    calls = []
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
-    monkeypatch.setattr(cmd_illustrate, '_invoke',
-                        lambda *a, **k: _ONE_CONTRADICTION)
+
+    def _record(*a, **k):
+        calls.append(1)
+        return _ONE_CONTRADICTION
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _record)
     before = _snapshot(in_project)
     assert cmd_illustrate.main(['--audit']) == 0
+    assert calls, 'the contradiction pass must have run for this to mean anything'
+    assert 'Blank parchment' in _read(in_project, REPORT), (
+        'the contradiction must have reached the report')
     assert _snapshot(in_project) == before
 
 
@@ -161,13 +171,14 @@ def test_audit_reports_a_prose_assertion_that_contradicts_the_log(in_project, mo
     """Two transitions do not disagree with each other; a scene between them
     asserts a state the span cannot support."""
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
-    # Neither row disagrees with the other — a change of clothes between act 1
-    # and act 2 is a story. act1-sc02 sits between them and names Dorren, so it
-    # is the one scene that could assert a state the span cannot support.
+    # Neither row disagrees with the other — a village drawn in act 1 and redrawn
+    # in act 2 is a story. act1-sc02 sits between them and names the village, so
+    # it is the one scene that could assert a state the span cannot support.
     _write_state(in_project, [
-        ('dorren-clothing', 'act1-sc01', 'office dress, brass calipers in hand',
+        ('village', 'act1-sc01',
+         'drawn on the master survey, four hundred and twelve souls',
          'held her breath'),
-        ('dorren-clothing', 'act2-sc01', 'travel coat, boots',
+        ('village', 'act2-sc01', 'redrawn from the blank',
          'She checked her compass'),
     ])
     monkeypatch.setattr(cmd_illustrate, '_invoke',
@@ -175,8 +186,8 @@ def test_audit_reports_a_prose_assertion_that_contradicts_the_log(in_project, mo
     assert cmd_illustrate.main(['--audit']) == 0
     body = _read(in_project, REPORT)
     assert 'act1-sc02' in body
-    assert 'dorren-clothing' in body
-    assert 'Dorren sat at her desk' in body
+    assert 'village' in body
+    assert 'Blank parchment' in body
     assert 'the log is missing a transition' in body
     # The pre-pass found nothing wrong with the log itself — the contradiction
     # is only visible by reading the prose against it.
@@ -429,6 +440,7 @@ def test_audit_skips_a_candidate_whose_file_disappeared(in_project, monkeypatch,
     monkeypatch.setattr(cmd_illustrate.vs, 'prepass', lambda _p: {
         'findings': [], 'candidate_scenes': ['vanished'], 'scene_count': 3,
         'tracked_entities': ['x'], 'undrafted_scenes': [],
+        'unmapped_scenes': [], 'search_terms': {'x': ['x']},
     })
     monkeypatch.setattr(cmd_illustrate.vs, 'read_transitions', lambda _p: [
         {'entity': 'x', 'from_scene': 'act1-sc01', 'state': 'y',
@@ -517,7 +529,7 @@ def test_diagnose_reports_the_state_rung_with_no_plan(in_project, capsys):
     assert cmd_illustrate.main(['--diagnose']) == 0
     out = capsys.readouterr().out
     assert 'No illustration plan yet' in out
-    assert 'dorren-clothing' in out
+    assert 'village' in out
 
 
 def test_diagnose_counts_entities_and_transitions(in_project, capsys):
@@ -566,3 +578,290 @@ def test_diagnose_reports_the_state_rung_alongside_a_plan(in_project, capsys):
     out = capsys.readouterr().out
     assert 'Illustration plan: 1 rows' in out
     assert 'Visual state:' in out
+
+
+# ============================================================================
+# B1 — the cap must not let "None found" claim coverage it does not have
+# ============================================================================
+
+def _oversized_scene(project_dir, scene_id, tail):
+    """Pad a scene past the audit cap, keeping its original prose and putting
+    *tail* at the very end — so the tail is exactly what truncation removes."""
+    path = os.path.join(project_dir, 'scenes', f'{scene_id}.md')
+    with open(path, encoding='utf-8') as f:
+        original = f.read()
+    filler = 'The survey lines ran on across the vellum, mile after mile. ' * 500
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(f'{original}\n\n{filler}\n\n{tail}\n')
+    return path
+
+
+def test_a_truncated_scene_is_logged_with_both_lengths(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    _oversized_scene(in_project, 'act1-sc02', 'The village was still there.')
+    cmd_illustrate.main(['--audit'])
+    out = capsys.readouterr().out
+    assert 'act1-sc02 is ' in out and 'characters; only the first' in out
+    assert 'will not be found' in out
+
+
+def test_a_truncated_scene_is_named_in_the_report(in_project, monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    _oversized_scene(in_project, 'act1-sc02', 'The village was still there.')
+    cmd_illustrate.main(['--audit'])
+    body = _read(in_project, REPORT)
+    assert 'Read only in part' in body
+    assert 'act1-sc02' in body
+
+
+def test_a_truncated_scene_never_yields_a_bare_none_found(in_project, monkeypatch):
+    """The failure that matters: a clean claim over prose that was not read."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    _oversized_scene(in_project, 'act1-sc02', 'The village was still there.')
+    cmd_illustrate.main(['--audit'])
+    body = _read(in_project, REPORT)
+    assert 'None found. The prose and the matrix agree' not in body
+    assert 'Coverage is incomplete' in body
+    assert 'not a clean bill of health' in body
+
+
+def test_a_truncated_scene_is_not_recorded_as_audited(in_project, monkeypatch, capsys):
+    """The digest covers the whole scene, so recording a partly-read one means
+    the unread tail can never come back as audit_stale."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    _oversized_scene(in_project, 'act1-sc02', 'The village was still there.')
+    cmd_illustrate.main(['--audit'])
+    audited = {row['scene_id'] for row in vs.read_provenance(in_project)}
+    assert 'act1-sc02' not in audited
+    assert 'not recorded as audited' in capsys.readouterr().out
+
+
+def test_the_cap_covers_a_scene_of_realistic_length(in_project, monkeypatch):
+    """Templates target 80,000 words at 1,500-2,000 words per scene, so a cap a
+    typical scene exceeds would truncate a large fraction of a real book."""
+    captured = {}
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def _capture(project_dir, prompt, operation, **kwargs):
+        captured['prompt'] = prompt
+        return '{"contradictions": []}'
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _capture)
+    # ~2,100 words at ~6.7 characters each ≈ 14,000 characters, the upper end of
+    # a typical scene, plus a distinctive tail. Appended, so the scene keeps the
+    # evidence quote the fixture log points at.
+    path = os.path.join(in_project, 'scenes', 'act1-sc02.md')
+    with open(path, encoding='utf-8') as f:
+        original = f.read()
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(original + '\n\n' + 'village survey line ' * 700
+                + '\n\nTHE TAIL SENTENCE.\n')
+    cmd_illustrate.main(['--audit'])
+    assert 'THE TAIL SENTENCE.' in captured['prompt']
+    assert 'Read only in part' not in _read(in_project, REPORT)
+
+
+# ============================================================================
+# B2 — dropped rows must never render as agreement
+# ============================================================================
+
+def test_all_rows_dropped_is_not_a_clean_pass(in_project, monkeypatch, capsys):
+    """The model found three contradictions and keyed none of them readably.
+    Reporting agreement would be the exact opposite of what it said."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: json.dumps(
+        {'contradictions': [
+            {'scene_id': 's1', 'log_says': 'x'},
+            {'scene_id': 's2', 'log_says': 'y'},
+        ]}))
+    assert cmd_illustrate.main(['--audit']) == 1
+    assert not os.path.isfile(os.path.join(in_project, REPORT))
+    out = capsys.readouterr().out
+    assert 'all 2 row(s) in the audit response were unusable' in out
+    assert 'not as agreement' in out
+
+
+def test_every_dropped_row_names_what_it_was_missing(capsys):
+    rows, status = pi.parse_audit_response(json.dumps({'contradictions': [
+        {'scene_id': 's1', 'entity': 'e', 'quote': 'q'},
+        {'scene_id': 's2', 'quote': 'q'},
+        'a string',
+    ]}))
+    assert status == 'ok'
+    assert len(rows) == 1
+    out = capsys.readouterr().out
+    assert 'row 2 is missing entity' in out
+    assert 'row 3 is not an object (str)' in out
+
+
+def test_evidence_is_accepted_as_an_alias_for_quote():
+    """The transition log calls it `evidence`, so a model just shown the log
+    reaches for that word. Dropping real contradictions over a key name is not a
+    trade worth making."""
+    rows, status = pi.parse_audit_response(json.dumps({'contradictions': [
+        {'scene_id': 's1', 'entity': 'e', 'evidence': 'the quoted phrase'},
+    ]}))
+    assert status == 'ok'
+    assert rows[0]['quote'] == 'the quoted phrase'
+
+
+def test_parse_audit_response_status_domain():
+    assert pi.parse_audit_response('{"contradictions": []}')[1] == 'empty'
+    assert pi.parse_audit_response(
+        '{"contradictions": [{"scene_id": "s"}]}')[1] == 'unusable'
+    assert pi.parse_audit_response('not json')[1] == 'no_json'
+
+
+# ============================================================================
+# H1 — a drafted but unmapped scene is invisible to the narrowing
+# ============================================================================
+
+def test_a_drafted_unmapped_scene_is_named_in_the_report(in_project, monkeypatch):
+    """new-x1 exists, is active in scenes.csv, and the chapter map omits it — so
+    `_candidate_scenes` (which walks the order) never looks at it."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    assert cmd_illustrate.main(['--audit']) == 0
+    body = _read(in_project, REPORT)
+    assert 'Not examined at all' in body
+    assert 'new-x1' in body
+    assert 'None found. The prose and the matrix agree' not in body
+    assert 'chapter-map.csv' in body
+
+
+def test_an_unmapped_scene_is_warned_about_on_stdout(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    cmd_illustrate.main(['--audit'])
+    out = capsys.readouterr().out
+    assert 'absent from the chapter map' in out
+    assert 'never examines them' in out
+
+
+def test_prepass_separates_unmapped_from_undrafted(project_dir):
+    """act2-sc02 and act2-sc03 are unmapped AND undrafted; new-x1 is unmapped but
+    drafted. Only the last is prose nothing reads."""
+    result = vs.prepass(project_dir)
+    assert result['unmapped_scenes'] == ['new-x1']
+    assert result['undrafted_scenes'] == []
+
+
+def test_the_coverage_prose_no_longer_claims_unread_scenes_cannot_disagree(in_project, monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    cmd_illustrate.main(['--audit'])
+    body = _read(in_project, REPORT)
+    assert 'cannot contradict the log' not in body
+
+
+# ============================================================================
+# M1 — the skip reason must be true of the run it describes
+# ============================================================================
+
+def test_findings_with_no_candidates_does_not_claim_the_files_were_missing(
+        in_project, monkeypatch):
+    """There were no candidates at all — no candidate 'turned out' to be
+    anything."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    _write_state(in_project, [('lamp', 'scene-that-was-cut', 'dark', '')])
+
+    def _boom(*a, **k):
+        raise AssertionError('no candidates means no call')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
+    assert cmd_illustrate.main(['--audit']) == 0
+    body = _read(in_project, REPORT)
+    assert 'no file in `scenes/`, so there was no prose to read' not in body
+    assert 'no prose for a model to read' in body
+    assert '1 deterministic finding(s) below still stand' in body
+    assert 'state_unknown_scene' in body
+
+
+def test_search_terms_are_logged_so_a_wide_narrowing_is_diagnosable(
+        in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    cmd_illustrate.main(['--audit'])
+    assert "village: matched on 'village'" in capsys.readouterr().out
+
+
+# ============================================================================
+# M3 / double-work / hardenings
+# ============================================================================
+
+def test_diagnose_fails_on_a_state_error_even_with_no_plan(in_project, capsys):
+    """The skill tells authors to build the log before the plan, so the early
+    return must not hide a blocking finding about it."""
+    assert not ill.read_plan(in_project)
+    _write_state(in_project, [('lamp', 'scene-that-was-cut', 'dark', '')])
+    assert cmd_illustrate.main(['--diagnose']) == 1
+    assert 'state_unknown_scene' in capsys.readouterr().out
+
+
+def test_diagnose_still_says_no_problems_with_no_plan_and_a_clean_log(
+        in_project, capsys):
+    assert cmd_illustrate.main(['--diagnose']) == 0
+    assert 'No problems found.' in capsys.readouterr().out
+
+
+def test_digest_drift_warns_once_per_diagnose(in_project, capsys):
+    """It used to run twice — once in the rung report and once inside
+    validate_plan — so a provenance row for a deleted scene printed twice."""
+    vs.write_provenance(in_project, [
+        {'scene_id': 'gone', 'digest': 'abc', 'audited_at': '2026-07-28'},
+    ])
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert out.count('names gone, which has no file in scenes/') == 1
+
+
+def test_an_aspect_prefix_must_match_at_a_segment_boundary(project_dir):
+    """`canon_refs=nora` must not be satisfied by `norah-clothing`. A
+    "simplification" to startswith(needle) would pass every other test here."""
+    from illustration_helpers import plan_row
+    _write_state(project_dir, [
+        ('norah-clothing', 'act1-sc01', 'a different character entirely',
+         'held her breath'),
+    ])
+    row = plan_row(scene_id='act1-sc01', placement='scene_open', anchor='',
+                   canon_refs='nora')
+    ill.write_plan(project_dir, [row])
+    found = [f for f in vs.prepass(project_dir)['findings']
+             if f['kind'] == 'state_unspecified']
+    assert len(found) == 1, 'nora is unstated; norah-clothing is someone else'
+
+
+def test_an_aspect_prefix_matches_at_a_real_segment_boundary(project_dir):
+    """The positive half of the same rule, so neither can be relaxed alone."""
+    from illustration_helpers import plan_row
+    _write_state(project_dir, [
+        ('nora-clothing', 'act1-sc01', 'office dress', 'held her breath'),
+    ])
+    ill.write_plan(project_dir, [
+        plan_row(scene_id='act1-sc01', placement='scene_open', anchor='',
+                 canon_refs='nora')])
+    kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
+    assert 'state_unspecified' not in kinds
+
+
+def test_a_fully_covered_clean_pass_still_says_so_plainly():
+    """The one case that earns an unqualified claim: nothing undrafted, nothing
+    truncated, nothing unmapped."""
+    body = pi.render_audit_report(
+        title='T', transitions=[], findings=[], contradictions=[],
+        scenes_read=['s1'], scene_count=1, tracked_entities=['e'],
+        undrafted_scenes=[], llm_skipped_reason='',
+        truncated_scenes=[], unmapped_scenes=[])
+    assert 'None found. The prose and the matrix agree across every scene read.' \
+        in body
+    assert 'Coverage is incomplete' not in body

@@ -386,12 +386,33 @@ def test_undrafted_scenes_are_named_not_counted(project_dir):
     assert result['scene_count'] == 3
 
 
-def test_an_aspect_track_searches_for_its_canon_portion(project_dir):
-    """`dorren-clothing` is not a phrase any prose uses; `dorren` is."""
+def test_an_aspect_track_is_not_shortened_without_a_canon_file(project_dir):
+    """The correction to the obvious heuristic. Guessing that the last segment is
+    the aspect would search for `dorren`, and state-only entities — a lantern
+    count, a lamp's lit/dark state — are systematically the ones with no canon
+    file, so `village-lights` would degenerate to `village` and make nearly every
+    scene of a village-set book a candidate."""
     _write_state(project_dir, [
         ('dorren-clothing', 'act1-sc01', 'office dress', 'held her breath'),
     ])
-    assert 'act1-sc02' in vs.prepass(project_dir)['candidate_scenes']
+    result = vs.prepass(project_dir)
+    assert result['search_terms'] == {'dorren-clothing': ['dorren clothing']}
+    assert result['candidate_scenes'] == []
+
+
+def test_village_lights_does_not_degenerate_to_village(project_dir):
+    """The spec's own example row, and the case that motivated the fix."""
+    terms = vs._entity_search_terms('village-lights', {})
+    assert terms == {'village lights'}
+    assert 'village' not in terms
+
+
+def test_search_terms_come_back_for_the_caller_to_log(project_dir):
+    """A wide or empty narrowing has to be diagnosable, and prepass is silent."""
+    _write_state(project_dir, [
+        ('compass', 'act1-sc01', 'brass', 'held her breath'),
+    ])
+    assert vs.prepass(project_dir)['search_terms'] == {'compass': ['compass']}
 
 
 def test_a_marker_does_not_make_a_scene_mention_an_entity(project_dir):

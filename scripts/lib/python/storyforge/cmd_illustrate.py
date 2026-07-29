@@ -193,11 +193,13 @@ def run_diagnose(project_dir: str) -> int:
     if not rows:
         log('No illustration plan yet. Run `storyforge illustrate --plan` to '
             'propose one.')
-        # The state rung is reported even with no plan: the transition log is
-        # about the book, not about the illustrations, and it is worth building
-        # before the plan rather than after.
-        _report_state_rung(project_dir)
-        return 0
+        # The state rung *and its findings* are reported even with no plan: the
+        # transition log is about the book, not about the illustrations, and the
+        # skill now tells authors to build it before the plan. Returning 0 here
+        # hid a `state_unknown_scene` error entirely.
+        findings = ill.validate_plan(project_dir)
+        _report_state_rung(project_dir, findings)
+        return _report_findings(findings)
 
     report = ill.plan_report(project_dir)
     log(f'Illustration plan: {report["total"]} rows')
@@ -231,9 +233,18 @@ def run_diagnose(project_dir: str) -> int:
                      if step['locks'] else '')
             log(f'  {mark} {i:2}. {step["id"]}{key}{locks}')
 
-    _report_state_rung(project_dir)
-
     findings = ill.validate_plan(project_dir)
+    _report_state_rung(project_dir, findings)
+    return _report_findings(findings)
+
+
+def _report_findings(findings: list[ill.IllustrationFinding]) -> int:
+    """Log every finding and return the exit code. 1 iff any is blocking.
+
+    Warning-only findings are normal in-flight state (a drifted anchor after a
+    revision, a file mid-rename), so they must not fail the command — matching
+    how cmd_validate gates on `errors` alone.
+    """
     if not findings:
         log('No problems found.')
         return 0
@@ -244,18 +255,19 @@ def run_diagnose(project_dir: str) -> int:
         target = finding.get('id') or finding.get('file') or ''
         prefix = 'WARNING: ' if ill.severity_of(finding['kind']) == 'warning' else ''
         log(f'  {prefix}[{finding["kind"]}] {target}: {finding["detail"]}')
-
-    # Warning-only findings are normal in-flight state (a drifted anchor after a
-    # revision, a file mid-rename), so they must not fail the command — matching
-    # how cmd_validate gates on `errors` alone.
     return 1 if errors else 0
 
 
-def _report_state_rung(project_dir: str) -> None:
+def _report_state_rung(project_dir: str,
+                       findings: list[ill.IllustrationFinding]) -> None:
     """Log the visual-state and audit rungs, for `--diagnose`.
 
     Three questions, in the order the author acts on them: does the transition
     log exist, how much does it track, and does the audit still cover the prose.
+
+    Staleness is read off *findings* rather than by calling `digest_drift` again:
+    `validate_plan` has already run it, and hashing every audited scene twice per
+    diagnose also printed each of its WARNING lines twice.
     """
     transitions = vs.read_transitions(project_dir)
     if not transitions:
@@ -274,8 +286,7 @@ def _report_state_rung(project_dir: str) -> None:
             'the prose against the matrix.')
         return
 
-    stale = [f['scene_id'] for f in vs.digest_drift(project_dir)
-             if f['kind'] == 'audit_stale']
+    stale = [f['scene_id'] for f in findings if f['kind'] == 'audit_stale']
     last = max((p['audited_at'] for p in provenance if p['audited_at']),
                default='')
     covered = f'{len(provenance)} scene(s)'
@@ -533,12 +544,18 @@ def run_state(project_dir: str, coaching: CoachingLevel,
         f'{len(hints)} candidate entity(ies) from canon and the registries')
 
     if coaching == 'strict':
-        if not dry_run:
-            # Strict may do structural and file work — it may not propose
-            # content. Writing the header (and any rows already there) gives the
-            # author the file the checklist describes.
-            vs.write_transitions(project_dir, existing)
-            log(f'Wrote {vs.STATE_FILE} ({len(existing)} row(s))')
+        # Strict may do structural and file work — it may not propose content, and
+        # it must not touch a file the author is already keeping. Writing the
+        # header only when the log does not exist gives the author the file the
+        # checklist describes; rewriting an existing one through read/write would
+        # silently drop any row with an empty `entity` and any column the author
+        # added beyond STATE_COLUMNS.
+        if not dry_run and not os.path.isfile(vs.state_path(project_dir)):
+            vs.write_transitions(project_dir, [])
+            log(f'Wrote {vs.STATE_FILE} (header only — fill it in)')
+        elif not dry_run:
+            log(f'{vs.STATE_FILE} already exists ({len(existing)} row(s)) — '
+                f'left untouched')
         return _write_coaching_file(
             project_dir, 'visual-state-checklist.md',
             pi.render_state_checklist(hints=hints, existing=existing,
@@ -584,12 +601,19 @@ def run_state(project_dir: str, coaching: CoachingLevel,
         return 1
 
     proposed, status = pi.parse_state_response(text)
+    if status == 'empty':
+        # A model that read the book and found nothing whose visible state
+        # changes is answering, not failing. Reporting it as a parse error told
+        # the author their response was unreadable and exited non-zero.
+        log('The model proposed no transitions — it found nothing whose visible '
+            'state changes. Nothing was written.')
+        return 0
     if status != 'ok':
         log(f'ERROR: could not parse transitions from the response ({status}).')
         return 1
     log(f'Received {len(proposed)} proposed transition(s)')
 
-    merged, added = _merge_transitions(existing, proposed)
+    merged, added = _merge_transitions(project_dir, existing, proposed)
     vs.write_transitions(project_dir, merged)
     log(f'Wrote {vs.STATE_FILE} — {len(existing)} kept, {added} added')
 
@@ -605,6 +629,7 @@ def run_state(project_dir: str, coaching: CoachingLevel,
 
 
 def _merge_transitions(
+    project_dir: str,
     existing: list[vs.Transition],
     proposed: list[dict[str, str]],
 ) -> tuple[list[vs.Transition], int]:
@@ -615,7 +640,14 @@ def _merge_transitions(
     appended after them. Row order is not resolution order (that comes from the
     chapter map), but it *is* the tiebreak between two transitions at one scene,
     so appending rather than interleaving keeps existing resolutions stable.
+
+    A proposal naming a scene that does not exist is **refused**, not written and
+    then warned about. That row is the model's, not the author's, so the
+    never-revise-author-text rule does not protect it — and writing it would put
+    a `state_unknown_scene` error into the log on purpose, which this command
+    then reports and exits 0 on.
     """
+    known = vs.known_scene_ids(project_dir)
     seen = {(row['entity'], row['from_scene']) for row in existing}
     merged: list[vs.Transition] = list(existing)
     added = 0
@@ -624,6 +656,11 @@ def _merge_transitions(
         if key in seen:
             log(f'  keeping the recorded state for {row["entity"]!r} at '
                 f'{row["from_scene"]} — the proposal was discarded')
+            continue
+        if row['from_scene'] not in known:
+            log(f'WARNING: discarding the proposal for {row["entity"]!r} — '
+                f'from_scene {row["from_scene"]!r} is not an active scene in '
+                f'scenes.csv, so the transition would never apply')
             continue
         seen.add(key)
         merged.append({
@@ -694,10 +731,15 @@ def _state_scene_prose(project_dir: str,
 # --audit
 # ============================================================================
 
-#: Per-scene prose cap for the audit prompt. Higher than the state pass's cap
-#: because the audit reads a narrowed set, and a contradiction can sit anywhere
-#: in a scene — truncating is how a real finding gets missed.
-_AUDIT_SCENE_CHARS = 8000
+#: Per-scene prose cap for the audit prompt. A contradiction can sit anywhere in
+#: a scene, so truncating is how a real finding gets missed — which is why this
+#: is well above any plausible scene (the templates target 80,000 words at
+#: 1,500-2,000 words per scene, so ~7,000-11,000 characters is typical and 24,000
+#: covers a 4,000-word outlier) and why a scene that still exceeds it is named in
+#: the report and kept out of the provenance file. Silent truncation would let
+#: the report claim coverage it does not have, and the only product of this pass
+#: is trust.
+_AUDIT_SCENE_CHARS = 24000
 
 AUDIT_REPORT_FILE = os.path.join('working', 'illustration-contradictions.md')
 
@@ -721,10 +763,18 @@ def run_audit(project_dir: str, dry_run: bool) -> int:
         f'{prepass["scene_count"]} scenes as candidates across '
         f'{len(prepass["tracked_entities"])} tracked entities; '
         f'{len(findings)} deterministic finding(s)')
+    for entity, terms in sorted(prepass['search_terms'].items()):
+        log(f'  {entity}: matched on {", ".join(repr(t) for t in terms)}')
     if prepass['undrafted_scenes']:
         log(f'  {len(prepass["undrafted_scenes"])} scene(s) have no file in '
             f'scenes/ and were not read: '
             f'{", ".join(prepass["undrafted_scenes"])}')
+    if prepass['unmapped_scenes']:
+        log(f'WARNING: {len(prepass["unmapped_scenes"])} drafted scene(s) are '
+            f'absent from the chapter map, so they have no reading position and '
+            f'this audit never examines them: '
+            f'{", ".join(prepass["unmapped_scenes"])}. Add them to '
+            f'reference/chapter-map.csv and re-run.')
 
     if dry_run:
         log(f'[dry-run] would audit {len(candidates)} scene(s) and write '
@@ -734,11 +784,13 @@ def run_audit(project_dir: str, dry_run: bool) -> int:
     contradictions: list[dict[str, str]] = []
     skipped = _audit_skip_reason(transitions, findings, candidates)
     scenes_read: list[str] = []
+    truncated: list[str] = []
 
     if skipped:
         log(f'No contradiction pass: {skipped}')
     else:
-        prose, scenes_read = _audit_scene_prose(project_dir, candidates)
+        prose, scenes_read, truncated = _audit_scene_prose(project_dir,
+                                                           candidates)
         if not scenes_read:
             skipped = ('Every candidate scene turned out to have no file in '
                        '`scenes/`, so there was no prose to read.')
@@ -761,6 +813,8 @@ def run_audit(project_dir: str, dry_run: bool) -> int:
         tracked_entities=prepass['tracked_entities'],
         undrafted_scenes=prepass['undrafted_scenes'],
         llm_skipped_reason=skipped,
+        truncated_scenes=truncated,
+        unmapped_scenes=prepass['unmapped_scenes'],
     )
     path = os.path.join(project_dir, AUDIT_REPORT_FILE)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -769,29 +823,47 @@ def run_audit(project_dir: str, dry_run: bool) -> int:
     log(f'Wrote {AUDIT_REPORT_FILE} — {len(contradictions)} contradiction(s), '
         f'{len(findings)} deterministic finding(s)')
 
-    # Provenance covers exactly the scenes whose prose was read. Recording a
-    # scene the pass never read would make a later run report it as audited.
-    if scenes_read:
+    # Provenance covers exactly the scenes whose prose was read **in full**.
+    # Recording a scene the pass never read would make a later run report it as
+    # audited; recording a *truncated* one is the same lie with a longer fuse,
+    # because the digest covers the whole scene, so the unread tail could never
+    # come back as `audit_stale`.
+    fully_read = [s for s in scenes_read if s not in set(truncated)]
+    if fully_read:
         today = date.today().isoformat()
         vs.write_provenance(project_dir, [
             {'scene_id': scene_id,
              'digest': ill.scene_prose_digest(project_dir, scene_id),
              'audited_at': today}
-            for scene_id in scenes_read
+            for scene_id in fully_read
         ])
-        log(f'Wrote {vs.PROVENANCE_FILE} — {len(scenes_read)} scene(s)')
+        log(f'Wrote {vs.PROVENANCE_FILE} — {len(fully_read)} scene(s)')
+    if truncated:
+        log(f'WARNING: {len(truncated)} scene(s) were read only in part and are '
+            f'not recorded as audited: {", ".join(truncated)}')
     return 0
 
 
 def _audit_skip_reason(transitions: list[vs.Transition],
                        findings: list[dict],
                        candidates: list[str]) -> str:
-    """Why no LLM call is warranted, or '' when one is. Author-facing prose."""
+    """Why no LLM call is warranted, or '' when one is. Author-facing prose.
+
+    Every branch must be true of the run it describes. Having deterministic
+    findings does not give a model anything to read, so the no-candidates case is
+    a skip either way — it just reports differently, because "we found problems
+    and called nothing" and "we found nothing at all" are different states.
+    """
     if not transitions:
         return ('There is no visual-state log yet, so there is nothing for the '
                 'prose to contradict. Run `storyforge illustrate --state` '
                 'first.')
-    if not findings and not candidates:
+    if not candidates:
+        if findings:
+            return (f'No scene sits inside a tracked entity\'s span while '
+                    f'mentioning it, so there was no prose for a model to read. '
+                    f'The {len(findings)} deterministic finding(s) below still '
+                    f'stand — fix those and re-run.')
         return ('The pre-pass found no problems and no scene sits inside a '
                 'tracked entity\'s span while mentioning it, so no scene could '
                 'disagree with the log. No model was called.')
@@ -823,32 +895,48 @@ def _audit_llm_pass(project_dir: str, transitions: list[vs.Transition],
         return [], '__error__'
 
     contradictions, status = pi.parse_audit_response(text)
-    if status == 'no_json':
-        log('ERROR: could not parse the audit response. No report was written — '
-            'an empty report would read as a clean audit.')
+    if status in ('no_json', 'unusable'):
+        # 'unusable' means the model *did* find contradictions and every row was
+        # malformed. Writing a report then would affirm agreement, which is the
+        # exact opposite of what the response said.
+        log(f'ERROR: the audit response could not be used ({status}). No report '
+            f'was written — an empty report would read as a clean audit.')
         return [], '__error__'
     log(f'Contradiction pass returned {len(contradictions)} finding(s)')
     return contradictions, ''
 
 
-def _audit_scene_prose(project_dir: str,
-                       scene_ids: list[str]) -> tuple[str, list[str]]:
-    """Assemble the candidate prose, and the scenes actually read.
+def _audit_scene_prose(
+    project_dir: str, scene_ids: list[str],
+) -> tuple[str, list[str], list[str]]:
+    """Assemble the candidate prose, the scenes read, and the ones cut short.
 
     Markers are stripped: the model is asked to quote the scene verbatim, and a
     marker is not prose the author can find by searching the manuscript.
+
+    Truncation is reported, never silent. The scene text is what the whole pass
+    is checking, so a cap that quietly removes the second half of a scene turns
+    "no contradictions found" into a claim the run cannot support.
     """
     blocks: list[str] = []
     read: list[str] = []
+    truncated: list[str] = []
     for scene_id in scene_ids:
         text = ill._read_scene(project_dir, scene_id)
         if text is None:
             log(f'  {scene_id} has no file in scenes/ — not read')
             continue
         read.append(scene_id)
-        prose = ill.strip_markers(text).strip()[:_AUDIT_SCENE_CHARS]
+        prose = ill.strip_markers(text).strip()
+        if len(prose) > _AUDIT_SCENE_CHARS:
+            truncated.append(scene_id)
+            log(f'WARNING: {scene_id} is {len(prose)} characters; only the '
+                f'first {_AUDIT_SCENE_CHARS} were sent. A contradiction in the '
+                f'remaining {len(prose) - _AUDIT_SCENE_CHARS} will not be '
+                f'found, and the scene is not recorded as audited.')
+            prose = prose[:_AUDIT_SCENE_CHARS]
         blocks.append(f'### `{scene_id}`\n\n{prose}')
-    return '\n\n'.join(blocks), read
+    return '\n\n'.join(blocks), read, truncated
 
 
 # ============================================================================

@@ -197,18 +197,26 @@ class PrepassResult(TypedDict):
     scenes whose prose could disagree with the log; it exists so the audit's one
     LLM call reads a handful of scenes instead of the book.
 
-    The last three fields are the denominators the *caller* needs to report the
+    Everything after `candidate_scenes` is what the *caller* needs to report the
     narrowing honestly — how many scenes were selected out of how many exist,
-    across how many entities, and which positioned scenes had no prose to read.
-    They are returned rather than logged here because `validate_plan` also calls
-    `prepass`, and neither `validate` nor `cleanup` is auditing anything: the
-    caller knows whether to speak.
+    across how many entities, which positioned scenes had no prose to read, which
+    drafted scenes the chapter map cannot position (so the audit never sees them
+    at all), and the search terms each entity was matched by. They are returned
+    rather than logged here because `validate_plan` also calls `prepass`, and
+    neither `validate` nor `cleanup` is auditing anything: the caller knows
+    whether to speak.
     """
     findings: list['IllustrationFinding']
     candidate_scenes: list[str]
     scene_count: int
     tracked_entities: list[str]
     undrafted_scenes: list[str]
+    #: Drafted, active scenes with no reading position. Invisible to the
+    #: narrowing — `_candidate_scenes` walks `_scene_order`, so a scene the
+    #: chapter map omits holds prose nothing reads. Surfaced so a clean audit
+    #: cannot silently exclude five scenes the author just drafted.
+    unmapped_scenes: list[str]
+    search_terms: dict[str, list[str]]
 
 
 def _csv_safe(text: str) -> str:
@@ -234,12 +242,18 @@ def _entity_search_terms(
 
     1. the longest prefix of the id that names a canon file — the author said
        where the id ends — plus that entity's display name;
-    2. failing that, the id minus its last segment, which is what the naming
-       convention implies;
-    3. always the humanized id itself.
+    2. otherwise the humanized id, whole.
 
-    Deliberately errs wide. An extra candidate scene costs one scene of reading
-    in a single LLM call; a missed one costs a contradiction that ships.
+    Shortening a multi-segment id is only safe when a canon file confirms where
+    the id ends. Guessing that the last segment is the aspect looked harmless
+    until you notice which entities are *state-only*: a lantern count or a lamp's
+    lit/dark state is not a character, location, or motif with an invariant
+    design, so it is systematically the kind of entity that has no canon file.
+    `village-lights` — the spec's own example — would degenerate to `village`,
+    and on a village-set book that makes nearly every scene a candidate, which
+    can push one call past its context window. A missed candidate is a
+    contradiction that ships; an unbounded candidate set is a call that cannot
+    run at all, and the second failure is worse because it is not partial.
     """
     terms = {entity.replace('-', ' ')}
     parts = entity.split('-')
@@ -254,10 +268,21 @@ def _entity_search_terms(
     if canon_id:
         terms.add(canon_id.replace('-', ' '))
         terms.add(display_names[canon_id]['label'])
-    elif len(parts) > 1:
-        terms.add('-'.join(parts[:-1]).replace('-', ' '))
 
     return {' '.join(t.lower().split()) for t in terms if t.strip()}
+
+
+def known_scene_ids(project_dir: str) -> set[str]:
+    """Every scene a transition may legitimately name.
+
+    A scene with a reading position, plus one that is active in `scenes.csv` but
+    absent from the chapter map — the latter is a `state_unmapped_scene` warning,
+    not a broken row. Anything outside this set produces `state_unknown_scene`.
+    """
+    from storyforge.common import check_chapter_map_freshness
+    from storyforge import illustrations as ill
+    _fresh, missing_from_map, _extra = check_chapter_map_freshness(project_dir)
+    return set(ill._scene_order(project_dir)) | set(missing_from_map)
 
 
 def _mentions(haystack: str, term: str) -> bool:
@@ -408,13 +433,22 @@ def prepass(project_dir: str) -> PrepassResult:
                           f'if the state is true in this image only',
             })
 
-    candidates, undrafted = _candidate_scenes(project_dir, order, resolved)
+    candidates, undrafted, terms = _candidate_scenes(project_dir, order,
+                                                     resolved)
+    # Drafted and active, but with no reading position — so the narrowing, which
+    # walks `order`, never looks at it. Its prose is neither read nor reported as
+    # unread unless this is surfaced.
+    unmapped = sorted(sid for sid in missing_from_map
+                      if ill._read_scene(project_dir, sid) is not None)
     return {
         'findings': findings,
         'candidate_scenes': candidates,
         'scene_count': len(order),
         'tracked_entities': sorted(resolved),
         'undrafted_scenes': undrafted,
+        'unmapped_scenes': unmapped,
+        'search_terms': {entity: sorted(values)
+                         for entity, values in terms.items()},
     }
 
 
@@ -422,7 +456,7 @@ def _candidate_scenes(
     project_dir: str,
     order: dict[str, int],
     resolved: dict[str, set[int]],
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], dict[str, set[str]]]:
     """Scenes whose prose could contradict the log, and scenes with no prose.
 
     A scene qualifies when it mentions a tracked entity and sits at or after
@@ -431,14 +465,16 @@ def _candidate_scenes(
     transitions is skipped for it: the evidence quote already pins that scene,
     and check 2 verifies it.
 
-    Returns `(candidates, undrafted)` both in reading order. Silent by design —
-    the caller reports the narrowing, because `prepass` is also called from
-    `validate_plan` and neither `validate` nor `cleanup` is auditing anything.
+    Returns `(candidates, undrafted, terms_by_entity)`; the first two in reading
+    order. Silent by design — the caller reports the narrowing, because `prepass`
+    is also called from `validate_plan` and neither `validate` nor `cleanup` is
+    auditing anything. The term sets come back so the caller can log *why* a
+    narrowing was wide or empty, which is otherwise undiagnosable.
     """
     from storyforge import illustrations as ill
 
     if not resolved:
-        return [], []
+        return [], [], {}
 
     display_names = _display_names(project_dir)
     terms = {entity: _entity_search_terms(entity, display_names)
@@ -460,7 +496,7 @@ def _candidate_scenes(
                 candidates.append(scene_id)
                 break
 
-    return candidates, undrafted
+    return candidates, undrafted, terms
 
 
 def _display_names(project_dir: str) -> dict[str, 'AnchorLabel']:
