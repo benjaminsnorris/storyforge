@@ -591,8 +591,12 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         # and the --ids help text both promise. Applying the status filter first
         # made an already-prompted row unreachable, so the hint told the author
         # to use the exact flag they had just used.
-        rows = [r for r in plan if r['id'].strip() in ids
-                and (r.get('status') or '').strip() != 'superseded']
+        #
+        # A named `superseded` row is included, and re-prompting revives it as
+        # far as `prompted` (see _status_after_prompt). Naming a retired row by
+        # id is an unambiguous request to work on it; the unfiltered path below
+        # still never touches one, so a bulk run cannot resurrect retired art.
+        rows = [r for r in plan if r['id'].strip() in ids]
         unknown = ids - {r['id'].strip() for r in plan}
         if unknown:
             log(f'WARNING: --ids named {len(unknown)} illustration(s) with no '
@@ -715,8 +719,26 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         with open(os.path.join(project_dir, rel), 'w', encoding='utf-8') as f:
             f.write(content)
 
-        _update_row(project_dir, illus_id,
-                    {'prompt_file': rel, 'status': 'prompted'})
+        # Field-scoped: `prompt_file` always, `status` only when it moves
+        # forward. Writing status unconditionally demoted finished art —
+        # `--prompts --ids LF-05` on a fully-ingested book took the publishable
+        # set from 20/20 to 19/20, silently, because `prompted` is not
+        # `ingested` and `ingested` is what every consumer gates on.
+        current = (row.get('status') or '').strip()
+        updates = {'prompt_file': rel}
+        advanced = _status_after_prompt(current)
+        if advanced:
+            updates['status'] = advanced
+            if current == 'superseded':
+                log(f'  {illus_id}: reviving a retired row — status '
+                    f'superseded → prompted. Its old art still does not ship; '
+                    f'render this prompt and --ingest to bring the row back.')
+        else:
+            log(f'  {illus_id}: prompt rewritten for already-{current} art; '
+                f'status stays `{current}` so it keeps publishing. This means '
+                f'a re-render is pending — render this prompt and --ingest to '
+                f'replace the art.')
+        _update_row(project_dir, illus_id, updates)
         log(f'  {illus_id} → {rel}')
         written += 1
 
@@ -734,6 +756,30 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             f'committing.')
         return 1
     return 0
+
+
+#: Statuses a written prompt may set to `prompted`. Everything else is art that
+#: already exists on disk, and moving those backwards is what silently
+#: un-published a finished illustration. `''` is a row whose status cell was
+#: never filled in; `prompted` is the idempotent re-prompt; `superseded` is a
+#: retired row an author named explicitly, which means revive it — as far as
+#: `prompted`, never straight to `ingested`, because the replacement render
+#: does not exist yet.
+_ADVANCES_TO_PROMPTED = frozenset({'', 'planned', 'prompted', 'superseded'})
+
+
+def _status_after_prompt(current: str) -> str:
+    """The status to write after a prompt file, or '' to leave it alone.
+
+    Status only ever moves forward. A `rendered` or `ingested` row keeps its
+    status: the prompt file is new art direction for art that already ships,
+    and the row is the only thing saying that art exists. Demoting it removed
+    the illustration from Bookshelf (`manifest_assets` skips a non-`ingested`
+    row) and from the epub, PDF, and web book (`FILED_STATUSES` gates marker
+    resolution) while leaving the file on disk — invisible to `--diagnose`,
+    because an unrendered row is legitimate in-flight state.
+    """
+    return 'prompted' if current in _ADVANCES_TO_PROMPTED else ''
 
 
 #: Art-direction calls issued at once. Each is one independent HTTP request

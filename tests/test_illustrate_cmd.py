@@ -2134,10 +2134,24 @@ def test_ids_matching_nothing_exits_nonzero(in_project, capsys):
     assert 'None of the named ids' in capsys.readouterr().out
 
 
-def test_ids_does_not_reprompt_a_superseded_row(in_project, capsys):
+def test_ids_reaches_a_superseded_row_instead_of_refusing(in_project,
+                                                          monkeypatch, capsys):
+    """This used to assert the opposite — `--ids` filtered superseded rows out,
+    so a named retired row exited 1 with "None of the named ids match". Item 6
+    made an explicitly named retired row revive instead (see
+    test_prompting_a_superseded_row_revives_it for the transition itself).
+
+    The API key is set deliberately: without it the missing-key guard returns 1
+    ahead of everything this test is about, and the old assertion would have
+    kept passing for the wrong reason."""
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [plan_row(status='superseded')])
-    assert cmd_illustrate.main(['--prompts', '--ids', 'lantern-vigil']) == 1
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '### Scene\n\nX.\n')
+
+    assert cmd_illustrate.main(['--prompts', '--ids', 'lantern-vigil']) == 0
+    assert 'None of the named ids' not in capsys.readouterr().out
 
 
 def test_invoke_discards_a_truncated_response(in_project, monkeypatch, capsys):
@@ -2661,3 +2675,151 @@ def test_the_strict_scaffold_carries_no_constraints_section(in_project):
                            ill.default_prompt_rel('lantern-vigil'))) as f:
         body = f.read()
     assert body.count('Constraints') == 1
+
+
+# ============================================================================
+# Status only moves forward (prompt item 6)
+#
+# Reproduced on a live book: `--prompts --ids LF-05` on a fully-ingested plan
+# took the publishable set from 20/20 to 19/20, with no warning and no error.
+# `prompted` is not `ingested`, and `ingested` is what manifest_assets and
+# FILED_STATUSES both gate on, so the art stopped shipping to Bookshelf, the
+# epub, the PDF, and the web book. The file was never touched — only the row
+# that says it exists. `--diagnose` said "No problems found," because an
+# unrendered row is legitimate in-flight state.
+# ============================================================================
+
+def _prompt_one(project_dir, monkeypatch, ids=None):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '### Scene\n\nX.\n')
+    argv = ['--prompts', '--coaching', 'full']
+    if ids:
+        argv += ['--ids', ids]
+    return cmd_illustrate.main(argv)
+
+
+def test_prompting_a_planned_row_advances_it(in_project, monkeypatch):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(status='planned')])
+
+    assert _prompt_one(in_project, monkeypatch) == 0
+    row = read_plan_map(in_project)['lantern-vigil']
+    assert row['status'] == 'prompted'
+    assert row['prompt_file'] == ill.default_prompt_rel('lantern-vigil')
+
+
+def test_prompting_a_superseded_row_revives_it(in_project, monkeypatch, capsys):
+    """Naming a retired row by id is an unambiguous request to work on it, so
+    it revives — but only as far as `prompted`. Its replacement render does not
+    exist yet, so it must not go straight back to `ingested`."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(status='superseded')])
+
+    assert _prompt_one(in_project, monkeypatch, ids='lantern-vigil') == 0
+    row = read_plan_map(in_project)['lantern-vigil']
+    assert row['status'] == 'prompted'
+    assert row['prompt_file'] == ill.default_prompt_rel('lantern-vigil')
+    assert 'reviving a retired row' in capsys.readouterr().out
+
+
+def test_a_bulk_run_never_revives_a_superseded_row(in_project, monkeypatch):
+    """Only an explicit --ids revives. A bulk `--prompts` must not resurrect
+    retired art as a side effect of prompting the rest of the book."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [
+        plan_row(id='retired', status='superseded'),
+        plan_row(id='fresh', status='planned'),
+    ])
+
+    assert _prompt_one(in_project, monkeypatch) == 0
+    plan = read_plan_map(in_project)
+    assert plan['retired']['status'] == 'superseded'
+    assert plan['retired']['prompt_file'] == ''
+    assert plan['fresh']['status'] == 'prompted'
+
+
+def test_prompting_a_rendered_row_keeps_its_status(in_project, monkeypatch,
+                                                   capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(status='rendered')])
+
+    assert _prompt_one(in_project, monkeypatch, ids='lantern-vigil') == 0
+    row = read_plan_map(in_project)['lantern-vigil']
+    assert row['status'] == 'rendered'
+    # The prompt file is still written — that is the whole point of the run.
+    assert row['prompt_file'] == ill.default_prompt_rel('lantern-vigil')
+    out = capsys.readouterr().out
+    assert 'already-rendered art' in out
+    assert 're-render is pending' in out
+
+
+def test_prompting_an_ingested_row_keeps_it_publishable(in_project, monkeypatch,
+                                                        capsys):
+    """The consequence that actually bit: the publishable set must be identical
+    before and after. manifest_assets is the cheapest proof — it skips any row
+    whose status is not `ingested`."""
+    write_scene(in_project, 'vigil', SCENE)
+    make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
+                          'lantern-vigil.png'), 8, 8)
+    ill.write_plan(in_project, [plan_row(
+        status='ingested', asset_file=ill.default_asset_rel('lantern-vigil'),
+        sha256='a' * 64, width='8', height='8',
+        ingested_at='2026-07-28')])
+    before = ill.manifest_assets(in_project)
+    assert [a['key'] for a in before] == ['lantern-vigil']
+
+    assert _prompt_one(in_project, monkeypatch, ids='lantern-vigil') == 0
+
+    row = read_plan_map(in_project)['lantern-vigil']
+    assert row['status'] == 'ingested'
+    assert row['prompt_file'] == ill.default_prompt_rel('lantern-vigil')
+    # Digest, dimensions, and the file record are untouched.
+    assert row['sha256'] == 'a' * 64
+    assert row['asset_file'] == ill.default_asset_rel('lantern-vigil')
+    assert ill.manifest_assets(in_project) == before
+    out = capsys.readouterr().out
+    assert 'already-ingested art' in out
+
+
+def test_status_after_prompt_maps_every_status():
+    """Every value in VALID_PLAN_STATUSES, so a new status cannot be added
+    without deciding what re-prompting does to it."""
+    advance = cmd_illustrate._status_after_prompt
+    assert advance('') == 'prompted'
+    assert advance('planned') == 'prompted'
+    assert advance('superseded') == 'prompted'
+    assert advance('prompted') == 'prompted'
+    assert advance('rendered') == ''
+    assert advance('ingested') == ''
+    assert set(ill.VALID_PLAN_STATUSES) == {
+        'planned', 'prompted', 'rendered', 'ingested', 'superseded'}
+
+
+# ============================================================================
+# LF line endings (prompt item 7)
+# ============================================================================
+
+def test_write_plan_writes_no_carriage_returns(in_project):
+    """csv defaults to '\\r\\n', which turned a one-field edit into a whole-file
+    diff and produced the state cleanup's own crlf_line_endings check flags.
+    Note that opening with newline='\\n' would NOT have fixed it: the writer
+    emits the terminator itself, and no translation is applied on write."""
+    ill.write_plan(in_project, [plan_row(), plan_row(id='second')])
+    with open(ill.plan_path(in_project), 'rb') as f:
+        assert b'\r' not in f.read()
+
+
+def test_a_prompt_run_leaves_the_plan_in_lf(in_project, monkeypatch):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    assert _prompt_one(in_project, monkeypatch) == 0
+    with open(ill.plan_path(in_project), 'rb') as f:
+        assert b'\r' not in f.read()
+
+
+def test_cleanup_does_not_flag_a_freshly_written_plan(in_project):
+    from storyforge.cmd_cleanup import _check_crlf
+    ill.write_plan(in_project, [plan_row()])
+    assert [f for f in _check_crlf(in_project)
+            if 'illustration-plan' in f['file']] == []
