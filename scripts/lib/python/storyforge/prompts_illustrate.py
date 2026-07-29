@@ -114,6 +114,25 @@ def anchors_for_prompt(project_dir: str) -> dict[str, str]:
     return canon.anchor_texts(project_dir)
 
 
+def anchor_labels(project_dir: str) -> dict[str, str]:
+    """Display name per canon_id, for rendering an anchor list to a human.
+
+    Thin flattening of `canon.anchor_display_names` — callers that need to
+    report *where* a label came from use that directly. The keys stay
+    canon_ids, so this dict lines up with `anchors_for_prompt` and with plan
+    `canon_refs`; only the values are human-facing.
+    """
+    from storyforge import canon
+    return {cid: entry['label']
+            for cid, entry in canon.anchor_display_names(project_dir).items()}
+
+
+def _humanize(canon_id: str) -> str:
+    """Last-resort label for an anchor key with no recorded display name."""
+    from storyforge import canon
+    return canon.humanize_canon_id(canon_id)
+
+
 #: Canon subdirectory per proposed anchor type. A type outside this map (or
 #: absent) falls back to 'character' with a WARNING rather than guessing
 #: silently — a stub filed under the wrong registry tells the author to add a
@@ -462,16 +481,29 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
                                 character_anchors: dict[str, str],
                                 canon_context: str,
                                 direction: dict[str, str] | None = None,
-                                style_note: str = '') -> str:
+                                style_note: str = '',
+                                anchor_labels: dict[str, str] | None = None,
+                                ) -> str:
     """Build the prompt that writes one illustration's image prompt.
 
-    Asks for the prompt *body* in the 5-section template. The surrounding file
-    — references, orientation, the no-text constraint — is assembled
-    deterministically by render_prompt_file, so those invariants can't be
+    Asks for the prompt *body* in the four-section template — Scene, Subject,
+    Important details, Use case. Constraints are deliberately NOT requested:
+    render_prompt_file appends its own `### Constraints` block, and asking the
+    model for one too produced a file with `## Constraints` and a nested
+    `### Constraints` saying different things. The invariants (orientation, the
+    no-text rule, the reference manifest) stay deterministic so they can't be
     paraphrased away by a model having an off day.
+
+    `character_anchors` is keyed by canon_id, which is the matching key
+    everywhere else and must stay so. `anchor_labels` maps those ids to display
+    names for *rendering only* — a prompt that labels an anchor `leo` gets
+    `leo` echoed back in the model's prose. The anchor text itself is passed
+    through byte-identically; likeness continuity depends on it.
     """
+    labels = anchor_labels or {}
     anchors_block = '\n'.join(
-        f'- **{name}** — {anchor}' for name, anchor in sorted(character_anchors.items())
+        f'- **{labels.get(name) or _humanize(name)}** — {anchor}'
+        for name, anchor in sorted(character_anchors.items())
     ) or '(none recorded yet — propose one for each character or creature who appears)'
 
     fields = '\n'.join(
@@ -513,7 +545,8 @@ illustration.
 {style}
 ## How to write it
 
-Use OpenAI's five-section template, in this order, as markdown headings:
+Use the first four sections of OpenAI's template, in this order, as markdown
+headings:
 
 **Scene** — the setting in one or two sentences: place, time, light.
 **Subject** — who or what the image is of, and what they are doing. Character
@@ -522,7 +555,10 @@ anchors go here, verbatim.
 spatial relationships, the direction of light. Three to six of them.
 **Use case** — that this is an interior illustration for a novel, and the
 orientation.
-**Constraints** — what must hold.
+
+Do **not** write a Constraints section. The prompt file appends a fixed one
+(orientation, the no-text rule, reference-image fidelity), and a second
+Constraints section would contradict it.
 
 Rules:
 
@@ -534,7 +570,7 @@ Rules:
 - Be concrete. A specific object in a specific light beats an adjective.
 - Do not describe anything the scene has not revealed by this point in the book.
 
-Return the five sections as markdown. No preamble, no commentary.
+Return the four sections as markdown. No preamble, no commentary.
 
 If you propose any new anchor — a character, location, or motif with no
 anchor yet — append it at the very end as:

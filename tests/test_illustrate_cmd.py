@@ -1483,11 +1483,17 @@ def test_direction_dry_run_writes_nothing(in_project, capsys):
 
 
 def _write_entity_canon(project_dir, subdir, canon_id, anchor_text,
-                        canon_type=None):
+                        canon_type=None, canon_updated='2026-07-28',
+                        display_name=None):
     """Minimal entity canon file for prompt-anchor tests. Anchors now come
     from reference/canon/, not the direction document's Continuity anchors
     section (task 4) — this is the canon-side equivalent of write_direction's
-    old anchor headings."""
+    old anchor headings.
+
+    `canon_updated` is settable because it is the cutoff the reference chain
+    compares ingest dates against; `display_name` because it is the first
+    authority for an anchor's rendered label.
+    """
     canon_type = canon_type or {
         'characters': 'character', 'locations': 'location',
         'motifs': 'motif',
@@ -1500,14 +1506,16 @@ def _write_entity_canon(project_dir, subdir, canon_id, anchor_text,
             '---\n'
             f'canon_id: {canon_id}\n'
             f'canon_type: {canon_type}\n'
-            'canon_updated: 2026-07-28\n'
-            'appears_in: vigil\n'
+            f'canon_updated: {canon_updated}\n'
+            + (f'display_name: {display_name}\n' if display_name else '')
+            + 'appears_in: vigil\n'
             'first_appearance: vigil\n'
             '---\n\n'
             '## Embeddable block\n\n'
             f'{anchor_text}\n\n'
             '## Clauses\n\n## Related canon\n\n## Iteration history\n'
         )
+    return path
 
 
 def _write_book_level_canon(project_dir, canon_id, canon_type, body):
@@ -1582,7 +1590,9 @@ def test_prompts_narrow_anchors_to_what_the_illustration_shows(in_project,
     cmd_illustrate.main(['--prompts', '--coaching', 'full'])
 
     anchors_block = seen['prompt'].split('## Character anchors')[1]
-    assert 'murkwolves' in anchors_block
+    # Labeled by display name, not by canon_id (see the anchor-label tests).
+    assert '**Murkwolves**' in anchors_block
+    assert 'cold shadow' in anchors_block
     assert 'Ten years old' not in anchors_block   # leo is not in this frame
 
 
@@ -2223,3 +2233,428 @@ def test_enrich_word_count_excludes_markers(tmp_path):
     marked = tmp_path / 'marked.md'
     marked.write_text(ill.insert_marker(SCENE, plan_row())['text'])
     assert _word_count(str(marked)) == _word_count(str(plain))
+
+
+# ============================================================================
+# The reference chain vs. the canon (prompt item 3)
+#
+# Found on a real 20-illustration book: LF-05's prompt told the author to
+# upload LF-01/02/03 as *style* references, all three being pre-canon renders
+# whose drift the new canon was written to eliminate. LF-05 is the visual key,
+# so everything downstream would have inherited it — and nothing said a word.
+# ============================================================================
+
+def _ingested_prior(project_dir, illus_id='earlier', ingested_at=''):
+    """An ingested plan row with a real file on disk."""
+    make_png(os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
+                          f'{illus_id}.png'), 8, 8)
+    return plan_row(id=illus_id, status='ingested',
+                    asset_file=ill.default_asset_rel(illus_id),
+                    ingested_at=ingested_at)
+
+
+def test_references_skip_art_ingested_before_the_canon(in_project, capsys):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    ill.write_plan(in_project, [
+        _ingested_prior(in_project, ingested_at='2026-07-01'), plan_row()])
+
+    cutoff = cmd_illustrate._reference_cutoff(in_project, False)
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil',
+                                          canon_cutoff=cutoff)
+    assert refs == []
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'earlier.png' in out
+    assert 'ingested 2026-07-01, before the canon was last updated 2026-07-20' in out
+    assert '--no-prior-refs' in out
+
+
+def test_references_skip_art_with_no_ingest_date(in_project, capsys):
+    """The state of every row on the real book: the column postdates the plan
+    schema, so "unknown" has to mean "predates the canon" or the fix does
+    nothing without a migration."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    ill.write_plan(in_project, [_ingested_prior(in_project), plan_row()])
+
+    cutoff = cmd_illustrate._reference_cutoff(in_project, False)
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil',
+                                          canon_cutoff=cutoff)
+    assert refs == []
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'earlier.png' in out
+    assert '`ingested_at` is empty' in out
+
+
+def test_references_report_an_unparseable_ingest_date(in_project, capsys):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    ill.write_plan(in_project, [
+        _ingested_prior(in_project, ingested_at='last Tuesday'), plan_row()])
+
+    cutoff = cmd_illustrate._reference_cutoff(in_project, False)
+    assert cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', canon_cutoff=cutoff) == []
+    out = capsys.readouterr().out
+    assert 'not an ISO date' in out
+    assert 'last Tuesday' in out
+
+
+def test_references_keep_art_ingested_after_the_canon(in_project):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    ill.write_plan(in_project, [
+        _ingested_prior(in_project, ingested_at='2026-07-21'), plan_row()])
+
+    cutoff = cmd_illustrate._reference_cutoff(in_project, False)
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil',
+                                          canon_cutoff=cutoff)
+    assert [p for p, _ in refs] == [ill.default_asset_rel('earlier')]
+
+
+def test_references_keep_art_ingested_the_same_day_as_the_canon(in_project):
+    """Same-day is the ordinary incremental loop — write canon, render, ingest,
+    prompt the next one — and a date cannot separate the two. Treating it as
+    stale would empty the chain on every normal run."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    ill.write_plan(in_project, [
+        _ingested_prior(in_project, ingested_at='2026-07-20'), plan_row()])
+
+    cutoff = cmd_illustrate._reference_cutoff(in_project, False)
+    assert cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', canon_cutoff=cutoff) != []
+
+
+def test_references_are_unchecked_when_no_canon_date_exists(in_project, capsys):
+    """No canon means no governing direction, so nothing can predate it.
+    Inventing a cutoff here would discard every reference on a book that never
+    adopted the canon tier."""
+    ill.write_plan(in_project, [_ingested_prior(in_project), plan_row()])
+
+    cutoff = cmd_illustrate._reference_cutoff(in_project, False)
+    assert cutoff == ''
+    assert 'without a staleness check' in capsys.readouterr().out
+    assert cmd_illustrate._references_for(
+        in_project, 'lantern-vigil', canon_cutoff=cutoff) != []
+
+
+def test_no_prior_refs_falls_back_to_cover_only(in_project, capsys):
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 8)
+    ill.write_plan(in_project, [
+        _ingested_prior(in_project, ingested_at='2999-01-01'), plan_row()])
+
+    cutoff = cmd_illustrate._reference_cutoff(in_project, True)
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil',
+                                          canon_cutoff=cutoff,
+                                          no_prior_refs=True)
+    assert [p for p, _ in refs] == [
+        os.path.join('manuscript', 'assets', 'cover-illustration.png')]
+    out = capsys.readouterr().out
+    assert '--no-prior-refs' in out
+    assert 'cover-only' in out
+    assert '1 prior illustration(s) excluded' in out
+
+
+def test_no_prior_refs_flag_reaches_the_prompt_file(in_project, monkeypatch):
+    write_scene(in_project, 'vigil', SCENE)
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 8)
+    ill.write_plan(in_project, [
+        _ingested_prior(in_project, ingested_at='2999-01-01'), plan_row()])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '### Scene\n\nX.\n')
+
+    assert cmd_illustrate.main(['--prompts', '--ids', 'lantern-vigil',
+                                '--coaching', 'full', '--no-prior-refs']) == 0
+    with open(os.path.join(in_project,
+                           ill.default_prompt_rel('lantern-vigil'))) as f:
+        content = f.read()
+    assert 'cover-illustration.png' in content
+    assert 'earlier.png' not in content
+
+
+def test_an_empty_reference_chain_is_logged(in_project, capsys):
+    ill.write_plan(in_project, [plan_row()])
+    assert cmd_illustrate._references_for(in_project, 'lantern-vigil') == []
+    assert 'no reference images at all' in capsys.readouterr().out
+
+
+def test_ingest_records_the_ingest_date(in_project):
+    from datetime import date
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    src = make_png(os.path.join(in_project, 'incoming', 'lantern-vigil.png'),
+                   8, 8)
+
+    assert cmd_illustrate.main(['--ingest', os.path.dirname(src)]) == 0
+    row = read_plan_map(in_project)['lantern-vigil']
+    assert row['ingested_at'] == date.today().isoformat()
+
+
+def test_a_plan_predating_the_ingested_at_column_still_validates(in_project):
+    """Every row on the real book is in this state. Failing its schema check
+    would block the run that fixes it."""
+    from storyforge.schema import validate_illustration_plan
+    legacy = [c for c in ill.PLAN_COLUMNS if c != 'ingested_at']
+    with open(ill.plan_path(in_project), 'w') as f:
+        f.write('|'.join(legacy) + '\n')
+        f.write('lantern-vigil' + '|' * (len(legacy) - 1) + '\n')
+
+    result = validate_illustration_plan(in_project)
+    # The header check must pass. (The row itself is blank, so its own
+    # cross-referential findings are expected and beside the point here.)
+    assert [e for e in result['errors'] if e['row'] == 'header'] == []
+    assert any('ingested_at' in w['message'] for w in result['warnings'])
+
+
+def test_cleanup_does_not_flag_a_plan_without_ingested_at(in_project):
+    from storyforge.cmd_cleanup import report_csv_schema
+    legacy = [c for c in ill.PLAN_COLUMNS if c != 'ingested_at']
+    with open(ill.plan_path(in_project), 'w') as f:
+        f.write('|'.join(legacy) + '\n')
+
+    issues = report_csv_schema(in_project)
+    assert not [i for i in issues if 'illustration-plan' in i]
+
+
+def test_a_plan_write_upgrades_the_header(in_project):
+    """Which is why the missing column is not worth an action item: the next
+    write closes it."""
+    legacy = [c for c in ill.PLAN_COLUMNS if c != 'ingested_at']
+    with open(ill.plan_path(in_project), 'w') as f:
+        f.write('|'.join(legacy) + '\n')
+        f.write('lantern-vigil' + '|' * (len(legacy) - 1) + '\n')
+
+    ill.write_plan(in_project, ill.read_plan(in_project))
+    with open(ill.plan_path(in_project)) as f:
+        assert 'ingested_at' in f.readline()
+
+
+# ============================================================================
+# Concurrency (prompt item 1)
+#
+# One measured art-direction call took 13 seconds; a 20-illustration book was
+# 4-5 minutes of strictly serial waiting for calls that share nothing.
+# ============================================================================
+
+def test_prompt_calls_run_concurrently(in_project, monkeypatch):
+    """A barrier is the assertion: if the calls are serialized, the first one
+    waits for peers that never arrive and the barrier times out."""
+    import threading
+
+    rows = [plan_row(id=f'lf-{i}', scene_id='vigil') for i in range(3)]
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, rows)
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    barrier = threading.Barrier(3, timeout=10)
+
+    def _blocking(*a, **k):
+        barrier.wait()
+        return '### Scene\n\nX.\n'
+
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _blocking)
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+    assert all(read_plan_map(in_project)[f'lf-{i}']['status'] == 'prompted'
+               for i in range(3))
+
+
+def test_two_rows_proposing_the_same_anchor_write_one_canon_file(in_project,
+                                                                 monkeypatch,
+                                                                 capsys):
+    """append_anchor_stubs mutates its canon_id_index in-loop precisely so two
+    proposals in one batch write one file. A naive fan-out breaks that
+    guarantee: both workers see no file and both write. First proposal wins,
+    and the second is reported rather than overwriting it."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [
+        plan_row(id='lf-01', scene_id='vigil'),
+        plan_row(id='lf-02', scene_id='vigil'),
+    ])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    bodies = {
+        'lf-01': '### Scene\n\nA.\n\nANCHORS\n- Dorren Hayle | character — '
+                 'first proposal, a spare woman of fifty\n',
+        'lf-02': '### Scene\n\nB.\n\nANCHORS\n- Dorren Hayle | character — '
+                 'second proposal, a stout woman of thirty\n',
+    }
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda pd, prompt, op, **kw: bodies[kw['target']])
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+
+    from storyforge import canon
+    canon_dir = os.path.join(in_project, 'reference', 'canon', 'characters')
+    assert sorted(os.listdir(canon_dir)) == ['dorren-hayle.md']
+    assert canon.anchor_texts(in_project)['dorren-hayle'] == (
+        'first proposal, a spare woman of fifty')
+    assert 'already exists at' in capsys.readouterr().out
+
+
+def test_a_worker_exception_fails_only_its_own_row(in_project, monkeypatch,
+                                                   capsys):
+    """Retry granularity: one raised call must not cost the other rows their
+    prompts, and its own row must stay at `planned` so a re-run picks it up."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [
+        plan_row(id='lf-01', scene_id='vigil'),
+        plan_row(id='lf-02', scene_id='vigil'),
+    ])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def _flaky(pd, prompt, op, **kw):
+        if kw['target'] == 'lf-01':
+            raise OSError('network is down')
+        return '### Scene\n\nX.\n'
+
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _flaky)
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 1
+
+    plan = read_plan_map(in_project)
+    assert plan['lf-01']['status'] == 'planned'
+    assert plan['lf-02']['status'] == 'prompted'
+    out = capsys.readouterr().out
+    assert 'network is down' in out
+    assert 'lf-01' in out
+
+
+def test_prompt_files_are_written_in_plan_order(in_project, monkeypatch,
+                                                capsys):
+    """Concurrency is in the calls only. Writes and their log lines stay
+    sequential, so a run stays readable and reviewable."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row(id=f'lf-{i}', scene_id='vigil')
+                                for i in range(4)])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '### Scene\n\nX.\n')
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+    out = capsys.readouterr().out
+    written = [line for line in out.splitlines() if '→' in line]
+    assert [f'lf-{i}' in line for i, line in enumerate(written)] == [True] * 4
+
+
+# ============================================================================
+# Anchor labels (prompt item 4) and the single Constraints section (item 5)
+# ============================================================================
+
+def _capture_request(in_project, monkeypatch):
+    seen = {}
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda pd, prompt, op, **kw: (
+                            seen.update(prompt=prompt)
+                            or '### Scene\n\nX.\n'))
+    return seen
+
+
+def test_anchor_labels_use_the_registry_name_not_the_slug(in_project,
+                                                          monkeypatch):
+    """The leak: the model echoed the id back in its prose ("kneeling are
+    leo — ten, warm light-brown skin…"), which is text the author pastes into
+    an image model."""
+    write_scene(in_project, 'vigil', SCENE)
+    _write_entity_canon(in_project, 'characters', 'dorren-hayle',
+                        'A spare woman of fifty in a grey coat.')
+    ill.write_plan(in_project, [plan_row(canon_refs='dorren-hayle')])
+    seen = _capture_request(in_project, monkeypatch)
+
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+    block = seen['prompt'].split('## Character anchors')[1]
+    assert '**Dorren Hayle**' in block
+    assert 'dorren-hayle' not in block
+    # The anchor text itself is untouched — likeness continuity depends on it.
+    assert 'A spare woman of fifty in a grey coat.' in block
+
+
+def test_anchor_labels_prefer_a_frontmatter_display_name(in_project,
+                                                         monkeypatch):
+    write_scene(in_project, 'vigil', SCENE)
+    _write_entity_canon(in_project, 'characters', 'dorren-hayle',
+                        'A spare woman of fifty.',
+                        display_name='Dr. Dorren Hayle')
+    ill.write_plan(in_project, [plan_row(canon_refs='dorren-hayle')])
+    seen = _capture_request(in_project, monkeypatch)
+
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+    assert '**Dr. Dorren Hayle**' in seen['prompt']
+
+
+def test_an_anchor_with_no_recorded_name_is_labeled_and_reported(in_project,
+                                                                monkeypatch,
+                                                                capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    _write_entity_canon(in_project, 'motifs', 'great-lamp',
+                        'A brass lamp the height of a child.')
+    ill.write_plan(in_project, [plan_row(canon_refs='great-lamp')])
+    seen = _capture_request(in_project, monkeypatch)
+
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+    assert '**Great Lamp**' in seen['prompt']
+    out = capsys.readouterr().out
+    assert 'no recorded display name' in out
+    assert 'great-lamp' in out
+
+
+def test_canon_refs_still_match_on_the_canon_id(in_project, monkeypatch,
+                                                capsys):
+    """Only the rendered label changes; the matching key stays the canon_id, so
+    a row naming the id must not warn about an unmatched canon_ref."""
+    write_scene(in_project, 'vigil', SCENE)
+    _write_entity_canon(in_project, 'characters', 'dorren-hayle',
+                        'A spare woman of fifty.')
+    _write_entity_canon(in_project, 'motifs', 'great-lamp', 'A brass lamp.')
+    ill.write_plan(in_project, [plan_row(canon_refs='dorren-hayle')])
+    seen = _capture_request(in_project, monkeypatch)
+
+    cmd_illustrate.main(['--prompts', '--coaching', 'full'])
+    block = seen['prompt'].split('## Character anchors')[1]
+    assert '**Dorren Hayle**' in block
+    assert 'A brass lamp' not in block   # narrowing still works
+    assert 'matched no known anchor' not in capsys.readouterr().out
+
+
+def test_the_request_does_not_ask_for_a_constraints_section():
+    """The deterministic block owns that section. Asking for one too produced
+    `## Constraints` with a nested, contradicting `### Constraints`."""
+    request = pi.build_art_direction_request(
+        row=plan_row(), scene_excerpt='x', character_anchors={},
+        canon_context='c')
+    assert '**Constraints** — what must hold' not in request
+    assert 'Do **not** write a Constraints section' in request
+    assert 'four sections' in request
+
+
+def test_the_prompt_file_has_exactly_one_constraints_heading(in_project,
+                                                             monkeypatch):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
+        '### Scene\n\nA cold street.\n\n### Subject\n\nA woman.\n\n'
+        '### Important details\n\n- a lit sill\n\n### Use case\n\n'
+        'Interior illustration.\n'))
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+    with open(os.path.join(in_project,
+                           ill.default_prompt_rel('lantern-vigil'))) as f:
+        lines = f.read().splitlines()
+    headings = [line for line in lines if line.lstrip('#').strip() == 'Constraints']
+    assert headings == ['### Constraints']
+
+
+def test_the_strict_scaffold_carries_no_constraints_section(in_project):
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'strict']) == 0
+    with open(os.path.join(in_project,
+                           ill.default_prompt_rel('lantern-vigil'))) as f:
+        body = f.read()
+    assert body.count('Constraints') == 1
