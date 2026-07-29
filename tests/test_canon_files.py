@@ -561,6 +561,146 @@ def test_validate_unfilled_template_flagged(tmp_path):
     assert 'Related canon' not in unfilled[0]['detail']
 
 
+# ---------------------------------------------------------------------------
+# Embeddable-block truncation (issue #289)
+# ---------------------------------------------------------------------------
+
+def _anchor_body(*, block_lines: str) -> str:
+    """A canon body whose Embeddable block holds `block_lines` verbatim."""
+    return (
+        '\n## Embeddable block\n\n'
+        f'{block_lines}\n\n'
+        '## Clauses\n\n- clause one\n\n'
+        '## Related canon\n\n- [[other]]\n\n'
+        '## Iteration history\n\n- 2026-07-29 — created\n'
+    )
+
+
+def _truncations(findings):
+    return [f for f in findings
+            if f['type'] == 'canon_truncated_embeddable_block']
+
+
+def test_h2_heading_inside_embeddable_block_is_reported(tmp_path):
+    """Issue #289: the anchor extractor reads to the next `##`, so an author
+    who sub-heads the anchor with `## Wardrobe` loses everything below it.
+    The truncation must not be silent — it produces a finding naming the file
+    and the offending line."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            '**Nora Vance**, 9 years old, a dark braid over one shoulder.\n\n'
+            '## Wardrobe\n\n'
+            'A grey wool coat, two buttons missing.'
+        )),
+    )
+    findings = validate_canon_file(path, project)
+    truncated = _truncations(findings)
+    assert len(truncated) == 1, findings
+    assert truncated[0]['severity'] == 'error'
+    assert truncated[0]['file'] == os.path.join(
+        'reference', 'canon', 'characters', 'nora.md')
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().splitlines()
+    expected_line = lines.index('## Wardrobe') + 1
+    assert f'line {expected_line}' in truncated[0]['detail']
+    assert '## Wardrobe' in truncated[0]['detail']
+
+
+def test_truncated_anchor_is_reported_not_silently_shortened(tmp_path):
+    """The byte-identity checks in test_packet / test_illustrate_package both
+    compare against anchor_texts — the truncating function — so they agree
+    with each other about an already-wrong value. This asserts the chosen
+    behavior directly against anchor_texts: the anchor is still cut at the
+    `##` line (widening it would swallow whatever section follows), and the
+    cut is always accompanied by a finding."""
+    from storyforge.canon import anchor_texts
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            'A dark braid over one shoulder.\n\n'
+            '## Wardrobe\n\n'
+            'A grey wool coat, two buttons missing.'
+        )),
+    )
+    anchor = anchor_texts(project)['nora']
+    assert anchor == 'A dark braid over one shoulder.'
+    assert 'grey wool coat' not in anchor
+    assert _truncations(validate_canon_file(path, project))
+
+
+def test_bare_double_hash_line_inside_embeddable_block_is_reported(tmp_path):
+    """A lone `##` line truncates the block (the extractor's lookahead is
+    `^##\\s`, which a bare `##` satisfies) but does not match the section-name
+    regex, which needs `##` plus a name. Enumerating offenders through the
+    section-name regex would therefore miss exactly this case."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            'A dark braid over one shoulder.\n\n'
+            '##\n\n'
+            'A grey wool coat.'
+        )),
+    )
+    assert len(_truncations(validate_canon_file(path, project))) == 1
+
+
+def test_h3_subheading_inside_embeddable_block_is_not_truncation(tmp_path):
+    """`### Wardrobe` is inside the block, not a terminator — it must round-trip
+    whole and produce no finding. This is the fix an author is told to apply,
+    so firing on it would make the remediation impossible."""
+    from storyforge.canon import anchor_texts
+    project = str(tmp_path)
+    block = ('A dark braid over one shoulder.\n\n'
+             '### Wardrobe\n\n'
+             'A grey wool coat, two buttons missing.')
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=block),
+    )
+    assert anchor_texts(project)['nora'] == block
+    assert _truncations(validate_canon_file(path, project)) == []
+
+
+def test_detector_agrees_with_the_extractor_on_a_final_bare_hash(tmp_path):
+    """The invariant is agreement: the detector must flag exactly the headings
+    the extractor stops at. A bare `##` on the last line with no trailing
+    newline does NOT stop it (the lookahead's `\\s` has no character to match),
+    so the text survives and there is nothing to report. A per-line
+    reimplementation spelled `^##(\\s|$)` looks equivalent and breaks here."""
+    from storyforge.canon import (
+        embeddable_block_text, embeddable_block_truncations,
+    )
+    project = str(tmp_path)
+    body = '\n## Embeddable block\n\nA dark braid.\n\n##'
+    path = write_canon(project, 'characters/nora.md', 'nora',
+                       canon_type='character', body=body)
+    assert '##' in (embeddable_block_text(path) or '').splitlines()
+    assert embeddable_block_truncations(body) == []
+    assert _truncations(validate_canon_file(path, project)) == []
+
+
+def test_well_formed_canon_file_has_no_truncation_finding(tmp_path):
+    project = str(tmp_path)
+    path = write_canon(project, 'style-foundation.md', 'style-foundation')
+    assert _truncations(validate_canon_file(path, project)) == []
+
+
+def test_heading_after_the_required_sections_is_not_truncation(tmp_path):
+    """The offending window closes at the first required section that follows
+    the Embeddable block. A non-schema `## Notes` further down the file does
+    not shorten the anchor, so it is not this finding."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines='A dark braid.') + '\n## Notes\n\nlater.\n',
+    )
+    assert _truncations(validate_canon_file(path, project)) == []
+
+
 def test_validate_filled_canon_no_unfilled_finding(tmp_path):
     """A canon file with real content in every section must not register
     as unfilled. Only a first-non-blank-line `TODO` prefix decides on one

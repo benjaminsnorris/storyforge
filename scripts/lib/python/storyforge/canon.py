@@ -50,6 +50,7 @@ CanonFindingKind = Literal[
     'canon_unknown_subdir',
     'canon_unexpected_nesting',
     'canon_missing_section',
+    'canon_truncated_embeddable_block',
     'canon_unfilled_template',
     'canon_registry_unreadable',
     'canon_missing_registry_entry',
@@ -84,6 +85,10 @@ class ParsedCanonFile(TypedDict):
     frontmatter: dict[str, str] | None
     sections: set[str]
     body: str
+    #: Lines consumed by the frontmatter, so a body-relative line number can
+    #: be reported as the file line the author will actually look at. Body
+    #: line N is file line `body_line_offset + N`.
+    body_line_offset: int
 
 
 CANON_DIR = os.path.join('reference', 'canon')
@@ -247,6 +252,58 @@ _SECTION_BODY_RE = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 
+#: The section name `_EMBEDDABLE_BLOCK_RE` matches, named so the truncation
+#: detector below recognizes the same heading the extractor keys on.
+EMBEDDABLE_SECTION = 'Embeddable block'
+
+#: `_EMBEDDABLE_BLOCK_RE`'s lookahead, character-for-character, so the
+#: truncation detector finds every heading the extractor stops at and no
+#: others. Deliberately NOT `_SECTION_RE`, which requires `##` plus a name: a
+#: bare `##` line truncates the block but has no name, so an enumerator built
+#: on _SECTION_RE would miss exactly the case nothing else reports. Matched
+#: against the whole body rather than per line because the `\s` here is
+#: usually the line's own newline, which splitlines() would have removed.
+_BLOCK_TERMINATOR_RE = re.compile(r'^##\s', re.MULTILINE)
+
+
+def embeddable_block_truncations(body: str) -> list[tuple[int, str]]:
+    """Every `##` heading that cuts the `## Embeddable block` short.
+
+    Returns `(body line number, the line verbatim)` per offender, in source
+    order. Body line N is file line `parse_canon_file(...)['body_line_offset']
+    + N`.
+
+    `embeddable_block_text` reads to the next `##`, which is correct markdown
+    and correct for the schema — the four `REQUIRED_SECTIONS` are what follows
+    a real anchor. But an author who sub-heads the anchor itself
+    (`## Wardrobe`) loses every word below that line, and the anchor is the
+    string every prompt embeds verbatim, so the images then drift on whatever
+    the dropped tail described. Widening the extractor instead would swallow
+    whichever section actually followed and feed it to an image model as
+    though it were description, so the truncation stays and is reported
+    (issue #289).
+
+    The window closes at the first `REQUIRED_SECTIONS` heading after the
+    Embeddable block: past that point a non-schema heading is somebody's extra
+    section, not lost anchor text. A second `## Embeddable block` closes it
+    too, matching `_EMBEDDABLE_BLOCK_RE.search`, which takes the first.
+    """
+    offenders: list[tuple[int, str]] = []
+    started = False
+    for match in _BLOCK_TERMINATOR_RE.finditer(body):
+        start = match.start()
+        eol = body.find('\n', start)
+        line = (body[start:] if eol == -1 else body[start:eol]).rstrip()
+        named = _SECTION_RE.match(line)
+        name = named.group(1).strip() if named else ''
+        if not started:
+            started = name == EMBEDDABLE_SECTION
+            continue
+        if name in REQUIRED_SECTIONS:
+            break
+        offenders.append((body.count('\n', 0, start) + 1, line))
+    return offenders
+
 # Lines that mark a section as unfilled scaffolding. Stripped of leading
 # `<!--` HTML-comment fragments and surrounding whitespace, a section
 # body that starts with one of these strings is considered placeholder.
@@ -395,6 +452,7 @@ def parse_canon_file(path: str) -> ParsedCanonFile:
             'frontmatter': None,
             'sections': set(),
             'body': '',
+            'body_line_offset': 0,
         }
     with open(path, encoding='utf-8') as f:
         text = f.read()
@@ -404,12 +462,16 @@ def parse_canon_file(path: str) -> ParsedCanonFile:
         text = text.lstrip('﻿')
     frontmatter, body = _parse_frontmatter(text)
     sections = {m.group(1).strip() for m in _SECTION_RE.finditer(body)}
+    # `text` is prefix + body, so the prefix's line count is the difference in
+    # newlines. Counting that way (rather than measuring the frontmatter match)
+    # keeps this correct for the no-frontmatter case, where body IS text.
     return {
         'path': path,
         'exists': True,
         'frontmatter': frontmatter,
         'sections': sections,
         'body': body,
+        'body_line_offset': text.count('\n') - body.count('\n'),
     }
 
 
@@ -608,6 +670,29 @@ def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
                 f'Add a `## {section}` section to the body',
                 'canon_missing_section',
             ))
+
+    # Truncated-anchor check: a `##` heading inside the Embeddable block ends
+    # it, so the anchor every prompt embeds is quietly short. 'error' severity
+    # for the same reason canon_id_mismatch is one — downstream consumers get
+    # wrong data with no other sign, and here the only repair once art exists
+    # is a re-render.
+    truncations = embeddable_block_truncations(parsed['body'])
+    if truncations:
+        offset = parsed['body_line_offset']
+        where = ', '.join(
+            f'line {offset + lineno}: `{text}`' for lineno, text in truncations
+        )
+        findings.append(_finding(
+            rel,
+            f'## {EMBEDDABLE_SECTION} is cut short by a `##` heading in its '
+            f'own body ({where}); the anchor every prompt embeds stops above '
+            'it, so the rest is silently dropped',
+            'Demote the heading to `###` so it stays inside the anchor, or — '
+            'if it was meant to be its own section — move it below the four '
+            'required sections',
+            'canon_truncated_embeddable_block',
+            severity='error',
+        ))
 
     # Unfilled-template check: scan section bodies for TODO placeholders
     # left over from the shipped starter templates. Surfaces as a single
