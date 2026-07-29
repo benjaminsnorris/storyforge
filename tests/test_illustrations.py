@@ -856,52 +856,15 @@ def test_read_direction_keeps_author_added_sections(project_dir):
 
 def test_read_direction_with_no_file(project_dir):
     assert ill.read_direction(project_dir) == {}
-    assert ill.has_direction(project_dir) is False
 
 
-def test_anchors_cover_characters_creatures_and_locations(project_dir):
-    """The sample plan anchors a creature and a location, not just a cast."""
-    write_direction_file(project_dir, SAMPLE_DIRECTION)
-    anchors = ill.read_continuity_anchors(project_dir)
-    assert set(anchors) == {'Leo', 'Murkwolves', 'The village and Great Lamp'}
-    assert anchors['Murkwolves'].startswith('Large wolf-shaped')
-
-
-def test_missing_direction_sections_when_absent(project_dir):
-    assert ill.missing_direction_sections(project_dir) == \
-        list(ill.DIRECTION_SECTIONS)
-
-
-def test_missing_direction_sections_when_complete(project_dir):
-    write_direction_file(project_dir, SAMPLE_DIRECTION)
-    assert ill.missing_direction_sections(project_dir) == []
-
-
-def test_missing_direction_sections_reports_empty_ones(project_dir):
-    write_direction_file(project_dir,
-                         '# D\n\n## Format\n\nPhotoreal.\n\n'
-                         '## Visual promise\n\n')
-    missing = ill.missing_direction_sections(project_dir)
-    assert 'Format' not in missing
-    assert 'Visual promise' in missing
-    assert ill.ANCHORS_SECTION in missing
-
-
-@pytest.mark.parametrize('body', [
-    '_(fill this in)_', 'TBD', 'todo', '_Required: describe the palette_',
-    '(you fill this in)',
-])
-def test_placeholder_sections_count_as_missing(project_dir, body):
-    """A scaffold left unfilled must not be fed to an image model as direction."""
-    write_direction_file(project_dir, f'# D\n\n## Format\n\n{body}\n')
-    assert 'Format' in ill.missing_direction_sections(project_dir)
-
-
-def test_real_prose_is_not_mistaken_for_a_placeholder(project_dir):
-    write_direction_file(
-        project_dir,
-        '# D\n\n## Format\n\nDescribed in full color, photorealistic.\n')
-    assert 'Format' not in ill.missing_direction_sections(project_dir)
+# Continuity anchors and book-level placeholder detection now live in
+# `reference/canon/` (see storyforge.canon and prompts_illustrate.CANON_PLAN):
+# `read_continuity_anchors`, `has_direction`, and `missing_direction_sections`
+# are gone. Equivalent coverage: canon.anchor_texts in
+# test_illustration_canon.py, and canon._section_body_is_placeholder in
+# test_canon_files.py. `read_direction` itself survives above only for
+# `illustrations._direction_anchor_mismatches`, the hand-edit safety net.
 
 
 # ============================================================================

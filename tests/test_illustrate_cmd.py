@@ -15,8 +15,8 @@ from storyforge import cmd_illustrate
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from illustration_helpers import (
-    SAMPLE_DIRECTION, SCENE, SCENE_ADVERSARIAL, make_png, plan_row,
-    truncated_png, write_csv, write_direction_file, write_scene,
+    SCENE, SCENE_ADVERSARIAL, make_png, plan_row,
+    truncated_png, write_csv, write_scene,
 )
 
 
@@ -41,17 +41,6 @@ def in_project(project_dir, monkeypatch):
 
 def read_plan_map(project_dir):
     return ill.read_plan_as_map(project_dir)
-
-
-def write_direction(project_dir, sections):
-    """Write a direction document from {heading: body}."""
-    path = ill.direction_path(project_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    body = '\n\n'.join(f'## {name}\n\n{text}'
-                       for name, text in sections.items())
-    with open(path, 'w') as f:
-        f.write(f'# Illustration art direction\n\n{body}\n')
-    return path
 
 
 # ============================================================================
@@ -117,6 +106,26 @@ def test_diagnose_exits_nonzero_on_findings(in_project, capsys):
 
     assert cmd_illustrate.main(['--diagnose']) == 1
     assert 'orphan_marker' in capsys.readouterr().out
+
+
+def test_diagnose_reports_an_incomplete_reference_tier(in_project, capsys):
+    """Mode detection shifted from 'no direction document' to 'no reference
+    tier' — diagnose names the missing canon ids, not missing document
+    sections."""
+    write_scene(in_project, 'vigil', ill.insert_marker(SCENE, plan_row())['text'])
+    make_png(os.path.join(in_project, ill.ILLUSTRATIONS_SUBDIR,
+                          'lantern-vigil.png'), 8, 8)
+    ill.write_plan(in_project, [plan_row(
+        status='ingested', sha256='a' * 64,
+        asset_file=ill.default_asset_rel('lantern-vigil'),
+    )])
+
+    assert cmd_illustrate.main(['--diagnose']) == 0
+    out = capsys.readouterr().out
+    assert 'reference tier incomplete' in out
+    assert 'visual-foundation' in out
+    assert 'visual-vocabulary' in out
+    assert 'content-limits' in out
 
 
 # ============================================================================
@@ -646,29 +655,6 @@ def test_split_anchor_block_parses_multiple_anchors():
     }
 
 
-def test_continuity_anchors_round_trip(project_dir):
-    write_direction(project_dir, {
-        ill.ANCHORS_SECTION: '### Dorren\n\na spare woman in grey',
-    })
-    assert ill.read_continuity_anchors(project_dir) == {
-        'Dorren': 'a spare woman in grey'}
-
-
-def test_continuity_anchors_collapse_multi_paragraph_bodies(project_dir):
-    """A real anchor is a paragraph, not a phrase."""
-    write_direction(project_dir, {
-        ill.ANCHORS_SECTION: (
-            '### Dorren\n\nTen years old; tall for her age.\n\n'
-            'Navy pyjamas on the first night.\n\n'
-            '### Vell\n\nA boy with ink-stained cuffs.'
-        ),
-    })
-    anchors = ill.read_continuity_anchors(project_dir)
-    assert anchors['Dorren'] == (
-        'Ten years old; tall for her age. Navy pyjamas on the first night.')
-    assert anchors['Vell'] == 'A boy with ink-stained cuffs.'
-
-
 def test_append_anchor_stubs_never_overwrites_an_existing_anchor(project_dir):
     """Likeness continuity depends on the anchor staying byte-identical."""
     from storyforge import canon
@@ -707,8 +693,7 @@ def test_append_anchor_stubs_skips_empty_values(project_dir, capsys):
     assert "WARNING: proposed anchor '' has no usable slug" in out
 
 
-def test_read_continuity_anchors_with_no_document(project_dir):
-    assert ill.read_continuity_anchors(project_dir) == {}
+def test_anchors_for_prompt_with_no_canon_dir(project_dir):
     assert pi.anchors_for_prompt(project_dir) == {}
 
 
@@ -1460,9 +1445,37 @@ def _write_entity_canon(project_dir, subdir, canon_id, anchor_text,
         )
 
 
-def test_direction_reaches_the_art_direction_prompt(in_project, monkeypatch):
-    """The whole point of the document: every prompt carries it."""
-    write_direction_file(in_project, SAMPLE_DIRECTION)
+def _write_book_level_canon(project_dir, canon_id, canon_type, body):
+    """One of the three CANON_PLAN book-level canon files (visual-foundation,
+    visual-vocabulary, content-limits). This is the canon-side equivalent of
+    the old direction document's non-anchor sections."""
+    path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(
+            '---\n'
+            f'canon_id: {canon_id}\n'
+            f'canon_type: {canon_type}\n'
+            'canon_updated: 2026-07-28\n'
+            'appears_in:\n'
+            'first_appearance:\n'
+            '---\n\n'
+            '## Embeddable block\n\n'
+            f'{body}\n\n'
+            '## Clauses\n\n## Related canon\n\n## Iteration history\n'
+        )
+    return path
+
+
+def test_reference_tier_reaches_the_art_direction_prompt(in_project,
+                                                         monkeypatch):
+    """The whole point of the reference tier: every prompt carries it."""
+    _write_book_level_canon(
+        in_project, 'visual-foundation', 'foundation',
+        'Full-color, cinematic photorealistic storybook imagery.')
+    _write_book_level_canon(
+        in_project, 'content-limits', 'rules',
+        'Never horror imagery. No blood or gore.')
     write_scene(in_project, 'vigil', SCENE)
     _write_entity_canon(in_project, 'characters', 'leo',
                         'Ten years old; tall and lean for his age.')
@@ -1483,13 +1496,12 @@ def test_direction_reaches_the_art_direction_prompt(in_project, monkeypatch):
     assert 'cinematic photorealistic' in prompt
     assert 'Never horror imagery' in prompt
     # Anchors come from canon, rendered separately from the rest of the
-    # direction document.
+    # book-level direction.
     assert 'Ten years old' in prompt
 
 
 def test_prompts_narrow_anchors_to_what_the_illustration_shows(in_project,
                                                               monkeypatch):
-    write_direction_file(in_project, SAMPLE_DIRECTION)
     write_scene(in_project, 'vigil', SCENE)
     _write_entity_canon(in_project, 'characters', 'leo',
                         'Ten years old; tall and lean for his age.')
@@ -1548,7 +1560,13 @@ def test_relevant_anchors_no_warning_when_canon_refs_is_simply_empty(capsys):
 # ============================================================================
 
 def test_review_writes_the_sequence_checklist(in_project):
-    write_direction_file(in_project, SAMPLE_DIRECTION)
+    _write_book_level_canon(
+        in_project, 'content-limits', 'rules',
+        'Never horror imagery. No blood or gore.')
+    _write_entity_canon(in_project, 'characters', 'leo',
+                        'Ten years old; tall and lean for his age.')
+    _write_entity_canon(in_project, 'motifs', 'murkwolves',
+                        'Large wolf-shaped concentrations of cold shadow.')
     write_csv(in_project, 'chapter-map.csv', 'chapter|scenes', ['1|s1;s2'])
     ill.write_plan(in_project, [
         plan_row(id='LF-01', scene_id='s1', canon_refs='Leo;Murkwolves',
@@ -1566,10 +1584,10 @@ def test_review_writes_the_sequence_checklist(in_project):
     assert '**Identity**' in content
     assert '**Light progression**' in content
     assert 'Never horror imagery' in content       # content limits carried over
-    assert '- [ ] **Leo**' in content              # anchors to check against
+    assert '- [ ] **leo**' in content              # anchors to check against
     assert '1. [x] `LF-01`' in content             # rendered
     assert '2. [ ] `LF-02`' in content             # pending
-    assert 'locks: Leo, Murkwolves' in content
+    assert 'locks: Leo, Murkwolves' in content     # locks read canon_refs verbatim
 
 
 def test_review_marks_the_visual_key(in_project):
@@ -1993,18 +2011,6 @@ def test_prompts_warns_about_mangled_anchor_lines(in_project, monkeypatch,
     # Regression (fix round 1, M-4): the message quoted the pre-task-4 format
     # after the request text had already moved to "Name | type — description".
     assert 'Name | type — description' in out
-
-
-def test_anchors_section_is_read_case_insensitively(project_dir):
-    """A model asked for `## Continuity anchors` sometimes writes
-    `## Continuity Anchors`; a case-sensitive lookup silently returned nothing,
-    so the author's anchors were invisible to every prompt."""
-    write_direction_file(project_dir,
-                         '# D\n\n## Continuity Anchors\n\n### Mara\n\n'
-                         'Eleven years old, black braid.\n')
-    assert ill.read_continuity_anchors(project_dir) == {
-        'Mara': 'Eleven years old, black braid.'}
-    assert ill.ANCHORS_SECTION not in ill.missing_direction_sections(project_dir)
 
 
 def test_find_section_is_case_insensitive():

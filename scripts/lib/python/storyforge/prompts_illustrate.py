@@ -33,10 +33,7 @@ import re
 from datetime import date
 from typing import Final, Literal
 
-from storyforge.illustrations import (
-    ANCHORS_SECTION, DIRECTION_SECTIONS, PrepassFindings, RenderStep,
-    VALID_PLACEMENTS,
-)
+from storyforge.illustrations import PrepassFindings, RenderStep, VALID_PLACEMENTS
 
 #: Aspect is derived from author-written prose (layout, then composition) and
 #: consumed by orientation_clause, which silently falls back to portrait for an
@@ -409,22 +406,49 @@ def _json_candidates(text: str):
 def render_direction_block(direction: dict[str, str]) -> str:
     """Render the book-level art direction for inclusion in a prompt.
 
-    Every section of the author's document is passed through, in the canonical
-    order first and then anything they added of their own. The anchors section
-    is excluded — it is rendered separately, because anchors must be reused
-    verbatim rather than summarized alongside the rest of the direction.
+    `direction` is `book_level_direction`'s return value — already ordered
+    (dict insertion order follows `CANON_PLAN`) and already excluding
+    per-entity continuity anchors, which are rendered separately because they
+    must be reused verbatim rather than summarized alongside the rest of the
+    direction. This just joins the non-empty entries as `###` subsections.
     """
     if not direction:
         return ''
-    ordered = [name for name in DIRECTION_SECTIONS if name != ANCHORS_SECTION]
-    ordered += [name for name in direction
-                if name not in DIRECTION_SECTIONS]
     parts = []
-    for name in ordered:
-        body = direction.get(name, '').strip()
+    for name, body in direction.items():
+        body = body.strip()
         if body:
             parts.append(f'### {name}\n\n{body}')
     return '\n\n'.join(parts)
+
+
+def book_level_direction(project_dir: str) -> dict[str, str]:
+    """Book-level house style, keyed by heading, from the three `CANON_PLAN`
+    canon files' `## Embeddable block` bodies.
+
+    Replaces the old direction document's non-anchor sections now that
+    `--direction` writes canon files instead of `illustration-direction.md`
+    (see `.superpowers/sdd/2026-07-28-illustration-canon-adoption/`). A
+    canon_id that is absent or still placeholder contributes nothing —
+    `illustrations.missing_reference_sections` is what reports that state
+    loudly to the author; this stays silent so a partially-populated
+    reference tier still contributes whatever it has. Insertion order follows
+    `CANON_PLAN`, which is what lets `render_direction_block` join the result
+    without re-sorting it.
+    """
+    from storyforge import canon
+
+    direction: dict[str, str] = {}
+    for canon_id, _canon_type, _purpose in CANON_PLAN:
+        path = canon.resolve_canon_path(project_dir, canon_id)
+        if path is None:
+            continue
+        body = canon.embeddable_block_text(path)
+        if body is None or canon._section_body_is_placeholder(body):
+            continue
+        heading = canon_id.replace('-', ' ').capitalize()
+        direction[heading] = body.strip()
+    return direction
 
 
 def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,

@@ -757,3 +757,109 @@ def test_direction_strict_makes_no_api_call(project_dir, monkeypatch):
 
     monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
     run_direction(project_dir, coaching='strict', dry_run=False)
+
+
+# ============================================================================
+# Task 7: has_reference_tier / missing_reference_sections replace the
+# direction-document readers
+# ============================================================================
+
+def test_has_reference_tier_requires_all_three(project_dir):
+    from storyforge.illustrations import has_reference_tier
+    _set_medium(project_dir, 'novel')
+    assert has_reference_tier(project_dir) is False
+
+    for canon_id, canon_type in (('visual-foundation', 'foundation'),
+                                 ('visual-vocabulary', 'vocabulary'),
+                                 ('content-limits', 'rules')):
+        _write_canon(project_dir, f'{canon_id}.md',
+                     body=CANON_BODY
+                     .replace('canon_id: nora', f'canon_id: {canon_id}')
+                     .replace('canon_type: character',
+                              f'canon_type: {canon_type}'))
+
+    assert has_reference_tier(project_dir) is True
+
+
+def test_missing_reference_sections_reports_placeholders(project_dir):
+    from storyforge.illustrations import missing_reference_sections
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, 'visual-foundation.md',
+                 body=CANON_BODY
+                 .replace('canon_id: nora', 'canon_id: visual-foundation')
+                 .replace('canon_type: character', 'canon_type: foundation')
+                 .replace('Nora, 9 years old, 132 cm, dark brown hair in a '
+                          'short bob, grey-green eyes.',
+                          'TODO — fill this in'))
+
+    missing = missing_reference_sections(project_dir)
+
+    assert 'visual-foundation' in missing
+    assert 'content-limits' in missing
+
+
+def test_read_continuity_anchors_is_gone():
+    import storyforge.illustrations as ill
+    assert not hasattr(ill, 'read_continuity_anchors')
+
+
+def test_missing_direction_sections_and_has_direction_are_gone():
+    """Deleted alongside read_continuity_anchors — has_reference_tier and
+    missing_reference_sections replace them."""
+    import storyforge.illustrations as ill
+    assert not hasattr(ill, 'missing_direction_sections')
+    assert not hasattr(ill, 'has_direction')
+    assert not hasattr(ill, 'anchors_section_headings')
+
+
+def test_prompts_carry_canon_house_style_end_to_end(project_dir, monkeypatch):
+    """The defect this task closes: --prompts must read the three CANON_PLAN
+    files, not the retired illustration-direction.md, and a populated
+    reference tier must actually reach the generated prompt text — not just
+    the reader function in isolation. Exercises cmd_illustrate.run_prompts
+    directly (as the rest of this module does for run_direction), rather than
+    cmd_illustrate.main, so it does not depend on the process cwd."""
+    from storyforge import cmd_illustrate
+    from storyforge.illustrations import write_plan, blank_row
+
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, 'visual-foundation.md',
+                 body=CANON_BODY
+                 .replace('canon_id: nora', 'canon_id: visual-foundation')
+                 .replace('canon_type: character', 'canon_type: foundation')
+                 .replace('Nora, 9 years old, 132 cm, dark brown hair in a '
+                          'short bob, grey-green eyes.',
+                          'Full-color, cinematic photorealistic storybook '
+                          'imagery for ages 6-8.'))
+    _write_canon(project_dir, 'content-limits.md',
+                 body=CANON_BODY
+                 .replace('canon_id: nora', 'canon_id: content-limits')
+                 .replace('canon_type: character', 'canon_type: rules')
+                 .replace('Nora, 9 years old, 132 cm, dark brown hair in a '
+                          'short bob, grey-green eyes.',
+                          'Never horror imagery. No blood or gore.'))
+
+    scene_path = os.path.join(project_dir, 'scenes', 'vigil.md')
+    os.makedirs(os.path.dirname(scene_path), exist_ok=True)
+    with open(scene_path, 'w', encoding='utf-8') as f:
+        f.write('She set it on the sill and waited.\n')
+
+    row = blank_row('lantern-vigil')
+    row.update({'scene_id': 'vigil', 'anchor': 'She set it on the sill',
+               'placement': 'after_anchor', 'beat': 'A woman waits',
+               'rationale': 'holds the waiting'})
+    write_plan(project_dir, [row])
+
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    seen = {}
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda pd, prompt, op, **kw: (
+                            seen.update(prompt=prompt) or
+                            '### Scene\n\nX.\n'))
+
+    assert cmd_illustrate.run_prompts(
+        project_dir, coaching='full', ids=None, dry_run=False) == 0
+    prompt = seen['prompt']
+    assert 'Book-level art direction' in prompt
+    assert 'cinematic photorealistic' in prompt
+    assert 'Never horror imagery' in prompt

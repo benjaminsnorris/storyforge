@@ -6,8 +6,11 @@ mechanics behind them:
   - ``reference/illustration-plan.csv`` — one row per illustration, holding
     the narrative justification, the art-direction fields, and (after ingest)
     the file digest and dimensions.
-  - ``reference/illustration-direction.md`` — the book-level art-direction
-    document and the continuity anchors inside it.
+  - ``reference/illustration-direction.md`` — the old book-level art-direction
+    document, superseded by ``reference/canon/`` (see ``storyforge.canon`` and
+    ``storyforge.prompts_illustrate.CANON_PLAN``). Kept readable here only for
+    ``_direction_anchor_mismatches``, a one-time safety net for a project that
+    still has a hand-edited copy lying around.
   - The scene marker ``![[illus:{id}]]`` — insertion at a whitespace-tolerant
     prose anchor, parsing, and stripping.
   - Resolution — one marker, three output targets (epub/PDF, web book,
@@ -159,8 +162,13 @@ def default_prompt_rel(illus_id: str) -> str:
 # Art-direction document
 # ============================================================================
 
-#: Sections the direction document is expected to carry. `Continuity anchors`
-#: is parsed structurally; the rest are passed to the prompt builder as prose.
+#: Sections the direction document used to be expected to carry. The
+#: reference tier (`reference/canon/`) replaced this document as the source
+#: of book-level direction and continuity anchors — `--direction` no longer
+#: writes it, and `--prompts` no longer reads it. This constant now exists
+#: only for `_direction_anchor_mismatches`, the one-time safety net that
+#: compares a still-present hand-edited document against canon until the
+#: author deletes it.
 DIRECTION_SECTIONS: tuple[str, ...] = (
     'Format', 'Visual promise', 'Recurring visual language',
     'Content limits', 'Continuity anchors',
@@ -169,7 +177,6 @@ DIRECTION_SECTIONS: tuple[str, ...] = (
 ANCHORS_SECTION = 'Continuity anchors'
 
 _H2_RE = re.compile(r'^##[ \t]+(.+?)[ \t]*$', re.MULTILINE)
-_H3_RE = re.compile(r'^###[ \t]+(.+?)[ \t]*$', re.MULTILINE)
 
 
 def read_direction(project_dir: str) -> dict[str, str]:
@@ -208,101 +215,32 @@ def find_section(sections: dict[str, str], wanted: str) -> str | None:
     return None
 
 
-def anchors_section_headings(project_dir: str) -> list[str]:
-    """Every heading in the document that reads as the anchors section.
+def has_reference_tier(project_dir: str) -> bool:
+    """True when every book-level canon file exists and is populated.
 
-    More than one means the document has been split — usually by an append that
-    could not find an existing differently-cased heading — and anchors under
-    all but one of them reach nothing.
+    The reference tier is what makes a book's images look like one book. A
+    project without it can still be planned, but its prompts would carry no
+    house style, which is why --prompts warns loudly rather than proceeding
+    quietly.
     """
-    return [name for name in read_direction(project_dir)
-            if name.strip().lower() == ANCHORS_SECTION.lower()]
+    return not missing_reference_sections(project_dir)
 
 
-def read_continuity_anchors(project_dir: str) -> dict[str, str]:
-    """Parse the `## Continuity anchors` section into `{name: description}`.
+def missing_reference_sections(project_dir: str) -> list[str]:
+    """Book-level canon ids that are absent or still placeholder text."""
+    from storyforge import canon
+    from storyforge.prompts_illustrate import CANON_PLAN
 
-    Each anchor is an ``### Name`` subsection whose body is the fixed
-    description — a paragraph, not a phrase, because that is what a character
-    or creature actually needs to stay recognizable. Anchors cover whatever the
-    art must keep consistent: characters, creatures, locations, props.
-    """
-    sections = read_direction(project_dir)
-    # Every heading that reads as the anchors section contributes, so a
-    # differently-cased duplicate does not silently orphan the anchors under it.
-    bodies = [text for name, text in sections.items()
-              if name.strip().lower() == ANCHORS_SECTION.lower()]
-    body = '\n\n'.join(b for b in bodies if b.strip())
-    if not body:
-        return {}
-
-    anchors: dict[str, str] = {}
-    matches = list(_H3_RE.finditer(body))
-    for i, match in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
-        name = match.group(1).strip()
-        description = ' '.join(body[match.end():end].split())
-        if name and description:
-            anchors[name] = description
-    return anchors
-
-
-def has_direction(project_dir: str) -> bool:
-    """True when a non-empty direction document exists."""
-    return bool(read_direction(project_dir))
-
-
-def missing_direction_sections(project_dir: str) -> list[str]:
-    """Return the expected sections a direction document is missing or left empty."""
-    sections = read_direction(project_dir)
-    if not sections:
-        return list(DIRECTION_SECTIONS)
-
-    missing = []
-    for name in DIRECTION_SECTIONS:
-        actual = find_section(sections, name)
-        body = sections.get(actual, '') if actual else ''
-        if not body.strip() or _is_placeholder(body):
-            missing.append(name)
+    missing: list[str] = []
+    for canon_id, _canon_type, _purpose in CANON_PLAN:
+        path = canon.resolve_canon_path(project_dir, canon_id)
+        if path is None:
+            missing.append(canon_id)
+            continue
+        body = canon.embeddable_block_text(path)
+        if body is None or canon._section_body_is_placeholder(body):
+            missing.append(canon_id)
     return missing
-
-
-#: A line wholly wrapped in markdown emphasis. Both the coach and strict
-#: templates emit their instructions this way, so a section made of nothing but
-#: emphasized lines is boilerplate by construction.
-_EMPHASIZED_LINE_RE = re.compile(r'\A[_*]{1,2}.*[_*]{1,2}\Z')
-
-# Unemphasized placeholders an author might type by hand. The templates always
-# emphasize theirs, so this is a courtesy net, not the primary test.
-_BARE_PLACEHOLDER_RE = re.compile(
-    r'\A\(?\s*(tbd|todo|n/?a|(you )?fill (this )?in)\b', re.IGNORECASE,
-)
-
-
-def _is_placeholder(body: str) -> bool:
-    """True when a section body is still template boilerplate.
-
-    A scaffolded document with every section left as a prompt-to-the-author is
-    worse than no document, because it would be fed to the image model as
-    though it were direction.
-
-    The test is structural rather than a keyword list: strip the emphasized
-    instruction lines the templates emit, and if nothing substantive remains,
-    the author has not written this section yet. `### Name` subsection headings
-    do not count as content either — an anchor heading with no description
-    under it is an unfilled anchor.
-    """
-    substantive = []
-    for line in body.strip().splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
-            continue
-        if _EMPHASIZED_LINE_RE.match(stripped):
-            continue
-        if _BARE_PLACEHOLDER_RE.match(stripped):
-            continue
-        substantive.append(stripped)
-    return not substantive
 
 
 # ============================================================================

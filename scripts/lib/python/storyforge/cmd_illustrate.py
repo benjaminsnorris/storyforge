@@ -160,6 +160,12 @@ def run_diagnose(project_dir: str) -> int:
     if report['next_unrendered']:
         log(f'  next to render: {report["next_unrendered"]}')
 
+    missing_ref = ill.missing_reference_sections(project_dir)
+    if missing_ref:
+        log(f'  reference tier incomplete: {", ".join(missing_ref)} missing '
+            f'or still placeholder — --prompts will warn until these are '
+            f'filled (run `storyforge illustrate --direction`)')
+
     steps = ill.render_order(project_dir)
     if steps:
         log('Recommended render order:')
@@ -383,8 +389,8 @@ def run_review(project_dir: str, dry_run: bool) -> int:
     content = pi.render_sequence_review(
         title=read_yaml_field('project.title', project_dir) or 'Untitled',
         steps=steps,
-        anchors=ill.read_continuity_anchors(project_dir),
-        direction=ill.read_direction(project_dir),
+        anchors=pi.anchors_for_prompt(project_dir),
+        direction=pi.book_level_direction(project_dir),
     )
     path = os.path.join(project_dir, rel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -565,17 +571,18 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
 
     log(f'Writing art direction for {len(rows)} illustration(s)')
 
-    direction = ill.read_direction(project_dir)
-    if not direction:
-        log(f'WARNING: no {ill.DIRECTION_FILENAME} — these prompts will carry '
-            f'no house style, and the illustrations will not look like they '
-            f'belong to one book. Run `storyforge illustrate --direction` '
-            f'first.')
-    else:
-        missing = ill.missing_direction_sections(project_dir)
-        if missing:
-            log(f'WARNING: {ill.DIRECTION_FILENAME} is missing: '
-                f'{", ".join(missing)}')
+    missing = ill.missing_reference_sections(project_dir)
+    if missing:
+        all_ids = {canon_id for canon_id, _t, _p in pi.CANON_PLAN}
+        if set(missing) == all_ids:
+            log('WARNING: no reference/canon/ book-level files — these '
+                'prompts will carry no house style, and the illustrations '
+                'will not look like they belong to one book. Run '
+                '`storyforge illustrate --direction` first.')
+        else:
+            log(f'WARNING: reference/canon/ is missing or still placeholder '
+                f'for: {", ".join(missing)}')
+    direction = pi.book_level_direction(project_dir)
 
     if coaching == 'strict':
         log('Coaching is strict — art direction is creative work. Writing the '
