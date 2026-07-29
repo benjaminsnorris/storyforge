@@ -905,10 +905,35 @@ def scene_placements(scene_md: str,
     return placements
 
 
+#: Roles the publish manifest's `assets` array can carry.
+#:
+#: A growing set, deliberately. `illustration` came first; `cover` joined it
+#: when the cover stopped riding the deprecated `cover_base64` field
+#: (benjaminsnorris/storyforge#284), and a later phase may add a packet or
+#: reference role. The asset *transport* never branches on this value — see
+#: `storyforge.bookshelf.sync_assets` — so widening it is a one-line change
+#: here plus whatever produces the new rows.
+AssetRole = Literal['illustration', 'cover']
+
+
+def normalize_asset_extension(extension: str) -> str:
+    """Normalize a file extension to the form the asset bucket stores.
+
+    Collapses ``jpg`` onto ``jpeg``, matching bookshelf's own
+    ``normalizeExtension``. The storage path is ``{digest}.{extension}``, so
+    leaving both spellings in play lets one image occupy two paths — which
+    quietly undoes content addressing and makes the digest diff re-upload bytes
+    that are already in the bucket. Both sides normalizing means the client's
+    idea of an object is identical to the server's.
+    """
+    ext = extension.strip().lstrip('.').lower()
+    return 'jpeg' if ext == 'jpg' else ext
+
+
 class _ManifestAssetRequired(TypedDict):
     """Fields every published asset carries."""
     key: str          #: normalized via asset_key — never a raw plan id
-    role: Literal['illustration']
+    role: AssetRole
     sha256: str
     extension: str
 
@@ -917,6 +942,7 @@ class ManifestAsset(_ManifestAssetRequired, total=False):
     """One asset entry for the Bookshelf publish manifest."""
     width: int
     height: int
+    byte_size: int
     alt_text: str
 
 
@@ -944,7 +970,7 @@ def manifest_assets(project_dir: str,
         if not digest:
             continue
         rel = (row.get('asset_file') or '').strip()
-        ext = os.path.splitext(rel)[1].lstrip('.').lower() or 'png'
+        ext = normalize_asset_extension(os.path.splitext(rel)[1]) or 'png'
         asset: ManifestAsset = {
             'key': key, 'role': 'illustration',
             'sha256': digest, 'extension': ext,
@@ -964,6 +990,28 @@ def manifest_assets(project_dir: str,
             asset['alt_text'] = alt
         assets.append(asset)
     return assets
+
+
+def manifest_asset_sources(project_dir: str) -> dict[str, str]:
+    """Map each ingested plan row's digest to its project-relative file.
+
+    The publish transport uploads bytes by digest and never reads the plan
+    itself (see ``storyforge.bookshelf.sync_assets``), so this is the
+    illustration half of the mapping its caller assembles — the cover
+    contributes the other half.
+
+    Rows without a digest or a recorded file are omitted; they cannot be
+    published either, so ``manifest_assets`` skips them too.
+    """
+    sources: dict[str, str] = {}
+    for row in read_plan(project_dir):
+        if row.get('status', '').strip() != 'ingested':
+            continue
+        digest = (row.get('sha256') or '').strip()
+        rel = (row.get('asset_file') or '').strip()
+        if digest and rel:
+            sources.setdefault(digest, rel)
+    return sources
 
 
 # ============================================================================

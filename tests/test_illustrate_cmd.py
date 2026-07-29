@@ -15,7 +15,7 @@ from storyforge import cmd_illustrate
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from illustration_helpers import (
-    SCENE, SCENE_ADVERSARIAL, make_png, plan_row,
+    SCENE, SCENE_ADVERSARIAL, make_jpeg, make_png, plan_row,
     truncated_png, write_csv, write_scene,
 )
 
@@ -1022,9 +1022,24 @@ def freshen_chapter_map(project_dir):
     return ids
 
 
+def give_project_a_cover(project_dir):
+    """Put a publishable cover on disk.
+
+    Required, not incidental: a manifest that declares assets without a
+    `role: 'cover'` entry is refused, because Bookshelf would read it as "this
+    book has no cover" and clear the live one. A small JPEG so the cover
+    optimizer returns it untouched and the manifest build stays subprocess-free.
+    """
+    cover = os.path.join(project_dir, 'production', 'cover.jpg')
+    if not os.path.isfile(cover):
+        make_jpeg(cover, 800, 1200)
+    return cover
+
+
 def build_manifest(project_dir):
     from storyforge.assembly import generate_publish_manifest
     freshen_chapter_map(project_dir)
+    give_project_a_cover(project_dir)
     path = generate_publish_manifest(project_dir, include_dashboard=False)
     with open(path) as f:
         return json.load(f)
@@ -1126,17 +1141,29 @@ def test_manifest_carries_placements_and_assets(illustrated_project):
     assert scene['illustrations'] == [
         {'key': 'lantern-vigil', 'after_paragraph': 1}]
     assert '![[illus:' not in scene['content_html']
-    assert manifest['assets'] == [{
+    illustrations = [a for a in manifest['assets']
+                     if a['role'] == 'illustration']
+    assert illustrations == [{
         'key': 'lantern-vigil', 'role': 'illustration',
         'sha256': 'a' * 64, 'extension': 'png',
         'width': 40, 'height': 60,
         'alt_text': 'A woman waits at a lit window',
     }]
+    # The cover rides the same array. Without it the manifest would be refused.
+    assert manifest['assets'][0]['role'] == 'cover'
+
+
+def test_manifest_refuses_illustrations_with_no_cover(illustrated_project):
+    """Assets with no cover asset would null out the live book's cover."""
+    from storyforge.assembly import generate_publish_manifest
+    freshen_chapter_map(illustrated_project)
+    with pytest.raises(ValueError, match='none with role "cover"'):
+        generate_publish_manifest(illustrated_project, include_dashboard=False)
 
 
 def test_manifest_omits_assets_when_no_scene_is_illustrated(project_dir):
     manifest = build_manifest(project_dir)
-    assert 'assets' not in manifest
+    assert [a['role'] for a in manifest['assets']] == ['cover']
     assert all('illustrations' not in s
                for ch in manifest['chapters'] for s in ch['scenes'])
 
@@ -1159,7 +1186,7 @@ def test_manifest_drops_a_placement_with_no_publishable_asset(project_dir,
 
     manifest = build_manifest(project_dir)
 
-    assert 'assets' not in manifest
+    assert not [a for a in manifest['assets'] if a['role'] == 'illustration']
     # The dangling placement is gone, not merely warned about.
     assert all('illustrations' not in s
                for ch in manifest['chapters'] for s in ch['scenes'])

@@ -5,6 +5,7 @@ epub metadata, manuscript assembly, genre CSS, cover generation, publish manifes
 and YAML helpers against real fixture data and purpose-built temp projects.
 """
 
+import hashlib
 import json
 import os
 import textwrap
@@ -922,8 +923,13 @@ class TestGeneratePublishManifest:
             path = generate_publish_manifest(project_dir, include_cover=True)
         with open(path) as f:
             manifest = json.load(f)
-        assert 'cover_base64' in manifest
-        assert manifest['cover_extension'] == '.png'
+        # The cover is a content-addressed asset, not embedded base64: its
+        # bytes go straight to storage, and the manifest carries metadata only.
+        assert 'cover_base64' not in manifest
+        cover = next(a for a in manifest['assets'] if a['role'] == 'cover')
+        assert cover['key'] == 'cover'
+        assert cover['extension'] == 'png'
+        assert cover['sha256'] == hashlib.sha256(b'\x89PNG test data').hexdigest()
 
     def test_stale_chapter_map_raises_valueerror(self, project_dir):
         """If chapter map is stale, generate_publish_manifest should raise."""

@@ -1,16 +1,25 @@
 """storyforge publish -- Publish a book to the Bookshelf app via API.
 
 Generates a publish manifest from the scene files and chapter map, authenticates
-with Supabase, and PUTs the manifest to the Bookshelf API. Optionally includes
-the dashboard HTML and cover image.
+with Supabase, uploads any image bytes the server does not already hold, then
+PUTs the metadata-only manifest to the Bookshelf API.
+
+Images (the cover and any interior illustrations) are content-addressed. They
+are declared as manifest metadata and their bytes go straight to storage via
+signed upload URLs, so a re-publish with unchanged art transfers nothing. See
+`storyforge.bookshelf.sync_assets`.
+
+The cover is always published as a `role: 'cover'` asset. It is not optional for
+an illustrated book: Bookshelf derives the book's cover image from that entry,
+so a manifest declaring assets without one would clear the live cover.
 
 Usage:
-    storyforge publish                    # Publish content only
-    storyforge publish --cover            # Include cover image
+    storyforge publish                    # Publish content, cover, and art
+    storyforge publish --no-cover         # Omit the cover asset (no assets only)
     storyforge publish --dashboard        # Include dashboard (default: on)
     storyforge publish --no-dashboard     # Skip dashboard
     storyforge publish --annotations      # Fetch and display reader annotations
-    storyforge publish --dry-run          # Generate manifest without publishing
+    storyforge publish --dry-run          # Report what would publish and upload
 """
 
 import argparse
@@ -34,7 +43,13 @@ def parse_args(argv):
         description='Publish a book to the Bookshelf app via the API.',
     )
     parser.add_argument('--cover', action='store_true',
-                        help='Include the cover image in the publish')
+                        help='Deprecated no-op — the cover is always published '
+                             'as an asset')
+    parser.add_argument('--no-cover', action='store_true',
+                        help='Omit the cover asset. Only valid for a book with '
+                             'no illustrations; publishing other assets without '
+                             'a cover is refused because it would clear the '
+                             "live book's cover image")
     parser.add_argument('--dashboard', action='store_true', default=True,
                         help='Include the dashboard HTML (default: on)')
     parser.add_argument('--no-dashboard', action='store_true',
@@ -94,6 +109,10 @@ def main(argv=None):
     project_dir = detect_project_root()
 
     include_dashboard = args.dashboard and not args.no_dashboard
+    include_cover = not args.no_cover
+    if args.cover:
+        log('Note: --cover is a no-op — the cover is always published as an '
+            'asset now. Pass --no-cover to omit it.')
 
     # Step 1: Regenerate dashboard if needed
     if include_dashboard and not args.skip_visualize and not args.dry_run:
@@ -106,7 +125,7 @@ def main(argv=None):
         manifest_path = generate_publish_manifest(
             project_dir,
             include_dashboard=include_dashboard,
-            include_cover=args.cover,
+            include_cover=include_cover,
         )
     except ValueError as e:
         log(f'Error: {e}')
@@ -124,12 +143,26 @@ def main(argv=None):
         f'{total_scenes} scenes, {total_words:,} words')
     if manifest.get('dashboard_html'):
         log(f'Dashboard: included ({len(manifest["dashboard_html"]):,} bytes)')
-    if manifest.get('cover_base64'):
-        log(f'Cover: included ({manifest["cover_extension"]})')
+
+    # Second line of defence behind generate_publish_manifest's own check, so a
+    # hand-edited working/publish-manifest.json cannot destroy a live cover
+    # either. Runs before the dry-run return: an author checking their publish
+    # should see this, not discover it on the real run.
+    from storyforge.assembly import read_asset_sources, require_cover_asset
+    assets = manifest.get('assets') or []
+    try:
+        require_cover_asset(manifest)
+    except ValueError as e:
+        log(f'Error: {e}')
+        sys.exit(1)
+
+    sources = read_asset_sources(project_dir) if assets else {}
 
     if args.dry_run:
         log(f'Dry run — manifest written to {manifest_path}')
-        log('Would publish to Bookshelf API. Exiting.')
+        if assets:
+            _report_asset_plan(assets, sources)
+        log('Would publish to Bookshelf API. Nothing uploaded. Exiting.')
         return
 
     # Step 3: Authenticate
@@ -150,15 +183,39 @@ def main(argv=None):
 
     log('Authenticated successfully.')
 
-    # Step 4: Publish
+    # Step 4: Upload asset bytes.
+    #
+    # Before the manifest, not after: the publish route refuses a manifest whose
+    # declared bytes are not in the bucket (`assets_missing_bytes`), and it
+    # refuses it at a phase that runs before chapters are written — so a book
+    # blocked here is intact, never half-published.
+    asset_sync = None
+    if assets:
+        from storyforge.bookshelf import sync_assets
+        log(f'Syncing {len(assets)} asset(s) with Bookshelf storage...')
+        try:
+            asset_sync = sync_assets(
+                env['BOOKSHELF_URL'], token, manifest['slug'], assets, sources,
+                supabase_url=env['BOOKSHELF_SUPABASE_URL'],
+            )
+        except RuntimeError as e:
+            log(f'Asset sync failed: {e}')
+            log('The manifest was not sent — the live book is unchanged.')
+            sys.exit(1)
+        log(f'Assets: {asset_sync["uploaded"]} uploaded '
+            f'({asset_sync["bytes_uploaded"]:,} bytes), '
+            f'{asset_sync["unchanged"]} already present')
+
+    # Step 5: Publish
     log(f'Publishing "{manifest["title"]}" to Bookshelf...')
     try:
         result = publish(env['BOOKSHELF_URL'], token, manifest)
     except RuntimeError as e:
         log(f'Publish failed: {e}')
+        _explain_publish_failure(str(e))
         sys.exit(1)
 
-    # Step 5: Report results
+    # Step 6: Report results
     pub = result.get('published', {})
     log(f'Published successfully!')
     log(f'  Book ID: {result.get("book_id", "unknown")}')
@@ -179,12 +236,88 @@ def main(argv=None):
         if parts:
             log(f'  Highlights: {", ".join(parts)}')
 
-    if result.get('cover_uploaded'):
-        log('  Cover: uploaded')
+    if asset_sync:
+        log(f'  Assets: {asset_sync["declared"]} declared, '
+            f'{asset_sync["uploaded"]} uploaded, '
+            f'{asset_sync["unchanged"]} unchanged '
+            f'({asset_sync["bytes_uploaded"]:,} bytes transferred)')
 
-    # Step 6: Fetch annotations if requested
+    # Step 7: Fetch annotations if requested
     if args.annotations:
         _show_annotations(env, token, manifest['slug'])
+
+
+def _report_asset_plan(assets: list, sources: dict) -> None:
+    """Dry-run asset report: what would upload, and what could not.
+
+    Cannot say which digests the server already holds — that needs the
+    authenticated digest diff, which a dry run deliberately does not perform.
+    What it can do is check every declared asset against its local file, which
+    is where the failures actually are.
+    """
+    from storyforge.illustrations import sha256_of
+
+    by_role: dict[str, int] = {}
+    for asset in assets:
+        role = asset.get('role', 'unknown')
+        by_role[role] = by_role.get(role, 0) + 1
+    breakdown = ', '.join(f'{n} {role}' for role, n in sorted(by_role.items()))
+    log(f'Assets: {len(assets)} declared ({breakdown}). Would negotiate '
+        f'digests and upload only the bytes Bookshelf is missing.')
+
+    problems = 0
+    total_bytes = 0
+    for asset in assets:
+        digest = asset.get('sha256', '')
+        local = sources.get(digest)
+        label = f'{asset.get("key")} ({digest[:12]}…)'
+        if not local:
+            log(f'  ERROR: {label} has no local file recorded — re-run '
+                f'`storyforge illustrate --ingest`')
+            problems += 1
+            continue
+        if not os.path.isfile(local):
+            log(f'  ERROR: {label} file is missing: {local}')
+            problems += 1
+            continue
+        try:
+            actual = sha256_of(local)
+        except OSError as e:
+            log(f'  ERROR: {label} cannot be read: {e}')
+            problems += 1
+            continue
+        if actual != digest:
+            log(f'  ERROR: {label} has drifted — {local} now hashes to '
+                f'{actual[:12]}…; re-ingest to record it')
+            problems += 1
+            continue
+        total_bytes += os.path.getsize(local)
+
+    if problems:
+        log(f'  {problems} asset(s) would block the publish. Nothing uploaded '
+            f'(dry run).')
+    else:
+        log(f'  All {len(assets)} asset file(s) resolve and match their '
+            f'digests; up to {total_bytes:,} bytes would transfer on a first '
+            f'publish. Nothing uploaded (dry run).')
+
+
+def _explain_publish_failure(message: str) -> None:
+    """Add an actionable next step to the server's own error phase."""
+    if 'assets_missing_bytes' in message:
+        log('Bookshelf has metadata for assets whose bytes are not in storage. '
+            'The upload step ran but did not cover them — re-run publish; if it '
+            'repeats, check that every plan row\'s sha256 matches its file '
+            '(`storyforge cleanup`).')
+    elif 'assets_digest_mismatch' in message:
+        log('Bookshelf re-hashed the uploaded bytes and got a different digest '
+            'than the manifest declared. The file changed between ingest and '
+            'publish. Re-run `storyforge illustrate --ingest` to record the '
+            'current digest, then publish again.')
+    elif 'assets_legacy_cover' in message:
+        log('The manifest sent both a cover asset and the deprecated '
+            'cover_base64 field. Regenerate the manifest with the current '
+            'plugin version.')
 
 
 def _show_annotations(env: dict, token: str, slug: str) -> None:

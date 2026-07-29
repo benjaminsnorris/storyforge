@@ -1,5 +1,5 @@
 """Tests for API-compatible publish manifest generation and cmd_publish."""
-import base64
+import hashlib
 import json
 import os
 
@@ -95,11 +95,18 @@ class TestManifestDashboard:
 
 
 class TestManifestCover:
-    def test_includes_cover_base64(self, tmp_path):
+    """The cover is an ordinary content-addressed asset.
+
+    It used to ride the manifest as base64 in `cover_base64`, which bookshelf
+    deprecated: the server adopted it into a cover asset and warned. It is now
+    declared as `role: 'cover'` alongside any illustrations, hashed the same
+    way, with its bytes uploaded through the same signed-URL path.
+    """
+
+    def test_declares_the_cover_as_an_asset(self, tmp_path):
         from storyforge.assembly import generate_publish_manifest
         proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
 
-        # Create a cover image
         production = tmp_path / 'production'
         production.mkdir(exist_ok=True)
         cover_data = b'\x89PNG fake cover data'
@@ -108,8 +115,32 @@ class TestManifestCover:
         path = generate_publish_manifest(proj, include_cover=True)
         with open(path) as f:
             manifest = json.load(f)
-        assert manifest['cover_base64'] == base64.b64encode(cover_data).decode('ascii')
-        assert manifest['cover_extension'] == '.png'
+
+        assert 'cover_base64' not in manifest
+        assert 'cover_extension' not in manifest
+        assert manifest['assets'] == [{
+            'key': 'cover', 'role': 'cover',
+            'sha256': hashlib.sha256(cover_data).hexdigest(),
+            'extension': 'png', 'byte_size': len(cover_data),
+        }]
+
+    def test_records_the_cover_bytes_in_the_source_sidecar(self, tmp_path):
+        """The transport uploads by digest, so the digest must map to a file."""
+        from storyforge.assembly import (generate_publish_manifest,
+                                         read_asset_sources)
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        production = tmp_path / 'production'
+        production.mkdir(exist_ok=True)
+        cover_data = b'\x89PNG fake cover data'
+        (production / 'cover.png').write_bytes(cover_data)
+
+        generate_publish_manifest(proj, include_cover=True)
+
+        sources = read_asset_sources(proj)
+        digest = hashlib.sha256(cover_data).hexdigest()
+        assert os.path.isfile(sources[digest])
+        with open(sources[digest], 'rb') as f:
+            assert f.read() == cover_data
 
     def test_explicit_cover_path(self, tmp_path):
         from storyforge.assembly import generate_publish_manifest
@@ -126,8 +157,11 @@ class TestManifestCover:
         )
         with open(path) as f:
             manifest = json.load(f)
-        assert manifest['cover_base64'] == base64.b64encode(cover_data).decode('ascii')
-        assert manifest['cover_extension'] == '.jpg'
+        cover = manifest['assets'][0]
+        assert cover['sha256'] == hashlib.sha256(cover_data).hexdigest()
+        # Normalized to `jpeg`: the storage path is {digest}.{extension}, so two
+        # spellings of one format would occupy two paths for the same bytes.
+        assert cover['extension'] == 'jpeg'
 
     def test_no_cover_when_not_requested(self, tmp_path):
         from storyforge.assembly import generate_publish_manifest
@@ -140,17 +174,54 @@ class TestManifestCover:
         path = generate_publish_manifest(proj, include_cover=False)
         with open(path) as f:
             manifest = json.load(f)
-        assert 'cover_base64' not in manifest
-        assert 'cover_extension' not in manifest
+        # No assets at all, so bookshelf reads nothing about the cover and
+        # leaves the live one alone. An EMPTY array would not do: `Boolean([])`
+        # is true in JS, and the server treats a declared array as a statement.
+        assert 'assets' not in manifest
 
-    def test_missing_cover_not_included(self, tmp_path):
+    def test_missing_cover_not_included(self, tmp_path, capsys):
         from storyforge.assembly import generate_publish_manifest
         proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
         # No cover file exists
         path = generate_publish_manifest(proj, include_cover=True)
         with open(path) as f:
             manifest = json.load(f)
-        assert 'cover_base64' not in manifest
+        assert 'assets' not in manifest
+        assert 'no cover image found' in capsys.readouterr().out
+
+    def test_svg_cover_is_refused_as_an_asset(self, tmp_path, capsys):
+        """The asset bucket takes png/jpg/jpeg/webp. An SVG is not publishable.
+
+        Autodetect must not settle for it either: a project can hold a
+        production/cover.svg compositing source next to the rendered PNG that
+        actually ships.
+        """
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        production = tmp_path / 'production'
+        production.mkdir(exist_ok=True)
+        (production / 'cover.svg').write_text('<svg/>')
+
+        path = generate_publish_manifest(proj, include_cover=True)
+        with open(path) as f:
+            manifest = json.load(f)
+        assert 'assets' not in manifest
+        assert 'no cover image found' in capsys.readouterr().out
+
+    def test_autodetect_prefers_a_publishable_cover_over_an_svg(self, tmp_path):
+        from storyforge.assembly import generate_publish_manifest
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        production = tmp_path / 'production'
+        production.mkdir(exist_ok=True)
+        (production / 'cover.svg').write_text('<svg/>')
+        assets_dir = tmp_path / 'manuscript' / 'assets'
+        assets_dir.mkdir(parents=True)
+        (assets_dir / 'cover.jpg').write_bytes(b'\xff\xd8\xff jpeg')
+
+        path = generate_publish_manifest(proj, include_cover=True)
+        with open(path) as f:
+            manifest = json.load(f)
+        assert manifest['assets'][0]['extension'] == 'jpeg'
 
 
 class TestResolveCoverPath:

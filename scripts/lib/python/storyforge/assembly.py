@@ -1206,31 +1206,38 @@ def main():
 
 def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
                               include_dashboard: bool = True,
-                              include_cover: bool = False) -> str:
+                              include_cover: bool = True) -> str:
     """Generate a JSON publish manifest from scene files and chapter map.
 
     Converts each scene's markdown to HTML, groups by chapter from
-    chapter-map.csv, and writes working/publish-manifest.json.
+    chapter-map.csv, and writes working/publish-manifest.json plus the
+    digest -> local-file sidecar the asset transport uploads from.
 
     The manifest is compatible with the Bookshelf PUT /api/books/<slug>
-    endpoint and optionally includes dashboard_html and cover_base64.
+    endpoint. Images are metadata-only entries in a role-generic `assets`
+    array; their bytes travel separately (see `storyforge.bookshelf.sync_assets`).
+    The deprecated `cover_base64` field is no longer emitted — the cover is an
+    ordinary `role: 'cover'` asset.
 
     Args:
         project_dir: Root directory of the project.
         cover_path: Optional path to cover image (absolute or relative to
-            project_dir). When include_cover is True and cover_path is None,
-            auto-detects from production/cover.* or manuscript/assets/cover.*.
+            project_dir). When None, resolves from production.cover_image then
+            production/cover.* then manuscript/assets/cover.*.
         include_dashboard: If True (default), include dashboard_html and
             dashboard_data. Pass False to omit all dashboard fields.
-        include_cover: If True, base64-encode the cover image and embed it.
+        include_cover: Declare the cover asset. On by default, and effectively
+            mandatory for an illustrated book: a manifest that declares assets
+            without a cover is refused, because Bookshelf would read it as
+            "this book has no cover" and clear the live one.
 
     Returns:
         Path to the generated manifest file.
 
     Raises:
-        ValueError: If the chapter map is stale.
+        ValueError: If the chapter map is stale, or if the manifest would
+            declare assets with no cover among them.
     """
-    import base64
     import json
     from storyforge import illustrations as _ill
     from storyforge.common import (check_chapter_map_freshness,
@@ -1324,15 +1331,20 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
         'chapters': chapters,
     }
 
-    # Illustration assets — metadata only, no bytes. The bytes go straight to
-    # storage via a content-addressed digest diff (benjaminsnorris/bookshelf#11).
-    if used_illustrations:
-        from storyforge.common import log as _log
+    # The manifest's `assets` array is role-generic — illustrations and the
+    # cover both land in it, and each contributes its own digest -> local file
+    # entry so the publish transport can upload bytes without knowing what a
+    # plan row is. Metadata only here; the bytes go straight to storage via a
+    # content-addressed digest diff (benjaminsnorris/bookshelf#11).
+    from storyforge.common import log as _log
 
+    assets: list = []
+    #: digest -> project-relative file, written beside the manifest.
+    asset_sources: dict[str, str] = {}
+
+    if used_illustrations:
         assets = _ill.manifest_assets(project_dir, used_illustrations)
         declared = {a['key'] for a in assets}
-        if assets:
-            manifest['assets'] = assets
 
         undeclared = used_illustrations - declared
         if undeclared:
@@ -1367,6 +1379,37 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
                          f're-ingest to record it')
         if assets:
             _log(f'Manifest: {len(assets)} illustration(s) declared')
+            asset_sources.update(_ill.manifest_asset_sources(project_dir))
+
+    # The cover is a second source path into the SAME asset array, hashed the
+    # same way. It is not a plan row — it lives at production/cover.* or
+    # manuscript/assets/cover.* — so it contributes here rather than from
+    # manifest_assets. Declared first, which is also why the array's order is
+    # cover-then-illustrations.
+    if include_cover:
+        cover = cover_manifest_asset(project_dir, cover_path)
+        if cover is not None:
+            cover_asset, cover_rel = cover
+            # Asset keys are unique per book, and an illustration whose plan id
+            # normalizes to "cover" would collide with the cover itself. Caught
+            # here so the author gets the plan row to rename, rather than a
+            # server-side "Duplicate asset key" halfway through publish.
+            if any(a['key'] == cover_asset['key'] for a in assets):
+                raise ValueError(
+                    f'An illustration is published under the asset key '
+                    f'"{COVER_ASSET_KEY}", which is reserved for the book '
+                    f'cover. Rename that row\'s id in '
+                    f'reference/illustration-plan.csv (and its scene marker).'
+                )
+            assets.insert(0, cover_asset)
+            asset_sources[cover_asset['sha256']] = cover_rel
+            _log(f'Manifest: cover declared as an asset '
+                 f'({cover_asset["extension"]}, '
+                 f'{cover_asset.get("byte_size", 0):,} bytes)')
+
+    if assets:
+        manifest['assets'] = assets
+    require_cover_asset(manifest)
 
     # Embed dashboard HTML if requested
     if include_dashboard:
@@ -1384,21 +1427,143 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
             from storyforge.common import log as _log
             _log(f'WARNING: Could not load dashboard data: {exc}')
 
-    # Embed cover as base64 if requested
-    if include_cover:
-        resolved = _resolve_cover_path(project_dir, cover_path)
-        if resolved and os.path.isfile(resolved):
-            optimized = _optimize_cover_image(resolved, project_dir)
-            with open(optimized, 'rb') as f:
-                manifest['cover_base64'] = base64.b64encode(f.read()).decode('ascii')
-            manifest['cover_extension'] = os.path.splitext(optimized)[1]
-
     output_path = os.path.join(project_dir, 'working', 'publish-manifest.json')
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w') as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
+    # The digest -> file map goes in a sidecar rather than into the manifest:
+    # local paths are no business of the server's, and the transport needs them.
+    # Written from the same pass that computed the digests, so the bytes
+    # uploaded are always the bytes the manifest claims — recomputing the cover
+    # digest separately could disagree if the optimizer's output shifted.
+    with open(asset_sources_path(project_dir), 'w') as f:
+        json.dump(asset_sources, f, indent=2, sort_keys=True)
+
     return output_path
+
+
+ASSET_SOURCES_FILENAME = 'publish-asset-sources.json'
+
+#: Extensions the `book-assets` bucket accepts. SVG is not among them, so an
+#: SVG cover cannot be published as an asset even though the epub build uses one.
+COVER_ASSET_EXTENSIONS = ('png', 'jpg', 'jpeg', 'webp')
+
+#: The cover's asset key. Fixed, because bookshelf derives `books.cover_image_url`
+#: from `role: 'cover'` and refuses a manifest that also sends `cover_base64`.
+COVER_ASSET_KEY = 'cover'
+
+
+def asset_sources_path(project_dir: str) -> str:
+    """Path to the digest -> local-file sidecar written beside the manifest."""
+    return os.path.join(project_dir, 'working', ASSET_SOURCES_FILENAME)
+
+
+def read_asset_sources(project_dir: str) -> dict[str, str]:
+    """Load the digest -> absolute local path map for the current manifest.
+
+    Paths are stored project-relative so the sidecar survives a moved checkout;
+    they are resolved here.
+    """
+    import json
+
+    path = asset_sources_path(project_dir)
+    if not os.path.isfile(path):
+        return {}
+    with open(path) as f:
+        raw = json.load(f)
+    return {digest: os.path.join(project_dir, rel) for digest, rel in raw.items()}
+
+
+def require_cover_asset(manifest: dict) -> None:
+    """Refuse a manifest that declares assets without a cover among them.
+
+    Bookshelf derives `books.cover_image_url` from the `role: 'cover'` asset and
+    treats a manifest that declares *any* assets as an authoritative statement
+    about the cover — so an assets array with no cover entry sets the column to
+    null and the live book loses its cover image. That is silent data loss on
+    the reader side, which is why this refuses rather than warns.
+
+    Raises:
+        ValueError: If `assets` is non-empty and contains no cover.
+    """
+    assets = manifest.get('assets') or []
+    if not assets:
+        return
+    if any(a.get('role') == 'cover' for a in assets):
+        return
+    raise ValueError(
+        f'Refusing to publish: the manifest declares {len(assets)} asset(s) but '
+        f'none with role "cover". Bookshelf derives the book\'s cover image '
+        f'from that entry, so publishing this manifest would REMOVE the live '
+        f'cover. Add a cover at production/cover.{{png,jpg,webp}} or '
+        f'manuscript/assets/cover.{{png,jpg,webp}}, or point '
+        f'production.cover_image in storyforge.yaml at one, then re-run '
+        f'publish. (An SVG cover cannot be published — the asset bucket only '
+        f'accepts png, jpg, jpeg, and webp.)'
+    )
+
+
+def cover_manifest_asset(project_dir: str, cover_path: str | None = None):
+    """Build the cover's manifest asset entry, or None if there is no usable one.
+
+    Resolution order — explicit path, then `production.cover_image` in
+    storyforge.yaml, then autodetect `production/` before `manuscript/assets/`.
+    The YAML field comes before autodetect because that is where a project
+    records which of several cover files is the real one: a book can hold a
+    `production/cover.svg` compositing source alongside the rendered
+    `manuscript/assets/cover.png` that actually ships, and autodetect alone
+    would pick the SVG.
+
+    Returns:
+        (asset, project_relative_path), or None with a WARNING logged.
+    """
+    from storyforge import illustrations as _ill
+    from storyforge.common import log
+
+    resolved = _resolve_cover_path(project_dir, cover_path,
+                                   extensions=COVER_ASSET_EXTENSIONS)
+    if not resolved:
+        log('WARNING: no cover image found — the published book will have no '
+            'cover asset. Add production/cover.png (or .jpg/.webp), or set '
+            'production.cover_image in storyforge.yaml.')
+        return None
+    if not os.path.isfile(resolved):
+        log(f'WARNING: cover image {resolved} does not exist — no cover asset '
+            f'will be published.')
+        return None
+
+    extension = _ill.normalize_asset_extension(os.path.splitext(resolved)[1])
+    if extension not in COVER_ASSET_EXTENSIONS:
+        log(f'WARNING: cover {resolved} has extension .{extension}, which the '
+            f'asset bucket does not accept ({", ".join(COVER_ASSET_EXTENSIONS)}). '
+            f'Export a PNG or JPEG cover and point production.cover_image at '
+            f'it. No cover asset will be published.')
+        return None
+
+    # Optimized rather than raw: a cover renders at a few hundred pixels in the
+    # library grid, and a multi-megabyte original is wasted bytes for every
+    # reader. Digested AFTER optimization so the recorded digest matches the
+    # bytes that actually get uploaded.
+    optimized = _optimize_cover_image(resolved, project_dir)
+    extension = _ill.normalize_asset_extension(os.path.splitext(optimized)[1])
+
+    asset = {
+        'key': COVER_ASSET_KEY,
+        'role': 'cover',
+        'sha256': _ill.sha256_of(optimized),
+        'extension': extension,
+        'byte_size': os.path.getsize(optimized),
+    }
+    dimensions = _ill.image_dimensions(optimized)
+    if dimensions:
+        asset['width'], asset['height'] = dimensions
+
+    # Relative when it can be, so the sidecar survives a moved checkout; an
+    # explicit cover outside the project keeps its absolute path, which
+    # read_asset_sources joins through unchanged.
+    relative = os.path.relpath(optimized, project_dir)
+    return asset, optimized if relative.startswith(os.pardir) else relative
 
 
 _COVER_MAX_DIMENSION = 1600
@@ -1484,11 +1649,22 @@ def _optimize_cover_image(cover_path: str, project_dir: str) -> str:
     return optimized
 
 
-def _resolve_cover_path(project_dir: str, cover_path: str | None) -> str | None:
+_COVER_AUTODETECT_EXTENSIONS = ('jpg', 'jpeg', 'png', 'webp', 'svg')
+
+
+def _resolve_cover_path(project_dir: str, cover_path: str | None,
+                        extensions: tuple[str, ...] = _COVER_AUTODETECT_EXTENSIONS,
+                        ) -> str | None:
     """Resolve a cover image path, auto-detecting if not provided.
 
     Priority: explicit cover_path > production.cover_image YAML field >
     auto-detect from production/ then manuscript/assets/ (jpg first).
+
+    Args:
+        extensions: Which `cover.*` files autodetect will consider. The epub and
+            PDF builds accept SVG; the publish asset path does not, so it passes
+            a narrower tuple rather than filtering an SVG out afterwards and
+            missing a publishable cover sitting next to it.
     """
     if cover_path:
         if os.path.isabs(cover_path):
@@ -1509,7 +1685,7 @@ def _resolve_cover_path(project_dir: str, cover_path: str | None) -> str | None:
 
     # Auto-detect from standard locations (jpg preferred for publishing)
     for directory in ('production', 'manuscript/assets'):
-        for ext in ('jpg', 'jpeg', 'png', 'webp', 'svg'):
+        for ext in extensions:
             candidate = os.path.join(project_dir, directory, f'cover.{ext}')
             if os.path.isfile(candidate):
                 return candidate
