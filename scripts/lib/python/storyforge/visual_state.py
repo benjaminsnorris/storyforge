@@ -32,12 +32,19 @@ docs/superpowers/specs/2026-07-28-illustration-state-matrix-and-packet-design.md
 
 import csv
 import os
-from typing import TypedDict
+import re
+from typing import TYPE_CHECKING, TypedDict
 
 from storyforge.common import log
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from storyforge.canon import AnchorLabel
+    from storyforge.illustrations import IllustrationFinding
+
 STATE_COLUMNS: list[str] = ['entity', 'from_scene', 'state', 'evidence']
 STATE_FILENAME = 'visual-state.csv'
+#: Project-relative, and the `file` every state finding carries: the fix is an
+#: edit to the log even when the finding is *about* a scene.
 STATE_FILE = os.path.join('reference', STATE_FILENAME)
 
 
@@ -127,10 +134,21 @@ def state_at(project_dir: str, scene_id: str) -> dict[str, str]:
             f'the chapter map and from scenes.csv) — visual state resolves as '
             f'empty, not as unchanged')
         return {}
-    target = order[scene_id]
+    return _resolve(order, read_transitions(project_dir), order[scene_id])
 
+
+def _resolve(
+    order: dict[str, int],
+    transitions: list[Transition],
+    target: int,
+) -> dict[str, str]:
+    """The forward walk itself, over already-loaded order and transitions.
+
+    Separate from `state_at` so the pre-pass can resolve many scenes without
+    re-reading the chapter map and the log once per scene.
+    """
     best: dict[str, tuple[int, str]] = {}
-    for transition in read_transitions(project_dir):
+    for transition in transitions:
         pos = order.get(transition['from_scene'])
         if pos is None or pos > target:
             continue
@@ -165,3 +183,251 @@ def write_transitions(project_dir: str, rows: list[Transition]) -> str:
         for row in rows:
             writer.writerow({k: row.get(k, '') for k in STATE_COLUMNS})
     return path
+
+
+# ============================================================================
+# The deterministic pre-pass
+# ============================================================================
+
+class PrepassResult(TypedDict):
+    """What the deterministic pass found, and what the LLM should read.
+
+    `findings` are problems in the log itself and gaps between the log and the
+    plan — all cheap, all certain. `candidate_scenes` is the narrowed set of
+    scenes whose prose could disagree with the log; it exists so the audit's one
+    LLM call reads a handful of scenes instead of the book.
+    """
+    findings: list['IllustrationFinding']
+    candidate_scenes: list[str]
+
+
+def _csv_safe(text: str) -> str:
+    """Collapse *text* onto one line with no `|` before it enters a `detail`.
+
+    Finding details land in the unquoted pipe-delimited
+    `working/cleanup-report.csv`, and evidence and state cells are author prose.
+    Delegates to the illustration module's helper so there is one such function.
+    """
+    from storyforge.illustrations import _csv_safe as flatten
+    return flatten(text)
+
+
+def _entity_search_terms(
+    entity: str,
+    display_names: dict[str, 'AnchorLabel'],
+) -> set[str]:
+    """Phrases whose presence in a scene means that scene talks about *entity*.
+
+    An entity id is `{canon_id}-{aspect}` where it has several tracks and a bare
+    `canon_id` where it has one, so the id alone ("nora-clothing") is rarely the
+    phrase the prose uses. Resolution:
+
+    1. the longest prefix of the id that names a canon file — the author said
+       where the id ends — plus that entity's display name;
+    2. failing that, the id minus its last segment, which is what the naming
+       convention implies;
+    3. always the humanized id itself.
+
+    Deliberately errs wide. An extra candidate scene costs one scene of reading
+    in a single LLM call; a missed one costs a contradiction that ships.
+    """
+    terms = {entity.replace('-', ' ')}
+    parts = entity.split('-')
+
+    canon_id = ''
+    for count in range(len(parts), 0, -1):
+        candidate = '-'.join(parts[:count])
+        if candidate in display_names:
+            canon_id = candidate
+            break
+
+    if canon_id:
+        terms.add(canon_id.replace('-', ' '))
+        terms.add(display_names[canon_id]['label'])
+    elif len(parts) > 1:
+        terms.add('-'.join(parts[:-1]).replace('-', ' '))
+
+    return {' '.join(t.lower().split()) for t in terms if t.strip()}
+
+
+def _mentions(haystack: str, term: str) -> bool:
+    """Whole-word match of *term* in already-normalized lowercase *haystack*."""
+    return re.search(rf'(?<!\w){re.escape(term)}(?!\w)', haystack) is not None
+
+
+def _scene_haystack(text: str) -> str:
+    """Scene prose, marker-free, whitespace-collapsed, lowercased.
+
+    Markers come out first: a marker is not prose, and `illus:great-lamp` would
+    otherwise make every illustrated scene mention every entity it names.
+    """
+    from storyforge.illustrations import strip_markers
+    return ' '.join(strip_markers(text).split()).lower()
+
+
+def prepass(project_dir: str) -> PrepassResult:
+    """Check the log deterministically, and narrow the prose the LLM reads.
+
+    Four checks, none of which needs a model:
+
+    1. a `from_scene` with no reading position — `state_unknown_scene`, an
+       error, because the transition never applies and every scene after it
+       resolves to the wrong state;
+    2. an `evidence` quote no longer in that scene's prose —
+       `evidence_not_found`, matched whitespace-tolerantly so a reflow does not
+       read as drift;
+    3. an illustration whose `canon_refs` names an entity with no resolved state
+       at its scene — `state_unspecified`. An aspect track satisfies a bare
+       canon id (`nora-clothing` covers `nora`), and a `state_override` on the
+       row satisfies it too: a one-off state that does not persist is still a
+       stated state;
+    4. `candidate_scenes` — the scenes that mention a tracked entity at or after
+       that entity's first transition, which is where prose and log can
+       disagree.
+    """
+    from storyforge import illustrations as ill
+
+    transitions = read_transitions(project_dir)
+    order = ill._scene_order(project_dir)
+    findings: list['IllustrationFinding'] = []
+
+    # --- Checks 1 and 2: the log against the prose -------------------------
+    # Positions of the transitions that actually resolve, per entity. Built
+    # here so checks 3 and 4 do not re-walk the log.
+    resolved: dict[str, set[int]] = {}
+    for transition in transitions:
+        entity = transition['entity']
+        from_scene = transition['from_scene']
+        position = order.get(from_scene)
+        if position is None:
+            findings.append({
+                'kind': 'state_unknown_scene',
+                'id': entity,
+                'file': STATE_FILE,
+                'detail': f'transition for {entity!r} is keyed to '
+                          f'{from_scene!r}, which has no reading position — it '
+                          f'is in neither the chapter map nor scenes.csv, so '
+                          f'the transition never applies and every scene after '
+                          f'it resolves to the previous state',
+            })
+            continue
+        resolved.setdefault(entity, set()).add(position)
+
+        if not transition['evidence']:
+            continue
+        text = ill._read_scene(project_dir, from_scene)
+        if text is None:
+            # Undrafted is valid in-flight state, not a finding — the same
+            # posture as an unrendered illustration. Say so rather than
+            # reporting the evidence as missing from prose that does not exist.
+            log(f'  visual-state: {from_scene} has no file in scenes/ — cannot '
+                f'check the evidence for {entity!r} yet')
+            continue
+        if ill.find_anchor(ill.strip_markers(text), transition['evidence']) is None:
+            findings.append({
+                'kind': 'evidence_not_found',
+                'id': entity,
+                'scene_id': from_scene,
+                'file': STATE_FILE,
+                'detail': f'evidence for {entity!r} — '
+                          f'"{_csv_safe(transition["evidence"])}" — no longer '
+                          f'appears in {from_scene}. Either the prose was '
+                          f'revised or the transition belongs in another scene',
+            })
+
+    # --- Check 3: illustrations naming state nobody stated -----------------
+    for row in ill.read_plan(project_dir):
+        if (row.get('status') or '').strip() == 'superseded':
+            continue
+        refs = ill._split_array(row.get('canon_refs', ''))
+        if not refs:
+            continue
+        rid = (row.get('id') or '').strip()
+        scene_id = (row.get('scene_id') or '').strip()
+        if scene_id not in order:
+            # validate_plan already reports a missing or unknown scene_id;
+            # emitting a second finding for the same cell would double-count.
+            log(f'  visual-state: illustration {rid!r} has no resolvable '
+                f'scene_id ({scene_id!r}) — its entity states were not checked')
+            continue
+
+        covered = {key.lower()
+                   for key in _resolve(order, transitions, order[scene_id])}
+        covered |= {key.lower()
+                    for key in parse_state_override(row.get('state_override', ''))}
+        for ref in refs:
+            needle = ref.lower()
+            if any(key == needle or key.startswith(f'{needle}-')
+                   for key in covered):
+                continue
+            findings.append({
+                'kind': 'state_unspecified',
+                'id': rid,
+                'scene_id': scene_id,
+                'file': STATE_FILE,
+                'detail': f'illustration {rid!r} in {scene_id} shows '
+                          f'{_csv_safe(ref)}, but no transition states its '
+                          f'visible state at that point. Add a row to '
+                          f'{STATE_FILE}, or set state_override on the plan row '
+                          f'if the state is true in this image only',
+            })
+
+    return {
+        'findings': findings,
+        'candidate_scenes': _candidate_scenes(project_dir, order, resolved),
+    }
+
+
+def _candidate_scenes(
+    project_dir: str,
+    order: dict[str, int],
+    resolved: dict[str, set[int]],
+) -> list[str]:
+    """Scenes whose prose could contradict the log, in reading order.
+
+    A scene qualifies when it mentions a tracked entity and sits at or after
+    that entity's first resolved transition — the span over which the log
+    asserts something about that entity. A scene that *is* one of the entity's
+    transitions is skipped for it: the evidence quote already pins that scene,
+    and check 2 verifies it.
+
+    Logs how many scenes were selected out of how many exist, so a run that
+    selects nothing says so instead of looking like it checked everything.
+    """
+    from storyforge import illustrations as ill
+
+    if not resolved:
+        return []
+
+    display_names = _display_names(project_dir)
+    terms = {entity: _entity_search_terms(entity, display_names)
+             for entity in resolved}
+    first = {entity: min(positions) for entity, positions in resolved.items()}
+
+    candidates: list[str] = []
+    undrafted = 0
+    for scene_id, position in sorted(order.items(), key=lambda kv: (kv[1], kv[0])):
+        text = ill._read_scene(project_dir, scene_id)
+        if text is None:
+            undrafted += 1
+            continue
+        haystack = _scene_haystack(text)
+        for entity, entity_terms in terms.items():
+            if position < first[entity] or position in resolved[entity]:
+                continue
+            if any(_mentions(haystack, term) for term in entity_terms):
+                candidates.append(scene_id)
+                break
+
+    log(f'  visual-state pre-pass: selected {len(candidates)} of {len(order)} '
+        f'scenes as audit candidates across {len(terms)} tracked entities')
+    if undrafted:
+        log(f'  visual-state pre-pass: {undrafted} scene(s) have no file in '
+            f'scenes/ and were not read')
+    return candidates
+
+
+def _display_names(project_dir: str) -> dict[str, 'AnchorLabel']:
+    """Canon display names, or {} when the project has no canon tier yet."""
+    from storyforge import canon
+    return canon.anchor_display_names(project_dir)

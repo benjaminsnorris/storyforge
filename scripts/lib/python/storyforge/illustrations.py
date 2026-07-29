@@ -1626,8 +1626,21 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     incoherence: a marker with no row, a row claiming a file that isn't
     there, a file no row claims, an anchor that no longer matches the prose,
     and a marker repeated in one scene.
+
+    Also folds in `visual_state.prepass`, whose findings are about the
+    transition log: a transition keyed to a scene that no longer exists, an
+    evidence quote the prose no longer contains, and an illustration naming an
+    entity whose visible state nobody stated at that point.
     """
+    from storyforge import visual_state
+
     findings: list[IllustrationFinding] = []
+
+    # The visual-state pre-pass runs first and unconditionally: two of its three
+    # checks are about the transition log alone, and a log can be wrong before a
+    # single illustration has been planned.
+    findings.extend(visual_state.prepass(project_dir)['findings'])
+
     rows = read_plan(project_dir)
     if not rows and not os.path.isdir(illustrations_dir(project_dir)):
         # No plan and no ingested files — but the hand-edit safety net still
