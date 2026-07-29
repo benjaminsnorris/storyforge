@@ -155,25 +155,39 @@ Turn planned rows into prompts the author can paste into an image model.
 > cd [project_dir] && [plugin_path]/storyforge illustrate --prompts
 > ```
 
-Wait for the author's choice. This is **one creative API call per illustration**, so it is the most expensive phase in the flow — a fifteen-illustration book means fifteen calls.
+Wait for the author's choice. This is **one creative API call per illustration**, so it is the most expensive phase in the flow — a fifteen-illustration book means fifteen calls. The calls run five at a time, so wall-clock is roughly a fifth of the call count, not the sum; every write (canon stubs, prompt files, plan rows) still happens sequentially in plan order afterwards.
 
 Add `--ids one,two` to limit it to specific illustrations, or to re-prompt ones already written after editing their plan row.
 
-This writes `manuscript/assets/illustrations/prompts/{id}.md` per illustration, and sets `status=prompted`. Each prompt file carries the reference list, the prompt body in OpenAI's five-section template, the constraints, and a log table.
+Add `--no-prior-refs` to reference the cover only. Use it when re-rendering a set whose existing art no longer matches the canon — see "The reference chain" below.
+
+This writes `manuscript/assets/illustrations/prompts/{id}.md` per illustration, and sets `status=prompted`. Each prompt file carries the reference list, the prompt body (Scene / Subject / Important details / Use case), a deterministic Constraints block, and a log table.
 
 ### What the prompts encode
 
 These come from lived iteration (benjaminsnorris/ashes PR #9, tracked as #260 and #263). Do not paraphrase them away when you edit a prompt by hand:
 
-1. **Five-section template** — Scene / Subject / Important details / Use case / Constraints. Structure beats brevity.
-2. **Reference images carry style and likeness**, so prompt prose stays short (~250–400 words). The references are the cover art plus prior ingested illustrations — that chain is what keeps a book's interior art visually of a piece instead of fifteen unrelated pictures.
+1. **Five-section template** — Scene / Subject / Important details / Use case / Constraints. Structure beats brevity. The model writes the first four; the **Constraints section is appended deterministically** (orientation, the no-text rule, reference fidelity, anchor consistency) and is deliberately not requested from the model. Asking for both produced a file with `## Constraints` and a nested `### Constraints` saying different things.
+2. **Reference images carry style and likeness**, so prompt prose stays short (~250–400 words). The references are the cover art plus prior ingested illustrations — that chain is what keeps a book's interior art visually of a piece instead of fifteen unrelated pictures. See "The reference chain" for when a prior illustration is *excluded*.
 3. **The continuity anchor is the identical string every time.** Anchors are canon files under `reference/canon/characters/`, `locations/`, `motifs/` — each file's `## Embeddable block` *is* the anchor. Only the anchors an illustration actually shows are sent, narrowed by matching its `canon_refs` against each anchor's `canon_id` (the canon file's slug, not a display name). If `canon_refs` is empty, or if none of its entries match a `canon_id`, the full set is sent instead — an unfiltered anchor set is a smaller failure than a missing one, but it means a plan row still carrying a pre-canon display name (e.g. "Great Lamp" instead of "great-lamp") sends the whole cast at full token cost, with a WARNING rather than narrowing correctly. Never revise an anchor a rendered illustration already used — likeness continuity depends on the string being byte-identical.
+   The anchor is *labeled* in the prompt with a display name — `display_name:` in the canon file's frontmatter, else the registry's `name` for that id, else the title-cased slug (and the command names the ids it had to guess at). `canon_id` stays the matching key; only the label changes, because a slug-labeled anchor gets the slug echoed back in the model's prose ("kneeling are leo — ten, warm light-brown skin…").
 4. **Positive framing for content, not negation.** Negated content keywords leak into the image. "A bare sill," not "no clutter on the sill." Orientation and the no-text rule are the two deliberate exceptions — both are failure modes positive phrasing has not been observed to prevent.
 5. **Explicit orientation, in two places.** GPT Image 2 returns landscape unless told otherwise. Aspect comes from `layout` first — a `double_page` spread is landscape because that is a fact about the page — then from the row's `composition` field, which can say `landscape` or `square`. Portrait otherwise.
 
 The whole book-level direction — the three root canon files — goes into every prompt too, which is why the command warns before it spends anything when the reference tier is incomplete: a canon file that's simply absent tells you to run `--direction`, one that exists but is still a TODO placeholder tells you to edit it directly (re-running `--direction` is a no-op once the file exists). Either way, without it the prompts carry no house style, and the images won't look like they belong to one book.
 
 Plus: no text, no letters, no words, no typography. Image models render text unreliably, and an illustration doesn't need any.
+
+### The reference chain
+
+A prior illustration is used as a style reference only if it was ingested **on or after** the newest `canon_updated` date in `reference/canon/`. Art rendered before the canon that now governs it was directed by rules that no longer apply, and feeding it back in teaches the new render exactly the drift the canon was rewritten to remove — which is how a whole set inherits a mistake through the visual key.
+
+- An **empty `ingested_at`** counts as pre-canon. The column postdates the plan schema, so "unknown" means the render predates even the bookkeeping. A plan CSV with no `ingested_at` column at all is legal; the next write adds it, and every ingest stamps today's date.
+- Every exclusion is a WARNING naming the file and the reason. Silent staleness is what made this hard to notice — the prompts looked fine, they just pointed at the wrong images.
+- With **no canon dates at all**, nothing can be judged stale and the chain is unfiltered (said plainly in the log).
+- `--no-prior-refs` is the explicit rebuild switch: cover only, nothing inherited.
+
+When the chain ends up cover-only or empty, the log says so rather than quietly emitting a short reference list.
 
 ### Author reviews before spending credits
 
@@ -197,7 +211,7 @@ _(No API calls — safe to run here without asking.)_
 
 Files are matched to plan rows **by filename stem** — `lantern-vigil.png` matches the row with id `lantern-vigil`. A file matching nothing is reported and skipped, never guessed at. If the author's filenames don't match, have them rename, or ingest one file at a time.
 
-Ingest copies each file to `manuscript/assets/illustrations/{id}{.ext}`, keeping the source extension (png, jpg, jpeg, or webp), records `sha256` / `width` / `height`, sets `status=ingested`, and then embeds the marker in the scene file.
+Ingest copies each file to `manuscript/assets/illustrations/{id}{.ext}`, keeping the source extension (png, jpg, jpeg, or webp), records `sha256` / `width` / `height` / `ingested_at` (today's date), sets `status=ingested`, and then embeds the marker in the scene file. The `ingested_at` stamp is what lets a later `--prompts` run tell a render directed by the current canon from one that predates it.
 
 A truncated file is refused before anything is written — an aborted render download leaves a header-valid stub whose dimensions parse fine, and overwriting good art with it is unrecoverable. A legitimate replacement is logged with both shapes.
 
@@ -298,7 +312,7 @@ Don't pick the moments. When the author has decided, record their choices and ex
 
 ### `strict`
 
-No creative proposals. Every canon file `--direction` writes arrives as a bare `TODO` line under the required section skeleton (`## Embeddable block`, `## Clauses`, `## Related canon`, `## Iteration history`); the author writes all of it. The command writes `working/coaching/illustration-checklist.md` — structural data and per-column requirements, nothing interpreted. The author supplies every moment, subject, palette, and composition. Ingest, embed, and validation are structural work and stay available; `--prompts` produces a five-section scaffold with the author's own constraint values and empty prose sections.
+No creative proposals. Every canon file `--direction` writes arrives as a bare `TODO` line under the required section skeleton (`## Embeddable block`, `## Clauses`, `## Related canon`, `## Iteration history`); the author writes all of it. The command writes `working/coaching/illustration-checklist.md` — structural data and per-column requirements, nothing interpreted. The author supplies every moment, subject, palette, and composition. Ingest, embed, and validation are structural work and stay available; `--prompts` produces a four-section scaffold (Scene / Subject / Important details / Use case) with the author's own constraint values and empty prose sections; the Constraints block is appended deterministically.
 
 ## Ensure Feature Branch
 
