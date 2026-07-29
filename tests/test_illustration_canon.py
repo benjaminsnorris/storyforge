@@ -578,6 +578,39 @@ A bronze bowl with several wicks, always lit at dusk but for one flame gone dark
     assert findings[0]['id'] == 'great-lamp'
 
 
+def test_direction_anchors_heading_is_matched_case_insensitively(project_dir):
+    """M6 (Task 7 fix round 1): find_section's case-insensitive lookup is
+    what _direction_anchor_mismatches relies on to locate the anchors
+    section at all — a hand-edited document that writes '## Continuity
+    Anchors' (capital A) rather than the exact '## Continuity anchors' must
+    still be found, or the safety net goes silent on every document that
+    doesn't match the case exactly. This restores, at the safety net's real
+    entry point, the integration-level coverage
+    test_anchors_section_is_read_case_insensitively gave the retired
+    read_continuity_anchors/missing_direction_sections pair before Task 7
+    deleted them — find_section itself is still load-bearing here.
+
+    Asserts the mismatch (not the no-mismatch case): if find_section failed
+    to match the mis-cased heading, anchors_body would be '' and
+    _direction_anchor_mismatches would return [] regardless of whether the
+    anchor text actually changed — a no-mismatch assertion alone wouldn't
+    distinguish 'correctly matched, texts agree' from 'silently found
+    nothing.' Asserting the finding fires when the text HAS changed proves
+    the heading was actually located."""
+    from storyforge.illustrations import validate_plan
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'))
+    _write_direction(project_dir, DIRECTION_DOC
+                     .replace('## Continuity anchors', '## Continuity Anchors')
+                     .replace('132 cm', '140 cm'))
+
+    findings = [f for f in validate_plan(project_dir)
+                if f['kind'] == 'direction_anchor_mismatch']
+
+    assert len(findings) == 1
+    assert findings[0]['id'] == 'nora'
+
+
 def test_normalize_for_comparison_matches_extracted_canon_behavior():
     """common.normalize_for_comparison must be byte-identical to the
     behavior canon._normalize_for_drift had before the extraction — a
@@ -747,16 +780,25 @@ def test_direction_strict_makes_no_api_call(project_dir, monkeypatch):
     same target test_direction_full_writes_the_model_output and
     test_direction_reports_incomplete_sections already patch, so this test
     actually fails if the coaching == 'full' gate at the top of the API
-    branch is ever removed or widened."""
+    branch is ever removed or widened.
+
+    ANTHROPIC_API_KEY is set deliberately (fix round 1): without it, the
+    `if coaching == 'full':` branch's own `if not
+    os.environ.get('ANTHROPIC_API_KEY'): return 1` guard would fire first if
+    that gate were ever buggily widened to include 'strict' — the run would
+    return 1 without ever reaching `_invoke`, and this test would pass
+    without the _boom trap ever springing, protecting nothing. With a key
+    present, a widened gate reaches `_invoke` and `_boom` raises for real."""
     from storyforge import cmd_illustrate
     from storyforge.cmd_illustrate import run_direction
     _set_medium(project_dir, 'novel')
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
 
     def _boom(*args, **kwargs):
         raise AssertionError('strict coaching must not call the API')
 
     monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
-    run_direction(project_dir, coaching='strict', dry_run=False)
+    assert run_direction(project_dir, coaching='strict', dry_run=False) == 0
 
 
 # ============================================================================
@@ -796,6 +838,51 @@ def test_missing_reference_sections_reports_placeholders(project_dir):
 
     assert 'visual-foundation' in missing
     assert 'content-limits' in missing
+
+
+@pytest.mark.parametrize('placeholder_text', [
+    '_(fill this in)_', 'TBD', 'todo', '_Required: describe the palette_',
+    '(you fill this in)',
+])
+def test_missing_reference_sections_catches_every_hand_typed_placeholder(
+        project_dir, placeholder_text):
+    """The five shapes the retired illustrations._is_placeholder recognized
+    (emphasized boilerplate, bare TBD/todo/n-a/fill-this-in), now routed
+    through canon._section_body_is_placeholder. A hand-typed
+    '_(fill this in)_' Embeddable block must not read as populated house
+    style — that's exactly what would have been fed to the image model as
+    though it were direction."""
+    from storyforge.illustrations import missing_reference_sections
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, 'visual-foundation.md',
+                 body=CANON_BODY
+                 .replace('canon_id: nora', 'canon_id: visual-foundation')
+                 .replace('canon_type: character', 'canon_type: foundation')
+                 .replace('Nora, 9 years old, 132 cm, dark brown hair in a '
+                          'short bob, grey-green eyes.', placeholder_text))
+
+    assert 'visual-foundation' in missing_reference_sections(project_dir)
+
+
+def test_missing_reference_sections_catches_an_empty_embeddable_block(
+        project_dir):
+    """canon._section_body_is_placeholder deliberately treats an empty
+    Embeddable block as populated (is_canon_block_populated's documented
+    behavior, which GN's page-architecture gate relies on) — but an empty
+    book-level direction section is still useless to a prompt, same as the
+    retired illustration-direction reader. missing_reference_sections adds
+    that check on its own side rather than the shared function's behavior
+    changing under every caller."""
+    from storyforge.illustrations import missing_reference_sections
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, 'visual-foundation.md',
+                 body=CANON_BODY
+                 .replace('canon_id: nora', 'canon_id: visual-foundation')
+                 .replace('canon_type: character', 'canon_type: foundation')
+                 .replace('Nora, 9 years old, 132 cm, dark brown hair in a '
+                          'short bob, grey-green eyes.', ''))
+
+    assert 'visual-foundation' in missing_reference_sections(project_dir)
 
 
 def test_read_continuity_anchors_is_gone():

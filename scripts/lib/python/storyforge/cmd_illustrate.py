@@ -138,6 +138,26 @@ def _id_filter(raw: str | None) -> set[str] | None:
     return {part.strip() for part in raw.split(',') if part.strip()} or None
 
 
+def _reference_tier_gaps(
+        project_dir: str) -> tuple[list[str], list[str]]:
+    """Split ill.missing_reference_sections into (absent, placeholder).
+
+    The two need different fixes and different advice: an absent canon_id
+    has no file at all, so `--direction` is exactly right for it; a
+    placeholder one already exists as a TODO scaffold, so re-running
+    `--direction` is a silent no-op (it never overwrites an existing file —
+    see run_direction) and the real fix is editing the file directly.
+    Conflating them told an author who had just run `--direction` to run it
+    again, which is the milder recurrence of this task's own defect.
+    """
+    from storyforge import canon as canon_mod
+    missing = ill.missing_reference_sections(project_dir)
+    absent = [c for c in missing
+              if canon_mod.resolve_canon_path(project_dir, c) is None]
+    placeholder = [c for c in missing if c not in absent]
+    return absent, placeholder
+
+
 # ============================================================================
 # --diagnose
 # ============================================================================
@@ -160,11 +180,17 @@ def run_diagnose(project_dir: str) -> int:
     if report['next_unrendered']:
         log(f'  next to render: {report["next_unrendered"]}')
 
-    missing_ref = ill.missing_reference_sections(project_dir)
-    if missing_ref:
-        log(f'  reference tier incomplete: {", ".join(missing_ref)} missing '
-            f'or still placeholder — --prompts will warn until these are '
-            f'filled (run `storyforge illustrate --direction`)')
+    absent_ref, placeholder_ref = _reference_tier_gaps(project_dir)
+    if absent_ref or placeholder_ref:
+        parts = []
+        if absent_ref:
+            parts.append(f'missing: {", ".join(absent_ref)} (run '
+                         f'`storyforge illustrate --direction`)')
+        if placeholder_ref:
+            parts.append(f'unfilled: {", ".join(placeholder_ref)} (edit '
+                         f'directly)')
+        log(f'  reference tier incomplete — {"; ".join(parts)} — --prompts '
+            f'will warn until these are filled')
 
     steps = ill.render_order(project_dir)
     if steps:
@@ -571,17 +597,18 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
 
     log(f'Writing art direction for {len(rows)} illustration(s)')
 
-    missing = ill.missing_reference_sections(project_dir)
-    if missing:
-        all_ids = {canon_id for canon_id, _t, _p in pi.CANON_PLAN}
-        if set(missing) == all_ids:
-            log('WARNING: no reference/canon/ book-level files — these '
-                'prompts will carry no house style, and the illustrations '
-                'will not look like they belong to one book. Run '
-                '`storyforge illustrate --direction` first.')
-        else:
-            log(f'WARNING: reference/canon/ is missing or still placeholder '
-                f'for: {", ".join(missing)}')
+    absent, placeholder = _reference_tier_gaps(project_dir)
+    if absent:
+        log(f'WARNING: reference/canon/ is missing book-level file(s) for: '
+            f'{", ".join(absent)} — these prompts will carry no house '
+            f'style for them, and the illustrations will not look like '
+            f'they belong to one book. Run `storyforge illustrate '
+            f'--direction` first.')
+    if placeholder:
+        log(f'WARNING: reference/canon/ has unfilled book-level file(s) '
+            f'for: {", ".join(placeholder)} — these already exist as '
+            f'TODO scaffolds; edit them directly (re-running --direction '
+            f'is a no-op once the files exist).')
     direction = pi.book_level_direction(project_dir)
 
     if coaching == 'strict':

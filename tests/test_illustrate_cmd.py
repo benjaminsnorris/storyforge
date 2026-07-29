@@ -485,6 +485,44 @@ def test_prompts_full_without_an_api_key_fails(in_project, capsys):
     assert 'ANTHROPIC_API_KEY is not set' in capsys.readouterr().out
 
 
+def test_prompts_warns_missing_when_reference_tier_is_entirely_absent(
+        in_project, capsys):
+    """No reference/canon/ book-level files at all: the fix belongs to
+    --direction, so the WARNING points there."""
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'strict']) == 0
+    out = capsys.readouterr().out
+    assert 'is missing book-level file(s) for' in out
+    assert 'visual-foundation' in out
+    assert 'Run `storyforge illustrate --direction` first' in out
+    assert 'has unfilled book-level file(s)' not in out
+
+
+def test_prompts_warns_to_edit_when_reference_tier_is_placeholder(
+        in_project, capsys):
+    """Regression: after `--direction --coaching strict`, every book-level
+    file already exists as a TODO scaffold. Telling the author to run
+    --direction again would be a no-op (run_direction never overwrites an
+    existing file) — the WARNING must point at editing the files, and must
+    not repeat the 'missing' advice for files that already exist."""
+    for canon_id, canon_type in (('visual-foundation', 'foundation'),
+                                 ('visual-vocabulary', 'vocabulary'),
+                                 ('content-limits', 'rules')):
+        _write_book_level_canon(in_project, canon_id, canon_type,
+                                'TODO — fill this in')
+    write_scene(in_project, 'vigil', SCENE)
+    ill.write_plan(in_project, [plan_row()])
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'strict']) == 0
+    out = capsys.readouterr().out
+    assert 'has unfilled book-level file(s) for' in out
+    assert 'visual-foundation' in out
+    assert 'edit them directly' in out
+    assert 'is missing book-level file(s)' not in out
+
+
 def test_prompts_full_writes_body_and_appends_new_anchors(in_project, monkeypatch):
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, [plan_row()])

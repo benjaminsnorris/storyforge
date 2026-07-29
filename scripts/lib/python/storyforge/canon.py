@@ -252,22 +252,58 @@ _SECTION_BODY_RE = re.compile(
 # body that starts with one of these strings is considered placeholder.
 _PLACEHOLDER_PREFIXES = ('TODO', 'TODO —', 'TODO -', 'TODO.', 'TODO:')
 
+# A line wholly wrapped in markdown emphasis. The (now-retired)
+# illustration-direction coach/strict templates emitted their instructions
+# this way (`_(fill this in)_`, `_Required: describe the palette_`), so a
+# section made of nothing but an emphasized line is boilerplate by
+# construction. Ported verbatim from illustrations._EMPHASIZED_LINE_RE (Task
+# 7 fix round 1, .superpowers/sdd/2026-07-28-illustration-canon-adoption/)
+# rather than reinvented, so the same shapes stay recognized now that
+# placeholder detection is shared here instead of duplicated per module.
+_EMPHASIZED_LINE_RE = re.compile(r'\A[_*]{1,2}.*[_*]{1,2}\Z')
+
+# Unemphasized placeholders an author might type by hand: TBD, n/a, "fill
+# this in". Case-insensitive and broader than _PLACEHOLDER_PREFIXES (which
+# only recognizes the exact-case TODO shapes the templates themselves emit).
+# Also ported verbatim from illustrations._BARE_PLACEHOLDER_RE.
+_BARE_PLACEHOLDER_RE = re.compile(
+    r'\A\(?\s*(tbd|todo|n/?a|(you )?fill (this )?in)\b', re.IGNORECASE,
+)
+
 
 def _section_body_is_placeholder(body: str) -> bool:
     """Return True if the section body looks like an unfilled template.
 
     Strips leading HTML comments (the starter templates wrap orienting
-    comments in `<!-- ... -->`) and checks whether the first non-blank
-    line begins with a TODO marker. False positives are unlikely:
-    authors using TODO as an inline note typically place it mid-text,
-    not as the first content line of a required section.
+    comments in `<!-- ... -->`) and checks whether the first non-blank line
+    reads as scaffolding: a `TODO`-prefixed line (what every shipped
+    template — GN canon, and formerly illustration-direction's own
+    templates — actually emits), a line wholly wrapped in markdown emphasis
+    (the retired illustration-direction coach/strict templates' shape for
+    instructional text), or a bare TBD/n-a/fill-this-in an author might type
+    by hand instead. False positives are unlikely: authors using one of
+    these as an inline note typically place it mid-text, not as the first
+    content line of a required section.
+
+    An empty body (nothing but blank lines) is deliberately NOT a
+    placeholder here — see is_canon_block_populated's docstring for the
+    rationale. A caller that wants an empty book-level Embeddable block to
+    also count as unfilled (illustrations.missing_reference_sections does,
+    because the retired illustration-direction reader treated an empty
+    direction section that way) adds that check on its own side, on top of
+    this function's result, rather than this function's behavior changing
+    under every caller including GN's page-architecture gate.
     """
     text = re.sub(r'^\s*<!--.*?-->\s*', '', body, flags=re.DOTALL)
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        return any(stripped.startswith(p) for p in _PLACEHOLDER_PREFIXES)
+        if any(stripped.startswith(p) for p in _PLACEHOLDER_PREFIXES):
+            return True
+        if _EMPHASIZED_LINE_RE.match(stripped):
+            return True
+        return bool(_BARE_PLACEHOLDER_RE.match(stripped))
     return False
 
 

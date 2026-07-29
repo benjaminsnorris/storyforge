@@ -573,6 +573,37 @@ def test_validate_filled_canon_no_unfilled_finding(tmp_path):
     assert [f for f in findings if f['type'] == 'canon_unfilled_template'] == []
 
 
+@pytest.mark.parametrize('placeholder_text', [
+    '_(fill this in)_', 'TBD', 'todo', '_Required: describe the palette_',
+    '(you fill this in)',
+])
+def test_hand_typed_placeholder_shapes_are_flagged_unfilled(
+        tmp_path, placeholder_text):
+    """Regression: the pre-canon illustrations._is_placeholder recognized
+    five hand-typed scaffold shapes (emphasized boilerplate, bare
+    TBD/todo/n-a/fill-this-in) in addition to the TODO-prefixed lines the
+    shipped templates themselves emit. When that detector was retired in
+    favor of canon._section_body_is_placeholder (illustration-canon-adoption
+    Task 7), the narrower TODO-only version silently stopped catching four
+    of these five shapes — a hand-typed `_(fill this in)_` Embeddable block
+    read as populated and would have been fed to an image model as house
+    style. _section_body_is_placeholder now recognizes all five; this is
+    the canon-level (not illustration-specific) coverage for that, since
+    the widening is shared with GN's canon_unfilled_template finding and
+    is_canon_block_populated gate."""
+    project = str(tmp_path)
+    body = f'\n## Embeddable block\n\n{placeholder_text}\n\n## Clauses\n\n## Related canon\n\n## Iteration history\n'
+    write_canon(project, 'style-foundation.md', 'style-foundation', body=body)
+    findings = validate_canon_file(
+        os.path.join(project, CANON_DIR, 'style-foundation.md'), project,
+    )
+    unfilled = [f for f in findings if f['type'] == 'canon_unfilled_template']
+    assert len(unfilled) == 1, (
+        f'{placeholder_text!r} was not flagged as unfilled: {findings}'
+    )
+    assert 'Embeddable block' in unfilled[0]['detail']
+
+
 def test_validate_directory_skips_template_files(tmp_path):
     project = str(tmp_path)
     canon_dir = os.path.join(project, CANON_DIR, 'characters')

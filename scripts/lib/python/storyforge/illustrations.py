@@ -165,10 +165,12 @@ def default_prompt_rel(illus_id: str) -> str:
 #: Sections the direction document used to be expected to carry. The
 #: reference tier (`reference/canon/`) replaced this document as the source
 #: of book-level direction and continuity anchors — `--direction` no longer
-#: writes it, and `--prompts` no longer reads it. This constant now exists
-#: only for `_direction_anchor_mismatches`, the one-time safety net that
-#: compares a still-present hand-edited document against canon until the
-#: author deletes it.
+#: writes it, and `--prompts` no longer reads it. `_direction_anchor_mismatches`
+#: (the hand-edit safety net) reads the document itself directly — via
+#: `read_direction`/`find_section`/`ANCHORS_SECTION` — and never touches this
+#: constant. Its only remaining reference is the assertion in
+#: `tests/test_illustrations.py::test_read_direction_parses_every_section`;
+#: it is test-only at this point, kept rather than deleted this round.
 DIRECTION_SECTIONS: tuple[str, ...] = (
     'Format', 'Visual promise', 'Recurring visual language',
     'Content limits', 'Continuity anchors',
@@ -227,7 +229,17 @@ def has_reference_tier(project_dir: str) -> bool:
 
 
 def missing_reference_sections(project_dir: str) -> list[str]:
-    """Book-level canon ids that are absent or still placeholder text."""
+    """Book-level canon ids that are absent, empty, or still placeholder text.
+
+    Empty is checked here rather than in canon._section_body_is_placeholder:
+    that shared function deliberately treats an empty Embeddable block as
+    populated (see is_canon_block_populated's docstring — GN's
+    page-architecture gate relies on that). An empty book-level direction
+    section is still useless to a prompt, the same way the retired
+    illustration-direction reader treated an empty section as missing, so
+    the empty check is added on this side, composing with the shared
+    placeholder detector rather than forking it.
+    """
     from storyforge import canon
     from storyforge.prompts_illustrate import CANON_PLAN
 
@@ -238,7 +250,8 @@ def missing_reference_sections(project_dir: str) -> list[str]:
             missing.append(canon_id)
             continue
         body = canon.embeddable_block_text(path)
-        if body is None or canon._section_body_is_placeholder(body):
+        if (body is None or not body.strip()
+                or canon._section_body_is_placeholder(body)):
             missing.append(canon_id)
     return missing
 
