@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 
+import pytest
+
 
 def _make_project(tmp_path, scenes, chapters):
     """Helper to create a minimal project for manifest tests."""
@@ -273,6 +275,7 @@ class TestCmdPublishParseArgs:
         assert args.dashboard is True
         assert args.no_dashboard is False
         assert args.cover is False
+        assert args.no_cover is False
         assert args.annotations is False
         assert args.dry_run is False
 
@@ -280,6 +283,10 @@ class TestCmdPublishParseArgs:
         from storyforge.cmd_publish import parse_args
         args = parse_args(['--cover'])
         assert args.cover is True
+
+    def test_no_cover_flag(self):
+        from storyforge.cmd_publish import parse_args
+        assert parse_args(['--no-cover']).no_cover is True
 
     def test_no_dashboard_flag(self):
         from storyforge.cmd_publish import parse_args
@@ -295,3 +302,182 @@ class TestCmdPublishParseArgs:
         from storyforge.cmd_publish import parse_args
         args = parse_args(['--annotations'])
         assert args.annotations is True
+
+
+# ============================================================================
+# cmd_publish orchestration
+# ============================================================================
+
+def _illustrated_project(tmp_path):
+    """A project with a cover, one ingested illustration, and a marked scene."""
+    from illustration_helpers import make_jpeg, make_png
+    from storyforge import illustrations as ill
+
+    proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+    make_jpeg(os.path.join(proj, 'production', 'cover.jpg'), 600, 900)
+    art = os.path.join(proj, ill.ILLUSTRATIONS_SUBDIR, 'lf-01.png')
+    make_png(art, 40, 60)
+    with open(ill.plan_path(proj), 'w') as f:
+        f.write('|'.join(ill.PLAN_COLUMNS) + '\n')
+        row = dict.fromkeys(ill.PLAN_COLUMNS, '')
+        row.update(id='LF-01', scene_id='s1', placement='scene_open',
+                   layout='full_page', status='ingested',
+                   sha256=ill.sha256_of(art),
+                   asset_file=ill.default_asset_rel('lf-01'))
+        f.write('|'.join(row[c] for c in ill.PLAN_COLUMNS) + '\n')
+    with open(os.path.join(proj, 'scenes', 's1.md'), 'w') as f:
+        f.write('![[illus:LF-01]]\n\nThe prose for scene s1.\n')
+    return proj
+
+
+class TestCmdPublishAssets:
+    def test_dry_run_uploads_nothing(self, tmp_path, capsys):
+        """A dry run must not touch storage — and must not need credentials."""
+        from unittest.mock import patch
+        from storyforge import cmd_publish
+
+        proj = _illustrated_project(tmp_path)
+        with patch('storyforge.cmd_publish.detect_project_root', return_value=proj), \
+             patch('storyforge.bookshelf.sync_assets') as sync, \
+             patch('storyforge.bookshelf.publish') as pub, \
+             patch('storyforge.bookshelf.check_env') as env:
+            cmd_publish.main(['--dry-run', '--no-dashboard'])
+
+        sync.assert_not_called()
+        pub.assert_not_called()
+        env.assert_not_called()
+        out = capsys.readouterr().out
+        assert 'Nothing uploaded' in out
+        assert '2 declared (1 cover, 1 illustration)' in out
+
+    def test_dry_run_reports_a_drifted_asset(self, tmp_path, capsys):
+        from unittest.mock import patch
+        from storyforge import cmd_publish
+        from storyforge import illustrations as ill
+
+        proj = _illustrated_project(tmp_path)
+        art = os.path.join(proj, ill.ILLUSTRATIONS_SUBDIR, 'lf-01.png')
+        with open(art, 'ab') as f:
+            f.write(b'edited after ingest')
+
+        with patch('storyforge.cmd_publish.detect_project_root', return_value=proj):
+            cmd_publish.main(['--dry-run', '--no-dashboard'])
+
+        out = capsys.readouterr().out
+        assert 'has drifted' in out
+        assert 'would block the publish' in out
+
+    def test_assets_are_synced_before_the_manifest(self, tmp_path):
+        """assets_missing_bytes fires before chapters are written, so bytes first."""
+        from unittest.mock import patch
+        from storyforge import cmd_publish
+
+        proj = _illustrated_project(tmp_path)
+        calls = []
+        fake_env = {
+            'BOOKSHELF_URL': 'https://bs.example.com',
+            'BOOKSHELF_SUPABASE_URL': 'https://sb.example.com',
+            'BOOKSHELF_SUPABASE_ANON_KEY': 'anon',
+            'BOOKSHELF_EMAIL': 'a@b.c',
+            'BOOKSHELF_PASSWORD': 'pw',
+        }
+        sync_result = {'declared': 2, 'objects': 2, 'uploaded': 2,
+                       'unchanged': 0, 'bytes_uploaded': 1234}
+
+        def record_sync(*args, **kwargs):
+            calls.append('sync')
+            return sync_result
+
+        def record_publish(*args, **kwargs):
+            calls.append('publish')
+            return {'ok': True, 'book_id': 'id', 'slug': 'test-book',
+                    'published': {'chapters': 1, 'scenes': 1, 'words': 7}}
+
+        with patch('storyforge.cmd_publish.detect_project_root', return_value=proj), \
+             patch('storyforge.bookshelf.check_env', return_value=fake_env), \
+             patch('storyforge.bookshelf.authenticate', return_value='jwt'), \
+             patch('storyforge.bookshelf.sync_assets', side_effect=record_sync) as sync, \
+             patch('storyforge.bookshelf.publish', side_effect=record_publish):
+            cmd_publish.main(['--no-dashboard'])
+
+        assert calls == ['sync', 'publish']
+        _url, _token, slug, declared, sources = sync.call_args.args
+        assert slug == 'test-book'
+        assert [a['role'] for a in declared] == ['cover', 'illustration']
+        # Every declared digest resolves to a real file — that mapping is the
+        # caller's job, not the transport's.
+        assert all(os.path.isfile(sources[a['sha256']]) for a in declared)
+
+    def test_a_failed_asset_sync_stops_before_publishing(self, tmp_path, capsys):
+        from unittest.mock import patch
+        from storyforge import cmd_publish
+
+        proj = _illustrated_project(tmp_path)
+        fake_env = {
+            'BOOKSHELF_URL': 'https://bs.example.com',
+            'BOOKSHELF_SUPABASE_URL': 'https://sb.example.com',
+            'BOOKSHELF_SUPABASE_ANON_KEY': 'anon',
+            'BOOKSHELF_EMAIL': 'a@b.c',
+            'BOOKSHELF_PASSWORD': 'pw',
+        }
+        with patch('storyforge.cmd_publish.detect_project_root', return_value=proj), \
+             patch('storyforge.bookshelf.check_env', return_value=fake_env), \
+             patch('storyforge.bookshelf.authenticate', return_value='jwt'), \
+             patch('storyforge.bookshelf.sync_assets',
+                   side_effect=RuntimeError('storage refused')), \
+             patch('storyforge.bookshelf.publish') as pub:
+            with pytest.raises(SystemExit):
+                cmd_publish.main(['--no-dashboard'])
+
+        pub.assert_not_called()
+        out = capsys.readouterr().out
+        assert 'storage refused' in out
+        assert 'live book is unchanged' in out
+
+    def test_illustrations_without_a_cover_exit_nonzero(self, tmp_path, capsys):
+        from unittest.mock import patch
+        from storyforge import cmd_publish
+
+        proj = _illustrated_project(tmp_path)
+        os.remove(os.path.join(proj, 'production', 'cover.jpg'))
+
+        with patch('storyforge.cmd_publish.detect_project_root', return_value=proj), \
+             patch('storyforge.bookshelf.publish') as pub:
+            with pytest.raises(SystemExit):
+                cmd_publish.main(['--no-dashboard'])
+
+        pub.assert_not_called()
+        assert 'none with role "cover"' in capsys.readouterr().out
+
+    def test_a_book_with_no_assets_skips_the_sync(self, tmp_path):
+        """No cover, no art: nothing is declared, so bookshelf is told nothing."""
+        from unittest.mock import patch
+        from storyforge import cmd_publish
+
+        proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
+        fake_env = {
+            'BOOKSHELF_URL': 'https://bs.example.com',
+            'BOOKSHELF_SUPABASE_URL': 'https://sb.example.com',
+            'BOOKSHELF_SUPABASE_ANON_KEY': 'anon',
+            'BOOKSHELF_EMAIL': 'a@b.c',
+            'BOOKSHELF_PASSWORD': 'pw',
+        }
+        with patch('storyforge.cmd_publish.detect_project_root', return_value=proj), \
+             patch('storyforge.bookshelf.check_env', return_value=fake_env), \
+             patch('storyforge.bookshelf.authenticate', return_value='jwt'), \
+             patch('storyforge.bookshelf.sync_assets') as sync, \
+             patch('storyforge.bookshelf.publish',
+                   return_value={'ok': True, 'slug': 'test-book',
+                                 'published': {}}):
+            cmd_publish.main(['--no-dashboard'])
+
+        sync.assert_not_called()
+
+    def test_cover_flag_is_a_no_op_with_a_note(self, tmp_path, capsys):
+        from unittest.mock import patch
+        from storyforge import cmd_publish
+
+        proj = _illustrated_project(tmp_path)
+        with patch('storyforge.cmd_publish.detect_project_root', return_value=proj):
+            cmd_publish.main(['--dry-run', '--no-dashboard', '--cover'])
+        assert '--cover is a no-op' in capsys.readouterr().out
