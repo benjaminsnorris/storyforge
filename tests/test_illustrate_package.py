@@ -225,16 +225,36 @@ _SPEC_EXAMPLE = {
 
 
 def test_entries_stay_within_the_word_budget(in_project):
-    """80–120 words is this phase's stated design constraint: thin entries are
-    the whole reason the packet exists. Asserted against the spec's own worked
-    example with every field populated, including a treatment."""
+    """80–120 words of *derived* content is this phase's stated design
+    constraint: thin entries are the whole reason the packet exists. Asserted
+    against the spec's own worked example with every derived field populated,
+    including a treatment — and then swept across every entry, which costs one
+    line and catches a future long field on some other row."""
     rows = ill.read_plan(in_project)
     rows[1].update(_SPEC_EXAMPLE)
     ill.write_plan(in_project, rows)
     entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
-    rendered = pp.render_entry(entries['the-blank-page'])
-    words = len(rendered.split())
-    assert words <= 120, f'{words} words:\n{rendered}'
+
+    maximal = pp.render_entry(entries['the-blank-page'])
+    words = len(maximal.split())
+    assert words <= 120, f'{words} words:\n{maximal}'
+
+    for entry in entries.values():
+        body = pp.render_entry(entry)
+        assert len(body.split()) <= 120, body
+
+
+def test_an_author_column_may_exceed_the_budget(in_project):
+    """`absent` and `contrast` are the author's words, and SKILL.md invites
+    them. The budget guards the renderer's overhead, not the author's choice —
+    so this documents that it is allowed rather than pretending it cannot
+    happen."""
+    rows = ill.read_plan(in_project)
+    rows[1].update(_SPEC_EXAMPLE)
+    rows[1]['contrast'] = ' '.join(['deliberately verbose'] * 20)
+    ill.write_plan(in_project, rows)
+    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    assert len(pp.render_entry(entries['the-blank-page']).split()) > 120
 
 
 def test_the_rendered_marker_costs_only_the_marker(in_project):
@@ -419,20 +439,101 @@ def test_a_prompted_entry_is_not_marked_as_rendered(in_project):
     assert pp.DONE_MARK not in _read(in_project, 'illustrations.md')
 
 
-def test_a_treatment_on_ingested_art_is_reported_as_possibly_late(in_project):
-    _ingest(in_project, 0, treatment='wide, high, environmental, dusk')
+def test_staging_before_the_render_is_not_a_gap(in_project):
+    """The documented order — stage, prompt, render, ingest. On a 12-row book
+    this fired 12 of 14 gaps before `treatment_at` existed, burying the real
+    ones and training the author to skip the section."""
+    _ingest(in_project, 0, treatment='wide, high, environmental, dusk',
+            treatment_at='2026-07-01', ingested_at='2026-07-20')
+    cmd_illustrate.main(['--package'])
+    assert 'does not follow its treatment' not in _read(in_project, 'README.md')
+
+
+def test_staging_after_the_render_is_a_gap_naming_both_dates(in_project):
+    _ingest(in_project, 0, treatment='wide, high, environmental, dusk',
+            treatment_at='2026-07-25', ingested_at='2026-07-20')
     cmd_illustrate.main(['--package'])
     readme = _read(in_project, 'README.md')
-    assert 'already ingested and carries a treatment' in readme
-    assert 'cannot tell which came first' in readme
+    assert 'does not follow its treatment' in readme
+    assert '2026-07-25' in readme and '2026-07-20' in readme
+
+
+def test_a_missing_stamp_says_nothing(in_project):
+    """An unstamped legacy row, or a treatment the author wrote by hand (which
+    `--sequence` never stamps, because it never overwrites one), is not
+    evidence of a problem."""
+    for cells in ({'treatment_at': '', 'ingested_at': '2026-07-20'},
+                  {'treatment_at': '2026-07-25', 'ingested_at': ''},
+                  {'treatment_at': 'whenever', 'ingested_at': '2026-07-20'}):
+        _ingest(in_project, 0, treatment='wide, high, dusk', **cells)
+        cmd_illustrate.main(['--package'])
+        assert 'does not follow its treatment' not in \
+            _read(in_project, 'README.md'), cells
+
+
+def test_same_day_staging_is_not_a_gap(in_project):
+    """Stage, prompt, render, ingest is an ordinary one-day loop, and date
+    granularity cannot separate the two."""
+    _ingest(in_project, 0, treatment='wide, high, dusk',
+            treatment_at='2026-07-20', ingested_at='2026-07-20')
+    cmd_illustrate.main(['--package'])
+    assert 'does not follow its treatment' not in _read(in_project, 'README.md')
 
 
 def test_a_treatment_on_pending_art_is_not_reported(in_project):
     rows = ill.read_plan(in_project)
     rows[0]['treatment'] = 'wide, high, environmental, dusk'
+    rows[0]['treatment_at'] = '2026-07-25'
     ill.write_plan(in_project, rows)
     cmd_illustrate.main(['--package'])
-    assert 'carries a treatment' not in _read(in_project, 'README.md')
+    assert 'does not follow its treatment' not in _read(in_project, 'README.md')
+
+
+def test_sequence_stamps_when_it_staged_a_row(in_project, staged):
+    from datetime import date
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night')))
+    assert cmd_illustrate.main(['--sequence']) == 0
+    plan = ill.read_plan_as_map(in_project)
+    assert plan['the-finest-cartographer']['treatment_at'] == \
+        date.today().isoformat()
+    # A row it did not stage is not stamped.
+    assert plan['the-blank-page']['treatment_at'] == ''
+
+
+def test_an_author_treatment_is_never_stamped(in_project, staged):
+    """`--sequence` skips the row entirely, so no stamp is invented for a
+    treatment it did not write — which is what keeps the gap silent for it."""
+    rows = ill.read_plan(in_project)
+    rows[0]['treatment'] = 'wide, high, environmental, dusk'
+    ill.write_plan(in_project, rows)
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night')))
+    cmd_illustrate.main(['--sequence'])
+    assert ill.read_plan_as_map(in_project)[
+        'the-finest-cartographer']['treatment_at'] == ''
+
+
+def test_an_unrecognized_status_errs_toward_being_read(in_project):
+    """`validate_plan` gates the vocabulary, but if one slips through, marking
+    an entry "already rendered — do not regenerate" would drop an illustration
+    from the book. Falling toward pending costs a glance."""
+    rows = ill.read_plan(in_project)
+    rows[0]['status'] = 'rendring'
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'illustrations.md')
+    assert f'### the-finest-cartographer{pp.DONE_MARK}' not in body
+    assert '### the-finest-cartographer\n' in body
+
+
+def test_a_rendered_status_is_marked_as_well_as_ingested(in_project):
+    rows = ill.read_plan(in_project)
+    rows[0]['status'] = 'rendered'
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    assert f'### the-finest-cartographer{pp.DONE_MARK}' in \
+        _read(in_project, 'illustrations.md')
 
 
 def test_the_sequence_rules_are_in_the_packet(in_project):

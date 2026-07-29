@@ -282,15 +282,18 @@ def render_visual_state(*, grid: StateGrid,
 #: an author told to work the file "top to bottom" would re-render finished art.
 DONE_MARK: Final[str] = ' — already rendered'
 
-#: Statuses that mean the art does not exist yet. Everything else — `rendered`,
-#: `ingested` — means a file was made from this entry. `superseded` never reaches
-#: an entry (`rows_in_reading_order` drops it).
-_PENDING_STATUSES: Final[frozenset[str]] = frozenset({'', 'planned', 'prompted'})
+#: Statuses that mean a file was made from this entry. Enumerated positively,
+#: rather than as everything-but-the-pending-ones, so an out-of-vocabulary value
+#: falls toward *pending*: reading an entry that did not need reading costs a
+#: glance, while skipping one because a typo made it look finished loses an
+#: illustration from the book. `superseded` never reaches an entry at all —
+#: `rows_in_reading_order` drops it.
+_RENDERED_STATUSES: Final[frozenset[str]] = frozenset({'rendered', 'ingested'})
 
 
 def _is_rendered(entry: Entry) -> bool:
     """Whether this entry's art already exists."""
-    return entry['status'] not in _PENDING_STATUSES
+    return entry['status'] in _RENDERED_STATUSES
 
 
 def render_entry(entry: Entry) -> str:

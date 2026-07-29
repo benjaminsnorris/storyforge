@@ -1524,6 +1524,13 @@ def _apply_treatments(project_dir: str, proposed: dict[str, str]) -> int:
                     f'{proposed[illus_id]!r}')
             continue
         row['treatment'] = proposed[illus_id]
+        # Stamped so the packet can tell a treatment written *after* a render
+        # (the finished art does not follow it) from one written before it
+        # (nothing is wrong). Without the stamp the only honest report was "the
+        # packet cannot tell which came first", which on a book staged in the
+        # documented order fired on every ingested row — 12 of 14 gaps on a
+        # 12-row book, burying the two real ones.
+        row['treatment_at'] = date.today().isoformat()
         written += 1
     if written:
         ill.write_plan(project_dir, plan)

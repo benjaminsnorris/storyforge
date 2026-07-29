@@ -27,7 +27,7 @@ docs/superpowers/specs/2026-07-28-illustration-state-matrix-and-packet-design.md
 """
 
 import os
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from storyforge import canon
 from storyforge import illustrations as ill
@@ -53,7 +53,13 @@ NOT_RECORDED = '_(not recorded — see the gaps in README.md)_'
 
 
 class Entry(TypedDict):
-    """One illustration's entry: 80–120 words of what is specific to it.
+    """One illustration's entry: what is specific to this image and nothing else.
+
+    **The 80–120 word budget governs the derived content** — the beat, the
+    subject, the resolved state, the one-sentence contrast, the composition note.
+    An author's own `absent` and `contrast` cells sit on top of that and are
+    their choice to spend; the budget exists to stop the *renderer* from
+    restating what the shared sections already say.
 
     Everything identical across the set lives in `canon.md` and
     `acceptance.md` instead — the colour prohibitions, the orientation rule,
@@ -62,11 +68,12 @@ class Entry(TypedDict):
     """
     id: str
     scene_id: str
-    #: The plan row's status. Carried so an entry for finished art cannot look
-    #: identical to one for pending work: the documented flow renders the anchor
-    #: batch, ingests it, and regenerates, so the normal mid-flight packet mixes
-    #: the two, and README tells the author to work the file top to bottom.
-    status: str
+    #: The plan row's status, typed to the vocabulary `validate_plan` gates.
+    #: Carried so an entry for finished art cannot look identical to one for
+    #: pending work: the documented flow renders the anchor batch, ingests it,
+    #: and regenerates, so the normal mid-flight packet mixes the two while
+    #: README tells the author to work the file top to bottom.
+    status: ill.PlanStatus
     layout: str
     aspect: str
     beat: str
@@ -280,17 +287,16 @@ def _entry_for(row: dict[str, str], *, project_dir: str,
         order=order, known=known, transitions=transitions)
     gaps.extend(state_gaps)
 
-    status = (row.get('status') or '').strip() or 'planned'
+    status = cast(ill.PlanStatus,
+                  (row.get('status') or '').strip() or 'planned')
     treatment = (row.get('treatment') or '').strip()
-    if status == 'ingested' and treatment:
-        # `--sequence` stages every live row, including finished art, and does
-        # not record when it did so. If the staging was assigned after the
-        # render, the render does not follow it — and nothing else would say so.
+    late = _staging_postdates_render(row) if treatment else ''
+    if late:
         gaps.append(
-            f'illustration `{illus_id}` is already ingested and carries a '
-            f'treatment. If the staging was assigned after the render — which '
-            f'nothing records — the finished art does not follow it. The packet '
-            f'cannot tell which came first, so confirm before you re-render.')
+            f'illustration `{illus_id}` was staged {late[0]}, after its render '
+            f'was ingested {late[1]} — the finished art does not follow its '
+            f'treatment. Re-render it from the current entry, or clear the '
+            f'`treatment` cell if the art is right as it stands.')
 
     entry: Entry = {
         'id': illus_id,
@@ -314,6 +320,30 @@ def _entry_for(row: dict[str, str], *, project_dir: str,
         'treatment': treatment,
     }
     return entry, gaps
+
+
+def _staging_postdates_render(row: dict[str, str]) -> tuple[str, str] | None:
+    """`(treatment_at, ingested_at)` when the staging is later, else None.
+
+    Only an ingested row can have art that fails to follow its treatment, and
+    only *dates* can establish that it does. **A missing stamp says nothing.**
+    An unstamped legacy row, or a treatment an author wrote by hand (which
+    `--sequence` never stamps because it never overwrites one), is not evidence
+    of a problem — and treating it as one made this gap fire on every ingested
+    row of a book staged in the documented order, which is 86% noise in the one
+    section whose credibility the rest of the packet's honesty depends on.
+
+    Compared as ISO dates via `canon.iso_date_or_empty`, which sort
+    lexicographically. Strictly later: same-day is the ordinary incremental loop
+    (stage, prompt, render, ingest) and date granularity cannot separate the two.
+    """
+    if (row.get('status') or '').strip() != 'ingested':
+        return None
+    staged = canon.iso_date_or_empty(row.get('treatment_at') or '')
+    ingested = canon.iso_date_or_empty(row.get('ingested_at') or '')
+    if not staged or not ingested or staged <= ingested:
+        return None
+    return staged, ingested
 
 
 def _state_for(row: dict[str, str], *, project_dir: str,
