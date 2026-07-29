@@ -62,6 +62,23 @@ CanonFindingKind = Literal[
 ]
 
 
+class _Sentinel(enum.Enum):
+    """Distinct sentinel values returned by parser helpers when the input
+    is malformed in a way that the caller needs to distinguish from a
+    normal result. Using an enum (rather than ad-hoc `object()` or string
+    sentinels) gives both narrow Literal types and stable `is` identity.
+
+    Declared up here rather than beside the parsers because
+    `ParsedCanonFile.frontmatter` names `TRUNCATED` in its own type.
+    """
+    TRUNCATED = enum.auto()
+    REGISTRY_MALFORMED = enum.auto()
+
+
+_TRUNCATED = _Sentinel.TRUNCATED
+_REGISTRY_MALFORMED = _Sentinel.REGISTRY_MALFORMED
+
+
 class _CanonFindingRequired(TypedDict):
     type: CanonFindingKind
     file: str
@@ -82,7 +99,12 @@ class ParsedCanonFile(TypedDict):
     are zero-initialized so callers can read uniformly."""
     path: str
     exists: bool
-    frontmatter: dict[str, str] | None
+    #: The sentinel is part of this type, not an implementation detail:
+    #: `parse_canon_file` passes `_parse_frontmatter`'s result straight through,
+    #: so an unclosed `---` block really does land here. Declaring only
+    #: `dict | None` gave callers no reason to guard, while the value they would
+    #: hit is neither (#294).
+    frontmatter: dict[str, str] | None | Literal[_Sentinel.TRUNCATED]
     sections: set[str]
     body: str
     #: Lines consumed by the frontmatter, so a body-relative line number can
@@ -159,21 +181,22 @@ ENTITY_CANON_TYPES: frozenset[CanonType] = frozenset(
     {'character', 'location', 'motif'})
 
 
-class _Sentinel(enum.Enum):
-    """Distinct sentinel values returned by parser helpers when the input
-    is malformed in a way that the caller needs to distinguish from a
-    normal result. Using an enum (rather than ad-hoc `object()` or string
-    sentinels) gives both narrow Literal types and stable `is` identity.
-    """
-    TRUNCATED = enum.auto()
-    REGISTRY_MALFORMED = enum.auto()
-
-
-_TRUNCATED = _Sentinel.TRUNCATED
-_REGISTRY_MALFORMED = _Sentinel.REGISTRY_MALFORMED
-
 _FRONTMATTER_RE = re.compile(r'\A---\s*\n(.*?\n)---\s*(?:\n|$)', re.DOTALL)
-_SECTION_RE = re.compile(r'^##\s+(.+?)\s*$', re.MULTILINE)
+
+#: Separates `##` from its heading name. `[ \t]`, never `\s`: without DOTALL a
+#: `.` cannot cross a newline, but `\s+` always could, so `##\nClauses` was read
+#: as a heading *named* `Clauses`. That fabricated a section, and since
+#: `parse_canon_file`'s `sections` set is what `canon_missing_section` checks
+#: `REQUIRED_SECTIONS` against, a file with no `## Clauses` heading anywhere
+#: reported none missing. It also split the extractor from the truncation
+#: detector: a bare `##` above a line reading `Embeddable block` made
+#: `_EMBEDDABLE_BLOCK_RE` report a block while the detector (matching per line)
+#: never opened its window, so a real truncation below went unreported (#294).
+#: A markdown heading is one line; all three consumers now say so.
+_H2_GAP = r'[ \t]+'
+_H2_TRAIL = r'[ \t]*'
+
+_SECTION_RE = re.compile(rf'^##{_H2_GAP}(.+?){_H2_TRAIL}$', re.MULTILINE)
 _SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]*$')
 
 # Canon-embed markers: opener captures a candidate id (permissive — we
@@ -259,12 +282,13 @@ def find_canon_embeds(
 _BLOCK_TERMINATOR = r'^##\s'
 
 _EMBEDDABLE_BLOCK_RE = re.compile(
-    rf'^##\s+{re.escape(EMBEDDABLE_SECTION)}\s*\n(.*?)(?={_BLOCK_TERMINATOR}|\Z)',
+    rf'^##{_H2_GAP}{re.escape(EMBEDDABLE_SECTION)}{_H2_TRAIL}\n'
+    rf'(.*?)(?={_BLOCK_TERMINATOR}|\Z)',
     re.MULTILINE | re.DOTALL,
 )
 
 _SECTION_BODY_RE = re.compile(
-    rf'^##\s+(.+?)\s*\n(.*?)(?={_BLOCK_TERMINATOR}|\Z)',
+    rf'^##{_H2_GAP}(.+?){_H2_TRAIL}\n(.*?)(?={_BLOCK_TERMINATOR}|\Z)',
     re.MULTILINE | re.DOTALL,
 )
 

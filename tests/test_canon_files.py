@@ -562,6 +562,100 @@ def test_validate_unfilled_template_flagged(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# An H2 heading name lives on one physical line (issue #294)
+#
+# `_SECTION_RE`, `_SECTION_BODY_RE` and `_EMBEDDABLE_BLOCK_RE` all separated
+# `##` from the heading name with `\s+`. Without DOTALL `.` cannot cross a
+# newline, but `\s+` always could — so a bare `##` line followed by a text line
+# was read as a heading *named* by that text. Four consequences, all verified.
+# ---------------------------------------------------------------------------
+
+def test_bare_hash_does_not_fabricate_a_section_name(tmp_path):
+    """The phantom entry. `sections` is what `canon_missing_section` checks
+    `REQUIRED_SECTIONS` membership against, so a fabricated name is not
+    cosmetic."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines='A dark braid.\n\n##\nA grey wool coat.'),
+    )
+    assert 'A grey wool coat.' not in parse_canon_file(path)['sections']
+
+
+def test_missing_required_section_reported_despite_a_bare_hash(tmp_path):
+    """The live bug (#294): a file with NO `## Clauses` heading anywhere read as
+    having one, because a bare `##` sat above a line whose text was `Clauses`.
+    A structural validator reporting a file as complete when a required section
+    is absent is the one thing it exists to prevent."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'visual-foundation.md', 'visual-foundation',
+        body='\n## Embeddable block\n\nStyle notes.\n\n##\nClauses\n\n'
+             '## Related canon\n\n- x\n\n## Iteration history\n\n- y\n',
+    )
+    missing = [f for f in validate_canon_file(path, project)
+               if f['type'] == 'canon_missing_section']
+    assert len(missing) == 1, 'the absent ## Clauses section must be reported'
+    assert 'Clauses' in missing[0]['detail']
+
+
+def test_section_body_re_does_not_fabricate_a_section(tmp_path):
+    """`_SECTION_BODY_RE` shared the quirk, so the unfilled-template check could
+    attribute a body to a section name that does not exist."""
+    from storyforge.canon import _SECTION_BODY_RE
+    body = '\n## Embeddable block\n\nStyle.\n\n##\nClauses\n\n## Related canon\n\n- x\n'
+    assert [m.group(1) for m in _SECTION_BODY_RE.finditer(body)] == [
+        'Embeddable block', 'Related canon']
+
+
+def test_embeddable_block_heading_must_be_on_one_line(tmp_path):
+    """The quirk also split the extractor from the detector. A bare `##` above a
+    line reading `Embeddable block` made the *extractor* report a block, while
+    the detector (which matches `_SECTION_RE` per line) never opened its window
+    — so a real `## Wardrobe` truncation below went unreported. Neither should
+    see a block here: a heading is one line."""
+    from storyforge.canon import (
+        _EMBEDDABLE_BLOCK_RE, embeddable_block_truncations,
+    )
+    body = ('\n##\nEmbeddable block\n\nStyle notes.\n\n'
+            '## Wardrobe\n\nGrey.\n\n## Clauses\n\n- c\n')
+    assert _EMBEDDABLE_BLOCK_RE.search(body) is None
+    assert embeddable_block_truncations(body) == []
+
+
+@pytest.mark.parametrize('heading,expected', [
+    ('## Wardrobe', 'Wardrobe'),
+    ('##\tWardrobe', 'Wardrobe'),          # tab still separates
+    ('## Wardrobe   ', 'Wardrobe'),        # trailing spaces still stripped
+    ('##  Two  spaces', 'Two  spaces'),    # interior spacing preserved
+])
+def test_one_line_headings_still_parse(tmp_path, heading, expected):
+    """The narrowing must not reject headings that were always legal."""
+    from storyforge.canon import _SECTION_RE
+    match = _SECTION_RE.match(heading)
+    assert match is not None and match.group(1).strip() == expected
+
+
+def test_bare_hash_still_reports_as_a_truncation(tmp_path):
+    """Guards the per-line call site the #294 fix must not disturb: a bare `##`
+    gets no name, and that empty name is what makes it report (issue #289)."""
+    from storyforge.canon import embeddable_block_truncations
+    assert embeddable_block_truncations(
+        '\n## Embeddable block\n\nA dark braid.\n\n##\n\n') == [(6, '##')]
+
+
+def test_parsed_frontmatter_can_be_the_truncated_sentinel(tmp_path):
+    """`ParsedCanonFile['frontmatter']` really does hold `_Sentinel.TRUNCATED`
+    for an unclosed block, so the annotation has to admit it — a caller that
+    trusted `dict | None` and skipped an isinstance check was wrong."""
+    from storyforge.canon import _TRUNCATED
+    project = str(tmp_path)
+    path = write_canon(project, 'style-foundation.md', 'style-foundation',
+                       frontmatter='---\ncanon_id: style-foundation\n')
+    assert parse_canon_file(path)['frontmatter'] is _TRUNCATED
+
+
+# ---------------------------------------------------------------------------
 # Embeddable-block truncation (issue #289)
 # ---------------------------------------------------------------------------
 
