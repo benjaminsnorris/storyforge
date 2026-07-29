@@ -366,7 +366,8 @@ Key principles:
 | `timeline.py` | Timeline construction |
 | `cover.py` | Cover generation |
 | `illustrations.py` | Illustration plan I/O, the `![[illus:id]]` marker (parse/insert/strip), per-target resolution, selection pre-pass, render order, plan validation. Continuity anchors and book-level direction now live in `canon.py` / `prompts_illustrate.py`; this module keeps only a read of the retired `illustration-direction.md` for the one-time hand-edit safety net |
-| `prompts_illustrate.py` | Illustration selection + art-direction prompt builders, direction-document builders, sequence-review renderer, coach brief, strict checklist |
+| `prompts_illustrate.py` | Illustration selection + art-direction prompt builders, book-level canon-file builders (`CANON_PLAN` templates, filled-canon and anchor stubs, the direction request and its response parser), sequence-review renderer, coach brief, strict checklist |
+| `canon.py` | `reference/canon/` typed canon files: frontmatter + section parsing, validation (id/type/location/required sections/unfilled scaffolds), registry cross-check, and the `## Embeddable block` — a verbatim string that serves as a GN per-panel prompt block and as a prose continuity anchor (`anchor_texts`, `is_canon_block_populated`). Also canon-embed drift detection against `pages/*.md`. Both mediums depend on it |
 | `scenes.py` | Scene file management |
 | `exemplars.py` | Prose exemplar validation |
 | `prose_analysis.py` | Shared text analysis: passive voice, dialogue extraction, adverbs, fillers, AI-tell vocabulary |
