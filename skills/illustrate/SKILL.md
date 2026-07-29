@@ -270,7 +270,18 @@ Six files in `manuscript/illustration-packet/`:
 
 **Read the README's "What this packet cannot tell you" section aloud to the author.** It lists every gap in the data the packet was built from: a row with no beat or no subject, a `canon_refs` entry with no canon file, an entity whose visual state nobody stated at that scene, a book-level canon file still holding TODO text, and whether the contradiction audit has ever run. Those are the places the packet is thinner than it looks, and the moment to fix them is before a generation session spends money on them.
 
-Reference images are **not copied** into the packet — the paths are project-relative and the author uploads from disk. A copy would be a second thing to invalidate on every re-render.
+Reference images are **not copied** into the packet — the paths are project-relative and the author uploads from disk. A copy would be a second thing to invalidate on every re-render. `reference-images.md` also carries a "What is not in that list" section whenever the list is shorter than the ingested art suggests: a render excluded as pre-canon, a `--no-prior-refs` build, or the four-image cap. Read it before uploading — a cover-only list is not the same thing as having nothing to reference, and uploading the cover alone generates the rest of the set with no likeness reference.
+
+Entries for illustrations that are already rendered are marked `— already rendered` in their heading. Say so to the author: the packet is worked top to bottom, and finished art is there for context, not to be regenerated.
+
+### Two columns you write by hand
+
+`absent` and `contrast` are plan columns nothing populates automatically — no command proposes them — but `write_plan` preserves any column an author adds, and the packet reads both:
+
+- **`absent`** — named entities that must **not** appear in this image. It is one of only three sanctioned exceptions to positive framing (the others are the colour logic and the orientation directive), and it exists because a positively-framed instruction did not stop a real book rendering a character who was elsewhere in the story at that point. Name entities, not qualities: "Ember. A second Great Lamp."
+- **`contrast`** — anything you want said about how this image must differ from its neighbours, beyond the register and predecessor sentence the packet derives for you.
+
+Offer to add them when the author says an image keeps coming back with something that should not be in it.
 
 ---
 
