@@ -23,7 +23,7 @@ The `./storyforge` runner dispatches to these modules via `storyforge.__main__`.
 - Each command module has `parse_args(argv)` and `main(argv=None)`
 - Import shared utilities from `storyforge.common`, `storyforge.git`, `storyforge.cli`, `storyforge.runner`
 - Use `argparse` for CLI flags (matching the original interface)
-- Use `concurrent.futures.ProcessPoolExecutor` for parallel execution via `storyforge.runner`
+- Use `storyforge.runner` for parallel execution rather than rolling your own pool. It is a thread pool, which is the right choice for the I/O-bound API work these commands do (and it sidesteps the pickling constraints a process pool puts on worker functions) — but treat the executor type as `runner`'s implementation detail, not something a caller should name
 - Use `storyforge.api` for all Claude API calls
 
 ### Shared Modules — USE THEM
@@ -56,7 +56,7 @@ Before writing new code, check if a shared function already exists.
 - `resolve_filter_args(args)` — returns (mode, value, value2) tuple
 
 **runner.py:**
-- `run_parallel(items, worker_fn, max_workers, label)` — ProcessPoolExecutor parallel execution
+- `run_parallel(items, worker_fn, max_workers, label)` — ThreadPoolExecutor parallel execution; honours `STORYFORGE_PARALLEL` and the shutdown flag, and returns `{item: result-or-Exception}` (a raised worker is a value in that dict, so the caller must check for it)
 - `run_batched(items, worker_fn, merge_fn, batch_size)` — batched with merge step
 - `HealingZone(description, project_dir)` — retry with Claude diagnosis on failure
 
@@ -334,7 +334,7 @@ Key principles:
 | `common.py` | Logging, YAML reading, model selection, coaching, signal handling, pipeline manifest |
 | `git.py` | Branch/PR workflow, commit helpers, review phase |
 | `cli.py` | Shared argparse helpers, common flags |
-| `runner.py` | Parallel execution (ProcessPoolExecutor), healing zones |
+| `runner.py` | Parallel execution (ThreadPoolExecutor), healing zones |
 | `scene_filter.py` | Scene list building and filtering |
 
 **Domain modules:**
@@ -443,7 +443,7 @@ Three book-level files live at the canon **root**, defined in `prompts_illustrat
 
 **Render order** — `render_order()` puts the **visual key** first: the biggest establisher among the *early* illustrations, not the biggest overall. The climax usually names the most entities because it is where everyone converges, and picking it would be backwards — the key exists so later images have something real to reference, which only works if most illustrations come after it. Everything else follows story order, which automatically locks each entity's design in its earliest appearance. `locks` reports the anchors an illustration is first to show.
 
-**Retiring an illustration** — set `status=superseded` and run `--embed`, which removes its marker. A superseded row also stops resolving into epub/PDF/web even while its file is on disk, so no target ships retired art.
+**Retiring an illustration** — set `status=superseded` and run `--embed`, which removes its marker. A superseded row also stops resolving into epub/PDF/web even while its file is on disk, so no target ships retired art. That gate — only `ingested` resolves (`FILED_STATUSES`, and `manifest_assets` for the publish manifest) — is why **status only ever moves forward**: `--prompts` writes `prompt_file` on any row but sets `status=prompted` only from `planned` / `prompted` / `superseded`. Re-prompting `rendered` or `ingested` art keeps its status and logs that a re-render is pending. Demoting it was a bug, never a legitimate exclusion — it took a live book's publishable set from 20/20 to 19/20 with no warning, invisible to `--diagnose` because an unrendered row is valid in-flight state. Naming a `superseded` row in `--ids` revives it as far as `prompted` (never straight to `ingested` — the replacement render does not exist yet); a bulk run still never touches one.
 
 **Sequence review** — `--review` writes `working/illustration-sequence-review.md`. Per-illustration validation passes on images that are individually fine and collectively inconsistent; only the set shows drift (a character an inch taller in image nine, light brightening where the story darkens). Reviewing before the set is complete is the cheap moment, because every later illustration references the earlier ones.
 
@@ -468,6 +468,8 @@ A revision pass *does* see scene text, and a model has no reason to reproduce a 
 **The reference chain is canon-gated.** A prior ingested illustration is a style reference only if its `ingested_at` is on or after the newest `canon_updated` in `reference/canon/`. Art rendered before the canon that now governs it was directed by rules that no longer apply, so feeding it back teaches the new render the drift the canon was rewritten to remove — and because the visual key renders first, a whole set inherits it. An **empty** `ingested_at` counts as pre-canon (the column postdates the schema, so "unknown" is not a reason for optimism). Every exclusion is a WARNING naming the file and why; a cover-only or empty chain is said plainly rather than emitting a quietly-short reference list. With no parseable `canon_updated` anywhere, nothing can be judged stale and the chain is unfiltered. `--no-prior-refs` is the explicit rebuild switch.
 
 **Anchors are labeled, matched by id.** `canon_id` stays the matching key for `canon_refs` and for the anchor dict; the prompt *renders* a display name — `display_name:` frontmatter, else the registry `name`, else the title-cased slug (reported, since it is a guess). A slug-labeled anchor got the slug echoed back in the model's prose.
+
+**Plan writes are LF.** `write_plan` passes `lineterminator='\n'` to the csv writer, whose default `'\r\n'` turned every one-cell edit into a whole-file diff and produced exactly the state `cleanup`'s `crlf_line_endings` check flags. Opening the file with `newline='\n'` does not fix this — the writer emits the terminator itself. Same one-line fix applied to `elaborate._write_csv` and `history.append_cycle`, the other two `csv.DictWriter` call sites; `csv_cli` writes `'\n'` by hand and was always fine.
 
 **Rendering happens outside Storyforge.** The command emits prompts; the author renders and `--ingest` brings files back. Files match plan rows by filename stem — an unmatched file is reported, never guessed at.
 

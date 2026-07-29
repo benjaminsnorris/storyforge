@@ -159,6 +159,8 @@ Wait for the author's choice. This is **one creative API call per illustration**
 
 Add `--ids one,two` to limit it to specific illustrations, or to re-prompt ones already written after editing their plan row.
 
+**Re-prompting never un-publishes finished art.** `prompt_file` is always written, but `status` only moves forward: `planned` / `prompted` / `superseded` advance to `prompted`, while a `rendered` or `ingested` row **keeps its status** and the command logs that a re-render is pending. That matters because `ingested` is what every consumer gates on — Bookshelf publishing, the epub, the PDF, and the web book — so a demotion silently drops the illustration from the build while leaving the file on disk. Naming a `superseded` row in `--ids` revives it as far as `prompted`; render and `--ingest` bring it the rest of the way.
+
 Add `--no-prior-refs` to reference the cover only. Use it when re-rendering a set whose existing art no longer matches the canon — see "The reference chain" below.
 
 This writes `manuscript/assets/illustrations/prompts/{id}.md` per illustration, and sets `status=prompted`. Each prompt file carries the reference list, the prompt body (Scene / Subject / Important details / Use case), a deterministic Constraints block, and a log table.
@@ -237,7 +239,8 @@ An illustration isn't working.
 
 1. Set its `status` to `superseded` in the plan.
 2. Run `--embed`, which removes the markers of superseded rows. A superseded illustration also stops rendering into the epub, PDF, and web book even if its file is still on disk.
-3. Add a fresh row with a new id, or re-prompt the existing one with `--ids`.
+3. Add a fresh row with a new id, or re-prompt the existing one with `--ids` — naming a superseded row explicitly revives it to `prompted`, so it is waiting on a render rather than retired. (A bulk `--prompts` with no `--ids` never touches a superseded row.)
+4. Consider `--no-prior-refs`, or hardening the canon first: a re-render whose references are the art you are replacing inherits the problem you are trying to fix.
 
 Keep the superseded row. It records what was tried and why it didn't land, which is exactly what you want when the third attempt is also not working.
 
