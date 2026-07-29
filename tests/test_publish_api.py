@@ -47,7 +47,7 @@ class TestManifestMetadata:
         assert manifest['metadata']['language'] == 'en'
 
     def test_no_cover_path_or_generated_at(self, tmp_path):
-        """The API manifest uses metadata/cover_base64 instead of cover_path/generated_at."""
+        """The API manifest carries `metadata`, not the old cover_path/generated_at."""
         from storyforge.assembly import generate_publish_manifest
         proj = _make_project(tmp_path, ['s1'], [('Ch', ['s1'])])
         path = generate_publish_manifest(proj)

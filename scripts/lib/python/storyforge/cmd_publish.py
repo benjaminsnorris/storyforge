@@ -157,6 +157,14 @@ def main(argv=None):
         sys.exit(1)
 
     sources = read_asset_sources(project_dir) if assets else {}
+    if assets and not sources:
+        # generate_publish_manifest writes the sidecar in the same pass, so an
+        # empty one means the manifest was hand-carried or hand-edited. Named
+        # now rather than surfacing as an opaque per-digest failure later.
+        log('WARNING: the manifest declares assets but '
+            'working/publish-asset-sources.json maps no digests to files. '
+            'Re-run publish so the manifest and its source map are generated '
+            'together.')
 
     if args.dry_run:
         log(f'Dry run — manifest written to {manifest_path}')

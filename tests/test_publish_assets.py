@@ -210,6 +210,13 @@ class TestSignedUploadTarget:
         with pytest.raises(RuntimeError, match='no url'):
             bookshelf.signed_upload_target({'token': 'tok'})
 
+    def test_relative_url_with_no_token_anywhere_is_an_error(self):
+        """A relative form carries no token, so one must come alongside it."""
+        entry = {'url': '/object/upload/sign/book-assets/b/c.png', 'token': ''}
+        with pytest.raises(RuntimeError, match='carries no token'):
+            bookshelf.signed_upload_target(
+                entry, supabase_url='https://sb.example.com')
+
 
 # ============================================================================
 # Digest diff
@@ -383,6 +390,16 @@ class TestUploadShape:
         with pytest.raises(RuntimeError, match='not one of'):
             bookshelf.upload_asset_bytes('http://x/y', path, 'gif')
 
+    def test_an_unreadable_file_fails_before_the_put(self, tmp_path):
+        with pytest.raises(RuntimeError, match='Cannot read'):
+            bookshelf.upload_asset_bytes(
+                'http://127.0.0.1:1/x', str(tmp_path / 'absent.png'), 'png')
+
+    def test_unreachable_storage_is_surfaced(self, tmp_path):
+        path, _ = write_image(tmp_path, 'one.png')
+        with pytest.raises(RuntimeError, match='could not reach storage'):
+            bookshelf.upload_asset_bytes('http://127.0.0.1:1/x', path, 'png')
+
 
 # ============================================================================
 # The transport is role-generic
@@ -431,6 +448,15 @@ class TestErrorPaths:
             bookshelf.sync_assets(server, 'bad-jwt', 'bk',
                                   [asset('one', digest)], {digest: path})
         assert _AssetHandler.uploads == []
+
+    def test_a_non_json_error_body_is_still_reported(self, server, tmp_path):
+        """A gateway or proxy failure returns HTML, not the API's error shape."""
+        path, digest = write_image(tmp_path, 'one.png')
+        _AssetHandler.negotiate_queue = [(502, '<html>Bad Gateway</html>')]
+
+        with pytest.raises(RuntimeError, match='502'):
+            bookshelf.sync_assets(server, 'jwt', 'bk',
+                                  [asset('one', digest)], {digest: path})
 
     def test_unreachable_endpoint_is_surfaced(self, tmp_path):
         path, digest = write_image(tmp_path, 'one.png')
@@ -668,3 +694,90 @@ class TestManifestCoverIntegration:
 
         with pytest.raises(ValueError, match='reserved for the book cover'):
             generate_publish_manifest(project, include_dashboard=False)
+
+
+class TestOnDiskManifestGuards:
+    """working/publish-manifest.json is a durable artifact — in some projects a
+    tracked one. cmd_publish reads it back from disk, so the guards there are
+    about what is actually being sent, not about what was just generated.
+
+    Exercised by handing cmd_publish a manifest it did not build, which is the
+    only way that file and the generator can disagree.
+    """
+
+    def _hand_written(self, tmp_path, manifest):
+        project = TestManifestCoverIntegration()._project(tmp_path)
+        os.makedirs(os.path.join(project, 'working'), exist_ok=True)
+        path = os.path.join(project, 'working', 'publish-manifest.json')
+        with open(path, 'w') as f:
+            json.dump(manifest, f)
+        return project, path
+
+    def test_an_edited_manifest_cannot_destroy_the_cover(self, tmp_path, capsys):
+        from unittest.mock import patch
+        from storyforge import cmd_publish
+
+        project, path = self._hand_written(tmp_path, {
+            'title': 'T', 'author': 'A', 'slug': 'bk', 'chapters': [],
+            'assets': [{'key': 'lf-01', 'role': 'illustration',
+                        'sha256': 'a' * 64, 'extension': 'png'}],
+        })
+        with patch('storyforge.cmd_publish.detect_project_root',
+                   return_value=project), \
+             patch('storyforge.assembly.generate_publish_manifest',
+                   return_value=path), \
+             patch('storyforge.bookshelf.publish') as pub:
+            with pytest.raises(SystemExit):
+                cmd_publish.main(['--no-dashboard'])
+
+        pub.assert_not_called()
+        assert 'none with role "cover"' in capsys.readouterr().out
+
+    def test_a_manifest_with_no_source_map_is_named(self, tmp_path, capsys):
+        """An empty map would otherwise surface as an opaque per-digest failure."""
+        from unittest.mock import patch
+        from storyforge import cmd_publish
+
+        project, path = self._hand_written(tmp_path, {
+            'title': 'T', 'author': 'A', 'slug': 'bk', 'chapters': [],
+            'assets': [{'key': 'cover', 'role': 'cover',
+                        'sha256': 'a' * 64, 'extension': 'png'}],
+        })
+        with patch('storyforge.cmd_publish.detect_project_root',
+                   return_value=project), \
+             patch('storyforge.assembly.generate_publish_manifest',
+                   return_value=path):
+            cmd_publish.main(['--dry-run', '--no-dashboard'])
+
+        out = capsys.readouterr().out
+        assert 'maps no digests to files' in out
+        assert 'no local file recorded' in out
+
+
+class TestAssetSourcesSidecar:
+    def test_sidecar_paths_survive_a_moved_checkout(self, tmp_path):
+        """Stored project-relative, resolved on read."""
+        from storyforge.assembly import (asset_sources_path,
+                                         generate_publish_manifest,
+                                         read_asset_sources)
+        project = TestManifestCoverIntegration()._project(tmp_path)
+        TestManifestCoverIntegration()._plan_one_illustration(project)
+        generate_publish_manifest(project, include_dashboard=False)
+
+        with open(asset_sources_path(project)) as f:
+            raw = json.load(f)
+        assert all(not os.path.isabs(p) for p in raw.values())
+        assert all(os.path.isfile(p)
+                   for p in read_asset_sources(project).values())
+
+    def test_the_sidecar_covers_every_declared_digest(self, tmp_path):
+        from storyforge.assembly import (generate_publish_manifest,
+                                         read_asset_sources)
+        project = TestManifestCoverIntegration()._project(tmp_path)
+        TestManifestCoverIntegration()._plan_one_illustration(project)
+
+        with open(generate_publish_manifest(project,
+                                           include_dashboard=False)) as f:
+            manifest = json.load(f)
+        sources = read_asset_sources(project)
+        assert {a['sha256'] for a in manifest['assets']} <= set(sources)

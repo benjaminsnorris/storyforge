@@ -441,6 +441,10 @@ def sync_assets(bookshelf_url: str, token: str, slug: str,
         log(f'Uploading {len(planned)} asset object(s) '
             f'({len(chunk) - len(missing)} already present)...')
 
+        # Collected rather than raised on the first failure, so the author sees
+        # every broken file in one run instead of fixing them one publish at a
+        # time.
+        failures: list[str] = []
         workers = max(1, min(concurrency, len(planned)))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
@@ -448,7 +452,6 @@ def sync_assets(bookshelf_url: str, token: str, slug: str,
                             extension_by_digest.get(digest, '')): (digest, local)
                 for digest, local, target in planned
             }
-            failures: list[str] = []
             for future in concurrent.futures.as_completed(futures):
                 digest, local = futures[future]
                 try:
@@ -458,8 +461,12 @@ def sync_assets(bookshelf_url: str, token: str, slug: str,
                     continue
                 result['uploaded'] += 1
                 result['bytes_uploaded'] += written
-                log(f'  uploaded {os.path.basename(local)} '
-                    f'({written:,} bytes)')
+                # written == 0 means the object was already there (a 409, which
+                # logged its own warning) — saying "uploaded 0 bytes" would read
+                # as a successful transfer of nothing.
+                if written:
+                    log(f'  uploaded {os.path.basename(local)} '
+                        f'({written:,} bytes)')
 
         if failures:
             for message in failures:
