@@ -28,6 +28,8 @@ import os
 import re
 from typing import Literal, TypedDict
 
+from storyforge.common import normalize_for_comparison
+
 # Severity is part of the cleanup-report contract — build_cleanup_report
 # filters action items by != 'info' and counts errors/warnings/info. A
 # typo on either side silently demotes a finding.
@@ -56,9 +58,6 @@ CanonFindingKind = Literal[
     'canon_embed_invalid_id',
     'canon_page_unreadable',
     'canon_drift',
-    # Emitted by cmd_cleanup.report_canon_files, not canon.py — kept here
-    # so the enum is the single source of truth for canon-category types.
-    'canon_present_in_novel_project',
 ]
 
 
@@ -98,13 +97,24 @@ CANON_TYPES: tuple[CanonType, ...] = (
     'foundation', 'vocabulary', 'rules', 'character', 'location', 'motif',
 )
 
-REQUIRED_FRONTMATTER_KEYS = (
+#: Keys every canon file needs regardless of medium.
+ALWAYS_REQUIRED_FRONTMATTER_KEYS = (
     'canon_id',
     'canon_type',
     'canon_updated',
     'appears_in',
-    'embeds_as',
     'first_appearance',
+)
+
+#: `embeds_as` serves the inline-embed convention, which only the
+#: graphic-novel page pipeline uses. Requiring it of a prose project would
+#: make it write-only. Its long-term fate is decided by the
+#: staleness-unification issue.
+GN_ONLY_FRONTMATTER_KEYS = ('embeds_as',)
+
+#: Retained for importers that predate the split.
+REQUIRED_FRONTMATTER_KEYS = (
+    ALWAYS_REQUIRED_FRONTMATTER_KEYS + GN_ONLY_FRONTMATTER_KEYS
 )
 
 REQUIRED_SECTIONS = (
@@ -129,6 +139,12 @@ SUBDIR_REGISTRY = {
 ROOT_TYPES: frozenset[CanonType] = frozenset(
     {'foundation', 'vocabulary', 'rules'},
 )
+
+#: Canon types that describe one entity whose look must stay fixed. The
+#: foundation/vocabulary/rules types describe the book, not a thing in it,
+#: so they are house style rather than per-entity anchors.
+ENTITY_CANON_TYPES: frozenset[CanonType] = frozenset(
+    {'character', 'location', 'motif'})
 
 
 class _Sentinel(enum.Enum):
@@ -170,26 +186,6 @@ class _UnclosedEmbed(TypedDict):
 class _InvalidIdEmbed(TypedDict):
     """Closed block whose id failed slug validation."""
     raw_id: str
-
-
-def _normalize_for_drift(text: str) -> str:
-    """Normalize text for drift comparison. Strips outer whitespace, strips
-    leading and trailing whitespace per line, and collapses internal
-    blank-line runs so cosmetic whitespace shifts (indentation drift from
-    a formatter, stray blank line, trailing-space drift) don't surface as
-    drift."""
-    lines = [ln.strip() for ln in text.strip().splitlines()]
-    out: list[str] = []
-    blank = False
-    for ln in lines:
-        if not ln:
-            if not blank:
-                out.append('')
-            blank = True
-        else:
-            out.append(ln)
-            blank = False
-    return '\n'.join(out)
 
 
 def find_canon_embeds(
@@ -235,7 +231,7 @@ def find_canon_embeds(
             embeds.append({
                 'canon_id': raw_id,
                 'text': block_text,
-                'normalized': _normalize_for_drift(block_text),
+                'normalized': normalize_for_comparison(block_text),
             })
         pos = next_close.end()
     return embeds, unclosed, invalid
@@ -256,28 +252,93 @@ _SECTION_BODY_RE = re.compile(
 # body that starts with one of these strings is considered placeholder.
 _PLACEHOLDER_PREFIXES = ('TODO', 'TODO —', 'TODO -', 'TODO.', 'TODO:')
 
+# A line wholly wrapped in markdown emphasis. The (now-retired)
+# illustration-direction coach/strict templates emitted their instructions
+# this way (`_(fill this in)_`, `_Required: describe the palette_`), so a
+# section made of nothing but emphasized lines is boilerplate by
+# construction. Ported verbatim from illustrations._EMPHASIZED_LINE_RE (Task
+# 7 fix round 1, .superpowers/sdd/2026-07-28-illustration-canon-adoption/)
+# rather than reinvented, so the same shapes stay recognized now that
+# placeholder detection is shared here instead of duplicated per module.
+#
+# NOTE: this regex also matches a *bold lead-in* line (`**Nora Vance**`,
+# `_The lamp remembers._`), which is why it is only ever applied to a WHOLE
+# body — see _section_body_is_placeholder. Applied to the first line alone it
+# would call a filled anchor a scaffold.
+_EMPHASIZED_LINE_RE = re.compile(r'\A[_*]{1,2}.*[_*]{1,2}\Z')
+
+# Unemphasized placeholders an author might type by hand: TBD, n/a, "fill
+# this in". Case-insensitive and broader than _PLACEHOLDER_PREFIXES (which
+# only recognizes the exact-case TODO shapes the templates themselves emit).
+# Also ported verbatim from illustrations._BARE_PLACEHOLDER_RE.
+_BARE_PLACEHOLDER_RE = re.compile(
+    r'\A\(?\s*(tbd|todo|n/?a|(you )?fill (this )?in)\b', re.IGNORECASE,
+)
+
 
 def _section_body_is_placeholder(body: str) -> bool:
     """Return True if the section body looks like an unfilled template.
 
-    Strips leading HTML comments (the starter templates wrap orienting
-    comments in `<!-- ... -->`) and checks whether the first non-blank
-    line begins with a TODO marker. False positives are unlikely:
-    authors using TODO as an inline note typically place it mid-text,
-    not as the first content line of a required section.
+    Leading HTML comments are stripped first (the starter templates wrap
+    orienting comments in `<!-- ... -->`). Two independent rules then apply,
+    and the distinction between them is load-bearing:
+
+    - **First-line `TODO`** — if the first non-blank line starts with one of
+      `_PLACEHOLDER_PREFIXES`, the body is a scaffold. Every shipped template
+      (GN canon, and formerly illustration-direction's own) emits exactly
+      that, and GN's `elaborate --stage page-architecture` gate has depended
+      on this first-line rule since before the canon adoption — so it stays a
+      first-line rule, unchanged.
+    - **Whole-body emphasis / bare placeholder** — a body that consists of
+      *nothing but* emphasized instruction lines (`_(fill this in)_`,
+      `_Required: describe the palette_`), bare TBD/n-a/fill-this-in lines,
+      and headings has nothing substantive in it, so it is a scaffold. This
+      is the retired `illustrations._is_placeholder`'s semantics, restored
+      verbatim: it was a whole-body test, and narrowing it to the first line
+      classified real content as scaffolding. A continuity anchor opening
+      with a bold name (`**Nora Vance**`, then the description) or an italic
+      epigraph is filled prose — treating it as unfilled drops the anchor
+      from `anchor_texts`, and every prompt for that entity then renders with
+      no anchor at all, which is the exact drift anchors exist to prevent.
+      On the GN side the same misclassification made a register vocabulary
+      opening `**Dominant / transitional / rhythmic.**` fail the
+      page-architecture gate.
+
+    An empty body (nothing but blank lines) is deliberately NOT a
+    placeholder here — see is_canon_block_populated's docstring for the
+    rationale. A caller that wants an empty book-level Embeddable block to
+    also count as unfilled (illustrations.missing_reference_sections does,
+    because the retired illustration-direction reader treated an empty
+    direction section that way) adds that check on its own side, on top of
+    this function's result, rather than this function's behavior changing
+    under every caller including GN's page-architecture gate.
     """
     text = re.sub(r'^\s*<!--.*?-->\s*', '', body, flags=re.DOTALL)
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        return any(stripped.startswith(p) for p in _PLACEHOLDER_PREFIXES)
-    return False
+    lines = [line.strip() for line in text.splitlines()]
+    content = [line for line in lines if line]
+    if not content:
+        return False  # empty body counts as populated — see the docstring
+    if any(content[0].startswith(p) for p in _PLACEHOLDER_PREFIXES):
+        return True
+    # Whole-body test: headings are not content either — an anchor heading
+    # with no description under it is an unfilled anchor.
+    substantive = [
+        line for line in content
+        if not line.startswith('#')
+        and not _EMPHASIZED_LINE_RE.match(line)
+        and not _BARE_PLACEHOLDER_RE.match(line)
+    ]
+    return not substantive
 
 
-def _embeddable_block_text(canon_path: str) -> str | None:
-    """Return the verbatim text of a canon file's `## Embeddable block`
-    section. None if the file is missing or has no such section.
+def embeddable_block_text(canon_path: str) -> str | None:
+    """Return the verbatim text of a canon file's `## Embeddable block`.
+
+    Verbatim is the whole point: an anchor works only because every prompt
+    that uses it sends a byte-identical string. Never normalize here —
+    normalization belongs at comparison time, in the caller.
+
+    Returns None when the file or the section is absent.
     """
     parsed = parse_canon_file(canon_path)
     if not parsed['exists']:
@@ -434,20 +495,27 @@ def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
             severity='error',
         ))
         return findings  # nothing else to check — frontmatter is unparseable
+    from storyforge.common import get_medium
+    required = ALWAYS_REQUIRED_FRONTMATTER_KEYS
+    if get_medium(project_root) == 'graphic-novel':
+        required = required + GN_ONLY_FRONTMATTER_KEYS
+
     if fm is None:
         # 'error' severity: a file without frontmatter can't be resolved by
-        # canon_id; embedders rely on the YAML block.
+        # canon_id; embedders rely on the YAML block. The key list in the
+        # action text is medium-aware — `embeds_as` is GN-only
+        # (GN_ONLY_FRONTMATTER_KEYS), so naming it here for a novel project
+        # would tell the author to add a key nothing ever reads.
         findings.append(_finding(
             rel,
             'canon file is missing YAML frontmatter',
-            'Add a --- delimited YAML block with canon_id, canon_type, '
-            'canon_updated, appears_in, embeds_as, first_appearance',
+            'Add a --- delimited YAML block with ' + ', '.join(required),
             'canon_missing_frontmatter',
             severity='error',
         ))
         return findings  # nothing else to check without frontmatter
 
-    for key in REQUIRED_FRONTMATTER_KEYS:
+    for key in required:
         if not fm.get(key):
             findings.append(_finding(
                 rel,
@@ -678,6 +746,51 @@ def _resolve_canon_path(project_dir: str, canon_id: str,
     return index.get(canon_id)
 
 
+def resolve_canon_path(project_dir: str, canon_id: str) -> str | None:
+    """Resolve a canon_id to its file path, root or subdirectory.
+
+    Thin public wrapper over the cached internal resolver, for callers that
+    look up one id and do not hold an index.
+    """
+    return _resolve_canon_path(project_dir, canon_id, {})
+
+
+def canon_id_index(project_dir: str) -> dict[str, str]:
+    """Map every canon file's declared `canon_id` (lowercased) to its path,
+    relative to project_dir.
+
+    This is deliberately NOT the same index `resolve_canon_path` builds:
+    that one keys on the filename stem, which is only ever right when the
+    file's `canon_id` matches its own filename — an assumption
+    `canon_id_mismatch` and `canon_id_invalid` merely warn about rather than
+    block. A caller that needs to know "does this id already exist
+    anywhere" (an existence check before creating a new file, say) has to
+    key on the id actually declared in frontmatter, or a mismatched or
+    differently-cased stem lets a same-id file get written right past an
+    existing one — silently truncating it in place on a case-insensitive
+    filesystem, or shadowing it under a second path.
+
+    Lowercased so a merely-differently-cased id still collides. On a
+    genuine duplicate id, last-sorted-path wins — the same tie-break
+    `anchor_texts` uses — so this index answers consistently with what
+    `anchor_texts` would actually resolve for that id.
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return {}
+    index: dict[str, str] = {}
+    for path in _walk_canon_files(canon_dir):
+        parsed = parse_canon_file(path)
+        fm = parsed['frontmatter']
+        if not isinstance(fm, dict):
+            continue
+        canon_id = (fm.get('canon_id') or '').strip().lower()
+        if not canon_id:
+            continue
+        index[canon_id] = os.path.relpath(path, project_dir)
+    return index
+
+
 def check_canon_drift(project_dir: str) -> list[CanonFinding]:
     """Walk pages/*.md and compare each canon-embed to its source canon's
     `## Embeddable block`. Emits five finding types:
@@ -712,7 +825,7 @@ def check_canon_drift(project_dir: str) -> list[CanonFinding]:
     findings: list[CanonFinding] = []
     canon_index: dict[str, str] = {}
     # Cache the NORMALIZED source text, not the raw source — avoids
-    # re-running _normalize_for_drift on every embed-of-the-same-canon hit.
+    # re-running normalize_for_comparison on every embed-of-the-same-canon hit.
     normalized_source_cache: dict[str, str | None] = {}
 
     for page_path in pages:
@@ -762,9 +875,9 @@ def check_canon_drift(project_dir: str) -> list[CanonFinding]:
                 ))
                 continue
             if cid not in normalized_source_cache:
-                raw_source = _embeddable_block_text(canon_path)
+                raw_source = embeddable_block_text(canon_path)
                 normalized_source_cache[cid] = (
-                    _normalize_for_drift(raw_source)
+                    normalize_for_comparison(raw_source)
                     if raw_source is not None else None
                 )
             normalized_source = normalized_source_cache[cid]
@@ -801,7 +914,7 @@ def is_canon_block_populated(project_dir: str, canon_id: str) -> bool:
     path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
     if not os.path.isfile(path):
         return False
-    block_text = _embeddable_block_text(path)
+    block_text = embeddable_block_text(path)
     if block_text is None:
         return False
     return not _section_body_is_placeholder(block_text)
@@ -823,7 +936,44 @@ def get_canon_embeddable_block(project_dir: str, canon_id: str) -> str:
     path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
     if not os.path.isfile(path):
         return ''
-    return (_embeddable_block_text(path) or '').strip()
+    return (embeddable_block_text(path) or '').strip()
+
+
+def anchor_texts(project_dir: str) -> dict[str, str]:
+    """Map canon_id -> verbatim anchor text for every entity canon file.
+
+    Skips files whose Embeddable block is missing or still placeholder text:
+    a scaffold sent to an image model as though it were direction is worse
+    than sending nothing, because it reads as a deliberate instruction.
+
+    Walks via `_walk_canon_files` (not a hand-rolled `os.walk`) so this
+    accessor shares two guarantees with every other reader of the canon
+    tree: starter templates (`_template.md`) are excluded — their
+    Embeddable block is instructional prose, not a TODO stub, so the
+    placeholder check alone would not catch them — and traversal order is
+    deterministic (sorted by full path) so a duplicate `canon_id` across
+    directories resolves to the same winner on every machine.
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return {}
+
+    anchors: dict[str, str] = {}
+    for path in _walk_canon_files(canon_dir):
+        parsed = parse_canon_file(path)
+        fm = parsed['frontmatter']
+        if not isinstance(fm, dict):
+            continue
+        if fm.get('canon_type') not in ENTITY_CANON_TYPES:
+            continue
+        canon_id = (fm.get('canon_id') or '').strip()
+        if not canon_id:
+            continue
+        body = embeddable_block_text(path)
+        if body is None or _section_body_is_placeholder(body):
+            continue
+        anchors[canon_id] = body.strip()
+    return anchors
 
 
 def validate_canon_directory(project_dir: str) -> list[CanonFinding]:

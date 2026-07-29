@@ -6,8 +6,11 @@ mechanics behind them:
   - ``reference/illustration-plan.csv`` — one row per illustration, holding
     the narrative justification, the art-direction fields, and (after ingest)
     the file digest and dimensions.
-  - ``reference/illustration-direction.md`` — the book-level art-direction
-    document and the continuity anchors inside it.
+  - ``reference/illustration-direction.md`` — the old book-level art-direction
+    document, superseded by ``reference/canon/`` (see ``storyforge.canon`` and
+    ``storyforge.prompts_illustrate.CANON_PLAN``). Kept readable here only for
+    ``_direction_anchor_mismatches``, a one-time safety net for a project that
+    still has a hand-edited copy lying around.
   - The scene marker ``![[illus:{id}]]`` — insertion at a whitespace-tolerant
     prose anchor, parsing, and stripping.
   - Resolution — one marker, three output targets (epub/PDF, web book,
@@ -159,8 +162,15 @@ def default_prompt_rel(illus_id: str) -> str:
 # Art-direction document
 # ============================================================================
 
-#: Sections the direction document is expected to carry. `Continuity anchors`
-#: is parsed structurally; the rest are passed to the prompt builder as prose.
+#: Sections the direction document used to be expected to carry. The
+#: reference tier (`reference/canon/`) replaced this document as the source
+#: of book-level direction and continuity anchors — `--direction` no longer
+#: writes it, and `--prompts` no longer reads it. `_direction_anchor_mismatches`
+#: (the hand-edit safety net) reads the document itself directly — via
+#: `read_direction`/`find_section`/`ANCHORS_SECTION` — and never touches this
+#: constant. Its only remaining reference is the assertion in
+#: `tests/test_illustrations.py::test_read_direction_parses_every_section`;
+#: it is test-only at this point, kept rather than deleted this round.
 DIRECTION_SECTIONS: tuple[str, ...] = (
     'Format', 'Visual promise', 'Recurring visual language',
     'Content limits', 'Continuity anchors',
@@ -169,7 +179,6 @@ DIRECTION_SECTIONS: tuple[str, ...] = (
 ANCHORS_SECTION = 'Continuity anchors'
 
 _H2_RE = re.compile(r'^##[ \t]+(.+?)[ \t]*$', re.MULTILINE)
-_H3_RE = re.compile(r'^###[ \t]+(.+?)[ \t]*$', re.MULTILINE)
 
 
 def read_direction(project_dir: str) -> dict[str, str]:
@@ -208,101 +217,43 @@ def find_section(sections: dict[str, str], wanted: str) -> str | None:
     return None
 
 
-def anchors_section_headings(project_dir: str) -> list[str]:
-    """Every heading in the document that reads as the anchors section.
+def has_reference_tier(project_dir: str) -> bool:
+    """True when every book-level canon file exists and is populated.
 
-    More than one means the document has been split — usually by an append that
-    could not find an existing differently-cased heading — and anchors under
-    all but one of them reach nothing.
+    The reference tier is what makes a book's images look like one book. A
+    project without it can still be planned, but its prompts would carry no
+    house style, which is why --prompts warns loudly rather than proceeding
+    quietly.
     """
-    return [name for name in read_direction(project_dir)
-            if name.strip().lower() == ANCHORS_SECTION.lower()]
+    return not missing_reference_sections(project_dir)
 
 
-def read_continuity_anchors(project_dir: str) -> dict[str, str]:
-    """Parse the `## Continuity anchors` section into `{name: description}`.
+def missing_reference_sections(project_dir: str) -> list[str]:
+    """Book-level canon ids that are absent, empty, or still placeholder text.
 
-    Each anchor is an ``### Name`` subsection whose body is the fixed
-    description — a paragraph, not a phrase, because that is what a character
-    or creature actually needs to stay recognizable. Anchors cover whatever the
-    art must keep consistent: characters, creatures, locations, props.
+    Empty is checked here rather than in canon._section_body_is_placeholder:
+    that shared function deliberately treats an empty Embeddable block as
+    populated (see is_canon_block_populated's docstring — GN's
+    page-architecture gate relies on that). An empty book-level direction
+    section is still useless to a prompt, the same way the retired
+    illustration-direction reader treated an empty section as missing, so
+    the empty check is added on this side, composing with the shared
+    placeholder detector rather than forking it.
     """
-    sections = read_direction(project_dir)
-    # Every heading that reads as the anchors section contributes, so a
-    # differently-cased duplicate does not silently orphan the anchors under it.
-    bodies = [text for name, text in sections.items()
-              if name.strip().lower() == ANCHORS_SECTION.lower()]
-    body = '\n\n'.join(b for b in bodies if b.strip())
-    if not body:
-        return {}
+    from storyforge import canon
+    from storyforge.prompts_illustrate import CANON_PLAN
 
-    anchors: dict[str, str] = {}
-    matches = list(_H3_RE.finditer(body))
-    for i, match in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
-        name = match.group(1).strip()
-        description = ' '.join(body[match.end():end].split())
-        if name and description:
-            anchors[name] = description
-    return anchors
-
-
-def has_direction(project_dir: str) -> bool:
-    """True when a non-empty direction document exists."""
-    return bool(read_direction(project_dir))
-
-
-def missing_direction_sections(project_dir: str) -> list[str]:
-    """Return the expected sections a direction document is missing or left empty."""
-    sections = read_direction(project_dir)
-    if not sections:
-        return list(DIRECTION_SECTIONS)
-
-    missing = []
-    for name in DIRECTION_SECTIONS:
-        actual = find_section(sections, name)
-        body = sections.get(actual, '') if actual else ''
-        if not body.strip() or _is_placeholder(body):
-            missing.append(name)
+    missing: list[str] = []
+    for canon_id, _canon_type, _purpose in CANON_PLAN:
+        path = canon.resolve_canon_path(project_dir, canon_id)
+        if path is None:
+            missing.append(canon_id)
+            continue
+        body = canon.embeddable_block_text(path)
+        if (body is None or not body.strip()
+                or canon._section_body_is_placeholder(body)):
+            missing.append(canon_id)
     return missing
-
-
-#: A line wholly wrapped in markdown emphasis. Both the coach and strict
-#: templates emit their instructions this way, so a section made of nothing but
-#: emphasized lines is boilerplate by construction.
-_EMPHASIZED_LINE_RE = re.compile(r'\A[_*]{1,2}.*[_*]{1,2}\Z')
-
-# Unemphasized placeholders an author might type by hand. The templates always
-# emphasize theirs, so this is a courtesy net, not the primary test.
-_BARE_PLACEHOLDER_RE = re.compile(
-    r'\A\(?\s*(tbd|todo|n/?a|(you )?fill (this )?in)\b', re.IGNORECASE,
-)
-
-
-def _is_placeholder(body: str) -> bool:
-    """True when a section body is still template boilerplate.
-
-    A scaffolded document with every section left as a prompt-to-the-author is
-    worse than no document, because it would be fed to the image model as
-    though it were direction.
-
-    The test is structural rather than a keyword list: strip the emphasized
-    instruction lines the templates emit, and if nothing substantive remains,
-    the author has not written this section yet. `### Name` subsection headings
-    do not count as content either — an anchor heading with no description
-    under it is an unfilled anchor.
-    """
-    substantive = []
-    for line in body.strip().splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
-            continue
-        if _EMPHASIZED_LINE_RE.match(stripped):
-            continue
-        if _BARE_PLACEHOLDER_RE.match(stripped):
-            continue
-        substantive.append(stripped)
-    return not substantive
 
 
 # ============================================================================
@@ -1505,7 +1456,7 @@ IllustrationFindingKind = Literal[
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
-    'unembedded_ingested', 'shattered_row',
+    'unembedded_ingested', 'shattered_row', 'direction_anchor_mismatch',
 ]
 
 
@@ -1519,7 +1470,7 @@ class IllustrationFinding(_IllustrationFindingRequired, total=False):
     """One problem with the illustration plan or its markers."""
     id: str        #: every finding except orphan_file
     scene_id: str  #: set when the finding is locatable in a scene
-    file: str      #: set for orphan_file and missing_file
+    file: str      #: set for orphan_file, missing_file, and direction_anchor_mismatch
 
 
 # Findings that make the plan incoherent — the book cannot be published or
@@ -1535,7 +1486,7 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
 # usually a rename in progress.
 WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
-    'unembedded_ingested', 'shattered_row',
+    'unembedded_ingested', 'shattered_row', 'direction_anchor_mismatch',
 })
 
 Severity = Literal['error', 'warning']
@@ -1565,6 +1516,10 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     findings: list[IllustrationFinding] = []
     rows = read_plan(project_dir)
     if not rows and not os.path.isdir(illustrations_dir(project_dir)):
+        # No plan and no ingested files — but the hand-edit safety net still
+        # needs to run: a direction document can exist (and drift from
+        # canon) before a single illustration has ever been planned.
+        findings.extend(_direction_anchor_mismatches(project_dir))
         return findings
 
     seen_ids: set[str] = set()
@@ -1720,7 +1675,99 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
                     'detail': f'{rel} is not referenced by any plan row',
                 })
 
+    findings.extend(_direction_anchor_mismatches(project_dir))
+
     return findings
+
+
+def _direction_anchor_mismatches(project_dir: str) -> list[IllustrationFinding]:
+    """Compare canon anchors against a still-present direction document.
+
+    A one-time safety net for the hand-edit off illustration-direction.md.
+    The unrecoverable mistake is an anchor whose text changed: every
+    illustration already rendered from the old string is invalidated, and
+    nothing else in the pipeline would notice. Goes silent once the old
+    document is deleted, which is the intended end state.
+
+    The direction document's anchors are `### Name` subsections written by a
+    human (e.g. "Great Lamp"); canon ids are slugs (e.g. "great-lamp"). An
+    exact-key lookup between the two would match nothing, so the heading is
+    slugified with the same function `append_anchor_stubs` uses to derive a
+    canon id from a proposed anchor name — one slug function, not two.
+    """
+    from storyforge import canon
+    from storyforge.common import normalize_for_comparison
+    from storyforge.prompts_illustrate import _slugify
+
+    if not os.path.isfile(direction_path(project_dir)):
+        return []
+    sections = read_direction(project_dir)
+    anchors_heading = find_section(sections, ANCHORS_SECTION)
+    anchors_body = sections.get(anchors_heading, '') if anchors_heading else ''
+    if not anchors_body:
+        return []
+
+    old: dict[str, str] = {}
+    current_name: str | None = None
+    buffer: list[str] = []
+    for line in anchors_body.splitlines():
+        heading = re.match(r'^###\s+(.+?)\s*$', line)
+        if heading:
+            if current_name is not None:
+                old[current_name] = '\n'.join(buffer).strip()
+            current_name = heading.group(1).strip()
+            buffer = []
+        elif current_name is not None:
+            buffer.append(line)
+    if current_name is not None:
+        old[current_name] = '\n'.join(buffer).strip()
+
+    findings: list[IllustrationFinding] = []
+    new = canon.anchor_texts(project_dir)
+    for name, old_text in sorted(old.items()):
+        canon_id = _slugify(name)
+        # No matching canon id — including a canon file that exists but is
+        # still a placeholder, which anchor_texts already excludes — is
+        # skipped, not reported. Mid-hand-edit is normal in-flight state,
+        # and the author decides which anchors survive.
+        new_text = new.get(canon_id)
+        if new_text is None:
+            continue
+        if normalize_for_comparison(old_text) != normalize_for_comparison(new_text):
+            # cmd_cleanup._write_report emits findings as unquoted
+            # pipe-delimited CSV, one row per newline — the same reason
+            # 'shattered_row' exists as a finding kind for the plan CSV
+            # itself. old_text/new_text are author-written anchor prose and
+            # may contain either character, so both must be flattened to a
+            # single physical line with no '|' before they reach `detail`.
+            old_flat = _csv_safe(old_text)
+            new_flat = _csv_safe(new_text)
+            findings.append({
+                'kind': 'direction_anchor_mismatch',
+                'id': canon_id,
+                'file': f'reference/{DIRECTION_FILENAME}',
+                'detail': (
+                    f'canon anchor for `{canon_id}` differs from the '
+                    f'### {_csv_safe(name)} section in '
+                    f'reference/{DIRECTION_FILENAME} — direction doc: '
+                    f'"{old_flat}" / canon file: "{new_flat}" — every '
+                    f'illustration already rendered from the old text is '
+                    f'invalidated if this change was unintentional'
+                ),
+            })
+    return findings
+
+
+def _csv_safe(text: str) -> str:
+    """Collapse *text* onto one physical line with no `|`.
+
+    Finding `detail` strings land in the unquoted pipe-delimited
+    `working/cleanup-report.csv` (`cmd_cleanup._write_report`), one row per
+    newline and one column per `|`. Free-form prose — anchor text here — can
+    contain either, so anything interpolated into a `detail` from prose must
+    pass through this first.
+    """
+    return ' '.join(text.split()).replace('|', '/')
 
 
 # ============================================================================

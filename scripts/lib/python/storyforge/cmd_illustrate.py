@@ -138,6 +138,26 @@ def _id_filter(raw: str | None) -> set[str] | None:
     return {part.strip() for part in raw.split(',') if part.strip()} or None
 
 
+def _reference_tier_gaps(
+        project_dir: str) -> tuple[list[str], list[str]]:
+    """Split ill.missing_reference_sections into (absent, placeholder).
+
+    The two need different fixes and different advice: an absent canon_id
+    has no file at all, so `--direction` is exactly right for it; a
+    placeholder one already exists as a TODO scaffold, so re-running
+    `--direction` is a silent no-op (it never overwrites an existing file —
+    see run_direction) and the real fix is editing the file directly.
+    Conflating them told an author who had just run `--direction` to run it
+    again, which is the milder recurrence of this task's own defect.
+    """
+    from storyforge import canon as canon_mod
+    missing = ill.missing_reference_sections(project_dir)
+    absent = [c for c in missing
+              if canon_mod.resolve_canon_path(project_dir, c) is None]
+    placeholder = [c for c in missing if c not in absent]
+    return absent, placeholder
+
+
 # ============================================================================
 # --diagnose
 # ============================================================================
@@ -159,6 +179,18 @@ def run_diagnose(project_dir: str) -> int:
         log(f'  not yet embedded: {", ".join(report["unembedded"])}')
     if report['next_unrendered']:
         log(f'  next to render: {report["next_unrendered"]}')
+
+    absent_ref, placeholder_ref = _reference_tier_gaps(project_dir)
+    if absent_ref or placeholder_ref:
+        parts = []
+        if absent_ref:
+            parts.append(f'missing: {", ".join(absent_ref)} (run '
+                         f'`storyforge illustrate --direction`)')
+        if placeholder_ref:
+            parts.append(f'unfilled: {", ".join(placeholder_ref)} (edit '
+                         f'directly)')
+        log(f'  reference tier incomplete — {"; ".join(parts)} — --prompts '
+            f'will warn until these are filled')
 
     steps = ill.render_order(project_dir)
     if steps:
@@ -194,99 +226,174 @@ def run_diagnose(project_dir: str) -> int:
 
 def run_direction(project_dir: str, coaching: CoachingLevel,
                   dry_run: bool) -> int:
-    """Write the book-level art-direction document."""
-    path = ill.direction_path(project_dir)
-    rel = os.path.relpath(path, project_dir)
-    entities = _anchor_candidates(project_dir)
+    """Write the book-level and continuity-anchor canon files.
 
-    if ill.has_direction(project_dir):
-        missing = ill.missing_direction_sections(project_dir)
-        if not missing:
-            log(f'{rel} is already written. Edit it directly, or delete it to '
-                f'start over.')
-            return 0
-        log(f'{rel} exists but these sections are empty or still placeholder: '
-            f'{", ".join(missing)}')
-        log('Fill them in, or delete the file to regenerate it.')
-        return 0
+    One file per `pi.CANON_PLAN` entry plus one per continuity-anchor
+    candidate from the character/location registries. A canon_id that
+    already resolves anywhere in reference/canon/ is left alone — a rendered
+    illustration may already depend on its exact text, the same discipline
+    `append_anchor_stubs` uses.
+    """
+    from storyforge import canon
 
-    title = read_yaml_field('project.title', project_dir) or 'Untitled'
+    plan: list[tuple[str, str, str]] = list(pi.CANON_PLAN)
+    for canon_id, canon_type, name in _anchor_candidates(project_dir):
+        plan.append((canon_id, canon_type,
+                     f'A continuity anchor for {name}, reused verbatim in '
+                     f'every prompt that shows {name}. Include measurable '
+                     f'facts: height, age, exact colors, specific garments '
+                     f'(or exact materials and layout for a place).'))
 
-    if coaching in ('coach', 'strict'):
-        content = pi.render_direction_template(
-            title=title, coaching=coaching, entities=entities)
-        return _write_direction(project_dir, content, rel, dry_run,
-                               entities, coaching)
+    rel_dir = canon.CANON_DIR
 
     if dry_run:
-        log(f'[dry-run] would draft {rel} '
-            f'({len(entities)} continuity anchor(s))')
+        log(f'[dry-run] would write up to {len(plan)} canon file(s) under '
+            f'{rel_dir}/')
         return 0
 
-    if not os.environ.get('ANTHROPIC_API_KEY'):
-        log('ERROR: ANTHROPIC_API_KEY is not set. Drafting art direction in '
-            'full coaching requires an API key. Set it and re-run, or use '
-            '--coaching coach for a template to fill in yourself.')
-        return 1
+    existing_ids = canon.canon_id_index(project_dir)
+    to_write: list[tuple[str, str, str, str]] = []
+    for canon_id, canon_type, purpose in plan:
+        rel_path = pi.canon_rel_path(canon_type, canon_id)
+        if canon_id in existing_ids:
+            existing_rel = existing_ids[canon_id]
+            if existing_rel == rel_path:
+                # The plain steady-state skip: a re-run finds the file it
+                # would have written already sitting exactly where expected.
+                # This is the common case on every run after the first, so
+                # it is not a WARNING — only a mismatch below (a different
+                # path claiming this id) or a malformed file at the
+                # candidate path (below that) indicates a real problem.
+                log(f'{rel_path} already exists; left alone rather than '
+                    f'risk overwriting it')
+            else:
+                log(f'WARNING: canon_id {canon_id!r} already exists at '
+                    f'{existing_rel} (expected {rel_path}); left alone '
+                    f'rather than risk overwriting or shadowing it')
+            continue
+        path = os.path.join(project_dir, rel_path)
+        if os.path.exists(path):
+            # canon_id_index only sees files whose frontmatter it could parse
+            # a canon_id out of — a malformed file sitting at this exact
+            # path is invisible to it, so this second check is not
+            # redundant (same two-check discipline as append_anchor_stubs).
+            log(f'WARNING: {rel_path} already exists at that path; left '
+                f'alone rather than overwrite it')
+            continue
+        to_write.append((canon_id, canon_type, purpose, rel_path))
 
-    prompt = pi.build_direction_request(
-        title=title,
-        genre=read_yaml_field('project.genre', project_dir) or '',
-        audience=read_yaml_field('project.audience', project_dir) or '',
-        canon_context=_canon_context(project_dir),
-        story_context=_story_context(project_dir),
-        entities=entities,
-    )
-    body = _invoke(project_dir, prompt, 'illustrate-direction',
-                   task_type='synthesis', max_tokens=8192)
-    if not body:
-        log('ERROR: no response from the API.')
-        return 1
-
-    content = f'# Illustration art direction — {title}\n\n{body.strip()}\n'
-    return _write_direction(project_dir, content, rel, dry_run, entities,
-                            coaching)
-
-
-def _write_direction(project_dir: str, content: str, rel: str, dry_run: bool,
-                     entities: list[str], coaching: CoachingLevel) -> int:
-    """Write the direction document and report what still needs the author."""
-    if dry_run:
-        log(f'[dry-run] would write {rel}')
-        return 0
-
-    path = ill.direction_path(project_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(content)
-    log(f'Wrote {rel}')
-
-    anchors = ill.read_continuity_anchors(project_dir)
-    log(f'  continuity anchors: {len(anchors)}')
-    missing = ill.missing_direction_sections(project_dir)
-    if missing:
-        log(f'  needs your input: {", ".join(missing)}')
+    book_level_ids = {c for c, _t, _p in pi.CANON_PLAN}
+    filled: dict[str, str] = {}
     if coaching == 'full':
-        log('Read it before running --prompts — every illustration inherits '
-            'whatever is in there, including anything it got wrong.')
+        needs_fill = [c for c, _t, _p, _r in to_write if c in book_level_ids]
+        if needs_fill:
+            if not os.environ.get('ANTHROPIC_API_KEY'):
+                log('ERROR: ANTHROPIC_API_KEY is not set. Drafting art '
+                    'direction in full coaching requires an API key. Set it '
+                    'and re-run, or use --coaching coach for a template to '
+                    'fill in yourself.')
+                return 1
+            prompt = pi.build_canon_direction_request(
+                title=read_yaml_field('project.title', project_dir)
+                or 'Untitled',
+                genre=read_yaml_field('project.genre', project_dir) or '',
+                audience=read_yaml_field('project.audience', project_dir)
+                or '',
+                canon_context=_canon_context(project_dir),
+                story_context=_story_context(project_dir),
+            )
+            body = _invoke(project_dir, prompt, 'illustrate-direction',
+                           task_type='synthesis', max_tokens=4096)
+            if not body:
+                log('ERROR: no response from the API.')
+                return 1
+            filled = pi.parse_canon_direction_response(body)
+
+    for canon_id, canon_type, purpose, rel_path in to_write:
+        body = filled.get(canon_id)
+        if body:
+            content = pi.render_filled_canon(
+                canon_id=canon_id, canon_type=canon_type, body=body)
+        else:
+            content = pi.render_canon_template(
+                canon_id=canon_id, canon_type=canon_type, purpose=purpose,
+                coaching=coaching)
+        path = os.path.join(project_dir, rel_path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        log(f'Wrote {rel_path}')
+
+    # Resolve every plan entry — written this run OR already on disk from an
+    # earlier run — to its real path, so the placeholder check below covers
+    # the whole reference tier rather than only what this run happened to
+    # write. A canon_id skipped as malformed-at-candidate-path has no
+    # resolvable path and is left out; that case is already flagged above.
+    resolved_paths: dict[str, str] = {
+        canon_id: existing_ids[canon_id]
+        for canon_id, _canon_type, _purpose in plan
+        if canon_id in existing_ids
+    }
+    resolved_paths.update(
+        (canon_id, rel_path)
+        for canon_id, _canon_type, _purpose, rel_path in to_write
+    )
+
+    # canon._section_body_is_placeholder is the same TODO-detection rule
+    # anchor_texts and is_canon_block_populated use — a file that is still
+    # TODO scaffolding, whether written just now or left over from an
+    # earlier run, must be reported every time, not just the run that wrote
+    # it — a later no-op re-run over an all-placeholder reference tier must
+    # not read as an all-clear.
+    needs_input = [
+        resolved_paths[canon_id] for canon_id, _canon_type, _purpose in plan
+        if canon_id in resolved_paths
+        and canon._section_body_is_placeholder(
+            canon.embeddable_block_text(
+                os.path.join(project_dir, resolved_paths[canon_id])) or '')
+    ]
+    if not to_write and not needs_input:
+        log(f'Every canon file already exists under {rel_dir}/. Edit them '
+            f'directly, or delete one to regenerate it.')
+    if needs_input:
+        log(f'  needs your input: {", ".join(needs_input)}')
+    if coaching == 'full':
+        log('Read the canon files before running --prompts — every '
+            'illustration inherits whatever is in there, including anything '
+            'it got wrong.')
     return 0
 
 
-def _anchor_candidates(project_dir: str) -> list[str]:
-    """Suggest what needs a continuity anchor, from the project's registries.
+def _anchor_candidates(project_dir: str) -> list[tuple[str, str, str]]:
+    """Suggest continuity-anchor canon files to stub, from the project's
+    registries. Returns (canon_id, canon_type, display_name) tuples.
 
     Characters and locations come from their registries; both matter because
     art has to keep a place consistent as much as a face. The author adds
-    creatures and signature props the registries don't model.
+    creatures and signature props the registries don't model. Uses each
+    registry row's own `id` — not a re-slugified name — so the stub's
+    filename always matches the id `canon_missing_registry_entry` cross-checks
+    against.
     """
-    names: list[str] = []
-    for filename, limit in (('characters.csv', 12), ('locations.csv', 6)):
+    entities: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for filename, canon_type, limit in (
+        ('characters.csv', 'character', 12),
+        ('locations.csv', 'location', 6),
+    ):
         rows = ill._read_ref_csv(project_dir, filename)
         for row in rows[:limit]:
-            name = (row.get('name') or row.get('id') or '').strip()
-            if name and name not in names:
-                names.append(name)
-    return names
+            canon_id = (row.get('id') or '').strip()
+            if not canon_id:
+                log(f'WARNING: a row in {filename} has no id; skipped as a '
+                    f'continuity-anchor candidate (the canon filename must '
+                    f'equal the registry id)')
+                continue
+            name = (row.get('name') or canon_id).strip()
+            if canon_id not in seen:
+                seen.add(canon_id)
+                entities.append((canon_id, canon_type, name))
+    return entities
 
 
 # ============================================================================
@@ -308,8 +415,8 @@ def run_review(project_dir: str, dry_run: bool) -> int:
     content = pi.render_sequence_review(
         title=read_yaml_field('project.title', project_dir) or 'Untitled',
         steps=steps,
-        anchors=ill.read_continuity_anchors(project_dir),
-        direction=ill.read_direction(project_dir),
+        anchors=pi.anchors_for_prompt(project_dir),
+        direction=pi.book_level_direction(project_dir),
     )
     path = os.path.join(project_dir, rel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -490,17 +597,19 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
 
     log(f'Writing art direction for {len(rows)} illustration(s)')
 
-    direction = ill.read_direction(project_dir)
-    if not direction:
-        log(f'WARNING: no {ill.DIRECTION_FILENAME} — these prompts will carry '
-            f'no house style, and the illustrations will not look like they '
-            f'belong to one book. Run `storyforge illustrate --direction` '
-            f'first.')
-    else:
-        missing = ill.missing_direction_sections(project_dir)
-        if missing:
-            log(f'WARNING: {ill.DIRECTION_FILENAME} is missing: '
-                f'{", ".join(missing)}')
+    absent, placeholder = _reference_tier_gaps(project_dir)
+    if absent:
+        log(f'WARNING: reference/canon/ is missing book-level file(s) for: '
+            f'{", ".join(absent)} — these prompts will carry no house '
+            f'style for them, and the illustrations will not look like '
+            f'they belong to one book. Run `storyforge illustrate '
+            f'--direction` first.')
+    if placeholder:
+        log(f'WARNING: reference/canon/ has unfilled book-level file(s) '
+            f'for: {", ".join(placeholder)} — these already exist as '
+            f'TODO scaffolds; edit them directly (re-running --direction '
+            f'is a no-op once the files exist).')
+    direction = pi.book_level_direction(project_dir)
 
     if coaching == 'strict':
         log('Coaching is strict — art direction is creative work. Writing the '
@@ -552,13 +661,12 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             body, new_anchors = pi.split_anchor_block(body)
             if unparsed:
                 log(f'  WARNING: {len(unparsed)} line(s) in the proposed '
-                    f'ANCHORS block did not parse as "Name — description" and '
-                    f'were discarded: {unparsed!r}')
+                    f'ANCHORS block did not parse as "Name | type — '
+                    f'description" and were discarded: {unparsed!r}')
             if new_anchors:
                 added = pi.append_anchor_stubs(project_dir, new_anchors)
                 if added:
-                    log(f'  appended {len(added)} anchor(s) to '
-                        f'{ill.DIRECTION_FILENAME} for review: '
+                    log(f'  wrote {len(added)} new canon stub(s) for review: '
                         f'{", ".join(added)}')
         else:
             body = _strict_prompt_scaffold(row)
@@ -651,6 +759,22 @@ def _relevant_anchors(anchors: dict[str, str],
     the frame, and invites the model to include them. Falls back to all anchors
     when the row names none, since an unfiltered anchor set is a smaller
     failure than a missing one.
+
+    That fallback is silent when `canon_refs` is simply empty (nothing was
+    asked for). Every `canon_refs` entry that matched no anchor key is logged
+    as a WARNING, whether some others matched or not. Anchor keys are
+    canon_ids now (task 4); a plan row still carrying a pre-canon display name
+    (e.g. "The village and Great Lamp" instead of "great-lamp") matches
+    nothing, and the unfiltered fallback would otherwise send the whole cast
+    at full token cost with no sign that the row needs migrating.
+
+    The *partial* mismatch is the one that actually loses art direction, and
+    it used to be silent: a row naming `nora;great-lamp` where only `nora`
+    resolves narrows to Nora alone, and the lamp is then rendered with no
+    anchor in every illustration that shows it. Nothing else catches that —
+    an id with no canon anchor is by design not a
+    `_direction_anchor_mismatches` finding, and `canon_unfilled_template` is
+    info severity, which `build_cleanup_report` leaves out of action items.
     """
     named = {n.strip().lower()
              for n in ill._split_array(row.get('canon_refs', ''))}
@@ -658,7 +782,18 @@ def _relevant_anchors(anchors: dict[str, str],
         return anchors
     matched = {name: text for name, text in anchors.items()
                if name.strip().lower() in named}
-    return matched or anchors
+    unmatched = sorted(named - {n.strip().lower() for n in matched})
+    if unmatched:
+        tail = ('sending the full anchor set instead of narrowing to this '
+                'cast' if not matched else
+                'those entities are art-directed with no continuity anchor')
+        log(f'WARNING: canon_refs {unmatched!r} matched no known anchor '
+            f'(illustration {row.get("id", "").strip() or "?"}); {tail} — '
+            f'check whether this plan row still uses pre-canon display names, '
+            f'or whether those canon files are still TODO scaffolds')
+    if matched:
+        return matched
+    return anchors
 
 
 # ============================================================================

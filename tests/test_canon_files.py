@@ -443,7 +443,7 @@ def test_build_cleanup_report_clean_canon_plus_pages_zero_findings(
     canon-embed of the actual Embeddable block text produces zero canon
     findings in the full cleanup report pipeline. Guards against a
     regression in any of the layers: list_page_files, _walk_canon_files,
-    _resolve_canon_path, _embeddable_block_text, _normalize_for_drift."""
+    _resolve_canon_path, _embeddable_block_text, normalize_for_comparison."""
     import shutil
     from storyforge.cmd_cleanup import build_cleanup_report
 
@@ -563,14 +563,103 @@ def test_validate_unfilled_template_flagged(tmp_path):
 
 def test_validate_filled_canon_no_unfilled_finding(tmp_path):
     """A canon file with real content in every section must not register
-    as unfilled — the placeholder check looks only at the first non-blank
-    line of each section body."""
+    as unfilled. Only a first-non-blank-line `TODO` prefix decides on one
+    line; the emphasis / bare-placeholder rules are whole-body tests, so a
+    section holding any substantive line is filled (see
+    _section_body_is_placeholder)."""
     project = str(tmp_path)
     write_canon(project, 'style-foundation.md', 'style-foundation')
     findings = validate_canon_file(
         os.path.join(project, CANON_DIR, 'style-foundation.md'), project,
     )
     assert [f for f in findings if f['type'] == 'canon_unfilled_template'] == []
+
+
+@pytest.mark.parametrize('placeholder_text', [
+    '_(fill this in)_', 'TBD', 'todo', '_Required: describe the palette_',
+    '(you fill this in)',
+])
+def test_hand_typed_placeholder_shapes_are_flagged_unfilled(
+        tmp_path, placeholder_text):
+    """Regression: the pre-canon illustrations._is_placeholder recognized
+    five hand-typed scaffold shapes (emphasized boilerplate, bare
+    TBD/todo/n-a/fill-this-in) in addition to the TODO-prefixed lines the
+    shipped templates themselves emit. When that detector was retired in
+    favor of canon._section_body_is_placeholder (illustration-canon-adoption
+    Task 7), the narrower TODO-only version silently stopped catching four
+    of these five shapes — a hand-typed `_(fill this in)_` Embeddable block
+    read as populated and would have been fed to an image model as house
+    style. _section_body_is_placeholder now recognizes all five; this is
+    the canon-level (not illustration-specific) coverage for that, since
+    the widening is shared with GN's canon_unfilled_template finding and
+    is_canon_block_populated gate."""
+    project = str(tmp_path)
+    body = f'\n## Embeddable block\n\n{placeholder_text}\n\n## Clauses\n\n## Related canon\n\n## Iteration history\n'
+    write_canon(project, 'style-foundation.md', 'style-foundation', body=body)
+    findings = validate_canon_file(
+        os.path.join(project, CANON_DIR, 'style-foundation.md'), project,
+    )
+    unfilled = [f for f in findings if f['type'] == 'canon_unfilled_template']
+    assert len(unfilled) == 1, (
+        f'{placeholder_text!r} was not flagged as unfilled: {findings}'
+    )
+    assert 'Embeddable block' in unfilled[0]['detail']
+
+
+@pytest.mark.parametrize('block', [
+    '**Nora Vance**\n9 years old, 132 cm, a dark braid over one shoulder.',
+    '_The lamp remembers._\nA squat brass lantern, dented on the left face.',
+    '**Style:** cinematic, warm, hand-inked.',
+    '**Dominant / transitional / rhythmic.**\nDominant panels carry the beat.',
+])
+def test_real_prose_is_not_mistaken_for_a_placeholder(tmp_path, block):
+    """Regression for the branch's CRITICAL: the emphasis and bare-placeholder
+    rules are WHOLE-BODY tests, restored from the retired
+    illustrations._is_placeholder (whose negative guard,
+    test_real_prose_is_not_mistaken_for_a_placeholder in test_illustrations.py,
+    was deleted with it). Deciding on the first non-blank line instead made a
+    filled Embeddable block whose first line happens to be wholly emphasized
+    read as a scaffold — a continuity anchor opening with a bold character
+    name dropped out of anchor_texts entirely, so every prompt for that
+    character rendered with no anchor; on the GN side a register vocabulary
+    opening `**Dominant / transitional / rhythmic.**` failed
+    is_canon_block_populated and blocked `elaborate --stage
+    page-architecture`.
+    """
+    from storyforge.canon import _section_body_is_placeholder
+    project = str(tmp_path)
+    body = (f'\n## Embeddable block\n\n{block}\n\n## Clauses\n\n'
+            f'## Related canon\n\n## Iteration history\n')
+    write_canon(project, 'characters/nora.md', 'nora',
+                canon_type='character', body=body)
+    assert _section_body_is_placeholder(f'\n{block}\n') is False
+    findings = validate_canon_file(
+        os.path.join(project, CANON_DIR, 'characters', 'nora.md'), project,
+    )
+    unfilled = [f for f in findings if f['type'] == 'canon_unfilled_template']
+    assert unfilled == [], f'{block!r} was misread as a placeholder'
+
+
+def test_first_line_todo_still_wins_over_following_prose(tmp_path):
+    """The first-line TODO rule is deliberately NOT whole-body: GN's
+    page-architecture gate has keyed on it since before the canon adoption,
+    and a scaffold whose author started answering below the TODO line is
+    still a scaffold until the TODO comes out."""
+    from storyforge.canon import _section_body_is_placeholder
+    assert _section_body_is_placeholder(
+        '\nTODO — describe the palette.\nWarm amber and gold.\n') is True
+
+
+def test_bold_anchor_survives_anchor_texts(tmp_path):
+    """End-to-end for the same regression: a bold-lead anchor must reach
+    anchor_texts verbatim, since that dict is what every prompt embeds."""
+    from storyforge.canon import anchor_texts
+    project = str(tmp_path)
+    block = '**Nora Vance**\n9 years old, 132 cm, a dark braid.'
+    write_canon(project, 'characters/nora.md', 'nora', canon_type='character',
+                body=f'\n## Embeddable block\n\n{block}\n\n## Clauses\n\n'
+                     f'## Related canon\n\n## Iteration history\n')
+    assert anchor_texts(project) == {'nora': block}
 
 
 def test_validate_directory_skips_template_files(tmp_path):
@@ -935,7 +1024,7 @@ def test_check_canon_drift_invalid_id_in_page_flagged(tmp_path):
 
 def test_check_canon_drift_normalize_tolerates_indentation(tmp_path):
     """CR2-5: a markdown formatter that re-indents the embed body must
-    not register as drift. _normalize_for_drift now lstrips per line."""
+    not register as drift. normalize_for_comparison now lstrips per line."""
     project = str(tmp_path)
     write_canon(project, 'style-foundation.md', 'style-foundation')
     indented_page = (
@@ -997,10 +1086,10 @@ def test_cleanup_report_skips_canon_for_novel_medium_without_canon_dir(tmp_path)
     assert findings == []
 
 
-def test_cleanup_report_warns_when_canon_dir_in_novel_project(tmp_path):
-    """SF-4: canon/ present but medium isn't graphic-novel should warn rather
-    than silently skip — otherwise a deleted-yaml or misconfigured-medium
-    project ships with unvalidated canon and a green cleanup report.
+def test_cleanup_report_validates_canon_in_novel_project(tmp_path):
+    """SF-4: canon/ present in a novel project is validated the same as a
+    graphic-novel project's — a broken file surfaces its real structural
+    finding rather than being skipped wholesale.
     """
     from storyforge.cmd_cleanup import report_canon_files
 
@@ -1011,21 +1100,21 @@ def test_cleanup_report_warns_when_canon_dir_in_novel_project(tmp_path):
     write_canon(project, 'style-foundation.md', 'mismatched-id')
     findings = report_canon_files(project)
     assert len(findings) == 1
-    assert findings[0]['type'] == 'canon_present_in_novel_project'
+    assert findings[0]['type'] == 'canon_id_mismatch'
     assert findings[0]['category'] == 'canon'
 
 
-def test_cleanup_report_warns_when_canon_dir_present_no_yaml(tmp_path):
-    """SF-4: missing storyforge.yaml causes get_medium → 'novel' fallback. If
-    canon/ is populated, we surface a finding rather than silently skipping.
+def test_cleanup_report_validates_canon_when_no_yaml(tmp_path):
+    """SF-4: missing storyforge.yaml causes get_medium → 'novel' fallback.
+    Canon validation still runs normally, so a well-formed canon file
+    produces no findings even without a storyforge.yaml.
     """
     from storyforge.cmd_cleanup import report_canon_files
 
     project = str(tmp_path)
     write_canon(project, 'style-foundation.md', 'style-foundation')
     findings = report_canon_files(project)
-    assert len(findings) == 1
-    assert findings[0]['type'] == 'canon_present_in_novel_project'
+    assert findings == []
 
 
 # ---------------------------------------------------------------------------

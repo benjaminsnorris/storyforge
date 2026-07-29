@@ -21,8 +21,8 @@ Store this resolved plugin path for use throughout the session.
 
 1. **`storyforge.yaml`** — title, genre, medium, coaching level, `production.cover_image`.
    - If `project.medium` is `graphic-novel`, **stop**. GN projects have their own page pipeline: `storyforge elaborate --stage page-architecture` and `--stage prompts`. Tell the author that and route them there.
-2. **`reference/illustration-direction.md`** — the book-level art direction, if it exists. This is the document that governs every illustration; read it before anything else about the art.
-3. **`reference/illustration-plan.csv`** — the plan, if one exists. Together with the direction document, this tells you which mode you are in.
+2. **`reference/canon/`** — the reference tier that governs every illustration; read it before anything else about the art. Three book-level files at the root (`visual-foundation.md`, `visual-vocabulary.md`, `content-limits.md`) plus one per-entity file per character/creature/location/prop under `characters/`, `locations/`, `motifs/`. If `reference/illustration-direction.md` still exists too, it's the pre-canon document one project hand-edited from — read it only to spot a transcription slip against the canon anchors (`illus_direction_anchor_mismatch` reports these in `cleanup`); it is not itself an input to a prompt anymore.
+3. **`reference/illustration-plan.csv`** — the plan, if one exists. Together with the reference tier, this tells you which mode you are in.
 4. **Structural context** — read what exists:
    - `reference/story-summary.md` — logline, synopsis, act shape, theme
    - `reference/spine.csv` — the irreducible events
@@ -38,8 +38,8 @@ Store this resolved plugin path for use throughout the session.
 
 | State | Mode |
 |-------|------|
-| No direction document | **Direct** — set the book's visual contract first |
-| Direction exists, no plan | **Plan** — decide where illustrations belong |
+| Reference tier missing or incomplete | **Direct** — set the book's visual contract first |
+| Reference tier complete, no plan | **Plan** — decide where illustrations belong |
 | Plan exists, rows at `status=planned` | **Art-direct** — write the prompts |
 | Author has rendered files | **Ingest** — bring them in and embed |
 | An illustration isn't working | **Revise** — supersede and re-direct |
@@ -52,27 +52,27 @@ Announce the mode you're in and why before doing anything.
 
 ## Mode: Direct
 
-Before deciding where illustrations go, settle what they look like. `reference/illustration-direction.md` is the book's visual contract — one document, authored once, that every illustration inherits.
+Before deciding where illustrations go, settle what they look like. `reference/canon/` is the book's visual contract — a canon file per concern, authored once, that every illustration inherits.
 
 This is the highest-leverage artifact in the flow. A per-illustration prompt can be re-rolled for a few cents. A book whose fifteen images disagree with each other has to be re-rendered wholesale.
 
 > **Option A: Run it here**
-> I'll draft the direction document in this conversation.
+> I'll write the canon files in this conversation.
 >
 > **Option B: Run it yourself**
 > ```bash
 > cd [project_dir] && [plugin_path]/storyforge illustrate --direction
 > ```
 
-Wait for the author's choice; if Option B, give them the command and stop. In `full` coaching this is an Opus synthesis call, so it costs real money.
+Wait for the author's choice; if Option B, give them the command and stop. `--direction` never overwrites a canon file that already exists — a rendered illustration may already depend on its exact text — so running it again after the first pass only fills what's still missing. In `full` coaching, the three book-level files below are drafted by one Opus synthesis call, so it costs real money; per-entity anchor files are always written as TODO stubs for you (or, later, the model proposing a new one while it writes a prompt) to fill in by hand.
 
-Five sections:
+Three book-level files, at the root of `reference/canon/`:
 
-- **Format** — medium, rendering style, audience, in a sentence or two. "Full-color cinematic photorealism for a read-aloud fantasy novel, ages 6–8" tells an image model more than three paragraphs of adjectives.
-- **Visual promise** — what every image must deliver. Usually a relationship between two registers: how the ordinary world reads, and how the extraordinary appears inside it.
-- **Recurring visual language** — the rules that repeat. Palette split by faction or mood, camera height, depth of field, materials rendered naturalistically, the standing no-text rule.
-- **Content limits** — what the art must never do. Intensity ceilings, imagery to stay away from, anything the audience age rules out. State these as limits, not as prompt text.
-- **Continuity anchors** — one `### Name` subsection per thing that must look the same every time. Not just characters: creatures, key locations, signature props. Each body is a fixed description reused **verbatim** in every prompt that features it.
+- **`visual-foundation.md`** — medium, rendering style, audience, in a sentence or two. "Full-color cinematic photorealism for a read-aloud fantasy novel, ages 6–8" tells an image model more than three paragraphs of adjectives.
+- **`visual-vocabulary.md`** — the rules that repeat. Palette split by faction or mood, camera height, depth of field, materials rendered naturalistically, the standing no-text rule.
+- **`content-limits.md`** — what the art must never do. Intensity ceilings, imagery to stay away from, anything the audience age rules out. State these as limits, not as prompt text.
+
+Plus one **continuity anchor** file per thing that must look the same every time, one file per entity: `reference/canon/characters/{id}.md` for characters and creatures, `locations/{id}.md`, `motifs/{id}.md` for signature props. `--direction` proposes a stub for every row already in `characters.csv` and `locations.csv`; add creatures and props by hand (each anchor's filename stem must match its registry row's `id`, or `cleanup` reports `canon_missing_registry_entry`). Each anchor's `## Embeddable block` is reused **verbatim** in every prompt that features it.
 
 ### Anchors are inputs, not residue
 
@@ -80,9 +80,9 @@ An anchor works only because every prompt uses the identical string. So it has t
 
 Put measurable facts in them — height in centimeters, age in years, exact hair and eye color, specific garments. Those are precisely what drifts between separately generated images, and stating them is the only defence.
 
-**Never revise an anchor a rendered illustration already used.** If it's wrong, the fix is re-rendering from the corrected anchor, not editing the string and leaving the old art in place. If the model proposes a new anchor while writing a prompt, the command appends it to the direction document for you to review rather than treating it as settled.
+**Never revise an anchor a rendered illustration already used.** If it's wrong, the fix is re-rendering from the corrected anchor, not editing the string and leaving the old art in place. If the model proposes a new anchor while writing a prompt, the command writes it as a new canon file for you to review — it does not create the registry row, so `cleanup` will flag the gap rather than the model's guess becoming canonical unreviewed.
 
-`--direction` reports sections left empty or still holding template text when the document already exists, and `--prompts` warns before it spends anything — a scaffold fed to an image model as though it were direction is worse than no document at all.
+`--direction` reports book-level files left empty or still holding TODO text, and `--prompts` warns before it spends anything — a scaffold fed to an image model as though it were direction is worse than no canon file at all.
 
 ---
 
@@ -167,11 +167,11 @@ These come from lived iteration (benjaminsnorris/ashes PR #9, tracked as #260 an
 
 1. **Five-section template** — Scene / Subject / Important details / Use case / Constraints. Structure beats brevity.
 2. **Reference images carry style and likeness**, so prompt prose stays short (~250–400 words). The references are the cover art plus prior ingested illustrations — that chain is what keeps a book's interior art visually of a piece instead of fifteen unrelated pictures.
-3. **The continuity anchor is the identical string every time.** Anchors live in the `## Continuity anchors` section of `reference/illustration-direction.md`. Only the anchors an illustration actually shows are sent, narrowed by matching its `canon_refs` against the anchor names. If `canon_refs` is empty, or if none of its entries match an anchor name, the full set is sent instead — an unfiltered anchor set is a smaller failure than a missing one, but it means a mismatch between `canon_refs` wording and your `### Name` headings shows up as an over-broad prompt rather than an error. Never revise an anchor a rendered illustration already used — likeness continuity depends on the string being byte-identical.
+3. **The continuity anchor is the identical string every time.** Anchors are canon files under `reference/canon/characters/`, `locations/`, `motifs/` — each file's `## Embeddable block` *is* the anchor. Only the anchors an illustration actually shows are sent, narrowed by matching its `canon_refs` against each anchor's `canon_id` (the canon file's slug, not a display name). If `canon_refs` is empty, or if none of its entries match a `canon_id`, the full set is sent instead — an unfiltered anchor set is a smaller failure than a missing one, but it means a plan row still carrying a pre-canon display name (e.g. "Great Lamp" instead of "great-lamp") sends the whole cast at full token cost, with a WARNING rather than narrowing correctly. Never revise an anchor a rendered illustration already used — likeness continuity depends on the string being byte-identical.
 4. **Positive framing for content, not negation.** Negated content keywords leak into the image. "A bare sill," not "no clutter on the sill." Orientation and the no-text rule are the two deliberate exceptions — both are failure modes positive phrasing has not been observed to prevent.
 5. **Explicit orientation, in two places.** GPT Image 2 returns landscape unless told otherwise. Aspect comes from `layout` first — a `double_page` spread is landscape because that is a fact about the page — then from the row's `composition` field, which can say `landscape` or `square`. Portrait otherwise.
 
-The whole book-level direction goes into every prompt too, which is why the command warns loudly when the direction document is missing: without it the prompts carry no house style, and the images won't look like they belong to one book.
+The whole book-level direction — the three root canon files — goes into every prompt too, which is why the command warns before it spends anything when the reference tier is incomplete: a canon file that's simply absent tells you to run `--direction`, one that exists but is still a TODO placeholder tells you to edit it directly (re-running `--direction` is a no-op once the file exists). Either way, without it the prompts carry no house style, and the images won't look like they belong to one book.
 
 Plus: no text, no letters, no words, no typography. Image models render text unreliably, and an illustration doesn't need any.
 
@@ -281,11 +281,11 @@ Read `project.coaching_level` from `storyforge.yaml`.
 
 ### `full` (default)
 
-Draft the direction document from the bibles, then read it back and say what you committed to and why. Propose the illustration set with conviction and argue each moment's rationale. Write the per-illustration art direction. Ingest and embed. You know what an image can do that prose can't — say so. If a moment the author wants would spoil a reveal, tell them plainly and offer the beat two paragraphs later instead.
+Write the canon files from the bibles, then read them back and say what you committed to and why. Propose the illustration set with conviction and argue each moment's rationale. Write the per-illustration art direction. Ingest and embed. You know what an image can do that prose can't — say so. If a moment the author wants would spoil a reveal, tell them plainly and offer the beat two paragraphs later instead.
 
 ### `coach`
 
-The direction document arrives as a template of questions, one per section. Work through those with the author first — the visual contract is theirs to set.
+Every canon file `--direction` writes arrives with a guiding question in its TODO block, one per file. Work through those with the author first — the visual contract is theirs to set.
 
 Then help them find their own illustration set. The command writes a brief to `working/coaching/illustration-brief.md` with the structural findings framed as questions:
 
@@ -298,7 +298,7 @@ Don't pick the moments. When the author has decided, record their choices and ex
 
 ### `strict`
 
-No creative proposals. The direction document arrives as a blank template listing what each section must contain; the author writes all of it. The command writes `working/coaching/illustration-checklist.md` — structural data and per-column requirements, nothing interpreted. The author supplies every moment, subject, palette, and composition. Ingest, embed, and validation are structural work and stay available; `--prompts` produces a five-section scaffold with the author's own constraint values and empty prose sections.
+No creative proposals. Every canon file `--direction` writes arrives as a bare `TODO` line under the required section skeleton (`## Embeddable block`, `## Clauses`, `## Related canon`, `## Iteration history`); the author writes all of it. The command writes `working/coaching/illustration-checklist.md` — structural data and per-column requirements, nothing interpreted. The author supplies every moment, subject, palette, and composition. Ingest, embed, and validation are structural work and stay available; `--prompts` produces a five-section scaffold with the author's own constraint values and empty prose sections.
 
 ## Ensure Feature Branch
 
@@ -316,9 +316,9 @@ git rev-parse --abbrev-ref HEAD
 
 Every artifact gets its own commit:
 
-- Wrote or edited the direction document? Commit and push — it governs everything after it.
+- Wrote or edited canon files? Commit and push — they govern everything after them.
 - Wrote or extended the plan? Commit and push.
-- Wrote prompt files? Commit and push — including any anchors appended to the direction document.
+- Wrote prompt files? Commit and push — including any new canon anchor stubs the model proposed while writing them.
 - Ingested illustrations? Commit and push the files, the updated plan, and the scene files together, so the marker and the art it points at land in the same commit.
 - Superseded an illustration? Commit and push.
 - Ran a sequence review? Commit the checklist, then commit each drift fix separately.
@@ -333,4 +333,4 @@ Illustrations are an argument about what matters in the book. Fifteen of them sa
 
 Set expectations on resolution: this is screen and epub quality, not print at 300 DPI. And on iteration: the first render is rarely the final one, which is why the prompt log exists.
 
-The direction document is where you earn the coherence. The house style matters more than any single image. A book whose illustrations agree with each other — palette, framing, level of abstraction — looks made. One where each image was generated fresh looks assembled. That's what the reference chain in the prompts is for.
+The reference tier is where you earn the coherence. The house style matters more than any single image. A book whose illustrations agree with each other — palette, framing, level of abstraction — looks made. One where each image was generated fresh looks assembled. That's what the reference chain in the prompts is for.

@@ -1215,6 +1215,11 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
                            'but nothing in the prose points at it',
     'shattered_row': 'Replace the "|" in the offending cell with "/" — the '
                      'plan is pipe-delimited and unquoted',
+    'direction_anchor_mismatch':
+        'Confirm which text is correct. If the canon file is right, delete '
+        'reference/illustration-direction.md. If the old text is right, '
+        'restore it into the canon file and re-render nothing — the existing '
+        'art already matches it',
 }
 
 
@@ -1272,33 +1277,15 @@ def _check_crlf(project_dir: str) -> list[dict]:
 
 
 def report_canon_files(project_dir: str) -> list[CanonFinding]:
-    """Validate reference/canon/ for graphic-novel projects.
+    """Validate reference/canon/ for any medium.
 
-    Returns a list of canon-category findings. Canon validation only
-    runs when the project is in graphic-novel mode. If canon files
-    exist but the project isn't graphic-novel (typically: missing or
-    malformed storyforge.yaml), emit a single finding rather than
-    silently skip — somebody put canon files there on purpose.
+    Both mediums use canon as their reference tier: graphic novels for
+    page prompts, prose books for illustration continuity anchors. A
+    project with no canon directory yet is valid in-flight state, not
+    a finding.
     """
     canon_dir_present = os.path.isdir(os.path.join(project_dir, CANON_DIR))
-    if get_medium(project_dir) != 'graphic-novel':
-        if canon_dir_present:
-            finding: CanonFinding = {
-                'type': 'canon_present_in_novel_project',
-                'file': CANON_DIR + '/',
-                'detail': (
-                    'reference/canon/ exists but project.medium is not '
-                    'graphic-novel; canon validation skipped'
-                ),
-                'action': (
-                    'Set project.medium: graphic-novel in storyforge.yaml '
-                    '(or remove reference/canon/ if it was left over from '
-                    'an aborted migration)'
-                ),
-                'severity': 'warning',
-                'category': 'canon',
-            }
-            return [finding]
+    if not canon_dir_present:
         return []
     findings = validate_canon_directory(project_dir)
     for f in findings:

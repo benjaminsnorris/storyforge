@@ -4,14 +4,16 @@ Three prompt families live here:
 
   - **Selection** — asks the model which narrative moments earn an
     illustration, given the deterministic pre-pass findings.
-  - **Art direction (book level)** — the one document every illustration
-    inherits: format, visual promise, recurring visual language, content
-    limits, continuity anchors.
+  - **Art direction (book level)** — the typed canon files every illustration
+    inherits: `visual-foundation`, `visual-vocabulary`, `content-limits`, plus
+    one continuity-anchor file per character/location/motif (see
+    `.superpowers/sdd/2026-07-28-illustration-canon-adoption/`).
   - **Art direction (per illustration)** — turns one plan row into an
     image-generation prompt the author can paste into GPT Image 2.
 
-Plus the author-facing renderers for the non-``full`` coaching levels (planning
-brief, constraint checklist, direction template) and the whole-sequence
+Plus the author-facing renderers for the non-``full`` coaching levels
+(planning brief, constraint checklist) and the canon template (all three
+coaching levels — see `render_canon_template`) and the whole-sequence
 continuity review — documents, not prompts.
 
 The art-direction prompts reuse the five principles validated on
@@ -28,12 +30,10 @@ See benjaminsnorris/storyforge#278.
 import json
 import os
 import re
+from datetime import date
 from typing import Final, Literal
 
-from storyforge.illustrations import (
-    ANCHORS_SECTION, DIRECTION_SECTIONS, PrepassFindings, RenderStep,
-    VALID_PLACEMENTS, find_section, read_continuity_anchors, read_direction,
-)
+from storyforge.illustrations import PrepassFindings, RenderStep, VALID_PLACEMENTS
 
 #: Aspect is derived from author-written prose (layout, then composition) and
 #: consumed by orientation_clause, which silently falls back to portrait for an
@@ -104,61 +104,171 @@ def orientation_clause(aspect: Aspect = DEFAULT_ASPECT) -> str:
 # ============================================================================
 
 def anchors_for_prompt(project_dir: str) -> dict[str, str]:
-    """Return the continuity anchors from the direction document.
+    """Anchors available to an illustration prompt, keyed by canon_id.
 
-    Anchors are authored up front in `reference/illustration-direction.md`, not
-    accumulated as a side effect of prompting. That ordering is the point: an
-    anchor is an input to the art, and the reason it works is that every prompt
-    reuses the identical string. A description invented on the fly by whichever
-    illustration happened to be rendered first is not an anchor, it is a
-    coincidence.
+    Reads reference/canon/ entity files. The strings are verbatim and must
+    stay that way: likeness continuity across separately generated images
+    depends on every prompt sending byte-identical text.
     """
-    return read_continuity_anchors(project_dir)
+    from storyforge import canon
+    return canon.anchor_texts(project_dir)
 
 
-def append_anchor_stubs(project_dir: str, anchors: dict[str, str]) -> list[str]:
-    """Append newly-proposed anchors to the direction document.
+#: Canon subdirectory per proposed anchor type. A type outside this map (or
+#: absent) falls back to 'character' with a WARNING rather than guessing
+#: silently — a stub filed under the wrong registry tells the author to add a
+#: character row for a location, which is a confusing way to learn about a
+#: parse failure.
+_ANCHOR_TYPE_SUBDIR: Final[dict[str, str]] = {
+    'character': 'characters',
+    'location': 'locations',
+    'motif': 'motifs',
+}
+_ANCHOR_TYPE_FALLBACK: Final[str] = 'character'
 
-    Returns the names actually added. Existing anchors are never touched: their
-    whole value is staying byte-identical across every illustration, so revising
-    one silently would break likeness continuity in art already rendered.
 
-    New anchors are appended rather than merged in place so the author sees them
-    as additions to review, in the one document that holds the book's whole
-    visual contract.
+def canon_rel_path(canon_type: str, canon_id: str) -> str:
+    """Project-relative path where a canon_id of canon_type belongs.
+
+    Root types (`canon.ROOT_TYPES` — foundation/vocabulary/rules) live at the
+    canon directory's root; every entity type lives under its subdirectory
+    per `_ANCHOR_TYPE_SUBDIR`, falling back to `character` for an
+    unrecognized type. Used by `--direction` to place both the three
+    book-level files and the per-entity anchor stubs it writes.
     """
-    from storyforge.illustrations import direction_path
+    from storyforge import canon
+    if canon_type in canon.ROOT_TYPES:
+        return os.path.join(canon.CANON_DIR, f'{canon_id}.md')
+    subdir = _ANCHOR_TYPE_SUBDIR.get(canon_type, _ANCHOR_TYPE_FALLBACK)
+    return os.path.join(canon.CANON_DIR, subdir, f'{canon_id}.md')
 
-    existing = {name.lower() for name in read_continuity_anchors(project_dir)}
-    fresh = {name.strip(): desc.strip() for name, desc in anchors.items()
-             if name.strip() and desc.strip()
-             and name.strip().lower() not in existing}
-    if not fresh:
-        return []
 
-    path = direction_path(project_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+def append_anchor_stubs(project_dir: str,
+                        anchors: dict[str, tuple[str, str]]) -> list[str]:
+    """Persist model-proposed anchors as canon file stubs.
 
-    if os.path.isfile(path):
-        with open(path, encoding='utf-8') as f:
-            current = f.read()
-    else:
-        current = f'# Illustration art direction\n\n## {ANCHORS_SECTION}\n'
+    `anchors` maps display name -> (canon_type, anchor_text).
 
-    # Detect the heading structurally and case-insensitively. A substring test
-    # over the whole document matched the phrase appearing in ordinary prose
-    # (appending the stubs into some other section's body, where they were fed
-    # to the image model as, say, a content limit) and missed a
-    # differently-cased real heading (appending a *second* anchors section,
-    # permanently orphaning everything under the first).
-    if find_section(read_direction(project_dir), ANCHORS_SECTION) is None:
-        current = current.rstrip('\n') + f'\n\n## {ANCHORS_SECTION}\n'
+    Returns the canon_ids written. An anchor whose canon_id already exists
+    anywhere in reference/canon/ is left alone: append_anchor_stubs never
+    revises an existing anchor, because a rendered illustration may already
+    depend on its exact text.
 
-    addition = '\n'.join(
-        f'### {name}\n\n{fresh[name]}\n' for name in sorted(fresh))
-    with open(path, 'w', encoding='utf-8') as f:
-        f.write(current.rstrip('\n') + '\n\n' + addition)
-    return sorted(fresh)
+    Two independent existence checks guard the write, and neither subsumes
+    the other:
+
+    - canon.canon_id_index — the declared `canon_id` in each *parseable*
+      file's frontmatter, lowercased — catches an existing anchor whose
+      filename stem differs from its own canon_id (a warning, not a block,
+      in validate_canon_file). Keying on the stem instead let
+      `characters/nora.md` get written to "add" an anchor already at
+      `characters/Nora.md` (truncating it in place on a case-insensitive
+      filesystem) or already at `characters/nora-smith.md` (creating a
+      second file that then shadowed the original in anchor_texts's
+      last-sorted-path tie-break).
+    - a plain `os.path.exists` on the exact candidate path catches a file
+      sitting at that path whose frontmatter canon_id_index can't read at
+      all — absent, truncated, or missing the `canon_id` key. Those files
+      are invisible to canon_id_index (it only indexes what it can parse a
+      canon_id out of), so relying on canon_id_index alone would silently
+      truncate a malformed-but-real file the moment a proposal's slug
+      happened to match its path.
+
+    Either check firing skips the write and logs a WARNING; the anchor is
+    left for the author to sort out rather than risking any of the above.
+
+    The registry row is deliberately NOT created. canon_missing_registry_entry
+    reports the gap, and an author confirming the name is cheaper than
+    silently making a model's guess canonical.
+    """
+    from storyforge import canon
+    from storyforge.common import log
+
+    existing = canon.canon_id_index(project_dir)
+    written: list[str] = []
+    for name, (raw_type, text) in sorted(anchors.items()):
+        name = name.strip()
+        text = (text or '').strip()
+        if not text:
+            log(f'WARNING: proposed anchor {name!r} has no anchor text; skipped')
+            continue
+        canon_id = _slugify(name)
+        if not canon_id:
+            log(f'WARNING: proposed anchor {name!r} has no usable slug; skipped')
+            continue
+        if canon_id in existing:
+            log(f'WARNING: proposed anchor {name!r} (canon_id {canon_id!r}) '
+                f'already exists at {existing[canon_id]}; left alone rather '
+                f'than risk overwriting or shadowing it')
+            continue
+        canon_type = (raw_type or '').strip().lower()
+        if canon_type not in _ANCHOR_TYPE_SUBDIR:
+            log(f'WARNING: proposed anchor {name!r} has type {raw_type!r}; '
+                f'filing as {_ANCHOR_TYPE_FALLBACK} — move the file and its '
+                f'registry row if that is wrong')
+            canon_type = _ANCHOR_TYPE_FALLBACK
+        subdir = _ANCHOR_TYPE_SUBDIR[canon_type]
+        rel_path = os.path.join(canon.CANON_DIR, subdir, f'{canon_id}.md')
+        path = os.path.join(project_dir, rel_path)
+        if os.path.exists(path):
+            # canon_id_index only sees files whose frontmatter it could
+            # parse a canon_id out of — a file at this exact path with no
+            # frontmatter, truncated frontmatter, or no canon_id key is
+            # invisible to it, so it would otherwise be silently
+            # overwritten here.
+            log(f'WARNING: proposed anchor {name!r} would write {rel_path}, '
+                f'which already exists; left alone rather than overwrite it')
+            continue
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(_canon_stub(canon_id=canon_id, canon_type=canon_type,
+                                anchor=text))
+        # Keep the index current within this call too — a second proposal in
+        # the same batch that collides with one just written must skip it for
+        # the same reason, not race it.
+        existing[canon_id] = rel_path
+        written.append(canon_id)
+    return written
+
+
+def _slugify(name: str) -> str:
+    """Lowercase kebab-case slug, matching canon's id validation."""
+    return re.sub(r'[^a-z0-9]+', '-', name.strip().lower()).strip('-')
+
+
+def _canon_stub(*, canon_id: str, canon_type: str, anchor: str) -> str:
+    """A minimal valid canon file carrying one anchor.
+
+    `canon_updated` is stamped with today's date — it is knowable at write
+    time, and the same reasoning as `render_canon_template`'s applies here:
+    leaving it blank only buys a `canon_missing_key` finding per file. This
+    path is the full-coaching default (`render_filled_canon` and
+    `append_anchor_stubs` both route through it), so leaving it blank here
+    made full coaching noisier than coach coaching.
+
+    `appears_in` and `first_appearance` are left empty rather than guessed:
+    a wrong first_appearance would misorder the render sequence, and
+    canon_missing_key reports the omission deliberately.
+    """
+    return (
+        '---\n'
+        f'canon_id: {canon_id}\n'
+        f'canon_type: {canon_type}\n'
+        f'canon_updated: {date.today().isoformat()}\n'
+        'appears_in:\n'
+        'first_appearance:\n'
+        '---\n'
+        '\n'
+        '## Embeddable block\n'
+        '\n'
+        f'{anchor}\n'
+        '\n'
+        '## Clauses\n'
+        '\n'
+        '## Related canon\n'
+        '\n'
+        '## Iteration history\n'
+    )
 
 
 # ============================================================================
@@ -303,22 +413,49 @@ def _json_candidates(text: str):
 def render_direction_block(direction: dict[str, str]) -> str:
     """Render the book-level art direction for inclusion in a prompt.
 
-    Every section of the author's document is passed through, in the canonical
-    order first and then anything they added of their own. The anchors section
-    is excluded — it is rendered separately, because anchors must be reused
-    verbatim rather than summarized alongside the rest of the direction.
+    `direction` is `book_level_direction`'s return value — already ordered
+    (dict insertion order follows `CANON_PLAN`) and already excluding
+    per-entity continuity anchors, which are rendered separately because they
+    must be reused verbatim rather than summarized alongside the rest of the
+    direction. This just joins the non-empty entries as `###` subsections.
     """
     if not direction:
         return ''
-    ordered = [name for name in DIRECTION_SECTIONS if name != ANCHORS_SECTION]
-    ordered += [name for name in direction
-                if name not in DIRECTION_SECTIONS]
     parts = []
-    for name in ordered:
-        body = direction.get(name, '').strip()
+    for name, body in direction.items():
+        body = body.strip()
         if body:
             parts.append(f'### {name}\n\n{body}')
     return '\n\n'.join(parts)
+
+
+def book_level_direction(project_dir: str) -> dict[str, str]:
+    """Book-level house style, keyed by heading, from the three `CANON_PLAN`
+    canon files' `## Embeddable block` bodies.
+
+    Replaces the old direction document's non-anchor sections now that
+    `--direction` writes canon files instead of `illustration-direction.md`
+    (see `.superpowers/sdd/2026-07-28-illustration-canon-adoption/`). A
+    canon_id that is absent or still placeholder contributes nothing —
+    `illustrations.missing_reference_sections` is what reports that state
+    loudly to the author; this stays silent so a partially-populated
+    reference tier still contributes whatever it has. Insertion order follows
+    `CANON_PLAN`, which is what lets `render_direction_block` join the result
+    without re-sorting it.
+    """
+    from storyforge import canon
+
+    direction: dict[str, str] = {}
+    for canon_id, _canon_type, _purpose in CANON_PLAN:
+        path = canon.resolve_canon_path(project_dir, canon_id)
+        if path is None:
+            continue
+        body = canon.embeddable_block_text(path)
+        if body is None or canon._section_body_is_placeholder(body):
+            continue
+        heading = canon_id.replace('-', ' ').capitalize()
+        direction[heading] = body.strip()
+    return direction
 
 
 def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
@@ -399,12 +536,15 @@ Rules:
 
 Return the five sections as markdown. No preamble, no commentary.
 
-If you propose any new character anchor, append it at the very end as:
+If you propose any new anchor — a character, location, or motif with no
+anchor yet — append it at the very end as:
 
 ```
 ANCHORS
-- Name — the anchor string
+- Name | type — the anchor string
 ```
+
+`type` must be one of `character`, `location`, or `motif`.
 """
 
 
@@ -416,14 +556,21 @@ ANCHOR_BLOCK_RE = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 
-# `Name — description`. The separator is an em/en dash, or a colon, or a hyphen
-# *surrounded by whitespace* — never a bare hyphen, which would sever every
-# hyphenated name ("Jean-Luc" became {'Jean': 'Luc — …'}). The mangled name was
-# then written into the direction document as canonical and, because
-# append_anchor_stubs never revises an existing anchor, stayed corrupt — and
-# stopped matching canon_refs, so the anchor silently left every prompt.
+# `Name | type — description`, with `| type` optional. The separator before
+# the description is an em/en dash, or a colon, or a hyphen *surrounded by
+# whitespace* — never a bare hyphen, which would sever every hyphenated name
+# ("Jean-Luc" became {'Jean': 'Luc — …'}). The mangled name was then written
+# into the direction document as canonical and, because append_anchor_stubs
+# never revises an existing anchor, stayed corrupt — and stopped matching
+# canon_refs, so the anchor silently left every prompt. That guard is
+# unchanged by the added `| type` group: the optional pipe segment is tried
+# and abandoned at every candidate split point before the separator
+# alternation runs, so it cannot turn a hyphenated name's internal `-` into a
+# false separator either.
 _ANCHOR_LINE_RE = re.compile(
-    r'^[ \t]*[-*][ \t]*(?P<name>.+?)[ \t]*(?:[—–]|:|(?<=\s)-(?=\s))[ \t]*'
+    r'^[ \t]*[-*][ \t]*(?P<name>.+?)[ \t]*'
+    r'(?:\|[ \t]*(?P<type>[a-zA-Z]+)[ \t]*)?'
+    r'(?:[—–]|:|(?<=\s)-(?=\s))[ \t]*'
     r'(?P<desc>.+?)[ \t]*$'
 )
 
@@ -431,27 +578,33 @@ _ANCHOR_LINE_RE = re.compile(
 _TRAILING_FENCE_RE = re.compile(r'\n[ \t]*`{3,}[ \t]*\Z')
 
 
-def split_anchor_block(body: str) -> tuple[str, dict[str, str]]:
+def split_anchor_block(body: str) -> tuple[str, dict[str, tuple[str, str]]]:
     """Split a model's prompt body from any trailing ANCHORS block.
 
-    Returns (body_without_anchors, anchors). Anchors proposed inline are lifted
-    out so they can be persisted once and reused verbatim.
+    Returns (body_without_anchors, anchors), where anchors maps display name
+    -> (canon_type, anchor_text). Anchors proposed inline are lifted out so
+    they can be persisted once and reused verbatim. `canon_type` is the raw,
+    unvalidated string the model wrote (possibly '' when no `| type` was
+    given) — append_anchor_stubs is what falls back to 'character' with a
+    warning.
 
-    Lines in the block that do not parse as ``Name — description`` are reported
-    by :func:`unparsed_anchor_lines` rather than silently dropped.
+    Lines in the block that do not parse as ``Name [| type] — description``
+    are reported by :func:`unparsed_anchor_lines` rather than silently
+    dropped.
     """
     m = ANCHOR_BLOCK_RE.search(body)
     if not m:
         return _strip_trailing_fence(body), {}
 
-    anchors: dict[str, str] = {}
+    anchors: dict[str, tuple[str, str]] = {}
     for line in m.group(1).splitlines():
         am = _ANCHOR_LINE_RE.match(line)
         if am:
             name = am.group('name').strip().strip('*').strip()
             desc = am.group('desc').strip()
+            raw_type = (am.group('type') or '').strip()
             if name and desc:
-                anchors[name] = desc
+                anchors[name] = (raw_type, desc)
     # The request demonstrates the block inside a code fence, so the model
     # usually emits one; cutting at the ANCHORS line leaves the opening fence
     # behind, which corrupts every following section of the prompt file.
@@ -734,54 +887,110 @@ def render_strict_checklist(*, prepass: PrepassFindings,
 
 
 # ============================================================================
-# Art-direction document
+# Canon files (book level)
 # ============================================================================
 
-#: What each expected section of the direction document has to answer. Used by
-#: every coaching level: as instructions to the model, as questions to the
-#: author, and as a checklist.
-DIRECTION_BRIEF: Final[dict[str, str]] = {
-    'Format': 'The medium, rendering style, and intended audience in one or '
-              'two sentences. "Full-color cinematic photorealism for a '
-              'read-aloud fantasy novel, ages 6-8" tells an image model more '
-              'than three paragraphs of adjectives.',
-    'Visual promise': 'What every image in this book must deliver — the thing '
-                      'a reader would notice missing. Usually a relationship '
-                      'between two registers: how the ordinary world reads, '
-                      'and how the extraordinary appears inside it.',
-    'Recurring visual language': 'The rules that repeat: palette split by '
-                                 'faction or mood, camera height, depth of '
-                                 'field, materials rendered naturalistically, '
-                                 'and the standing no-text rule.',
-    'Content limits': 'What the art must never do, stated as limits rather '
-                      'than as prompt text — intensity ceilings, imagery to '
-                      'stay away from, anything the audience age rules out.',
-    ANCHORS_SECTION: 'One `### Name` subsection per thing the art must keep '
-                     'consistent: characters, creatures, key locations, '
-                     'signature props. Each body is a fixed description, '
-                     'reused verbatim in every prompt that features it. '
-                     'Include measurable facts — height, age, exact colors — '
-                     'because those are what drift.',
-}
+#: The three book-level canon files an illustrated prose book needs, mapped
+#: from the old direction document's non-anchor sections. Continuity anchors
+#: are not here — they are one file per entity, discovered from the
+#: character/location registries (`cmd_illustrate._anchor_candidates`).
+#: `canon_type` is one of `canon.ROOT_TYPES`, so all three live at the canon
+#: root rather than in a subdirectory.
+CANON_PLAN: tuple[tuple[str, str, str], ...] = (
+    ('visual-foundation', 'foundation',
+     'Medium, rendering style, audience, and what every image must deliver. '
+     'One or two sentences beat three paragraphs of adjectives.'),
+    ('visual-vocabulary', 'vocabulary',
+     'The rules that repeat: palette split by faction or mood, camera '
+     'height, depth of field, how materials render, the standing no-text '
+     'rule.'),
+    ('content-limits', 'rules',
+     'What the art must never do. Intensity ceilings, imagery to stay away '
+     'from, anything the audience age rules out. State these as limits.'),
+)
 
 
-def build_direction_request(*, title: str, genre: str, audience: str,
-                            canon_context: str, story_context: str,
-                            entities: list[str]) -> str:
-    """Build the prompt that drafts the book-level art-direction document."""
+def render_canon_template(*, canon_id: str, canon_type: str, purpose: str,
+                          coaching: str) -> str:
+    """Render an unfilled canon file for the author or the model to complete.
+
+    The Embeddable block carries a TODO line deliberately: canon.anchor_texts
+    and canon.is_canon_block_populated both treat placeholder text as
+    unpopulated, so an unfinished file is reported rather than silently
+    shipped into a prompt as though it were direction.
+
+    `canon_updated` is stamped with today's date — it is knowable at write
+    time, unlike `appears_in`/`first_appearance`, which stay blank because
+    guessing them would misorder the render sequence (Task 4); leaving
+    `canon_updated` blank too would only buy an extra `canon_missing_key`
+    finding on every one of these files for no reason.
+    """
+    if coaching == 'coach':
+        block = (f'TODO — {purpose}\n\nWhat would you say here, in one or '
+                 f'two sentences?\n')
+    else:
+        block = f'TODO — {purpose}\n'
+    return (
+        '---\n'
+        f'canon_id: {canon_id}\n'
+        f'canon_type: {canon_type}\n'
+        f'canon_updated: {date.today().isoformat()}\n'
+        'appears_in:\n'
+        'first_appearance:\n'
+        '---\n'
+        '\n'
+        '## Embeddable block\n'
+        '\n'
+        f'{block}'
+        '\n'
+        '## Clauses\n'
+        '\n'
+        '## Related canon\n'
+        '\n'
+        '## Iteration history\n'
+    )
+
+
+def render_filled_canon(*, canon_id: str, canon_type: str, body: str) -> str:
+    """Render a canon file whose Embeddable block is already-written text.
+
+    Thin wrapper over `_canon_stub` — the full-coaching `--direction` path
+    reaches for the same minimal-valid-file shape `append_anchor_stubs` uses
+    for a model-proposed anchor; there is no reason for a second format.
+    """
+    return _canon_stub(canon_id=canon_id, canon_type=canon_type, anchor=body)
+
+
+def build_canon_direction_request(*, title: str, genre: str, audience: str,
+                                  canon_context: str,
+                                  story_context: str) -> str:
+    """Build the prompt that drafts the three book-level canon Embeddable
+    blocks in a single call.
+
+    Asks for exactly the three `CANON_PLAN` ids as `##`-headed sections, so
+    `parse_canon_direction_response` can drop each body straight into its own
+    canon file without a second request per file.
+
+    The briefs below are rendered at the same `##` level the instruction asks
+    for. They used to be demonstrated as `###` while the text said "use these
+    exact `##` headings" — a model that copied the demonstration produced a
+    response the parser discarded wholesale, and the run paid for the call and
+    then wrote TODO scaffolds.
+    """
     briefs = '\n\n'.join(
-        f'### {name}\n\n{brief}' for name, brief in DIRECTION_BRIEF.items())
-    entity_list = '\n'.join(f'- {name}' for name in entities) or \
-        '(derive them from the bibles below)'
+        f'## {canon_id}\n\n{purpose}'
+        for canon_id, _canon_type, purpose in CANON_PLAN)
 
-    return f"""Write the book-level illustration art direction for a novel.
+    return f"""Write the book-level illustration direction for a novel, as \
+three short canonical blocks.
 
 **Title:** {title}{f' · **Genre:** {genre}' if genre else ''}\
 {f' · **Audience:** {audience}' if audience else ''}
 
-This single document governs every interior illustration in the book. A
-per-illustration prompt can be re-rolled cheaply; a book whose images disagree
-with each other has to be re-rendered wholesale. Be specific and be decisive.
+Each block below becomes a canon file that every interior-illustration prompt
+in this book inherits. A per-illustration prompt can be re-rolled cheaply; a
+book whose images disagree with each other has to be re-rendered wholesale.
+Be specific and be decisive.
 
 ## Story context
 
@@ -791,16 +1000,10 @@ with each other has to be re-rendered wholesale. Be specific and be decisive.
 
 {canon_context}
 
-## Things the art must keep consistent
+## Blocks to write
 
-Write a continuity anchor for each of these, plus any others the canon makes
-necessary:
-
-{entity_list}
-
-## Sections to write
-
-Use these exact `##` headings, in this order.
+Use these exact `##` headings, in this order, and write only the block's
+content underneath — no restating the heading, no extra commentary.
 
 {briefs}
 
@@ -811,89 +1014,77 @@ Use these exact `##` headings, in this order.
   not.
 - **Name real materials.** Bark, moss, wax, leaded glass, waxed thread. Image
   models render named materials well and abstractions badly.
-- **Put measurable facts in the anchors.** Height in centimeters, age in years,
-  exact hair and eye color, specific garments. These are the details that drift
-  between separately generated images, and the only defence is stating them.
-- **Anchors are descriptions, not scenes.** What the thing *is*, always — not
-  what it does in any one illustration.
-- State the standing no-text rule in the recurring visual language.
+- **State limits as limits**, not as prompt text.
+- State the standing no-text rule under `visual-vocabulary`.
 
-Return the document as markdown, starting at the first `##` heading. No
-preamble, no commentary.
+Return markdown, starting at the first `##` heading. No preamble, no
+commentary.
 """
 
 
-def render_direction_template(*, title: str, coaching: str,
-                              entities: list[str]) -> str:
-    """Render the direction-document template for coach or strict coaching.
+def _canon_heading_id(heading: str) -> str:
+    """Normalize a response heading to a candidate canon_id.
 
-    `coach` frames each section as a question the author answers; `strict`
-    reduces it to the requirement plus a blank. Neither writes any creative
-    content, which is the whole distinction from the `full` path.
+    Lowercases, drops surrounding emphasis/backticks and a trailing colon, and
+    joins words with dashes — so `Visual Foundation`, `visual foundation`,
+    `**Visual-Foundation**` and `visual-foundation:` all resolve to
+    `visual-foundation`. Normalizing at comparison time only: the *body* text
+    this heading introduces is never touched.
     """
-    lines = [f'# Illustration art direction — {title}', '']
-    if coaching == 'coach':
-        lines += [
-            'This document governs every interior illustration in the book.',
-            'Answer each section in your own words — what you write here is',
-            'what every prompt will carry.',
-            '',
-        ]
-    else:
-        lines += [
-            'This document governs every interior illustration in the book.',
-            'Each section below lists what it must contain. Fill them in.',
-            '',
-        ]
-
-    for name, brief in DIRECTION_BRIEF.items():
-        lines.append(f'## {name}')
-        lines.append('')
-        if coaching == 'coach':
-            lines.append(f'_{_as_question(name, brief)}_')
-        else:
-            lines.append(f'_Required: {brief}_')
-        lines.append('')
-        if name == ANCHORS_SECTION:
-            for entity in entities:
-                lines.append(f'### {entity}')
-                lines.append('')
-                lines.append('_(fill this in — include height, age, exact '
-                             'colors, and specific garments)_')
-                lines.append('')
-            if not entities:
-                lines.append('### Name')
-                lines.append('')
-                lines.append('_(fill this in)_')
-                lines.append('')
-        else:
-            lines.append('_(fill this in)_')
-            lines.append('')
-    return '\n'.join(lines)
+    cleaned = heading.strip().strip('*_`').strip().rstrip(':').strip()
+    return re.sub(r'\s+', '-', cleaned.lower())
 
 
-#: Coach-mode phrasings, so the template asks rather than instructs.
-_DIRECTION_QUESTIONS: Final[dict[str, str]] = {
-    'Format': 'What is someone holding when they hold this book — what medium, '
-              'what rendering style, for what reader?',
-    'Visual promise': 'What would a reader notice missing if one illustration '
-                      'failed to deliver it?',
-    'Recurring visual language': 'What repeats across every image — palette, '
-                                 'camera height, level of detail? What makes '
-                                 'two of these images obviously from the same '
-                                 'book?',
-    'Content limits': 'What must the art never do? What would be too much for '
-                      'your reader?',
-    ANCHORS_SECTION: 'What must look the same every time it appears — which '
-                     'characters, creatures, places, objects? Describe each one '
-                     'the way you would to someone who has to draw it without '
-                     'reading the book.',
-}
+def _split_canon_headings(text: str, pattern: str) -> dict[str, str]:
+    """Split `text` on `pattern` headings, keeping only `CANON_PLAN` ids."""
+    known_ids = {canon_id for canon_id, _canon_type, _purpose in CANON_PLAN}
+    sections: dict[str, str] = {}
+    matches = list(re.finditer(pattern, text, re.MULTILINE))
+    for i, match in enumerate(matches):
+        name = _canon_heading_id(match.group(1))
+        if name not in known_ids:
+            continue
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[match.end():end].strip()
+        if body:
+            sections[name] = body
+    return sections
 
 
-def _as_question(name: str, brief: str) -> str:
-    """Return the coach-mode question for a section, falling back to its brief."""
-    return _DIRECTION_QUESTIONS.get(name, brief)
+def parse_canon_direction_response(text: str) -> dict[str, str]:
+    """Split a canon-direction response into `{canon_id: embeddable body}`.
+
+    Headings are matched against `CANON_PLAN`'s ids specifically — a model
+    that free-associates an extra heading must not silently become a fourth
+    canon file. Unmatched headings are simply not in the result.
+
+    Both `##` and `###` are accepted, and a heading is matched through
+    `_canon_heading_id`, so a title-cased or space-separated variant of an id
+    still lands. Three of four plausible model outputs used to yield `{}` —
+    and the caller then quietly wrote TODO scaffolds over a paid-for response.
+    The `##` pass runs first and wins on conflict: accepting `###` as a
+    delimiter outright would truncate a `##` section body at its first `###`
+    sub-heading.
+
+    Any `CANON_PLAN` id the response did not yield is logged as a WARNING —
+    the request always asks for all three, so a missing one means the response
+    was partially unusable, which the caller would otherwise report only as
+    "needs your input" on a file it just scaffolded.
+    """
+    from storyforge.common import log
+
+    sections = _split_canon_headings(text, r'^##\s+(.+?)\s*$')
+    for name, body in _split_canon_headings(text, r'^#{2,3}\s+(.+?)\s*$').items():
+        sections.setdefault(name, body)
+
+    unyielded = [canon_id for canon_id, _t, _p in CANON_PLAN
+                 if canon_id not in sections]
+    if unyielded:
+        log(f'WARNING: the art-direction response yielded no section for '
+            f'{", ".join(unyielded)} — expected a `## <id>` heading per '
+            f'block. Those canon files fall back to a TODO scaffold you '
+            f'will have to fill in yourself.')
+    return sections
 
 
 # ============================================================================
