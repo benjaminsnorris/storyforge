@@ -332,6 +332,157 @@ def test_resolve_on_a_bare_project_does_not_raise(project_dir):
 
 
 # ============================================================================
+# The anchor batch
+# ============================================================================
+
+def test_the_establisher_is_the_visual_key(packet_project):
+    key = next((s['id'] for s in ill.render_order(packet_project)
+                if s['is_visual_key']), None)
+    assert key, 'the seeded plan should have a visual key'
+    assert packet.anchor_batch(packet_project)['establisher'] == key
+
+
+def test_all_four_slots_when_register_is_populated(packet_project):
+    """The seeded plan marks both extremes and needs one later-state row."""
+    from storyforge import visual_state as vs
+    rows = vs.read_transitions(packet_project)
+    rows.append({'entity': 'maps', 'from_scene': 'act1-sc01',
+                 'state': 'ruled, inked, and clean',
+                 'evidence': 'held her breath'})
+    vs.write_transitions(packet_project, rows)
+    plan = ill.read_plan(packet_project)
+    plan[1]['canon_refs'] = 'maps'
+    ill.write_plan(packet_project, plan)
+
+    batch = packet.anchor_batch(packet_project)
+    assert batch['establisher'] == 'the-finest-cartographer'
+    assert batch['brightest'] == 'the-finest-cartographer'
+    assert batch['darkest'] == 'the-blank-page'
+    # maps transitions at act1-sc01 and again at act1-sc02, so the second
+    # illustration shows it in a state later than its first.
+    assert batch['later_state'] == 'the-blank-page'
+    assert batch['fallback'] == []
+
+
+def test_the_fallback_is_reported_when_register_is_empty(packet_project):
+    rows = ill.read_plan(packet_project)
+    for row in rows:
+        row['register'] = ''
+    ill.write_plan(packet_project, rows)
+    batch = packet.anchor_batch(packet_project)
+    assert batch['fallback'], 'a guessed darkest/brightest must be disclosed'
+    assert any('register=darkest' in note for note in batch['fallback'])
+    # Still filled, so the batch is renderable — it is the guess that is
+    # disclosed, not the slot that is dropped.
+    assert batch['darkest'] == 'the-finest-cartographer'
+    assert batch['brightest'] == 'the-blank-page'
+
+
+def test_only_the_missing_register_slot_is_disclosed(packet_project):
+    rows = ill.read_plan(packet_project)
+    rows[0]['register'] = ''  # was brightest
+    ill.write_plan(packet_project, rows)
+    batch = packet.anchor_batch(packet_project)
+    assert any('brightest slot is a guess' in n for n in batch['fallback'])
+    assert not any('darkest slot is a guess' in n for n in batch['fallback'])
+
+
+def test_a_batch_that_brackets_nothing_says_so(packet_project):
+    """The realistic collision: the author marks only the *last* illustration
+    as darkest, and the brightest guess is also the last one."""
+    rows = ill.read_plan(packet_project)
+    rows[0]['register'] = ''
+    rows[1]['register'] = 'darkest'
+    ill.write_plan(packet_project, rows)
+    batch = packet.anchor_batch(packet_project)
+    assert batch['darkest'] == batch['brightest'] == 'the-blank-page'
+    assert any('brackets nothing' in n for n in batch['fallback'])
+
+
+def test_a_missing_later_state_exemplar_is_disclosed(packet_project):
+    """Every seeded transition is its entity's first, so nothing qualifies."""
+    batch = packet.anchor_batch(packet_project)
+    assert batch['later_state'] == ''
+    assert any('later-state exemplar' in n for n in batch['fallback'])
+
+
+def test_an_entity_the_row_does_not_show_cannot_make_it_the_exemplar(
+        packet_project):
+    """An image can only lock a changed wardrobe if the wardrobe is in it."""
+    from storyforge import visual_state as vs
+    rows = vs.read_transitions(packet_project)
+    rows.append({'entity': 'village', 'from_scene': 'act1-sc02',
+                 'state': 'gone from the sheet', 'evidence': 'Blank parchment'})
+    vs.write_transitions(packet_project, rows)
+    # `the-blank-page` names only `maps`, so the later village state is not
+    # something it shows.
+    assert packet.anchor_batch(packet_project)['later_state'] == ''
+
+
+def test_a_missing_establisher_is_disclosed(packet_project):
+    rows = ill.read_plan(packet_project)
+    for row in rows:
+        row['canon_refs'] = ''
+    ill.write_plan(packet_project, rows)
+    batch = packet.anchor_batch(packet_project)
+    assert batch['establisher'] == ''
+    assert any('no visual key' in n for n in batch['fallback'])
+
+
+def test_an_empty_plan_has_no_batch_and_says_why(project_dir):
+    batch = packet.anchor_batch(project_dir)
+    assert batch['establisher'] == batch['darkest'] == ''
+    assert any('no rows' in n for n in batch['fallback'])
+
+
+def test_a_superseded_row_is_not_in_the_batch(packet_project):
+    rows = ill.read_plan(packet_project)
+    rows[1]['status'] = 'superseded'
+    ill.write_plan(packet_project, rows)
+    batch = packet.anchor_batch(packet_project)
+    assert 'the-blank-page' not in batch.values()
+
+
+def test_the_batch_ignores_what_it_cannot_position(packet_project):
+    """A transition or an illustration the chapter map cannot place must be
+    skipped rather than counted at position zero — which would make the last
+    illustration in the book look like the earliest."""
+    from storyforge import visual_state as vs
+    rows = vs.read_transitions(packet_project)
+    rows.extend([
+        # Active in scenes.csv, absent from the chapter map: no position.
+        {'entity': 'maps', 'from_scene': 'act2-sc02',
+         'state': 'rolled and shelved', 'evidence': ''},
+        # Later than the illustration that shows `maps`, so it must not govern.
+        {'entity': 'maps', 'from_scene': 'act2-sc01',
+         'state': 'annotated in red', 'evidence': ''},
+    ])
+    vs.write_transitions(packet_project, rows)
+    plan = ill.read_plan(packet_project)
+    plan[0]['scene_id'] = 'new-x1'  # active, unmapped
+    ill.write_plan(packet_project, plan)
+
+    batch = packet.anchor_batch(packet_project)
+    assert batch['later_state'] == ''
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    # The illustration at act1-sc02 still resolves against its own transition,
+    # not the later one.
+    assert 'annotated in red' not in entries['the-blank-page']['state']
+
+
+def test_the_batch_is_derived_not_stored(packet_project):
+    """It must not be possible for the batch to disagree with the plan."""
+    before = packet.anchor_batch(packet_project)
+    rows = ill.read_plan(packet_project)
+    rows[0]['register'] = 'darkest'
+    rows[1]['register'] = 'brightest'
+    ill.write_plan(packet_project, rows)
+    after = packet.anchor_batch(packet_project)
+    assert before['darkest'] != after['darkest']
+    assert after['darkest'] == 'the-finest-cartographer'
+
+
+# ============================================================================
 # The written packet, checked against its sources
 # ============================================================================
 #

@@ -122,6 +122,23 @@ def is_built(project_dir: str) -> bool:
 # Resolution
 # ============================================================================
 
+def rows_in_reading_order(project_dir: str) -> list[dict[str, str]]:
+    """Live plan rows in the order a reader meets them.
+
+    Reading order, not render order: `render_order` deliberately hoists the
+    visual key to the front, which is right for producing the art and wrong for
+    deciding what an illustration's neighbours are. One function so the entries,
+    the contrast lines, and the anchor batch cannot end up disagreeing about
+    which illustration comes first.
+    """
+    order = ill._scene_order(project_dir)
+    rows = [row for row in ill.read_plan(project_dir)
+            if (row.get('status') or '').strip() != 'superseded']
+    return sorted(rows, key=lambda r: (
+        order.get((r.get('scene_id') or '').strip(), ill._SORTS_LAST),
+        r['id'].strip()))
+
+
 def resolve(project_dir: str) -> PacketContents:
     """Collect what the packet says, recording every gap rather than filtering.
 
@@ -142,8 +159,7 @@ def resolve(project_dir: str) -> PacketContents:
             'nothing holds a character or a place to one design across the '
             'set. Run `storyforge illustrate --direction`.')
 
-    rows = [row for row in ill.read_plan(project_dir)
-            if (row.get('status') or '').strip() != 'superseded']
+    rows = rows_in_reading_order(project_dir)
     if not rows:
         gaps.append(
             'the illustration plan has no rows — this packet describes no '
@@ -153,10 +169,6 @@ def resolve(project_dir: str) -> PacketContents:
     known = vs.known_scene_ids(project_dir)
     transitions = vs.read_transitions(project_dir)
     labels = canon.anchor_display_names(project_dir)
-
-    rows = sorted(rows, key=lambda r: (
-        order.get((r.get('scene_id') or '').strip(), ill._SORTS_LAST),
-        r['id'].strip()))
 
     entries: list[Entry] = []
     previous_id = ''
@@ -435,6 +447,175 @@ def state_grid(project_dir: str) -> StateGrid:
         'cells': cells,
         'unpositioned': unpositioned,
     }
+# ============================================================================
+# The anchor batch
+# ============================================================================
+
+#: Slot order, and the label each slot carries wherever the batch is reported.
+BATCH_SLOTS: tuple[tuple[str, str], ...] = (
+    ('establisher', 'establisher — the most shared vocabulary, earliest'),
+    ('darkest', 'darkest register'),
+    ('brightest', 'brightest register'),
+    ('later_state', 'later-state exemplar'),
+)
+
+
+class AnchorBatch(TypedDict):
+    """The four illustrations to render and approve before the churn.
+
+    Derived on every read, never stored, so it cannot disagree with the plan —
+    the same reasoning `render_order` follows. Phase 1 of the handoff exists
+    because a long generation run referencing *descriptions* drifts, while one
+    referencing four approved images does not.
+
+    An empty slot is a real answer, not an error: a plan where nothing names a
+    continuity anchor has no establisher. Every empty or guessed slot is
+    disclosed in `fallback`.
+    """
+    establisher: str
+    darkest: str
+    brightest: str
+    later_state: str
+    #: Disclosures about slots that were guessed or could not be filled. The
+    #: point of the whole structure: a silent guess about which image is the
+    #: darkest in the book is how an author discovers at image twenty that
+    #: nothing is.
+    fallback: list[str]
+
+
+def anchor_batch(project_dir: str) -> AnchorBatch:
+    """The four-slot anchor batch, with every guess disclosed."""
+    rows = rows_in_reading_order(project_dir)
+    fallback: list[str] = []
+    if not rows:
+        return {'establisher': '', 'darkest': '', 'brightest': '',
+                'later_state': '',
+                'fallback': ['the plan has no rows, so there is no anchor '
+                             'batch to render. Run `storyforge illustrate '
+                             '--plan`.']}
+
+    ids = [row['id'].strip() for row in rows]
+
+    establisher = next((step['id'] for step in ill.render_order(project_dir)
+                        if step['is_visual_key']), '')
+    if not establisher:
+        fallback.append(
+            'no illustration names a continuity anchor in `canon_refs`, so '
+            'there is no visual key to establish the look — the batch has no '
+            'establisher, and whichever image is rendered first will set the '
+            'style by accident. Fill `canon_refs` in '
+            f'reference/{ill.PLAN_FILENAME}.')
+
+    by_register: dict[str, str] = {}
+    for row in rows:
+        register = (row.get('register') or '').strip().lower()
+        if register in ill.VALID_REGISTERS and register not in by_register:
+            by_register[register] = row['id'].strip()
+
+    darkest = by_register.get('darkest') or ids[0]
+    brightest = by_register.get('brightest') or ids[-1]
+    for slot, guess, position in (('darkest', darkest, 'first'),
+                                  ('brightest', brightest, 'last')):
+        if slot not in by_register:
+            fallback.append(
+                f'no plan row is marked `register={slot}`, so the {slot} slot '
+                f'is a guess: `{guess}`, the {position} illustration in '
+                f'reading order. Mark the real extremes with '
+                f'`register=darkest` and `register=brightest` in '
+                f'reference/{ill.PLAN_FILENAME}; bracketing the book\'s '
+                f'lighting range is what stops the whole set landing in one '
+                f'exposure.')
+    if darkest == brightest and len(ids) > 1:
+        fallback.append(
+            f'the darkest and brightest slots resolved to the same '
+            f'illustration (`{darkest}`), so the batch brackets nothing.')
+
+    later_state, later_state_note = _later_state_exemplar(project_dir, rows)
+    if later_state_note:
+        fallback.append(later_state_note)
+
+    return {'establisher': establisher, 'darkest': darkest,
+            'brightest': brightest, 'later_state': later_state,
+            'fallback': fallback}
+
+
+def _later_state_exemplar(project_dir: str,
+                          rows: list[dict[str, str]]) -> tuple[str, str]:
+    """The illustration furthest from opening conditions, and any disclosure.
+
+    "Furthest" is counted as the entities it *shows* — the ones its `canon_refs`
+    name — whose governing transition is not that entity's first. An image can
+    only lock a changed wardrobe if the wardrobe is in it, so counting entities
+    the row does not name would pick an image that establishes nothing.
+
+    Ties break to the earliest position, because the batch exists to lock
+    designs for everything after it.
+    """
+    order = ill._scene_order(project_dir)
+    transitions = vs.read_transitions(project_dir)
+
+    first_position: dict[str, int] = {}
+    for transition in transitions:
+        position = order.get(transition['from_scene'])
+        if position is None:
+            continue
+        entity = transition['entity']
+        if entity not in first_position or position < first_position[entity]:
+            first_position[entity] = position
+
+    best_id, best_count = '', 0
+    for row in rows:
+        scene_id = (row.get('scene_id') or '').strip()
+        if scene_id not in order:
+            continue
+        resolved = vs._resolve(order, transitions, order[scene_id])
+        named = {ref.lower() for ref in ill._split_array(row.get('canon_refs', ''))}
+        count = 0
+        for entity, _state in resolved.items():
+            key = entity.lower()
+            shows = any(key == ref or key.startswith(f'{ref}-')
+                        for ref in named)
+            if not shows:
+                continue
+            governing = _governing_position(order, transitions, entity,
+                                           order[scene_id])
+            if governing is not None and governing != first_position.get(entity):
+                count += 1
+        if count > best_count:
+            best_id, best_count = row['id'].strip(), count
+
+    if best_id:
+        return best_id, ''
+    return '', (
+        'no illustration shows a tracked entity in a state later than that '
+        'entity\'s first, so the batch has no later-state exemplar — nothing '
+        'locks a changed wardrobe or a broken object before the churn, and the '
+        'first image that needs one will invent it. Either that is true of the '
+        f'book, or {vs.STATE_FILE} is thinner than the story.')
+
+
+def _governing_position(order: dict[str, int],
+                        transitions: list[vs.Transition],
+                        entity: str, target: int) -> int | None:
+    """Position of the transition in effect for *entity* at *target*.
+
+    Mirrors `visual_state._resolve`'s rule — take effect **at** the transition's
+    own scene, latest row wins a tie — but returns the position rather than the
+    state, which is what tells us whether the governing transition is the
+    entity's first.
+    """
+    best: int | None = None
+    for transition in transitions:
+        if transition['entity'] != entity:
+            continue
+        position = order.get(transition['from_scene'])
+        if position is None or position > target:
+            continue
+        if best is None or position >= best:
+            best = position
+    return best
+
+
 # ============================================================================
 # The written packet, checked against its sources
 # ============================================================================

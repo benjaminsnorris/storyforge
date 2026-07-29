@@ -244,6 +244,9 @@ def run_diagnose(project_dir: str) -> int:
                      if step['locks'] else '')
             log(f'  {mark} {i:2}. {step["id"]}{key}{locks}')
 
+    _report_anchor_batch(packet.anchor_batch(project_dir),
+                         _unrendered_ids(project_dir))
+
     findings = ill.validate_plan(project_dir)
     _report_state_rung(project_dir, findings)
     return _report_findings(findings)
@@ -1343,6 +1346,8 @@ def run_package(project_dir: str, dry_run: bool) -> int:
     """
     contents = packet.resolve(project_dir)
     grid = packet.state_grid(project_dir)
+    batch = packet.anchor_batch(project_dir)
+    unrendered = _unrendered_ids(project_dir)
     title = read_yaml_field('project.title', project_dir) or '(untitled)'
 
     illustrated: dict[str, list[str]] = {}
@@ -1358,7 +1363,8 @@ def run_package(project_dir: str, dry_run: bool) -> int:
     files = {
         'README.md': pp.render_readme(
             title=title, contents=contents,
-            entry_count=len(contents['entries'])),
+            entry_count=len(contents['entries']), batch=batch,
+            unrendered=unrendered),
         'canon.md': pp.render_canon(
             book_level=contents['book_level'], anchors=contents['anchors'],
             labels=_anchor_labels(project_dir)),
@@ -1394,9 +1400,37 @@ def run_package(project_dir: str, dry_run: bool) -> int:
         log(f'  {len(contents["gaps"])} gap(s) above are also written into '
             f'{os.path.join(packet.PACKET_DIR, "README.md")}, so the packet '
             f'says what it cannot tell you.')
-    log('Render and approve a first batch, ingest those, then re-run '
+    _report_anchor_batch(batch, unrendered)
+    log('Render and approve the anchor batch, ingest those, then re-run '
         '--package so the rest can reference real images.')
     return 0
+
+
+def _unrendered_ids(project_dir: str) -> list[str]:
+    """Plan ids that have not reached `ingested`, in reading order."""
+    return [row['id'].strip()
+            for row in packet.rows_in_reading_order(project_dir)
+            if (row.get('status') or '').strip() != 'ingested']
+
+
+def _report_anchor_batch(batch: packet.AnchorBatch,
+                         unrendered: list[str]) -> None:
+    """Log the four slots and every disclosure.
+
+    The fallback notes are WARNING lines rather than plain output: a guessed
+    darkest slot is a claim the author has to either confirm or correct, and it
+    reads as a decision unless something says otherwise.
+    """
+    log('Anchor batch — render and approve these before the rest:')
+    for slot, label in packet.BATCH_SLOTS:
+        illus_id = batch[slot]  # type: ignore[literal-required]
+        if not illus_id:
+            log(f'  {label}: (unfilled)')
+            continue
+        mark = '' if illus_id in unrendered else '  [ingested]'
+        log(f'  {label}: {illus_id}{mark}')
+    for note in batch['fallback']:
+        log(f'  WARNING: {note}')
 
 
 def _warn_unanchored_rows(rows: list[dict[str, str]],

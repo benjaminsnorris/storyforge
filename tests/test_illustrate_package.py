@@ -238,6 +238,71 @@ def test_the_sequence_rules_are_in_the_packet(in_project):
 
 
 # ============================================================================
+# The anchor batch, where the author reads it
+# ============================================================================
+
+def test_the_readme_names_the_batch_and_its_render_state(in_project):
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'README.md')
+    batch = packet.anchor_batch(in_project)
+    assert f'`{batch["establisher"]}`' in body
+    assert 'establisher' in body
+    assert 'not yet' in body  # nothing is ingested in the fixture
+
+
+def test_a_guessed_batch_slot_is_disclosed_in_the_packet(in_project):
+    """The whole point: a guess must not read as a choice."""
+    rows = ill.read_plan(in_project)
+    for row in rows:
+        row['register'] = ''
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'README.md')
+    assert 'Read this before rendering the batch' in body
+    assert 'register=darkest' in body
+
+
+def test_a_guessed_batch_slot_is_a_warning_in_the_log(in_project, capsys):
+    rows = ill.read_plan(in_project)
+    for row in rows:
+        row['register'] = ''
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'is a guess' in out
+
+
+def test_an_unfilled_slot_reads_as_unfilled_not_as_the_first_row(in_project):
+    cmd_illustrate.main(['--package'])
+    # The seeded project has no later-state exemplar.
+    body = _read(in_project, 'README.md')
+    assert 'later-state exemplar | _unfilled' in body
+
+
+def test_diagnose_reports_the_anchor_batch(in_project, capsys):
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'Anchor batch' in out
+    assert 'the-finest-cartographer' in out
+
+
+def test_an_ingested_batch_row_is_marked_as_such(in_project):
+    from illustration_helpers import make_png
+    rows = ill.read_plan(in_project)
+    rel = ill.default_asset_rel('the-finest-cartographer')
+    make_png(os.path.join(in_project, rel), 8, 12)
+    rows[0]['status'] = 'ingested'
+    rows[0]['asset_file'] = rel
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'README.md')
+    line = next(l for l in body.splitlines()
+                if '`the-finest-cartographer`' in l and '|' in l)
+    assert line.strip().endswith('| yes |')
+
+
+# ============================================================================
 # The renderers, driven directly
 # ============================================================================
 
@@ -245,7 +310,9 @@ def test_a_clean_readme_claims_only_what_it_can(in_project):
     """With no gaps the README must still not promise the art will be right."""
     contents = packet.resolve(in_project)
     contents['gaps'] = []
-    body = pp.render_readme(title='T', contents=contents, entry_count=2)
+    body = pp.render_readme(title='T', contents=contents, entry_count=2,
+                            batch=packet.anchor_batch(in_project),
+                            unrendered=[])
     assert 'Nothing was missing' in body
     assert 'not a promise that' in body
 

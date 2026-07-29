@@ -27,7 +27,9 @@ import os
 from typing import Final
 
 from storyforge import prompts_illustrate as pi
-from storyforge.packet import Entry, PacketContents, StateGrid, anchor_block
+from storyforge.packet import (
+    BATCH_SLOTS, AnchorBatch, Entry, PacketContents, StateGrid, anchor_block,
+)
 
 #: What a section says when the data behind it is absent. The packet's coverage
 #: contract lives in these two strings as much as in README.md's gap list.
@@ -50,8 +52,33 @@ def _heading_for(canon_id: str) -> str:
 # README.md
 # ============================================================================
 
+def _render_batch(batch: AnchorBatch, unrendered: list[str]) -> str:
+    """The four slots, marked for whether they are rendered, guesses disclosed.
+
+    The disclosure is the load-bearing half. When `register` is unpopulated the
+    darkest and brightest slots are guesses, and a guess presented as a choice
+    is how an author finds out at image twenty that nothing in the book is the
+    darkest image in the book.
+    """
+    lines = ['| Slot | Illustration | Rendered |', '|---|---|---|']
+    for slot, label in BATCH_SLOTS:
+        illus_id = batch[slot]  # type: ignore[literal-required]
+        if not illus_id:
+            lines.append(f'| {label} | _unfilled — see below_ | — |')
+            continue
+        state = 'not yet' if illus_id in unrendered else 'yes'
+        lines.append(f'| {label} | `{illus_id}` | {state} |')
+    body = '\n'.join(lines)
+    if batch['fallback']:
+        disclosure = '\n'.join(f'- {note}' for note in batch['fallback'])
+        body += (f'\n\n**Read this before rendering the batch.** '
+                 f'{len(batch["fallback"])} slot(s) are guessed or '
+                 f'unfilled:\n\n{disclosure}')
+    return body
+
 def render_readme(*, title: str, contents: PacketContents,
-                  entry_count: int) -> str:
+                  entry_count: int, batch: AnchorBatch,
+                  unrendered: list[str]) -> str:
     """The two phases, how to work the packet, and what it cannot tell you."""
     gaps = contents['gaps']
     if gaps:
@@ -88,12 +115,12 @@ lost on the next run and never reaches the plan. Change
 
 ## Two phases
 
-**Phase 1 — the anchor batch.** Render and approve a small set first, then
-`storyforge illustrate --ingest <dir>` them. Those images become reference
-images for everything after, which is the difference between a set that agrees
-with itself and twenty images that each invented their own version of a
-character. `storyforge illustrate --diagnose` names the render order and which
-of them are still unrendered.
+**Phase 1 — the anchor batch.** Render and approve these four first, then
+`storyforge illustrate --ingest <dir>` them. They become reference images for
+everything after, which is the difference between a set that agrees with itself
+and twenty images that each invented their own version of a character.
+
+{_render_batch(batch, unrendered)}
 
 **Phase 2 — the churn.** Work `illustrations.md` top to bottom. Read `canon.md`
 once at the start of the session and keep it in context; it is not repeated per
