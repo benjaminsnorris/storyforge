@@ -130,9 +130,9 @@ def state_at(project_dir: str, scene_id: str) -> dict[str, str]:
     from storyforge.illustrations import _scene_order
     order = _scene_order(project_dir)
     if scene_id not in order:
-        log(f'WARNING: scene {scene_id!r} has no reading position (absent from '
-            f'the chapter map and from scenes.csv) — visual state resolves as '
-            f'empty, not as unchanged')
+        log(f'WARNING: scene {scene_id!r} has no reading position — the chapter '
+            f'map does not list it, and scenes.csv is only consulted when the '
+            f'map is empty. Visual state resolves as empty, not as unchanged')
         return {}
     return _resolve(order, read_transitions(project_dir), order[scene_id])
 
@@ -196,9 +196,19 @@ class PrepassResult(TypedDict):
     plan — all cheap, all certain. `candidate_scenes` is the narrowed set of
     scenes whose prose could disagree with the log; it exists so the audit's one
     LLM call reads a handful of scenes instead of the book.
+
+    The last three fields are the denominators the *caller* needs to report the
+    narrowing honestly — how many scenes were selected out of how many exist,
+    across how many entities, and which positioned scenes had no prose to read.
+    They are returned rather than logged here because `validate_plan` also calls
+    `prepass`, and neither `validate` nor `cleanup` is auditing anything: the
+    caller knows whether to speak.
     """
     findings: list['IllustrationFinding']
     candidate_scenes: list[str]
+    scene_count: int
+    tracked_entities: list[str]
+    undrafted_scenes: list[str]
 
 
 def _csv_safe(text: str) -> str:
@@ -270,9 +280,13 @@ def prepass(project_dir: str) -> PrepassResult:
 
     Four checks, none of which needs a model:
 
-    1. a `from_scene` with no reading position — `state_unknown_scene`, an
+    1. a `from_scene` that names no scene at all — `state_unknown_scene`, an
        error, because the transition never applies and every scene after it
-       resolves to the wrong state;
+       resolves to the previous state. A `from_scene` that *does* exist in
+       `scenes.csv` but is not in the chapter map is a different situation and a
+       different finding: `state_unmapped_scene`, a warning, because the
+       transition row is well-formed and the chapter map is what is incomplete.
+       Conflating the two would push an author to delete good rows;
     2. an `evidence` quote no longer in that scene's prose —
        `evidence_not_found`, matched whitespace-tolerantly so a reflow does not
        read as drift;
@@ -285,11 +299,20 @@ def prepass(project_dir: str) -> PrepassResult:
        that entity's first transition, which is where prose and log can
        disagree.
     """
+    from storyforge.common import check_chapter_map_freshness
     from storyforge import illustrations as ill
 
     transitions = read_transitions(project_dir)
     order = ill._scene_order(project_dir)
     findings: list['IllustrationFinding'] = []
+
+    # The authority on "exists in scenes.csv but the chapter map omits it" — the
+    # same function `assemble` and `evaluate` gate on, rather than a second
+    # hand-rolled scenes.csv read that could disagree with it. It excludes
+    # cut/merged/archived scenes from `active_ids`, which is exactly right here:
+    # a transition keyed to a cut scene must stay an error.
+    _fresh, missing_from_map, _extra = check_chapter_map_freshness(project_dir)
+    unmapped = set(missing_from_map)
 
     # --- Checks 1 and 2: the log against the prose -------------------------
     # Positions of the transitions that actually resolve, per entity. Built
@@ -300,16 +323,29 @@ def prepass(project_dir: str) -> PrepassResult:
         from_scene = transition['from_scene']
         position = order.get(from_scene)
         if position is None:
-            findings.append({
-                'kind': 'state_unknown_scene',
-                'id': entity,
-                'file': STATE_FILE,
-                'detail': f'transition for {entity!r} is keyed to '
-                          f'{from_scene!r}, which has no reading position — it '
-                          f'is in neither the chapter map nor scenes.csv, so '
-                          f'the transition never applies and every scene after '
-                          f'it resolves to the previous state',
-            })
+            if from_scene in unmapped:
+                findings.append({
+                    'kind': 'state_unmapped_scene',
+                    'id': entity,
+                    'scene_id': from_scene,
+                    'file': os.path.join('reference', 'chapter-map.csv'),
+                    'detail': f'transition for {entity!r} is keyed to '
+                              f'{from_scene}, which exists in scenes.csv but is '
+                              f'not in the chapter map — the row is fine, but '
+                              f'the transition cannot be positioned until the '
+                              f'map lists the scene',
+                })
+            else:
+                findings.append({
+                    'kind': 'state_unknown_scene',
+                    'id': entity,
+                    'file': STATE_FILE,
+                    'detail': f'transition for {entity!r} is keyed to '
+                              f'{from_scene!r}, which is not an active scene in '
+                              f'scenes.csv — cut, renamed, or mistyped. The '
+                              f'transition never applies, so every scene after '
+                              f'it resolves to the previous state',
+                })
             continue
         resolved.setdefault(entity, set()).add(position)
 
@@ -372,9 +408,13 @@ def prepass(project_dir: str) -> PrepassResult:
                           f'if the state is true in this image only',
             })
 
+    candidates, undrafted = _candidate_scenes(project_dir, order, resolved)
     return {
         'findings': findings,
-        'candidate_scenes': _candidate_scenes(project_dir, order, resolved),
+        'candidate_scenes': candidates,
+        'scene_count': len(order),
+        'tracked_entities': sorted(resolved),
+        'undrafted_scenes': undrafted,
     }
 
 
@@ -382,8 +422,8 @@ def _candidate_scenes(
     project_dir: str,
     order: dict[str, int],
     resolved: dict[str, set[int]],
-) -> list[str]:
-    """Scenes whose prose could contradict the log, in reading order.
+) -> tuple[list[str], list[str]]:
+    """Scenes whose prose could contradict the log, and scenes with no prose.
 
     A scene qualifies when it mentions a tracked entity and sits at or after
     that entity's first resolved transition — the span over which the log
@@ -391,13 +431,14 @@ def _candidate_scenes(
     transitions is skipped for it: the evidence quote already pins that scene,
     and check 2 verifies it.
 
-    Logs how many scenes were selected out of how many exist, so a run that
-    selects nothing says so instead of looking like it checked everything.
+    Returns `(candidates, undrafted)` both in reading order. Silent by design —
+    the caller reports the narrowing, because `prepass` is also called from
+    `validate_plan` and neither `validate` nor `cleanup` is auditing anything.
     """
     from storyforge import illustrations as ill
 
     if not resolved:
-        return []
+        return [], []
 
     display_names = _display_names(project_dir)
     terms = {entity: _entity_search_terms(entity, display_names)
@@ -405,11 +446,11 @@ def _candidate_scenes(
     first = {entity: min(positions) for entity, positions in resolved.items()}
 
     candidates: list[str] = []
-    undrafted = 0
+    undrafted: list[str] = []
     for scene_id, position in sorted(order.items(), key=lambda kv: (kv[1], kv[0])):
         text = ill._read_scene(project_dir, scene_id)
         if text is None:
-            undrafted += 1
+            undrafted.append(scene_id)
             continue
         haystack = _scene_haystack(text)
         for entity, entity_terms in terms.items():
@@ -419,12 +460,7 @@ def _candidate_scenes(
                 candidates.append(scene_id)
                 break
 
-    log(f'  visual-state pre-pass: selected {len(candidates)} of {len(order)} '
-        f'scenes as audit candidates across {len(terms)} tracked entities')
-    if undrafted:
-        log(f'  visual-state pre-pass: {undrafted} scene(s) have no file in '
-            f'scenes/ and were not read')
-    return candidates
+    return candidates, undrafted
 
 
 def _display_names(project_dir: str) -> dict[str, 'AnchorLabel']:

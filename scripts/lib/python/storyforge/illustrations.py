@@ -1554,8 +1554,8 @@ IllustrationFindingKind = Literal[
     'unembedded_ingested', 'shattered_row', 'direction_anchor_mismatch',
     # The visual-state matrix and the contradiction audit (#278 phase 2).
     # Bare, like every kind above: cmd_cleanup renders `illus_{kind}`.
-    'state_unknown_scene', 'evidence_not_found', 'state_unspecified',
-    'prose_changed', 'audit_stale',
+    'state_unknown_scene', 'state_unmapped_scene', 'evidence_not_found',
+    'state_unspecified', 'prose_changed', 'audit_stale',
 ]
 
 
@@ -1586,7 +1586,9 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     # A transition keyed to a scene that no longer exists silently stops
     # applying, and every scene downstream of it resolves to the wrong state.
     # This is the one failure a dense grid could not have, and the price the
-    # sparse log pays — so it blocks.
+    # sparse log pays — so it blocks. Note its sibling `state_unmapped_scene`
+    # is only a warning: a scene the chapter map omits still exists, so the
+    # transition row is fine and the map is what needs fixing.
     'state_unknown_scene',
 })
 
@@ -1596,11 +1598,13 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
 WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
     'unembedded_ingested', 'shattered_row', 'direction_anchor_mismatch',
-    # Visual state (#278 phase 2). All four leave a publishable book: an
-    # evidence quote that drifted, an entity nobody stated, prose revised
-    # under a render, and an audit older than the prose are each information
-    # the author acts on before paying for art, not a broken manuscript.
-    'evidence_not_found', 'state_unspecified', 'prose_changed', 'audit_stale',
+    # Visual state (#278 phase 2). All five leave a publishable book: a
+    # transition the chapter map cannot position yet, an evidence quote that
+    # drifted, an entity nobody stated, prose revised under a render, and an
+    # audit older than the prose are each information the author acts on before
+    # paying for art, not a broken manuscript.
+    'state_unmapped_scene', 'evidence_not_found', 'state_unspecified',
+    'prose_changed', 'audit_stale',
 })
 
 Severity = Literal['error', 'warning']

@@ -1722,14 +1722,16 @@ def test_strip_is_byte_identical_for_every_placement(placement, anchor):
 
 @pytest.mark.parametrize('kind,expected', [
     ('state_unknown_scene', 'error'),
+    ('state_unmapped_scene', 'warning'),
     ('evidence_not_found', 'warning'),
     ('state_unspecified', 'warning'),
     ('prose_changed', 'warning'),
     ('audit_stale', 'warning'),
 ])
 def test_new_finding_kinds_have_the_intended_severity(kind, expected):
-    """A transition pointing at a cut scene silently stops applying, so it
-    blocks; the other four leave a publishable book."""
+    """A transition pointing at a scene that exists nowhere silently stops
+    applying, so it blocks. A scene the chapter map merely omits still exists —
+    that row is fine and the map needs fixing, so it warns, as do the rest."""
     assert ill.severity_of(kind) == expected
 
 

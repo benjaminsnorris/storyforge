@@ -1243,9 +1243,12 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
         'restore it into the canon file and re-render nothing — the existing '
         'art already matches it',
     'state_unknown_scene':
-        'Point from_scene at a scene that exists in reference/visual-state.csv, '
-        'or delete the row — a transition keyed to a cut scene never applies, '
-        'so every scene after it resolves to the wrong state',
+        'In reference/visual-state.csv, point from_scene at an active scene in '
+        'scenes.csv, or delete the row — a transition keyed to a cut scene never '
+        'applies, so every scene after it resolves to the wrong state',
+    'state_unmapped_scene':
+        'Add the scene to reference/chapter-map.csv — the transition row is '
+        'fine, but it cannot be positioned until the map lists the scene',
     'evidence_not_found':
         'Re-quote evidence from the current prose of from_scene, or move the '
         'transition to the scene that now establishes it',

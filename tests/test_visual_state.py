@@ -159,19 +159,61 @@ def _plan(project_dir, **overrides):
     return row
 
 
-def test_unresolvable_from_scene_is_an_error(project_dir):
+def test_a_from_scene_that_exists_nowhere_is_an_error(project_dir):
+    """Cut, renamed, or mistyped: the author must fix the log."""
+    from storyforge import illustrations as ill
     _write_state(project_dir, ROWS + [
         ('master-survey', 'scene-that-was-cut', 'burned', 'held her breath'),
     ])
-    findings = vs.prepass(project_dir)['findings']
-    kinds = {f['kind'] for f in findings}
-    assert 'state_unknown_scene' in kinds
-    from storyforge import illustrations as ill
+    found = [f for f in vs.prepass(project_dir)['findings']
+             if f['kind'] == 'state_unknown_scene']
+    assert len(found) == 1
+    assert found[0]['file'] == vs.STATE_FILE
     assert ill.severity_of('state_unknown_scene') == 'error'
 
 
 def test_a_blank_from_scene_is_the_same_error(project_dir):
     _write_state(project_dir, [('master-survey', '', 'burned', '')])
+    kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
+    assert kinds == {'state_unknown_scene'}
+
+
+def test_a_scene_the_chapter_map_omits_is_a_warning_not_an_error(project_dir):
+    """new-x1 is in scenes.csv and not in the fixture's chapter map. The
+    transition row is well-formed; the map is what is incomplete. Flagging it as
+    an error would push the author to delete a good row."""
+    from storyforge import illustrations as ill
+    _write_state(project_dir, [('master-survey', 'new-x1', 'burned', '')])
+    findings = vs.prepass(project_dir)['findings']
+    kinds = {f['kind'] for f in findings}
+    assert kinds == {'state_unmapped_scene'}
+    assert ill.severity_of('state_unmapped_scene') == 'warning'
+    assert 'state_unknown_scene' not in kinds
+
+
+def test_the_unmapped_warning_points_at_the_chapter_map(project_dir):
+    _write_state(project_dir, [('master-survey', 'new-x1', 'burned', '')])
+    finding = vs.prepass(project_dir)['findings'][0]
+    assert finding['file'] == os.path.join('reference', 'chapter-map.csv')
+    assert finding['scene_id'] == 'new-x1'
+    assert 'the row is fine' in finding['detail']
+
+
+def test_a_cut_scene_stays_an_error_even_though_scenes_csv_lists_it(project_dir):
+    """check_chapter_map_freshness excludes cut/merged/archived scenes, which is
+    exactly right: a transition keyed to a cut scene must not read as a mere
+    chapter-map gap."""
+    path = os.path.join(project_dir, 'reference', 'scenes.csv')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace('new-x1|3|The Archivist\'s Warning|1|Kael Maren|'
+                             'The Deep Archive|2|afternoon|30 minutes|'
+                             'revelation|mapped',
+                             'new-x1|3|The Archivist\'s Warning|1|Kael Maren|'
+                             'The Deep Archive|2|afternoon|30 minutes|'
+                             'revelation|cut'))
+    _write_state(project_dir, [('master-survey', 'new-x1', 'burned', '')])
     kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
     assert kinds == {'state_unknown_scene'}
 
@@ -210,7 +252,7 @@ def test_an_undrafted_from_scene_is_logged_not_flagged(project_dir, capsys):
     _write_state(project_dir, [('x', 'act2-sc01', 'y', 'some quote')])
     kinds = {f['kind'] for f in vs.prepass(project_dir)['findings']}
     assert 'evidence_not_found' not in kinds
-    assert 'no file in scenes/' in capsys.readouterr().out
+    assert 'cannot check the evidence' in capsys.readouterr().out
 
 
 def test_an_illustration_naming_an_unstated_entity_is_reported(project_dir):
@@ -312,22 +354,36 @@ def test_candidate_scenes_is_empty_with_no_log(project_dir):
     assert vs.prepass(project_dir)['candidate_scenes'] == []
 
 
-def test_candidate_narrowing_is_logged_with_both_counts(project_dir, capsys):
+def test_prepass_returns_the_denominators_the_caller_needs(project_dir):
+    """The narrowing count is the caller's to report, so prepass hands back both
+    sides of it rather than logging — validate and cleanup also call prepass and
+    are not auditing anything."""
+    _write_state(project_dir, [
+        ('compass', 'act1-sc01', 'brass', 'held her breath'),
+    ])
+    result = vs.prepass(project_dir)
+    assert result['candidate_scenes'] == ['act2-sc01']
+    assert result['scene_count'] == 3
+    assert result['tracked_entities'] == ['compass']
+    assert result['undrafted_scenes'] == []
+
+
+def test_prepass_does_not_log_the_narrowing(project_dir, capsys):
     _write_state(project_dir, [
         ('compass', 'act1-sc01', 'brass', 'held her breath'),
     ])
     vs.prepass(project_dir)
-    out = capsys.readouterr().out
-    assert ('visual-state pre-pass: selected 1 of 3 scenes as audit candidates '
-            'across 1 tracked entities') in out
+    assert 'candidate' not in capsys.readouterr().out.lower()
 
 
-def test_a_run_that_selects_nothing_says_so(project_dir, capsys):
+def test_undrafted_scenes_are_named_not_counted(project_dir):
+    os.remove(os.path.join(project_dir, 'scenes', 'act2-sc01.md'))
     _write_state(project_dir, [
-        ('nothing-in-the-prose', 'act1-sc01', 'x', 'held her breath'),
+        ('compass', 'act1-sc01', 'brass', 'held her breath'),
     ])
-    assert vs.prepass(project_dir)['candidate_scenes'] == []
-    assert 'selected 0 of 3 scenes' in capsys.readouterr().out
+    result = vs.prepass(project_dir)
+    assert result['undrafted_scenes'] == ['act2-sc01']
+    assert result['scene_count'] == 3
 
 
 def test_an_aspect_track_searches_for_its_canon_portion(project_dir):
