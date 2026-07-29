@@ -1182,6 +1182,42 @@ def anchor_texts(project_dir: str) -> dict[str, str]:
     return anchors
 
 
+def truncated_anchor_ids(
+    project_dir: str,
+) -> dict[str, list[BlockTruncation]]:
+    """Every canon file whose Embeddable block is cut short, keyed by canon_id.
+
+    The shared source `illustrations.validate_plan`, `--prompts` and the packet
+    all read, so a truncated anchor is diagnosed identically wherever it is
+    caught. `validate_canon_file` reports the same condition per *file* for the
+    cleanup report; this exists because that report gates nothing and the
+    consumers that actually spend money on a short anchor needed something to
+    check (#293).
+
+    Entity anchors and the three book-level files both — a truncated
+    `visual-vocabulary` ships partial house style to every prompt in the book,
+    which is worse than one character's anchor being short. Keys are `canon_id`
+    so a plan row's `canon_refs` matches directly, and traversal is
+    `_walk_canon_files` so starter templates stay out and order is
+    deterministic, exactly as in `anchor_texts`.
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return {}
+
+    out: dict[str, list[BlockTruncation]] = {}
+    for path in _walk_canon_files(canon_dir):
+        parsed = parse_canon_file(path)
+        fm = parsed['frontmatter']
+        canon_id = (
+            (fm.get('canon_id') or '').strip() if isinstance(fm, dict) else ''
+        ) or os.path.splitext(os.path.basename(path))[0]
+        truncations = embeddable_block_truncations(parsed['body'])
+        if truncations:
+            out[canon_id] = truncations
+    return out
+
+
 #: `canon_updated: YYYY-MM-DD`. ISO dates sort lexicographically, so the
 #: newest one is just `max()` over the parseable values — no date arithmetic,
 #: and nothing to get wrong across timezones.

@@ -1489,6 +1489,56 @@ def test_validate_reports_a_shattered_row(project_dir):
 
 
 # ============================================================================
+# A truncated continuity anchor blocks (issue #293)
+# ============================================================================
+
+def test_truncated_entity_anchor_is_a_blocking_finding(project_dir):
+    """#293: `canon_truncated_embeddable_block` diagnoses the file, but it lands
+    in `cleanup`, which gates nothing — so `--prompts` and `--package` still
+    embedded a half anchor in every request. Emitting from `validate_plan` is
+    what buys `validate` exit 1, `--diagnose`, and cleanup's Interior
+    Illustrations section from one placement."""
+    from illustration_helpers import write_canon_file
+    write_canon_file(project_dir, canon_id='nora', canon_type='character',
+                     subdir='characters',
+                     body='A dark braid.\n\n## Wardrobe\n\nA grey wool coat.')
+    ill.write_plan(project_dir, [plan_row(canon_refs='nora')])
+
+    findings = [f for f in ill.validate_plan(project_dir)
+                if f['kind'] == 'canon_anchor_truncated']
+    assert len(findings) == 1, 'a truncated anchor must block'
+    assert ill.severity_of('canon_anchor_truncated') == 'error'
+    assert 'nora' in findings[0]['detail']
+    assert '## Wardrobe' in findings[0]['detail']
+
+
+def test_truncated_book_level_canon_is_a_blocking_finding(project_dir):
+    """A truncated `visual-vocabulary` is worse than one short character anchor:
+    the rules that repeat are gone from every prompt in the book. It is reported
+    even though no plan row references it by id, and `missing_reference_sections`
+    reports it clean because the block is populated — just short."""
+    from illustration_helpers import write_canon_file
+    write_canon_file(project_dir, canon_id='visual-vocabulary',
+                     canon_type='vocabulary',
+                     body='Palette: muted greens.\n\n## Camera\n\nChild height.')
+    ill.write_plan(project_dir, [plan_row()])
+
+    assert 'visual-vocabulary' not in ill.missing_reference_sections(project_dir)
+    findings = [f for f in ill.validate_plan(project_dir)
+                if f['kind'] == 'canon_anchor_truncated']
+    assert len(findings) == 1
+    assert 'visual-vocabulary' in findings[0]['detail']
+
+
+def test_clean_canon_produces_no_truncation_finding(project_dir):
+    from illustration_helpers import seed_canon
+    seed_canon(project_dir)
+    ill.write_plan(project_dir, [plan_row(canon_refs='dorren-hayle')])
+    assert [f for f in ill.validate_plan(project_dir)
+            if f['kind'] == 'canon_anchor_truncated'] == []
+
+
+# ============================================================================
 # The finding-kind domain, enforced
 # ============================================================================
 

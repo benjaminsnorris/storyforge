@@ -561,6 +561,39 @@ def test_validate_unfilled_template_flagged(tmp_path):
     assert 'Related canon' not in unfilled[0]['detail']
 
 
+def test_truncated_anchor_ids_reports_every_affected_canon_file(tmp_path):
+    """#293: the shared source `validate_plan`, `--prompts` and the packet all
+    read, so a truncated anchor is diagnosed the same way in each. Keyed by
+    canon_id, which is what `canon_refs` matches against."""
+    from storyforge.canon import truncated_anchor_ids
+    project = str(tmp_path)
+    write_canon(project, 'characters/nora.md', 'nora', canon_type='character',
+                body=_anchor_body(block_lines='A braid.\n\n## Wardrobe\n\nCoat.'))
+    write_canon(project, 'visual-vocabulary.md', 'visual-vocabulary',
+                canon_type='vocabulary',
+                body=_anchor_body(block_lines='Greens.\n\n## Camera\n\nLow.'))
+    write_canon(project, 'locations/office.md', 'office', canon_type='location',
+                body=_anchor_body(block_lines='A narrow room.'))
+
+    found = truncated_anchor_ids(project)
+    assert set(found) == {'nora', 'visual-vocabulary'}, 'clean files must not appear'
+    assert [t.heading for t in found['nora']] == ['## Wardrobe']
+    assert [t.heading for t in found['visual-vocabulary']] == ['## Camera']
+
+
+def test_truncated_anchor_ids_skips_templates_and_missing_dir(tmp_path):
+    """Walks via `_walk_canon_files` like every other reader, so a starter
+    template is not reported as a broken anchor. A project with no canon
+    directory is valid in-flight state, not a finding."""
+    from storyforge.canon import truncated_anchor_ids
+    project = str(tmp_path)
+    assert truncated_anchor_ids(project) == {}
+    write_canon(project, 'characters/_template.md', '_template',
+                canon_type='character',
+                body=_anchor_body(block_lines='X.\n\n## Sub\n\nY.'))
+    assert truncated_anchor_ids(project) == {}
+
+
 # ---------------------------------------------------------------------------
 # An H2 heading name lives on one physical line (issue #294)
 #

@@ -701,6 +701,20 @@ def test_validate_plan_folds_in_the_packet_checks(packet_project):
     assert 'anchor_copy_drift' in kinds
 
 
+def test_truncated_canon_is_a_packet_gap(packet_project):
+    """#293: a truncated block is neither absent nor a scaffold, so
+    `missing_reference_sections` reports it clean while the packet copies only
+    the text above the stray `##`. Silence there is exactly the coverage
+    overclaim README.md exists not to make."""
+    from illustration_helpers import write_canon_file
+    write_canon_file(packet_project, canon_id='visual-vocabulary',
+                     canon_type='vocabulary',
+                     body='Palette: muted greens.\n\n## Camera\n\nChild height.')
+    gaps = packet.resolve(packet_project)['gaps']
+    hits = [g for g in gaps if 'visual-vocabulary' in g and '## Camera' in g]
+    assert len(hits) == 1, gaps
+
+
 def test_cleanup_has_remediation_for_the_new_kinds():
     """A kind with no action falls back to 'Review the illustration plan',
     which tells an author nothing about a packet."""
