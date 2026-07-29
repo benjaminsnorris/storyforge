@@ -1215,6 +1215,11 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
                            'but nothing in the prose points at it',
     'shattered_row': 'Replace the "|" in the offending cell with "/" — the '
                      'plan is pipe-delimited and unquoted',
+    'direction_anchor_mismatch':
+        'Confirm which text is correct. If the canon file is right, delete '
+        'reference/illustration-direction.md. If the old text is right, '
+        'restore it into the canon file and re-render nothing — the existing '
+        'art already matches it',
 }
 
 

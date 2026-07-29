@@ -1505,7 +1505,7 @@ IllustrationFindingKind = Literal[
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
-    'unembedded_ingested', 'shattered_row',
+    'unembedded_ingested', 'shattered_row', 'direction_anchor_mismatch',
 ]
 
 
@@ -1519,7 +1519,7 @@ class IllustrationFinding(_IllustrationFindingRequired, total=False):
     """One problem with the illustration plan or its markers."""
     id: str        #: every finding except orphan_file
     scene_id: str  #: set when the finding is locatable in a scene
-    file: str      #: set for orphan_file and missing_file
+    file: str      #: set for orphan_file, missing_file, and direction_anchor_mismatch
 
 
 # Findings that make the plan incoherent — the book cannot be published or
@@ -1535,7 +1535,7 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
 # usually a rename in progress.
 WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
-    'unembedded_ingested', 'shattered_row',
+    'unembedded_ingested', 'shattered_row', 'direction_anchor_mismatch',
 })
 
 Severity = Literal['error', 'warning']
@@ -1565,6 +1565,10 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     findings: list[IllustrationFinding] = []
     rows = read_plan(project_dir)
     if not rows and not os.path.isdir(illustrations_dir(project_dir)):
+        # No plan and no ingested files — but the hand-edit safety net still
+        # needs to run: a direction document can exist (and drift from
+        # canon) before a single illustration has ever been planned.
+        findings.extend(_direction_anchor_mismatches(project_dir))
         return findings
 
     seen_ids: set[str] = set()
@@ -1720,6 +1724,78 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
                     'detail': f'{rel} is not referenced by any plan row',
                 })
 
+    findings.extend(_direction_anchor_mismatches(project_dir))
+
+    return findings
+
+
+def _direction_anchor_mismatches(project_dir: str) -> list[IllustrationFinding]:
+    """Compare canon anchors against a still-present direction document.
+
+    A one-time safety net for the hand-edit off illustration-direction.md.
+    The unrecoverable mistake is an anchor whose text changed: every
+    illustration already rendered from the old string is invalidated, and
+    nothing else in the pipeline would notice. Goes silent once the old
+    document is deleted, which is the intended end state.
+
+    The direction document's anchors are `### Name` subsections written by a
+    human (e.g. "Great Lamp"); canon ids are slugs (e.g. "great-lamp"). An
+    exact-key lookup between the two would match nothing, so the heading is
+    slugified with the same function `append_anchor_stubs` uses to derive a
+    canon id from a proposed anchor name — one slug function, not two.
+    """
+    from storyforge import canon
+    from storyforge.common import normalize_for_comparison
+    from storyforge.prompts_illustrate import _slugify
+
+    if not os.path.isfile(direction_path(project_dir)):
+        return []
+    sections = read_direction(project_dir)
+    anchors_heading = find_section(sections, ANCHORS_SECTION)
+    anchors_body = sections.get(anchors_heading, '') if anchors_heading else ''
+    if not anchors_body:
+        return []
+
+    old: dict[str, str] = {}
+    current_name: str | None = None
+    buffer: list[str] = []
+    for line in anchors_body.splitlines():
+        heading = re.match(r'^###\s+(.+?)\s*$', line)
+        if heading:
+            if current_name is not None:
+                old[current_name] = '\n'.join(buffer).strip()
+            current_name = heading.group(1).strip()
+            buffer = []
+        elif current_name is not None:
+            buffer.append(line)
+    if current_name is not None:
+        old[current_name] = '\n'.join(buffer).strip()
+
+    findings: list[IllustrationFinding] = []
+    new = canon.anchor_texts(project_dir)
+    for name, old_text in sorted(old.items()):
+        canon_id = _slugify(name)
+        # No matching canon id — including a canon file that exists but is
+        # still a placeholder, which anchor_texts already excludes — is
+        # skipped, not reported. Mid-hand-edit is normal in-flight state,
+        # and the author decides which anchors survive.
+        new_text = new.get(canon_id)
+        if new_text is None:
+            continue
+        if normalize_for_comparison(old_text) != normalize_for_comparison(new_text):
+            findings.append({
+                'kind': 'direction_anchor_mismatch',
+                'id': canon_id,
+                'file': f'reference/{DIRECTION_FILENAME}',
+                'detail': (
+                    f'canon anchor for `{canon_id}` differs from the '
+                    f'### {name} section in reference/{DIRECTION_FILENAME}:\n'
+                    f'  direction doc: {old_text}\n'
+                    f'  canon file:    {new_text}\n'
+                    f'Every illustration already rendered from the old text '
+                    f'is invalidated if this change was unintentional.'
+                ),
+            })
     return findings
 
 

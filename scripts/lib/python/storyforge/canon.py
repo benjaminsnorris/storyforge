@@ -28,6 +28,8 @@ import os
 import re
 from typing import Literal, TypedDict
 
+from storyforge.common import normalize_for_comparison
+
 # Severity is part of the cleanup-report contract — build_cleanup_report
 # filters action items by != 'info' and counts errors/warnings/info. A
 # typo on either side silently demotes a finding.
@@ -186,26 +188,6 @@ class _InvalidIdEmbed(TypedDict):
     raw_id: str
 
 
-def _normalize_for_drift(text: str) -> str:
-    """Normalize text for drift comparison. Strips outer whitespace, strips
-    leading and trailing whitespace per line, and collapses internal
-    blank-line runs so cosmetic whitespace shifts (indentation drift from
-    a formatter, stray blank line, trailing-space drift) don't surface as
-    drift."""
-    lines = [ln.strip() for ln in text.strip().splitlines()]
-    out: list[str] = []
-    blank = False
-    for ln in lines:
-        if not ln:
-            if not blank:
-                out.append('')
-            blank = True
-        else:
-            out.append(ln)
-            blank = False
-    return '\n'.join(out)
-
-
 def find_canon_embeds(
     text: str,
 ) -> tuple[list[CanonEmbed], list[_UnclosedEmbed], list[_InvalidIdEmbed]]:
@@ -249,7 +231,7 @@ def find_canon_embeds(
             embeds.append({
                 'canon_id': raw_id,
                 'text': block_text,
-                'normalized': _normalize_for_drift(block_text),
+                'normalized': normalize_for_comparison(block_text),
             })
         pos = next_close.end()
     return embeds, unclosed, invalid
@@ -781,7 +763,7 @@ def check_canon_drift(project_dir: str) -> list[CanonFinding]:
     findings: list[CanonFinding] = []
     canon_index: dict[str, str] = {}
     # Cache the NORMALIZED source text, not the raw source — avoids
-    # re-running _normalize_for_drift on every embed-of-the-same-canon hit.
+    # re-running normalize_for_comparison on every embed-of-the-same-canon hit.
     normalized_source_cache: dict[str, str | None] = {}
 
     for page_path in pages:
@@ -833,7 +815,7 @@ def check_canon_drift(project_dir: str) -> list[CanonFinding]:
             if cid not in normalized_source_cache:
                 raw_source = embeddable_block_text(canon_path)
                 normalized_source_cache[cid] = (
-                    _normalize_for_drift(raw_source)
+                    normalize_for_comparison(raw_source)
                     if raw_source is not None else None
                 )
             normalized_source = normalized_source_cache[cid]

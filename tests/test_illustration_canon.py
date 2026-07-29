@@ -464,3 +464,135 @@ def test_append_anchor_stubs_never_touches_a_malformed_file_at_the_candidate_pat
         after = f.read()
     assert written == [], label
     assert after == before, label
+
+
+# ============================================================================
+# Task 5: the direction_anchor_mismatch hand-edit safety net
+# ============================================================================
+
+DIRECTION_DOC = """# Illustration art direction
+
+## Continuity anchors
+
+### nora
+
+Nora, 9 years old, 132 cm, dark brown hair in a short bob, grey-green eyes.
+"""
+
+
+def _write_direction(project_dir, body=DIRECTION_DOC):
+    path = os.path.join(project_dir, 'reference', 'illustration-direction.md')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(body)
+
+
+def test_matching_anchor_produces_no_mismatch(project_dir):
+    from storyforge.illustrations import validate_plan
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'))
+    _write_direction(project_dir)
+
+    kinds = {f['kind'] for f in validate_plan(project_dir)}
+
+    assert 'direction_anchor_mismatch' not in kinds
+
+
+def test_changed_anchor_is_reported(project_dir):
+    from storyforge.illustrations import validate_plan
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'))
+    _write_direction(project_dir, DIRECTION_DOC.replace('132 cm', '140 cm'))
+
+    findings = [f for f in validate_plan(project_dir)
+                if f['kind'] == 'direction_anchor_mismatch']
+
+    assert len(findings) == 1
+    assert findings[0]['id'] == 'nora'
+    assert '140 cm' in findings[0]['detail'] or '132 cm' in findings[0]['detail']
+
+
+def test_no_direction_document_means_silence(project_dir):
+    """Once the old file is deleted the check goes quiet forever."""
+    from storyforge.illustrations import validate_plan
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'))
+
+    kinds = {f['kind'] for f in validate_plan(project_dir)}
+
+    assert 'direction_anchor_mismatch' not in kinds
+
+
+def test_mismatch_is_a_warning_not_blocking(project_dir):
+    from storyforge.illustrations import severity_of
+    assert severity_of('direction_anchor_mismatch') == 'warning'
+
+
+def test_anchor_absent_from_canon_is_skipped_not_reported(project_dir):
+    """Mid-hand-edit is normal in-flight state: an anchor still sitting in
+    the direction document that has no corresponding canon file at all
+    (not even a placeholder one) is the author's call, not a finding."""
+    from storyforge.illustrations import validate_plan
+    _set_medium(project_dir, 'novel')
+    # No canon file written at all — 'nora' resolves to nothing.
+    _write_direction(project_dir)
+
+    findings = [f for f in validate_plan(project_dir)
+                if f['kind'] == 'direction_anchor_mismatch']
+
+    assert findings == []
+
+
+def test_direction_heading_is_slugified_before_matching_canon_id(project_dir):
+    """The one real project's headings are human names ('Great Lamp') while
+    canon ids are slugs ('great-lamp'). An exact-key lookup would match
+    nothing and the safety net would be silent everywhere it matters, so the
+    heading must be slugified with the same function
+    prompts_illustrate._slugify uses elsewhere for this exact translation."""
+    from storyforge.illustrations import validate_plan
+    _set_medium(project_dir, 'novel')
+    _write_canon(
+        project_dir, os.path.join('motifs', 'great-lamp.md'),
+        body=CANON_BODY
+        .replace('canon_id: nora', 'canon_id: great-lamp')
+        .replace('canon_type: character', 'canon_type: motif')
+        .replace(
+            'Nora, 9 years old, 132 cm, dark brown hair in a short bob, '
+            'grey-green eyes.',
+            'A bronze bowl with several wicks, always lit at dusk.',
+        ),
+    )
+    _write_direction(project_dir, """# Illustration art direction
+
+## Continuity anchors
+
+### Great Lamp
+
+A bronze bowl with several wicks, always lit at dusk but for one flame gone dark.
+""")
+
+    findings = [f for f in validate_plan(project_dir)
+                if f['kind'] == 'direction_anchor_mismatch']
+
+    assert len(findings) == 1
+    assert findings[0]['id'] == 'great-lamp'
+
+
+def test_normalize_for_comparison_matches_extracted_canon_behavior():
+    """common.normalize_for_comparison must be byte-identical to the
+    behavior canon._normalize_for_drift had before the extraction — a
+    multi-line block with trailing spaces and a doubled blank line is the
+    shape that behavior exists to handle."""
+    from storyforge.common import normalize_for_comparison
+
+    text = (
+        "  Line one.   \n"
+        "Line two.  \n"
+        "\n"
+        "\n"
+        "   Line three.\n"
+    )
+
+    assert normalize_for_comparison(text) == (
+        "Line one.\nLine two.\n\nLine three."
+    )

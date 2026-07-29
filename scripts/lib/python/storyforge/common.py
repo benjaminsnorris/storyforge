@@ -726,6 +726,30 @@ def get_medium(project_dir: str) -> str:
     return 'novel'
 
 
+# ============================================================================
+# Text comparison
+# ============================================================================
+
+def normalize_for_comparison(text: str) -> str:
+    """Normalize text for drift/equality comparison. Strips outer whitespace,
+    strips leading and trailing whitespace per line, and collapses internal
+    blank-line runs so cosmetic whitespace shifts (indentation drift from
+    a formatter, stray blank line, trailing-space drift) don't surface as
+    drift."""
+    lines = [ln.strip() for ln in text.strip().splitlines()]
+    out: list[str] = []
+    blank = False
+    for ln in lines:
+        if not ln:
+            if not blank:
+                out.append('')
+            blank = True
+        else:
+            out.append(ln)
+            blank = False
+    return '\n'.join(out)
+
+
 def build_interactive_system_prompt(project_dir: str, work_unit: str = 'step') -> str:
     """Build system prompt appendix for interactive mode."""
     interactive_file = os.path.join(project_dir, 'working', '.interactive')
