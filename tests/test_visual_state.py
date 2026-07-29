@@ -105,3 +105,42 @@ def test_write_transitions_round_trips(project_dir):
             for e, s, st, ev in ROWS]
     vs.write_transitions(project_dir, rows)
     assert vs.read_transitions(project_dir) == rows
+
+
+# ============================================================================
+# state_override and the new plan columns
+# ============================================================================
+
+def test_parse_state_override_splits_on_the_first_colon_only():
+    from storyforge.visual_state import parse_state_override
+    got = parse_state_override('nora-face:tear-streaked;leo-hands:muddy, gripping')
+    assert got == {'nora-face': 'tear-streaked', 'leo-hands': 'muddy, gripping'}
+    # a state containing a colon survives
+    assert parse_state_override('x:a:b') == {'x': 'a:b'}
+    assert parse_state_override('') == {}
+    assert parse_state_override('malformed') == {}
+
+
+def test_parse_state_override_reports_what_it_skipped(capsys):
+    from storyforge.visual_state import parse_state_override
+    assert parse_state_override('no-colon-here;x:ok') == {'x': 'ok'}
+    assert 'no-colon-here' in capsys.readouterr().out
+
+
+def test_parse_state_override_skips_an_empty_half(capsys):
+    from storyforge.visual_state import parse_state_override
+    assert parse_state_override('x:;:y') == {}
+    assert 'empty entity or' in capsys.readouterr().out
+
+
+def test_new_plan_columns_are_optional():
+    from storyforge.illustrations import PLAN_COLUMNS, OPTIONAL_PLAN_COLUMNS
+    for col in ('state_override', 'register', 'scene_digest'):
+        assert col in PLAN_COLUMNS
+        assert col in OPTIONAL_PLAN_COLUMNS, (
+            f'{col} must be optional or every legacy plan becomes an error')
+
+
+def test_valid_registers_are_the_two_lighting_extremes():
+    from storyforge.illustrations import VALID_REGISTERS
+    assert VALID_REGISTERS == frozenset({'darkest', 'brightest'})

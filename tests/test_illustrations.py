@@ -1714,3 +1714,27 @@ def test_strip_is_byte_identical_for_every_placement(placement, anchor):
                                plan_row(placement=placement, anchor=anchor))
     assert marked['changed'], marked['error']
     assert ill.strip_markers(marked['text']) == SCENE_ADVERSARIAL
+
+
+# ============================================================================
+# The visual-state finding kinds (#278 phase 2)
+# ============================================================================
+
+@pytest.mark.parametrize('kind,expected', [
+    ('state_unknown_scene', 'error'),
+    ('evidence_not_found', 'warning'),
+    ('state_unspecified', 'warning'),
+    ('prose_changed', 'warning'),
+    ('audit_stale', 'warning'),
+])
+def test_new_finding_kinds_have_the_intended_severity(kind, expected):
+    """A transition pointing at a cut scene silently stops applying, so it
+    blocks; the other four leave a publishable book."""
+    assert ill.severity_of(kind) == expected
+
+
+def test_new_finding_kinds_are_bare_not_prefixed():
+    """cmd_cleanup adds the illus_ prefix; a prefixed member renders doubled."""
+    from typing import get_args
+    for kind in get_args(ill.IllustrationFindingKind):
+        assert not kind.startswith('illus_'), kind

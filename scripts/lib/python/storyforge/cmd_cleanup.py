@@ -1242,6 +1242,23 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
         'reference/illustration-direction.md. If the old text is right, '
         'restore it into the canon file and re-render nothing — the existing '
         'art already matches it',
+    'state_unknown_scene':
+        'Point from_scene at a scene that exists in reference/visual-state.csv, '
+        'or delete the row — a transition keyed to a cut scene never applies, '
+        'so every scene after it resolves to the wrong state',
+    'evidence_not_found':
+        'Re-quote evidence from the current prose of from_scene, or move the '
+        'transition to the scene that now establishes it',
+    'state_unspecified':
+        'Add a transition for the entity in reference/visual-state.csv, or set '
+        'state_override on the plan row if the state is true in this image only',
+    'prose_changed':
+        'The scene was revised after this illustration was rendered. Confirm '
+        'the art still matches, then re-run storyforge illustrate --ingest to '
+        'record the new scene_digest — or re-render',
+    'audit_stale':
+        'Re-run storyforge illustrate --audit — the prose has changed since the '
+        'last contradiction pass',
 }
 
 

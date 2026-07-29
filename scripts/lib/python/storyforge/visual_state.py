@@ -49,6 +49,36 @@ class Transition(TypedDict):
     evidence: str
 
 
+def parse_state_override(value: str) -> dict[str, str]:
+    """Parse a plan row's `state_override` cell — `entity:state;entity:state`.
+
+    An override is visual state true in *this image only*, which the transition
+    log cannot express: tear-streaked faces and arms raised against a light are
+    not schedule changes, and a pure log would have to write a change and then a
+    change back, which is nonsense.
+
+    Splits on the FIRST colon so a state may itself contain one. An entry with
+    no colon names no entity and is skipped rather than guessed at.
+    """
+    out: dict[str, str] = {}
+    for part in (value or '').split(';'):
+        part = part.strip()
+        if not part:
+            continue
+        if ':' not in part:
+            log(f'WARNING: state_override entry {part!r} has no "entity:state" '
+                f'colon — skipped')
+            continue
+        entity, _, state = part.partition(':')
+        entity, state = entity.strip(), state.strip()
+        if entity and state:
+            out[entity] = state
+        else:
+            log(f'WARNING: state_override entry {part!r} has an empty entity or '
+                f'state — skipped')
+    return out
+
+
 def state_path(project_dir: str) -> str:
     """Absolute path to the transition log, whether or not it exists."""
     return os.path.join(project_dir, STATE_FILE)

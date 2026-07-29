@@ -44,7 +44,7 @@ PLAN_COLUMNS: list[str] = [
     'id', 'scene_id', 'anchor', 'placement', 'layout', 'beat', 'rationale',
     'subject', 'composition', 'palette', 'mood', 'motifs', 'canon_refs',
     'status', 'asset_file', 'prompt_file', 'sha256', 'width', 'height',
-    'ingested_at',
+    'ingested_at', 'state_override', 'register', 'scene_digest',
 ]
 
 #: Columns added after the plan schema shipped. They are in PLAN_COLUMNS, so
@@ -55,7 +55,17 @@ PLAN_COLUMNS: list[str] = [
 #: cope with, and failing its schema check would block the very run that fixes
 #: it. Empty is meaningful, not missing: `cmd_illustrate._references_for`
 #: reads an empty `ingested_at` as "predates the current canon".
-OPTIONAL_PLAN_COLUMNS: frozenset[str] = frozenset({'ingested_at'})
+#:
+#: `state_override`, `register`, and `scene_digest` join it for the same reason
+#: (#278 phase 2): a plan written before the visual-state matrix existed is
+#: legal, and the first write to it upgrades the header.
+OPTIONAL_PLAN_COLUMNS: frozenset[str] = frozenset({
+    'ingested_at', 'state_override', 'register', 'scene_digest',
+})
+
+#: The book's lighting extremes, marked on the plan so the anchor batch can
+#: bracket them. Optional — most illustrations are neither.
+VALID_REGISTERS: frozenset[str] = frozenset({'darkest', 'brightest'})
 
 # Placement is relative to the *paragraph* containing the anchor, not to the
 # anchor's character offset — an illustration never splits a paragraph.
@@ -1542,6 +1552,10 @@ IllustrationFindingKind = Literal[
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
     'unembedded_ingested', 'shattered_row', 'direction_anchor_mismatch',
+    # The visual-state matrix and the contradiction audit (#278 phase 2).
+    # Bare, like every kind above: cmd_cleanup renders `illus_{kind}`.
+    'state_unknown_scene', 'evidence_not_found', 'state_unspecified',
+    'prose_changed', 'audit_stale',
 ]
 
 
@@ -1555,7 +1569,11 @@ class IllustrationFinding(_IllustrationFindingRequired, total=False):
     """One problem with the illustration plan or its markers."""
     id: str        #: every finding except orphan_file
     scene_id: str  #: set when the finding is locatable in a scene
-    file: str      #: set for orphan_file, missing_file, and direction_anchor_mismatch
+    #: The file the fix belongs in, when that is not the plan CSV or the scene:
+    #: orphan_file, missing_file, direction_anchor_mismatch, and the
+    #: visual-state kinds, whose fix is an edit to reference/visual-state.csv
+    #: even though the finding is *about* a scene.
+    file: str
 
 
 # Findings that make the plan incoherent — the book cannot be published or
@@ -1565,6 +1583,11 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'invalid_placement',
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
+    # A transition keyed to a scene that no longer exists silently stops
+    # applying, and every scene downstream of it resolves to the wrong state.
+    # This is the one failure a dense grid could not have, and the price the
+    # sparse log pays — so it blocks.
+    'state_unknown_scene',
 })
 
 # Findings that need author attention but leave a valid book. An anchor that
@@ -1573,6 +1596,11 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
 WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
     'unembedded_ingested', 'shattered_row', 'direction_anchor_mismatch',
+    # Visual state (#278 phase 2). All four leave a publishable book: an
+    # evidence quote that drifted, an entity nobody stated, prose revised
+    # under a render, and an audit older than the prose are each information
+    # the author acts on before paying for art, not a broken manuscript.
+    'evidence_not_found', 'state_unspecified', 'prose_changed', 'audit_stale',
 })
 
 Severity = Literal['error', 'warning']
