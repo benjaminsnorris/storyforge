@@ -661,3 +661,49 @@ def test_placeholder_canon_file_is_skipped_not_reported(project_dir):
                 if f['kind'] == 'direction_anchor_mismatch']
 
     assert findings == []
+
+
+# ============================================================================
+# Task 6: --direction writes canon files
+# ============================================================================
+
+def test_direction_writes_the_three_book_level_canon_files(project_dir):
+    from storyforge.cmd_illustrate import run_direction
+    _set_medium(project_dir, 'novel')
+
+    run_direction(project_dir, coaching='strict', dry_run=False)
+
+    from storyforge.canon import resolve_canon_path
+    for canon_id in ('visual-foundation', 'visual-vocabulary',
+                     'content-limits'):
+        assert resolve_canon_path(project_dir, canon_id) is not None, canon_id
+
+
+def test_direction_never_overwrites_an_existing_canon_file(project_dir):
+    from storyforge.cmd_illustrate import run_direction
+    from storyforge.canon import resolve_canon_path, embeddable_block_text
+    _set_medium(project_dir, 'novel')
+    _write_canon(project_dir, 'visual-foundation.md',
+                 body=CANON_BODY
+                 .replace('canon_id: nora', 'canon_id: visual-foundation')
+                 .replace('canon_type: character', 'canon_type: foundation'))
+    before = embeddable_block_text(
+        resolve_canon_path(project_dir, 'visual-foundation'))
+
+    run_direction(project_dir, coaching='strict', dry_run=False)
+
+    after = embeddable_block_text(
+        resolve_canon_path(project_dir, 'visual-foundation'))
+    assert after == before
+
+
+def test_direction_strict_makes_no_api_call(project_dir, monkeypatch):
+    from storyforge import api
+    from storyforge.cmd_illustrate import run_direction
+    _set_medium(project_dir, 'novel')
+
+    def _boom(*args, **kwargs):
+        raise AssertionError('strict coaching must not call the API')
+
+    monkeypatch.setattr(api, 'invoke_api', _boom)
+    run_direction(project_dir, coaching='strict', dry_run=False)

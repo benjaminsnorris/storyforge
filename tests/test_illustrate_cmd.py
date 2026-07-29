@@ -1190,37 +1190,55 @@ def test_assemble_chapter_without_illustrations_is_unchanged(project_dir):
 # --direction
 # ============================================================================
 
+#: The book-level canon ids --direction writes, mirroring pi.CANON_PLAN
+#: without importing it — a divergence between the two would be a bug worth
+#: a loud test failure, not a silently-shared constant.
+_BOOK_LEVEL_CANON_IDS = ('visual-foundation', 'visual-vocabulary',
+                        'content-limits')
+
+
 def test_direction_strict_writes_a_template_without_an_api_key(in_project):
+    from storyforge import canon
     assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
 
-    path = ill.direction_path(in_project)
-    assert os.path.isfile(path)
-    with open(path) as f:
-        content = f.read()
-    for section in ill.DIRECTION_SECTIONS:
-        assert f'## {section}' in content
-    assert '_Required:' in content
-    # A strict scaffold proposes nothing, so every section still needs the author.
-    assert ill.missing_direction_sections(in_project) == \
-        list(ill.DIRECTION_SECTIONS)
+    for canon_id in _BOOK_LEVEL_CANON_IDS:
+        path = canon.resolve_canon_path(in_project, canon_id)
+        assert path is not None, canon_id
+        with open(path) as f:
+            content = f.read()
+        assert 'TODO —' in content
+        # A strict scaffold proposes nothing, so the block stays placeholder.
+        assert not canon.is_canon_block_populated(in_project, canon_id)
 
 
 def test_direction_coach_template_asks_questions(in_project):
+    from storyforge import canon
     assert cmd_illustrate.main(['--direction', '--coaching', 'coach']) == 0
-    with open(ill.direction_path(in_project)) as f:
+
+    path = canon.resolve_canon_path(in_project, 'visual-vocabulary')
+    with open(path) as f:
         content = f.read()
-    assert 'notice missing' in content          # visual-promise question
-    assert 'obviously from the same' in content  # recurring-language question
-    assert '_Required:' not in content
+    assert 'What would you say here' in content
+    assert not canon.is_canon_block_populated(in_project, 'visual-vocabulary')
 
 
 def test_direction_template_stubs_an_anchor_per_registry_entry(in_project):
+    from storyforge import canon
     assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
-    with open(ill.direction_path(in_project)) as f:
+
+    # The fixture has characters and locations; both need anchors, filed by
+    # the registry's own id rather than a re-slugified display name.
+    path = canon.resolve_canon_path(in_project, 'dorren-hayle')
+    assert path is not None
+    assert path.endswith(os.path.join('characters', 'dorren-hayle.md'))
+    with open(path) as f:
         content = f.read()
-    # The fixture has characters and locations; both need anchors.
-    assert '### Dorren Hayle' in content
+    assert 'canon_type: character' in content
     assert 'height, age, exact colors' in content
+
+    loc_path = canon.resolve_canon_path(in_project, 'cartography-office')
+    assert loc_path is not None
+    assert loc_path.endswith(os.path.join('locations', 'cartography-office.md'))
 
 
 def test_direction_full_without_an_api_key_fails(in_project, capsys):
@@ -1231,60 +1249,108 @@ def test_direction_full_without_an_api_key_fails(in_project, capsys):
 
 
 def test_direction_full_writes_the_model_output(in_project, monkeypatch, capsys):
+    from storyforge import canon
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: (
-        '## Format\n\nFull-color photorealism for ages 6-8.\n\n'
-        '## Visual promise\n\nThe ordinary world feels real.\n\n'
-        '## Recurring visual language\n\nWarm amber against cool blue.\n\n'
-        '## Content limits\n\nNever horror imagery.\n\n'
-        '## Continuity anchors\n\n### Leo\n\nTen years old; tall for his age.\n'
+        '## visual-foundation\n\nFull-color photorealism for ages 6-8.\n\n'
+        '## visual-vocabulary\n\nWarm amber against cool blue.\n\n'
+        '## content-limits\n\nNever horror imagery.\n'
     ))
 
     assert cmd_illustrate.main(['--direction', '--coaching', 'full']) == 0
 
-    assert ill.missing_direction_sections(in_project) == []
-    assert ill.read_continuity_anchors(in_project) == {
-        'Leo': 'Ten years old; tall for his age.'}
+    def block(canon_id):
+        return canon.embeddable_block_text(
+            canon.resolve_canon_path(in_project, canon_id)).strip()
+
+    assert block('visual-foundation') == 'Full-color photorealism for ages 6-8.'
+    assert block('visual-vocabulary') == 'Warm amber against cool blue.'
+    assert block('content-limits') == 'Never horror imagery.'
+    for canon_id in _BOOK_LEVEL_CANON_IDS:
+        assert canon.is_canon_block_populated(in_project, canon_id)
     out = capsys.readouterr().out
-    assert 'continuity anchors: 1' in out
-    assert 'Read it before running --prompts' in out
+    assert 'Read the canon files before running --prompts' in out
 
 
 def test_direction_reports_incomplete_sections(in_project, monkeypatch, capsys):
+    from storyforge import canon
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k:
-                        '## Format\n\nPhotorealism.\n')
+                        '## visual-foundation\n\nPhotorealism.\n')
 
     cmd_illustrate.main(['--direction', '--coaching', 'full'])
-    assert 'needs your input' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert 'needs your input' in out
+    # The one filled block must not itself be reported as incomplete.
+    needs_line = next(l for l in out.splitlines() if 'needs your input' in l)
+    assert 'visual-vocabulary' in needs_line
+    assert 'content-limits' in needs_line
+    assert 'visual-foundation' not in needs_line
+    assert canon.is_canon_block_populated(in_project, 'visual-foundation')
 
 
-def test_direction_does_not_clobber_a_complete_document(in_project, capsys):
-    write_direction_file(in_project, SAMPLE_DIRECTION)
+def _write_book_level_canon(project_dir, canon_id, canon_type, body):
+    path = os.path.join(project_dir, 'reference', 'canon', f'{canon_id}.md')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(
+            '---\n'
+            f'canon_id: {canon_id}\n'
+            f'canon_type: {canon_type}\n'
+            'canon_updated: 2026-07-28\n'
+            'appears_in:\n'
+            'first_appearance:\n'
+            '---\n\n'
+            '## Embeddable block\n\n'
+            f'{body}\n\n'
+            '## Clauses\n\n## Related canon\n\n## Iteration history\n'
+        )
+    return path
+
+
+def test_direction_skips_a_canon_file_that_already_exists(in_project, capsys):
+    """Analogue of the old 'does not clobber a complete document' test: a
+    canon file the author (or an earlier run) already wrote is left
+    untouched, reported by name, and the command still proceeds to write
+    whatever else is missing."""
+    from storyforge import canon
+    path = _write_book_level_canon(
+        in_project, 'visual-foundation', 'foundation',
+        'Cinematic photorealistic storybook art.')
 
     assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
-    assert 'already written' in capsys.readouterr().out
-    with open(ill.direction_path(in_project)) as f:
-        assert 'cinematic photorealistic' in f.read()
+
+    with open(path) as f:
+        assert 'Cinematic photorealistic storybook art.' in f.read()
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'visual-foundation' in out
+    assert 'already exists' in out
+    # The rest still get written.
+    assert canon.resolve_canon_path(in_project, 'visual-vocabulary') is not None
+    assert canon.resolve_canon_path(in_project, 'content-limits') is not None
 
 
-def test_direction_reports_gaps_in_an_existing_document(in_project, capsys):
-    write_direction_file(in_project, '# D\n\n## Format\n\nPhotorealism.\n')
+def test_direction_reports_gaps_across_canon_files(in_project, capsys):
+    """One book-level file already has real content; the rest remain
+    placeholder templates and get reported as needing the author."""
+    _write_book_level_canon(
+        in_project, 'visual-foundation', 'foundation',
+        'Cinematic photorealistic storybook art.')
 
     assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
     out = capsys.readouterr().out
-    assert 'sections are empty or still placeholder' in out
-    assert 'Continuity anchors' in out
-    # And it must not overwrite what is there.
-    with open(ill.direction_path(in_project)) as f:
-        assert 'Photorealism.' in f.read()
+    needs_line = next(l for l in out.splitlines() if 'needs your input' in l)
+    assert 'visual-vocabulary' in needs_line
+    assert 'content-limits' in needs_line
+    assert 'visual-foundation' not in needs_line
 
 
 def test_direction_dry_run_writes_nothing(in_project, capsys):
     assert cmd_illustrate.main(['--direction', '--dry-run',
                                 '--coaching', 'strict']) == 0
     assert '[dry-run] would write' in capsys.readouterr().out
-    assert not os.path.isfile(ill.direction_path(in_project))
+    assert not os.path.isdir(os.path.join(in_project, 'reference', 'canon'))
 
 
 def _write_entity_canon(project_dir, subdir, canon_id, anchor_text,

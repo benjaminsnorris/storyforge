@@ -4,9 +4,10 @@ Three prompt families live here:
 
   - **Selection** — asks the model which narrative moments earn an
     illustration, given the deterministic pre-pass findings.
-  - **Art direction (book level)** — the one document every illustration
-    inherits: format, visual promise, recurring visual language, content
-    limits, continuity anchors.
+  - **Art direction (book level)** — the typed canon files every illustration
+    inherits: `visual-foundation`, `visual-vocabulary`, `content-limits`, plus
+    one continuity-anchor file per character/location/motif (see
+    `.superpowers/sdd/2026-07-28-illustration-canon-adoption/`).
   - **Art direction (per illustration)** — turns one plan row into an
     image-generation prompt the author can paste into GPT Image 2.
 
@@ -125,6 +126,22 @@ _ANCHOR_TYPE_SUBDIR: Final[dict[str, str]] = {
     'motif': 'motifs',
 }
 _ANCHOR_TYPE_FALLBACK: Final[str] = 'character'
+
+
+def canon_rel_path(canon_type: str, canon_id: str) -> str:
+    """Project-relative path where a canon_id of canon_type belongs.
+
+    Root types (`canon.ROOT_TYPES` — foundation/vocabulary/rules) live at the
+    canon directory's root; every entity type lives under its subdirectory
+    per `_ANCHOR_TYPE_SUBDIR`, falling back to `character` for an
+    unrecognized type. Used by `--direction` to place both the three
+    book-level files and the per-entity anchor stubs it writes.
+    """
+    from storyforge import canon
+    if canon_type in canon.ROOT_TYPES:
+        return os.path.join(canon.CANON_DIR, f'{canon_id}.md')
+    subdir = _ANCHOR_TYPE_SUBDIR.get(canon_type, _ANCHOR_TYPE_FALLBACK)
+    return os.path.join(canon.CANON_DIR, subdir, f'{canon_id}.md')
 
 
 def append_anchor_stubs(project_dir: str,
@@ -837,54 +854,98 @@ def render_strict_checklist(*, prepass: PrepassFindings,
 
 
 # ============================================================================
-# Art-direction document
+# Canon files (book level)
 # ============================================================================
 
-#: What each expected section of the direction document has to answer. Used by
-#: every coaching level: as instructions to the model, as questions to the
-#: author, and as a checklist.
-DIRECTION_BRIEF: Final[dict[str, str]] = {
-    'Format': 'The medium, rendering style, and intended audience in one or '
-              'two sentences. "Full-color cinematic photorealism for a '
-              'read-aloud fantasy novel, ages 6-8" tells an image model more '
-              'than three paragraphs of adjectives.',
-    'Visual promise': 'What every image in this book must deliver — the thing '
-                      'a reader would notice missing. Usually a relationship '
-                      'between two registers: how the ordinary world reads, '
-                      'and how the extraordinary appears inside it.',
-    'Recurring visual language': 'The rules that repeat: palette split by '
-                                 'faction or mood, camera height, depth of '
-                                 'field, materials rendered naturalistically, '
-                                 'and the standing no-text rule.',
-    'Content limits': 'What the art must never do, stated as limits rather '
-                      'than as prompt text — intensity ceilings, imagery to '
-                      'stay away from, anything the audience age rules out.',
-    ANCHORS_SECTION: 'One `### Name` subsection per thing the art must keep '
-                     'consistent: characters, creatures, key locations, '
-                     'signature props. Each body is a fixed description, '
-                     'reused verbatim in every prompt that features it. '
-                     'Include measurable facts — height, age, exact colors — '
-                     'because those are what drift.',
-}
+#: The three book-level canon files an illustrated prose book needs, mapped
+#: from the old direction document's non-anchor sections. Continuity anchors
+#: are not here — they are one file per entity, discovered from the
+#: character/location registries and the plan's canon_refs. `canon_type` is
+#: one of `canon.ROOT_TYPES`, so all three live at the canon root rather than
+#: in a subdirectory.
+CANON_PLAN: tuple[tuple[str, str, str], ...] = (
+    ('visual-foundation', 'foundation',
+     'Medium, rendering style, audience, and what every image must deliver. '
+     'One or two sentences beat three paragraphs of adjectives.'),
+    ('visual-vocabulary', 'vocabulary',
+     'The rules that repeat: palette split by faction or mood, camera '
+     'height, depth of field, how materials render, the standing no-text '
+     'rule.'),
+    ('content-limits', 'rules',
+     'What the art must never do. Intensity ceilings, imagery to stay away '
+     'from, anything the audience age rules out. State these as limits.'),
+)
 
 
-def build_direction_request(*, title: str, genre: str, audience: str,
-                            canon_context: str, story_context: str,
-                            entities: list[str]) -> str:
-    """Build the prompt that drafts the book-level art-direction document."""
+def render_canon_template(*, canon_id: str, canon_type: str, purpose: str,
+                          coaching: str) -> str:
+    """Render an unfilled canon file for the author or the model to complete.
+
+    The Embeddable block carries a TODO line deliberately: canon.anchor_texts
+    and canon.is_canon_block_populated both treat placeholder text as
+    unpopulated, so an unfinished file is reported rather than silently
+    shipped into a prompt as though it were direction.
+    """
+    if coaching == 'coach':
+        block = (f'TODO — {purpose}\n\nWhat would you say here, in one or '
+                 f'two sentences?\n')
+    else:
+        block = f'TODO — {purpose}\n'
+    return (
+        '---\n'
+        f'canon_id: {canon_id}\n'
+        f'canon_type: {canon_type}\n'
+        'canon_updated:\n'
+        'appears_in:\n'
+        'first_appearance:\n'
+        '---\n'
+        '\n'
+        '## Embeddable block\n'
+        '\n'
+        f'{block}'
+        '\n'
+        '## Clauses\n'
+        '\n'
+        '## Related canon\n'
+        '\n'
+        '## Iteration history\n'
+    )
+
+
+def render_filled_canon(*, canon_id: str, canon_type: str, body: str) -> str:
+    """Render a canon file whose Embeddable block is already-written text.
+
+    Thin wrapper over `_canon_stub` — the full-coaching `--direction` path
+    reaches for the same minimal-valid-file shape `append_anchor_stubs` uses
+    for a model-proposed anchor; there is no reason for a second format.
+    """
+    return _canon_stub(canon_id=canon_id, canon_type=canon_type, anchor=body)
+
+
+def build_canon_direction_request(*, title: str, genre: str, audience: str,
+                                  canon_context: str,
+                                  story_context: str) -> str:
+    """Build the prompt that drafts the three book-level canon Embeddable
+    blocks in a single call.
+
+    Asks for exactly the three `CANON_PLAN` ids as `##`-headed sections, so
+    `parse_canon_direction_response` can drop each body straight into its own
+    canon file without a second request per file.
+    """
     briefs = '\n\n'.join(
-        f'### {name}\n\n{brief}' for name, brief in DIRECTION_BRIEF.items())
-    entity_list = '\n'.join(f'- {name}' for name in entities) or \
-        '(derive them from the bibles below)'
+        f'### {canon_id}\n\n{purpose}'
+        for canon_id, _canon_type, purpose in CANON_PLAN)
 
-    return f"""Write the book-level illustration art direction for a novel.
+    return f"""Write the book-level illustration direction for a novel, as \
+three short canonical blocks.
 
 **Title:** {title}{f' · **Genre:** {genre}' if genre else ''}\
 {f' · **Audience:** {audience}' if audience else ''}
 
-This single document governs every interior illustration in the book. A
-per-illustration prompt can be re-rolled cheaply; a book whose images disagree
-with each other has to be re-rendered wholesale. Be specific and be decisive.
+Each block below becomes a canon file that every interior-illustration prompt
+in this book inherits. A per-illustration prompt can be re-rolled cheaply; a
+book whose images disagree with each other has to be re-rendered wholesale.
+Be specific and be decisive.
 
 ## Story context
 
@@ -894,16 +955,10 @@ with each other has to be re-rendered wholesale. Be specific and be decisive.
 
 {canon_context}
 
-## Things the art must keep consistent
+## Blocks to write
 
-Write a continuity anchor for each of these, plus any others the canon makes
-necessary:
-
-{entity_list}
-
-## Sections to write
-
-Use these exact `##` headings, in this order.
+Use these exact `##` headings, in this order, and write only the block's
+content underneath — no restating the heading, no extra commentary.
 
 {briefs}
 
@@ -914,89 +969,33 @@ Use these exact `##` headings, in this order.
   not.
 - **Name real materials.** Bark, moss, wax, leaded glass, waxed thread. Image
   models render named materials well and abstractions badly.
-- **Put measurable facts in the anchors.** Height in centimeters, age in years,
-  exact hair and eye color, specific garments. These are the details that drift
-  between separately generated images, and the only defence is stating them.
-- **Anchors are descriptions, not scenes.** What the thing *is*, always — not
-  what it does in any one illustration.
-- State the standing no-text rule in the recurring visual language.
+- **State limits as limits**, not as prompt text.
+- State the standing no-text rule under `visual-vocabulary`.
 
-Return the document as markdown, starting at the first `##` heading. No
-preamble, no commentary.
+Return markdown, starting at the first `##` heading. No preamble, no
+commentary.
 """
 
 
-def render_direction_template(*, title: str, coaching: str,
-                              entities: list[str]) -> str:
-    """Render the direction-document template for coach or strict coaching.
+def parse_canon_direction_response(text: str) -> dict[str, str]:
+    """Split a canon-direction response into `{canon_id: embeddable body}`.
 
-    `coach` frames each section as a question the author answers; `strict`
-    reduces it to the requirement plus a blank. Neither writes any creative
-    content, which is the whole distinction from the `full` path.
+    Matches `## <heading>` headings against `CANON_PLAN`'s ids specifically —
+    a model that free-associates an extra heading must not silently become a
+    fourth canon file. Unmatched headings are simply not in the result.
     """
-    lines = [f'# Illustration art direction — {title}', '']
-    if coaching == 'coach':
-        lines += [
-            'This document governs every interior illustration in the book.',
-            'Answer each section in your own words — what you write here is',
-            'what every prompt will carry.',
-            '',
-        ]
-    else:
-        lines += [
-            'This document governs every interior illustration in the book.',
-            'Each section below lists what it must contain. Fill them in.',
-            '',
-        ]
-
-    for name, brief in DIRECTION_BRIEF.items():
-        lines.append(f'## {name}')
-        lines.append('')
-        if coaching == 'coach':
-            lines.append(f'_{_as_question(name, brief)}_')
-        else:
-            lines.append(f'_Required: {brief}_')
-        lines.append('')
-        if name == ANCHORS_SECTION:
-            for entity in entities:
-                lines.append(f'### {entity}')
-                lines.append('')
-                lines.append('_(fill this in — include height, age, exact '
-                             'colors, and specific garments)_')
-                lines.append('')
-            if not entities:
-                lines.append('### Name')
-                lines.append('')
-                lines.append('_(fill this in)_')
-                lines.append('')
-        else:
-            lines.append('_(fill this in)_')
-            lines.append('')
-    return '\n'.join(lines)
-
-
-#: Coach-mode phrasings, so the template asks rather than instructs.
-_DIRECTION_QUESTIONS: Final[dict[str, str]] = {
-    'Format': 'What is someone holding when they hold this book — what medium, '
-              'what rendering style, for what reader?',
-    'Visual promise': 'What would a reader notice missing if one illustration '
-                      'failed to deliver it?',
-    'Recurring visual language': 'What repeats across every image — palette, '
-                                 'camera height, level of detail? What makes '
-                                 'two of these images obviously from the same '
-                                 'book?',
-    'Content limits': 'What must the art never do? What would be too much for '
-                      'your reader?',
-    ANCHORS_SECTION: 'What must look the same every time it appears — which '
-                     'characters, creatures, places, objects? Describe each one '
-                     'the way you would to someone who has to draw it without '
-                     'reading the book.',
-}
-
-
-def _as_question(name: str, brief: str) -> str:
-    """Return the coach-mode question for a section, falling back to its brief."""
-    return _DIRECTION_QUESTIONS.get(name, brief)
+    known_ids = {canon_id for canon_id, _canon_type, _purpose in CANON_PLAN}
+    sections: dict[str, str] = {}
+    matches = list(re.finditer(r'^##\s+(.+?)\s*$', text, re.MULTILINE))
+    for i, match in enumerate(matches):
+        name = match.group(1).strip().lower()
+        if name not in known_ids:
+            continue
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[match.end():end].strip()
+        if body:
+            sections[name] = body
+    return sections
 
 
 # ============================================================================
