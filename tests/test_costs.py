@@ -153,3 +153,36 @@ class TestSessionScopedSummary:
         out = capsys.readouterr().out
         assert '1h 1m 1s' in out
         assert '3661s' not in out
+
+
+def test_concurrent_log_operation_writes_one_header(tmp_path):
+    """Regression: `illustrate --prompts` now fans its API calls across a
+    thread pool, so log_operation is reached concurrently. The
+    create-header-then-append sequence is not atomic — two threads finding no
+    ledger both wrote the header, leaving a second header line mid-file that
+    every ledger reader parses as a malformed row."""
+    import threading
+
+    from storyforge.costs import LEDGER_HEADER, log_operation
+
+    project_dir = str(tmp_path / 'proj')
+    workers = 8
+    barrier = threading.Barrier(workers, timeout=10)
+
+    def _write(i):
+        barrier.wait()
+        log_operation(project_dir, 'illustrate-prompt', 'opus', 10, 5, 0.01,
+                      target=f'lf-{i}')
+
+    threads = [threading.Thread(target=_write, args=(i,))
+               for i in range(workers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    with open(tmp_path / 'proj' / 'working' / 'costs' / 'ledger.csv') as f:
+        lines = [line for line in f.read().splitlines() if line.strip()]
+    assert lines[0] == LEDGER_HEADER
+    assert lines.count(LEDGER_HEADER) == 1
+    assert len(lines) == workers + 1

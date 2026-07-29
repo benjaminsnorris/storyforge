@@ -107,6 +107,10 @@ def _write_csv(path: str, rows: list[dict[str, str]], columns: list[str]) -> Non
         writer = csv.DictWriter(
             f, fieldnames=columns, delimiter=DELIMITER,
             extrasaction='ignore',
+            # csv defaults to '\r\n', which makes a one-cell edit a whole-file
+            # diff and trips cleanup's own `crlf_line_endings` check. Every
+            # other writer in the project emits LF.
+            lineterminator='\n',
         )
         writer.writeheader()
         writer.writerows(rows)

@@ -27,6 +27,8 @@ import os
 import re
 import sys
 import time
+from datetime import date
+from typing import TypedDict
 
 from storyforge.api import (
     calculate_cost_from_usage, extract_text, extract_usage, invoke,
@@ -72,6 +74,11 @@ def parse_args(argv):
     parser.add_argument('--ids', type=str, default=None,
                         help='Comma-separated illustration ids to limit '
                              '--prompts or --embed to')
+    parser.add_argument('--no-prior-refs', action='store_true',
+                        help='For --prompts: reference the cover only, never '
+                             'prior ingested illustrations. Use when '
+                             're-rendering a set whose existing art no longer '
+                             'matches the canon.')
     parser.add_argument('--coaching', choices=['full', 'coach', 'strict'],
                         default=None,
                         help='Override coaching level (default: project setting)')
@@ -114,7 +121,8 @@ def main(argv=None):
                              args.dry_run) or exit_code
     if args.prompts:
         exit_code = run_prompts(project_dir, coaching, _id_filter(args.ids),
-                                args.dry_run) or exit_code
+                                args.dry_run,
+                                no_prior_refs=args.no_prior_refs) or exit_code
     if args.ingest:
         exit_code = run_ingest(project_dir, args.ingest,
                                args.dry_run) or exit_code
@@ -568,16 +576,27 @@ def _format_proposals(proposals: list[dict]) -> str:
 # ============================================================================
 
 def run_prompts(project_dir: str, coaching: CoachingLevel,
-                ids: set[str] | None, dry_run: bool) -> int:
-    """Write an art-direction prompt file per planned illustration."""
+                ids: set[str] | None, dry_run: bool,
+                no_prior_refs: bool = False) -> int:
+    """Write an art-direction prompt file per planned illustration.
+
+    The API calls fan out (see `_PROMPT_WORKERS`); everything that writes —
+    canon stubs, prompt files, plan rows — runs sequentially afterwards in
+    plan order, so two rows proposing the same anchor cannot race on the same
+    canon file and the log still reads top-to-bottom.
+    """
     plan = ill.read_plan(project_dir)
     if ids is not None:
         # An explicit id list means "re-prompt these", which is what the skill
         # and the --ids help text both promise. Applying the status filter first
         # made an already-prompted row unreachable, so the hint told the author
         # to use the exact flag they had just used.
-        rows = [r for r in plan if r['id'].strip() in ids
-                and (r.get('status') or '').strip() != 'superseded']
+        #
+        # A named `superseded` row is included, and re-prompting revives it as
+        # far as `prompted` (see _status_after_prompt). Naming a retired row by
+        # id is an unambiguous request to work on it; the unfiltered path below
+        # still never touches one, so a bulk run cannot resurrect retired art.
+        rows = [r for r in plan if r['id'].strip() in ids]
         unknown = ids - {r['id'].strip() for r in plan}
         if unknown:
             log(f'WARNING: --ids named {len(unknown)} illustration(s) with no '
@@ -613,8 +632,8 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
 
     if coaching == 'strict':
         log('Coaching is strict — art direction is creative work. Writing the '
-            'prompt scaffold with your constraints; fill in the five sections '
-            'yourself.')
+            'prompt scaffold with your constraints; fill in the four sections '
+            'yourself (the Constraints section is appended for you).')
 
     if dry_run:
         for row in rows:
@@ -630,31 +649,64 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         return 1
 
     os.makedirs(ill.prompts_dir(project_dir), exist_ok=True)
-    canon = _canon_context(project_dir)
+    canon_ctx = _canon_context(project_dir)
     style_note = _style_note(project_dir)
+    # Read once for the whole run. Every request is built before any call is
+    # made, so a stub a later row's response proposes cannot reach the others
+    # — which is exactly why _warn_unanchored_rows runs first, while the author
+    # can still fix it for free.
+    anchors = pi.anchors_for_prompt(project_dir)
+    labels = _anchor_labels(project_dir)
+    if needs_api:
+        _warn_unanchored_rows(rows, anchors)
+    cutoff = _reference_cutoff(project_dir, no_prior_refs)
     written = 0
     failed: list[str] = []
 
+    # Phase 1 — assemble every request. Sequential and cheap (file reads
+    # only), which keeps the reference and anchor warnings in plan order.
+    jobs: list[_PromptJob] = []
     for row in rows:
         illus_id = row['id'].strip()
-        anchors = pi.anchors_for_prompt(project_dir)
-        references = _references_for(project_dir, illus_id)
-        aspect = pi.aspect_for_row(row)
-
-        if needs_api:
-            request = pi.build_art_direction_request(
+        jobs.append({
+            'id': illus_id,
+            'row': row,
+            'references': _references_for(
+                project_dir, illus_id, plan=plan, canon_cutoff=cutoff,
+                no_prior_refs=no_prior_refs),
+            'aspect': pi.aspect_for_row(row),
+            'request': pi.build_art_direction_request(
                 row=row,
                 scene_excerpt=_scene_excerpt(project_dir, row),
                 character_anchors=_relevant_anchors(anchors, row),
-                canon_context=canon, direction=direction,
-                style_note=style_note,
-            )
-            body = _invoke(project_dir, request, 'illustrate-prompt',
-                           task_type='creative', max_tokens=2048,
-                           target=illus_id)
+                canon_context=canon_ctx, direction=direction,
+                style_note=style_note, anchor_labels=labels,
+            ) if needs_api else '',
+        })
+
+    # Phase 2 — fan the API calls out. Each is ~13s of waiting on one
+    # independent request, so a 20-illustration book is minutes of serial
+    # latency for no reason. Nothing is written here.
+    bodies = _fetch_art_direction(project_dir, jobs) if needs_api else {}
+
+    # Phase 3 — apply, in plan order, single-threaded. Every write lives here:
+    # append_anchor_stubs rebuilds its canon_id_index per call, so two rows
+    # proposing the same anchor must reach it one at a time or the second
+    # would overwrite the first instead of skipping it.
+    for job in jobs:
+        illus_id = job['id']
+        row = job['row']
+        if needs_api:
+            body = bodies.get(illus_id, '')
             if not body:
+                # The actual status, not a hardcoded `planned`: via --ids this
+                # row can be ingested, rendered, prompted, or superseded, and
+                # telling an author their finished art is at `planned` is the
+                # same confusion the status guard below exists to prevent.
+                held = (row.get('status') or '').strip()
                 log(f'WARNING: no art direction returned for {illus_id} — '
-                    f'skipping (status stays `planned`)')
+                    f'skipping (status stays '
+                    f'`{held or "planned (its status cell is empty)"}`)')
                 failed.append(illus_id)
                 continue
             unparsed = pi.unparsed_anchor_lines(body)
@@ -668,18 +720,48 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
                 if added:
                     log(f'  wrote {len(added)} new canon stub(s) for review: '
                         f'{", ".join(added)}')
+                    others = [j['id'] for j in jobs if j['id'] != illus_id]
+                    if others:
+                        # Every request in this run was built before these
+                        # stubs existed, so no other prompt file uses them.
+                        # Naming the re-run is the difference between a note
+                        # and an action.
+                        log(f'         the other prompt(s) in this run were '
+                            f'built before these stubs existed and do not use '
+                            f'them. Review the stub text, then re-run: '
+                            f'storyforge illustrate --prompts --ids '
+                            f'{",".join(others)}')
         else:
             body = _strict_prompt_scaffold(row)
 
         content = pi.render_prompt_file(
-            row=row, body=body, references=references, aspect=aspect,
+            row=row, body=body, references=job['references'],
+            aspect=job['aspect'],
         )
         rel = ill.default_prompt_rel(illus_id)
         with open(os.path.join(project_dir, rel), 'w', encoding='utf-8') as f:
             f.write(content)
 
-        _update_row(project_dir, illus_id,
-                    {'prompt_file': rel, 'status': 'prompted'})
+        # Field-scoped: `prompt_file` always, `status` only when it moves
+        # forward. Writing status unconditionally demoted finished art —
+        # `--prompts --ids LF-05` on a fully-ingested book took the publishable
+        # set from 20/20 to 19/20, silently, because `prompted` is not
+        # `ingested` and `ingested` is what every consumer gates on.
+        current = (row.get('status') or '').strip()
+        updates = {'prompt_file': rel}
+        advanced = _status_after_prompt(current)
+        if advanced:
+            updates['status'] = advanced
+            if current == 'superseded':
+                log(f'  {illus_id}: reviving a retired row — status '
+                    f'superseded → prompted. Its old art still does not ship; '
+                    f'render this prompt and --ingest to bring the row back.')
+        else:
+            log(f'  {illus_id}: prompt rewritten for already-{current} art; '
+                f'status stays `{current}` so it keeps publishing. This means '
+                f'a re-render is pending — render this prompt and --ingest to '
+                f'replace the art.')
+        _update_row(project_dir, illus_id, updates)
         log(f'  {illus_id} → {rel}')
         written += 1
 
@@ -699,8 +781,204 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     return 0
 
 
+def _warn_unanchored_rows(rows: list[dict[str, str]],
+                          anchors: dict[str, str]) -> None:
+    """Warn, before any call is paid for, about rows with no usable anchor.
+
+    Anchors are *inputs* to the art, not residue from it: `append_anchor_stubs`
+    is a fallback for canon that does not exist yet, never the intended path.
+    That distinction became load-bearing when the calls started fanning out.
+    Previously the anchor set was re-read per row, so a stub written for row 1
+    reached rows 2..N verbatim — the identical-string mechanism working by
+    accident. Now every request is built before the first call, so N rows with
+    no anchor for a character each invent their own description, the first stub
+    wins the file, and the other N-1 prompt files disagree with it. That is the
+    exact likeness drift the anchor mechanism exists to prevent.
+
+    Nothing downstream can repair that, so the only useful moment is here.
+    Two shapes of gap:
+
+    - `canon_refs` naming an id with no anchor — the row asked for an anchor
+      that does not exist.
+    - `canon_refs` empty while the book *does* have entity canon — the
+      full-set fallback is in play (see `_relevant_anchors`), so nothing checks
+      whether this row's actual cast is anchored.
+    """
+    known = {key.strip().lower() for key in anchors}
+    missing: dict[str, list[str]] = {}
+    unnarrowed: list[str] = []
+    for row in rows:
+        rid = (row.get('id') or '').strip() or '(no id)'
+        named = {n.strip().lower()
+                 for n in ill._split_array(row.get('canon_refs', ''))}
+        if not named:
+            if anchors:
+                unnarrowed.append(rid)
+            continue
+        gaps = sorted(named - known)
+        if gaps:
+            missing[rid] = gaps
+
+    if missing:
+        detail = '; '.join(f'{rid} → {", ".join(ids)}'
+                           for rid, ids in sorted(missing.items()))
+        log(f'WARNING: {len(missing)} row(s) name canon_refs with no '
+            f'continuity anchor: {detail}. Those entities will be '
+            f'art-directed with nothing holding their look fixed, and each '
+            f'prompt will invent its own description — a model-proposed '
+            f'anchor is written after the calls and does NOT reach the other '
+            f'rows in this run, so the first one wins the canon file and the '
+            f'rest disagree with it. Anchors are inputs, not residue: run '
+            f'`storyforge illustrate --direction`, fill the new canon files, '
+            f'and then prompt.')
+    if unnarrowed:
+        log(f'WARNING: {len(unnarrowed)} row(s) have no canon_refs '
+            f'({", ".join(sorted(unnarrowed))}), so narrowing is off entirely: '
+            f'every anchor in the book is sent to those prompts, which costs '
+            f'tokens on a cast that is not in the frame and invites the model '
+            f'to put off-frame characters in it. Nothing can check whether '
+            f'their actual cast is anchored either, and a model-proposed '
+            f'anchor is written after the calls and does NOT reach the other '
+            f'rows in this run. Run `storyforge illustrate --direction` to '
+            f'author the anchors, then fill canon_refs so each prompt gets '
+            f'only the cast it shows.')
+
+
+#: Statuses a written prompt may set to `prompted`. Everything else is art that
+#: already exists on disk, and moving those backwards is what silently
+#: un-published a finished illustration. `''` is a row whose status cell was
+#: never filled in; `prompted` is the idempotent re-prompt; `superseded` is a
+#: retired row an author named explicitly, which means revive it — as far as
+#: `prompted`, never straight to `ingested`, because the replacement render
+#: does not exist yet.
+_ADVANCES_TO_PROMPTED = frozenset({'', 'planned', 'prompted', 'superseded'})
+
+
+def _status_after_prompt(current: str) -> str:
+    """The status to write after a prompt file, or '' to leave it alone.
+
+    Status only ever moves forward. A `rendered` or `ingested` row keeps its
+    status: the prompt file is new art direction for art that already ships,
+    and the row is the only thing saying that art exists. Demoting it removed
+    the illustration from Bookshelf (`manifest_assets` skips a non-`ingested`
+    row) and from the epub, PDF, and web book (`FILED_STATUSES` gates marker
+    resolution) while leaving the file on disk — invisible to `--diagnose`,
+    because an unrendered row is legitimate in-flight state.
+    """
+    return 'prompted' if current in _ADVANCES_TO_PROMPTED else ''
+
+
+#: Art-direction calls issued at once. Each is one independent HTTP request
+#: that spends its whole duration waiting, so the ceiling is politeness to the
+#: API rather than local resources. `run_parallel` lets STORYFORGE_PARALLEL
+#: lower it.
+_PROMPT_WORKERS = 5
+
+
+class _PromptJob(TypedDict):
+    """One illustration's prepared art-direction work.
+
+    Built before the fan-out and consumed after it, so the parallel phase
+    carries no project state and the writing phase needs no locks. `request`
+    is '' in strict coaching, where no API call happens at all.
+    """
+    id: str
+    row: dict[str, str]
+    references: list[tuple[str, str]]
+    aspect: pi.Aspect
+    request: str
+
+
+def _fetch_art_direction(project_dir: str,
+                         jobs: list[_PromptJob]) -> dict[str, str]:
+    """Run every job's art-direction call concurrently. Returns id -> body.
+
+    A body of '' means the call failed; the caller reports it and leaves the
+    row at `planned`. Uses `runner.run_parallel`, which is a thread pool (the
+    calls are I/O-bound) and honours the shutdown flag the signal handlers set.
+    An id missing from the results because of that shutdown is reported here
+    rather than silently becoming an empty body indistinguishable from an API
+    error.
+    """
+    from storyforge.runner import run_parallel
+
+    requests = {job['id']: job['request'] for job in jobs}
+
+    def _worker(illus_id: str) -> str:
+        return _invoke(project_dir, requests[illus_id], 'illustrate-prompt',
+                       task_type='creative', max_tokens=2048,
+                       target=illus_id)
+
+    results = run_parallel(list(requests), _worker,
+                           max_workers=_PROMPT_WORKERS, label='illustration')
+
+    bodies: dict[str, str] = {}
+    for illus_id in requests:
+        if illus_id not in results:
+            log(f'WARNING: {illus_id} was never dispatched — the run was '
+                f'interrupted before its art direction was requested.')
+            bodies[illus_id] = ''
+            continue
+        outcome = results[illus_id]
+        if isinstance(outcome, BaseException):
+            # run_parallel already logged the failure; name the consequence.
+            log(f'WARNING: art direction for {illus_id} raised '
+                f'{type(outcome).__name__}: {outcome}')
+            bodies[illus_id] = ''
+        else:
+            bodies[illus_id] = outcome
+    return bodies
+
+
+def _anchor_labels(project_dir: str) -> dict[str, str]:
+    """Display names for the prompt's anchor list, keyed by canon_id.
+
+    Reports the ids that fell all the way through to a title-cased slug — that
+    means neither the canon file nor the registry records the entity's name, so
+    the prompt is labeling it with a guess.
+    """
+    from storyforge import canon as canon_mod
+    entries = canon_mod.anchor_display_names(project_dir)
+    guessed = sorted(cid for cid, entry in entries.items()
+                     if entry['source'] == 'slug')
+    if guessed:
+        log(f'{len(guessed)} anchor(s) have no recorded display name and are '
+            f'labeled from their id: {", ".join(guessed)}. Add '
+            f'`display_name:` to the canon file, or a `name` to the registry '
+            f'row, if the title-cased slug reads wrong.')
+    return {cid: entry['label'] for cid, entry in entries.items()}
+
+
+def _reference_cutoff(project_dir: str, no_prior_refs: bool) -> str:
+    """The canon date a prior render must post-date to serve as a reference.
+
+    '' means no cutoff — either the author asked for cover-only references
+    anyway, or no canon file carries a parseable `canon_updated`, in which case
+    there is no governing direction for art to predate.
+    """
+    from storyforge import canon as canon_mod
+    if no_prior_refs:
+        log('--no-prior-refs: prompts will reference the cover only, not any '
+            'previously ingested illustration.')
+        return ''
+    cutoff = canon_mod.newest_canon_updated(project_dir)
+    if not cutoff:
+        log('No parseable `canon_updated` date in reference/canon/ — prior '
+            'ingested illustrations will be used as style references without '
+            'a staleness check.')
+        return ''
+    log(f'Canon last updated {cutoff}; illustrations ingested before then are '
+        f'not used as style references.')
+    return cutoff
+
+
 def _strict_prompt_scaffold(row: dict[str, str]) -> str:
-    """Build the five-section scaffold for strict coaching — no prose."""
+    """Build the four-section scaffold for strict coaching — no prose.
+
+    Four, not five: the Constraints section is appended deterministically by
+    render_prompt_file, so a scaffolded one would be a second, contradictory
+    heading.
+    """
     def cell(key: str) -> str:
         return (row.get(key) or '').strip() or '_(you fill this in)_'
 
@@ -722,8 +1000,10 @@ def _strict_prompt_scaffold(row: dict[str, str]) -> str:
 _MAX_REFERENCES = 4
 
 
-def _references_for(project_dir: str,
-                    illus_id: str) -> list[tuple[str, str]]:
+def _references_for(project_dir: str, illus_id: str, *,
+                    plan: list[dict[str, str]] | None = None,
+                    canon_cutoff: str = '',
+                    no_prior_refs: bool = False) -> list[tuple[str, str]]:
     """Build the labeled reference list for an illustration.
 
     Prior ingested illustrations plus the cover are what hold a book's art
@@ -731,13 +1011,35 @@ def _references_for(project_dir: str,
     belongs to no book in particular. Walked in plan order, which is usually but
     not necessarily render order — the chain only needs *some* prior art to
     anchor style, not a specific one.
+
+    The cover reference is the *artwork* (`cover-illustration.png`), not the
+    typeset cover — using the art as a style reference is right, and the two
+    files are deliberately different.
+
+    Two ways a prior illustration is excluded:
+
+    - `no_prior_refs` — the author said so. This is the rebuild switch: cover
+      only, nothing inherited.
+    - `canon_cutoff` — a render older than the newest `canon_updated` was
+      directed by canon that has since been rewritten, so feeding it back in
+      teaches the new render the drift the new canon exists to remove. That is
+      how a whole set inherits a pre-canon mistake through the visual key. An
+      *empty* `ingested_at` counts as older: the column postdates the plan
+      schema, so "unknown" means the render predates even the bookkeeping, and
+      guessing in its favour is the failure mode this exists to stop.
+
+    Every exclusion is logged. Silent staleness is what made the original bug
+    hard to notice — the prompts looked fine, they just referenced the wrong
+    images.
     """
     references: list[tuple[str, str]] = []
     cover = os.path.join('manuscript', 'assets', 'cover-illustration.png')
     if os.path.isfile(os.path.join(project_dir, cover)):
         references.append((cover, 'cover art (sets the house style)'))
 
-    for row in ill.read_plan(project_dir):
+    rows = plan if plan is not None else ill.read_plan(project_dir)
+    skipped_stale = 0
+    for row in rows:
         if len(references) >= _MAX_REFERENCES:
             break
         if row['id'].strip() == illus_id:
@@ -745,10 +1047,64 @@ def _references_for(project_dir: str,
         if (row.get('status') or '').strip() != 'ingested':
             continue
         rel = (row.get('asset_file') or '').strip()
-        if rel and os.path.isfile(os.path.join(project_dir, rel)):
-            references.append((rel, 'prior illustration (style continuity)'))
+        if not rel or not os.path.isfile(os.path.join(project_dir, rel)):
+            continue
+        if no_prior_refs:
+            skipped_stale += 1
+            continue
+        if canon_cutoff:
+            stale_reason = _stale_reference_reason(row, canon_cutoff)
+            if stale_reason:
+                log(f'WARNING: not referencing {rel} for {illus_id} — '
+                    f'{stale_reason}. Re-render it from the current canon '
+                    f'(see `storyforge illustrate --diagnose` for the render '
+                    f'order), or pass --no-prior-refs to build this prompt '
+                    f'from the cover alone.')
+                skipped_stale += 1
+                continue
+        references.append((rel, 'prior illustration (style continuity)'))
 
+    prior = [r for r in references if r[0] != cover]
+    if not prior:
+        if references:
+            log(f'  {illus_id}: reference chain is cover-only'
+                + (f' ({skipped_stale} prior illustration(s) excluded)'
+                   if skipped_stale else
+                   ' (no prior illustration is ingested yet)') + '.')
+        else:
+            log(f'  {illus_id}: no reference images at all'
+                + (f' ({skipped_stale} prior illustration(s) excluded)'
+                   if skipped_stale else '')
+                + ' — nothing anchors this prompt\'s style, so it establishes '
+                  'the look for everything that references it.')
     return references
+
+
+def _stale_reference_reason(row: dict[str, str], canon_cutoff: str) -> str:
+    """Why this ingested row predates the canon, or '' if it does not.
+
+    Compared as ISO dates (`canon.iso_date_or_empty`), which sort
+    lexicographically. Strictly older: a render ingested the *same day* the
+    canon was last touched is kept, because same-day is the normal incremental
+    loop (write canon, render, ingest, prompt the next one) and date granularity
+    cannot separate the two — treating same-day as stale would empty the chain
+    on every ordinary run.
+    """
+    from storyforge import canon as canon_mod
+    raw = (row.get('ingested_at') or '').strip()
+    if not raw:
+        return (f'its `ingested_at` is empty, so it predates ingest '
+                f'timestamps and therefore the canon last updated '
+                f'{canon_cutoff}')
+    ingested = canon_mod.iso_date_or_empty(raw)
+    if not ingested:
+        return (f'its `ingested_at` ({raw!r}) is not an ISO date, so it '
+                f'cannot be shown to postdate the canon last updated '
+                f'{canon_cutoff}')
+    if ingested < canon_cutoff:
+        return (f'it was ingested {ingested}, before the canon was last '
+                f'updated {canon_cutoff}')
+    return ''
 
 
 def _relevant_anchors(anchors: dict[str, str],
@@ -834,6 +1190,8 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
         return 1
 
     os.makedirs(ill.illustrations_dir(project_dir), exist_ok=True)
+    status_before = {r['id'].strip(): (r.get('status') or '').strip()
+                     for r in plan}
     ingested = 0
     ingested_ids: set[str] = set()
     for illus_id, src in matched:
@@ -867,9 +1225,24 @@ def run_ingest(project_dir: str, source: str, dry_run: bool) -> int:
                     f'{dims[0]}×{dims[1]}')
 
         digest = ill.sha256_of(dest)
+        # Ingest is the documented revival endpoint for a retired row, so
+        # superseded → ingested is correct — but it changes the publishable set,
+        # and a stale leftover file in the ingest directory would otherwise
+        # un-retire an illustration with nothing said. Same class of silent
+        # change the --prompts status guard closes.
+        if status_before.get(illus_id) == 'superseded':
+            log(f'  {illus_id} was retired (status=superseded); this render '
+                f'un-retires it — status superseded → ingested, its marker is '
+                f're-embedded, and it ships again. If that was not intended, '
+                f'set status back to superseded and re-run --embed.')
+        # `ingested_at` is what lets --prompts tell a render directed by the
+        # current canon from one that predates it. Stamped on every ingest,
+        # including a re-ingest of the same id, because a replacement render is
+        # exactly the event that makes the old date wrong.
         _update_row(project_dir, illus_id, {
             'asset_file': rel, 'sha256': digest, 'status': 'ingested',
             'width': str(dims[0]), 'height': str(dims[1]),
+            'ingested_at': date.today().isoformat(),
         })
         log(f'  {illus_id} → {rel} ({dims[0]}×{dims[1]}, '
             f'sha256 {digest[:12]}…)')

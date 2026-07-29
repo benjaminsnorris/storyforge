@@ -44,7 +44,18 @@ PLAN_COLUMNS: list[str] = [
     'id', 'scene_id', 'anchor', 'placement', 'layout', 'beat', 'rationale',
     'subject', 'composition', 'palette', 'mood', 'motifs', 'canon_refs',
     'status', 'asset_file', 'prompt_file', 'sha256', 'width', 'height',
+    'ingested_at',
 ]
+
+#: Columns added after the plan schema shipped. They are in PLAN_COLUMNS, so
+#: every `write_plan` emits them and a plan upgrades its own header the first
+#: time anything writes to it — but a plan CSV that predates them is legal and
+#: must not be a validation error. A book with twenty ingested illustrations
+#: and no `ingested_at` column is exactly the state this column was added to
+#: cope with, and failing its schema check would block the very run that fixes
+#: it. Empty is meaningful, not missing: `cmd_illustrate._references_for`
+#: reads an empty `ingested_at` as "predates the current canon".
+OPTIONAL_PLAN_COLUMNS: frozenset[str] = frozenset({'ingested_at'})
 
 # Placement is relative to the *paragraph* containing the anchor, not to the
 # anchor's character offset — an illustration never splits a paragraph.
@@ -355,10 +366,17 @@ def write_plan(project_dir: str, rows: list[dict[str, str]]) -> str:
         # QUOTE_NONE with no escapechar: the format is unquoted by definition,
         # so a value that still needs escaping after sanitize_cell must raise
         # rather than silently switch the file to RFC-4180 quoting.
+        #
+        # lineterminator='\n' because csv defaults to '\r\n', which turned
+        # every one-field edit into a whole-file diff (LF -> CRLF on all 20
+        # rows, hiding the real change in review) and produced exactly the
+        # state `cleanup`'s own `crlf_line_endings` check flags. Opening with
+        # newline='\n' does NOT fix this — the writer emits the terminator
+        # itself and no translation is applied on write.
         writer = csv.DictWriter(f, fieldnames=fieldnames,
                                 delimiter=DELIMITER, extrasaction='ignore',
                                 quoting=csv.QUOTE_NONE, escapechar=None,
-                                quotechar=None)
+                                quotechar=None, lineterminator='\n')
         writer.writeheader()
         for row in rows:
             writer.writerow({col: sanitize_cell(row.get(col, ''))
