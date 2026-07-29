@@ -561,6 +561,89 @@ def test_validate_unfilled_template_flagged(tmp_path):
     assert 'Related canon' not in unfilled[0]['detail']
 
 
+# ---------------------------------------------------------------------------
+# Canon validation joins `validate`'s gate (issue #295)
+# ---------------------------------------------------------------------------
+
+def test_canon_errors_are_separated_from_warnings(project_dir):
+    """#295: `error` severity on a canon finding meant nothing — `cleanup` was
+    its only consumer and returns None on every path. `canon_gate` is what
+    `cmd_validate` folds into its exit code, so only `error` blocks: info
+    (`canon_unfilled_template`) and warning findings still report and pass, or
+    an in-flight project could never validate."""
+    from storyforge.canon import canon_gate
+    project = str(project_dir)
+    # An unclosed frontmatter block — an existing 'error' kind.
+    write_canon(project, 'characters/nora.md', 'nora', canon_type='character',
+                frontmatter='---\ncanon_id: nora\n')
+    result = canon_gate(project)
+    assert result['errors'], 'an error-severity canon finding must block'
+    assert all(f['severity'] == 'error' for f in result['errors'])
+    assert all(f['severity'] != 'error' for f in result['other'])
+
+
+def test_canon_gate_is_empty_without_a_canon_directory(project_dir):
+    """A project with no `reference/canon/` is valid in-flight state, matching
+    `cmd_cleanup.report_canon_files`' own guard — not a reason to fail
+    `validate` for every project that has never run `--direction`."""
+    from storyforge.canon import canon_gate
+    import shutil
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if os.path.isdir(canon_dir):
+        shutil.rmtree(canon_dir)
+    assert canon_gate(str(project_dir)) == {'errors': [], 'other': []}
+
+
+def _validate_exit_code(project, monkeypatch):
+    """Run `cmd_validate.main` with the non-canon validators stubbed to passing.
+
+    The fixture project does not pass `validate` on its own (six structural
+    failures), so an unstubbed exit code would be 1 either way — the broken-canon
+    assertion would pass for the wrong reason and the clean-canon one could never
+    pass. Stubbing the other three contributors is what isolates the canon half
+    of the gate, which is the only thing these two tests are about. `canon_gate`
+    itself is exercised for real.
+    """
+    import storyforge.elaborate as el
+    import storyforge.schema as sch
+    from storyforge import cmd_validate
+    monkeypatch.setattr(el, 'validate_structure',
+                        lambda ref: {'passed': True, 'checks': [], 'failures': []})
+    monkeypatch.setattr(sch, 'validate_schema',
+                        lambda ref, proj: {'failed': 0, 'checks': [], 'results': []})
+    monkeypatch.setattr(sch, 'validate_illustration_plan',
+                        lambda proj: {'row_count': 0, 'errors': [], 'warnings': []})
+    monkeypatch.setattr(cmd_validate, 'detect_project_root', lambda: project)
+    with pytest.raises(SystemExit) as exc:
+        cmd_validate.main(['--quiet'])
+    return exc.value.code
+
+
+def test_validate_exits_nonzero_on_a_canon_error(project_dir, monkeypatch):
+    """The gate itself: a canon error must fail `storyforge validate`, which is
+    where every other blocking check in this project already lives. Before #295
+    an `error`-severity canon finding could not fail anything."""
+    project = str(project_dir)
+    write_canon(project, 'characters/nora.md', 'nora', canon_type='character',
+                frontmatter='---\ncanon_id: nora\n')
+    assert [f for f in validate_canon_directory(project)
+            if f['severity'] == 'error'], 'fixture must really have a canon error'
+    assert _validate_exit_code(project, monkeypatch) == 1
+
+
+def test_validate_passes_when_canon_is_only_unfinished(project_dir, monkeypatch):
+    """The negative half, and the one that decides whether this is usable: canon
+    that is merely incomplete — TODO scaffolds (info), warnings — must not block,
+    or a project mid-`--direction` could never validate."""
+    project = str(project_dir)
+    write_canon(project, 'characters/nora.md', 'nora', canon_type='character',
+                body='\n## Embeddable block\n\nTODO — describe her.\n\n'
+                     '## Clauses\n\n## Related canon\n\n## Iteration history\n')
+    severities = {f['severity'] for f in validate_canon_directory(project)}
+    assert 'error' not in severities, f'unexpected canon error: {severities}'
+    assert _validate_exit_code(project, monkeypatch) == 0
+
+
 def test_truncated_anchor_ids_reports_every_affected_canon_file(tmp_path):
     """#293: the shared source `validate_plan`, `--prompts` and the packet all
     read, so a truncated anchor is diagnosed the same way in each. Keyed by

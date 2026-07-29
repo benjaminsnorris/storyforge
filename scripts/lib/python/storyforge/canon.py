@@ -1182,6 +1182,40 @@ def anchor_texts(project_dir: str) -> dict[str, str]:
     return anchors
 
 
+class CanonGate(TypedDict):
+    """`validate`'s view of canon: what blocks, and what merely reports."""
+    errors: list[CanonFinding]
+    other: list[CanonFinding]
+
+
+def canon_gate(project_dir: str) -> CanonGate:
+    """Split canon findings into the blocking and the reportable.
+
+    `error` severity on a canon finding used to mean nothing: `cleanup` was the
+    only command that ran canon validation and it returns `None` on every path,
+    so `canon_truncated_frontmatter`, `canon_id_mismatch` and
+    `canon_registry_unreadable` all printed and blocked nothing. `cmd_validate`
+    folds `errors` into its exit code, which puts canon where every other
+    blocking check in this project already lives (#295).
+
+    Only `error` blocks. `canon_unfilled_template` is `info` and warnings leave a
+    working project, so a book mid-`--direction` still validates — gating on
+    those would make the check impossible to adopt, which is how a gate gets
+    turned off wholesale.
+
+    A project with no `reference/canon/` yields nothing, matching
+    `cmd_cleanup.report_canon_files`' own guard: never having run `--direction`
+    is valid in-flight state, not a failure.
+    """
+    if not os.path.isdir(os.path.join(project_dir, CANON_DIR)):
+        return {'errors': [], 'other': []}
+    findings = validate_canon_directory(project_dir)
+    return {
+        'errors': [f for f in findings if f['severity'] == 'error'],
+        'other': [f for f in findings if f['severity'] != 'error'],
+    }
+
+
 def truncated_anchor_ids(
     project_dir: str,
 ) -> dict[str, list[BlockTruncation]]:
