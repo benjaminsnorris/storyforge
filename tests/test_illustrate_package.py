@@ -287,6 +287,69 @@ def test_diagnose_reports_the_anchor_batch(in_project, capsys):
     assert 'the-finest-cartographer' in out
 
 
+def test_diagnose_reports_the_packet_rung(in_project, capsys):
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'Packet: not built' in out
+    assert 'Sequence staging: 0 of 2' in out
+
+    cmd_illustrate.main(['--package'])
+    capsys.readouterr()
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'Packet: built and current' in out
+    # Two distinct rows fill three slots in the seeded plan; the fourth slot
+    # (later-state exemplar) is unfilled and cannot be waited on.
+    assert 'anchor batch: 2 row(s) not yet ingested' in out
+
+
+def test_diagnose_reports_a_stale_packet(in_project, capsys):
+    cmd_illustrate.main(['--package'])
+    future = os.path.getmtime(
+        packet.packet_file(in_project, 'README.md')) + 60
+    os.utime(ill.plan_path(in_project), (future, future))
+    capsys.readouterr()
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'Packet: built and stale' in out
+    assert 'illustration-plan.csv' in out
+
+
+def test_diagnose_reports_a_drifted_anchor_copy(in_project, capsys):
+    cmd_illustrate.main(['--package'])
+    path = packet.packet_file(in_project, 'canon.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    original = next(iter(canon.anchor_texts(in_project).values()))
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace(original, original.replace('.', '!', 1)))
+    capsys.readouterr()
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'anchor copy problem' in out
+    assert 'anchor_copy_drift' in out
+
+
+def test_diagnose_says_when_the_packet_is_ready_to_hand_over(in_project,
+                                                            capsys, staged):
+    """Every anchor-batch row ingested is the Churn rung."""
+    from illustration_helpers import make_png
+    rows = ill.read_plan(in_project)
+    for row in rows:
+        rel = ill.default_asset_rel(row['id'].strip())
+        make_png(os.path.join(in_project, rel), 8, 12)
+        row['status'] = 'ingested'
+        row['asset_file'] = rel
+        row['treatment'] = f'staging for {row["id"].strip()}'
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    capsys.readouterr()
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'ready to hand over' in out
+    assert 'all 2 illustration(s) carry a treatment' in out
+
+
 def test_an_ingested_batch_row_is_marked_as_such(in_project):
     from illustration_helpers import make_png
     rows = ill.read_plan(in_project)

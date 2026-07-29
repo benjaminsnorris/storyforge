@@ -256,11 +256,12 @@ def run_diagnose(project_dir: str) -> int:
                      if step['locks'] else '')
             log(f'  {mark} {i:2}. {step["id"]}{key}{locks}')
 
-    _report_anchor_batch(packet.anchor_batch(project_dir),
-                         _unrendered_ids(project_dir))
+    unrendered = _unrendered_ids(project_dir)
+    _report_anchor_batch(packet.anchor_batch(project_dir), unrendered)
 
     findings = ill.validate_plan(project_dir)
     _report_state_rung(project_dir, findings)
+    _report_packet_rung(project_dir, findings, unrendered)
     return _report_findings(findings)
 
 
@@ -322,6 +323,58 @@ def _report_state_rung(project_dir: str,
     else:
         log(f'  audit: current — last run {last or "(date not recorded)"} over '
             f'{covered}')
+
+
+def _report_packet_rung(project_dir: str,
+                        findings: list[ill.IllustrationFinding],
+                        unrendered: list[str]) -> None:
+    """Log the staging and packet rungs, for `--diagnose`.
+
+    Read off `findings` rather than by re-running `packet_stale` and
+    `anchor_copy_drift`: `validate_plan` has already run both, and computing
+    them twice would print each of their WARNING lines twice — the defect
+    `_report_state_rung` documents for `digest_drift`.
+    """
+    rows = packet.rows_in_reading_order(project_dir)
+    if rows:
+        staged = [r['id'].strip() for r in rows
+                  if (r.get('treatment') or '').strip()]
+        if len(staged) == len(rows):
+            log(f'Sequence staging: all {len(rows)} illustration(s) carry a '
+                f'treatment')
+        else:
+            log(f'Sequence staging: {len(staged)} of {len(rows)} '
+                f'illustration(s) carry a treatment. Run `storyforge '
+                f'illustrate --sequence` — an unstaged set converges on one '
+                f'shot, because no generation call can see the others.')
+
+    if not packet.is_built(project_dir):
+        log('Packet: not built. Run `storyforge illustrate --package` to '
+            'assemble the handoff bundle a generation session works from.')
+        return
+
+    stale = [f for f in findings if f['kind'] == 'packet_stale']
+    drift = [f for f in findings if f['kind'] == 'anchor_copy_drift']
+    state = 'stale' if stale else 'current'
+    log(f'Packet: built and {state} — {packet.PACKET_DIR}/')
+    if stale:
+        log(f'  {stale[0]["detail"]}')
+    if drift:
+        log(f'  {len(drift)} anchor copy problem(s) — see the findings below. '
+            f'Regenerate rather than editing the packet.')
+    batch_unrendered = [
+        batch_id for batch_id in
+        (packet.anchor_batch(project_dir)[slot]  # type: ignore[literal-required]
+         for slot, _label in packet.BATCH_SLOTS)
+        if batch_id and batch_id in unrendered]
+    if batch_unrendered:
+        log(f'  anchor batch: {len(set(batch_unrendered))} row(s) not yet '
+            f'ingested ({", ".join(sorted(set(batch_unrendered)))}) — render '
+            f'and ingest those before handing the packet over, so the churn '
+            f'has real references.')
+    else:
+        log('  anchor batch: every row is ingested — the packet is ready to '
+            'hand over.')
 
 
 # ============================================================================
