@@ -761,12 +761,20 @@ def _relevant_anchors(anchors: dict[str, str],
     failure than a missing one.
 
     That fallback is silent when `canon_refs` is simply empty (nothing was
-    asked for) — but logs a WARNING when `canon_refs` named something and
-    none of it matched an anchor key. Anchor keys are canon_ids now (task 4);
-    a plan row still carrying a pre-canon display name (e.g. "The village and
-    Great Lamp" instead of "great-lamp") matches nothing, and the unfiltered
-    fallback would otherwise send the whole cast at full token cost with no
-    sign that the row needs migrating.
+    asked for). Every `canon_refs` entry that matched no anchor key is logged
+    as a WARNING, whether some others matched or not. Anchor keys are
+    canon_ids now (task 4); a plan row still carrying a pre-canon display name
+    (e.g. "The village and Great Lamp" instead of "great-lamp") matches
+    nothing, and the unfiltered fallback would otherwise send the whole cast
+    at full token cost with no sign that the row needs migrating.
+
+    The *partial* mismatch is the one that actually loses art direction, and
+    it used to be silent: a row naming `nora;great-lamp` where only `nora`
+    resolves narrows to Nora alone, and the lamp is then rendered with no
+    anchor in every illustration that shows it. Nothing else catches that —
+    an id with no canon anchor is by design not a
+    `_direction_anchor_mismatches` finding, and `canon_unfilled_template` is
+    info severity, which `build_cleanup_report` leaves out of action items.
     """
     named = {n.strip().lower()
              for n in ill._split_array(row.get('canon_refs', ''))}
@@ -774,11 +782,17 @@ def _relevant_anchors(anchors: dict[str, str],
         return anchors
     matched = {name: text for name, text in anchors.items()
                if name.strip().lower() in named}
+    unmatched = sorted(named - {n.strip().lower() for n in matched})
+    if unmatched:
+        tail = ('sending the full anchor set instead of narrowing to this '
+                'cast' if not matched else
+                'those entities are art-directed with no continuity anchor')
+        log(f'WARNING: canon_refs {unmatched!r} matched no known anchor '
+            f'(illustration {row.get("id", "").strip() or "?"}); {tail} — '
+            f'check whether this plan row still uses pre-canon display names, '
+            f'or whether those canon files are still TODO scaffolds')
     if matched:
         return matched
-    log(f'WARNING: canon_refs {sorted(named)!r} matched no known anchor; '
-        f'sending the full anchor set instead of narrowing to this cast — '
-        f'check whether this plan row still uses pre-canon display names')
     return anchors
 
 

@@ -239,15 +239,22 @@ def _slugify(name: str) -> str:
 def _canon_stub(*, canon_id: str, canon_type: str, anchor: str) -> str:
     """A minimal valid canon file carrying one anchor.
 
+    `canon_updated` is stamped with today's date — it is knowable at write
+    time, and the same reasoning as `render_canon_template`'s applies here:
+    leaving it blank only buys a `canon_missing_key` finding per file. This
+    path is the full-coaching default (`render_filled_canon` and
+    `append_anchor_stubs` both route through it), so leaving it blank here
+    made full coaching noisier than coach coaching.
+
     `appears_in` and `first_appearance` are left empty rather than guessed:
     a wrong first_appearance would misorder the render sequence, and
-    canon_missing_key reports the omission.
+    canon_missing_key reports the omission deliberately.
     """
     return (
         '---\n'
         f'canon_id: {canon_id}\n'
         f'canon_type: {canon_type}\n'
-        'canon_updated:\n'
+        f'canon_updated: {date.today().isoformat()}\n'
         'appears_in:\n'
         'first_appearance:\n'
         '---\n'
@@ -963,9 +970,15 @@ def build_canon_direction_request(*, title: str, genre: str, audience: str,
     Asks for exactly the three `CANON_PLAN` ids as `##`-headed sections, so
     `parse_canon_direction_response` can drop each body straight into its own
     canon file without a second request per file.
+
+    The briefs below are rendered at the same `##` level the instruction asks
+    for. They used to be demonstrated as `###` while the text said "use these
+    exact `##` headings" — a model that copied the demonstration produced a
+    response the parser discarded wholesale, and the run paid for the call and
+    then wrote TODO scaffolds.
     """
     briefs = '\n\n'.join(
-        f'### {canon_id}\n\n{purpose}'
+        f'## {canon_id}\n\n{purpose}'
         for canon_id, _canon_type, purpose in CANON_PLAN)
 
     return f"""Write the book-level illustration direction for a novel, as \
@@ -1009,24 +1022,68 @@ commentary.
 """
 
 
-def parse_canon_direction_response(text: str) -> dict[str, str]:
-    """Split a canon-direction response into `{canon_id: embeddable body}`.
+def _canon_heading_id(heading: str) -> str:
+    """Normalize a response heading to a candidate canon_id.
 
-    Matches `## <heading>` headings against `CANON_PLAN`'s ids specifically —
-    a model that free-associates an extra heading must not silently become a
-    fourth canon file. Unmatched headings are simply not in the result.
+    Lowercases, drops surrounding emphasis/backticks and a trailing colon, and
+    joins words with dashes — so `Visual Foundation`, `visual foundation`,
+    `**Visual-Foundation**` and `visual-foundation:` all resolve to
+    `visual-foundation`. Normalizing at comparison time only: the *body* text
+    this heading introduces is never touched.
     """
+    cleaned = heading.strip().strip('*_`').strip().rstrip(':').strip()
+    return re.sub(r'\s+', '-', cleaned.lower())
+
+
+def _split_canon_headings(text: str, pattern: str) -> dict[str, str]:
+    """Split `text` on `pattern` headings, keeping only `CANON_PLAN` ids."""
     known_ids = {canon_id for canon_id, _canon_type, _purpose in CANON_PLAN}
     sections: dict[str, str] = {}
-    matches = list(re.finditer(r'^##\s+(.+?)\s*$', text, re.MULTILINE))
+    matches = list(re.finditer(pattern, text, re.MULTILINE))
     for i, match in enumerate(matches):
-        name = match.group(1).strip().lower()
+        name = _canon_heading_id(match.group(1))
         if name not in known_ids:
             continue
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         body = text[match.end():end].strip()
         if body:
             sections[name] = body
+    return sections
+
+
+def parse_canon_direction_response(text: str) -> dict[str, str]:
+    """Split a canon-direction response into `{canon_id: embeddable body}`.
+
+    Headings are matched against `CANON_PLAN`'s ids specifically — a model
+    that free-associates an extra heading must not silently become a fourth
+    canon file. Unmatched headings are simply not in the result.
+
+    Both `##` and `###` are accepted, and a heading is matched through
+    `_canon_heading_id`, so a title-cased or space-separated variant of an id
+    still lands. Three of four plausible model outputs used to yield `{}` —
+    and the caller then quietly wrote TODO scaffolds over a paid-for response.
+    The `##` pass runs first and wins on conflict: accepting `###` as a
+    delimiter outright would truncate a `##` section body at its first `###`
+    sub-heading.
+
+    Any `CANON_PLAN` id the response did not yield is logged as a WARNING —
+    the request always asks for all three, so a missing one means the response
+    was partially unusable, which the caller would otherwise report only as
+    "needs your input" on a file it just scaffolded.
+    """
+    from storyforge.common import log
+
+    sections = _split_canon_headings(text, r'^##\s+(.+?)\s*$')
+    for name, body in _split_canon_headings(text, r'^#{2,3}\s+(.+?)\s*$').items():
+        sections.setdefault(name, body)
+
+    unyielded = [canon_id for canon_id, _t, _p in CANON_PLAN
+                 if canon_id not in sections]
+    if unyielded:
+        log(f'WARNING: the art-direction response yielded no section for '
+            f'{", ".join(unyielded)} — expected a `## <id>` heading per '
+            f'block. Those canon files fall back to a TODO scaffold you '
+            f'will have to fill in yourself.')
     return sections
 
 

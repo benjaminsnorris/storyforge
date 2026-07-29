@@ -289,6 +289,25 @@ def test_relevant_anchors_falls_back_when_nothing_matches(project_dir):
     assert set(_relevant_anchors(anchors, row)) == {'nora', 'leo'}
 
 
+def test_relevant_anchors_warns_on_a_partial_mismatch(project_dir, capsys):
+    """The migration hole for a real book: a row naming two entities where
+    only one has a canon anchor narrows to that one and renders the other
+    with no anchor at all. Nothing else catches it — an id with no canon
+    anchor is deliberately not a _direction_anchor_mismatches finding, and
+    canon_unfilled_template is info severity, which build_cleanup_report
+    excludes from action items. Only the total-failure case used to warn."""
+    from storyforge.cmd_illustrate import _relevant_anchors
+    anchors = {'nora': 'Nora anchor', 'village': 'Village anchor'}
+
+    row = {'id': 'LF-01', 'canon_refs': 'nora;great-lamp'}
+    assert set(_relevant_anchors(anchors, row)) == {'nora'}
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'great-lamp' in out
+    assert 'LF-01' in out
+    assert 'nora' not in out.replace('great-lamp', '')  # matched one is silent
+
+
 def test_append_anchor_stubs_routes_by_type(project_dir):
     from storyforge.prompts_illustrate import append_anchor_stubs
     from storyforge.canon import anchor_texts, resolve_canon_path
@@ -950,3 +969,173 @@ def test_prompts_carry_canon_house_style_end_to_end(project_dir, monkeypatch):
     assert 'Book-level art direction' in prompt
     assert 'cinematic photorealistic' in prompt
     assert 'Never horror imagery' in prompt
+
+
+# ============================================================================
+# The --direction request/response contract
+#
+# Fix round 2, item 2: the request demonstrated its blocks as `###` while its
+# own instruction said "use these exact `##` headings", and the parser matched
+# only an exact-lowercase `##` id. Three of four plausible model outputs
+# yielded {}, and run_direction then paid for the call and silently wrote TODO
+# scaffolds over the discarded response. There were zero tests for either
+# function.
+# ============================================================================
+
+_DIRECTION_BODIES = (
+    'Full-color photorealism for ages 6-8.',
+    'Warm amber against cool blue.',
+    'Never horror imagery.',
+)
+
+
+@pytest.mark.parametrize('label,heading_fmt', [
+    ('h2 exact id', '## {id}'),
+    ('h3 exact id', '### {id}'),
+    ('h2 title case', '## {Title}'),
+    ('h2 spaced words', '## {spaced}'),
+    ('h2 title-cased words', '## {Spaced}'),
+    ('h2 trailing colon', '## {id}:'),
+])
+def test_parse_canon_direction_response_accepts_each_shape(label, heading_fmt):
+    from storyforge.prompts_illustrate import (
+        CANON_PLAN, parse_canon_direction_response,
+    )
+    chunks = []
+    for (canon_id, _t, _p), body in zip(CANON_PLAN, _DIRECTION_BODIES):
+        spaced = canon_id.replace('-', ' ')
+        heading = heading_fmt.format(
+            id=canon_id, Title=canon_id.title(), spaced=spaced,
+            Spaced=spaced.title())
+        chunks.append(f'{heading}\n\n{body}\n')
+    parsed = parse_canon_direction_response('\n'.join(chunks))
+
+    assert parsed == {
+        canon_id: body
+        for (canon_id, _t, _p), body in zip(CANON_PLAN, _DIRECTION_BODIES)
+    }, label
+
+
+def test_parse_canon_direction_response_keeps_h3_subheadings_in_the_body():
+    """`###` is accepted as a section delimiter only as a fallback: an h2
+    section whose body contains h3 sub-headings must keep them, or accepting
+    h3 outright would truncate the body at the first one."""
+    from storyforge.prompts_illustrate import parse_canon_direction_response
+    text = ('## visual-vocabulary\n\n### Palette\n\nWarm amber.\n\n'
+            '### Camera\n\nEye level.\n')
+
+    parsed = parse_canon_direction_response(text)
+
+    assert '### Camera' in parsed['visual-vocabulary']
+    assert 'Eye level.' in parsed['visual-vocabulary']
+
+
+def test_parse_canon_direction_response_ignores_unknown_headings():
+    from storyforge.prompts_illustrate import parse_canon_direction_response
+    parsed = parse_canon_direction_response(
+        '## visual-foundation\n\nPhotorealism.\n\n'
+        '## bonus-thoughts\n\nSomething the model made up.\n')
+    assert set(parsed) == {'visual-foundation'}
+
+
+def test_parse_canon_direction_response_warns_on_unyielded_ids(capsys):
+    """The response is always asked for all three blocks, so a missing one
+    means the caller is about to write a TODO scaffold over a paid-for
+    response — which used to be reported only as `needs your input` on a
+    file --direction had just created."""
+    from storyforge.prompts_illustrate import parse_canon_direction_response
+    parse_canon_direction_response('## visual-foundation\n\nPhotorealism.\n')
+
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'visual-vocabulary' in out
+    assert 'content-limits' in out
+    assert 'visual-foundation' not in out.replace('WARNING', '')
+
+
+def test_parse_canon_direction_response_silent_when_complete(capsys):
+    from storyforge.prompts_illustrate import (
+        CANON_PLAN, parse_canon_direction_response,
+    )
+    text = '\n'.join(
+        f'## {canon_id}\n\n{body}\n'
+        for (canon_id, _t, _p), body in zip(CANON_PLAN, _DIRECTION_BODIES))
+    parse_canon_direction_response(text)
+    assert 'WARNING' not in capsys.readouterr().out
+
+
+def test_canon_direction_request_demonstrates_the_heading_level_it_asks_for():
+    """Regression: the briefs were rendered as `### <id>` under an
+    instruction to "use these exact `##` headings". A model that copied the
+    demonstration produced a response the parser discarded wholesale."""
+    from storyforge.prompts_illustrate import (
+        CANON_PLAN, build_canon_direction_request,
+    )
+    prompt = build_canon_direction_request(
+        title='T', genre='', audience='', canon_context='C',
+        story_context='S')
+
+    for canon_id, _t, _p in CANON_PLAN:
+        assert f'## {canon_id}' in prompt
+        assert f'### {canon_id}' not in prompt
+
+
+def test_canon_direction_request_headings_round_trip_through_the_parser():
+    """The two halves of the contract must agree: whatever heading shape the
+    request demonstrates has to be a shape the parser accepts. Echoing the
+    request's own briefs back as a response must parse to all three ids."""
+    from storyforge.prompts_illustrate import (
+        CANON_PLAN, build_canon_direction_request,
+        parse_canon_direction_response,
+    )
+    prompt = build_canon_direction_request(
+        title='T', genre='', audience='', canon_context='C',
+        story_context='S')
+    start = prompt.index(f'## {CANON_PLAN[0][0]}')
+    echoed = prompt[start:prompt.index('## How to write it')]
+
+    assert set(parse_canon_direction_response(echoed)) == {
+        canon_id for canon_id, _t, _p in CANON_PLAN}
+
+
+# ============================================================================
+# Fix round 2, item 4: _canon_stub stamps canon_updated
+#
+# render_canon_template (coach/strict) stamped today's date; _canon_stub — the
+# shape render_filled_canon and append_anchor_stubs both write, i.e. the FULL
+# coaching path — left it blank, so full coaching produced three extra
+# canon_missing_key warnings coach coaching did not.
+# ============================================================================
+
+def test_filled_canon_and_anchor_stubs_stamp_canon_updated(project_dir):
+    from datetime import date
+
+    from storyforge.canon import (
+        parse_canon_file, resolve_canon_path, validate_canon_file,
+    )
+    from storyforge.prompts_illustrate import (
+        append_anchor_stubs, render_filled_canon,
+    )
+    _set_medium(project_dir, 'novel')
+    today = date.today().isoformat()
+
+    path = os.path.join(project_dir, 'reference', 'canon',
+                        'visual-foundation.md')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(render_filled_canon(canon_id='visual-foundation',
+                                    canon_type='foundation',
+                                    body='Full-color photorealism.'))
+    assert parse_canon_file(path)['frontmatter']['canon_updated'] == today
+    keys = [f['detail'] for f in validate_canon_file(path, project_dir)
+            if f['type'] == 'canon_missing_key']
+    assert not any('canon_updated' in d for d in keys), keys
+
+    append_anchor_stubs(project_dir, {'Nora': ('character', 'Nora, 9, 132 cm.')})
+    stub = resolve_canon_path(project_dir, 'nora')
+    fm = parse_canon_file(stub)['frontmatter']
+    assert fm['canon_updated'] == today
+    # appears_in / first_appearance stay blank deliberately — guessing
+    # first_appearance would misorder the render sequence.
+    assert fm['appears_in'] == ''
+    assert fm['first_appearance'] == ''
