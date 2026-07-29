@@ -224,9 +224,20 @@ def run_direction(project_dir: str, coaching: CoachingLevel,
     for canon_id, canon_type, purpose in plan:
         rel_path = pi.canon_rel_path(canon_type, canon_id)
         if canon_id in existing_ids:
-            log(f'WARNING: canon_id {canon_id!r} already exists at '
-                f'{existing_ids[canon_id]}; left alone rather than risk '
-                f'overwriting or shadowing it')
+            existing_rel = existing_ids[canon_id]
+            if existing_rel == rel_path:
+                # The plain steady-state skip: a re-run finds the file it
+                # would have written already sitting exactly where expected.
+                # This is the common case on every run after the first, so
+                # it is not a WARNING — only a mismatch below (a different
+                # path claiming this id) or a malformed file at the
+                # candidate path (below that) indicates a real problem.
+                log(f'{rel_path} already exists; left alone rather than '
+                    f'risk overwriting it')
+            else:
+                log(f'WARNING: canon_id {canon_id!r} already exists at '
+                    f'{existing_rel} (expected {rel_path}); left alone '
+                    f'rather than risk overwriting or shadowing it')
             continue
         path = os.path.join(project_dir, rel_path)
         if os.path.exists(path):
@@ -238,11 +249,6 @@ def run_direction(project_dir: str, coaching: CoachingLevel,
                 f'alone rather than overwrite it')
             continue
         to_write.append((canon_id, canon_type, purpose, rel_path))
-
-    if not to_write:
-        log(f'Every canon file already exists under {rel_dir}/. Edit them '
-            f'directly, or delete one to regenerate it.')
-        return 0
 
     book_level_ids = {c for c, _t, _p in pi.CANON_PLAN}
     filled: dict[str, str] = {}
@@ -286,16 +292,37 @@ def run_direction(project_dir: str, coaching: CoachingLevel,
             f.write(content)
         log(f'Wrote {rel_path}')
 
+    # Resolve every plan entry — written this run OR already on disk from an
+    # earlier run — to its real path, so the placeholder check below covers
+    # the whole reference tier rather than only what this run happened to
+    # write. A canon_id skipped as malformed-at-candidate-path has no
+    # resolvable path and is left out; that case is already flagged above.
+    resolved_paths: dict[str, str] = {
+        canon_id: existing_ids[canon_id]
+        for canon_id, _canon_type, _purpose in plan
+        if canon_id in existing_ids
+    }
+    resolved_paths.update(
+        (canon_id, rel_path)
+        for canon_id, _canon_type, _purpose, rel_path in to_write
+    )
+
     # canon._section_body_is_placeholder is the same TODO-detection rule
-    # anchor_texts and is_canon_block_populated use — a file this loop just
-    # wrote with a template body must be reported, not silently treated as
-    # finished direction.
+    # anchor_texts and is_canon_block_populated use — a file that is still
+    # TODO scaffolding, whether written just now or left over from an
+    # earlier run, must be reported every time, not just the run that wrote
+    # it — a later no-op re-run over an all-placeholder reference tier must
+    # not read as an all-clear.
     needs_input = [
-        rel_path for canon_id, _canon_type, _purpose, rel_path in to_write
-        if canon._section_body_is_placeholder(
-            canon.embeddable_block_text(os.path.join(project_dir, rel_path))
-            or '')
+        resolved_paths[canon_id] for canon_id, _canon_type, _purpose in plan
+        if canon_id in resolved_paths
+        and canon._section_body_is_placeholder(
+            canon.embeddable_block_text(
+                os.path.join(project_dir, resolved_paths[canon_id])) or '')
     ]
+    if not to_write and not needs_input:
+        log(f'Every canon file already exists under {rel_dir}/. Edit them '
+            f'directly, or delete one to regenerate it.')
     if needs_input:
         log(f'  needs your input: {", ".join(needs_input)}')
     if coaching == 'full':
@@ -325,8 +352,13 @@ def _anchor_candidates(project_dir: str) -> list[tuple[str, str, str]]:
         rows = ill._read_ref_csv(project_dir, filename)
         for row in rows[:limit]:
             canon_id = (row.get('id') or '').strip()
+            if not canon_id:
+                log(f'WARNING: a row in {filename} has no id; skipped as a '
+                    f'continuity-anchor candidate (the canon filename must '
+                    f'equal the registry id)')
+                continue
             name = (row.get('name') or canon_id).strip()
-            if canon_id and canon_id not in seen:
+            if canon_id not in seen:
                 seen.add(canon_id)
                 entities.append((canon_id, canon_type, name))
     return entities

@@ -1209,6 +1209,10 @@ def test_direction_strict_writes_a_template_without_an_api_key(in_project):
         assert 'TODO —' in content
         # A strict scaffold proposes nothing, so the block stays placeholder.
         assert not canon.is_canon_block_populated(in_project, canon_id)
+        # Both coaching levels emit 'TODO —'; only coach adds the question
+        # framing, so this is the one assertion that actually distinguishes
+        # strict's template from coach's.
+        assert 'What would you say here' not in content
 
 
 def test_direction_coach_template_asks_questions(in_project):
@@ -1239,6 +1243,22 @@ def test_direction_template_stubs_an_anchor_per_registry_entry(in_project):
     loc_path = canon.resolve_canon_path(in_project, 'cartography-office')
     assert loc_path is not None
     assert loc_path.endswith(os.path.join('locations', 'cartography-office.md'))
+
+
+def test_anchor_candidates_warns_on_a_registry_row_with_no_id(
+        in_project, capsys):
+    """A registry row missing its own id can't back a canon filename (the
+    filename must equal the registry id), so it's dropped as a candidate —
+    but silently is the wrong failure mode for a row an author forgot to
+    finish; assert the drop is logged."""
+    write_csv(in_project, 'characters.csv', 'id|name', ['|Nameless'])
+
+    candidates = cmd_illustrate._anchor_candidates(in_project)
+
+    assert 'Nameless' not in [name for _cid, _ct, name in candidates]
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'characters.csv' in out
 
 
 def test_direction_full_without_an_api_key_fails(in_project, capsys):
@@ -1311,8 +1331,14 @@ def _write_book_level_canon(project_dir, canon_id, canon_type, body):
 def test_direction_skips_a_canon_file_that_already_exists(in_project, capsys):
     """Analogue of the old 'does not clobber a complete document' test: a
     canon file the author (or an earlier run) already wrote is left
-    untouched, reported by name, and the command still proceeds to write
-    whatever else is missing."""
+    untouched and reported by name — at info level, not WARNING, since this
+    is the ordinary steady state on every run after the first. (The
+    WARNING-worthy variants — a malformed file at the candidate path, and
+    an id claimed by a *different* path than expected — are covered by
+    test_direction_never_touches_a_malformed_file_at_the_candidate_path in
+    test_illustration_canon.py and
+    test_direction_warns_when_an_existing_id_is_at_a_different_path below.)
+    The command still proceeds to write whatever else is missing."""
     from storyforge import canon
     path = _write_book_level_canon(
         in_project, 'visual-foundation', 'foundation',
@@ -1323,12 +1349,65 @@ def test_direction_skips_a_canon_file_that_already_exists(in_project, capsys):
     with open(path) as f:
         assert 'Cinematic photorealistic storybook art.' in f.read()
     out = capsys.readouterr().out
-    assert 'WARNING' in out
-    assert 'visual-foundation' in out
-    assert 'already exists' in out
+    assert 'visual-foundation.md already exists' in out
+    assert 'WARNING' not in out
     # The rest still get written.
     assert canon.resolve_canon_path(in_project, 'visual-vocabulary') is not None
     assert canon.resolve_canon_path(in_project, 'content-limits') is not None
+
+
+def test_direction_warns_when_an_existing_id_is_at_a_different_path(
+        in_project, capsys):
+    """The other branch of the existing_ids check: canon_id_index finds
+    'dorren-hayle' declared in a file that is NOT where --direction would
+    write it. Unlike the plain steady-state skip above, this is a real
+    problem — two paths could both claim to be the canonical file for this
+    id — so it stays a WARNING, and no second file gets written for it."""
+    path = os.path.join(in_project, 'reference', 'canon', 'characters',
+                        'dorren-hayle-renamed.md')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(
+            '---\ncanon_id: dorren-hayle\ncanon_type: character\n'
+            'canon_updated: 2026-07-28\nappears_in:\nfirst_appearance:\n'
+            '---\n\n## Embeddable block\n\nSomething.\n\n'
+            '## Clauses\n\n## Related canon\n\n## Iteration history\n'
+        )
+
+    assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
+
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'dorren-hayle' in out
+    assert not os.path.isfile(os.path.join(
+        in_project, 'reference', 'canon', 'characters', 'dorren-hayle.md'))
+
+
+def test_direction_reports_a_preexisting_placeholder_as_needing_input(
+        in_project, capsys):
+    """Restores the property the old test_direction_reports_gaps_in_an_
+    existing_document covered for the single-document format: a canon file
+    that already exists but was never filled in — the steady state after an
+    earlier --direction run — must still show up in 'needs your input' on a
+    later run, even though it is skipped rather than rewritten. Before this
+    fix, needs_input was computed only over files THIS run wrote, so a
+    second strict run over an all-placeholder reference tier silently
+    reported nothing — 'Every canon file already exists... Edit them
+    directly' read as an all-clear over pure TODO scaffolding."""
+    from storyforge import canon
+    assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
+    capsys.readouterr()  # discard the first run's output
+
+    assert cmd_illustrate.main(['--direction', '--coaching', 'strict']) == 0
+    out = capsys.readouterr().out
+
+    assert 'needs your input' in out
+    needs_line = next(l for l in out.splitlines() if 'needs your input' in l)
+    for canon_id in _BOOK_LEVEL_CANON_IDS:
+        assert canon_id in needs_line
+    assert not canon.is_canon_block_populated(in_project, 'visual-foundation')
+    # A real gap must not be masked by the "nothing to do" all-clear.
+    assert 'Every canon file already exists' not in out
 
 
 def test_direction_reports_gaps_across_canon_files(in_project, capsys):

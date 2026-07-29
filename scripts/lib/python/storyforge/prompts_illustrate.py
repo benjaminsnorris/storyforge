@@ -11,8 +11,9 @@ Three prompt families live here:
   - **Art direction (per illustration)** — turns one plan row into an
     image-generation prompt the author can paste into GPT Image 2.
 
-Plus the author-facing renderers for the non-``full`` coaching levels (planning
-brief, constraint checklist, direction template) and the whole-sequence
+Plus the author-facing renderers for the non-``full`` coaching levels
+(planning brief, constraint checklist) and the canon template (all three
+coaching levels — see `render_canon_template`) and the whole-sequence
 continuity review — documents, not prompts.
 
 The art-direction prompts reuse the five principles validated on
@@ -29,6 +30,7 @@ See benjaminsnorris/storyforge#278.
 import json
 import os
 import re
+from datetime import date
 from typing import Final, Literal
 
 from storyforge.illustrations import (
@@ -860,9 +862,9 @@ def render_strict_checklist(*, prepass: PrepassFindings,
 #: The three book-level canon files an illustrated prose book needs, mapped
 #: from the old direction document's non-anchor sections. Continuity anchors
 #: are not here — they are one file per entity, discovered from the
-#: character/location registries and the plan's canon_refs. `canon_type` is
-#: one of `canon.ROOT_TYPES`, so all three live at the canon root rather than
-#: in a subdirectory.
+#: character/location registries (`cmd_illustrate._anchor_candidates`).
+#: `canon_type` is one of `canon.ROOT_TYPES`, so all three live at the canon
+#: root rather than in a subdirectory.
 CANON_PLAN: tuple[tuple[str, str, str], ...] = (
     ('visual-foundation', 'foundation',
      'Medium, rendering style, audience, and what every image must deliver. '
@@ -885,6 +887,12 @@ def render_canon_template(*, canon_id: str, canon_type: str, purpose: str,
     and canon.is_canon_block_populated both treat placeholder text as
     unpopulated, so an unfinished file is reported rather than silently
     shipped into a prompt as though it were direction.
+
+    `canon_updated` is stamped with today's date — it is knowable at write
+    time, unlike `appears_in`/`first_appearance`, which stay blank because
+    guessing them would misorder the render sequence (Task 4); leaving
+    `canon_updated` blank too would only buy an extra `canon_missing_key`
+    finding on every one of these files for no reason.
     """
     if coaching == 'coach':
         block = (f'TODO — {purpose}\n\nWhat would you say here, in one or '
@@ -895,7 +903,7 @@ def render_canon_template(*, canon_id: str, canon_type: str, purpose: str,
         '---\n'
         f'canon_id: {canon_id}\n'
         f'canon_type: {canon_type}\n'
-        'canon_updated:\n'
+        f'canon_updated: {date.today().isoformat()}\n'
         'appears_in:\n'
         'first_appearance:\n'
         '---\n'

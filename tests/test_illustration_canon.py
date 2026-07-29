@@ -697,13 +697,63 @@ def test_direction_never_overwrites_an_existing_canon_file(project_dir):
     assert after == before
 
 
+@pytest.mark.parametrize('label,body', [
+    ('no frontmatter', 'Just some prose, no frontmatter block at all.\n'),
+    ('truncated frontmatter',
+     '---\ncanon_id: visual-foundation\ncanon_type: foundation\n'),
+    ('no canon_id key',
+     '---\ncanon_type: foundation\ncanon_updated: 2026-07-28\n'
+     'appears_in:\nfirst_appearance:\n---\n\n'
+     '## Embeddable block\n\nSomething.\n'),
+])
+def test_direction_never_touches_a_malformed_file_at_the_candidate_path(
+        project_dir, capsys, label, body):
+    """Both overwrite tests above use well-formed files, which trip the
+    canon_id_index check before the os.path.exists check is ever reached —
+    that second check has no coverage without this. Same regression shape
+    as Task 4's test_append_anchor_stubs_never_touches_a_malformed_file_at_the_candidate_path:
+    a file sitting at the exact path --direction would write
+    (reference/canon/visual-foundation.md) whose frontmatter
+    canon_id_index cannot parse a canon_id out of — absent, truncated, or
+    missing the canon_id key — is invisible to that index alone. Asserting
+    only that the run succeeds would pass even if the file had been
+    clobbered first; this reads bytes before and after and compares them
+    exactly, and asserts the WARNING that names the file."""
+    from storyforge.cmd_illustrate import run_direction
+    _set_medium(project_dir, 'novel')
+    path = os.path.join(project_dir, 'reference', 'canon',
+                        'visual-foundation.md')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(body)
+    with open(path, 'rb') as f:
+        before = f.read()
+
+    run_direction(project_dir, coaching='strict', dry_run=False)
+
+    with open(path, 'rb') as f:
+        after = f.read()
+    assert after == before, label
+    out = capsys.readouterr().out
+    assert 'WARNING' in out, label
+    assert 'visual-foundation.md' in out, label
+
+
 def test_direction_strict_makes_no_api_call(project_dir, monkeypatch):
-    from storyforge import api
+    """run_direction's only API path is cmd_illustrate._invoke (which calls
+    api.invoke, not api.invoke_api) — patching api.invoke_api, as the brief's
+    own snippet did, never intercepts anything real: run_direction(..., coaching='full')
+    still reaches the network under that patch. Patch _invoke itself, the
+    same target test_direction_full_writes_the_model_output and
+    test_direction_reports_incomplete_sections already patch, so this test
+    actually fails if the coaching == 'full' gate at the top of the API
+    branch is ever removed or widened."""
+    from storyforge import cmd_illustrate
     from storyforge.cmd_illustrate import run_direction
     _set_medium(project_dir, 'novel')
 
     def _boom(*args, **kwargs):
         raise AssertionError('strict coaching must not call the API')
 
-    monkeypatch.setattr(api, 'invoke_api', _boom)
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
     run_direction(project_dir, coaching='strict', dry_run=False)
