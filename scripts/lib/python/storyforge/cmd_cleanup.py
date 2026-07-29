@@ -28,6 +28,7 @@ from storyforge.illustrations import (
 from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
 from storyforge.parsing import clean_scene_content, extract_single_scene
+from storyforge.visual_state import STATE_COLUMNS
 
 
 # ============================================================================
@@ -116,11 +117,18 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
     # ALWAYS_OPTIONAL_CSV_FILES — most books have no illustrations, so its
     # absence is not a finding.
     'reference/illustration-plan.csv': list(PLAN_COLUMNS),
+    # The visual-state transition log. Registered so a malformed header and
+    # CRLF endings are caught; the cross-referential checks (does `from_scene`
+    # resolve, does `evidence` still appear in the prose) live in
+    # visual_state.prepass. Also always optional — most books track no
+    # changing visual state.
+    'reference/visual-state.csv': list(STATE_COLUMNS),
 }
 
 #: Registered for header checking but never required to exist, in any medium.
 ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
     'reference/illustration-plan.csv',
+    'reference/visual-state.csv',
 }
 
 #: Columns a registered CSV may legally lack — schema additions that older
