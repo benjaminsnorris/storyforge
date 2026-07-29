@@ -109,7 +109,11 @@ def append_cycle(scores_dir: str, cycle: int, project_dir: str) -> int:
     # Write (create with header) or append
     write_header = not os.path.exists(history_path)
     with open(history_path, 'a', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=HISTORY_HEADER, delimiter=DELIMITER)
+        # lineterminator='\n': csv defaults to '\r\n', which trips cleanup's
+        # own `crlf_line_endings` check on working/scores/score-history.csv and
+        # would mix line endings within one file across appends.
+        writer = csv.DictWriter(f, fieldnames=HISTORY_HEADER,
+                                delimiter=DELIMITER, lineterminator='\n')
         if write_header:
             writer.writeheader()
         writer.writerows(new_rows)

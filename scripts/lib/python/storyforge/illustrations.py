@@ -366,10 +366,17 @@ def write_plan(project_dir: str, rows: list[dict[str, str]]) -> str:
         # QUOTE_NONE with no escapechar: the format is unquoted by definition,
         # so a value that still needs escaping after sanitize_cell must raise
         # rather than silently switch the file to RFC-4180 quoting.
+        #
+        # lineterminator='\n' because csv defaults to '\r\n', which turned
+        # every one-field edit into a whole-file diff (LF -> CRLF on all 20
+        # rows, hiding the real change in review) and produced exactly the
+        # state `cleanup`'s own `crlf_line_endings` check flags. Opening with
+        # newline='\n' does NOT fix this — the writer emits the terminator
+        # itself and no translation is applied on write.
         writer = csv.DictWriter(f, fieldnames=fieldnames,
                                 delimiter=DELIMITER, extrasaction='ignore',
                                 quoting=csv.QUOTE_NONE, escapechar=None,
-                                quotechar=None)
+                                quotechar=None, lineterminator='\n')
         writer.writeheader()
         for row in rows:
             writer.writerow({col: sanitize_cell(row.get(col, ''))

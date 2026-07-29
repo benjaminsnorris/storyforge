@@ -335,3 +335,57 @@ class TestMixedLineEndings:
         header, rows = _read_csv(path)
         assert header == ['id', 'score']
         assert rows == [['sc-01', '7'], ['sc-02', '5']]
+
+
+# ============================================================================
+# Writers must EMIT LF (#278 follow-up, prompt item 7)
+#
+# The readers above all tolerate CRLF. The writers were producing it: csv's
+# default lineterminator is '\r\n', so a one-cell edit rewrote every line of
+# the file (a whole-file diff that hides the real change in review) and left
+# the CSV in exactly the state `cleanup`'s own crlf_line_endings check flags.
+#
+# Note that opening the file with newline='\n' does NOT fix this — the csv
+# writer emits the terminator itself and no translation happens on write. The
+# fix is lineterminator='\n' on the writer.
+# ============================================================================
+
+class TestWritersEmitLf:
+
+    def test_illustration_plan_writer(self, project_dir):
+        from storyforge import illustrations as ill
+        row = ill.blank_row('lf-01')
+        row['scene_id'] = 'vigil'
+        ill.write_plan(project_dir, [row, ill.blank_row('lf-02')])
+        with open(ill.plan_path(project_dir), 'rb') as f:
+            assert b'\r' not in f.read()
+
+    def test_elaborate_write_csv(self, tmp_path):
+        from storyforge.elaborate import _write_csv
+        path = str(tmp_path / 'scenes.csv')
+        _write_csv(path, [{'id': 'sc-01', 'title': 'Opening'},
+                          {'id': 'sc-02', 'title': 'Midpoint'}],
+                   ['id', 'title'])
+        with open(path, 'rb') as f:
+            assert b'\r' not in f.read()
+
+    def test_score_history_writer(self, tmp_path):
+        import os
+
+        from storyforge.history import append_cycle
+        scores_dir = tmp_path / 'scores'
+        scores_dir.mkdir()
+        (scores_dir / 'scene-scores.csv').write_text(
+            'id|show_dont_tell|economy_clarity\n'
+            'sc-01|7|6\n'
+            'sc-02|5|8\n')
+        project_dir = str(tmp_path / 'proj')
+        os.makedirs(os.path.join(project_dir, 'working', 'scores'),
+                    exist_ok=True)
+        assert append_cycle(str(scores_dir), 1, project_dir) == 4
+        path = os.path.join(project_dir, 'working', 'scores',
+                            'score-history.csv')
+        with open(path, 'rb') as f:
+            written = f.read()
+        assert written, 'append_cycle wrote no rows — the test proves nothing'
+        assert b'\r' not in written
