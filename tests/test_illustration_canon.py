@@ -596,3 +596,68 @@ def test_normalize_for_comparison_matches_extracted_canon_behavior():
     assert normalize_for_comparison(text) == (
         "Line one.\nLine two.\n\nLine three."
     )
+
+
+def test_mismatch_detail_has_no_newline_or_pipe(project_dir):
+    """Fix round 1: working/cleanup-report.csv (cmd_cleanup._write_report) is
+    unquoted pipe-delimited CSV written one row per '\\n' — a multi-line or
+    pipe-carrying `detail` shatters the row into several malformed ones with
+    no `status` field, exactly the shape skills/cleanup and skills/forge read
+    by column. The anchor text here deliberately carries both a newline and
+    a `|` so a regression that reintroduces either would be caught."""
+    from storyforge.illustrations import validate_plan
+    _set_medium(project_dir, 'novel')
+    _write_canon(
+        project_dir, os.path.join('characters', 'nora.md'),
+        body=CANON_BODY.replace(
+            'Nora, 9 years old, 132 cm, dark brown hair in a short bob, '
+            'grey-green eyes.',
+            'Nora, 9 years old, 132 cm | 52 kg, dark brown hair.',
+        ),
+    )
+    _write_direction(project_dir, """# Illustration art direction
+
+## Continuity anchors
+
+### nora
+
+Nora, 9 years old,
+140 cm | 52 kg, dark brown hair.
+""")
+
+    findings = [f for f in validate_plan(project_dir)
+                if f['kind'] == 'direction_anchor_mismatch']
+
+    assert len(findings) == 1
+    detail = findings[0]['detail']
+    assert '\n' not in detail
+    assert '|' not in detail
+    # Flattened content must still be present and readable, just not as a
+    # literal pipe or physical newline.
+    assert '140 cm' in detail or '132 cm' in detail
+
+
+def test_placeholder_canon_file_is_skipped_not_reported(project_dir):
+    """The skip-don't-report branch also covers a canon file that EXISTS but
+    whose Embeddable block is still placeholder text — a different mechanism
+    than 'no canon file at all' (this one runs through
+    canon.anchor_texts's placeholder filter, which excludes the id from the
+    dict entirely). Both collapse into new.get(canon_id) is None, so the
+    direction document's original text survives unreported, same as
+    mid-hand-edit with no canon file yet."""
+    from storyforge.illustrations import validate_plan
+    _set_medium(project_dir, 'novel')
+    _write_canon(
+        project_dir, os.path.join('characters', 'nora.md'),
+        body=CANON_BODY.replace(
+            'Nora, 9 years old, 132 cm, dark brown hair in a short bob, '
+            'grey-green eyes.',
+            'TODO: describe this character',
+        ),
+    )
+    _write_direction(project_dir)
+
+    findings = [f for f in validate_plan(project_dir)
+                if f['kind'] == 'direction_anchor_mismatch']
+
+    assert findings == []

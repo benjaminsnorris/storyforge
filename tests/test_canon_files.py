@@ -443,7 +443,7 @@ def test_build_cleanup_report_clean_canon_plus_pages_zero_findings(
     canon-embed of the actual Embeddable block text produces zero canon
     findings in the full cleanup report pipeline. Guards against a
     regression in any of the layers: list_page_files, _walk_canon_files,
-    _resolve_canon_path, _embeddable_block_text, _normalize_for_drift."""
+    _resolve_canon_path, _embeddable_block_text, normalize_for_comparison."""
     import shutil
     from storyforge.cmd_cleanup import build_cleanup_report
 
@@ -935,7 +935,7 @@ def test_check_canon_drift_invalid_id_in_page_flagged(tmp_path):
 
 def test_check_canon_drift_normalize_tolerates_indentation(tmp_path):
     """CR2-5: a markdown formatter that re-indents the embed body must
-    not register as drift. _normalize_for_drift now lstrips per line."""
+    not register as drift. normalize_for_comparison now lstrips per line."""
     project = str(tmp_path)
     write_canon(project, 'style-foundation.md', 'style-foundation')
     indented_page = (

@@ -1783,20 +1783,40 @@ def _direction_anchor_mismatches(project_dir: str) -> list[IllustrationFinding]:
         if new_text is None:
             continue
         if normalize_for_comparison(old_text) != normalize_for_comparison(new_text):
+            # cmd_cleanup._write_report emits findings as unquoted
+            # pipe-delimited CSV, one row per newline — the same reason
+            # 'shattered_row' exists as a finding kind for the plan CSV
+            # itself. old_text/new_text are author-written anchor prose and
+            # may contain either character, so both must be flattened to a
+            # single physical line with no '|' before they reach `detail`.
+            old_flat = _csv_safe(old_text)
+            new_flat = _csv_safe(new_text)
             findings.append({
                 'kind': 'direction_anchor_mismatch',
                 'id': canon_id,
                 'file': f'reference/{DIRECTION_FILENAME}',
                 'detail': (
                     f'canon anchor for `{canon_id}` differs from the '
-                    f'### {name} section in reference/{DIRECTION_FILENAME}:\n'
-                    f'  direction doc: {old_text}\n'
-                    f'  canon file:    {new_text}\n'
-                    f'Every illustration already rendered from the old text '
-                    f'is invalidated if this change was unintentional.'
+                    f'### {_csv_safe(name)} section in '
+                    f'reference/{DIRECTION_FILENAME} — direction doc: '
+                    f'"{old_flat}" / canon file: "{new_flat}" — every '
+                    f'illustration already rendered from the old text is '
+                    f'invalidated if this change was unintentional'
                 ),
             })
     return findings
+
+
+def _csv_safe(text: str) -> str:
+    """Collapse *text* onto one physical line with no `|`.
+
+    Finding `detail` strings land in the unquoted pipe-delimited
+    `working/cleanup-report.csv` (`cmd_cleanup._write_report`), one row per
+    newline and one column per `|`. Free-form prose — anchor text here — can
+    contain either, so anything interpolated into a `detail` from prose must
+    pass through this first.
+    """
+    return ' '.join(text.split()).replace('|', '/')
 
 
 # ============================================================================
