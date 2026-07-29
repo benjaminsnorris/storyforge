@@ -1410,6 +1410,7 @@ def generate_publish_manifest(project_dir: str, cover_path: str | None = None,
     if assets:
         manifest['assets'] = assets
     require_cover_asset(manifest)
+    require_asset_count_within_cap(assets)
 
     # Embed dashboard HTML if requested
     if include_dashboard:
@@ -1501,6 +1502,34 @@ def require_cover_asset(manifest: dict) -> None:
         f'production.cover_image in storyforge.yaml at one, then re-run '
         f'publish. (An SVG cover cannot be published — the asset bucket only '
         f'accepts png, jpg, jpeg, and webp.)'
+    )
+
+
+#: Bookshelf's `MAX_ASSETS_PER_REQUEST`. Enforced on the *manifest's* array too,
+#: not just the upload endpoint's request — `publishAssets` runs the declared
+#: assets through the same `validateAssetRequests`.
+MAX_MANIFEST_ASSETS = 200
+
+
+def require_asset_count_within_cap(assets: list) -> None:
+    """Refuse more assets than Bookshelf will accept in one manifest.
+
+    Checked here rather than discovered at step 3. The upload transport chunks
+    correctly above the cap, so without this a 250-asset book uploads every
+    byte and *then* fails on `assets_validate` — the whole transfer wasted.
+
+    Raises:
+        ValueError: If the manifest declares more than MAX_MANIFEST_ASSETS.
+    """
+    if len(assets) <= MAX_MANIFEST_ASSETS:
+        return
+    raise ValueError(
+        f'Refusing to publish: the manifest declares {len(assets)} assets, and '
+        f'Bookshelf accepts at most {MAX_MANIFEST_ASSETS} (the publish route '
+        f'validates the manifest array against the same cap as the upload '
+        f'endpoint). Retire illustrations you no longer ship by setting their '
+        f'plan rows to status=superseded, or split the book. Nothing was '
+        f'uploaded.'
     )
 
 
@@ -1658,7 +1687,9 @@ def _resolve_cover_path(project_dir: str, cover_path: str | None,
     """Resolve a cover image path, auto-detecting if not provided.
 
     Priority: explicit cover_path > production.cover_image YAML field >
-    auto-detect from production/ then manuscript/assets/ (jpg first).
+    auto-detect from production/ then manuscript/assets/, in the order the
+    `extensions` tuple gives (jpg first for the epub/PDF default, png first for
+    the publish asset path).
 
     Args:
         extensions: Which `cover.*` files autodetect will consider. The epub and

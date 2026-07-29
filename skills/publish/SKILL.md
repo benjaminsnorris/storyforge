@@ -156,12 +156,16 @@ Asset-specific failure modes:
 | Failure | Meaning | Fix |
 |---------|---------|-----|
 | refused: assets declared with `none with role "cover"` | The manifest would have cleared the live cover, so nothing was sent | Add a publishable cover, or point `production.cover_image` at one |
+| refused: `declares N assets ... at most 200` | Bookshelf caps the manifest array at 200, so uploading first would waste the whole transfer | Set plan rows you no longer ship to `status=superseded` |
+| `illus_unpublishable_id` from `cleanup` / `validate` | A plan id contains `_`, or is over 128 characters — legal as a marker, rejected as an asset key | Rename the row and its scene marker, using hyphens |
 | `no longer matches its recorded digest` | A file changed after ingest | `storyforge illustrate --ingest <path>` to re-record it |
 | `assets_missing_bytes` | Bookshelf has metadata for bytes that are not in storage | Re-run publish; if it repeats, check the plan's digests with `storyforge cleanup` |
 | `assets_digest_mismatch` | Bookshelf re-hashed the upload and got something else | Re-ingest, then publish again |
 
 None of these leave the live book altered — they all fail before the manifest
-is written.
+is written. A connection that drops mid-upload is reported per file, with the
+list of files to retry; re-running publish re-sends only what did not land,
+because the objects are content-addressed.
 
 ## Step 6: Annotations (Optional)
 

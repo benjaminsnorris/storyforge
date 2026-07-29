@@ -144,10 +144,17 @@ def main(argv=None):
     if manifest.get('dashboard_html'):
         log(f'Dashboard: included ({len(manifest["dashboard_html"]):,} bytes)')
 
-    # Second line of defence behind generate_publish_manifest's own check, so a
-    # hand-edited working/publish-manifest.json cannot destroy a live cover
-    # either. Runs before the dry-run return: an author checking their publish
-    # should see this, not discover it on the real run.
+    # Second line of defence behind generate_publish_manifest's own check.
+    #
+    # It does NOT protect a hand-edited working/publish-manifest.json — that file
+    # is overwritten a few lines above, so an edit to it is discarded by
+    # regeneration, not caught here. What this covers is a manifest that reached
+    # this point without going through the generator's check: a bypassed or
+    # changed generator, which is exactly what the test exercises. Cheap
+    # insurance on the one operation in this command that can destroy live data.
+    #
+    # Runs before the dry-run return: an author checking their publish should see
+    # this, not discover it on the real run.
     from storyforge.assembly import read_asset_sources, require_cover_asset
     assets = manifest.get('assets') or []
     try:
@@ -158,9 +165,10 @@ def main(argv=None):
 
     sources = read_asset_sources(project_dir) if assets else {}
     if assets and not sources:
-        # generate_publish_manifest writes the sidecar in the same pass, so an
-        # empty one means the manifest was hand-carried or hand-edited. Named
-        # now rather than surfacing as an opaque per-digest failure later.
+        # generate_publish_manifest writes the sidecar in the same pass as the
+        # manifest, so an empty one means the sidecar was deleted or the
+        # generator was bypassed. Named now rather than surfacing as an opaque
+        # per-digest failure later.
         log('WARNING: the manifest declares assets but '
             'working/publish-asset-sources.json maps no digests to files. '
             'Re-run publish so the manifest and its source map are generated '
@@ -204,9 +212,12 @@ def main(argv=None):
         try:
             asset_sync = sync_assets(
                 env['BOOKSHELF_URL'], token, manifest['slug'], assets, sources,
-                supabase_url=env['BOOKSHELF_SUPABASE_URL'],
             )
-        except RuntimeError as e:
+        except Exception as e:
+            # Broader than RuntimeError: a socket that drops mid-transfer can
+            # surface as a bare OSError subclass, and a traceback here would
+            # bury the one thing the author needs to know — that nothing was
+            # published and the live book is untouched.
             log(f'Asset sync failed: {e}')
             log('The manifest was not sent — the live book is unchanged.')
             sys.exit(1)
@@ -322,6 +333,11 @@ def _explain_publish_failure(message: str) -> None:
             'than the manifest declared. The file changed between ingest and '
             'publish. Re-run `storyforge illustrate --ingest` to record the '
             'current digest, then publish again.')
+    elif 'assets_validate' in message:
+        log('Bookshelf rejected the assets array itself. The likeliest cause is '
+            'more than 200 assets: the publish route validates the manifest\'s '
+            'array against the same 200 cap as the upload endpoint. Split the '
+            'book or retire illustrations with status=superseded.')
     elif 'assets_legacy_cover' in message:
         log('The manifest sent both a cover asset and the deprecated '
             'cover_base64 field. Regenerate the manifest with the current '

@@ -102,6 +102,24 @@ def marker_for(illus_id: str) -> str:
     return f'![[illus:{illus_id}]]'
 
 
+# What Bookshelf accepts as an asset key, from its `isValidSlug` —
+# `/^[a-z0-9][a-z0-9-]*$/`, max 128 characters.
+#
+# Narrower than `_ID_RE`, which also allows `_` because the marker regex does.
+# So `LF_01` is a legal plan id and a legal marker, and `asset_key` lowercases
+# it into `lf_01`, which the assets endpoint rejects with a 400. That went
+# unnoticed until #284 made assets actually ship; `validate_plan` reports it
+# now, because a publish is a poor place to discover a naming rule.
+ASSET_KEY_RE = re.compile(r'\A[a-z0-9][a-z0-9-]*\Z')
+ASSET_KEY_MAX_LENGTH = 128
+
+
+def _publishable_asset_key(illus_id: str) -> bool:
+    """Whether this id's asset key is one Bookshelf will accept."""
+    key = asset_key(illus_id)
+    return bool(ASSET_KEY_RE.match(key)) and len(key) <= ASSET_KEY_MAX_LENGTH
+
+
 def asset_key(illus_id: str) -> str:
     """Normalize a plan id into its published asset key.
 
@@ -1500,7 +1518,8 @@ def next_to_render(project_dir: str) -> str:
 #: severity_of defaults anything unrecognized to 'error', and its remediation
 #: text in cmd_cleanup would silently fall back to a generic one.
 IllustrationFindingKind = Literal[
-    'duplicate_id', 'invalid_id', 'invalid_status', 'invalid_placement',
+    'duplicate_id', 'invalid_id', 'unpublishable_id', 'invalid_status',
+    'invalid_placement',
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
@@ -1524,7 +1543,8 @@ class IllustrationFinding(_IllustrationFindingRequired, total=False):
 # Findings that make the plan incoherent — the book cannot be published or
 # assembled correctly while they stand, so `validate` fails on them.
 BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
-    'duplicate_id', 'invalid_id', 'invalid_status', 'invalid_placement',
+    'duplicate_id', 'invalid_id', 'unpublishable_id', 'invalid_status',
+    'invalid_placement',
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
 })
@@ -1596,6 +1616,17 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
                              'detail': f'id {rid!r} must start with a letter or digit '
                                        f'and contain only letters, digits, '
                                        f'hyphens, and underscores'})
+        elif not _publishable_asset_key(rid):
+            findings.append({
+                'kind': 'unpublishable_id', 'id': rid,
+                'detail': f'id {rid!r} publishes as the asset key '
+                          f'{asset_key(rid)!r}, which Bookshelf rejects — a key '
+                          f'must start with a lowercase letter or digit and '
+                          f'contain only lowercase letters, digits, and hyphens '
+                          f'(max {ASSET_KEY_MAX_LENGTH} characters). Rename the '
+                          f'row and its scene marker, using hyphens instead of '
+                          f'underscores.',
+            })
 
         status = (row.get('status') or '').strip()
         if status and status not in VALID_PLAN_STATUSES:

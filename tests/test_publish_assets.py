@@ -178,44 +178,28 @@ class TestSignedUploadTarget:
         entry = signed('https://sb.example.com', 'book', 'a' * 64)
         assert bookshelf.signed_upload_target(entry) == entry['url']
 
-    def test_absolute_url_needs_no_supabase_url(self):
+    def test_the_token_rides_in_the_url_it_returns(self):
         """The token in the query string is the whole credential."""
         entry = signed('https://sb.example.com', 'book', 'b' * 64)
-        target = bookshelf.signed_upload_target(entry, supabase_url=None)
-        assert 'token=' in target
+        assert 'token=' in bookshelf.signed_upload_target(entry)
 
-    def test_relative_url_is_rooted_at_the_storage_api(self):
-        """Defensive branch: a path-only url would be relative to /storage/v1."""
+    def test_a_non_absolute_url_is_refused_not_reconstructed(self):
+        """storage-js builds signedUrl as `new URL(this.url + data.url)`, so it
+        cannot come back relative, and route.ts forwards it verbatim.
+
+        A relative url therefore means the contract changed. Rebuilding one from
+        a guessed /storage/v1 prefix would be *less* safe than refusing — a
+        signed upload URL is a bare write capability, and a wrong guess PUTs the
+        bytes somewhere unintended.
+        """
         entry = {'url': '/object/upload/sign/book-assets/b/c.png',
                  'token': 'tok', 'path': 'b/c.png'}
-        target = bookshelf.signed_upload_target(
-            entry, supabase_url='https://sb.example.com/')
-        assert target == (
-            'https://sb.example.com/storage/v1/object/upload/sign/'
-            'book-assets/b/c.png?token=tok')
-
-    def test_relative_url_keeps_a_token_it_already_carries(self):
-        entry = {'url': '/object/upload/sign/book-assets/b/c.png?token=inline',
-                 'token': 'other', 'path': 'b/c.png'}
-        target = bookshelf.signed_upload_target(
-            entry, supabase_url='https://sb.example.com')
-        assert target.endswith('?token=inline')
-
-    def test_relative_url_without_supabase_url_is_an_error(self):
-        entry = {'url': '/object/upload/sign/x.png', 'token': 'tok'}
-        with pytest.raises(RuntimeError, match='relative'):
+        with pytest.raises(RuntimeError, match='not absolute'):
             bookshelf.signed_upload_target(entry)
 
     def test_empty_url_is_an_error(self):
         with pytest.raises(RuntimeError, match='no url'):
             bookshelf.signed_upload_target({'token': 'tok'})
-
-    def test_relative_url_with_no_token_anywhere_is_an_error(self):
-        """A relative form carries no token, so one must come alongside it."""
-        entry = {'url': '/object/upload/sign/book-assets/b/c.png', 'token': ''}
-        with pytest.raises(RuntimeError, match='carries no token'):
-            bookshelf.signed_upload_target(
-                entry, supabase_url='https://sb.example.com')
 
 
 # ============================================================================
@@ -288,6 +272,26 @@ class TestDigestDiff:
         assert sizes == [200, 50]
         assert result['objects'] == 250
         assert result['unchanged'] == 250
+
+    def test_exactly_the_cap_is_one_request(self, server, tmp_path):
+        """200 is the boundary: the server rejects only *above* it.
+
+        250 proves chunking happens; this proves it does not happen a request
+        too early and split a legal declaration in two.
+        """
+        assets, sources = [], {}
+        for i in range(bookshelf.MAX_ASSETS_PER_REQUEST):
+            path, digest = write_image(tmp_path, f'b{i}.png', PNG + b'b%d' % i)
+            assets.append(asset(f'b{i}', digest))
+            sources[digest] = path
+        _AssetHandler.negotiate_queue = [
+            (200, diff_response(server, 'bk', [], unchanged=200))]
+
+        bookshelf.sync_assets(server, 'jwt', 'bk', assets, sources)
+
+        sizes = [len(r['body']['assets'])
+                 for r in _AssetHandler.negotiate_requests]
+        assert sizes == [200]
 
     def test_one_object_per_distinct_digest(self, server, tmp_path):
         """Two keys can share a digest — the same image used twice.
@@ -505,6 +509,73 @@ class TestErrorPaths:
         assert result['bytes_uploaded'] == 0
         assert 'already present' in capsys.readouterr().out
 
+    def test_a_socket_error_mid_transfer_is_wrapped(self, tmp_path):
+        """`urlopen` only wraps request-phase failures.
+
+        `getresponse()` and `resp.read()` raise ConnectionResetError,
+        TimeoutError, or RemoteDisconnected unwrapped — none of them a URLError.
+        This is the likeliest real failure: 8 concurrent PUTs of multi-megabyte
+        images, and a reset while reading one response.
+        """
+        from unittest.mock import patch
+
+        path, _ = write_image(tmp_path, 'one.png')
+        with patch('storyforge.bookshelf.urllib.request.urlopen',
+                   side_effect=ConnectionResetError('Connection reset by peer')):
+            with pytest.raises(RuntimeError, match='broke mid-transfer'):
+                bookshelf.upload_asset_bytes('http://x/y', path, 'png')
+
+    def test_a_socket_error_during_negotiation_is_wrapped(self, server, tmp_path):
+        from unittest.mock import patch
+
+        _, digest = write_image(tmp_path, 'one.png')
+        with patch('storyforge.bookshelf.urllib.request.urlopen',
+                   side_effect=TimeoutError('timed out')):
+            with pytest.raises(RuntimeError,
+                               match='negotiation connection failed'):
+                bookshelf.negotiate_assets(server, 'jwt', 'bk',
+                                           [asset('one', digest)])
+
+    def test_a_socket_error_is_aggregated_not_escaped(self, server, tmp_path,
+                                                     capsys):
+        """Escaping would discard the OTHER uploads' collected failures and
+        reach the author as a traceback instead of a retry list."""
+        from unittest.mock import patch
+
+        one, d1 = write_image(tmp_path, 'one.png')
+        two, d2 = write_image(tmp_path, 'two.png', PNG + b'2')
+        _AssetHandler.negotiate_queue = [
+            (200, diff_response(server, 'bk', [d1, d2]))]
+
+        with patch('storyforge.bookshelf.upload_asset_bytes',
+                   side_effect=ConnectionResetError('Connection reset by peer')):
+            with pytest.raises(RuntimeError,
+                               match=r'2 asset upload\(s\) failed'):
+                bookshelf.sync_assets(server, 'jwt', 'bk',
+                                      [asset('one', d1), asset('two', d2)],
+                                      {d1: one, d2: two})
+
+        out = capsys.readouterr().out
+        assert 'one.png' in out and 'two.png' in out
+        assert 'Connection reset by peer' in out
+
+    def test_an_unforeseen_failure_still_names_its_file(self, server, tmp_path,
+                                                       capsys):
+        """A bare exception may say nothing about which asset it was."""
+        from unittest.mock import patch
+
+        path, digest = write_image(tmp_path, 'one.png')
+        _AssetHandler.negotiate_queue = [
+            (200, diff_response(server, 'bk', [digest]))]
+
+        with patch('storyforge.bookshelf.upload_asset_bytes',
+                   side_effect=MemoryError('out of memory')):
+            with pytest.raises(RuntimeError, match='1 asset upload'):
+                bookshelf.sync_assets(server, 'jwt', 'bk',
+                                      [asset('one', digest)], {digest: path})
+
+        assert 'one.png: out of memory' in capsys.readouterr().out
+
     def test_unmapped_digest_is_refused_with_a_next_step(self, server, tmp_path):
         _, digest = write_image(tmp_path, 'one.png')
         _AssetHandler.negotiate_queue = [
@@ -697,12 +768,14 @@ class TestManifestCoverIntegration:
 
 
 class TestOnDiskManifestGuards:
-    """working/publish-manifest.json is a durable artifact — in some projects a
-    tracked one. cmd_publish reads it back from disk, so the guards there are
-    about what is actually being sent, not about what was just generated.
+    """cmd_publish re-checks the manifest it reads back before sending it.
 
-    Exercised by handing cmd_publish a manifest it did not build, which is the
-    only way that file and the generator can disagree.
+    Not a defence against editing working/publish-manifest.json: that file is
+    regenerated on every run, so an edit is discarded rather than caught. What
+    these cover is a manifest that reached the send path without passing the
+    generator's own check — a bypassed or changed generator — which is what
+    patching generate_publish_manifest simulates. Worth having on the one
+    operation in this command that can destroy live data.
     """
 
     def _hand_written(self, tmp_path, manifest):
@@ -713,7 +786,7 @@ class TestOnDiskManifestGuards:
             json.dump(manifest, f)
         return project, path
 
-    def test_an_edited_manifest_cannot_destroy_the_cover(self, tmp_path, capsys):
+    def test_a_bypassed_generator_cannot_destroy_the_cover(self, tmp_path, capsys):
         from unittest.mock import patch
         from storyforge import cmd_publish
 
@@ -781,3 +854,126 @@ class TestAssetSourcesSidecar:
             manifest = json.load(f)
         sources = read_asset_sources(project)
         assert {a['sha256'] for a in manifest['assets']} <= set(sources)
+
+
+class TestAssetCountCap:
+    """Bookshelf validates the MANIFEST's array against MAX_ASSETS_PER_REQUEST
+    too, not only the upload endpoint's request (`validateManifestAssets` runs
+    the same `validateAssetRequests`).
+
+    So the transport chunking correctly above 200 is not enough: without a
+    pre-check, a 250-asset book uploads every byte and only then fails on
+    `assets_validate`, wasting the whole transfer.
+    """
+
+    def test_at_the_cap_is_allowed(self):
+        from storyforge.assembly import (MAX_MANIFEST_ASSETS,
+                                         require_asset_count_within_cap)
+        assets = [{'key': f'a{i}', 'role': 'illustration'}
+                  for i in range(MAX_MANIFEST_ASSETS)]
+        require_asset_count_within_cap(assets)
+
+    def test_above_the_cap_is_refused_before_uploading(self):
+        from storyforge.assembly import (MAX_MANIFEST_ASSETS,
+                                         require_asset_count_within_cap)
+        assets = [{'key': f'a{i}', 'role': 'illustration'}
+                  for i in range(MAX_MANIFEST_ASSETS + 1)]
+        with pytest.raises(ValueError, match='at most 200'):
+            require_asset_count_within_cap(assets)
+
+    def test_the_refusal_names_the_way_out(self):
+        from storyforge.assembly import require_asset_count_within_cap
+        with pytest.raises(ValueError) as excinfo:
+            require_asset_count_within_cap([{'key': 'a'}] * 201)
+        message = str(excinfo.value)
+        assert 'status=superseded' in message
+        assert 'Nothing was uploaded' in message
+
+    def test_the_cap_matches_the_transport_constant(self):
+        """Two copies of the server's limit would drift."""
+        from storyforge.assembly import MAX_MANIFEST_ASSETS
+        assert MAX_MANIFEST_ASSETS == bookshelf.MAX_ASSETS_PER_REQUEST
+
+
+class TestUnpublishableIds:
+    """`_ID_RE` allows `_` because the marker regex does; Bookshelf's key
+    validator is `/^[a-z0-9][a-z0-9-]*$/` and does not.
+
+    So `LF_01` is a legal plan id, a legal marker, and a 400 from the assets
+    endpoint. Unreachable before #284 made assets actually ship.
+    """
+
+    def _plan_with_id(self, project_dir, illus_id):
+        from illustration_helpers import make_png
+        from storyforge import illustrations as ill
+        art = os.path.join(project_dir, ill.ILLUSTRATIONS_SUBDIR,
+                           f'{illus_id}.png')
+        make_png(art, 8, 8)
+        row = dict.fromkeys(ill.PLAN_COLUMNS, '')
+        row.update(id=illus_id, scene_id='s1', placement='scene_open',
+                   layout='full_page', status='ingested',
+                   sha256=ill.sha256_of(art),
+                   asset_file=ill.default_asset_rel(illus_id))
+        ill.write_plan(project_dir, [row])
+        scene = os.path.join(project_dir, 'scenes', 's1.md')
+        with open(scene, 'w') as f:
+            f.write(f'![[illus:{illus_id}]]\n\nProse.\n')
+
+    def test_an_underscore_id_is_reported_locally(self, tmp_path):
+        from storyforge import illustrations as ill
+        project = TestManifestCoverIntegration()._project(tmp_path)
+        self._plan_with_id(project, 'LF_01')
+
+        kinds = [f['kind'] for f in ill.validate_plan(project)]
+        assert 'unpublishable_id' in kinds
+
+    def test_the_finding_is_blocking(self, tmp_path):
+        """A row that cannot publish is incoherent, like invalid_id."""
+        from storyforge import illustrations as ill
+        assert 'unpublishable_id' in ill.BLOCKING_FINDINGS
+
+    def test_the_finding_names_the_key_and_the_fix(self, tmp_path):
+        from storyforge import illustrations as ill
+        project = TestManifestCoverIntegration()._project(tmp_path)
+        self._plan_with_id(project, 'LF_01')
+
+        finding = next(f for f in ill.validate_plan(project)
+                       if f['kind'] == 'unpublishable_id')
+        assert "'lf_01'" in finding['detail']
+        assert 'hyphens instead of underscores' in finding['detail']
+
+    def test_a_hyphenated_id_is_fine(self, tmp_path):
+        from storyforge import illustrations as ill
+        project = TestManifestCoverIntegration()._project(tmp_path)
+        self._plan_with_id(project, 'LF-01')
+
+        kinds = [f['kind'] for f in ill.validate_plan(project)]
+        assert 'unpublishable_id' not in kinds
+
+    def test_an_overlong_id_is_reported(self, tmp_path):
+        """The server caps a key at 128 characters."""
+        from storyforge import illustrations as ill
+        project = TestManifestCoverIntegration()._project(tmp_path)
+        self._plan_with_id(project, 'a' * 129)
+
+        kinds = [f['kind'] for f in ill.validate_plan(project)]
+        assert 'unpublishable_id' in kinds
+
+    def test_it_does_not_double_report_an_already_invalid_id(self, tmp_path):
+        """An id `_ID_RE` rejects is invalid_id, not both."""
+        from storyforge import illustrations as ill
+        project = TestManifestCoverIntegration()._project(tmp_path)
+        self._plan_with_id(project, 'LF-01')
+        rows = ill.read_plan(project)
+        rows[0]['id'] = '-leading-hyphen'
+        ill.write_plan(project, rows)
+
+        kinds = [f['kind'] for f in ill.validate_plan(project)]
+        assert 'invalid_id' in kinds
+        assert 'unpublishable_id' not in kinds
+
+    def test_cleanup_prefixes_the_kind(self):
+        """Kinds are declared bare; cmd_cleanup adds the illus_ prefix."""
+        from storyforge import illustrations as ill
+        assert not any(k.startswith('illus_')
+                       for k in ill.IllustrationFindingKind.__args__)

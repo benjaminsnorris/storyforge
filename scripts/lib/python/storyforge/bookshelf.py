@@ -46,6 +46,23 @@ COLOR_LABELS = {
 }
 
 
+# Every request in this module ends with three except arms, in this order:
+#
+#   except urllib.error.HTTPError   — the server answered with a status
+#   except urllib.error.URLError    — the connection never got that far
+#   except OSError                  — the response phase broke mid-flight
+#
+# The order is required: HTTPError ⊂ URLError ⊂ OSError.
+#
+# The third arm is not belt-and-braces. `urlopen` only wraps failures it raises
+# during the *request*; `getresponse()` and `resp.read()` raise unwrapped, so a
+# TimeoutError, a ConnectionResetError, or an http.client.RemoteDisconnected
+# comes out as itself — none of them a URLError. Without this arm a socket that
+# drops while reading a response escapes as a traceback, and in `sync_assets` it
+# also discards the other uploads' collected failures, so the author loses the
+# list of files to retry.
+
+
 def check_env() -> dict[str, str]:
     """Validate that all required environment variables are set.
 
@@ -103,6 +120,8 @@ def authenticate(supabase_url: str, supabase_anon_key: str,
         ) from e
     except urllib.error.URLError as e:
         raise RuntimeError(f'Cannot reach Supabase: {e.reason}') from e
+    except OSError as e:
+        raise RuntimeError(f'Supabase auth connection failed: {e}') from e
 
     token = data.get('access_token')
     if not token:
@@ -203,9 +222,13 @@ def negotiate_assets(bookshelf_url: str, token: str, slug: str,
         ) from e
     except urllib.error.URLError as e:
         raise RuntimeError(f'Cannot reach Bookshelf: {e.reason}') from e
+    except OSError as e:
+        raise RuntimeError(
+            f'Bookshelf asset negotiation connection failed: {e}'
+        ) from e
 
 
-def signed_upload_target(entry: Mapping, supabase_url: str | None = None) -> str:
+def signed_upload_target(entry: Mapping) -> str:
     """Absolute PUT target for one entry of the endpoint's ``upload`` map.
 
     This is the one part of the contract that had to be read out of Supabase
@@ -215,8 +238,9 @@ def signed_upload_target(entry: Mapping, supabase_url: str | None = None) -> str
     ``StorageFileApi.createSignedUploadUrl`` (bookshelf's own dependency): it
     returns ``{signedUrl, token, path}`` where ``signedUrl`` is **absolute** —
     ``{supabase_url}/storage/v1/object/upload/sign/{bucket}/{path}?token=<JWT>``
-    — with the token already present as a query parameter. The bookshelf
-    endpoint passes that value through as ``upload[digest].url``.
+    — with the token already present as a query parameter. It is built as
+    ``new URL(this.url + data.url)``, so it cannot come back relative, and
+    ``assets/route.ts`` forwards it verbatim as ``upload[digest].url``.
 
     ``uploadToSignedUrl`` then PUTs to exactly that URL. The token in the query
     string is the whole credential: no ``Authorization`` header is required,
@@ -224,33 +248,22 @@ def signed_upload_target(entry: Mapping, supabase_url: str | None = None) -> str
     redirected at another book's prefix (asserted by bookshelf's
     ``tests/integration/assets-endpoint.test.ts``).
 
-    The relative branch is defensive only. Should a future storage-js return a
-    path-only ``url``, it would be rooted at the storage API — hence the
-    ``/storage/v1`` prefix — and the separately returned ``token`` has to be
-    reattached because a relative form would not carry it.
+    A non-absolute url is therefore a broken contract, not a case to
+    accommodate. Reconstructing one from a guessed ``/storage/v1`` prefix would
+    be *less* safe than refusing: a wrong guess PUTs the bytes somewhere
+    unintended, and a signed upload URL is a bare write capability.
     """
     url = str(entry.get('url') or '')
     if not url:
         raise RuntimeError('Signed upload entry has no url')
-    if url.startswith('http://') or url.startswith('https://'):
-        return url
-
-    if not supabase_url:
+    if not (url.startswith('http://') or url.startswith('https://')):
         raise RuntimeError(
-            f'Signed upload url {url!r} is relative and BOOKSHELF_SUPABASE_URL '
-            f'was not supplied, so it cannot be resolved'
+            f'Signed upload url {url!r} is not absolute — the endpoint contract '
+            f'changed. Do not reconstruct it; check '
+            f'benjaminsnorris/bookshelf src/app/api/books/[slug]/assets/route.ts '
+            f'against createSignedUploadUrl.'
         )
-    absolute = f'{supabase_url.rstrip("/")}/storage/v1/{url.lstrip("/")}'
-    if 'token=' in absolute:
-        return absolute
-    upload_token = str(entry.get('token') or '')
-    if not upload_token:
-        raise RuntimeError(
-            f'Signed upload url {url!r} carries no token and none was returned '
-            f'alongside it'
-        )
-    joiner = '&' if '?' in absolute else '?'
-    return f'{absolute}{joiner}token={urllib.parse.quote(upload_token)}'
+    return url
 
 
 def upload_asset_bytes(target_url: str, local_path: str, extension: str,
@@ -303,6 +316,12 @@ def upload_asset_bytes(target_url: str, local_path: str, extension: str,
     except urllib.error.URLError as e:
         raise RuntimeError(
             f'Signed upload of {local_path} could not reach storage: {e.reason}'
+        ) from e
+    except OSError as e:
+        # The likeliest failure on a real run: 8 concurrent PUTs of multi-megabyte
+        # images, and a connection reset while reading one response.
+        raise RuntimeError(
+            f'Signed upload of {local_path} broke mid-transfer: {e}'
         ) from e
     return len(data)
 
@@ -371,7 +390,6 @@ def _resolve_local_file(digest: str, extension: str,
 def sync_assets(bookshelf_url: str, token: str, slug: str,
                 assets: Sequence[Mapping],
                 sources: Mapping[str, str],
-                supabase_url: str | None = None,
                 concurrency: int = UPLOAD_CONCURRENCY) -> AssetSyncResult:
     """Steps 1 and 2 — negotiate digests, then upload only the missing bytes.
 
@@ -385,8 +403,6 @@ def sync_assets(bookshelf_url: str, token: str, slug: str,
         slug: Book slug.
         assets: The manifest's `assets` array (metadata only).
         sources: Maps each asset's sha256 to an absolute local file path.
-        supabase_url: Only used if the endpoint ever returns a relative signed
-            URL; see signed_upload_target.
         concurrency: Parallel uploads.
 
     Returns:
@@ -435,8 +451,7 @@ def sync_assets(bookshelf_url: str, token: str, slug: str,
                     f'Bookshelf reported digest {digest[:12]}… as missing but '
                     f'returned no signed upload URL for it'
                 )
-            planned.append((digest, local,
-                            signed_upload_target(entry, supabase_url)))
+            planned.append((digest, local, signed_upload_target(entry)))
 
         log(f'Uploading {len(planned)} asset object(s) '
             f'({len(chunk) - len(missing)} already present)...')
@@ -456,8 +471,19 @@ def sync_assets(bookshelf_url: str, token: str, slug: str,
                 digest, local = futures[future]
                 try:
                     written = future.result()
-                except RuntimeError as e:
-                    failures.append(str(e))
+                except Exception as e:
+                    # Broad on purpose. `upload_asset_bytes` wraps what it can
+                    # foresee, but anything it lets through would otherwise
+                    # escape here and take the OTHER uploads' collected failures
+                    # with it — leaving the author a traceback instead of the
+                    # list of files to retry. Re-raised below, so nothing is
+                    # swallowed.
+                    message = str(e)
+                    # An unforeseen exception may say nothing about which file it
+                    # was ('timed out'), whereas the wrapped ones already name it.
+                    if local not in message:
+                        message = f'{local}: {message}'
+                    failures.append(message)
                     continue
                 result['uploaded'] += 1
                 result['bytes_uploaded'] += written
@@ -555,6 +581,8 @@ def publish(bookshelf_url: str, token: str, manifest: dict) -> dict:
         ) from e
     except urllib.error.URLError as e:
         raise RuntimeError(f'Cannot reach Bookshelf: {e.reason}') from e
+    except OSError as e:
+        raise RuntimeError(f'Bookshelf publish connection failed: {e}') from e
 
 
 def _log_manifest_size(manifest: dict, raw_body: bytes) -> None:
@@ -635,3 +663,7 @@ def get_annotations(bookshelf_url: str, token: str, slug: str,
         ) from e
     except urllib.error.URLError as e:
         raise RuntimeError(f'Cannot reach Bookshelf: {e.reason}') from e
+    except OSError as e:
+        raise RuntimeError(
+            f'Bookshelf annotations connection failed: {e}'
+        ) from e
