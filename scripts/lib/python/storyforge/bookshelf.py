@@ -11,13 +11,16 @@ Environment variables:
     BOOKSHELF_SUPABASE_ANON_KEY — Supabase anon/publishable key
 """
 
+import concurrent.futures
 import json
 import os
 import urllib.request
 import urllib.error
 import urllib.parse
+from typing import Iterable, Mapping, Sequence, TypedDict
 
 from storyforge.common import log
+from storyforge.illustrations import normalize_asset_extension, sha256_of
 
 
 # ============================================================================
@@ -41,6 +44,23 @@ COLOR_LABELS = {
     'green': 'Strong Passage',
     'yellow': 'Important',
 }
+
+
+# Every request in this module ends with three except arms, in this order:
+#
+#   except urllib.error.HTTPError   — the server answered with a status
+#   except urllib.error.URLError    — the connection never got that far
+#   except OSError                  — the response phase broke mid-flight
+#
+# The order is required: HTTPError ⊂ URLError ⊂ OSError.
+#
+# The third arm is not belt-and-braces. `urlopen` only wraps failures it raises
+# during the *request*; `getresponse()` and `resp.read()` raise unwrapped, so a
+# TimeoutError, a ConnectionResetError, or an http.client.RemoteDisconnected
+# comes out as itself — none of them a URLError. Without this arm a socket that
+# drops while reading a response escapes as a traceback, and in `sync_assets` it
+# also discards the other uploads' collected failures, so the author loses the
+# list of files to retry.
 
 
 def check_env() -> dict[str, str]:
@@ -100,11 +120,391 @@ def authenticate(supabase_url: str, supabase_anon_key: str,
         ) from e
     except urllib.error.URLError as e:
         raise RuntimeError(f'Cannot reach Supabase: {e.reason}') from e
+    except OSError as e:
+        raise RuntimeError(f'Supabase auth connection failed: {e}') from e
 
     token = data.get('access_token')
     if not token:
         raise RuntimeError('Supabase auth response missing access_token')
     return token
+
+
+# ============================================================================
+# Asset transport — digest negotiation and signed-URL upload
+# ============================================================================
+#
+# Publishing a book with images is a three-step contract
+# (benjaminsnorris/bookshelf#11):
+#
+#   1. POST /api/books/{slug}/assets — declare every asset's metadata, receive
+#      the digests whose bytes are not in the bucket plus a signed upload URL
+#      for each.
+#   2. PUT the bytes to those signed URLs. Keeps image size out of the publish
+#      route's request budget, and unchanged art costs zero bytes on
+#      re-publish because its digest is already present.
+#   3. PUT /api/books/{slug} — the metadata-only manifest.
+#
+# Everything in this section is steps 1 and 2, and it is deliberately
+# **role-generic**: it takes an asset list and a digest -> local-path mapping
+# from its caller and never reads project data itself. The cover, illustrations,
+# and any future asset role all travel the same path, so nothing here branches
+# on `role`.
+
+#: Server-side `MAX_ASSETS_PER_REQUEST`. Requests above this are rejected
+#: outright, so the declaration is chunked.
+MAX_ASSETS_PER_REQUEST = 200
+
+#: Matches the endpoint's `SIGN_CONCURRENCY`. Its `maxDuration` is 30s, so a
+#: serial upload loop over a large book is a plausible timeout, and unbounded
+#: parallelism would open a connection per image.
+UPLOAD_CONCURRENCY = 8
+
+#: The bucket enforces `allowed_mime_types`, so a real Content-Type is
+#: required. Keyed on normalized extensions; `jpg` collapses onto `jpeg`.
+MIME_BY_EXTENSION = {
+    'png': 'image/png',
+    'jpeg': 'image/jpeg',
+    'webp': 'image/webp',
+}
+
+#: What `uploadToSignedUrl` sends by default. Objects are content-addressed, so
+#: the same digest is always the same bytes and re-writing one is pointless.
+_UPLOAD_CACHE_CONTROL = 'max-age=3600'
+
+
+class AssetSyncResult(TypedDict):
+    """Outcome of one asset sync — counted in distinct storage objects."""
+    declared: int       #: assets the caller handed in
+    objects: int        #: distinct (digest, extension) pairs among them
+    uploaded: int       #: objects whose bytes this run wrote
+    unchanged: int      #: objects the bucket already held
+    bytes_uploaded: int
+
+
+def negotiate_assets(bookshelf_url: str, token: str, slug: str,
+                     assets: Sequence[Mapping]) -> dict:
+    """Step 1 — declare assets, learn which digests need bytes.
+
+    Args:
+        bookshelf_url: Deployed bookshelf URL.
+        token: JWT access token from authenticate().
+        slug: Book slug.
+        assets: Asset descriptors (key, role, sha256, extension, ...). At most
+            MAX_ASSETS_PER_REQUEST entries; chunking is sync_assets' job.
+
+    Returns:
+        Response dict: bucket, total, unchanged, missing (list of digests), and
+        upload (digest -> {url, token, path}).
+
+    Raises:
+        RuntimeError: If the endpoint rejects the request or is unreachable.
+    """
+    url = (f'{bookshelf_url.rstrip("/")}/api/books/'
+           f'{urllib.parse.quote(slug)}/assets')
+    body = json.dumps({'assets': list(assets)}).encode()
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {token}',
+    }
+
+    req = urllib.request.Request(url, data=body, headers=headers, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors='replace') if e.fp else ''
+        try:
+            detail = json.loads(detail).get('error', detail)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        raise RuntimeError(
+            f'Bookshelf asset negotiation failed (HTTP {e.code}): {detail}'
+        ) from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f'Cannot reach Bookshelf: {e.reason}') from e
+    except OSError as e:
+        raise RuntimeError(
+            f'Bookshelf asset negotiation connection failed: {e}'
+        ) from e
+
+
+def signed_upload_target(entry: Mapping) -> str:
+    """Absolute PUT target for one entry of the endpoint's ``upload`` map.
+
+    This is the one part of the contract that had to be read out of Supabase
+    rather than out of bookshelf, so it lives in a single function.
+
+    Verified against ``@supabase/storage-js``
+    ``StorageFileApi.createSignedUploadUrl`` (bookshelf's own dependency): it
+    returns ``{signedUrl, token, path}`` where ``signedUrl`` is **absolute** —
+    ``{supabase_url}/storage/v1/object/upload/sign/{bucket}/{path}?token=<JWT>``
+    — with the token already present as a query parameter. It is built as
+    ``new URL(this.url + data.url)``, so it cannot come back relative, and
+    ``assets/route.ts`` forwards it verbatim as ``upload[digest].url``.
+
+    ``uploadToSignedUrl`` then PUTs to exactly that URL. The token in the query
+    string is the whole credential: no ``Authorization`` header is required,
+    and the token is bound to the path the server signed, so it cannot be
+    redirected at another book's prefix (asserted by bookshelf's
+    ``tests/integration/assets-endpoint.test.ts``).
+
+    A non-absolute url is therefore a broken contract, not a case to
+    accommodate. Reconstructing one from a guessed ``/storage/v1`` prefix would
+    be *less* safe than refusing: a wrong guess PUTs the bytes somewhere
+    unintended, and a signed upload URL is a bare write capability.
+    """
+    url = str(entry.get('url') or '')
+    if not url:
+        raise RuntimeError('Signed upload entry has no url')
+    if not (url.startswith('http://') or url.startswith('https://')):
+        raise RuntimeError(
+            f'Signed upload url {url!r} is not absolute — the endpoint contract '
+            f'changed. Do not reconstruct it; check '
+            f'benjaminsnorris/bookshelf src/app/api/books/[slug]/assets/route.ts '
+            f'against createSignedUploadUrl.'
+        )
+    return url
+
+
+def upload_asset_bytes(target_url: str, local_path: str, extension: str,
+                       timeout: int = 300) -> int:
+    """PUT one asset's bytes to a signed upload URL. Returns bytes written.
+
+    Raises:
+        RuntimeError: If the file cannot be read or storage rejects the write.
+    """
+    mime = MIME_BY_EXTENSION.get(normalize_asset_extension(extension))
+    if not mime:
+        raise RuntimeError(
+            f'{local_path}: extension {extension!r} is not one of '
+            f'{", ".join(sorted(MIME_BY_EXTENSION))} — the storage bucket '
+            f'would reject it'
+        )
+    try:
+        with open(local_path, 'rb') as f:
+            data = f.read()
+    except OSError as e:
+        raise RuntimeError(f'Cannot read {local_path}: {e}') from e
+
+    headers = {
+        'Content-Type': mime,
+        'cache-control': _UPLOAD_CACHE_CONTROL,
+        # Mirrors uploadToSignedUrl's default. An object that already exists is
+        # the same bytes by construction, so overwriting has nothing to gain.
+        'x-upsert': 'false',
+    }
+    req = urllib.request.Request(target_url, data=data, headers=headers,
+                                method='PUT')
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors='replace') if e.fp else ''
+        if e.code == 409:
+            # Content-addressed: a name collision means these exact bytes are
+            # already there. Report it rather than swallowing it — a 409 also
+            # means the digest diff and the bucket disagreed.
+            log(f'WARNING: {os.path.basename(local_path)} was already present '
+                f'at its content-addressed path (HTTP 409); bytes not '
+                f're-sent. Nothing is lost — the object is identical by '
+                f'construction — but the digest diff and the bucket '
+                f'disagreed about it.')
+            return 0
+        raise RuntimeError(
+            f'Signed upload of {local_path} failed (HTTP {e.code}): {detail}'
+        ) from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(
+            f'Signed upload of {local_path} could not reach storage: {e.reason}'
+        ) from e
+    except OSError as e:
+        # The likeliest failure on a real run: 8 concurrent PUTs of multi-megabyte
+        # images, and a connection reset while reading one response.
+        raise RuntimeError(
+            f'Signed upload of {local_path} broke mid-transfer: {e}'
+        ) from e
+    return len(data)
+
+
+def _distinct_objects(assets: Iterable[Mapping]) -> list[dict]:
+    """One declaration per distinct storage object.
+
+    Two assets can legitimately share a digest — the same image used twice —
+    and the server dedupes to ``{digest}.{extension}`` before minting upload
+    URLs. Deduping on the same unit here keeps the declaration under
+    MAX_ASSETS_PER_REQUEST for its real cost, and means a digest spanning two
+    chunks cannot be uploaded twice. The authoritative asset list is the
+    manifest's, sent in step 3; this request is only a digest diff.
+    """
+    seen: set[tuple[str, str]] = set()
+    objects: list[dict] = []
+    for asset in assets:
+        digest = str(asset.get('sha256') or '')
+        extension = normalize_asset_extension(str(asset.get('extension') or ''))
+        identity = (digest, extension)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        # Only the fields the digest-diff endpoint validates. `role` is passed
+        # through untouched and never inspected.
+        objects.append({
+            'key': asset.get('key'),
+            'role': asset.get('role'),
+            'sha256': digest,
+            'extension': extension,
+        })
+    return objects
+
+
+def _resolve_local_file(digest: str, extension: str,
+                        sources: Mapping[str, str]) -> str:
+    """Local file holding `digest`, verified to actually hash to it."""
+    local = sources.get(digest)
+    if not local:
+        raise RuntimeError(
+            f'Bookshelf needs the bytes for digest {digest[:12]}… '
+            f'({extension}) but no local file was supplied for it. '
+            f'Re-run `storyforge illustrate --ingest` (or regenerate the '
+            f'publish manifest) so the digest maps to a file on disk.'
+        )
+    if not os.path.isfile(local):
+        raise RuntimeError(
+            f'Declared asset file is missing: {local} '
+            f'(digest {digest[:12]}…). Re-ingest it, or set its plan row to '
+            f'status=superseded so it is not published.'
+        )
+    try:
+        actual = sha256_of(local)
+    except OSError as e:
+        raise RuntimeError(f'Cannot read declared asset file {local}: {e}') from e
+    if actual != digest:
+        raise RuntimeError(
+            f'{local} no longer matches its recorded digest: manifest claims '
+            f'{digest[:12]}…, the file on disk hashes to {actual[:12]}…. '
+            f'The file changed after ingest — re-run '
+            f'`storyforge illustrate --ingest` to record the new digest.'
+        )
+    return local
+
+
+def sync_assets(bookshelf_url: str, token: str, slug: str,
+                assets: Sequence[Mapping],
+                sources: Mapping[str, str],
+                concurrency: int = UPLOAD_CONCURRENCY) -> AssetSyncResult:
+    """Steps 1 and 2 — negotiate digests, then upload only the missing bytes.
+
+    Role-generic by design. `assets` and `sources` both come from the caller,
+    which owns resolving a digest to a file; nothing here reads project data or
+    branches on an asset's role, so a new role needs no change in this module.
+
+    Args:
+        bookshelf_url: Deployed bookshelf URL.
+        token: JWT access token from authenticate().
+        slug: Book slug.
+        assets: The manifest's `assets` array (metadata only).
+        sources: Maps each asset's sha256 to an absolute local file path.
+        concurrency: Parallel uploads.
+
+    Returns:
+        AssetSyncResult with per-object counts.
+
+    Raises:
+        RuntimeError: On negotiation failure, a missing or drifted local file,
+            or a rejected upload. Never returns partial success silently.
+    """
+    objects = _distinct_objects(assets)
+    result: AssetSyncResult = {
+        'declared': len(assets),
+        'objects': len(objects),
+        'uploaded': 0,
+        'unchanged': 0,
+        'bytes_uploaded': 0,
+    }
+    if not objects:
+        return result
+
+    extension_by_digest = {o['sha256']: o['extension'] for o in objects}
+
+    # Chunked because the endpoint caps a request at MAX_ASSETS_PER_REQUEST.
+    # Each chunk's bytes are uploaded before the next chunk is declared, so a
+    # later chunk sees earlier uploads as already present.
+    for start in range(0, len(objects), MAX_ASSETS_PER_REQUEST):
+        chunk = objects[start:start + MAX_ASSETS_PER_REQUEST]
+        response = negotiate_assets(bookshelf_url, token, slug, chunk)
+
+        upload = response.get('upload') or {}
+        missing = list(response.get('missing') or [])
+        result['unchanged'] += int(response.get('unchanged') or 0)
+
+        if not missing:
+            continue
+
+        # Resolve every file before writing any bytes, so an unreadable or
+        # drifted asset fails the publish before it half-uploads a book.
+        planned: list[tuple[str, str, str]] = []
+        for digest in missing:
+            extension = extension_by_digest.get(digest, '')
+            local = _resolve_local_file(digest, extension, sources)
+            entry = upload.get(digest)
+            if not entry:
+                raise RuntimeError(
+                    f'Bookshelf reported digest {digest[:12]}… as missing but '
+                    f'returned no signed upload URL for it'
+                )
+            planned.append((digest, local, signed_upload_target(entry)))
+
+        log(f'Uploading {len(planned)} asset object(s) '
+            f'({len(chunk) - len(missing)} already present)...')
+
+        # Collected rather than raised on the first failure, so the author sees
+        # every broken file in one run instead of fixing them one publish at a
+        # time.
+        failures: list[str] = []
+        workers = max(1, min(concurrency, len(planned)))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(upload_asset_bytes, target, local,
+                            extension_by_digest.get(digest, '')): (digest, local)
+                for digest, local, target in planned
+            }
+            for future in concurrent.futures.as_completed(futures):
+                digest, local = futures[future]
+                try:
+                    written = future.result()
+                except Exception as e:
+                    # Broad on purpose. `upload_asset_bytes` wraps what it can
+                    # foresee, but anything it lets through would otherwise
+                    # escape here and take the OTHER uploads' collected failures
+                    # with it — leaving the author a traceback instead of the
+                    # list of files to retry. Re-raised below, so nothing is
+                    # swallowed.
+                    message = str(e)
+                    # An unforeseen exception may say nothing about which file it
+                    # was ('timed out'), whereas the wrapped ones already name it.
+                    if local not in message:
+                        message = f'{local}: {message}'
+                    failures.append(message)
+                    continue
+                result['uploaded'] += 1
+                result['bytes_uploaded'] += written
+                # written == 0 means the object was already there (a 409, which
+                # logged its own warning) — saying "uploaded 0 bytes" would read
+                # as a successful transfer of nothing.
+                if written:
+                    log(f'  uploaded {os.path.basename(local)} '
+                        f'({written:,} bytes)')
+
+        if failures:
+            for message in failures:
+                log(f'ERROR: {message}')
+            raise RuntimeError(
+                f'{len(failures)} asset upload(s) failed; the manifest was '
+                f'not sent. Fix the files above and re-run publish — assets '
+                f'that did upload are content-addressed and will not be '
+                f're-sent.'
+            )
+
+    return result
 
 
 # ============================================================================
@@ -181,12 +581,16 @@ def publish(bookshelf_url: str, token: str, manifest: dict) -> dict:
         ) from e
     except urllib.error.URLError as e:
         raise RuntimeError(f'Cannot reach Bookshelf: {e.reason}') from e
+    except OSError as e:
+        raise RuntimeError(f'Bookshelf publish connection failed: {e}') from e
 
 
 def _log_manifest_size(manifest: dict, raw_body: bytes) -> None:
     """Log a breakdown of manifest component sizes."""
     parts = []
-    for key in ('dashboard_html', 'dashboard_data', 'cover_base64'):
+    # Images are not in the manifest at all — they travel as bytes via
+    # sync_assets, and only their metadata rides along in `assets`.
+    for key in ('dashboard_html', 'dashboard_data'):
         val = manifest.get(key)
         if val:
             size = len(json.dumps(val, ensure_ascii=False).encode())
@@ -259,3 +663,7 @@ def get_annotations(bookshelf_url: str, token: str, slug: str,
         ) from e
     except urllib.error.URLError as e:
         raise RuntimeError(f'Cannot reach Bookshelf: {e.reason}') from e
+    except OSError as e:
+        raise RuntimeError(
+            f'Bookshelf annotations connection failed: {e}'
+        ) from e

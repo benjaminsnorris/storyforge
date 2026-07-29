@@ -2,6 +2,7 @@
 import gzip
 import json
 import os
+import socketserver
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 from unittest.mock import patch
@@ -71,12 +72,27 @@ class _MockHandler(BaseHTTPRequestHandler):
         pass  # suppress request logging
 
 
+class _QuietHTTPServer(HTTPServer):
+    """HTTPServer without the reverse-DNS lookup it does on bind.
+
+    `socket.getfqdn` blocks for 35 seconds on a machine whose resolver cannot
+    answer for a loopback address — measured, and cached after the first call,
+    so it read as a slow first test rather than as a DNS problem. `server_name`
+    is never used here.
+    """
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 @pytest.fixture
 def mock_server():
     """Start a local HTTP server for testing API calls."""
-    server = HTTPServer(('127.0.0.1', 0), _MockHandler)
+    server = _QuietHTTPServer(('127.0.0.1', 0), _MockHandler)
     port = server.server_address[1]
-    thread = Thread(target=server.serve_forever, daemon=True)
+    thread = Thread(target=server.serve_forever,
+                    kwargs={'poll_interval': 0.02}, daemon=True)
     thread.start()
     yield f'http://127.0.0.1:{port}'
     server.shutdown()
@@ -271,3 +287,67 @@ class TestGetAnnotations:
 
         with pytest.raises(RuntimeError, match='404'):
             get_annotations(mock_server, 'token', 'nonexistent')
+
+
+# ============================================================================
+# Socket errors in the response phase
+# ============================================================================
+
+class TestResponsePhaseSocketErrors:
+    """Every request in the module needs an OSError arm, not just URLError.
+
+    `urlopen` wraps only what it raises during the request. `getresponse()` and
+    `resp.read()` raise TimeoutError, ConnectionResetError, and
+    http.client.RemoteDisconnected unwrapped, and none of those is a URLError —
+    so without the third arm they escape as tracebacks.
+
+    Pinned per function rather than trusted: an editing slip while adding these
+    arms gave one function the wrong message and left another with no arm at
+    all, and nothing failed.
+    """
+
+    def test_authenticate_wraps_a_reset(self):
+        from storyforge.bookshelf import authenticate
+        with patch('storyforge.bookshelf.urllib.request.urlopen',
+                   side_effect=ConnectionResetError('reset by peer')):
+            with pytest.raises(RuntimeError, match='auth connection failed'):
+                authenticate('https://sb.test', 'key', 'a@b.c', 'pw')
+
+    def test_publish_wraps_a_timeout(self):
+        from storyforge.bookshelf import publish
+        with patch('storyforge.bookshelf.urllib.request.urlopen',
+                   side_effect=TimeoutError('timed out')):
+            with pytest.raises(RuntimeError, match='publish connection failed'):
+                publish('https://bs.test', 'token', {'slug': 'bk'})
+
+    def test_get_annotations_wraps_a_disconnect(self):
+        import http.client
+        from storyforge.bookshelf import get_annotations
+        with patch('storyforge.bookshelf.urllib.request.urlopen',
+                   side_effect=http.client.RemoteDisconnected('closed')):
+            with pytest.raises(RuntimeError,
+                               match='annotations connection failed'):
+                get_annotations('https://bs.test', 'token', 'bk')
+
+    def test_each_message_names_its_own_operation(self):
+        """A shared message would send the author to the wrong place."""
+        import http.client
+        from storyforge import bookshelf
+
+        cases = [
+            (lambda: bookshelf.authenticate('https://s', 'k', 'a@b.c', 'p'),
+             'auth'),
+            (lambda: bookshelf.negotiate_assets('https://b', 't', 'bk', []),
+             'negotiation'),
+            (lambda: bookshelf.publish('https://b', 't', {'slug': 'bk'}),
+             'publish'),
+            (lambda: bookshelf.get_annotations('https://b', 't', 'bk'),
+             'annotations'),
+        ]
+        for call, expected in cases:
+            with patch('storyforge.bookshelf.urllib.request.urlopen',
+                       side_effect=http.client.RemoteDisconnected('closed')):
+                with pytest.raises(RuntimeError) as excinfo:
+                    call()
+            assert expected in str(excinfo.value), (
+                f'expected {expected!r} in {excinfo.value}')

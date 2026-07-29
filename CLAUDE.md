@@ -475,6 +475,20 @@ A revision pass *does* see scene text, and a model has no reason to reproduce a 
 
 **Bookshelf side:** benjaminsnorris/bookshelf#11 (content-addressed `book_assets` + digest-diff upload; the cover migrates onto it) and #12 (reading experience). The `assets` / `illustrations` manifest shape is the interface between the repos — keep them in sync.
 
+**Publishing image bytes** (#284) is a three-step contract, and Storyforge long implemented only the third — an illustrated book failed at `assets_missing_bytes` before chapters were written:
+
+1. `POST /api/books/{slug}/assets` — declare every asset's digest; receive the ones whose bytes are missing plus a signed upload URL each.
+2. `PUT` those bytes to the signed URLs. Keeps image size out of the publish route's budget, and unchanged art costs zero bytes on re-publish.
+3. `PUT /api/books/{slug}` — the metadata-only manifest.
+
+Steps 1 and 2 live in `bookshelf.py` (`negotiate_assets`, `signed_upload_target`, `upload_asset_bytes`, `sync_assets`) and are **role-generic on purpose**: `sync_assets` takes the asset list and a digest→local-path map *from its caller* and never reads `illustration-plan.csv` or branches on `role`. `cmd_publish` owns resolving digests to files; `assembly.generate_publish_manifest` writes that map to `working/publish-asset-sources.json` from the same pass that computed the digests, so uploaded bytes always match the declared digest. Chunk at `MAX_ASSETS_PER_REQUEST` (200); upload concurrency 8, matching the endpoint's `SIGN_CONCURRENCY` against a 30s `maxDuration`.
+
+The **signed-URL call shape** is the one part read out of Supabase rather than bookshelf: `createSignedUploadUrl` returns an **absolute** `signedUrl` with the token already in the query string, and that token — not the caller's JWT — is the whole credential. `signed_upload_target` isolates it; do not inline that call shape anywhere else.
+
+**Assets must never ship without a cover.** Bookshelf derives `books.cover_image_url` from the `role: 'cover'` asset and treats a manifest declaring *any* assets as authoritative about the cover — so an assets array with no cover entry nulls the column and **publishing illustrations deletes the live book's cover**. `assembly.require_cover_asset` refuses that manifest; it is a refusal, not a warning, because the loss is silent on the reader side. `cmd_publish` re-checks the manifest it reads back — not against a hand-edit of `working/publish-manifest.json`, which regeneration overwrites, but against a bypassed generator. An empty `assets: []` is never emitted either — `Boolean([])` is true in JS, so the server would read it as a removal.
+
+The cover is a **second source path into the same array**, not a plan row: resolved explicit path → `production.cover_image` → autodetect `production/` then `manuscript/assets/`, restricted to the extensions the bucket accepts. The YAML field beats autodetect because a project can hold a `production/cover.svg` compositing source next to the rendered PNG that ships. `cover_base64` is retired; `--cover` is a deprecated no-op and `--no-cover` is the escape hatch for a book with no assets. Extensions normalize `jpg`→`jpeg` on this side too — the storage path is `{digest}.{extension}`, so two spellings would give one image two paths.
+
 ## PR Review Workflow — MANDATORY
 
 When the user asks for "the 5-agent review" or after creating a PR, run **all five** specialized review agents **in parallel** (single message, multiple `Agent` tool calls). The five agents are:

@@ -439,6 +439,86 @@ plan row stays valid in-flight state and is not a finding, unchanged from today.
 Fixture work: `tests/fixtures/test-project` (a novel project) gains `reference/canon/` files,
 a `visual-state.csv`, and two illustration rows carrying `state_override` and `register`.
 
+## Robustness requirements found in first real use
+
+Phase 1 shipped and was exercised against a real 20-illustration book. Five things the
+design did not anticipate. These are **authoring-robustness requirements on the skill**, not
+migration mechanics — each one bites an author working normally, not just one converting an
+old project.
+
+### A canon file's name is constrained by its registry, and nothing says so up front
+
+`canon_missing_registry_entry` matches the canon **filename stem** against the registry `id`
+column, so `characters/keeper.md` is required when `characters.csv` says `keeper|Ember`, even
+though the author thinks of that character as "Ember." Authors do not know this until a
+finding tells them, and the finding arrives after the file is written.
+
+**Requirement:** `--direction` derives entity canon ids from the registries, which is correct
+and must stay. But a hand-added canon file must fail fast and legibly. Add a
+`canon_id_not_in_registry` check that names the expected filename, and have the skill state
+the constraint in Mode: Direct — the canon file is named for the registry id, not the
+character's name.
+
+### One anchor may legitimately describe two coupled entities
+
+The real book had a single anchor covering the village *and* the Great Lamp at its center —
+they are one visual subject, and describing them apart is artificial. The canon model is one
+entity per file with a registry row, so the anchor had to be split.
+
+**Requirement:** don't force the split silently. Splitting is defensible — each entity gets
+its own row, `Related canon` links them, and `canon_refs` names both — but the *skill* must
+say so, and `--prompts` must send coupled anchors together and adjacently so a model reads
+them as one subject. A design decision worth recording rather than leaving to whoever hits it
+next: **coupled entities stay separate files linked through `Related canon`**, because a joint
+file would have no single registry row and could not be referenced independently by an
+illustration that shows only one of them.
+
+### Fresh entity stubs generate warning-severity noise proportional to cast size
+
+A 14-file canon tree produced 28 `canon_missing_key` warnings — `appears_in` and
+`first_appearance`, two per file — and `build_cleanup_report` counts every non-`info` finding
+as an action item. That is the documented first step of the illustration flow filling the
+cleanup report with work the author cannot usefully do yet, because neither field is knowable
+before the plan exists.
+
+**Requirement:** `appears_in` and `first_appearance` are `info` severity on an entity canon
+file whose Embeddable block is populated but which no plan row references yet. Better still,
+have `--plan` and `--prompts` **populate** them from `canon_refs` — the plan is the authority
+on which illustrations feature an entity, and `render_order` already derives `first_appearance`
+in effect when it computes `locks`. Deriving beats nagging.
+
+### Findings must name their file
+
+The canon findings printed 28 identical `missing required frontmatter key: appears_in` lines
+with no filename. The `file` field is in the report CSV, but the console output is what an
+author reads. **Requirement:** every canon finding's console line names its file.
+
+### The direction-document safety net is nearly spent
+
+`direction_anchor_mismatch` compares a slugified `### Name` heading against canon ids, so it
+verifies only anchors whose display name already slugifies to its registry id — 7 of 10 on the
+real book, skipping exactly the three that had to be renamed. The mechanism works (perturbing a
+covered anchor fires the finding); its coverage is structurally thin precisely where risk is
+highest.
+
+Since there is no migration code and one project has now converted by hand, **this check
+should be retired** rather than deepened. Keep it for one release, then delete it along with
+`read_direction`, `find_section`, `direction_path`, `DIRECTION_SECTIONS`, and `ANCHORS_SECTION`
+— it is the only remaining consumer of all five.
+
+## Forward compatibility for asset transport
+
+`storyforge publish` cannot upload illustration bytes at all (issue #284), which is being
+fixed before Phases 2 and 3. Two constraints so that work does not have to be redone:
+
+- **Asset transport is role-generic, not illustration-shaped.** The client function takes an
+  asset list and a digest→local-path mapping supplied by its caller; it must not read
+  `illustration-plan.csv` itself. The cover already needs a second source path into the same
+  array, and Phase 3's packet will want to publish reference images the same way.
+- **`ManifestAsset.role` widens to a Literal that can grow.** Today `illustration`; the cover
+  fix adds `cover`. Phase 3 may add a packet or reference role. Keep the digest-diff logic
+  indifferent to the role's value.
+
 ## Out of scope
 
 - **GN convergence** — adopting the state matrix, contradiction audit, per-page acceptance

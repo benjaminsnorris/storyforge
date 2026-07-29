@@ -22,7 +22,17 @@ Read the following files to assess readiness:
 
 Check for optional artifacts:
 - `working/dashboard.html` — manuscript visualization dashboard
-- Cover image at `production/cover.*` or `manuscript/assets/cover.*`
+- `reference/illustration-plan.csv` — interior illustrations, if the book has any
+
+And one that is **not** optional once the book has any images:
+- Cover image at `production/cover.png` / `.jpg` / `.webp`, or the same under
+  `manuscript/assets/`, or wherever `production.cover_image` in
+  `storyforge.yaml` points.
+
+An SVG cover cannot be published: the asset bucket accepts png, jpg, jpeg, and
+webp only. A project can hold `production/cover.svg` as a compositing source
+alongside the rendered PNG that actually ships — point `production.cover_image`
+at the PNG.
 
 ## Step 2: Check Environment
 
@@ -67,15 +77,32 @@ Delegate to the `storyforge publish` command. Always offer two options:
 
 | Flag | Effect |
 |------|--------|
-| `--cover` | Include the cover image (base64-encoded) in the publish |
+| `--no-cover` | Omit the cover asset. Only valid for a book with no other assets |
+| `--cover` | Deprecated no-op — kept so old invocations still run |
 | `--no-dashboard` | Skip dashboard inclusion |
 | `--skip-visualize` | Use existing dashboard.html instead of regenerating |
 | `--annotations` | Fetch and display reader annotations after publishing |
-| `--dry-run` | Generate manifest without actually publishing |
+| `--dry-run` | Report what would publish and upload, and upload nothing |
 
-Default behavior (no flags): publish content + dashboard, no cover.
+Default behavior (no flags): publish content, dashboard, cover, and any
+ingested illustrations.
 
-Include `--cover` only if the author explicitly asks to publish the cover.
+### The cover is not opt-in
+
+Earlier guidance said to pass `--cover` only when the author asked for it. That
+is now wrong, and `--cover` does nothing.
+
+Bookshelf derives the book's cover image from the `role: 'cover'` entry in the
+manifest's `assets` array, and it reads a manifest that declares *any* assets as
+an authoritative statement about the cover. So a manifest with illustrations and
+no cover entry sets `cover_image_url` to null — **publishing illustrations would
+delete the live book's cover.** The cover therefore rides every publish as an
+ordinary content-addressed asset, and a manifest that declares assets without
+one is refused before anything is sent. Never suggest working around that
+refusal; fix the cover.
+
+`--no-cover` exists only for a book with no images at all, where a manifest
+declares no assets and so says nothing about the cover.
 
 If running here (Option A):
 
@@ -85,13 +112,25 @@ cd <project_dir> && <plugin_path>/storyforge publish --skip-visualize
 
 Use `--skip-visualize` when running here because you already regenerated the dashboard in Step 3.
 
-If the author wants the cover too:
-
-```bash
-cd <project_dir> && <plugin_path>/storyforge publish --skip-visualize --cover
-```
-
 Wait for the author's choice. If Option B, provide the full command and end.
+
+## Step 4b: What the Asset Step Does
+
+Images never travel inside the manifest. Publishing is three steps:
+
+1. **Declare** — every asset's digest goes to `POST /api/books/<slug>/assets`,
+   which replies with the digests whose bytes are not already in storage.
+2. **Upload** — only those bytes are PUT to signed upload URLs.
+3. **Publish** — the metadata-only manifest goes to `PUT /api/books/<slug>`.
+
+So a re-publish with unchanged art uploads **zero bytes**, and a first publish
+of an illustrated book uploads each image exactly once. Assets are synced
+*before* the manifest: the publish route refuses a manifest whose declared bytes
+are not in storage, and it refuses it before chapters are written, so a book
+blocked at this step is intact rather than half-published.
+
+`--dry-run` performs no negotiation and no upload. It checks every declared
+asset against its local file and reports which ones would block the publish.
 
 ## Step 5: Report Results
 
@@ -99,16 +138,34 @@ The publish command reports:
 - Chapters and scenes published
 - Word count
 - Dashboard inclusion status
-- Cover upload status
+- Assets: how many were declared, uploaded, and already present, plus bytes
+  transferred
 - Highlight preservation stats (unchanged, re-anchored, orphaned)
 
-Relay this information to the author.
+Relay this information to the author. On a second immediate publish, expect
+`0 uploaded` — anything else means a file changed.
 
 If the publish fails, show the error. Common issues:
 - **400**: Invalid manifest — check for missing fields or stale chapter map
 - **401**: Auth failed — check environment variables
 - **403**: User is not an admin — verify the Supabase user has admin role
 - **500**: Server error — the response includes a `phase` field showing where it failed
+
+Asset-specific failure modes:
+
+| Failure | Meaning | Fix |
+|---------|---------|-----|
+| refused: assets declared with `none with role "cover"` | The manifest would have cleared the live cover, so nothing was sent | Add a publishable cover, or point `production.cover_image` at one |
+| refused: `declares N assets ... at most 200` | Bookshelf caps the manifest array at 200, so uploading first would waste the whole transfer | Set plan rows you no longer ship to `status=superseded` |
+| `illus_unpublishable_id` from `cleanup` / `validate` | A plan id contains `_`, or is over 128 characters — legal as a marker, rejected as an asset key | Rename the row and its scene marker, using hyphens |
+| `no longer matches its recorded digest` | A file changed after ingest | `storyforge illustrate --ingest <path>` to re-record it |
+| `assets_missing_bytes` | Bookshelf has metadata for bytes that are not in storage | Re-run publish; if it repeats, check the plan's digests with `storyforge cleanup` |
+| `assets_digest_mismatch` | Bookshelf re-hashed the upload and got something else | Re-ingest, then publish again |
+
+None of these leave the live book altered — they all fail before the manifest
+is written. A connection that drops mid-upload is reported per file, with the
+list of files to retry; re-running publish re-sends only what did not land,
+because the objects are content-addressed.
 
 ## Step 6: Annotations (Optional)
 

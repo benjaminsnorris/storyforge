@@ -102,6 +102,24 @@ def marker_for(illus_id: str) -> str:
     return f'![[illus:{illus_id}]]'
 
 
+# What Bookshelf accepts as an asset key, from its `isValidSlug` —
+# `/^[a-z0-9][a-z0-9-]*$/`, max 128 characters.
+#
+# Narrower than `_ID_RE`, which also allows `_` because the marker regex does.
+# So `LF_01` is a legal plan id and a legal marker, and `asset_key` lowercases
+# it into `lf_01`, which the assets endpoint rejects with a 400. That went
+# unnoticed until #284 made assets actually ship; `validate_plan` reports it
+# now, because a publish is a poor place to discover a naming rule.
+ASSET_KEY_RE = re.compile(r'\A[a-z0-9][a-z0-9-]*\Z')
+ASSET_KEY_MAX_LENGTH = 128
+
+
+def _publishable_asset_key(illus_id: str) -> bool:
+    """Whether this id's asset key is one Bookshelf will accept."""
+    key = asset_key(illus_id)
+    return bool(ASSET_KEY_RE.match(key)) and len(key) <= ASSET_KEY_MAX_LENGTH
+
+
 def asset_key(illus_id: str) -> str:
     """Normalize a plan id into its published asset key.
 
@@ -905,10 +923,35 @@ def scene_placements(scene_md: str,
     return placements
 
 
+#: Roles the publish manifest's `assets` array can carry.
+#:
+#: A growing set, deliberately. `illustration` came first; `cover` joined it
+#: when the cover stopped riding the deprecated `cover_base64` field
+#: (benjaminsnorris/storyforge#284), and a later phase may add a packet or
+#: reference role. The asset *transport* never branches on this value — see
+#: `storyforge.bookshelf.sync_assets` — so widening it is a one-line change
+#: here plus whatever produces the new rows.
+AssetRole = Literal['illustration', 'cover']
+
+
+def normalize_asset_extension(extension: str) -> str:
+    """Normalize a file extension to the form the asset bucket stores.
+
+    Collapses ``jpg`` onto ``jpeg``, matching bookshelf's own
+    ``normalizeExtension``. The storage path is ``{digest}.{extension}``, so
+    leaving both spellings in play lets one image occupy two paths — which
+    quietly undoes content addressing and makes the digest diff re-upload bytes
+    that are already in the bucket. Both sides normalizing means the client's
+    idea of an object is identical to the server's.
+    """
+    ext = extension.strip().lstrip('.').lower()
+    return 'jpeg' if ext == 'jpg' else ext
+
+
 class _ManifestAssetRequired(TypedDict):
     """Fields every published asset carries."""
     key: str          #: normalized via asset_key — never a raw plan id
-    role: Literal['illustration']
+    role: AssetRole
     sha256: str
     extension: str
 
@@ -917,6 +960,7 @@ class ManifestAsset(_ManifestAssetRequired, total=False):
     """One asset entry for the Bookshelf publish manifest."""
     width: int
     height: int
+    byte_size: int
     alt_text: str
 
 
@@ -944,7 +988,7 @@ def manifest_assets(project_dir: str,
         if not digest:
             continue
         rel = (row.get('asset_file') or '').strip()
-        ext = os.path.splitext(rel)[1].lstrip('.').lower() or 'png'
+        ext = normalize_asset_extension(os.path.splitext(rel)[1]) or 'png'
         asset: ManifestAsset = {
             'key': key, 'role': 'illustration',
             'sha256': digest, 'extension': ext,
@@ -964,6 +1008,28 @@ def manifest_assets(project_dir: str,
             asset['alt_text'] = alt
         assets.append(asset)
     return assets
+
+
+def manifest_asset_sources(project_dir: str) -> dict[str, str]:
+    """Map each ingested plan row's digest to its project-relative file.
+
+    The publish transport uploads bytes by digest and never reads the plan
+    itself (see ``storyforge.bookshelf.sync_assets``), so this is the
+    illustration half of the mapping its caller assembles — the cover
+    contributes the other half.
+
+    Rows without a digest or a recorded file are omitted; they cannot be
+    published either, so ``manifest_assets`` skips them too.
+    """
+    sources: dict[str, str] = {}
+    for row in read_plan(project_dir):
+        if row.get('status', '').strip() != 'ingested':
+            continue
+        digest = (row.get('sha256') or '').strip()
+        rel = (row.get('asset_file') or '').strip()
+        if digest and rel:
+            sources.setdefault(digest, rel)
+    return sources
 
 
 # ============================================================================
@@ -1452,7 +1518,8 @@ def next_to_render(project_dir: str) -> str:
 #: severity_of defaults anything unrecognized to 'error', and its remediation
 #: text in cmd_cleanup would silently fall back to a generic one.
 IllustrationFindingKind = Literal[
-    'duplicate_id', 'invalid_id', 'invalid_status', 'invalid_placement',
+    'duplicate_id', 'invalid_id', 'unpublishable_id', 'invalid_status',
+    'invalid_placement',
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
     'anchor_drift', 'anchor_ambiguous', 'orphan_file', 'inline_marker',
@@ -1476,7 +1543,8 @@ class IllustrationFinding(_IllustrationFindingRequired, total=False):
 # Findings that make the plan incoherent — the book cannot be published or
 # assembled correctly while they stand, so `validate` fails on them.
 BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
-    'duplicate_id', 'invalid_id', 'invalid_status', 'invalid_placement',
+    'duplicate_id', 'invalid_id', 'unpublishable_id', 'invalid_status',
+    'invalid_placement',
     'invalid_layout', 'missing_scene', 'unknown_scene', 'missing_file',
     'missing_digest', 'duplicate_marker', 'orphan_marker', 'marker_lost',
 })
@@ -1548,6 +1616,17 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
                              'detail': f'id {rid!r} must start with a letter or digit '
                                        f'and contain only letters, digits, '
                                        f'hyphens, and underscores'})
+        elif not _publishable_asset_key(rid):
+            findings.append({
+                'kind': 'unpublishable_id', 'id': rid,
+                'detail': f'id {rid!r} publishes as the asset key '
+                          f'{asset_key(rid)!r}, which Bookshelf rejects — a key '
+                          f'must start with a lowercase letter or digit and '
+                          f'contain only lowercase letters, digits, and hyphens '
+                          f'(max {ASSET_KEY_MAX_LENGTH} characters). Rename the '
+                          f'row and its scene marker, using hyphens instead of '
+                          f'underscores.',
+            })
 
         status = (row.get('status') or '').strip()
         if status and status not in VALID_PLAN_STATUSES:

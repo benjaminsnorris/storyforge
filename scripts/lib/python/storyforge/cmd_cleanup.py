@@ -1185,6 +1185,9 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
                     'reference/illustration-plan.csv',
     'invalid_id': 'Rename the id to start with a letter or digit, using '
                   'only letters, digits, hyphens, and underscores',
+    'unpublishable_id': 'Rename the id and its scene marker using hyphens '
+                        'instead of underscores — Bookshelf asset keys allow '
+                        'only lowercase letters, digits, and hyphens',
     'invalid_status': 'Set status to planned, prompted, rendered, ingested, '
                       'or superseded',
     'invalid_placement': 'Set placement to before_anchor, after_anchor, '
