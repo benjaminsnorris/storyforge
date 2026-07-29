@@ -74,6 +74,30 @@ def test_empty_embeddable_block_returns_true(tmp_path):
     assert is_canon_block_populated(str(tmp_path), 'panel-registers') is True
 
 
+def test_emphasized_first_line_with_prose_under_it_is_populated(tmp_path):
+    """Regression for the branch's CRITICAL: a register vocabulary whose
+    first line is a bold summary (`**Dominant / transitional / rhythmic.**`)
+    read as a TODO scaffold once placeholder detection decided on the first
+    non-blank line, and `elaborate --stage page-architecture` refused to run
+    on a live book. The emphasis rule is a whole-body test again."""
+    from storyforge.canon import is_canon_block_populated
+    body = textwrap.dedent("""\
+        ---
+        canon_id: panel-registers
+        canon_type: vocabulary
+        ---
+
+        ## Embeddable block
+
+        **Dominant / transitional / rhythmic.**
+
+        Dominant panels carry the page's emotional fulcrum. Transitional
+        panels move the eye. Rhythmic panels hold the beat.
+        """)
+    _write_canon(tmp_path, 'panel-registers', body)
+    assert is_canon_block_populated(str(tmp_path), 'panel-registers') is True
+
+
 def test_missing_canon_file_returns_false(tmp_path):
     from storyforge.canon import is_canon_block_populated
     assert is_canon_block_populated(str(tmp_path), 'panel-registers') is False

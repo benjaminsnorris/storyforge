@@ -255,11 +255,16 @@ _PLACEHOLDER_PREFIXES = ('TODO', 'TODO —', 'TODO -', 'TODO.', 'TODO:')
 # A line wholly wrapped in markdown emphasis. The (now-retired)
 # illustration-direction coach/strict templates emitted their instructions
 # this way (`_(fill this in)_`, `_Required: describe the palette_`), so a
-# section made of nothing but an emphasized line is boilerplate by
+# section made of nothing but emphasized lines is boilerplate by
 # construction. Ported verbatim from illustrations._EMPHASIZED_LINE_RE (Task
 # 7 fix round 1, .superpowers/sdd/2026-07-28-illustration-canon-adoption/)
 # rather than reinvented, so the same shapes stay recognized now that
 # placeholder detection is shared here instead of duplicated per module.
+#
+# NOTE: this regex also matches a *bold lead-in* line (`**Nora Vance**`,
+# `_The lamp remembers._`), which is why it is only ever applied to a WHOLE
+# body — see _section_body_is_placeholder. Applied to the first line alone it
+# would call a filled anchor a scaffold.
 _EMPHASIZED_LINE_RE = re.compile(r'\A[_*]{1,2}.*[_*]{1,2}\Z')
 
 # Unemphasized placeholders an author might type by hand: TBD, n/a, "fill
@@ -274,16 +279,30 @@ _BARE_PLACEHOLDER_RE = re.compile(
 def _section_body_is_placeholder(body: str) -> bool:
     """Return True if the section body looks like an unfilled template.
 
-    Strips leading HTML comments (the starter templates wrap orienting
-    comments in `<!-- ... -->`) and checks whether the first non-blank line
-    reads as scaffolding: a `TODO`-prefixed line (what every shipped
-    template — GN canon, and formerly illustration-direction's own
-    templates — actually emits), a line wholly wrapped in markdown emphasis
-    (the retired illustration-direction coach/strict templates' shape for
-    instructional text), or a bare TBD/n-a/fill-this-in an author might type
-    by hand instead. False positives are unlikely: authors using one of
-    these as an inline note typically place it mid-text, not as the first
-    content line of a required section.
+    Leading HTML comments are stripped first (the starter templates wrap
+    orienting comments in `<!-- ... -->`). Two independent rules then apply,
+    and the distinction between them is load-bearing:
+
+    - **First-line `TODO`** — if the first non-blank line starts with one of
+      `_PLACEHOLDER_PREFIXES`, the body is a scaffold. Every shipped template
+      (GN canon, and formerly illustration-direction's own) emits exactly
+      that, and GN's `elaborate --stage page-architecture` gate has depended
+      on this first-line rule since before the canon adoption — so it stays a
+      first-line rule, unchanged.
+    - **Whole-body emphasis / bare placeholder** — a body that consists of
+      *nothing but* emphasized instruction lines (`_(fill this in)_`,
+      `_Required: describe the palette_`), bare TBD/n-a/fill-this-in lines,
+      and headings has nothing substantive in it, so it is a scaffold. This
+      is the retired `illustrations._is_placeholder`'s semantics, restored
+      verbatim: it was a whole-body test, and narrowing it to the first line
+      classified real content as scaffolding. A continuity anchor opening
+      with a bold name (`**Nora Vance**`, then the description) or an italic
+      epigraph is filled prose — treating it as unfilled drops the anchor
+      from `anchor_texts`, and every prompt for that entity then renders with
+      no anchor at all, which is the exact drift anchors exist to prevent.
+      On the GN side the same misclassification made a register vocabulary
+      opening `**Dominant / transitional / rhythmic.**` fail the
+      page-architecture gate.
 
     An empty body (nothing but blank lines) is deliberately NOT a
     placeholder here — see is_canon_block_populated's docstring for the
@@ -295,16 +314,21 @@ def _section_body_is_placeholder(body: str) -> bool:
     under every caller including GN's page-architecture gate.
     """
     text = re.sub(r'^\s*<!--.*?-->\s*', '', body, flags=re.DOTALL)
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if any(stripped.startswith(p) for p in _PLACEHOLDER_PREFIXES):
-            return True
-        if _EMPHASIZED_LINE_RE.match(stripped):
-            return True
-        return bool(_BARE_PLACEHOLDER_RE.match(stripped))
-    return False
+    lines = [line.strip() for line in text.splitlines()]
+    content = [line for line in lines if line]
+    if not content:
+        return False  # empty body counts as populated — see the docstring
+    if any(content[0].startswith(p) for p in _PLACEHOLDER_PREFIXES):
+        return True
+    # Whole-body test: headings are not content either — an anchor heading
+    # with no description under it is an unfilled anchor.
+    substantive = [
+        line for line in content
+        if not line.startswith('#')
+        and not _EMPHASIZED_LINE_RE.match(line)
+        and not _BARE_PLACEHOLDER_RE.match(line)
+    ]
+    return not substantive
 
 
 def embeddable_block_text(canon_path: str) -> str | None:

@@ -563,8 +563,10 @@ def test_validate_unfilled_template_flagged(tmp_path):
 
 def test_validate_filled_canon_no_unfilled_finding(tmp_path):
     """A canon file with real content in every section must not register
-    as unfilled — the placeholder check looks only at the first non-blank
-    line of each section body."""
+    as unfilled. Only a first-non-blank-line `TODO` prefix decides on one
+    line; the emphasis / bare-placeholder rules are whole-body tests, so a
+    section holding any substantive line is filled (see
+    _section_body_is_placeholder)."""
     project = str(tmp_path)
     write_canon(project, 'style-foundation.md', 'style-foundation')
     findings = validate_canon_file(
@@ -602,6 +604,62 @@ def test_hand_typed_placeholder_shapes_are_flagged_unfilled(
         f'{placeholder_text!r} was not flagged as unfilled: {findings}'
     )
     assert 'Embeddable block' in unfilled[0]['detail']
+
+
+@pytest.mark.parametrize('block', [
+    '**Nora Vance**\n9 years old, 132 cm, a dark braid over one shoulder.',
+    '_The lamp remembers._\nA squat brass lantern, dented on the left face.',
+    '**Style:** cinematic, warm, hand-inked.',
+    '**Dominant / transitional / rhythmic.**\nDominant panels carry the beat.',
+])
+def test_real_prose_is_not_mistaken_for_a_placeholder(tmp_path, block):
+    """Regression for the branch's CRITICAL: the emphasis and bare-placeholder
+    rules are WHOLE-BODY tests, restored from the retired
+    illustrations._is_placeholder (whose negative guard,
+    test_real_prose_is_not_mistaken_for_a_placeholder in test_illustrations.py,
+    was deleted with it). Deciding on the first non-blank line instead made a
+    filled Embeddable block whose first line happens to be wholly emphasized
+    read as a scaffold — a continuity anchor opening with a bold character
+    name dropped out of anchor_texts entirely, so every prompt for that
+    character rendered with no anchor; on the GN side a register vocabulary
+    opening `**Dominant / transitional / rhythmic.**` failed
+    is_canon_block_populated and blocked `elaborate --stage
+    page-architecture`.
+    """
+    from storyforge.canon import _section_body_is_placeholder
+    project = str(tmp_path)
+    body = (f'\n## Embeddable block\n\n{block}\n\n## Clauses\n\n'
+            f'## Related canon\n\n## Iteration history\n')
+    write_canon(project, 'characters/nora.md', 'nora',
+                canon_type='character', body=body)
+    assert _section_body_is_placeholder(f'\n{block}\n') is False
+    findings = validate_canon_file(
+        os.path.join(project, CANON_DIR, 'characters', 'nora.md'), project,
+    )
+    unfilled = [f for f in findings if f['type'] == 'canon_unfilled_template']
+    assert unfilled == [], f'{block!r} was misread as a placeholder'
+
+
+def test_first_line_todo_still_wins_over_following_prose(tmp_path):
+    """The first-line TODO rule is deliberately NOT whole-body: GN's
+    page-architecture gate has keyed on it since before the canon adoption,
+    and a scaffold whose author started answering below the TODO line is
+    still a scaffold until the TODO comes out."""
+    from storyforge.canon import _section_body_is_placeholder
+    assert _section_body_is_placeholder(
+        '\nTODO — describe the palette.\nWarm amber and gold.\n') is True
+
+
+def test_bold_anchor_survives_anchor_texts(tmp_path):
+    """End-to-end for the same regression: a bold-lead anchor must reach
+    anchor_texts verbatim, since that dict is what every prompt embeds."""
+    from storyforge.canon import anchor_texts
+    project = str(tmp_path)
+    block = '**Nora Vance**\n9 years old, 132 cm, a dark braid.'
+    write_canon(project, 'characters/nora.md', 'nora', canon_type='character',
+                body=f'\n## Embeddable block\n\n{block}\n\n## Clauses\n\n'
+                     f'## Related canon\n\n## Iteration history\n')
+    assert anchor_texts(project) == {'nora': block}
 
 
 def test_validate_directory_skips_template_files(tmp_path):
