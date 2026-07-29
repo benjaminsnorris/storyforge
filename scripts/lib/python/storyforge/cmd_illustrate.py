@@ -940,9 +940,11 @@ def _references_for(project_dir: str, illus_id: str, *,
                    if skipped_stale else
                    ' (no prior illustration is ingested yet)') + '.')
         else:
-            log(f'  {illus_id}: no reference images at all — this prompt has '
-                f'nothing anchoring its style, so it establishes the look for '
-                f'everything that references it.')
+            log(f'  {illus_id}: no reference images at all'
+                + (f' ({skipped_stale} prior illustration(s) excluded)'
+                   if skipped_stale else '')
+                + ' — nothing anchors this prompt\'s style, so it establishes '
+                  'the look for everything that references it.')
     return references
 
 

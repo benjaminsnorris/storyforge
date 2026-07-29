@@ -2451,6 +2451,9 @@ def test_prompt_calls_run_concurrently(in_project, monkeypatch):
     write_scene(in_project, 'vigil', SCENE)
     ill.write_plan(in_project, rows)
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    # run_parallel honours STORYFORGE_PARALLEL; a dev shell exporting 1 would
+    # otherwise make this test fail for an environmental reason.
+    monkeypatch.delenv('STORYFORGE_PARALLEL', raising=False)
 
     barrier = threading.Barrier(3, timeout=10)
 
