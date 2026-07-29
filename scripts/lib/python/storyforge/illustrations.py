@@ -44,7 +44,8 @@ PLAN_COLUMNS: list[str] = [
     'id', 'scene_id', 'anchor', 'placement', 'layout', 'beat', 'rationale',
     'subject', 'composition', 'palette', 'mood', 'motifs', 'canon_refs',
     'status', 'asset_file', 'prompt_file', 'sha256', 'width', 'height',
-    'ingested_at', 'state_override', 'register', 'scene_digest',
+    'ingested_at', 'state_override', 'register', 'scene_digest', 'treatment',
+    'treatment_at',
 ]
 
 #: Columns added after the plan schema shipped. They are in PLAN_COLUMNS, so
@@ -58,9 +59,15 @@ PLAN_COLUMNS: list[str] = [
 #:
 #: `state_override`, `register`, and `scene_digest` join it for the same reason
 #: (#278 phase 2): a plan written before the visual-state matrix existed is
-#: legal, and the first write to it upgrades the header.
+#: legal, and the first write to it upgrades the header. `treatment` joins it in
+#: phase 3 — a plan that predates the sequence pre-pass is legal, and an empty
+#: `treatment` is exactly the state `--sequence` exists to fill. `treatment_at`
+#: is the ISO date `--sequence` staged the row, and is what lets the packet
+#: distinguish a treatment written *after* a render (the art does not follow it)
+#: from one written before (nothing is wrong) instead of warning about both.
 OPTIONAL_PLAN_COLUMNS: frozenset[str] = frozenset({
-    'ingested_at', 'state_override', 'register', 'scene_digest',
+    'ingested_at', 'state_override', 'register', 'scene_digest', 'treatment',
+    'treatment_at',
 })
 
 #: The book's lighting extremes, marked on the plan so the anchor batch can
@@ -1576,6 +1583,8 @@ IllustrationFindingKind = Literal[
     # Bare, like every kind above: cmd_cleanup renders `illus_{kind}`.
     'state_unknown_scene', 'state_unmapped_scene', 'evidence_not_found',
     'state_unspecified', 'prose_changed', 'audit_stale',
+    # The handoff packet (#278 phase 3).
+    'packet_stale', 'anchor_copy_drift',
 ]
 
 
@@ -1625,6 +1634,13 @@ WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     # paying for art, not a broken manuscript.
     'state_unmapped_scene', 'evidence_not_found', 'state_unspecified',
     'prose_changed', 'audit_stale',
+    # The packet (#278 phase 3) is a render, so neither of these leaves a
+    # broken book: a stale packet and a hand-edited anchor copy are both one
+    # `--package` away. They are still worth reporting, because a stale packet
+    # looks exactly like a fresh one to the author working through it, and an
+    # anchor copy that no longer matches its canon file quietly breaks the
+    # likeness continuity the anchor exists to hold.
+    'packet_stale', 'anchor_copy_drift',
 })
 
 Severity = Literal['error', 'warning']
@@ -1657,7 +1673,14 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     entity whose visible state nobody stated at that point — plus
     `visual_state.digest_drift`, for prose that moved after the audit read it or
     after an illustration was rendered from it.
+
+    And the packet's two checks (#278 phase 3): a packet older than the plan,
+    the transition log, or any canon file, and an anchor copy in the written
+    packet that no longer matches its canon source. Both return [] when no
+    packet has been built, so a project that never runs `--package` sees
+    nothing new.
     """
+    from storyforge import packet
     from storyforge import visual_state
 
     findings: list[IllustrationFinding] = []
@@ -1667,6 +1690,8 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     # single illustration has been planned.
     findings.extend(visual_state.prepass(project_dir)['findings'])
     findings.extend(visual_state.digest_drift(project_dir))
+    findings.extend(packet.packet_stale(project_dir))
+    findings.extend(packet.anchor_copy_drift(project_dir))
 
     rows = read_plan(project_dir)
     if not rows and not os.path.isdir(illustrations_dir(project_dir)):

@@ -11,7 +11,13 @@ Nine phases, each its own flag:
                as opposed to the canon tier for what must never change.
   --audit      Read the prose against that matrix and report contradictions.
                Read-only with respect to the prose and the log.
+  --sequence   Assign each illustration a distinct treatment — camera
+               distance and height, time of day, framing — so twenty
+               independent generation calls stop converging on one shot.
   --prompts    Turn planned rows into image-generation prompts.
+  --package    Assemble manuscript/illustration-packet/ — one bundle a
+               long-running generation session works through, instead of
+               fifteen separate prompt pastes. Assembly only, no API calls.
   --ingest     Bring rendered files in, record digests, embed markers.
   --embed      (Re)insert markers from the plan, without ingesting.
   --diagnose   Read-only plan health report, with the recommended render
@@ -43,7 +49,9 @@ from storyforge.common import (
 )
 from storyforge.costs import log_operation
 from storyforge import illustrations as ill
+from storyforge import packet
 from storyforge import prompts_illustrate as pi
+from storyforge import prompts_packet as pp
 from storyforge import visual_state as vs
 
 # Excerpt handed to the art-direction prompt. Enough to establish the beat and
@@ -63,6 +71,12 @@ def parse_args(argv):
                        help='Propose illustration moments into the plan CSV')
     phase.add_argument('--prompts', action='store_true',
                        help='Write art-direction prompts for planned rows')
+    phase.add_argument('--sequence', action='store_true',
+                       help='Assign each illustration a distinct treatment so '
+                            'the set does not converge on one shot')
+    phase.add_argument('--package', action='store_true',
+                       help='Assemble the handoff packet in '
+                            'manuscript/illustration-packet/ (no API calls)')
     phase.add_argument('--ingest', metavar='PATH', default=None,
                        help='Ingest rendered illustration file(s) from a file '
                             'or directory')
@@ -115,11 +129,12 @@ def main(argv=None):
     coaching = args.coaching or get_coaching_level(project_dir)
 
     phases = [args.direction, args.plan, args.prompts, bool(args.ingest),
-              args.embed, args.diagnose, args.review, args.state, args.audit]
+              args.embed, args.diagnose, args.review, args.state, args.audit,
+              args.package, args.sequence]
     if not any(phases):
-        log('Nothing to do. Pick a phase: --direction, --plan, --prompts, '
-            '--ingest PATH, --embed, --state, --audit, --diagnose, or '
-            '--review.')
+        log('Nothing to do. Pick a phase: --direction, --plan, --sequence, '
+            '--prompts, --package, --ingest PATH, --embed, --state, --audit, '
+            '--diagnose, or --review.')
         return 1
 
     if args.diagnose:
@@ -132,10 +147,18 @@ def main(argv=None):
     if args.plan:
         exit_code = run_plan(project_dir, coaching, args.count,
                              args.dry_run) or exit_code
+    if args.sequence:
+        # Before --prompts, deliberately: the treatment is an input to the
+        # art-direction request, so staging after prompting would leave every
+        # prompt file built from the staging that did not exist yet.
+        exit_code = run_sequence(project_dir, coaching,
+                                 args.dry_run) or exit_code
     if args.prompts:
         exit_code = run_prompts(project_dir, coaching, _id_filter(args.ids),
                                 args.dry_run,
                                 no_prior_refs=args.no_prior_refs) or exit_code
+    if args.package:
+        exit_code = run_package(project_dir, args.dry_run) or exit_code
     if args.ingest:
         exit_code = run_ingest(project_dir, args.ingest,
                                args.dry_run) or exit_code
@@ -233,8 +256,12 @@ def run_diagnose(project_dir: str) -> int:
                      if step['locks'] else '')
             log(f'  {mark} {i:2}. {step["id"]}{key}{locks}')
 
+    unrendered = _unrendered_ids(project_dir)
+    _report_anchor_batch(packet.anchor_batch(project_dir), unrendered)
+
     findings = ill.validate_plan(project_dir)
     _report_state_rung(project_dir, findings)
+    _report_packet_rung(project_dir, findings, unrendered)
     return _report_findings(findings)
 
 
@@ -296,6 +323,58 @@ def _report_state_rung(project_dir: str,
     else:
         log(f'  audit: current — last run {last or "(date not recorded)"} over '
             f'{covered}')
+
+
+def _report_packet_rung(project_dir: str,
+                        findings: list[ill.IllustrationFinding],
+                        unrendered: list[str]) -> None:
+    """Log the staging and packet rungs, for `--diagnose`.
+
+    Read off `findings` rather than by re-running `packet_stale` and
+    `anchor_copy_drift`: `validate_plan` has already run both, and computing
+    them twice would print each of their WARNING lines twice — the defect
+    `_report_state_rung` documents for `digest_drift`.
+    """
+    rows = packet.rows_in_reading_order(project_dir)
+    if rows:
+        staged = [r['id'].strip() for r in rows
+                  if (r.get('treatment') or '').strip()]
+        if len(staged) == len(rows):
+            log(f'Sequence staging: all {len(rows)} illustration(s) carry a '
+                f'treatment')
+        else:
+            log(f'Sequence staging: {len(staged)} of {len(rows)} '
+                f'illustration(s) carry a treatment. Run `storyforge '
+                f'illustrate --sequence` — an unstaged set converges on one '
+                f'shot, because no generation call can see the others.')
+
+    if not packet.is_built(project_dir):
+        log('Packet: not built. Run `storyforge illustrate --package` to '
+            'assemble the handoff bundle a generation session works from.')
+        return
+
+    stale = [f for f in findings if f['kind'] == 'packet_stale']
+    drift = [f for f in findings if f['kind'] == 'anchor_copy_drift']
+    state = 'stale' if stale else 'current'
+    log(f'Packet: built and {state} — {packet.PACKET_DIR}/')
+    if stale:
+        log(f'  {stale[0]["detail"]}')
+    if drift:
+        log(f'  {len(drift)} anchor copy problem(s) — see the findings below. '
+            f'Regenerate rather than editing the packet.')
+    batch_unrendered = [
+        batch_id for batch_id in
+        (packet.anchor_batch(project_dir)[slot]  # type: ignore[literal-required]
+         for slot, _label in packet.BATCH_SLOTS)
+        if batch_id and batch_id in unrendered]
+    if batch_unrendered:
+        log(f'  anchor batch: {len(set(batch_unrendered))} row(s) not yet '
+            f'ingested ({", ".join(sorted(set(batch_unrendered)))}) — render '
+            f'and ingest those before handing the packet over, so the churn '
+            f'has real references.')
+    else:
+        log('  anchor batch: every row is ingested — the packet is ready to '
+            'hand over.')
 
 
 # ============================================================================
@@ -1313,6 +1392,269 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     return 0
 
 
+# ============================================================================
+# --sequence
+# ============================================================================
+
+def run_sequence(project_dir: str, coaching: CoachingLevel,
+                 dry_run: bool) -> int:
+    """Assign each illustration a distinct treatment, in one cheap call.
+
+    One call for the whole set, because the problem is a property of the set:
+    each per-illustration call is individually happy with the shot it wanted,
+    and no one of them can see that three others want the same one. It reads
+    beats and layouts only — never the scene prose, which is what the
+    per-illustration pass reads.
+
+    An author-written treatment is never overwritten, and identical treatments
+    across rows are reported: variety is the entire purpose, so a duplicate
+    defeats the pass while every individual prompt still looks fine.
+    """
+    rows = packet.rows_in_reading_order(project_dir)
+    if not rows:
+        log('No illustration plan rows to stage. Run '
+            '`storyforge illustrate --plan` first.')
+        return 0
+
+    authored = [r['id'].strip() for r in rows
+                if (r.get('treatment') or '').strip()]
+    log(f'Staging {len(rows)} illustration(s) as a sequence'
+        + (f'; {len(authored)} already carry an author treatment and will not '
+           f'be changed: {", ".join(authored)}' if authored else ''))
+
+    if coaching == 'strict':
+        return _write_coaching_file(
+            project_dir, 'illustration-sequence-checklist.md',
+            pp.render_sequence_checklist(rows=rows), dry_run)
+
+    if dry_run:
+        log(f'[dry-run] would request treatments for {len(rows)} '
+            f'illustration(s) (coaching={coaching})')
+        return 0
+
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        log('ERROR: ANTHROPIC_API_KEY is not set. Staging the sequence in '
+            f'{coaching} coaching requires an API key. Set it and re-run, or '
+            'use --coaching strict for a checklist.')
+        return 1
+
+    text = _invoke(project_dir,
+                   pp.build_sequence_request(
+                       rows=rows, story_context=_story_context(project_dir)),
+                   'illustrate-sequence', task_type='synthesis',
+                   max_tokens=4096)
+    if not text:
+        log('ERROR: no response from the API.')
+        return 1
+
+    treatments, status = pp.parse_sequence_response(text)
+    if status != 'ok':
+        log(f'ERROR: could not parse treatments from the response ({status}). '
+            f'Nothing was written to the plan.')
+        return 1
+
+    known = {row['id'].strip() for row in rows}
+    proposed: dict[str, str] = {}
+    unknown: list[str] = []
+    for item in treatments:
+        if item['id'] in known:
+            proposed[item['id']] = _sanitize_cell(item['treatment'])
+        else:
+            unknown.append(item['id'])
+    if unknown:
+        log(f'WARNING: {len(unknown)} proposed treatment(s) name no plan row '
+            f'and were dropped: {", ".join(sorted(unknown))}')
+
+    unstaged = sorted(known - set(proposed) - set(authored))
+    if unstaged:
+        log(f'WARNING: {len(unstaged)} illustration(s) got no treatment and '
+            f'stay unstaged: {", ".join(unstaged)}. Re-run --sequence, or fill '
+            f'`treatment` by hand — an unstaged image is one the set cannot '
+            f'stop converging on.')
+
+    log(f'Received {len(proposed)} usable treatment(s)')
+
+    if coaching == 'coach':
+        # Duplicates are reported here too, over what the *brief* proposes. The
+        # author is about to hand-copy these into the plan, and a repeat defeats
+        # the pass whichever hand writes it — reporting only on the write path
+        # meant coach mode never got the one warning this pass exists to give.
+        _report_duplicate_treatments([
+            {'id': row['id'].strip(),
+             'treatment': (row.get('treatment') or '').strip()
+                          or proposed.get(row['id'].strip(), '')}
+            for row in rows
+        ], where='in this brief')
+        return _write_coaching_file(
+            project_dir, 'illustration-sequence-brief.md',
+            pp.render_sequence_brief(rows=rows, proposed=proposed), dry_run)
+
+    return _apply_treatments(project_dir, proposed)
+
+
+def _report_duplicate_treatments(rows: list[dict[str, str]], *,
+                                 where: str) -> None:
+    """Warn about any treatment shared by more than one row."""
+    for treatment, ids in sorted(pp.duplicate_treatments(rows).items()):
+        log(f'WARNING: {len(ids)} illustrations share one treatment {where} '
+            f'({treatment!r}): {", ".join(sorted(ids))}. Variety is the whole '
+            f'point of this pass — give them different staging, or say in one '
+            f'of them that the echo is deliberate.')
+
+
+def _apply_treatments(project_dir: str, proposed: dict[str, str]) -> int:
+    """Write proposed treatments, never over an author's, and report repeats.
+
+    Reads and writes the *whole* plan, not the reading-order subset, so a
+    superseded row keeps its cells. The write is skipped entirely when nothing
+    changed: rewriting identical bytes still bumps the plan's mtime, which makes
+    an existing packet report `packet_stale` over a run that changed nothing.
+    """
+    plan = ill.read_plan(project_dir)
+    written = 0
+    for row in plan:
+        illus_id = row['id'].strip()
+        if illus_id not in proposed:
+            continue
+        existing = (row.get('treatment') or '').strip()
+        if existing:
+            if existing != proposed[illus_id]:
+                log(f'  {illus_id}: keeping the author treatment '
+                    f'({existing!r}); the model proposed '
+                    f'{proposed[illus_id]!r}')
+            continue
+        row['treatment'] = proposed[illus_id]
+        # Stamped so the packet can tell a treatment written *after* a render
+        # (the finished art does not follow it) from one written before it
+        # (nothing is wrong). Without the stamp the only honest report was "the
+        # packet cannot tell which came first", which on a book staged in the
+        # documented order fired on every ingested row — 12 of 14 gaps on a
+        # 12-row book, burying the two real ones.
+        row['treatment_at'] = date.today().isoformat()
+        written += 1
+    if written:
+        ill.write_plan(project_dir, plan)
+        log(f'Wrote {written} treatment(s) to reference/{ill.PLAN_FILENAME}')
+    else:
+        log(f'No new treatment(s) to write — reference/{ill.PLAN_FILENAME} was '
+            f'left untouched, so an existing packet does not become stale over '
+            f'a run that changed nothing.')
+
+    _report_duplicate_treatments(packet.rows_in_reading_order(project_dir),
+                                 where='in the plan')
+    if written:
+        log('Re-run `storyforge illustrate --package` to carry the staging '
+            'into the packet, and --prompts to carry it into the prompts.')
+    return 0
+
+
+# ============================================================================
+# --package
+# ============================================================================
+
+def run_package(project_dir: str, dry_run: bool) -> int:
+    """Assemble `manuscript/illustration-packet/` — six files, no API calls.
+
+    Regenerated wholesale, so the packet is a render and never hand-edited: the
+    author's edits belong in the plan, the transition log, or the canon files,
+    all of which this reads.
+
+    Nothing here blocks. A warning the author has considered is theirs to
+    override, and refusing to build the packet over a never-run audit would
+    strand them behind a check they may have a reason to skip — so every gap is
+    logged as a WARNING *and* written into README.md, which is the copy they
+    will still have in front of them an hour later.
+    """
+    contents = packet.resolve(project_dir)
+    grid = packet.state_grid(project_dir)
+    batch = packet.anchor_batch(project_dir)
+    unrendered = _unrendered_ids(project_dir)
+    title = read_yaml_field('project.title', project_dir) or '(untitled)'
+
+    illustrated: dict[str, list[str]] = {}
+    for entry in contents['entries']:
+        if entry['scene_id']:
+            illustrated.setdefault(entry['scene_id'], []).append(entry['id'])
+
+    # Every aspect the set actually uses, in the canonical order, so
+    # acceptance.md states the orientation rule for those and no others.
+    used = {entry['aspect'] for entry in contents['entries']}
+    aspects = [a for a in pi.ASPECTS if a in used] or [pi.DEFAULT_ASPECT]
+
+    files = {
+        'README.md': pp.render_readme(
+            title=title, contents=contents,
+            entry_count=len(contents['entries']), batch=batch,
+            unrendered=unrendered),
+        'canon.md': pp.render_canon(
+            book_level=contents['book_level'], anchors=contents['anchors'],
+            labels=_anchor_labels(project_dir)),
+        'visual-state.md': pp.render_visual_state(
+            grid=grid, illustrated=illustrated),
+        'illustrations.md': pp.render_illustrations(
+            entries=contents['entries']),
+        'reference-images.md': pp.render_reference_images(
+            references=contents['references'],
+            notes=contents['reference_notes']),
+        'acceptance.md': pp.render_acceptance(aspects=aspects),
+    }
+
+    if dry_run:
+        for name in packet.PACKET_FILES:
+            log(f'[dry-run] would write '
+                f'{os.path.join(packet.PACKET_DIR, name)}')
+        for gap in contents['gaps']:
+            log(f'[dry-run] WARNING: {gap}')
+        return 0
+
+    os.makedirs(packet.packet_dir(project_dir), exist_ok=True)
+    for name in packet.PACKET_FILES:
+        with open(packet.packet_file(project_dir, name), 'w',
+                  encoding='utf-8') as f:
+            f.write(files[name])
+
+    log(f'Wrote {len(packet.PACKET_FILES)} file(s) to '
+        f'{packet.PACKET_DIR}/ — {len(contents["entries"])} illustration(s), '
+        f'{len(contents["anchors"])} continuity anchor(s)')
+    for gap in contents['gaps']:
+        log(f'  WARNING: {gap}')
+    if contents['gaps']:
+        log(f'  {len(contents["gaps"])} gap(s) above are also written into '
+            f'{os.path.join(packet.PACKET_DIR, "README.md")}, so the packet '
+            f'says what it cannot tell you.')
+    _report_anchor_batch(batch, unrendered)
+    log('Render and approve the anchor batch, ingest those, then re-run '
+        '--package so the rest can reference real images.')
+    return 0
+
+
+def _unrendered_ids(project_dir: str) -> list[str]:
+    """Plan ids that have not reached `ingested`, in reading order."""
+    return [row['id'].strip()
+            for row in packet.rows_in_reading_order(project_dir)
+            if (row.get('status') or '').strip() != 'ingested']
+
+
+def _report_anchor_batch(batch: packet.AnchorBatch,
+                         unrendered: list[str]) -> None:
+    """Log the four slots and every disclosure.
+
+    The fallback notes are WARNING lines rather than plain output: a guessed
+    darkest slot is a claim the author has to either confirm or correct, and it
+    reads as a decision unless something says otherwise.
+    """
+    log('Anchor batch — render and approve these before the rest:')
+    for slot, label in packet.BATCH_SLOTS:
+        illus_id = batch[slot]  # type: ignore[literal-required]
+        if not illus_id:
+            log(f'  {label}: (unfilled)')
+            continue
+        mark = '' if illus_id in unrendered else '  [ingested]'
+        log(f'  {label}: {illus_id}{mark}')
+    for note in batch['fallback']:
+        log(f'  WARNING: {note}')
+
+
 def _warn_unanchored_rows(rows: list[dict[str, str]],
                           anchors: dict[str, str]) -> None:
     """Warn, before any call is paid for, about rows with no usable anchor.
@@ -1535,7 +1877,8 @@ _MAX_REFERENCES = 4
 def _references_for(project_dir: str, illus_id: str, *,
                     plan: list[dict[str, str]] | None = None,
                     canon_cutoff: str = '',
-                    no_prior_refs: bool = False) -> list[tuple[str, str]]:
+                    no_prior_refs: bool = False,
+                    notes: list[str] | None = None) -> list[tuple[str, str]]:
     """Build the labeled reference list for an illustration.
 
     Prior ingested illustrations plus the cover are what hold a book's art
@@ -1563,17 +1906,33 @@ def _references_for(project_dir: str, illus_id: str, *,
     Every exclusion is logged. Silent staleness is what made the original bug
     hard to notice — the prompts looked fine, they just referenced the wrong
     images.
+
+    `notes` is an optional out-list the same disclosures are appended to, in
+    prose, for a caller that has to *render* them rather than log them. The
+    packet's `reference-images.md` is that caller: a log line the author read
+    twenty minutes ago is not a substitute for the file whose only job is
+    telling them what to upload, and a list that silently shrank to the cover
+    reads as "nothing is ingested yet". Threaded through this function rather
+    than recomputed beside it so the two can never disagree about which
+    references were dropped and why.
     """
+    def note(text: str) -> None:
+        if notes is not None:
+            notes.append(text)
+
     references: list[tuple[str, str]] = []
     cover = os.path.join('manuscript', 'assets', 'cover-illustration.png')
     if os.path.isfile(os.path.join(project_dir, cover)):
         references.append((cover, 'cover art (sets the house style)'))
+    else:
+        note('There is no cover artwork at manuscript/assets/'
+             'cover-illustration.png, so nothing sets the house style from '
+             'outside this set.')
 
     rows = plan if plan is not None else ill.read_plan(project_dir)
     skipped_stale = 0
+    capped = 0
     for row in rows:
-        if len(references) >= _MAX_REFERENCES:
-            break
         if row['id'].strip() == illus_id:
             continue
         if (row.get('status') or '').strip() != 'ingested':
@@ -1583,6 +1942,8 @@ def _references_for(project_dir: str, illus_id: str, *,
             continue
         if no_prior_refs:
             skipped_stale += 1
+            note(f'`{rel}` is not listed because --no-prior-refs was passed: '
+                 f'this build inherits nothing from the existing art.')
             continue
         if canon_cutoff:
             stale_reason = _stale_reference_reason(row, canon_cutoff)
@@ -1593,8 +1954,28 @@ def _references_for(project_dir: str, illus_id: str, *,
                     f'order), or pass --no-prior-refs to build this prompt '
                     f'from the cover alone.')
                 skipped_stale += 1
+                note(f'`{rel}` is **not** listed — {stale_reason}. It was '
+                     f'directed by canon that has since been rewritten, so '
+                     f'using it would teach the new render the drift the new '
+                     f'canon exists to remove. Re-render it from the current '
+                     f'canon (`storyforge illustrate --diagnose` gives the '
+                     f'order), then re-run --package.')
                 continue
+        # The cap is checked *after* the exclusion checks so that a skipped
+        # render is still disclosed: breaking out of the loop early would hide
+        # every stale render past the fourth reference behind a cap that is not
+        # why they were dropped.
+        if len(references) >= _MAX_REFERENCES:
+            capped += 1
+            continue
         references.append((rel, 'prior illustration (style continuity)'))
+
+    if capped:
+        log(f'  {illus_id}: {capped} further ingested illustration(s) were not '
+            f'listed — the reference list stops at {_MAX_REFERENCES}.')
+        note(f'{capped} further ingested illustration(s) are eligible but not '
+             f'listed: the list stops at {_MAX_REFERENCES} images, because past '
+             f'that a model starts averaging them rather than matching them.')
 
     prior = [r for r in references if r[0] != cover]
     if not prior:
@@ -1603,12 +1984,25 @@ def _references_for(project_dir: str, illus_id: str, *,
                 + (f' ({skipped_stale} prior illustration(s) excluded)'
                    if skipped_stale else
                    ' (no prior illustration is ingested yet)') + '.')
+            note('This list is **cover-only**. '
+                 + (f'{skipped_stale} ingested illustration(s) exist and were '
+                    f'excluded for the reasons above — that is not the same as '
+                    f'having nothing to reference.'
+                    if skipped_stale else
+                    'No illustration has been ingested yet, so the first '
+                    'renders establish the look for everything after them.'))
         else:
             log(f'  {illus_id}: no reference images at all'
                 + (f' ({skipped_stale} prior illustration(s) excluded)'
                    if skipped_stale else '')
                 + ' — nothing anchors this prompt\'s style, so it establishes '
                   'the look for everything that references it.')
+            note('There are **no reference images at all**'
+                 + (f', and {skipped_stale} ingested illustration(s) were '
+                    f'excluded for the reasons above'
+                    if skipped_stale else '')
+                 + '. Nothing anchors style or likeness, so whatever is '
+                   'rendered first sets the look for the whole book.')
     return references
 
 
