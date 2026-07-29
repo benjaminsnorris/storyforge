@@ -33,6 +33,7 @@ from storyforge import canon
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from storyforge import visual_state as vs
+from storyforge.common import log, normalize_for_comparison
 
 #: Project-relative home of the packet. Under `manuscript/` because it is a
 #: production artifact like the assembled chapters, not reference material the
@@ -433,3 +434,163 @@ def state_grid(project_dir: str) -> StateGrid:
         'cells': cells,
         'unpositioned': unpositioned,
     }
+# ============================================================================
+# The written packet, checked against its sources
+# ============================================================================
+
+#: Anchor copies are wrapped in the canon-embed markers `canon.py` already
+#: parses. Adopting the existing convention rather than a private one gives the
+#: drift check a parser it does not have to write, and gives that convention its
+#: first legitimate writer: nothing in the pipeline emits these markers today,
+#: so `check_canon_drift` has been guarding a shape only hand-editing produced.
+_EMBED_OPEN = '<!-- canon-embed: {canon_id} -->'
+_EMBED_CLOSE = '<!-- /canon-embed -->'
+
+
+def anchor_block(canon_id: str, text: str, label: str) -> str:
+    """Render one anchor copy, wrapped so its fidelity can be checked.
+
+    The writer lives beside `anchor_copy_drift`, its reader, so the two cannot
+    disagree about the marker format. `text` goes in byte-for-byte on its own
+    lines — no indentation, no wrapping, no trailing punctuation added — which
+    is what lets the drift check compare against the canon source and what lets
+    a generating session paste the string verbatim.
+    """
+    return '\n'.join([
+        f'### {label}',
+        '',
+        _EMBED_OPEN.format(canon_id=canon_id),
+        text,
+        _EMBED_CLOSE,
+    ])
+
+
+def anchor_copy_drift(project_dir: str) -> list[ill.IllustrationFinding]:
+    """Compare every anchor copy in the written packet to its canon source.
+
+    The copies are wrapped in `<!-- canon-embed: id -->` markers, which is the
+    convention `canon.find_canon_embeds` already parses and `check_canon_drift`
+    already guards for GN page files. Reading the *written file* back is a
+    different check from `resolve`'s: this one is the only thing that would
+    catch a renderer wrapping or re-indenting a long anchor, or an author
+    hand-editing a file whose whole point is being a render.
+
+    Compared after `normalize_for_comparison`, so cosmetic whitespace is not
+    drift and a changed word is. Returns [] when no packet is built — an
+    unbuilt packet is in-flight state, not a finding.
+    """
+    findings: list[ill.IllustrationFinding] = []
+    directory = packet_dir(project_dir)
+    if not os.path.isdir(directory):
+        return findings
+
+    sources = canon.anchor_texts(project_dir)
+    normalized = {cid: normalize_for_comparison(text)
+                  for cid, text in sources.items()}
+
+    for name in PACKET_FILES:
+        path = packet_file(project_dir, name)
+        if not os.path.isfile(path):
+            continue
+        rel = os.path.join(PACKET_DIR, name)
+        try:
+            with open(path, encoding='utf-8') as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            # One unreadable file must not take the whole check down, and must
+            # not pass for "no drift" either.
+            findings.append({
+                'kind': 'anchor_copy_drift',
+                'file': rel,
+                'detail': f'could not read {rel} to check its anchor copies: '
+                          f'{exc}. Re-run `storyforge illustrate --package`.',
+            })
+            continue
+        embeds, unclosed, invalid = canon.find_canon_embeds(text)
+        for opener in unclosed:
+            findings.append({
+                'kind': 'anchor_copy_drift',
+                'id': opener['canon_id'],
+                'file': rel,
+                'detail': f'anchor copy `{opener["canon_id"]}` in {rel} has no '
+                          f'closing marker, so its text cannot be checked '
+                          f'against reference/canon/. Re-run `storyforge '
+                          f'illustrate --package`.',
+            })
+        for bad in invalid:
+            findings.append({
+                'kind': 'anchor_copy_drift',
+                'file': rel,
+                'detail': f'anchor copy marker `{bad["raw_id"]}` in {rel} is '
+                          f'not a valid canon id, so its text cannot be '
+                          f'checked against reference/canon/. Re-run '
+                          f'`storyforge illustrate --package`.',
+            })
+        for embed in embeds:
+            cid = embed['canon_id']
+            if cid not in normalized:
+                findings.append({
+                    'kind': 'anchor_copy_drift',
+                    'id': cid,
+                    'file': rel,
+                    'detail': f'{rel} carries an anchor for `{cid}`, which no '
+                              f'longer resolves to a populated canon file — '
+                              f'the packet is directing art from an anchor '
+                              f'that no longer exists.',
+                })
+                continue
+            if embed['normalized'] != normalized[cid]:
+                findings.append({
+                    'kind': 'anchor_copy_drift',
+                    'id': cid,
+                    'file': rel,
+                    'detail': f'the anchor copy for `{cid}` in {rel} differs '
+                              f'from reference/canon/. Likeness continuity is '
+                              f'the string, so re-run `storyforge illustrate '
+                              f'--package` rather than editing the packet.',
+                })
+    return findings
+
+
+#: Sources whose edit invalidates the packet: the plan, the transition log, and
+#: every canon file. Not the scene prose — a prose revision is `prose_changed`
+#: and `audit_stale`, which say something more specific than "regenerate".
+def _packet_sources(project_dir: str) -> list[str]:
+    """Absolute paths of every file the packet is assembled from."""
+    sources = [ill.plan_path(project_dir), vs.state_path(project_dir)]
+    canon_dir = os.path.join(project_dir, canon.CANON_DIR)
+    if os.path.isdir(canon_dir):
+        sources.extend(canon._walk_canon_files(canon_dir))
+    return [path for path in sources if os.path.isfile(path)]
+
+
+def packet_stale(project_dir: str) -> list[ill.IllustrationFinding]:
+    """Report a packet older than the plan, the state log, or any canon file.
+
+    The packet is a render, so an out-of-date one is not a conflict to merge —
+    it is a `--package` away. What makes it worth a finding is that a stale
+    packet looks exactly like a fresh one to the author working through it, and
+    a session generating twenty images from last week's plan is expensive.
+
+    Compared by mtime, strictly: a source written in the same clock tick as the
+    packet is the ordinary `--package` run itself, not staleness.
+    """
+    if not is_built(project_dir):
+        return []
+    packet_mtime = min(os.path.getmtime(packet_file(project_dir, name))
+                       for name in PACKET_FILES)
+    newer = sorted(os.path.relpath(path, project_dir)
+                   for path in _packet_sources(project_dir)
+                   if os.path.getmtime(path) > packet_mtime)
+    if not newer:
+        return []
+    log(f'WARNING: the illustration packet is older than {len(newer)} of its '
+        f'source file(s): {", ".join(newer)}')
+    return [{
+        'kind': 'packet_stale',
+        'file': os.path.join(PACKET_DIR, 'README.md'),
+        'detail': f'the packet is older than {len(newer)} file(s) it was '
+                  f'assembled from ({", ".join(newer)}) — regenerate it with '
+                  f'`storyforge illustrate --package` before generating from '
+                  f'it.',
+    }]

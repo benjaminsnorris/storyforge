@@ -1262,6 +1262,16 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
     'audit_stale':
         'Re-run storyforge illustrate --audit — the prose has changed since the '
         'last contradiction pass',
+    'packet_stale':
+        'Re-run storyforge illustrate --package — the packet is a render, so '
+        'regenerating it is the whole fix; a generating session working from a '
+        'stale packet spends real money on last week\'s plan',
+    'anchor_copy_drift':
+        'Re-run storyforge illustrate --package rather than editing the packet '
+        '— the anchor copy must be byte-identical to the canon file, because '
+        'likeness continuity across separately generated images is the string. '
+        'If the packet text is the one you want, put it in the canon file '
+        'first (and do not revise an anchor a rendered illustration used)',
 }
 
 

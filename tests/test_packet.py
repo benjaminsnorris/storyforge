@@ -284,3 +284,196 @@ def test_resolve_on_a_bare_project_does_not_raise(project_dir):
     contents = packet.resolve(project_dir)
     assert contents['entries'] == []
     assert contents['gaps']
+
+
+# ============================================================================
+# The written packet, checked against its sources
+# ============================================================================
+#
+# These exercise the *file-reading* half of the byte-identity invariant, which
+# `--package` (task 3) then drives end to end. The helper writes the anchor
+# copies through `packet.anchor_block` — the same function the renderer uses —
+# so the marker format has exactly one definition.
+
+def _write_packet(project_dir, *, anchors=None):
+    """Write a stand-in packet: six files, with anchor copies in canon.md."""
+    src = canon.anchor_texts(project_dir) if anchors is None else anchors
+    labels = canon.anchor_display_names(project_dir)
+    body = '\n\n'.join(
+        packet.anchor_block(cid, text,
+                            labels[cid]['label'] if cid in labels else cid)
+        for cid, text in src.items())
+    os.makedirs(packet.packet_dir(project_dir), exist_ok=True)
+    for name in packet.PACKET_FILES:
+        with open(packet.packet_file(project_dir, name), 'w',
+                  encoding='utf-8') as f:
+            f.write(f'# {name}\n\n' + (body if name == 'canon.md' else 'x\n'))
+
+
+def test_a_hand_edited_anchor_in_the_packet_is_reported(packet_project):
+    _write_packet(packet_project)
+    path = packet.packet_file(packet_project, 'canon.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    src = canon.anchor_texts(packet_project)
+    cid, original = next(iter(src.items()))
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace(original, original.replace('.', '!', 1)))
+
+    findings = packet.anchor_copy_drift(packet_project)
+    assert {f['kind'] for f in findings} == {'anchor_copy_drift'}
+    assert any(f.get('id') == cid for f in findings)
+
+
+def test_cosmetic_whitespace_is_not_drift(packet_project):
+    _write_packet(packet_project)
+    path = packet.packet_file(packet_project, 'canon.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace('\n\n', '\n\n\n'))
+    assert packet.anchor_copy_drift(packet_project) == []
+
+
+def test_a_fresh_packet_has_no_drift(packet_project):
+    _write_packet(packet_project)
+    assert packet.anchor_copy_drift(packet_project) == []
+
+
+def test_no_packet_means_no_drift_findings(packet_project):
+    """An unbuilt packet is in-flight state, not a finding."""
+    assert packet.anchor_copy_drift(packet_project) == []
+
+
+def test_an_anchor_copy_for_a_deleted_canon_file_is_reported(packet_project):
+    """The packet directs art from an anchor that no longer exists."""
+    _write_packet(packet_project)
+    os.remove(canon.resolve_canon_path(packet_project, 'maps'))
+    findings = packet.anchor_copy_drift(packet_project)
+    assert any(f.get('id') == 'maps' and 'no longer resolves' in f['detail']
+               for f in findings)
+
+
+def test_an_unclosed_anchor_marker_is_reported(packet_project):
+    """An unchecked copy must not read as a verified one."""
+    _write_packet(packet_project)
+    path = packet.packet_file(packet_project, 'canon.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace('<!-- /canon-embed -->', '', 1))
+    findings = packet.anchor_copy_drift(packet_project)
+    assert any('no closing marker' in f['detail'] for f in findings)
+
+
+def test_an_invalid_anchor_marker_id_is_reported(packet_project):
+    _write_packet(packet_project)
+    path = packet.packet_file(packet_project, 'canon.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace('canon-embed: dorren-hayle',
+                             'canon-embed: Dorren_Hayle', 1))
+    findings = packet.anchor_copy_drift(packet_project)
+    assert any('not a valid canon id' in f['detail'] for f in findings)
+
+
+def test_an_unreadable_packet_file_is_reported_not_skipped(packet_project):
+    _write_packet(packet_project)
+    with open(packet.packet_file(packet_project, 'illustrations.md'),
+              'wb') as f:
+        f.write(b'\xff\xfe\x00broken')
+    findings = packet.anchor_copy_drift(packet_project)
+    assert any('could not read' in f['detail'] for f in findings)
+
+
+# ============================================================================
+# Staleness
+# ============================================================================
+
+def test_a_fresh_packet_is_not_stale(packet_project):
+    _write_packet(packet_project)
+    assert packet.packet_stale(packet_project) == []
+
+
+def test_a_packet_older_than_the_plan_is_stale(packet_project):
+    _write_packet(packet_project)
+    future = os.path.getmtime(
+        packet.packet_file(packet_project, 'README.md')) + 60
+    plan = ill.plan_path(packet_project)
+    os.utime(plan, (future, future))
+    findings = packet.packet_stale(packet_project)
+    assert [f['kind'] for f in findings] == ['packet_stale']
+    assert 'illustration-plan.csv' in findings[0]['detail']
+
+
+def test_a_packet_older_than_a_canon_file_is_stale(packet_project):
+    _write_packet(packet_project)
+    future = os.path.getmtime(
+        packet.packet_file(packet_project, 'README.md')) + 60
+    path = canon.resolve_canon_path(packet_project, 'dorren-hayle')
+    os.utime(path, (future, future))
+    findings = packet.packet_stale(packet_project)
+    assert findings and 'dorren-hayle.md' in findings[0]['detail']
+
+
+def test_a_packet_older_than_the_state_log_is_stale(packet_project):
+    from storyforge import visual_state as vs
+    _write_packet(packet_project)
+    future = os.path.getmtime(
+        packet.packet_file(packet_project, 'README.md')) + 60
+    os.utime(vs.state_path(packet_project), (future, future))
+    assert 'visual-state.csv' in packet.packet_stale(packet_project)[0]['detail']
+
+
+def test_a_half_written_packet_is_not_reported_as_stale(packet_project):
+    """`is_built` is all six or none — a partial packet is a different
+    problem, and `--package` writes the set."""
+    _write_packet(packet_project)
+    os.remove(packet.packet_file(packet_project, 'acceptance.md'))
+    future = os.path.getmtime(
+        packet.packet_file(packet_project, 'README.md')) + 60
+    os.utime(ill.plan_path(packet_project), (future, future))
+    assert packet.packet_stale(packet_project) == []
+    assert not packet.is_built(packet_project)
+
+
+def test_no_packet_is_not_stale(packet_project):
+    assert packet.packet_stale(packet_project) == []
+
+
+# ============================================================================
+# Severity and wiring
+# ============================================================================
+
+@pytest.mark.parametrize('kind,expected', [
+    ('packet_stale', 'warning'), ('anchor_copy_drift', 'warning')])
+def test_new_kinds_have_the_intended_severity(kind, expected):
+    assert ill.severity_of(kind) == expected
+
+
+def test_validate_plan_folds_in_the_packet_checks(packet_project):
+    _write_packet(packet_project)
+    future = os.path.getmtime(
+        packet.packet_file(packet_project, 'README.md')) + 60
+    os.utime(ill.plan_path(packet_project), (future, future))
+    path = packet.packet_file(packet_project, 'canon.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    src = canon.anchor_texts(packet_project)
+    _cid, original = next(iter(src.items()))
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace(original, original.replace('.', '!', 1)))
+
+    kinds = {f['kind'] for f in ill.validate_plan(packet_project)}
+    assert 'packet_stale' in kinds
+    assert 'anchor_copy_drift' in kinds
+
+
+def test_cleanup_has_remediation_for_the_new_kinds():
+    """A kind with no action falls back to 'Review the illustration plan',
+    which tells an author nothing about a packet."""
+    from storyforge.cmd_cleanup import _ILLUSTRATION_ACTIONS
+    for kind in ('packet_stale', 'anchor_copy_drift'):
+        assert kind in _ILLUSTRATION_ACTIONS
+        assert 'packet' in _ILLUSTRATION_ACTIONS[kind]
