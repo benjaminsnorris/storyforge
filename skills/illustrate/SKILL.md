@@ -273,7 +273,7 @@ Every row needs an `evidence` quote: a short verbatim phrase from `from_scene`'s
 > cd [project_dir] && [plugin_path]/storyforge illustrate --state
 > ```
 
-Existing rows are **never revised** — a transition the author wrote is an authorial decision about the book. Proposals that collide with one on `(entity, from_scene)` are discarded and reported.
+Existing rows are **never revised** — a transition the author wrote is an authorial decision about the book. Proposals that collide with one on `(entity, from_scene)` are discarded and reported, as is any proposal naming a scene that is not active in `scenes.csv`: that row is the model's, not the author's, so nothing protects it. A model that proposes nothing at all is answering, not failing — the run says so and writes nothing.
 
 ---
 
@@ -294,6 +294,8 @@ Read-only with respect to the prose and the log. Writes `working/illustration-co
 **Why a model is needed here at all**, which is worth explaining to the author: two transitions never disagree with each other, because things are allowed to change. Village lights dark at chapter ten and four still burning at chapter thirteen is a story, not an error. The contradiction is a scene *between* them asserting a state the span cannot support. Only reading prose against the resolved matrix finds it.
 
 A deterministic pre-pass runs first and narrows the read to the scenes that mention a tracked entity inside its span. When the pre-pass finds no problems **and** no candidate scenes, no model is called and the report says so — a clean report that skipped the pass is not the same as a clean pass.
+
+**Read the report's Coverage section before you trust its findings.** It names every gap: scenes with no prose yet, scenes long enough that only part was sent to the model, and scenes that are drafted and active in `scenes.csv` but absent from `reference/chapter-map.csv` — those have no reading position, so nothing in this pass ever looks at them. Any gap downgrades the result to "None found in the prose that was read". If the report names unexamined scenes, add them to the chapter map and re-run before believing anything.
 
 A contradiction is usually a **missing transition**, not bad prose: the book changed something the log never recorded. Where the prose is wrong instead, fix the prose — the audit records a digest per scene it read, so a revised scene reports as stale on the next `--diagnose`.
 
