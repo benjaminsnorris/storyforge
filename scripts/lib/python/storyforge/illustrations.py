@@ -536,6 +536,26 @@ def count_prose_words(text: str) -> int:
     return len(strip_markers(text).split())
 
 
+def prose_digest(text: str) -> str:
+    """A digest of scene prose, stable under cosmetic whitespace edits.
+
+    Markers come out first (a marker is not prose, and embedding one must not
+    read as a revision), then `normalize_for_comparison`, so a reflow or a
+    trailing-space change does not surface as staleness while a real rewrite
+    does. This is what `illustration-plan.csv:scene_digest` records at ingest and
+    what the audit's provenance file records per scene it read.
+    """
+    from storyforge.common import normalize_for_comparison
+    normalized = normalize_for_comparison(strip_markers(text))
+    return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
+
+def scene_prose_digest(project_dir: str, scene_id: str) -> str:
+    """`prose_digest` of a scene on disk, or '' when the scene has no file."""
+    text = _read_scene(project_dir, scene_id)
+    return prose_digest(text) if text is not None else ''
+
+
 # ============================================================================
 # Anchor matching
 # ============================================================================
@@ -1634,7 +1654,9 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     Also folds in `visual_state.prepass`, whose findings are about the
     transition log: a transition keyed to a scene that no longer exists, an
     evidence quote the prose no longer contains, and an illustration naming an
-    entity whose visible state nobody stated at that point.
+    entity whose visible state nobody stated at that point — plus
+    `visual_state.digest_drift`, for prose that moved after the audit read it or
+    after an illustration was rendered from it.
     """
     from storyforge import visual_state
 
@@ -1644,6 +1666,7 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     # checks are about the transition log alone, and a log can be wrong before a
     # single illustration has been planned.
     findings.extend(visual_state.prepass(project_dir)['findings'])
+    findings.extend(visual_state.digest_drift(project_dir))
 
     rows = read_plan(project_dir)
     if not rows and not os.path.isdir(illustrations_dir(project_dir)):

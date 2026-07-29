@@ -467,3 +467,121 @@ def _display_names(project_dir: str) -> dict[str, 'AnchorLabel']:
     """Canon display names, or {} when the project has no canon tier yet."""
     from storyforge import canon
     return canon.anchor_display_names(project_dir)
+
+
+# ============================================================================
+# Digest drift — the audit's provenance, and prose revised under a render
+# ============================================================================
+
+PROVENANCE_COLUMNS: list[str] = ['scene_id', 'digest', 'audited_at']
+PROVENANCE_FILE = os.path.join('working', 'illustration-audit-provenance.csv')
+
+
+class Provenance(TypedDict):
+    """One scene the audit read, and the prose it read."""
+    scene_id: str
+    digest: str
+    audited_at: str
+
+
+def provenance_path(project_dir: str) -> str:
+    return os.path.join(project_dir, PROVENANCE_FILE)
+
+
+def read_provenance(project_dir: str) -> list[Provenance]:
+    """Every provenance row, in file order. Absent file is empty, not an error."""
+    path = provenance_path(project_dir)
+    if not os.path.isfile(path):
+        return []
+    with open(path, newline='', encoding='utf-8') as f:
+        raw = f.read().replace('\r\n', '\n').replace('\r', '')
+    reader = csv.DictReader(raw.splitlines(), delimiter='|')
+    out: list[Provenance] = []
+    for index, row in enumerate(reader, start=2):
+        scene_id = (row.get('scene_id') or '').strip()
+        if not scene_id:
+            log(f'WARNING: {PROVENANCE_FILE} line {index} has no scene_id — '
+                f'skipped')
+            continue
+        out.append({
+            'scene_id': scene_id,
+            'digest': (row.get('digest') or '').strip(),
+            'audited_at': (row.get('audited_at') or '').strip(),
+        })
+    return out
+
+
+def write_provenance(project_dir: str, rows: list[Provenance]) -> str:
+    """Write the provenance file. `lineterminator` explicit, as everywhere."""
+    path = provenance_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=PROVENANCE_COLUMNS, delimiter='|',
+                                lineterminator='\n')
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k, '') for k in PROVENANCE_COLUMNS})
+    return path
+
+
+def digest_drift(project_dir: str) -> list['IllustrationFinding']:
+    """Scenes whose prose moved since something recorded a digest of it.
+
+    Two independent records, two findings:
+
+    - `audit_stale` — the audit read this scene's prose and recorded its digest;
+      the prose has since changed, so the contradiction pass no longer covers it.
+    - `prose_changed` — an illustration was ingested against this scene's prose;
+      the prose has since changed, so the art may no longer match what it
+      accompanies. The row is not wrong, but nothing else in the pipeline would
+      notice.
+
+    Both compare `illustrations.prose_digest`, which is marker-free and
+    whitespace-normalized, so embedding a marker or reflowing a paragraph does
+    not read as a revision.
+    """
+    from storyforge import illustrations as ill
+
+    findings: list['IllustrationFinding'] = []
+
+    for record in read_provenance(project_dir):
+        scene_id = record['scene_id']
+        current = ill.scene_prose_digest(project_dir, scene_id)
+        if not current:
+            log(f'WARNING: {PROVENANCE_FILE} names {scene_id}, which has no '
+                f'file in scenes/ — staleness for it cannot be determined')
+            continue
+        if record['digest'] and current != record['digest']:
+            findings.append({
+                'kind': 'audit_stale',
+                'id': scene_id,
+                'scene_id': scene_id,
+                'file': PROVENANCE_FILE,
+                'detail': f'{scene_id} was revised since the last '
+                          f'contradiction audit '
+                          f'({record["audited_at"] or "date not recorded"}) — '
+                          f'the audit no longer covers its prose',
+            })
+
+    for row in ill.read_plan(project_dir):
+        if (row.get('status') or '').strip() != 'ingested':
+            continue
+        recorded = (row.get('scene_digest') or '').strip()
+        if not recorded:
+            continue
+        scene_id = (row.get('scene_id') or '').strip()
+        current = ill.scene_prose_digest(project_dir, scene_id)
+        if not current or current == recorded:
+            continue
+        findings.append({
+            'kind': 'prose_changed',
+            'id': (row.get('id') or '').strip(),
+            'scene_id': scene_id,
+            'file': os.path.join('reference', ill.PLAN_FILENAME),
+            'detail': f'{scene_id} was revised after '
+                      f'{(row.get("id") or "").strip()!r} was rendered from it '
+                      f'— confirm the art still matches the prose it '
+                      f'accompanies',
+        })
+
+    return findings

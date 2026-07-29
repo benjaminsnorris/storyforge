@@ -1526,3 +1526,250 @@ def render_state_checklist(*, hints: list[EntityHint],
         '',
     ]
     return '\n'.join(lines)
+
+
+# ============================================================================
+# The contradiction audit (#278 phase 2)
+# ============================================================================
+
+#: Why an LLM pass is needed at all. Stated in the report itself, not only here:
+#: an author looking at a contradiction report has to understand what it can and
+#: cannot see, or they will read a clean report as proof of consistency.
+_WHY_THE_LLM_PASS: Final[str] = (
+    'Two transitions never disagree with each other, because things are allowed '
+    'to change: village lights dark at chapter ten and four still burning at '
+    'chapter thirteen is a story, not an error. The contradiction is a scene '
+    '*between* them asserting a state the span cannot support. Nothing '
+    'deterministic finds that — it takes reading the prose against the matrix, '
+    'which is what this pass does.'
+)
+
+
+def render_state_matrix(rows: list[dict[str, str]]) -> str:
+    """Render the transition log as a table, for the audit prompt and report."""
+    if not rows:
+        return '*No transitions recorded.*\n'
+    lines = ['| Entity | From scene | State | Evidence |', '|---|---|---|---|']
+    for row in rows:
+        lines.append(f'| `{row["entity"]}` | `{row["from_scene"]}` '
+                     f'| {row["state"]} | {row["evidence"]} |')
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def build_audit_request(*, story_context: str,
+                        transitions: list[dict[str, str]],
+                        resolved_by_scene: list[tuple[str, dict[str, str]]],
+                        scene_prose: str) -> str:
+    """Build the contradiction-audit prompt.
+
+    `resolved_by_scene` is the forward walk already done — the state in effect at
+    each candidate scene — so the model is checking prose against a resolved
+    matrix rather than being asked to re-derive resolution, which it would get
+    wrong at the `<=` boundary.
+    """
+    walked = []
+    for scene_id, state in resolved_by_scene:
+        if state:
+            body = '; '.join(f'{entity} = {value}'
+                             for entity, value in sorted(state.items()))
+        else:
+            body = '(nothing tracked is established yet at this point)'
+        walked.append(f'- `{scene_id}`: {body}')
+    walked_block = '\n'.join(walked) or '- (no candidate scenes)'
+
+    return f"""You are auditing an illustrated novel's prose against its
+visual-state matrix, before any art is paid for.
+
+## What you are looking for
+
+{_WHY_THE_LLM_PASS}
+
+Report only contradictions you can quote. A scene that simply does not mention a
+tracked entity is not a contradiction — the state persists silently, which is the
+whole point of a sparse log. What counts is prose that asserts something
+incompatible with the state in effect there.
+
+## Story context
+
+{story_context}
+
+## The transition log
+
+{render_state_matrix(transitions)}
+
+## State in effect at each scene you are reading
+
+This is the resolved forward walk. A transition takes effect **at** its own
+scene, and these lines already account for that — do not re-derive them.
+
+{walked_block}
+
+## The prose
+
+{scene_prose}
+
+## Output
+
+Return JSON only, in this exact shape:
+
+```json
+{{
+  "contradictions": [
+    {{
+      "scene_id": "the scene whose prose disagrees",
+      "entity": "the tracked entity, as spelled in the log",
+      "quote": "a short verbatim quote from that scene asserting the conflicting state",
+      "log_says": "the state the matrix has in effect at that scene",
+      "prose_says": "what the quoted prose asserts instead",
+      "resolution": "which to change and why — a missing transition, a wrong from_scene, or prose that contradicts a deliberate decision"
+    }}
+  ]
+}}
+```
+
+`quote` must appear **verbatim** in the named scene. Return an empty
+`contradictions` list if the prose and the matrix agree — a fabricated finding
+costs more than a missed one, because it sends the author to re-read a scene that
+was fine.
+"""
+
+
+def parse_audit_response(text: str) -> tuple[list[dict[str, str]], str]:
+    """Extract the ``contradictions`` list from an audit response.
+
+    Returns `(contradictions, status)` where status is 'ok', 'empty' (the key was
+    present and the list was empty — the model said the prose agrees, which is a
+    real answer), or 'no_json'. `parse_selection_response` conflates the middle
+    case with failure; here it must not, because "no contradictions" is the
+    outcome the author most wants to be able to trust.
+    """
+    required = ('scene_id', 'entity', 'quote')
+
+    for candidate in _json_candidates(text):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        inner = parsed.get('contradictions')
+        if not isinstance(inner, list):
+            continue
+        out: list[dict[str, str]] = []
+        for item in inner:
+            if not isinstance(item, dict):
+                continue
+            row = {key: str(item.get(key, '')).strip()
+                   for key in (*required, 'log_says', 'prose_says',
+                               'resolution')}
+            if all(row[key] for key in required):
+                out.append(row)
+        return out, 'ok' if out else 'empty'
+    return [], 'no_json'
+
+
+def render_audit_report(*, title: str, transitions: list[dict[str, str]],
+                        findings: list[dict[str, str]],
+                        contradictions: list[dict[str, str]],
+                        scenes_read: list[str], scene_count: int,
+                        tracked_entities: list[str],
+                        undrafted_scenes: list[str],
+                        llm_skipped_reason: str) -> str:
+    """Render `working/illustration-contradictions.md`.
+
+    Read-only output. The report states what it read and what it could not see,
+    because a clean report is only as trustworthy as its coverage.
+    """
+    lines = [
+        f'# Illustration contradiction audit — {title}',
+        '',
+        f'Generated {date.today().isoformat()}. Read-only: this pass reports, '
+        'it never edits the prose or the log.',
+        '',
+        '## Why this pass exists',
+        '',
+        _WHY_THE_LLM_PASS,
+        '',
+        '## Coverage',
+        '',
+        f'- Scenes in reading order: {scene_count}',
+        f'- Scenes read: {len(scenes_read)}'
+        + (f' — {", ".join(f"`{s}`" for s in scenes_read)}'
+           if scenes_read else ''),
+        f'- Entities tracked: {len(tracked_entities)}'
+        + (f' — {", ".join(f"`{e}`" for e in tracked_entities)}'
+           if tracked_entities else ''),
+    ]
+    if undrafted_scenes:
+        lines.append(
+            f'- Not read (no file in `scenes/`): '
+            f'{", ".join(f"`{s}`" for s in undrafted_scenes)}')
+    lines.extend([
+        '',
+        'A scene is read when it mentions a tracked entity at or after that '
+        'entity\'s first transition. Scenes outside that span cannot contradict '
+        'the log, so they are not read — and a scene the log says nothing about '
+        'is not covered by this report.',
+        '',
+    ])
+
+    if llm_skipped_reason:
+        lines.extend([
+            '## No contradiction pass was run',
+            '',
+            llm_skipped_reason,
+            '',
+        ])
+
+    lines.extend(['## Deterministic findings', ''])
+    if findings:
+        lines.append('These were computed without a model — each one is certain.')
+        lines.append('')
+        for finding in findings:
+            lines.append(f'- **`{finding["kind"]}`** '
+                         f'{finding.get("id", "")} — {finding["detail"]}')
+        lines.append('')
+    else:
+        lines.extend(['None. The log resolves cleanly and every evidence quote '
+                      'is still in the prose.', ''])
+
+    lines.extend(['## Contradictions', ''])
+    if contradictions:
+        for item in contradictions:
+            lines.extend([
+                f'### `{item["scene_id"]}` — `{item["entity"]}`',
+                '',
+                f'> {item["quote"]}',
+                '',
+                f'- **The matrix says:** {item.get("log_says") or "(not stated)"}',
+                f'- **The prose asserts:** '
+                f'{item.get("prose_says") or "(not stated)"}',
+                f'- **Resolution:** '
+                f'{item.get("resolution") or "(none proposed)"}',
+                '',
+            ])
+    elif llm_skipped_reason:
+        lines.extend(['Not assessed — no contradiction pass was run.', ''])
+    else:
+        lines.extend(['None found. The prose and the matrix agree across every '
+                      'scene read.', ''])
+
+    lines.extend([
+        '## What to do next',
+        '',
+        '- A contradiction is usually a **missing transition**, not bad prose: '
+        'the book changed something the log never recorded.',
+        '- Where the prose is wrong instead, fix the prose and re-run — the '
+        'audit records a digest per scene it read, so a revised scene reports '
+        'as stale.',
+        '- Never revise a transition an already-rendered illustration used. '
+        'Correct the log and re-render from the corrected state.',
+        '',
+        '```bash',
+        'storyforge illustrate --state     # record a missing transition',
+        'storyforge illustrate --audit     # re-run this pass',
+        '```',
+        '',
+    ])
+    return '\n'.join(lines)
