@@ -750,6 +750,27 @@ def normalize_for_comparison(text: str) -> str:
     return '\n'.join(out)
 
 
+def csv_safe(text: str) -> str:
+    """Collapse *text* onto one physical line with no `|`.
+
+    Finding `detail` strings land in the unquoted pipe-delimited
+    `working/cleanup-report.csv` (`cmd_cleanup._write_report`), one row per
+    newline and one column per `|`. Anything interpolated into a `detail` from
+    author prose — anchor text, an evidence quote, a heading lifted out of a
+    canon file — must pass through this first.
+
+    A stray `|` is not cosmetic: it shifts every later field one column right,
+    so the trailing `status` cell (which `build_cleanup_report` sets to
+    `pending` for every actionable finding) reads as empty, and the
+    `status=pending` scan in `skills/forge/SKILL.md` walks straight past the
+    finding. A report row that silences its own finding is worse than no row.
+
+    Lives here rather than in `illustrations` so `canon` can reach it —
+    `illustrations` imports `canon`, so the reverse would be circular.
+    """
+    return ' '.join(text.split()).replace('|', '/')
+
+
 def build_interactive_system_prompt(project_dir: str, work_unit: str = 'step') -> str:
     """Build system prompt appendix for interactive mode."""
     interactive_file = os.path.join(project_dir, 'working', '.interactive')

@@ -458,7 +458,19 @@ def book_level_direction(project_dir: str) -> dict[str, str]:
     canon_id that is absent or still placeholder contributes nothing —
     `illustrations.missing_reference_sections` is what reports that state
     loudly to the author; this stays silent so a partially-populated
-    reference tier still contributes whatever it has. Insertion order follows
+    reference tier still contributes whatever it has.
+
+    A *truncated* block is a third state and `missing_reference_sections` does
+    NOT cover it: the block is populated, just cut short by a `##` heading
+    inside it, so what returns here is a shorter house style than the file
+    appears to hold. That one is reported by
+    `illustrations.truncated_anchor_findings` (`canon_anchor_truncated`, which
+    blocks `validate`) and warned about pre-fan-out by `--prompts` — this
+    function stays silent about it for the same reason as the other two. Do not
+    read the delegation above as covering truncation; it did not, and a whole
+    book's worth of prompts shipped partial vocabulary before #293.
+
+    Insertion order follows
     `CANON_PLAN`, which is what lets `render_direction_block` join the result
     without re-sorting it.
     """

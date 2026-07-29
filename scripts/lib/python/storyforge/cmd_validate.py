@@ -72,6 +72,22 @@ def main(argv=None):
             log(f'Illustration plan: valid '
                 f'({illus_result["row_count"]} illustrations)')
 
+    # Canon joins the gate here rather than staying advisory in `cleanup`, whose
+    # main() returns None on every path — so an `error`-severity canon finding
+    # blocked nothing before this (#295). Only errors block; TODO scaffolds are
+    # info and warnings leave a working project, so a book mid-`--direction`
+    # still validates.
+    from storyforge.canon import canon_gate
+    canon_result = canon_gate(project_dir)
+    if canon_result['errors']:
+        log(f'Canon files: {len(canon_result["errors"])} error(s)')
+        for f in canon_result['errors']:
+            log(f'  {f["file"]}: [{f["type"]}] {f["detail"]}')
+    if canon_result['other']:
+        log(f'Canon files: {len(canon_result["other"])} non-blocking finding(s)')
+        for f in canon_result['other']:
+            log(f'  {f["file"]}: [{f["severity"]}] {f["type"]}')
+
     structural_scores = None
     scores_previous = None
     if args.structural:
@@ -89,6 +105,7 @@ def main(argv=None):
         'schema': schema,
         'knowledge': knowledge,
         'illustrations': illus_result,
+        'canon': canon_result,
         'scores': structural_scores,
         'scores_previous': scores_previous,
     }
@@ -102,7 +119,9 @@ def main(argv=None):
     structural_ok = structural['passed']
     schema_ok = schema is None or schema['failed'] == 0
     illustrations_ok = not illus_result['errors']
-    sys.exit(0 if structural_ok and schema_ok and illustrations_ok else 1)
+    canon_ok = not canon_result['errors']
+    sys.exit(0 if structural_ok and schema_ok and illustrations_ok and canon_ok
+             else 1)
 
 
 def _print_human_readable(combined):

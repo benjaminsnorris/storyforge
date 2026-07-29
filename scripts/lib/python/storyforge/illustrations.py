@@ -1585,6 +1585,11 @@ IllustrationFindingKind = Literal[
     'state_unspecified', 'prose_changed', 'audit_stale',
     # The handoff packet (#278 phase 3).
     'packet_stale', 'anchor_copy_drift',
+    # A canon Embeddable block cut short by a `##` heading inside it (#293).
+    # Blocking: canon.validate_canon_file reports the same condition per file,
+    # but only `cleanup` runs that and `cleanup` gates nothing, so the consumers
+    # that actually spend money on a half anchor had nothing to check.
+    'canon_anchor_truncated',
 ]
 
 
@@ -1619,6 +1624,12 @@ BLOCKING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     # is only a warning: a scene the chapter map omits still exists, so the
     # transition row is fine and the map is what needs fixing.
     'state_unknown_scene',
+    # A half anchor is worse than a missing one: `_warn_unanchored_rows` is loud
+    # about an absent anchor, while a truncated one is present, real prose, and
+    # silently short — so every prompt accepts it and the set drifts on whatever
+    # the dropped tail described. Once art exists the only repair is a
+    # re-render, which is what earns a block rather than a warning (#293).
+    'canon_anchor_truncated',
 })
 
 # Findings that need author attention but leave a valid book. An anchor that
@@ -1658,6 +1669,35 @@ def severity_of(kind: IllustrationFindingKind) -> Severity:
     return 'warning' if kind in WARNING_FINDINGS else 'error'
 
 
+def truncated_anchor_findings(project_dir: str) -> list[IllustrationFinding]:
+    """One `canon_anchor_truncated` finding per canon file with a short block.
+
+    Reported for the whole canon tree rather than only for ids some plan row
+    names in `canon_refs`, for two reasons: the three book-level files are never
+    named by a row and a truncated `visual-vocabulary` costs every prompt in the
+    book, and `_relevant_anchors`' full-set fallback means a row with empty
+    `canon_refs` can still receive any anchor.
+
+    Deterministic order (`sorted`) so the cleanup report and `--diagnose` do not
+    reshuffle between runs over unchanged canon.
+    """
+    from storyforge import canon
+
+    findings: list[IllustrationFinding] = []
+    for canon_id, truncations in sorted(
+            canon.truncated_anchor_ids(project_dir).items()):
+        where = ', '.join(
+            _csv_safe(t.heading) for t in truncations)
+        findings.append({
+            'kind': 'canon_anchor_truncated', 'id': canon_id,
+            'detail': f'canon `{canon_id}` has a `##` heading inside its '
+                      f'Embeddable block ({where}), so the anchor stops above '
+                      f'it — every prompt embedding it gets a shorter string '
+                      f'than the file appears to hold',
+        })
+    return findings
+
+
 def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     """Check the plan, the markers, and the files against each other.
 
@@ -1692,6 +1732,10 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     findings.extend(visual_state.digest_drift(project_dir))
     findings.extend(packet.packet_stale(project_dir))
     findings.extend(packet.anchor_copy_drift(project_dir))
+    # Before the early return below: a truncated anchor matters whether or not
+    # a single illustration has been planned yet, and fixing it before the plan
+    # exists is the cheapest moment there is.
+    findings.extend(truncated_anchor_findings(project_dir))
 
     rows = read_plan(project_dir)
     if not rows and not os.path.isdir(illustrations_dir(project_dir)):
@@ -1951,13 +1995,12 @@ def _direction_anchor_mismatches(project_dir: str) -> list[IllustrationFinding]:
 def _csv_safe(text: str) -> str:
     """Collapse *text* onto one physical line with no `|`.
 
-    Finding `detail` strings land in the unquoted pipe-delimited
-    `working/cleanup-report.csv` (`cmd_cleanup._write_report`), one row per
-    newline and one column per `|`. Free-form prose — anchor text here — can
-    contain either, so anything interpolated into a `detail` from prose must
-    pass through this first.
+    Retained as the illustration-side name for `common.csv_safe`, which is
+    where the implementation now lives so `canon` can reach it too (see that
+    docstring for why a stray `|` silences the finding it appears in).
     """
-    return ' '.join(text.split()).replace('|', '/')
+    from storyforge.common import csv_safe
+    return csv_safe(text)
 
 
 # ============================================================================

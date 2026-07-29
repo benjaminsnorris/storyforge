@@ -26,9 +26,9 @@ for the emitted finding types).
 import enum
 import os
 import re
-from typing import Literal, TypedDict
+from typing import Literal, NamedTuple, TypedDict
 
-from storyforge.common import log, normalize_for_comparison
+from storyforge.common import csv_safe, log, normalize_for_comparison
 
 # Severity is part of the cleanup-report contract — build_cleanup_report
 # filters action items by != 'info' and counts errors/warnings/info. A
@@ -50,6 +50,7 @@ CanonFindingKind = Literal[
     'canon_unknown_subdir',
     'canon_unexpected_nesting',
     'canon_missing_section',
+    'canon_truncated_embeddable_block',
     'canon_unfilled_template',
     'canon_registry_unreadable',
     'canon_missing_registry_entry',
@@ -59,6 +60,23 @@ CanonFindingKind = Literal[
     'canon_page_unreadable',
     'canon_drift',
 ]
+
+
+class _Sentinel(enum.Enum):
+    """Distinct sentinel values returned by parser helpers when the input
+    is malformed in a way that the caller needs to distinguish from a
+    normal result. Using an enum (rather than ad-hoc `object()` or string
+    sentinels) gives both narrow Literal types and stable `is` identity.
+
+    Declared up here rather than beside the parsers because
+    `ParsedCanonFile.frontmatter` names `TRUNCATED` in its own type.
+    """
+    TRUNCATED = enum.auto()
+    REGISTRY_MALFORMED = enum.auto()
+
+
+_TRUNCATED = _Sentinel.TRUNCATED
+_REGISTRY_MALFORMED = _Sentinel.REGISTRY_MALFORMED
 
 
 class _CanonFindingRequired(TypedDict):
@@ -81,9 +99,18 @@ class ParsedCanonFile(TypedDict):
     are zero-initialized so callers can read uniformly."""
     path: str
     exists: bool
-    frontmatter: dict[str, str] | None
+    #: The sentinel is part of this type, not an implementation detail:
+    #: `parse_canon_file` passes `_parse_frontmatter`'s result straight through,
+    #: so an unclosed `---` block really does land here. Declaring only
+    #: `dict | None` gave callers no reason to guard, while the value they would
+    #: hit is neither (#294).
+    frontmatter: dict[str, str] | None | Literal[_Sentinel.TRUNCATED]
     sections: set[str]
     body: str
+    #: Lines consumed by the frontmatter, so a body-relative line number can
+    #: be reported as the file line the author will actually look at. Body
+    #: line N is file line `body_line_offset + N`.
+    body_line_offset: int
 
 
 CANON_DIR = os.path.join('reference', 'canon')
@@ -117,8 +144,15 @@ REQUIRED_FRONTMATTER_KEYS = (
     ALWAYS_REQUIRED_FRONTMATTER_KEYS + GN_ONLY_FRONTMATTER_KEYS
 )
 
+#: The section carrying the anchor / embeddable prompt block. Defined here and
+#: composed into `REQUIRED_SECTIONS` and `_EMBEDDABLE_BLOCK_RE` below, so the
+#: name has one spelling: three independent copies could be renamed apart, and
+#: a detector that no longer recognizes the extractor's heading would report
+#: `[]` for every file forever with no test failing.
+EMBEDDABLE_SECTION = 'Embeddable block'
+
 REQUIRED_SECTIONS = (
-    'Embeddable block',
+    EMBEDDABLE_SECTION,
     'Clauses',
     'Related canon',
     'Iteration history',
@@ -147,21 +181,22 @@ ENTITY_CANON_TYPES: frozenset[CanonType] = frozenset(
     {'character', 'location', 'motif'})
 
 
-class _Sentinel(enum.Enum):
-    """Distinct sentinel values returned by parser helpers when the input
-    is malformed in a way that the caller needs to distinguish from a
-    normal result. Using an enum (rather than ad-hoc `object()` or string
-    sentinels) gives both narrow Literal types and stable `is` identity.
-    """
-    TRUNCATED = enum.auto()
-    REGISTRY_MALFORMED = enum.auto()
-
-
-_TRUNCATED = _Sentinel.TRUNCATED
-_REGISTRY_MALFORMED = _Sentinel.REGISTRY_MALFORMED
-
 _FRONTMATTER_RE = re.compile(r'\A---\s*\n(.*?\n)---\s*(?:\n|$)', re.DOTALL)
-_SECTION_RE = re.compile(r'^##\s+(.+?)\s*$', re.MULTILINE)
+
+#: Separates `##` from its heading name. `[ \t]`, never `\s`: without DOTALL a
+#: `.` cannot cross a newline, but `\s+` always could, so `##\nClauses` was read
+#: as a heading *named* `Clauses`. That fabricated a section, and since
+#: `parse_canon_file`'s `sections` set is what `canon_missing_section` checks
+#: `REQUIRED_SECTIONS` against, a file with no `## Clauses` heading anywhere
+#: reported none missing. It also split the extractor from the truncation
+#: detector: a bare `##` above a line reading `Embeddable block` made
+#: `_EMBEDDABLE_BLOCK_RE` report a block while the detector (matching per line)
+#: never opened its window, so a real truncation below went unreported (#294).
+#: A markdown heading is one line; all three consumers now say so.
+_H2_GAP = r'[ \t]+'
+_H2_TRAIL = r'[ \t]*'
+
+_SECTION_RE = re.compile(rf'^##{_H2_GAP}(.+?){_H2_TRAIL}$', re.MULTILINE)
 _SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]*$')
 
 # Canon-embed markers: opener captures a candidate id (permissive — we
@@ -237,15 +272,115 @@ def find_canon_embeds(
     return embeds, unclosed, invalid
 
 
+#: What ends an H2 section: an `##` at line start followed by any whitespace.
+#: Composed into all three consumers below rather than retyped in each, because
+#: the truncation detector is only correct while it enumerates *exactly* the
+#: headings the extractor stops at, and two hand-copied spellings of one
+#: pattern are free to drift apart the moment either is edited. The comments
+#: that used to argue the copies were identical are what motivated composing
+#: them: an invariant defended in prose is an invariant nothing enforces.
+_BLOCK_TERMINATOR = r'^##\s'
+
 _EMBEDDABLE_BLOCK_RE = re.compile(
-    r'^##\s+Embeddable block\s*\n(.*?)(?=^##\s|\Z)',
+    rf'^##{_H2_GAP}{re.escape(EMBEDDABLE_SECTION)}{_H2_TRAIL}\n'
+    rf'(.*?)(?={_BLOCK_TERMINATOR}|\Z)',
     re.MULTILINE | re.DOTALL,
 )
 
 _SECTION_BODY_RE = re.compile(
-    r'^##\s+(.+?)\s*\n(.*?)(?=^##\s|\Z)',
+    rf'^##{_H2_GAP}(.+?){_H2_TRAIL}\n(.*?)(?={_BLOCK_TERMINATOR}|\Z)',
     re.MULTILINE | re.DOTALL,
 )
+
+#: The heading alternative of `_EMBEDDABLE_BLOCK_RE`'s lookahead — the other
+#: alternative, `\Z`, is end-of-body and never an offending heading. So this
+#: *enumerates* every heading the extractor stops at and no others;
+#: `embeddable_block_truncations` then narrows that enumeration to the ones
+#: inside the block, and therefore reports a strict subset.
+#:
+#: Deliberately NOT `_SECTION_RE`, which requires `##` plus a name. Matched
+#: against the whole body rather than per line, because for a bare `##` line —
+#: the case with no name, which nothing else reports — the `\s` is the line's
+#: own newline, and `splitlines()` strips it. (In the ordinary case the `\s` is
+#: just the space after `##`; the newline only carries it for a bare `##`.)
+_BLOCK_TERMINATOR_RE = re.compile(_BLOCK_TERMINATOR, re.MULTILINE)
+
+#: The required sections that legitimately *follow* the anchor, and so close
+#: the truncation window. Deliberately not `REQUIRED_SECTIONS`, which contains
+#: the section we are inside: `EMBEDDABLE_SECTION` is `REQUIRED_SECTIONS[0]`,
+#: so breaking on the whole tuple made a *duplicated* `## Embeddable block`
+#: read as a clean terminator. The extractor stops there too (`.search` takes
+#: the first block), so the anchor was silently halved and `validate_canon_file`
+#: returned zero findings — the exact failure class #289 exists to close,
+#: reached through its own fix. `parsed['sections']` is a set, so no
+#: duplicate-heading check catches it either. An author who sub-heads their
+#: anchor and one who pastes the heading twice are making the same mistake.
+_SECTIONS_AFTER_ANCHOR = tuple(
+    s for s in REQUIRED_SECTIONS if s != EMBEDDABLE_SECTION
+)
+
+
+class BlockTruncation(NamedTuple):
+    """One `##` heading that cuts the Embeddable block short.
+
+    `body_line` is named for its units on purpose: it is *body*-relative, and
+    the file-relative number a finding must show is
+    `body_line + ParsedCanonFile['body_line_offset']`. Two quantities of type
+    `int` that mean different things is a mix-up no annotation here would
+    catch, so the field name is the only guard available — and the name also
+    lands in pytest failure output, where `BlockTruncation(body_line=6,
+    heading='## Wardrobe')` beats `(6, '## Wardrobe')` when the assertion that
+    fails is a transposition. Unpacks like the tuple it replaces.
+    """
+    body_line: int
+    heading: str
+
+
+def embeddable_block_truncations(body: str) -> list[BlockTruncation]:
+    """Every `##` heading that cuts the `## Embeddable block` short.
+
+    Returns one `BlockTruncation` per offender, in source order, with trailing
+    whitespace stripped from the quoted heading.
+
+    `embeddable_block_text` reads to the next `##`, which is correct markdown
+    and correct for the schema — the four `REQUIRED_SECTIONS` are what follows
+    a real anchor. But an author who sub-heads the anchor itself
+    (`## Wardrobe`) loses every word below that line, and the anchor is the
+    string every prompt embeds verbatim, so the images then drift on whatever
+    the dropped tail described. Widening the extractor instead would swallow
+    whichever section actually followed and feed it to an image model as
+    though it were description, so the truncation stays and is reported
+    (issue #289).
+
+    The window closes at the first `_SECTIONS_AFTER_ANCHOR` heading: past that
+    point a non-schema heading is somebody's extra section, not lost anchor
+    text. A second `## Embeddable block` is an offender like any other — see
+    that constant for why it must not close the window.
+    """
+    offenders: list[BlockTruncation] = []
+    started = False
+    for match in _BLOCK_TERMINATOR_RE.finditer(body):
+        start = match.start()
+        eol = body.find('\n', start)
+        # `eol == -1` is a heading on the last line with no trailing newline;
+        # `body[start:eol]` would silently drop the body's final character and
+        # report a heading the author cannot find by searching for it.
+        line = (body[start:] if eol == -1 else body[start:eol]).rstrip()
+        # Matched against the extracted LINE, never over the body: `_SECTION_RE`
+        # has no DOTALL but its `\s+` crosses newlines, so over a body it reads
+        # `##\nA grey coat.` as a heading named `A grey coat.`. Per line it
+        # returns None for a bare `##`, and that empty name is exactly what
+        # makes the bare-`##` case report. Collapsing this into one
+        # `_SECTION_RE.finditer(body)` pass would break the case #289 is about.
+        named = _SECTION_RE.match(line)
+        name = named.group(1).strip() if named else ''
+        if not started:
+            started = name == EMBEDDABLE_SECTION
+            continue
+        if name in _SECTIONS_AFTER_ANCHOR:
+            break
+        offenders.append(BlockTruncation(body.count('\n', 0, start) + 1, line))
+    return offenders
 
 # Lines that mark a section as unfilled scaffolding. Stripped of leading
 # `<!--` HTML-comment fragments and surrounding whitespace, a section
@@ -395,6 +530,7 @@ def parse_canon_file(path: str) -> ParsedCanonFile:
             'frontmatter': None,
             'sections': set(),
             'body': '',
+            'body_line_offset': 0,
         }
     with open(path, encoding='utf-8') as f:
         text = f.read()
@@ -404,12 +540,19 @@ def parse_canon_file(path: str) -> ParsedCanonFile:
         text = text.lstrip('﻿')
     frontmatter, body = _parse_frontmatter(text)
     sections = {m.group(1).strip() for m in _SECTION_RE.finditer(body)}
+    # `text` is prefix + body, so the prefix's line count is exactly the
+    # difference in newlines. Counting that way rather than measuring the
+    # frontmatter match holds for every branch: no frontmatter (body IS text),
+    # a `_TRUNCATED` block (same), and `_FRONTMATTER_RE`'s trailing `\s*`
+    # absorbing a variable number of blank lines, which a match-length
+    # measurement would get wrong.
     return {
         'path': path,
         'exists': True,
         'frontmatter': frontmatter,
         'sections': sections,
         'body': body,
+        'body_line_offset': text.count('\n') - body.count('\n'),
     }
 
 
@@ -473,6 +616,59 @@ def _finding(file_rel: str, detail: str, action: str,
     }
 
 
+#: Longest quoted heading in a `detail`, so one pathological line cannot make
+#: a CSV cell unreadable. The line number is what the author navigates by; the
+#: quote is only there to confirm they are looking at the right line.
+_MAX_QUOTED_HEADING = 60
+
+
+def _truncated_block_findings(
+    rel: str, parsed: ParsedCanonFile,
+) -> list[CanonFinding]:
+    """The `canon_truncated_embeddable_block` finding, or nothing.
+
+    'error' severity, the same class as `canon_id_mismatch`: both break prompt
+    assembly at the point the anchor is consumed. The failure modes differ, and
+    truncation's is the worse of the two — a `canon_id` mismatch fails the
+    lookup and surfaces as an unanchored row that `_warn_unanchored_rows`
+    announces, whereas a truncation hands every consumer a shorter string that
+    they all accept, and once art exists the only repair is a re-render.
+
+    Only `cleanup` surfaces this; nothing exits non-zero on it (see the
+    follow-up in CLAUDE.md).
+    """
+    truncations = embeddable_block_truncations(parsed['body'])
+    if not truncations:
+        return []
+    offset = parsed['body_line_offset']
+    # csv_safe because the quoted heading is verbatim author markdown — a `|`
+    # in it shifts every later column of the cleanup-report row, emptying the
+    # trailing `status` cell that `forge` scans for `pending`. The finding
+    # would then silence itself. Newlines are already impossible (the line is
+    # cut at the first `\n` and rstripped), so `|` is the whole exposure.
+    where = ', '.join(
+        f'line {offset + body_line}: `{csv_safe(heading)[:_MAX_QUOTED_HEADING]}`'
+        for body_line, heading in truncations
+    )
+    # One finding per file listing every offender, matching the adjacent
+    # unfilled-template check: the author opens the file once and fixes them
+    # together. Reporting only the first would make an error-severity finding
+    # into an N-round loop on the file where several sub-heads are likeliest.
+    return [_finding(
+        rel,
+        f'## {EMBEDDABLE_SECTION} is ended early by a `##` heading inside it '
+        f'({where}; the anchor stops at the first). If that heading was meant '
+        'to be part of the anchor, every word below it is missing from the '
+        'string each prompt embeds',
+        'Demote the heading to `###` so it stays inside the anchor; if it was '
+        'meant to be its own section, move it below the four required '
+        'sections; if it is a second `## Embeddable block`, merge it into the '
+        'first. A `##` inside a fenced code block ends the section too',
+        'canon_truncated_embeddable_block',
+        severity='error',
+    )]
+
+
 def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
     """Validate one canon file. Finding paths are project-root-relative so
     they display the way authors think about files."""
@@ -482,6 +678,16 @@ def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
 
     if not parsed['exists']:
         return findings  # callers handle missing files at the directory level
+
+    # Runs BEFORE the two frontmatter early returns below, and must stay there.
+    # It reads only `parsed['body']`, and so do the accessors that consume a
+    # truncated anchor: `embeddable_block_text`, `get_canon_embeddable_block`,
+    # `is_canon_block_populated`, and `prompts_illustrate.book_level_direction`
+    # never look at frontmatter. Returning early past this check therefore
+    # converted a reported truncation into an unreported one while the short
+    # value was still being shipped to every prompt — a swallowed finding, not
+    # deferred triage.
+    findings.extend(_truncated_block_findings(rel, parsed))
 
     fm = parsed['frontmatter']
     if fm is _TRUNCATED:
@@ -974,6 +1180,76 @@ def anchor_texts(project_dir: str) -> dict[str, str]:
             continue
         anchors[canon_id] = body.strip()
     return anchors
+
+
+class CanonGate(TypedDict):
+    """`validate`'s view of canon: what blocks, and what merely reports."""
+    errors: list[CanonFinding]
+    other: list[CanonFinding]
+
+
+def canon_gate(project_dir: str) -> CanonGate:
+    """Split canon findings into the blocking and the reportable.
+
+    `error` severity on a canon finding used to mean nothing: `cleanup` was the
+    only command that ran canon validation and it returns `None` on every path,
+    so `canon_truncated_frontmatter`, `canon_id_mismatch` and
+    `canon_registry_unreadable` all printed and blocked nothing. `cmd_validate`
+    folds `errors` into its exit code, which puts canon where every other
+    blocking check in this project already lives (#295).
+
+    Only `error` blocks. `canon_unfilled_template` is `info` and warnings leave a
+    working project, so a book mid-`--direction` still validates — gating on
+    those would make the check impossible to adopt, which is how a gate gets
+    turned off wholesale.
+
+    A project with no `reference/canon/` yields nothing, matching
+    `cmd_cleanup.report_canon_files`' own guard: never having run `--direction`
+    is valid in-flight state, not a failure.
+    """
+    if not os.path.isdir(os.path.join(project_dir, CANON_DIR)):
+        return {'errors': [], 'other': []}
+    findings = validate_canon_directory(project_dir)
+    return {
+        'errors': [f for f in findings if f['severity'] == 'error'],
+        'other': [f for f in findings if f['severity'] != 'error'],
+    }
+
+
+def truncated_anchor_ids(
+    project_dir: str,
+) -> dict[str, list[BlockTruncation]]:
+    """Every canon file whose Embeddable block is cut short, keyed by canon_id.
+
+    The shared source `illustrations.validate_plan`, `--prompts` and the packet
+    all read, so a truncated anchor is diagnosed identically wherever it is
+    caught. `validate_canon_file` reports the same condition per *file* for the
+    cleanup report; this exists because that report gates nothing and the
+    consumers that actually spend money on a short anchor needed something to
+    check (#293).
+
+    Entity anchors and the three book-level files both — a truncated
+    `visual-vocabulary` ships partial house style to every prompt in the book,
+    which is worse than one character's anchor being short. Keys are `canon_id`
+    so a plan row's `canon_refs` matches directly, and traversal is
+    `_walk_canon_files` so starter templates stay out and order is
+    deterministic, exactly as in `anchor_texts`.
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return {}
+
+    out: dict[str, list[BlockTruncation]] = {}
+    for path in _walk_canon_files(canon_dir):
+        parsed = parse_canon_file(path)
+        fm = parsed['frontmatter']
+        canon_id = (
+            (fm.get('canon_id') or '').strip() if isinstance(fm, dict) else ''
+        ) or os.path.splitext(os.path.basename(path))[0]
+        truncations = embeddable_block_truncations(parsed['body'])
+        if truncations:
+            out[canon_id] = truncations
+    return out
 
 
 #: `canon_updated: YYYY-MM-DD`. ISO dates sort lexicographically, so the

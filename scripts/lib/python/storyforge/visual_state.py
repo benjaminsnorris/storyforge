@@ -224,10 +224,10 @@ def _csv_safe(text: str) -> str:
 
     Finding details land in the unquoted pipe-delimited
     `working/cleanup-report.csv`, and evidence and state cells are author prose.
-    Delegates to the illustration module's helper so there is one such function.
+    Delegates to `common.csv_safe` so there is one such function.
     """
-    from storyforge.illustrations import _csv_safe as flatten
-    return flatten(text)
+    from storyforge.common import csv_safe
+    return csv_safe(text)
 
 
 def _entity_search_terms(

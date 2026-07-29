@@ -1270,6 +1270,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     labels = _anchor_labels(project_dir)
     if needs_api:
         _warn_unanchored_rows(rows, anchors)
+        _warn_truncated_anchors(project_dir)
     cutoff = _reference_cutoff(project_dir, no_prior_refs)
     written = 0
     failed: list[str] = []
@@ -1653,6 +1654,29 @@ def _report_anchor_batch(batch: packet.AnchorBatch,
         log(f'  {label}: {illus_id}{mark}')
     for note in batch['fallback']:
         log(f'  WARNING: {note}')
+
+
+def _warn_truncated_anchors(project_dir: str) -> None:
+    """Warn, before any call is paid for, about anchors that are silently short.
+
+    The sibling of `_warn_unanchored_rows`, and the harder case: an absent
+    anchor is loud, while a truncated one is present, real prose, and shorter
+    than the file looks — so every request accepts it and the set drifts on
+    whatever the dropped tail described. `validate` and `cleanup` both report it
+    (`canon_anchor_truncated`), but an author who goes straight to `--prompts`
+    has run neither, and after the calls the money is spent (#293).
+    """
+    from storyforge import canon
+
+    for canon_id, truncations in sorted(
+            canon.truncated_anchor_ids(project_dir).items()):
+        headings = ', '.join(f'`{t.heading}`' for t in truncations)
+        log(f'WARNING: canon `{canon_id}` has a `##` heading inside its '
+            f'Embeddable block ({headings}), which ENDS the block — every '
+            f'prompt in this run embeds only the text above it, and the images '
+            f'will drift on whatever the rest described. Demote it to `###` '
+            f'and re-run. Art already rendered from the short anchor needs '
+            f're-rendering.')
 
 
 def _warn_unanchored_rows(rows: list[dict[str, str]],

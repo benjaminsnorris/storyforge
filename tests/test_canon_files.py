@@ -561,6 +561,556 @@ def test_validate_unfilled_template_flagged(tmp_path):
     assert 'Related canon' not in unfilled[0]['detail']
 
 
+# ---------------------------------------------------------------------------
+# Canon validation joins `validate`'s gate (issue #295)
+# ---------------------------------------------------------------------------
+
+def test_canon_errors_are_separated_from_warnings(project_dir):
+    """#295: `error` severity on a canon finding meant nothing — `cleanup` was
+    its only consumer and returns None on every path. `canon_gate` is what
+    `cmd_validate` folds into its exit code, so only `error` blocks: info
+    (`canon_unfilled_template`) and warning findings still report and pass, or
+    an in-flight project could never validate."""
+    from storyforge.canon import canon_gate
+    project = str(project_dir)
+    # An unclosed frontmatter block — an existing 'error' kind.
+    write_canon(project, 'characters/nora.md', 'nora', canon_type='character',
+                frontmatter='---\ncanon_id: nora\n')
+    result = canon_gate(project)
+    assert result['errors'], 'an error-severity canon finding must block'
+    assert all(f['severity'] == 'error' for f in result['errors'])
+    assert all(f['severity'] != 'error' for f in result['other'])
+
+
+def test_canon_gate_is_empty_without_a_canon_directory(project_dir):
+    """A project with no `reference/canon/` is valid in-flight state, matching
+    `cmd_cleanup.report_canon_files`' own guard — not a reason to fail
+    `validate` for every project that has never run `--direction`."""
+    from storyforge.canon import canon_gate
+    import shutil
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if os.path.isdir(canon_dir):
+        shutil.rmtree(canon_dir)
+    assert canon_gate(str(project_dir)) == {'errors': [], 'other': []}
+
+
+def _validate_exit_code(project, monkeypatch):
+    """Run `cmd_validate.main` with the non-canon validators stubbed to passing.
+
+    The fixture project does not pass `validate` on its own (six structural
+    failures), so an unstubbed exit code would be 1 either way — the broken-canon
+    assertion would pass for the wrong reason and the clean-canon one could never
+    pass. Stubbing the other three contributors is what isolates the canon half
+    of the gate, which is the only thing these two tests are about. `canon_gate`
+    itself is exercised for real.
+    """
+    import storyforge.elaborate as el
+    import storyforge.schema as sch
+    from storyforge import cmd_validate
+    monkeypatch.setattr(el, 'validate_structure',
+                        lambda ref: {'passed': True, 'checks': [], 'failures': []})
+    monkeypatch.setattr(sch, 'validate_schema',
+                        lambda ref, proj: {'failed': 0, 'checks': [], 'results': []})
+    monkeypatch.setattr(sch, 'validate_illustration_plan',
+                        lambda proj: {'row_count': 0, 'errors': [], 'warnings': []})
+    monkeypatch.setattr(cmd_validate, 'detect_project_root', lambda: project)
+    with pytest.raises(SystemExit) as exc:
+        cmd_validate.main(['--quiet'])
+    return exc.value.code
+
+
+def test_validate_exits_nonzero_on_a_canon_error(project_dir, monkeypatch):
+    """The gate itself: a canon error must fail `storyforge validate`, which is
+    where every other blocking check in this project already lives. Before #295
+    an `error`-severity canon finding could not fail anything."""
+    project = str(project_dir)
+    write_canon(project, 'characters/nora.md', 'nora', canon_type='character',
+                frontmatter='---\ncanon_id: nora\n')
+    assert [f for f in validate_canon_directory(project)
+            if f['severity'] == 'error'], 'fixture must really have a canon error'
+    assert _validate_exit_code(project, monkeypatch) == 1
+
+
+def test_validate_passes_when_canon_is_only_unfinished(project_dir, monkeypatch):
+    """The negative half, and the one that decides whether this is usable: canon
+    that is merely incomplete — TODO scaffolds (info), warnings — must not block,
+    or a project mid-`--direction` could never validate."""
+    project = str(project_dir)
+    write_canon(project, 'characters/nora.md', 'nora', canon_type='character',
+                body='\n## Embeddable block\n\nTODO — describe her.\n\n'
+                     '## Clauses\n\n## Related canon\n\n## Iteration history\n')
+    severities = {f['severity'] for f in validate_canon_directory(project)}
+    assert 'error' not in severities, f'unexpected canon error: {severities}'
+    assert _validate_exit_code(project, monkeypatch) == 0
+
+
+def test_truncated_anchor_ids_reports_every_affected_canon_file(tmp_path):
+    """#293: the shared source `validate_plan`, `--prompts` and the packet all
+    read, so a truncated anchor is diagnosed the same way in each. Keyed by
+    canon_id, which is what `canon_refs` matches against."""
+    from storyforge.canon import truncated_anchor_ids
+    project = str(tmp_path)
+    write_canon(project, 'characters/nora.md', 'nora', canon_type='character',
+                body=_anchor_body(block_lines='A braid.\n\n## Wardrobe\n\nCoat.'))
+    write_canon(project, 'visual-vocabulary.md', 'visual-vocabulary',
+                canon_type='vocabulary',
+                body=_anchor_body(block_lines='Greens.\n\n## Camera\n\nLow.'))
+    write_canon(project, 'locations/office.md', 'office', canon_type='location',
+                body=_anchor_body(block_lines='A narrow room.'))
+
+    found = truncated_anchor_ids(project)
+    assert set(found) == {'nora', 'visual-vocabulary'}, 'clean files must not appear'
+    assert [t.heading for t in found['nora']] == ['## Wardrobe']
+    assert [t.heading for t in found['visual-vocabulary']] == ['## Camera']
+
+
+def test_truncated_anchor_ids_skips_templates_and_missing_dir(tmp_path):
+    """Walks via `_walk_canon_files` like every other reader, so a starter
+    template is not reported as a broken anchor. A project with no canon
+    directory is valid in-flight state, not a finding."""
+    from storyforge.canon import truncated_anchor_ids
+    project = str(tmp_path)
+    assert truncated_anchor_ids(project) == {}
+    write_canon(project, 'characters/_template.md', '_template',
+                canon_type='character',
+                body=_anchor_body(block_lines='X.\n\n## Sub\n\nY.'))
+    assert truncated_anchor_ids(project) == {}
+
+
+# ---------------------------------------------------------------------------
+# An H2 heading name lives on one physical line (issue #294)
+#
+# `_SECTION_RE`, `_SECTION_BODY_RE` and `_EMBEDDABLE_BLOCK_RE` all separated
+# `##` from the heading name with `\s+`. Without DOTALL `.` cannot cross a
+# newline, but `\s+` always could — so a bare `##` line followed by a text line
+# was read as a heading *named* by that text. Four consequences, all verified.
+# ---------------------------------------------------------------------------
+
+def test_bare_hash_does_not_fabricate_a_section_name(tmp_path):
+    """The phantom entry. `sections` is what `canon_missing_section` checks
+    `REQUIRED_SECTIONS` membership against, so a fabricated name is not
+    cosmetic."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines='A dark braid.\n\n##\nA grey wool coat.'),
+    )
+    assert 'A grey wool coat.' not in parse_canon_file(path)['sections']
+
+
+def test_missing_required_section_reported_despite_a_bare_hash(tmp_path):
+    """The live bug (#294): a file with NO `## Clauses` heading anywhere read as
+    having one, because a bare `##` sat above a line whose text was `Clauses`.
+    A structural validator reporting a file as complete when a required section
+    is absent is the one thing it exists to prevent."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'visual-foundation.md', 'visual-foundation',
+        body='\n## Embeddable block\n\nStyle notes.\n\n##\nClauses\n\n'
+             '## Related canon\n\n- x\n\n## Iteration history\n\n- y\n',
+    )
+    missing = [f for f in validate_canon_file(path, project)
+               if f['type'] == 'canon_missing_section']
+    assert len(missing) == 1, 'the absent ## Clauses section must be reported'
+    assert 'Clauses' in missing[0]['detail']
+
+
+def test_section_body_re_does_not_fabricate_a_section(tmp_path):
+    """`_SECTION_BODY_RE` shared the quirk, so the unfilled-template check could
+    attribute a body to a section name that does not exist."""
+    from storyforge.canon import _SECTION_BODY_RE
+    body = '\n## Embeddable block\n\nStyle.\n\n##\nClauses\n\n## Related canon\n\n- x\n'
+    assert [m.group(1) for m in _SECTION_BODY_RE.finditer(body)] == [
+        'Embeddable block', 'Related canon']
+
+
+def test_embeddable_block_heading_must_be_on_one_line(tmp_path):
+    """The quirk also split the extractor from the detector. A bare `##` above a
+    line reading `Embeddable block` made the *extractor* report a block, while
+    the detector (which matches `_SECTION_RE` per line) never opened its window
+    — so a real `## Wardrobe` truncation below went unreported. Neither should
+    see a block here: a heading is one line."""
+    from storyforge.canon import (
+        _EMBEDDABLE_BLOCK_RE, embeddable_block_truncations,
+    )
+    body = ('\n##\nEmbeddable block\n\nStyle notes.\n\n'
+            '## Wardrobe\n\nGrey.\n\n## Clauses\n\n- c\n')
+    assert _EMBEDDABLE_BLOCK_RE.search(body) is None
+    assert embeddable_block_truncations(body) == []
+
+
+@pytest.mark.parametrize('heading,expected', [
+    ('## Wardrobe', 'Wardrobe'),
+    ('##\tWardrobe', 'Wardrobe'),          # tab still separates
+    ('## Wardrobe   ', 'Wardrobe'),        # trailing spaces still stripped
+    ('##  Two  spaces', 'Two  spaces'),    # interior spacing preserved
+])
+def test_one_line_headings_still_parse(tmp_path, heading, expected):
+    """The narrowing must not reject headings that were always legal."""
+    from storyforge.canon import _SECTION_RE
+    match = _SECTION_RE.match(heading)
+    assert match is not None and match.group(1).strip() == expected
+
+
+def test_bare_hash_still_reports_as_a_truncation(tmp_path):
+    """Guards the per-line call site the #294 fix must not disturb: a bare `##`
+    gets no name, and that empty name is what makes it report (issue #289)."""
+    from storyforge.canon import embeddable_block_truncations
+    assert embeddable_block_truncations(
+        '\n## Embeddable block\n\nA dark braid.\n\n##\n\n') == [(6, '##')]
+
+
+def test_parsed_frontmatter_can_be_the_truncated_sentinel(tmp_path):
+    """`ParsedCanonFile['frontmatter']` really does hold `_Sentinel.TRUNCATED`
+    for an unclosed block, so the annotation has to admit it — a caller that
+    trusted `dict | None` and skipped an isinstance check was wrong."""
+    from storyforge.canon import _TRUNCATED
+    project = str(tmp_path)
+    path = write_canon(project, 'style-foundation.md', 'style-foundation',
+                       frontmatter='---\ncanon_id: style-foundation\n')
+    assert parse_canon_file(path)['frontmatter'] is _TRUNCATED
+
+
+# ---------------------------------------------------------------------------
+# Embeddable-block truncation (issue #289)
+# ---------------------------------------------------------------------------
+
+def _anchor_body(*, block_lines: str) -> str:
+    """A canon body that puts `block_lines` under `## Embeddable block`, followed
+    by the other three required sections. What the extractor then *reads* back
+    is often less than `block_lines` — that truncation is the point of most of
+    these fixtures, so this deliberately does not promise a verbatim round-trip.
+    """
+    return (
+        '\n## Embeddable block\n\n'
+        f'{block_lines}\n\n'
+        '## Clauses\n\n- clause one\n\n'
+        '## Related canon\n\n- [[other]]\n\n'
+        '## Iteration history\n\n- 2026-07-29 — created\n'
+    )
+
+
+def _truncations(findings):
+    return [f for f in findings
+            if f['type'] == 'canon_truncated_embeddable_block']
+
+
+def test_h2_heading_inside_embeddable_block_is_reported(tmp_path):
+    """Issue #289: the anchor extractor reads to the next `##`, so an author
+    who sub-heads the anchor with `## Wardrobe` loses everything below it.
+    The truncation must not be silent — it produces a finding naming the file
+    and the offending line."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            '**Nora Vance**, 9 years old, a dark braid over one shoulder.\n\n'
+            '## Wardrobe\n\n'
+            'A grey wool coat, two buttons missing.'
+        )),
+    )
+    findings = validate_canon_file(path, project)
+    truncated = _truncations(findings)
+    assert len(truncated) == 1, findings
+    assert truncated[0]['severity'] == 'error'
+    assert truncated[0]['file'] == os.path.join(
+        'reference', 'canon', 'characters', 'nora.md')
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().splitlines()
+    expected_line = lines.index('## Wardrobe') + 1
+    assert f'line {expected_line}' in truncated[0]['detail']
+    assert '## Wardrobe' in truncated[0]['detail']
+
+
+def test_truncated_anchor_is_reported_not_silently_shortened(tmp_path):
+    """The byte-identity checks in test_packet / test_illustrate_package both
+    compare against anchor_texts — the truncating function — so they agree
+    with each other about an already-wrong value. This asserts the chosen
+    behavior directly against anchor_texts: the anchor is still cut at the
+    `##` line (widening it would swallow whatever section follows), and the
+    cut is always accompanied by a finding."""
+    from storyforge.canon import anchor_texts
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            'A dark braid over one shoulder.\n\n'
+            '## Wardrobe\n\n'
+            'A grey wool coat, two buttons missing.'
+        )),
+    )
+    anchor = anchor_texts(project)['nora']
+    assert anchor == 'A dark braid over one shoulder.'
+    assert 'grey wool coat' not in anchor
+    assert _truncations(validate_canon_file(path, project))
+
+
+def test_bare_double_hash_line_inside_embeddable_block_is_reported(tmp_path):
+    """A lone `##` line truncates the block — the extractor's lookahead is
+    `^##\\s` and here the `\\s` is the line's own newline — and `_SECTION_RE`
+    gives it no name, so it cannot be mistaken for a section that closes the
+    window. (An earlier version of this docstring claimed `_SECTION_RE` would
+    *miss* this line; it does not. See
+    test_section_re_is_the_wrong_enumerator_for_a_trailing_bare_hash for the
+    shape where the two genuinely diverge.)"""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            'A dark braid over one shoulder.\n\n'
+            '##\n\n'
+            'A grey wool coat.'
+        )),
+    )
+    assert len(_truncations(validate_canon_file(path, project))) == 1
+
+
+def test_section_re_is_the_wrong_enumerator_for_a_trailing_bare_hash(tmp_path):
+    """T-5: swapping the enumerator to `_SECTION_RE` survived 294 tests, because
+    `_SECTION_RE` is MULTILINE without DOTALL, so its `\\s+` crosses newlines and
+    it happily reads `##\\nA grey coat.` as a heading *named* `A grey coat.`.
+    The shape where the two genuinely diverge is a bare `##` with only
+    whitespace after it: the terminator matches, `_SECTION_RE` does not, and an
+    enumerator built on the latter reports nothing at all."""
+    from storyforge.canon import (
+        _BLOCK_TERMINATOR_RE, _SECTION_RE, embeddable_block_truncations,
+    )
+    body = '\n## Embeddable block\n\nA dark braid.\n\n##\n\n'
+    assert len(_BLOCK_TERMINATOR_RE.findall(body)) == 2
+    assert [m.group(1) for m in _SECTION_RE.finditer(body)] == ['Embeddable block']
+    assert embeddable_block_truncations(body) == [(6, '##')]
+
+
+def test_h3_subheading_inside_embeddable_block_is_not_truncation(tmp_path):
+    """`### Wardrobe` is inside the block, not a terminator — it must round-trip
+    whole and produce no finding. This is the fix an author is told to apply,
+    so firing on it would make the remediation impossible."""
+    from storyforge.canon import anchor_texts
+    project = str(tmp_path)
+    block = ('A dark braid over one shoulder.\n\n'
+             '### Wardrobe\n\n'
+             'A grey wool coat, two buttons missing.')
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=block),
+    )
+    assert anchor_texts(project)['nora'] == block
+    assert _truncations(validate_canon_file(path, project)) == []
+
+
+def test_detector_agrees_with_the_extractor_on_a_final_bare_hash(tmp_path):
+    """The invariant is one-directional: the detector must never flag a heading
+    the extractor does not stop at. (It reports a strict *subset* — the window
+    closes at `_SECTIONS_AFTER_ANCHOR`, so `## Clauses` is a stop the detector
+    deliberately does not report. An earlier docstring here said "exactly",
+    which would invite a future reader to delete that break.)
+
+    A bare `##` on the last line with no trailing newline does NOT stop the
+    extractor — the lookahead's `\\s` has no character to match — so the text
+    survives and there is nothing to report. A per-line reimplementation spelled
+    `^##(\\s|$)` looks equivalent and breaks exactly here."""
+    from storyforge.canon import (
+        embeddable_block_text, embeddable_block_truncations,
+    )
+    project = str(tmp_path)
+    body = '\n## Embeddable block\n\nA dark braid.\n\n##'
+    path = write_canon(project, 'characters/nora.md', 'nora',
+                       canon_type='character', body=body)
+    assert '##' in (embeddable_block_text(path) or '').splitlines()
+    assert embeddable_block_truncations(body) == []
+    assert _truncations(validate_canon_file(path, project)) == []
+
+
+def test_duplicate_embeddable_block_heading_is_reported(tmp_path):
+    """Round-2 CRITICAL. `EMBEDDABLE_SECTION` is `REQUIRED_SECTIONS[0]`, so
+    breaking the window on the whole tuple made a *duplicated*
+    `## Embeddable block` read as a clean terminator. The extractor stops there
+    too (`.search` takes the first), so the anchor was silently halved and
+    validation returned zero findings — the exact failure class #289 exists to
+    close, reached through its own fix. `parsed['sections']` is a set, so no
+    duplicate-heading check catches it either."""
+    from storyforge.canon import anchor_texts
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            'A dark braid over one shoulder.\n\n'
+            '## Embeddable block\n\n'
+            'A grey wool coat, two buttons missing.'
+        )),
+    )
+    assert anchor_texts(project)['nora'] == 'A dark braid over one shoulder.'
+    truncated = _truncations(validate_canon_file(path, project))
+    assert len(truncated) == 1, 'a duplicated heading halves the anchor silently'
+    assert '## Embeddable block' in truncated[0]['detail']
+
+
+def test_truncation_detail_has_no_pipe(tmp_path):
+    """Round-2 CRITICAL. This is the first finding to interpolate a verbatim
+    line of author markdown into a `detail`, and `working/cleanup-report.csv`
+    is unquoted pipe-delimited — a `|` in the heading shifts every later field
+    one column right, emptying the trailing `status` cell that
+    `build_cleanup_report` sets to `pending` and `skills/forge/SKILL.md` scans
+    for. The error-severity finding would silence itself in its only durable
+    artifact. Mirrors test_illustration_canon.py's
+    test_mismatch_detail_has_no_newline_or_pipe for the sibling finding that
+    also quotes author prose."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            'A dark braid.\n\n## Wardrobe | winter\n\nA grey wool coat.'
+        )),
+    )
+    finding = _truncations(validate_canon_file(path, project))[0]
+    assert '|' not in finding['detail']
+    assert '\n' not in finding['detail']
+    assert 'Wardrobe' in finding['detail'], 'the heading must still be named'
+
+
+def test_truncation_reported_even_without_frontmatter(tmp_path):
+    """Round-2 CRITICAL. `validate_canon_file` returns early when frontmatter
+    is missing or unclosed, but `embeddable_block_text`,
+    `get_canon_embeddable_block`, `is_canon_block_populated` and
+    `prompts_illustrate.book_level_direction` never read frontmatter — so a
+    root canon file's truncated house style was still shipped to every prompt
+    while the truncation went unreported. The check reads only the body and
+    must run before those returns."""
+    from storyforge.canon import embeddable_block_text
+    project = str(tmp_path)
+    body = _anchor_body(block_lines=(
+        'Palette: muted greens.\n\n## Camera\n\nAt child height.'
+    ))
+    path = write_canon(project, 'visual-vocabulary.md', 'visual-vocabulary',
+                       canon_type='vocabulary', frontmatter='', body=body)
+    kinds = [f['type'] for f in validate_canon_file(path, project)]
+    assert 'canon_missing_frontmatter' in kinds
+    assert 'canon_truncated_embeddable_block' in kinds
+    # The truncated value really is still readable — that is why it must report.
+    assert embeddable_block_text(path).strip() == 'Palette: muted greens.'
+
+
+def test_truncation_reported_when_frontmatter_is_unclosed(tmp_path):
+    """Same early-return gap via the other branch: an unclosed `---` block."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'visual-vocabulary.md', 'visual-vocabulary',
+        canon_type='vocabulary', frontmatter='---\ncanon_id: x\n',
+        body=_anchor_body(block_lines='Palette.\n\n## Camera\n\nLow.'),
+    )
+    kinds = [f['type'] for f in validate_canon_file(path, project)]
+    assert 'canon_truncated_frontmatter' in kinds
+    assert 'canon_truncated_embeddable_block' in kinds
+
+
+def test_embeddable_section_constant_matches_the_extractor(tmp_path):
+    """`EMBEDDABLE_SECTION` is only load-bearing if the extractor actually keys
+    on it. Without this, renaming the section in the regex but not the constant
+    would make the detector return `[]` for every file forever — a findings-
+    never-silent regression with no other test failing."""
+    from storyforge.canon import (
+        EMBEDDABLE_SECTION, REQUIRED_SECTIONS, _EMBEDDABLE_BLOCK_RE,
+    )
+    assert _EMBEDDABLE_BLOCK_RE.search(
+        f'## {EMBEDDABLE_SECTION}\nbody text\n') is not None
+    assert REQUIRED_SECTIONS[0] == EMBEDDABLE_SECTION
+
+
+def test_all_offenders_are_reported_in_source_order(tmp_path):
+    """T-1: a `break` after the first offender, or `return offenders[:1]`,
+    passed all 5584 tests. Reporting one at a time turns an error-severity
+    finding into an N-round loop on exactly the file where an author is likeliest
+    to have written several sub-heads."""
+    from storyforge.canon import embeddable_block_truncations
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            'A dark braid.\n\n## Wardrobe\n\nGrey coat.\n\n## Injury\n\nA scar.'
+        )),
+    )
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().splitlines()
+    detail = _truncations(validate_canon_file(path, project))[0]['detail']
+    for heading in ('## Wardrobe', '## Injury'):
+        assert heading in detail
+        assert f'line {lines.index(heading) + 1}' in detail
+    assert detail.index('## Wardrobe') < detail.index('## Injury'), 'source order'
+    assert [t.heading for t in embeddable_block_truncations('\n'.join(lines))] == [
+        '## Wardrobe', '## Injury']
+
+
+def test_heading_on_the_last_line_without_a_trailing_newline(tmp_path):
+    """T-2: the `eol == -1` branch. Simplifying to `body[start:eol]` survived the
+    full suite, and with `eol == -1` that is `body[start:-1]` — silently dropping
+    the body's last character, so the finding names `## Wardrob`, which the
+    author cannot find by searching for it."""
+    from storyforge.canon import embeddable_block_truncations
+    assert embeddable_block_truncations(
+        '\n## Embeddable block\n\nx\n\n## Wardrobe') == [(6, '## Wardrobe')]
+
+
+@pytest.mark.parametrize('block_lines,expected', [
+    ('x\n\n```\n## not a heading\n```', '## not a heading'),
+    ('x\n\n## hash at line start in prose', '## hash at line start in prose'),
+])
+def test_fenced_and_prose_hashes_still_fire(tmp_path, block_lines, expected):
+    """T-3: both of these DO fire, and that is correct — `_EMBEDDABLE_BLOCK_RE`
+    is not fence-aware either, so the anchor really is truncated there. Tested
+    because it looks like a false positive and isn't: a future "reduce noise"
+    commit teaching the detector to skip fenced blocks would break the
+    agreement invariant, leaving the anchor truncated and the finding gone."""
+    project = str(tmp_path)
+    path = write_canon(project, 'characters/nora.md', 'nora',
+                       canon_type='character',
+                       body=_anchor_body(block_lines=block_lines))
+    truncated = _truncations(validate_canon_file(path, project))
+    assert len(truncated) == 1
+    assert expected in truncated[0]['detail']
+
+
+def test_heading_above_the_embeddable_block_does_not_open_the_window(tmp_path):
+    """T-4: every other test opens its body with `## Embeddable block`, so the
+    skip-and-continue path was never exercised with a non-matching name and
+    `started = True` (unconditional) survived the full suite. That mutant breaks
+    both ways: a real truncation under a file with `## Overview` above the block
+    goes missed, and a file with no Embeddable block at all reports spuriously."""
+    from storyforge.canon import embeddable_block_truncations
+    assert embeddable_block_truncations(
+        '\n## Overview\n\nblah\n\n## Embeddable block\n\nx\n\n## Wardrobe\n\ny\n'
+    ) == [(10, '## Wardrobe')]
+    assert embeddable_block_truncations(
+        '\n## Clauses\n\nc\n\n## Notes\n\nn\n') == []
+
+
+def test_body_line_offset_is_zero_without_frontmatter(tmp_path):
+    """T-6: `write_canon` always emits frontmatter, so the offset was only ever
+    exercised at one non-zero value. This covers the `body IS text` case the
+    production comment specifically defends."""
+    project = str(tmp_path)
+    path = write_canon(project, 'style-foundation.md', 'style-foundation',
+                       frontmatter='')
+    assert parse_canon_file(path)['body_line_offset'] == 0
+
+
+def test_well_formed_canon_file_has_no_truncation_finding(tmp_path):
+    project = str(tmp_path)
+    path = write_canon(project, 'style-foundation.md', 'style-foundation')
+    assert _truncations(validate_canon_file(path, project)) == []
+
+
+def test_heading_after_the_required_sections_is_not_truncation(tmp_path):
+    """The offending window closes at the first required section that follows
+    the Embeddable block. A non-schema `## Notes` further down the file does
+    not shorten the anchor, so it is not this finding."""
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines='A dark braid.') + '\n## Notes\n\nlater.\n',
+    )
+    assert _truncations(validate_canon_file(path, project)) == []
+
+
 def test_validate_filled_canon_no_unfilled_finding(tmp_path):
     """A canon file with real content in every section must not register
     as unfilled. Only a first-non-blank-line `TODO` prefix decides on one

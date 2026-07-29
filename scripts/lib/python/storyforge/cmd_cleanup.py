@@ -1213,6 +1213,12 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
                          'scene_open, or scene_close',
     'invalid_layout': 'Set layout to full_page, half_page, double_page, '
                       'or inline',
+    'canon_anchor_truncated': 'Demote the `##` heading inside that canon '
+                              'file\'s Embeddable block to `###` so it stays '
+                              'inside the anchor; if it was meant to be its '
+                              'own section, move it below the four required '
+                              'sections. Re-render any art already generated '
+                              'from the short anchor',
     'missing_scene': 'Set scene_id to the scene this illustration belongs to',
     'unknown_scene': 'Fix scene_id, or add the missing scene file',
     'missing_file': 'Run storyforge illustrate --ingest <path>, or set the '

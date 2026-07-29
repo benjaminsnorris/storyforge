@@ -243,6 +243,18 @@ def _book_level_gaps(project_dir: str) -> list[str]:
     conflating them tells an author who has just run it to run it again.
     """
     gaps: list[str] = []
+    # A truncated block is neither absent nor a scaffold, so
+    # missing_reference_sections reports it clean — but the packet copied only
+    # the text above the stray `##`, which is exactly the coverage overclaim
+    # README.md must not make (#293).
+    for canon_id, truncations in sorted(
+            canon.truncated_anchor_ids(project_dir).items()):
+        headings = ', '.join(f'`{t.heading}`' for t in truncations)
+        gaps.append(
+            f'canon `{canon_id}` has a `##` heading inside its Embeddable '
+            f'block ({headings}), which ends the block — the copy in this '
+            f'packet stops there, so it is shorter than the canon file looks. '
+            f'Demote it to `###`, then re-run `--package`.')
     for canon_id in ill.missing_reference_sections(project_dir):
         if canon.resolve_canon_path(project_dir, canon_id) is None:
             gaps.append(
