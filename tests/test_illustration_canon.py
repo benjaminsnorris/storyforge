@@ -1139,3 +1139,103 @@ def test_filled_canon_and_anchor_stubs_stamp_canon_updated(project_dir):
     # first_appearance would misorder the render sequence.
     assert fm['appears_in'] == ''
     assert fm['first_appearance'] == ''
+
+
+# ============================================================================
+# The canon cutoff and anchor display names (prompt items 3 and 4)
+#
+# The cutoff answers "was this render directed by the canon that governs it
+# now?" — the question _references_for had no way to ask, which is how three
+# pre-canon renders ended up as the style references for the image meant to
+# replace them. The display names answer "what should a human-facing document
+# call this anchor?", which is why a model echoed `leo` back in prose.
+# ============================================================================
+
+def test_iso_date_or_empty_accepts_a_date_and_a_timestamp():
+    from storyforge.canon import iso_date_or_empty
+    assert iso_date_or_empty('2026-07-28') == '2026-07-28'
+    assert iso_date_or_empty('2026-07-28T09:14:00') == '2026-07-28'
+    assert iso_date_or_empty(' 2026-07-28 ') == '2026-07-28'
+    assert iso_date_or_empty('July 28 2026') == ''
+    assert iso_date_or_empty('2026-7-8') == ''
+    assert iso_date_or_empty('') == ''
+
+
+def test_newest_canon_updated_takes_the_latest_date(project_dir):
+    from storyforge.canon import newest_canon_updated
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'),
+                 CANON_BODY.replace('canon_updated: 2026-07-28',
+                                    'canon_updated: 2026-07-01'))
+    _write_canon(project_dir, os.path.join('characters', 'leo.md'),
+                 CANON_BODY.replace('canon_id: nora', 'canon_id: leo')
+                 .replace('canon_updated: 2026-07-28',
+                          'canon_updated: 2026-07-20'))
+    assert newest_canon_updated(project_dir) == '2026-07-20'
+
+
+def test_newest_canon_updated_is_empty_without_canon(project_dir):
+    from storyforge.canon import newest_canon_updated
+    assert newest_canon_updated(project_dir) == ''
+
+
+def test_newest_canon_updated_reports_an_unparseable_date(project_dir, capsys):
+    """A date it cannot read cannot raise the cutoff, so a canon edit can look
+    older than it is. That has to be said out loud, not skipped."""
+    from storyforge.canon import newest_canon_updated
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'),
+                 CANON_BODY.replace('canon_updated: 2026-07-28',
+                                    'canon_updated: last Tuesday'))
+    assert newest_canon_updated(project_dir) == ''
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'last Tuesday' in out
+    assert 'canon cutoff' in out
+
+
+def test_anchor_display_names_prefer_frontmatter(project_dir):
+    from storyforge.canon import anchor_display_names
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'),
+                 CANON_BODY.replace('canon_type: character',
+                                    'canon_type: character\n'
+                                    'display_name: Nora Vance'))
+    entry = anchor_display_names(project_dir)['nora']
+    assert entry == {'label': 'Nora Vance', 'source': 'frontmatter'}
+
+
+def test_anchor_display_names_fall_back_to_the_registry(project_dir):
+    """reference/characters.csv already carries the canonical spelling — the
+    same source --direction names its stubs from."""
+    from storyforge.canon import anchor_display_names
+    _write_canon(project_dir, os.path.join('characters', 'dorren-hayle.md'),
+                 CANON_BODY.replace('canon_id: nora',
+                                    'canon_id: dorren-hayle'))
+    entry = anchor_display_names(project_dir)['dorren-hayle']
+    assert entry == {'label': 'Dorren Hayle', 'source': 'registry'}
+
+
+def test_anchor_display_names_fall_back_to_the_humanized_slug(project_dir):
+    from storyforge.canon import anchor_display_names, humanize_canon_id
+    _write_canon(project_dir, os.path.join('motifs', 'great-lamp.md'),
+                 CANON_BODY.replace('canon_id: nora', 'canon_id: great-lamp')
+                 .replace('canon_type: character', 'canon_type: motif'))
+    entry = anchor_display_names(project_dir)['great-lamp']
+    assert entry == {'label': 'Great Lamp', 'source': 'slug'}
+    assert humanize_canon_id('great-lamp') == 'Great Lamp'
+
+
+def test_anchor_display_names_keys_line_up_with_anchor_texts(project_dir):
+    """The label dict is looked up by anchor key, so the two must agree."""
+    from storyforge.canon import anchor_display_names, anchor_texts
+    _write_canon(project_dir, os.path.join('characters', 'nora.md'))
+    assert set(anchor_texts(project_dir)) <= set(
+        anchor_display_names(project_dir))
+
+
+def test_anchor_display_names_ignore_book_level_canon(project_dir):
+    """Foundation/vocabulary/rules describe the book, not an entity in it."""
+    from storyforge.canon import anchor_display_names
+    _write_canon(project_dir, 'visual-foundation.md',
+                 CANON_BODY.replace('canon_id: nora',
+                                    'canon_id: visual-foundation')
+                 .replace('canon_type: character', 'canon_type: foundation'))
+    assert 'visual-foundation' not in anchor_display_names(project_dir)

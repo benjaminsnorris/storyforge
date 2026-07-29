@@ -28,7 +28,7 @@ import os
 import re
 from typing import Literal, TypedDict
 
-from storyforge.common import normalize_for_comparison
+from storyforge.common import log, normalize_for_comparison
 
 # Severity is part of the cleanup-report contract — build_cleanup_report
 # filters action items by != 'info' and counts errors/warnings/info. A
@@ -974,6 +974,183 @@ def anchor_texts(project_dir: str) -> dict[str, str]:
             continue
         anchors[canon_id] = body.strip()
     return anchors
+
+
+#: `canon_updated: YYYY-MM-DD`. ISO dates sort lexicographically, so the
+#: newest one is just `max()` over the parseable values — no date arithmetic,
+#: and nothing to get wrong across timezones.
+_ISO_DATE_RE = re.compile(r'\A(\d{4})-(\d{2})-(\d{2})\Z')
+
+
+def iso_date_or_empty(value: str) -> str:
+    """Return the ISO date at the head of *value*, or '' if there isn't one.
+
+    Accepts a bare date and a timestamp (the date part is taken), because a
+    hand-written `canon_updated` or `ingested_at` may carry a time. Anything
+    else returns '' — the caller decides what an unusable date means rather
+    than comparing garbage.
+    """
+    head = (value or '').strip()[:10]
+    return head if _ISO_DATE_RE.match(head) else ''
+
+
+def newest_canon_updated(project_dir: str) -> str:
+    """The most recent `canon_updated` date across the canon tree, or ''.
+
+    This is the cutoff a consumer compares its own artifacts against: art
+    rendered before the newest canon edit was directed by canon that no
+    longer applies. Returns '' when there is no canon directory or no file
+    carries a parseable date — with no governing date, nothing can be judged
+    stale, and inventing a cutoff would silently discard every reference.
+
+    An unparseable `canon_updated` is logged rather than skipped quietly: a
+    file whose date cannot be read cannot raise the cutoff, so a canon edit
+    can look older than it is.
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return ''
+
+    newest = ''
+    for path in _walk_canon_files(canon_dir):
+        fm = parse_canon_file(path)['frontmatter']
+        if not isinstance(fm, dict):
+            continue
+        raw = (fm.get('canon_updated') or '').strip()
+        if not raw:
+            continue
+        parsed = iso_date_or_empty(raw)
+        if not parsed:
+            log(f'WARNING: {os.path.relpath(path, project_dir)} has '
+                f'canon_updated={raw!r}, which is not an ISO date '
+                f'(YYYY-MM-DD); it cannot count toward the canon cutoff that '
+                f'decides whether earlier art is stale.')
+            continue
+        newest = max(newest, parsed)
+    return newest
+
+
+class AnchorLabel(TypedDict):
+    """The human-readable name for one anchor, and where it came from.
+
+    `source` is carried so a caller can report the fallback: an anchor
+    labeled from its slug means no one ever wrote the entity's name down,
+    which is worth a line in the log but is not an error.
+    """
+    label: str
+    source: Literal['frontmatter', 'registry', 'slug']
+
+
+#: Registry CSV per entity canon type. Composed from the two existing maps
+#: rather than written out again, so a new entity type cannot be added to one
+#: and forgotten in the other.
+REGISTRY_BY_TYPE: dict[CanonType, str] = {
+    SUBDIR_TYPE[subdir]: registry
+    for subdir, registry in SUBDIR_REGISTRY.items()
+}
+
+
+def anchor_display_names(project_dir: str) -> dict[str, AnchorLabel]:
+    """Map canon_id -> the display name to use when *rendering* that anchor.
+
+    `canon_id` stays the matching key everywhere (plan `canon_refs`, the
+    anchor dict from `anchor_texts`); this is only what a human-facing
+    document should call the entity. A prompt that labels an anchor with its
+    slug gets the slug echoed back in the model's prose ("kneeling are leo —
+    ten, warm light-brown skin…"), which is text the author pastes into an
+    image model.
+
+    Resolution order, each step a deliberate authority:
+
+    1. `display_name` in the canon file's frontmatter — the author said so.
+    2. the `name` column of the matching registry row — already canonical,
+       and the same source `--direction` names its stubs from.
+    3. the humanized slug — `great-lamp` becomes `Great Lamp`.
+
+    Keyed to match `anchor_texts`, walked the same way (so template files are
+    excluded and duplicate ids resolve to the same winner). Unlike
+    `anchor_texts` this does not skip placeholder Embeddable blocks: a name is
+    a name whether or not the anchor text is written yet, and extra keys are
+    harmless to callers that look labels up by anchor key.
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    if not os.path.isdir(canon_dir):
+        return {}
+
+    registry_names: dict[str, dict[str, str]] = {}
+    labels: dict[str, AnchorLabel] = {}
+    for path in _walk_canon_files(canon_dir):
+        fm = parse_canon_file(path)['frontmatter']
+        if not isinstance(fm, dict):
+            continue
+        canon_type = fm.get('canon_type')
+        if canon_type not in ENTITY_CANON_TYPES:
+            continue
+        canon_id = (fm.get('canon_id') or '').strip()
+        if not canon_id:
+            continue
+
+        declared = (fm.get('display_name') or '').strip()
+        if declared:
+            labels[canon_id] = {'label': declared, 'source': 'frontmatter'}
+            continue
+
+        registry_file = REGISTRY_BY_TYPE.get(canon_type, '')
+        if registry_file and registry_file not in registry_names:
+            registry_names[registry_file] = _read_registry_names(
+                project_dir, registry_file)
+        from_registry = (registry_names.get(registry_file, {})
+                         .get(canon_id.lower(), '').strip())
+        if from_registry:
+            labels[canon_id] = {'label': from_registry, 'source': 'registry'}
+            continue
+
+        labels[canon_id] = {'label': humanize_canon_id(canon_id),
+                            'source': 'slug'}
+    return labels
+
+
+def humanize_canon_id(canon_id: str) -> str:
+    """Title-case a canon slug into a readable label. `great-lamp` -> `Great Lamp`.
+
+    The last-resort label. `str.title()` is deliberate over `capitalize()`:
+    every word of a multi-word entity should read as a name.
+    """
+    words = (canon_id or '').replace('_', ' ').replace('-', ' ').split()
+    return ' '.join(w[:1].upper() + w[1:] for w in words) or canon_id
+
+
+def _read_registry_names(project_dir: str,
+                         registry_filename: str) -> dict[str, str]:
+    """Map lowercased registry `id` -> `name` for one registry CSV.
+
+    Returns {} when the file is absent, has no header, or has no `id`/`name`
+    columns — the caller falls back to the humanized slug, which is a
+    cosmetic downgrade, not a failure. Kept separate from
+    `_read_registry_ids`, whose malformed/absent distinction exists to drive
+    findings this caller has no use for.
+    """
+    csv_path = os.path.join(project_dir, 'reference', registry_filename)
+    if not os.path.isfile(csv_path):
+        return {}
+    names: dict[str, str] = {}
+    with open(csv_path, encoding='utf-8') as f:
+        header = f.readline().rstrip('\n')
+        if not header:
+            return {}
+        cols = header.split('|')
+        if 'id' not in cols or 'name' not in cols:
+            return {}
+        id_idx, name_idx = cols.index('id'), cols.index('name')
+        for line in f:
+            parts = line.rstrip('\n').split('|')
+            if id_idx >= len(parts) or name_idx >= len(parts):
+                continue
+            key = parts[id_idx].strip().lower()
+            value = parts[name_idx].strip()
+            if key and value:
+                names[key] = value
+    return names
 
 
 def validate_canon_directory(project_dir: str) -> list[CanonFinding]:

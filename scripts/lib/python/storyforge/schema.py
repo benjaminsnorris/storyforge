@@ -970,7 +970,8 @@ def validate_illustration_plan(project_dir: str) -> dict:
         return {'row_count': 0, 'errors': [], 'warnings': []}
 
     header = lines[0].split('|')
-    missing = [c for c in expected_columns if c not in header]
+    missing = [c for c in expected_columns if c not in header
+               and c not in ill.OPTIONAL_PLAN_COLUMNS]
     if missing:
         return {
             'row_count': 0,
@@ -984,6 +985,20 @@ def validate_illustration_plan(project_dir: str) -> dict:
 
     errors: list[dict] = []
     warnings: list[dict] = []
+
+    # An absent optional column is a warning, not an error: the plan predates
+    # the column and still validates, but the author should know what the gap
+    # costs them (every prior render reads as pre-canon, so --prompts stops
+    # using them as references) and that the next plan write closes it.
+    for col in [c for c in expected_columns
+                if c in ill.OPTIONAL_PLAN_COLUMNS and c not in header]:
+        warnings.append({
+            'row': 'header',
+            'message': f'Illustration plan has no `{col}` column (it predates '
+                       f'the column). The next write to the plan adds it; '
+                       f'until then every ingested illustration reads as '
+                       f'predating the current canon.',
+        })
     for finding in ill.validate_plan(project_dir):
         entry = {
             'row': finding.get('id') or finding.get('file') or '(plan)',

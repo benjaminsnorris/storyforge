@@ -23,7 +23,7 @@ import tempfile
 
 from storyforge.canon import CANON_DIR, CanonFinding, validate_canon_directory
 from storyforge.illustrations import (
-    PLAN_COLUMNS, IllustrationFindingKind,
+    OPTIONAL_PLAN_COLUMNS, PLAN_COLUMNS, IllustrationFindingKind,
 )
 from storyforge.common import detect_project_root, get_medium, log, read_yaml_field
 from storyforge.git import commit_and_push, ensure_on_branch
@@ -121,6 +121,16 @@ EXPECTED_CSV_SCHEMAS: dict[str, list[str]] = {
 #: Registered for header checking but never required to exist, in any medium.
 ALWAYS_OPTIONAL_CSV_FILES: set[str] = {
     'reference/illustration-plan.csv',
+}
+
+#: Columns a registered CSV may legally lack — schema additions that older
+#: projects predate and that the owning writer adds on its next write. Absence
+#: is not a finding: `cleanup` would otherwise tell an author to hand-edit a
+#: header that `storyforge illustrate` upgrades by itself, and the illustration
+#: code reads an absent/empty `ingested_at` as meaningful (pre-canon), not
+#: broken. Sourced from the owning module so the two cannot drift.
+OPTIONAL_CSV_COLUMNS: dict[str, set[str]] = {
+    'reference/illustration-plan.csv': set(OPTIONAL_PLAN_COLUMNS),
 }
 EXPECTED_WORKING_DIRS = set(
     'logs evaluations plans scores costs reviews recommendations coaching enrich timeline backups scenes-setup'.split()
@@ -536,8 +546,9 @@ def report_csv_schema(project_dir: str) -> list[str]:
         expected_set = set(expected_cols)
         actual_set = set(actual_cols)
 
+        optional_cols = OPTIONAL_CSV_COLUMNS.get(rel_path, set())
         for col in expected_cols:
-            if col not in actual_set:
+            if col not in actual_set and col not in optional_cols:
                 issues.append(f'MISSING_COLUMN:{rel_path}:{col}')
 
         for col in actual_cols:

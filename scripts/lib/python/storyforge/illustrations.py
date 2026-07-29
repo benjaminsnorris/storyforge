@@ -44,7 +44,18 @@ PLAN_COLUMNS: list[str] = [
     'id', 'scene_id', 'anchor', 'placement', 'layout', 'beat', 'rationale',
     'subject', 'composition', 'palette', 'mood', 'motifs', 'canon_refs',
     'status', 'asset_file', 'prompt_file', 'sha256', 'width', 'height',
+    'ingested_at',
 ]
+
+#: Columns added after the plan schema shipped. They are in PLAN_COLUMNS, so
+#: every `write_plan` emits them and a plan upgrades its own header the first
+#: time anything writes to it — but a plan CSV that predates them is legal and
+#: must not be a validation error. A book with twenty ingested illustrations
+#: and no `ingested_at` column is exactly the state this column was added to
+#: cope with, and failing its schema check would block the very run that fixes
+#: it. Empty is meaningful, not missing: `cmd_illustrate._references_for`
+#: reads an empty `ingested_at` as "predates the current canon".
+OPTIONAL_PLAN_COLUMNS: frozenset[str] = frozenset({'ingested_at'})
 
 # Placement is relative to the *paragraph* containing the anchor, not to the
 # anchor's character offset — an illustration never splits a paragraph.
