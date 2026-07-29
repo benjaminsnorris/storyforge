@@ -516,9 +516,12 @@ def parse_canon_file(path: str) -> ParsedCanonFile:
         text = text.lstrip('﻿')
     frontmatter, body = _parse_frontmatter(text)
     sections = {m.group(1).strip() for m in _SECTION_RE.finditer(body)}
-    # `text` is prefix + body, so the prefix's line count is the difference in
-    # newlines. Counting that way (rather than measuring the frontmatter match)
-    # keeps this correct for the no-frontmatter case, where body IS text.
+    # `text` is prefix + body, so the prefix's line count is exactly the
+    # difference in newlines. Counting that way rather than measuring the
+    # frontmatter match holds for every branch: no frontmatter (body IS text),
+    # a `_TRUNCATED` block (same), and `_FRONTMATTER_RE`'s trailing `\s*`
+    # absorbing a variable number of blank lines, which a match-length
+    # measurement would get wrong.
     return {
         'path': path,
         'exists': True,

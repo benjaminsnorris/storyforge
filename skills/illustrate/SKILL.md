@@ -91,6 +91,8 @@ An anchor works only because every prompt uses the identical string. So it has t
 
 Put measurable facts in them — height in centimeters, age in years, exact hair and eye color, specific garments. Those are precisely what drifts between separately generated images, and stating them is the only defence.
 
+**Do not sub-head the anchor with `##`.** A `##` line inside `## Embeddable block` *ends* the section, so everything below it silently drops out of the string every prompt embeds — including a second `## Embeddable block` pasted in by accident. Use `###` if you want structure inside the anchor; `cleanup` reports the mistake as `canon_truncated_embeddable_block`, but by then the prompts may already be written.
+
 **Never revise an anchor a rendered illustration already used.** If it's wrong, the fix is re-rendering from the corrected anchor, not editing the string and leaving the old art in place. If the model proposes a new anchor while writing a prompt, the command writes it as a new canon file for you to review — it does not create the registry row, so `cleanup` will flag the gap rather than the model's guess becoming canonical unreviewed.
 
 `--direction` reports book-level files left empty or still holding TODO text, and `--prompts` warns before it spends anything — a scaffold fed to an image model as though it were direction is worse than no canon file at all.
