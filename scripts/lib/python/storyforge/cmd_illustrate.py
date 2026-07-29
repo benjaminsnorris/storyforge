@@ -11,6 +11,9 @@ Nine phases, each its own flag:
                as opposed to the canon tier for what must never change.
   --audit      Read the prose against that matrix and report contradictions.
                Read-only with respect to the prose and the log.
+  --sequence   Assign each illustration a distinct treatment — camera
+               distance and height, time of day, framing — so twenty
+               independent generation calls stop converging on one shot.
   --prompts    Turn planned rows into image-generation prompts.
   --package    Assemble manuscript/illustration-packet/ — one bundle a
                long-running generation session works through, instead of
@@ -68,6 +71,9 @@ def parse_args(argv):
                        help='Propose illustration moments into the plan CSV')
     phase.add_argument('--prompts', action='store_true',
                        help='Write art-direction prompts for planned rows')
+    phase.add_argument('--sequence', action='store_true',
+                       help='Assign each illustration a distinct treatment so '
+                            'the set does not converge on one shot')
     phase.add_argument('--package', action='store_true',
                        help='Assemble the handoff packet in '
                             'manuscript/illustration-packet/ (no API calls)')
@@ -124,11 +130,11 @@ def main(argv=None):
 
     phases = [args.direction, args.plan, args.prompts, bool(args.ingest),
               args.embed, args.diagnose, args.review, args.state, args.audit,
-              args.package]
+              args.package, args.sequence]
     if not any(phases):
-        log('Nothing to do. Pick a phase: --direction, --plan, --prompts, '
-            '--package, --ingest PATH, --embed, --state, --audit, --diagnose, '
-            'or --review.')
+        log('Nothing to do. Pick a phase: --direction, --plan, --sequence, '
+            '--prompts, --package, --ingest PATH, --embed, --state, --audit, '
+            '--diagnose, or --review.')
         return 1
 
     if args.diagnose:
@@ -141,6 +147,12 @@ def main(argv=None):
     if args.plan:
         exit_code = run_plan(project_dir, coaching, args.count,
                              args.dry_run) or exit_code
+    if args.sequence:
+        # Before --prompts, deliberately: the treatment is an input to the
+        # art-direction request, so staging after prompting would leave every
+        # prompt file built from the staging that did not exist yet.
+        exit_code = run_sequence(project_dir, coaching,
+                                 args.dry_run) or exit_code
     if args.prompts:
         exit_code = run_prompts(project_dir, coaching, _id_filter(args.ids),
                                 args.dry_run,
@@ -1324,6 +1336,132 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             f'{", ".join(failed)}. Re-run --prompts for those before '
             f'committing.')
         return 1
+    return 0
+
+
+# ============================================================================
+# --sequence
+# ============================================================================
+
+def run_sequence(project_dir: str, coaching: CoachingLevel,
+                 dry_run: bool) -> int:
+    """Assign each illustration a distinct treatment, in one cheap call.
+
+    One call for the whole set, because the problem is a property of the set:
+    each per-illustration call is individually happy with the shot it wanted,
+    and no one of them can see that three others want the same one. It reads
+    beats and layouts only — never the scene prose, which is what the
+    per-illustration pass reads.
+
+    An author-written treatment is never overwritten, and identical treatments
+    across rows are reported: variety is the entire purpose, so a duplicate
+    defeats the pass while every individual prompt still looks fine.
+    """
+    rows = packet.rows_in_reading_order(project_dir)
+    if not rows:
+        log('No illustration plan rows to stage. Run '
+            '`storyforge illustrate --plan` first.')
+        return 0
+
+    authored = [r['id'].strip() for r in rows
+                if (r.get('treatment') or '').strip()]
+    log(f'Staging {len(rows)} illustration(s) as a sequence'
+        + (f'; {len(authored)} already carry an author treatment and will not '
+           f'be changed: {", ".join(authored)}' if authored else ''))
+
+    if coaching == 'strict':
+        return _write_coaching_file(
+            project_dir, 'illustration-sequence-checklist.md',
+            pp.render_sequence_checklist(rows=rows), dry_run)
+
+    if dry_run:
+        log(f'[dry-run] would request treatments for {len(rows)} '
+            f'illustration(s) (coaching={coaching})')
+        return 0
+
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        log('ERROR: ANTHROPIC_API_KEY is not set. Staging the sequence in '
+            f'{coaching} coaching requires an API key. Set it and re-run, or '
+            'use --coaching strict for a checklist.')
+        return 1
+
+    text = _invoke(project_dir,
+                   pp.build_sequence_request(
+                       rows=rows, story_context=_story_context(project_dir)),
+                   'illustrate-sequence', task_type='synthesis',
+                   max_tokens=4096)
+    if not text:
+        log('ERROR: no response from the API.')
+        return 1
+
+    treatments, status = pp.parse_sequence_response(text)
+    if status != 'ok':
+        log(f'ERROR: could not parse treatments from the response ({status}). '
+            f'Nothing was written to the plan.')
+        return 1
+
+    known = {row['id'].strip() for row in rows}
+    proposed: dict[str, str] = {}
+    unknown: list[str] = []
+    for item in treatments:
+        if item['id'] in known:
+            proposed[item['id']] = _sanitize_cell(item['treatment'])
+        else:
+            unknown.append(item['id'])
+    if unknown:
+        log(f'WARNING: {len(unknown)} proposed treatment(s) name no plan row '
+            f'and were dropped: {", ".join(sorted(unknown))}')
+
+    unstaged = sorted(known - set(proposed) - set(authored))
+    if unstaged:
+        log(f'WARNING: {len(unstaged)} illustration(s) got no treatment and '
+            f'stay unstaged: {", ".join(unstaged)}. Re-run --sequence, or fill '
+            f'`treatment` by hand — an unstaged image is one the set cannot '
+            f'stop converging on.')
+
+    log(f'Received {len(proposed)} usable treatment(s)')
+
+    if coaching == 'coach':
+        return _write_coaching_file(
+            project_dir, 'illustration-sequence-brief.md',
+            pp.render_sequence_brief(rows=rows, proposed=proposed), dry_run)
+
+    return _apply_treatments(project_dir, proposed)
+
+
+def _apply_treatments(project_dir: str, proposed: dict[str, str]) -> int:
+    """Write proposed treatments, never over an author's, and report repeats.
+
+    Reads and writes the *whole* plan, not the reading-order subset, so a
+    superseded row keeps its cells.
+    """
+    plan = ill.read_plan(project_dir)
+    written = 0
+    for row in plan:
+        illus_id = row['id'].strip()
+        if illus_id not in proposed:
+            continue
+        existing = (row.get('treatment') or '').strip()
+        if existing:
+            if existing != proposed[illus_id]:
+                log(f'  {illus_id}: keeping the author treatment '
+                    f'({existing!r}); the model proposed '
+                    f'{proposed[illus_id]!r}')
+            continue
+        row['treatment'] = proposed[illus_id]
+        written += 1
+    ill.write_plan(project_dir, plan)
+    log(f'Wrote {written} treatment(s) to reference/{ill.PLAN_FILENAME}')
+
+    duplicates = pp.duplicate_treatments(packet.rows_in_reading_order(project_dir))
+    for treatment, ids in sorted(duplicates.items()):
+        log(f'WARNING: {len(ids)} illustrations share one treatment '
+            f'({treatment!r}): {", ".join(sorted(ids))}. Variety is the whole '
+            f'point of this pass — give them different staging, or say in one '
+            f'of them that the echo is deliberate.')
+    if written:
+        log('Re-run `storyforge illustrate --package` to carry the staging '
+            'into the packet, and --prompts to carry it into the prompts.')
     return 0
 
 

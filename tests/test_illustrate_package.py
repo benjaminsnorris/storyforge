@@ -334,6 +334,242 @@ def test_illustrations_md_says_so_when_nothing_is_planned():
 
 
 # ============================================================================
+# --sequence — compositional variety
+# ============================================================================
+
+def _sequence_response(*pairs):
+    import json
+    return json.dumps({'treatments': [{'id': i, 'treatment': t}
+                                      for i, t in pairs]})
+
+
+@pytest.fixture
+def staged(monkeypatch):
+    """Patch `cmd_illustrate._invoke` (never storyforge.api) with a canned reply."""
+    def _install(body):
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: body)
+    return _install
+
+
+def test_sequence_assigns_a_distinct_treatment_per_row(in_project, staged):
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night'),
+        ('the-blank-page', 'overhead, flat, object fills the frame, daylight')))
+    assert cmd_illustrate.main(['--sequence']) == 0
+    plan = ill.read_plan_as_map(in_project)
+    assert 'close' in plan['the-finest-cartographer']['treatment']
+    assert 'overhead' in plan['the-blank-page']['treatment']
+
+
+def test_sequence_never_overwrites_an_author_treatment(in_project, staged):
+    rows = ill.read_plan(in_project)
+    rows[0]['treatment'] = 'wide, high, environmental, dusk'
+    ill.write_plan(in_project, rows)
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night'),
+        ('the-blank-page', 'overhead, flat, daylight')))
+    assert cmd_illustrate.main(['--sequence']) == 0
+    plan = ill.read_plan_as_map(in_project)
+    assert plan['the-finest-cartographer']['treatment'] == \
+        'wide, high, environmental, dusk'
+
+
+def test_a_kept_author_treatment_is_reported(in_project, staged, capsys):
+    rows = ill.read_plan(in_project)
+    rows[0]['treatment'] = 'wide, high, environmental, dusk'
+    ill.write_plan(in_project, rows)
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night')))
+    cmd_illustrate.main(['--sequence'])
+    out = capsys.readouterr().out
+    assert 'keeping the author treatment' in out
+    assert 'already carry an author treatment' in out
+
+
+def test_a_repeated_treatment_across_rows_is_reported(in_project, staged,
+                                                     capsys):
+    """The point of the pass is variety — identical treatments defeat it."""
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night'),
+        ('the-blank-page', 'Close, low, interior, night')))
+    assert cmd_illustrate.main(['--sequence']) == 0
+    out = capsys.readouterr().out
+    assert 'WARNING' in out
+    assert 'share one treatment' in out
+    assert 'the-blank-page' in out
+    assert 'the-finest-cartographer' in out
+
+
+def test_a_row_the_model_skipped_is_reported_as_unstaged(in_project, staged,
+                                                         capsys):
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night')))
+    cmd_illustrate.main(['--sequence'])
+    out = capsys.readouterr().out
+    assert 'stay unstaged' in out
+    assert 'the-blank-page' in out
+
+
+def test_a_treatment_for_an_unknown_id_is_dropped_and_reported(in_project,
+                                                               staged, capsys):
+    staged(_sequence_response(('nobody', 'close, low')))
+    cmd_illustrate.main(['--sequence'])
+    out = capsys.readouterr().out
+    assert 'name no plan row' in out
+    assert 'nobody' in out
+    assert 'treatment' not in ill.read_plan_as_map(in_project).get(
+        'nobody', {'treatment': ''})['treatment']
+
+
+def test_an_unparseable_response_writes_nothing(in_project, staged, capsys):
+    staged('I would rather describe the images in prose.')
+    assert cmd_illustrate.main(['--sequence']) == 1
+    out = capsys.readouterr().out
+    assert 'no_json' in out
+    assert 'Nothing was written' in out
+    assert not ill.read_plan_as_map(in_project)[
+        'the-finest-cartographer']['treatment']
+
+
+def test_a_json_response_with_no_treatments_key_is_reported(in_project, staged,
+                                                            capsys):
+    staged('{"proposals": []}')
+    assert cmd_illustrate.main(['--sequence']) == 1
+    assert 'no_treatments_key' in capsys.readouterr().out
+
+
+def test_an_empty_response_is_an_error(in_project, staged):
+    staged('')
+    assert cmd_illustrate.main(['--sequence']) == 1
+
+
+def test_a_fenced_response_is_parsed(in_project, staged):
+    """The common shape: a model wrapping its JSON in a code fence."""
+    staged('Here you go:\n\n```json\n'
+           + _sequence_response(('the-blank-page', 'overhead, flat, daylight'))
+           + '\n```\n')
+    assert cmd_illustrate.main(['--sequence']) == 0
+    assert ill.read_plan_as_map(in_project)['the-blank-page']['treatment'] == \
+        'overhead, flat, daylight'
+
+
+def test_a_top_level_array_is_reported_not_guessed_at(in_project, staged,
+                                                      capsys):
+    staged('[{"id": "the-blank-page", "treatment": "overhead"}]')
+    assert cmd_illustrate.main(['--sequence']) == 1
+    assert 'no_treatments_key' in capsys.readouterr().out
+
+
+def test_sequence_makes_no_api_call_under_strict_coaching(in_project,
+                                                          monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def _boom(*a, **k):
+        raise AssertionError('strict coaching proposes nothing')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
+    assert cmd_illustrate.main(['--sequence', '--coaching', 'strict']) == 0
+    path = os.path.join(in_project, 'working', 'coaching',
+                        'illustration-sequence-checklist.md')
+    with open(path, encoding='utf-8') as f:
+        body = f.read()
+    assert 'camera distance' in body
+    assert '_(fill in)_' in body
+    assert not ill.read_plan_as_map(in_project)[
+        'the-finest-cartographer']['treatment']
+
+
+def test_coach_coaching_writes_a_brief_and_not_the_plan(in_project, staged):
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night')))
+    assert cmd_illustrate.main(['--sequence', '--coaching', 'coach']) == 0
+    path = os.path.join(in_project, 'working', 'coaching',
+                        'illustration-sequence-brief.md')
+    with open(path, encoding='utf-8') as f:
+        assert 'close, low, interior, night' in f.read()
+    assert not ill.read_plan_as_map(in_project)[
+        'the-finest-cartographer']['treatment']
+
+
+def test_sequence_dry_run_calls_nothing_and_writes_nothing(in_project,
+                                                           monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
+    assert cmd_illustrate.main(['--sequence', '--dry-run']) == 0
+    assert not ill.read_plan_as_map(in_project)[
+        'the-finest-cartographer']['treatment']
+
+
+def test_sequence_without_a_key_is_an_error(in_project, capsys):
+    assert cmd_illustrate.main(['--sequence']) == 1
+    assert 'ANTHROPIC_API_KEY' in capsys.readouterr().out
+
+
+def test_sequence_on_an_empty_plan_says_so(project_dir, monkeypatch, capsys):
+    monkeypatch.chdir(project_dir)
+    assert cmd_illustrate.main(['--sequence']) == 0
+    assert 'No illustration plan rows to stage' in capsys.readouterr().out
+
+
+def test_the_request_carries_beats_but_not_scene_prose(in_project):
+    rows = ill.read_plan(in_project)
+    prompt = pp.build_sequence_request(rows=rows, story_context='ctx')
+    assert 'The village is gone from the new survey' in prompt
+    # act1-sc02's prose, which this pass must not be paying for.
+    assert 'Blank parchment. Not even a contour line' not in prompt
+    assert 'camera distance' in prompt
+
+
+def test_the_treatment_reaches_the_packet_entry(in_project, staged):
+    staged(_sequence_response(
+        ('the-finest-cartographer', 'close, low, interior, night')))
+    cmd_illustrate.main(['--sequence'])
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'illustrations.md')
+    assert '**Treatment.** close, low, interior, night' in body
+
+
+def test_the_treatment_reaches_the_art_direction_request(in_project):
+    from storyforge import prompts_illustrate as pi
+    row = ill.read_plan(in_project)[0]
+    row['treatment'] = 'close, low, interior, night'
+    prompt = pi.build_art_direction_request(
+        row=row, scene_excerpt='x', character_anchors={}, canon_context='y')
+    assert 'close, low, interior, night' in prompt
+    assert 'Staging assigned to this image' in prompt
+
+
+def test_no_staging_section_when_there_is_no_treatment(in_project):
+    from storyforge import prompts_illustrate as pi
+    row = ill.read_plan(in_project)[0]
+    prompt = pi.build_art_direction_request(
+        row=row, scene_excerpt='x', character_anchors={}, canon_context='y')
+    assert 'Staging assigned to this image' not in prompt
+
+
+def test_treatment_is_an_optional_plan_column(in_project):
+    """A plan CSV written before the sequence pass must stay valid."""
+    assert 'treatment' in ill.PLAN_COLUMNS
+    assert 'treatment' in ill.OPTIONAL_PLAN_COLUMNS
+
+
+def test_a_plan_without_the_treatment_column_still_validates(in_project):
+    path = ill.plan_path(in_project)
+    columns = [c for c in ill.PLAN_COLUMNS if c != 'treatment']
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('|'.join(columns) + '\n')
+        f.write('|'.join('the-finest-cartographer' if c == 'id'
+                         else 'act1-sc01' if c == 'scene_id'
+                         else 'scene_open' if c == 'placement'
+                         else 'planned' if c == 'status' else ''
+                         for c in columns) + '\n')
+    kinds = {f['kind'] for f in ill.validate_plan(in_project)}
+    assert 'shattered_row' not in kinds
+    assert cmd_illustrate.main(['--package']) == 0
+
+
+# ============================================================================
 # Dispatch
 # ============================================================================
 

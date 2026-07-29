@@ -70,6 +70,10 @@ class Entry(TypedDict):
     absent: str
     contrast: str
     notes: str
+    #: This image's place in the sequence's staging — camera distance and
+    #: height, time of day, how much of the frame the subject occupies,
+    #: interior versus environmental. Written by `--sequence` or by the author.
+    treatment: str
 
 
 class PacketContents(TypedDict):
@@ -263,6 +267,7 @@ def _entry_for(row: dict[str, str], *, project_dir: str,
         'absent': (row.get('absent') or '').strip(),
         'contrast': _contrast_for(row, previous_id),
         'notes': (row.get('composition') or '').strip(),
+        'treatment': (row.get('treatment') or '').strip(),
     }
     return entry, gaps
 

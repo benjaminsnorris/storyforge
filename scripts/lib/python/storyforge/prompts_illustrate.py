@@ -513,6 +513,18 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
         if (row.get(key) or '').strip()
     )
 
+    # The sequence pre-pass assigned this image its staging so that twenty
+    # independent calls do not converge on the same shot. Passed as a
+    # requirement rather than a hint: a treatment the model is free to ignore
+    # buys nothing, since each call is individually happy with the shot it
+    # already wanted.
+    treatment = (row.get('treatment') or '').strip()
+    staging = (f'\n## Staging assigned to this image\n\n{treatment}\n\nThis is '
+               f'the whole reason the image differs from its neighbours in the '
+               f'book. Honour it in the Scene and Subject sections; do not '
+               f'substitute a staging you like better.\n'
+               if treatment else '')
+
     direction_text = render_direction_block(direction or {})
     house = (f'\n## Book-level art direction\n\nEvery illustration in this '
              f'book obeys this. It is not background — a prompt that departs '
@@ -526,7 +538,7 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
 ## The illustration
 
 {fields}
-
+{staging}
 ## The scene it accompanies
 
 {scene_excerpt}

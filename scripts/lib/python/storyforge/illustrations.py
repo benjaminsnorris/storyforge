@@ -44,7 +44,7 @@ PLAN_COLUMNS: list[str] = [
     'id', 'scene_id', 'anchor', 'placement', 'layout', 'beat', 'rationale',
     'subject', 'composition', 'palette', 'mood', 'motifs', 'canon_refs',
     'status', 'asset_file', 'prompt_file', 'sha256', 'width', 'height',
-    'ingested_at', 'state_override', 'register', 'scene_digest',
+    'ingested_at', 'state_override', 'register', 'scene_digest', 'treatment',
 ]
 
 #: Columns added after the plan schema shipped. They are in PLAN_COLUMNS, so
@@ -58,9 +58,11 @@ PLAN_COLUMNS: list[str] = [
 #:
 #: `state_override`, `register`, and `scene_digest` join it for the same reason
 #: (#278 phase 2): a plan written before the visual-state matrix existed is
-#: legal, and the first write to it upgrades the header.
+#: legal, and the first write to it upgrades the header. `treatment` joins it in
+#: phase 3 — a plan that predates the sequence pre-pass is legal, and an empty
+#: `treatment` is exactly the state `--sequence` exists to fill.
 OPTIONAL_PLAN_COLUMNS: frozenset[str] = frozenset({
-    'ingested_at', 'state_override', 'register', 'scene_digest',
+    'ingested_at', 'state_override', 'register', 'scene_digest', 'treatment',
 })
 
 #: The book's lighting extremes, marked on the plan so the anchor batch can
