@@ -566,7 +566,11 @@ def test_validate_unfilled_template_flagged(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _anchor_body(*, block_lines: str) -> str:
-    """A canon body whose Embeddable block holds `block_lines` verbatim."""
+    """A canon body that puts `block_lines` under `## Embeddable block`, followed
+    by the other three required sections. What the extractor then *reads* back
+    is often less than `block_lines` — that truncation is the point of most of
+    these fixtures, so this deliberately does not promise a verbatim round-trip.
+    """
     return (
         '\n## Embeddable block\n\n'
         f'{block_lines}\n\n'
@@ -632,10 +636,13 @@ def test_truncated_anchor_is_reported_not_silently_shortened(tmp_path):
 
 
 def test_bare_double_hash_line_inside_embeddable_block_is_reported(tmp_path):
-    """A lone `##` line truncates the block (the extractor's lookahead is
-    `^##\\s`, which a bare `##` satisfies) but does not match the section-name
-    regex, which needs `##` plus a name. Enumerating offenders through the
-    section-name regex would therefore miss exactly this case."""
+    """A lone `##` line truncates the block — the extractor's lookahead is
+    `^##\\s` and here the `\\s` is the line's own newline — and `_SECTION_RE`
+    gives it no name, so it cannot be mistaken for a section that closes the
+    window. (An earlier version of this docstring claimed `_SECTION_RE` would
+    *miss* this line; it does not. See
+    test_section_re_is_the_wrong_enumerator_for_a_trailing_bare_hash for the
+    shape where the two genuinely diverge.)"""
     project = str(tmp_path)
     path = write_canon(
         project, 'characters/nora.md', 'nora', canon_type='character',
@@ -646,6 +653,22 @@ def test_bare_double_hash_line_inside_embeddable_block_is_reported(tmp_path):
         )),
     )
     assert len(_truncations(validate_canon_file(path, project))) == 1
+
+
+def test_section_re_is_the_wrong_enumerator_for_a_trailing_bare_hash(tmp_path):
+    """T-5: swapping the enumerator to `_SECTION_RE` survived 294 tests, because
+    `_SECTION_RE` is MULTILINE without DOTALL, so its `\\s+` crosses newlines and
+    it happily reads `##\\nA grey coat.` as a heading *named* `A grey coat.`.
+    The shape where the two genuinely diverge is a bare `##` with only
+    whitespace after it: the terminator matches, `_SECTION_RE` does not, and an
+    enumerator built on the latter reports nothing at all."""
+    from storyforge.canon import (
+        _BLOCK_TERMINATOR_RE, _SECTION_RE, embeddable_block_truncations,
+    )
+    body = '\n## Embeddable block\n\nA dark braid.\n\n##\n\n'
+    assert len(_BLOCK_TERMINATOR_RE.findall(body)) == 2
+    assert [m.group(1) for m in _SECTION_RE.finditer(body)] == ['Embeddable block']
+    assert embeddable_block_truncations(body) == [(6, '##')]
 
 
 def test_h3_subheading_inside_embeddable_block_is_not_truncation(tmp_path):
@@ -666,11 +689,16 @@ def test_h3_subheading_inside_embeddable_block_is_not_truncation(tmp_path):
 
 
 def test_detector_agrees_with_the_extractor_on_a_final_bare_hash(tmp_path):
-    """The invariant is agreement: the detector must flag exactly the headings
-    the extractor stops at. A bare `##` on the last line with no trailing
-    newline does NOT stop it (the lookahead's `\\s` has no character to match),
-    so the text survives and there is nothing to report. A per-line
-    reimplementation spelled `^##(\\s|$)` looks equivalent and breaks here."""
+    """The invariant is one-directional: the detector must never flag a heading
+    the extractor does not stop at. (It reports a strict *subset* — the window
+    closes at `_SECTIONS_AFTER_ANCHOR`, so `## Clauses` is a stop the detector
+    deliberately does not report. An earlier docstring here said "exactly",
+    which would invite a future reader to delete that break.)
+
+    A bare `##` on the last line with no trailing newline does NOT stop the
+    extractor — the lookahead's `\\s` has no character to match — so the text
+    survives and there is nothing to report. A per-line reimplementation spelled
+    `^##(\\s|$)` looks equivalent and breaks exactly here."""
     from storyforge.canon import (
         embeddable_block_text, embeddable_block_truncations,
     )
@@ -763,6 +791,96 @@ def test_truncation_reported_when_frontmatter_is_unclosed(tmp_path):
     kinds = [f['type'] for f in validate_canon_file(path, project)]
     assert 'canon_truncated_frontmatter' in kinds
     assert 'canon_truncated_embeddable_block' in kinds
+
+
+def test_embeddable_section_constant_matches_the_extractor(tmp_path):
+    """`EMBEDDABLE_SECTION` is only load-bearing if the extractor actually keys
+    on it. Without this, renaming the section in the regex but not the constant
+    would make the detector return `[]` for every file forever — a findings-
+    never-silent regression with no other test failing."""
+    from storyforge.canon import (
+        EMBEDDABLE_SECTION, REQUIRED_SECTIONS, _EMBEDDABLE_BLOCK_RE,
+    )
+    assert _EMBEDDABLE_BLOCK_RE.search(
+        f'## {EMBEDDABLE_SECTION}\nbody text\n') is not None
+    assert REQUIRED_SECTIONS[0] == EMBEDDABLE_SECTION
+
+
+def test_all_offenders_are_reported_in_source_order(tmp_path):
+    """T-1: a `break` after the first offender, or `return offenders[:1]`,
+    passed all 5584 tests. Reporting one at a time turns an error-severity
+    finding into an N-round loop on exactly the file where an author is likeliest
+    to have written several sub-heads."""
+    from storyforge.canon import embeddable_block_truncations
+    project = str(tmp_path)
+    path = write_canon(
+        project, 'characters/nora.md', 'nora', canon_type='character',
+        body=_anchor_body(block_lines=(
+            'A dark braid.\n\n## Wardrobe\n\nGrey coat.\n\n## Injury\n\nA scar.'
+        )),
+    )
+    with open(path, encoding='utf-8') as f:
+        lines = f.read().splitlines()
+    detail = _truncations(validate_canon_file(path, project))[0]['detail']
+    for heading in ('## Wardrobe', '## Injury'):
+        assert heading in detail
+        assert f'line {lines.index(heading) + 1}' in detail
+    assert detail.index('## Wardrobe') < detail.index('## Injury'), 'source order'
+    assert [t.heading for t in embeddable_block_truncations('\n'.join(lines))] == [
+        '## Wardrobe', '## Injury']
+
+
+def test_heading_on_the_last_line_without_a_trailing_newline(tmp_path):
+    """T-2: the `eol == -1` branch. Simplifying to `body[start:eol]` survived the
+    full suite, and with `eol == -1` that is `body[start:-1]` — silently dropping
+    the body's last character, so the finding names `## Wardrob`, which the
+    author cannot find by searching for it."""
+    from storyforge.canon import embeddable_block_truncations
+    assert embeddable_block_truncations(
+        '\n## Embeddable block\n\nx\n\n## Wardrobe') == [(6, '## Wardrobe')]
+
+
+@pytest.mark.parametrize('block_lines,expected', [
+    ('x\n\n```\n## not a heading\n```', '## not a heading'),
+    ('x\n\n## hash at line start in prose', '## hash at line start in prose'),
+])
+def test_fenced_and_prose_hashes_still_fire(tmp_path, block_lines, expected):
+    """T-3: both of these DO fire, and that is correct — `_EMBEDDABLE_BLOCK_RE`
+    is not fence-aware either, so the anchor really is truncated there. Tested
+    because it looks like a false positive and isn't: a future "reduce noise"
+    commit teaching the detector to skip fenced blocks would break the
+    agreement invariant, leaving the anchor truncated and the finding gone."""
+    project = str(tmp_path)
+    path = write_canon(project, 'characters/nora.md', 'nora',
+                       canon_type='character',
+                       body=_anchor_body(block_lines=block_lines))
+    truncated = _truncations(validate_canon_file(path, project))
+    assert len(truncated) == 1
+    assert expected in truncated[0]['detail']
+
+
+def test_heading_above_the_embeddable_block_does_not_open_the_window(tmp_path):
+    """T-4: every other test opens its body with `## Embeddable block`, so the
+    skip-and-continue path was never exercised with a non-matching name and
+    `started = True` (unconditional) survived the full suite. That mutant breaks
+    both ways: a real truncation under a file with `## Overview` above the block
+    goes missed, and a file with no Embeddable block at all reports spuriously."""
+    from storyforge.canon import embeddable_block_truncations
+    assert embeddable_block_truncations(
+        '\n## Overview\n\nblah\n\n## Embeddable block\n\nx\n\n## Wardrobe\n\ny\n'
+    ) == [(10, '## Wardrobe')]
+    assert embeddable_block_truncations(
+        '\n## Clauses\n\nc\n\n## Notes\n\nn\n') == []
+
+
+def test_body_line_offset_is_zero_without_frontmatter(tmp_path):
+    """T-6: `write_canon` always emits frontmatter, so the offset was only ever
+    exercised at one non-zero value. This covers the `body IS text` case the
+    production comment specifically defends."""
+    project = str(tmp_path)
+    path = write_canon(project, 'style-foundation.md', 'style-foundation',
+                       frontmatter='')
+    assert parse_canon_file(path)['body_line_offset'] == 0
 
 
 def test_well_formed_canon_file_has_no_truncation_finding(tmp_path):

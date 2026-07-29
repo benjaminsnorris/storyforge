@@ -26,7 +26,7 @@ for the emitted finding types).
 import enum
 import os
 import re
-from typing import Literal, TypedDict
+from typing import Literal, NamedTuple, TypedDict
 
 from storyforge.common import csv_safe, log, normalize_for_comparison
 
@@ -122,8 +122,15 @@ REQUIRED_FRONTMATTER_KEYS = (
     ALWAYS_REQUIRED_FRONTMATTER_KEYS + GN_ONLY_FRONTMATTER_KEYS
 )
 
+#: The section carrying the anchor / embeddable prompt block. Defined here and
+#: composed into `REQUIRED_SECTIONS` and `_EMBEDDABLE_BLOCK_RE` below, so the
+#: name has one spelling: three independent copies could be renamed apart, and
+#: a detector that no longer recognizes the extractor's heading would report
+#: `[]` for every file forever with no test failing.
+EMBEDDABLE_SECTION = 'Embeddable block'
+
 REQUIRED_SECTIONS = (
-    'Embeddable block',
+    EMBEDDABLE_SECTION,
     'Clauses',
     'Related canon',
     'Iteration history',
@@ -242,28 +249,37 @@ def find_canon_embeds(
     return embeds, unclosed, invalid
 
 
+#: What ends an H2 section: an `##` at line start followed by any whitespace.
+#: Composed into all three consumers below rather than retyped in each, because
+#: the truncation detector is only correct while it enumerates *exactly* the
+#: headings the extractor stops at, and two hand-copied spellings of one
+#: pattern are free to drift apart the moment either is edited. The comments
+#: that used to argue the copies were identical are what motivated composing
+#: them: an invariant defended in prose is an invariant nothing enforces.
+_BLOCK_TERMINATOR = r'^##\s'
+
 _EMBEDDABLE_BLOCK_RE = re.compile(
-    r'^##\s+Embeddable block\s*\n(.*?)(?=^##\s|\Z)',
+    rf'^##\s+{re.escape(EMBEDDABLE_SECTION)}\s*\n(.*?)(?={_BLOCK_TERMINATOR}|\Z)',
     re.MULTILINE | re.DOTALL,
 )
 
 _SECTION_BODY_RE = re.compile(
-    r'^##\s+(.+?)\s*\n(.*?)(?=^##\s|\Z)',
+    rf'^##\s+(.+?)\s*\n(.*?)(?={_BLOCK_TERMINATOR}|\Z)',
     re.MULTILINE | re.DOTALL,
 )
 
-#: The section name `_EMBEDDABLE_BLOCK_RE` matches, named so the truncation
-#: detector below recognizes the same heading the extractor keys on.
-EMBEDDABLE_SECTION = 'Embeddable block'
-
-#: `_EMBEDDABLE_BLOCK_RE`'s lookahead, character-for-character, so the
-#: truncation detector finds every heading the extractor stops at and no
-#: others. Deliberately NOT `_SECTION_RE`, which requires `##` plus a name: a
-#: bare `##` line truncates the block but has no name, so an enumerator built
-#: on _SECTION_RE would miss exactly the case nothing else reports. Matched
-#: against the whole body rather than per line because the `\s` here is
-#: usually the line's own newline, which splitlines() would have removed.
-_BLOCK_TERMINATOR_RE = re.compile(r'^##\s', re.MULTILINE)
+#: The heading alternative of `_EMBEDDABLE_BLOCK_RE`'s lookahead — the other
+#: alternative, `\Z`, is end-of-body and never an offending heading. So this
+#: *enumerates* every heading the extractor stops at and no others;
+#: `embeddable_block_truncations` then narrows that enumeration to the ones
+#: inside the block, and therefore reports a strict subset.
+#:
+#: Deliberately NOT `_SECTION_RE`, which requires `##` plus a name. Matched
+#: against the whole body rather than per line, because for a bare `##` line —
+#: the case with no name, which nothing else reports — the `\s` is the line's
+#: own newline, and `splitlines()` strips it. (In the ordinary case the `\s` is
+#: just the space after `##`; the newline only carries it for a bare `##`.)
+_BLOCK_TERMINATOR_RE = re.compile(_BLOCK_TERMINATOR, re.MULTILINE)
 
 #: The required sections that legitimately *follow* the anchor, and so close
 #: the truncation window. Deliberately not `REQUIRED_SECTIONS`, which contains
@@ -280,12 +296,27 @@ _SECTIONS_AFTER_ANCHOR = tuple(
 )
 
 
-def embeddable_block_truncations(body: str) -> list[tuple[int, str]]:
+class BlockTruncation(NamedTuple):
+    """One `##` heading that cuts the Embeddable block short.
+
+    `body_line` is named for its units on purpose: it is *body*-relative, and
+    the file-relative number a finding must show is
+    `body_line + ParsedCanonFile['body_line_offset']`. Two quantities of type
+    `int` that mean different things is a mix-up no annotation here would
+    catch, so the field name is the only guard available — and the name also
+    lands in pytest failure output, where `BlockTruncation(body_line=6,
+    heading='## Wardrobe')` beats `(6, '## Wardrobe')` when the assertion that
+    fails is a transposition. Unpacks like the tuple it replaces.
+    """
+    body_line: int
+    heading: str
+
+
+def embeddable_block_truncations(body: str) -> list[BlockTruncation]:
     """Every `##` heading that cuts the `## Embeddable block` short.
 
-    Returns `(body line number, the line verbatim)` per offender, in source
-    order. Body line N is file line `parse_canon_file(...)['body_line_offset']
-    + N`.
+    Returns one `BlockTruncation` per offender, in source order, with trailing
+    whitespace stripped from the quoted heading.
 
     `embeddable_block_text` reads to the next `##`, which is correct markdown
     and correct for the schema — the four `REQUIRED_SECTIONS` are what follows
@@ -302,12 +333,21 @@ def embeddable_block_truncations(body: str) -> list[tuple[int, str]]:
     text. A second `## Embeddable block` is an offender like any other — see
     that constant for why it must not close the window.
     """
-    offenders: list[tuple[int, str]] = []
+    offenders: list[BlockTruncation] = []
     started = False
     for match in _BLOCK_TERMINATOR_RE.finditer(body):
         start = match.start()
         eol = body.find('\n', start)
+        # `eol == -1` is a heading on the last line with no trailing newline;
+        # `body[start:eol]` would silently drop the body's final character and
+        # report a heading the author cannot find by searching for it.
         line = (body[start:] if eol == -1 else body[start:eol]).rstrip()
+        # Matched against the extracted LINE, never over the body: `_SECTION_RE`
+        # has no DOTALL but its `\s+` crosses newlines, so over a body it reads
+        # `##\nA grey coat.` as a heading named `A grey coat.`. Per line it
+        # returns None for a bare `##`, and that empty name is exactly what
+        # makes the bare-`##` case report. Collapsing this into one
+        # `_SECTION_RE.finditer(body)` pass would break the case #289 is about.
         named = _SECTION_RE.match(line)
         name = named.group(1).strip() if named else ''
         if not started:
@@ -315,7 +355,7 @@ def embeddable_block_truncations(body: str) -> list[tuple[int, str]]:
             continue
         if name in _SECTIONS_AFTER_ANCHOR:
             break
-        offenders.append((body.count('\n', 0, start) + 1, line))
+        offenders.append(BlockTruncation(body.count('\n', 0, start) + 1, line))
     return offenders
 
 # Lines that mark a section as unfilled scaffolding. Stripped of leading
