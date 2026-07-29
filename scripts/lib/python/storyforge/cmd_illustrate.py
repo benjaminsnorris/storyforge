@@ -785,6 +785,7 @@ def run_audit(project_dir: str, dry_run: bool) -> int:
     skipped = _audit_skip_reason(transitions, findings, candidates)
     scenes_read: list[str] = []
     truncated: list[str] = []
+    dropped = 0
 
     if skipped:
         log(f'No contradiction pass: {skipped}')
@@ -800,10 +801,13 @@ def run_audit(project_dir: str, dry_run: bool) -> int:
                 'needs it. Set it and re-run, or use --dry-run.')
             return 1
         else:
-            contradictions, skipped = _audit_llm_pass(
+            contradictions, skipped, dropped = _audit_llm_pass(
                 project_dir, transitions, scenes_read, prose)
             if skipped == '__error__':
-                return 1
+                return _write_audit_failure(
+                    project_dir,
+                    'The model\'s response could not be read, so no findings '
+                    'were recorded.')
 
     report = pi.render_audit_report(
         title=read_yaml_field('project.title', project_dir) or 'Untitled',
@@ -815,6 +819,7 @@ def run_audit(project_dir: str, dry_run: bool) -> int:
         llm_skipped_reason=skipped,
         truncated_scenes=truncated,
         unmapped_scenes=prepass['unmapped_scenes'],
+        dropped_rows=dropped,
     )
     path = os.path.join(project_dir, AUDIT_REPORT_FILE)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -822,6 +827,10 @@ def run_audit(project_dir: str, dry_run: bool) -> int:
         f.write(report)
     log(f'Wrote {AUDIT_REPORT_FILE} — {len(contradictions)} contradiction(s), '
         f'{len(findings)} deterministic finding(s)')
+    if dropped:
+        log(f'WARNING: {dropped} row(s) the model returned could not be read '
+            f'and are not in the report\'s findings list — the report says so '
+            f'under Coverage.')
 
     # Provenance covers exactly the scenes whose prose was read **in full**.
     # Recording a scene the pass never read would make a later run report it as
@@ -870,14 +879,35 @@ def _audit_skip_reason(transitions: list[vs.Transition],
     return ''
 
 
+def _write_audit_failure(project_dir: str, reason: str) -> int:
+    """Replace the report with a failure stub and return exit code 1.
+
+    Not "write nothing": a report left over from an earlier run would say
+    "None found" under a stale date while looking like the latest result.
+    """
+    path = os.path.join(project_dir, AUDIT_REPORT_FILE)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    existed = os.path.isfile(path)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(pi.render_audit_failure(reason))
+    log(f'{"Replaced" if existed else "Wrote"} {AUDIT_REPORT_FILE} with a '
+        f'failure stub — no findings were recorded'
+        + (', and the previous report was removed so it cannot be read as this '
+           'run\'s result' if existed else ''))
+    return 1
+
+
 def _audit_llm_pass(project_dir: str, transitions: list[vs.Transition],
                     scenes_read: list[str],
-                    prose: str) -> tuple[list[dict[str, str]], str]:
-    """Run the one contradiction call. Returns (contradictions, skip_reason).
+                    prose: str) -> tuple[list[dict[str, str]], str, int]:
+    """Run the one contradiction call.
 
-    A skip reason of `'__error__'` means the caller should fail rather than write
-    a report that would read as a clean pass. Sonnet, not Opus: this is analytical
-    reading against a table, not creative work.
+    Returns `(contradictions, skip_reason, dropped)`. A skip reason of
+    `'__error__'` means the caller must fail rather than write a report that
+    would read as a clean pass; `dropped` counts rows the model returned that
+    could not be read, which the *report* has to disclose — stdout is not enough
+    when the skill tells the author to read the report first. Sonnet, not Opus:
+    this is analytical reading against a table, not creative work.
     """
     order = ill._scene_order(project_dir)
     resolved = [(scene_id, vs._resolve(order, transitions, order[scene_id]))
@@ -890,20 +920,22 @@ def _audit_llm_pass(project_dir: str, transitions: list[vs.Transition],
     text = _invoke(project_dir, prompt, 'illustrate-audit',
                    task_type='evaluator', max_tokens=8192)
     if not text:
-        log('ERROR: no response from the API. No report was written — an empty '
-            'report would read as a clean audit.')
-        return [], '__error__'
+        log('ERROR: no response from the API. No findings were recorded — an '
+            'empty report would read as a clean audit.')
+        return [], '__error__', 0
 
-    contradictions, status = pi.parse_audit_response(text)
+    contradictions, status, dropped = pi.parse_audit_response(text)
     if status in ('no_json', 'unusable'):
         # 'unusable' means the model *did* find contradictions and every row was
         # malformed. Writing a report then would affirm agreement, which is the
         # exact opposite of what the response said.
-        log(f'ERROR: the audit response could not be used ({status}). No report '
-            f'was written — an empty report would read as a clean audit.')
-        return [], '__error__'
-    log(f'Contradiction pass returned {len(contradictions)} finding(s)')
-    return contradictions, ''
+        log(f'ERROR: the audit response could not be used ({status}). No '
+            f'findings were recorded — an empty report would read as a clean '
+            f'audit.')
+        return [], '__error__', dropped
+    log(f'Contradiction pass returned {len(contradictions)} finding(s)'
+        + (f'; {dropped} further row(s) could not be read' if dropped else ''))
+    return contradictions, '', dropped
 
 
 def _audit_scene_prose(

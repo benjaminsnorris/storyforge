@@ -297,6 +297,8 @@ A deterministic pre-pass runs first and narrows the read to the scenes that ment
 
 **Read the report's Coverage section before you trust its findings.** It names every gap: scenes with no prose yet, scenes long enough that only part was sent to the model, and scenes that are drafted and active in `scenes.csv` but absent from `reference/chapter-map.csv` — those have no reading position, so nothing in this pass ever looks at them. Any gap downgrades the result to "None found in the prose that was read". If the report names unexamined scenes, add them to the chapter map and re-run before believing anything.
 
+**`--audit` always exits 0 when it produces a report, even over a broken log.** It is a report, not a gate — `--diagnose` and `storyforge validate` are the gates, and they exit 1 on the same finding. So if the report's Deterministic findings section contains `state_unknown_scene`, the log is broken: that transition names a scene that does not exist, never applies, and every scene after it resolves to the wrong state — which means the contradiction pass read the prose against a matrix that is wrong, and its conclusions are unreliable until you fix it. Tell the author that plainly. A zero exit code from `--audit` is not a pass.
+
 A contradiction is usually a **missing transition**, not bad prose: the book changed something the log never recorded. Where the prose is wrong instead, fix the prose — the audit records a digest per scene it read, so a revised scene reports as stale on the next `--diagnose`.
 
 Never revise a transition an already-rendered illustration used. Correct the log and re-render from the corrected state.

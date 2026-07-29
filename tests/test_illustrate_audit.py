@@ -375,29 +375,32 @@ def test_parse_audit_response_distinguishes_empty_from_unparseable():
 
 
 def test_parse_audit_response_drops_rows_with_no_quote():
-    rows, status = pi.parse_audit_response(json.dumps({'contradictions': [
+    rows, status, dropped = pi.parse_audit_response(json.dumps({'contradictions': [
         {'scene_id': 's1', 'entity': 'e', 'quote': 'q'},
         {'scene_id': 's1', 'entity': 'e'},
         'a string',
     ]}))
     assert status == 'ok'
     assert len(rows) == 1
+    assert dropped == 2
 
 
-def test_an_unparseable_audit_response_writes_no_report(in_project, monkeypatch, capsys):
-    """An empty report would read as a clean audit."""
+def test_an_unparseable_audit_response_records_no_findings(in_project, monkeypatch, capsys):
+    """A report with findings in it would read as a clean audit."""
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: 'garbage')
     assert cmd_illustrate.main(['--audit']) == 1
-    assert not os.path.isfile(os.path.join(in_project, REPORT))
+    body = _read(in_project, REPORT)
+    assert 'failed' in body
+    assert 'None found' not in body
     assert 'would read as a clean audit' in capsys.readouterr().out
 
 
-def test_an_empty_api_response_writes_no_report(in_project, monkeypatch):
+def test_an_empty_api_response_records_no_findings(in_project, monkeypatch):
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
     monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: '')
     assert cmd_illustrate.main(['--audit']) == 1
-    assert not os.path.isfile(os.path.join(in_project, REPORT))
+    assert 'None found' not in _read(in_project, REPORT)
 
 
 def test_audit_without_a_key_is_an_error(in_project, capsys):
@@ -682,20 +685,23 @@ def test_all_rows_dropped_is_not_a_clean_pass(in_project, monkeypatch, capsys):
             {'scene_id': 's2', 'log_says': 'y'},
         ]}))
     assert cmd_illustrate.main(['--audit']) == 1
-    assert not os.path.isfile(os.path.join(in_project, REPORT))
+    body = _read(in_project, REPORT)
+    assert 'did not complete' in body
+    assert 'None found' not in body
     out = capsys.readouterr().out
     assert 'all 2 row(s) in the audit response were unusable' in out
     assert 'not as agreement' in out
 
 
 def test_every_dropped_row_names_what_it_was_missing(capsys):
-    rows, status = pi.parse_audit_response(json.dumps({'contradictions': [
+    rows, status, dropped = pi.parse_audit_response(json.dumps({'contradictions': [
         {'scene_id': 's1', 'entity': 'e', 'quote': 'q'},
         {'scene_id': 's2', 'quote': 'q'},
         'a string',
     ]}))
     assert status == 'ok'
     assert len(rows) == 1
+    assert dropped == 2
     out = capsys.readouterr().out
     assert 'row 2 is missing entity' in out
     assert 'row 3 is not an object (str)' in out
@@ -705,10 +711,11 @@ def test_evidence_is_accepted_as_an_alias_for_quote():
     """The transition log calls it `evidence`, so a model just shown the log
     reaches for that word. Dropping real contradictions over a key name is not a
     trade worth making."""
-    rows, status = pi.parse_audit_response(json.dumps({'contradictions': [
+    rows, status, dropped = pi.parse_audit_response(json.dumps({'contradictions': [
         {'scene_id': 's1', 'entity': 'e', 'evidence': 'the quoted phrase'},
     ]}))
     assert status == 'ok'
+    assert dropped == 0
     assert rows[0]['quote'] == 'the quoted phrase'
 
 
@@ -865,3 +872,124 @@ def test_a_fully_covered_clean_pass_still_says_so_plainly():
     assert 'None found. The prose and the matrix agree across every scene read.' \
         in body
     assert 'Coverage is incomplete' not in body
+
+
+# ============================================================================
+# R1 — a partially-dropped response must be disclosed in the report
+# ============================================================================
+
+_PARTIAL_DROP = json.dumps({'contradictions': [
+    {'scene_id': 'act1-sc02', 'entity': 'village', 'quote': 'Blank parchment',
+     'log_says': 'drawn on the master survey', 'prose_says': 'already gone',
+     'resolution': 'add a transition'},
+    {'scene_id': 'act1-sc02', 'log_says': 'the second finding, unreadable'},
+    {'entity': 'village', 'prose_says': 'the third finding, unreadable'},
+]})
+
+
+def test_a_partially_dropped_response_says_so_in_the_report(in_project, monkeypatch):
+    """B2's shape on the partial path: an author reading the report — which the
+    skill tells them to read first — must not see a complete-looking list."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: _PARTIAL_DROP)
+    assert cmd_illustrate.main(['--audit']) == 0
+    body = _read(in_project, REPORT)
+    assert '2 finding(s) the model reported could not be read' in body
+    assert 'Incomplete.** 1 of 3 rows' in body
+    assert 'Coverage is incomplete' in body
+
+
+def test_a_partially_dropped_response_is_also_logged(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: _PARTIAL_DROP)
+    cmd_illustrate.main(['--audit'])
+    out = capsys.readouterr().out
+    assert '2 further row(s) could not be read' in out
+    assert 'the report says so under Coverage' in out
+
+
+def test_a_fully_read_response_carries_no_incompleteness_note(in_project, monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: _ONE_CONTRADICTION)
+    cmd_illustrate.main(['--audit'])
+    body = _read(in_project, REPORT)
+    assert 'could not be read' not in body
+    assert 'Incomplete.' not in body
+
+
+def test_the_dropped_count_reaches_the_renderer():
+    body = pi.render_audit_report(
+        title='T', transitions=[], findings=[],
+        contradictions=[{'scene_id': 's1', 'entity': 'e', 'quote': 'q'}],
+        scenes_read=['s1'], scene_count=1, tracked_entities=['e'],
+        undrafted_scenes=[], llm_skipped_reason='', truncated_scenes=[],
+        unmapped_scenes=[], dropped_rows=4)
+    assert '4 finding(s) the model reported could not be read' in body
+    assert 'Incomplete.** 1 of 5 rows' in body
+
+
+# ============================================================================
+# R2 — an errored run must not leave a stale clean report behind
+# ============================================================================
+
+def test_a_failed_run_replaces_a_previous_clean_report(in_project, monkeypatch, capsys):
+    """The author re-runs after a failure and opens the report. It must not still
+    say "None found" under an older date."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    assert cmd_illustrate.main(['--audit']) == 0
+    assert 'None found' in _read(in_project, REPORT)
+
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: 'garbage')
+    capsys.readouterr()
+    assert cmd_illustrate.main(['--audit']) == 1
+    body = _read(in_project, REPORT)
+    assert 'None found' not in body
+    assert 'did not complete' in body
+    assert 'no results' in body
+    out = capsys.readouterr().out
+    assert 'Replaced' in out
+    assert 'cannot be read as this run' in out
+
+
+def test_the_failure_stub_is_dated_and_names_the_failure(in_project, monkeypatch):
+    from datetime import date
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: 'garbage')
+    cmd_illustrate.main(['--audit'])
+    body = _read(in_project, REPORT)
+    assert date.today().isoformat() in body
+    assert 'could not be read' in body
+    assert '--audit' in body
+
+
+def test_a_failure_with_no_previous_report_writes_the_stub_too(in_project, monkeypatch, capsys):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: 'garbage')
+    assert not os.path.isfile(os.path.join(in_project, REPORT))
+    assert cmd_illustrate.main(['--audit']) == 1
+    assert 'failed' in _read(in_project, REPORT)
+    assert 'Wrote' in capsys.readouterr().out
+
+
+def test_a_failed_run_does_not_touch_the_provenance(in_project, monkeypatch):
+    """Provenance from an earlier successful run stays — those scenes really were
+    audited. Only the report is about this run."""
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '{"contradictions": []}')
+    cmd_illustrate.main(['--audit'])
+    before = open(os.path.join(in_project, PROVENANCE), 'rb').read()
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: 'garbage')
+    cmd_illustrate.main(['--audit'])
+    assert open(os.path.join(in_project, PROVENANCE), 'rb').read() == before
+
+
+def test_a_failed_run_still_edits_neither_the_log_nor_the_prose(in_project, monkeypatch):
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', lambda *a, **k: 'garbage')
+    before = _snapshot(in_project)
+    assert cmd_illustrate.main(['--audit']) == 1
+    assert _snapshot(in_project) == before

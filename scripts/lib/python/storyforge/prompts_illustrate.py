@@ -1654,10 +1654,16 @@ was fine.
 """
 
 
-def parse_audit_response(text: str) -> tuple[list[dict[str, str]], str]:
+def parse_audit_response(text: str) -> tuple[list[dict[str, str]], str, int]:
     """Extract the ``contradictions`` list from an audit response.
 
-    Returns `(contradictions, status)`:
+    Returns `(contradictions, status, dropped)`. `dropped` is how many rows the
+    model emitted that this pass could not read — carried out rather than left in
+    the log because the *report* has to disclose it. A findings list showing N
+    survivors of N+M rows looks complete, and the skill tells the author to read
+    the report first.
+
+    Statuses:
 
     - `'ok'` — at least one usable row.
     - `'empty'` — the key was present and the list was empty. The model said the
@@ -1715,13 +1721,13 @@ def parse_audit_response(text: str) -> tuple[list[dict[str, str]], str]:
             out.append(row)
 
         if out:
-            return out, 'ok'
+            return out, 'ok', dropped
         if dropped:
             log(f'ERROR: all {dropped} row(s) in the audit response were '
                 f'unusable. Treating this as a failed pass, not as agreement.')
-            return [], 'unusable'
-        return [], 'empty'
-    return [], 'no_json'
+            return [], 'unusable', dropped
+        return [], 'empty', 0
+    return [], 'no_json', 0
 
 
 def render_audit_report(*, title: str, transitions: list[dict[str, str]],
@@ -1732,18 +1738,20 @@ def render_audit_report(*, title: str, transitions: list[dict[str, str]],
                         undrafted_scenes: list[str],
                         llm_skipped_reason: str,
                         truncated_scenes: list[str] | None = None,
-                        unmapped_scenes: list[str] | None = None) -> str:
+                        unmapped_scenes: list[str] | None = None,
+                        dropped_rows: int = 0) -> str:
     """Render `working/illustration-contradictions.md`.
 
     Read-only output. The report states what it read and what it could not see,
     because a clean report is only as trustworthy as its coverage — and the only
     product of this pass is trust. Every gap in coverage is named: a scene with
-    no prose, a scene whose prose was cut at the character cap, and a drafted
-    scene the chapter map cannot position (which the narrowing never looks at).
+    no prose, a scene whose prose was cut at the character cap, a drafted scene
+    the chapter map cannot position (which the narrowing never looks at), and any
+    row the model emitted that could not be read.
     """
     truncated = truncated_scenes or []
     unmapped = unmapped_scenes or []
-    partial = bool(truncated or unmapped)
+    partial = bool(truncated or unmapped or dropped_rows)
 
     lines = [
         f'# Illustration contradiction audit — {title}',
@@ -1780,6 +1788,12 @@ def render_audit_report(*, title: str, transitions: list[dict[str, str]],
             f'but absent from `reference/chapter-map.csv`, so it has no reading '
             f'position and the narrowing never looks at it): '
             f'{", ".join(f"`{s}`" for s in unmapped)}')
+    if dropped_rows:
+        lines.append(
+            f'- **{dropped_rows} finding(s) the model reported could not be '
+            f'read** and are not listed below — the rows were missing a scene, '
+            f'an entity, or a quote. The Contradictions section is therefore '
+            f'incomplete, not a full account of what the pass found.')
     lines.extend([
         '',
         'A scene is read when it mentions a tracked entity at or after that '
@@ -1829,6 +1843,13 @@ def render_audit_report(*, title: str, transitions: list[dict[str, str]],
                       'is still in the prose.', ''])
 
     lines.extend(['## Contradictions', ''])
+    if contradictions and dropped_rows:
+        lines.extend([
+            f'**Incomplete.** {len(contradictions)} of '
+            f'{len(contradictions) + dropped_rows} rows the model returned could '
+            f'be read; the rest are described under Coverage. Re-run to see them.',
+            '',
+        ])
     if contradictions:
         for item in contradictions:
             lines.extend([
@@ -1871,3 +1892,25 @@ def render_audit_report(*, title: str, transitions: list[dict[str, str]],
         '',
     ])
     return '\n'.join(lines)
+
+
+def render_audit_failure(reason: str) -> str:
+    """The stub that replaces the report when a pass fails.
+
+    Writing nothing on failure is right — an empty report reads as a clean audit
+    — but *leaving the previous report in place* is the same lie with a date on
+    it: an author who re-runs after a failure and then opens the file reads a
+    stale "None found". The artifact must never assert a result the latest run did
+    not produce, so the file is truncated to this.
+    """
+    return (
+        f'# Illustration contradiction audit — failed\n'
+        f'\n'
+        f'{date.today().isoformat()}: the contradiction pass did not complete, '
+        f'so there are no results. {reason}\n'
+        f'\n'
+        f'Any previous report was removed rather than left in place — it would '
+        f'have described an earlier run while looking like this one.\n'
+        f'\n'
+        f'Re-run `storyforge illustrate --audit`.\n'
+    )
