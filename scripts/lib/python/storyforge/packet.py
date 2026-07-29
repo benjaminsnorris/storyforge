@@ -51,13 +51,6 @@ PACKET_FILES: tuple[str, ...] = (
 #: "nobody wrote this down", and the difference is the whole coverage contract.
 NOT_RECORDED = '_(not recorded — see the gaps in README.md)_'
 
-#: Author-writable plan columns the packet reads but the schema does not define.
-#: `write_plan` preserves columns beyond `PLAN_COLUMNS`, so an author can add
-#: these by hand without a migration; they are deliberately NOT added to
-#: `PLAN_COLUMNS`, because nothing in the pipeline populates them and a
-#: write-only column is the mistake `embeds_as` already made.
-AUTHOR_ENTRY_COLUMNS: tuple[str, ...] = ('absent', 'contrast')
-
 
 class Entry(TypedDict):
     """One illustration's entry: 80–120 words of what is specific to it.
@@ -249,6 +242,12 @@ def _entry_for(row: dict[str, str], *, project_dir: str,
         'beat': beat or NOT_RECORDED,
         'in_frame': subject or NOT_RECORDED,
         'state': state,
+        # `absent` is an author-written column the plan schema does not define:
+        # `write_plan` preserves columns beyond `PLAN_COLUMNS`, so an author can
+        # add it by hand. Deliberately not added to `PLAN_COLUMNS`, because
+        # nothing in the pipeline populates it and a write-only column is the
+        # mistake `embeds_as` already made. Empty is the normal case — most
+        # images have nothing that must be absent.
         'absent': (row.get('absent') or '').strip(),
         'contrast': _contrast_for(row, previous_id),
         'notes': (row.get('composition') or '').strip(),
@@ -358,7 +357,9 @@ def _contrast_for(row: dict[str, str], previous_id: str) -> str:
 
     Derived from facts on the plan — the reading-order predecessor and the
     `register` extremes — plus anything the author wrote in a `contrast`
-    column. Nothing is invented: twenty independent generation calls cannot
+    column (author-written, like `absent`, and preserved by `write_plan`
+    without being part of the schema). Nothing is invented: twenty independent
+    generation calls cannot
     see each other, which is how a set ends up with four images of the same
     two children kneeling around the same lamp.
     """
