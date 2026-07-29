@@ -471,23 +471,25 @@ def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
             severity='error',
         ))
         return findings  # nothing else to check — frontmatter is unparseable
-    if fm is None:
-        # 'error' severity: a file without frontmatter can't be resolved by
-        # canon_id; embedders rely on the YAML block.
-        findings.append(_finding(
-            rel,
-            'canon file is missing YAML frontmatter',
-            'Add a --- delimited YAML block with canon_id, canon_type, '
-            'canon_updated, appears_in, embeds_as, first_appearance',
-            'canon_missing_frontmatter',
-            severity='error',
-        ))
-        return findings  # nothing else to check without frontmatter
-
     from storyforge.common import get_medium
     required = ALWAYS_REQUIRED_FRONTMATTER_KEYS
     if get_medium(project_root) == 'graphic-novel':
         required = required + GN_ONLY_FRONTMATTER_KEYS
+
+    if fm is None:
+        # 'error' severity: a file without frontmatter can't be resolved by
+        # canon_id; embedders rely on the YAML block. The key list in the
+        # action text is medium-aware — `embeds_as` is GN-only
+        # (GN_ONLY_FRONTMATTER_KEYS), so naming it here for a novel project
+        # would tell the author to add a key nothing ever reads.
+        findings.append(_finding(
+            rel,
+            'canon file is missing YAML frontmatter',
+            'Add a --- delimited YAML block with ' + ', '.join(required),
+            'canon_missing_frontmatter',
+            severity='error',
+        ))
+        return findings  # nothing else to check without frontmatter
 
     for key in required:
         if not fm.get(key):
