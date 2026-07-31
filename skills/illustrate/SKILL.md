@@ -48,8 +48,8 @@ Store this resolved plugin path for use throughout the session.
 | Plan exists, rows with no `treatment` | **Sequence** — stage the set so it doesn't converge |
 | Plan exists, rows at `status=planned` | **Art-direct** — write the prompts |
 | Prompts written, no packet or packet stale | **Package** — assemble the handoff bundle |
-| Packet built, any anchor-batch row not ingested | **Anchor** — render and approve those N first |
-| Every anchor-batch row ingested | **Churn** — hand the packet over |
+| Packet built, any anchor-batch row not ingested, or ingested from canon since rewritten | **Anchor** — render and approve those N first |
+| Every anchor-batch row ingested from the current canon | **Churn** — hand the packet over |
 | Non-anchor files on disk | **Ingest** — bring them in and embed |
 | An illustration isn't working | **Revise** — supersede and re-direct |
 | All or most are rendered | **Review** — check the sequence for continuity drift |
@@ -57,7 +57,7 @@ Store this resolved plugin path for use throughout the session.
 
 Announce the mode you're in and why before doing anything.
 
-**The flags are output, not vocabulary the author has to learn.** Detect the rung, say which mode that puts them in, and offer the command. `storyforge illustrate --diagnose` reports every rung in this table — the reference tier, the state matrix, the audit, the sequence staging, the packet, and which anchor-batch rows are still unrendered — so when you are unsure, run it and read the answer rather than guessing from file mtimes.
+**The flags are output, not vocabulary the author has to learn.** Detect the rung, say which mode that puts them in, and offer the command. `storyforge illustrate --diagnose` reports every rung in this table — the reference tier, the state matrix, the audit, the sequence staging, the packet, and which anchor-batch rows still need a render — so when you are unsure, run it and read the answer rather than guessing from file mtimes.
 
 ---
 
@@ -299,6 +299,8 @@ Reference images are **not copied** into the packet — the paths are project-re
 
 Entries for illustrations that are already rendered are marked `— already rendered` in their heading. Say so to the author: the packet is worked top to bottom, and finished art is there for context, not to be regenerated.
 
+An entry marked `— re-render: the art predates the current canon` is the opposite instruction on a row that still says `ingested`: the art exists and ships, and it was directed by canon that has since been rewritten, so it is not a usable reference for anything rendered now. Its `**Re-render.**` line says why. **Never fix this by demoting `status`** — that is what an author reaches for, and it takes the illustration out of the epub, the PDF, the web book, and Bookshelf while the replacement does not exist yet. Re-render it and `--ingest` the new file; the status is already right.
+
 ### Two columns you write by hand
 
 `absent` and `contrast` are plan columns nothing populates automatically — no command proposes them — but `write_plan` preserves any column an author adds, and the packet reads both:
@@ -322,6 +324,8 @@ The packet is built and the anchor batch is not rendered yet. This is phase one 
 4. **Later-state exemplar** — the illustration that shows the most entities in a state later than their first, earliest. It locks a changed wardrobe or a broken object before the churn needs one.
 
 The batch is **derived, never stored**, so it cannot disagree with the plan.
+
+**`Rendered: yes` is a claim about the current canon, not about `status`.** A slot reading `re-render` has art that predates the newest `canon_updated`, so phase 1 is not done for it — and `--diagnose` will not say "ready to hand over" while any slot is in that state. Rebuilding a book's canon after the art was made puts the *whole* set in this position; that is normal, and the right response is to re-render the batch first, exactly as if nothing had been made yet, because everything after it references these four.
 
 **Take the disclosures seriously.** Nothing populates `register` automatically, so on most projects the darkest and brightest slots are *guesses* — the first and last illustration in reading order — and the batch says so in both the log and the README. A silent guess about which image is the darkest in the book is how an author finds out at image twenty that nothing in the book is. If the author knows which images are the extremes, have them mark `register` and re-run `--package`. Same for an unfilled later-state slot: either the book really has no later state to lock, or `reference/visual-state.csv` is thinner than the story.
 
@@ -468,7 +472,7 @@ When you find drift, fix it by re-rendering from the anchor — not by patching 
 
 _(No API calls — safe to run here without asking.)_
 
-Read-only. Reports plan counts by status, what's embedded, the recommended render order with the visual key marked, what's next to render, the anchor batch with every guessed slot disclosed, the visual-state rung (whether the transition log exists, how many entities it tracks, and whether the audit is unrun, current, or stale), the sequence-staging rung (how many rows carry a `treatment`), the packet rung (not built, built and current, or built and stale, plus which anchor-batch rows are still unrendered), and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers, invalid layouts, a stale packet, a drifted anchor copy.
+Read-only. Reports plan counts by status, what's embedded, the recommended render order with the visual key marked (and `~` on any ingested row whose art predates the current canon), what's next to render, every ingested illustration that needs re-rendering because the canon moved under it, the anchor batch with every guessed slot disclosed, the visual-state rung (whether the transition log exists, how many entities it tracks, and whether the audit is unrun, current, or stale), the sequence-staging rung (how many rows carry a `treatment`), the packet rung (not built, built and current, or built and stale, plus which anchor-batch rows are still unrendered and which are ingested but canon-stale — "ready to hand over" is only said when neither is true), and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers, invalid layouts, a stale packet, a drifted anchor copy.
 
 This is the gate for plan health, deliberately rather than the packet: `--package` is assembly and reports only what it could not cover, so problems with the plan itself surface here.
 

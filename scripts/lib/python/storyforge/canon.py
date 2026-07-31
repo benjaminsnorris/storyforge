@@ -1275,7 +1275,7 @@ def predates_canon(*, when: str, cutoff: str) -> bool:
 
     The one comparison every staleness check **against the canon cutoff** makes,
     in one place: the ingested-render check in
-    `cmd_illustrate._stale_reference_reason` and the style-reference check in
+    `illustrations.stale_render_reason` and the style-reference check in
     `cmd_illustrate.resolve_style_reference`. `packet._staging_postdates_render`
     is the same predicate against a *different* cutoff (`treatment_at` versus
     `ingested_at`) and still rolls its own, restating the same-day rule below —

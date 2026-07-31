@@ -1478,6 +1478,18 @@ VISUAL_KEY_HORIZON_DIVISOR = 3
 VISUAL_KEY_MIN_CANDIDATES = 3
 
 
+def visual_key_horizon(row_count: int) -> int:
+    """How many early illustrations the visual key is chosen from.
+
+    Extracted so `packet.anchor_batch` can *name* the horizon when no early row
+    fills it. The batch used to report "no illustration names a continuity
+    anchor in `canon_refs`" for that shape, which is false whenever a later row
+    does — and the horizon, not the plan, is why the slot is empty (#290).
+    """
+    return max(VISUAL_KEY_MIN_CANDIDATES,
+               row_count // VISUAL_KEY_HORIZON_DIVISOR)
+
+
 PlanStatus = Literal['planned', 'prompted', 'rendered', 'ingested',
                      'superseded']
 
@@ -1528,9 +1540,7 @@ def render_order(project_dir: str) -> list[RenderStep]:
     def establishes(row: dict[str, str]) -> int:
         return len(_split_array(row.get('canon_refs', '')))
 
-    horizon = max(VISUAL_KEY_MIN_CANDIDATES,
-                  len(in_story_order) // VISUAL_KEY_HORIZON_DIVISOR)
-    candidates = in_story_order[:horizon]
+    candidates = in_story_order[:visual_key_horizon(len(in_story_order))]
 
     key_id = ''
     if any(establishes(r) for r in candidates):
@@ -1561,6 +1571,60 @@ def next_to_render(project_dir: str) -> str:
     for step in render_order(project_dir):
         if step['status'] != 'ingested':
             return step['id']
+    return ''
+
+
+def stale_render_reason(row: dict[str, str], canon_cutoff: str) -> str:
+    """Why this row's finished art predates the canon now governing it, or ''.
+
+    **The one staleness predicate for a plan row's own art**, so the parts of a
+    run that decide whether art *counts* cannot disagree about it. They did, in
+    the same `--package` run: `cmd_illustrate._references_for` excluded all
+    twenty of a book's ingested renders as pre-canon and logged twenty WARNING
+    lines saying so, while the anchor batch marked four of the same images
+    `Rendered: yes` and the packet's README declared phase 1 complete. A session
+    working that packet top to bottom would have skipped the anchor batch
+    entirely and run the churn against a cover-only reference list — the exact
+    failure the two-phase order exists to prevent (#300). Three callers now:
+    `_references_for`, `packet.needs_render`, and `packet._entry_for`.
+
+    Reported as a *reason* rather than a bool because the whole point is that it
+    is said out loud. An author whose only signal is "needs a re-render" reaches
+    for the workaround this replaced — demoting `status` to `prompted`, which
+    makes the packet honest and simultaneously drops the row out of the epub,
+    the PDF, the web book, and Bookshelf, since `FILED_STATUSES` is what those
+    gate on.
+
+    Only `ingested` rows: `rendered` means a file exists that Storyforge has
+    never seen, so it carries no `ingested_at` and there is no date to judge —
+    the same gate `packet._staging_postdates_render` uses, and for the same
+    reason. With no parseable `canon_updated` anywhere, `canon_cutoff` is '' and
+    nothing can be judged stale at all.
+
+    Empty and unparseable `ingested_at` are both treated as pre-canon, which is
+    the opposite of `resolve_style_reference`'s policy for an unreadable mtime
+    and deliberately so: `ingested_at` postdates the plan schema, so "unknown"
+    means the render predates even the bookkeeping. The same-day-is-not-stale
+    rule lives in `canon.predates_canon`, not here.
+    """
+    from storyforge import canon
+    if not canon_cutoff:
+        return ''
+    if (row.get('status') or '').strip() != 'ingested':
+        return ''
+    raw = (row.get('ingested_at') or '').strip()
+    if not raw:
+        return (f'its `ingested_at` is empty, so it predates ingest '
+                f'timestamps and therefore the canon last updated '
+                f'{canon_cutoff}')
+    ingested = canon.iso_date_or_empty(raw)
+    if not ingested:
+        return (f'its `ingested_at` ({raw!r}) is not an ISO date, so it '
+                f'cannot be shown to postdate the canon last updated '
+                f'{canon_cutoff}')
+    if canon.predates_canon(when=ingested, cutoff=canon_cutoff):
+        return (f'it was ingested {ingested}, before the canon was last '
+                f'updated {canon_cutoff}')
     return ''
 
 

@@ -86,6 +86,11 @@ class Entry(TypedDict):
     #: height, time of day, how much of the frame the subject occupies,
     #: interior versus environmental. Written by `--sequence` or by the author.
     treatment: str
+    #: Why the art this row already claims no longer follows the canon, '' when
+    #: it does or when no art exists. `status` alone cannot answer that, and an
+    #: entry marked `ingested — do not regenerate` over art the canon has since
+    #: outgrown tells a session to skip the one image it must redo (#300).
+    stale_reason: str
 
 
 class PacketContents(TypedDict):
@@ -131,6 +136,11 @@ class RowContext(TypedDict):
     #: order rather than render order. A row **absent** from this map is not the
     #: first illustration — see `contrast_for_row`.
     predecessors: dict[str, str]
+    #: Newest `canon_updated` across reference/canon/, read once so the canon
+    #: tree is not walked per row (and its unparseable-date WARNING not logged
+    #: per row). '' when no canon file carries a parseable date, which means
+    #: nothing can be judged stale.
+    canon_cutoff: str
 
 
 #: Kept so a name other modules may already import does not silently vanish.
@@ -170,6 +180,7 @@ def state_context(project_dir: str, *,
         'known': vs.known_scene_ids(project_dir),
         'transitions': vs.read_transitions(project_dir),
         'predecessors': predecessors,
+        'canon_cutoff': canon.newest_canon_updated(project_dir),
     }
 
 
@@ -237,6 +248,46 @@ def rows_in_reading_order(project_dir: str, *,
     return sorted(rows, key=lambda r: (
         order.get((r.get('scene_id') or '').strip(), ill._SORTS_LAST),
         r['id'].strip()))
+
+
+#: Illustration id -> why it still needs a render, in reading order. An empty
+#: reason means no art exists for it yet; a non-empty one means art exists and
+#: predates the canon that now governs it, and *is the sentence shown to the
+#: author*. Absent from the mapping is the only shape that means done.
+RenderNeeds = dict[str, str]
+
+
+def needs_render(project_dir: str, *,
+                 plan: list[dict[str, str]] | None = None,
+                 canon_cutoff: str | None = None) -> RenderNeeds:
+    """Which illustrations still need a render, and why, in reading order.
+
+    **Not a status check.** `status == 'ingested'` says a file was filed, not
+    that the file follows the canon in force now — and a run that read it that
+    way contradicted itself out loud: `cmd_illustrate._references_for` excluded
+    every one of a book's twenty ingested renders as pre-canon while the anchor
+    batch reported four of them `Rendered: yes` and README declared phase 1
+    complete (#300). One predicate, `ill.stale_render_reason`, so the two halves
+    of a run cannot answer the question differently.
+
+    `status` is deliberately *not* consulted as the fix for that: it is what the
+    epub, the PDF, the web book, and Bookshelf gate on through `FILED_STATUSES`,
+    so demoting a canon-stale row to make the packet honest takes the art out of
+    the book. Needing a re-render and being publishable are different facts and
+    now have different homes.
+    """
+    if canon_cutoff is None:
+        canon_cutoff = canon.newest_canon_updated(project_dir)
+    needs: RenderNeeds = {}
+    for row in rows_in_reading_order(project_dir, plan=plan):
+        illus_id = row['id'].strip()
+        if (row.get('status') or '').strip() != 'ingested':
+            needs[illus_id] = ''
+            continue
+        reason = ill.stale_render_reason(row, canon_cutoff)
+        if reason:
+            needs[illus_id] = reason
+    return needs
 
 
 def resolve(project_dir: str) -> PacketContents:
@@ -413,6 +464,7 @@ def _entry_for(row: dict[str, str], *,
         'contrast': contrast_for_row(row, context=context),
         'notes': (row.get('composition') or '').strip(),
         'treatment': treatment,
+        'stale_reason': ill.stale_render_reason(row, context['canon_cutoff']),
     }
     return entry, gaps
 
@@ -468,6 +520,17 @@ def state_for_row(row: dict[str, str], *, context: RowContext,
     forward walk for the entities it names, which is what makes it a usable
     escape hatch for state true in one image only.
 
+    **An unresolvable `canon_refs` entry produces one gap, not two.** It used to
+    produce both the anchor gap below *and* the "no transition states its visual
+    state there" gap, for one root cause — and the second one's instruction was
+    wrong for that shape: adding a transition row for an entity with no canon
+    file states a change to a design nothing has stated yet, so it sends the
+    author to the wrong file (#290). The retained gap says both consequences, so
+    suppression loses no information. Under `include_anchor_gaps=False` the state
+    gap is suppressed too, deliberately: `_warn_unanchored_rows` covers that
+    row at every coaching level, and it names the missing anchor rather than a
+    missing transition.
+
     Args:
         include_anchor_gaps: Whether to report a `canon_refs` entry that
             resolves to no populated canon file. `--prompts` passes False
@@ -485,14 +548,20 @@ def state_for_row(row: dict[str, str], *, context: RowContext,
     overrides = vs.parse_state_override(row.get('state_override', ''))
     gaps: list[str] = []
 
-    for ref in refs:
-        if (include_anchor_gaps
-                and ref.lower() not in {key.lower() for key in anchors}):
-            gaps.append(
-                f'illustration `{illus_id}` names canon_refs `{ref}`, which '
-                f'resolves to no populated canon file — that entity is '
-                f'art-directed with no continuity anchor, so nothing holds it '
-                f'to one design.')
+    anchor_keys = {key.lower() for key in anchors}
+    unanchored = {ref for ref in refs if ref.lower() not in anchor_keys}
+    if include_anchor_gaps:
+        for ref in refs:
+            if ref in unanchored:
+                gaps.append(
+                    f'illustration `{illus_id}` names canon_refs `{ref}`, '
+                    f'which resolves to no populated canon file — that entity '
+                    f'is art-directed with no continuity anchor, so nothing '
+                    f'holds it to one design, and no visual state is reported '
+                    f'for it either. Author the anchor first (`storyforge '
+                    f'illustrate --direction`): a transition row for an entity '
+                    f'with no canon file states a change to a design nothing '
+                    f'has stated.')
 
     resolved: dict[str, str] = {}
     if not scene_id:
@@ -524,7 +593,10 @@ def state_for_row(row: dict[str, str], *, context: RowContext,
         if not matched and needle in {key.lower() for key in overrides}:
             matched = [key for key in overrides if key.lower() == needle]
         if not matched:
-            if scene_id and scene_id in order:
+            # `ref in unanchored` is one root cause reported once, above — and
+            # this gap's remedy is the wrong one for that shape. See the
+            # docstring.
+            if scene_id and scene_id in order and ref not in unanchored:
                 gaps.append(
                     f'illustration `{illus_id}` shows `{ref}` in '
                     f'`{scene_id}`, but no transition states its visual state '
@@ -752,12 +824,7 @@ def anchor_batch(project_dir: str) -> AnchorBatch:
     establisher = next((step['id'] for step in ill.render_order(project_dir)
                         if step['is_visual_key']), '')
     if not establisher:
-        fallback.append(
-            'no illustration names a continuity anchor in `canon_refs`, so '
-            'there is no visual key to establish the look — the batch has no '
-            'establisher, and whichever image is rendered first will set the '
-            'style by accident. Fill `canon_refs` in '
-            f'reference/{ill.PLAN_FILENAME}.')
+        fallback.append(_no_establisher_note(rows))
 
     by_register: dict[str, str] = {}
     for row in rows:
@@ -790,6 +857,37 @@ def anchor_batch(project_dir: str) -> AnchorBatch:
     return {'establisher': establisher, 'darkest': darkest,
             'brightest': brightest, 'later_state': later_state,
             'fallback': fallback}
+
+
+def _no_establisher_note(rows: list[dict[str, str]]) -> str:
+    """Why the establisher slot is empty — the plan, or the horizon.
+
+    Two different facts, and the batch used to report the first for both. The
+    visual key is chosen from the first `visual_key_horizon` illustrations in
+    reading order, so a plan whose later rows all name anchors and whose early
+    rows do not has an empty slot while "no illustration names a continuity
+    anchor in `canon_refs`" is flatly false about it (#290). The horizon is a
+    deliberate constraint — the key exists so the images *after* it have
+    something real to reference, which the climax cannot do — so the wording is
+    what changes, not the selection.
+    """
+    horizon = ill.visual_key_horizon(len(rows))
+    later = [row['id'].strip() for row in rows[horizon:]
+             if ill._split_array(row.get('canon_refs', ''))]
+    if not later:
+        return ('no illustration names a continuity anchor in `canon_refs`, so '
+                'there is no visual key to establish the look — the batch has '
+                'no establisher, and whichever image is rendered first will set '
+                'the style by accident. Fill `canon_refs` in '
+                f'reference/{ill.PLAN_FILENAME}.')
+    return (f'none of the first {horizon} illustration(s) in reading order '
+            f'names a continuity anchor in `canon_refs`, so the batch has no '
+            f'establisher. {len(later)} later illustration(s) do name anchors '
+            f'({", ".join(f"`{i}`" for i in later)}), but the visual key is '
+            f'chosen from the early ones on purpose: it exists so everything '
+            f'after it has something real to reference, and the climax cannot '
+            f'do that. Fill `canon_refs` on one of the first {horizon} rows in '
+            f'reference/{ill.PLAN_FILENAME}.')
 
 
 def _later_state_exemplar(project_dir: str,

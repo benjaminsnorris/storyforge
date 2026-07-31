@@ -354,6 +354,127 @@ def test_resolve_on_a_bare_project_does_not_raise(project_dir):
 
 
 # ============================================================================
+# One unresolvable canon_refs is one gap (#290 item 1)
+# ============================================================================
+
+def test_an_unresolvable_canon_ref_produces_exactly_one_gap(packet_project):
+    """Both the anchor check and the state-coverage check used to report it, and
+    the second one's remedy is wrong for this shape: adding a transition row for
+    an entity with no canon file states a change to a design nothing stated."""
+    rows = ill.read_plan(packet_project)
+    rows[0]['canon_refs'] = 'nobody-at-all'
+    ill.write_plan(packet_project, rows)
+    gaps = [g for g in packet.resolve(packet_project)['gaps']
+            if 'nobody-at-all' in g]
+    assert len(gaps) == 1, gaps
+    assert 'resolves to no populated canon file' in gaps[0]
+    # Nothing is lost by suppressing the other one: the survivor says both.
+    assert 'no visual state is reported for it either' in gaps[0]
+
+
+def test_an_anchored_ref_with_no_transition_still_gets_its_state_gap(
+        packet_project):
+    """The suppression is keyed on the *anchor*, not on "any missing state" —
+    `cartography-office` has a canon file and deliberately no transition."""
+    gaps = [g for g in packet.resolve(packet_project)['gaps']
+            if 'cartography-office' in g]
+    assert any('no transition states its visual state' in g for g in gaps)
+
+
+# ============================================================================
+# Canon-stale art is not finished art (#300)
+# ============================================================================
+
+def _ingest_rows(project_dir, **cells):
+    """Mark every plan row ingested with a real file, and return the ids."""
+    from illustration_helpers import make_png
+    rows = ill.read_plan(project_dir)
+    for row in rows:
+        rel = ill.default_asset_rel(row['id'].strip())
+        make_png(os.path.join(project_dir, rel), 8, 12)
+        row.update({'status': 'ingested', 'asset_file': rel})
+        row.update(cells)
+    ill.write_plan(project_dir, rows)
+    return [row['id'].strip() for row in rows]
+
+
+def test_needs_render_names_a_canon_stale_ingested_row_and_why(packet_project):
+    """The seeded canon is `canon_updated: 2026-07-28`."""
+    ids = _ingest_rows(packet_project, ingested_at='2026-01-01')
+    needs = packet.needs_render(packet_project)
+    assert sorted(needs) == sorted(ids)
+    for reason in needs.values():
+        assert 'before the canon was last updated 2026-07-28' in reason
+
+
+def test_an_empty_ingested_at_counts_as_pre_canon(packet_project):
+    """The column postdates the plan schema, so "unknown" means the render
+    predates even the bookkeeping — the shape the real book was in."""
+    _ingest_rows(packet_project, ingested_at='')
+    needs = packet.needs_render(packet_project)
+    assert all('`ingested_at` is empty' in r for r in needs.values())
+
+
+def test_an_unparseable_ingested_at_counts_as_pre_canon(packet_project):
+    _ingest_rows(packet_project, ingested_at='last Tuesday')
+    assert all('not an ISO date' in r
+               for r in packet.needs_render(packet_project).values())
+
+
+def test_a_row_ingested_from_the_current_canon_needs_nothing(packet_project):
+    _ingest_rows(packet_project, ingested_at='2026-07-28')
+    assert packet.needs_render(packet_project) == {}
+
+
+def test_a_pending_row_needs_a_render_with_no_reason(packet_project):
+    """'' and a reason are different answers: one is "no art yet", the other is
+    "art that no longer follows the canon", and they read differently."""
+    needs = packet.needs_render(packet_project)
+    assert set(needs) == {'the-finest-cartographer', 'the-blank-page'}
+    assert set(needs.values()) == {''}
+
+
+def test_a_rendered_status_is_never_judged_canon_stale(packet_project):
+    """`rendered` means a file exists Storyforge has never seen, so it carries
+    no `ingested_at` and there is no date to judge. It still needs ingesting,
+    so it is in the mapping — with no reason."""
+    rows = ill.read_plan(packet_project)
+    rows[0]['status'] = 'rendered'
+    ill.write_plan(packet_project, rows)
+    assert packet.needs_render(packet_project)['the-finest-cartographer'] == ''
+
+
+def test_nothing_is_stale_without_a_parseable_canon_cutoff(project_dir):
+    """No canon tree at all: nothing can be judged, so nothing is claimed."""
+    from illustration_helpers import seed_illustration_plan
+    seed_illustration_plan(project_dir)
+    _ingest_rows(project_dir, ingested_at='')
+    assert packet.needs_render(project_dir) == {}
+
+
+def test_a_superseded_row_is_not_something_that_needs_rendering(packet_project):
+    _ingest_rows(packet_project, ingested_at='')
+    rows = ill.read_plan(packet_project)
+    rows[1]['status'] = 'superseded'
+    ill.write_plan(packet_project, rows)
+    assert 'the-blank-page' not in packet.needs_render(packet_project)
+
+
+def test_an_entry_carries_the_stale_reason(packet_project):
+    """`prompts_packet` reads this to decide what the entry *instructs*, so it
+    has to reach the entry rather than being recomputed at render time."""
+    _ingest_rows(packet_project, ingested_at='2026-01-01')
+    entries = {e['id']: e for e in packet.resolve(packet_project)['entries']}
+    assert all(e['stale_reason'] for e in entries.values())
+
+
+def test_a_current_entry_carries_no_stale_reason(packet_project):
+    _ingest_rows(packet_project, ingested_at='2026-07-28')
+    entries = packet.resolve(packet_project)['entries']
+    assert all(e['stale_reason'] == '' for e in entries)
+
+
+# ============================================================================
 # The anchor batch
 # ============================================================================
 
@@ -448,7 +569,62 @@ def test_a_missing_establisher_is_disclosed(packet_project):
     ill.write_plan(packet_project, rows)
     batch = packet.anchor_batch(packet_project)
     assert batch['establisher'] == ''
-    assert any('no visual key' in n for n in batch['fallback'])
+    notes = batch['fallback']
+    assert any('no visual key' in n for n in notes)
+    # No row names an anchor, so the plain statement is true and is what is said.
+    assert any('no illustration names a continuity anchor' in n for n in notes)
+    assert not any('in reading order names a continuity anchor' in n
+                   for n in notes)
+
+
+def _anchors_only_outside_the_horizon(project_dir):
+    """Nine rows: six unanchored early, three anchored late. Horizon is 3.
+
+    Ids are chosen so `(position, id)` puts every unanchored row first — the
+    plan shape #290 item 3 describes, and the only one where the batch's
+    original wording is false.
+    """
+    rows = []
+    for index in range(1, 7):
+        row = ill.blank_row(f'a-{index:02}')
+        row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open',
+                    'beat': 'b', 'subject': 's'})
+        rows.append(row)
+    for index in range(1, 4):
+        row = ill.blank_row(f'z-{index:02}')
+        row.update({'scene_id': 'act2-sc01', 'placement': 'scene_open',
+                    'canon_refs': 'maps', 'beat': 'b', 'subject': 's'})
+        rows.append(row)
+    ill.write_plan(project_dir, rows)
+    return rows
+
+
+def test_an_empty_establisher_names_the_horizon_when_later_rows_have_anchors(
+        packet_project):
+    """#290 item 3: with anchors only outside the visual-key horizon, "no
+    illustration names a continuity anchor in `canon_refs`" is flatly false."""
+    _anchors_only_outside_the_horizon(packet_project)
+
+    batch = packet.anchor_batch(packet_project)
+    assert batch['establisher'] == ''
+    note = next(n for n in batch['fallback'] if 'establisher' in n)
+    assert 'none of the first 3 illustration(s)' in note
+    assert '3 later illustration(s) do name anchors' in note
+    assert '`z-01`' in note
+    # The false claim is gone.
+    assert not note.startswith('no illustration names a continuity anchor')
+
+
+def test_the_horizon_the_batch_names_is_the_one_render_order_uses(
+        packet_project):
+    """Two computations of the horizon would let the disclosure name a number
+    the selection does not use."""
+    rows = _anchors_only_outside_the_horizon(packet_project)
+    assert ill.visual_key_horizon(len(rows)) == 3
+    assert not any(s['is_visual_key'] for s in ill.render_order(packet_project))
+    note = next(n for n in packet.anchor_batch(packet_project)['fallback']
+                if 'establisher' in n)
+    assert f'first {ill.visual_key_horizon(len(rows))} illustration(s)' in note
 
 
 def test_an_empty_plan_has_no_batch_and_says_why(project_dir):

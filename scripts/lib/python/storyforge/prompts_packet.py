@@ -29,7 +29,8 @@ from typing import Final
 
 from storyforge import prompts_illustrate as pi
 from storyforge.packet import (
-    BATCH_SLOTS, AnchorBatch, Entry, PacketContents, StateGrid, anchor_block,
+    BATCH_SLOTS, AnchorBatch, Entry, PacketContents, RenderNeeds, StateGrid,
+    anchor_block,
 )
 
 #: What a section says when the data behind it is absent. The packet's coverage
@@ -53,23 +54,48 @@ def _heading_for(canon_id: str) -> str:
 # README.md
 # ============================================================================
 
-def _render_batch(batch: AnchorBatch, unrendered: list[str]) -> str:
+def _render_batch(batch: AnchorBatch, needs_render: RenderNeeds) -> str:
     """The four slots, marked for whether they are rendered, guesses disclosed.
 
     The disclosure is the load-bearing half. When `register` is unpopulated the
     darkest and brightest slots are guesses, and a guess presented as a choice
     is how an author finds out at image twenty that nothing in the book is the
     darkest image in the book.
+
+    **`Rendered: yes` is a claim about the current canon, not about `status`.**
+    A book whose twenty ingested renders all predated the canon governing them
+    got a table of four `yes` rows and a session that skipped phase 1 entirely
+    (#300). A canon-stale slot reads `re-render` and its reason is stated below
+    the table, because the row still says `ingested` everywhere else and an
+    unexplained `re-render` reads as a bug in the packet.
     """
     lines = ['| Slot | Illustration | Rendered |', '|---|---|---|']
+    #: dict, not a list: darkest and brightest can resolve to one illustration,
+    #: and one root cause stated twice is the noise #290 is about.
+    stale: dict[str, str] = {}
     for slot, label in BATCH_SLOTS:
         illus_id = batch[slot]  # type: ignore[literal-required]
         if not illus_id:
             lines.append(f'| {label} | _unfilled — see below_ | — |')
             continue
-        state = 'not yet' if illus_id in unrendered else 'yes'
+        if illus_id not in needs_render:
+            state = 'yes'
+        elif needs_render[illus_id]:
+            state = 're-render'
+            stale[illus_id] = needs_render[illus_id]
+        else:
+            state = 'not yet'
         lines.append(f'| {label} | `{illus_id}` | {state} |')
     body = '\n'.join(lines)
+    if stale:
+        reasons = '\n'.join(f'- `{illus_id}`: {reason}'
+                            for illus_id, reason in stale.items())
+        body += (
+            f'\n\n**{len(stale)} of these already has art, and it does not '
+            f'follow the canon in force now.** It is still `ingested`, so it '
+            f'still ships in the book — but it is not a usable reference for '
+            f'anything rendered from the current canon, so phase 1 is not done '
+            f'until it is re-rendered and re-ingested:\n\n{reasons}')
     if batch['fallback']:
         disclosure = '\n'.join(f'- {note}' for note in batch['fallback'])
         # Counted as notes, not as slots: `fallback` also carries the
@@ -83,7 +109,7 @@ def _render_batch(batch: AnchorBatch, unrendered: list[str]) -> str:
 
 def render_readme(*, title: str, contents: PacketContents,
                   entry_count: int, batch: AnchorBatch,
-                  unrendered: list[str]) -> str:
+                  needs_render: RenderNeeds) -> str:
     """The two phases, how to work the packet, and what it cannot tell you."""
     gaps = contents['gaps']
     if gaps:
@@ -125,7 +151,7 @@ lost on the next run and never reaches the plan. Change
 everything after, which is the difference between a set that agrees with itself
 and twenty images that each invented their own version of a character.
 
-{_render_batch(batch, unrendered)}
+{_render_batch(batch, needs_render)}
 
 **Phase 2 — the churn.** Work `illustrations.md` top to bottom. Read `canon.md`
 once at the start of the session and keep it in context; it is not repeated per
@@ -282,6 +308,11 @@ def render_visual_state(*, grid: StateGrid,
 #: an author told to work the file "top to bottom" would re-render finished art.
 DONE_MARK: Final[str] = ' — already rendered'
 
+#: Appended instead when art exists but predates the canon now governing it. The
+#: opposite instruction from `DONE_MARK`, on a row whose `status` is identical —
+#: which is exactly why `status` cannot be the signal (#300).
+STALE_MARK: Final[str] = ' — re-render: the art predates the current canon'
+
 #: Statuses that mean a file was made from this entry. Enumerated positively,
 #: rather than as everything-but-the-pending-ones, so an out-of-vocabulary value
 #: falls toward *pending*: reading an entry that did not need reading costs a
@@ -292,8 +323,15 @@ _RENDERED_STATUSES: Final[frozenset[str]] = frozenset({'rendered', 'ingested'})
 
 
 def _is_rendered(entry: Entry) -> bool:
-    """Whether this entry's art already exists."""
-    return entry['status'] in _RENDERED_STATUSES
+    """Whether this entry's art exists *and* was directed by the current canon.
+
+    Canon-stale art is not "already rendered" for the purpose of an instruction
+    that says do not regenerate — it is the art that most needs regenerating,
+    and marking it done is how a whole set inherits pre-canon drift through the
+    visual key (#300).
+    """
+    return (entry['status'] in _RENDERED_STATUSES
+            and not entry['stale_reason'])
 
 
 def render_entry(entry: Entry) -> str:
@@ -317,19 +355,33 @@ def render_entry(entry: Entry) -> str:
     entities that must not appear, and violations of the stated colour logic
     (the latter lives in `acceptance.md`). Orientation and no-text are the
     other two exceptions.
+
+    `Re-render` is not derived content and is outside the 80-120 word budget:
+    the entry is otherwise claiming to be finished, and the reason is what stops
+    an unexplained instruction reading as a defect in the packet.
     """
+    stale = entry['stale_reason']
+    if stale:
+        mark, note = STALE_MARK, (f' · **{entry["status"]}, but the art '
+                                  f'predates the current canon — re-render**')
+    elif _is_rendered(entry):
+        mark, note = DONE_MARK, f' · **{entry["status"]} — do not regenerate**'
+    else:
+        mark, note = '', ''
     lines = [
-        f'### {entry["id"]}{DONE_MARK if _is_rendered(entry) else ""}',
+        f'### {entry["id"]}{mark}',
         '',
         f'- Scene: `{entry["scene_id"] or "—"}` · Layout: '
-        f'{entry["layout"]} · Aspect: {entry["aspect"]}'
-        + (f' · **{entry["status"]} — do not regenerate**'
-           if _is_rendered(entry) else ''),
+        f'{entry["layout"]} · Aspect: {entry["aspect"]}{note}',
+    ]
+    if stale:
+        lines.extend(['', f'**Re-render.** {stale}'])
+    lines.extend([
         '',
         f'**Beat.** {entry["beat"]}',
         '',
         f'**In frame.** {entry["in_frame"]}',
-    ]
+    ])
     for label, value in (('State', entry['state']),
                          ('Absent', entry['absent']),
                          ('Treatment', entry['treatment']),

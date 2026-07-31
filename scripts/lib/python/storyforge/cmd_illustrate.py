@@ -158,7 +158,11 @@ def main(argv=None):
                                 args.dry_run,
                                 no_prior_refs=args.no_prior_refs) or exit_code
     if args.package:
-        exit_code = run_package(project_dir, args.dry_run) or exit_code
+        # `--diagnose` owns the anchor-batch report when both are asked for.
+        # Provably always True below while the early return above stands; see
+        # `run_package`'s docstring for why it is wired anyway.
+        exit_code = run_package(project_dir, args.dry_run,
+                                report_batch=not args.diagnose) or exit_code
     if args.ingest:
         exit_code = run_ingest(project_dir, args.ingest,
                                args.dry_run) or exit_code
@@ -247,24 +251,46 @@ def run_diagnose(project_dir: str) -> int:
         log(f'  reference tier incomplete — {"; ".join(parts)} — --prompts '
             f'will warn until these are filled')
 
+    needs = packet.needs_render(project_dir)
     steps = ill.render_order(project_dir)
     if steps:
         log('Recommended render order:')
         for i, step in enumerate(steps, 1):
-            mark = '*' if step['status'] == 'ingested' else ' '
+            # `~`, not `*`, for art the canon has outgrown: it is ingested, so
+            # it ships, and it still has to be rendered again.
+            mark = ('~' if needs.get(step['id'])
+                    else ' ' if step['id'] in needs else '*')
             key = '  <- visual key' if step['is_visual_key'] else ''
             locks = (f'  locks: {", ".join(step["locks"])}'
                      if step['locks'] else '')
             log(f'  {mark} {i:2}. {step["id"]}{key}{locks}')
-
-    unrendered = _unrendered_ids(project_dir)
-    _report_anchor_batch(packet.anchor_batch(project_dir), unrendered)
+    _report_canon_stale_renders(needs)
+    _report_anchor_batch(packet.anchor_batch(project_dir), needs)
 
     findings = ill.validate_plan(project_dir)
     _report_style_reference(project_dir)
     _report_state_rung(project_dir, findings)
-    _report_packet_rung(project_dir, findings, unrendered)
+    _report_packet_rung(project_dir, findings, needs)
     return _report_findings(findings)
+
+
+def _report_canon_stale_renders(needs: packet.RenderNeeds) -> None:
+    """Name every ingested illustration whose art predates the current canon.
+
+    The whole-plan version of what `_report_anchor_batch` says about four rows.
+    A book can have twenty stale renders and none of them in the batch, and
+    `--diagnose` is the health gate, so it has to be the place that says how much
+    of the set needs redoing — with the reason, since the fix is a re-render and
+    explicitly *not* a `status` demotion (#300).
+    """
+    stale = {illus_id: reason for illus_id, reason in needs.items() if reason}
+    if not stale:
+        return
+    log(f'  {len(stale)} ingested illustration(s) predate the current canon and '
+        f'need re-rendering — they still ship, but they are not usable '
+        f'references for anything rendered now:')
+    for illus_id, reason in stale.items():
+        log(f'    WARNING: {illus_id} — {reason}')
 
 
 def _report_style_reference(project_dir: str) -> None:
@@ -344,7 +370,7 @@ def _report_state_rung(project_dir: str,
 
 def _report_packet_rung(project_dir: str,
                         findings: list[ill.IllustrationFinding],
-                        unrendered: list[str]) -> None:
+                        needs_render: packet.RenderNeeds) -> None:
     """Log the staging and packet rungs, for `--diagnose`.
 
     Read off `findings` rather than by re-running `packet_stale` and
@@ -379,19 +405,31 @@ def _report_packet_rung(project_dir: str,
     if drift:
         log(f'  {len(drift)} anchor copy problem(s) — see the findings below. '
             f'Regenerate rather than editing the packet.')
-    batch_unrendered = [
-        batch_id for batch_id in
-        (packet.anchor_batch(project_dir)[slot]  # type: ignore[literal-required]
-         for slot, _label in packet.BATCH_SLOTS)
-        if batch_id and batch_id in unrendered]
-    if batch_unrendered:
-        log(f'  anchor batch: {len(set(batch_unrendered))} row(s) not yet '
-            f'ingested ({", ".join(sorted(set(batch_unrendered)))}) — render '
-            f'and ingest those before handing the packet over, so the churn '
-            f'has real references.')
-    else:
-        log('  anchor batch: every row is ingested — the packet is ready to '
-            'hand over.')
+    # "Ready to hand over" is a go/no-go on a paid render run, so it is derived
+    # from `needs_render` rather than from `status`: a batch of four ingested
+    # rows that all predated the canon reported ready, and the session that
+    # trusted it skipped phase 1 and ran the churn against a cover-only
+    # reference list (#300).
+    batch_ids = {batch_id for batch_id in
+                 (packet.anchor_batch(project_dir)[slot]  # type: ignore[literal-required]
+                  for slot, _label in packet.BATCH_SLOTS)
+                 if batch_id}
+    pending = sorted(i for i in batch_ids if i in needs_render
+                     and not needs_render[i])
+    stale = sorted(i for i in batch_ids if needs_render.get(i))
+    if pending:
+        log(f'  anchor batch: {len(pending)} row(s) not yet ingested '
+            f'({", ".join(pending)}) — render and ingest those before handing '
+            f'the packet over, so the churn has real references.')
+    if stale:
+        log(f'  anchor batch: {len(stale)} row(s) are ingested but predate the '
+            f'current canon ({", ".join(stale)}) — re-render and re-ingest '
+            f'those. Their art was directed by canon that has since been '
+            f'rewritten, so referencing it teaches the churn the drift the '
+            f'canon was rewritten to remove.')
+    if not pending and not stale:
+        log('  anchor batch: every row is ingested from the current canon — '
+            'the packet is ready to hand over.')
 
 
 # ============================================================================
@@ -1647,7 +1685,8 @@ def _apply_treatments(project_dir: str, proposed: dict[str, str]) -> int:
 # --package
 # ============================================================================
 
-def run_package(project_dir: str, dry_run: bool) -> int:
+def run_package(project_dir: str, dry_run: bool, *,
+                report_batch: bool = True) -> int:
     """Assemble `manuscript/illustration-packet/` — six files, no API calls.
 
     Regenerated wholesale, so the packet is a render and never hand-edited: the
@@ -1659,11 +1698,19 @@ def run_package(project_dir: str, dry_run: bool) -> int:
     strand them behind a check they may have a reason to skip — so every gap is
     logged as a WARNING *and* written into README.md, which is the copy they
     will still have in front of them an hour later.
+
+    Args:
+        report_batch: Whether to log the anchor batch. `main` passes False when
+            `--diagnose` was also requested, because that report owns the batch.
+            Today `main` early-returns on `--diagnose` so nothing exercises the
+            False path through the CLI; the parameter exists so removing that
+            early return does not silently start printing the batch twice (#290
+            item 2), which is a duplication no reader would trace back here.
     """
     contents = packet.resolve(project_dir)
     grid = packet.state_grid(project_dir)
     batch = packet.anchor_batch(project_dir)
-    unrendered = _unrendered_ids(project_dir)
+    needs = packet.needs_render(project_dir)
     title = read_yaml_field('project.title', project_dir) or '(untitled)'
 
     illustrated: dict[str, list[str]] = {}
@@ -1680,7 +1727,7 @@ def run_package(project_dir: str, dry_run: bool) -> int:
         'README.md': pp.render_readme(
             title=title, contents=contents,
             entry_count=len(contents['entries']), batch=batch,
-            unrendered=unrendered),
+            needs_render=needs),
         'canon.md': pp.render_canon(
             book_level=contents['book_level'], anchors=contents['anchors'],
             labels=_anchor_labels(project_dir)),
@@ -1717,35 +1764,45 @@ def run_package(project_dir: str, dry_run: bool) -> int:
         log(f'  {len(contents["gaps"])} gap(s) above are also written into '
             f'{os.path.join(packet.PACKET_DIR, "README.md")}, so the packet '
             f'says what it cannot tell you.')
-    _report_anchor_batch(batch, unrendered)
+    if report_batch:
+        _report_anchor_batch(batch, needs)
     log('Render and approve the anchor batch, ingest those, then re-run '
         '--package so the rest can reference real images.')
     return 0
 
 
-def _unrendered_ids(project_dir: str) -> list[str]:
-    """Plan ids that have not reached `ingested`, in reading order."""
-    return [row['id'].strip()
-            for row in packet.rows_in_reading_order(project_dir)
-            if (row.get('status') or '').strip() != 'ingested']
-
-
 def _report_anchor_batch(batch: packet.AnchorBatch,
-                         unrendered: list[str]) -> None:
+                         needs_render: packet.RenderNeeds) -> None:
     """Log the four slots and every disclosure.
 
     The fallback notes are WARNING lines rather than plain output: a guessed
     darkest slot is a claim the author has to either confirm or correct, and it
-    reads as a decision unless something says otherwise.
+    reads as a decision unless something says otherwise. A canon-stale slot is a
+    WARNING for the same reason: `[ingested]` on art the canon has outgrown is
+    what let a whole set be handed over unrendered (#300).
     """
     log('Anchor batch — render and approve these before the rest:')
+    stale: dict[str, str] = {}
     for slot, label in packet.BATCH_SLOTS:
         illus_id = batch[slot]  # type: ignore[literal-required]
         if not illus_id:
             log(f'  {label}: (unfilled)')
             continue
-        mark = '' if illus_id in unrendered else '  [ingested]'
+        if illus_id not in needs_render:
+            mark = '  [ingested]'
+        elif needs_render[illus_id]:
+            mark = '  [ingested, but needs a re-render]'
+            stale[illus_id] = needs_render[illus_id]
+        else:
+            mark = ''
         log(f'  {label}: {illus_id}{mark}')
+    for illus_id, reason in stale.items():
+        log(f'  WARNING: {illus_id} still says `ingested`, but {reason} — so it '
+            f'is not a usable reference for anything rendered from the current '
+            f'canon, and phase 1 is not done until it is re-rendered and '
+            f're-ingested. Leave `status` alone: demoting it would drop the '
+            f'illustration out of the epub, the PDF, the web book, and '
+            f'Bookshelf.')
     for note in batch['fallback']:
         log(f'  WARNING: {note}')
 
@@ -2437,7 +2494,10 @@ def _references_for(project_dir: str, illus_id: str, *,
                  f'this build inherits nothing from the existing art.')
             continue
         if canon_cutoff:
-            stale_reason = _stale_reference_reason(row, canon_cutoff)
+            # The same predicate `packet.needs_render` and `packet._entry_for`
+            # read, so nothing in one run can hold that a render is too stale to
+            # reference *and* that it is finished (#300).
+            stale_reason = ill.stale_render_reason(row, canon_cutoff)
             if stale_reason:
                 log(f'WARNING: not referencing {rel} for {illus_id} — '
                     f'{stale_reason}. Re-render it from the current canon '
@@ -2495,33 +2555,6 @@ def _references_for(project_dir: str, illus_id: str, *,
                  + '. Nothing anchors style or likeness, so whatever is '
                    'rendered first sets the look for the whole book.')
     return references
-
-
-def _stale_reference_reason(row: dict[str, str], canon_cutoff: str) -> str:
-    """Why this ingested row predates the canon, or '' if it does not.
-
-    The comparison itself is `canon.predates_canon`, which is where the
-    same-day-is-not-stale rule lives; this function only decides what an
-    *unusable* date means for an ingested render. Empty and unparseable are both
-    treated as pre-canon here, which is the opposite of the style reference's
-    policy and deliberately so: `ingested_at` postdates the plan schema, so
-    "unknown" means the render predates even the bookkeeping.
-    """
-    from storyforge import canon as canon_mod
-    raw = (row.get('ingested_at') or '').strip()
-    if not raw:
-        return (f'its `ingested_at` is empty, so it predates ingest '
-                f'timestamps and therefore the canon last updated '
-                f'{canon_cutoff}')
-    ingested = canon_mod.iso_date_or_empty(raw)
-    if not ingested:
-        return (f'its `ingested_at` ({raw!r}) is not an ISO date, so it '
-                f'cannot be shown to postdate the canon last updated '
-                f'{canon_cutoff}')
-    if canon_mod.predates_canon(when=ingested, cutoff=canon_cutoff):
-        return (f'it was ingested {ingested}, before the canon was last '
-                f'updated {canon_cutoff}')
-    return ''
 
 
 def _relevant_anchors(anchors: dict[str, str],
