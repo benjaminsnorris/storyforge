@@ -34,6 +34,7 @@ from datetime import date
 from typing import Final, Literal, TypedDict
 
 from storyforge.illustrations import PrepassFindings, RenderStep, VALID_PLACEMENTS
+from storyforge.visual_state import STATE_FILE
 
 #: Aspect is derived from author-written prose (layout, then composition) and
 #: consumed by orientation_clause, which silently falls back to portrait for an
@@ -778,10 +779,18 @@ def render_prompt_file(*, row: dict[str, str], body: str,
     too and not only into the request: a model that dropped it would leave a
     prompt file whose costume is inference, and the working fix on the real book
     was hand-editing the body — which makes the file no longer reproducible from
-    the plan (#297). It appears twice by design, as the orientation does: as a
-    constraint the image model reads, and in the `## Accept only if` block the
-    author checks the render against. That block is the spec's per-image
-    acceptance lines, which prompt files did not carry.
+    the plan (#297). It appears twice, for the same reason the orientation is
+    written here rather than requested: as a constraint the image model reads, and
+    in the `## Accept only if` block the author checks the render against. That
+    block is the spec's per-image acceptance lines, which prompt files did not
+    carry.
+
+    **A state that did not resolve is stated, not omitted.** An omitted line left
+    a Constraints block byte-identical to a pre-#297 one and an acceptance block
+    that announced "checked against this illustration's row" while silently
+    dropping the only check #297 was filed about. `packet.NOT_RECORDED` exists so
+    "nobody wrote this down" cannot read as "nothing to say here"; the prompt file
+    is read on the same timescale as the packet and owes the same honesty.
     """
     illus_id = (row.get('id') or '').strip()
     orientation = orientation_clause(aspect)
@@ -800,13 +809,26 @@ def render_prompt_file(*, row: dict[str, str], body: str,
     if absent.strip():
         constraints.append(f'- Not in this image: {absent.strip()}')
 
-    accept = [f'- The visual state matches: {state.strip()}'] if state.strip() else []
+    accept = [
+        f'- The visual state matches: {state.strip()}' if state.strip() else
+        f'- **No visual state resolved for this illustration**, so the costume, '
+        f'lighting, and damage states above are the model\'s inference rather '
+        f'than a read of `{STATE_FILE}`. Nothing here can be checked '
+        f'against the book\'s schedule — add a transition, or a '
+        f'`state_override` on the plan row if the state is true in this image '
+        f'only.'
+    ]
     if absent.strip():
         accept.append(f'- Nothing in frame that must not be: {absent.strip()}')
     if contrast.strip():
         accept.append(f'- It is set apart from its neighbours: {contrast.strip()}')
-    acceptance = ([
-        '## Accept only if',
+    # Always rendered, because `accept` always has its state line. Marked
+    # do-NOT-paste: it sits after "Paste everything below into the image model",
+    # its prose reads like prompt text, and via `contrast` it can name another
+    # illustration by id — which the request explicitly forbids reaching the
+    # model. Same marker convention as the GN page renderer.
+    acceptance = [
+        '## Accept only if (not part of the prompt — do NOT paste)',
         '',
         'Checked against this illustration\'s row, not against the render you '
         'happen to like. The checks identical across the whole set live in the '
@@ -816,7 +838,7 @@ def render_prompt_file(*, row: dict[str, str], body: str,
         '',
         '---',
         '',
-    ] if accept else [])
+    ]
 
     parts = [
         f'# Illustration prompt — {illus_id}',

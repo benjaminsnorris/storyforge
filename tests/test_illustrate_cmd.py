@@ -2450,8 +2450,9 @@ def test_a_declared_style_reference_beats_the_convention(in_project):
                          'manuscript/assets/cover-illustration-discovery.png')
 
     style = cmd_illustrate.resolve_style_reference(in_project)
-    assert style['path'] == 'manuscript/assets/cover-illustration-discovery.png'
-    assert style['declared'] is True
+    assert style['path'] == os.path.join(
+        'manuscript', 'assets', 'cover-illustration-discovery.png')
+    assert style['source'] == 'declared'
     refs = cmd_illustrate._references_for(in_project, 'lantern-vigil')
     assert [p for p, _ in refs] == [
         'manuscript/assets/cover-illustration-discovery.png']
@@ -2463,7 +2464,7 @@ def test_the_convention_still_answers_when_nothing_is_declared(in_project):
     style = cmd_illustrate.resolve_style_reference(in_project)
     assert style['path'] == os.path.join('manuscript', 'assets',
                                          'cover-illustration.png')
-    assert style['declared'] is False
+    assert style['source'] == 'convention'
     assert 'the conventional filename' in \
         cmd_illustrate.describe_style_reference(style)
 
@@ -2483,7 +2484,7 @@ def test_a_declared_path_that_does_not_exist_warns_and_falls_back(in_project):
     assert style['unresolved_declaration'] == 'manuscript/assets/gone.png'
     assert style['path'] == os.path.join('manuscript', 'assets',
                                          'cover-illustration.png')
-    assert style['declared'] is False
+    assert style['source'] == 'convention'
     warnings = cmd_illustrate.style_reference_warnings(style)
     assert any('does not exist' in w for w in warnings)
     assert any('may not be the artwork you meant' in w for w in warnings)
@@ -2509,7 +2510,7 @@ def test_a_style_reference_older_than_the_canon_warns(in_project):
 
     style = cmd_illustrate.resolve_style_reference(in_project)
     assert style['modified'] == '2026-07-01'
-    assert style['canon_cutoff'] == '2026-07-20'
+    assert style['checked_against'] == '2026-07-20'
     assert style['stale'] is True
     warning = ' '.join(cmd_illustrate.style_reference_warnings(style))
     assert 'cover-illustration.png' in warning
@@ -2612,6 +2613,208 @@ def test_prompts_logs_the_style_reference_before_any_call(in_project, monkeypatc
     monkeypatch.setattr(cmd_illustrate, '_invoke', _record)
 
     assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+
+
+def test_a_declared_absolute_path_inside_the_project_is_relativized(in_project):
+    """`path` reaches git-tracked prompt files and the packet, whose contract is
+    project-relative paths — an absolute declaration would commit a
+    machine-specific path into a shared artifact."""
+    real = _style_ref(in_project, 'selected.png')
+    _set_yaml_production(in_project, 'cover_artwork', real)   # absolute
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['path'] == os.path.join('manuscript', 'assets', 'selected.png')
+    assert style['source'] == 'declared'
+    assert style['outside_project'] is False
+    assert not os.path.isabs(
+        cmd_illustrate._references_for(in_project, 'lantern-vigil')[0][0])
+
+
+def test_a_declaration_outside_the_project_is_disclosed(in_project, tmp_path):
+    """It cannot be relativized, so the absolute path does reach the prompt
+    file — which is exactly why it is warned about rather than passed over."""
+    art = make_png(str(tmp_path / 'elsewhere' / 'art.png'), 8, 8)
+    _set_yaml_production(in_project, 'cover_artwork', art)
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['path'] == art
+    assert style['outside_project'] is True
+    assert any('outside the project' in w
+               for w in cmd_illustrate.style_reference_warnings(style))
+
+
+def test_a_declared_file_an_image_model_cannot_read_is_warned_about(in_project):
+    """`production/cover.svg` beside the rendered PNG is the realistic case, and
+    it is the same project shape the new key exists to disambiguate."""
+    path = os.path.join(in_project, 'production', 'cover.svg')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write('<svg/>')
+    _set_yaml_production(in_project, 'cover_artwork', 'production/cover.svg')
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['unusable_extension'] == 'svg'
+    warning = ' '.join(cmd_illustrate.style_reference_warnings(style))
+    assert 'no image model' in warning
+    assert 'still listed' in warning
+    # Warned, not dropped: the one reference that is sometimes the only one.
+    assert [p for p, _ in cmd_illustrate._references_for(
+        in_project, 'lantern-vigil')] == ['production/cover.svg']
+
+
+def test_the_convention_scan_cannot_produce_an_unusable_extension(in_project):
+    _style_ref(in_project)
+    assert cmd_illustrate.resolve_style_reference(
+        in_project)['unusable_extension'] == ''
+
+
+def test_an_unreadable_mtime_is_unknown_not_fresh(in_project, monkeypatch):
+    """Deliberately the opposite of `ingested_at`: there is no bookkeeping
+    column here for a file to predate, so unknown is genuinely unknown — and
+    unknown must not report as checked."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _style_ref(in_project)
+    monkeypatch.setattr(os.path, 'getmtime',
+                        lambda _p: (_ for _ in ()).throw(OSError('stat')))
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['modified'] == ''
+    assert style['stale'] is False
+    warning = ' '.join(cmd_illustrate.style_reference_warnings(style))
+    assert 'could not be read' in warning
+    assert 'not the same as fresh' in warning
+    headline = cmd_illustrate.describe_style_reference(style)
+    assert 'cover-illustration.png' in headline
+    assert 'unreadable' in headline
+
+
+def test_no_canon_date_means_the_check_did_not_run_and_says_so(in_project):
+    """The silent-unchecked case. `--no-prior-refs` skips the line that used to
+    mention it, which is the run where the cover is the whole style signal."""
+    _style_ref(in_project)
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['checked_against'] == ''
+    assert style['stale'] is False
+    warning = ' '.join(cmd_illustrate.style_reference_warnings(style))
+    assert 'could not be checked for staleness' in warning
+    assert 'no canon date to check it against' in \
+        cmd_illustrate.describe_style_reference(style)
+
+
+def test_the_headline_names_what_the_mtime_was_compared_against(in_project):
+    """A bare date is a verdict the reader completes themselves."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _backdate(_style_ref(in_project), '2026-07-21')
+    assert 'canon last updated 2026-07-20' in \
+        cmd_illustrate.describe_style_reference(
+            cmd_illustrate.resolve_style_reference(in_project))
+
+
+def test_a_dangling_convention_symlink_is_not_reported_as_no_artwork(in_project):
+    """The link is right there in `ls`; telling the author to create it is the
+    least useful thing to say. Symlinking the convention path at the selected
+    art is the workaround this resolution order documents, so a stale target is
+    its likeliest failure mode."""
+    assets = os.path.join(in_project, 'manuscript', 'assets')
+    os.makedirs(assets, exist_ok=True)
+    os.symlink('gone.png', os.path.join(assets, 'cover-illustration.png'))
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['path'] == ''
+    assert 'gone.png' in style['dangling_symlink']
+    warning = ' '.join(cmd_illustrate.style_reference_warnings(style))
+    assert 'target does not exist' in warning
+    assert 'there is no cover artwork' not in warning
+
+
+def test_a_symlink_target_outside_the_project_is_reported_absolute(in_project,
+                                                                  tmp_path):
+    art = make_png(str(tmp_path / 'ext' / 'real.png'), 8, 8)
+    assets = os.path.join(in_project, 'manuscript', 'assets')
+    os.makedirs(assets, exist_ok=True)
+    os.symlink(art, os.path.join(assets, 'cover-illustration.png'))
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['symlink_target'] == art
+
+
+def test_the_packet_note_does_not_capitalize_the_yaml_key(in_project):
+    """`Production.cover_artwork` is a key nothing reads, told to an author
+    reading the packet to find out what to set."""
+    _style_ref(in_project)
+    _set_yaml_production(in_project, 'cover_artwork', 'manuscript/assets/gone.png')
+    notes = []
+    cmd_illustrate._references_for(in_project, 'lantern-vigil', notes=notes)
+    assert any('production.cover_artwork' in n for n in notes)
+    assert not any('Production.cover_artwork' in n for n in notes)
+
+
+def test_the_extension_order_is_deterministic(in_project):
+    """Four candidates, one answer — otherwise which cover directs the book
+    depends on filesystem iteration order."""
+    assets = os.path.join(in_project, 'manuscript', 'assets')
+    make_jpeg(os.path.join(assets, 'cover-illustration.jpg'), 8, 8)
+    _style_ref(in_project)
+    assert cmd_illustrate.resolve_style_reference(in_project)['path'] == \
+        os.path.join('manuscript', 'assets', 'cover-illustration.png')
+
+
+def test_a_resolved_jpeg_cover_consumes_a_cap_slot(in_project):
+    """The extension widening is not behaviour-neutral: a jpeg-only project
+    previously resolved no cover at all and got four priors. Documented on
+    _STYLE_REFERENCE_EXTENSIONS; pinned here."""
+    make_jpeg(os.path.join(in_project, 'manuscript', 'assets',
+                           'cover-illustration.jpg'), 8, 8)
+    rows = []
+    for i in range(6):
+        rel = ill.default_asset_rel(f'prior-{i}')
+        make_png(os.path.join(in_project, rel), 8, 8)
+        rows.append(plan_row(id=f'prior-{i}', status='ingested',
+                             asset_file=rel))
+    ill.write_plan(in_project, rows + [plan_row()])
+
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil')
+    assert len(refs) == cmd_illustrate._MAX_REFERENCES
+    assert refs[0][0].endswith('cover-illustration.jpg')
+    priors = [p for p, _ in refs if 'cover-illustration' not in p]
+    assert len(priors) == cmd_illustrate._MAX_REFERENCES - 1
+
+
+def test_prompts_refuses_when_the_declaration_names_a_missing_file(
+        in_project, monkeypatch, capsys):
+    """Unambiguous, unlike staleness: an author who typed a path meant that
+    path. Spending the run on the convention's artwork and exiting 0 is #299's
+    outcome with a warning stapled to it."""
+    write_scene(in_project, 'vigil', SCENE)
+    _style_ref(in_project)
+    _set_yaml_production(in_project, 'cover_artwork', 'manuscript/assets/gone.png')
+    ill.write_plan(in_project, [plan_row()])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def _boom(*a, **k):
+        raise AssertionError('nothing should be spent')
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _boom)
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 1
+    out = capsys.readouterr().out
+    assert 'refusing to write prompts' in out
+    assert 'gone.png' in out
+    assert not os.path.exists(
+        os.path.join(in_project, ill.default_prompt_rel('lantern-vigil')))
+
+
+def test_prompts_dry_run_names_the_style_reference(in_project, capsys):
+    """The one pre-flight mode an author reaches for reported neither the cover
+    nor the state gaps, because it returned before both."""
+    write_scene(in_project, 'vigil', SCENE)
+    _style_ref(in_project)
+    ill.write_plan(in_project, [plan_row()])
+
+    assert cmd_illustrate.main(['--prompts', '--dry-run']) == 0
+    out = capsys.readouterr().out
+    assert 'Style reference: ' in out
+    assert '[dry-run] would write' in out
 
 
 def test_prompts_logs_the_style_staleness_warning_once(in_project, monkeypatch,

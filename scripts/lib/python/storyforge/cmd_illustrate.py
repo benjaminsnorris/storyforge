@@ -38,7 +38,7 @@ import re
 import sys
 import time
 from datetime import date
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from storyforge.api import (
     calculate_cost_from_usage, extract_text, extract_usage, invoke,
@@ -1246,59 +1246,71 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             'prompt scaffold with your constraints; fill in the four sections '
             'yourself (the Constraints section is appended for you).')
 
-    if dry_run:
-        for row in rows:
-            log(f'[dry-run] would write '
-                f'{ill.default_prompt_rel(row["id"].strip())}')
-        return 0
-
     needs_api = coaching in ('full', 'coach')
-    if needs_api and not os.environ.get('ANTHROPIC_API_KEY'):
-        log('ERROR: ANTHROPIC_API_KEY is not set. Art direction in '
-            f'{coaching} coaching requires an API key. Set it and re-run, or '
-            'use --coaching strict for a scaffold.')
-        return 1
 
-    os.makedirs(ill.prompts_dir(project_dir), exist_ok=True)
-    canon_ctx = _canon_context(project_dir)
-    style_note = _style_note(project_dir)
+    # Everything below to the end of phase 1 is file reads. It runs before the
+    # dry-run return on purpose: "which cover is about to direct twenty calls,
+    # and which rows have no stated visual state?" are exactly the questions a
+    # pre-flight mode exists to answer, and the mode that reported neither was
+    # the one an author would reach for first.
+    from storyforge import canon as canon_mod
+    canon_cutoff = canon_mod.newest_canon_updated(project_dir)
+    cutoff = _reference_cutoff(project_dir, no_prior_refs, canon_cutoff)
+    # Resolved once for the run, and logged before a single call goes out: with
+    # nothing naming the file, a run that spent twenty calls on a superseded
+    # cover surfaced only by reading a generated prompt by hand (#299). The
+    # run's own `canon_cutoff` is passed rather than recomputed, so the canon
+    # tree is walked once and its unparseable-date WARNING logged once.
+    style = resolve_style_reference(project_dir, canon_cutoff=canon_cutoff)
+    headline = describe_style_reference(style)
+    if headline:
+        log(headline)
+    for warning in style_reference_warnings(style):
+        log(f'WARNING: {warning}')
+
     # Read once for the whole run. Every request is built before any call is
     # made, so a stub a later row's response proposes cannot reach the others
     # — which is exactly why _warn_unanchored_rows runs first, while the author
     # can still fix it for free.
     anchors = pi.anchors_for_prompt(project_dir)
     labels = _anchor_labels(project_dir)
+    canon_ctx = _canon_context(project_dir)
+    style_note = _style_note(project_dir)
+    # Not gated on `needs_api`. A `canon_refs` entry with no anchor is a plan
+    # defect whoever writes the prose, and strict coaching is where the author is
+    # hand-authoring the direction and most needs to know. It was gated, and
+    # `state_for_row`'s suppression of the same finding was not — so in strict the
+    # accurate warning vanished and `state_unspecified` fired in its place,
+    # telling the author to add a transition row when the fix is to author the
+    # canon anchor.
+    _warn_unanchored_rows(rows, anchors)
     if needs_api:
-        _warn_unanchored_rows(rows, anchors)
         _warn_truncated_anchors(project_dir)
-    cutoff = _reference_cutoff(project_dir, no_prior_refs)
-    # Resolved once for the run, and logged before a single call goes out: with
-    # nothing naming the file, a run that spent twenty calls on a superseded
-    # cover surfaced only by reading a generated prompt by hand (#299).
-    style = resolve_style_reference(project_dir)
-    headline = describe_style_reference(style)
-    if headline:
-        log(headline)
-    for warning in style_reference_warnings(style):
-        log(f'WARNING: {warning}')
+
     # The visual-state matrix, read once and resolved per row through the same
     # function `--package` uses, so a prompt file and the packet entry built from
     # one row cannot describe different costumes (#297).
-    state_ctx = packet.state_context(project_dir)
-    written = 0
-    failed: list[str] = []
+    state_ctx = packet.state_context(project_dir, plan=plan)
 
     # Phase 1 — assemble every request. Sequential and cheap (file reads
     # only), which keeps the reference and anchor warnings in plan order.
     jobs: list[_PromptJob] = []
+    state_gaps: dict[str, list[str]] = {}
     for row in rows:
         illus_id = row['id'].strip()
-        # `include_anchor_gaps=False`: _warn_unanchored_rows already named every
-        # canon_refs entry with no anchor, above.
-        state, state_gaps = packet.state_for_row(row, context=state_ctx,
-                                                 include_anchor_gaps=False)
-        for gap in state_gaps:
-            log(f'WARNING: {gap}')
+        # `include_anchor_gaps=False` because `_warn_unanchored_rows` above named
+        # every canon_refs entry with no anchor — and it now runs at every
+        # coaching level, which is what makes that true unconditionally.
+        state, gaps = packet.state_for_row(row, context=state_ctx,
+                                           include_anchor_gaps=False)
+        for gap in gaps:
+            # Collected, not logged here. One untracked entity across twenty rows
+            # is twenty near-identical WARNINGs interleaved with the per-row
+            # reference chatter, which is the log-skimming this command's own
+            # de-dup rationale objects to. Grouped after the loop, the way
+            # `_warn_unanchored_rows` does it — still before the fan-out, so the
+            # free-fix moment is preserved.
+            state_gaps.setdefault(gap, []).append(illus_id)
         absent_cell = (row.get('absent') or '').strip()
         contrast = packet.contrast_for_row(row, context=state_ctx)
         jobs.append({
@@ -1320,6 +1332,48 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
                 state=state, absent=absent_cell, contrast=contrast,
             ) if needs_api else '',
         })
+
+    for gap, ids in state_gaps.items():
+        log(f'WARNING: {gap} ({len(ids)} illustration(s): '
+            f'{", ".join(sorted(ids))})')
+    unstated = [job['id'] for job in jobs if not job['state']]
+    if unstated:
+        log(f'{len(unstated)} of {len(jobs)} illustration(s) have no resolved '
+            f'visual state, so their costumes and lighting are the model\'s '
+            f'inference rather than a read of reference/visual-state.csv: '
+            f'{", ".join(unstated)}. The prompt files say so too.')
+
+    if dry_run:
+        for job in jobs:
+            log(f'[dry-run] would write '
+                f'{ill.default_prompt_rel(job["id"])}')
+        return 0
+
+    if style['unresolved_declaration']:
+        # Refused, not warned. Staleness is a judgment call and "warn, never
+        # exclude" is right for it; a declaration naming a path that does not
+        # exist is unambiguous — an author who typed a path meant that path. The
+        # alternative is spending the whole run on the convention's artwork and
+        # returning 0, which is what the skill commits on: #299's exact outcome
+        # with a warning stapled to it.
+        log(f'ERROR: refusing to write prompts. {STYLE_REFERENCE_KEY} names '
+            f'`{style["unresolved_declaration"]}`, which does not exist, so '
+            f'every prompt in this run would inherit its house style from '
+            + (f'`{style["path"]}` instead.' if style['path']
+               else 'nothing at all.')
+            + f' Fix the path, or remove {STYLE_REFERENCE_KEY} to use the '
+              f'convention deliberately.')
+        return 1
+
+    if needs_api and not os.environ.get('ANTHROPIC_API_KEY'):
+        log('ERROR: ANTHROPIC_API_KEY is not set. Art direction in '
+            f'{coaching} coaching requires an API key. Set it and re-run, or '
+            'use --coaching strict for a scaffold.')
+        return 1
+
+    os.makedirs(ill.prompts_dir(project_dir), exist_ok=True)
+    written = 0
+    failed: list[str] = []
 
     # Phase 2 — fan the API calls out. Each is ~13s of waiting on one
     # independent request, so a 20-illustration book is minutes of serial
@@ -1881,19 +1935,28 @@ def _anchor_labels(project_dir: str) -> dict[str, str]:
     return {cid: entry['label'] for cid, entry in entries.items()}
 
 
-def _reference_cutoff(project_dir: str, no_prior_refs: bool) -> str:
+def _reference_cutoff(project_dir: str, no_prior_refs: bool,
+                      cutoff: str | None = None) -> str:
     """The canon date a prior render must post-date to serve as a reference.
 
     '' means no cutoff — either the author asked for cover-only references
     anyway, or no canon file carries a parseable `canon_updated`, in which case
     there is no governing direction for art to predate.
+
+    `cutoff` is the run's already-read `newest_canon_updated`. Passed in rather
+    than read again so the canon tree is walked once per run and its
+    unparseable-date WARNING is logged once. **This return value is not a
+    substitute for that argument**: it is '' under `--no-prior-refs`, which is
+    exactly the run where the style reference most needs checking, and handing it
+    to `resolve_style_reference` is how #299 would come back.
     """
     from storyforge import canon as canon_mod
+    if cutoff is None:
+        cutoff = canon_mod.newest_canon_updated(project_dir)
     if no_prior_refs:
         log('--no-prior-refs: prompts will reference the cover only, not any '
             'previously ingested illustration.')
         return ''
-    cutoff = canon_mod.newest_canon_updated(project_dir)
     if not cutoff:
         log('No parseable `canon_updated` date in reference/canon/ — prior '
             'ingested illustrations will be used as style references without '
@@ -1932,20 +1995,32 @@ def _strict_prompt_scaffold(row: dict[str, str]) -> str:
 _MAX_REFERENCES = 4
 
 #: Where the style reference lives when nothing declares it. The *artwork*, not
-#: the typeset cover — `manuscript/assets/cover.png` is the composite with the
-#: title burned into the raster, and feeding that to a prompt whose own
-#: constraint block says "no text, no letters, no words" teaches the render
-#: baked-in lettering.
+#: the typeset cover — `production/cover.*` (or `manuscript/assets/cover.*`) is
+#: the composite with the title burned into the raster, and feeding that to a
+#: prompt whose own constraint block says "no text, no letters, no words"
+#: teaches the render baked-in lettering.
 _STYLE_REFERENCE_STEM = os.path.join('manuscript', 'assets', 'cover-illustration')
 
-#: Extensions the convention filename is tried with, in order. A jpeg export of
-#: the same artwork is the same convention; refusing it because the name ends
+#: Extensions the convention filename is tried with, in this order. A jpeg export
+#: of the same artwork is the same convention; refusing it because the name ends
 #: `.jpg` is the brittleness this whole resolution order exists to fix.
+#:
+#: **This is not behaviour-neutral for a non-PNG project**, and the order is not
+#: cosmetic. A book holding only `cover-illustration.jpg` previously resolved *no*
+#: cover at all and got four prior illustrations; it now gets the cover plus
+#: three, because `_references_for` counts the cap after appending the cover. That
+#: is the better chain — the cover is the strongest style anchor a book has — but
+#: it is a change, so it is stated rather than described as "unchanged".
 _STYLE_REFERENCE_EXTENSIONS = ('png', 'jpg', 'jpeg', 'webp')
 
 #: The YAML key a project uses to say which of several cover variations is the
 #: one that sets the house style.
 STYLE_REFERENCE_KEY = 'production.cover_artwork'
+
+#: Where the resolved path came from. A `Literal` rather than a `declared: bool`
+#: beside an empty-`path` sentinel, because those two fields encoded one
+#: three-valued fact and let a caller represent "declared but nothing resolved".
+StyleReferenceSource = Literal['declared', 'convention', 'none']
 
 
 class StyleReference(TypedDict):
@@ -1955,29 +2030,56 @@ class StyleReference(TypedDict):
     run by `--prompts` and rendered into the packet's `reference-images.md`,
     without a per-row call logging the same warning twenty times. Same posture
     as `visual_state.prepass`: resolve silently, let the caller report.
+
+    Which combinations occur, so a reader need not re-derive them from the
+    constructor (`resolve_style_reference` is the only one):
+
+    - `source='none'` ⟺ `path=''`, and then `symlink_target`, `modified` are ''
+      and `stale` is False. Nothing resolved.
+    - `source='declared'` ⟹ `unresolved_declaration=''`. The declaration either
+      resolved or it did not.
+    - `unresolved_declaration != ''` with `source='convention'` — the declaration
+      was ignored and the convention answered instead.
+    - `stale=True` ⟹ `modified != ''` and `checked_against != ''`.
+    - `path != ''` with `modified=''` — the mtime could not be read, so freshness
+      is *unknown*, which is not the same as fresh and is warned about.
     """
-    #: Project-relative path, or absolute when a declaration points outside the
-    #: project. Empty when nothing resolved at all.
+    #: Whatever the resolution produced, verbatim: the declaration as written
+    #: (relativized when it names a file inside the project), or the convention's
+    #: project-relative path. '' when nothing resolved.
     path: str
-    #: Whether `path` came from the YAML declaration rather than the convention.
-    declared: bool
+    source: StyleReferenceSource
     #: A declared path that does not exist. Non-empty *and* a resolved `path`
     #: means the declaration was ignored and the convention answered instead —
     #: the one shape an author most needs told about, because the run still
     #: succeeds with the wrong art.
     unresolved_declaration: str
+    #: Set when the declaration resolves to a file outside the project. The path
+    #: then cannot be made project-relative, and it reaches git-tracked prompt
+    #: files, so it is disclosed rather than silently committed.
+    outside_project: bool
+    #: Set when the resolved file's extension is not one an image model reads.
+    #: A `production/cover.svg` compositing source is the realistic case, and it
+    #: is exactly what a project with several cover variations also holds.
+    unusable_extension: str
     #: What the path points at, when it is a symlink. The documented workaround
     #: for a project with several cover variations is to symlink the convention
     #: filename at the selected art, so the target is the thing the author
     #: actually recognizes.
     symlink_target: str
+    #: A symlink whose target does not exist. Distinguished from "no artwork"
+    #: because the convention filename *is* present, and telling an author to
+    #: create a file they can see in `ls` is the least useful thing to say.
+    dangling_symlink: str
     #: ISO date of the file's mtime, or '' if it could not be read.
     modified: str
     #: The newest `canon_updated` this was checked against, '' if there is none.
-    #: Carried so the warning can name it, and so a caller cannot report a
-    #: staleness verdict against a different date than the one that produced it.
-    canon_cutoff: str
-    #: `modified` is strictly older than `canon_cutoff`.
+    #: Named for what it is rather than `canon_cutoff`, which is also the name of
+    #: `_references_for`'s parameter — and those two mean deliberately different
+    #: things (that parameter is '' under `--no-prior-refs`; this never is), so
+    #: one name for both invites the tidy-up that reintroduces #299.
+    checked_against: str
+    #: `modified` is strictly older than `checked_against`.
     stale: bool
 
 
@@ -1985,7 +2087,9 @@ def resolve_style_reference(project_dir: str, *,
                             canon_cutoff: str | None = None) -> StyleReference:
     """Resolve the artwork that sets the house style, and how fresh it is.
 
-    Resolution order, mirroring `assembly._resolve_cover_path` one level over:
+    Resolution order — the same *shape* as `assembly._resolve_cover_path`
+    (declaration, then convention), but narrower: one directory, four extensions,
+    and no explicit-path argument.
 
     1. `production.cover_artwork` in storyforge.yaml — the declaration. A book
        can hold four rendered cover variations and one selected one, and before
@@ -1994,7 +2098,8 @@ def resolve_style_reference(project_dir: str, *,
        how twenty interior prompts inherited a superseded cover as their sole
        style reference (#299).
     2. `manuscript/assets/cover-illustration.{png,jpg,jpeg,webp}` — the
-       convention, kept so every existing project resolves exactly as before.
+       convention, so an existing PNG project resolves exactly as before. See
+       `_STYLE_REFERENCE_EXTENSIONS` for why a non-PNG project does not.
 
     Deliberately **not** `production.cover_image`: that key names the file that
     *ships*, which on a real book is the typeset composite. The artwork and the
@@ -2005,28 +2110,40 @@ def resolve_style_reference(project_dir: str, *,
     reference in the list and the *only* one under `--no-prior-refs`, so
     exempting it left the highest-stakes run unchecked. Unlike an ingested row,
     an unreadable mtime is **not** treated as stale: there is no bookkeeping
-    column here that a file could predate, so "unknown" is genuinely unknown.
-    `os.path.getmtime` follows symlinks, which is what we want — the target is
-    the artwork.
+    column here that a file could predate, so "unknown" is genuinely unknown —
+    and because unknown must not read as fresh, it is warned about rather than
+    passed over. `os.path.getmtime` follows symlinks, which is what we want —
+    the target is the artwork.
 
     `canon_cutoff` defaults to reading the canon tree rather than taking
     `_reference_cutoff`'s answer, and that distinction is the whole point:
     `_reference_cutoff` returns '' under `--no-prior-refs`, which is precisely
     the run where the cover is 100% of the style signal. Inheriting that
-    suppression would leave the highest-stakes run the only unchecked one.
-    Pass `''` to skip the check deliberately.
+    suppression would leave the highest-stakes run the only unchecked one. A
+    caller that has already read the canon tree passes its own value so the tree
+    is not walked twice (and its unparseable-date WARNING not logged twice).
     """
     from storyforge import canon as canon_mod
     if canon_cutoff is None:
         canon_cutoff = canon_mod.newest_canon_updated(project_dir)
     declared = read_yaml_field(STYLE_REFERENCE_KEY, project_dir).strip()
     unresolved = ''
+    outside = False
     path = ''
+    source: StyleReferenceSource = 'none'
     if declared:
         full = (declared if os.path.isabs(declared)
                 else os.path.join(project_dir, declared))
         if os.path.isfile(full):
-            path = declared
+            # Relativized when it can be. `path` reaches git-tracked prompt files
+            # and the packet's `reference-images.md`, whose contract is
+            # project-relative paths — an absolute declaration naming a file
+            # inside the project would commit a machine-specific path to a shared
+            # artifact. Same dance as `symlink_target` below.
+            relative = os.path.relpath(full, project_dir)
+            outside = relative.startswith(os.pardir)
+            path = full if outside else relative
+            source = 'declared'
         else:
             unresolved = declared
 
@@ -2035,21 +2152,40 @@ def resolve_style_reference(project_dir: str, *,
             candidate = f'{_STYLE_REFERENCE_STEM}.{extension}'
             if os.path.isfile(os.path.join(project_dir, candidate)):
                 path = candidate
+                source = 'convention'
                 break
 
     reference: StyleReference = {
         'path': path,
-        'declared': bool(path) and path == declared,
+        'source': source,
         'unresolved_declaration': unresolved,
+        'outside_project': outside and bool(path),
+        'unusable_extension': '',
         'symlink_target': '',
+        'dangling_symlink': '',
         'modified': '',
-        'canon_cutoff': canon_cutoff,
+        'checked_against': canon_cutoff,
         'stale': False,
     }
     if not path:
+        # A dangling symlink at the convention path is not "no artwork": the file
+        # is right there in `ls`, and symlinking the convention filename at the
+        # selected art is the workaround this whole resolution order documents,
+        # so a stale target is its likeliest failure mode.
+        reference['dangling_symlink'] = _dangling_convention_link(project_dir)
         return reference
 
     full = path if os.path.isabs(path) else os.path.join(project_dir, path)
+
+    extension = ill.normalize_asset_extension(os.path.splitext(full)[1])
+    if extension not in _STYLE_REFERENCE_EXTENSIONS:
+        # The convention scan cannot produce this; a declaration can, and
+        # `production/cover.svg` is the case the key's own documentation raises.
+        # `assembly.cover_manifest_asset` refuses the same condition for the
+        # shipped cover; here it is a warning, because "warn, never exclude"
+        # holds for the one reference that is sometimes the only one.
+        reference['unusable_extension'] = extension
+
     if os.path.islink(full):
         target = os.path.realpath(full)
         relative = os.path.relpath(target, project_dir)
@@ -2061,8 +2197,22 @@ def resolve_style_reference(project_dir: str, *,
     except OSError:
         return reference
     reference['stale'] = canon_mod.predates_canon(
-        reference['modified'], canon_cutoff)
+        when=reference['modified'], cutoff=canon_cutoff)
     return reference
+
+
+def _dangling_convention_link(project_dir: str) -> str:
+    """The convention path's symlink target, when the link exists and the target does not.
+
+    Returns '' when there is no link at all, which is the ordinary "this book has
+    no cover artwork" case.
+    """
+    for extension in _STYLE_REFERENCE_EXTENSIONS:
+        candidate = os.path.join(project_dir,
+                                 f'{_STYLE_REFERENCE_STEM}.{extension}')
+        if os.path.islink(candidate) and not os.path.exists(candidate):
+            return f'{_STYLE_REFERENCE_STEM}.{extension} → {os.readlink(candidate)}'
+    return ''
 
 
 def describe_style_reference(reference: StyleReference) -> str:
@@ -2074,55 +2224,112 @@ def describe_style_reference(reference: StyleReference) -> str:
     target because the documented workaround for a book with several cover
     variations is to symlink the convention filename at the selected art, and
     the target is the name the author recognizes.
+
+    The freshness clause names what the mtime was compared against, so a bare
+    date is never left for the reader to complete into a verdict of their own —
+    and says so explicitly when there was nothing to compare against.
     """
     if not reference['path']:
         return ''
-    source = (f'declared in {STYLE_REFERENCE_KEY}' if reference['declared']
+    source = (f'declared in {STYLE_REFERENCE_KEY}'
+              if reference['source'] == 'declared'
               else 'the conventional filename')
+    if not reference['modified']:
+        freshness = ', modification time unreadable'
+    elif reference['checked_against']:
+        freshness = (f', modified {reference["modified"]} '
+                     f'(canon last updated {reference["checked_against"]})')
+    else:
+        freshness = (f', modified {reference["modified"]} — no canon date to '
+                     f'check it against')
     return (f'Style reference: {reference["path"]} ({source})'
             + (f' → {reference["symlink_target"]}'
                if reference['symlink_target'] else '')
-            + (f', modified {reference["modified"]}'
-               if reference['modified'] else ''))
+            + freshness)
 
 
 def style_reference_warnings(reference: StyleReference) -> list[str]:
-    """Everything wrong with the style reference, unprefixed.
+    """Everything wrong with the style reference, as sentences starting lowercase.
 
     Separate from `describe_style_reference` because the two go to different
-    places: the headline is a log line, while these are logged as WARNINGs
-    *and* written into the packet's "What is not in that list" section, which
-    must carry only problems — a positive resolution line there would read as
-    an exclusion.
+    places: the headline is a log line, while these are logged as WARNINGs *and*
+    written into the packet's "What is not in that list" section, which must
+    carry only problems — a positive resolution line there would read as an
+    exclusion.
+
+    **Every way this reference can be wrong or unverified produces a sentence
+    here**, including the two that produce no verdict at all: no canon date to
+    check against, and an unreadable mtime. #299 was a silent wrong reference, so
+    a silent *unchecked* one is the same bug with a smaller blast radius —
+    `--audit` renders "Not assessed" rather than "None found" for exactly this
+    reason.
     """
     warnings: list[str] = []
     if reference['unresolved_declaration']:
         warnings.append(
             f'{STYLE_REFERENCE_KEY} names '
             f'`{reference["unresolved_declaration"]}`, which does not exist'
-            + (f' — the conventional `{reference["path"]}` was used instead, '
-               f'which may not be the artwork you meant.'
+            + (f' — the conventional `{reference["path"]}` would be used '
+               f'instead, which may not be the artwork you meant.'
                if reference['path'] else
                ' — and no conventional style reference was found either.'))
     if not reference['path']:
-        warnings.append(
-            f'there is no cover artwork, so nothing sets the house style from '
-            f'outside this set and the first render establishes the look. Add '
-            f'{_STYLE_REFERENCE_STEM}.png, or set {STYLE_REFERENCE_KEY} in '
-            f'storyforge.yaml.')
+        if reference['dangling_symlink']:
+            warnings.append(
+                f'the style reference `{reference["dangling_symlink"]}` is a '
+                f'symlink whose target does not exist, so nothing sets the '
+                f'house style. The link is there in `ls` — repoint it at the '
+                f'artwork you selected, or set {STYLE_REFERENCE_KEY}.')
+        else:
+            warnings.append(
+                f'there is no cover artwork, so nothing sets the house style '
+                f'from outside this set and the first render establishes the '
+                f'look. Add {_STYLE_REFERENCE_STEM}.png, or set '
+                f'{STYLE_REFERENCE_KEY} in storyforge.yaml.')
         return warnings
-    if reference['stale']:
+
+    named = (f'`{reference["path"]}`'
+             + (f' (→ `{reference["symlink_target"]}`)'
+                if reference['symlink_target'] else ''))
+
+    if reference['outside_project']:
         warnings.append(
-            f'the style reference `{reference["path"]}`'
-            + (f' (→ `{reference["symlink_target"]}`)'
-               if reference['symlink_target'] else '')
-            + f' was last modified {reference["modified"]}, before the canon '
-              f'was last updated {reference["canon_cutoff"]}. It sets the '
-              f'house style for '
-              f'every prompt — under --no-prior-refs it is the only thing that '
-              f'does — so drift the new canon exists to remove is taught back. '
-              f'Re-render the cover artwork, or point {STYLE_REFERENCE_KEY} at '
-              f'art that postdates the canon.')
+            f'the style reference {named} is outside the project, so its path '
+            f'cannot be made project-relative — the prompt files and the '
+            f'packet will carry an absolute path that means nothing on another '
+            f'machine. Copy the artwork into the project and point '
+            f'{STYLE_REFERENCE_KEY} at it.')
+    if reference['unusable_extension']:
+        warnings.append(
+            f'the style reference {named} is a '
+            f'.{reference["unusable_extension"]} file, which no image model '
+            f'reads ({", ".join(_STYLE_REFERENCE_EXTENSIONS)} are usable). If '
+            f'that is a compositing source, point {STYLE_REFERENCE_KEY} at the '
+            f'rendered artwork beside it. It is still listed, because the one '
+            f'reference that is sometimes the only one is never dropped '
+            f'silently.')
+    if not reference['modified']:
+        warnings.append(
+            f'the style reference {named} exists but its modification time '
+            f'could not be read, so it could not be checked against the canon. '
+            f'Unknown freshness is not the same as fresh — the art may predate '
+            f'the direction now governing the book.')
+    elif not reference['checked_against']:
+        warnings.append(
+            f'nothing in reference/canon/ carries a parseable `canon_updated`, '
+            f'so the style reference {named} could not be checked for '
+            f'staleness at all. It may predate the direction now governing the '
+            f'book, and under --no-prior-refs it is the only thing setting the '
+            f'house style.')
+    elif reference['stale']:
+        warnings.append(
+            f'the style reference {named} was last modified '
+            f'{reference["modified"]}, before the canon was last updated '
+            f'{reference["checked_against"]}. It sets the house style for '
+            f'every prompt — under --no-prior-refs it is the only thing that '
+            f'does — so drift the new canon exists to remove is taught back. '
+            f'Re-render the cover artwork, or point {STYLE_REFERENCE_KEY} at '
+            f'art that postdates the canon.')
     return warnings
 
 
@@ -2192,7 +2399,12 @@ def _references_for(project_dir: str, illus_id: str, *,
     for warning in style_reference_warnings(style):
         # Noted, not logged: this function is called once per row, and
         # `run_prompts` logs the same warnings once for the whole run.
-        note(warning[0].upper() + warning[1:])
+        #
+        # Not sentence-cased. The first warning begins with the literal YAML key,
+        # and capitalising it printed `Production.cover_artwork` into the packet
+        # — a key nothing reads, told to an author who is reading the packet
+        # precisely to find out what to set.
+        note(warning)
 
     rows = plan if plan is not None else ill.read_plan(project_dir)
     skipped_stale = 0
@@ -2292,7 +2504,7 @@ def _stale_reference_reason(row: dict[str, str], canon_cutoff: str) -> str:
         return (f'its `ingested_at` ({raw!r}) is not an ISO date, so it '
                 f'cannot be shown to postdate the canon last updated '
                 f'{canon_cutoff}')
-    if canon_mod.predates_canon(ingested, canon_cutoff):
+    if canon_mod.predates_canon(when=ingested, cutoff=canon_cutoff):
         return (f'it was ingested {ingested}, before the canon was last '
                 f'updated {canon_cutoff}')
     return ''

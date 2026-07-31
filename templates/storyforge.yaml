@@ -174,13 +174,17 @@ phase: spine
 #   default_heading: numbered-titled  # numbered, titled, numbered-titled, none
 #   include_toc: true
 #   cover_image:               # path relative to project root, or empty for auto-generation
-#   cover_artwork:             # the cover ART, for interior illustrations to inherit as house style.
-#                              # Deliberately separate from cover_image: that names the file that
-#                              # SHIPS, which is usually the composite with the title typeset into
-#                              # the raster — feeding that to an image model teaches it baked-in
-#                              # lettering. Set this when the book holds several cover variations
-#                              # and only one is the selected art. Defaults to
-#                              # manuscript/assets/cover-illustration.{png,jpg,jpeg,webp}.
+#   # cover_artwork: the cover ART, which interior illustrations inherit as house
+#   # style. Deliberately separate from cover_image: that names the file that
+#   # SHIPS, usually the composite with the title typeset into the raster, and
+#   # feeding that to an image model teaches it baked-in lettering. Set this when
+#   # the book holds several cover variations and only one is the selected art.
+#   # Defaults to manuscript/assets/cover-illustration.{png,jpg,jpeg,webp}.
+#   #
+#   # The prose is on its own lines, not trailing this key: the YAML reader does
+#   # not strip trailing comments, so an uncommented key with a trailing comment
+#   # and no value reads the comment text as the value.
+#   cover_artwork:
 #   genre_preset:              # default, literary-fiction, thriller, romance, fantasy, science-fiction
 #   cover:
 #     subtitle:

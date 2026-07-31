@@ -1270,15 +1270,23 @@ def iso_date_or_empty(value: str) -> str:
     return head if _ISO_DATE_RE.match(head) else ''
 
 
-def predates_canon(when: str, cutoff: str) -> bool:
+def predates_canon(*, when: str, cutoff: str) -> bool:
     """True when *when* is strictly older than the canon cutoff.
 
-    The one comparison every illustration staleness check makes, in one place:
-    the ingested-render check in `cmd_illustrate._stale_reference_reason`, the
-    style-reference check in `cmd_illustrate.resolve_style_reference`, and
-    whatever #281 unifies them into later. ISO dates sort lexicographically, so
-    this is a string compare — no date arithmetic, nothing to get wrong across
-    timezones.
+    The one comparison every staleness check **against the canon cutoff** makes,
+    in one place: the ingested-render check in
+    `cmd_illustrate._stale_reference_reason` and the style-reference check in
+    `cmd_illustrate.resolve_style_reference`. `packet._staging_postdates_render`
+    is the same predicate against a *different* cutoff (`treatment_at` versus
+    `ingested_at`) and still rolls its own, restating the same-day rule below —
+    #281 will want both in its inventory.
+
+    Keyword-only: the two arguments are both ISO date strings, they carry
+    deliberately different unknown-value policies (see below), and swapping them
+    inverts the result with no crash and no test failure at the call site.
+
+    ISO dates sort lexicographically, so this is a string compare — no date
+    arithmetic, nothing to get wrong across timezones.
 
     **Strictly** older: an artifact dated the *same day* the canon was last
     touched is not stale, because same-day is the ordinary incremental loop
