@@ -29,7 +29,8 @@ from typing import Final
 
 from storyforge import prompts_illustrate as pi
 from storyforge.packet import (
-    BATCH_SLOTS, AnchorBatch, Entry, PacketContents, StateGrid, anchor_block,
+    BATCH_SLOTS, AnchorBatch, Entry, PacketContents, RenderNeeds, RenderState,
+    StateGrid, anchor_block, ids_in_state, render_state,
 )
 
 #: What a section says when the data behind it is absent. The packet's coverage
@@ -53,23 +54,60 @@ def _heading_for(canon_id: str) -> str:
 # README.md
 # ============================================================================
 
-def _render_batch(batch: AnchorBatch, unrendered: list[str]) -> str:
+def _render_batch(batch: AnchorBatch, needs_render: RenderNeeds) -> str:
     """The four slots, marked for whether they are rendered, guesses disclosed.
 
     The disclosure is the load-bearing half. When `register` is unpopulated the
     darkest and brightest slots are guesses, and a guess presented as a choice
     is how an author finds out at image twenty that nothing in the book is the
     darkest image in the book.
+
+    **`Rendered: yes` is a claim about the current canon, not about `status`.**
+    A book whose twenty ingested renders all predated the canon governing them
+    got a table of four `yes` rows, and a session working it top to bottom would
+    have skipped phase 1 entirely (#300). A canon-stale slot reads `re-render`,
+    and its reason is stated below the table because the row still says
+    `ingested` everywhere else and an unexplained `re-render` reads as a bug in
+    the packet.
     """
+    cells: Final[dict[RenderState, str]] = {
+        'done': 'yes', 'pending': 'not yet', 'stale': 're-render'}
     lines = ['| Slot | Illustration | Rendered |', '|---|---|---|']
+    filled: list[str] = []
     for slot, label in BATCH_SLOTS:
         illus_id = batch[slot]  # type: ignore[literal-required]
         if not illus_id:
             lines.append(f'| {label} | _unfilled — see below_ | — |')
             continue
-        state = 'not yet' if illus_id in unrendered else 'yes'
-        lines.append(f'| {label} | `{illus_id}` | {state} |')
+        filled.append(illus_id)
+        lines.append(f'| {label} | `{illus_id}` | '
+                     f'{cells[render_state(needs_render, illus_id)]} |')
     body = '\n'.join(lines)
+    # Deduplicated: darkest and brightest can resolve to one illustration, and
+    # one root cause stated twice is the noise #290 is about.
+    stale = ids_in_state(needs_render, 'stale', filled)
+    if stale:
+        reasons = '\n'.join(f'- `{illus_id}`: {needs_render[illus_id]}'
+                            for illus_id in stale)
+        # Written out per number rather than assembled from inline ternaries.
+        # This is the headline sentence of the phase-1 section, in the artifact
+        # whose only product is credibility — "4 of these already has art" reads
+        # as a defect in the packet, and the count is interpolated so the
+        # `row(s)` convention the rest of the pipeline uses cannot apply here.
+        if len(stale) == 1:
+            claim = ('**1 of these already has art, and it does not follow the '
+                     'canon in force now.** It is still `ingested`, so it still '
+                     'ships in the book — but it is not a usable reference for '
+                     'anything rendered from the current canon, so phase 1 is '
+                     'not done until it is re-rendered and re-ingested:')
+        else:
+            claim = (f'**{len(stale)} of these already have art, and it does not '
+                     f'follow the canon in force now.** They are still '
+                     f'`ingested`, so they still ship in the book — but they are '
+                     f'not usable references for anything rendered from the '
+                     f'current canon, so phase 1 is not done until they are '
+                     f're-rendered and re-ingested:')
+        body += f'\n\n{claim}\n\n{reasons}'
     if batch['fallback']:
         disclosure = '\n'.join(f'- {note}' for note in batch['fallback'])
         # Counted as notes, not as slots: `fallback` also carries the
@@ -83,7 +121,7 @@ def _render_batch(batch: AnchorBatch, unrendered: list[str]) -> str:
 
 def render_readme(*, title: str, contents: PacketContents,
                   entry_count: int, batch: AnchorBatch,
-                  unrendered: list[str]) -> str:
+                  needs_render: RenderNeeds) -> str:
     """The two phases, how to work the packet, and what it cannot tell you."""
     gaps = contents['gaps']
     if gaps:
@@ -125,7 +163,7 @@ lost on the next run and never reaches the plan. Change
 everything after, which is the difference between a set that agrees with itself
 and twenty images that each invented their own version of a character.
 
-{_render_batch(batch, unrendered)}
+{_render_batch(batch, needs_render)}
 
 **Phase 2 — the churn.** Work `illustrations.md` top to bottom. Read `canon.md`
 once at the start of the session and keep it in context; it is not repeated per
@@ -282,6 +320,11 @@ def render_visual_state(*, grid: StateGrid,
 #: an author told to work the file "top to bottom" would re-render finished art.
 DONE_MARK: Final[str] = ' — already rendered'
 
+#: Appended instead when art exists but predates the canon now governing it. The
+#: opposite instruction from `DONE_MARK`, on a row whose `status` is identical —
+#: which is exactly why `status` cannot be the signal (#300).
+STALE_MARK: Final[str] = ' — re-render: the art predates the current canon'
+
 #: Statuses that mean a file was made from this entry. Enumerated positively,
 #: rather than as everything-but-the-pending-ones, so an out-of-vocabulary value
 #: falls toward *pending*: reading an entry that did not need reading costs a
@@ -291,9 +334,24 @@ DONE_MARK: Final[str] = ' — already rendered'
 _RENDERED_STATUSES: Final[frozenset[str]] = frozenset({'rendered', 'ingested'})
 
 
-def _is_rendered(entry: Entry) -> bool:
-    """Whether this entry's art already exists."""
-    return entry['status'] in _RENDERED_STATUSES
+def _entry_state(entry: Entry) -> RenderState:
+    """Which instruction this entry carries, as one exhaustive answer.
+
+    Replaces a `_is_rendered` predicate whose composite meaning ("rendered *and*
+    current") its only caller had already discriminated — the `stale_reason`
+    conjunct was dead by the elif ordering, so no test could reach it and a
+    reader could take the predicate for the mechanism and reorder the caller.
+    Mutual exclusion of the three marks is now structural.
+
+    Canon-stale art is deliberately **not** `'done'`: it is the art that most
+    needs regenerating, and an entry saying `do not regenerate` over it is what
+    lets a session hand the set over unrendered. `--prompts` already excludes a
+    pre-canon render from the reference chain, so the cost is not inherited drift
+    — it is a churn with no likeness reference beyond the cover (#300).
+    """
+    if entry['stale_reason']:
+        return 'stale'
+    return ('done' if entry['status'] in _RENDERED_STATUSES else 'pending')
 
 
 def render_entry(entry: Entry) -> str:
@@ -317,19 +375,35 @@ def render_entry(entry: Entry) -> str:
     entities that must not appear, and violations of the stated colour logic
     (the latter lives in `acceptance.md`). Orientation and no-text are the
     other two exceptions.
+
+    `Re-render` is bookkeeping, not derived content, and it is the one thing that
+    pushes an entry past the budget — see
+    `test_the_re_render_note_costs_only_its_own_lines`, which bounds it the way
+    `DONE_MARK`'s test bounds the rendered marker. The entry is otherwise claiming
+    to be finished, and the reason is what stops an unexplained instruction
+    reading as a defect in the packet.
     """
+    state = _entry_state(entry)
+    mark, note = {
+        'stale': (STALE_MARK, f' · **{entry["status"]}, but the art predates '
+                              f'the current canon — re-render**'),
+        'done': (DONE_MARK, f' · **{entry["status"]} — do not regenerate**'),
+        'pending': ('', ''),
+    }[state]
     lines = [
-        f'### {entry["id"]}{DONE_MARK if _is_rendered(entry) else ""}',
+        f'### {entry["id"]}{mark}',
         '',
         f'- Scene: `{entry["scene_id"] or "—"}` · Layout: '
-        f'{entry["layout"]} · Aspect: {entry["aspect"]}'
-        + (f' · **{entry["status"]} — do not regenerate**'
-           if _is_rendered(entry) else ''),
+        f'{entry["layout"]} · Aspect: {entry["aspect"]}{note}',
+    ]
+    if state == 'stale':
+        lines.extend(['', f'**Re-render.** {entry["stale_reason"]}'])
+    lines.extend([
         '',
         f'**Beat.** {entry["beat"]}',
         '',
         f'**In frame.** {entry["in_frame"]}',
-    ]
+    ])
     for label, value in (('State', entry['state']),
                          ('Absent', entry['absent']),
                          ('Treatment', entry['treatment']),

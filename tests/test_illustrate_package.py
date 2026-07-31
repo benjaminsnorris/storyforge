@@ -240,6 +240,13 @@ def test_entries_stay_within_the_word_budget(in_project):
     assert words <= 120, f'{words} words:\n{maximal}'
 
     for entry in entries.values():
+        # A rendered or canon-stale entry carries a bounded marker exemption
+        # (`test_the_rendered_marker_costs_only_the_marker` and
+        # `test_the_re_render_note_costs_only_its_own_lines`), so the sweep is
+        # over what a session actually has to read and act on. Skipping them by
+        # *state* rather than raising the ceiling keeps the budget meaningful.
+        if pp._entry_state(entry) != 'pending':
+            continue
         body = pp.render_entry(entry)
         assert len(body.split()) <= 120, body
 
@@ -278,6 +285,45 @@ def test_the_rendered_marker_costs_only_the_marker(in_project):
     # The marker touches the heading and the metadata line and nothing else:
     # every content line below them is byte-identical.
     assert rendered.split('\n')[3:] == pending.split('\n')[3:]
+
+
+def test_the_re_render_note_costs_only_its_own_lines(in_project):
+    """The sibling of the rendered-marker bound, and the reason it is needed: a
+    stale spec-length entry renders 152 words against a 120-word sweep, so the
+    exemption has to be *measured* rather than asserted in a docstring. The
+    budget governs what a session reads and acts on; this entry is bookkeeping
+    saying do not act on it yet."""
+    rows = ill.read_plan(in_project)
+    rows[1].update(_SPEC_EXAMPLE)
+    ill.write_plan(in_project, rows)
+    pending = pp.render_entry(
+        {e['id']: e for e in packet.resolve(in_project)['entries']}
+        ['the-blank-page'])
+    _ingest(in_project, 1, ingested_at='')  # ingested, pre-canon
+    stale = pp.render_entry(
+        {e['id']: e for e in packet.resolve(in_project)['entries']}
+        ['the-blank-page'])
+
+    assert pp.STALE_MARK in stale
+    cost = len(stale.split()) - len(pending.split())
+    assert cost <= 40, f'the re-render note costs {cost} words'
+    # Heading, metadata line, and the two `**Re-render.**` lines — nothing else.
+    # Every line of derived content below them is byte-identical.
+    assert stale.split('\n')[5:] == pending.split('\n')[3:]
+
+
+def test_the_word_budget_sweep_covers_every_pending_entry(in_project):
+    """The sweep in `test_entries_stay_within_the_word_budget` is what a future
+    long field trips over, so it must be the *pending* shape that is swept — a
+    stale entry carries a bounded exemption instead (above), and folding the two
+    together would raise the ceiling for everyone."""
+    rows = ill.read_plan(in_project)
+    rows[1].update(_SPEC_EXAMPLE)
+    ill.write_plan(in_project, rows)
+    entries = packet.resolve(in_project)['entries']
+    assert all(e['stale_reason'] == '' for e in entries), 'all pending here'
+    for entry in entries:
+        assert len(pp.render_entry(entry).split()) <= 120
 
 
 def test_contrast_is_one_derived_sentence(in_project):
@@ -654,7 +700,9 @@ def test_diagnose_reports_a_drifted_anchor_copy(in_project, capsys):
 
 def test_diagnose_says_when_the_packet_is_ready_to_hand_over(in_project,
                                                             capsys):
-    """Every anchor-batch row ingested is the Churn rung."""
+    """Every anchor-batch row ingested *from the current canon* is the Churn
+    rung. `ingested_at` matches the seeded `canon_updated`, which is what makes
+    the art current — an empty one would report as needing a re-render (#300)."""
     from illustration_helpers import make_png
     rows = ill.read_plan(in_project)
     for row in rows:
@@ -662,6 +710,7 @@ def test_diagnose_says_when_the_packet_is_ready_to_hand_over(in_project,
         make_png(os.path.join(in_project, rel), 8, 12)
         row['status'] = 'ingested'
         row['asset_file'] = rel
+        row['ingested_at'] = '2026-07-28'
         row['treatment'] = f'staging for {row["id"].strip()}'
     ill.write_plan(in_project, rows)
     cmd_illustrate.main(['--package'])
@@ -673,18 +722,308 @@ def test_diagnose_says_when_the_packet_is_ready_to_hand_over(in_project,
 
 
 def test_an_ingested_batch_row_is_marked_as_such(in_project):
-    from illustration_helpers import make_png
-    rows = ill.read_plan(in_project)
-    rel = ill.default_asset_rel('the-finest-cartographer')
-    make_png(os.path.join(in_project, rel), 8, 12)
-    rows[0]['status'] = 'ingested'
-    rows[0]['asset_file'] = rel
-    ill.write_plan(in_project, rows)
+    _ingest(in_project, 0)  # ingested_at == the seeded canon_updated
     cmd_illustrate.main(['--package'])
     body = _read(in_project, 'README.md')
     line = next(l for l in body.splitlines()
                 if '`the-finest-cartographer`' in l and '|' in l)
     assert line.strip().endswith('| yes |')
+
+
+# ============================================================================
+# Canon-stale ingested art is not a finished handoff (#300)
+# ============================================================================
+
+def _four_stale_slots(project_dir):
+    """A plan filling all four batch slots with four distinct rows, every one
+    `ingested` with an empty `ingested_at` — *The Lantern Folk*'s shape.
+
+    The seeded canon is `canon_updated: 2026-07-28`, so every row's art predates
+    the canon governing it while `status` says the set is finished.
+    """
+    from illustration_helpers import make_png
+    from storyforge import visual_state as vs
+
+    # `maps` first transitions at act1-sc02 (seeded); a second, later one is
+    # what lets an illustration show it in a state later than its first.
+    transitions = vs.read_transitions(project_dir)
+    transitions.append({'entity': 'maps', 'from_scene': 'act2-sc01',
+                        'state': 'rolled and shelved', 'evidence': ''})
+    vs.write_transitions(project_dir, transitions)
+
+    spec = (
+        # id, scene, canon_refs, register — two anchors puts the establisher in
+        # the horizon; the registers are declared so neither slot is a guess.
+        ('a-establisher', 'act1-sc01', 'dorren-hayle;cartography-office', ''),
+        ('b-darkest', 'act1-sc01', '', 'darkest'),
+        ('c-brightest', 'act1-sc02', '', 'brightest'),
+        ('d-later-state', 'act2-sc01', 'maps', ''),
+    )
+    ids = _write_slot_rows(project_dir, spec, ingested_at='')
+    # The guard lives in the helper, not in one caller: removing the `maps`
+    # transition above silently emptied the later-state slot and five of this
+    # helper's six tests went on passing while testing three slots.
+    batch = packet.anchor_batch(project_dir)
+    assert [batch[slot] for slot, _ in packet.BATCH_SLOTS] == ids, \
+        'the fixture must fill all four slots with four distinct rows'
+    return ids
+
+
+def _write_slot_rows(project_dir, spec, *, ingested_at):
+    """Write one ingested row per spec tuple, and return the ids in order."""
+    from illustration_helpers import make_png
+    rows = []
+    for illus_id, scene_id, refs, register in spec:
+        rel = ill.default_asset_rel(illus_id)
+        full = os.path.join(project_dir, rel)
+        make_png(full, 8, 12)
+        row = ill.blank_row(illus_id)
+        row.update({'scene_id': scene_id, 'placement': 'scene_open',
+                    'beat': 'b', 'subject': 's', 'canon_refs': refs,
+                    'register': register, 'status': 'ingested',
+                    'asset_file': rel, 'ingested_at': ingested_at,
+                    # A real digest, so the row is genuinely publishable and the
+                    # no-demotion assertion is about status rather than about a
+                    # row `manifest_assets` would have skipped anyway.
+                    'sha256': ill.sha256_of(full), 'width': '8', 'height': '12'})
+        rows.append(row)
+    ill.write_plan(project_dir, rows)
+    return [illus_id for illus_id, *_ in spec]
+
+
+def test_four_canon_stale_batch_rows_all_report_as_needing_a_render(in_project):
+    """The regression #300 names. Every slot filled, every row `ingested`, every
+    render pre-canon: the table said `yes` four times and a session working the
+    packet top to bottom skipped phase 1 entirely."""
+    ids = _four_stale_slots(in_project)  # asserts all four slots are distinct
+    assert cmd_illustrate.main(['--package']) == 0
+    body = _read(in_project, 'README.md')
+    for illus_id in ids:
+        line = next(l for l in body.splitlines()
+                    if f'`{illus_id}`' in l and l.startswith('|'))
+        assert line.strip().endswith('| re-render |'), line
+    assert '| yes |' not in body
+    # And the reason, per row, because `status` still says ingested everywhere
+    # else and an unexplained instruction reads as a packet defect.
+    assert 'does not follow the canon in force now' in body
+    assert body.count('`ingested_at` is empty') >= len(ids)
+
+
+def test_a_canon_stale_batch_is_never_ready_to_hand_over(in_project, capsys):
+    ids = _four_stale_slots(in_project)
+    cmd_illustrate.main(['--package'])
+    capsys.readouterr()
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'ready to hand over' not in out
+    assert 'predate the current canon' in out
+    # The slot mark itself, which nothing asserted: deleting the whole stale
+    # branch of `_report_anchor_batch` passed the entire suite, restoring
+    # `[ingested]` on art the canon had outgrown — #300 on the stdout channel
+    # the issue quotes.
+    for illus_id in ids:
+        assert f'{illus_id}  [ingested, but needs a re-render]' in out
+    assert '  [ingested]\n' not in out
+    # And the advice that keeps the author off the demotion workaround.
+    assert 'Leave `status` alone' in out
+
+
+def test_diagnose_names_every_canon_stale_render_with_its_reason(in_project,
+                                                                capsys):
+    """A book can have twenty stale renders and none of them in the batch, so
+    the whole-plan line is what says how much of the set needs redoing."""
+    ids = _four_stale_slots(in_project)
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert (f'{len(ids)} of {len(ids)} illustration(s) predate the current '
+            f'canon') in out
+    # One reason per row, in the findings list — and *only* there. Stating each
+    # reason in the rung summary too said the same sentence five times.
+    for illus_id in ids:
+        assert f'[canon_stale_render] {illus_id}:' in out
+    assert out.count('`ingested_at` is empty, so it predates') == len(ids)
+    # And the render order marks them apart from art that is actually done.
+    assert '~  1. a-establisher' in out
+    # The batch's own warning names them once, aggregated, and says what the
+    # real consequence is — not the drift the reference gate already prevents.
+    assert 'no likeness reference beyond the cover' in out
+
+
+def test_a_canon_stale_entry_does_not_say_do_not_regenerate(in_project):
+    _four_stale_slots(in_project)
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'illustrations.md')
+    assert 'do not regenerate' not in body
+    assert pp.DONE_MARK not in body
+    assert f'### a-establisher{pp.STALE_MARK}' in body
+    assert '**Re-render.** its `ingested_at` is empty' in body
+
+
+def test_the_batch_and_the_reference_list_cannot_disagree_in_one_run(in_project):
+    """The sharp part of #300: one `--package` run held both that these images
+    were too stale to reference and that they were done."""
+    _four_stale_slots(in_project)
+    cmd_illustrate.main(['--package'])
+    excluded = _read(in_project, 'reference-images.md')
+    assert 'a-establisher' in excluded
+    assert 'is **not** listed' in excluded
+    assert '| yes |' not in _read(in_project, 'README.md')
+
+
+def test_reporting_a_stale_render_does_not_demote_its_status(in_project):
+    """The workaround this replaces: demoting to `prompted` dropped the row from
+    the Bookshelf publish manifest while the epub, the PDF, and the web book kept
+    shipping it, so the editions disagreed about art the author had retired."""
+    ids = _four_stale_slots(in_project)
+    cmd_illustrate.main(['--package'])
+    cmd_illustrate.main(['--diagnose'])
+    plan = ill.read_plan_as_map(in_project)
+    assert all(plan[i]['status'] == 'ingested' for i in ids)
+    assert {a['key'] for a in ill.manifest_assets(in_project)} == set(ids)
+
+
+def test_the_demotion_penalty_is_the_one_the_warning_names(in_project):
+    """The claim that motivates the whole design, pinned. It was stated as all
+    four targets across five places including an author-facing WARNING; only
+    Bookshelf actually gates on `ingested`, because `resolve_for_local` excludes
+    only `superseded`. A design argument sized by a false penalty is one a
+    maintainer discounts along with the text around it."""
+    ids = _four_stale_slots(in_project)
+    scene_text = '![[illus:a-establisher]]\n'
+    assert {a['key'] for a in ill.manifest_assets(in_project)} == set(ids)
+    assert 'a-establisher.png' in ill.resolve_for_local(in_project, scene_text)
+
+    rows = ill.read_plan(in_project)
+    rows[0]['status'] = 'prompted'
+    ill.write_plan(in_project, rows)
+    # Bookshelf drops it...
+    assert 'a-establisher' not in {a['key'] for a in
+                                   ill.manifest_assets(in_project)}
+    # ...and the epub, the PDF, and the web book do not.
+    assert 'a-establisher.png' in ill.resolve_for_local(in_project, scene_text)
+
+
+def test_a_mixed_batch_reports_both_pending_and_stale(in_project, capsys):
+    """Render the batch, ingest some, then edit canon — the *normal* mid-flight
+    state, and the one where either message alone is a lie. Neither branch may
+    suppress the other, and "ready to hand over" must stay away from both."""
+    spec = (
+        ('a-establisher', 'act1-sc01', 'dorren-hayle;cartography-office', ''),
+        ('b-darkest', 'act1-sc01', '', 'darkest'),
+        ('c-brightest', 'act1-sc02', '', 'brightest'),
+        ('d-later-state', 'act2-sc01', 'maps', ''),
+    )
+    _write_slot_rows(in_project, spec, ingested_at='2026-07-28')  # all current
+    rows = ill.read_plan(in_project)
+    rows[0]['ingested_at'] = ''          # canon-stale
+    rows[1]['status'] = 'planned'        # never rendered
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+    capsys.readouterr()
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'not yet ingested (b-darkest)' in out
+    assert 'ingested but predate the current canon (a-establisher)' in out
+    assert 'ready to hand over' not in out
+
+    body = _read(in_project, 'README.md')
+    assert '| re-render |' in body and '| not yet |' in body and '| yes |' in body
+    # Singular, because exactly one slot is stale — the count and the verb agree.
+    assert '**1 of these already has art' in body
+
+
+def test_the_canon_tree_is_walked_once_per_run(in_project, capsys, monkeypatch):
+    """An unparseable `canon_updated` logs a WARNING per *walk*, so five walks
+    read as five broken files. `--package` did five and `--diagnose` two; the
+    cutoff is now read once and threaded into every consumer."""
+    from storyforge import canon as canon_mod
+    path = os.path.join(in_project, 'reference', 'canon',
+                        'visual-foundation.md')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text.replace('canon_updated: 2026-07-28',
+                             'canon_updated: TBD'))
+    # A second file still dates the canon, so this is about the WARNING only.
+    assert canon_mod.newest_canon_updated(in_project) == '2026-07-28'
+
+    walks = []
+    real = canon_mod.newest_canon_updated
+    monkeypatch.setattr(canon_mod, 'newest_canon_updated',
+                        lambda pd: (walks.append(pd), real(pd))[1])
+    for argv in (['--package'], ['--diagnose']):
+        walks.clear()
+        capsys.readouterr()
+        cmd_illustrate.main(argv)
+        out = capsys.readouterr().out
+        assert len(walks) == 1, f'{argv}: {len(walks)} canon-tree walks'
+        assert out.count('is not an ISO date') == 1, argv
+
+
+def test_a_stale_packet_regenerates_byte_identically(in_project):
+    """`--package` now appends variable-length derived prose (the reason lines)
+    to a file whose byte-identity on re-run is a documented contract."""
+    _four_stale_slots(in_project)
+    cmd_illustrate.main(['--package'])
+    first = _read_all(in_project)
+    cmd_illustrate.main(['--package'])
+    assert _read_all(in_project) == first
+
+
+def test_the_render_order_distinguishes_current_art_from_stale(in_project,
+                                                              capsys):
+    """Three marks, three meanings: `*` ingested and current, `~` ingested and
+    canon-stale, blank for no art. Only `~` was asserted, so collapsing the
+    other two would have gone unnoticed."""
+    spec = (
+        ('a-establisher', 'act1-sc01', 'dorren-hayle;cartography-office', ''),
+        ('b-darkest', 'act1-sc01', '', 'darkest'),
+        ('c-brightest', 'act1-sc02', '', 'brightest'),
+        ('d-later-state', 'act2-sc01', 'maps', ''),
+    )
+    _write_slot_rows(in_project, spec, ingested_at='2026-07-28')
+    rows = ill.read_plan(in_project)
+    rows[0]['ingested_at'] = ''      # stale
+    rows[1]['status'] = 'planned'    # no art
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--diagnose'])
+    order = [l.split(']')[-1] for l in capsys.readouterr().out.splitlines()
+             if '. a-establisher' in l or '. b-darkest' in l
+             or '. c-brightest' in l]
+    assert len(order) == 3, order
+    assert any('~' in l and 'a-establisher' in l for l in order), order
+    assert any('*' in l and 'c-brightest' in l for l in order), order
+    assert any('b-darkest' in l and '*' not in l and '~' not in l
+               for l in order), order
+
+
+def test_the_stale_batch_note_agrees_with_its_own_count(in_project):
+    """`4 of these already has art` — the headline sentence of the phase-1
+    section, in the artifact whose only product is credibility."""
+    _four_stale_slots(in_project)
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'README.md')
+    assert '**4 of these already have art' in body
+    assert 'They are still `ingested`, so they still ship' in body
+    assert 'already has art' not in body
+
+
+def test_the_anchor_batch_is_reported_once_when_package_yields_to_diagnose(
+        in_project, capsys):
+    """#290 item 2. `main` early-returns on `--diagnose`, so the collapse is
+    exercised here rather than through the CLI — the point is that removing that
+    early return cannot silently start printing the batch twice."""
+    cmd_illustrate.run_package(in_project, False, report_batch=False)
+    out = capsys.readouterr().out
+    assert 'Anchor batch' not in out
+    # Reporting it is the other half, so nothing was lost.
+    cmd_illustrate.run_package(in_project, False, report_batch=True)
+    assert 'Anchor batch' in capsys.readouterr().out
+    # No default: a second caller must decide rather than inherit True silently.
+    with pytest.raises(TypeError):
+        cmd_illustrate.run_package(in_project, False)
 
 
 # ============================================================================
@@ -697,7 +1036,7 @@ def test_a_clean_readme_claims_only_what_it_can(in_project):
     contents['gaps'] = []
     body = pp.render_readme(title='T', contents=contents, entry_count=2,
                             batch=packet.anchor_batch(in_project),
-                            unrendered=[])
+                            needs_render={})
     assert 'Nothing was missing' in body
     assert 'not a promise that' in body
 

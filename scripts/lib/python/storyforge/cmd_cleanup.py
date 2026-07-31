@@ -1278,6 +1278,18 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
         'likeness continuity across separately generated images is the string. '
         'If the packet text is the one you want, put it in the canon file '
         'first (and do not revise an anchor a rendered illustration used)',
+    'canon_stale_render':
+        'Re-render it from the current canon and run storyforge illustrate '
+        '--ingest, which stamps a fresh ingested_at. Do NOT demote status to '
+        'get the warning to stop — the row would drop out of the Bookshelf '
+        'publish manifest while the epub, the PDF, and the web book kept '
+        'shipping it, so the editions would disagree about a book you had '
+        'not re-rendered yet',
+    'canon_staleness_unchecked':
+        'Set canon_updated: YYYY-MM-DD in the canon files you have edited — '
+        'until one carries a parseable date, no ingested illustration can be '
+        'shown to predate the canon that governs it, so every render reads as '
+        'current whether or not it is',
 }
 
 

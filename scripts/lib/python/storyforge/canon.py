@@ -838,6 +838,18 @@ def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
     return findings
 
 
+def has_canon_files(project_dir: str) -> bool:
+    """Whether any author-managed canon file exists.
+
+    Lets a caller separate "canon governs this book and cannot be dated" from
+    "this book has no canon yet" — the second is in-flight state for a project
+    that has not run `--direction`, and warning about it would fire on every new
+    project (the same guard `cmd_cleanup.report_canon_files` applies).
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    return os.path.isdir(canon_dir) and bool(_walk_canon_files(canon_dir))
+
+
 def _walk_canon_files(canon_dir: str) -> list[str]:
     """Return all author-managed canon .md files under canon_dir.
 
@@ -1275,7 +1287,7 @@ def predates_canon(*, when: str, cutoff: str) -> bool:
 
     The one comparison every staleness check **against the canon cutoff** makes,
     in one place: the ingested-render check in
-    `cmd_illustrate._stale_reference_reason` and the style-reference check in
+    `illustrations.stale_render_reason` and the style-reference check in
     `cmd_illustrate.resolve_style_reference`. `packet._staging_postdates_render`
     is the same predicate against a *different* cutoff (`treatment_at` versus
     `ingested_at`) and still rolls its own, restating the same-day rule below —
