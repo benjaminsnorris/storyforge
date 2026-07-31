@@ -1015,6 +1015,31 @@ def captured(monkeypatch):
     return _run
 
 
+def _set_production(project_dir, key, value):
+    """Append a key under the `production:` section of storyforge.yaml."""
+    path = os.path.join(project_dir, 'storyforge.yaml')
+    with open(path, encoding='utf-8') as f:
+        lines = f.readlines()
+    out = []
+    inserted = False
+    for line in lines:
+        out.append(line)
+        if not inserted and line.startswith('production:'):
+            out.append(f'  {key}: {value}\n')
+            inserted = True
+    if not inserted:
+        out.append(f'production:\n  {key}: {value}\n')
+    with open(path, 'w', encoding='utf-8') as f:
+        f.writelines(out)
+
+
+def _backdate(path, iso_date):
+    """Set a file's mtime to local midnight on an ISO date."""
+    from datetime import datetime
+    stamp = datetime.fromisoformat(f'{iso_date}T00:00:00').timestamp()
+    os.utime(path, (stamp, stamp))
+
+
 def _add_transition(project_dir, **cells):
     from storyforge import visual_state as vs
     rows = list(vs.read_transitions(project_dir))
@@ -1038,6 +1063,19 @@ def _later_state_anchor(project_dir):
              'she carries, and it is how the reader finds her in a dark image.')
 
 
+def _state_section(request):
+    """Just the `## The visual state in THIS image` block of a request.
+
+    Asserted against rather than the whole request, because an anchor
+    necessarily describes the whole book — Dorren's fixture anchor contains the
+    words "black wool waistcoat" — so a negative assertion over the full text
+    cannot tell "the walk resolved wrongly" from "the anchor mentions it", which
+    is the exact confusion #297 is about.
+    """
+    _, _, tail = request.partition('## The visual state in THIS image')
+    return tail.partition('\n##')[0]
+
+
 def test_the_resolved_state_reaches_the_art_direction_request(in_project,
                                                               captured):
     """The core regression: the row's scene resolves to the *early* state while
@@ -1053,13 +1091,49 @@ def test_the_resolved_state_reaches_the_art_direction_request(in_project,
                     evidence='held her breath')
 
     request = captured()['the-finest-cartographer']
-    assert 'black wool waistcoat, sleeves buttoned to the wrist' in request
-    assert 'rust-red travelling coat, hood back' not in request
+    state = _state_section(request)
+    assert 'black wool waistcoat, sleeves buttoned to the wrist' in state
+    assert 'rust-red travelling coat, hood back' not in state
     # Stated as a requirement that outranks the anchor, not as context — the
     # anchor is a paragraph of vivid prose and this is one line.
     assert 'The visual state in THIS image' in request
     assert 'requirement' in request
     assert 'outranks the character anchors' in request
+
+
+def test_a_later_scene_row_gets_the_later_state_not_the_earlier(in_project,
+                                                               captured):
+    """The *other* half of the reported failure: LF-05 came back in pajamas.
+
+    The sibling test above covers the first direction, but its row sits at the
+    book's first scene, so the entity's earliest transition happens to be the
+    right answer — the whole section passed with the forward walk stuck on the
+    earliest transition per entity. This is the one that fails when it is.
+    """
+    _add_transition(in_project, entity='dorren-hayle-clothing',
+                    from_scene='act1-sc01',
+                    state='black wool waistcoat, sleeves buttoned',
+                    evidence='held her breath')
+    _add_transition(in_project, entity='dorren-hayle-clothing',
+                    from_scene='act1-sc02',
+                    state='rust-red travelling coat, hood back',
+                    evidence='Blank parchment')
+    rows = ill.read_plan(in_project)
+    # the-blank-page is at act1-sc02; name Dorren so she resolves there too.
+    rows[1].update({'canon_refs': 'maps;dorren-hayle', 'state_override': ''})
+    ill.write_plan(in_project, rows)
+
+    requests = captured()
+    early = _state_section(requests['the-finest-cartographer'])
+    late = _state_section(requests['the-blank-page'])
+    # Qualified by track. The fixture also seeds a *bare* `dorren-hayle`
+    # transition, which `canon_refs: dorren-hayle` matches too and which
+    # correctly still reads its act1-sc01 value at the later scene — so an
+    # unqualified assertion would fail on a working forward walk.
+    assert 'Dorren Hayle (clothing): black wool waistcoat' in early
+    assert 'Dorren Hayle (clothing): rust-red travelling coat' not in early
+    assert 'Dorren Hayle (clothing): rust-red travelling coat, hood back' in late
+    assert 'Dorren Hayle (clothing): black wool waistcoat' not in late
 
 
 def test_state_override_beats_the_forward_walk_in_the_request(in_project,
@@ -1122,9 +1196,14 @@ def test_contrast_reaches_the_request_without_naming_other_illustrations(
     assert 'Do not name another illustration in the prompt body' in request
 
 
-def test_no_state_blocks_when_the_row_resolves_to_nothing(in_project, captured):
+def test_no_state_block_when_the_row_resolves_to_nothing(in_project, captured):
     """A row with no canon_refs has no state, and the request must not carry an
-    empty section header claiming otherwise."""
+    empty section header claiming otherwise.
+
+    Asserts only about the state block. It also used to assert the *absent* block
+    was missing, which would have passed on a build where that block was
+    unconditional — `absent` was never populated on the row.
+    """
     rows = ill.read_plan(in_project)
     rows[0].update({'canon_refs': '', 'state_override': '', 'register': ''})
     ill.write_plan(in_project, rows)
@@ -1132,7 +1211,17 @@ def test_no_state_blocks_when_the_row_resolves_to_nothing(in_project, captured):
     request = captured('--ids', 'the-finest-cartographer'
                        )['the-finest-cartographer']
     assert 'The visual state in THIS image' not in request
-    assert 'Must not appear in this image' not in request
+
+
+def test_the_absent_block_disappears_when_the_cell_is_cleared(in_project,
+                                                             captured):
+    """The negative half of the `absent` test, on a row that *could* have had
+    one — the sibling above cannot show this, because it never set `absent`."""
+    rows = ill.read_plan(in_project)
+    rows[0]['absent'] = ''
+    ill.write_plan(in_project, rows)
+    assert 'Must not appear in this image' not in \
+        captured('--ids', 'the-finest-cartographer')['the-finest-cartographer']
 
 
 def test_prompts_reports_an_entity_with_no_stated_visual_state(in_project,
@@ -1162,6 +1251,78 @@ def test_prompts_does_not_double_report_an_unanchored_canon_ref(in_project,
     assert 'nobody-at-all' in out
     # But not a second time, in the packet's wording.
     assert 'resolves to no populated canon file' not in out
+
+
+def test_a_declared_style_reference_reaches_the_packet(in_project):
+    """The packet is what the author uploads from, so the declaration has to win
+    here too — not only in --prompts."""
+    from illustration_helpers import make_png
+    assets = os.path.join(in_project, 'manuscript', 'assets')
+    make_png(os.path.join(assets, 'cover-illustration.png'), 8, 8)  # superseded
+    make_png(os.path.join(assets, 'selected-art.png'), 8, 8)
+    _set_production(in_project, 'cover_artwork',
+                    'manuscript/assets/selected-art.png')
+
+    assert cmd_illustrate.main(['--package']) == 0
+    body = _read(in_project, 'reference-images.md')
+    assert 'selected-art.png' in body
+    assert 'cover-illustration.png' not in body
+
+
+def test_a_stale_style_reference_is_disclosed_in_the_packet(in_project, capsys):
+    """It is never excluded, so the packet must say it is old — in README's gaps
+    as well as reference-images.md, because run_package logs only `gaps`."""
+    from illustration_helpers import make_png
+    cover = make_png(os.path.join(in_project, 'manuscript', 'assets',
+                                  'cover-illustration.png'), 8, 8)
+    _backdate(cover, '2026-01-01')          # canon fixture is 2026-07-28
+
+    assert cmd_illustrate.main(['--package']) == 0
+    out = capsys.readouterr().out
+    assert 'before the canon was last updated' in out
+    assert 'before the canon was last updated' in _read(in_project, 'README.md')
+    assert 'before the canon was last updated' in \
+        _read(in_project, 'reference-images.md')
+
+
+def test_the_positive_headline_never_reaches_the_packet(in_project):
+    """The `describe_style_reference` / `style_reference_warnings` split exists
+    for this: a resolution line under "What is not in that list" reads as an
+    exclusion."""
+    from illustration_helpers import make_png
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 8)
+    cmd_illustrate.main(['--package'])
+    assert 'Style reference:' not in _read(in_project, 'reference-images.md')
+
+
+def test_a_missing_declaration_is_a_packet_gap_not_a_refusal(in_project):
+    """--package is assembly and reports what it cannot tell you; only
+    --prompts refuses, because only --prompts spends money on the wrong art."""
+    from illustration_helpers import make_png
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 8)
+    _set_production(in_project, 'cover_artwork', 'manuscript/assets/gone.png')
+
+    assert cmd_illustrate.main(['--package']) == 0
+    assert 'which does not exist' in _read(in_project, 'README.md')
+
+
+def test_a_revived_superseded_row_is_not_treated_as_the_books_first(in_project,
+                                                                   capsys):
+    """`rows_in_reading_order` excludes `superseded` while `--prompts --ids`
+    revives one, so a `.get(id, '')` default merged "not in the order I indexed"
+    into "starts the book" — the prompt lost its contrast clause while the packet
+    built after ingest had one."""
+    rows = ill.read_plan(in_project)
+    rows[1]['status'] = 'superseded'
+    ill.write_plan(in_project, rows)
+
+    context = packet.state_context(in_project, plan=ill.read_plan(in_project))
+    assert rows[1]['id'] not in context['predecessors']
+    contrast = packet.contrast_for_row(rows[1], context=context)
+    assert 'follows' not in contrast
+    assert 'not in the book' in capsys.readouterr().out
 
 
 def test_state_context_and_the_packet_share_one_resolution(in_project):

@@ -663,6 +663,49 @@ def test_render_prompt_file_states_orientation_twice():
     assert '| Attempt | Model |' in content
 
 
+@pytest.mark.parametrize('kwargs,present,missing', [
+    ({'state': 'Leo: rust-red jacket'},
+     ['overrides any anchor detail that disagrees',
+      'The visual state matches: Leo: rust-red jacket'],
+     ['Not in this image', 'must not be', 'No visual state resolved']),
+    ({'absent': 'the apprentice'},
+     ['Not in this image: the apprentice',
+      'Nothing in frame that must not be',
+      'No visual state resolved'],
+     ['The visual state matches']),
+    ({'contrast': 'The darkest image in the book'},
+     ['set apart from its neighbours', 'No visual state resolved'],
+     ['The visual state matches: ', 'Not in this image']),
+    ({}, ['No visual state resolved'],
+     ['The visual state matches: ', 'Not in this image',
+      'set apart from its neighbours']),
+])
+def test_the_prompt_file_emits_only_the_blocks_it_has(kwargs, present, missing):
+    """Each of the three is independently optional. `## Accept only if` is always
+    rendered, because a state that did not resolve is stated rather than
+    omitted — an omitted line left the block claiming a completeness it did not
+    have."""
+    content = pi.render_prompt_file(row=plan_row(), body='### Scene\n\nX.\n',
+                                    references=[], **kwargs)
+    assert '## Accept only if' in content
+    for text in present:
+        assert text in content
+    for text in missing:
+        assert text not in content
+
+
+def test_the_acceptance_block_is_marked_do_not_paste():
+    """It follows "paste everything below", its prose reads like prompt text, and
+    via `contrast` it can name another illustration by id — which the request
+    explicitly forbids reaching the model."""
+    content = pi.render_prompt_file(
+        row=plan_row(), body='### Scene\n\nX.\n', references=[],
+        contrast='Follows `lantern-vigil` and must not repeat its staging')
+    assert '## Accept only if (not part of the prompt — do NOT paste)' in content
+    paste_marker = 'Paste everything below into the image model.'
+    assert content.index(paste_marker) < content.index('## Accept only if')
+
+
 def test_render_references_block_labels_each_reference():
     block = pi.render_references_block(['a.png  — cover art', 'b.png  — prior'])
     assert '1. `a.png  — cover art`' in block
@@ -2543,8 +2586,12 @@ def test_a_style_reference_is_never_excluded_for_being_stale(in_project, capsys)
     ill.write_plan(in_project, [plan_row()])
 
     notes = []
+    # The conjunction the docstring names: stale AND --no-prior-refs AND still
+    # in the list. Passing the flag's own suppressed cutoff is what `run_prompts`
+    # actually does on that path.
     refs = cmd_illustrate._references_for(in_project, 'lantern-vigil',
-                                         notes=notes)
+                                          canon_cutoff='', no_prior_refs=True,
+                                          notes=notes)
     assert [p for p, _ in refs] == [os.path.join('manuscript', 'assets',
                                                  'cover-illustration.png')]
     assert any('before the canon was last updated' in n for n in notes)
@@ -2605,14 +2652,22 @@ def test_prompts_logs_the_style_reference_before_any_call(in_project, monkeypatc
     ill.write_plan(in_project, [plan_row()])
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
 
+    before_first_call = []
+
     def _record(*a, **k):
-        # Anything logged after this point is too late to be useful.
-        assert 'Style reference: manuscript/assets/' \
-            'cover-illustration-discovery.png' in capsys.readouterr().out
+        # Snapshot, not assert. `capsys.readouterr()` drains the buffer and this
+        # runs on a `run_parallel` worker, so a second row's worker would see an
+        # empty buffer and fail for a reason unrelated to ordering.
+        if not before_first_call:
+            before_first_call.append(capsys.readouterr().out)
         return '### Scene\n\nX.\n'
     monkeypatch.setattr(cmd_illustrate, '_invoke', _record)
 
     assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+    assert before_first_call, '_invoke was never called — nothing was proved'
+    # Anything logged after this point is too late to be useful.
+    assert ('Style reference: manuscript/assets/cover-illustration-'
+            'discovery.png') in before_first_call[0]
 
 
 def test_a_declared_absolute_path_inside_the_project_is_relativized(in_project):
