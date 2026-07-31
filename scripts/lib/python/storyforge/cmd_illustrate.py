@@ -1281,6 +1281,10 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         log(headline)
     for warning in style_reference_warnings(style):
         log(f'WARNING: {warning}')
+    # The visual-state matrix, read once and resolved per row through the same
+    # function `--package` uses, so a prompt file and the packet entry built from
+    # one row cannot describe different costumes (#297).
+    state_ctx = packet.state_context(project_dir)
     written = 0
     failed: list[str] = []
 
@@ -1289,9 +1293,20 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     jobs: list[_PromptJob] = []
     for row in rows:
         illus_id = row['id'].strip()
+        # `include_anchor_gaps=False`: _warn_unanchored_rows already named every
+        # canon_refs entry with no anchor, above.
+        state, state_gaps = packet.state_for_row(row, context=state_ctx,
+                                                 include_anchor_gaps=False)
+        for gap in state_gaps:
+            log(f'WARNING: {gap}')
+        absent_cell = (row.get('absent') or '').strip()
+        contrast = packet.contrast_for_row(row, context=state_ctx)
         jobs.append({
             'id': illus_id,
             'row': row,
+            'state': state,
+            'absent': absent_cell,
+            'contrast': contrast,
             'references': _references_for(
                 project_dir, illus_id, plan=plan, canon_cutoff=cutoff,
                 no_prior_refs=no_prior_refs, style=style),
@@ -1302,6 +1317,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
                 character_anchors=_relevant_anchors(anchors, row),
                 canon_context=canon_ctx, direction=direction,
                 style_note=style_note, anchor_labels=labels,
+                state=state, absent=absent_cell, contrast=contrast,
             ) if needs_api else '',
         })
 
@@ -1357,7 +1373,8 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
 
         content = pi.render_prompt_file(
             row=row, body=body, references=job['references'],
-            aspect=job['aspect'],
+            aspect=job['aspect'], state=job['state'],
+            absent=job['absent'], contrast=job['contrast'],
         )
         rel = ill.default_prompt_rel(illus_id)
         with open(os.path.join(project_dir, rel), 'w', encoding='utf-8') as f:
@@ -1794,6 +1811,14 @@ class _PromptJob(TypedDict):
     references: list[tuple[str, str]]
     aspect: pi.Aspect
     request: str
+    #: The visual-state matrix resolved at this row's scene, `state_override`
+    #: overlaid. Carried on the job rather than recomputed in the write phase so
+    #: the request the model answered and the prompt file's constraint and
+    #: acceptance blocks are the same string — the whole point of #297 is that
+    #: two renderings of one row drift apart.
+    state: str
+    absent: str
+    contrast: str
 
 
 def _fetch_art_direction(project_dir: str,

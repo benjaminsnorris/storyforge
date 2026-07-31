@@ -985,6 +985,197 @@ def test_a_plan_without_the_treatment_column_still_validates(in_project):
 
 
 # ============================================================================
+# The resolved visual state reaches --prompts (#297)
+# ============================================================================
+#
+# Rebuilding all 20 prompts for a real book, two prompts straddling a costume
+# changeover came back wrong in *opposite* directions: the night-one image in
+# the night-two jacket, the night-two image in pajamas. The matrix was right in
+# both cases — the packet's `**State.**` line said so — but
+# `build_art_direction_request` never received it, so every costume in a
+# generated prompt was the model's inference from anchor prose describing the
+# whole book. Pinning the changeover to scene ids in the anchors fixed one row
+# and not the other; setting `state_override` did nothing, because the column
+# was not in the request either.
+# ============================================================================
+
+@pytest.fixture
+def captured(monkeypatch):
+    """Run `--prompts` and return {illus_id: art-direction request}."""
+    def _run(*argv):
+        requests = {}
+
+        def _invoke(project_dir, prompt, operation, **kwargs):
+            requests[kwargs.get('target') or operation] = prompt
+            return '### Scene\n\nA room.\n'
+        monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+        monkeypatch.setattr(cmd_illustrate, '_invoke', _invoke)
+        assert cmd_illustrate.main(['--prompts', '--coaching', 'full', *argv]) == 0
+        return requests
+    return _run
+
+
+def _add_transition(project_dir, **cells):
+    from storyforge import visual_state as vs
+    rows = list(vs.read_transitions(project_dir))
+    rows.append(cells)
+    vs.write_transitions(project_dir, rows)
+
+
+def _later_state_anchor(project_dir):
+    """Re-anchor Dorren with an emphatic clause about her *later* wardrobe.
+
+    This is the shape that actually bit: an anchor clause added after a sequence
+    review ("it is how the reader finds her in a dark image") is exactly why a
+    model reached for the later costume in an earlier scene.
+    """
+    from illustration_helpers import write_canon_file
+    write_canon_file(
+        project_dir, canon_id='dorren-hayle', canon_type='character',
+        subdir='characters',
+        body='Dorren Hayle: fifty-one, grey hair pinned flat. From act1-sc02 '
+             'onward she wears a rust-red travelling coat, the one warm colour '
+             'she carries, and it is how the reader finds her in a dark image.')
+
+
+def test_the_resolved_state_reaches_the_art_direction_request(in_project,
+                                                              captured):
+    """The core regression: the row's scene resolves to the *early* state while
+    the anchor describes the later one, emphatically."""
+    _later_state_anchor(in_project)
+    _add_transition(in_project, entity='dorren-hayle-clothing',
+                    from_scene='act1-sc02',
+                    state='rust-red travelling coat, hood back',
+                    evidence='Blank parchment')
+    _add_transition(in_project, entity='dorren-hayle-clothing',
+                    from_scene='act1-sc01',
+                    state='black wool waistcoat, sleeves buttoned to the wrist',
+                    evidence='held her breath')
+
+    request = captured()['the-finest-cartographer']
+    assert 'black wool waistcoat, sleeves buttoned to the wrist' in request
+    assert 'rust-red travelling coat, hood back' not in request
+    # Stated as a requirement that outranks the anchor, not as context — the
+    # anchor is a paragraph of vivid prose and this is one line.
+    assert 'The visual state in THIS image' in request
+    assert 'requirement' in request
+    assert 'outranks the character anchors' in request
+
+
+def test_state_override_beats_the_forward_walk_in_the_request(in_project,
+                                                             captured):
+    """`maps` has a transition at act1-sc02 and the row overrides it."""
+    request = captured()['the-blank-page']
+    assert 'one corner curled back under a paperweight' in request
+    assert 'the new survey blank where the village was' not in request
+
+
+def test_the_prompt_file_and_the_packet_entry_agree_about_the_state(in_project,
+                                                                   captured):
+    """Two disjoint renderings of one row is how they disagree; one resolution
+    is how they cannot."""
+    captured()
+    cmd_illustrate.main(['--package'])
+    entry = _read(in_project, 'illustrations.md')
+    with open(os.path.join(in_project,
+                           ill.default_prompt_rel('the-finest-cartographer')),
+              encoding='utf-8') as f:
+        prompt_file = f.read()
+    state = {e['id']: e for e in packet.resolve(in_project)['entries']
+             }['the-finest-cartographer']['state']
+    assert state
+    assert state in entry
+    assert state in prompt_file
+
+
+def test_the_prompt_file_carries_the_state_as_a_constraint(in_project, captured):
+    """It appears twice by design, as the orientation directive does: a model
+    that dropped it would leave a file whose costume is inference, and the
+    working fix on the real book was hand-editing the body."""
+    captured()
+    with open(os.path.join(in_project,
+                           ill.default_prompt_rel('the-finest-cartographer')),
+              encoding='utf-8') as f:
+        content = f.read()
+    assert 'overrides any anchor detail that disagrees' in content
+    assert '## Accept only if' in content
+    assert 'The visual state matches: Dorren Hayle' in content
+
+
+def test_absent_reaches_the_request_as_an_explicit_exclusion(in_project,
+                                                             captured):
+    rows = ill.read_plan(in_project)
+    rows[0]['absent'] = 'the apprentice; any second lamp'
+    ill.write_plan(in_project, rows)
+
+    request = captured()['the-finest-cartographer']
+    assert 'Must not appear in this image' in request
+    assert 'the apprentice; any second lamp' in request
+    assert 'sanctioned exception to the positive-framing rule' in request
+
+
+def test_contrast_reaches_the_request_without_naming_other_illustrations(
+        in_project, captured):
+    request = captured()['the-blank-page']
+    assert 'What must set this image apart' in request
+    assert 'darkest image in the book' in request
+    assert 'Do not name another illustration in the prompt body' in request
+
+
+def test_no_state_blocks_when_the_row_resolves_to_nothing(in_project, captured):
+    """A row with no canon_refs has no state, and the request must not carry an
+    empty section header claiming otherwise."""
+    rows = ill.read_plan(in_project)
+    rows[0].update({'canon_refs': '', 'state_override': '', 'register': ''})
+    ill.write_plan(in_project, rows)
+
+    request = captured('--ids', 'the-finest-cartographer'
+                       )['the-finest-cartographer']
+    assert 'The visual state in THIS image' not in request
+    assert 'Must not appear in this image' not in request
+
+
+def test_prompts_reports_an_entity_with_no_stated_visual_state(in_project,
+                                                               captured,
+                                                               capsys):
+    """`cartography-office` is deliberately unstated in the seeded matrix, and
+    the free moment to hear about it is before 20 calls go out."""
+    captured()
+    out = capsys.readouterr().out
+    assert 'cartography-office' in out
+    assert 'no transition states its visual state there' in out
+
+
+def test_prompts_does_not_double_report_an_unanchored_canon_ref(in_project,
+                                                               captured,
+                                                               capsys):
+    """`_warn_unanchored_rows` already names these; a second copy of the same
+    finding trains an author to skim the log where the other gaps live."""
+    rows = ill.read_plan(in_project)
+    rows[0]['canon_refs'] = 'dorren-hayle;nobody-at-all'
+    ill.write_plan(in_project, rows)
+
+    captured()
+    out = capsys.readouterr().out
+    # Still reported, by the check that runs before the fan-out.
+    assert 'name canon_refs with no continuity anchor' in out
+    assert 'nobody-at-all' in out
+    # But not a second time, in the packet's wording.
+    assert 'resolves to no populated canon file' not in out
+
+
+def test_state_context_and_the_packet_share_one_resolution(in_project):
+    context = packet.state_context(in_project)
+    rows = {r['id'].strip(): r for r in packet.rows_in_reading_order(in_project)}
+    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    for illus_id, row in rows.items():
+        state, _gaps = packet.state_for_row(row, context=context)
+        assert state == entries[illus_id]['state']
+        assert packet.contrast_for_row(row, context=context) == \
+            entries[illus_id]['contrast']
+
+
+# ============================================================================
 # Dispatch
 # ============================================================================
 

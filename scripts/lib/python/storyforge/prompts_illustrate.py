@@ -495,7 +495,8 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
                                 direction: dict[str, str] | None = None,
                                 style_note: str = '',
                                 anchor_labels: dict[str, str] | None = None,
-                                ) -> str:
+                                state: str = '', absent: str = '',
+                                contrast: str = '') -> str:
     """Build the prompt that writes one illustration's image prompt.
 
     Asks for the prompt *body* in the four-section template — Scene, Subject,
@@ -511,6 +512,16 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
     names for *rendering only* — a prompt that labels an anchor `leo` gets
     `leo` echoed back in the model's prose. The anchor text itself is passed
     through byte-identically; likeness continuity depends on it.
+
+    `state` is the visual-state matrix *resolved at this row's scene*
+    (`packet.state_for_row`, with `state_override` already overlaid) and is the
+    one field here that an anchor actively fights. An anchor describes the whole
+    book, and an emphatic clause in one — "the jacket is how the reader finds him
+    in a dark image" — will pull a night-one image into a night-two costume,
+    which is exactly what happened before the matrix reached this request (#297).
+    So it is stated as a requirement that *outranks the anchors*, not as
+    context. `absent` and `contrast` come from the same row and the same
+    resolution the packet renders.
     """
     labels = anchor_labels or {}
     anchors_block = '\n'.join(
@@ -536,6 +547,39 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
                f'book. Honour it in the Scene and Subject sections; do not '
                f'substitute a staging you like better.\n'
                if treatment else '')
+
+    # The matrix, resolved. Placed after the anchors in the assembled request so
+    # the override reads in the order it applies, and worded to outrank them: the
+    # anchors are a paragraph of vivid prose about the whole book and this is one
+    # line about one image, so anything short of "this wins" loses.
+    state_block = (
+        f'\n## The visual state in THIS image\n\n{state.strip()}\n\n'
+        f'This is a **requirement**, not a hint, and it **outranks the '
+        f'character anchors above**. An anchor describes an entity across the '
+        f'whole book; this line is what is true at this point in it. Where the '
+        f'two disagree about a costume, a lit or unlit object, or a damage '
+        f'state, follow this line and say nothing the anchor says about that '
+        f'same detail. Do not substitute a state you like better because it '
+        f'composes more easily or gives you a warmer colour.\n'
+        if state.strip() else '')
+
+    # One of the three sanctioned exceptions to positive framing, alongside the
+    # orientation directive and the colour prohibitions. Narrow and enumerable
+    # on purpose — #263's finding that negated content keywords leak into the
+    # render still holds for description.
+    absent_block = (
+        f'\n## Must not appear in this image\n\n{absent.strip()}\n\n'
+        f'Name these as explicit exclusions in Important details. They are the '
+        f'one sanctioned exception to the positive-framing rule below; '
+        f'everything else stays positively framed.\n'
+        if absent.strip() else '')
+
+    contrast_block = (
+        f'\n## What must set this image apart\n\n{contrast.strip()}\n\n'
+        f'Facts about this image\'s place in the sequence. Honour them in the '
+        f'staging. Do not name another illustration in the prompt body — the '
+        f'image model has never seen it.\n'
+        if contrast.strip() else '')
 
     direction_text = render_direction_block(direction or {})
     house = (f'\n## Book-level art direction\n\nEvery illustration in this '
@@ -566,7 +610,7 @@ has no anchor yet, write one and it becomes canonical for every later
 illustration.
 
 {anchors_block}
-{style}
+{state_block}{absent_block}{contrast_block}{style}
 ## How to write it
 
 Use the first four sections of OpenAI's template, in this order, as markdown
@@ -720,17 +764,59 @@ def render_references_block(
 def render_prompt_file(*, row: dict[str, str], body: str,
                        references: list[str] | list[tuple[str, str]],
                        aspect: Aspect = DEFAULT_ASPECT,
-                       model: str = 'gpt-image-2') -> str:
+                       model: str = 'gpt-image-2',
+                       state: str = '', absent: str = '',
+                       contrast: str = '') -> str:
     """Assemble an illustration's prompt file.
 
     The invariants — orientation in two places, the no-text constraint, the
     reference manifest — are written here rather than requested from the model,
     because a prompt that quietly loses its orientation directive produces a
     landscape image and a wasted generation.
+
+    The resolved visual state is the same kind of thing, so it is written here
+    too and not only into the request: a model that dropped it would leave a
+    prompt file whose costume is inference, and the working fix on the real book
+    was hand-editing the body — which makes the file no longer reproducible from
+    the plan (#297). It appears twice by design, as the orientation does: as a
+    constraint the image model reads, and in the `## Accept only if` block the
+    author checks the render against. That block is the spec's per-image
+    acceptance lines, which prompt files did not carry.
     """
     illus_id = (row.get('id') or '').strip()
     orientation = orientation_clause(aspect)
     scene_id = (row.get('scene_id') or '').strip()
+
+    constraints = [f'- {orientation}',
+                   f'- Render {_NO_TEXT_CONSTRAINT}',
+                   '- Match the style, palette, and line quality of the '
+                   'reference images.',
+                   '- Keep every character consistent with their anchor '
+                   'description above.']
+    if state.strip():
+        constraints.append(
+            f'- The visual state at this point in the book, which overrides '
+            f'any anchor detail that disagrees: {state.strip()}')
+    if absent.strip():
+        constraints.append(f'- Not in this image: {absent.strip()}')
+
+    accept = [f'- The visual state matches: {state.strip()}'] if state.strip() else []
+    if absent.strip():
+        accept.append(f'- Nothing in frame that must not be: {absent.strip()}')
+    if contrast.strip():
+        accept.append(f'- It is set apart from its neighbours: {contrast.strip()}')
+    acceptance = ([
+        '## Accept only if',
+        '',
+        'Checked against this illustration\'s row, not against the render you '
+        'happen to like. The checks identical across the whole set live in the '
+        'handoff packet\'s `acceptance.md`.',
+        '',
+        '\n'.join(accept),
+        '',
+        '---',
+        '',
+    ] if accept else [])
 
     parts = [
         f'# Illustration prompt — {illus_id}',
@@ -754,13 +840,11 @@ def render_prompt_file(*, row: dict[str, str], body: str,
         '',
         '### Constraints',
         '',
-        f'- {orientation}',
-        f'- Render {_NO_TEXT_CONSTRAINT}',
-        '- Match the style, palette, and line quality of the reference images.',
-        '- Keep every character consistent with their anchor description above.',
+        '\n'.join(constraints),
         '',
         '---',
         '',
+        *acceptance,
         '## Log',
         '',
         '| Attempt | Model | Aspect | Output | Status | Note |',

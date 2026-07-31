@@ -104,6 +104,47 @@ class PacketContents(TypedDict):
     gaps: list[str]
 
 
+class StateContext(TypedDict):
+    """Everything `state_for_row` and `contrast_for_row` need, read once.
+
+    Exists so `--prompts` and `--package` resolve a row's visual state through
+    the *same* code over the *same* inputs. They did not, and the divergence was
+    not cosmetic: the packet's `**State.**` line said pajamas while the prompt
+    file for the same row said jacket and boots, because `--prompts` never
+    received the matrix at all and the model inferred a costume from anchor
+    prose describing the whole book (#297).
+    """
+    anchors: dict[str, str]
+    labels: dict[str, canon.AnchorLabel]
+    #: Reading position per scene, from the chapter map.
+    order: dict[str, int]
+    #: Active scene ids, so a cut scene is distinguishable from an unmapped one.
+    known: set[str]
+    transitions: list[vs.Transition]
+    #: Reading-order predecessor per illustration id, '' for the first. What
+    #: `contrast_for_row` needs, and the reason both callers must read reading
+    #: order rather than render order.
+    predecessors: dict[str, str]
+
+
+def state_context(project_dir: str) -> StateContext:
+    """Read the canon tier, the chapter map, and the transition log once."""
+    predecessors: dict[str, str] = {}
+    previous = ''
+    for row in rows_in_reading_order(project_dir):
+        illus_id = row['id'].strip()
+        predecessors[illus_id] = previous
+        previous = illus_id
+    return {
+        'anchors': canon.anchor_texts(project_dir),
+        'labels': canon.anchor_display_names(project_dir),
+        'order': ill._scene_order(project_dir),
+        'known': vs.known_scene_ids(project_dir),
+        'transitions': vs.read_transitions(project_dir),
+        'predecessors': predecessors,
+    }
+
+
 class StateGrid(TypedDict):
     """The dense scene x entity view derived from the sparse transition log.
 
@@ -174,7 +215,8 @@ def resolve(project_dir: str) -> PacketContents:
     book_level = pi.book_level_direction(project_dir)
     gaps.extend(_book_level_gaps(project_dir))
 
-    anchors = canon.anchor_texts(project_dir)
+    context = state_context(project_dir)
+    anchors = context['anchors']
     if not anchors:
         gaps.append(
             'no entity canon file has a populated Embeddable block — no '
@@ -188,22 +230,12 @@ def resolve(project_dir: str) -> PacketContents:
             'the illustration plan has no rows — this packet describes no '
             'illustrations. Run `storyforge illustrate --plan`.')
 
-    order = ill._scene_order(project_dir)
-    known = vs.known_scene_ids(project_dir)
-    transitions = vs.read_transitions(project_dir)
-    labels = canon.anchor_display_names(project_dir)
-
     entries: list[Entry] = []
-    previous_id = ''
     for row in rows:
-        entry, row_gaps = _entry_for(
-            row, project_dir=project_dir, anchors=anchors, labels=labels,
-            order=order, known=known, transitions=transitions,
-            previous_id=previous_id,
-        )
+        entry, row_gaps = _entry_for(row, project_dir=project_dir,
+                                     context=context)
         entries.append(entry)
         gaps.extend(row_gaps)
-        previous_id = entry['id']
 
     gaps.extend(_audit_gaps(project_dir))
 
@@ -272,10 +304,7 @@ def _book_level_gaps(project_dir: str) -> list[str]:
 
 
 def _entry_for(row: dict[str, str], *, project_dir: str,
-               anchors: dict[str, str], labels: dict[str, canon.AnchorLabel],
-               order: dict[str, int], known: set[str],
-               transitions: list[vs.Transition],
-               previous_id: str) -> tuple[Entry, list[str]]:
+               context: StateContext) -> tuple[Entry, list[str]]:
     """Build one entry and the gaps found while building it."""
     illus_id = row['id'].strip()
     scene_id = (row.get('scene_id') or '').strip()
@@ -294,9 +323,7 @@ def _entry_for(row: dict[str, str], *, project_dir: str,
             f'what is in frame. Fill `subject` in '
             f'reference/{ill.PLAN_FILENAME}.')
 
-    state, state_gaps = _state_for(
-        row, project_dir=project_dir, anchors=anchors, labels=labels,
-        order=order, known=known, transitions=transitions)
+    state, state_gaps = state_for_row(row, context=context)
     gaps.extend(state_gaps)
 
     status = cast(ill.PlanStatus,
@@ -327,7 +354,7 @@ def _entry_for(row: dict[str, str], *, project_dir: str,
         # mistake `embeds_as` already made. Empty is the normal case — most
         # images have nothing that must be absent.
         'absent': (row.get('absent') or '').strip(),
-        'contrast': _contrast_for(row, previous_id),
+        'contrast': contrast_for_row(row, context=context),
         'notes': (row.get('composition') or '').strip(),
         'treatment': treatment,
     }
@@ -358,12 +385,17 @@ def _staging_postdates_render(row: dict[str, str]) -> tuple[str, str] | None:
     return staged, ingested
 
 
-def _state_for(row: dict[str, str], *, project_dir: str,
-               anchors: dict[str, str],
-               labels: dict[str, canon.AnchorLabel],
-               order: dict[str, int], known: set[str],
-               transitions: list[vs.Transition]) -> tuple[str, list[str]]:
+def state_for_row(row: dict[str, str], *, context: StateContext,
+                  include_anchor_gaps: bool = True) -> tuple[str, list[str]]:
     """Resolve the matrix for this scene, then overlay the row's override.
+
+    **The single resolution both `--package` and `--prompts` read.** An anchor
+    necessarily describes the whole book — "navy pajamas on the first night, and
+    from a04 onward a rust-red jacket" — so no anchor can tell a generation call
+    which night *this* image is. That is the question the matrix answers, and
+    while it reached only the packet, prompt files contradicted the packet built
+    from the same row in both directions (#297). Two renderings of one row is
+    how they disagree; one function is how they cannot.
 
     Only the entities the row's `canon_refs` names, because sending the whole
     cast wastes tokens and invites the model to draw people who are not in the
@@ -372,16 +404,30 @@ def _state_for(row: dict[str, str], *, project_dir: str,
 
     A `state_override` entity the row does not name is still included: it was
     written for this image specifically, and dropping it would be the silent
-    filtering this module exists to avoid.
+    filtering this module exists to avoid. The override also *wins* over the
+    forward walk for the entities it names, which is what makes it a usable
+    escape hatch for state true in one image only.
+
+    Args:
+        include_anchor_gaps: Whether to report a `canon_refs` entry that
+            resolves to no populated canon file. `--prompts` passes False
+            because `cmd_illustrate._warn_unanchored_rows` already warns about
+            exactly that, before the fan-out, naming the rows and the missing
+            ids — a second copy of the same finding trains an author to skim the
+            log where the other gaps live.
     """
     illus_id = row['id'].strip()
     scene_id = (row.get('scene_id') or '').strip()
+    anchors = context['anchors']
+    order = context['order']
+    known = context['known']
     refs = ill._split_array(row.get('canon_refs', ''))
     overrides = vs.parse_state_override(row.get('state_override', ''))
     gaps: list[str] = []
 
     for ref in refs:
-        if ref.lower() not in {key.lower() for key in anchors}:
+        if (include_anchor_gaps
+                and ref.lower() not in {key.lower() for key in anchors}):
             gaps.append(
                 f'illustration `{illus_id}` names canon_refs `{ref}`, which '
                 f'resolves to no populated canon file — that entity is '
@@ -406,7 +452,7 @@ def _state_for(row: dict[str, str], *, project_dir: str,
             f'position — reference/chapter-map.csv does not list it — so '
             f'nothing in the visual-state matrix resolves for this entry.')
     else:
-        resolved = vs._resolve(order, transitions, order[scene_id])
+        resolved = vs._resolve(order, context['transitions'], order[scene_id])
 
     parts: list[tuple[str, str]] = []
     claimed: set[str] = set()
@@ -450,7 +496,7 @@ def _state_for(row: dict[str, str], *, project_dir: str,
                 f'suppressing the gap that would have told you to state it. '
                 f'Fill the state in {vs.STATE_FILE}, or delete the row.')
 
-    return '; '.join(f'{_entity_label(key, labels)}: {value}'
+    return '; '.join(f'{_entity_label(key, context["labels"])}: {value}'
                      for key, value in parts if value), gaps
 
 
@@ -470,7 +516,7 @@ def _entity_label(entity: str, labels: dict[str, canon.AnchorLabel]) -> str:
     return canon.humanize_canon_id(entity)
 
 
-def _contrast_for(row: dict[str, str], previous_id: str) -> str:
+def contrast_for_row(row: dict[str, str], *, context: StateContext) -> str:
     """What must make this image different from its neighbours.
 
     Derived from facts on the plan — the reading-order predecessor and the
@@ -484,7 +530,12 @@ def _contrast_for(row: dict[str, str], previous_id: str) -> str:
     **One derived sentence, not three.** The entry exists to be thin, and three
     stacked sentences here spent a tenth of the 80–120 word budget restating two
     facts. The author's own note, if any, follows it untouched.
+
+    Read by `--prompts` as well as `--package`, for the same reason as
+    `state_for_row`: one string, so the two artifacts cannot describe the same
+    row differently.
     """
+    previous_id = context['predecessors'].get(row['id'].strip(), '')
     register = (row.get('register') or '').strip().lower()
     extreme = (f'The {register} image in the book'
                if register in ill.VALID_REGISTERS else '')
