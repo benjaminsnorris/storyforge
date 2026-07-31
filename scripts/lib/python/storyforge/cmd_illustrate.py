@@ -2534,25 +2534,25 @@ def _references_for(project_dir: str, illus_id: str, *,
             note(f'`{rel}` is not listed because --no-prior-refs was passed: '
                  f'this build inherits nothing from the existing art.')
             continue
-        if canon_cutoff:
-            # The same predicate `packet.needs_render` and `packet._entry_for`
-            # read, so nothing in one run can hold that a render is too stale to
-            # reference *and* that it is finished (#300).
-            stale_reason = ill.stale_render_reason(row, canon_cutoff)
-            if stale_reason:
-                log(f'WARNING: not referencing {rel} for {illus_id} — '
-                    f'{stale_reason}. Re-render it from the current canon '
-                    f'(see `storyforge illustrate --diagnose` for the render '
-                    f'order), or pass --no-prior-refs to build this prompt '
-                    f'from the cover alone.')
-                skipped_stale += 1
-                note(f'`{rel}` is **not** listed — {stale_reason}. It was '
-                     f'directed by canon that has since been rewritten, so '
-                     f'using it would teach the new render the drift the new '
-                     f'canon exists to remove. Re-render it from the current '
-                     f'canon (`storyforge illustrate --diagnose` gives the '
-                     f'order), then re-run --package.')
-                continue
+        # No `if canon_cutoff:` around this: the predicate makes that check
+        # itself, and a caller-side copy reads as this caller having a different
+        # rule from `packet.needs_render` and `packet._entry_for` — which is the
+        # divergence one shared predicate exists to make impossible (#300).
+        stale_reason = ill.stale_render_reason(row, canon_cutoff)
+        if stale_reason:
+            log(f'WARNING: not referencing {rel} for {illus_id} — '
+                f'{stale_reason}. Re-render it from the current canon '
+                f'(see `storyforge illustrate --diagnose` for the render '
+                f'order), or pass --no-prior-refs to build this prompt '
+                f'from the cover alone.')
+            skipped_stale += 1
+            note(f'`{rel}` is **not** listed — {stale_reason}. It was '
+                 f'directed by canon that has since been rewritten, so '
+                 f'using it would teach the new render the drift the new '
+                 f'canon exists to remove. Re-render it from the current '
+                 f'canon (`storyforge illustrate --diagnose` gives the '
+                 f'order), then re-run --package.')
+            continue
         # The cap is checked *after* the exclusion checks so that a skipped
         # render is still disclosed: breaking out of the loop early would hide
         # every stale render past the fourth reference behind a cap that is not

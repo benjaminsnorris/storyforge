@@ -1016,11 +1016,32 @@ def _no_establisher_note(rows: list[dict[str, str]]) -> str:
     return (f'none of the first {horizon} illustration(s) in reading order '
             f'names a continuity anchor in `canon_refs`, so the batch has no '
             f'establisher. {len(later)} later illustration(s) do name anchors '
-            f'({", ".join(f"`{i}`" for i in later)}), but the visual key is '
-            f'chosen from the early ones on purpose: it exists so everything '
-            f'after it has something real to reference, and the climax cannot '
-            f'do that. Fill `canon_refs` on one of the first {horizon} rows in '
+            f'({_and_more(later)}), but the visual key is chosen from the early '
+            f'ones on purpose: it exists so everything after it has something '
+            f'real to reference, and the climax cannot do that. Fill '
+            f'`canon_refs` on one of the first {horizon} rows in '
             f'reference/{ill.PLAN_FILENAME}.')
+
+
+#: How many ids a disclosure names before it summarises the rest. Enough to
+#: recognise which rows are meant, few enough that the sentence stays readable.
+_MAX_NAMED_IDS = 3
+
+
+def _and_more(ids: list[str]) -> str:
+    """Name the first few ids and count the rest.
+
+    The shape this exists for is not rare: on a twenty-row book the horizon is
+    six, so filling `canon_refs` from the middle of the book outward leaves
+    fourteen ids to name. Fourteen backticked ids mid-sentence is what makes a
+    `fallback` note skippable — and these notes are the whole disclosure channel
+    for a guessed or unfillable slot, so their readability *is* the feature (the
+    reasoning `treatment_at` records: a channel that cries wolf teaches the
+    author to skip the section where the real warnings live).
+    """
+    named = ', '.join(f'`{i}`' for i in ids[:_MAX_NAMED_IDS])
+    rest = len(ids) - _MAX_NAMED_IDS
+    return named if rest <= 0 else f'{named}, and {rest} more'
 
 
 def _later_state_exemplar(project_dir: str,

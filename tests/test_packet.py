@@ -499,6 +499,43 @@ def test_nothing_is_stale_without_a_parseable_canon_cutoff(project_dir):
     assert packet.needs_render(project_dir) == {}
 
 
+def test_the_predicate_owns_the_empty_cutoff_check(packet_project):
+    """`_references_for` used to guard the call with its own `if canon_cutoff:`.
+    Harmless, but a caller-side copy reads as this caller having a different rule
+    from the other consumers — the divergence one shared predicate exists to make
+    impossible. Asserted on the predicate so the guard cannot come back as
+    behaviour."""
+    row = ill.read_plan(packet_project)[0]
+    row['status'] = 'ingested'
+    row['ingested_at'] = ''
+    assert ill.stale_render_reason(row, '') == ''
+    assert ill.stale_render_reason(row, '2026-07-28') != ''
+
+
+def test_references_for_excludes_a_stale_render_without_a_caller_side_guard(
+        packet_project, monkeypatch):
+    """The behavioural half: the reference list still drops a pre-canon render,
+    and an empty cutoff still excludes nothing."""
+    from illustration_helpers import make_png
+    from storyforge import cmd_illustrate
+    monkeypatch.chdir(packet_project)
+    rel = ill.default_asset_rel('the-blank-page')
+    make_png(os.path.join(packet_project, rel), 8, 12)
+    rows = ill.read_plan(packet_project)
+    rows[1].update({'status': 'ingested', 'asset_file': rel,
+                    'ingested_at': '2026-01-01'})
+    ill.write_plan(packet_project, rows)
+
+    stale_cut = cmd_illustrate._references_for(
+        packet_project, 'the-finest-cartographer', plan=rows,
+        canon_cutoff='2026-07-28')
+    assert not any(rel in path for path, _label in stale_cut)
+
+    no_cut = cmd_illustrate._references_for(
+        packet_project, 'the-finest-cartographer', plan=rows, canon_cutoff='')
+    assert any(rel in path for path, _label in no_cut)
+
+
 def test_a_superseded_row_is_not_something_that_needs_rendering(packet_project):
     _ingest_rows(packet_project, ingested_at='')
     rows = ill.read_plan(packet_project)
@@ -787,6 +824,44 @@ def test_the_horizon_the_batch_names_is_the_one_render_order_uses(
                 if 'establisher' in n)
     assert f'first {ill.visual_key_horizon(len(reading_order))} illustration(s)' \
         in note
+
+
+def test_the_later_anchored_rows_are_summarised_not_enumerated(packet_project):
+    """The shape is not rare: on a twenty-row book the horizon is six, so
+    filling `canon_refs` from the middle outward leaves fourteen ids to name.
+    Fourteen backticked ids mid-sentence is what makes a `fallback` note
+    skippable, and these notes are the only disclosure channel for a guessed or
+    unfillable slot."""
+    rows = []
+    for index in range(1, 7):          # six unanchored, inside the horizon
+        row = ill.blank_row(f'a-{index:02}')
+        row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open',
+                    'beat': 'b', 'subject': 's'})
+        rows.append(row)
+    for index in range(1, 15):         # fourteen anchored, outside it
+        row = ill.blank_row(f'z-{index:02}')
+        row.update({'scene_id': 'act2-sc01', 'placement': 'scene_open',
+                    'canon_refs': 'maps', 'beat': 'b', 'subject': 's'})
+        rows.append(row)
+    ill.write_plan(packet_project, rows)
+    assert ill.visual_key_horizon(len(rows)) == 6
+
+    note = next(n for n in packet.anchor_batch(packet_project)['fallback']
+                if 'establisher' in n)
+    # The count is still exact — it is the *enumeration* that is bounded.
+    assert '14 later illustration(s) do name anchors' in note
+    assert '`z-01`, `z-02`, `z-03`, and 11 more' in note
+    assert '`z-04`' not in note
+    assert note.count('`z-') == 3
+
+
+def test_a_short_later_list_is_named_in_full(packet_project):
+    """The cap must not turn three ids into "and 0 more"."""
+    _anchors_only_outside_the_horizon(packet_project)  # three later rows
+    note = next(n for n in packet.anchor_batch(packet_project)['fallback']
+                if 'establisher' in n)
+    assert '`z-01`, `z-02`, `z-03`' in note
+    assert 'more' not in note
 
 
 def test_an_anchor_exactly_at_the_horizon_boundary_is_not_the_key(
