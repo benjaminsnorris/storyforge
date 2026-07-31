@@ -786,10 +786,14 @@ def prompt_constraints(*, aspect: Aspect = DEFAULT_ASPECT, state: str = '',
                        absent: str = '', contrast: str = '') -> list[str]:
     """The Constraints bullets, as one list both paste-ready artifacts render.
 
-    Shared by `render_prompt_file` and the export's paste block so the two
-    cannot state different constraints for the same row — the same reasoning
+    Shared by `render_prompt_file` and the export's paste block so the two cannot
+    drift apart in *how* they phrase a constraint — the same reasoning
     `packet.state_for_row` records for the state itself (#297): two renderings of
-    one row is how they disagree, one function is how they cannot.
+    one row is how they disagree, one function is how they cannot. Scoped to
+    phrasing on purpose: the two artifacts can still differ in *content*, in two
+    documented ways. The export opts into `contrast` (below), and a prompt file
+    written before a matrix edit keeps its old state bullet while a fresh export
+    carries the state in force now, because there is no `prompt_stale`.
 
     `contrast` is opt-in and `render_prompt_file` does not pass it: the prompt
     file keeps contrast in its do-NOT-paste block because the derived clause can
@@ -941,17 +945,31 @@ def render_prompt_file(*, row: dict[str, str], body: str,
     return '\n'.join(parts)
 
 
-#: Why a prompt file yielded no model-authored body. `'ok'` is the only value a
-#: caller may render from; the other two are reported, never silently treated as
-#: an empty prompt — a caller that exported '' would hand over a paste block
-#: containing nothing but constraints, which looks like a complete artifact.
-ParsedPromptStatus = Literal['ok', 'no_prompt_section', 'empty_body']
+#: Why a prompt file yielded no usable model-authored body, or yielded a partial
+#: one. `'ok'` is the only value a caller may render from without saying
+#: something: `'empty_body'` and `'no_prompt_section'` mean fall back and report,
+#: and `'body_truncated'` means the prose *is* usable but is provably short, which
+#: must be said out loud rather than accepted (#293's finding: a truncation every
+#: consumer accepts is worse than an absence, because nothing looks wrong).
+ParsedPromptStatus = Literal['ok', 'no_prompt_section', 'empty_body',
+                             'body_truncated']
 
 
 class ParsedPrompt(TypedDict):
     """The model-authored prose recovered from a written prompt file."""
     body: str
     status: ParsedPromptStatus
+
+
+#: The headings that end the model-authored body. Matched at **any** `##`–`####`
+#: level, which is the whole point: the literal `'### Constraints'` missed a
+#: hand-promoted `## Constraints` (the likeliest hand edit, since every heading
+#: around it is `##`), and the old constraints then landed *inside* the exported
+#: paste block beside the freshly derived ones — two contradicting costume
+#: directives in one region a reader is told to paste whole, which is #297
+#: reconstituted inside the split that exists to prevent it.
+_BODY_TERMINATOR_RE = re.compile(
+    r'(?m)^\#{2,4}[ \t]*(Constraints|Accept only if|Log)\b')
 
 
 def parse_prompt_file(text: str) -> ParsedPrompt:
@@ -965,7 +983,7 @@ def parse_prompt_file(text: str) -> ParsedPrompt:
     around the body would be a more robust parse, and it would also sit *inside*
     the region the file tells the author to paste into an image model — so every
     export would carry two lines of machine bookkeeping into the prompt. The
-    bounds are instead the sentinel line and the Constraints heading this module
+    bounds are instead the sentinel line and the trailer headings this module
     writes, which are already load-bearing prose.
 
     Only the body is returned. The Constraints block is deliberately **not**
@@ -974,6 +992,17 @@ def parse_prompt_file(text: str) -> ParsedPrompt:
     the prompt file was written. That is the one part of the prompt file an
     export must not inherit — the model's prose is the irreplaceable half, the
     constraints are derived.
+
+    **A heading collision is decidable, and is reported rather than resolved.**
+    The writer emits `Constraints`, `Accept only if`, and `Log` exactly once each,
+    so a *repeated* one means the model wrote its own — documented behaviour, per
+    the note in `build_art_direction_request` about a returned `## Constraints`
+    holding a nested contradicting `### Constraints`. Neither reading of that is
+    safe to make silently: cutting at the last match carries stale constraints
+    into the paste block, and cutting at the first drops whatever the model wrote
+    after them (often `### Use case`). So the cut is at the **first** match, which
+    is the half that cannot produce a self-contradicting prompt, and the status
+    says the body is short so the caller can turn it into a gap.
     """
     normalized = text.replace('\r\n', '\n').replace('\r', '')
     start = normalized.find(PASTE_SENTINEL)
@@ -988,10 +1017,11 @@ def parse_prompt_file(text: str) -> ParsedPrompt:
         return {'body': '', 'status': 'no_prompt_section'}
 
     tail = normalized[start:]
-    for terminator in (CONSTRAINTS_HEADING, '## Accept only if', '## Log'):
-        cut = tail.find(terminator)
-        if cut >= 0:
-            tail = tail[:cut]
+    matches = _BODY_TERMINATOR_RE.findall(tail)
+    truncated = len(matches) != len(set(matches))
+    boundary = _BODY_TERMINATOR_RE.search(tail)
+    if boundary:
+        tail = tail[:boundary.start()]
     # The horizontal rule the writer puts between the sentinel and the body is
     # separator, not content; anything further in is the author's own.
     body = tail.strip()
@@ -999,7 +1029,8 @@ def parse_prompt_file(text: str) -> ParsedPrompt:
         body = body[3:].strip()
     if not body:
         return {'body': '', 'status': 'empty_body'}
-    return {'body': body, 'status': 'ok'}
+    return {'body': body,
+            'status': 'body_truncated' if truncated else 'ok'}
 
 
 # ============================================================================

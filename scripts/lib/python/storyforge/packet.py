@@ -34,13 +34,18 @@ docs/superpowers/specs/2026-07-28-illustration-state-matrix-and-packet-design.md
 
 import os
 from collections.abc import Iterable
-from typing import Literal, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 from storyforge import canon
 from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from storyforge import visual_state as vs
 from storyforge.common import log, normalize_for_comparison
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # `cmd_illustrate` imports this module, so the real type cannot be imported
+    # at module scope; only the annotation needs it.
+    from storyforge.cmd_illustrate import StyleReference
 
 #: Project-relative home of the packet. Under `manuscript/` because it is a
 #: production artifact like the assembled chapters, not reference material the
@@ -82,7 +87,11 @@ class Entry(TypedDict):
     #: README tells the author to work the file top to bottom.
     status: ill.PlanStatus
     layout: str
-    aspect: str
+    #: From `pi.aspect_for_row`, which returns the vocabulary rather than a raw
+    #: cell — so no `cast` here, unlike `status`. Typed because a consumer indexes
+    #: a per-aspect table with it (`export.SIZES`), where an out-of-vocabulary
+    #: value would be a KeyError partway through writing a bundle.
+    aspect: pi.Aspect
     beat: str
     in_frame: str
     state: str
@@ -875,7 +884,7 @@ def audit_gaps(project_dir: str, *, bundle: str = 'packet') -> list[str]:
 def _packet_references(
         project_dir: str, rows: list[dict[str, str]], *,
         canon_cutoff: str | None = None,
-        style: 'object | None' = None,
+        style: "StyleReference | None" = None,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     """The labeled reference-image list for the whole packet, and why it is short.
 

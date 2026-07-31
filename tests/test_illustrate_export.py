@@ -90,9 +90,16 @@ def _manifest(project_dir, illus_id):
 
 
 def _paste_block(text):
-    """The contiguous region a reader is told to paste, and nothing else."""
+    """The contiguous region a reader is told to paste, and nothing else.
+
+    `.index` raises on a missing marker, which is what keeps a negative assertion
+    over this slice from passing vacuously. The ordering assert covers the other
+    way it could return '': markers present but swapped.
+    """
     start = text.index(pe._PASTE_OPEN) + len(pe._PASTE_OPEN)
-    return text[start:text.index(pe._PASTE_CLOSE)]
+    end = text.index(pe._PASTE_CLOSE)
+    assert start < end, 'paste markers are out of order'
+    return text[start:end]
 
 
 def _tree(project_dir):
@@ -424,9 +431,29 @@ def test_a_whole_plan_export_is_not_called_partial(in_project):
     assert 'partial export' not in _read(in_project, 'README.md')
 
 
-def test_ids_naming_no_live_row_warns(in_project, capsys):
-    assert cmd_illustrate.main(['--export', '--ids', 'not-a-row']) == 0
-    assert 'no live plan row' in capsys.readouterr().out
+def test_ids_matching_nothing_is_a_failed_request(in_project, capsys):
+    """The author named ids and got no directories. `run_prompts` returns 1 for
+    the same flag with the same meaning, and two commands disagreeing about that
+    is worse than either answer."""
+    assert cmd_illustrate.main(['--export', '--ids', 'not-a-row']) == 1
+    assert '--ids named 1 illustration(s)' in capsys.readouterr().out
+
+
+def test_ids_matching_nothing_also_says_so_in_the_readme(in_project):
+    """The stdout warning and the README gap are two different channels with two
+    different sentences; asserting a substring both share pins neither."""
+    cmd_illustrate.main(['--export', '--ids', 'not-a-row'])
+    assert 'none of the requested ids match' in _read(in_project, 'README.md')
+
+
+def test_some_valid_and_some_unknown_ids_still_exports_the_valid_ones(
+        in_project, capsys):
+    """A partial match is a partial success, not a failed request — only an
+    empty result is the latter."""
+    assert cmd_illustrate.main(
+        ['--export', '--ids', f'{SECOND},not-a-row']) == 0
+    assert os.path.isdir(ex.unit_dir(in_project, SECOND))
+    assert 'not-a-row' in capsys.readouterr().out
 
 
 def test_anchor_batch_exports_the_batch_in_one_command(in_project, capsys):
@@ -798,3 +825,593 @@ def test_the_prompt_file_still_omits_contrast_from_its_paste_block():
     head, _, tail = text.partition('## Accept only if')
     assert 'follows `y`' not in head
     assert 'follows `y`' in tail
+
+
+# ============================================================================
+# Review round: the destructive paths
+# ============================================================================
+
+def test_a_lost_plan_does_not_delete_the_bundle(in_project, capsys):
+    """`ill.read_plan` returns [] for a plan file that is missing, renamed, or
+    mid-merge, which made a single `complete` bool vacuously true and pruned every
+    unit — exit 0, with a log line blaming rows that had not moved. A wipe
+    authorized by a missing file is not a wipe authorized by a changed plan."""
+    cmd_illustrate.main(['--export'])
+    os.remove(ill.plan_path(in_project))
+    capsys.readouterr()
+
+    assert cmd_illustrate.main(['--export']) == 0
+    assert os.path.isdir(ex.unit_dir(in_project, FIRST))
+    assert os.path.isdir(ex.unit_dir(in_project, SECOND))
+    assert 'nothing was pruned' in capsys.readouterr().out
+
+
+def test_an_empty_plan_is_not_called_a_partial_export(in_project):
+    """The other half of the same bool: README must not call an empty plan a
+    partial export, which is why the scope flag and the prune authority had to
+    become two different things rather than one."""
+    ill.write_plan(in_project, [])
+    assert cmd_illustrate.main(['--export']) == 0
+    readme = _read(in_project, 'README.md')
+    assert 'partial export' not in readme
+    assert 'no illustrations to export' in readme
+
+
+def test_an_id_that_escapes_the_export_tree_is_refused(in_project):
+    """A plan `id` of `../../evil` names a directory this command writes to and
+    `rmtree`s. The plan is a documented hand-edit surface, so a typo reaches it,
+    and `run_export` does not call `validate_plan` — the one check whose absence
+    is destructive is made directly."""
+    outside = os.path.join(in_project, 'evil', 'references')
+    os.makedirs(outside)
+    keep = os.path.join(outside, 'precious.txt')
+    with open(keep, 'w') as f:
+        f.write('do not delete me')
+
+    rows = ill.read_plan(in_project)
+    rows[0]['id'] = os.path.join('..', '..', 'evil')
+    ill.write_plan(in_project, rows)
+
+    assert cmd_illustrate.main(['--export']) == 1
+    assert os.path.isfile(keep)
+    assert not os.path.isdir(ex.export_dir(in_project))
+
+
+def test_unit_dir_refuses_an_illegal_id_even_without_the_preflight(in_project):
+    """The pre-flight is the message; this is the guard that keeps a future caller
+    from bypassing it."""
+    with pytest.raises(ValueError, match='invalid_id'):
+        ex.unit_dir(in_project, '../../evil')
+
+
+def test_a_foreign_directory_is_not_a_prune_candidate_even_with_a_manifest(
+        in_project):
+    """`existing_units` keys on a legal id *and* a manifest, so a stray directory
+    name cannot become a deletion candidate — nor crash `unit_dir` on the way to
+    that decision."""
+    stray = os.path.join(ex.export_dir(in_project), 'not a legal id')
+    os.makedirs(stray)
+    with open(os.path.join(stray, ex.MANIFEST_FILENAME), 'w') as f:
+        f.write('{}')
+    assert ex.existing_units(in_project) == []
+    cmd_illustrate.main(['--export'])
+    assert os.path.isdir(stray)
+
+
+# ============================================================================
+# Review round: staleness must never crash, and never pass for "checked"
+# ============================================================================
+
+def test_an_unreadable_reference_does_not_crash_validate(in_project):
+    """`validate_plan` is the single finding collector, so an unguarded hash took
+    `validate`, `cleanup`, and `--diagnose` down with a PermissionError — losing
+    the blocking findings `cmd_validate` gates on, over a file permission."""
+    cmd_illustrate.main(['--export'])
+    cover = os.path.join(in_project, 'manuscript', 'assets',
+                         'cover-illustration.png')
+    os.chmod(cover, 0o000)
+    try:
+        findings = ill.validate_plan(in_project)
+        assert [f['kind'] for f in ex.export_stale(in_project)] == \
+            ['export_stale']
+        assert any(f['kind'] == 'export_stale' for f in findings)
+        assert 'could not be read' in ex.export_stale(in_project)[0]['detail']
+    finally:
+        os.chmod(cover, 0o644)
+
+
+def test_a_deleted_copy_is_reported(in_project):
+    """The claim the recorded digest exists to defend: a manifest never promises
+    an upload the directory does not hold. Checking only the source left the file
+    the reader actually uploads unverified."""
+    cmd_illustrate.main(['--export'])
+    os.remove(os.path.join(ex.unit_dir(in_project, FIRST), 'references',
+                           '1-cover-illustration.png'))
+    detail = ex.export_stale(in_project)[0]['detail']
+    assert 'is missing, so the manifest promises an upload' in detail
+
+
+def test_a_corrupted_copy_is_reported(in_project):
+    """A copy that exists and is not the image it claims to be. Only re-hashing
+    the copy catches this; the source is untouched."""
+    cmd_illustrate.main(['--export'])
+    make_png(os.path.join(ex.unit_dir(in_project, FIRST), 'references',
+                          '1-cover-illustration.png'), 12, 12)
+    detail = ex.export_stale(in_project)[0]['detail']
+    assert 'does not match the digest recorded for it' in detail
+
+
+def test_a_unit_with_no_prompt_file_is_reported(in_project):
+    """Omitting the missing file from the mtime set was the shape where the
+    absence of the thing being checked removes it from the check."""
+    cmd_illustrate.main(['--export'])
+    os.remove(os.path.join(ex.unit_dir(in_project, FIRST), ex.PROMPT_FILENAME))
+    detail = ex.export_stale(in_project)[0]['detail']
+    assert f'has no {ex.PROMPT_FILENAME}' in detail
+
+
+def test_a_manifest_whose_references_is_not_a_list_is_reported(in_project):
+    """Parseable JSON of the wrong shape left every reference unchecked while
+    `--diagnose` printed `built and current`. Silence must mean checked."""
+    cmd_illustrate.main(['--export'])
+    path = os.path.join(ex.unit_dir(in_project, FIRST), ex.MANIFEST_FILENAME)
+    manifest = json.loads(open(path).read())
+    manifest['references'] = {'1': 'oops'}
+    with open(path, 'w') as f:
+        json.dump(manifest, f)
+    detail = ex.export_stale(in_project)[0]['detail']
+    assert 'rather than a list' in detail
+
+
+def test_a_reference_entry_missing_its_digest_is_reported(in_project):
+    """An entry with no `sha256` is unverifiable, and unverifiable must not render
+    as verified."""
+    cmd_illustrate.main(['--export'])
+    path = os.path.join(ex.unit_dir(in_project, FIRST), ex.MANIFEST_FILENAME)
+    manifest = json.loads(open(path).read())
+    manifest['references'][0].pop('sha256')
+    with open(path, 'w') as f:
+        json.dump(manifest, f)
+    assert 'records no sha256' in ex.export_stale(in_project)[0]['detail']
+
+
+def test_a_non_object_reference_entry_is_reported(in_project):
+    cmd_illustrate.main(['--export'])
+    path = os.path.join(ex.unit_dir(in_project, FIRST), ex.MANIFEST_FILENAME)
+    manifest = json.loads(open(path).read())
+    manifest['references'].append('not an object')
+    with open(path, 'w') as f:
+        json.dump(manifest, f)
+    assert 'is not an object' in ex.export_stale(in_project)[0]['detail']
+
+
+def test_the_stale_detail_does_not_assert_a_mismatch_over_an_unknown(in_project):
+    """"could not be read" is not "no longer matches its sources" — the detail
+    must not claim more than the check established."""
+    cmd_illustrate.main(['--export'])
+    with open(os.path.join(ex.unit_dir(in_project, FIRST),
+                           ex.MANIFEST_FILENAME), 'w') as f:
+        f.write('{not json')
+    assert 'or cannot be checked against them' in \
+        ex.export_stale(in_project)[0]['detail']
+
+
+def test_art_direction_appearing_at_the_default_path_is_reported(in_project):
+    """`_body_for` picks up `default_prompt_rel` with no plan edit, and
+    `parse_prompt_file` invites hand-authoring — so a bundle built from a
+    three-cell stand-in must not report itself current once the real prose lands
+    beside it. This is why `prompt_source` is recorded even when nothing was read
+    from it."""
+    cmd_illustrate.main(['--export'])
+    assert ex.export_stale(in_project) == []
+    _write_prompt_file(in_project, FIRST)
+    detail = ex.export_stale(in_project)[0]['detail']
+    assert 'now has art direction at' in detail
+
+
+def test_a_vanished_prompt_file_is_reported(in_project):
+    """The other direction: re-exporting would silently downgrade the body to the
+    plan row."""
+    rel = _write_prompt_file(in_project, FIRST)
+    cmd_illustrate.main(['--export'])
+    os.remove(os.path.join(in_project, rel))
+    detail = ex.export_stale(in_project)[0]['detail']
+    assert 'is gone, so re-exporting would fall back' in detail
+
+
+def test_the_cover_is_hashed_once_per_run_not_once_per_unit(in_project,
+                                                           monkeypatch):
+    """The cover is a reference in every unit, so a twenty-illustration export
+    hashed it twenty times per `validate_plan` — a command that previously hashed
+    nothing, run by `validate`, `cleanup`, and `--diagnose`."""
+    cmd_illustrate.main(['--export'])
+    calls: list[str] = []
+    real = ill.sha256_of
+    monkeypatch.setattr(ill, 'sha256_of',
+                        lambda path: calls.append(path) or real(path))
+    ex.export_stale(in_project)
+    # The *source*, not the copies: each unit's copy is a distinct file and is
+    # hashed once, which is the check itself. The source is one file shared by
+    # every unit, and it is the one that was hashed per unit.
+    source = os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png')
+    assert [c for c in calls if c == source] == [source], calls
+
+
+# ============================================================================
+# Review round: the shared-file write order
+# ============================================================================
+
+def test_the_shared_files_are_written_after_the_units(in_project):
+    """`is_built` keys on the shared files, so writing them first flipped it True
+    at the moment the bundle was emptiest — an interrupted run then reported
+    `built and current` over zero unit directories."""
+    order: list[str] = []
+    real = open
+
+    def _tracking(path, *args, **kwargs):
+        if isinstance(path, str) and ex.EXPORT_DIR in path and 'w' in str(args[:1] + (kwargs.get('mode', ''),)):
+            order.append(os.path.relpath(path, ex.export_dir(in_project)))
+        return real(path, *args, **kwargs)
+
+    import builtins
+    builtins.open = _tracking
+    try:
+        cmd_illustrate.main(['--export'])
+    finally:
+        builtins.open = real
+
+    shared = [i for i, name in enumerate(order) if name in ex.SHARED_FILES]
+    units = [i for i, name in enumerate(order) if name not in ex.SHARED_FILES]
+    assert shared and units
+    assert min(shared) > max(units), order
+
+
+# ============================================================================
+# Review round: the parse, the leak, and the truncation
+# ============================================================================
+
+def test_a_promoted_constraints_heading_does_not_leak_into_the_paste_block():
+    """The likeliest hand edit — every heading around `### Constraints` is `##` —
+    used to carry the file's own stale constraints into the exported paste block
+    beside the freshly derived ones. Two contradicting costume directives in one
+    region a reader pastes whole is #297 inside the fix."""
+    text = pi.render_prompt_file(row={'id': 'x', 'scene_id': 's1'},
+                                 body='### Scene\n\nA room.', references=[],
+                                 state='navy pajamas')
+    parsed = pi.parse_prompt_file(
+        text.replace(pi.CONSTRAINTS_HEADING, '## Constraints'))
+    assert parsed['status'] == 'ok'
+    assert 'navy pajamas' not in parsed['body']
+    assert parsed['body'] == '### Scene\n\nA room.'
+
+
+def test_a_model_authored_constraints_heading_is_reported_as_truncated():
+    """Documented model behaviour, per `build_art_direction_request`'s own note.
+    Cutting at the first heading is the only reading that cannot self-contradict,
+    so the tail is dropped — and #293 is why that is said out loud rather than
+    accepted: a truncation every consumer accepts is worse than an absence."""
+    body = ('### Scene\n\nA hall.\n\n### Constraints\n\nNo lettering.\n\n'
+            '### Use case\n\nFull-page.')
+    parsed = pi.parse_prompt_file(pi.render_prompt_file(
+        row={'id': 'x', 'scene_id': 's1'}, body=body, references=[]))
+    assert parsed['status'] == 'body_truncated'
+    assert parsed['body'] == '### Scene\n\nA hall.'
+
+
+def test_a_truncated_body_is_used_and_reported_in_the_export(in_project):
+    """The prose is still better than three plan cells, so it is kept — and the
+    reader is told a section is missing, in the file they are reading."""
+    _write_prompt_file(in_project, FIRST, body=(
+        '### Scene\n\nA hall.\n\n### Constraints\n\nNo lettering.\n\n'
+        '### Use case\n\nFull-page.'))
+    assert cmd_illustrate.main(['--export']) == 0
+    unit = _read_unit(in_project, FIRST)
+    assert 'carries its own `Constraints` heading' in unit
+    assert _manifest(in_project, FIRST)['body_source'] == 'prompt_file'
+    assert 'Constraints` heading inside their prompt body' in \
+        _read(in_project, 'README.md')
+
+
+def test_a_declared_prompt_file_that_is_missing_gets_its_own_sentence(in_project):
+    """An author who typed a path meant that path, so the prose usually exists
+    somewhere (moved, renamed, uncommitted) — a different action from "generate
+    it again"."""
+    rows = ill.read_plan(in_project)
+    rows[0]['prompt_file'] = 'manuscript/assets/illustrations/prompts/gone.md'
+    ill.write_plan(in_project, rows)
+    assert cmd_illustrate.main(['--export']) == 0
+    assert 'the plan declares art direction at' in _read_unit(in_project, FIRST)
+
+
+def test_an_unreadable_prompt_file_falls_back_and_says_so(in_project):
+    rel = _write_prompt_file(in_project, FIRST)
+    path = os.path.join(in_project, rel)
+    os.chmod(path, 0o000)
+    try:
+        assert cmd_illustrate.main(['--export']) == 0
+        assert 'could not be read' in _read_unit(in_project, FIRST)
+        assert _manifest(in_project, FIRST)['body_source'] == 'plan_row'
+    finally:
+        os.chmod(path, 0o644)
+
+
+def test_an_empty_prompt_body_falls_back_and_says_so(in_project):
+    rel = _write_prompt_file(in_project, FIRST)
+    with open(os.path.join(in_project, rel), 'w', encoding='utf-8') as f:
+        f.write(f'# x\n\n{pi.PROMPT_HEADING}\n\n{pi.PASTE_SENTINEL}\n\n---\n\n'
+                f'{pi.CONSTRAINTS_HEADING}\n\n- a rule\n')
+    assert cmd_illustrate.main(['--export']) == 0
+    assert 'has an empty prompt body' in _read_unit(in_project, FIRST)
+
+
+# ============================================================================
+# Review round: the invariant the whole PR rests on
+# ============================================================================
+
+def test_a_subset_export_renders_a_row_exactly_as_a_whole_plan_export_does(
+        in_project):
+    """#297's shape inside the fix: a one-row `--ids` run must not make that row
+    its own book-start and strip the contrast clause it has in the full book. The
+    docstrings said so and nothing asserted it — a mutation passing the subset to
+    `state_context` survived all 63 tests."""
+    _write_prompt_file(in_project, SECOND)
+    cmd_illustrate.main(['--export', '--ids', SECOND])
+    subset = _read_unit(in_project, SECOND)
+    cmd_illustrate.main(['--export'])
+    assert _read_unit(in_project, SECOND) == subset
+    assert FIRST in subset, 'the contrast clause names its predecessor'
+
+
+# ============================================================================
+# Review round: where facts land
+# ============================================================================
+
+def test_the_warnings_come_before_the_paste_region(in_project):
+    """The placement is the point and it is about money: a reader who has already
+    pasted has already spent the render."""
+    assert cmd_illustrate.main(['--export']) == 0
+    text = _read_unit(in_project, FIRST)
+    assert text.index('Read this first') < text.index(pe._PASTE_OPEN)
+
+
+def test_a_reference_chain_note_reaches_the_log_and_the_readme(in_project,
+                                                              capsys):
+    """It reached only the unit's own `prompt.md` while README enumerated a count
+    that implied completeness — a finding whose only channel is one artifact."""
+    assert cmd_illustrate.main(['--export']) == 0
+    out = capsys.readouterr().out
+    assert 'cover-only' in _read(in_project, 'README.md')
+    assert 'cover-only' in out
+
+
+def test_a_chain_note_is_not_in_read_this_first(in_project):
+    """An unavoidable note about a book with no ingested art yet is not a reason
+    to stop, and putting it above the genuine blockers dilutes them."""
+    assert cmd_illustrate.main(['--export']) == 0
+    text = _read_unit(in_project, FIRST)
+    head = text[:text.index(pe._PASTE_OPEN)]
+    first_block = head[head.index('Read this first'):head.index('## References')]
+    assert 'cover-only' not in first_block
+    assert 'About these reference images' in head
+
+
+def test_one_project_wide_cause_is_one_readme_gap(in_project):
+    """Two rows with no art direction produced one aggregate log line plus two
+    per-row WARNINGs plus two README bullets. On twenty rows that is the noise
+    that teaches an author to skip the section the real warnings live in."""
+    assert cmd_illustrate.main(['--export']) == 0
+    readme = _read(in_project, 'README.md')
+    assert readme.count('have no written art direction') == 1
+    assert '2 of 2 illustration(s)' in readme
+    # The per-unit sentence still reaches the unit's own file: two readers.
+    assert 'no written art direction' in _read_unit(in_project, FIRST)
+
+
+def test_a_stale_prior_render_note_names_export_not_package(in_project):
+    """The note is rendered into *this* bundle, and `--package` does not rebuild
+    it."""
+    rows = ill.read_plan(in_project)
+    asset = ill.default_asset_rel(SECOND)
+    make_png(os.path.join(in_project, asset), 100, 150)
+    row = next(r for r in rows if r['id'].strip() == SECOND)
+    row.update({'status': 'ingested', 'asset_file': asset,
+                'sha256': ill.sha256_of(os.path.join(in_project, asset)),
+                'width': '100', 'height': '150', 'ingested_at': '2020-01-01'})
+    ill.write_plan(in_project, rows)
+
+    assert cmd_illustrate.main(['--export']) == 0
+    readme = _read(in_project, 'README.md')
+    assert 'then re-run --export' in readme
+    assert 'then re-run --package' not in readme
+
+
+# ============================================================================
+# Review round: acceptance.md speaks the export's vocabulary
+# ============================================================================
+
+def test_acceptance_points_at_the_prompt_not_at_packet_entries(in_project):
+    """The export has no entries, and its reader may have no repo to look them up
+    in. Same class as the `bundle` noun, applied to the renderer that was missed."""
+    assert cmd_illustrate.main(['--export']) == 0
+    acceptance = _read(in_project, 'acceptance.md')
+    assert 'entry' not in acceptance.lower()
+    assert 'prompt.md' in acceptance
+    assert "prompt's `Not in this image:` constraint" in acceptance
+
+
+def test_the_packet_acceptance_still_points_at_its_entries(in_project):
+    """Regression: parameterizing the renderer must not change the packet."""
+    assert cmd_illustrate.main(['--package']) == 0
+    from storyforge import packet
+    with open(packet.packet_file(in_project, 'acceptance.md'),
+              encoding='utf-8') as f:
+        acceptance = f.read()
+    assert "its entry's **Beat**" in acceptance
+    assert "the entry's **Absent** line" in acceptance
+
+
+# ============================================================================
+# Review round: the remaining uncovered branches
+# ============================================================================
+
+def test_a_gap_free_export_says_nothing_was_missing(in_project):
+    """The happy-path README shape is unreachable end to end — a book with nothing
+    ingested always carries the cover-only chain note — so the branch is asserted
+    at the renderer, which is where it lives. Its own blank `gap_block` region is
+    what a future edit to the f-string would break."""
+    contents = ex.resolve(in_project)
+    contents['gaps'] = []
+    readme = pe.render_readme(title='A Book', contents=contents)
+    assert 'Nothing was missing from the data' in readme
+    assert 'thing(s) below were missing' not in readme
+
+
+def test_two_references_resolving_to_one_file_are_listed_once(in_project):
+    """Positional numbering must not gap: `copy_references` writes only what the
+    manifest lists, so a skipped `order` would leave `1-…`, `3-…`."""
+    rows = ill.read_plan(in_project)
+    asset = ill.default_asset_rel(SECOND)
+    os.makedirs(os.path.dirname(os.path.join(in_project, asset)), exist_ok=True)
+    os.symlink(os.path.join(in_project, 'manuscript', 'assets',
+                            'cover-illustration.png'),
+               os.path.join(in_project, asset))
+    row = next(r for r in rows if r['id'].strip() == SECOND)
+    row.update({'status': 'ingested', 'asset_file': asset,
+                'sha256': ill.sha256_of(os.path.join(in_project, asset)),
+                'width': '800', 'height': '1200', 'ingested_at': '2026-07-29'})
+    ill.write_plan(in_project, rows)
+
+    assert cmd_illustrate.main(['--export']) == 0
+    references = _manifest(in_project, FIRST)['references']
+    assert [r['order'] for r in references] == list(
+        range(1, len(references) + 1))
+    assert len({r['source'] for r in references}) == len(references)
+
+
+def test_a_treatment_renders_outside_the_paste_block(in_project):
+    """The only place `--sequence`'s work surfaces in the export, and its
+    placement below the paste line is deliberate: the body already embodies it, so
+    repeating it to the model would be a second competing staging note."""
+    rows = ill.read_plan(in_project)
+    rows[0]['treatment'] = 'close, low angle, interior, night'
+    ill.write_plan(in_project, rows)
+    assert cmd_illustrate.main(['--export']) == 0
+    text = _read_unit(in_project, FIRST)
+    assert 'Staging assigned to this image' in text
+    assert 'close, low angle, interior, night' not in _paste_block(text)
+
+
+def test_an_unresolved_visual_state_is_stated_in_the_export(in_project):
+    """`packet.NOT_RECORDED`'s reasoning, on this artifact: an acceptance block
+    announcing "checked against this illustration's row" while silently dropping
+    the state check is the omission #297 was filed about."""
+    rows = ill.read_plan(in_project)
+    rows[0]['canon_refs'] = 'cartography-office'
+    rows[0]['state_override'] = ''
+    ill.write_plan(in_project, rows)
+    assert cmd_illustrate.main(['--export']) == 0
+    text = _read_unit(in_project, FIRST)
+    assert 'no visual state resolved' in text
+    assert 'No visual state resolved for this illustration' in text
+
+
+def test_a_reference_outside_the_project_keeps_its_absolute_path(in_project,
+                                                                tmp_path):
+    """Disclosed by being visibly absolute rather than quietly relativized into
+    `../../..`, because the path reaches a bundle handed to another machine."""
+    outside = tmp_path / 'elsewhere' / 'cover.png'
+    make_png(str(outside), 640, 960)
+    convention = os.path.join(in_project, 'manuscript', 'assets',
+                              'cover-illustration.png')
+    os.remove(convention)
+    os.symlink(str(outside), convention)
+
+    assert cmd_illustrate.main(['--export']) == 0
+    reference = _manifest(in_project, FIRST)['references'][0]
+    assert os.path.isabs(reference['resolved_from']), reference
+
+
+def test_export_stale_over_a_project_with_no_canon_tree(in_project):
+    """The canon-directory branch was never taken with the directory absent."""
+    import shutil
+    cmd_illustrate.main(['--export'])
+    shutil.rmtree(os.path.join(in_project, 'reference', 'canon'))
+    assert isinstance(ex.export_stale(in_project), list)
+
+
+def test_resolve_reads_the_canon_cutoff_itself_when_not_given_one(in_project):
+    """`cmd_illustrate` always threads one in; the default is the documented
+    one-walk-per-run contract for any other caller."""
+    contents = ex.resolve(in_project)
+    assert [u['id'] for u in contents['units']] == [FIRST, SECOND]
+
+
+def test_an_export_with_no_anchors_says_so(in_project):
+    import shutil
+    shutil.rmtree(os.path.join(in_project, 'reference', 'canon', 'characters'))
+    shutil.rmtree(os.path.join(in_project, 'reference', 'canon', 'locations'))
+    shutil.rmtree(os.path.join(in_project, 'reference', 'canon', 'motifs'))
+    assert cmd_illustrate.main(['--export']) == 0
+    assert 'no entity canon file has a populated Embeddable block' in \
+        _read(in_project, 'README.md')
+
+
+def test_the_zip_hint_quotes_a_path_with_a_space(in_project):
+    hint = pe.render_zip_hint('/tmp/my project', FIRST)
+    assert "'/tmp/my project/manuscript/illustration-export'" in hint
+
+
+# ============================================================================
+# Review round: the two changes the whole suite did not notice
+# ============================================================================
+
+def test_the_prompt_file_renders_the_shared_constraint_list():
+    """The extraction is shared, but nothing asserted the *prompt file* half —
+    so the constraint wording could change and 5789 tests still pass."""
+    text = pi.render_prompt_file(row={'id': 'x', 'scene_id': 's1'},
+                                 body='### Scene\n\nA room.', references=[],
+                                 state='a state', absent='a thing')
+    for bullet in pi.prompt_constraints(state='a state', absent='a thing'):
+        assert bullet in text, bullet
+
+
+def test_the_constraint_list_has_no_positional_anchor_reference():
+    """In the export the anchors live in a sibling `canon.md`, so "the anchor
+    description above" pointed at nothing in one of the two artifacts."""
+    assert 'above' not in '\n'.join(pi.prompt_constraints())
+
+
+def test_the_packet_names_the_prompt_convention_and_export_once():
+    """The code half of the answer to the issue's criterion 1. Deleting the whole
+    paragraph left 5789 tests passing."""
+    from storyforge import prompts_packet as pp
+    text = pp.render_illustrations(entries=[])
+    assert text.count('--export') == 1
+    assert 'prompts/<id>.md' in text
+
+
+def test_a_reference_with_no_recorded_copy_is_reported(in_project):
+    """An entry naming a source but no copied file means nothing in that unit can
+    be uploaded for it — unverifiable, so it is said rather than skipped."""
+    cmd_illustrate.main(['--export'])
+    path = os.path.join(ex.unit_dir(in_project, FIRST), ex.MANIFEST_FILENAME)
+    manifest = json.loads(open(path).read())
+    manifest['references'][0].pop('file')
+    with open(path, 'w') as f:
+        json.dump(manifest, f)
+    assert 'records no copied file' in ex.export_stale(in_project)[0]['detail']
+
+
+def test_an_unreadable_copy_is_reported_rather_than_crashing(in_project):
+    """The copy's own read can fail for the reason the source's can, and the same
+    rule applies: unverifiable is not verified, and neither is a traceback."""
+    cmd_illustrate.main(['--export'])
+    copy = os.path.join(ex.unit_dir(in_project, FIRST), 'references',
+                        '1-cover-illustration.png')
+    os.chmod(copy, 0o000)
+    try:
+        detail = ex.export_stale(in_project)[0]['detail']
+        assert 'the copy cannot be checked at all' in detail
+    finally:
+        os.chmod(copy, 0o644)

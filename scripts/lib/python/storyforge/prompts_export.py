@@ -20,10 +20,12 @@ line and says so in its heading — the marker convention the GN page renderer a
 """
 
 import os
+import shlex
 from typing import Final
 
 from storyforge import export as ex
 from storyforge import prompts_illustrate as pi
+from storyforge import prompts_packet as pp
 
 #: The heading that opens the paste region, and the rule that closes it. A reader
 #: skimming for "what do I paste" finds one answer.
@@ -35,15 +37,22 @@ def render_prompt(*, unit: ex.ExportUnit, title: str) -> str:
     """One illustration's `prompt.md`: the whole paste-ready block and its checks.
 
     The Constraints bullets come from `prompts_illustrate.prompt_constraints`,
-    the same function the prompt file uses, so the two artifacts cannot state
-    different constraints for one row. `contrast` is passed here and not there —
-    see that function for why the prompt file keeps it out of its paste block.
+    the same function the prompt file uses, so the two artifacts cannot drift
+    apart in *how* they phrase a constraint. They can still differ in content, in
+    two documented ways: the export opts into `contrast` (see that function for
+    why the prompt file does not), and a prompt file predating a matrix edit still
+    carries the old state in its own block while a fresh export carries the state
+    in force now — there is no `prompt_stale`.
 
     A unit's `warnings` are rendered **above** the paste region rather than in a
-    footnote. They are the things that change whether generating from this block
+    footnote, and `test_the_warnings_come_before_the_paste_region` pins that
+    position. They are the things that change whether generating from this block
     is a good idea at all — no written art direction, no resolved visual state,
     art that predates the current canon, a reference image that could not be
     copied — and a reader who has already pasted has already spent the render.
+    The reference chain's own disclosures are *not* here: they go under
+    `## About these reference images`, below, because an unavoidable note about a
+    book with no ingested art yet is not a reason to stop.
     """
     constraints = pi.prompt_constraints(
         aspect=unit['aspect'], state=unit['state'], absent=unit['absent'],
@@ -90,6 +99,18 @@ def render_prompt(*, unit: ex.ExportUnit, title: str) -> str:
         '',
         upload_block,
         '',
+    ])
+    if unit['chain_notes']:
+        parts.extend([
+            '### About these reference images',
+            '',
+            'A short list is not the same as having little to reference.',
+            '',
+            '\n'.join(f'- {note}' for note in unit['chain_notes']),
+            '',
+        ])
+
+    parts.extend([
         _PASTE_OPEN,
         '',
         unit['body'].strip(),
@@ -132,7 +153,7 @@ def render_prompt(*, unit: ex.ExportUnit, title: str) -> str:
 
 
 def _provenance(unit: ex.ExportUnit) -> str:
-    """Which files this block was assembled from, and which are regenerated.
+    """Which files this block was assembled from, and that it is a render.
 
     Stated because the block is paste-ready and therefore looks authoritative: a
     reader who edits it is editing a render, and the sentence that tells them so
@@ -140,13 +161,17 @@ def _provenance(unit: ex.ExportUnit) -> str:
     """
     lines = [
         f'- The prompt prose above: '
-        + (f'`{unit["prompt_source"]}`' if unit['prompt_source']
-           else '**assembled from the plan row**, because no art-direction '
-                'prompt file exists for this illustration'),
-        '- The state, absent, contrast, and constraint lines: '
+        + (f'`{unit["prompt_source"]}`' if unit['body_source'] == 'prompt_file'
+           else '**assembled from the plan row**, because '
+                f'`{unit["prompt_source"]}` did not yield one'),
+        '- The state, `absent`, and `contrast` lines: '
         '`reference/illustration-plan.csv` and `reference/visual-state.csv`',
-        f'- The reference images: copied from the paths in '
-        f'`{ex.MANIFEST_FILENAME}`, with symlinks resolved',
+        '- The orientation, no-lettering, style-match, and anchor-consistency '
+        'rules: fixed house rules in `prompts_illustrate.prompt_constraints`, '
+        'the same ones every illustration in the book carries',
+        f'- The reference images: copied from their project paths with symlinks '
+        f'resolved; `{ex.MANIFEST_FILENAME}` records where each came from and '
+        f'its sha256',
     ]
     return '\n'.join(lines) + (
         '\n\nThis file is a render. Edit the plan, the transition log, or the '
@@ -259,17 +284,17 @@ longer matches the prose — is not in this list. Run `storyforge illustrate
 def _unit_mark(unit: ex.ExportUnit) -> str:
     """The one-word note beside an id whose art already exists.
 
-    Three states, mutually exclusive by structure rather than by if-ordering, the
-    way `prompts_packet._entry_state` is: a canon-stale row is `ingested`
-    everywhere else, so `status` alone cannot say whether to generate it — and an
-    entry marked "do not regenerate" over art the canon has outgrown is what let a
-    whole set be handed over unrendered (#300).
+    Routed through `prompts_packet._entry_state` rather than re-deciding the three
+    states here. That function returns a `RenderState`, so the marks are exclusive
+    structurally rather than by the order of two `if`s — and, more to the point,
+    it owns `_RENDERED_STATUSES`, whose comment explains why the set is enumerated
+    positively. A forked copy of `('rendered', 'ingested')` would leave this table
+    disagreeing with the packet's entry headings the first time a status is added.
+
+    `ExportUnit` inherits `packet.Entry`, so the same function reads both.
     """
-    if unit['stale_reason']:
-        return ' — **re-render**'
-    if unit['status'] in ('rendered', 'ingested'):
-        return ' — already rendered'
-    return ''
+    return {'stale': ' — **re-render**', 'done': ' — already rendered',
+            'pending': ''}[pp._entry_state(unit)]
 
 
 def _scope_note(contents: ex.ExportContents) -> str:
@@ -279,8 +304,13 @@ def _scope_note(contents: ex.ExportContents) -> str:
     built from a plan that has since moved. Saying "N illustrations" over a
     directory holding twenty is the coverage overclaim this whole bundle's gap
     section exists to avoid.
+
+    Reads `scope`, not a bool. An empty plan is `whole-plan` here — calling it a
+    partial export would be the wrong sentence — and that is only safe because
+    `prune_units` takes `live_ids` and refuses an empty set, rather than deriving
+    its delete authority from this same flag.
     """
-    if contents['complete']:
+    if contents['scope'] == 'whole-plan':
         return ('This export covers every illustration in the plan.'
                 if contents['units'] else
                 'The plan has no illustrations to export.')
@@ -303,6 +333,11 @@ def render_zip_hint(project_dir: str, illus_id: str) -> str:
     Kept as a renderer rather than run: zipping is the author's call — they may
     be uploading the directory directly — and a command they can read beats a
     file this command decided to create.
+
+    Shell-quoted, because this is a command a reader copies: a project path with a
+    space in it otherwise produces one that fails, or worse, one that `cd`s
+    somewhere else.
     """
-    return (f'cd {os.path.join(project_dir, ex.EXPORT_DIR)} && '
-            f'zip -r {illus_id}.zip {illus_id} canon.md acceptance.md')
+    return (f'cd {shlex.quote(os.path.join(project_dir, ex.EXPORT_DIR))} && '
+            f'zip -r {shlex.quote(f"{illus_id}.zip")} {shlex.quote(illus_id)} '
+            f'canon.md acceptance.md')

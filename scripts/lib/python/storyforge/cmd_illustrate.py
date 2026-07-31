@@ -265,6 +265,12 @@ def run_diagnose(project_dir: str) -> int:
         findings = ill.validate_plan(project_dir, canon_cutoff=canon_cutoff)
         _report_style_reference(project_dir, canon_cutoff=canon_cutoff)
         _report_state_rung(project_dir, findings)
+        # Reported on this branch too. An export built from a plan that has since
+        # been emptied — or whose file was renamed, which `read_plan` also reads as
+        # zero rows — is exactly the state where the export rung is the useful
+        # line, and returning before it hid the bundle at the one moment it was
+        # certainly out of date.
+        _report_export_rung(project_dir, findings)
         return _report_findings(findings)
 
     needs = packet.needs_render(project_dir, plan=rows,
@@ -1930,10 +1936,20 @@ def run_export(project_dir: str, ids: set[str] | None, dry_run: bool, *,
     over to a browser session or to someone without the repo (#298).
 
     No API calls, no timestamps, so regeneration over unchanged sources is
-    byte-identical. Nothing blocks: an export costs nothing to produce, so the
-    useful behaviour over incomplete data is to build it and say what is thin —
-    every gap is logged **and** written into `README.md`, which is the copy the
-    reader still has when the log has scrolled away.
+    byte-identical.
+
+    **Data problems do not block; two things do.** An export costs nothing to
+    produce, so over incomplete data the useful behaviour is to build it and say
+    what is thin — every gap is logged **and** written into `README.md`, which is
+    the copy the reader still has when the log has scrolled away. That is
+    `run_package`'s posture, and it is why a mis-declared `production.cover_artwork`
+    warns here where `run_prompts` refuses: that refusal exists to stop *spending*
+    on a wrong house style, and this command spends nothing.
+
+    The two refusals are a plan carrying an illegal `id` — this writes to and
+    `rmtree`s a directory named from that cell, so `../../evil` escapes the export
+    tree — and an `--ids` list that matched no live row, which is a failed request
+    rather than a thin bundle and which `run_prompts` already returns 1 for.
     """
     from storyforge import canon as canon_mod
     from storyforge import export as ex
@@ -1952,8 +1968,25 @@ def run_export(project_dir: str, ids: set[str] | None, dry_run: bool, *,
                 'first, or `--diagnose` to see why the slots are empty.')
             return 1
 
+    # Before `resolve`, which builds paths from these cells. `validate_plan` would
+    # report this as `invalid_id` but is not run here (its other findings would
+    # duplicate the gaps), so the one check whose absence is destructive is made
+    # directly.
+    illegal = sorted(row['id'].strip() for row in ill.read_plan(project_dir)
+                     if not ill._ID_RE.match(row['id'].strip()))
+    if illegal:
+        log(f'ERROR: refusing to export. {len(illegal)} plan row(s) have an id '
+            f'that is not a legal illustration id: {", ".join(repr(i) for i in illegal)}. '
+            f'Every unit is a directory named from that cell, and this command '
+            f'writes to and deletes inside it — an id containing a path '
+            f'separator would reach outside {ex.EXPORT_DIR}/. Fix them in '
+            f'reference/{ill.PLAN_FILENAME} (`storyforge validate` reports the '
+            f'same rows as `invalid_id`).')
+        return 1
+
     contents = ex.resolve(project_dir, ids=ids, canon_cutoff=canon_cutoff)
     units = contents['units']
+    unknown: set[str] = set()
     if ids is not None:
         unknown = ids - {unit['id'] for unit in units}
         if unknown:
@@ -1967,26 +2000,25 @@ def run_export(project_dir: str, ids: set[str] | None, dry_run: bool, *,
         'canon.md': pp.render_canon(
             book_level=contents['book_level'], anchors=contents['anchors'],
             labels=contents['labels']),
-        'acceptance.md': pp.render_acceptance(aspects=contents['aspects']),
+        # The export's own vocabulary: its checks must point at `prompt.md`'s
+        # sections, not at packet entries that do not exist in this bundle and
+        # that a reader without the repo could not go and look up.
+        'acceptance.md': pp.render_acceptance(aspects=contents['aspects'],
+                                              source='export-prompt'),
     }
 
     if dry_run:
-        for name in ex.SHARED_FILES:
-            log(f'[dry-run] would write {os.path.join(ex.EXPORT_DIR, name)}')
         for unit in units:
             log(f'[dry-run] would write {unit["id"]}/ — '
                 f'{ex.PROMPT_FILENAME}, {ex.MANIFEST_FILENAME}, and '
                 f'{len(unit["references"])} reference image(s)')
+        for name in ex.SHARED_FILES:
+            log(f'[dry-run] would write {os.path.join(ex.EXPORT_DIR, name)}')
         for gap in contents['gaps']:
             log(f'[dry-run] WARNING: {gap}')
         return 0
 
     os.makedirs(ex.export_dir(project_dir), exist_ok=True)
-    for name in ex.SHARED_FILES:
-        with open(ex.shared_file(project_dir, name), 'w',
-                  encoding='utf-8') as f:
-            f.write(shared[name])
-
     copied = 0
     for unit in units:
         directory = ex.unit_dir(project_dir, unit['id'])
@@ -1994,16 +2026,30 @@ def run_export(project_dir: str, ids: set[str] | None, dry_run: bool, *,
         with open(os.path.join(directory, ex.PROMPT_FILENAME), 'w',
                   encoding='utf-8') as f:
             f.write(pe.render_prompt(unit=unit, title=title))
+        copied += ex.copy_references(project_dir, unit)
+        # After the copies, so a manifest never outlives the images it declares.
+        # `export_stale` checks both ends of every recorded digest, and this
+        # ordering means the window it would report is the one that genuinely
+        # exists rather than one this loop opened.
         with open(os.path.join(directory, ex.MANIFEST_FILENAME), 'w',
                   encoding='utf-8') as f:
             f.write(ex.manifest_for(unit))
-        copied += ex.copy_references(project_dir, unit)
 
-    if contents['complete']:
-        # Only a whole-plan run prunes. A subset run has no business deleting the
-        # units it was not asked about — `README.md` names them as untouched
-        # instead, which is the honest report and the reversible one.
-        removed = ex.prune_units(project_dir, {u['id'] for u in units})
+    # The shared files last, which is what makes `ex.is_built` mean something.
+    # Written first, they flipped it True at the moment the bundle was emptiest —
+    # an interrupted run then left `--diagnose` printing "built and current" over
+    # zero unit directories, with the count as the only tell.
+    for name in ex.SHARED_FILES:
+        with open(ex.shared_file(project_dir, name), 'w',
+                  encoding='utf-8') as f:
+            f.write(shared[name])
+
+    if contents['scope'] == 'whole-plan':
+        # Only a whole-plan run prunes, and it prunes against the *plan's* ids
+        # rather than the exported set — see `prune_units`, which refuses an empty
+        # one. A subset run has no business deleting the units it was not asked
+        # about; `README.md` names them as untouched instead.
+        removed = ex.prune_units(project_dir, live_ids=contents['live_ids'])
         if removed:
             log(f'  removed {len(removed)} directory(ies) for illustration(s) '
                 f'no longer in the plan: {", ".join(removed)}')
@@ -2011,12 +2057,6 @@ def run_export(project_dir: str, ids: set[str] | None, dry_run: bool, *,
     log(f'Wrote {len(units)} illustration directory(ies) and '
         f'{len(ex.SHARED_FILES)} shared file(s) to {ex.EXPORT_DIR}/ — '
         f'{copied} reference image(s) copied in')
-    derived = [u['id'] for u in units if u['body_source'] == 'plan_row']
-    if derived:
-        log(f'  {len(derived)} of {len(units)} illustration(s) have no written '
-            f'art direction, so their paste blocks come from the plan row '
-            f'alone: {", ".join(derived)}. Run `storyforge illustrate --prompts '
-            f'--ids {",".join(derived)}` for stronger prompts, then re-export.')
     for gap in contents['gaps']:
         log(f'  WARNING: {gap}')
     if contents['gaps']:
@@ -2026,6 +2066,12 @@ def run_export(project_dir: str, ids: set[str] | None, dry_run: bool, *,
     if units:
         log(f'Hand one over with, for example: '
             f'{pe.render_zip_hint(project_dir, units[0]["id"])}')
+    if unknown and not units:
+        # A failed request, not a thin bundle: the author named ids and got no
+        # directories. `run_prompts` returns 1 for the same flag with the same
+        # meaning, and two commands disagreeing about it is worse than either
+        # answer.
+        return 1
     return 0
 
 
@@ -2650,7 +2696,8 @@ def _references_for(project_dir: str, illus_id: str, *,
                     canon_cutoff: str = '',
                     no_prior_refs: bool = False,
                     style: StyleReference | None = None,
-                    notes: list[str] | None = None) -> list[tuple[str, str]]:
+                    notes: list[str] | None = None,
+                    rerun: str = '--package') -> list[tuple[str, str]]:
     """Build the labeled reference list for an illustration.
 
     Prior ingested illustrations plus the cover are what hold a book's art
@@ -2692,6 +2739,12 @@ def _references_for(project_dir: str, illus_id: str, *,
     reads as "nothing is ingested yet". Threaded through this function rather
     than recomputed beside it so the two can never disagree about which
     references were dropped and why.
+
+    `rerun` is the flag a note tells the reader to re-run, because the notes are
+    *rendered into* whichever bundle asked for them and `--package` does not
+    rebuild the export. A gap inside `illustration-export/` telling the reader to
+    regenerate the packet is the same class of wrongness as a gap there saying
+    "this packet", which `packet.book_level_gaps`' `bundle` parameter fixes.
     """
     def note(text: str) -> None:
         if notes is not None:
@@ -2751,7 +2804,7 @@ def _references_for(project_dir: str, illus_id: str, *,
                  f'using it would teach the new render the drift the new '
                  f'canon exists to remove. Re-render it from the current '
                  f'canon (`storyforge illustrate --diagnose` gives the '
-                 f'order), then re-run --package.')
+                 f'order), then re-run {rerun}.')
             continue
         # The cap is checked *after* the exclusion checks so that a skipped
         # render is still disclosed: breaking out of the loop early would hide
