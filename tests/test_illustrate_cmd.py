@@ -2398,6 +2398,239 @@ def test_an_empty_reference_chain_is_logged(in_project, capsys):
     assert 'no reference images at all' in capsys.readouterr().out
 
 
+# ============================================================================
+# The style reference (#299)
+# ============================================================================
+#
+# Found on a real 20-illustration book: `--prompts --no-prior-refs` wrote 20
+# prompt files whose only style reference was `cover-illustration.png`, which on
+# that project held a cover variation the author had explicitly rejected. Every
+# live consumer pointed at a different file; nothing could declare which artwork
+# counted, nothing staleness-checked the one reference always present, and
+# nothing logged which file had been chosen. It surfaced by reading a generated
+# prompt by hand, 20 calls too late.
+# ============================================================================
+
+def _style_ref(project_dir, name='cover-illustration.png'):
+    return make_png(os.path.join(project_dir, 'manuscript', 'assets', name),
+                    8, 8)
+
+
+def _set_yaml_production(project_dir, key, value):
+    """Append a key under the `production:` section of storyforge.yaml."""
+    path = os.path.join(project_dir, 'storyforge.yaml')
+    with open(path, encoding='utf-8') as f:
+        lines = f.readlines()
+    out = []
+    inserted = False
+    for line in lines:
+        out.append(line)
+        if not inserted and line.startswith('production:'):
+            out.append(f'  {key}: {value}\n')
+            inserted = True
+    if not inserted:
+        out.append(f'production:\n  {key}: {value}\n')
+    with open(path, 'w', encoding='utf-8') as f:
+        f.writelines(out)
+
+
+def _backdate(path, iso_date):
+    """Set a file's mtime to midnight on an ISO date."""
+    from datetime import datetime
+    stamp = datetime.fromisoformat(f'{iso_date}T00:00:00').timestamp()
+    os.utime(path, (stamp, stamp))
+
+
+def test_a_declared_style_reference_beats_the_convention(in_project):
+    """The regression: the convention filename held a superseded variation and
+    the selected art sat next to it under a descriptive name."""
+    _style_ref(in_project)  # the superseded variation
+    _style_ref(in_project, 'cover-illustration-discovery.png')
+    _set_yaml_production(in_project, 'cover_artwork',
+                         'manuscript/assets/cover-illustration-discovery.png')
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['path'] == 'manuscript/assets/cover-illustration-discovery.png'
+    assert style['declared'] is True
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil')
+    assert [p for p, _ in refs] == [
+        'manuscript/assets/cover-illustration-discovery.png']
+
+
+def test_the_convention_still_answers_when_nothing_is_declared(in_project):
+    """Existing projects keep working — the whole point of the fallback."""
+    _style_ref(in_project)
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['path'] == os.path.join('manuscript', 'assets',
+                                         'cover-illustration.png')
+    assert style['declared'] is False
+    assert 'the conventional filename' in \
+        cmd_illustrate.describe_style_reference(style)
+
+
+def test_the_convention_accepts_a_jpeg(in_project):
+    make_jpeg(os.path.join(in_project, 'manuscript', 'assets',
+                           'cover-illustration.jpg'), 8, 8)
+    assert cmd_illustrate.resolve_style_reference(in_project)['path'] == \
+        os.path.join('manuscript', 'assets', 'cover-illustration.jpg')
+
+
+def test_a_declared_path_that_does_not_exist_warns_and_falls_back(in_project):
+    _style_ref(in_project)
+    _set_yaml_production(in_project, 'cover_artwork', 'manuscript/assets/gone.png')
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['unresolved_declaration'] == 'manuscript/assets/gone.png'
+    assert style['path'] == os.path.join('manuscript', 'assets',
+                                         'cover-illustration.png')
+    assert style['declared'] is False
+    warnings = cmd_illustrate.style_reference_warnings(style)
+    assert any('does not exist' in w for w in warnings)
+    assert any('may not be the artwork you meant' in w for w in warnings)
+
+
+def test_a_declared_path_that_does_not_exist_with_no_convention(in_project):
+    _set_yaml_production(in_project, 'cover_artwork', 'manuscript/assets/gone.png')
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['path'] == ''
+    assert cmd_illustrate.describe_style_reference(style) == ''
+    warnings = cmd_illustrate.style_reference_warnings(style)
+    assert any('no conventional style reference was found either' in w
+               for w in warnings)
+    assert any('no cover artwork' in w for w in warnings)
+
+
+def test_a_style_reference_older_than_the_canon_warns(in_project):
+    """The regression: every other reference was staleness-checked and the most
+    influential one was exempt."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _backdate(_style_ref(in_project), '2026-07-01')
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['modified'] == '2026-07-01'
+    assert style['canon_cutoff'] == '2026-07-20'
+    assert style['stale'] is True
+    warning = ' '.join(cmd_illustrate.style_reference_warnings(style))
+    assert 'cover-illustration.png' in warning
+    assert 'last modified 2026-07-01' in warning
+    assert '2026-07-20' in warning
+    assert 'production.cover_artwork' in warning
+
+
+def test_a_style_reference_newer_than_the_canon_is_not_stale(in_project):
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _backdate(_style_ref(in_project), '2026-07-21')
+    assert cmd_illustrate.resolve_style_reference(in_project)['stale'] is False
+
+
+def test_a_style_reference_modified_the_same_day_is_not_stale(in_project):
+    """Same-day is the ordinary loop — edit canon, re-render the cover, prompt."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _backdate(_style_ref(in_project), '2026-07-20')
+    assert cmd_illustrate.resolve_style_reference(in_project)['stale'] is False
+
+
+def test_a_style_reference_is_never_excluded_for_being_stale(in_project, capsys):
+    """It is warned about, not dropped: under --no-prior-refs it is the whole
+    style signal, so excluding it would leave the run with nothing."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _backdate(_style_ref(in_project), '2026-07-01')
+    ill.write_plan(in_project, [plan_row()])
+
+    notes = []
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil',
+                                         notes=notes)
+    assert [p for p, _ in refs] == [os.path.join('manuscript', 'assets',
+                                                 'cover-illustration.png')]
+    assert any('before the canon was last updated' in n for n in notes)
+
+
+def test_the_style_staleness_check_survives_no_prior_refs(in_project):
+    """`_reference_cutoff` returns '' under --no-prior-refs, and inheriting that
+    would leave the highest-stakes run — cover is 100% of the signal — as the
+    only unchecked one."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _backdate(_style_ref(in_project), '2026-07-01')
+
+    cutoff = cmd_illustrate._reference_cutoff(in_project, True)
+    assert cutoff == ''
+    notes = []
+    cmd_illustrate._references_for(in_project, 'lantern-vigil',
+                                   canon_cutoff=cutoff, no_prior_refs=True,
+                                   notes=notes)
+    assert any('before the canon was last updated 2026-07-20' in n
+               for n in notes)
+
+
+def test_a_symlinked_style_reference_resolves_with_its_target(in_project):
+    """The project-side workaround for a book with several cover variations."""
+    real = _style_ref(in_project, 'cover-illustration-discovery.png')
+    link = os.path.join(in_project, 'manuscript', 'assets',
+                        'cover-illustration.png')
+    os.symlink(os.path.basename(real), link)
+
+    style = cmd_illustrate.resolve_style_reference(in_project)
+    assert style['path'] == os.path.join('manuscript', 'assets',
+                                         'cover-illustration.png')
+    assert style['symlink_target'] == os.path.join(
+        'manuscript', 'assets', 'cover-illustration-discovery.png')
+    headline = cmd_illustrate.describe_style_reference(style)
+    assert 'cover-illustration-discovery.png' in headline
+    # The prompt file's reference list names the target too — it is what the
+    # author recognizes when uploading.
+    refs = cmd_illustrate._references_for(in_project, 'lantern-vigil')
+    assert 'cover-illustration-discovery.png' in refs[0][1]
+
+
+def test_a_broken_symlink_is_not_a_style_reference(in_project):
+    os.makedirs(os.path.join(in_project, 'manuscript', 'assets'), exist_ok=True)
+    os.symlink('nowhere.png', os.path.join(in_project, 'manuscript', 'assets',
+                                           'cover-illustration.png'))
+    assert cmd_illustrate.resolve_style_reference(in_project)['path'] == ''
+
+
+def test_prompts_logs_the_style_reference_before_any_call(in_project, monkeypatch,
+                                                          capsys):
+    """A run that spends 20 model calls must say what set the house style."""
+    write_scene(in_project, 'vigil', SCENE)
+    _style_ref(in_project, 'cover-illustration-discovery.png')
+    _set_yaml_production(in_project, 'cover_artwork',
+                         'manuscript/assets/cover-illustration-discovery.png')
+    ill.write_plan(in_project, [plan_row()])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+
+    def _record(*a, **k):
+        # Anything logged after this point is too late to be useful.
+        assert 'Style reference: manuscript/assets/' \
+            'cover-illustration-discovery.png' in capsys.readouterr().out
+        return '### Scene\n\nX.\n'
+    monkeypatch.setattr(cmd_illustrate, '_invoke', _record)
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+
+
+def test_prompts_logs_the_style_staleness_warning_once(in_project, monkeypatch,
+                                                       capsys):
+    write_scene(in_project, 'vigil', SCENE)
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _backdate(_style_ref(in_project), '2026-07-01')
+    ill.write_plan(in_project, [plan_row(), plan_row(id='second')])
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'test-key')
+    monkeypatch.setattr(cmd_illustrate, '_invoke',
+                        lambda *a, **k: '### Scene\n\nX.\n')
+
+    assert cmd_illustrate.main(['--prompts', '--coaching', 'full']) == 0
+    out = capsys.readouterr().out
+    # Two rows, one warning: resolved once for the run, not once per row.
+    assert out.count('was last modified 2026-07-01') == 1
+
+
 def test_ingest_records_the_ingest_date(in_project):
     from datetime import date
     write_scene(in_project, 'vigil', SCENE)

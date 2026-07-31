@@ -1272,6 +1272,15 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
         _warn_unanchored_rows(rows, anchors)
         _warn_truncated_anchors(project_dir)
     cutoff = _reference_cutoff(project_dir, no_prior_refs)
+    # Resolved once for the run, and logged before a single call goes out: with
+    # nothing naming the file, a run that spent twenty calls on a superseded
+    # cover surfaced only by reading a generated prompt by hand (#299).
+    style = resolve_style_reference(project_dir)
+    headline = describe_style_reference(style)
+    if headline:
+        log(headline)
+    for warning in style_reference_warnings(style):
+        log(f'WARNING: {warning}')
     written = 0
     failed: list[str] = []
 
@@ -1285,7 +1294,7 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
             'row': row,
             'references': _references_for(
                 project_dir, illus_id, plan=plan, canon_cutoff=cutoff,
-                no_prior_refs=no_prior_refs),
+                no_prior_refs=no_prior_refs, style=style),
             'aspect': pi.aspect_for_row(row),
             'request': pi.build_art_direction_request(
                 row=row,
@@ -1897,11 +1906,206 @@ def _strict_prompt_scaffold(row: dict[str, str]) -> str:
 #: than this and the model starts averaging them.
 _MAX_REFERENCES = 4
 
+#: Where the style reference lives when nothing declares it. The *artwork*, not
+#: the typeset cover — `manuscript/assets/cover.png` is the composite with the
+#: title burned into the raster, and feeding that to a prompt whose own
+#: constraint block says "no text, no letters, no words" teaches the render
+#: baked-in lettering.
+_STYLE_REFERENCE_STEM = os.path.join('manuscript', 'assets', 'cover-illustration')
+
+#: Extensions the convention filename is tried with, in order. A jpeg export of
+#: the same artwork is the same convention; refusing it because the name ends
+#: `.jpg` is the brittleness this whole resolution order exists to fix.
+_STYLE_REFERENCE_EXTENSIONS = ('png', 'jpg', 'jpeg', 'webp')
+
+#: The YAML key a project uses to say which of several cover variations is the
+#: one that sets the house style.
+STYLE_REFERENCE_KEY = 'production.cover_artwork'
+
+
+class StyleReference(TypedDict):
+    """Which artwork sets the house style for every prompt in the book.
+
+    Returned rather than logged so the same resolution can be reported once per
+    run by `--prompts` and rendered into the packet's `reference-images.md`,
+    without a per-row call logging the same warning twenty times. Same posture
+    as `visual_state.prepass`: resolve silently, let the caller report.
+    """
+    #: Project-relative path, or absolute when a declaration points outside the
+    #: project. Empty when nothing resolved at all.
+    path: str
+    #: Whether `path` came from the YAML declaration rather than the convention.
+    declared: bool
+    #: A declared path that does not exist. Non-empty *and* a resolved `path`
+    #: means the declaration was ignored and the convention answered instead —
+    #: the one shape an author most needs told about, because the run still
+    #: succeeds with the wrong art.
+    unresolved_declaration: str
+    #: What the path points at, when it is a symlink. The documented workaround
+    #: for a project with several cover variations is to symlink the convention
+    #: filename at the selected art, so the target is the thing the author
+    #: actually recognizes.
+    symlink_target: str
+    #: ISO date of the file's mtime, or '' if it could not be read.
+    modified: str
+    #: The newest `canon_updated` this was checked against, '' if there is none.
+    #: Carried so the warning can name it, and so a caller cannot report a
+    #: staleness verdict against a different date than the one that produced it.
+    canon_cutoff: str
+    #: `modified` is strictly older than `canon_cutoff`.
+    stale: bool
+
+
+def resolve_style_reference(project_dir: str, *,
+                            canon_cutoff: str | None = None) -> StyleReference:
+    """Resolve the artwork that sets the house style, and how fresh it is.
+
+    Resolution order, mirroring `assembly._resolve_cover_path` one level over:
+
+    1. `production.cover_artwork` in storyforge.yaml — the declaration. A book
+       can hold four rendered cover variations and one selected one, and before
+       this key there was no way to say which counted: the convention filename
+       won, silently, even when every live consumer pointed elsewhere. That is
+       how twenty interior prompts inherited a superseded cover as their sole
+       style reference (#299).
+    2. `manuscript/assets/cover-illustration.{png,jpg,jpeg,webp}` — the
+       convention, kept so every existing project resolves exactly as before.
+
+    Deliberately **not** `production.cover_image`: that key names the file that
+    *ships*, which on a real book is the typeset composite. The artwork and the
+    typeset cover are different files on purpose, so they get different keys.
+
+    Staleness is the file's mtime against the newest `canon_updated`, on the
+    same footing as a prior ingested render — the cover is the most influential
+    reference in the list and the *only* one under `--no-prior-refs`, so
+    exempting it left the highest-stakes run unchecked. Unlike an ingested row,
+    an unreadable mtime is **not** treated as stale: there is no bookkeeping
+    column here that a file could predate, so "unknown" is genuinely unknown.
+    `os.path.getmtime` follows symlinks, which is what we want — the target is
+    the artwork.
+
+    `canon_cutoff` defaults to reading the canon tree rather than taking
+    `_reference_cutoff`'s answer, and that distinction is the whole point:
+    `_reference_cutoff` returns '' under `--no-prior-refs`, which is precisely
+    the run where the cover is 100% of the style signal. Inheriting that
+    suppression would leave the highest-stakes run the only unchecked one.
+    Pass `''` to skip the check deliberately.
+    """
+    from storyforge import canon as canon_mod
+    if canon_cutoff is None:
+        canon_cutoff = canon_mod.newest_canon_updated(project_dir)
+    declared = read_yaml_field(STYLE_REFERENCE_KEY, project_dir).strip()
+    unresolved = ''
+    path = ''
+    if declared:
+        full = (declared if os.path.isabs(declared)
+                else os.path.join(project_dir, declared))
+        if os.path.isfile(full):
+            path = declared
+        else:
+            unresolved = declared
+
+    if not path:
+        for extension in _STYLE_REFERENCE_EXTENSIONS:
+            candidate = f'{_STYLE_REFERENCE_STEM}.{extension}'
+            if os.path.isfile(os.path.join(project_dir, candidate)):
+                path = candidate
+                break
+
+    reference: StyleReference = {
+        'path': path,
+        'declared': bool(path) and path == declared,
+        'unresolved_declaration': unresolved,
+        'symlink_target': '',
+        'modified': '',
+        'canon_cutoff': canon_cutoff,
+        'stale': False,
+    }
+    if not path:
+        return reference
+
+    full = path if os.path.isabs(path) else os.path.join(project_dir, path)
+    if os.path.islink(full):
+        target = os.path.realpath(full)
+        relative = os.path.relpath(target, project_dir)
+        reference['symlink_target'] = (
+            target if relative.startswith(os.pardir) else relative)
+    try:
+        reference['modified'] = date.fromtimestamp(
+            os.path.getmtime(full)).isoformat()
+    except OSError:
+        return reference
+    reference['stale'] = canon_mod.predates_canon(
+        reference['modified'], canon_cutoff)
+    return reference
+
+
+def describe_style_reference(reference: StyleReference) -> str:
+    """The one line that names what set the house style, or '' if nothing did.
+
+    A run that spends twenty model calls must say which file directed them.
+    Absent that line, the wrong cover surfaced only by reading a generated
+    prompt by hand, twenty calls too late (#299). Reported with its symlink
+    target because the documented workaround for a book with several cover
+    variations is to symlink the convention filename at the selected art, and
+    the target is the name the author recognizes.
+    """
+    if not reference['path']:
+        return ''
+    source = (f'declared in {STYLE_REFERENCE_KEY}' if reference['declared']
+              else 'the conventional filename')
+    return (f'Style reference: {reference["path"]} ({source})'
+            + (f' → {reference["symlink_target"]}'
+               if reference['symlink_target'] else '')
+            + (f', modified {reference["modified"]}'
+               if reference['modified'] else ''))
+
+
+def style_reference_warnings(reference: StyleReference) -> list[str]:
+    """Everything wrong with the style reference, unprefixed.
+
+    Separate from `describe_style_reference` because the two go to different
+    places: the headline is a log line, while these are logged as WARNINGs
+    *and* written into the packet's "What is not in that list" section, which
+    must carry only problems — a positive resolution line there would read as
+    an exclusion.
+    """
+    warnings: list[str] = []
+    if reference['unresolved_declaration']:
+        warnings.append(
+            f'{STYLE_REFERENCE_KEY} names '
+            f'`{reference["unresolved_declaration"]}`, which does not exist'
+            + (f' — the conventional `{reference["path"]}` was used instead, '
+               f'which may not be the artwork you meant.'
+               if reference['path'] else
+               ' — and no conventional style reference was found either.'))
+    if not reference['path']:
+        warnings.append(
+            f'there is no cover artwork, so nothing sets the house style from '
+            f'outside this set and the first render establishes the look. Add '
+            f'{_STYLE_REFERENCE_STEM}.png, or set {STYLE_REFERENCE_KEY} in '
+            f'storyforge.yaml.')
+        return warnings
+    if reference['stale']:
+        warnings.append(
+            f'the style reference `{reference["path"]}`'
+            + (f' (→ `{reference["symlink_target"]}`)'
+               if reference['symlink_target'] else '')
+            + f' was last modified {reference["modified"]}, before the canon '
+              f'was last updated {reference["canon_cutoff"]}. It sets the '
+              f'house style for '
+              f'every prompt — under --no-prior-refs it is the only thing that '
+              f'does — so drift the new canon exists to remove is taught back. '
+              f'Re-render the cover artwork, or point {STYLE_REFERENCE_KEY} at '
+              f'art that postdates the canon.')
+    return warnings
+
 
 def _references_for(project_dir: str, illus_id: str, *,
                     plan: list[dict[str, str]] | None = None,
                     canon_cutoff: str = '',
                     no_prior_refs: bool = False,
+                    style: StyleReference | None = None,
                     notes: list[str] | None = None) -> list[tuple[str, str]]:
     """Build the labeled reference list for an illustration.
 
@@ -1911,9 +2115,14 @@ def _references_for(project_dir: str, illus_id: str, *,
     not necessarily render order — the chain only needs *some* prior art to
     anchor style, not a specific one.
 
-    The cover reference is the *artwork* (`cover-illustration.png`), not the
-    typeset cover — using the art as a style reference is right, and the two
-    files are deliberately different.
+    The cover reference is the *artwork*, not the typeset cover — using the art
+    as a style reference is right, and the two files are deliberately different.
+    Which artwork is resolved by `resolve_style_reference`: a declaration in
+    `production.cover_artwork` first, then the `cover-illustration.*`
+    convention. That reference is staleness-checked on the same footing as a
+    prior render, but never *excluded* for being stale — under
+    `--no-prior-refs` it is the whole style signal, so dropping it would leave
+    the highest-stakes run with nothing.
 
     Two ways a prior illustration is excluded:
 
@@ -1945,13 +2154,20 @@ def _references_for(project_dir: str, illus_id: str, *,
             notes.append(text)
 
     references: list[tuple[str, str]] = []
-    cover = os.path.join('manuscript', 'assets', 'cover-illustration.png')
-    if os.path.isfile(os.path.join(project_dir, cover)):
-        references.append((cover, 'cover art (sets the house style)'))
-    else:
-        note('There is no cover artwork at manuscript/assets/'
-             'cover-illustration.png, so nothing sets the house style from '
-             'outside this set.')
+    # Threaded in by `--prompts`, which resolves it once for the run so the
+    # canon tree is not walked per row and the headline is logged exactly once.
+    if style is None:
+        style = resolve_style_reference(project_dir)
+    cover = style['path']
+    if cover:
+        label = 'cover art (sets the house style)'
+        if style['symlink_target']:
+            label += f' → {style["symlink_target"]}'
+        references.append((cover, label))
+    for warning in style_reference_warnings(style):
+        # Noted, not logged: this function is called once per row, and
+        # `run_prompts` logs the same warnings once for the whole run.
+        note(warning[0].upper() + warning[1:])
 
     rows = plan if plan is not None else ill.read_plan(project_dir)
     skipped_stale = 0
@@ -2033,12 +2249,12 @@ def _references_for(project_dir: str, illus_id: str, *,
 def _stale_reference_reason(row: dict[str, str], canon_cutoff: str) -> str:
     """Why this ingested row predates the canon, or '' if it does not.
 
-    Compared as ISO dates (`canon.iso_date_or_empty`), which sort
-    lexicographically. Strictly older: a render ingested the *same day* the
-    canon was last touched is kept, because same-day is the normal incremental
-    loop (write canon, render, ingest, prompt the next one) and date granularity
-    cannot separate the two — treating same-day as stale would empty the chain
-    on every ordinary run.
+    The comparison itself is `canon.predates_canon`, which is where the
+    same-day-is-not-stale rule lives; this function only decides what an
+    *unusable* date means for an ingested render. Empty and unparseable are both
+    treated as pre-canon here, which is the opposite of the style reference's
+    policy and deliberately so: `ingested_at` postdates the plan schema, so
+    "unknown" means the render predates even the bookkeeping.
     """
     from storyforge import canon as canon_mod
     raw = (row.get('ingested_at') or '').strip()
@@ -2051,7 +2267,7 @@ def _stale_reference_reason(row: dict[str, str], canon_cutoff: str) -> str:
         return (f'its `ingested_at` ({raw!r}) is not an ISO date, so it '
                 f'cannot be shown to postdate the canon last updated '
                 f'{canon_cutoff}')
-    if ingested < canon_cutoff:
+    if canon_mod.predates_canon(ingested, canon_cutoff):
         return (f'it was ingested {ingested}, before the canon was last '
                 f'updated {canon_cutoff}')
     return ''
