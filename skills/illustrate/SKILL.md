@@ -50,6 +50,7 @@ Store this resolved plugin path for use throughout the session.
 | Prompts written, no packet or packet stale | **Package** — assemble the handoff bundle |
 | Packet built, any anchor-batch row not ingested, or ingested from canon since rewritten | **Anchor** — render and approve those N first |
 | Every anchor-batch row ingested from the current canon | **Churn** — hand the packet over |
+| Author is generating in a browser session, or handing images to someone without the repo | **Export** — one self-contained directory per illustration |
 | Non-anchor files on disk | **Ingest** — bring them in and embed |
 | An illustration isn't working | **Revise** — supersede and re-direct |
 | All or most are rendered | **Review** — check the sequence for continuity drift |
@@ -314,6 +315,45 @@ Offer to add them when the author says an image keeps coming back with something
 
 ---
 
+## Mode: Export
+
+The packet is what a long session works through with `canon.md` in context. The export is what you hand over **one image at a time** — to a browser session, to a person who does not have the repo, to anything that takes an upload.
+
+```bash
+[plugin_path]/storyforge illustrate --export
+[plugin_path]/storyforge illustrate --export --anchor-batch     # just phase 1
+[plugin_path]/storyforge illustrate --export --ids LF-05,LF-11
+```
+
+_(No API calls — assembly only, safe to run here without asking.)_
+
+**Why both exist.** The packet's economies are deliberate and they are exactly what a single-image handover cannot afford: an 80–120 word entry derived from the plan row, with the model-authored prose in a second file and the reference images left as paths on disk. Zip that and you hand over six markdown files and no art. So the export is complete by construction:
+
+```
+manuscript/illustration-export/
+  README.md          # how to work it, and every gap in the data
+  canon.md           # shared — read once, keep it in front of you
+  acceptance.md      # shared
+  LF-05/
+    prompt.md        # ONE contiguous paste block, then the per-image checks
+    references/      # the actual image files, numbered in upload order
+    manifest.json    # each reference's sha256, plus model / size / quality / aspect
+```
+
+**How to talk an author through one unit.** Open `<id>/prompt.md`. Read anything under **Read this first** — that is why generating right now might be a bad idea. Upload the files in `references/` in filename order. Paste everything between the "Paste everything below this line" heading and the end-of-prompt line, and nothing outside it. Check the result against that file's **Accept only if** section plus `acceptance.md`. Save it as `<id>.png` and `--ingest` it.
+
+**The paste block carries the state, not the prompt file's memory of it.** The body comes from `manuscript/assets/illustrations/prompts/<id>.md`; the state, `absent`, and `contrast` lines are re-derived from the plan and the transition log at export time. So an export built after you edited `reference/visual-state.csv` is correct even though the prompt file is not — there is no `prompt_stale`. If you want the prompt file right too, re-run `--prompts --ids <id>`.
+
+**A unit whose row has no prompt file is still exported, and says so.** Its paste block is assembled from the plan row alone — beat, subject, composition — with none of the scene-specific prose `--prompts` writes. That is stated in `prompt.md`, in `README.md`'s table (`plan row only`), and in the log. Tell the author plainly: it reads like a complete prompt and it is a thinner one. Run `--prompts --ids <those ids>` first if the image matters.
+
+**`--anchor-batch` is phase 1 in one command.** It resolves the four slots itself and reports how — read those disclosures out. Nothing populates `register`, so darkest and brightest are usually guesses (the first and last illustration in reading order), and the author who typed the flag never named the four ids.
+
+**It is a render, never hand-edited** — same as the packet. `cleanup` reports `illus_export_stale` when the export is older than the plan, the transition log, a canon file, or a prompt file it aggregated; when a copied reference image is missing, corrupt, or no longer matches its source; when a unit has no `prompt.md`; and when a manifest cannot be read or checked at all. The digests in `manifest.json` are what make the reference checks possible, and they are the only way this bundle goes stale without anything under `reference/` moving: someone re-rendered an illustration the export was carrying as a reference. A reason that says *could not be checked* is not a claim the export is wrong — but it is not a claim it is right either, which is why it is reported.
+
+**A `--ids` run leaves the other directories alone.** They stay on disk and `README.md` names them as untouched, because they may have been built from a plan that has since changed. A whole-plan run removes directories for rows that have left the plan. If the author is unsure which state the bundle is in, re-run `--export` with no `--ids`.
+
+---
+
 ## Mode: Anchor
 
 The packet is built and the anchor batch is not rendered yet. This is phase one of the handoff, and skipping it is expensive: a long generation run that references *descriptions* drifts, and one that references four approved images does not.
@@ -474,7 +514,7 @@ When you find drift, fix it by re-rendering from the anchor — not by patching 
 
 _(No API calls — safe to run here without asking.)_
 
-Read-only. Reports plan counts by status, what's embedded, the recommended render order with the visual key marked (and `~` on any ingested row whose art predates the current canon), what's next to render, every ingested illustration that needs re-rendering because the canon moved under it, the anchor batch with every guessed slot disclosed, the visual-state rung (whether the transition log exists, how many entities it tracks, and whether the audit is unrun, current, or stale), the sequence-staging rung (how many rows carry a `treatment`), the packet rung (not built, built and current, or built and stale, plus which anchor-batch rows are still unrendered and which are ingested but canon-stale — "ready to hand over" is only said when neither is true), and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers, invalid layouts, a stale packet, a drifted anchor copy.
+Read-only. Reports plan counts by status, what's embedded, the recommended render order with the visual key marked (and `~` on any ingested row whose art predates the current canon), what's next to render, every ingested illustration that needs re-rendering because the canon moved under it, the anchor batch with every guessed slot disclosed, the visual-state rung (whether the transition log exists, how many entities it tracks, and whether the audit is unrun, current, or stale), the sequence-staging rung (how many rows carry a `treatment`), the packet rung (not built, built and current, or built and stale, plus which anchor-batch rows are still unrendered and which are ingested but canon-stale — "ready to hand over" is only said when neither is true), the export rung (not built, built and current, or built and stale, with how many illustration directories it holds — reported independently of the packet, since an author can want one and never the other), and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers, invalid layouts, a stale packet, a stale export, a drifted anchor copy.
 
 This is the gate for plan health, deliberately rather than the packet: `--package` is assembly and reports only what it could not cover, so problems with the plan itself surface here.
 

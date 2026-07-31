@@ -43,6 +43,12 @@ Aspect = Literal['portrait', 'square', 'landscape']
 ASPECTS: Final[tuple[Aspect, ...]] = ('portrait', 'square', 'landscape')
 DEFAULT_ASPECT: Final[Aspect] = 'portrait'
 
+#: The image model every prompt file and every export manifest names. A constant
+#: rather than a default argument repeated at each site, so the prompt file and
+#: the export's `manifest.json` cannot disagree about what the prompt was written
+#: for — the manifest exists to be a reproducible record of the render settings.
+DEFAULT_IMAGE_MODEL: Final[str] = 'gpt-image-2'
+
 # Phrasing matches the cover skill's Step T2.1 constraint verbatim — image
 # models render text unreliably, and the two prompt families should not drift
 # apart on the one constraint they share.
@@ -766,10 +772,88 @@ def render_references_block(
     return '\n'.join(lines)
 
 
+#: The line written immediately before the paste region, and the two headings
+#: that bound the model-authored body inside it. Named constants because
+#: `parse_prompt_file` reads back what `render_prompt_file` writes: a literal
+#: repeated in the reader is how the two drift, and the reader's failure mode is
+#: silently exporting half a prompt.
+PASTE_SENTINEL: Final[str] = 'Paste everything below into the image model.'
+PROMPT_HEADING: Final[str] = '## Prompt'
+CONSTRAINTS_HEADING: Final[str] = '### Constraints'
+
+
+def prompt_constraints(*, aspect: Aspect = DEFAULT_ASPECT, state: str = '',
+                       absent: str = '', contrast: str = '') -> list[str]:
+    """The Constraints bullets, as one list both paste-ready artifacts render.
+
+    Shared by `render_prompt_file` and the export's paste block so the two cannot
+    drift apart in *how* they phrase a constraint — the same reasoning
+    `packet.state_for_row` records for the state itself (#297): two renderings of
+    one row is how they disagree, one function is how they cannot. Scoped to
+    phrasing on purpose: the two artifacts can still differ in *content*, in two
+    documented ways. The export opts into `contrast` (below), and a prompt file
+    written before a matrix edit keeps its old state bullet while a fresh export
+    carries the state in force now, because there is no `prompt_stale`.
+
+    `contrast` is opt-in and `render_prompt_file` does not pass it: the prompt
+    file keeps contrast in its do-NOT-paste block because the derived clause can
+    name a neighbouring illustration by id. The export passes it, because a
+    single contiguous paste block is that artifact's whole purpose and the
+    directive — vary the staging — is the one thing no generation call can work
+    out for itself.
+    """
+    constraints = [f'- {orientation_clause(aspect)}',
+                   f'- Render {_NO_TEXT_CONSTRAINT}',
+                   '- Match the style, palette, and line quality of the '
+                   'reference images.',
+                   # "their continuity anchor", not "the anchor description
+                   # above": the export renders these same bullets in a block
+                   # whose anchors live in a sibling `canon.md`, so a positional
+                   # reference would point at nothing in one of the two
+                   # artifacts that share this list.
+                   '- Keep every character, place, and prop consistent with '
+                   'its continuity anchor, word for word.']
+    if state.strip():
+        constraints.append(
+            f'- The visual state at this point in the book, which overrides '
+            f'any anchor detail that disagrees: {state.strip()}')
+    if absent.strip():
+        constraints.append(f'- Not in this image: {absent.strip()}')
+    if contrast.strip():
+        constraints.append(
+            f'- Set this image apart from its neighbours: {contrast.strip()}')
+    return constraints
+
+
+def prompt_acceptance_lines(*, state: str = '', absent: str = '',
+                            contrast: str = '') -> list[str]:
+    """The per-image acceptance checks, shared by the prompt file and the export.
+
+    **A state that did not resolve is stated, not omitted.** Omitting the line
+    left an acceptance block announcing "checked against this illustration's row"
+    while dropping the only check #297 was filed about, so the unresolved case
+    gets the longer sentence rather than silence.
+    """
+    accept = [
+        f'- The visual state matches: {state.strip()}' if state.strip() else
+        f'- **No visual state resolved for this illustration**, so the costume, '
+        f'lighting, and damage states above are the model\'s inference rather '
+        f'than a read of `{STATE_FILE}`. Nothing here can be checked '
+        f'against the book\'s schedule — add a transition, or a '
+        f'`state_override` on the plan row if the state is true in this image '
+        f'only.'
+    ]
+    if absent.strip():
+        accept.append(f'- Nothing in frame that must not be: {absent.strip()}')
+    if contrast.strip():
+        accept.append(f'- It is set apart from its neighbours: {contrast.strip()}')
+    return accept
+
+
 def render_prompt_file(*, row: dict[str, str], body: str,
                        references: list[str] | list[tuple[str, str]],
                        aspect: Aspect = DEFAULT_ASPECT,
-                       model: str = 'gpt-image-2',
+                       model: str = DEFAULT_IMAGE_MODEL,
                        state: str = '', absent: str = '',
                        contrast: str = '') -> str:
     """Assemble an illustration's prompt file.
@@ -797,35 +881,11 @@ def render_prompt_file(*, row: dict[str, str], body: str,
     is read on the same timescale as the packet and owes the same honesty.
     """
     illus_id = (row.get('id') or '').strip()
-    orientation = orientation_clause(aspect)
     scene_id = (row.get('scene_id') or '').strip()
 
-    constraints = [f'- {orientation}',
-                   f'- Render {_NO_TEXT_CONSTRAINT}',
-                   '- Match the style, palette, and line quality of the '
-                   'reference images.',
-                   '- Keep every character consistent with their anchor '
-                   'description above.']
-    if state.strip():
-        constraints.append(
-            f'- The visual state at this point in the book, which overrides '
-            f'any anchor detail that disagrees: {state.strip()}')
-    if absent.strip():
-        constraints.append(f'- Not in this image: {absent.strip()}')
-
-    accept = [
-        f'- The visual state matches: {state.strip()}' if state.strip() else
-        f'- **No visual state resolved for this illustration**, so the costume, '
-        f'lighting, and damage states above are the model\'s inference rather '
-        f'than a read of `{STATE_FILE}`. Nothing here can be checked '
-        f'against the book\'s schedule — add a transition, or a '
-        f'`state_override` on the plan row if the state is true in this image '
-        f'only.'
-    ]
-    if absent.strip():
-        accept.append(f'- Nothing in frame that must not be: {absent.strip()}')
-    if contrast.strip():
-        accept.append(f'- It is set apart from its neighbours: {contrast.strip()}')
+    constraints = prompt_constraints(aspect=aspect, state=state, absent=absent)
+    accept = prompt_acceptance_lines(state=state, absent=absent,
+                                     contrast=contrast)
     # Always rendered, because `accept` always has its state line. Marked
     # do-NOT-paste: it sits after "Paste everything below into the image model",
     # its prose reads like prompt text, and via `contrast` it can name another
@@ -856,15 +916,15 @@ def render_prompt_file(*, row: dict[str, str], body: str,
         '',
         render_references_block(references),
         '',
-        '## Prompt',
+        PROMPT_HEADING,
         '',
-        'Paste everything below into the image model.',
+        PASTE_SENTINEL,
         '',
         '---',
         '',
         body.strip(),
         '',
-        '### Constraints',
+        CONSTRAINTS_HEADING,
         '',
         '\n'.join(constraints),
         '',
@@ -883,6 +943,94 @@ def render_prompt_file(*, row: dict[str, str], body: str,
         '',
     ]
     return '\n'.join(parts)
+
+
+#: Why a prompt file yielded no usable model-authored body, or yielded a partial
+#: one. `'ok'` is the only value a caller may render from without saying
+#: something: `'empty_body'` and `'no_prompt_section'` mean fall back and report,
+#: and `'body_truncated'` means the prose *is* usable but is provably short, which
+#: must be said out loud rather than accepted (#293's finding: a truncation every
+#: consumer accepts is worse than an absence, because nothing looks wrong).
+ParsedPromptStatus = Literal['ok', 'no_prompt_section', 'empty_body',
+                             'body_truncated']
+
+
+class ParsedPrompt(TypedDict):
+    """The model-authored prose recovered from a written prompt file."""
+    body: str
+    status: ParsedPromptStatus
+
+
+#: The headings that end the model-authored body. Matched at **any** `##`–`####`
+#: level, which is the whole point: the literal `'### Constraints'` missed a
+#: hand-promoted `## Constraints` (the likeliest hand edit, since every heading
+#: around it is `##`), and the old constraints then landed *inside* the exported
+#: paste block beside the freshly derived ones — two contradicting costume
+#: directives in one region a reader is told to paste whole, which is #297
+#: reconstituted inside the split that exists to prevent it.
+_BODY_TERMINATOR_RE = re.compile(
+    r'(?m)^\#{2,4}[ \t]*(Constraints|Accept only if|Log)\b')
+
+
+def parse_prompt_file(text: str) -> ParsedPrompt:
+    """Recover the model-authored body from a file `render_prompt_file` wrote.
+
+    **The reader of that writer, kept beside it** so the two cannot drift over
+    the strings that bound the body — the same reasoning `packet.anchor_block`
+    and `packet.anchor_copy_drift` record for the canon-embed markers.
+
+    Structural rather than marker-delimited on purpose. An HTML comment pair
+    around the body would be a more robust parse, and it would also sit *inside*
+    the region the file tells the author to paste into an image model — so every
+    export would carry two lines of machine bookkeeping into the prompt. The
+    bounds are instead the sentinel line and the trailer headings this module
+    writes, which are already load-bearing prose.
+
+    Only the body is returned. The Constraints block is deliberately **not**
+    parsed back out: `prompt_constraints` regenerates it from the plan, so an
+    export gets the constraints in force now rather than whatever was true when
+    the prompt file was written. That is the one part of the prompt file an
+    export must not inherit — the model's prose is the irreplaceable half, the
+    constraints are derived.
+
+    **A heading collision is decidable, and is reported rather than resolved.**
+    The writer emits `Constraints`, `Accept only if`, and `Log` exactly once each,
+    so a *repeated* one means the model wrote its own — documented behaviour, per
+    the note in `build_art_direction_request` about a returned `## Constraints`
+    holding a nested contradicting `### Constraints`. Neither reading of that is
+    safe to make silently: cutting at the last match carries stale constraints
+    into the paste block, and cutting at the first drops whatever the model wrote
+    after them (often `### Use case`). So the cut is at the **first** match, which
+    is the half that cannot produce a self-contradicting prompt, and the status
+    says the body is short so the caller can turn it into a gap.
+    """
+    normalized = text.replace('\r\n', '\n').replace('\r', '')
+    start = normalized.find(PASTE_SENTINEL)
+    if start >= 0:
+        start += len(PASTE_SENTINEL)
+    elif PROMPT_HEADING in normalized:
+        # A hand-edited file that lost the sentinel but kept the heading. Worth
+        # recovering: the prompt file is documented as the editable source, and
+        # refusing here would send an author to re-run a paid `--prompts`.
+        start = normalized.find(PROMPT_HEADING) + len(PROMPT_HEADING)
+    else:
+        return {'body': '', 'status': 'no_prompt_section'}
+
+    tail = normalized[start:]
+    matches = _BODY_TERMINATOR_RE.findall(tail)
+    truncated = len(matches) != len(set(matches))
+    boundary = _BODY_TERMINATOR_RE.search(tail)
+    if boundary:
+        tail = tail[:boundary.start()]
+    # The horizontal rule the writer puts between the sentinel and the body is
+    # separator, not content; anything further in is the author's own.
+    body = tail.strip()
+    if body.startswith('---'):
+        body = body[3:].strip()
+    if not body:
+        return {'body': '', 'status': 'empty_body'}
+    return {'body': body,
+            'status': 'body_truncated' if truncated else 'ok'}
 
 
 # ============================================================================

@@ -25,7 +25,8 @@ Two things the renderers must not do:
 
 import json
 import re
-from typing import Final
+from collections.abc import Sequence
+from typing import Final, Literal
 
 from storyforge import prompts_illustrate as pi
 from storyforge.packet import (
@@ -415,7 +416,14 @@ def render_entry(entry: Entry) -> str:
 
 
 def render_illustrations(*, entries: list[Entry]) -> str:
-    """Every entry, in reading order."""
+    """Every entry, in reading order.
+
+    The header names the prompt-file convention and `--export` **once**, not per
+    entry. The packet's own economy is that anything identical across the set is
+    stated once, and both the path (`prompts/{id}.md`) and the command are
+    identical for every row — so per-entry copies would spend the 80–120 word
+    budget twenty times over on a sentence that never varies (#298).
+    """
     parts = [
         '# The illustrations',
         '',
@@ -428,6 +436,16 @@ def render_illustrations(*, entries: list[Entry]) -> str:
         '`State` is the visual-state matrix resolved for that scene — what is '
         'visibly true there — not a restatement of the anchors, which say what '
         'never changes.',
+        '',
+        'Where `storyforge illustrate --prompts` has been run, fuller '
+        'scene-specific art direction for an illustration is in '
+        '`manuscript/assets/illustrations/prompts/<id>.md`. These entries do '
+        'not inline it: an entry that carried 300 words of prose would stop '
+        'being thin, which is the one property this packet is built around. If '
+        'you want the two halves in one paste-ready block, with the reference '
+        'images copied in as files, run `storyforge illustrate --export` — that '
+        'bundle is built for handing a single illustration over, and this one '
+        'for working the set with `canon.md` in context.',
         '',
     ]
     if not entries:
@@ -494,32 +512,69 @@ def render_reference_images(*, references: list[tuple[str, str]],
 # acceptance.md
 # ============================================================================
 
-def render_acceptance(*, aspects: list[str]) -> str:
+#: Where each per-image field lives, per bundle. The eight checks are identical
+#: across both artifacts and are therefore written once — but they *point* at the
+#: place the reader will find each field, and the packet's entries do not exist in
+#: the export. Reusing the packet's wording verbatim there told a reader with no
+#: repo to check the image against "the entry's Absent line", in a bundle whose
+#: whole purpose is being readable without one.
+_FIELD_HOMES: Final[dict[str, dict[str, str]]] = {
+    'packet-entry': {
+        'where': "its entry in `illustrations.md`",
+        'beat': "its entry's **Beat**",
+        'in_frame': "the entry's **In frame**",
+        'absent': "the entry's **Absent** line",
+        'state': "the entry's **State** line",
+        'contrast': "the entry's **Contrast** line",
+        'orientation': 'its entry',
+    },
+    'export-prompt': {
+        'where': "that illustration's `prompt.md`",
+        'beat': "the prompt's **Scene** and **Subject** sections",
+        'in_frame': "the prompt's **Subject** section",
+        'absent': "the prompt's `Not in this image:` constraint",
+        'state': "the prompt's visual-state constraint",
+        'contrast': "the prompt's `Set this image apart` constraint",
+        'orientation': 'its prompt',
+    },
+}
+
+#: Which bundle `render_acceptance` is writing for.
+AcceptanceSource = Literal['packet-entry', 'export-prompt']
+
+
+def render_acceptance(*, aspects: Sequence[pi.Aspect],
+                      source: AcceptanceSource = 'packet-entry') -> str:
     """The checks that are identical for every image in the set.
 
     Everything here was deliberately moved *out* of the per-illustration
     entries: stating the orientation rule twenty times is twenty chances for
     one of them to be paraphrased away, and an entry that carries the whole
     house style is no longer thin.
+
+    `source` selects the vocabulary for the per-image fields — see
+    `_FIELD_HOMES`. One renderer, one list of checks, two sets of pointers,
+    because the checks genuinely are the same and only their homes differ.
     """
+    homes = _FIELD_HOMES[source]
     orientation = '\n'.join(
-        f'- {pi.orientation_clause(aspect)}'  # type: ignore[arg-type]
+        f'- {pi.orientation_clause(aspect)}'
         for aspect in aspects) or f'- {pi.orientation_clause()}'
 
     return f"""# Acceptance criteria
 
-Apply all of this to every image. It is stated once here rather than in each
-entry, which is what keeps the entries short.
+Apply all of this to every image. It is stated once here rather than in
+{homes['where']}, which is what keeps those short.
 
 ## Before you accept an image
 
-1. **The beat.** The image shows what its entry's **Beat** says happens. Not
+1. **The beat.** The image shows what {homes['beat']} says happens. Not
    the scene in general — that moment.
-2. **In frame.** Everything the entry's **In frame** names is present and
+2. **In frame.** Everything {homes['in_frame']} names is present and
    recognizable.
-3. **Absent.** Nothing the entry's **Absent** line names appears anywhere in
+3. **Absent.** Nothing {homes['absent']} names appears anywhere in
    the image.
-4. **State.** Every entity matches the entry's **State** line: the wardrobe,
+4. **State.** Every entity matches {homes['state']}: the wardrobe,
    the lit or unlit thing, the damage. State is what changes on schedule, and
    getting it wrong is the single most common way an illustration contradicts
    the chapter it sits in.
@@ -530,9 +585,9 @@ entry, which is what keeps the entries short.
    palette is usually carrying meaning, and an off-palette object reads as a
    different kind of thing.
 7. **Contrast.** The image does not repeat the staging of its neighbours — see
-   the entry's **Contrast** line and the sequence rules below.
+   {homes['contrast']} and the sequence rules below.
 8. **No lettering.** {pi._NO_TEXT_CONSTRAINT.capitalize()}
-9. **Orientation.** The image is in the orientation its entry names:
+9. **Orientation.** The image is in the orientation {homes['orientation']} names:
 
 {orientation}
 
