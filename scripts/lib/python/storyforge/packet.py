@@ -22,6 +22,12 @@ have to be assertable without going through a renderer:
    and an audit that never ran are all coverage facts the author needs while
    they are working, not twenty minutes earlier.
 
+`entry_for`, `book_level_gaps`, `audit_gaps`, and `stale_render_gaps` are public
+because `export.py` builds its units from them (#298). That sharing is the point
+rather than a convenience: an export and a packet assembled in one run must not
+describe the same row's costume differently, which is the divergence #297 was
+filed about — so the derivation has one home and both artifacts read it.
+
 See benjaminsnorris/storyforge#278 and
 docs/superpowers/specs/2026-07-28-illustration-state-matrix-and-packet-design.md.
 """
@@ -350,7 +356,7 @@ def resolve(project_dir: str, *,
     gaps: list[str] = []
 
     book_level = pi.book_level_direction(project_dir)
-    gaps.extend(_book_level_gaps(project_dir))
+    gaps.extend(book_level_gaps(project_dir))
 
     plan = ill.read_plan(project_dir)
     context = state_context(project_dir, plan=plan,
@@ -372,12 +378,12 @@ def resolve(project_dir: str, *,
 
     entries: list[Entry] = []
     for row in rows:
-        entry, row_gaps = _entry_for(row, context=context)
+        entry, row_gaps = entry_for(row, context=context)
         entries.append(entry)
         gaps.extend(row_gaps)
 
-    gaps.extend(_audit_gaps(project_dir))
-    gaps.extend(_stale_render_gaps(project_dir, rows,
+    gaps.extend(audit_gaps(project_dir))
+    gaps.extend(stale_render_gaps(project_dir, rows,
                                    context['canon_cutoff']))
 
     # The style reference is resolved once here and handed to both consumers: the
@@ -393,7 +399,7 @@ def resolve(project_dir: str, *,
     # problems reached exactly one file: `run_package` logs `gaps`, so a stale or
     # mis-declared cover appeared in no log line and no README gap — which made
     # "the packet says what it cannot tell you" an overclaim. Same class as
-    # `_book_level_gaps`' "no house style for it", which is already unconditional.
+    # `book_level_gaps`' "no house style for it", which is already unconditional.
     gaps.extend(cmd_illustrate.style_reference_warnings(style))
     if reference_notes and _has_ingested_art(rows) and len(references) <= 1:
         # The dangerous shape: renders exist on disk and none of them reached
@@ -416,7 +422,7 @@ def resolve(project_dir: str, *,
     }
 
 
-def _stale_render_gaps(project_dir: str, rows: list[dict[str, str]],
+def stale_render_gaps(project_dir: str, rows: list[dict[str, str]],
                        canon_cutoff: str) -> list[str]:
     """Canon-stale art, as one aggregate gap — and the case where it is unknown.
 
@@ -445,8 +451,8 @@ def _stale_render_gaps(project_dir: str, rows: list[dict[str, str]],
         gaps.append(
             f'{len(stale)} of {len(rows)} illustration(s) already have art that '
             f'predates the canon now governing them ({", ".join(stale)}) — they '
-            f'still ship, and they still need re-rendering. Their entries below '
-            f'say so individually; re-render and re-ingest them rather than '
+            f'still ship, and they still need re-rendering. Each one says so '
+            f'where it appears; re-render and re-ingest them rather than '
             f'demoting `status`.')
     return gaps
 
@@ -457,12 +463,18 @@ def _has_ingested_art(rows: list[dict[str, str]]) -> bool:
                and (row.get('asset_file') or '').strip() for row in rows)
 
 
-def _book_level_gaps(project_dir: str) -> list[str]:
+def book_level_gaps(project_dir: str, *,
+                    bundle: str = 'packet') -> list[str]:
     """Gaps for the three book-level canon files.
 
     Absent and scaffolded are separated because the fixes differ: `--direction`
     writes an absent file and is a no-op on one that already exists, so
     conflating them tells an author who has just run it to run it again.
+
+    `bundle` is the noun the sentences use for the artifact these gaps are being
+    written into — `export.resolve` reads the same collectors, and a gap in
+    `illustration-export/README.md` saying "this packet" sends the reader to a
+    directory that may not exist.
     """
     gaps: list[str] = []
     # A truncated block is neither absent nor a scaffold, so
@@ -475,26 +487,26 @@ def _book_level_gaps(project_dir: str) -> list[str]:
         gaps.append(
             f'canon `{canon_id}` has a `##` heading inside its Embeddable '
             f'block ({headings}), which ends the block — the copy in this '
-            f'packet stops there, so it is shorter than the canon file looks. '
-            f'Demote it to `###`, then re-run `--package`.')
+            f'{bundle} stops there, so it is shorter than the canon file looks. '
+            f'Demote it to `###`, then regenerate.')
     for canon_id in ill.missing_reference_sections(project_dir):
         if canon.resolve_canon_path(project_dir, canon_id) is None:
             gaps.append(
                 f'book-level canon `{canon_id}` has no file under '
-                f'reference/canon/ — this packet states no house style for it, '
+                f'reference/canon/ — this {bundle} states no house style for it, '
                 f'and images generated without it will not look like one '
                 f'book. Run `storyforge illustrate --direction`.')
         else:
             gaps.append(
                 f'book-level canon `{canon_id}` is still an unfilled scaffold '
                 f'— a TODO fed to an image model reads as a deliberate '
-                f'instruction, so this packet leaves it out entirely. Edit '
+                f'instruction, so this {bundle} leaves it out entirely. Edit '
                 f'reference/canon/{canon_id}.md directly.')
     return gaps
 
 
-def _entry_for(row: dict[str, str], *,
-               context: RowContext) -> tuple[Entry, list[str]]:
+def entry_for(row: dict[str, str], *,
+              context: RowContext) -> tuple[Entry, list[str]]:
     """Build one entry and the gaps found while building it."""
     illus_id = row['id'].strip()
     scene_id = (row.get('scene_id') or '').strip()
@@ -837,15 +849,19 @@ def contrast_for_row(row: dict[str, str], *, context: RowContext) -> str:
     return ' '.join(part for part in (derived, author) if part)
 
 
-def _audit_gaps(project_dir: str) -> list[str]:
-    """The contradiction audit's coverage of the prose this packet describes."""
+def audit_gaps(project_dir: str, *, bundle: str = 'packet') -> list[str]:
+    """The contradiction audit's coverage of the prose this bundle describes.
+
+    `bundle` names the artifact for the reason `book_level_gaps` records: the
+    export reads the same collector, and its README must not talk about a packet.
+    """
     gaps: list[str] = []
     if not vs.read_provenance(project_dir):
         return [
-            'the contradiction audit has never been run — nothing has read '
-            'the prose against the visual-state matrix, so this packet may '
-            'describe an image of something the book does not do. Run '
-            '`storyforge illustrate --audit`.']
+            f'the contradiction audit has never been run — nothing has read '
+            f'the prose against the visual-state matrix, so this {bundle} may '
+            f'describe an image of something the book does not do. Run '
+            f'`storyforge illustrate --audit`.']
     stale = sorted({f['scene_id'] for f in vs.digest_drift(project_dir)
                     if f['kind'] == 'audit_stale' and f.get('scene_id')})
     if stale:
@@ -1153,7 +1169,7 @@ def anchor_block(canon_id: str, text: str, label: str) -> str:
 
 
 def anchor_copy_drift(project_dir: str) -> list[ill.IllustrationFinding]:
-    """Compare every anchor copy in the written packet to its canon source.
+    """Compare every written anchor copy to its canon source.
 
     The copies are wrapped in `<!-- canon-embed: id -->` markers, which is the
     convention `canon.find_canon_embeds` already parses and `check_canon_drift`
@@ -1162,80 +1178,97 @@ def anchor_copy_drift(project_dir: str) -> list[ill.IllustrationFinding]:
     catch a renderer wrapping or re-indenting a long anchor, or an author
     hand-editing a file whose whole point is being a render.
 
-    Compared after `normalize_for_comparison`, so cosmetic whitespace is not
-    drift and a changed word is. Returns [] when no packet is built — an
-    unbuilt packet is in-flight state, not a finding.
-    """
-    findings: list[ill.IllustrationFinding] = []
-    directory = packet_dir(project_dir)
-    if not os.path.isdir(directory):
-        return findings
+    Covers the packet **and** the export's `canon.md` (#298). Both write anchor
+    copies through the same `anchor_block`, so both are subject to the same
+    byte-identity invariant, and checking only one would leave the artifact
+    designed to be *handed to someone else* unguarded. The remediation names
+    whichever command regenerates the file, since `--package` does not rebuild
+    the export and vice versa.
 
+    Compared after `normalize_for_comparison`, so cosmetic whitespace is not
+    drift and a changed word is. Returns [] when neither bundle is built — an
+    unbuilt bundle is in-flight state, not a finding.
+    """
+    from storyforge import export as ex
+
+    findings: list[ill.IllustrationFinding] = []
     sources = canon.anchor_texts(project_dir)
     normalized = {cid: normalize_for_comparison(text)
                   for cid, text in sources.items()}
 
-    for name in PACKET_FILES:
-        path = packet_file(project_dir, name)
-        if not os.path.isfile(path):
+    trees = [(PACKET_DIR, PACKET_FILES, '--package'),
+             (ex.EXPORT_DIR, ex.SHARED_FILES, '--export')]
+    for subdir, names, command in trees:
+        if not os.path.isdir(os.path.join(project_dir, subdir)):
             continue
-        rel = os.path.join(PACKET_DIR, name)
-        try:
-            with open(path, encoding='utf-8') as f:
-                text = f.read()
-        except (OSError, UnicodeDecodeError) as exc:
-            # One unreadable file must not take the whole check down, and must
-            # not pass for "no drift" either.
+        for name in names:
+            findings.extend(_file_anchor_drift(
+                project_dir, os.path.join(subdir, name), normalized, command))
+    return findings
+
+
+def _file_anchor_drift(project_dir: str, rel: str,
+                       normalized: dict[str, str],
+                       command: str) -> list[ill.IllustrationFinding]:
+    """Every anchor-copy problem in one written file."""
+    path = os.path.join(project_dir, rel)
+    if not os.path.isfile(path):
+        return []
+    rerun = f'`storyforge illustrate {command}`'
+    findings: list[ill.IllustrationFinding] = []
+    try:
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        # One unreadable file must not take the whole check down, and must
+        # not pass for "no drift" either.
+        return [{
+            'kind': 'anchor_copy_drift',
+            'file': rel,
+            'detail': f'could not read {rel} to check its anchor copies: '
+                      f'{exc}. Re-run {rerun}.',
+        }]
+    embeds, unclosed, invalid = canon.find_canon_embeds(text)
+    for opener in unclosed:
+        findings.append({
+            'kind': 'anchor_copy_drift',
+            'id': opener['canon_id'],
+            'file': rel,
+            'detail': f'anchor copy `{opener["canon_id"]}` in {rel} has no '
+                      f'closing marker, so its text cannot be checked '
+                      f'against reference/canon/. Re-run {rerun}.',
+        })
+    for bad in invalid:
+        findings.append({
+            'kind': 'anchor_copy_drift',
+            'file': rel,
+            'detail': f'anchor copy marker `{bad["raw_id"]}` in {rel} is '
+                      f'not a valid canon id, so its text cannot be '
+                      f'checked against reference/canon/. Re-run {rerun}.',
+        })
+    for embed in embeds:
+        cid = embed['canon_id']
+        if cid not in normalized:
             findings.append({
                 'kind': 'anchor_copy_drift',
+                'id': cid,
                 'file': rel,
-                'detail': f'could not read {rel} to check its anchor copies: '
-                          f'{exc}. Re-run `storyforge illustrate --package`.',
+                'detail': f'{rel} carries an anchor for `{cid}`, which no '
+                          f'longer resolves to a populated canon file — it '
+                          f'is directing art from an anchor that no longer '
+                          f'exists.',
             })
             continue
-        embeds, unclosed, invalid = canon.find_canon_embeds(text)
-        for opener in unclosed:
+        if embed['normalized'] != normalized[cid]:
             findings.append({
                 'kind': 'anchor_copy_drift',
-                'id': opener['canon_id'],
+                'id': cid,
                 'file': rel,
-                'detail': f'anchor copy `{opener["canon_id"]}` in {rel} has no '
-                          f'closing marker, so its text cannot be checked '
-                          f'against reference/canon/. Re-run `storyforge '
-                          f'illustrate --package`.',
+                'detail': f'the anchor copy for `{cid}` in {rel} differs '
+                          f'from reference/canon/. Likeness continuity is '
+                          f'the string, so re-run {rerun} rather than '
+                          f'editing the file.',
             })
-        for bad in invalid:
-            findings.append({
-                'kind': 'anchor_copy_drift',
-                'file': rel,
-                'detail': f'anchor copy marker `{bad["raw_id"]}` in {rel} is '
-                          f'not a valid canon id, so its text cannot be '
-                          f'checked against reference/canon/. Re-run '
-                          f'`storyforge illustrate --package`.',
-            })
-        for embed in embeds:
-            cid = embed['canon_id']
-            if cid not in normalized:
-                findings.append({
-                    'kind': 'anchor_copy_drift',
-                    'id': cid,
-                    'file': rel,
-                    'detail': f'{rel} carries an anchor for `{cid}`, which no '
-                              f'longer resolves to a populated canon file — '
-                              f'the packet is directing art from an anchor '
-                              f'that no longer exists.',
-                })
-                continue
-            if embed['normalized'] != normalized[cid]:
-                findings.append({
-                    'kind': 'anchor_copy_drift',
-                    'id': cid,
-                    'file': rel,
-                    'detail': f'the anchor copy for `{cid}` in {rel} differs '
-                              f'from reference/canon/. Likeness continuity is '
-                              f'the string, so re-run `storyforge illustrate '
-                              f'--package` rather than editing the packet.',
-                })
     return findings
 
 

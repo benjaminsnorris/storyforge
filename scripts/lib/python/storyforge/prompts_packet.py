@@ -415,7 +415,14 @@ def render_entry(entry: Entry) -> str:
 
 
 def render_illustrations(*, entries: list[Entry]) -> str:
-    """Every entry, in reading order."""
+    """Every entry, in reading order.
+
+    The header names the prompt-file convention and `--export` **once**, not per
+    entry. The packet's own economy is that anything identical across the set is
+    stated once, and both the path (`prompts/{id}.md`) and the command are
+    identical for every row — so per-entry copies would spend the 80–120 word
+    budget twenty times over on a sentence that never varies (#298).
+    """
     parts = [
         '# The illustrations',
         '',
@@ -428,6 +435,16 @@ def render_illustrations(*, entries: list[Entry]) -> str:
         '`State` is the visual-state matrix resolved for that scene — what is '
         'visibly true there — not a restatement of the anchors, which say what '
         'never changes.',
+        '',
+        'Where `storyforge illustrate --prompts` has been run, fuller '
+        'scene-specific art direction for an illustration is in '
+        '`manuscript/assets/illustrations/prompts/<id>.md`. These entries do '
+        'not inline it: an entry that carried 300 words of prose would stop '
+        'being thin, which is the one property this packet is built around. If '
+        'you want the two halves in one paste-ready block, with the reference '
+        'images copied in as files, run `storyforge illustrate --export` — that '
+        'bundle is built for handing a single illustration over, and this one '
+        'for working the set with `canon.md` in context.',
         '',
     ]
     if not entries:

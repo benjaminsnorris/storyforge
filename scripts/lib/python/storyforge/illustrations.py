@@ -1619,7 +1619,7 @@ def stale_render_reason(row: dict[str, str], canon_cutoff: str) -> str:
 
     **This is the predicate for the packet, the prompts, and the reference chain
     — not for every "is it rendered" question in the codebase.** Callers:
-    `_references_for`, `packet.needs_render`, `packet._entry_for`,
+    `_references_for`, `packet.needs_render`, `packet.entry_for`,
     `stale_render_findings`. `next_to_render` routes through
     `packet.needs_render`; nothing else should read bare `status` to answer this.
 
@@ -1785,6 +1785,12 @@ IllustrationFindingKind = Literal[
     'state_unspecified', 'prose_changed', 'audit_stale',
     # The handoff packet (#278 phase 3).
     'packet_stale', 'anchor_copy_drift',
+    # The self-contained per-illustration export (#298). Its own kind rather
+    # than a second `packet_stale`: the two artifacts stale against overlapping
+    # but different source sets — the export also aggregates prompt-file bodies
+    # and *copies* reference images — and a finding whose detail named one while
+    # its kind named the other would send the author to the wrong command.
+    'export_stale',
     # A canon Embeddable block cut short by a `##` heading inside it (#293).
     # Blocking: canon.validate_canon_file reports the same condition per file,
     # but only `cleanup` runs that and `cleanup` gates nothing, so the consumers
@@ -1861,6 +1867,11 @@ WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     # anchor copy that no longer matches its canon file quietly breaks the
     # likeness continuity the anchor exists to hold.
     'packet_stale', 'anchor_copy_drift',
+    # The export (#298) is a render on the same footing, and worth reporting for
+    # the same reason: a stale bundle looks exactly like a fresh one to whoever
+    # it was handed to, and its copied reference images make it the one artifact
+    # that can go stale without any file in `reference/` being touched.
+    'export_stale',
     # Canon-stale art (#300) still ships and still reads correctly; it is only
     # unusable as a *reference* for new renders. Blocking would take a working
     # book offline over a re-render the author may be deliberately deferring —
@@ -1936,8 +1947,10 @@ def validate_plan(project_dir: str, *,
     the transition log, or any canon file, and an anchor copy in the written
     packet that no longer matches its canon source. Both return [] when no
     packet has been built, so a project that never runs `--package` sees
-    nothing new.
+    nothing new. `export.export_stale` is the same shape for the per-illustration
+    export (#298), and returns [] on the same grounds.
     """
+    from storyforge import export
     from storyforge import packet
     from storyforge import visual_state
 
@@ -1950,6 +1963,7 @@ def validate_plan(project_dir: str, *,
     findings.extend(visual_state.digest_drift(project_dir))
     findings.extend(packet.packet_stale(project_dir))
     findings.extend(packet.anchor_copy_drift(project_dir))
+    findings.extend(export.export_stale(project_dir))
     # Before the early return below: a truncated anchor matters whether or not
     # a single illustration has been planned yet, and fixing it before the plan
     # exists is the cheapest moment there is.
