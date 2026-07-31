@@ -1,6 +1,6 @@
 """storyforge illustrate — plan, art-direct, ingest, and embed interior illustrations.
 
-Ten phases, each its own flag:
+Every phase is its own flag:
 
   --direction  Write the book-level art direction: format, visual promise,
                recurring visual language, content limits, continuity anchors.

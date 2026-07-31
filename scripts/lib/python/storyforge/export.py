@@ -576,7 +576,7 @@ def _derived_body(row: dict[str, str]) -> str:
     """A paste block built from the plan row, in the prompt file's own shape.
 
     Four sections rather than free prose, because the whole export is written for
-    a model that was tuned on the 5-section template (#260/#263) — and because a
+    a model that was tuned on the 5-section template (#260) — and because a
     stand-in shaped like the real thing is how a reader sees at a glance which
     parts are thin. `packet.NOT_RECORDED` is deliberately not reused: it points
     at README gaps, and this file may be read on its own.
