@@ -2859,6 +2859,29 @@ def test_prompts_refuses_when_the_declaration_names_a_missing_file(
         os.path.join(in_project, ill.default_prompt_rel('lantern-vigil')))
 
 
+def test_diagnose_reports_the_style_reference(in_project, capsys):
+    """--diagnose is the health gate, and a stale or mis-declared style reference
+    is a free pure-function health fact about the book's most influential image.
+    Previously reachable only by starting a run or reading the packet by hand."""
+    _write_entity_canon(in_project, 'characters', 'leo', 'Ten years old.',
+                        canon_updated='2026-07-20')
+    _backdate(_style_ref(in_project), '2026-07-01')
+    ill.write_plan(in_project, [plan_row()])
+
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'Style reference: ' in out
+    assert 'before the canon was last updated' in out
+
+
+def test_diagnose_reports_the_style_reference_with_no_plan(in_project, capsys):
+    """The no-plan branch is a separate exit; a book mid-setup is exactly when
+    the author is choosing which cover artwork counts."""
+    cmd_illustrate.main(['--diagnose'])
+    out = capsys.readouterr().out
+    assert 'no cover artwork' in out
+
+
 def test_prompts_dry_run_names_the_style_reference(in_project, capsys):
     """The one pre-flight mode an author reaches for reported neither the cover
     nor the state gaps, because it returned before both."""

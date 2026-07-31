@@ -450,8 +450,12 @@ def state_for_row(row: dict[str, str], *, context: RowContext,
     from a04 onward a rust-red jacket" — so no anchor can tell a generation call
     which night *this* image is. That is the question the matrix answers, and
     while it reached only the packet, prompt files contradicted the packet built
-    from the same row in both directions (#297). Two renderings of one row is
-    how they disagree; one function is how they cannot.
+    from the same row in both directions (#297). Two renderings of one row is how
+    they disagree; one function is how they cannot — **within one run**. Across
+    runs they still can: a prompt file is a render like the packet, but unlike the
+    packet there is no `prompt_stale`, so editing the transition log after
+    `--prompts` diverges the two silently. Re-run `--prompts --ids …` after
+    editing the matrix.
 
     Only the entities the row's `canon_refs` names, because sending the whole
     cast wastes tokens and invites the model to draw people who are not in the

@@ -221,6 +221,7 @@ def run_diagnose(project_dir: str) -> int:
         # skill now tells authors to build it before the plan. Returning 0 here
         # hid a `state_unknown_scene` error entirely.
         findings = ill.validate_plan(project_dir)
+        _report_style_reference(project_dir)
         _report_state_rung(project_dir, findings)
         return _report_findings(findings)
 
@@ -260,9 +261,25 @@ def run_diagnose(project_dir: str) -> int:
     _report_anchor_batch(packet.anchor_batch(project_dir), unrendered)
 
     findings = ill.validate_plan(project_dir)
+    _report_style_reference(project_dir)
     _report_state_rung(project_dir, findings)
     _report_packet_rung(project_dir, findings, unrendered)
     return _report_findings(findings)
+
+
+def _report_style_reference(project_dir: str) -> None:
+    """Name the artwork setting the house style, and anything wrong with it.
+
+    `--diagnose` is the health gate, and a stale, mis-declared, or absent style
+    reference is a pure-function health fact about the most influential image in
+    the book — free to compute, and previously reachable only by starting a run
+    that spends money or opening `reference-images.md` by hand.
+    """
+    style = resolve_style_reference(project_dir)
+    headline = describe_style_reference(style)
+    log(f'  {headline}' if headline else '  Style reference: none resolved')
+    for warning in style_reference_warnings(style):
+        log(f'  WARNING: {warning}')
 
 
 def _report_findings(findings: list[ill.IllustrationFinding]) -> int:
@@ -1256,11 +1273,9 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     from storyforge import canon as canon_mod
     canon_cutoff = canon_mod.newest_canon_updated(project_dir)
     cutoff = _reference_cutoff(project_dir, no_prior_refs, canon_cutoff)
-    # Resolved once for the run, and logged before a single call goes out: with
-    # nothing naming the file, a run that spent twenty calls on a superseded
-    # cover surfaced only by reading a generated prompt by hand (#299). The
-    # run's own `canon_cutoff` is passed rather than recomputed, so the canon
-    # tree is walked once and its unparseable-date WARNING logged once.
+    # Resolved once for the run and logged before the fan-out (#299). The run's
+    # own `canon_cutoff` is passed rather than recomputed, so the canon tree is
+    # walked once and its unparseable-date WARNING logged once.
     style = resolve_style_reference(project_dir, canon_cutoff=canon_cutoff)
     headline = describe_style_reference(style)
     if headline:
@@ -1287,9 +1302,8 @@ def run_prompts(project_dir: str, coaching: CoachingLevel,
     if needs_api:
         _warn_truncated_anchors(project_dir)
 
-    # The visual-state matrix, read once and resolved per row through the same
-    # function `--package` uses, so a prompt file and the packet entry built from
-    # one row cannot describe different costumes (#297).
+    # Read once; resolved per row through the same function `--package` uses
+    # (#297). The whole plan, never the --ids subset — see `state_context`.
     state_ctx = packet.state_context(project_dir, plan=plan)
 
     # Phase 1 — assemble every request. Sequential and cheap (file reads
@@ -1865,11 +1879,11 @@ class _PromptJob(TypedDict):
     references: list[tuple[str, str]]
     aspect: pi.Aspect
     request: str
-    #: The visual-state matrix resolved at this row's scene, `state_override`
-    #: overlaid. Carried on the job rather than recomputed in the write phase so
-    #: the request the model answered and the prompt file's constraint and
-    #: acceptance blocks are the same string — the whole point of #297 is that
-    #: two renderings of one row drift apart.
+    #: The matrix resolved at this row's scene (`state_override` overlaid), and
+    #: the row's `absent` and `contrast`. All three are carried on the job rather
+    #: than recomputed in the write phase, so the request the model answered and
+    #: the prompt file's constraint and acceptance blocks are the same strings —
+    #: the whole point of #297 is that two renderings of one row drift apart.
     state: str
     absent: str
     contrast: str

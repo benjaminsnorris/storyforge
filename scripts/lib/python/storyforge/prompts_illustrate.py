@@ -564,15 +564,19 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
         f'composes more easily or gives you a warmer colour.\n'
         if state.strip() else '')
 
-    # One of the three sanctioned exceptions to positive framing, alongside the
-    # orientation directive and the colour prohibitions. Narrow and enumerable
-    # on purpose — #263's finding that negated content keywords leak into the
-    # render still holds for description.
+    # One of the two *content* exceptions to positive framing — named entities
+    # that must not appear, and violations of stated colour logic — alongside the
+    # orientation directive and the no-text rule, which are exceptions about form
+    # rather than content. Four in total; the spec, CLAUDE.md and
+    # `prompts_packet.render_entry` all count them that way, and this comment said
+    # three because it forgot that no-text is itself a negation. Narrow and
+    # enumerable on purpose: #263's finding that negated content keywords leak
+    # into the render still holds for description.
     absent_block = (
         f'\n## Must not appear in this image\n\n{absent.strip()}\n\n'
-        f'Name these as explicit exclusions in Important details. They are the '
-        f'one sanctioned exception to the positive-framing rule below; '
-        f'everything else stays positively framed.\n'
+        f'Name these as explicit exclusions in Important details. Together with '
+        f'the colour logic they are the only exceptions to the positive-framing '
+        f'rule below; everything else stays positively framed.\n'
         if absent.strip() else '')
 
     contrast_block = (

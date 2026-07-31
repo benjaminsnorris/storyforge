@@ -1185,7 +1185,7 @@ def test_absent_reaches_the_request_as_an_explicit_exclusion(in_project,
     request = captured()['the-finest-cartographer']
     assert 'Must not appear in this image' in request
     assert 'the apprentice; any second lamp' in request
-    assert 'sanctioned exception to the positive-framing rule' in request
+    assert 'only exceptions to the positive-framing rule' in request
 
 
 def test_contrast_reaches_the_request_without_naming_other_illustrations(
