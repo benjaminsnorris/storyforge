@@ -205,7 +205,13 @@ Add `--ids one,two` to limit it to specific illustrations, or to re-prompt ones 
 
 Add `--no-prior-refs` to reference the cover only. Use it when re-rendering a set whose existing art no longer matches the canon — see "The reference chain" below.
 
-This writes `manuscript/assets/illustrations/prompts/{id}.md` per illustration, and sets `status=prompted`. Each prompt file carries the reference list, the prompt body (Scene / Subject / Important details / Use case), a deterministic Constraints block, and a log table.
+This writes `manuscript/assets/illustrations/prompts/{id}.md` per illustration, and sets `status=prompted`. Each prompt file carries the reference list, the prompt body (Scene / Subject / Important details / Use case), a deterministic Constraints block, an **Accept only if** block, and a log table.
+
+**The resolved visual state goes into the request, and it outranks the anchors.** An anchor necessarily describes an entity across the whole book — "navy pajamas on the first two nights, and from a04 onward a rust-red jacket" — so no anchor can tell a generation call which night *this* image is. That is what `reference/visual-state.csv` answers, resolved forward to the row's scene with the plan row's `state_override` laid on top: the same resolution the handoff packet renders, so a prompt file and a packet entry built from one row cannot describe different costumes. It is stated as a requirement rather than context because an emphatic anchor clause actively pulls the other way — "the jacket is how the reader finds him in a dark image" is exactly why a dark night-one image came back in the night-two coat.
+
+The state also lands twice in the prompt *file*, the way the orientation directive does: as a Constraints bullet the image model reads, and in `## Accept only if` — the per-image acceptance lines, checked against the row rather than against the render you happen to like. Hand-editing a prompt body to fix a costume works once and makes the file no longer reproducible from the plan; fix the transition log or the row's `state_override` instead and re-run.
+
+If an entity the row names has no stated state at that scene, the command says so **before** the calls go out. That is the free moment to add the transition.
 
 ### What the prompts encode
 
@@ -223,6 +229,15 @@ The whole book-level direction — the three root canon files — goes into ever
 Plus: no text, no letters, no words, no typography. Image models render text unreliably, and an illustration doesn't need any.
 
 ### The reference chain
+
+**The cover artwork is the first reference in every list, and the only one under `--no-prior-refs`** — so which file it is matters more than any other single choice in this phase. Resolution order:
+
+1. `production.cover_artwork` in `storyforge.yaml` — set this when the book holds several cover variations and only one is the selected art. Without it, the convention filename wins silently even when every other consumer points elsewhere, which is how twenty interior prompts once inherited a cover the author had explicitly rejected.
+2. `manuscript/assets/cover-illustration.{png,jpg,jpeg,webp}` — the convention, so existing projects resolve as before.
+
+It is the *artwork*, deliberately not `production.cover_image`: that key names the file that ships, which on most books is the composite with the title typeset into the raster. Feeding baked-in lettering to a prompt whose own constraints say "no text, no letters, no words" is a wasted generation.
+
+The command names the resolved file **once per run, before any call is made**, with its symlink target if it is a symlink. It is also staleness-checked on the same footing as a prior render — an mtime older than the newest `canon_updated` is a WARNING — but never *excluded* for it, because dropping it would leave the highest-stakes run with no style signal at all. If you see that warning, re-render the cover artwork or point `production.cover_artwork` at art that postdates the canon.
 
 A prior illustration is used as a style reference only if it was ingested **on or after** the newest `canon_updated` date in `reference/canon/`. Art rendered before the canon that now governs it was directed by rules that no longer apply, and feeding it back in teaches the new render exactly the drift the canon was rewritten to remove — which is how a whole set inherits a mistake through the visual key.
 
