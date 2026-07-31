@@ -341,8 +341,65 @@ assembler takes a reference-tier source, a unit list, and a leaf-entry renderer.
 ### `--prompts`
 
 Unchanged entry point, thinner output, plus the per-image acceptance lines. Still writes
-per-illustration files as the editable source, which `--package` aggregates — the GN
-precedent where page files hold sections and `script-package` aggregates them.
+per-illustration files as the editable source.
+
+**Amended (#298): `--package` does not aggregate those files, and `--export` does.** The
+original sentence here claimed the GN precedent, where page files hold sections and
+`script-package` aggregates them. That precedent does not transfer, and `packet.py` never
+implemented it — every packet entry is built from the plan row.
+
+Keeping it that way is a decision, not an omission. The packet's entries are 80–120 words
+*because* hyper-detailed leaf prompts underperform and a session working from shared
+reference material does better; that is the finding the packet exists to act on. Inlining a
+250–400 word model-authored body per entry would spend that budget twenty times over,
+rebuild the twenty-independent-prompts shape the packet replaced, and duplicate content that
+already has a Constraints block of its own.
+
+But the complaint #298 raises is real: two half-artifacts, neither able to generate an image
+alone, so a human opens two files and resolves image paths from disk by hand — sixty copy
+operations for twenty images. The answer is a *second* artifact rather than a compromised
+first one, because the two consumers genuinely differ:
+
+| | `--package` | `--export` |
+|---|---|---|
+| Consumer | one long session, `canon.md` in context | one image, handed to a browser session or someone without the repo |
+| Per-illustration | 80–120 words, derived from the plan row | one contiguous paste block: model prose + state + absent + contrast |
+| Reference images | project-relative paths, not copied | copied in, numbered in upload order, symlinks resolved |
+| Prompt bodies | named once in `illustrations.md`'s header | aggregated from `prompts/{id}.md` |
+| Manifest | — | `manifest.json` per unit: each reference's sha256, plus model/size/quality/aspect |
+| Staleness | `packet_stale` | `export_stale` (adds prompt files and reference-image digests) |
+
+Both are renders, never hand-edited. Both read the *same* derivation of a row's state,
+absent, and contrast — `packet.entry_for`, `state_for_row`, `contrast_for_row` — because two
+renderings of one row is how they come to disagree about a costume, which is #297.
+
+The export re-derives the Constraints block from the plan rather than parsing it back out of
+the prompt file: the model's prose is the irreplaceable half, and the constraints are derived,
+so a prompt file written before a matrix edit still exports with the state in force now.
+
+### `--export`
+
+`storyforge illustrate --export [--ids …] [--anchor-batch]`, writing
+`manuscript/illustration-export/`:
+
+```
+illustration-export/
+  README.md          # how to work it, and every gap in the data it was built from
+  canon.md           # shared, read once
+  acceptance.md      # shared
+  <id>/
+    prompt.md        # one contiguous paste block, then the per-image checks
+    references/      # actual image files, numbered in upload order
+    manifest.json
+```
+
+`--anchor-batch` makes phase 1 one command, and reports how each slot was chosen — nothing
+populates `register`, so the darkest and brightest slots are usually guesses and the author
+who typed the flag never named the four ids.
+
+A whole-plan export prunes unit directories for rows that have left the plan. A `--ids` run
+does not: it has no business deleting units it was not asked about, so `README.md` names them
+as untouched and possibly built from sources that have since moved.
 
 ## The anchor batch
 

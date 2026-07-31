@@ -465,14 +465,21 @@ def _references_for_unit(project_dir: str, illus_id: str, *,
         real = os.path.realpath(source)
         if real in seen:
             continue
-        if not os.path.isfile(real):
+        try:
+            digest = ill.sha256_of(real)
+        except OSError as exc:
+            # `_references_for` resolved this path with `isfile`, which follows
+            # symlinks — so a dangling link never gets here and an absent file
+            # never does either. What does get here is a file that exists and
+            # cannot be *read*. Skipped with a note rather than allowed to raise,
+            # because the alternative is a traceback partway through writing the
+            # bundle, and rather than silently dropped because a unit whose
+            # manifest promises an upload the directory does not hold is the one
+            # failure the whole export exists to make impossible.
             notes.append(
-                f'`{rel}` is not in this directory — '
-                + (f'it is a symlink to `{os.path.relpath(real, project_dir)}`, '
-                   f'which does not exist. '
-                   if os.path.islink(source) else 'the file is not there. ')
-                + 'A copy could not be made, so nothing in this export carries '
-                  'what it was for.')
+                f'`{rel}` could not be read ({exc.strerror or exc}), so no copy '
+                f'of it is in this export and nothing here carries what it was '
+                f'for. Fix its permissions and re-run `--export`.')
             continue
         seen.add(real)
         order = len(references) + 1
@@ -488,7 +495,7 @@ def _references_for_unit(project_dir: str, illus_id: str, *,
                                  f'{order}-{stem}{extension.lower()}'),
             'source': rel,
             'resolved_from': resolved,
-            'sha256': ill.sha256_of(real),
+            'sha256': digest,
             'purpose': purpose,
         })
     return references
