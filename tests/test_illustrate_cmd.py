@@ -3201,10 +3201,11 @@ def test_the_strict_scaffold_carries_no_constraints_section(in_project):
 #
 # Reproduced on a live book: `--prompts --ids LF-05` on a fully-ingested plan
 # took the publishable set from 20/20 to 19/20, with no warning and no error.
-# `prompted` is not `ingested`, and `ingested` is what manifest_assets and
-# FILED_STATUSES both gate on, so the art stopped shipping to Bookshelf, the
-# epub, the PDF, and the web book. The file was never touched — only the row
-# that says it exists. `--diagnose` said "No problems found," because an
+# `prompted` is not `ingested`, which is what `manifest_assets` gates on, so the
+# art stopped shipping to Bookshelf. It kept shipping in the epub, the PDF, and
+# the web book, which drop only `superseded` — so the editions disagreed about a
+# book nobody had changed. The file was never touched, only the row that says it
+# exists. `--diagnose` said "No problems found," because an
 # unrendered row is legitimate in-flight state.
 # ============================================================================
 

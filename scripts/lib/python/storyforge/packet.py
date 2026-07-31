@@ -27,7 +27,8 @@ docs/superpowers/specs/2026-07-28-illustration-state-matrix-and-packet-design.md
 """
 
 import os
-from typing import TypedDict, cast
+from collections.abc import Iterable
+from typing import Literal, TypedDict, cast
 
 from storyforge import canon
 from storyforge import illustrations as ill
@@ -86,8 +87,10 @@ class Entry(TypedDict):
     #: height, time of day, how much of the frame the subject occupies,
     #: interior versus environmental. Written by `--sequence` or by the author.
     treatment: str
-    #: Why the art this row already claims no longer follows the canon, '' when
-    #: it does or when no art exists. `status` alone cannot answer that, and an
+    #: Why the art this row already claims no longer follows the canon. '' means
+    #: only that this check found nothing to say — the art is current, no art
+    #: exists yet, or the row is `rendered` and carries no date to judge. `status`
+    #: alone cannot answer the question, and an
     #: entry marked `ingested — do not regenerate` over art the canon has since
     #: outgrown tells a session to skip the one image it must redo (#300).
     stale_reason: str
@@ -149,7 +152,8 @@ StateContext = RowContext
 
 
 def state_context(project_dir: str, *,
-                  plan: list[dict[str, str]] | None = None) -> RowContext:
+                  plan: list[dict[str, str]] | None = None,
+                  canon_cutoff: str | None = None) -> RowContext:
     """Read the canon tier, the chapter map, the transition log, and the plan once.
 
     `plan` must be the **whole** plan, never an `--ids` subset: `predecessors` is
@@ -180,7 +184,8 @@ def state_context(project_dir: str, *,
         'known': vs.known_scene_ids(project_dir),
         'transitions': vs.read_transitions(project_dir),
         'predecessors': predecessors,
-        'canon_cutoff': canon.newest_canon_updated(project_dir),
+        'canon_cutoff': (canon.newest_canon_updated(project_dir)
+                         if canon_cutoff is None else canon_cutoff),
     }
 
 
@@ -256,6 +261,36 @@ def rows_in_reading_order(project_dir: str, *,
 #: author*. Absent from the mapping is the only shape that means done.
 RenderNeeds = dict[str, str]
 
+#: What `render_state` answers. `'done'` is the only one that means leave it be.
+RenderState = Literal['done', 'pending', 'stale']
+
+
+def render_state(needs: RenderNeeds, illus_id: str) -> RenderState:
+    """Which of the three states this illustration is in.
+
+    **The single place `in` versus `.get()` is decided.** `RenderNeeds` encodes
+    three states over two levels, so every consumer that spelled the check by
+    hand had to get that distinction right independently — and `needs.get(id)`
+    read as "done" collapses *pending* into *done*, which is #300 exactly, at the
+    call site (`_report_packet_rung`) that is the go/no-go on a paid render run.
+    Five hand-written copies of a discrimination whose failure mode is the bug
+    the discrimination exists to fix is one too many.
+    """
+    if illus_id not in needs:
+        return 'done'
+    return 'stale' if needs[illus_id] else 'pending'
+
+
+def ids_in_state(needs: RenderNeeds, state: RenderState,
+                 among: Iterable[str] | None = None) -> list[str]:
+    """Ids in *state*, deduplicated, in `needs` order (or `among`'s order).
+
+    `among` narrows to a subset — the anchor batch's four slots, where two slots
+    can resolve to one illustration and a naive list would name it twice.
+    """
+    source = list(needs) if among is None else list(dict.fromkeys(among))
+    return [i for i in source if render_state(needs, i) == state]
+
 
 def needs_render(project_dir: str, *,
                  plan: list[dict[str, str]] | None = None,
@@ -270,11 +305,20 @@ def needs_render(project_dir: str, *,
     complete (#300). One predicate, `ill.stale_render_reason`, so the two halves
     of a run cannot answer the question differently.
 
-    `status` is deliberately *not* consulted as the fix for that: it is what the
-    epub, the PDF, the web book, and Bookshelf gate on through `FILED_STATUSES`,
-    so demoting a canon-stale row to make the packet honest takes the art out of
-    the book. Needing a re-render and being publishable are different facts and
-    now have different homes.
+    `status` is deliberately *not* consulted as the fix for that: demoting a
+    canon-stale row to make the packet honest drops it from the Bookshelf publish
+    manifest (`ill.manifest_assets` skips a non-`ingested` row) while the epub,
+    the PDF, and the web book keep shipping it (`ill.resolve_for_local` excludes
+    only `superseded`) — so the editions disagree about art the author believes
+    they retired. Needing a re-render and being publishable are different facts
+    and now have different homes.
+
+    `plan` must be the **whole** plan, for a sharper version of the reason
+    `state_context` says so: every id *absent* from the result reads as finished,
+    so a subset plan reports every row it omitted as done — #300's exact shape.
+    `canon_cutoff` lets a caller that has already read the canon tree pass its
+    answer, so one command does not walk it (and re-log its unparseable-date
+    WARNING) several times.
     """
     if canon_cutoff is None:
         canon_cutoff = canon.newest_canon_updated(project_dir)
@@ -290,12 +334,18 @@ def needs_render(project_dir: str, *,
     return needs
 
 
-def resolve(project_dir: str) -> PacketContents:
+def resolve(project_dir: str, *,
+            canon_cutoff: str | None = None) -> PacketContents:
     """Collect what the packet says, recording every gap rather than filtering.
 
     Reads the canon tier (phase 1), the visual-state matrix (phase 2), and the
     plan. Deterministic and side-effect free apart from log lines: `--package`
     must be safe to re-run, and the idempotence test compares two calls.
+
+    `canon_cutoff` is threaded to `state_context`, the reference list, and the
+    style reference, so one `--package` walks the canon tree once. It was walked
+    five times, which logged an unparseable `canon_updated` five times and read
+    as five broken files.
     """
     gaps: list[str] = []
 
@@ -303,7 +353,8 @@ def resolve(project_dir: str) -> PacketContents:
     gaps.extend(_book_level_gaps(project_dir))
 
     plan = ill.read_plan(project_dir)
-    context = state_context(project_dir, plan=plan)
+    context = state_context(project_dir, plan=plan,
+                            canon_cutoff=canon_cutoff)
     anchors = context['anchors']
     if not anchors:
         gaps.append(
@@ -326,15 +377,24 @@ def resolve(project_dir: str) -> PacketContents:
         gaps.extend(row_gaps)
 
     gaps.extend(_audit_gaps(project_dir))
+    gaps.extend(_stale_render_gaps(project_dir, rows,
+                                   context['canon_cutoff']))
 
-    references, reference_notes = _packet_references(project_dir, rows)
+    # The style reference is resolved once here and handed to both consumers: the
+    # reference list embeds it and the gaps report its problems, and resolving it
+    # twice walked the canon tree a second time to answer the same question.
+    from storyforge import cmd_illustrate
+    style = cmd_illustrate.resolve_style_reference(
+        project_dir, canon_cutoff=context['canon_cutoff'])
+    references, reference_notes = _packet_references(
+        project_dir, rows, canon_cutoff=context['canon_cutoff'], style=style)
     # Unconditionally, not behind the composite below. The style reference is the
     # packet's most influential image and the only one always present, and its
     # problems reached exactly one file: `run_package` logs `gaps`, so a stale or
     # mis-declared cover appeared in no log line and no README gap — which made
     # "the packet says what it cannot tell you" an overclaim. Same class as
     # `_book_level_gaps`' "no house style for it", which is already unconditional.
-    gaps.extend(_style_reference_gaps(project_dir))
+    gaps.extend(cmd_illustrate.style_reference_warnings(style))
     if reference_notes and _has_ingested_art(rows) and len(references) <= 1:
         # The dangerous shape: renders exist on disk and none of them reached
         # the list. The detail is in reference-images.md; this is the line that
@@ -356,16 +416,39 @@ def resolve(project_dir: str) -> PacketContents:
     }
 
 
-def _style_reference_gaps(project_dir: str) -> list[str]:
-    """What is wrong or unverified about the artwork setting the house style.
+def _stale_render_gaps(project_dir: str, rows: list[dict[str, str]],
+                       canon_cutoff: str) -> list[str]:
+    """Canon-stale art, as one aggregate gap — and the case where it is unknown.
 
-    Reuses `--prompts`' own resolution rather than a second one, for the reason
-    `_packet_references` does: two answers to "which cover directs this book" is
-    the #299 shape.
+    Two holes this closes, both of the kind README.md exists to state:
+
+    - **Rows outside the anchor batch were invisible here.** A stale row was
+      marked in its own entry heading and, if it happened to fill one of the four
+      slots, in the batch table. On a twenty-row book that put seventeen of them
+      nowhere in README.md, while the author was told to work `illustrations.md`
+      top to bottom. `_references_for`'s per-row WARNINGs are the log channel
+      #300 says was scrolled past.
+    - **An unjudgeable cutoff read as "all current."** See
+      `ill.staleness_unchecked_finding`; this is the same disclosure in the
+      artifact the author still has an hour later.
+
+    Aggregated `count → ids`, following `_warn_unanchored_rows`: one project-wide
+    fact behind every row's reason means twenty near-identical sentences, and a
+    gap channel that cries wolf teaches the author to skip the section where the
+    real warnings live.
     """
-    from storyforge import cmd_illustrate
-    style = cmd_illustrate.resolve_style_reference(project_dir)
-    return cmd_illustrate.style_reference_warnings(style)
+    gaps = [f['detail'] for f in ill.staleness_unchecked_finding(
+        project_dir, rows, canon_cutoff)]
+    stale = [row['id'].strip() for row in rows
+             if ill.stale_render_reason(row, canon_cutoff)]
+    if stale:
+        gaps.append(
+            f'{len(stale)} of {len(rows)} illustration(s) already have art that '
+            f'predates the canon now governing them ({", ".join(stale)}) — they '
+            f'still ship, and they still need re-rendering. Their entries below '
+            f'say so individually; re-render and re-ingest them rather than '
+            f'demoting `status`.')
+    return gaps
 
 
 def _has_ingested_art(rows: list[dict[str, str]]) -> bool:
@@ -520,16 +603,16 @@ def state_for_row(row: dict[str, str], *, context: RowContext,
     forward walk for the entities it names, which is what makes it a usable
     escape hatch for state true in one image only.
 
-    **An unresolvable `canon_refs` entry produces one gap, not two.** It used to
-    produce both the anchor gap below *and* the "no transition states its visual
-    state there" gap, for one root cause — and the second one's instruction was
-    wrong for that shape: adding a transition row for an entity with no canon
-    file states a change to a design nothing has stated yet, so it sends the
-    author to the wrong file (#290). The retained gap says both consequences, so
-    suppression loses no information. Under `include_anchor_gaps=False` the state
-    gap is suppressed too, deliberately: `_warn_unanchored_rows` covers that
-    row at every coaching level, and it names the missing anchor rather than a
-    missing transition.
+    **An unresolvable `canon_refs` entry produces one gap, not two** (#290). It
+    used to produce both the anchor gap and the "no transition states its visual
+    state there" gap for one root cause. `_unanchored_gap` is the survivor, and
+    it is emitted *after* resolution so it can name what actually happened —
+    both consequences and both remedies when the state is also unstated, the
+    anchor alone when the state resolved. Under `include_anchor_gaps=False`
+    (`--prompts`) both are suppressed **for those refs only**: an anchored entity
+    with no transition still reports, and `_warn_unanchored_rows` covers the
+    unanchored ones at every coaching level, naming the missing anchor rather
+    than a missing transition.
 
     Args:
         include_anchor_gaps: Whether to report a `canon_refs` entry that
@@ -550,18 +633,12 @@ def state_for_row(row: dict[str, str], *, context: RowContext,
 
     anchor_keys = {key.lower() for key in anchors}
     unanchored = {ref for ref in refs if ref.lower() not in anchor_keys}
-    if include_anchor_gaps:
-        for ref in refs:
-            if ref in unanchored:
-                gaps.append(
-                    f'illustration `{illus_id}` names canon_refs `{ref}`, '
-                    f'which resolves to no populated canon file — that entity '
-                    f'is art-directed with no continuity anchor, so nothing '
-                    f'holds it to one design, and no visual state is reported '
-                    f'for it either. Author the anchor first (`storyforge '
-                    f'illustrate --direction`): a transition row for an entity '
-                    f'with no canon file states a change to a design nothing '
-                    f'has stated.')
+    # Filled by the resolution loop below, then read by the anchor gaps, which
+    # are therefore emitted *after* it: whether an unanchored ref also failed to
+    # resolve a state decides which remedies the one gap should offer, and
+    # asserting the answer before knowing it made the first version of this gap
+    # state a falsehood about half the rows it fired on.
+    unstated: set[str] = set()
 
     resolved: dict[str, str] = {}
     if not scene_id:
@@ -593,16 +670,18 @@ def state_for_row(row: dict[str, str], *, context: RowContext,
         if not matched and needle in {key.lower() for key in overrides}:
             matched = [key for key in overrides if key.lower() == needle]
         if not matched:
-            # `ref in unanchored` is one root cause reported once, above — and
-            # this gap's remedy is the wrong one for that shape. See the
-            # docstring.
-            if scene_id and scene_id in order and ref not in unanchored:
-                gaps.append(
-                    f'illustration `{illus_id}` shows `{ref}` in '
-                    f'`{scene_id}`, but no transition states its visual state '
-                    f'there. Add a row to {vs.STATE_FILE}, or a '
-                    f'`state_override` on the plan row if the state is true '
-                    f'in this image only.')
+            if scene_id and scene_id in order:
+                if ref in unanchored:
+                    # One root cause, one gap — reported below, where it can
+                    # offer both remedies instead of guessing which applies.
+                    unstated.add(ref)
+                else:
+                    gaps.append(
+                        f'illustration `{illus_id}` shows `{ref}` in '
+                        f'`{scene_id}`, but no transition states its visual '
+                        f'state there. Add a row to {vs.STATE_FILE}, or a '
+                        f'`state_override` on the plan row if the state is '
+                        f'true in this image only.')
             continue
         for key in sorted(matched):
             claimed.add(key.lower())
@@ -628,8 +707,58 @@ def state_for_row(row: dict[str, str], *, context: RowContext,
                 f'suppressing the gap that would have told you to state it. '
                 f'Fill the state in {vs.STATE_FILE}, or delete the row.')
 
+    if include_anchor_gaps:
+        for ref in refs:
+            if ref in unanchored:
+                gaps.append(_unanchored_gap(illus_id, ref, scene_id,
+                                            stated=ref not in unstated))
+
     return '; '.join(f'{_entity_label(key, context["labels"])}: {value}'
                      for key, value in parts if value), gaps
+
+
+def _unanchored_gap(illus_id: str, ref: str, scene_id: str, *,
+                    stated: bool) -> str:
+    """The one gap for a `canon_refs` entry that resolves to no canon file.
+
+    Two shapes, because the remedy differs and the first version asserted the
+    wrong one for both:
+
+    - **State resolved.** The gap is about the anchor only. Saying "no visual
+      state is reported for it either" here is simply false — the entry shows the
+      state — and the sentence that followed it condemned the transition row that
+      produced it.
+    - **State also unstated.** Then it is genuinely one root cause with two
+      consequences, and the gap says so. But it must offer *both* remedies:
+      `visual_state.prepass` still emits `state_unspecified` for this row (it
+      does not consult anchors), whose action text says to add a transition row.
+      Telling the author here that a transition row "states a change to a design
+      nothing has stated" put two instructions twenty lines apart in one
+      `--diagnose` in direct contradiction — strictly worse than the duplication
+      the suppression was meant to remove.
+
+    The state-only entity class is why neither remedy can be presented as the
+    only one: a lantern count or a lamp's lit/dark state has no invariant design,
+    so it has no canon file **by design**, and for those the transition row is
+    right and `--direction` is wrong.
+    """
+    head = (f'illustration `{illus_id}` names canon_refs `{ref}`, which '
+            f'resolves to no populated canon file — that entity is '
+            f'art-directed with no continuity anchor, so nothing holds it to '
+            f'one design')
+    if stated:
+        return (f'{head}. Its visual state does resolve, so this is about the '
+                f'anchor alone: author it with `storyforge illustrate '
+                f'--direction`, or drop `{ref}` from `canon_refs` if it is a '
+                f'state-only entity — a light count, a lamp lit or dark — with '
+                f'no invariant design to anchor.')
+    return (f'{head}, and no transition states its visual state'
+            f'{f" in `{scene_id}`" if scene_id else ""} either, so the entry '
+            f'says nothing about it. If `{ref}` has an invariant design, author '
+            f'the anchor with `storyforge illustrate --direction`. If it is a '
+            f'state-only entity — a light count, a lamp lit or dark — it has no '
+            f'canon file by design: add a row to {vs.STATE_FILE} or a '
+            f'`state_override` instead, and drop it from `canon_refs`.')
 
 
 def _entity_label(entity: str, labels: dict[str, canon.AnchorLabel]) -> str:
@@ -728,7 +857,9 @@ def _audit_gaps(project_dir: str) -> list[str]:
 
 
 def _packet_references(
-        project_dir: str, rows: list[dict[str, str]],
+        project_dir: str, rows: list[dict[str, str]], *,
+        canon_cutoff: str | None = None,
+        style: 'object | None' = None,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     """The labeled reference-image list for the whole packet, and why it is short.
 
@@ -747,9 +878,11 @@ def _packet_references(
     """
     from storyforge import cmd_illustrate
     notes: list[str] = []
+    if canon_cutoff is None:
+        canon_cutoff = canon.newest_canon_updated(project_dir)
     references = cmd_illustrate._references_for(
         project_dir, 'the packet', plan=rows,
-        canon_cutoff=canon.newest_canon_updated(project_dir), notes=notes)
+        canon_cutoff=canon_cutoff, style=style, notes=notes)
     return references, notes
 
 
@@ -862,14 +995,14 @@ def anchor_batch(project_dir: str) -> AnchorBatch:
 def _no_establisher_note(rows: list[dict[str, str]]) -> str:
     """Why the establisher slot is empty — the plan, or the horizon.
 
-    Two different facts, and the batch used to report the first for both. The
-    visual key is chosen from the first `visual_key_horizon` illustrations in
-    reading order, so a plan whose later rows all name anchors and whose early
-    rows do not has an empty slot while "no illustration names a continuity
-    anchor in `canon_refs`" is flatly false about it (#290). The horizon is a
-    deliberate constraint — the key exists so the images *after* it have
-    something real to reference, which the climax cannot do — so the wording is
-    what changes, not the selection.
+    Two different facts, and the batch reported the first for both: a plan whose
+    early rows name no `canon_refs` and whose later rows do had an empty slot
+    while "no illustration names a continuity anchor" was flatly false about it
+    (#290). Only the wording changed — the horizon is a deliberate constraint,
+    for the reason `ill.render_order` states.
+
+    The emitted string carries the explanation rather than this docstring,
+    because the author is the one who has to act on it.
     """
     horizon = ill.visual_key_horizon(len(rows))
     later = [row['id'].strip() for row in rows[horizon:]

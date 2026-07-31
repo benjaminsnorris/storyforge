@@ -838,6 +838,18 @@ def validate_canon_file(path: str, project_root: str) -> list[CanonFinding]:
     return findings
 
 
+def has_canon_files(project_dir: str) -> bool:
+    """Whether any author-managed canon file exists.
+
+    Lets a caller separate "canon governs this book and cannot be dated" from
+    "this book has no canon yet" — the second is in-flight state for a project
+    that has not run `--direction`, and warning about it would fire on every new
+    project (the same guard `cmd_cleanup.report_canon_files` applies).
+    """
+    canon_dir = os.path.join(project_dir, CANON_DIR)
+    return os.path.isdir(canon_dir) and bool(_walk_canon_files(canon_dir))
+
+
 def _walk_canon_files(canon_dir: str) -> list[str]:
     """Return all author-managed canon .md files under canon_dir.
 

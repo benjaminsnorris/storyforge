@@ -216,6 +216,11 @@ def _reference_tier_gaps(
 
 def run_diagnose(project_dir: str) -> int:
     """Report plan state and every incoherence, without writing anything."""
+    from storyforge import canon as canon_mod
+    # One read of the canon tree for the whole report, threaded into every
+    # consumer below, so an unparseable `canon_updated` is reported once rather
+    # than once per consumer — which read as several broken files.
+    canon_cutoff = canon_mod.newest_canon_updated(project_dir)
     rows = ill.read_plan(project_dir)
     if not rows:
         log('No illustration plan yet. Run `storyforge illustrate --plan` to '
@@ -224,12 +229,14 @@ def run_diagnose(project_dir: str) -> int:
         # transition log is about the book, not about the illustrations, and the
         # skill now tells authors to build it before the plan. Returning 0 here
         # hid a `state_unknown_scene` error entirely.
-        findings = ill.validate_plan(project_dir)
-        _report_style_reference(project_dir)
+        findings = ill.validate_plan(project_dir, canon_cutoff=canon_cutoff)
+        _report_style_reference(project_dir, canon_cutoff=canon_cutoff)
         _report_state_rung(project_dir, findings)
         return _report_findings(findings)
 
-    report = ill.plan_report(project_dir)
+    needs = packet.needs_render(project_dir, plan=rows,
+                                canon_cutoff=canon_cutoff)
+    report = ill.plan_report(project_dir, needs=needs)
     log(f'Illustration plan: {report["total"]} rows')
     for status in sorted(report['by_status']):
         log(f'  {status}: {report["by_status"][status]}')
@@ -251,7 +258,6 @@ def run_diagnose(project_dir: str) -> int:
         log(f'  reference tier incomplete — {"; ".join(parts)} — --prompts '
             f'will warn until these are filled')
 
-    needs = packet.needs_render(project_dir)
     steps = ill.render_order(project_dir)
     if steps:
         log('Recommended render order:')
@@ -264,36 +270,52 @@ def run_diagnose(project_dir: str) -> int:
             locks = (f'  locks: {", ".join(step["locks"])}'
                      if step['locks'] else '')
             log(f'  {mark} {i:2}. {step["id"]}{key}{locks}')
-    _report_canon_stale_renders(needs)
+    findings = ill.validate_plan(project_dir, canon_cutoff=canon_cutoff)
+    _report_canon_stale_renders(findings, len(rows))
     _report_anchor_batch(packet.anchor_batch(project_dir), needs)
 
-    findings = ill.validate_plan(project_dir)
-    _report_style_reference(project_dir)
+    _report_style_reference(project_dir, canon_cutoff=canon_cutoff)
     _report_state_rung(project_dir, findings)
     _report_packet_rung(project_dir, findings, needs)
     return _report_findings(findings)
 
 
-def _report_canon_stale_renders(needs: packet.RenderNeeds) -> None:
-    """Name every ingested illustration whose art predates the current canon.
+def _report_canon_stale_renders(
+        findings: list[ill.IllustrationFinding], total: int) -> None:
+    """Say how much of the set needs re-rendering, or that it could not be told.
 
-    The whole-plan version of what `_report_anchor_batch` says about four rows.
-    A book can have twenty stale renders and none of them in the batch, and
+    The whole-plan summary of what `_report_anchor_batch` says about four rows: a
+    book can have twenty stale renders with none of them in the batch, and
     `--diagnose` is the health gate, so it has to be the place that says how much
-    of the set needs redoing — with the reason, since the fix is a re-render and
-    explicitly *not* a `status` demotion (#300).
+    of the set needs redoing.
+
+    **Silence here has to mean "checked, all current" and nothing else.** With no
+    parseable `canon_updated` anywhere, nothing can be judged and every render
+    reads as current — so `canon_staleness_unchecked` is surfaced first and
+    separately, the way `--audit` renders "Not assessed" rather than "None
+    found".
+
+    Read off *findings* rather than recomputed from `needs`, following
+    `_report_state_rung`: `validate_plan` has already produced one per row with
+    its reason, and stating each reason here too made `--diagnose` say the same
+    sentence five times for a four-row book — the noise pattern
+    `_warn_unanchored_rows` fixed once already. This is the count; the findings
+    list below is the itemisation.
     """
-    stale = {illus_id: reason for illus_id, reason in needs.items() if reason}
+    for finding in findings:
+        if finding['kind'] == 'canon_staleness_unchecked':
+            log(f'  WARNING: {finding["detail"]}')
+    stale = [f for f in findings if f['kind'] == 'canon_stale_render']
     if not stale:
         return
-    log(f'  {len(stale)} ingested illustration(s) predate the current canon and '
-        f'need re-rendering — they still ship, but they are not usable '
-        f'references for anything rendered now:')
-    for illus_id, reason in stale.items():
-        log(f'    WARNING: {illus_id} — {reason}')
+    log(f'  {len(stale)} of {total} illustration(s) predate the current canon '
+        f'and need re-rendering — they still ship, but they are not usable '
+        f'references for anything rendered now. Re-render and re-ingest them '
+        f'(never demote `status`); see the findings below for each.')
 
 
-def _report_style_reference(project_dir: str) -> None:
+def _report_style_reference(project_dir: str, *,
+                            canon_cutoff: str | None = None) -> None:
     """Name the artwork setting the house style, and anything wrong with it.
 
     `--diagnose` is the health gate, and a stale, mis-declared, or absent style
@@ -301,7 +323,7 @@ def _report_style_reference(project_dir: str) -> None:
     the book — free to compute, and previously reachable only by starting a run
     that spends money or opening `reference-images.md` by hand.
     """
-    style = resolve_style_reference(project_dir)
+    style = resolve_style_reference(project_dir, canon_cutoff=canon_cutoff)
     headline = describe_style_reference(style)
     log(f'  {headline}' if headline else '  Style reference: none resolved')
     for warning in style_reference_warnings(style):
@@ -407,16 +429,16 @@ def _report_packet_rung(project_dir: str,
             f'Regenerate rather than editing the packet.')
     # "Ready to hand over" is a go/no-go on a paid render run, so it is derived
     # from `needs_render` rather than from `status`: a batch of four ingested
-    # rows that all predated the canon reported ready, and the session that
-    # trusted it skipped phase 1 and ran the churn against a cover-only
-    # reference list (#300).
-    batch_ids = {batch_id for batch_id in
-                 (packet.anchor_batch(project_dir)[slot]  # type: ignore[literal-required]
-                  for slot, _label in packet.BATCH_SLOTS)
-                 if batch_id}
-    pending = sorted(i for i in batch_ids if i in needs_render
-                     and not needs_render[i])
-    stale = sorted(i for i in batch_ids if needs_render.get(i))
+    # rows that all predated the canon reported ready, and a session trusting it
+    # would have skipped phase 1 and run the churn against a cover-only
+    # reference list (#300). Both messages can print — the mid-flight batch (some
+    # rendered, then a canon edit) is the normal state, not an either/or.
+    batch = packet.anchor_batch(project_dir)
+    batch_ids = [batch[slot]  # type: ignore[literal-required]
+                 for slot, _label in packet.BATCH_SLOTS
+                 if batch[slot]]  # type: ignore[literal-required]
+    pending = sorted(packet.ids_in_state(needs_render, 'pending', batch_ids))
+    stale = sorted(packet.ids_in_state(needs_render, 'stale', batch_ids))
     if pending:
         log(f'  anchor batch: {len(pending)} row(s) not yet ingested '
             f'({", ".join(pending)}) — render and ingest those before handing '
@@ -424,9 +446,9 @@ def _report_packet_rung(project_dir: str,
     if stale:
         log(f'  anchor batch: {len(stale)} row(s) are ingested but predate the '
             f'current canon ({", ".join(stale)}) — re-render and re-ingest '
-            f'those. Their art was directed by canon that has since been '
-            f'rewritten, so referencing it teaches the churn the drift the '
-            f'canon was rewritten to remove.')
+            f'those. `--prompts` already excludes pre-canon renders from the '
+            f'reference chain, so leaving them is what makes the churn '
+            f'reference nothing but the cover.')
     if not pending and not stale:
         log('  anchor batch: every row is ingested from the current canon — '
             'the packet is ready to hand over.')
@@ -1686,7 +1708,7 @@ def _apply_treatments(project_dir: str, proposed: dict[str, str]) -> int:
 # ============================================================================
 
 def run_package(project_dir: str, dry_run: bool, *,
-                report_batch: bool = True) -> int:
+                report_batch: bool) -> int:
     """Assemble `manuscript/illustration-packet/` — six files, no API calls.
 
     Regenerated wholesale, so the packet is a render and never hand-edited: the
@@ -1701,16 +1723,24 @@ def run_package(project_dir: str, dry_run: bool, *,
 
     Args:
         report_batch: Whether to log the anchor batch. `main` passes False when
-            `--diagnose` was also requested, because that report owns the batch.
-            Today `main` early-returns on `--diagnose` so nothing exercises the
-            False path through the CLI; the parameter exists so removing that
-            early return does not silently start printing the batch twice (#290
-            item 2), which is a duplication no reader would trace back here.
+            `--diagnose` was also requested, because that report owns the batch
+            (#290 item 2). **No default**: the guard is against a second caller
+            forgetting the coupling, which is likelier than the case it was
+            written for — `main` early-returns on `--diagnose` today, so its
+            argument is provably True and nothing exercises the False path
+            through the CLI. Requiring it keeps the decision at every call site
+            rather than only at the one that remembered.
     """
-    contents = packet.resolve(project_dir)
+    from storyforge import canon as canon_mod
+    # One read for the whole run: `resolve` threads this into `state_context`,
+    # the reference list, and the style reference, and `needs_render` takes it
+    # too — so the canon tree is walked once and an unparseable `canon_updated`
+    # is reported once rather than five times.
+    canon_cutoff = canon_mod.newest_canon_updated(project_dir)
+    contents = packet.resolve(project_dir, canon_cutoff=canon_cutoff)
     grid = packet.state_grid(project_dir)
     batch = packet.anchor_batch(project_dir)
-    needs = packet.needs_render(project_dir)
+    needs = packet.needs_render(project_dir, canon_cutoff=canon_cutoff)
     title = read_yaml_field('project.title', project_dir) or '(untitled)'
 
     illustrated: dict[str, list[str]] = {}
@@ -1782,27 +1812,36 @@ def _report_anchor_batch(batch: packet.AnchorBatch,
     what let a whole set be handed over unrendered (#300).
     """
     log('Anchor batch — render and approve these before the rest:')
-    stale: dict[str, str] = {}
+    marks: dict[packet.RenderState, str] = {
+        'done': '  [ingested]',
+        'stale': '  [ingested, but needs a re-render]',
+        'pending': '',
+    }
     for slot, label in packet.BATCH_SLOTS:
         illus_id = batch[slot]  # type: ignore[literal-required]
         if not illus_id:
             log(f'  {label}: (unfilled)')
             continue
-        if illus_id not in needs_render:
-            mark = '  [ingested]'
-        elif needs_render[illus_id]:
-            mark = '  [ingested, but needs a re-render]'
-            stale[illus_id] = needs_render[illus_id]
-        else:
-            mark = ''
-        log(f'  {label}: {illus_id}{mark}')
-    for illus_id, reason in stale.items():
-        log(f'  WARNING: {illus_id} still says `ingested`, but {reason} — so it '
-            f'is not a usable reference for anything rendered from the current '
-            f'canon, and phase 1 is not done until it is re-rendered and '
-            f're-ingested. Leave `status` alone: demoting it would drop the '
-            f'illustration out of the epub, the PDF, the web book, and '
-            f'Bookshelf.')
+        log(f'  {label}: {illus_id}'
+            f'{marks[packet.render_state(needs_render, illus_id)]}')
+    stale = packet.ids_in_state(
+        needs_render, 'stale',
+        among=[batch[slot]  # type: ignore[literal-required]
+               for slot, _label in packet.BATCH_SLOTS if batch[slot]])  # type: ignore[literal-required]
+    if stale:
+        # One aggregated warning, not one per slot: the reason is the same
+        # sentence for every row sharing a cause, and the advice is identical for
+        # all of them. `--diagnose` has already listed the whole plan's stale
+        # rows by the time this runs, so per-slot paragraphs restated it twice.
+        log(f'  WARNING: {", ".join(stale)} still say `ingested`, but their art '
+            f'predates the current canon (see the reasons above), so phase 1 is '
+            f'not done until they are re-rendered and re-ingested. The churn '
+            f'would otherwise reference nothing at all: `--prompts` already '
+            f'excludes pre-canon renders, so an unrepaired batch leaves the set '
+            f'with no likeness reference beyond the cover. Leave `status` alone '
+            f'— demoting it drops the illustration from the Bookshelf publish '
+            f'manifest while the epub, the PDF, and the web book keep shipping '
+            f'it.')
     for note in batch['fallback']:
         log(f'  WARNING: {note}')
 
@@ -1910,9 +1949,11 @@ def _status_after_prompt(current: str) -> str:
     status: the prompt file is new art direction for art that already ships,
     and the row is the only thing saying that art exists. Demoting it removed
     the illustration from Bookshelf (`manifest_assets` skips a non-`ingested`
-    row) and from the epub, PDF, and web book (`FILED_STATUSES` gates marker
-    resolution) while leaving the file on disk — invisible to `--diagnose`,
-    because an unrendered row is legitimate in-flight state.
+    row) while leaving it in the epub, the PDF, and the web book, which drop
+    only `superseded` (`ill.resolve_for_local`) — so the editions silently
+    disagreed, and `--diagnose` said nothing, because an unrendered row is
+    legitimate in-flight state. `FILED_STATUSES` does **not** gate marker
+    resolution; its only consumer is `validate_plan`'s file/digest check.
     """
     return 'prompted' if current in _ADVANCES_TO_PROMPTED else ''
 

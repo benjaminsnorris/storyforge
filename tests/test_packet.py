@@ -358,9 +358,7 @@ def test_resolve_on_a_bare_project_does_not_raise(project_dir):
 # ============================================================================
 
 def test_an_unresolvable_canon_ref_produces_exactly_one_gap(packet_project):
-    """Both the anchor check and the state-coverage check used to report it, and
-    the second one's remedy is wrong for this shape: adding a transition row for
-    an entity with no canon file states a change to a design nothing stated."""
+    """Both the anchor check and the state-coverage check used to report it."""
     rows = ill.read_plan(packet_project)
     rows[0]['canon_refs'] = 'nobody-at-all'
     ill.write_plan(packet_project, rows)
@@ -368,8 +366,57 @@ def test_an_unresolvable_canon_ref_produces_exactly_one_gap(packet_project):
             if 'nobody-at-all' in g]
     assert len(gaps) == 1, gaps
     assert 'resolves to no populated canon file' in gaps[0]
-    # Nothing is lost by suppressing the other one: the survivor says both.
-    assert 'no visual state is reported for it either' in gaps[0]
+    # Nothing is lost by suppressing the other one: the survivor states the
+    # second consequence *and* keeps the remedy the suppressed gap carried.
+    assert 'no transition states its visual state' in gaps[0]
+    assert 'reference/visual-state.csv' in gaps[0]
+    assert 'illustrate --direction' in gaps[0]
+
+
+def test_an_unanchored_ref_whose_state_resolves_is_not_told_it_has_none(
+        packet_project):
+    """The gap used to assert "no visual state is reported for it either"
+    unconditionally, while the suppression was conditional on nothing resolving.
+    For a state-only entity with a transition that is simply false — the entry
+    shows the state — and the sentence after it condemned the row that
+    produced it."""
+    from storyforge import visual_state as vs
+    transitions = vs.read_transitions(packet_project)
+    transitions.append({'entity': 'village-lights', 'from_scene': 'act1-sc01',
+                        'state': 'nine still lit',
+                        'evidence': 'held her breath'})
+    vs.write_transitions(packet_project, transitions)
+    rows = ill.read_plan(packet_project)
+    rows[0]['canon_refs'] = 'village-lights'
+    ill.write_plan(packet_project, rows)
+
+    contents = packet.resolve(packet_project)
+    entry = {e['id']: e for e in contents['entries']}['the-finest-cartographer']
+    assert 'nine still lit' in entry['state'], 'the state does resolve'
+    gaps = [g for g in contents['gaps'] if 'village-lights' in g]
+    assert len(gaps) == 1, gaps
+    assert 'no transition states its visual state' not in gaps[0]
+    assert 'Its visual state does resolve' in gaps[0]
+
+
+def test_an_unanchored_state_only_entity_keeps_the_transition_remedy(
+        packet_project):
+    """`visual_state.prepass` does not consult anchors, so `state_unspecified`
+    still fires for this row telling the author to add a transition. A gap
+    saying a transition row "states a change to a design nothing has stated"
+    put two opposite instructions in one --diagnose."""
+    rows = ill.read_plan(packet_project)
+    rows[0]['canon_refs'] = 'village-lights'
+    ill.write_plan(packet_project, rows)
+    gaps = [g for g in packet.resolve(packet_project)['gaps']
+            if 'village-lights' in g]
+    assert len(gaps) == 1, gaps
+    assert 'state-only entity' in gaps[0]
+    # Both remedies, since which one applies depends on the entity.
+    assert 'reference/visual-state.csv' in gaps[0]
+    assert 'illustrate --direction' in gaps[0]
+    # And it does not contradict `state_unspecified`'s advice.
+    assert 'nothing has stated' not in gaps[0]
 
 
 def test_an_anchored_ref_with_no_transition_still_gets_its_state_gap(
@@ -458,6 +505,113 @@ def test_a_superseded_row_is_not_something_that_needs_rendering(packet_project):
     rows[1]['status'] = 'superseded'
     ill.write_plan(packet_project, rows)
     assert 'the-blank-page' not in packet.needs_render(packet_project)
+
+
+def test_render_state_is_the_one_place_in_versus_get_is_decided(packet_project):
+    """Three states over two levels: `needs.get(id)` read as "done" collapses
+    *pending* into *done*, which is #300 at the go/no-go call site."""
+    needs = {'pending-one': '', 'stale-one': 'because reasons'}
+    assert packet.render_state(needs, 'pending-one') == 'pending'
+    assert packet.render_state(needs, 'stale-one') == 'stale'
+    assert packet.render_state(needs, 'not-in-there') == 'done'
+
+
+def test_ids_in_state_dedupes_within_a_narrowed_subset(packet_project):
+    """The anchor batch's darkest and brightest can be one illustration, and a
+    naive list names it twice."""
+    needs = {'a': 'stale', 'b': ''}
+    assert packet.ids_in_state(needs, 'stale', ['a', 'a', 'b']) == ['a']
+    assert packet.ids_in_state(needs, 'pending', ['a', 'b', 'b']) == ['b']
+    assert packet.ids_in_state(needs, 'done', ['a', 'b', 'z']) == ['z']
+
+
+def test_next_to_render_names_a_canon_stale_row(packet_project):
+    """As a bare status check this returned '' for a fully-ingested pre-canon
+    book, so `--diagnose` printed no "next to render" line and then said N
+    illustrations needed re-rendering — #300's contradiction inside #300's fix."""
+    _ingest_rows(packet_project, ingested_at='2026-01-01')
+    assert ill.next_to_render(packet_project) != ''
+    report = ill.plan_report(packet_project)
+    assert report['next_unrendered'] != ''
+    assert sorted(report['awaiting_render']) == ['the-blank-page',
+                                                 'the-finest-cartographer']
+    # `ingested` stays a literal count of the column — it is what publishing
+    # gates on, so it must not start meaning "done".
+    assert len(report['ingested']) == 2
+
+
+def test_next_to_render_is_empty_when_the_set_is_genuinely_current(
+        packet_project):
+    _ingest_rows(packet_project, ingested_at='2026-07-28')
+    assert ill.next_to_render(packet_project) == ''
+    assert ill.plan_report(packet_project)['awaiting_render'] == []
+
+
+def test_stale_render_findings_name_each_row(packet_project):
+    """The signal has to reach `validate` and `cleanup`, not only --diagnose:
+    `working/cleanup-report.csv` is the durable artifact forge scans."""
+    ids = _ingest_rows(packet_project, ingested_at='2026-01-01')
+    findings = ill.validate_plan(packet_project)
+    stale = [f for f in findings if f['kind'] == 'canon_stale_render']
+    assert sorted(f['id'] for f in stale) == sorted(ids)
+    assert all(ill.severity_of(f['kind']) == 'warning' for f in stale)
+    assert all('never demote' in f['detail'] or 'rather than demoting'
+               in f['detail'] for f in stale)
+
+
+def test_an_undatable_canon_is_reported_rather_than_read_as_current(
+        packet_project):
+    """The #300-shaped silence: with no parseable `canon_updated`, every render
+    reads as current because nothing can show otherwise."""
+    import re
+    canon_dir = os.path.join(packet_project, 'reference', 'canon')
+    for root, _dirs, files in os.walk(canon_dir):
+        for name in files:
+            if name.endswith('.md'):
+                path = os.path.join(root, name)
+                with open(path, encoding='utf-8') as f:
+                    text = f.read()
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(re.sub(r'canon_updated: .*', 'canon_updated: TODO',
+                                   text))
+    _ingest_rows(packet_project, ingested_at='')
+
+    assert packet.needs_render(packet_project) == {}, 'nothing is judgeable'
+    kinds = [f['kind'] for f in ill.validate_plan(packet_project)]
+    assert 'canon_staleness_unchecked' in kinds
+    assert kinds.count('canon_staleness_unchecked') == 1
+    gaps = packet.resolve(packet_project)['gaps']
+    assert any('not because it was checked' in g for g in gaps)
+
+
+def test_a_project_with_no_canon_at_all_is_not_warned(project_dir):
+    """Never having run `--direction` is in-flight state, not a failure — the
+    guard `cmd_cleanup.report_canon_files` already applies."""
+    from illustration_helpers import seed_illustration_plan
+    seed_illustration_plan(project_dir)
+    _ingest_rows(project_dir, ingested_at='')
+    kinds = [f['kind'] for f in ill.validate_plan(project_dir)]
+    assert 'canon_staleness_unchecked' not in kinds
+
+
+def test_a_book_with_no_ingested_art_is_not_warned_about_the_cutoff(
+        packet_project):
+    """Nothing filed means nothing that could be stale, so an undatable canon
+    costs this project nothing and warning would fire on every new project."""
+    assert ill.staleness_unchecked_finding(
+        packet_project, ill.read_plan(packet_project), '') == []
+
+
+def test_the_packet_states_stale_rows_outside_the_anchor_batch(packet_project):
+    """A stale row was marked in its own entry and, if it filled a slot, in the
+    batch table. On a twenty-row book that put seventeen of them nowhere in
+    README.md while the author was told to work top to bottom."""
+    _ingest_rows(packet_project, ingested_at='2026-01-01')
+    gaps = packet.resolve(packet_project)['gaps']
+    aggregate = [g for g in gaps if 'predates the canon now governing' in g]
+    assert len(aggregate) == 1, aggregate
+    assert '2 of 2 illustration(s)' in aggregate[0]
+    assert 'the-finest-cartographer' in aggregate[0]
 
 
 def test_an_entry_carries_the_stale_reason(packet_project):
@@ -617,14 +771,45 @@ def test_an_empty_establisher_names_the_horizon_when_later_rows_have_anchors(
 
 def test_the_horizon_the_batch_names_is_the_one_render_order_uses(
         packet_project):
-    """Two computations of the horizon would let the disclosure name a number
-    the selection does not use."""
-    rows = _anchors_only_outside_the_horizon(packet_project)
-    assert ill.visual_key_horizon(len(rows)) == 3
+    """Two computations of the horizon would let the disclosure name a number the
+    selection does not use. Asserted by comparing the two *lists* the horizon is
+    sliced from — `max(3, n // 3)` is flat at 3 for every n <= 11, so comparing
+    the numbers alone would pass even after the lists diverged."""
+    _anchors_only_outside_the_horizon(packet_project)
+    reading_order = [r['id'].strip() for r in
+                     packet.rows_in_reading_order(packet_project)]
+    render_sequence = [s['id'] for s in ill.render_order(packet_project)]
+    # render_order hoists the visual key; with none, the two must be identical.
     assert not any(s['is_visual_key'] for s in ill.render_order(packet_project))
+    assert render_sequence == reading_order
+
     note = next(n for n in packet.anchor_batch(packet_project)['fallback']
                 if 'establisher' in n)
-    assert f'first {ill.visual_key_horizon(len(rows))} illustration(s)' in note
+    assert f'first {ill.visual_key_horizon(len(reading_order))} illustration(s)' \
+        in note
+
+
+def test_an_anchor_exactly_at_the_horizon_boundary_is_not_the_key(
+        packet_project):
+    """The realistic near-miss: the only anchored row is the first one *outside*
+    the window. `rows[horizon:]` must include it — off by one and the batch tells
+    the author no illustration names an anchor while one does."""
+    rows = []
+    for index in range(1, 10):
+        row = ill.blank_row(f'a-{index:02}')
+        row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open',
+                    'beat': 'b', 'subject': 's'})
+        rows.append(row)
+    horizon = ill.visual_key_horizon(len(rows))
+    rows[horizon]['canon_refs'] = 'maps'  # index 3, the first row outside
+    ill.write_plan(packet_project, rows)
+
+    batch = packet.anchor_batch(packet_project)
+    assert batch['establisher'] == '', 'the boundary row is outside the window'
+    note = next(n for n in batch['fallback'] if 'establisher' in n)
+    assert f'none of the first {horizon} illustration(s)' in note
+    assert '1 later illustration(s) do name anchors' in note
+    assert f'`a-{horizon + 1:02}`' in note
 
 
 def test_an_empty_plan_has_no_batch_and_says_why(project_dir):

@@ -1344,16 +1344,34 @@ class IllustrationReport(TypedDict):
     """Plan state at a glance."""
     total: int
     by_status: dict[str, int]
+    #: Literal count of `status == 'ingested'` — what the column says, which is
+    #: also what the publish manifest gates on.
     ingested: list[str]
+    #: Rows that still need a render, which is **not** the complement of
+    #: `ingested`: a row can be both filed and canon-stale (#300).
     awaiting_render: list[str]
+    #: First row in `awaiting_render` by render order, '' when none.
     next_unrendered: str
     embedded: list[str]
     unembedded: list[str]
 
 
-def plan_report(project_dir: str) -> IllustrationReport:
-    """Summarize plan state, in scene reading order where available."""
+def plan_report(project_dir: str, *,
+                needs: 'dict[str, str] | None' = None) -> IllustrationReport:
+    """Summarize plan state, in scene reading order where available.
+
+    `awaiting_render` and `next_unrendered` both come from `packet.needs_render`
+    rather than from `status`, so neither can report a finished set while the
+    same report says N renders are needed (#300). `ingested` and `by_status`
+    stay literal counts of the column, because that is what they are named for.
+
+    `needs` lets a caller that has already computed it pass it in, so one report
+    does not walk the canon tree twice.
+    """
+    from storyforge import packet
     rows = read_plan(project_dir)
+    if needs is None:
+        needs = packet.needs_render(project_dir, plan=rows)
     by_status: dict[str, int] = {}
     ingested: list[str] = []
     awaiting: list[str] = []
@@ -1362,7 +1380,7 @@ def plan_report(project_dir: str) -> IllustrationReport:
         by_status[status] = by_status.get(status, 0) + 1
         if status == 'ingested':
             ingested.append(row['id'].strip())
-        elif status != 'superseded':
+        if row['id'].strip() in needs:
             awaiting.append(row['id'].strip())
 
     embedded, unembedded = [], []
@@ -1381,7 +1399,7 @@ def plan_report(project_dir: str) -> IllustrationReport:
         'awaiting_render': awaiting,
         # Follows the recommended render order (visual key first), not plan
         # order — the point of the order is that it is what to render next.
-        'next_unrendered': next_to_render(project_dir),
+        'next_unrendered': next_to_render(project_dir, needs),
         'embedded': embedded, 'unembedded': unembedded,
     }
 
@@ -1481,10 +1499,8 @@ VISUAL_KEY_MIN_CANDIDATES = 3
 def visual_key_horizon(row_count: int) -> int:
     """How many early illustrations the visual key is chosen from.
 
-    Extracted so `packet.anchor_batch` can *name* the horizon when no early row
-    fills it. The batch used to report "no illustration names a continuity
-    anchor in `canon_refs`" for that shape, which is false whenever a later row
-    does — and the horizon, not the plan, is why the slot is empty (#290).
+    Extracted so `packet._no_establisher_note` can name the same horizon the
+    selection used, rather than recomputing one that could drift from it (#290).
     """
     return max(VISUAL_KEY_MIN_CANDIDATES,
                row_count // VISUAL_KEY_HORIZON_DIVISOR)
@@ -1566,10 +1582,24 @@ def render_order(project_dir: str) -> list[RenderStep]:
     return steps
 
 
-def next_to_render(project_dir: str) -> str:
-    """The next illustration to render, following the recommended order."""
+def next_to_render(project_dir: str,
+                   needs: 'dict[str, str] | None' = None) -> str:
+    """The next illustration to render, following the recommended order.
+
+    Reads `packet.needs_render`, not bare `status`. As a status check this
+    returned '' for a book whose every row was `ingested` from canon since
+    rewritten — so `--diagnose` printed no "next to render" line and then, three
+    lines later, that N illustrations needed re-rendering. #300's own same-run
+    contradiction, inside the report added to fix it.
+
+    `needs` lets a caller that has already computed the mapping pass it in, so
+    one report does not walk the canon tree twice.
+    """
+    from storyforge import packet
+    if needs is None:
+        needs = packet.needs_render(project_dir)
     for step in render_order(project_dir):
-        if step['status'] != 'ingested':
+        if step['id'] in needs:
             return step['id']
     return ''
 
@@ -1585,21 +1615,34 @@ def stale_render_reason(row: dict[str, str], canon_cutoff: str) -> str:
     `Rendered: yes` and the packet's README declared phase 1 complete. A session
     working that packet top to bottom would have skipped the anchor batch
     entirely and run the churn against a cover-only reference list — the exact
-    failure the two-phase order exists to prevent (#300). Three callers now:
-    `_references_for`, `packet.needs_render`, and `packet._entry_for`.
+    failure the two-phase order exists to prevent (#300).
+
+    **This is the predicate for the packet, the prompts, and the reference chain
+    — not for every "is it rendered" question in the codebase.** Callers:
+    `_references_for`, `packet.needs_render`, `packet._entry_for`,
+    `stale_render_findings`. `next_to_render` routes through
+    `packet.needs_render`; nothing else should read bare `status` to answer this.
 
     Reported as a *reason* rather than a bool because the whole point is that it
     is said out loud. An author whose only signal is "needs a re-render" reaches
     for the workaround this replaced — demoting `status` to `prompted`, which
-    makes the packet honest and simultaneously drops the row out of the epub,
-    the PDF, the web book, and Bookshelf, since `FILED_STATUSES` is what those
-    gate on.
+    makes the packet honest and drops the row out of the Bookshelf publish
+    manifest (`manifest_assets` skips any non-`ingested` row). Note the epub, the
+    PDF, and the web book keep shipping it: `resolve_for_local` excludes only
+    `superseded`. So the demotion costs the reader-app edition silently while the
+    print editions carry art the author believes they retired, which is a worse
+    split than losing all four at once.
 
     Only `ingested` rows: `rendered` means a file exists that Storyforge has
-    never seen, so it carries no `ingested_at` and there is no date to judge —
-    the same gate `packet._staging_postdates_render` uses, and for the same
-    reason. With no parseable `canon_updated` anywhere, `canon_cutoff` is '' and
-    nothing can be judged stale at all.
+    never seen, so it carries no `ingested_at` and there is no date to judge.
+    That is the same *gate* `packet._staging_postdates_render` uses, though the
+    opposite policy on a missing date — see the paragraph below, and note that a
+    `rendered` row therefore also returns '' without its art being current.
+
+    With no parseable `canon_updated` anywhere, `canon_cutoff` is '' and nothing
+    can be judged stale at all. That is **not** the same as nothing being stale,
+    and a caller reporting on this must say which — see
+    `staleness_unchecked_finding`.
 
     Empty and unparseable `ingested_at` are both treated as pre-canon, which is
     the opposite of `resolve_style_reference`'s policy for an unreadable mtime
@@ -1628,6 +1671,99 @@ def stale_render_reason(row: dict[str, str], canon_cutoff: str) -> str:
     return ''
 
 
+def has_ingested_rows(rows: list[dict[str, str]]) -> bool:
+    """Whether any row claims filed art — i.e. whether staleness is a question.
+
+    A book with nothing ingested has nothing that *could* be canon-stale, so an
+    unreadable canon cutoff costs it nothing and warning about one would be
+    noise on every new project.
+    """
+    return any((row.get('status') or '').strip() == 'ingested' for row in rows)
+
+
+def staleness_unchecked_finding(
+        project_dir: str,
+        rows: list[dict[str, str]],
+        canon_cutoff: str) -> list[IllustrationFinding]:
+    """One finding when canon exists, filed art exists, and nothing can date it.
+
+    **Silence would be indistinguishable from "everything is current."** With no
+    parseable `canon_updated` anywhere, `stale_render_reason` returns '' for
+    every row, `needs_render` returns {}, and every downstream signal — the
+    batch table's `yes`, the entry's `do not regenerate`, `--diagnose`'s "ready
+    to hand over" — renders exactly as it does for a set that genuinely was
+    rendered from the current canon. That is #300's output produced by the code
+    that fixes #300, and the templates ship `canon_updated: TODO`, so it is the
+    default state of a project whose author has not filled the scaffolds in.
+
+    This is `--audit`'s "Not assessed" rather than "None found", and
+    `style_reference_warnings`' policy for the same missing cutoff — which does
+    not cover this case, because it returns early when no cover artwork resolves
+    at all and speaks only about the cover when it does.
+
+    **Requires canon to exist.** A project with no canon files has not run
+    `--direction`, which is in-flight state rather than a failure — the guard
+    `cmd_cleanup.report_canon_files` already applies — and there is nothing for
+    its art to be stale against. The reportable case is canon that *does* govern
+    the book and cannot be dated, which is what the shipped templates
+    (`canon_updated: TODO`) leave behind.
+    """
+    from storyforge import canon
+    if (canon_cutoff or not has_ingested_rows(rows)
+            or not canon.has_canon_files(project_dir)):
+        return []
+    return [{
+        'kind': 'canon_staleness_unchecked',
+        # The only finding here whose fix is in the canon tree rather than in a
+        # plan row or a scene, so it carries `file`: without it
+        # `_report_findings` renders an empty target and `cmd_cleanup` falls back
+        # to naming the plan CSV, which is not where the missing date goes.
+        'file': canon.CANON_DIR,
+        'detail': (
+            f'no file under {canon.CANON_DIR}/ carries a parseable '
+            f'`canon_updated`, so no ingested illustration can be checked '
+            f'against the canon that governs it. Every render reads as current '
+            f'because nothing can show otherwise — not because it was checked. '
+            f'Set `canon_updated: YYYY-MM-DD` in the canon files you have '
+            f'edited.'),
+    }]
+
+
+def stale_render_findings(
+        project_dir: str, *,
+        plan: list[dict[str, str]] | None = None,
+        canon_cutoff: str | None = None) -> list[IllustrationFinding]:
+    """One finding per ingested row whose art predates the current canon.
+
+    Plus `staleness_unchecked_finding`, because "no stale rows" and "could not
+    tell" must not both render as an empty list.
+
+    In plan order rather than reading order: this feeds `validate` and `cleanup`,
+    which report per row and never need the reading sequence.
+    """
+    from storyforge import canon as canon_mod
+    rows = plan if plan is not None else read_plan(project_dir)
+    if canon_cutoff is None:
+        canon_cutoff = canon_mod.newest_canon_updated(project_dir)
+
+    findings: list[IllustrationFinding] = list(
+        staleness_unchecked_finding(project_dir, rows, canon_cutoff))
+    for row in rows:
+        reason = stale_render_reason(row, canon_cutoff)
+        if not reason:
+            continue
+        findings.append({
+            'kind': 'canon_stale_render',
+            'id': row['id'].strip(),
+            'detail': (
+                f'still says `ingested`, but {reason} — so its art was directed '
+                f'by canon that has since been rewritten. It still ships; it is '
+                f'not a usable reference for anything rendered now. Re-render '
+                f'and re-ingest it rather than demoting `status`'),
+        })
+    return findings
+
+
 # ============================================================================
 # Validation
 # ============================================================================
@@ -1654,6 +1790,15 @@ IllustrationFindingKind = Literal[
     # but only `cleanup` runs that and `cleanup` gates nothing, so the consumers
     # that actually spend money on a half anchor had nothing to check.
     'canon_anchor_truncated',
+    # Ingested art the canon has outgrown, and the case where that cannot be
+    # judged at all (#300). Placed here for the reason `prose_changed` and
+    # `audit_stale` are — they are the same shape, "this ingested render is out
+    # of date relative to its source" — which buys `validate`, `illustrate
+    # --diagnose`, and cleanup's Interior Illustrations section from one
+    # placement. Without them the signal lived only in log lines, so
+    # `working/cleanup-report.csv` never mentioned that a book's whole set
+    # needed re-rendering.
+    'canon_stale_render', 'canon_staleness_unchecked',
 ]
 
 
@@ -1716,6 +1861,14 @@ WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     # anchor copy that no longer matches its canon file quietly breaks the
     # likeness continuity the anchor exists to hold.
     'packet_stale', 'anchor_copy_drift',
+    # Canon-stale art (#300) still ships and still reads correctly; it is only
+    # unusable as a *reference* for new renders. Blocking would take a working
+    # book offline over a re-render the author may be deliberately deferring —
+    # and the whole point of the fix is that this fact and publishability are
+    # separate. `canon_staleness_unchecked` is a warning for the reason
+    # `--audit` renders "Not assessed": not knowing is not the same as being
+    # broken, and it must not read as being fine either.
+    'canon_stale_render', 'canon_staleness_unchecked',
 })
 
 Severity = Literal['error', 'warning']
@@ -1762,7 +1915,8 @@ def truncated_anchor_findings(project_dir: str) -> list[IllustrationFinding]:
     return findings
 
 
-def validate_plan(project_dir: str) -> list[IllustrationFinding]:
+def validate_plan(project_dir: str, *,
+                  canon_cutoff: str | None = None) -> list[IllustrationFinding]:
     """Check the plan, the markers, and the files against each other.
 
     A planned-but-unrendered row is valid in-flight state, not a finding —
@@ -1802,6 +1956,12 @@ def validate_plan(project_dir: str) -> list[IllustrationFinding]:
     findings.extend(truncated_anchor_findings(project_dir))
 
     rows = read_plan(project_dir)
+    # Canon staleness, and the case where it cannot be judged (#300). Both are
+    # warnings, so `validate` still passes over a set awaiting a re-render —
+    # but `cleanup`'s report and its CSV now say the set needs one, which was
+    # reachable only through `illustrate --diagnose` before.
+    findings.extend(stale_render_findings(project_dir, plan=rows,
+                                          canon_cutoff=canon_cutoff))
     if not rows and not os.path.isdir(illustrations_dir(project_dir)):
         # No plan and no ingested files — but the hand-edit safety net still
         # needs to run: a direction document can exist (and drift from

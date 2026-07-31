@@ -299,7 +299,9 @@ Reference images are **not copied** into the packet — the paths are project-re
 
 Entries for illustrations that are already rendered are marked `— already rendered` in their heading. Say so to the author: the packet is worked top to bottom, and finished art is there for context, not to be regenerated.
 
-An entry marked `— re-render: the art predates the current canon` is the opposite instruction on a row that still says `ingested`: the art exists and ships, and it was directed by canon that has since been rewritten, so it is not a usable reference for anything rendered now. Its `**Re-render.**` line says why. **Never fix this by demoting `status`** — that is what an author reaches for, and it takes the illustration out of the epub, the PDF, the web book, and Bookshelf while the replacement does not exist yet. Re-render it and `--ingest` the new file; the status is already right.
+An entry marked `— re-render: the art predates the current canon` is the opposite instruction on a row that still says `ingested`: the art exists and ships, and it was directed by canon that has since been rewritten, so it is not a usable reference for anything rendered now. Its `**Re-render.**` line says why. **Never fix this by demoting `status`** — that is what an author reaches for, and it drops the illustration from Bookshelf while the epub, the PDF, and the web book keep shipping it, so the editions disagree about a book nobody re-rendered. Re-render it and `--ingest` the new file; the status is already right.
+
+If `--diagnose` says *no file under `reference/canon/` carries a parseable `canon_updated`*, treat every "current" signal in the packet as unverified rather than confirmed: nothing can be shown to predate a canon with no date, so the batch table's `yes` means only "nothing could show otherwise". Set `canon_updated: YYYY-MM-DD` in the canon files you have edited and re-run before trusting a hand-over.
 
 ### Two columns you write by hand
 
