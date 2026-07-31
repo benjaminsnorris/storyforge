@@ -1270,6 +1270,41 @@ def iso_date_or_empty(value: str) -> str:
     return head if _ISO_DATE_RE.match(head) else ''
 
 
+def predates_canon(*, when: str, cutoff: str) -> bool:
+    """True when *when* is strictly older than the canon cutoff.
+
+    The one comparison every staleness check **against the canon cutoff** makes,
+    in one place: the ingested-render check in
+    `cmd_illustrate._stale_reference_reason` and the style-reference check in
+    `cmd_illustrate.resolve_style_reference`. `packet._staging_postdates_render`
+    is the same predicate against a *different* cutoff (`treatment_at` versus
+    `ingested_at`) and still rolls its own, restating the same-day rule below —
+    #281 will want both in its inventory.
+
+    Keyword-only: the two arguments are both ISO date strings, they carry
+    deliberately different unknown-value policies (see below), and swapping them
+    inverts the result with no crash and no test failure at the call site.
+
+    ISO dates sort lexicographically, so this is a string compare — no date
+    arithmetic, nothing to get wrong across timezones.
+
+    **Strictly** older: an artifact dated the *same day* the canon was last
+    touched is not stale, because same-day is the ordinary incremental loop
+    (write canon, render, ingest, prompt the next one) and date granularity
+    cannot separate the two. Treating same-day as stale would empty the
+    reference chain on every normal run.
+
+    An unparseable or empty date on either side is **not** older. Callers
+    disagree about what an unknown date means — an empty `ingested_at` counts
+    as pre-canon because the column postdates the plan schema, while a file
+    whose mtime cannot be read says nothing at all — so each states its own
+    policy rather than inheriting one from here.
+    """
+    left = iso_date_or_empty(when)
+    right = iso_date_or_empty(cutoff)
+    return bool(left and right and left < right)
+
+
 def newest_canon_updated(project_dir: str) -> str:
     """The most recent `canon_updated` date across the canon tree, or ''.
 

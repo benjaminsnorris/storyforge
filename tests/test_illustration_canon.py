@@ -6,6 +6,7 @@ import os
 
 import pytest
 
+from storyforge import canon
 from storyforge.cmd_cleanup import report_canon_files
 
 CANON_BODY = """---
@@ -1239,3 +1240,34 @@ def test_anchor_display_names_ignore_book_level_canon(project_dir):
                                     'canon_id: visual-foundation')
                  .replace('canon_type: character', 'canon_type: foundation'))
     assert 'visual-foundation' not in anchor_display_names(project_dir)
+
+
+# ============================================================================
+# predates_canon — the one comparison every canon-cutoff staleness check makes
+# ============================================================================
+
+@pytest.mark.parametrize('when,cutoff,expected', [
+    ('2026-07-01', '2026-07-20', True),             # strictly older
+    ('2026-07-20', '2026-07-20', False),            # same day is the ordinary loop
+    ('2026-07-21', '2026-07-20', False),
+    ('2026-07-01T10:00:00', '2026-07-20', True),    # a timestamp head compares
+    ('2026-07-01', '2026-07-20T23:59:59', True),
+    ('', '2026-07-20', False),                      # unknown left says nothing
+    ('2026-07-01', '', False),                      # unknown right disables it
+    ('not-a-date', '2026-07-20', False),
+    ('2026-07-01', 'nonsense', False),
+    ('', '', False),
+])
+def test_predates_canon(when, cutoff, expected):
+    """Each caller states its own policy for an unusable date, so this returns
+    False for one rather than guessing — including the right-hand-side case,
+    which is what silently switches a whole staleness check off."""
+    assert canon.predates_canon(when=when, cutoff=cutoff) is expected
+
+
+def test_predates_canon_is_keyword_only():
+    """Two ISO-date arguments where swapping them inverts the result with no
+    crash, and the two sides carry deliberately different unknown-value
+    policies."""
+    with pytest.raises(TypeError):
+        canon.predates_canon('2026-07-01', '2026-07-20')

@@ -307,6 +307,8 @@ This file is committed alongside the illustration at Step T2.7.
 
 Present the file paths. The author opens them to review and picks one. Update `manuscript/assets/cover-prompt.md` — mark the chosen variation `selected` and the others `superseded`, each with a brief reason.
 
+**Then record the choice machine-readably.** `cover-prompt.md` is prose: nothing reads it. Interior illustrations inherit the cover *artwork* as their house style, and they resolve it by convention — `manuscript/assets/cover-illustration.png` — so if the selected variation is any other file, set `production.cover_artwork` in `storyforge.yaml` to its path (or point the convention filename at it as a symlink). Skipping this is how a real book's twenty interior prompts inherited a variation the author had explicitly marked `superseded`, with the selected art sitting beside it (benjaminsnorris/storyforge#299). `storyforge illustrate --prompts` and `--diagnose` both name the file they resolved, so the check is one command.
+
 ### Step T2.6: Text Compositing Decision
 
 Ask: "Would you like me to add title and author text as a crisp overlay (recommended — AI text rendering is unreliable), or use this illustration as the complete cover?"

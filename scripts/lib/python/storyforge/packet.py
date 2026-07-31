@@ -104,6 +104,75 @@ class PacketContents(TypedDict):
     gaps: list[str]
 
 
+class RowContext(TypedDict):
+    """Everything `state_for_row` and `contrast_for_row` need, read once.
+
+    Exists so `--prompts` and `--package` resolve a row's visual state through
+    the *same* code over the *same* inputs. They did not, and the divergence was
+    not cosmetic: the packet's `**State.**` line said pajamas while the prompt
+    file for the same row said jacket and boots, because `--prompts` never
+    received the matrix at all and the model inferred a costume from anchor
+    prose describing the whole book (#297).
+
+    Named for the row rather than the state because `predecessors` serves
+    `contrast_for_row`, and a type called `StateContext` carrying a
+    contrast-only field is how the next reader concludes their addition needs
+    its own bag.
+    """
+    anchors: dict[str, str]
+    labels: dict[str, canon.AnchorLabel]
+    #: Reading position per scene, from the chapter map.
+    order: dict[str, int]
+    #: Active scene ids, so a cut scene is distinguishable from an unmapped one.
+    known: set[str]
+    transitions: list[vs.Transition]
+    #: Reading-order predecessor per illustration id, '' for the first. What
+    #: `contrast_for_row` needs, and the reason both callers must read reading
+    #: order rather than render order. A row **absent** from this map is not the
+    #: first illustration — see `contrast_for_row`.
+    predecessors: dict[str, str]
+
+
+#: Kept so a name other modules may already import does not silently vanish.
+#: Same type; `RowContext` is what new code should say.
+StateContext = RowContext
+
+
+def state_context(project_dir: str, *,
+                  plan: list[dict[str, str]] | None = None) -> RowContext:
+    """Read the canon tier, the chapter map, the transition log, and the plan once.
+
+    `plan` must be the **whole** plan, never an `--ids` subset: `predecessors` is
+    a statement about reading order across the book, and a one-row plan would
+    make that row its own book-start and strip its contrast clause. Passed in so
+    the reading order comes from the same `read_plan` the caller iterates rather
+    than from a second read that could differ.
+
+    Reading order excludes `superseded` rows, so a row revived through
+    `--prompts --ids` is **absent** from `predecessors` rather than mapped to '';
+    `contrast_for_row` is what keeps those two apart.
+    """
+    order = ill._scene_order(project_dir)
+    predecessors: dict[str, str] = {}
+    previous = ''
+    for row in rows_in_reading_order(project_dir, plan=plan, order=order):
+        illus_id = row['id'].strip()
+        # setdefault, not assignment: two rows sharing an id would otherwise
+        # leave only the later one's predecessor, where the old in-loop
+        # accumulator gave each row its own. `run_package` deliberately skips
+        # `validate_plan`, so nothing upstream gates a duplicate id.
+        predecessors.setdefault(illus_id, previous)
+        previous = illus_id
+    return {
+        'anchors': canon.anchor_texts(project_dir),
+        'labels': canon.anchor_display_names(project_dir),
+        'order': order,
+        'known': vs.known_scene_ids(project_dir),
+        'transitions': vs.read_transitions(project_dir),
+        'predecessors': predecessors,
+    }
+
+
 class StateGrid(TypedDict):
     """The dense scene x entity view derived from the sparse transition log.
 
@@ -145,7 +214,10 @@ def is_built(project_dir: str) -> bool:
 # Resolution
 # ============================================================================
 
-def rows_in_reading_order(project_dir: str) -> list[dict[str, str]]:
+def rows_in_reading_order(project_dir: str, *,
+                          plan: list[dict[str, str]] | None = None,
+                          order: dict[str, int] | None = None,
+                          ) -> list[dict[str, str]]:
     """Live plan rows in the order a reader meets them.
 
     Reading order, not render order: `render_order` deliberately hoists the
@@ -153,9 +225,14 @@ def rows_in_reading_order(project_dir: str) -> list[dict[str, str]]:
     deciding what an illustration's neighbours are. One function so the entries,
     the contrast lines, and the anchor batch cannot end up disagreeing about
     which illustration comes first.
+
+    `plan` and `order` let a caller that has already read them pass them in, so
+    one packet build parses `chapter-map.csv` once instead of three times.
     """
-    order = ill._scene_order(project_dir)
-    rows = [row for row in ill.read_plan(project_dir)
+    if order is None:
+        order = ill._scene_order(project_dir)
+    rows = [row for row in (plan if plan is not None
+                            else ill.read_plan(project_dir))
             if (row.get('status') or '').strip() != 'superseded']
     return sorted(rows, key=lambda r: (
         order.get((r.get('scene_id') or '').strip(), ill._SORTS_LAST),
@@ -174,7 +251,9 @@ def resolve(project_dir: str) -> PacketContents:
     book_level = pi.book_level_direction(project_dir)
     gaps.extend(_book_level_gaps(project_dir))
 
-    anchors = canon.anchor_texts(project_dir)
+    plan = ill.read_plan(project_dir)
+    context = state_context(project_dir, plan=plan)
+    anchors = context['anchors']
     if not anchors:
         gaps.append(
             'no entity canon file has a populated Embeddable block — no '
@@ -182,32 +261,29 @@ def resolve(project_dir: str) -> PacketContents:
             'nothing holds a character or a place to one design across the '
             'set. Run `storyforge illustrate --direction`.')
 
-    rows = rows_in_reading_order(project_dir)
+    rows = rows_in_reading_order(project_dir, plan=plan,
+                                 order=context['order'])
     if not rows:
         gaps.append(
             'the illustration plan has no rows — this packet describes no '
             'illustrations. Run `storyforge illustrate --plan`.')
 
-    order = ill._scene_order(project_dir)
-    known = vs.known_scene_ids(project_dir)
-    transitions = vs.read_transitions(project_dir)
-    labels = canon.anchor_display_names(project_dir)
-
     entries: list[Entry] = []
-    previous_id = ''
     for row in rows:
-        entry, row_gaps = _entry_for(
-            row, project_dir=project_dir, anchors=anchors, labels=labels,
-            order=order, known=known, transitions=transitions,
-            previous_id=previous_id,
-        )
+        entry, row_gaps = _entry_for(row, context=context)
         entries.append(entry)
         gaps.extend(row_gaps)
-        previous_id = entry['id']
 
     gaps.extend(_audit_gaps(project_dir))
 
     references, reference_notes = _packet_references(project_dir, rows)
+    # Unconditionally, not behind the composite below. The style reference is the
+    # packet's most influential image and the only one always present, and its
+    # problems reached exactly one file: `run_package` logs `gaps`, so a stale or
+    # mis-declared cover appeared in no log line and no README gap — which made
+    # "the packet says what it cannot tell you" an overclaim. Same class as
+    # `_book_level_gaps`' "no house style for it", which is already unconditional.
+    gaps.extend(_style_reference_gaps(project_dir))
     if reference_notes and _has_ingested_art(rows) and len(references) <= 1:
         # The dangerous shape: renders exist on disk and none of them reached
         # the list. The detail is in reference-images.md; this is the line that
@@ -227,6 +303,18 @@ def resolve(project_dir: str) -> PacketContents:
         'reference_notes': reference_notes,
         'gaps': gaps,
     }
+
+
+def _style_reference_gaps(project_dir: str) -> list[str]:
+    """What is wrong or unverified about the artwork setting the house style.
+
+    Reuses `--prompts`' own resolution rather than a second one, for the reason
+    `_packet_references` does: two answers to "which cover directs this book" is
+    the #299 shape.
+    """
+    from storyforge import cmd_illustrate
+    style = cmd_illustrate.resolve_style_reference(project_dir)
+    return cmd_illustrate.style_reference_warnings(style)
 
 
 def _has_ingested_art(rows: list[dict[str, str]]) -> bool:
@@ -271,11 +359,8 @@ def _book_level_gaps(project_dir: str) -> list[str]:
     return gaps
 
 
-def _entry_for(row: dict[str, str], *, project_dir: str,
-               anchors: dict[str, str], labels: dict[str, canon.AnchorLabel],
-               order: dict[str, int], known: set[str],
-               transitions: list[vs.Transition],
-               previous_id: str) -> tuple[Entry, list[str]]:
+def _entry_for(row: dict[str, str], *,
+               context: RowContext) -> tuple[Entry, list[str]]:
     """Build one entry and the gaps found while building it."""
     illus_id = row['id'].strip()
     scene_id = (row.get('scene_id') or '').strip()
@@ -294,9 +379,7 @@ def _entry_for(row: dict[str, str], *, project_dir: str,
             f'what is in frame. Fill `subject` in '
             f'reference/{ill.PLAN_FILENAME}.')
 
-    state, state_gaps = _state_for(
-        row, project_dir=project_dir, anchors=anchors, labels=labels,
-        order=order, known=known, transitions=transitions)
+    state, state_gaps = state_for_row(row, context=context)
     gaps.extend(state_gaps)
 
     status = cast(ill.PlanStatus,
@@ -327,7 +410,7 @@ def _entry_for(row: dict[str, str], *, project_dir: str,
         # mistake `embeds_as` already made. Empty is the normal case — most
         # images have nothing that must be absent.
         'absent': (row.get('absent') or '').strip(),
-        'contrast': _contrast_for(row, previous_id),
+        'contrast': contrast_for_row(row, context=context),
         'notes': (row.get('composition') or '').strip(),
         'treatment': treatment,
     }
@@ -358,12 +441,21 @@ def _staging_postdates_render(row: dict[str, str]) -> tuple[str, str] | None:
     return staged, ingested
 
 
-def _state_for(row: dict[str, str], *, project_dir: str,
-               anchors: dict[str, str],
-               labels: dict[str, canon.AnchorLabel],
-               order: dict[str, int], known: set[str],
-               transitions: list[vs.Transition]) -> tuple[str, list[str]]:
+def state_for_row(row: dict[str, str], *, context: RowContext,
+                  include_anchor_gaps: bool = True) -> tuple[str, list[str]]:
     """Resolve the matrix for this scene, then overlay the row's override.
+
+    **The single resolution both `--package` and `--prompts` read.** An anchor
+    necessarily describes the whole book — "navy pajamas on the first night, and
+    from a04 onward a rust-red jacket" — so no anchor can tell a generation call
+    which night *this* image is. That is the question the matrix answers, and
+    while it reached only the packet, prompt files contradicted the packet built
+    from the same row in both directions (#297). Two renderings of one row is how
+    they disagree; one function is how they cannot — **within one run**. Across
+    runs they still can: a prompt file is a render like the packet, but unlike the
+    packet there is no `prompt_stale`, so editing the transition log after
+    `--prompts` diverges the two silently. Re-run `--prompts --ids …` after
+    editing the matrix.
 
     Only the entities the row's `canon_refs` names, because sending the whole
     cast wastes tokens and invites the model to draw people who are not in the
@@ -372,16 +464,30 @@ def _state_for(row: dict[str, str], *, project_dir: str,
 
     A `state_override` entity the row does not name is still included: it was
     written for this image specifically, and dropping it would be the silent
-    filtering this module exists to avoid.
+    filtering this module exists to avoid. The override also *wins* over the
+    forward walk for the entities it names, which is what makes it a usable
+    escape hatch for state true in one image only.
+
+    Args:
+        include_anchor_gaps: Whether to report a `canon_refs` entry that
+            resolves to no populated canon file. `--prompts` passes False
+            because `cmd_illustrate._warn_unanchored_rows` already warns about
+            exactly that, before the fan-out, naming the rows and the missing
+            ids — a second copy of the same finding trains an author to skim the
+            log where the other gaps live.
     """
     illus_id = row['id'].strip()
     scene_id = (row.get('scene_id') or '').strip()
+    anchors = context['anchors']
+    order = context['order']
+    known = context['known']
     refs = ill._split_array(row.get('canon_refs', ''))
     overrides = vs.parse_state_override(row.get('state_override', ''))
     gaps: list[str] = []
 
     for ref in refs:
-        if ref.lower() not in {key.lower() for key in anchors}:
+        if (include_anchor_gaps
+                and ref.lower() not in {key.lower() for key in anchors}):
             gaps.append(
                 f'illustration `{illus_id}` names canon_refs `{ref}`, which '
                 f'resolves to no populated canon file — that entity is '
@@ -406,7 +512,7 @@ def _state_for(row: dict[str, str], *, project_dir: str,
             f'position — reference/chapter-map.csv does not list it — so '
             f'nothing in the visual-state matrix resolves for this entry.')
     else:
-        resolved = vs._resolve(order, transitions, order[scene_id])
+        resolved = vs._resolve(order, context['transitions'], order[scene_id])
 
     parts: list[tuple[str, str]] = []
     claimed: set[str] = set()
@@ -450,7 +556,7 @@ def _state_for(row: dict[str, str], *, project_dir: str,
                 f'suppressing the gap that would have told you to state it. '
                 f'Fill the state in {vs.STATE_FILE}, or delete the row.')
 
-    return '; '.join(f'{_entity_label(key, labels)}: {value}'
+    return '; '.join(f'{_entity_label(key, context["labels"])}: {value}'
                      for key, value in parts if value), gaps
 
 
@@ -470,7 +576,7 @@ def _entity_label(entity: str, labels: dict[str, canon.AnchorLabel]) -> str:
     return canon.humanize_canon_id(entity)
 
 
-def _contrast_for(row: dict[str, str], previous_id: str) -> str:
+def contrast_for_row(row: dict[str, str], *, context: RowContext) -> str:
     """What must make this image different from its neighbours.
 
     Derived from facts on the plan — the reading-order predecessor and the
@@ -484,7 +590,33 @@ def _contrast_for(row: dict[str, str], previous_id: str) -> str:
     **One derived sentence, not three.** The entry exists to be thin, and three
     stacked sentences here spent a tenth of the 80–120 word budget restating two
     facts. The author's own note, if any, follows it untouched.
+
+    Read by `--prompts` as well as `--package`, for the same reason as
+    `state_for_row`: one string, so the two artifacts cannot describe the same
+    row differently **within one run**. Across runs they still can: a prompt file
+    is a render like the packet, but unlike the packet there is no
+    `prompt_stale`, so editing the plan or the transition log after `--prompts`
+    diverges the two silently. Re-run `--prompts --ids …` after editing either.
+
+    **A row absent from `predecessors` is not the first illustration.** Reading
+    order excludes `superseded` rows while `--prompts --ids` deliberately revives
+    one, so a `.get(id, '')` default merged "not in the order I indexed" into
+    "starts the book" — the revived row's prompt lost its contrast clause, and
+    the packet built after ingest had it. That is #297's own failure shape inside
+    the function written to prevent it, so the two cases are kept apart: an
+    absent row gets a clause naming the situation rather than a silent omission.
     """
+    illus_id = row['id'].strip()
+    predecessors = context['predecessors']
+    if illus_id in predecessors:
+        previous_id = predecessors[illus_id]
+    else:
+        previous_id = ''
+        log(f'WARNING: illustration `{illus_id}` is not in the book\'s reading '
+            f'order — a `superseded` row revived by --ids, or a plan written '
+            f'since this context was read. Nothing states which illustration it '
+            f'follows, so its contrast line cannot say what staging to avoid; '
+            f'the packet will say once the row is live again.')
     register = (row.get('register') or '').strip().lower()
     extreme = (f'The {register} image in the book'
                if register in ill.VALID_REGISTERS else '')

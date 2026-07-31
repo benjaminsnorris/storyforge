@@ -205,7 +205,17 @@ Add `--ids one,two` to limit it to specific illustrations, or to re-prompt ones 
 
 Add `--no-prior-refs` to reference the cover only. Use it when re-rendering a set whose existing art no longer matches the canon — see "The reference chain" below.
 
-This writes `manuscript/assets/illustrations/prompts/{id}.md` per illustration, and sets `status=prompted`. Each prompt file carries the reference list, the prompt body (Scene / Subject / Important details / Use case), a deterministic Constraints block, and a log table.
+This writes `manuscript/assets/illustrations/prompts/{id}.md` per illustration, and sets `status=prompted`. Each prompt file carries the reference list, the prompt body (Scene / Subject / Important details / Use case), a deterministic Constraints block, an **Accept only if** block, and a log table.
+
+**The resolved visual state goes into the request, and it outranks the anchors.** An anchor necessarily describes an entity across the whole book — "navy pajamas on the first two nights, and from a04 onward a rust-red jacket" — so no anchor can tell a generation call which night *this* image is. That is what `reference/visual-state.csv` answers, resolved forward to the row's scene with the plan row's `state_override` laid on top: the same resolution the handoff packet renders, so a prompt file and a packet entry built from one row cannot describe different costumes. It is stated as a requirement rather than context because an emphatic anchor clause actively pulls the other way — "the jacket is how the reader finds him in a dark image" is exactly why a dark night-one image came back in the night-two coat.
+
+The state also lands twice in the prompt *file*, the way the orientation directive does: as a Constraints bullet the image model reads, and in `## Accept only if` — the per-image acceptance lines, checked against the row rather than against the render you happen to like. Hand-editing a prompt body to fix a costume works once and makes the file no longer reproducible from the plan; fix the transition log or the row's `state_override` instead and re-run.
+
+If an entity the row names has no stated state at that scene, the command says so **before** the calls go out, grouped by finding rather than repeated per row, with a closing count of how many rows carry no resolved state at all. That is the free moment to add the transition. `--prompts --dry-run` reports the same thing and spends nothing.
+
+A row whose state does not resolve still gets a prompt — the file says so, in Constraints and in `## Accept only if`, rather than quietly omitting the line. Take that at face value: it means the costume and lighting in that prompt are the model's inference, not a read of the matrix.
+
+**`## Accept only if` is not part of the prompt.** It is marked so, and it sits below the pasted region — it is what you check the render against, and via `contrast` it can name another illustration by id, which must never reach the image model.
 
 ### What the prompts encode
 
@@ -215,7 +225,7 @@ These come from lived iteration (benjaminsnorris/ashes PR #9, tracked as #260 an
 2. **Reference images carry style and likeness**, so prompt prose stays short (~250–400 words). The references are the cover art plus prior ingested illustrations — that chain is what keeps a book's interior art visually of a piece instead of fifteen unrelated pictures. See "The reference chain" for when a prior illustration is *excluded*.
 3. **The continuity anchor is the identical string every time.** Anchors are canon files under `reference/canon/characters/`, `locations/`, `motifs/` — each file's `## Embeddable block` *is* the anchor. Only the anchors an illustration actually shows are sent, narrowed by matching its `canon_refs` against each anchor's `canon_id` (the canon file's slug, not a display name). If `canon_refs` is empty, or if none of its entries match a `canon_id`, the full set is sent instead — an unfiltered anchor set is a smaller failure than a missing one, but it means a plan row still carrying a pre-canon display name (e.g. "Great Lamp" instead of "great-lamp") sends the whole cast at full token cost, with a WARNING rather than narrowing correctly. Never revise an anchor a rendered illustration already used — likeness continuity depends on the string being byte-identical.
    The anchor is *labeled* in the prompt with a display name — `display_name:` in the canon file's frontmatter, else the registry's `name` for that id, else the title-cased slug (and the command names the ids it had to guess at). `canon_id` stays the matching key; only the label changes, because a slug-labeled anchor gets the slug echoed back in the model's prose ("kneeling are leo — ten, warm light-brown skin…").
-4. **Positive framing for content, not negation.** Negated content keywords leak into the image. "A bare sill," not "no clutter on the sill." Orientation and the no-text rule are the two deliberate exceptions — both are failure modes positive phrasing has not been observed to prevent.
+4. **Positive framing for content, not negation.** Negated content keywords leak into the image. "A bare sill," not "no clutter on the sill." Orientation and the no-text rule are the two exceptions about form — both are failure modes positive phrasing has not been observed to prevent — and `absent` plus the colour logic are the two about content. Four in total; do not widen the list.
 5. **Explicit orientation, in two places.** GPT Image 2 returns landscape unless told otherwise. Aspect comes from `layout` first — a `double_page` spread is landscape because that is a fact about the page — then from the row's `composition` field, which can say `landscape` or `square`. Portrait otherwise.
 
 The whole book-level direction — the three root canon files — goes into every prompt too, which is why the command warns before it spends anything when the reference tier is incomplete: a canon file that's simply absent tells you to run `--direction`, one that exists but is still a TODO placeholder tells you to edit it directly (re-running `--direction` is a no-op once the file exists). Either way, without it the prompts carry no house style, and the images won't look like they belong to one book.
@@ -223,6 +233,19 @@ The whole book-level direction — the three root canon files — goes into ever
 Plus: no text, no letters, no words, no typography. Image models render text unreliably, and an illustration doesn't need any.
 
 ### The reference chain
+
+**The cover artwork is the first reference in every list, and the only one under `--no-prior-refs`** — so which file it is matters more than any other single choice in this phase. Resolution order:
+
+1. `production.cover_artwork` in `storyforge.yaml` — set this when the book holds several cover variations and only one is the selected art. Without it, the convention filename wins silently even when every other consumer points elsewhere, which is how twenty interior prompts once inherited a cover the author had explicitly rejected.
+2. `manuscript/assets/cover-illustration.{png,jpg,jpeg,webp}` — the convention, so existing projects resolve as before.
+
+It is the *artwork*, deliberately not `production.cover_image`: that key names the file that ships, which on most books is the composite with the title typeset into the raster. Feeding baked-in lettering to a prompt whose own constraints say "no text, no letters, no words" is a wasted generation.
+
+The command names the resolved file **once per run, before any call is made**, with its symlink target if it is a symlink — and `--diagnose` and `--prompts --dry-run` report it too, so you never have to start a paid run to find out which cover is about to direct it.
+
+If `production.cover_artwork` names a file that does not exist, `--prompts` **refuses** rather than falling back to the convention and spending the run. A path that isn't there is unambiguous — you meant that path — where staleness is a judgment call. Fix the path, or remove the key to use the convention deliberately. It is also staleness-checked on the same footing as a prior render — an mtime older than the newest `canon_updated` is a WARNING — but never *excluded* for it, because dropping it would leave the highest-stakes run with no style signal at all. If you see that warning, re-render the cover artwork or point `production.cover_artwork` at art that postdates the canon.
+
+Two more cases get their own warning, and both mean the check did not run rather than that it passed: no canon file carries a parseable `canon_updated`, and the file's modification time could not be read. Unknown freshness is not freshness. A file an image model cannot read — an SVG compositing source, say — is warned about and still listed, because the one reference that is sometimes the only one is never dropped silently.
 
 A prior illustration is used as a style reference only if it was ingested **on or after** the newest `canon_updated` date in `reference/canon/`. Art rendered before the canon that now governs it was directed by rules that no longer apply, and feeding it back in teaches the new render exactly the drift the canon was rewritten to remove — which is how a whole set inherits a mistake through the visual key.
 
@@ -280,7 +303,7 @@ Entries for illustrations that are already rendered are marked `— already rend
 
 `absent` and `contrast` are plan columns nothing populates automatically — no command proposes them — but `write_plan` preserves any column an author adds, and the packet reads both:
 
-- **`absent`** — named entities that must **not** appear in this image. It is one of only three sanctioned exceptions to positive framing (the others are the colour logic and the orientation directive), and it exists because a positively-framed instruction did not stop a real book rendering a character who was elsewhere in the story at that point. Name entities, not qualities: "Ember. A second Great Lamp."
+- **`absent`** — named entities that must **not** appear in this image. It is one of only two *content* exceptions to positive framing (the other is the colour logic; the orientation directive and the no-text rule are exceptions about form), and it exists because a positively-framed instruction did not stop a real book rendering a character who was elsewhere in the story at that point. Name entities, not qualities: "Ember. A second Great Lamp."
 - **`contrast`** — anything you want said about how this image must differ from its neighbours, beyond the register and predecessor sentence the packet derives for you.
 
 Offer to add them when the author says an image keeps coming back with something that should not be in it.
