@@ -99,7 +99,28 @@ VALID_PLAN_STATUSES = frozenset({
 FILED_STATUSES = frozenset({'ingested'})
 
 ILLUSTRATIONS_SUBDIR = os.path.join('manuscript', 'assets', 'illustrations')
-PROMPTS_SUBDIR = os.path.join(ILLUSTRATIONS_SUBDIR, 'prompts')
+
+#: Where the model-authored prompt bodies live. Under `reference/` beside the
+#: other inputs the bundles inherit — `reference/canon/`,
+#: `reference/illustration-plan.csv`, `reference/visual-state.csv` — because that
+#: is what a body is: a durable, git-tracked record of a paid API call that
+#: `--package` renders *from*.
+#:
+#: **Deliberately not inside the packet.** The packet is a render: regenerated
+#: wholesale, byte-identical over unchanged sources, safe to delete and safe to
+#: gitignore. A body cannot be reproduced without paying for it again, and
+#: putting non-reproducible output inside a directory documented as disposable is
+#: how it gets lost.
+#:
+#: **Deliberately not under `ILLUSTRATIONS_SUBDIR` any more** (#306): that
+#: directory holds illustrations. `LEGACY_PROMPTS_SUBDIR` is what `migrate` moves
+#: away from; nothing else reads it.
+PROMPTS_SUBDIR = os.path.join('reference', 'illustration-prompts')
+
+#: The pre-#306 home. Read by `cmd_migrate` only — every other consumer goes
+#: through `default_prompt_rel`, so a project that has not migrated resolves its
+#: bodies through the plan's `prompt_file` column until it does.
+LEGACY_PROMPTS_SUBDIR = os.path.join(ILLUSTRATIONS_SUBDIR, 'prompts')
 
 VALID_IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp')
 
@@ -1785,12 +1806,6 @@ IllustrationFindingKind = Literal[
     'state_unspecified', 'prose_changed', 'audit_stale',
     # The handoff packet (#278 phase 3).
     'packet_stale', 'anchor_copy_drift',
-    # The self-contained per-illustration export (#298). Its own kind rather
-    # than a second `packet_stale`: the two artifacts stale against overlapping
-    # but different source sets — the export also aggregates prompt-file bodies
-    # and *copies* reference images — and a finding whose detail named one while
-    # its kind named the other would send the author to the wrong command.
-    'export_stale',
     # A canon Embeddable block cut short by a `##` heading inside it (#293).
     # Blocking: canon.validate_canon_file reports the same condition per file,
     # but only `cleanup` runs that and `cleanup` gates nothing, so the consumers
@@ -1867,11 +1882,6 @@ WARNING_FINDINGS: frozenset[IllustrationFindingKind] = frozenset({
     # anchor copy that no longer matches its canon file quietly breaks the
     # likeness continuity the anchor exists to hold.
     'packet_stale', 'anchor_copy_drift',
-    # The export (#298) is a render on the same footing, and worth reporting for
-    # the same reason: a stale bundle looks exactly like a fresh one to whoever
-    # it was handed to, and its copied reference images make it the one artifact
-    # that can go stale without any file in `reference/` being touched.
-    'export_stale',
     # Canon-stale art (#300) still ships and still reads correctly; it is only
     # unusable as a *reference* for new renders. Blocking would take a working
     # book offline over a re-render the author may be deliberately deferring —
@@ -1947,10 +1957,8 @@ def validate_plan(project_dir: str, *,
     the transition log, or any canon file, and an anchor copy in the written
     packet that no longer matches its canon source. Both return [] when no
     packet has been built, so a project that never runs `--package` sees
-    nothing new. `export.export_stale` is the same shape for the per-illustration
-    export (#298), and returns [] on the same grounds.
+    nothing new.
     """
-    from storyforge import export
     from storyforge import packet
     from storyforge import visual_state
 
@@ -1963,7 +1971,6 @@ def validate_plan(project_dir: str, *,
     findings.extend(visual_state.digest_drift(project_dir))
     findings.extend(packet.packet_stale(project_dir))
     findings.extend(packet.anchor_copy_drift(project_dir))
-    findings.extend(export.export_stale(project_dir))
     # Before the early return below: a truncated anchor matters whether or not
     # a single illustration has been planned yet, and fixing it before the plan
     # exists is the cheapest moment there is.

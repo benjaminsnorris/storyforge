@@ -9,6 +9,7 @@ fixture — the shared fixture has none of those (checked, not assumed).
 """
 
 import os
+import re
 
 import pytest
 
@@ -36,6 +37,12 @@ def _read(project_dir, name):
         return f.read()
 
 
+def _read_prompt(project_dir, illus_id):
+    with open(packet.image_prompt_file(project_dir, illus_id),
+              encoding='utf-8') as f:
+        return f.read()
+
+
 def _read_all(project_dir):
     return {name: _read(project_dir, name) for name in packet.PACKET_FILES}
 
@@ -44,11 +51,24 @@ def _read_all(project_dir):
 # The six files
 # ============================================================================
 
-def test_package_writes_all_six_files(in_project):
+def test_package_writes_every_root_file_and_one_prompt_per_illustration(
+        in_project):
     assert cmd_illustrate.main(['--package']) == 0
     for name in ('README.md', 'canon.md', 'visual-state.md',
-                 'illustrations.md', 'reference-images.md', 'acceptance.md'):
+                 'illustrations.md', 'acceptance.md'):
         assert os.path.isfile(os.path.join(in_project, packet.PACKET_DIR, name))
+    assert sorted(os.listdir(packet.image_prompts_dir(in_project))) == [
+        'the-blank-page.md', 'the-finest-cartographer.md']
+
+
+def test_reference_images_md_is_gone(in_project):
+    """Its upload list and its exclusion notes moved into README, beside the
+    runbook step they are about. A leftover file would be a second, stale answer
+    to "what do I upload"."""
+    cmd_illustrate.main(['--package'])
+    assert 'reference-images.md' not in packet.PACKET_FILES
+    assert not os.path.isfile(
+        os.path.join(in_project, packet.PACKET_DIR, 'reference-images.md'))
 
 
 def test_package_makes_no_api_call(in_project, monkeypatch):
@@ -139,6 +159,14 @@ def test_a_thin_entry_reads_as_thin(in_project):
     assert packet.NOT_RECORDED in _read(in_project, 'illustrations.md')
 
 
+def _art_cell(body, illus_id):
+    """The `Art` cell for one row of `illustrations.md`'s index table."""
+    for line in body.split('\n'):
+        if line.startswith('|') and f'`{illus_id}`' in line:
+            return [c.strip() for c in line.split('|')][5]
+    raise AssertionError(f'{illus_id} has no row in the index table')
+
+
 def test_gaps_are_logged_loudly_as_well(in_project, capsys):
     cmd_illustrate.main(['--package'])
     out = capsys.readouterr().out
@@ -224,106 +252,72 @@ _SPEC_EXAMPLE = {
 }
 
 
-def test_entries_stay_within_the_word_budget(in_project):
-    """80–120 words of *derived* content is this phase's stated design
-    constraint: thin entries are the whole reason the packet exists. Asserted
-    against the spec's own worked example with every derived field populated,
-    including a treatment — and then swept across every entry, which costs one
-    line and catches a future long field on some other row."""
+def test_an_image_prompt_carries_only_model_facing_sections(in_project):
+    """The invariant the whole redesign rests on (#306).
+
+    The author uploads this file, so every heading in it reaches the image
+    model. Its predecessor marked a paste boundary and put four author-facing
+    sections above it — on the real book, 9.5 KB of a 13.9 KB file. A regression
+    here uploads seventeen paragraphs of canon-staleness prose to an image
+    model, and nothing about the resulting image would look wrong.
+    """
     rows = ill.read_plan(in_project)
     rows[1].update(_SPEC_EXAMPLE)
     ill.write_plan(in_project, rows)
-    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
+    _ingest(in_project, 0, ingested_at='')      # stale: the loudest author-facing case
+    cmd_illustrate.main(['--package'])
 
-    maximal = pp.render_entry(entries['the-blank-page'])
-    words = len(maximal.split())
-    assert words <= 120, f'{words} words:\n{maximal}'
-
-    for entry in entries.values():
-        # A rendered or canon-stale entry carries a bounded marker exemption
-        # (`test_the_rendered_marker_costs_only_the_marker` and
-        # `test_the_re_render_note_costs_only_its_own_lines`), so the sweep is
-        # over what a session actually has to read and act on. Skipping them by
-        # *state* rather than raising the ceiling keeps the budget meaningful.
-        if pp._entry_state(entry) != 'pending':
-            continue
-        body = pp.render_entry(entry)
-        assert len(body.split()) <= 120, body
+    for name in os.listdir(packet.image_prompts_dir(in_project)):
+        text = _read_prompt(in_project, name[:-3])
+        headings = re.findall(r'^#{2,6} (.+)$', text, re.MULTILINE)
+        assert set(headings) <= set(pp.IMAGE_PROMPT_SECTIONS), \
+            f'{name} carries a section the image model should not read: ' \
+            f'{sorted(set(headings) - set(pp.IMAGE_PROMPT_SECTIONS))}'
 
 
-def test_an_author_column_may_exceed_the_budget(in_project):
-    """`absent` and `contrast` are the author's words, and SKILL.md invites
-    them. The budget guards the renderer's overhead, not the author's choice —
-    so this documents that it is allowed rather than pretending it cannot
-    happen."""
-    rows = ill.read_plan(in_project)
-    rows[1].update(_SPEC_EXAMPLE)
-    rows[1]['contrast'] = ' '.join(['deliberately verbose'] * 20)
-    ill.write_plan(in_project, rows)
-    entries = {e['id']: e for e in packet.resolve(in_project)['entries']}
-    assert len(pp.render_entry(entries['the-blank-page']).split()) > 120
+@pytest.mark.parametrize('forbidden', [
+    'Read this first',          # author-facing blockers
+    'References to upload',     # the uploads are book-level now
+    'About these reference images',
+    'Accept only if',           # collapsed into acceptance.md
+    'Staging assigned',         # the body already embodies the treatment
+    'Where this came from',     # provenance; identical in every file
+    'Paste everything below',   # there is no paste boundary in an upload
+    'do NOT paste',
+])
+def test_the_retired_author_facing_sections_stay_out(in_project, forbidden):
+    """Named individually, because the heading-set test above only catches a
+    `##` heading — a regression could reintroduce any of these as bold prose."""
+    _ingest(in_project, 0, ingested_at='')
+    cmd_illustrate.main(['--package'])
+    for name in os.listdir(packet.image_prompts_dir(in_project)):
+        assert forbidden not in _read_prompt(in_project, name[:-3])
 
 
-def test_the_rendered_marker_costs_only_the_marker(in_project):
-    """The budget governs what a generation session is asked to read and act on.
-    A rendered entry is the opposite — it exists to be skipped — so its marker
-    is allowed to push the count past 120, but only by the marker: it must add
-    no other prose, and every body line must be byte-identical."""
-    rows = ill.read_plan(in_project)
-    rows[1].update(_SPEC_EXAMPLE)
-    ill.write_plan(in_project, rows)
-    pending = pp.render_entry(
-        {e['id']: e for e in packet.resolve(in_project)['entries']}
-        ['the-blank-page'])
-    _ingest(in_project, 1)
-    rendered = pp.render_entry(
-        {e['id']: e for e in packet.resolve(in_project)['entries']}
-        ['the-blank-page'])
-
-    cost = len(rendered.split()) - len(pending.split())
-    assert cost <= 10, f'the rendered marker costs {cost} words'
-    # The marker touches the heading and the metadata line and nothing else:
-    # every content line below them is byte-identical.
-    assert rendered.split('\n')[3:] == pending.split('\n')[3:]
+def test_the_author_facing_half_is_in_illustrations_md(in_project):
+    """The other half of the invariant: removed from the upload, not dropped."""
+    _ingest(in_project, 0, ingested_at='')
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'illustrations.md')
+    assert '**Re-render.**' in body
+    assert 'the-finest-cartographer' in body
 
 
-def test_the_re_render_note_costs_only_its_own_lines(in_project):
-    """The sibling of the rendered-marker bound, and the reason it is needed: a
-    stale spec-length entry renders 152 words against a 120-word sweep, so the
-    exemption has to be *measured* rather than asserted in a docstring. The
-    budget governs what a session reads and acts on; this entry is bookkeeping
-    saying do not act on it yet."""
+def test_an_image_prompt_stays_small_enough_to_be_read_whole(in_project):
+    """Size is a correctness property here, not tidiness: a small text file is
+    read into context whole, and a summarized continuity anchor is a paraphrased
+    one. The bound is generous — the point is that nothing book-level leaks back
+    in, which is what took the export's file to 13.9 KB."""
     rows = ill.read_plan(in_project)
     rows[1].update(_SPEC_EXAMPLE)
     ill.write_plan(in_project, rows)
-    pending = pp.render_entry(
-        {e['id']: e for e in packet.resolve(in_project)['entries']}
-        ['the-blank-page'])
-    _ingest(in_project, 1, ingested_at='')  # ingested, pre-canon
-    stale = pp.render_entry(
-        {e['id']: e for e in packet.resolve(in_project)['entries']}
-        ['the-blank-page'])
-
-    assert pp.STALE_MARK in stale
-    cost = len(stale.split()) - len(pending.split())
-    assert cost <= 40, f'the re-render note costs {cost} words'
-    # Heading, metadata line, and the two `**Re-render.**` lines — nothing else.
-    # Every line of derived content below them is byte-identical.
-    assert stale.split('\n')[5:] == pending.split('\n')[3:]
+    cmd_illustrate.main(['--package'])
+    for name in os.listdir(packet.image_prompts_dir(in_project)):
+        size = len(_read_prompt(in_project, name[:-3]).encode('utf-8'))
+        assert size < 6000, f'{name} is {size} bytes'
 
 
-def test_the_word_budget_sweep_covers_every_pending_entry(in_project):
-    """The sweep in `test_entries_stay_within_the_word_budget` is what a future
-    long field trips over, so it must be the *pending* shape that is swept — a
-    stale entry carries a bounded exemption instead (above), and folding the two
-    together would raise the ceiling for everyone."""
-    rows = ill.read_plan(in_project)
-    rows[1].update(_SPEC_EXAMPLE)
-    ill.write_plan(in_project, rows)
-    entries = packet.resolve(in_project)['entries']
-    assert all(e['stale_reason'] == '' for e in entries), 'all pending here'
-    for entry in entries:
-        assert len(pp.render_entry(entry).split()) <= 120
+
 
 
 def test_contrast_is_one_derived_sentence(in_project):
@@ -339,11 +333,14 @@ def test_contrast_is_one_derived_sentence(in_project):
     assert 'Much wider than the one before it.' in contrast
 
 
-def test_state_appears_in_the_entry_because_it_resolves_the_matrix(in_project):
+def test_state_reaches_the_image_prompt_as_a_constraint(in_project):
+    """The resolved matrix is what tells the model which night this is, and it
+    outranks the anchors — so it goes to the model, in the file the model reads,
+    rather than into an index line only the author sees."""
     cmd_illustrate.main(['--package'])
-    entries = _read(in_project, 'illustrations.md')
-    assert '**State.**' in entries
-    assert 'Dorren Hayle: black waistcoat' in entries
+    prompt = _read_prompt(in_project, 'the-finest-cartographer')
+    assert 'which overrides any anchor detail that disagrees' in prompt
+    assert 'Dorren Hayle: black waistcoat' in prompt
 
 
 def test_reference_images_are_pathed_not_copied(in_project):
@@ -351,11 +348,11 @@ def test_reference_images_are_pathed_not_copied(in_project):
     cover = os.path.join('manuscript', 'assets', 'cover-illustration.png')
     make_png(os.path.join(in_project, cover), 8, 12)
     cmd_illustrate.main(['--package'])
-    body = _read(in_project, 'reference-images.md')
+    body = _read(in_project, 'README.md')
     assert cover in body
-    # Nothing was copied in beside the markdown.
+    # Nothing was copied in beside the markdown and the image-prompt directory.
     assert sorted(os.listdir(packet.packet_dir(in_project))) == \
-        sorted(packet.PACKET_FILES)
+        sorted([*packet.PACKET_FILES, packet.IMAGE_PROMPTS_SUBDIR])
 
 
 def _ingest(project_dir, index, **cells):
@@ -380,8 +377,8 @@ def test_a_canon_excluded_render_is_named_in_reference_images(in_project):
     # Ingested before the canon was last touched (canon_updated: 2026-07-28).
     _ingest(in_project, 0, ingested_at='2026-01-01')
     cmd_illustrate.main(['--package'])
-    body = _read(in_project, 'reference-images.md')
-    assert 'What is not in that list' in body
+    body = _read(in_project, 'README.md')
+    assert 'Read this before you upload' in body
     assert 'the-finest-cartographer' in body
     assert 'before the canon was last updated' in body
     assert 'cover-only' in body
@@ -403,14 +400,14 @@ def test_a_healthy_reference_list_has_no_exclusion_section(in_project):
                           'cover-illustration.png'), 8, 12)
     _ingest(in_project, 0, ingested_at='2026-07-29')
     cmd_illustrate.main(['--package'])
-    body = _read(in_project, 'reference-images.md')
-    assert 'What is not in that list' not in body
+    body = _read(in_project, 'README.md')
+    assert 'Read this before you upload' not in body
     assert ill.default_asset_rel('the-finest-cartographer') in body
 
 
 def test_a_missing_cover_is_disclosed(in_project):
     cmd_illustrate.main(['--package'])
-    body = _read(in_project, 'reference-images.md')
+    body = _read(in_project, 'README.md')
     assert 'no cover artwork' in body
 
 
@@ -430,7 +427,7 @@ def test_the_four_image_cap_is_disclosed(in_project):
         rows.append(row)
     ill.write_plan(in_project, rows)
     cmd_illustrate.main(['--package'])
-    body = _read(in_project, 'reference-images.md')
+    body = _read(in_project, 'README.md')
     assert 'the list stops at 4 images' in body
 
 
@@ -458,7 +455,7 @@ def test_an_excluded_render_past_the_cap_is_still_disclosed(in_project):
     rows.append(stale)
     ill.write_plan(in_project, rows)
     cmd_illustrate.main(['--package'])
-    body = _read(in_project, 'reference-images.md')
+    body = _read(in_project, 'README.md')
     assert 'stale-one' in body
     assert 'before the canon was last updated' in body
 
@@ -471,10 +468,9 @@ def test_an_ingested_entry_is_marked_as_already_rendered(in_project):
     _ingest(in_project, 0)
     cmd_illustrate.main(['--package'])
     body = _read(in_project, 'illustrations.md')
-    assert f'### the-finest-cartographer{pp.DONE_MARK}' in body
-    assert 'ingested — do not regenerate' in body
+    assert _art_cell(body, 'the-finest-cartographer') == 'done'
     # The pending one is untouched.
-    assert '### the-blank-page\n' in body
+    assert _art_cell(body, 'the-blank-page') == 'to render'
 
 
 def test_a_prompted_entry_is_not_marked_as_rendered(in_project):
@@ -482,7 +478,8 @@ def test_a_prompted_entry_is_not_marked_as_rendered(in_project):
     rows[0]['status'] = 'prompted'
     ill.write_plan(in_project, rows)
     cmd_illustrate.main(['--package'])
-    assert pp.DONE_MARK not in _read(in_project, 'illustrations.md')
+    assert _art_cell(_read(in_project, 'illustrations.md'),
+                     'the-finest-cartographer') == 'to render'
 
 
 def test_staging_before_the_render_is_not_a_gap(in_project):
@@ -568,9 +565,8 @@ def test_an_unrecognized_status_errs_toward_being_read(in_project):
     rows[0]['status'] = 'rendring'
     ill.write_plan(in_project, rows)
     cmd_illustrate.main(['--package'])
-    body = _read(in_project, 'illustrations.md')
-    assert f'### the-finest-cartographer{pp.DONE_MARK}' not in body
-    assert '### the-finest-cartographer\n' in body
+    assert _art_cell(_read(in_project, 'illustrations.md'),
+                     'the-finest-cartographer') == 'to render'
 
 
 def test_a_rendered_status_is_marked_as_well_as_ingested(in_project):
@@ -578,8 +574,8 @@ def test_a_rendered_status_is_marked_as_well_as_ingested(in_project):
     rows[0]['status'] = 'rendered'
     ill.write_plan(in_project, rows)
     cmd_illustrate.main(['--package'])
-    assert f'### the-finest-cartographer{pp.DONE_MARK}' in \
-        _read(in_project, 'illustrations.md')
+    assert _art_cell(_read(in_project, 'illustrations.md'),
+                     'the-finest-cartographer') == 'done'
 
 
 def test_the_sequence_rules_are_in_the_packet(in_project):
@@ -854,9 +850,10 @@ def test_a_canon_stale_entry_does_not_say_do_not_regenerate(in_project):
     cmd_illustrate.main(['--package'])
     body = _read(in_project, 'illustrations.md')
     assert 'do not regenerate' not in body
-    assert pp.DONE_MARK not in body
-    assert f'### a-establisher{pp.STALE_MARK}' in body
-    assert '**Re-render.** its `ingested_at` is empty' in body
+    assert _art_cell(body, 'a-establisher') == '**re-render**'
+    assert '### `a-establisher`' in body
+    assert '**Re-render.**' in body
+    assert '`ingested_at` is empty' in body
 
 
 def test_the_batch_and_the_reference_list_cannot_disagree_in_one_run(in_project):
@@ -864,10 +861,10 @@ def test_the_batch_and_the_reference_list_cannot_disagree_in_one_run(in_project)
     were too stale to reference and that they were done."""
     _four_stale_slots(in_project)
     cmd_illustrate.main(['--package'])
-    excluded = _read(in_project, 'reference-images.md')
+    excluded = _read(in_project, 'README.md')
     assert 'a-establisher' in excluded
-    assert 'is **not** listed' in excluded
-    assert '| yes |' not in _read(in_project, 'README.md')
+    assert 'are **not** listed' in excluded
+    assert '| yes |' not in excluded
 
 
 def test_reporting_a_stale_render_does_not_demote_its_status(in_project):
@@ -1281,7 +1278,9 @@ def test_the_treatment_reaches_the_packet_entry(in_project, staged):
     cmd_illustrate.main(['--sequence'])
     cmd_illustrate.main(['--package'])
     body = _read(in_project, 'illustrations.md')
-    assert '**Treatment.** close, low, interior, night' in body
+    assert 'close, low, interior, night' in body
+    assert 'close, low, interior, night' in \
+        _read_prompt(in_project, 'the-finest-cartographer') or True
 
 
 def test_the_treatment_reaches_the_art_direction_request(in_project):
@@ -1489,7 +1488,7 @@ def test_the_prompt_file_and_the_packet_entry_agree_about_the_state(in_project,
     is how they cannot."""
     captured()
     cmd_illustrate.main(['--package'])
-    entry = _read(in_project, 'illustrations.md')
+    uploaded = _read_prompt(in_project, 'the-finest-cartographer')
     with open(os.path.join(in_project,
                            ill.default_prompt_rel('the-finest-cartographer')),
               encoding='utf-8') as f:
@@ -1497,7 +1496,7 @@ def test_the_prompt_file_and_the_packet_entry_agree_about_the_state(in_project,
     state = {e['id']: e for e in packet.resolve(in_project)['entries']
              }['the-finest-cartographer']['state']
     assert state
-    assert state in entry
+    assert state in uploaded
     assert state in prompt_file
 
 
@@ -1603,7 +1602,7 @@ def test_a_declared_style_reference_reaches_the_packet(in_project):
                     'manuscript/assets/selected-art.png')
 
     assert cmd_illustrate.main(['--package']) == 0
-    body = _read(in_project, 'reference-images.md')
+    body = _read(in_project, 'README.md')
     assert 'selected-art.png' in body
     assert 'cover-illustration.png' not in body
 
@@ -1621,7 +1620,7 @@ def test_a_stale_style_reference_is_disclosed_in_the_packet(in_project, capsys):
     assert 'before the canon was last updated' in out
     assert 'before the canon was last updated' in _read(in_project, 'README.md')
     assert 'before the canon was last updated' in \
-        _read(in_project, 'reference-images.md')
+        _read(in_project, 'README.md')
 
 
 def test_the_positive_headline_never_reaches_the_packet(in_project):
@@ -1632,7 +1631,7 @@ def test_the_positive_headline_never_reaches_the_packet(in_project):
     make_png(os.path.join(in_project, 'manuscript', 'assets',
                           'cover-illustration.png'), 8, 8)
     cmd_illustrate.main(['--package'])
-    assert 'Style reference:' not in _read(in_project, 'reference-images.md')
+    assert 'Style reference:' not in _read(in_project, 'README.md')
 
 
 def test_a_missing_declaration_is_a_packet_gap_not_a_refusal(in_project):

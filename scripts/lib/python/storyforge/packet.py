@@ -22,11 +22,12 @@ have to be assertable without going through a renderer:
    and an audit that never ran are all coverage facts the author needs while
    they are working, not twenty minutes earlier.
 
-`entry_for`, `book_level_gaps`, `audit_gaps`, and `stale_render_gaps` are public
-because `export.py` builds its units from them (#298). That sharing is the point
-rather than a convenience: an export and a packet assembled in one run must not
-describe the same row's costume differently, which is the divergence #297 was
-filed about — so the derivation has one home and both artifacts read it.
+`entry_for` is where `state_for_row`, `contrast_for_row` and
+`ill.stale_render_reason` are applied, and it is the **only** rendering of a plan
+row in the pipeline (#306). That was the point of sharing it with the retired
+export, and collapsing to one bundle makes #297's guarantee structural rather
+than conventional: two renderings of a row is how they come to disagree about a
+costume, and there is now one.
 
 See benjaminsnorris/storyforge#278 and
 docs/superpowers/specs/2026-07-28-illustration-state-matrix-and-packet-design.md.
@@ -34,7 +35,7 @@ docs/superpowers/specs/2026-07-28-illustration-state-matrix-and-packet-design.md
 
 import os
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Literal, TypedDict, cast
+from typing import TYPE_CHECKING, Final, Literal, TypedDict, cast
 
 from storyforge import canon
 from storyforge import illustrations as ill
@@ -52,11 +53,45 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 #: author edits — `--package` regenerates it wholesale.
 PACKET_DIR = os.path.join('manuscript', 'illustration-packet')
 
-#: The six files, in the order `--package` writes and reports them.
+#: The root files, in the order `--package` writes and reports them.
+#:
+#: `reference-images.md` was one of them until #306. Its upload list and its
+#: exclusion disclosures both moved into README.md, beside the step of the
+#: runbook where the author acts on them — sending a reader out of the runbook
+#: and back is the fragmentation the merge exists to remove.
 PACKET_FILES: tuple[str, ...] = (
     'README.md', 'canon.md', 'visual-state.md', 'illustrations.md',
-    'reference-images.md', 'acceptance.md',
+    'acceptance.md',
 )
+
+#: Where the per-illustration upload files go. `image-prompts/`, not `prompts/`,
+#: because the model-authored bodies live at
+#: `reference/illustration-prompts/{id}.md` with identical basenames: two
+#: directories called `prompts/` both holding `LF-05.md`, one a durable record
+#: and one a render, is a coin flip at the moment the author is picking a file to
+#: upload.
+IMAGE_PROMPTS_SUBDIR: Final[str] = 'image-prompts'
+
+#: Where an image prompt's body came from. Never a silent fallback: a block
+#: assembled from three plan cells reads exactly like a complete prompt, so
+#: `illustrations.md` says which rows are in this state and `README.md`
+#: aggregates the cause.
+BodySource = Literal['prompt_file', 'plan_row']
+
+#: The pixel size each aspect is generated at, stated in the image prompt so a
+#: render is reproducible two weeks later. GPT Image 2's portrait and landscape
+#: shapes; `orientation_clause` states the same ratios in prose, because the
+#: model reads the prose and not the numbers.
+SIZES: dict[pi.Aspect, str] = {
+    'portrait': '1024x1536',
+    'landscape': '1536x1024',
+    'square': '1024x1024',
+}
+
+#: Stated rather than chosen per row. Interior art is the one part of a book that
+#: cannot be fixed in proof, and the cost difference is a few cents against a
+#: re-render.
+QUALITY: Final[str] = 'high'
 
 #: What an entry says in place of a field the plan never filled. An entry that
 #: silently omitted the line would read as "nothing to say here" rather than
@@ -92,8 +127,11 @@ class Entry(TypedDict):
     #: a per-aspect table with it (`export.SIZES`), where an out-of-vocabulary
     #: value would be a KeyError partway through writing a bundle.
     aspect: pi.Aspect
+    #: One sentence: what happens in this image. Rendered in `illustrations.md`'s
+    #: index so two illustrations in one scene are distinguishable at a glance,
+    #: which a scene id alone cannot do. Carries `NOT_RECORDED` when the plan
+    #: never filled it, so a thin row reads as thin rather than as terse.
     beat: str
-    in_frame: str
     state: str
     absent: str
     contrast: str
@@ -111,11 +149,53 @@ class Entry(TypedDict):
     stale_reason: str
 
 
+class ImagePrompt(Entry):
+    """One illustration's upload file: everything, and only what, the image model
+    should read.
+
+    The rule this type exists to enforce (#306): **everything in an image prompt
+    is for the model, or it is not in the file.** The author uploads it rather
+    than pasting a marked region out of it, so there is no "below the line" — a
+    section addressed to the author reaches the image model. The retired export's
+    per-unit file was 13.9 KB of which 9.5 KB was seventeen paragraphs about
+    canon staleness, all of it above a paste boundary that an upload ignores.
+
+    So the author-facing halves of a row live on `Entry` and render into
+    `illustrations.md`: `stale_reason`, `treatment`, `notes`, and `body_warning`
+    below. What this subclass adds is the model-facing half.
+    """
+    model: str
+    size: str
+    quality: str
+    #: The model-authored prose, or the plan-derived stand-in. Never '': a row
+    #: with nothing written says so in `illustrations.md` and still renders a
+    #: usable shape here.
+    body: str
+    body_source: BodySource
+    #: The prompt file consulted for `body`, whether or not it yielded prose.
+    #: Recorded even when nothing was read from it, so a file appearing at the
+    #: default path is noticed rather than silently ignored.
+    prompt_source: str
+    #: Why this body is thinner than it looks, '' when there is nothing to say.
+    #: Rendered into `illustrations.md` — **never** into the image prompt, which
+    #: is the whole point of the type.
+    body_warning: str
+    #: The shared root cause behind `body_warning`, for README's `cause -> ids`
+    #: aggregation. '' when `body_warning` is ''.
+    body_cause: str
+    #: Set when this illustration's own earlier render is in the book-level
+    #: upload list. `_references_for` excludes a row from its own chain, and a
+    #: per-row chain is what the export had; one list uploaded once cannot make
+    #: that exclusion, so the row is told about it instead. Author-facing, so it
+    #: renders in `illustrations.md`.
+    self_reference: str
+
+
 class PacketContents(TypedDict):
-    """Everything the six renderers need, plus the record of what is missing."""
+    """Everything the renderers need, plus the record of what is missing."""
     book_level: dict[str, str]
     anchors: dict[str, str]
-    entries: list[Entry]
+    entries: list[ImagePrompt]
     references: list[tuple[str, str]]
     #: Why the reference list is shorter than the ingested art suggests —
     #: canon-excluded renders, `--no-prior-refs`, the four-image cap, and a
@@ -230,12 +310,42 @@ def packet_file(project_dir: str, name: str) -> str:
     return os.path.join(packet_dir(project_dir), name)
 
 
-def is_built(project_dir: str) -> bool:
-    """True when every packet file exists.
+def image_prompts_dir(project_dir: str) -> str:
+    """Absolute path to the image-prompt directory, whether or not it exists."""
+    return os.path.join(packet_dir(project_dir), IMAGE_PROMPTS_SUBDIR)
 
-    All six or none: a half-written packet is a partial handoff, and reporting
-    it as built is how an author hands over a bundle with no acceptance
-    criteria in it.
+
+def image_prompt_file(project_dir: str, illus_id: str) -> str:
+    """Absolute path to one illustration's upload file.
+
+    The id reaches a path, so it is checked here rather than trusted. The plan is
+    a documented hand-edit surface, `run_package` deliberately does not call
+    `validate_plan`, and `--package` clears this directory — so an id of
+    `../../evil` would escape the packet tree and take a directory nobody named
+    with it. Raising is the only behaviour that cannot be bypassed by a later
+    caller forgetting to check first (#298's lesson, kept).
+    """
+    if not ill._ID_RE.match(illus_id):
+        raise ValueError(
+            f'illustration id {illus_id!r} is not a legal id, so it cannot name '
+            f'a file in {PACKET_DIR}/{IMAGE_PROMPTS_SUBDIR}/. Fix the `id` cell '
+            f'in reference/{ill.PLAN_FILENAME}.')
+    return os.path.join(image_prompts_dir(project_dir), f'{illus_id}.md')
+
+
+def is_built(project_dir: str) -> bool:
+    """True when every packet root file exists.
+
+    All of them or none: a half-written packet is a partial handoff, and
+    reporting it as built is how an author hands over a bundle with no
+    acceptance criteria in it.
+
+    **Keyed on the root files only, and `--package` writes `image-prompts/`
+    first.** Writing the root files first would flip this True at the moment the
+    packet was emptiest, so an interrupted run left `--diagnose` printing "built
+    and current" over a directory with nothing to upload in it. The window is
+    closed by the write order rather than by widening the predicate, because a
+    packet legitimately has no image prompts when the plan has no rows.
     """
     return all(os.path.isfile(packet_file(project_dir, name))
                for name in PACKET_FILES)
@@ -385,24 +495,33 @@ def resolve(project_dir: str, *,
             'the illustration plan has no rows — this packet describes no '
             'illustrations. Run `storyforge illustrate --plan`.')
 
-    entries: list[Entry] = []
-    for row in rows:
-        entry, row_gaps = entry_for(row, context=context)
-        entries.append(entry)
-        gaps.extend(row_gaps)
-
-    gaps.extend(audit_gaps(project_dir))
-    gaps.extend(stale_render_gaps(project_dir, rows,
-                                   context['canon_cutoff']))
-
     # The style reference is resolved once here and handed to both consumers: the
     # reference list embeds it and the gaps report its problems, and resolving it
     # twice walked the canon tree a second time to answer the same question.
     from storyforge import cmd_illustrate
     style = cmd_illustrate.resolve_style_reference(
         project_dir, canon_cutoff=context['canon_cutoff'])
+    # Resolved *before* the row loop, not after it as the packet's six-file
+    # version did: the upload list is book-level now, and a row needs to know
+    # whether its own earlier render is in it (`_self_reference_note`).
     references, reference_notes = _packet_references(
         project_dir, rows, canon_cutoff=context['canon_cutoff'], style=style)
+    reference_stems = {
+        os.path.splitext(os.path.basename(rel))[0]: position
+        for position, (rel, _purpose) in enumerate(references, start=1)}
+
+    entries: list[ImagePrompt] = []
+    for row in rows:
+        entry, row_gaps = image_prompt_for(
+            project_dir, row, context=context,
+            reference_stems=reference_stems)
+        entries.append(entry)
+        gaps.extend(row_gaps)
+    gaps.extend(_body_cause_gaps(entries))
+
+    gaps.extend(audit_gaps(project_dir))
+    gaps.extend(stale_render_gaps(project_dir, rows,
+                                   context['canon_cutoff']))
     # Unconditionally, not behind the composite below. The style reference is the
     # packet's most influential image and the only one always present, and its
     # problems reached exactly one file: `run_package` logs `gaps`, so a stale or
@@ -429,6 +548,27 @@ def resolve(project_dir: str, *,
         'reference_notes': reference_notes,
         'gaps': gaps,
     }
+
+
+def _body_cause_gaps(entries: list[ImagePrompt]) -> list[str]:
+    """One gap per shared cause, naming the rows — never one gap per row.
+
+    A project-wide cause (no prompt files written yet, a prompt file that will
+    not parse) is one sentence about the project followed by the ids it hit. Per
+    row it is twenty near-identical bullets in the section whose value is
+    proportional to its signal-to-noise, which is what teaches an author to skip
+    the section the real warnings live in (#290).
+
+    Ids capped at three plus a count by `_and_more`, for the same reason.
+    """
+    causes: dict[str, list[str]] = {}
+    for entry in entries:
+        if entry['body_cause']:
+            causes.setdefault(entry['body_cause'], []).append(entry['id'])
+    return [
+        f'{len(ids)} of {len(entries)} illustration(s) {cause} '
+        f'({_and_more(ids)}).'
+        for cause, ids in causes.items()]
 
 
 def stale_render_gaps(project_dir: str, rows: list[dict[str, str]],
@@ -527,12 +667,15 @@ def entry_for(row: dict[str, str], *,
             f'illustration `{illus_id}` has no beat — its entry cannot say '
             f'what happens in the image. Fill `beat` in '
             f'reference/{ill.PLAN_FILENAME}.')
-    subject = (row.get('subject') or '').strip()
-    if not subject:
+    # The gap survives the removal of the `in_frame` field it used to populate.
+    # `subject` still reaches the image model — through `_derived_body` when no
+    # prompt file exists, and through the art-direction request `--prompts` built
+    # from it when one does — so an empty cell is still a hole, it just no longer
+    # has an index column of its own to be blank in.
+    if not (row.get('subject') or '').strip():
         gaps.append(
-            f'illustration `{illus_id}` has no subject — its entry cannot say '
-            f'what is in frame. Fill `subject` in '
-            f'reference/{ill.PLAN_FILENAME}.')
+            f'illustration `{illus_id}` has no subject — nothing says what is in '
+            f'frame. Fill `subject` in reference/{ill.PLAN_FILENAME}.')
 
     state, state_gaps = state_for_row(row, context=context)
     gaps.extend(state_gaps)
@@ -556,7 +699,6 @@ def entry_for(row: dict[str, str], *,
                   or ill.DEFAULT_LAYOUT,
         'aspect': pi.aspect_for_row(row),
         'beat': beat or NOT_RECORDED,
-        'in_frame': subject or NOT_RECORDED,
         'state': state,
         # `absent` is an author-written column the plan schema does not define:
         # `write_plan` preserves columns beyond `PLAN_COLUMNS`, so an author can
@@ -571,6 +713,209 @@ def entry_for(row: dict[str, str], *,
         'stale_reason': ill.stale_render_reason(row, context['canon_cutoff']),
     }
     return entry, gaps
+
+
+def image_prompt_for(project_dir: str, row: dict[str, str], *,
+                     context: RowContext,
+                     reference_stems: dict[str, int],
+                     ) -> tuple[ImagePrompt, list[str]]:
+    """Build one illustration's upload file and the gaps found while building it.
+
+    Everything author-facing that this collects — `body_warning`, `body_cause`,
+    `self_reference` — lands on the returned object for `illustrations.md` and
+    `README.md` to render. None of it reaches the file the model reads; see
+    `ImagePrompt`.
+
+    `reference_stems` maps an uploaded reference's filename stem to its position
+    in the book-level list, which is how a row learns that its own earlier render
+    is one of the images the author uploaded at the top of the session.
+    """
+    entry, gaps = entry_for(row, context=context)
+    body = _body_for(project_dir, row)
+
+    prompt: ImagePrompt = {
+        **entry,
+        'model': pi.DEFAULT_IMAGE_MODEL,
+        'size': SIZES[entry['aspect']],
+        'quality': QUALITY,
+        'body': body['text'],
+        'body_source': body['source'],
+        'prompt_source': body['path'],
+        'body_warning': body['warning'],
+        'body_cause': body['cause'],
+        'self_reference': _self_reference_note(entry['id'], reference_stems),
+    }
+    return prompt, gaps
+
+
+def _self_reference_note(illus_id: str, reference_stems: dict[str, int]) -> str:
+    """What to tell the author when their own earlier render is in the uploads.
+
+    `cmd_illustrate._references_for` excludes a row from its own chain, because
+    re-rendering an illustration with its own previous version in front of the
+    model is how a re-render reproduces what it was meant to replace. The retired
+    export could honour that per unit, since it copied a chain per directory. One
+    list uploaded once at the top of a session cannot — so the exclusion becomes
+    a sentence addressed to the author instead.
+
+    Deliberately author-facing and therefore **not** in the image prompt: phrased
+    for the model it would be a negation ("ignore reference 2"), and #263's
+    finding that negated keywords leak into the render is why the exceptions to
+    positive framing are enumerable rather than open. The four remain `absent`,
+    colour logic, orientation, and no-text.
+    """
+    position = reference_stems.get(illus_id)
+    if position is None:
+        return ''
+    others = [str(n) for n in sorted(reference_stems.values())
+              if n != position]
+    anchoring = (f'References {", ".join(others[:-1])} and {others[-1]} anchor '
+                 f'this image' if len(others) > 1 else
+                 f'Reference {others[0]} anchors this image' if others else
+                 'No other uploaded image anchors this one')
+    return (f'{anchoring}; reference {position} is this illustration\'s own '
+            f'earlier render. This is a re-render, not a match — do not treat '
+            f'it as the target.')
+
+
+class _Body(TypedDict):
+    """An image prompt's prose, where it came from, and what to say about it.
+
+    One bag rather than a four-tuple because `path` and `source` are one fact
+    about one file, and the pair `('prompt_file', '')` is not a state that can
+    exist — a tuple invited exactly that.
+    """
+    text: str
+    source: BodySource
+    #: The prompt file that was *consulted*, whether or not it existed or parsed.
+    #: Recorded unconditionally so a file appearing at the default path is
+    #: noticed: `_body_for` picks it up with no plan edit, and
+    #: `parse_prompt_file`'s docstring invites hand-authoring.
+    path: str
+    #: The sentence for `illustrations.md`, '' when there is nothing to say.
+    warning: str
+    #: The project-wide phrasing README aggregates `cause -> ids`. Names the
+    #: shared root cause, not this row.
+    cause: str
+
+
+def _body_for(project_dir: str, row: dict[str, str]) -> _Body:
+    """The model-authored prose for a row, or a stand-in — plus why.
+
+    A missing, unreadable, or unparseable prompt file is **not** a refusal: the
+    packet costs nothing to produce, so the useful behaviour is to build it and
+    say what is thin about it — `run_package`'s posture throughout. It is also
+    not silent: a block assembled from three plan cells reads exactly like a
+    complete prompt, and an author who cannot tell the difference generates from
+    it.
+
+    A **declared** `prompt_file` that does not exist gets its own sentence. An
+    author who typed a path meant that path, so the prose usually exists
+    somewhere (moved, renamed, uncommitted) and the action is to find it — a
+    different action from "generate it again".
+
+    A body whose own prose carries a `Constraints` heading is used and *reported*
+    (`body_truncated`): the parse cuts at the first such heading to keep stale
+    constraints out of the upload, which means anything the model wrote after it
+    — often `### Use case` — is dropped. Reporting rather than silently
+    substituting the plan row follows #293: a truncation every consumer accepts
+    is worse than an absence, because nothing looks wrong.
+    """
+    illus_id = row['id'].strip()
+    declared = (row.get('prompt_file') or '').strip()
+    rel = declared or ill.default_prompt_rel(illus_id)
+    path = os.path.join(project_dir, rel)
+    plan_row = _derived_body(row)
+    tail = (f'so its image prompt is assembled from the plan row alone — the '
+            f'beat, the subject, and the composition note, with none of the '
+            f'scene-specific prose `--prompts` writes')
+
+    if not os.path.isfile(path):
+        if declared:
+            return {
+                'text': plan_row, 'source': 'plan_row', 'path': rel,
+                'warning': f'the plan declares art direction at `{rel}`, which '
+                           f'is not there, {tail}. Restore that file, or clear '
+                           f'the `prompt_file` cell and run `storyforge '
+                           f'illustrate --prompts --ids {illus_id}`.',
+                'cause': 'declare a `prompt_file` that does not exist, so their '
+                         'image prompts come from the plan row',
+            }
+        return {
+            'text': plan_row, 'source': 'plan_row', 'path': rel,
+            'warning': f'this illustration has no written art direction, {tail}. '
+                       f'Run `storyforge illustrate --prompts --ids {illus_id}` '
+                       f'first for a stronger prompt.',
+            'cause': 'have no written art direction, so their image prompts come '
+                     'from the plan row alone',
+        }
+    try:
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        return {
+            'text': plan_row, 'source': 'plan_row', 'path': rel,
+            'warning': f'its prompt file `{rel}` could not be read '
+                       f'({getattr(exc, "strerror", None) or exc}), {tail}. Fix '
+                       f'its permissions or delete the file, then re-run '
+                       f'`--package`.',
+            'cause': 'have a prompt file that could not be read, so their image '
+                     'prompts come from the plan row',
+        }
+
+    parsed = pi.parse_prompt_file(text)
+    if parsed['status'] == 'ok':
+        return {'text': parsed['body'], 'source': 'prompt_file', 'path': rel,
+                'warning': '', 'cause': ''}
+    if parsed['status'] == 'body_truncated':
+        return {
+            'text': parsed['body'], 'source': 'prompt_file', 'path': rel,
+            'warning': f'its prompt file `{rel}` carries its own `Constraints` '
+                       f'heading inside the prompt body, which ends the body — '
+                       f'so everything the model wrote after it (often `### Use '
+                       f'case`) is **not** in the uploaded prompt. Demote that '
+                       f'heading in `{rel}` and re-run `--package`.',
+            'cause': 'have a `Constraints` heading inside their prompt body, so '
+                     'part of their art direction was dropped',
+        }
+    reason = ('has no `## Prompt` section'
+              if parsed['status'] == 'no_prompt_section'
+              else 'has an empty prompt body')
+    return {
+        'text': plan_row, 'source': 'plan_row', 'path': rel,
+        'warning': f'its prompt file `{rel}` {reason}, {tail}. Re-run '
+                   f'`storyforge illustrate --prompts --ids {illus_id}`.',
+        'cause': 'have a prompt file with no usable prompt body, so their image '
+                 'prompts come from the plan row',
+    }
+
+
+def _derived_body(row: dict[str, str]) -> str:
+    """A prompt body built from the plan row, in the prompt file's own shape.
+
+    Four sections rather than free prose, because the whole artifact is written
+    for a model tuned on the 5-section template (#260) — and because a stand-in
+    shaped like the real thing is how a reader sees at a glance which parts are
+    thin. `NOT_RECORDED` is deliberately not reused: it points at README's gap
+    list, and this text is uploaded to an image model that cannot follow it.
+    """
+    def cell(key: str) -> str:
+        return (row.get(key) or '').strip()
+
+    unwritten = '_(not recorded in the plan)_'
+    details = [f'- {label}: {cell(key) or unwritten}' for label, key in (
+        ('Palette', 'palette'), ('Composition', 'composition'),
+        ('Mood', 'mood'), ('Motifs to carry', 'motifs'))]
+    return '\n'.join([
+        '## Scene', '',
+        cell('beat') or unwritten, '',
+        '## Subject', '',
+        cell('subject') or unwritten, '',
+        '## Important details', '',
+        '\n'.join(details), '',
+        '## Use case', '',
+        'Interior illustration for a novel.',
+    ])
 
 
 def _staging_postdates_render(row: dict[str, str]) -> tuple[str, str] | None:
@@ -1187,32 +1532,25 @@ def anchor_copy_drift(project_dir: str) -> list[ill.IllustrationFinding]:
     catch a renderer wrapping or re-indenting a long anchor, or an author
     hand-editing a file whose whole point is being a render.
 
-    Covers the packet **and** the export's `canon.md` (#298). Both write anchor
-    copies through the same `anchor_block`, so both are subject to the same
-    byte-identity invariant, and checking only one would leave the artifact
-    designed to be *handed to someone else* unguarded. The remediation names
-    whichever command regenerates the file, since `--package` does not rebuild
-    the export and vice versa.
+    Covered both bundles until #306 folded the export into the packet; one tree
+    now, and the loop shape is kept because the per-file walk is what the
+    findings are built from either way.
 
     Compared after `normalize_for_comparison`, so cosmetic whitespace is not
-    drift and a changed word is. Returns [] when neither bundle is built — an
+    drift and a changed word is. Returns [] when the packet is not built — an
     unbuilt bundle is in-flight state, not a finding.
     """
-    from storyforge import export as ex
-
     findings: list[ill.IllustrationFinding] = []
     sources = canon.anchor_texts(project_dir)
     normalized = {cid: normalize_for_comparison(text)
                   for cid, text in sources.items()}
 
-    trees = [(PACKET_DIR, PACKET_FILES, '--package'),
-             (ex.EXPORT_DIR, ex.SHARED_FILES, '--export')]
-    for subdir, names, command in trees:
-        if not os.path.isdir(os.path.join(project_dir, subdir)):
-            continue
-        for name in names:
-            findings.extend(_file_anchor_drift(
-                project_dir, os.path.join(subdir, name), normalized, command))
+    if not os.path.isdir(os.path.join(project_dir, PACKET_DIR)):
+        return findings
+    for name in PACKET_FILES:
+        findings.extend(_file_anchor_drift(
+            project_dir, os.path.join(PACKET_DIR, name), normalized,
+            '--package'))
     return findings
 
 
@@ -1285,12 +1623,42 @@ def _file_anchor_drift(project_dir: str, rel: str,
 #: every canon file. Not the scene prose — a prose revision is `prose_changed`
 #: and `audit_stale`, which say something more specific than "regenerate".
 def _packet_sources(project_dir: str) -> list[str]:
-    """Absolute paths of every file the packet is assembled from."""
+    """Absolute paths of every file the packet is assembled from.
+
+    The prompt bodies are among them since #306. Before, the packet named their
+    path and the author opened them separately, so their mtime said nothing about
+    the packet; now `--package` inlines each body into an image prompt, and a
+    body rewritten after the last run is exactly the staleness this reports.
+    """
     sources = [ill.plan_path(project_dir), vs.state_path(project_dir)]
     canon_dir = os.path.join(project_dir, canon.CANON_DIR)
     if os.path.isdir(canon_dir):
         sources.extend(canon._walk_canon_files(canon_dir))
+    prompts_dir = os.path.join(project_dir, ill.PROMPTS_SUBDIR)
+    if os.path.isdir(prompts_dir):
+        sources.extend(
+            os.path.join(prompts_dir, name)
+            for name in sorted(os.listdir(prompts_dir))
+            if name.endswith('.md'))
     return [path for path in sources if os.path.isfile(path)]
+
+
+def _packet_written_files(project_dir: str) -> list[str]:
+    """Absolute paths of every file `--package` writes, root files and prompts.
+
+    `packet_stale` takes the *oldest* of these. Root files only would miss a
+    source rewritten between the image-prompt writes and the root-file writes of
+    the same run — a narrow window, but the whole finding is about a packet that
+    looks current and is not.
+    """
+    written = [packet_file(project_dir, name) for name in PACKET_FILES]
+    prompts = image_prompts_dir(project_dir)
+    if os.path.isdir(prompts):
+        written.extend(
+            os.path.join(prompts, name)
+            for name in sorted(os.listdir(prompts))
+            if name.endswith('.md'))
+    return [path for path in written if os.path.isfile(path)]
 
 
 def packet_stale(project_dir: str) -> list[ill.IllustrationFinding]:
@@ -1306,8 +1674,8 @@ def packet_stale(project_dir: str) -> list[ill.IllustrationFinding]:
     """
     if not is_built(project_dir):
         return []
-    packet_mtime = min(os.path.getmtime(packet_file(project_dir, name))
-                       for name in PACKET_FILES)
+    packet_mtime = min(os.path.getmtime(path)
+                       for path in _packet_written_files(project_dir))
     newer = sorted(os.path.relpath(path, project_dir)
                    for path in _packet_sources(project_dir)
                    if os.path.getmtime(path) > packet_mtime)

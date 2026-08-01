@@ -84,10 +84,7 @@ def parse_args(argv):
                        help='Assemble the handoff packet in '
                             'manuscript/illustration-packet/ (no API calls)')
     phase.add_argument('--export', action='store_true',
-                       help='Assemble a self-contained bundle in '
-                            'manuscript/illustration-export/ — one directory '
-                            'per illustration, with a paste-ready prompt and '
-                            'the reference images copied in (no API calls)')
+                       help=argparse.SUPPRESS)
     phase.add_argument('--ingest', metavar='PATH', default=None,
                        help='Ingest rendered illustration file(s) from a file '
                             'or directory')
@@ -110,10 +107,7 @@ def parse_args(argv):
                              '(default: recommended from book length)')
     parser.add_argument('--ids', type=str, default=None,
                         help='Comma-separated illustration ids to limit '
-                             '--prompts, --embed, or --export to')
-    parser.add_argument('--anchor-batch', action='store_true',
-                        help='For --export: export exactly the four anchor-batch '
-                             'illustrations, so phase 1 is one command')
+                             '--prompts or --embed to')
     parser.add_argument('--no-prior-refs', action='store_true',
                         help='For --prompts: reference the cover only, never '
                              'prior ingested illustrations. Use when '
@@ -142,25 +136,27 @@ def main(argv=None):
 
     coaching = args.coaching or get_coaching_level(project_dir)
 
+    if args.export:
+        # Retired in #306, kept for one version as a sentence rather than a bare
+        # argparse "unrecognized argument". The export's per-illustration file
+        # now lives in the packet as `image-prompts/<id>.md`, and its reference
+        # copies are gone: every unit held the same four images, so a
+        # twenty-illustration book spent 167 MB carrying 9 MB of distinct bytes.
+        log('ERROR: --export was removed in 1.57.0. Its per-illustration upload '
+            'file is now part of the packet: run `storyforge illustrate '
+            '--package` and upload '
+            f'{packet.PACKET_DIR}/{packet.IMAGE_PROMPTS_SUBDIR}/<id>.md. '
+            'Reference images are listed in the packet README and uploaded from '
+            'their project paths, never copied.')
+        return 2
+
     phases = [args.direction, args.plan, args.prompts, bool(args.ingest),
               args.embed, args.diagnose, args.review, args.state, args.audit,
-              args.package, args.sequence, args.export]
+              args.package, args.sequence]
     if not any(phases):
         log('Nothing to do. Pick a phase: --direction, --plan, --sequence, '
-            '--prompts, --package, --export, --ingest PATH, --embed, --state, '
+            '--prompts, --package, --ingest PATH, --embed, --state, '
             '--audit, --diagnose, or --review.')
-        return 1
-
-    if args.anchor_batch and not args.export:
-        # Refused rather than ignored: the flag reads as a scope, and silently
-        # dropping a scope is how a run that was meant to touch four rows touches
-        # twenty. Nothing else takes one.
-        log('ERROR: --anchor-batch only applies to --export.')
-        return 1
-    if args.anchor_batch and args.ids:
-        log('ERROR: pass either --anchor-batch or --ids, not both — they are '
-            'two ways of naming the same thing, and there is no reading of the '
-            'pair that is obviously right.')
         return 1
 
     if args.diagnose:
@@ -189,13 +185,6 @@ def main(argv=None):
         # `run_package`'s docstring for why it is wired anyway.
         exit_code = run_package(project_dir, args.dry_run,
                                 report_batch=not args.diagnose) or exit_code
-    if args.export:
-        # After --package, deliberately: the packet is the shared-context bundle
-        # a session works from, the export is what you hand over one image at a
-        # time, and an author running both wants the packet's gap list before the
-        # per-unit directories built from the same data.
-        exit_code = run_export(project_dir, _id_filter(args.ids), args.dry_run,
-                               anchor_batch=args.anchor_batch) or exit_code
     if args.ingest:
         exit_code = run_ingest(project_dir, args.ingest,
                                args.dry_run) or exit_code
@@ -265,12 +254,6 @@ def run_diagnose(project_dir: str) -> int:
         findings = ill.validate_plan(project_dir, canon_cutoff=canon_cutoff)
         _report_style_reference(project_dir, canon_cutoff=canon_cutoff)
         _report_state_rung(project_dir, findings)
-        # Reported on this branch too. An export built from a plan that has since
-        # been emptied — or whose file was renamed, which `read_plan` also reads as
-        # zero rows — is exactly the state where the export rung is the useful
-        # line, and returning before it hid the bundle at the one moment it was
-        # certainly out of date.
-        _report_export_rung(project_dir, findings)
         return _report_findings(findings)
 
     needs = packet.needs_render(project_dir, plan=rows,
@@ -316,12 +299,6 @@ def run_diagnose(project_dir: str) -> int:
     _report_style_reference(project_dir, canon_cutoff=canon_cutoff)
     _report_state_rung(project_dir, findings)
     _report_packet_rung(project_dir, findings, needs)
-    # Called from `run_diagnose` rather than from inside `_report_packet_rung`,
-    # which early-returns on an unbuilt packet: the two rungs are independent —
-    # an author can want the per-image export and never the session bundle — and
-    # nesting one inside the other made the export invisible in exactly the state
-    # where its rung line is the useful one.
-    _report_export_rung(project_dir, findings)
     return _report_findings(findings)
 
 
@@ -497,36 +474,6 @@ def _report_packet_rung(project_dir: str,
     if not pending and not stale:
         log('  anchor batch: every row is ingested from the current canon — '
             'the packet is ready to hand over.')
-
-
-def _report_export_rung(project_dir: str,
-                        findings: list[ill.IllustrationFinding]) -> None:
-    """Log the export rung, for `--diagnose`.
-
-    Reported separately from the packet because the two answer different
-    questions — the packet is what a session works through, the export is what
-    you hand over — and because a project can legitimately want one and never the
-    other. Not built is in-flight state, so it is stated without a warning.
-
-    Staleness is read off `findings` rather than by re-running `export_stale`:
-    `validate_plan` has already run it, and running it twice would hash every
-    copied reference image twice and print its WARNING line twice — the defect
-    `_report_state_rung` documents for `digest_drift`.
-    """
-    from storyforge import export as ex
-
-    if not ex.is_built(project_dir):
-        log('Export: not built. Run `storyforge illustrate --export` for a '
-            'bundle that is complete on its own — one directory per '
-            'illustration, with the reference images copied in. '
-            '`--anchor-batch` exports just the four.')
-        return
-    stale = [f for f in findings if f['kind'] == 'export_stale']
-    units = ex.existing_units(project_dir)
-    log(f'Export: built and {"stale" if stale else "current"} — '
-        f'{ex.EXPORT_DIR}/ ({len(units)} illustration directory(ies))')
-    if stale:
-        log(f'  {stale[0]["detail"]}')
 
 
 # ============================================================================
@@ -1840,29 +1787,40 @@ def run_package(project_dir: str, dry_run: bool, *,
             grid=grid, illustrated=illustrated),
         'illustrations.md': pp.render_illustrations(
             entries=contents['entries']),
-        'reference-images.md': pp.render_reference_images(
-            references=contents['references'],
-            notes=contents['reference_notes']),
         'acceptance.md': pp.render_acceptance(aspects=aspects),
     }
+    prompts = {
+        entry['id']: pp.render_image_prompt(prompt=entry, title=title)
+        for entry in contents['entries']}
 
     if dry_run:
         for name in packet.PACKET_FILES:
             log(f'[dry-run] would write '
                 f'{os.path.join(packet.PACKET_DIR, name)}')
+        log(f'[dry-run] would write {len(prompts)} file(s) to '
+            f'{os.path.join(packet.PACKET_DIR, packet.IMAGE_PROMPTS_SUBDIR)}/')
         for gap in contents['gaps']:
             log(f'[dry-run] WARNING: {gap}')
         return 0
 
     os.makedirs(packet.packet_dir(project_dir), exist_ok=True)
+    # The image prompts go down **before** the root files, and `is_built` keys on
+    # the root files alone. Written the other way round, an interrupted run left
+    # `--diagnose` reporting a packet "built and current" over a directory with
+    # nothing to upload in it (#298's lesson, kept). The stale copies are cleared
+    # first so a row dropped from the plan does not leave a file that still looks
+    # current beside the ones that are.
+    _write_image_prompts(project_dir, prompts)
     for name in packet.PACKET_FILES:
         with open(packet.packet_file(project_dir, name), 'w',
                   encoding='utf-8') as f:
             f.write(files[name])
 
-    log(f'Wrote {len(packet.PACKET_FILES)} file(s) to '
-        f'{packet.PACKET_DIR}/ — {len(contents["entries"])} illustration(s), '
+    log(f'Wrote {len(packet.PACKET_FILES)} file(s) and {len(prompts)} image '
+        f'prompt(s) to {packet.PACKET_DIR}/ — '
+        f'{len(contents["entries"])} illustration(s), '
         f'{len(contents["anchors"])} continuity anchor(s)')
+    _warn_superseded_export(project_dir)
     for gap in contents['gaps']:
         log(f'  WARNING: {gap}')
     if contents['gaps']:
@@ -1874,6 +1832,52 @@ def run_package(project_dir: str, dry_run: bool, *,
     log('Render and approve the anchor batch, ingest those, then re-run '
         '--package so the rest can reference real images.')
     return 0
+
+
+def _write_image_prompts(project_dir: str, prompts: dict[str, str]) -> None:
+    """Write `image-prompts/`, clearing whatever an earlier run left there.
+
+    Cleared rather than merged: an id dropped from the plan would otherwise leave
+    a file that reads exactly like the current ones, in the directory whose only
+    job is being the thing the author uploads.
+
+    Only `.md` files are removed. The directory is inside a render, so nothing
+    should be hand-placed there — but deleting an author's stray note is not this
+    function's call to make, and `shutil.rmtree` on a path assembled from a plan
+    cell is the destructive shape #298 was reviewed for.
+    """
+    directory = packet.image_prompts_dir(project_dir)
+    os.makedirs(directory, exist_ok=True)
+    keep = {f'{illus_id}.md' for illus_id in prompts}
+    for name in sorted(os.listdir(directory)):
+        if name.endswith('.md') and name not in keep:
+            os.remove(os.path.join(directory, name))
+    for illus_id, text in prompts.items():
+        # `image_prompt_file` re-checks the id against `_ID_RE` and raises: the
+        # plan is a hand-edit surface, `run_package` deliberately does not call
+        # `validate_plan`, and an id of `../../evil` would write outside the
+        # packet tree.
+        with open(packet.image_prompt_file(project_dir, illus_id), 'w',
+                  encoding='utf-8') as f:
+            f.write(text)
+
+
+def _warn_superseded_export(project_dir: str) -> None:
+    """Say once that a pre-1.57.0 export directory is superseded.
+
+    Reported, never deleted. It is 167 MB on the book this was filed about, so an
+    author wants it gone — but a command that removes a directory it did not
+    write, on a path the author may have put their own files under, is the
+    destructive shape this pipeline has been bitten by before.
+    """
+    legacy = os.path.join(project_dir, 'manuscript', 'illustration-export')
+    if not os.path.isdir(legacy):
+        return
+    log('NOTE: manuscript/illustration-export/ is superseded — its '
+        'per-illustration file is now '
+        f'{packet.PACKET_DIR}/{packet.IMAGE_PROMPTS_SUBDIR}/<id>.md and its '
+        'reference copies are gone (every unit held the same images). Nothing '
+        'reads that directory any more; delete it when you are ready.')
 
 
 def _report_anchor_batch(batch: packet.AnchorBatch,
@@ -1919,177 +1923,6 @@ def _report_anchor_batch(batch: packet.AnchorBatch,
             f'it.')
     for note in batch['fallback']:
         log(f'  WARNING: {note}')
-
-
-# ============================================================================
-# --export
-# ============================================================================
-
-def run_export(project_dir: str, ids: set[str] | None, dry_run: bool, *,
-               anchor_batch: bool) -> int:
-    """Assemble `manuscript/illustration-export/` — a bundle complete by itself.
-
-    The packet's sibling, not its replacement. `--package` produces the bundle a
-    long-running session works through with `canon.md` in context and reference
-    images left on disk; this produces one directory per illustration holding a
-    contiguous paste-ready block and the reference images as *files*, for handing
-    over to a browser session or to someone without the repo (#298).
-
-    No API calls, no timestamps, so regeneration over unchanged sources is
-    byte-identical.
-
-    **Data problems do not block; two things do.** An export costs nothing to
-    produce, so over incomplete data the useful behaviour is to build it and say
-    what is thin — every gap is logged **and** written into `README.md`, which is
-    the copy the reader still has when the log has scrolled away. That is
-    `run_package`'s posture, and it is why a mis-declared `production.cover_artwork`
-    warns here where `run_prompts` refuses: that refusal exists to stop *spending*
-    on a wrong house style, and this command spends nothing.
-
-    The two refusals are a plan carrying an illegal `id` — this writes to and
-    `rmtree`s a directory named from that cell, so `../../evil` escapes the export
-    tree — and an `--ids` list that matched no live row, which is a failed request
-    rather than a thin bundle and which `run_prompts` already returns 1 for.
-    """
-    from storyforge import canon as canon_mod
-    from storyforge import export as ex
-    from storyforge import prompts_export as pe
-
-    # One read for the whole run, threaded into `resolve` — so the canon tree is
-    # walked once and an unparseable `canon_updated` is reported once rather than
-    # once per unit.
-    canon_cutoff = canon_mod.newest_canon_updated(project_dir)
-
-    if anchor_batch:
-        ids = _anchor_batch_ids(project_dir, canon_cutoff=canon_cutoff)
-        if not ids:
-            log('ERROR: the anchor batch resolved to no illustrations, so there '
-                'is nothing to export. Run `storyforge illustrate --plan` '
-                'first, or `--diagnose` to see why the slots are empty.')
-            return 1
-
-    # Before `resolve`, which builds paths from these cells. `validate_plan` would
-    # report this as `invalid_id` but is not run here (its other findings would
-    # duplicate the gaps), so the one check whose absence is destructive is made
-    # directly.
-    illegal = sorted(row['id'].strip() for row in ill.read_plan(project_dir)
-                     if not ill._ID_RE.match(row['id'].strip()))
-    if illegal:
-        log(f'ERROR: refusing to export. {len(illegal)} plan row(s) have an id '
-            f'that is not a legal illustration id: {", ".join(repr(i) for i in illegal)}. '
-            f'Every unit is a directory named from that cell, and this command '
-            f'writes to and deletes inside it — an id containing a path '
-            f'separator would reach outside {ex.EXPORT_DIR}/. Fix them in '
-            f'reference/{ill.PLAN_FILENAME} (`storyforge validate` reports the '
-            f'same rows as `invalid_id`).')
-        return 1
-
-    contents = ex.resolve(project_dir, ids=ids, canon_cutoff=canon_cutoff)
-    units = contents['units']
-    unknown: set[str] = set()
-    if ids is not None:
-        unknown = ids - {unit['id'] for unit in units}
-        if unknown:
-            log(f'WARNING: --ids named {len(unknown)} illustration(s) with no '
-                f'live plan row: {", ".join(sorted(unknown))}. Nothing was '
-                f'written for them.')
-
-    title = read_yaml_field('project.title', project_dir) or '(untitled)'
-    shared = {
-        'README.md': pe.render_readme(title=title, contents=contents),
-        'canon.md': pp.render_canon(
-            book_level=contents['book_level'], anchors=contents['anchors'],
-            labels=contents['labels']),
-        # The export's own vocabulary: its checks must point at `prompt.md`'s
-        # sections, not at packet entries that do not exist in this bundle and
-        # that a reader without the repo could not go and look up.
-        'acceptance.md': pp.render_acceptance(aspects=contents['aspects'],
-                                              source='export-prompt'),
-    }
-
-    if dry_run:
-        for unit in units:
-            log(f'[dry-run] would write {unit["id"]}/ — '
-                f'{ex.PROMPT_FILENAME}, {ex.MANIFEST_FILENAME}, and '
-                f'{len(unit["references"])} reference image(s)')
-        for name in ex.SHARED_FILES:
-            log(f'[dry-run] would write {os.path.join(ex.EXPORT_DIR, name)}')
-        for gap in contents['gaps']:
-            log(f'[dry-run] WARNING: {gap}')
-        return 0
-
-    os.makedirs(ex.export_dir(project_dir), exist_ok=True)
-    copied = 0
-    for unit in units:
-        directory = ex.unit_dir(project_dir, unit['id'])
-        os.makedirs(directory, exist_ok=True)
-        with open(os.path.join(directory, ex.PROMPT_FILENAME), 'w',
-                  encoding='utf-8') as f:
-            f.write(pe.render_prompt(unit=unit, title=title))
-        copied += ex.copy_references(project_dir, unit)
-        # After the copies, so a manifest never outlives the images it declares.
-        # `export_stale` checks both ends of every recorded digest, and this
-        # ordering means the window it would report is the one that genuinely
-        # exists rather than one this loop opened.
-        with open(os.path.join(directory, ex.MANIFEST_FILENAME), 'w',
-                  encoding='utf-8') as f:
-            f.write(ex.manifest_for(unit))
-
-    # The shared files last, which is what makes `ex.is_built` mean something.
-    # Written first, they flipped it True at the moment the bundle was emptiest —
-    # an interrupted run then left `--diagnose` printing "built and current" over
-    # zero unit directories, with the count as the only tell.
-    for name in ex.SHARED_FILES:
-        with open(ex.shared_file(project_dir, name), 'w',
-                  encoding='utf-8') as f:
-            f.write(shared[name])
-
-    if contents['scope'] == 'whole-plan':
-        # Only a whole-plan run prunes, and it prunes against the *plan's* ids
-        # rather than the exported set — see `prune_units`, which refuses an empty
-        # one. A subset run has no business deleting the units it was not asked
-        # about; `README.md` names them as untouched instead.
-        removed = ex.prune_units(project_dir, live_ids=contents['live_ids'])
-        if removed:
-            log(f'  removed {len(removed)} directory(ies) for illustration(s) '
-                f'no longer in the plan: {", ".join(removed)}')
-
-    log(f'Wrote {len(units)} illustration directory(ies) and '
-        f'{len(ex.SHARED_FILES)} shared file(s) to {ex.EXPORT_DIR}/ — '
-        f'{copied} reference image(s) copied in')
-    for gap in contents['gaps']:
-        log(f'  WARNING: {gap}')
-    if contents['gaps']:
-        log(f'  {len(contents["gaps"])} gap(s) above are also written into '
-            f'{os.path.join(ex.EXPORT_DIR, "README.md")}, so the export says '
-            f'what it cannot tell you.')
-    if units:
-        log(f'Hand one over with, for example: '
-            f'{pe.render_zip_hint(project_dir, units[0]["id"])}')
-    if unknown and not units:
-        # A failed request, not a thin bundle: the author named ids and got no
-        # directories. `run_prompts` returns 1 for the same flag with the same
-        # meaning, and two commands disagreeing about it is worse than either
-        # answer.
-        return 1
-    return 0
-
-
-def _anchor_batch_ids(project_dir: str, *, canon_cutoff: str) -> set[str]:
-    """The anchor batch's ids, with every disclosure about how it was chosen.
-
-    Reported here rather than left to `README.md` because `--anchor-batch` is the
-    flag that makes phase 1 one command, and the author who typed it never named
-    the four ids — so a guessed `darkest` slot is a decision they are unaware of
-    having accepted. Nothing populates `register` automatically, which makes the
-    guess the *normal* case rather than an edge one.
-    """
-    batch = packet.anchor_batch(project_dir)
-    needs = packet.needs_render(project_dir, canon_cutoff=canon_cutoff)
-    _report_anchor_batch(batch, needs)
-    return {batch[slot]  # type: ignore[literal-required]
-            for slot, _label in packet.BATCH_SLOTS
-            if batch[slot]}  # type: ignore[literal-required]
 
 
 def _warn_truncated_anchors(project_dir: str) -> None:
@@ -2774,6 +2607,17 @@ def _references_for(project_dir: str, illus_id: str, *,
     rows = plan if plan is not None else ill.read_plan(project_dir)
     skipped_stale = 0
     capped = 0
+    # Excluded files accumulated by *reason*, emitted as one note per reason
+    # after the loop. Appended per row, this produced seventeen near-identical
+    # paragraphs on a twenty-illustration book — 9.5 KB of a 13.9 KB file — in
+    # the one section whose whole job is telling the author what they are not
+    # uploading. One root cause, one note (#290, #306).
+    excluded_no_prior: list[str] = []
+    # Keyed on the *reason*, not merely counted: `stale_render_reason` says
+    # something different for an empty `ingested_at` than for a date before the
+    # cutoff, and collapsing both into "predates the canon" would aggregate away
+    # the half of the sentence that tells the author what to fix.
+    excluded_stale: dict[str, list[str]] = {}
     for row in rows:
         if row['id'].strip() == illus_id:
             continue
@@ -2784,8 +2628,7 @@ def _references_for(project_dir: str, illus_id: str, *,
             continue
         if no_prior_refs:
             skipped_stale += 1
-            note(f'`{rel}` is not listed because --no-prior-refs was passed: '
-                 f'this build inherits nothing from the existing art.')
+            excluded_no_prior.append(rel)
             continue
         # No `if canon_cutoff:` around this: the predicate makes that check
         # itself, and a caller-side copy reads as this caller having a different
@@ -2793,18 +2636,16 @@ def _references_for(project_dir: str, illus_id: str, *,
         # divergence one shared predicate exists to make impossible (#300).
         stale_reason = ill.stale_render_reason(row, canon_cutoff)
         if stale_reason:
+            # Logged per file, aggregated in the note. "Every exclusion is
+            # logged" is a stated invariant and a log is not the artifact whose
+            # signal-to-noise is the feature.
             log(f'WARNING: not referencing {rel} for {illus_id} — '
                 f'{stale_reason}. Re-render it from the current canon '
                 f'(see `storyforge illustrate --diagnose` for the render '
                 f'order), or pass --no-prior-refs to build this prompt '
                 f'from the cover alone.')
             skipped_stale += 1
-            note(f'`{rel}` is **not** listed — {stale_reason}. It was '
-                 f'directed by canon that has since been rewritten, so '
-                 f'using it would teach the new render the drift the new '
-                 f'canon exists to remove. Re-render it from the current '
-                 f'canon (`storyforge illustrate --diagnose` gives the '
-                 f'order), then re-run {rerun}.')
+            excluded_stale.setdefault(stale_reason, []).append(rel)
             continue
         # The cap is checked *after* the exclusion checks so that a skipped
         # render is still disclosed: breaking out of the loop early would hide
@@ -2814,6 +2655,18 @@ def _references_for(project_dir: str, illus_id: str, *,
             capped += 1
             continue
         references.append((rel, 'prior illustration (style continuity)'))
+
+    if excluded_no_prior:
+        note(f'{len(excluded_no_prior)} ingested illustration(s) are not listed '
+             f'because --no-prior-refs was passed ({_and_more_files(excluded_no_prior)}): '
+             f'this build inherits nothing from the existing art.')
+    for reason, rels in excluded_stale.items():
+        note(f'{len(rels)} ingested illustration(s) are **not** listed '
+             f'({_and_more_files(rels)}) — {reason}. They were directed by canon '
+             f'that has since been rewritten, so using them would teach the new '
+             f'render the drift the new canon exists to remove. Re-render them '
+             f'from the current canon (`storyforge illustrate --diagnose` gives '
+             f'the order), then re-run {rerun}.')
 
     if capped:
         log(f'  {illus_id}: {capped} further ingested illustration(s) were not '
@@ -2849,6 +2702,19 @@ def _references_for(project_dir: str, illus_id: str, *,
                  + '. Nothing anchors style or likeness, so whatever is '
                    'rendered first sets the look for the whole book.')
     return references
+
+
+def _and_more_files(paths: list[str]) -> str:
+    """Name the first few excluded files and count the rest.
+
+    `packet._and_more` for paths rather than ids. The cap is what makes an
+    aggregated note readable: on the book this was filed about seventeen files
+    shared one cause, and seventeen backticked paths mid-sentence is not
+    meaningfully better than the seventeen paragraphs it replaced.
+    """
+    named = ', '.join(f'`{p}`' for p in paths[:packet._MAX_NAMED_IDS])
+    rest = len(paths) - packet._MAX_NAMED_IDS
+    return f'{named} and {rest} more' if rest > 0 else named
 
 
 def _relevant_anchors(anchors: dict[str, str],

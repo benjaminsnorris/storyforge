@@ -1272,10 +1272,6 @@ _ILLUSTRATION_ACTIONS: dict[IllustrationFindingKind, str] = {
         'Re-run storyforge illustrate --package — the packet is a render, so '
         'regenerating it is the whole fix; a generating session working from a '
         'stale packet spends real money on last week\'s plan',
-    'export_stale':
-        'Re-run storyforge illustrate --export — the export is a render too, '
-        'and it is the one bundle that can go stale without anything in '
-        'reference/ moving, because it holds copies of the reference images',
     'anchor_copy_drift':
         'Re-run storyforge illustrate --package rather than editing the packet '
         '— the anchor copy must be byte-identical to the canon file, because '
