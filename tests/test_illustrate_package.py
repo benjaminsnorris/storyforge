@@ -1272,15 +1272,21 @@ def test_the_request_carries_beats_but_not_scene_prose(in_project):
     assert 'camera distance' in prompt
 
 
-def test_the_treatment_reaches_the_packet_entry(in_project, staged):
+def test_the_treatment_reaches_the_index_and_not_the_upload(in_project, staged):
+    """The staging is author-facing here. `--prompts` takes it as a requirement
+    when it writes the body, so the body already embodies it; repeating it in
+    the uploaded file would be a second, competing staging note reaching the
+    model. It is in `illustrations.md` so the author can check that the body
+    honoured it."""
     staged(_sequence_response(
         ('the-finest-cartographer', 'close, low, interior, night')))
     cmd_illustrate.main(['--sequence'])
     cmd_illustrate.main(['--package'])
-    body = _read(in_project, 'illustrations.md')
-    assert 'close, low, interior, night' in body
-    assert 'close, low, interior, night' in \
-        _read_prompt(in_project, 'the-finest-cartographer') or True
+
+    assert 'close, low, interior, night' in _read(in_project,
+                                                  'illustrations.md')
+    assert 'close, low, interior, night' not in \
+        _read_prompt(in_project, 'the-finest-cartographer')
 
 
 def test_the_treatment_reaches_the_art_direction_request(in_project):
