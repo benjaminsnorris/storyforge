@@ -15,6 +15,7 @@ import pytest
 
 from storyforge import canon, cmd_illustrate, packet
 from storyforge import illustrations as ill
+from storyforge import prompts_illustrate as pi
 from storyforge import prompts_packet as pp
 from illustration_helpers import seed_packet_project
 
@@ -261,9 +262,14 @@ def test_an_image_prompt_carries_only_model_facing_sections(in_project):
     here uploads seventeen paragraphs of canon-staleness prose to an image
     model, and nothing about the resulting image would look wrong.
     """
+    from illustration_helpers import write_prompt_file
     rows = ill.read_plan(in_project)
     rows[1].update(_SPEC_EXAMPLE)
     ill.write_plan(in_project, rows)
+    # A real prompt file on disk, not just the plan-row stand-in. Without one
+    # every body comes from `_derived_body`, whose four headings ARE the
+    # enumeration — so the assertion could not fail (#306 review, T-3).
+    write_prompt_file(in_project, 'the-finest-cartographer')
     _ingest(in_project, 0, ingested_at='')      # stale: the loudest author-facing case
     cmd_illustrate.main(['--package'])
 
@@ -273,6 +279,10 @@ def test_an_image_prompt_carries_only_model_facing_sections(in_project):
         assert set(headings) <= set(pp.IMAGE_PROMPT_SECTIONS), \
             f'{name} carries a section the image model should not read: ' \
             f'{sorted(set(headings) - set(pp.IMAGE_PROMPT_SECTIONS))}'
+        # A floor as well as a ceiling: a subset assertion passes over a body
+        # that rendered nothing at all.
+        assert 'Constraints' in headings
+        assert len(headings) >= 4, f'{name} rendered almost nothing: {headings}'
 
 
 @pytest.mark.parametrize('forbidden', [
@@ -287,7 +297,15 @@ def test_an_image_prompt_carries_only_model_facing_sections(in_project):
 ])
 def test_the_retired_author_facing_sections_stay_out(in_project, forbidden):
     """Named individually, because the heading-set test above only catches a
-    `##` heading — a regression could reintroduce any of these as bold prose."""
+    `##` heading — a regression could reintroduce any of these as bold prose.
+
+    Five of these eight live in `render_prompt_file`'s output rather than in any
+    packet renderer, and the only thing keeping them out of an upload is
+    `parse_prompt_file`'s bounds. Without a real prompt file on disk they could
+    not appear whatever the code did (#306 review, T-3).
+    """
+    from illustration_helpers import write_prompt_file
+    write_prompt_file(in_project, 'the-finest-cartographer')
     _ingest(in_project, 0, ingested_at='')
     cmd_illustrate.main(['--package'])
     for name in os.listdir(packet.image_prompts_dir(in_project)):
@@ -308,13 +326,19 @@ def test_an_image_prompt_stays_small_enough_to_be_read_whole(in_project):
     read into context whole, and a summarized continuity anchor is a paraphrased
     one. The bound is generous — the point is that nothing book-level leaks back
     in, which is what took the export's file to 13.9 KB."""
+    from illustration_helpers import write_prompt_file
     rows = ill.read_plan(in_project)
     rows[1].update(_SPEC_EXAMPLE)
     ill.write_plan(in_project, rows)
+    write_prompt_file(in_project, 'the-finest-cartographer')
     cmd_illustrate.main(['--package'])
     for name in os.listdir(packet.image_prompts_dir(in_project)):
         size = len(_read_prompt(in_project, name[:-3]).encode('utf-8'))
-        assert size < 6000, f'{name} is {size} bytes'
+        # 2,500 rather than 6,000: measured, the fixture's uploads are ~1.2-1.5
+        # KB, and the whole author-facing corpus for both rows is 2.3 KB — so a
+        # 6,000 bound could not fail even with every retired section re-added.
+        # That is `_SPEC_EXAMPLE`'s own lesson about the retired word budget.
+        assert size < 2500, f'{name} is {size} bytes'
 
 
 
@@ -1920,3 +1944,255 @@ def test_an_unremovable_retired_file_does_not_abort_the_build(in_project,
     out = capsys.readouterr().out
     assert 'could not remove' in out
     assert 'delete it by hand' in out
+
+
+# ============================================================================
+# The prompt-file parser and the body fallbacks (#306 review, T-1/T-2)
+#
+# These moved from `export.py` into `packet.py` verbatim and their tests went
+# with the deleted `test_illustrate_export.py`. Two mutations proved the gap:
+# blanking `body_warning`/`body_cause` passed the whole suite, and so did making
+# `parse_prompt_file` never cut at the trailer — which uploads the file's own
+# stale Constraints block and its do-NOT-paste section straight to the model.
+# ============================================================================
+
+_MODEL_BODY = ('## Scene\n\nA long hall of slanted oak tables.\n\n'
+               '## Subject\n\nDorren bent over the master survey.\n\n'
+               '## Important details\n\n- Brass calipers.\n\n'
+               '## Use case\n\nInterior illustration for a novel.')
+
+
+def test_parse_prompt_file_round_trips_render_prompt_file():
+    """The reader lives beside the writer so the two cannot drift over the
+    strings that bound the body."""
+    text = pi.render_prompt_file(
+        row={'id': 'x', 'scene_id': 's1', 'beat': 'a beat'},
+        body=_MODEL_BODY, references=[], state='a state', absent='a thing',
+        contrast='different')
+    parsed = pi.parse_prompt_file(text)
+    assert parsed['status'] == 'ok'
+    assert parsed['body'] == _MODEL_BODY
+
+
+def test_parse_prompt_file_stops_before_the_constraints():
+    """The constraints are regenerated from the plan, never inherited: a file
+    written before a matrix edit still carries the old state, and an upload
+    holding both would contradict itself."""
+    text = pi.render_prompt_file(row={'id': 'x', 'scene_id': 's1'},
+                                 body='## Scene\n\nA room.', references=[],
+                                 state='a state')
+    body = pi.parse_prompt_file(text)['body']
+    assert 'a state' not in body
+    assert 'PORTRAIT' not in body
+
+
+def test_parse_prompt_file_reports_a_missing_prompt_section():
+    assert pi.parse_prompt_file('# notes\n\nnothing')['status'] == \
+        'no_prompt_section'
+
+
+def test_parse_prompt_file_reports_an_empty_body():
+    text = (f'# x\n\n{pi.PROMPT_HEADING}\n\n{pi.PASTE_SENTINEL}\n\n---\n\n'
+            f'{pi.CONSTRAINTS_HEADING}\n\n- a rule\n')
+    assert pi.parse_prompt_file(text) == {'body': '', 'status': 'empty_body'}
+
+
+def test_parse_prompt_file_recovers_a_file_missing_the_sentinel():
+    """The prompt file is documented as hand-editable, so refusing here would
+    send an author to re-run a paid `--prompts`."""
+    text = (f'# x\n\n{pi.PROMPT_HEADING}\n\n## Scene\n\nA room.\n\n'
+            f'{pi.CONSTRAINTS_HEADING}\n\n- a rule\n')
+    parsed = pi.parse_prompt_file(text)
+    assert parsed['status'] == 'ok'
+    assert parsed['body'] == '## Scene\n\nA room.'
+
+
+def test_parse_prompt_file_handles_crlf():
+    text = pi.render_prompt_file(row={'id': 'x', 'scene_id': 's1'},
+                                 body='## Scene\n\nA room.', references=[])
+    assert pi.parse_prompt_file(text.replace('\n', '\r\n'))['body'] == \
+        '## Scene\n\nA room.'
+
+
+def test_a_promoted_constraints_heading_does_not_leak_into_the_upload():
+    """The likeliest hand edit — every heading around it is `##`. Cutting at the
+    first match is the only reading that cannot self-contradict."""
+    text = pi.render_prompt_file(row={'id': 'x', 'scene_id': 's1'},
+                                 body='## Scene\n\nA room.', references=[],
+                                 state='navy pajamas')
+    parsed = pi.parse_prompt_file(
+        text.replace(pi.CONSTRAINTS_HEADING, '## Constraints'))
+    assert parsed['status'] == 'ok'
+    assert 'navy pajamas' not in parsed['body']
+
+
+def test_a_model_authored_constraints_heading_is_reported_as_truncated():
+    """#293: a truncation every consumer accepts is worse than an absence."""
+    body = ('## Scene\n\nA hall.\n\n## Constraints\n\nNo lettering.\n\n'
+            '## Use case\n\nFull-page.')
+    parsed = pi.parse_prompt_file(pi.render_prompt_file(
+        row={'id': 'x', 'scene_id': 's1'}, body=body, references=[]))
+    assert parsed['status'] == 'body_truncated'
+    assert parsed['body'] == '## Scene\n\nA hall.'
+
+
+def _body_note(project_dir, illus_id):
+    """The `**Art direction.**` note for one row of illustrations.md."""
+    body = _read(project_dir, 'illustrations.md')
+    section = body.split(f'### `{illus_id}`')
+    assert len(section) == 2, f'{illus_id} has no note in illustrations.md'
+    return section[1].split('###')[0]
+
+
+def test_a_truncated_body_is_used_and_reported(in_project):
+    """The prose is still better than three plan cells, so it is kept — and the
+    author is told a section is missing, in the file they read to choose."""
+    from illustration_helpers import write_prompt_file
+    write_prompt_file(in_project, 'the-finest-cartographer', body=(
+        '## Scene\n\nA hall.\n\n## Constraints\n\nNo lettering.\n\n'
+        '## Use case\n\nFull-page.'))
+    assert cmd_illustrate.main(['--package']) == 0
+
+    note = _body_note(in_project, 'the-finest-cartographer')
+    assert 'carries its own `Constraints` heading' in note
+    assert 'A hall.' in _read_prompt(in_project, 'the-finest-cartographer')
+    assert 'Constraints` heading inside their prompt body' in \
+        _read(in_project, 'README.md')
+
+
+def test_a_declared_prompt_file_that_is_missing_gets_its_own_sentence(
+        in_project):
+    """An author who typed a path meant that path, so the prose usually exists
+    somewhere — a different action from "generate it again"."""
+    rows = ill.read_plan(in_project)
+    rows[0]['prompt_file'] = 'reference/illustration-prompts/gone.md'
+    ill.write_plan(in_project, rows)
+
+    assert cmd_illustrate.main(['--package']) == 0
+    assert 'the plan declares art direction at' in \
+        _body_note(in_project, 'the-finest-cartographer')
+
+
+def test_an_unreadable_prompt_file_falls_back_and_says_so(in_project):
+    from illustration_helpers import write_prompt_file
+    path = write_prompt_file(in_project, 'the-finest-cartographer')
+    os.chmod(path, 0o000)
+    try:
+        assert cmd_illustrate.main(['--package']) == 0
+        assert 'could not be read' in \
+            _body_note(in_project, 'the-finest-cartographer')
+    finally:
+        os.chmod(path, 0o644)
+
+
+def test_an_empty_prompt_body_falls_back_and_says_so(in_project):
+    from illustration_helpers import write_prompt_file
+    path = write_prompt_file(in_project, 'the-finest-cartographer')
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(f'# x\n\n{pi.PROMPT_HEADING}\n\n{pi.PASTE_SENTINEL}\n\n---\n\n'
+                f'{pi.CONSTRAINTS_HEADING}\n\n- a rule\n')
+
+    assert cmd_illustrate.main(['--package']) == 0
+    assert 'has an empty prompt body' in \
+        _body_note(in_project, 'the-finest-cartographer')
+
+
+def test_a_thin_body_is_never_silent_in_either_channel(in_project):
+    """`body_warning` and `body_cause` are a strict biconditional, and blanking
+    either passed the whole suite: a plan-row stand-in reads exactly like a
+    complete prompt, so an author who cannot tell generates from it."""
+    cmd_illustrate.main(['--package'])
+    assert 'no written art direction' in \
+        _body_note(in_project, 'the-finest-cartographer')
+    assert 'have no written art direction' in _read(in_project, 'README.md')
+
+
+def test_a_non_markdown_file_in_the_upload_directory_survives(in_project):
+    """The clear pass removes `.md` files only. Widened to everything, an
+    author's own note in there is deleted on every run — the destructive shape
+    `_write_image_prompts`' docstring says is not its call to make. A mutation
+    dropping the extension guard passed the whole suite (#306 review, T-7)."""
+    cmd_illustrate.main(['--package'])
+    note = os.path.join(packet.image_prompts_dir(in_project), 'notes.txt')
+    with open(note, 'w', encoding='utf-8') as f:
+        f.write('mine')
+
+    cmd_illustrate.main(['--package'])
+
+    assert os.path.isfile(note)
+
+
+def test_export_exits_two_with_a_pointer(in_project, capsys):
+    """Two, not one and not zero: a retired flag is neither a failed run nor a
+    successful one, and the skill commits on the exit code."""
+    assert cmd_illustrate.main(['--export']) == 2
+    out = capsys.readouterr().out
+    assert '--export was removed' in out
+    assert '--package' in out
+    assert packet.IMAGE_PROMPTS_SUBDIR in out
+    # Refusing writes nothing.
+    assert not os.path.isdir(packet.packet_dir(in_project))
+
+
+def test_illegal_plan_ids_finds_what_it_claims_to():
+    """The gate is only as good as the predicate; a version matching nothing
+    would be a dead check that still reads as protection."""
+    assert ill.illegal_plan_ids([{'id': 'LF-01'}, {'id': 'a_b-1'}]) == []
+    assert ill.illegal_plan_ids([{'id': '../../evil'}]) == ['../../evil']
+    assert ill.illegal_plan_ids([{'id': ''}]) == ['']
+    assert ill.illegal_plan_ids([{'id': '-leading'}]) == ['-leading']
+    assert ill.illegal_plan_ids([{'id': 'x' * 300}]) == ['x' * 300]
+
+
+def test_a_superseded_export_directory_is_reported_never_deleted(in_project,
+                                                                 capsys):
+    """167 MB on the book this was filed about, so the author wants it gone —
+    but a command that removes a directory it did not write is the destructive
+    shape this pipeline has been bitten by before."""
+    legacy = os.path.join(in_project, 'manuscript', 'illustration-export')
+    os.makedirs(legacy)
+    with open(os.path.join(legacy, 'README.md'), 'w', encoding='utf-8') as f:
+        f.write('old')
+
+    assert cmd_illustrate.main(['--package']) == 0
+
+    assert 'superseded' in capsys.readouterr().out
+    assert os.path.isfile(os.path.join(legacy, 'README.md'))
+
+
+def test_cell_cannot_split_a_markdown_row():
+    """A pipe closes a markdown cell, so an unescaped one shifts every later
+    column along and drops the last.
+
+    Tested at the renderer rather than through a plan cell, because the plan is
+    itself pipe-delimited: `write_plan` sanitizes a pipe on the way out and an
+    extra one shatters the row on the way in, so no cell can carry one. This is
+    defence-in-depth for a renderer whose output nobody re-reads, and the test
+    says which it is rather than implying a live path.
+    """
+    assert pp._cell('she looks up | he does not') == \
+        r'she looks up \| he does not'
+    assert pp._cell('two\nlines') == 'two lines'
+    assert pp._cell('   ') == '—'
+    assert pp._cell('') == '—'
+
+
+def test_the_index_row_has_one_cell_per_column(in_project):
+    """The shape the escaping protects: seven columns, so eight separators."""
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'illustrations.md')
+    header = next(l for l in body.split('\n') if l.startswith('| # |'))
+    row = next(l for l in body.split('\n')
+               if l.startswith('|') and '`the-finest-cartographer`' in l)
+    assert len(row.split('|')) == len(header.split('|'))
+
+
+def test_the_re_render_note_is_two_sentences_not_one_run_on(in_project):
+    """`stale_render_reason` is a clause and ends without punctuation, so
+    concatenating it raw produced '...last updated 2026-07-28 Generate it
+    again', which reads as a defect in the packet."""
+    _ingest(in_project, 0, ingested_at='')
+    cmd_illustrate.main(['--package'])
+
+    note = _body_note(in_project, 'the-finest-cartographer')
+    assert '. Generate it again' in note

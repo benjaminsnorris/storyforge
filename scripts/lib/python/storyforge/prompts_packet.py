@@ -463,12 +463,16 @@ def _row_notes(entry: ImagePrompt) -> list[str]:
 def _cell(value: str) -> str:
     """One table cell: never empty, never able to split the row.
 
-    A pipe closes a markdown cell, so an unescaped one in author prose shifts
-    every later column left and drops the last — the same failure `common.csv_safe`
-    exists for in the unquoted pipe-delimited CSVs, in a different renderer. The
-    plan is itself pipe-delimited so a clean row cannot carry one, but
-    `read_plan` admits hand-edited rows and this is a render nobody re-reads.
-    Newlines are collapsed for the same reason.
+    A pipe closes a markdown cell, so an unescaped one shifts every later value
+    along by one column and drops the last — the shape `common.csv_safe` guards
+    against in the unquoted pipe-delimited CSVs, in a different renderer.
+
+    **Defence-in-depth, not a live path**, and worth saying so: the plan is
+    itself pipe-delimited, `write_plan` sanitizes a pipe on the way out, and an
+    extra one shatters the row on the way in — so no plan cell reaches here
+    carrying one. What *is* live is the newline collapse (a hand-edited cell can
+    hold one) and the em-dash default, which keeps an empty cell from closing
+    early.
     """
     text = ' '.join((value or '').split())
     return text.replace('|', '\\|') if text else '—'
