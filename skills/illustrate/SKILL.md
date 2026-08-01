@@ -50,7 +50,6 @@ Store this resolved plugin path for use throughout the session.
 | Prompts written, no packet or packet stale | **Package** — assemble the handoff bundle |
 | Packet built, any anchor-batch row not ingested, or ingested from canon since rewritten | **Anchor** — render and approve those N first |
 | Every anchor-batch row ingested from the current canon | **Churn** — hand the packet over |
-| Author is generating in a browser session, or handing images to someone without the repo | **Export** — one self-contained directory per illustration |
 | Non-anchor files on disk | **Ingest** — bring them in and embed |
 | An illustration isn't working | **Revise** — supersede and re-direct |
 | All or most are rendered | **Review** — check the sequence for continuity drift |
@@ -206,7 +205,7 @@ Add `--ids one,two` to limit it to specific illustrations, or to re-prompt ones 
 
 Add `--no-prior-refs` to reference the cover only. Use it when re-rendering a set whose existing art no longer matches the canon — see "The reference chain" below.
 
-This writes `manuscript/assets/illustrations/prompts/{id}.md` per illustration, and sets `status=prompted`. Each prompt file carries the reference list, the prompt body (Scene / Subject / Important details / Use case), a deterministic Constraints block, an **Accept only if** block, and a log table.
+This writes `reference/illustration-prompts/{id}.md` per illustration, and sets `status=prompted`. Each prompt file carries the reference list, the prompt body (Scene / Subject / Important details / Use case), a deterministic Constraints block, an **Accept only if** block, and a log table.
 
 **The resolved visual state goes into the request, and it outranks the anchors.** An anchor necessarily describes an entity across the whole book — "navy pajamas on the first two nights, and from a04 onward a rust-red jacket" — so no anchor can tell a generation call which night *this* image is. That is what `reference/visual-state.csv` answers, resolved forward to the row's scene with the plan row's `state_override` laid on top: the same resolution the handoff packet renders, so a prompt file and a packet entry built from one row cannot describe different costumes. It is stated as a requirement rather than context because an emphatic anchor clause actively pulls the other way — "the jacket is how the reader finds him in a dark image" is exactly why a dark night-one image came back in the night-two coat.
 
@@ -277,30 +276,44 @@ Assemble the handoff bundle. This is what the author (or a long-running generati
 
 _(No API calls — assembly only, safe to run here without asking.)_
 
-Why a bundle rather than fifteen prompt pastes: hyper-detailed standalone prompts underperform in practice, and a session working from shared reference material does better. Graphic-novel mode reached the same conclusion first when per-panel generation failed. So the shared material carries the house style, the anchors, the resolved state, and every acceptance check that is the same for every image, and each per-illustration entry drops to 80–120 words of what is specific to *that* image.
+Why a bundle rather than fifteen prompt pastes: hyper-detailed standalone prompts underperform in practice, and a session working from shared reference material does better. Graphic-novel mode reached the same conclusion first when per-panel generation failed. So the shared files carry the house style, the anchors, the state matrix, and every acceptance check that is the same for every image — uploaded **once**, at the top of the session.
 
-Six files in `manuscript/illustration-packet/`:
+```
+manuscript/illustration-packet/
+  README.md          # the runbook, the two phases, and what the packet cannot tell you
+  canon.md           # the reference tier — house style plus every continuity anchor
+  visual-state.md    # scene x entity: what is visibly true when
+  illustrations.md   # the index the author works down, and everything addressed to them
+  acceptance.md      # the checks identical across the set
+  image-prompts/     # one upload file per illustration
+```
 
-| File | What it is |
-|---|---|
-| `README.md` | The two phases, how to work it, and what the packet cannot tell you |
-| `canon.md` | The reference tier — house style plus every continuity anchor |
-| `visual-state.md` | Scene × entity: what is visibly true when |
-| `illustrations.md` | One thin entry per illustration |
-| `reference-images.md` | What to upload, in what order, what each is for |
-| `acceptance.md` | The checks identical across the set |
+**The session is three steps, and they are in README.** Upload the reference images it lists (project-relative paths, uploaded once). Upload `canon.md`. Then, **one illustration at a time**, upload `image-prompts/<id>.md` and ask for the image.
 
-**The packet is a render. Never hand-edit it.** It is regenerated wholesale on every run, so an edit is lost and never reaches the plan. Changes belong in `reference/illustration-plan.csv`, `reference/visual-state.csv`, or `reference/canon/`. `cleanup` reports a packet older than any of those (`illus_packet_stale`) and an anchor copy that no longer matches its canon file (`illus_anchor_copy_drift`) — for both, the fix is to regenerate.
+**One at a time is not fussiness.** A single small file is read into context whole; twenty at once is the case where the model retrieves and paraphrases instead — and a paraphrased continuity anchor is not an anchor, because the entire mechanism is the *identical string* arriving in every prompt that features that entity.
+
+**Everything in an image prompt is for the model. Everything for the author is in `illustrations.md`.** That split is the point of the file layout, and it matters because the author uploads the file rather than pasting a region out of it: anything in it reaches the image model. So `image-prompts/<id>.md` carries the title line, the model-authored body, and a Constraints block — no staleness notes, no provenance, no checklists. Before uploading a row's prompt, read that row in `illustrations.md`.
+
+`illustrations.md` is an index table — reading order, scene, aspect, art state, staging, beat — followed by a **Before you upload** section carrying only the rows that have something to say. Read those aloud to the author:
+
+- **Re-render** — the row is `ingested`, and its art predates the canon now governing it.
+- **Art direction** — the body is thinner than it looks (no prompt file, an unreadable one, or one whose own `Constraints` heading truncated it).
+- **Uploaded references** — this row's own earlier render is among the images uploaded at the top of the session. It is a re-render, not a match.
+- **No visual state resolved** — the costume and lighting in that prompt are the model's inference, not a read of the book's schedule.
+
+**The packet is a render. Never hand-edit it.** It is regenerated wholesale on every run, so an edit is lost and never reaches the plan. Changes belong in `reference/illustration-plan.csv`, `reference/visual-state.csv`, `reference/canon/`, or the prompt bodies in `reference/illustration-prompts/`. `cleanup` reports a packet older than any of those (`illus_packet_stale`) and an anchor copy that no longer matches its canon file (`illus_anchor_copy_drift`) — for both, the fix is to regenerate.
 
 **Anchors in the packet are byte-identical to their canon files**, wrapped in `<!-- canon-embed: id -->` markers so that can be checked mechanically. Likeness continuity across separately generated images is nothing but the same string arriving every time, so if the packet's wording is the one you want, put it in the canon file and regenerate — do not edit the packet, and never revise an anchor a rendered illustration already used.
 
-**Read the README's "What this packet cannot tell you" section aloud to the author.** It lists every gap in the data the packet was built from: a row with no beat or no subject, a `canon_refs` entry with no canon file, an entity whose visual state nobody stated at that scene, a book-level canon file still holding TODO text, and whether the contradiction audit has ever run. Those are the places the packet is thinner than it looks, and the moment to fix them is before a generation session spends money on them.
+**Read the README's "What this packet cannot tell you" section aloud to the author.** It lists every gap in the data the packet was built from: a row with no beat or no subject, a `canon_refs` entry with no canon file, an entity whose visual state nobody stated at that scene, a book-level canon file still holding TODO text, rows whose art direction was never written, and whether the contradiction audit has ever run. Those are the places the packet is thinner than it looks, and the moment to fix them is before a generation session spends money on them.
 
-Reference images are **not copied** into the packet — the paths are project-relative and the author uploads from disk. A copy would be a second thing to invalidate on every re-render. `reference-images.md` also carries a "What is not in that list" section whenever the list is shorter than the ingested art suggests: a render excluded as pre-canon, a `--no-prior-refs` build, or the four-image cap. Read it before uploading — a cover-only list is not the same thing as having nothing to reference, and uploading the cover alone generates the rest of the set with no likeness reference.
+**Reference images are never copied** — README lists project-relative paths and the author uploads from disk. A copy would be a second thing to invalidate on every re-render, and it would be the one part of the bundle that does not travel to another machine. README's upload step also carries a **Read this before you upload** block whenever the list is shorter than the ingested art suggests: renders excluded as pre-canon, a `--no-prior-refs` build, or the four-image cap. A cover-only list is not the same thing as having nothing to reference, and uploading the cover alone generates the rest of the set with no likeness reference.
 
-Entries for illustrations that are already rendered are marked `— already rendered` in their heading. Say so to the author: the packet is worked top to bottom, and finished art is there for context, not to be regenerated.
+**The Constraints block carries the state in force now, not the prompt file's memory of it.** The body comes from `reference/illustration-prompts/<id>.md`; the state, `absent`, and `contrast` lines are re-derived from the plan and the transition log every time `--package` runs. So a packet built after you edited `reference/visual-state.csv` is correct even though the prompt body's own file is not — there is no `prompt_stale`. If you want that file right too, re-run `--prompts --ids <id>`.
 
-An entry marked `— re-render: the art predates the current canon` is the opposite instruction on a row that still says `ingested`: the art exists and ships, and it was directed by canon that has since been rewritten, so it is not a usable reference for anything rendered now. Its `**Re-render.**` line says why. **Never fix this by demoting `status`** — that is what an author reaches for, and it drops the illustration from Bookshelf while the epub, the PDF, and the web book keep shipping it, so the editions disagree about a book nobody re-rendered. Re-render it and `--ingest` the new file; the status is already right.
+**A row with no prompt file still gets an upload file, and says so.** Its body is assembled from the plan row alone — beat, subject, composition — with none of the scene-specific prose `--prompts` writes. `illustrations.md` says which rows those are and README aggregates the count. Tell the author plainly: it reads like a complete prompt and it is a thinner one. Run `--prompts --ids <those ids>` first if the image matters.
+
+The index's `Art` column reads `done` for a row whose art exists and follows the current canon, `to render` for one that does not have art yet, and **`re-render`** for a row that still says `ingested` but whose art predates the canon now governing it. Say that third one out loud: the art exists and ships, and it was directed by canon that has since been rewritten, so it is not a usable reference for anything rendered now. Its `**Re-render.**` note says why. **Never fix this by demoting `status`** — that is what an author reaches for, and it drops the illustration from Bookshelf while the epub, the PDF, and the web book keep shipping it, so the editions disagree about a book nobody re-rendered. Re-render it and `--ingest` the new file; the status is already right.
 
 If `--diagnose` says *no file under `reference/canon/` carries a parseable `canon_updated`*, treat every "current" signal in the packet as unverified rather than confirmed: nothing can be shown to predate a canon with no date, so the batch table's `yes` means only "nothing could show otherwise". Set `canon_updated: YYYY-MM-DD` in the canon files you have edited and re-run before trusting a hand-over.
 
@@ -312,45 +325,6 @@ If `--diagnose` says *no file under `reference/canon/` carries a parseable `cano
 - **`contrast`** — anything you want said about how this image must differ from its neighbours, beyond the register and predecessor sentence the packet derives for you.
 
 Offer to add them when the author says an image keeps coming back with something that should not be in it.
-
----
-
-## Mode: Export
-
-The packet is what a long session works through with `canon.md` in context. The export is what you hand over **one image at a time** — to a browser session, to a person who does not have the repo, to anything that takes an upload.
-
-```bash
-[plugin_path]/storyforge illustrate --export
-[plugin_path]/storyforge illustrate --export --anchor-batch     # just phase 1
-[plugin_path]/storyforge illustrate --export --ids LF-05,LF-11
-```
-
-_(No API calls — assembly only, safe to run here without asking.)_
-
-**Why both exist.** The packet's economies are deliberate and they are exactly what a single-image handover cannot afford: an 80–120 word entry derived from the plan row, with the model-authored prose in a second file and the reference images left as paths on disk. Zip that and you hand over six markdown files and no art. So the export is complete by construction:
-
-```
-manuscript/illustration-export/
-  README.md          # how to work it, and every gap in the data
-  canon.md           # shared — read once, keep it in front of you
-  acceptance.md      # shared
-  LF-05/
-    prompt.md        # ONE contiguous paste block, then the per-image checks
-    references/      # the actual image files, numbered in upload order
-    manifest.json    # each reference's sha256, plus model / size / quality / aspect
-```
-
-**How to talk an author through one unit.** Open `<id>/prompt.md`. Read anything under **Read this first** — that is why generating right now might be a bad idea. Upload the files in `references/` in filename order. Paste everything between the "Paste everything below this line" heading and the end-of-prompt line, and nothing outside it. Check the result against that file's **Accept only if** section plus `acceptance.md`. Save it as `<id>.png` and `--ingest` it.
-
-**The paste block carries the state, not the prompt file's memory of it.** The body comes from `manuscript/assets/illustrations/prompts/<id>.md`; the state, `absent`, and `contrast` lines are re-derived from the plan and the transition log at export time. So an export built after you edited `reference/visual-state.csv` is correct even though the prompt file is not — there is no `prompt_stale`. If you want the prompt file right too, re-run `--prompts --ids <id>`.
-
-**A unit whose row has no prompt file is still exported, and says so.** Its paste block is assembled from the plan row alone — beat, subject, composition — with none of the scene-specific prose `--prompts` writes. That is stated in `prompt.md`, in `README.md`'s table (`plan row only`), and in the log. Tell the author plainly: it reads like a complete prompt and it is a thinner one. Run `--prompts --ids <those ids>` first if the image matters.
-
-**`--anchor-batch` is phase 1 in one command.** It resolves the four slots itself and reports how — read those disclosures out. Nothing populates `register`, so darkest and brightest are usually guesses (the first and last illustration in reading order), and the author who typed the flag never named the four ids.
-
-**It is a render, never hand-edited** — same as the packet. `cleanup` reports `illus_export_stale` when the export is older than the plan, the transition log, a canon file, or a prompt file it aggregated; when a copied reference image is missing, corrupt, or no longer matches its source; when a unit has no `prompt.md`; and when a manifest cannot be read or checked at all. The digests in `manifest.json` are what make the reference checks possible, and they are the only way this bundle goes stale without anything under `reference/` moving: someone re-rendered an illustration the export was carrying as a reference. A reason that says *could not be checked* is not a claim the export is wrong — but it is not a claim it is right either, which is why it is reported.
-
-**A `--ids` run leaves the other directories alone.** They stay on disk and `README.md` names them as untouched, because they may have been built from a plan that has since changed. A whole-plan run removes directories for rows that have left the plan. If the author is unsure which state the bundle is in, re-run `--export` with no `--ids`.
 
 ---
 
@@ -381,7 +355,7 @@ Then re-run `--package`, so the entries after them list the newly ingested image
 
 Every anchor-batch row is ingested. Hand the packet over.
 
-Point the author (or the generation session) at `manuscript/illustration-packet/README.md` and let them work `illustrations.md` top to bottom: read `canon.md` once and keep it in context, upload what `reference-images.md` names, generate, then check against `acceptance.md` before accepting anything.
+Point the author (or the generation session) at `manuscript/illustration-packet/README.md` and let them work `illustrations.md` top to bottom: read `canon.md` once and keep it in context, upload the reference images and `canon.md` once at the top, then upload `image-prompts/<id>.md` one row at a time, generating and checking each against `acceptance.md` before accepting it.
 
 Tell them to re-run `--ingest` and `--package` in batches rather than at the very end. Each ingest adds a reference image for the illustrations after it, and a re-roll caught at image five costs one render while the same drift caught at image fifteen costs ten.
 
@@ -514,7 +488,7 @@ When you find drift, fix it by re-rendering from the anchor — not by patching 
 
 _(No API calls — safe to run here without asking.)_
 
-Read-only. Reports plan counts by status, what's embedded, the recommended render order with the visual key marked (and `~` on any ingested row whose art predates the current canon), what's next to render, every ingested illustration that needs re-rendering because the canon moved under it, the anchor batch with every guessed slot disclosed, the visual-state rung (whether the transition log exists, how many entities it tracks, and whether the audit is unrun, current, or stale), the sequence-staging rung (how many rows carry a `treatment`), the packet rung (not built, built and current, or built and stale, plus which anchor-batch rows are still unrendered and which are ingested but canon-stale — "ready to hand over" is only said when neither is true), the export rung (not built, built and current, or built and stale, with how many illustration directories it holds — reported independently of the packet, since an author can want one and never the other), and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers, invalid layouts, a stale packet, a stale export, a drifted anchor copy.
+Read-only. Reports plan counts by status, what's embedded, the recommended render order with the visual key marked (and `~` on any ingested row whose art predates the current canon), what's next to render, every ingested illustration that needs re-rendering because the canon moved under it, the anchor batch with every guessed slot disclosed, the visual-state rung (whether the transition log exists, how many entities it tracks, and whether the audit is unrun, current, or stale), the sequence-staging rung (how many rows carry a `treatment`), the packet rung (not built, built and current, or built and stale, plus which anchor-batch rows are still unrendered and which are ingested but canon-stale — "ready to hand over" is only said when neither is true), and every incoherence: orphan markers, missing files, files nobody claims, drifted anchors, duplicate markers, invalid layouts, a stale packet, a drifted anchor copy.
 
 This is the gate for plan health, deliberately rather than the packet: `--package` is assembly and reports only what it could not cover, so problems with the plan itself surface here.
 

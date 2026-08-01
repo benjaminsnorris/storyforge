@@ -64,6 +64,12 @@ PACKET_FILES: tuple[str, ...] = (
     'acceptance.md',
 )
 
+#: Files earlier versions wrote at the packet root and this one does not.
+#: `--package` deletes them, because a leftover is a second, stale answer to a
+#: question the current packet already answers — and a packet is a render, so
+#: nothing in it should outlive the run that wrote it.
+RETIRED_PACKET_FILES: tuple[str, ...] = ('reference-images.md',)
+
 #: Where the per-illustration upload files go. `image-prompts/`, not `prompts/`,
 #: because the model-authored bodies live at
 #: `reference/illustration-prompts/{id}.md` with identical basenames: two

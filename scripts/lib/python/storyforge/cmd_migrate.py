@@ -1,8 +1,9 @@
 """storyforge migrate — Upgrade existing projects to the current schema.
 
-One-time migration that runs eight steps. Steps 1-5 normalize the
+One-time migration that runs nine steps. Steps 1-5 normalize the
 registry model; steps 6-8 carry projects forward to the elaboration-v1
-three-tier structure (#229):
+three-tier structure (#229); step 9 moves the illustration prompt bodies
+out of manuscript/assets/ (#306):
 
   1. Renames scene_type -> action_sequel in scene-intent.csv
   2. Removes the threads column from scene-intent.csv
@@ -16,6 +17,9 @@ three-tier structure (#229):
      rows). Idempotent — picks up stranded rows added between runs.
   8. Extracts status=architecture rows from scenes.csv into
      reference/architecture.csv (same shape as step 7).
+  9. Moves manuscript/assets/illustrations/prompts/*.md to
+     reference/illustration-prompts/ and rewrites the plan's prompt_file
+     column, so the illustrations directory holds only illustrations.
 
 Steps 7 and 8 use multi-file atomic writes so a mid-write failure
 doesn't leave the project in a half-migrated state.
@@ -773,6 +777,81 @@ def parse_args(argv):
 # Main
 # ============================================================================
 
+def step9_move_illustration_prompts(project_dir: str, dry_run: bool) -> str:
+    """Move illustration prompt bodies to `reference/illustration-prompts/`.
+
+    `manuscript/assets/illustrations/` holds illustrations; the prompt bodies
+    that used to sit in a `prompts/` subdirectory under it are inputs the packet
+    renders *from*, so they belong with `reference/canon/` and the plan (#306).
+
+    **Moved, never copied.** Two copies of a body, one of which `--package`
+    reads, is exactly the divergence this change exists to remove — and the
+    author would have no way to tell which one their edits reached.
+
+    The plan's `prompt_file` column is rewritten for every row whose cell names
+    a file this step moved. A cell pointing somewhere else is left alone: an
+    author who typed a path meant that path.
+
+    A destination that already holds a file of the same name is **not**
+    overwritten; the source is left in place and reported, because two bodies for
+    one illustration is a question only the author can answer.
+    """
+    from storyforge import illustrations as ill
+
+    legacy_dir = os.path.join(project_dir, ill.LEGACY_PROMPTS_SUBDIR)
+    if not os.path.isdir(legacy_dir):
+        return 'skip:no legacy prompts directory'
+    names = sorted(n for n in os.listdir(legacy_dir) if n.endswith('.md'))
+    if not names:
+        return 'skip:legacy prompts directory is empty'
+
+    target_dir = os.path.join(project_dir, ill.PROMPTS_SUBDIR)
+    moved: dict[str, str] = {}
+    collisions: list[str] = []
+    for name in names:
+        source_rel = os.path.join(ill.LEGACY_PROMPTS_SUBDIR, name)
+        target_rel = os.path.join(ill.PROMPTS_SUBDIR, name)
+        if os.path.exists(os.path.join(project_dir, target_rel)):
+            collisions.append(name)
+            continue
+        moved[source_rel] = target_rel
+
+    if dry_run:
+        detail = f'would move {len(moved)} prompt file(s)'
+        if collisions:
+            detail += f', {len(collisions)} already at the destination'
+        return f'dry-run:{detail}'
+
+    os.makedirs(target_dir, exist_ok=True)
+    for source_rel, target_rel in moved.items():
+        os.replace(os.path.join(project_dir, source_rel),
+                   os.path.join(project_dir, target_rel))
+
+    rewritten = 0
+    if moved:
+        rows = ill.read_plan(project_dir)
+        for row in rows:
+            declared = (row.get('prompt_file') or '').strip()
+            if declared in moved:
+                row['prompt_file'] = moved[declared]
+                rewritten += 1
+        if rewritten:
+            ill.write_plan(project_dir, rows)
+
+    # Removed only when empty, and only via rmdir: the author may have put
+    # something of their own in there, and this step has no business deciding
+    # what that was.
+    if not os.listdir(legacy_dir):
+        os.rmdir(legacy_dir)
+
+    detail = (f'moved {len(moved)} prompt file(s), '
+              f'rewrote {rewritten} prompt_file cell(s)')
+    if collisions:
+        detail += (f'; {len(collisions)} left in place — a file of the same '
+                   f'name is already in {ill.PROMPTS_SUBDIR}/')
+    return f'done:{detail}'
+
+
 def main(argv=None):
     args = parse_args(argv or [])
     project_dir = detect_project_root()
@@ -793,21 +872,21 @@ def main(argv=None):
     # Step 1: Rename scene_type -> action_sequel
     result = step1_rename_scene_type(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [1/8] Rename scene_type -> action_sequel: skipped ({result[5:]})')
+        log(f'  [1/9] Rename scene_type -> action_sequel: skipped ({result[5:]})')
     else:
         count = result.split(':')[1]
-        log(f'  [1/8] Rename scene_type -> action_sequel: done ({count} rows)')
+        log(f'  [1/9] Rename scene_type -> action_sequel: done ({count} rows)')
 
     # Step 2: Remove threads column
     result = step2_remove_threads(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [2/8] Remove threads column: skipped ({result[5:]})')
+        log(f'  [2/9] Remove threads column: skipped ({result[5:]})')
     else:
         count = result.split(':')[1]
-        log(f'  [2/8] Remove threads column: done ({count} rows)')
+        log(f'  [2/9] Remove threads column: done ({count} rows)')
 
     # Step 3: Seed registries
-    log('  [3/8] Seed registries:')
+    log('  [3/9] Seed registries:')
     registry_results = step3_seed_registries(ref_dir, args.dry_run)
     for line in registry_results:
         registry = line.split(':')[0]
@@ -820,15 +899,15 @@ def main(argv=None):
 
     # Step 4: Normalize fields
     if args.dry_run:
-        log('  [4/8] Normalize fields: skipped (dry run)')
+        log('  [4/9] Normalize fields: skipped (dry run)')
     else:
         updated = step4_normalize(ref_dir, project_dir)
-        log(f'  [4/8] Normalize fields: {updated} cells updated')
+        log(f'  [4/9] Normalize fields: {updated} cells updated')
 
     # Step 5: Validate
     validate_output = step5_validate(ref_dir, project_dir)
     first_line = validate_output.split('\n')[0]
-    log(f'  [5/8] Schema validation: {first_line}')
+    log(f'  [5/9] Schema validation: {first_line}')
     rest_lines = validate_output.split('\n')[1:]
     for line in rest_lines:
         log(f'         {line}')
@@ -836,23 +915,30 @@ def main(argv=None):
     # Step 6: Bootstrap story-summary.md (elaboration v1)
     result = step6_create_story_summary(project_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [6/8] Create story-summary.md: skipped ({result[5:]})')
+        log(f'  [6/9] Create story-summary.md: skipped ({result[5:]})')
     else:
-        log(f'  [6/8] Create story-summary.md: {result.split(":")[1]}')
+        log(f'  [6/9] Create story-summary.md: {result.split(":")[1]}')
 
     # Step 7: Extract spine.csv from status=spine rows
     result = step7_extract_spine(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [7/8] Extract spine.csv: skipped ({result[5:]})')
+        log(f'  [7/9] Extract spine.csv: skipped ({result[5:]})')
     else:
-        log(f'  [7/8] Extract spine.csv: {result.split(":")[1]}')
+        log(f'  [7/9] Extract spine.csv: {result.split(":")[1]}')
 
     # Step 8: Extract architecture.csv from status=architecture rows
     result = step8_extract_architecture(ref_dir, args.dry_run)
     if result.startswith('skip:'):
-        log(f'  [8/8] Extract architecture.csv: skipped ({result[5:]})')
+        log(f'  [8/9] Extract architecture.csv: skipped ({result[5:]})')
     else:
-        log(f'  [8/8] Extract architecture.csv: {result.split(":")[1]}')
+        log(f'  [8/9] Extract architecture.csv: {result.split(":")[1]}')
+
+    # Step 9: Move illustration prompt bodies out of manuscript/assets/
+    result = step9_move_illustration_prompts(project_dir, args.dry_run)
+    if result.startswith('skip:'):
+        log(f'  [9/9] Move illustration prompts: skipped ({result[5:]})')
+    else:
+        log(f'  [9/9] Move illustration prompts: {result.split(":")[1]}')
 
     # Commit
     if args.dry_run:
@@ -865,7 +951,7 @@ def main(argv=None):
         committed = commit_and_push(
             project_dir,
             'Migrate: upgrade to normalized registry model',
-            ['reference/'],
+            ['reference/', 'manuscript/'],
         )
         log('')
         if committed:

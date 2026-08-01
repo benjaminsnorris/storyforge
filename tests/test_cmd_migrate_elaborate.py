@@ -465,3 +465,108 @@ def test_upgrade_helper_refuses_when_existing_has_extra_columns(tmp_path):
     target_cols = ['id', 'seq', 'title', 'summary', 'function', 'part']
     with pytest.raises(ValueError, match='lose data'):
         _upgrade_csv_header_if_drifted(path, target_cols)
+
+
+# ============================================================================
+# Step 9: illustration prompt bodies leave manuscript/assets/ (#306)
+# ============================================================================
+
+def _seed_legacy_prompts(project_dir, ids, *, declare=True):
+    """A pre-#306 project: prompt bodies under manuscript/assets/illustrations."""
+    from storyforge import illustrations as ill
+    legacy = os.path.join(project_dir, ill.LEGACY_PROMPTS_SUBDIR)
+    os.makedirs(legacy, exist_ok=True)
+    rows = []
+    for illus_id in ids:
+        with open(os.path.join(legacy, f'{illus_id}.md'), 'w',
+                  encoding='utf-8') as f:
+            f.write(f'# Illustration prompt — {illus_id}\n')
+        row = ill.blank_row(illus_id)
+        row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open'})
+        if declare:
+            row['prompt_file'] = os.path.join(ill.LEGACY_PROMPTS_SUBDIR,
+                                              f'{illus_id}.md')
+        rows.append(row)
+    ill.write_plan(project_dir, rows)
+    return rows
+
+
+def test_step9_moves_bodies_and_rewrites_the_plan(project_dir):
+    from storyforge import cmd_migrate, illustrations as ill
+    _seed_legacy_prompts(project_dir, ['LF-01', 'LF-02'])
+
+    result = cmd_migrate.step9_move_illustration_prompts(project_dir, False)
+
+    assert result.startswith('done:')
+    for illus_id in ('LF-01', 'LF-02'):
+        assert os.path.isfile(os.path.join(project_dir, ill.PROMPTS_SUBDIR,
+                                           f'{illus_id}.md'))
+    # Moved, not copied: two bodies for one illustration, one of which
+    # --package reads, is the divergence this whole change removes.
+    assert not os.path.isdir(os.path.join(project_dir,
+                                          ill.LEGACY_PROMPTS_SUBDIR))
+    rows = {r['id']: r for r in ill.read_plan(project_dir)}
+    assert rows['LF-01']['prompt_file'] == os.path.join(
+        ill.PROMPTS_SUBDIR, 'LF-01.md')
+
+
+def test_step9_is_idempotent(project_dir):
+    from storyforge import cmd_migrate, illustrations as ill
+    _seed_legacy_prompts(project_dir, ['LF-01'])
+    cmd_migrate.step9_move_illustration_prompts(project_dir, False)
+    before = ill.read_plan(project_dir)
+
+    assert cmd_migrate.step9_move_illustration_prompts(
+        project_dir, False).startswith('skip:')
+    assert ill.read_plan(project_dir) == before
+
+
+def test_step9_is_a_noop_without_a_legacy_directory(project_dir):
+    from storyforge import cmd_migrate
+    assert cmd_migrate.step9_move_illustration_prompts(
+        project_dir, False) == 'skip:no legacy prompts directory'
+
+
+def test_step9_dry_run_moves_nothing(project_dir):
+    from storyforge import cmd_migrate, illustrations as ill
+    _seed_legacy_prompts(project_dir, ['LF-01'])
+
+    result = cmd_migrate.step9_move_illustration_prompts(project_dir, True)
+
+    assert result.startswith('dry-run:')
+    assert os.path.isfile(os.path.join(project_dir, ill.LEGACY_PROMPTS_SUBDIR,
+                                       'LF-01.md'))
+    assert not os.path.exists(os.path.join(project_dir, ill.PROMPTS_SUBDIR,
+                                           'LF-01.md'))
+
+
+def test_step9_leaves_a_collision_in_place_rather_than_overwriting(project_dir):
+    """Two bodies for one illustration is a question only the author can
+    answer, and the destination one may be the newer."""
+    from storyforge import cmd_migrate, illustrations as ill
+    _seed_legacy_prompts(project_dir, ['LF-01'])
+    target_dir = os.path.join(project_dir, ill.PROMPTS_SUBDIR)
+    os.makedirs(target_dir, exist_ok=True)
+    with open(os.path.join(target_dir, 'LF-01.md'), 'w', encoding='utf-8') as f:
+        f.write('the newer body')
+
+    result = cmd_migrate.step9_move_illustration_prompts(project_dir, False)
+
+    assert 'left in place' in result
+    with open(os.path.join(target_dir, 'LF-01.md'), encoding='utf-8') as f:
+        assert f.read() == 'the newer body'
+    assert os.path.isfile(os.path.join(project_dir, ill.LEGACY_PROMPTS_SUBDIR,
+                                       'LF-01.md'))
+
+
+def test_step9_leaves_an_unrelated_prompt_file_cell_alone(project_dir):
+    """An author who typed a path meant that path."""
+    from storyforge import cmd_migrate, illustrations as ill
+    rows = _seed_legacy_prompts(project_dir, ['LF-01'], declare=False)
+    rows[0]['prompt_file'] = 'reference/hand-written/LF-01.md'
+    ill.write_plan(project_dir, rows)
+
+    cmd_migrate.step9_move_illustration_prompts(project_dir, False)
+
+    assert ill.read_plan(project_dir)[0]['prompt_file'] == \
+        'reference/hand-written/LF-01.md'

@@ -1688,3 +1688,84 @@ def test_package_is_refused_for_graphic_novel_projects(project_dir_gn,
     monkeypatch.chdir(project_dir_gn)
     assert cmd_illustrate.main(['--package']) == 1
     assert not os.path.isdir(packet.packet_dir(project_dir_gn))
+
+
+def test_a_retired_packet_file_is_removed_on_the_next_run(in_project):
+    """A leftover `reference-images.md` is a second, stale answer to "what do I
+    upload" sitting beside the current one — and the pre-#306 file omits every
+    disclosure the aggregation added."""
+    cmd_illustrate.main(['--package'])
+    stale = os.path.join(in_project, packet.PACKET_DIR, 'reference-images.md')
+    with open(stale, 'w', encoding='utf-8') as f:
+        f.write('# Reference images\n\nupload these\n')
+
+    cmd_illustrate.main(['--package'])
+
+    assert not os.path.exists(stale)
+
+
+def test_the_packet_directory_is_not_swept_wholesale(in_project):
+    """Only the enumerated retired files go. The packet directory is the
+    author's to leave a note in, and a wholesale sweep is the destructive shape
+    this pipeline has been bitten by before."""
+    cmd_illustrate.main(['--package'])
+    note = os.path.join(in_project, packet.PACKET_DIR, 'my-notes.md')
+    with open(note, 'w', encoding='utf-8') as f:
+        f.write('mine')
+
+    cmd_illustrate.main(['--package'])
+
+    assert os.path.isfile(note)
+
+
+def test_an_image_prompt_for_a_dropped_row_does_not_survive(in_project):
+    """The upload directory's only job is being the thing the author uploads, so
+    a file for a row that has left the plan reads exactly like a current one."""
+    cmd_illustrate.main(['--package'])
+    assert os.path.isfile(packet.image_prompt_file(in_project,
+                                                   'the-blank-page'))
+    rows = [r for r in ill.read_plan(in_project)
+            if r['id'].strip() != 'the-blank-page']
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+
+    assert not os.path.exists(
+        packet.image_prompt_file(in_project, 'the-blank-page'))
+
+
+def test_an_illegal_plan_id_cannot_name_a_path(in_project):
+    """The plan is a documented hand-edit surface and `run_package` does not
+    call `validate_plan`, so the check that keeps a written path inside the
+    packet tree has to be at the write, not at a caller that may forget."""
+    with pytest.raises(ValueError):
+        packet.image_prompt_file(in_project, '../../evil')
+
+
+def test_the_exclusion_note_aggregates_by_reason(in_project):
+    """Seventeen near-identical paragraphs is what #306 was filed about. Two
+    different reasons stay two notes, so aggregation never costs the half of the
+    sentence that says what to fix."""
+    from illustration_helpers import make_png
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 12)
+    rows = ill.read_plan(in_project)
+    for index in range(4):
+        row = ill.blank_row(f'old-{index}')
+        rel = ill.default_asset_rel(row['id'])
+        make_png(os.path.join(in_project, rel), 8, 12)
+        row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open',
+                    'status': 'ingested', 'asset_file': rel,
+                    'ingested_at': '2026-01-01', 'beat': 'b', 'subject': 's'})
+        rows.append(row)
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'README.md')
+
+    assert '4 ingested illustration(s) are **not** listed' in body
+    assert 'The reason is the same for each' in body
+    # Aggregated, not repeated: one sentence, not four.
+    assert body.count('They were directed by canon') == 1
+    # And capped, so the note stays readable.
+    assert 'and 1 more' in body

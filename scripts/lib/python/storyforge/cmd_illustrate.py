@@ -1804,6 +1804,7 @@ def run_package(project_dir: str, dry_run: bool, *,
         return 0
 
     os.makedirs(packet.packet_dir(project_dir), exist_ok=True)
+    _remove_retired_files(project_dir)
     # The image prompts go down **before** the root files, and `is_built` keys on
     # the root files alone. Written the other way round, an interrupted run left
     # `--diagnose` reporting a packet "built and current" over a directory with
@@ -1832,6 +1833,27 @@ def run_package(project_dir: str, dry_run: bool, *,
     log('Render and approve the anchor batch, ingest those, then re-run '
         '--package so the rest can reference real images.')
     return 0
+
+
+def _remove_retired_files(project_dir: str) -> None:
+    """Delete packet files earlier versions wrote and this one does not.
+
+    A leftover `reference-images.md` is not clutter — it is a second, stale
+    answer to "what do I upload", sitting beside the current one in a bundle
+    whose whole contract is being a render. An author upgrading mid-book would
+    otherwise keep reading the pre-#306 file, which still lists the same four
+    images but omits every disclosure the aggregation added.
+
+    Enumerated rather than "anything not in PACKET_FILES": the packet directory
+    is the author's to put a note in, and a wholesale sweep is the destructive
+    shape this pipeline has been bitten by before.
+    """
+    for name in packet.RETIRED_PACKET_FILES:
+        path = packet.packet_file(project_dir, name)
+        if os.path.isfile(path):
+            os.remove(path)
+            log(f'  removed {os.path.join(packet.PACKET_DIR, name)} — its '
+                f'contents are in README.md now.')
 
 
 def _write_image_prompts(project_dir: str, prompts: dict[str, str]) -> None:
@@ -2661,12 +2683,18 @@ def _references_for(project_dir: str, illus_id: str, *,
              f'because --no-prior-refs was passed ({_and_more_files(excluded_no_prior)}): '
              f'this build inherits nothing from the existing art.')
     for reason, rels in excluded_stale.items():
+        # "the reason is the same for each" rather than splicing the reason
+        # straight into a plural clause: `stale_render_reason` is written about
+        # one row and starts "its `ingested_at` is ...", which read as a grammar
+        # error inside an aggregated sentence — in the section whose only product
+        # is the author's trust in it.
         note(f'{len(rels)} ingested illustration(s) are **not** listed '
-             f'({_and_more_files(rels)}) — {reason}. They were directed by canon '
-             f'that has since been rewritten, so using them would teach the new '
-             f'render the drift the new canon exists to remove. Re-render them '
-             f'from the current canon (`storyforge illustrate --diagnose` gives '
-             f'the order), then re-run {rerun}.')
+             f'({_and_more_files(rels)}). The reason is the same for each: '
+             f'{reason}. They were directed by canon that has since been '
+             f'rewritten, so using them would teach the new render the drift the '
+             f'new canon exists to remove. Re-render them from the current canon '
+             f'(`storyforge illustrate --diagnose` gives the order), then re-run '
+             f'{rerun}.')
 
     if capped:
         log(f'  {illus_id}: {capped} further ingested illustration(s) were not '
