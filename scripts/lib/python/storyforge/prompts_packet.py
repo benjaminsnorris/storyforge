@@ -37,8 +37,9 @@ Two things the renderers must not do:
 import json
 import re
 from collections.abc import Sequence
-from typing import Final
+from typing import Final, get_args
 
+from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from storyforge.packet import (
     BATCH_SLOTS, IMAGE_PROMPTS_SUBDIR, AnchorBatch, Entry, ImagePrompt,
@@ -401,7 +402,8 @@ def render_visual_state(*, grid: StateGrid,
 #: no reading costs a glance, while skipping one because a typo made it look
 #: finished loses an illustration from the book. `superseded` never reaches the
 #: index — `rows_in_reading_order` drops it.
-_RENDERED_STATUSES: Final[frozenset[str]] = frozenset({'rendered', 'ingested'})
+_RENDERED_STATUSES: Final[frozenset[ill.PlanStatus]] = frozenset(
+    {'rendered', 'ingested'})
 
 #: The `Art` cell per state. `re-render` and `done` sit on rows whose `status` is
 #: identical, which is exactly why `status` cannot be the signal (#300).
@@ -410,6 +412,11 @@ _ART_CELLS: Final[dict[RenderState, str]] = {
     'pending': 'to render',
     'stale': '**re-render**',
 }
+
+# Totality by assertion: a dict literal is not checked against its `Literal` key
+# type, so a missing member type-checks clean and raises `KeyError` partway
+# through writing the index table.
+assert set(_ART_CELLS) == set(get_args(RenderState))
 
 
 def _entry_state(entry: Entry) -> RenderState:
@@ -448,6 +455,17 @@ def _row_notes(entry: ImagePrompt) -> list[str]:
             f'it.')
     if entry['body_warning']:
         notes.append(f'**Art direction.** {entry["body_warning"]}')
+    elif (entry['body_source'] == 'prompt_file'
+          and entry['prompt_source'] != ill.default_prompt_rel(entry['id'])):
+        # Only when the path is *not* the convention. README states the
+        # convention once, and it is identical for every row — noting it per row
+        # would put every illustration in a section whose whole value is that it
+        # holds only the ones worth reading. A declared `prompt_file` is the
+        # case that genuinely differs, and the one an author editing the prose
+        # would otherwise go looking for at the default path.
+        notes.append(
+            f'**Art direction.** From `{entry["prompt_source"]}`, which the '
+            f'plan\'s `prompt_file` cell declares — not the default path.')
     if entry['self_reference']:
         notes.append(f'**Uploaded references.** {entry["self_reference"]}')
     if not entry['state']:
@@ -602,8 +620,8 @@ def render_image_prompt(*, prompt: ImagePrompt, title: str) -> str:
         f'# {prompt["id"]} — {title}',
         '',
         f'Generate one image from this brief. {prompt["aspect"].capitalize()}, '
-        f'{prompt["size"].replace("x", " × ")}, {prompt["quality"]} quality. '
-        f'Return it as `{prompt["id"]}.png`.',
+        f'{prompt["size"].replace("x", " × ")}, {prompt["quality"]} quality, '
+        f'{prompt["model"]}. Return it as `{prompt["id"]}.png`.',
         '',
         prompt['body'].strip(),
         '',

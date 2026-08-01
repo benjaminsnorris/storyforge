@@ -1772,33 +1772,79 @@ def test_an_illegal_plan_id_cannot_name_a_path(in_project):
         packet.image_prompt_file(in_project, '../../evil')
 
 
-def test_the_exclusion_note_aggregates_by_reason(in_project):
-    """Seventeen near-identical paragraphs is what #306 was filed about. Two
-    different reasons stay two notes, so aggregation never costs the half of the
-    sentence that says what to fix."""
+def _seed_stale_renders(project_dir, spec):
+    """Append ingested rows with the given `ingested_at` values."""
     from illustration_helpers import make_png
-    make_png(os.path.join(in_project, 'manuscript', 'assets',
+    make_png(os.path.join(project_dir, 'manuscript', 'assets',
                           'cover-illustration.png'), 8, 12)
-    rows = ill.read_plan(in_project)
-    for index in range(4):
+    rows = ill.read_plan(project_dir)
+    for index, ingested_at in enumerate(spec):
         row = ill.blank_row(f'old-{index}')
         rel = ill.default_asset_rel(row['id'])
-        make_png(os.path.join(in_project, rel), 8, 12)
+        make_png(os.path.join(project_dir, rel), 8, 12)
         row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open',
                     'status': 'ingested', 'asset_file': rel,
-                    'ingested_at': '2026-01-01', 'beat': 'b', 'subject': 's'})
+                    'ingested_at': ingested_at, 'beat': 'b', 'subject': 's'})
         rows.append(row)
-    ill.write_plan(in_project, rows)
+    ill.write_plan(project_dir, rows)
+
+
+def test_the_exclusion_note_aggregates_across_ingest_dates(in_project):
+    """The defect the by-prose key reintroduced: `stale_render_reason`
+    interpolates the row's own date, so four renders ingested on four days
+    produced four near-identical notes — the seventeen-paragraph shape #306 is
+    about, rebuilt by the choice of key. Keyed on the category, they are one."""
+    _seed_stale_renders(in_project, ['2026-01-01', '2026-01-02',
+                                     '2026-01-03', '2026-01-04'])
 
     cmd_illustrate.main(['--package'])
     body = _read(in_project, 'README.md')
 
     assert '4 ingested illustration(s) are **not** listed' in body
-    assert 'The reason is the same for each' in body
-    # Aggregated, not repeated: one sentence, not four.
     assert body.count('They were directed by canon') == 1
-    # And capped, so the note stays readable.
-    assert 'and 1 more' in body
+    assert 'All of them were ingested before the canon was last updated' in body
+    assert 'and 1 more' in body          # capped, so the note stays readable
+
+
+def test_two_different_stale_causes_stay_two_notes(in_project):
+    """Aggregation must never cost the half of the sentence that says what to
+    fix: an empty `ingested_at` and a date before the cutoff need different
+    remedies, so they stay separate."""
+    _seed_stale_renders(in_project, ['2026-01-01', '2026-01-02', ''])
+
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'README.md')
+
+    assert body.count('They were directed by canon') == 2
+    assert 'All of them were ingested before the canon' in body
+    assert 'None of them carries an `ingested_at`' in body
+
+
+def test_a_stale_kind_is_non_empty_exactly_when_a_reason_is():
+    """The two functions branch over the same conditions; a divergence would
+    aggregate rows under a category their sentence contradicts."""
+    cutoff = '2026-07-28'
+    rows = [
+        {'status': 'ingested', 'ingested_at': ''},
+        {'status': 'ingested', 'ingested_at': 'nonsense'},
+        {'status': 'ingested', 'ingested_at': '2026-01-01'},
+        {'status': 'ingested', 'ingested_at': '2026-08-01'},
+        {'status': 'rendered', 'ingested_at': ''},
+        {'status': 'planned', 'ingested_at': '2026-01-01'},
+    ]
+    for row in rows:
+        assert bool(ill.stale_render_kind(row, cutoff)) == \
+            bool(ill.stale_render_reason(row, cutoff)), row
+        # And nothing is stale when there is no cutoff to judge against.
+        assert ill.stale_render_kind(row, '') == ''
+
+
+def test_every_stale_kind_has_a_plural_clause():
+    """A missing key is a `KeyError` while writing README — total by test, since
+    a dict literal is not checked against its Literal key type."""
+    from typing import get_args
+    assert set(cmd_illustrate._STALE_KIND_CLAUSES) == \
+        set(get_args(ill.StaleKind))
 
 
 # ============================================================================
@@ -2196,3 +2242,46 @@ def test_the_re_render_note_is_two_sentences_not_one_run_on(in_project):
 
     note = _body_note(in_project, 'the-finest-cartographer')
     assert '. Generate it again' in note
+
+
+def test_a_declared_prompt_path_is_named_in_the_notes(in_project):
+    """`prompt_source` and `body_source` had no reader, which is the write-only
+    shape this PR removed `Entry.in_frame` for. The case worth a line is a path
+    that is *not* the convention: README states the convention once, so noting
+    it per row would put every illustration in the section whose value is that
+    it holds only the ones worth reading."""
+    from illustration_helpers import write_prompt_file
+    default = write_prompt_file(in_project, 'the-finest-cartographer')
+    declared = os.path.join(in_project, 'reference', 'elsewhere.md')
+    os.rename(default, declared)
+    rows = ill.read_plan(in_project)
+    rows[0]['prompt_file'] = 'reference/elsewhere.md'
+    ill.write_plan(in_project, rows)
+
+    cmd_illustrate.main(['--package'])
+
+    note = _body_note(in_project, 'the-finest-cartographer')
+    assert 'reference/elsewhere.md' in note
+    assert 'not the default path' in note
+
+
+def test_a_conventional_prompt_path_is_not_noted_per_row(in_project):
+    """The other half: a row whose art direction is fine and at the expected
+    path has nothing to say, and must not appear."""
+    from illustration_helpers import write_prompt_file
+    write_prompt_file(in_project, 'the-finest-cartographer')
+    write_prompt_file(in_project, 'the-blank-page')
+
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'illustrations.md')
+
+    assert 'Nothing on any row needs reading first' in body
+
+
+def test_the_model_reaches_the_upload(in_project):
+    """`model` was written and rendered nowhere. It belongs in the file the
+    author hands over, for the reason `size` and `quality` are there: it makes
+    the render reproducible two weeks later."""
+    cmd_illustrate.main(['--package'])
+    assert pi.DEFAULT_IMAGE_MODEL in \
+        _read_prompt(in_project, 'the-finest-cartographer')

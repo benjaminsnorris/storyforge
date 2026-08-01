@@ -214,6 +214,38 @@ def asset_path(project_dir: str, row: dict[str, str]) -> str | None:
     return os.path.join(project_dir, rel)
 
 
+#: Why a render is canon-stale, as a category rather than a sentence.
+#: `stale_render_reason` interpolates the row's own `ingested_at`, so grouping by
+#: its prose produces one group per row — which is the aggregation it exists to
+#: make possible. A caller that aggregates keys on this instead (#306 review).
+StaleKind = Literal['', 'no_date', 'unparseable_date', 'predates_canon']
+
+
+def stale_render_kind(row: dict[str, str], canon_cutoff: str) -> StaleKind:
+    """The category behind `stale_render_reason`, for callers that aggregate.
+
+    Deliberately a second function over the same branches rather than a second
+    return value: `stale_render_reason` has a dozen callers that want the
+    sentence, and threading a tuple through all of them to serve one would be
+    the churn this avoids. The two must branch identically — there is a test
+    asserting a kind is non-empty exactly when a reason is.
+    """
+    from storyforge import canon
+    if not canon_cutoff:
+        return ''
+    if (row.get('status') or '').strip() != 'ingested':
+        return ''
+    raw = (row.get('ingested_at') or '').strip()
+    if not raw:
+        return 'no_date'
+    ingested = canon.iso_date_or_empty(raw)
+    if not ingested:
+        return 'unparseable_date'
+    if canon.predates_canon(when=ingested, cutoff=canon_cutoff):
+        return 'predates_canon'
+    return ''
+
+
 def illegal_plan_ids(plan: list[dict[str, str]]) -> list[str]:
     """Every plan `id` that cannot legally name a file, in plan order.
 

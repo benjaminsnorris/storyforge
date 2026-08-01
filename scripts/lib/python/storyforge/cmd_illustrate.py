@@ -2680,11 +2680,15 @@ def _references_for(project_dir: str, illus_id: str, *,
     # the one section whose whole job is telling the author what they are not
     # uploading. One root cause, one note (#290, #306).
     excluded_no_prior: list[str] = []
-    # Keyed on the *reason*, not merely counted: `stale_render_reason` says
-    # something different for an empty `ingested_at` than for a date before the
-    # cutoff, and collapsing both into "predates the canon" would aggregate away
-    # the half of the sentence that tells the author what to fix.
-    excluded_stale: dict[str, list[str]] = {}
+    # Keyed on the *category*, not on the rendered sentence. The distinction
+    # between an empty `ingested_at` and a date before the cutoff is worth
+    # keeping — collapsing both into "predates the canon" aggregates away the
+    # half that says what to fix — but `stale_render_reason` interpolates the
+    # row's own date, so keying on it produced one group per ingest date. On the
+    # dominant real case, twenty renders ingested across a working session, that
+    # is one near-identical note per day: the shape this aggregation removes,
+    # reconstituted by the choice of key (#306 review).
+    excluded_stale: dict[ill.StaleKind, list[str]] = {}
     for row in rows:
         if row['id'].strip() == illus_id:
             continue
@@ -2712,7 +2716,8 @@ def _references_for(project_dir: str, illus_id: str, *,
                 f'order), or pass --no-prior-refs to build this prompt '
                 f'from the cover alone.')
             skipped_stale += 1
-            excluded_stale.setdefault(stale_reason, []).append(rel)
+            excluded_stale.setdefault(
+                ill.stale_render_kind(row, canon_cutoff), []).append(rel)
             continue
         # The cap is checked *after* the exclusion checks so that a skipped
         # render is still disclosed: breaking out of the loop early would hide
@@ -2727,19 +2732,14 @@ def _references_for(project_dir: str, illus_id: str, *,
         note(f'{len(excluded_no_prior)} ingested illustration(s) are not listed '
              f'because --no-prior-refs was passed ({_and_more_files(excluded_no_prior)}): '
              f'this build inherits nothing from the existing art.')
-    for reason, rels in excluded_stale.items():
-        # "the reason is the same for each" rather than splicing the reason
-        # straight into a plural clause: `stale_render_reason` is written about
-        # one row and starts "its `ingested_at` is ...", which read as a grammar
-        # error inside an aggregated sentence — in the section whose only product
-        # is the author's trust in it.
+    for kind, rels in excluded_stale.items():
         note(f'{len(rels)} ingested illustration(s) are **not** listed '
-             f'({_and_more_files(rels)}). The reason is the same for each: '
-             f'{reason}. They were directed by canon that has since been '
-             f'rewritten, so using them would teach the new render the drift the '
-             f'new canon exists to remove. Re-render them from the current canon '
-             f'(`storyforge illustrate --diagnose` gives the order), then re-run '
-             f'{rerun}.')
+             f'({_and_more_files(rels)}). '
+             f'{_STALE_KIND_CLAUSES[kind].format(cutoff=canon_cutoff)} They '
+             f'were directed by canon that has since been rewritten, so using '
+             f'them would teach the new render the drift the new canon exists '
+             f'to remove. Re-render them from the current canon (`storyforge '
+             f'illustrate --diagnose` gives the order), then re-run {rerun}.')
 
     if capped:
         log(f'  {illus_id}: {capped} further ingested illustration(s) were not '
@@ -2775,6 +2775,24 @@ def _references_for(project_dir: str, illus_id: str, *,
                  + '. Nothing anchors style or likeness, so whatever is '
                    'rendered first sets the look for the whole book.')
     return references
+
+
+#: One plural sentence per stale category. Written per kind rather than by
+#: splicing `stale_render_reason` into a plural frame: that reason is written
+#: about one row and opens "its `ingested_at` is ...", which read as a grammar
+#: error mid-aggregate — in the section whose only product is the author's trust
+#: in it. `''` cannot occur (a row with no kind is not excluded) and is present
+#: so the mapping is total over the Literal.
+_STALE_KIND_CLAUSES: dict['ill.StaleKind', str] = {
+    'no_date': 'None of them carries an `ingested_at`, so they predate ingest '
+               'timestamps and therefore the canon last updated {cutoff}.',
+    'unparseable_date': 'Each carries an `ingested_at` that is not an ISO date, '
+                        'so none of them can be shown to postdate the canon '
+                        'last updated {cutoff}.',
+    'predates_canon': 'All of them were ingested before the canon was last '
+                      'updated {cutoff}.',
+    '': 'They predate the canon last updated {cutoff}.',
+}
 
 
 def _and_more_files(paths: list[str]) -> str:

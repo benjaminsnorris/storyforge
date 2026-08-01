@@ -70,6 +70,12 @@ PACKET_FILES: tuple[str, ...] = (
 #: nothing in it should outlive the run that wrote it.
 RETIRED_PACKET_FILES: tuple[str, ...] = ('reference-images.md',)
 
+# A name in both would have one `--package` run delete a file it just wrote, or
+# write one it just deleted, depending on call order — and the removal logs
+# "its contents are in README.md now" about a file that is present.
+assert not set(PACKET_FILES) & set(RETIRED_PACKET_FILES), \
+    'a packet file cannot be both written and deleted by one run'
+
 #: Where the per-illustration upload files go. `image-prompts/`, not `prompts/`,
 #: because the model-authored bodies live at
 #: `reference/illustration-prompts/{id}.md` with identical basenames: two
