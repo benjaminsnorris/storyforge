@@ -537,14 +537,17 @@ def resolve(project_dir: str, *,
     gaps.extend(cmd_illustrate.style_reference_warnings(style))
     if reference_notes and _has_ingested_art(rows) and len(references) <= 1:
         # The dangerous shape: renders exist on disk and none of them reached
-        # the list. The detail is in reference-images.md; this is the line that
-        # gets it into README.md, which is where the author looks first.
+        # the list. This gap and the exclusions it points at are now both in
+        # README.md — the pointer named `reference-images.md` until #306
+        # retired that file, so the packet's most consequential gap sent the
+        # author to a filename the same run deletes.
         gaps.append(
             'the reference-image list is cover-only or empty even though this '
-            'book has ingested illustrations — see reference-images.md for '
-            'which were excluded and why. Uploading only what is listed means '
-            'the next renders carry no likeness reference, which is the drift '
-            'the reference chain exists to prevent.')
+            'book has ingested illustrations — the exclusions are listed under '
+            '**Read this before you upload** in step 1 above. Uploading only '
+            'what is listed means the next renders carry no likeness '
+            'reference, which is the drift the reference chain exists to '
+            'prevent.')
 
     return {
         'book_level': book_level,
@@ -1628,43 +1631,107 @@ def _file_anchor_drift(project_dir: str, rel: str,
 #: Sources whose edit invalidates the packet: the plan, the transition log, and
 #: every canon file. Not the scene prose — a prose revision is `prose_changed`
 #: and `audit_stale`, which say something more specific than "regenerate".
-def _packet_sources(project_dir: str) -> list[str]:
-    """Absolute paths of every file the packet is assembled from.
+def _body_paths(project_dir: str, plan: list[dict[str, str]]) -> list[str]:
+    """Every prompt body the packet inlines, resolved the way `_body_for` does.
+
+    Through each row's `prompt_file` cell, falling back to
+    `ill.default_prompt_rel` — **not** by listing
+    `reference/illustration-prompts/`. A directory listing missed two supported
+    shapes outright: a project that has not run `migrate` keeps its bodies under
+    the legacy path via that column, and a declared path elsewhere is
+    legitimate (`test_step9_leaves_an_unrelated_prompt_file_cell_alone`). For
+    both, editing a body left `--diagnose` reporting "built and current" over a
+    packet inlining the old prose.
+    """
+    paths: list[str] = []
+    for row in plan:
+        illus_id = (row.get('id') or '').strip()
+        if not illus_id:
+            continue
+        rel = ((row.get('prompt_file') or '').strip()
+               or ill.default_prompt_rel(illus_id))
+        paths.append(os.path.join(project_dir, rel))
+    return paths
+
+
+def _packet_sources(project_dir: str) -> tuple[list[str], list[str]]:
+    """`(paths, problems)` — every file the packet is assembled from.
 
     The prompt bodies are among them since #306. Before, the packet named their
     path and the author opened them separately, so their mtime said nothing about
     the packet; now `--package` inlines each body into an image prompt, and a
     body rewritten after the last run is exactly the staleness this reports.
+
+    A non-empty `problems` means freshness cannot be judged, which the caller
+    must report as *unknown* rather than render as current.
     """
+    problems: list[str] = []
     sources = [ill.plan_path(project_dir), vs.state_path(project_dir)]
     canon_dir = os.path.join(project_dir, canon.CANON_DIR)
     if os.path.isdir(canon_dir):
-        sources.extend(canon._walk_canon_files(canon_dir))
-    prompts_dir = os.path.join(project_dir, ill.PROMPTS_SUBDIR)
-    if os.path.isdir(prompts_dir):
-        sources.extend(
-            os.path.join(prompts_dir, name)
-            for name in sorted(os.listdir(prompts_dir))
-            if name.endswith('.md'))
-    return [path for path in sources if os.path.isfile(path)]
+        try:
+            sources.extend(canon._walk_canon_files(canon_dir))
+        except OSError as exc:
+            problems.append(f'{canon.CANON_DIR} could not be walked '
+                            f'({exc.strerror or exc})')
+    sources.extend(_body_paths(project_dir, ill.read_plan(project_dir)))
+    return [path for path in sources if os.path.isfile(path)], problems
 
 
-def _packet_written_files(project_dir: str) -> list[str]:
-    """Absolute paths of every file `--package` writes, root files and prompts.
+def _packet_written_files(project_dir: str) -> tuple[list[str], list[str]]:
+    """`(paths, problems)` — every file `--package` writes.
 
     `packet_stale` takes the *oldest* of these. Root files only would miss a
     source rewritten between the image-prompt writes and the root-file writes of
     the same run — a narrow window, but the whole finding is about a packet that
     looks current and is not.
+
+    The listing is guarded. An unguarded `os.listdir` here raised
+    `PermissionError` straight out of `validate_plan`, which is the single
+    finding collector — one unreadable directory took down the whole
+    illustration health report, including the blocking findings `cmd_validate`
+    gates on. That is the regression a prior round fixed for `ill.sha256_of`
+    (#298), reintroduced by #306.
     """
     written = [packet_file(project_dir, name) for name in PACKET_FILES]
+    problems: list[str] = []
     prompts = image_prompts_dir(project_dir)
     if os.path.isdir(prompts):
-        written.extend(
-            os.path.join(prompts, name)
-            for name in sorted(os.listdir(prompts))
-            if name.endswith('.md'))
-    return [path for path in written if os.path.isfile(path)]
+        try:
+            written.extend(
+                os.path.join(prompts, name)
+                for name in sorted(os.listdir(prompts))
+                if name.endswith('.md'))
+        except OSError as exc:
+            problems.append(f'{os.path.join(PACKET_DIR, IMAGE_PROMPTS_SUBDIR)} '
+                            f'could not be read ({exc.strerror or exc})')
+    return ([path for path in written if os.path.isfile(path)], problems)
+
+
+def _missing_image_prompts(project_dir: str) -> list[str]:
+    """Live plan rows with no upload file, in reading order.
+
+    mtime cannot see this. `is_built` keys on the root files, and on a *rebuild*
+    those already exist from the previous run — so a failure inside
+    `_write_image_prompts`, which clears before it writes, left `--diagnose`
+    printing "built and current" over the directory the author had been told to
+    upload from. The write-order argument only ever covered a first build.
+
+    An id that cannot name a file is skipped rather than reported: it is
+    `ill.illegal_plan_ids`' finding, `run_package` refuses on it before writing,
+    and `image_prompt_file` would raise out of a read-only health check.
+    """
+    directory = image_prompts_dir(project_dir)
+    if not os.path.isdir(directory):
+        return []
+    missing: list[str] = []
+    for row in rows_in_reading_order(project_dir):
+        illus_id = row['id'].strip()
+        if not ill._ID_RE.match(illus_id):
+            continue
+        if not os.path.isfile(os.path.join(directory, f'{illus_id}.md')):
+            missing.append(illus_id)
+    return missing
 
 
 def packet_stale(project_dir: str) -> list[ill.IllustrationFinding]:
@@ -1677,13 +1744,49 @@ def packet_stale(project_dir: str) -> list[ill.IllustrationFinding]:
 
     Compared by mtime, strictly: a source written in the same clock tick as the
     packet is the ordinary `--package` run itself, not staleness.
+
+    **Also reports an image prompt missing for a live plan row** — see
+    `_missing_image_prompts` — and **says so when freshness could not be judged
+    at all**, because `--diagnose` renders an empty list as "built and current".
+
+    **What it does not check** is the *content* of an image prompt against what
+    `render_image_prompt` would produce now, so a hand-edit of a file the packet
+    documents as a render goes undetected. Stated here rather than left for this
+    finding's silence to imply otherwise.
     """
     if not is_built(project_dir):
         return []
-    packet_mtime = min(os.path.getmtime(path)
-                       for path in _packet_written_files(project_dir))
+    written, write_problems = _packet_written_files(project_dir)
+    sources, source_problems = _packet_sources(project_dir)
+    problems = write_problems + source_problems
+    if problems:
+        detail = '; '.join(problems)
+        log(f'WARNING: the packet\'s freshness could not be checked: {detail}')
+        return [{
+            'kind': 'packet_stale',
+            'file': os.path.join(PACKET_DIR, 'README.md'),
+            'detail': f'the packet\'s freshness could not be checked '
+                      f'({detail}), so it is unknown rather than current. Fix '
+                      f'that and re-run `storyforge illustrate --diagnose`.',
+        }]
+
+    missing = _missing_image_prompts(project_dir)
+    if missing:
+        log(f'WARNING: {len(missing)} plan row(s) have no image prompt in the '
+            f'packet: {", ".join(missing)}')
+        return [{
+            'kind': 'packet_stale',
+            'file': os.path.join(PACKET_DIR, IMAGE_PROMPTS_SUBDIR),
+            'detail': f'{len(missing)} live plan row(s) have no upload file in '
+                      f'{PACKET_DIR}/{IMAGE_PROMPTS_SUBDIR}/ '
+                      f'({_and_more(missing)}) — the packet is half-written, '
+                      f'not merely out of date. Re-run `storyforge illustrate '
+                      f'--package`.',
+        }]
+
+    packet_mtime = min(os.path.getmtime(path) for path in written)
     newer = sorted(os.path.relpath(path, project_dir)
-                   for path in _packet_sources(project_dir)
+                   for path in sources
                    if os.path.getmtime(path) > packet_mtime)
     if not newer:
         return []

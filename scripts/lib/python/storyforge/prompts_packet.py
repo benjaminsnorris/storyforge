@@ -437,8 +437,12 @@ def _row_notes(entry: ImagePrompt) -> list[str]:
     notes: list[str] = []
     if entry['stale_reason']:
         notes.append(
+            # `stale_render_reason` is a clause, not a sentence — it ends
+            # without punctuation because its other callers embed it mid-line.
+            # Concatenated raw this rendered "...last updated 2026-07-28
+            # Generate it again", which reads as a defect in the packet.
             f'**Re-render.** This illustration already has art, and '
-            f'{entry["stale_reason"]} Generate it again; leave `status` alone — '
+            f'{entry["stale_reason"]}. Generate it again; leave `status` alone — '
             f'demoting it drops the illustration from the Bookshelf publish '
             f'manifest while the epub, the PDF, and the web book keep shipping '
             f'it.')

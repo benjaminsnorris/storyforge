@@ -951,7 +951,15 @@ def main(argv=None):
         committed = commit_and_push(
             project_dir,
             'Migrate: upgrade to normalized registry model',
-            ['reference/', 'manuscript/'],
+            # Narrowed to the one directory step 9 touches. `commit_and_push`
+            # does `git add <path>` per path, and this block is unconditional —
+            # so a bare `manuscript/` swept the rendered PNGs, the assembled
+            # epub and PDF, the regenerated packet, and the superseded
+            # illustration-export/ tree (167 MB on the book #306 was filed
+            # about, which this release deliberately declines to delete) into a
+            # commit titled "upgrade to normalized registry model".
+            ['reference/',
+             os.path.join('manuscript', 'assets', 'illustrations')],
         )
         log('')
         if committed:

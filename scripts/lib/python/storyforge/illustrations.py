@@ -214,6 +214,28 @@ def asset_path(project_dir: str, row: dict[str, str]) -> str | None:
     return os.path.join(project_dir, rel)
 
 
+def illegal_plan_ids(plan: list[dict[str, str]]) -> list[str]:
+    """Every plan `id` that cannot legally name a file, in plan order.
+
+    The plan is a documented hand-edit surface, and several commands turn an
+    `id` into a path. `run_export` refused up front on exactly this and that
+    check was lost when it was retired (#306) — leaving `--package` to raise
+    from `packet.image_prompt_file` *after* it had already cleared the previous
+    run's uploads. The raise is the un-bypassable backstop; this is the check
+    that lets a caller refuse before it destroys anything.
+
+    Length is bounded here and not in `_ID_RE`, which is shared with the marker
+    regex: a 300-character id is a legal *marker* and an `OSError: File name too
+    long` at `open()`, which would land in the same post-deletion window.
+    """
+    illegal: list[str] = []
+    for row in plan:
+        illus_id = (row.get('id') or '').strip()
+        if not _ID_RE.match(illus_id) or len(illus_id) > ASSET_KEY_MAX_LENGTH:
+            illegal.append(illus_id)
+    return illegal
+
+
 def default_asset_rel(illus_id: str, extension: str = '.png') -> str:
     """Canonical project-relative path for an illustration's file."""
     ext = extension if extension.startswith('.') else f'.{extension}'

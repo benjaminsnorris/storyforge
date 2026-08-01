@@ -1759,6 +1759,21 @@ def run_package(project_dir: str, dry_run: bool, *,
     # too — so the canon tree is walked once and an unparseable `canon_updated`
     # is reported once rather than five times.
     canon_cutoff = canon_mod.newest_canon_updated(project_dir)
+
+    # Before anything is resolved or written. `run_package` deliberately skips
+    # `validate_plan` — its findings would duplicate the gaps and make README
+    # depend on the previous packet's staleness — but that is a *reporting*
+    # argument and never applied to the one check whose absence is destructive.
+    # `_write_image_prompts` clears the previous run's uploads before it writes,
+    # so an id that cannot name a file used to delete the packet's payload and
+    # then raise a traceback out of `main` (#306 review).
+    illegal = ill.illegal_plan_ids(ill.read_plan(project_dir))
+    if illegal:
+        log(f'ERROR: {len(illegal)} plan row(s) have an `id` that cannot name a '
+            f'file ({", ".join(repr(i) for i in illegal)}). Fix the `id` cell in '
+            f'reference/{ill.PLAN_FILENAME}; nothing has been written.')
+        return 1
+
     contents = packet.resolve(project_dir, canon_cutoff=canon_cutoff)
     grid = packet.state_grid(project_dir)
     batch = packet.anchor_batch(project_dir)
@@ -1850,10 +1865,23 @@ def _remove_retired_files(project_dir: str) -> None:
     """
     for name in packet.RETIRED_PACKET_FILES:
         path = packet.packet_file(project_dir, name)
-        if os.path.isfile(path):
+        if not os.path.isfile(path):
+            continue
+        try:
             os.remove(path)
-            log(f'  removed {os.path.join(packet.PACKET_DIR, name)} — its '
-                f'contents are in README.md now.')
+        except OSError as exc:
+            # Never fatal. This runs before anything is written, so raising
+            # aborted the whole rebuild — leaving both the stale file the
+            # removal exists to prevent *and* a packet that was never
+            # regenerated, which is strictly worse than the condition guarded
+            # against.
+            log(f'WARNING: could not remove '
+                f'{os.path.join(packet.PACKET_DIR, name)} '
+                f'({exc.strerror or exc}). It is a stale upload list from an '
+                f'older version — delete it by hand, and do not read it.')
+            continue
+        log(f'  removed {os.path.join(packet.PACKET_DIR, name)} — its '
+            f'contents are in README.md now.')
 
 
 def _write_image_prompts(project_dir: str, prompts: dict[str, str]) -> None:
@@ -1870,18 +1898,35 @@ def _write_image_prompts(project_dir: str, prompts: dict[str, str]) -> None:
     """
     directory = packet.image_prompts_dir(project_dir)
     os.makedirs(directory, exist_ok=True)
-    keep = {f'{illus_id}.md' for illus_id in prompts}
+    # Every path is resolved before a single file is removed. `image_prompt_file`
+    # raises on an id that cannot name a file, and `run_package` gates on
+    # `ill.illegal_plan_ids` before this — but resolving first means even a
+    # caller that skipped the gate cannot get past the delete loop on bad data.
+    targets = {illus_id: packet.image_prompt_file(project_dir, illus_id)
+               for illus_id in prompts}
+    keep = {os.path.basename(path) for path in targets.values()}
     for name in sorted(os.listdir(directory)):
         if name.endswith('.md') and name not in keep:
             os.remove(os.path.join(directory, name))
-    for illus_id, text in prompts.items():
-        # `image_prompt_file` re-checks the id against `_ID_RE` and raises: the
-        # plan is a hand-edit surface, `run_package` deliberately does not call
-        # `validate_plan`, and an id of `../../evil` would write outside the
-        # packet tree.
-        with open(packet.image_prompt_file(project_dir, illus_id), 'w',
-                  encoding='utf-8') as f:
-            f.write(text)
+    for illus_id, path in targets.items():
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(prompts[illus_id])
+    # An exit-0 run reporting a count it did not achieve is worse than a loud
+    # failure: on a case-insensitive filesystem two ids differing only in case
+    # are one inode, so the survivor carries the second row's prompt under the
+    # first row's name and the author generates the wrong illustration.
+    # `validate_plan` catches `duplicate_id`, but `run_package` does not call it.
+    written = {name for name in os.listdir(directory) if name.endswith('.md')}
+    if len(written) != len(targets):
+        missing = sorted(os.path.basename(path) for path in targets.values()
+                         if os.path.basename(path) not in written)
+        cause = (', '.join(missing) if missing else
+                 'ids differing only in case collide on this filesystem')
+        log(f'WARNING: {len(targets)} image prompt(s) were written but '
+            f'{len(written)} file(s) exist — {cause}. The surviving file '
+            f'carries one row\'s prompt under another row\'s name, so '
+            f'uploading it generates the wrong illustration. Run `storyforge '
+            f'validate` and fix the `id` cells first.')
 
 
 def _warn_superseded_export(project_dir: str) -> None:

@@ -1775,3 +1775,148 @@ def test_the_exclusion_note_aggregates_by_reason(in_project):
     assert body.count('They were directed by canon') == 1
     # And capped, so the note stays readable.
     assert 'and 1 more' in body
+
+
+# ============================================================================
+# Review fixes: the destructive paths and the silences (#306 review)
+# ============================================================================
+
+def test_the_cover_only_gap_does_not_name_a_deleted_file(in_project):
+    """The packet's most consequential gap — twenty renders on disk and none of
+    them reachable — pointed the author at `reference-images.md`, which the same
+    run deletes. A dangling pointer in the section whose only product is
+    credibility is how that section gets skipped."""
+    from illustration_helpers import make_png
+    make_png(os.path.join(in_project, 'manuscript', 'assets',
+                          'cover-illustration.png'), 8, 12)
+    _ingest(in_project, 0, ingested_at='2026-01-01')   # pre-canon: excluded
+
+    cmd_illustrate.main(['--package'])
+    body = _read(in_project, 'README.md')
+
+    assert 'the reference-image list is cover-only or empty' in body
+    assert 'Read this before you upload' in body
+    for name in packet.RETIRED_PACKET_FILES:
+        assert name not in body
+
+
+def test_no_packet_file_names_a_retired_packet_file(in_project):
+    """The general form, so a future retirement cannot leave a live pointer."""
+    cmd_illustrate.main(['--package'])
+    for rendered in packet.PACKET_FILES:
+        body = _read(in_project, rendered)
+        for retired in packet.RETIRED_PACKET_FILES:
+            assert retired not in body, f'{rendered} names {retired}'
+
+
+def test_written_and_retired_packet_files_are_disjoint():
+    """A name in both would have one --package run delete a file it just wrote,
+    or write one it just deleted, depending on call order."""
+    assert not set(packet.PACKET_FILES) & set(packet.RETIRED_PACKET_FILES)
+
+
+def test_an_illegal_id_is_refused_before_anything_is_written(in_project):
+    """`run_export` refused up front and that check was lost when it retired.
+    Left to `image_prompt_file`'s raise, a bad id cleared the previous run's
+    uploads and then put a traceback on the terminal."""
+    cmd_illustrate.main(['--package'])
+    survivor = packet.image_prompt_file(in_project, 'the-finest-cartographer')
+    assert os.path.isfile(survivor)
+    rows = ill.read_plan(in_project)
+    rows[1]['id'] = '../../evil'
+    ill.write_plan(in_project, rows)
+
+    assert cmd_illustrate.main(['--package']) == 1
+    # Nothing was deleted on the way to refusing.
+    assert os.path.isfile(survivor)
+
+
+def test_an_over_long_id_is_refused_too(in_project):
+    """`_ID_RE` has no length bound — it is shared with the marker regex — so a
+    300-character id is legal and dies at `open()`, inside the same window."""
+    rows = ill.read_plan(in_project)
+    rows[1]['id'] = 'x' * 300
+    ill.write_plan(in_project, rows)
+
+    assert cmd_illustrate.main(['--package']) == 1
+
+
+def test_a_missing_image_prompt_is_reported_not_read_as_current(in_project):
+    """On a rebuild the root files already exist, so `is_built` is True before
+    the delete pass — the write-order argument only covers a first build. A
+    hollowed `image-prompts/` must not read as "built and current"."""
+    cmd_illustrate.main(['--package'])
+    os.remove(packet.image_prompt_file(in_project, 'the-blank-page'))
+
+    assert packet.is_built(in_project)          # the window this closes
+    findings = packet.packet_stale(in_project)
+    assert [f['kind'] for f in findings] == ['packet_stale']
+    assert 'the-blank-page' in findings[0]['detail']
+    assert 'half-written' in findings[0]['detail']
+
+
+def test_an_edited_body_at_a_declared_prompt_file_makes_the_packet_stale(
+        in_project):
+    """`_body_for` resolves through `prompt_file`, so listing the canonical
+    directory missed both supported shapes: an unmigrated project and a declared
+    path elsewhere. Editing the body left the packet reporting itself current
+    while it inlined the old prose."""
+    declared = os.path.join('reference', 'hand-written', 'LF.md')
+    os.makedirs(os.path.join(in_project, 'reference', 'hand-written'))
+    with open(os.path.join(in_project, declared), 'w', encoding='utf-8') as f:
+        f.write('## Prompt\n\nPaste everything below into the image model.\n\n'
+                '---\n\n## Scene\n\nfirst\n')
+    rows = ill.read_plan(in_project)
+    rows[0]['prompt_file'] = declared
+    ill.write_plan(in_project, rows)
+    cmd_illustrate.main(['--package'])
+    assert packet.packet_stale(in_project) == []
+
+    os.utime(os.path.join(in_project, declared), (2 ** 31, 2 ** 31))
+    with open(os.path.join(in_project, declared), 'a', encoding='utf-8') as f:
+        f.write('\nsecond\n')
+
+    findings = packet.packet_stale(in_project)
+    assert [f['kind'] for f in findings] == ['packet_stale']
+    assert declared in findings[0]['detail']
+
+
+def test_an_unreadable_prompt_directory_is_unknown_not_current(in_project,
+                                                               capsys):
+    """Two unguarded `os.listdir` calls raised out of `validate_plan`, which is
+    the single finding collector — one unreadable directory took the whole
+    illustration health report down, blocking findings included. That is the
+    #298 regression, and the fix must report *unknown* rather than swallow."""
+    cmd_illustrate.main(['--package'])
+    directory = packet.image_prompts_dir(in_project)
+    os.chmod(directory, 0o000)
+    try:
+        findings = packet.packet_stale(in_project)
+        # validate_plan must survive it too — that is the point.
+        assert isinstance(ill.validate_plan(in_project), list)
+    finally:
+        os.chmod(directory, 0o755)
+
+    assert [f['kind'] for f in findings] == ['packet_stale']
+    assert 'could not be checked' in findings[0]['detail']
+    assert 'unknown rather than' in findings[0]['detail']
+
+
+def test_an_unremovable_retired_file_does_not_abort_the_build(in_project,
+                                                              monkeypatch,
+                                                              capsys):
+    """Hygiene must not gate the build: raising left both the stale upload list
+    and a packet that was never regenerated."""
+    cmd_illustrate.main(['--package'])
+    stale = os.path.join(in_project, packet.PACKET_DIR, 'reference-images.md')
+    with open(stale, 'w', encoding='utf-8') as f:
+        f.write('old')
+
+    def _boom(path):
+        raise PermissionError(13, 'Permission denied')
+    monkeypatch.setattr(os, 'remove', _boom)
+
+    assert cmd_illustrate.main(['--package']) == 0
+    out = capsys.readouterr().out
+    assert 'could not remove' in out
+    assert 'delete it by hand' in out
