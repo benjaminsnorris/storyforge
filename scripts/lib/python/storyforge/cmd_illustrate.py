@@ -15,15 +15,12 @@ Every phase is its own flag:
                distance and height, time of day, framing — so twenty
                independent generation calls stop converging on one shot.
   --prompts    Turn planned rows into image-generation prompts.
-  --package    Assemble manuscript/illustration-packet/ — one bundle a
-               long-running generation session works through, instead of
-               fifteen separate prompt pastes. Assembly only, no API calls.
-  --export     Assemble manuscript/illustration-export/ — one directory per
-               illustration, each complete on its own: a contiguous
-               paste-ready prompt plus the reference images as files. What
-               you hand to a browser session or to someone without the repo.
-               Assembly only, no API calls. `--ids` and `--anchor-batch`
-               narrow it.
+  --package    Assemble manuscript/illustration-packet/ — the shared files a
+               long-running generation session uploads once, plus
+               image-prompts/<id>.md, the file uploaded per illustration.
+               Assembly only, no API calls.
+  --export     Removed in 1.57.0. Exits 2 with a pointer to --package, which
+               absorbed it; --anchor-batch retired with it.
   --ingest     Bring rendered files in, record digests, embed markers.
   --embed      (Re)insert markers from the plan, without ingesting.
   --diagnose   Read-only plan health report, with the recommended render
@@ -343,7 +340,7 @@ def _report_style_reference(project_dir: str, *,
     `--diagnose` is the health gate, and a stale, mis-declared, or absent style
     reference is a pure-function health fact about the most influential image in
     the book — free to compute, and previously reachable only by starting a run
-    that spends money or opening `reference-images.md` by hand.
+    that spends money or opening the packet's README by hand.
     """
     style = resolve_style_reference(project_dir, canon_cutoff=canon_cutoff)
     headline = describe_style_reference(style)
@@ -2285,7 +2282,7 @@ class StyleReference(TypedDict):
     """Which artwork sets the house style for every prompt in the book.
 
     Returned rather than logged so the same resolution can be reported once per
-    run by `--prompts` and rendered into the packet's `reference-images.md`,
+    run by `--prompts` and rendered into the packet's README,
     without a per-row call logging the same warning twenty times. Same posture
     as `visual_state.prepass`: resolve silently, let the caller report.
 
@@ -2394,7 +2391,7 @@ def resolve_style_reference(project_dir: str, *,
                 else os.path.join(project_dir, declared))
         if os.path.isfile(full):
             # Relativized when it can be. `path` reaches git-tracked prompt files
-            # and the packet's `reference-images.md`, whose contract is
+            # and the packet's README, whose contract is
             # project-relative paths — an absolute declaration naming a file
             # inside the project would commit a machine-specific path to a shared
             # artifact. Same dance as `symlink_target` below.
@@ -2633,18 +2630,16 @@ def _references_for(project_dir: str, illus_id: str, *,
 
     `notes` is an optional out-list the same disclosures are appended to, in
     prose, for a caller that has to *render* them rather than log them. The
-    packet's `reference-images.md` is that caller: a log line the author read
-    twenty minutes ago is not a substitute for the file whose only job is
-    telling them what to upload, and a list that silently shrank to the cover
-    reads as "nothing is ingested yet". Threaded through this function rather
-    than recomputed beside it so the two can never disagree about which
-    references were dropped and why.
+    packet's README is that caller: a log line the author read twenty minutes
+    ago is not a substitute for the runbook step that tells them what to upload,
+    and a list that silently shrank to the cover reads as "nothing is ingested
+    yet". Threaded through this function rather than recomputed beside it so the
+    two can never disagree about which references were dropped and why.
 
-    `rerun` is the flag a note tells the reader to re-run, because the notes are
-    *rendered into* whichever bundle asked for them and `--package` does not
-    rebuild the export. A gap inside `illustration-export/` telling the reader to
-    regenerate the packet is the same class of wrongness as a gap there saying
-    "this packet", which `packet.book_level_gaps`' `bundle` parameter fixes.
+    `rerun` names the command a note tells the reader to re-run. It had two
+    values while `--export` existed and has one now; kept as a parameter because
+    `--prompts` and `--package` both call this and a note is *rendered into*
+    whichever asked for it.
     """
     def note(text: str) -> None:
         if notes is not None:

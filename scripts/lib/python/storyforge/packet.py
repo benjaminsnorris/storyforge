@@ -112,13 +112,17 @@ NOT_RECORDED = '_(not recorded — see the gaps in README.md)_'
 
 
 class Entry(TypedDict):
-    """One illustration's entry: what is specific to this image and nothing else.
+    """One shared derivation of a plan row, consumed twice.
 
-    **The 80–120 word budget governs the derived content** — the beat, the
-    subject, the resolved state, the one-sentence contrast, the composition note.
-    An author's own `absent` and `contrast` cells sit on top of that and are
-    their choice to spend; the budget exists to stop the *renderer* from
-    restating what the shared sections already say.
+    `illustrations.md`'s index reads the author-facing half — `_entry_state`
+    over `status` and `stale_reason`, the `Staging` and `Beat` columns — and
+    `ImagePrompt` carries the model-facing half into the upload's Constraints
+    block.
+
+    **There is no longer a word budget.** `render_entry` enforced 80–120 words
+    of derived content and both went with #306: there is one rendering of a row
+    now, so there is nothing to restate, and the thing being rendered is a
+    model-authored body that has no business being squeezed to 120 words.
 
     Everything identical across the set lives in `canon.md` and
     `acceptance.md` instead — the colour prohibitions, the orientation rule,
@@ -136,7 +140,7 @@ class Entry(TypedDict):
     layout: str
     #: From `pi.aspect_for_row`, which returns the vocabulary rather than a raw
     #: cell — so no `cast` here, unlike `status`. Typed because a consumer indexes
-    #: a per-aspect table with it (`export.SIZES`), where an out-of-vocabulary
+    #: a per-aspect table with it (`SIZES`), where an out-of-vocabulary
     #: value would be a KeyError partway through writing a bundle.
     aspect: pi.Aspect
     #: One sentence: what happens in this image. Rendered in `illustrations.md`'s
@@ -212,7 +216,7 @@ class PacketContents(TypedDict):
     #: Why the reference list is shorter than the ingested art suggests —
     #: canon-excluded renders, `--no-prior-refs`, the four-image cap, and a
     #: cover-only or empty chain. Rendered beneath the list in
-    #: `reference-images.md`, because a list that silently shrank to the cover
+    #: README's upload step, because a list that silently shrank to the cover
     #: reads as "nothing is ingested yet" and the author then uploads the cover
     #: alone.
     reference_notes: list[str]
@@ -636,9 +640,11 @@ def book_level_gaps(project_dir: str, *,
     conflating them tells an author who has just run it to run it again.
 
     `bundle` is the noun the sentences use for the artifact these gaps are being
-    written into — `export.resolve` reads the same collectors, and a gap in
-    `illustration-export/README.md` saying "this packet" sends the reader to a
-    directory that may not exist.
+    written into. It had a second value while `--export` existed, whose README
+    must not have said "this packet"; there is one bundle now and no caller
+    passes it. Kept as a seam rather than inlined, because a gap that is wrong
+    about where it is written is the failure it exists to prevent — but a reader
+    should not go looking for a second caller, so: there is none.
     """
     gaps: list[str] = []
     # A truncated block is neither absent nor a scaffold, so
@@ -1170,7 +1176,7 @@ def contrast_for_row(row: dict[str, str], *, context: RowContext) -> str:
     two children kneeling around the same lamp.
 
     **One derived sentence, not three.** The entry exists to be thin, and three
-    stacked sentences here spent a tenth of the 80–120 word budget restating two
+    stacked sentences here restated two
     facts. The author's own note, if any, follows it untouched.
 
     Read by `--prompts` as well as `--package`, for the same reason as
@@ -1221,8 +1227,8 @@ def contrast_for_row(row: dict[str, str], *, context: RowContext) -> str:
 def audit_gaps(project_dir: str, *, bundle: str = 'packet') -> list[str]:
     """The contradiction audit's coverage of the prose this bundle describes.
 
-    `bundle` names the artifact for the reason `book_level_gaps` records: the
-    export reads the same collector, and its README must not talk about a packet.
+    `bundle` names the artifact for the reason `book_level_gaps` records, and
+    like it has one caller and one value since #306.
     """
     gaps: list[str] = []
     if not vs.read_provenance(project_dir):
@@ -1254,7 +1260,7 @@ def _packet_references(
     is left out with a WARNING instead of teaching the new session drift the
     current canon exists to remove.
 
-    Files are never copied into the packet — `reference-images.md` carries
+    Files are never copied into the packet — README's upload step carries
     project-relative paths, because a copy is a second thing to invalidate.
 
     The second element is the exclusion record. `--prompts` only logs those, and

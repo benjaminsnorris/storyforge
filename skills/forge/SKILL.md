@@ -228,7 +228,7 @@ Invoke the `illustrate` skill — interior illustrations for a prose book, disti
 
 In graphic-novel mode, route to the page pipeline instead (`elaborate --stage page-architecture` / `--stage prompts`); `illustrate` is prose-only and refuses to run on a GN project.
 
-**Illustration status (prose progress signal).** When `reference/illustration-plan.csv` exists, report where the art stands: N planned / M ingested, how many markers are embedded in scenes, and the next illustration awaiting a render. Rendering happens outside Storyforge — the author pastes the prompt from `manuscript/assets/illustrations/prompts/<id>.md` into their image model and saves the result, then `storyforge illustrate --ingest <path>` brings it in and embeds the marker. An unrendered plan row is valid in-flight state, not a problem.
+**Illustration status (prose progress signal).** When `reference/illustration-plan.csv` exists, report where the art stands: N planned / M ingested, how many markers are embedded in scenes, and the next illustration awaiting a render. Rendering happens outside Storyforge — the author uploads `manuscript/illustration-packet/image-prompts/<id>.md` to their image model (one at a time, after uploading the reference images and `canon.md` that the packet README lists) and saves the result, then `storyforge illustrate --ingest <path>` brings it in and embeds the marker. Run `storyforge illustrate --package` first if the packet is missing or stale. An unrendered plan row is valid in-flight state, not a problem.
 
 `storyforge illustrate --diagnose` gives the full punch list; `storyforge cleanup` surfaces the same findings under "Interior Illustrations" (orphan markers, missing files, drifted anchors), and `storyforge validate` fails on the blocking ones.
 
