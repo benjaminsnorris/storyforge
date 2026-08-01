@@ -1,17 +1,28 @@
-"""The six renderers for `manuscript/illustration-packet/`.
+"""The renderers for `manuscript/illustration-packet/`.
 
 Deterministic assembly — no API calls, no timestamps. `--package` regenerates
 the packet wholesale, so it is a render and never hand-edited, and two runs over
 unchanged sources must produce identical bytes (there is a test).
 
-Why a packet at all. Today's `--prompts` writes a standalone 250–400 word prompt
-per illustration, each pasted into an image model on its own. Lived experience on
-a twenty-illustration book is that hyper-detailed leaf prompts underperform and
-that one long-running session working from shared reference material does better
-— the same conclusion GN reached in #260 when per-panel generation failed. So
-the shared sections carry the house style, the anchors, the resolved state, and
-every acceptance check that is identical across the set, and a per-illustration
-entry drops to 80–120 words of what is specific to *that* image.
+Why a packet at all. Lived experience on a twenty-illustration book is that one
+long-running session working from shared reference material beats twenty
+independent hyper-detailed leaf prompts — the same conclusion GN reached in #260
+when per-panel generation failed. So the shared files carry the house style, the
+anchors, the state matrix, and every acceptance check identical across the set,
+uploaded once at the top of a session.
+
+**The author uploads files; they do not paste regions out of them (#306).** That
+one fact governs `render_image_prompt` and is why `illustrations.md` exists in
+the shape it does:
+
+- Everything in an image prompt is for the model, or it is not in the file.
+  There is no "below the line" an upload respects. The retired `--export`'s
+  per-unit file was 13.9 KB of which 9.5 KB was seventeen paragraphs about canon
+  staleness, sitting above a paste boundary an upload ignores.
+- Everything addressed to the author — staleness, treatment, why a body is thin,
+  which uploaded reference is this row's own old render — goes to
+  `illustrations.md`, which is the file the author works down to pick what to
+  generate next.
 
 Two things the renderers must not do:
 
@@ -26,12 +37,14 @@ Two things the renderers must not do:
 import json
 import re
 from collections.abc import Sequence
-from typing import Final, Literal
+from typing import Final, get_args
 
+from storyforge import illustrations as ill
 from storyforge import prompts_illustrate as pi
 from storyforge.packet import (
-    BATCH_SLOTS, AnchorBatch, Entry, PacketContents, RenderNeeds, RenderState,
-    StateGrid, anchor_block, ids_in_state, render_state,
+    BATCH_SLOTS, IMAGE_PROMPTS_SUBDIR, AnchorBatch, Entry, ImagePrompt,
+    PacketContents, RenderNeeds, RenderState, StateGrid, anchor_block,
+    ids_in_state, render_state,
 )
 
 #: What a section says when the data behind it is absent. The packet's coverage
@@ -120,10 +133,45 @@ def _render_batch(batch: AnchorBatch, needs_render: RenderNeeds) -> str:
                  f'one already made:\n\n{disclosure}')
     return body
 
+def _render_uploads(references: list[tuple[str, str]],
+                    notes: list[str]) -> str:
+    """Step 1 of the runbook: what to upload, and what is missing from it.
+
+    The paths are project-relative and the files are **not copied** into the
+    packet. Two reasons, and the second is the one that settled it: a copy is a
+    second thing to invalidate every time a render is replaced, and the author
+    frequently works from a machine other than the one holding the repo — so a
+    gitignored copy would be the one part of the bundle that does not travel,
+    while `manuscript/assets/**` is tracked and therefore already there.
+
+    `notes` is load-bearing, not decoration. A list that silently shrank to the
+    cover — every prior render excluded as pre-canon, say — reads exactly like a
+    book where nothing has been rendered yet, and the author then uploads the
+    cover alone and generates the whole set with no likeness reference. It lives
+    here rather than in a file of its own because this is the step it is about.
+    """
+    parts = [pi.render_references_block(references), '']
+    if notes:
+        parts.extend([
+            '**Read this before you upload.** A short list is not the same as '
+            'having little to reference.',
+            '',
+            '\n'.join(f'- {note}' for note in notes),
+            '',
+        ])
+    parts.append(
+        'These are uploaded **once**, at the top of the session, and every image '
+        'prompt below refers to them by number. As illustrations are ingested '
+        'they become references for the ones after them, so re-run `storyforge '
+        'illustrate --package` after each batch of ingests to pick up the new '
+        'ones.')
+    return '\n'.join(parts)
+
+
 def render_readme(*, title: str, contents: PacketContents,
                   entry_count: int, batch: AnchorBatch,
                   needs_render: RenderNeeds) -> str:
-    """The two phases, how to work the packet, and what it cannot tell you."""
+    """The runbook, the two phases, and what the packet cannot tell you."""
     gaps = contents['gaps']
     if gaps:
         gap_block = '\n'.join(f'- {gap}' for gap in gaps)
@@ -143,19 +191,43 @@ def render_readme(*, title: str, contents: PacketContents,
 {entry_count} illustration(s). **This packet is a render.** Every file in it is
 regenerated wholesale by `storyforge illustrate --package`, so an edit here is
 lost on the next run and never reaches the plan. Change
-`reference/illustration-plan.csv`, `reference/visual-state.csv`, or
-`reference/canon/` instead, then regenerate.
+`reference/illustration-plan.csv`, `reference/visual-state.csv`,
+`reference/canon/`, or the prompt bodies in `reference/illustration-prompts/`
+instead, then regenerate.
 
 ## The files
 
 | File | What it is |
 |---|---|
-| `README.md` | This file: the two phases, and what the packet cannot tell you |
+| `README.md` | This file: the runbook, the two phases, and what the packet cannot tell you |
 | `canon.md` | The reference tier — house style and the continuity anchors |
 | `visual-state.md` | Scene x entity: what is visibly true when |
-| `illustrations.md` | One thin entry per illustration |
-| `reference-images.md` | What to upload, in what order, and what each is for |
+| `illustrations.md` | The index you work down, and everything addressed to you |
 | `acceptance.md` | The checks that are the same for every image |
+| `{IMAGE_PROMPTS_SUBDIR}/<id>.md` | One upload file per illustration |
+
+## The session
+
+**1. Upload the reference images.** Paths are relative to the project root.
+
+{_render_uploads(contents['references'], contents['reference_notes'])}
+
+**2. Upload `canon.md`.** The house style and every continuity anchor, read once
+and kept in context. An anchor works because it is the *identical string* in
+every image its entity appears in, so it is uploaded rather than restated per
+illustration.
+
+**3. Generate, one illustration at a time.** Upload
+`{IMAGE_PROMPTS_SUBDIR}/<id>.md` and ask for the image.
+
+**Upload them one at a time, not all at once.** A single small file is read
+whole; twenty at once is the case where a model retrieves and paraphrases
+instead, and a paraphrased continuity anchor is not an anchor.
+
+Every file in `{IMAGE_PROMPTS_SUBDIR}/` is written for the image model and
+contains nothing addressed to you — no staleness notes, no provenance, no
+checklists. Everything that *is* addressed to you is in `illustrations.md`, so
+read that row before you upload its prompt.
 
 ## Two phases
 
@@ -166,10 +238,9 @@ and twenty images that each invented their own version of a character.
 
 {_render_batch(batch, needs_render)}
 
-**Phase 2 — the churn.** Work `illustrations.md` top to bottom. Read `canon.md`
-once at the start of the session and keep it in context; it is not repeated per
-entry. For each entry: upload the images `reference-images.md` names, generate,
-then check the result against `acceptance.md` before you accept it.
+**Phase 2 — the churn.** Work `illustrations.md` top to bottom, generating each
+row's image prompt in turn, then check the result against `acceptance.md` before
+you accept it.
 
 ## What to return
 
@@ -193,6 +264,16 @@ row is reported, never guessed at.
 Plan health — a marker with no row, a file no row claims, an anchor that no
 longer matches the prose — is not in this list. Run `storyforge illustrate
 --diagnose` for that.
+
+## Where the image prompts came from
+
+Each `{IMAGE_PROMPTS_SUBDIR}/<id>.md` is assembled from the model-authored prose
+in `reference/illustration-prompts/<id>.md` (written by `storyforge illustrate
+--prompts`, or stood in for from the plan row when that file is missing), plus a
+Constraints block re-derived from `reference/illustration-plan.csv` and
+`reference/visual-state.csv` on every run. The constraints are re-derived rather
+than inherited because a prompt body written before a matrix edit still carries
+the old state, and a file containing both would contradict itself.
 """
 
 
@@ -316,255 +397,286 @@ def render_visual_state(*, grid: StateGrid,
 # illustrations.md
 # ============================================================================
 
-#: Appended to the heading of an entry whose art already exists. The batch table
-#: in README.md has always said which rows are rendered; the entries did not, and
-#: an author told to work the file "top to bottom" would re-render finished art.
-DONE_MARK: Final[str] = ' — already rendered'
+#: How a row's art reads in the index. Enumerated positively for `done`, so an
+#: out-of-vocabulary `status` falls toward *pending*: reading a row that needed
+#: no reading costs a glance, while skipping one because a typo made it look
+#: finished loses an illustration from the book. `superseded` never reaches the
+#: index — `rows_in_reading_order` drops it.
+_RENDERED_STATUSES: Final[frozenset[ill.PlanStatus]] = frozenset(
+    {'rendered', 'ingested'})
 
-#: Appended instead when art exists but predates the canon now governing it. The
-#: opposite instruction from `DONE_MARK`, on a row whose `status` is identical —
-#: which is exactly why `status` cannot be the signal (#300).
-STALE_MARK: Final[str] = ' — re-render: the art predates the current canon'
+#: The `Art` cell per state. `re-render` and `done` sit on rows whose `status` is
+#: identical, which is exactly why `status` cannot be the signal (#300).
+_ART_CELLS: Final[dict[RenderState, str]] = {
+    'done': 'done',
+    'pending': 'to render',
+    'stale': '**re-render**',
+}
 
-#: Statuses that mean a file was made from this entry. Enumerated positively,
-#: rather than as everything-but-the-pending-ones, so an out-of-vocabulary value
-#: falls toward *pending*: reading an entry that did not need reading costs a
-#: glance, while skipping one because a typo made it look finished loses an
-#: illustration from the book. `superseded` never reaches an entry at all —
-#: `rows_in_reading_order` drops it.
-_RENDERED_STATUSES: Final[frozenset[str]] = frozenset({'rendered', 'ingested'})
+# Totality by assertion: a dict literal is not checked against its `Literal` key
+# type, so a missing member type-checks clean and raises `KeyError` partway
+# through writing the index table.
+assert set(_ART_CELLS) == set(get_args(RenderState))
 
 
 def _entry_state(entry: Entry) -> RenderState:
-    """Which instruction this entry carries, as one exhaustive answer.
-
-    Replaces a `_is_rendered` predicate whose composite meaning ("rendered *and*
-    current") its only caller had already discriminated — the `stale_reason`
-    conjunct was dead by the elif ordering, so no test could reach it and a
-    reader could take the predicate for the mechanism and reorder the caller.
-    Mutual exclusion of the three marks is now structural.
+    """Which instruction this row carries, as one exhaustive answer.
 
     Canon-stale art is deliberately **not** `'done'`: it is the art that most
-    needs regenerating, and an entry saying `do not regenerate` over it is what
-    lets a session hand the set over unrendered. `--prompts` already excludes a
-    pre-canon render from the reference chain, so the cost is not inherited drift
-    — it is a churn with no likeness reference beyond the cover (#300).
+    needs regenerating, and a row saying `done` over it is what lets a session
+    hand the set over unrendered. `--prompts` already excludes a pre-canon render
+    from the reference chain, so the cost is not inherited drift — it is a churn
+    with no likeness reference beyond the cover (#300).
     """
     if entry['stale_reason']:
         return 'stale'
     return ('done' if entry['status'] in _RENDERED_STATUSES else 'pending')
 
 
-def render_entry(entry: Entry) -> str:
-    """One illustration's entry — only what is specific to this image.
+def _row_notes(entry: ImagePrompt) -> list[str]:
+    """Everything addressed to the author about one illustration.
 
-    An entry whose art exists is marked in two places (the heading and the
-    metadata line) rather than one, because the heading is what a session
-    skimming for the next thing to do actually reads.
-
-    Sections with nothing in them are omitted rather than rendered empty,
-    except `Beat` and `In frame`, which carry `packet.NOT_RECORDED` from
-    `resolve` so a thin entry reads as thin instead of as terse.
-
-    `Treatment` is this image's assigned place in the sequence's staging, from
-    `--sequence`. It is per-image and cannot live in `acceptance.md`: the whole
-    point is that it differs from the treatment of every other entry.
-
-    `Absent` is one of the two deliberate exceptions to positive framing. #263
-    established that negated content keywords leak into the render, and that
-    holds for description; the exception is narrow and enumerable — named
-    entities that must not appear, and violations of the stated colour logic
-    (the latter lives in `acceptance.md`). Orientation and no-text are the
-    other two exceptions.
-
-    `Re-render` is bookkeeping, not derived content, and it is the one thing that
-    pushes an entry past the budget — see
-    `test_the_re_render_note_costs_only_its_own_lines`, which bounds it the way
-    `DONE_MARK`'s test bounds the rendered marker. The entry is otherwise claiming
-    to be finished, and the reason is what stops an unexplained instruction
-    reading as a defect in the packet.
+    Every one of these was a section of the retired export's per-unit file, above
+    a paste boundary that an upload does not respect. They are collected here
+    instead, in the file the author reads to choose what to generate next — which
+    is also the moment any of them can still be acted on for free.
     """
-    state = _entry_state(entry)
-    mark, note = {
-        'stale': (STALE_MARK, f' · **{entry["status"]}, but the art predates '
-                              f'the current canon — re-render**'),
-        'done': (DONE_MARK, f' · **{entry["status"]} — do not regenerate**'),
-        'pending': ('', ''),
-    }[state]
-    lines = [
-        f'### {entry["id"]}{mark}',
-        '',
-        f'- Scene: `{entry["scene_id"] or "—"}` · Layout: '
-        f'{entry["layout"]} · Aspect: {entry["aspect"]}{note}',
-    ]
-    if state == 'stale':
-        lines.extend(['', f'**Re-render.** {entry["stale_reason"]}'])
-    lines.extend([
-        '',
-        f'**Beat.** {entry["beat"]}',
-        '',
-        f'**In frame.** {entry["in_frame"]}',
-    ])
-    for label, value in (('State', entry['state']),
-                         ('Absent', entry['absent']),
-                         ('Treatment', entry['treatment']),
-                         ('Contrast', entry['contrast']),
-                         ('This image also', entry['notes'])):
-        if value:
-            lines.extend(['', f'**{label}.** {value}'])
-    return '\n'.join(lines)
+    notes: list[str] = []
+    if entry['stale_reason']:
+        notes.append(
+            # `stale_render_reason` is a clause, not a sentence — it ends
+            # without punctuation because its other callers embed it mid-line.
+            # Concatenated raw this rendered "...last updated 2026-07-28
+            # Generate it again", which reads as a defect in the packet.
+            f'**Re-render.** This illustration already has art, and '
+            f'{entry["stale_reason"]}. Generate it again; leave `status` alone — '
+            f'demoting it drops the illustration from the Bookshelf publish '
+            f'manifest while the epub, the PDF, and the web book keep shipping '
+            f'it.')
+    if entry['body_warning']:
+        notes.append(f'**Art direction.** {entry["body_warning"]}')
+    elif (entry['body_source'] == 'prompt_file'
+          and entry['prompt_source'] != ill.default_prompt_rel(entry['id'])):
+        # Only when the path is *not* the convention. README states the
+        # convention once, and it is identical for every row — noting it per row
+        # would put every illustration in a section whose whole value is that it
+        # holds only the ones worth reading. A declared `prompt_file` is the
+        # case that genuinely differs, and the one an author editing the prose
+        # would otherwise go looking for at the default path.
+        notes.append(
+            f'**Art direction.** From `{entry["prompt_source"]}`, which the '
+            f'plan\'s `prompt_file` cell declares — not the default path.')
+    if entry['self_reference']:
+        notes.append(f'**Uploaded references.** {entry["self_reference"]}')
+    if not entry['state']:
+        notes.append(
+            '**No visual state resolved.** The costume, the lighting, and any '
+            'damage in this prompt are the model\'s inference rather than a read '
+            'of the book\'s schedule. Add a transition to '
+            '`reference/visual-state.csv`, or a `state_override` on the plan row '
+            'if the state is true in this image only.')
+    return notes
 
 
-def render_illustrations(*, entries: list[Entry]) -> str:
-    """Every entry, in reading order.
+def _cell(value: str) -> str:
+    """One table cell: never empty, never able to split the row.
 
-    The header names the prompt-file convention and `--export` **once**, not per
-    entry. The packet's own economy is that anything identical across the set is
-    stated once, and both the path (`prompts/{id}.md`) and the command are
-    identical for every row — so per-entry copies would spend the 80–120 word
-    budget twenty times over on a sentence that never varies (#298).
+    A pipe closes a markdown cell, so an unescaped one shifts every later value
+    along by one column and drops the last — the shape `common.csv_safe` guards
+    against in the unquoted pipe-delimited CSVs, in a different renderer.
+
+    **Defence-in-depth, not a live path**, and worth saying so: the plan is
+    itself pipe-delimited, `write_plan` sanitizes a pipe on the way out, and an
+    extra one shatters the row on the way in — so no plan cell reaches here
+    carrying one. What *is* live is the newline collapse (a hand-edited cell can
+    hold one) and the em-dash default, which keeps an empty cell from closing
+    early.
+    """
+    text = ' '.join((value or '').split())
+    return text.replace('|', '\\|') if text else '—'
+
+
+def render_illustrations(*, entries: list[ImagePrompt]) -> str:
+    """The index the author works down — and the only place addressed to them.
+
+    This file stopped describing images in #306. It used to carry an 80-120 word
+    entry per illustration, derived from the plan row, while `--prompts`
+    separately paid for a 250-400 word body that the packet ignored and merely
+    pointed at. Two renderings of one row is how they come to disagree about a
+    costume (#297); the body is now rendered once, into the upload file, and this
+    file carries what a *human* needs: what is finished, what is stale, what is
+    thin, and what to check.
+
+    The 80-120 word budget went with the entries. It existed to stop the renderer
+    restating what the shared sections already said, and there is nothing left to
+    restate — the thing being rendered is a model-authored body that has no
+    business being squeezed to 120 words.
     """
     parts = [
         '# The illustrations',
         '',
-        f'{len(entries)} illustration(s), in reading order. Each entry is '
-        f'deliberately short: the house style, the anchors, and every check '
-        f'that is identical across the set live in `canon.md` and '
-        f'`acceptance.md`, and repeating them per image is how a set of prompts '
-        f'starts disagreeing with itself.',
+        f'{len(entries)} illustration(s), in reading order. Upload '
+        f'`{IMAGE_PROMPTS_SUBDIR}/<id>.md` for the one you are generating; that '
+        f'file is written for the image model and says nothing to you.',
         '',
-        '`State` is the visual-state matrix resolved for that scene — what is '
-        'visibly true there — not a restatement of the anchors, which say what '
-        'never changes.',
+        '**This file is the half addressed to you.** Read a row here before you '
+        'upload its prompt: what is already rendered, what needs re-rendering, '
+        'where the art direction is thin, and which of the uploaded reference '
+        'images is that row\'s own earlier render.',
         '',
-        'Where `storyforge illustrate --prompts` has been run, fuller '
-        'scene-specific art direction for an illustration is in '
-        '`manuscript/assets/illustrations/prompts/<id>.md`. These entries do '
-        'not inline it: an entry that carried 300 words of prose would stop '
-        'being thin, which is the one property this packet is built around. If '
-        'you want the two halves in one paste-ready block, with the reference '
-        'images copied in as files, run `storyforge illustrate --export` — that '
-        'bundle is built for handing a single illustration over, and this one '
-        'for working the set with `canon.md` in context.',
+        '`Staging` is the treatment `--sequence` assigned so twenty independent '
+        'generation calls stop converging on one shot. It is already embodied in '
+        'the prompt body, and is repeated here so you can check that it is.',
         '',
     ]
     if not entries:
         parts.extend([
             '_No illustrations are planned. Run `storyforge illustrate '
             '--plan`._', ''])
-    for entry in entries:
-        parts.extend([render_entry(entry), ''])
+        return '\n'.join(parts).rstrip() + '\n'
+
+    parts.extend([
+        '| # | Illustration | Scene | Aspect | Art | Staging | Beat |',
+        '|---|---|---|---|---|---|---|',
+    ])
+    for position, entry in enumerate(entries, start=1):
+        parts.append(
+            f'| {position} | `{entry["id"]}` | `{entry["scene_id"] or "—"}` | '
+            f'{entry["aspect"]} | {_ART_CELLS[_entry_state(entry)]} | '
+            f'{_cell(entry["treatment"])} | {_cell(entry["beat"])} |')
+    parts.append('')
+
+    flagged = [(entry, _row_notes(entry)) for entry in entries]
+    flagged = [(entry, notes) for entry, notes in flagged if notes]
+    if not flagged:
+        parts.extend([
+            '## Before you upload',
+            '',
+            '_Nothing on any row needs reading first. That is a statement about '
+            'the plan, the canon files, and the state matrix — not a promise '
+            'that the art will be right._',
+            '',
+        ])
+        return '\n'.join(parts).rstrip() + '\n'
+
+    parts.extend([
+        '## Before you upload',
+        '',
+        f'{len(flagged)} of {len(entries)} illustration(s) have something you '
+        f'should know before generating them. The rest need no reading.',
+        '',
+    ])
+    for entry, notes in flagged:
+        parts.extend([f'### `{entry["id"]}`', ''])
+        parts.extend([f'- {note}' for note in notes])
+        parts.append('')
     return '\n'.join(parts).rstrip() + '\n'
 
 
 # ============================================================================
-# reference-images.md
+# image-prompts/<id>.md
 # ============================================================================
 
-def render_reference_images(*, references: list[tuple[str, str]],
-                            notes: list[str]) -> str:
-    """What to upload, in what order, what each one is for, and what is missing.
+#: Headings an image prompt may carry. The four body sections come from the
+#: model-authored prose (or `packet._derived_body`, which mirrors them), and
+#: `Constraints` is appended deterministically.
+#:
+#: Enumerated so the invariant has something to be tested against: a regression
+#: that reinstates an author-facing section here uploads it to an image model,
+#: and nothing about the resulting image would look wrong.
+IMAGE_PROMPT_SECTIONS: Final[tuple[str, ...]] = (
+    'Scene', 'Subject', 'Important details', 'Use case', 'Constraints',
+)
 
-    The files are **not copied** into the packet. Paths are project-relative
-    from the project root, and the author uploads from disk — a copy inside the
-    packet would be a second thing to invalidate every time a render is
-    replaced.
 
-    `notes` is load-bearing, not decoration. A list that silently shrank to the
-    cover — every prior render excluded as pre-canon, say — reads exactly like a
-    book where nothing has been rendered yet, and the author then uploads the
-    cover alone and generates the rest of the set with no likeness reference.
-    That is the drift this file exists to prevent.
+def render_image_prompt(*, prompt: ImagePrompt, title: str) -> str:
+    """One illustration's upload file: the whole of it is for the image model.
+
+    **The rule, and the reason it is a rule** (#306): the author uploads this
+    file rather than pasting a region out of it, so anything in it reaches the
+    model. Its predecessor marked a paste boundary and put four author-facing
+    sections above it — on a real book, 9.5 KB of a 13.9 KB file, seventeen
+    near-identical paragraphs about canon staleness. An upload ignores the
+    boundary. So nothing addressed to the author goes in here; `_row_notes`
+    collects all of it into `illustrations.md`.
+
+    Size is a correctness property rather than tidiness. A small text file is
+    read into context whole; at 14 KB an upload is near the size where retrieval
+    and summarization begin, and a summarized continuity anchor is a paraphrased
+    one — which defeats the identical-string mechanism the canon tier rests on.
+
+    There is no `## Accept only if` block. #297 put the resolved state in the
+    file twice on purpose — once as a Constraints bullet for the model, once as
+    an acceptance line for the author — and the paste boundary is what made those
+    two audiences instead of one. Uploading collapses them, so the second copy
+    stopped being a check and became the longest string in the file repeated
+    verbatim. `acceptance.md` says the per-image checks are these Constraints
+    bullets; the check survives, the duplication does not.
     """
-    parts = [
-        '# Reference images',
+    constraints = pi.prompt_constraints(
+        aspect=prompt['aspect'], state=prompt['state'],
+        absent=prompt['absent'], contrast=prompt['contrast'])
+    return '\n'.join([
+        f'# {prompt["id"]} — {title}',
         '',
-        'These files are not copied into the packet. The paths below are '
-        'relative to the project root; upload them from disk. A copy in here '
-        'would be a second thing to invalidate every time a render is '
-        'replaced.',
+        f'Generate one image from this brief. {prompt["aspect"].capitalize()}, '
+        f'{prompt["size"].replace("x", " × ")}, {prompt["quality"]} quality, '
+        f'{prompt["model"]}. Return it as `{prompt["id"]}.png`.',
         '',
-        pi.render_references_block(references),
+        prompt['body'].strip(),
         '',
-    ]
-    if notes:
-        parts.extend([
-            '## What is not in that list',
-            '',
-            'Read this before you upload. A short list is not the same as '
-            'having little to reference.',
-            '',
-            '\n'.join(f'- {note}' for note in notes),
-            '',
-        ])
-    parts.extend([
-        'Reference images carry style and likeness, which is why the entries '
-        'in `illustrations.md` do not re-describe either. As illustrations are '
-        'ingested they become references for the ones after them, so re-run '
-        '`storyforge illustrate --package` after each batch of ingests to pick '
-        'up the new ones.',
+        '## Constraints',
+        '',
+        '\n'.join(constraints),
         '',
     ])
-    return '\n'.join(parts)
 
 
 # ============================================================================
 # acceptance.md
 # ============================================================================
 
-#: Where each per-image field lives, per bundle. The eight checks are identical
-#: across both artifacts and are therefore written once — but they *point* at the
-#: place the reader will find each field, and the packet's entries do not exist in
-#: the export. Reusing the packet's wording verbatim there told a reader with no
-#: repo to check the image against "the entry's Absent line", in a bundle whose
-#: whole purpose is being readable without one.
-_FIELD_HOMES: Final[dict[str, dict[str, str]]] = {
-    'packet-entry': {
-        'where': "its entry in `illustrations.md`",
-        'beat': "its entry's **Beat**",
-        'in_frame': "the entry's **In frame**",
-        'absent': "the entry's **Absent** line",
-        'state': "the entry's **State** line",
-        'contrast': "the entry's **Contrast** line",
-        'orientation': 'its entry',
-    },
-    'export-prompt': {
-        'where': "that illustration's `prompt.md`",
-        'beat': "the prompt's **Scene** and **Subject** sections",
-        'in_frame': "the prompt's **Subject** section",
-        'absent': "the prompt's `Not in this image:` constraint",
-        'state': "the prompt's visual-state constraint",
-        'contrast': "the prompt's `Set this image apart` constraint",
-        'orientation': 'its prompt',
-    },
+#: Where each per-image field lives. One dict rather than the two the export
+#: needed: the checks were always identical across bundles and only their
+#: *pointers* differed, and there is one bundle now. The pointers name the
+#: Constraints bullets because that is where every per-image field ends up — the
+#: image prompt carries no separate acceptance block since #306, for the reason
+#: `render_image_prompt` records.
+_FIELD_HOMES: Final[dict[str, str]] = {
+    'where': "each illustration's `%s/<id>.md`" % IMAGE_PROMPTS_SUBDIR,
+    'beat': "the prompt's **Scene** and **Subject** sections",
+    'in_frame': "the prompt's **Subject** section",
+    'absent': "the prompt's `Not in this image:` constraint",
+    'state': "the prompt's visual-state constraint",
+    'contrast': "the prompt's `Set this image apart` constraint",
+    'orientation': 'its prompt',
 }
 
-#: Which bundle `render_acceptance` is writing for.
-AcceptanceSource = Literal['packet-entry', 'export-prompt']
 
-
-def render_acceptance(*, aspects: Sequence[pi.Aspect],
-                      source: AcceptanceSource = 'packet-entry') -> str:
+def render_acceptance(*, aspects: Sequence[pi.Aspect]) -> str:
     """The checks that are identical for every image in the set.
 
-    Everything here was deliberately moved *out* of the per-illustration
-    entries: stating the orientation rule twenty times is twenty chances for
-    one of them to be paraphrased away, and an entry that carries the whole
-    house style is no longer thin.
+    Everything here was deliberately kept *out* of the per-illustration files:
+    stating the orientation rule twenty times is twenty chances for one of them
+    to be paraphrased away, and it is uploaded once per session anyway.
 
-    `source` selects the vocabulary for the per-image fields — see
-    `_FIELD_HOMES`. One renderer, one list of checks, two sets of pointers,
-    because the checks genuinely are the same and only their homes differ.
+    Since #306 this is also where the per-image acceptance check lives. An image
+    prompt used to carry its own `## Accept only if` block below a paste
+    boundary; the author uploads the whole file now, so that block became the
+    longest string in it repeated verbatim. The check did not go away — check the
+    render against the prompt's own Constraints bullets, which is what the
+    pointers below say.
     """
-    homes = _FIELD_HOMES[source]
+    homes = _FIELD_HOMES
     orientation = '\n'.join(
         f'- {pi.orientation_clause(aspect)}'
         for aspect in aspects) or f'- {pi.orientation_clause()}'
 
     return f"""# Acceptance criteria
 
-Apply all of this to every image. It is stated once here rather than in
-{homes['where']}, which is what keeps those short.
+Apply all of this to every image. It is stated once here, and uploaded once,
+rather than repeated in {homes['where']} — which is what keeps those small
+enough to be read whole rather than summarized.
 
 ## Before you accept an image
 

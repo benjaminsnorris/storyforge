@@ -45,7 +45,7 @@ DEFAULT_ASPECT: Final[Aspect] = 'portrait'
 
 #: The image model every prompt file and every export manifest names. A constant
 #: rather than a default argument repeated at each site, so the prompt file and
-#: the export's `manifest.json` cannot disagree about what the prompt was written
+#: the packet's upload file cannot disagree about what the prompt was written
 #: for — the manifest exists to be a reproducible record of the render settings.
 DEFAULT_IMAGE_MODEL: Final[str] = 'gpt-image-2'
 
@@ -574,7 +574,7 @@ def build_art_direction_request(*, row: dict[str, str], scene_excerpt: str,
     # that must not appear, and violations of stated colour logic — alongside the
     # orientation directive and the no-text rule, which are exceptions about form
     # rather than content. Four in total; the spec, CLAUDE.md and
-    # `prompts_packet.render_entry` all count them that way, and this comment said
+    # `packet._self_reference_note` all count them that way, and this comment said
     # three because it forgot that no-text is itself a negation. Narrow and
     # enumerable on purpose: #263's finding that negated content keywords leak
     # into the render still holds for description.
@@ -786,7 +786,7 @@ def prompt_constraints(*, aspect: Aspect = DEFAULT_ASPECT, state: str = '',
                        absent: str = '', contrast: str = '') -> list[str]:
     """The Constraints bullets, as one list both paste-ready artifacts render.
 
-    Shared by `render_prompt_file` and the export's paste block so the two cannot
+    Shared by `render_prompt_file` and the packet's upload file so the two cannot
     drift apart in *how* they phrase a constraint — the same reasoning
     `packet.state_for_row` records for the state itself (#297): two renderings of
     one row is how they disagree, one function is how they cannot. Scoped to
@@ -807,7 +807,7 @@ def prompt_constraints(*, aspect: Aspect = DEFAULT_ASPECT, state: str = '',
                    '- Match the style, palette, and line quality of the '
                    'reference images.',
                    # "their continuity anchor", not "the anchor description
-                   # above": the export renders these same bullets in a block
+                   # above": the packet renders these same bullets in a file
                    # whose anchors live in a sibling `canon.md`, so a positional
                    # reference would point at nothing in one of the two
                    # artifacts that share this list.
@@ -827,7 +827,12 @@ def prompt_constraints(*, aspect: Aspect = DEFAULT_ASPECT, state: str = '',
 
 def prompt_acceptance_lines(*, state: str = '', absent: str = '',
                             contrast: str = '') -> list[str]:
-    """The per-image acceptance checks, shared by the prompt file and the export.
+    """The per-image acceptance checks for the prompt file.
+
+    Sole consumer since #306: the packet's upload file carries no acceptance
+    block, because the author uploads it whole and the block became the longest
+    string in it repeated verbatim. `acceptance.md` says the per-image checks
+    are that file's Constraints bullets instead.
 
     **A state that did not resolve is stated, not omitted.** Omitting the line
     left an acceptance block announcing "checked against this illustration's row"
@@ -964,7 +969,7 @@ class ParsedPrompt(TypedDict):
 #: The headings that end the model-authored body. Matched at **any** `##`–`####`
 #: level, which is the whole point: the literal `'### Constraints'` missed a
 #: hand-promoted `## Constraints` (the likeliest hand edit, since every heading
-#: around it is `##`), and the old constraints then landed *inside* the exported
+#: around it is `##`), and the old constraints then landed *inside* the uploaded
 #: paste block beside the freshly derived ones — two contradicting costume
 #: directives in one region a reader is told to paste whole, which is #297
 #: reconstituted inside the split that exists to prevent it.

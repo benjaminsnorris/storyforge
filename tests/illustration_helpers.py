@@ -389,3 +389,36 @@ SCENE_WITH_FRONTMATTER = (
     '\n'
     + SCENE
 )
+
+
+def write_prompt_file(project_dir: str, illus_id: str, *,
+                      body: str = '', **kwargs) -> str:
+    """Write a real `render_prompt_file` output for one row, at its plan path.
+
+    The packet fixture deliberately has no prompt files, so every body in it
+    comes from `packet._derived_body` — a renderer that emits exactly the four
+    enumerated sections. That made the two invariant tests structurally
+    incapable of failing: five of the eight forbidden strings live in *this*
+    file's output, not in any packet renderer, and the only thing keeping them
+    out of an upload is `parse_prompt_file`'s bounds (#306 review, T-2/T-3).
+
+    So this writes the genuine article — paste sentinel, trailing `##
+    Constraints`, `## Accept only if`, `## Log` and all — which is the shape the
+    parse has to survive.
+    """
+    from storyforge import prompts_illustrate as pi
+    row = ill.blank_row(illus_id)
+    row.update({'scene_id': 'act1-sc01', 'placement': 'scene_open'})
+    row.update(kwargs)
+    text = pi.render_prompt_file(
+        row=row,
+        body=body or ('## Scene\n\nA low room.\n\n## Subject\n\nOne figure.\n\n'
+                      '## Important details\n\n- A lamp.\n\n## Use case\n\n'
+                      'Interior illustration for a novel.'),
+        references=[('manuscript/assets/cover-illustration.png', 'cover art')],
+        state='the coat is buttoned')
+    path = os.path.join(project_dir, ill.default_prompt_rel(illus_id))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(text)
+    return path
